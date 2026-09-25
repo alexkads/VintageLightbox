@@ -36,8 +36,11 @@ pub const ENFEITE_DA_TIRA: f32 = 34.0;
 /// A proporção da miniatura da tira — paisagem, como no site.
 pub const PROPORCAO: f32 = 1.35;
 
-fn caminho(qual: &str) -> PathBuf {
-    AppPaths::catalog_root().join(format!("tira-{qual}.txt"))
+/// 🚨 **Nos testes, nenhum** (25/set/2026): era o catálogo real de quem roda
+/// `cargo test`. Um teste que arrastava a tira gravava a altura de lá, e todos
+/// liam a de lá — o resultado dependia de como o operador tinha deixado a tela.
+fn caminho(qual: &str) -> Option<PathBuf> {
+    (!cfg!(test)).then(|| AppPaths::catalog_root().join(format!("tira-{qual}.txt")))
 }
 
 /// Limita ao que cabe — a mesma conta do arrasto e da leitura.
@@ -70,8 +73,8 @@ pub fn guardada(qual: &str) -> f32 {
 /// 🔑 Cada tira do site tem o seu: a da Revelação nasce com 110
 /// (`alturaGuardada("revelacao", 110)`, em `revelacao/tira.tsx`).
 pub fn guardada_ou(qual: &str, padrao: f32) -> f32 {
-    std::fs::read_to_string(caminho(qual))
-        .ok()
+    caminho(qual)
+        .and_then(|c| std::fs::read_to_string(c).ok())
         .and_then(|t| t.trim().parse::<f32>().ok())
         .map(limitar)
         .unwrap_or(padrao)
@@ -79,7 +82,9 @@ pub fn guardada_ou(qual: &str, padrao: f32) -> f32 {
 
 /// Grava. Não poder lembrar não pode impedir de arrastar.
 pub fn guardar(qual: &str, altura: f32) {
-    let destino = caminho(qual);
+    let Some(destino) = caminho(qual) else {
+        return;
+    };
     if let Some(pasta) = destino.parent() {
         let _ = std::fs::create_dir_all(pasta);
     }
@@ -101,6 +106,14 @@ mod testes {
     fn altura_invalida_volta_ao_padrao() {
         assert_eq!(limitar(f32::NAN), ALTURA_PADRAO);
         assert_eq!(limitar(f32::INFINITY), ALTURA_MAXIMA);
+    }
+
+    /// 🚨 O teste nunca lê nem grava a altura do catálogo real.
+    #[test]
+    fn nos_testes_a_altura_nao_toca_o_catalogo() {
+        assert_eq!(caminho("sessao"), None);
+        guardar("sessao", 300.0);
+        assert_eq!(guardada("sessao"), ALTURA_PADRAO, "nada foi guardado");
     }
 
     /// 🔑 A miniatura nunca some, mesmo na altura mínima.

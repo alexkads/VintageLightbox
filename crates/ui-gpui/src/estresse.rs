@@ -1957,3 +1957,33 @@ fn estresse_o_motor_em_vinte_e_quatro_mp() {
         println!("ℹ️ memória depois de 30 revelações: {mb:.0} MB");
     }
 }
+
+/// 🔬 **Quanto cada parte da tela da sessão pesa no quadro** — desliga uma
+/// de cada vez (`VLB_SEM`, lido só nos testes pelo `render` da sessão) e
+/// mede o quadro inteiro. É o que diz onde cortar antes de cortar.
+///
+/// Medido em 25/set/2026 (perfil `carga`, 300 fotos, 1600×1000): 23,6 ms
+/// com tudo e 7,6 ms sem a grade; depois das estrelas num texto só, 17,3 ms.
+///
+/// ```bash
+/// cargo test --profile carga -p ui-gpui --lib -- --ignored --nocapture medir_as_partes_do_quadro
+/// ```
+#[gpui::test]
+#[ignore = "medição: rodar à mão, no perfil carga"]
+fn medir_as_partes_do_quadro(cx: &mut TestAppContext) {
+    let (janela, _publicador, _dir, _abrir) = sessao_com(cx, 300);
+    for (nome, sem) in [
+        ("tudo", ""),
+        ("sem a tira", "tira"),
+        ("sem o painel", "painel"),
+        ("sem a grade", "grade"),
+        ("sem cabeçalho, envio e barra", "cabecalho,envio,barra"),
+        ("só a grade", "cabecalho,envio,barra,painel,tira"),
+        ("nada", "cabecalho,envio,barra,grade,painel,tira"),
+    ] {
+        std::env::set_var("VLB_SEM", sem);
+        let quadro = quadro_da_sessao(cx, janela, 21);
+        println!("🔬 {nome:<32} {quadro:?}");
+    }
+    std::env::remove_var("VLB_SEM");
+}

@@ -481,13 +481,29 @@ pub struct Detalhe {
     /// ⚠️ Rolar a cada quadro prenderia a barra: o operador não conseguiria
     /// arrastar a tira para olhar o resto sem ela voltar sozinha.
     ultimo_foco: Option<usize>,
-    /// Quantas **mudanças em lote** ainda esperam resposta — nota, levada,
-    /// negociação. Elas correm em série de propósito: são a mesma seleção, e
-    /// duas rodadas sobre as mesmas fotos disputariam a última palavra.
+    /// As fotos do site com um `PATCH` no ar — nota, rejeição, levada,
+    /// negociação.
     ///
-    /// 🚨 **Nada aqui conta importação, e é essa a separação inteira.** Ver
-    /// [`Self::importacao`].
-    mudando: usize,
+    /// 🚨 **A série é por foto, e não da tela** (dono, 25/set/2026: *"não
+    /// posso ficar bloqueado"*). Até aqui era um contador da tela inteira, e
+    /// com ele acima de zero a tecla seguinte **desistia em silêncio** — em
+    /// qualquer foto. Com o ensaio subindo ao R2 a rede fica cheia, o `PATCH`
+    /// demora segundos, e classificar parava de responder justo quando o
+    /// cliente estava olhando. Agora só a mesma foto espera a vez (duas
+    /// rodadas sobre ela disputariam a última palavra), e a espera é na fila
+    /// ([`Self::na_vez`]), nunca descartando o gesto.
+    ///
+    /// Nada aqui conta importação. Ver [`Self::importacao`].
+    no_ar: std::collections::HashSet<String>,
+    /// O que o operador pediu a uma foto enquanto a anterior estava no ar —
+    /// **fundido**, campo a campo: sai uma vez só, quando a do ar voltar.
+    na_vez: std::collections::HashMap<String, domain::services::pos_venda::MudancaDaFoto>,
+    /// 🔑 **O que a mão pôs na grade e a resposta ainda não trouxe.** A
+    /// estrela aparece na hora — o operador está com o cliente do lado — e
+    /// uma releitura pedida antes do gesto não a apaga ao chegar: ela sai
+    /// daqui quando o site (ou o catálogo) disser o mesmo, ou depois de
+    /// [`PRAZO_DA_MAO`] sem nada no ar, e aí vale o que lá estiver.
+    na_mao: std::collections::HashMap<String, MarcaDaMao>,
     /// Se a janela do sistema está aberta, esperando o operador escolher.
     ///
     /// 🚨 **Sem isto o clique no "Importar" não fazia nada** (achado pelo dono
@@ -630,7 +646,7 @@ pub struct Detalhe {
     freios: Freios,
     /// O andamento da importação — o que a barra de progresso desenha.
     ///
-    /// 🚨 **Ela vive separada de [`Self::mudando`] porque o operador trabalha
+    /// 🚨 **Ela vive separada de [`Self::no_ar`] porque o operador trabalha
     /// durante ela.** Até 8/set/2026 os dois eram um contador só (`enviando`), e
     /// o preço era exatamente o cenário do dono: com 500 fotos subindo,
     /// `mudar_as_marcadas` desistia em silêncio (`if … || self.enviando > 0 {
@@ -835,7 +851,9 @@ impl Detalhe {
             importador,
             andamentos: channel(),
             freios: Freios::default(),
-            mudando: 0,
+            no_ar: std::collections::HashSet::new(),
+            na_vez: std::collections::HashMap::new(),
+            na_mao: std::collections::HashMap::new(),
             escolhendo: false,
             importacao: None,
             link: None,
@@ -1556,6 +1574,7 @@ impl Detalhe {
     /// esconde a foto do cliente é a tecla `X` ([`Self::alternar_rejeicao`]) —
     /// que **marca sem apagar**.
     pub fn dar_nota(&mut self, nota: u8, cx: &mut Context<Self>) {
+        let _t = crate::regua::trecho("sessão: tecla de nota");
         let levadas = if nota == 0 {
             self.selecao
                 .marcadas()
@@ -1595,6 +1614,7 @@ impl Detalhe {
     ///
     /// ⚠️ **A comprada fica de fora**: há cobrança e entrega atrás dela.
     pub fn alternar_rejeicao(&mut self, cx: &mut Context<Self>) {
+        let _t = crate::regua::trecho("sessão: tecla de rejeição");
         let marcadas: Vec<acervo::Foto> = self
             .selecao
             .marcadas()
@@ -1729,6 +1749,7 @@ impl Detalhe {
 
     /// `P`: levada no balcão, e o mesmo gesto devolve à venda.
     pub fn alternar_levada(&mut self, cx: &mut Context<Self>) {
+        let _t = crate::regua::trecho("sessão: tecla de levada");
         let todas_levadas = self
             .selecao
             .marcadas()
@@ -1815,6 +1836,9 @@ impl Detalhe {
         let (locais, alvos): (Vec<String>, Vec<String>) = alvos
             .into_iter()
             .partition(|id| self.locais.iter().any(|f| &f.id == id));
+        // 🔑 **A grade muda antes de qualquer resposta**, nas duas pontas.
+        self.anotar_na_mao(&locais, &mudanca);
+        self.anotar_na_mao(&alvos, &mudanca);
         if !locais.is_empty() {
             match (mudanca.nota, mudanca.rejeitada, mudanca.estado) {
                 // O `0` também atravessa: tirar a nota é curadoria (C22), e
@@ -1834,10 +1858,16 @@ impl Detalhe {
                         nota: nota.unwrap_or(0) as i32,
                     });
                 }
-                (None, Some(rejeitada), None) => cx.emit(Pedido::Rejeitar {
-                    ids: locais,
-                    rejeitada,
-                }),
+                (None, Some(rejeitada), None) => {
+                    for foto in self.locais.iter_mut().filter(|f| locais.contains(&f.id)) {
+                        foto.rejeitada = rejeitada;
+                    }
+                    self.recompor_acervo();
+                    cx.emit(Pedido::Rejeitar {
+                        ids: locais,
+                        rejeitada,
+                    });
+                }
                 (None, None, Some(estado)) => {
                     // 🔑 **A grade mostra a marca antes de o catálogo
                     // responder**, como a Biblioteca: sem isto o segundo `B`,
@@ -1870,22 +1900,117 @@ impl Detalhe {
             }
         }
 
-        // 🚨 **A importação não entra nesta guarda**, e é o conserto de
-        // 8/set/2026: com 500 fotos subindo, classificar, sinalizar e negociar
-        // desistiam aqui em silêncio. O que ainda faz esperar é outra rodada
-        // *desta mesma* operação, sobre a mesma seleção.
-        if alvos.is_empty() || self.mudando > 0 {
+        // 🚨 **Nada aqui faz o gesto desistir** — nem a importação (conserto
+        // de 8/set/2026), nem o envio ao R2, nem a rodada anterior (25/set).
+        // A foto com um `PATCH` no ar guarda este na fila dela; as outras vão
+        // agora.
+        if alvos.is_empty() {
             return;
         }
 
         self.erro = None;
-        self.mudando = alvos.len();
+        self.pintar_a_mao_no_site();
         for id in alvos {
-            self.publicador
-                .negociar(sessao.clone(), id, mudanca.clone(), self.recados.0.clone());
+            self.despachar_mudanca(sessao.clone(), id, mudanca.clone());
         }
         self.acompanhar(cx);
         cx.notify();
+    }
+
+    /// Manda a mudança desta foto ao site — ou, se ela já tem uma no ar,
+    /// guarda na vez dela, fundida com o que já esperava.
+    fn despachar_mudanca(
+        &mut self,
+        sessao: Sessao,
+        foto_id: String,
+        mudanca: domain::services::pos_venda::MudancaDaFoto,
+    ) {
+        if self.no_ar.contains(&foto_id) {
+            let antes = self.na_vez.remove(&foto_id).unwrap_or_default();
+            self.na_vez.insert(foto_id, fundir_mudancas(antes, mudanca));
+            return;
+        }
+        self.no_ar.insert(foto_id.clone());
+        self.publicador
+            .negociar(sessao, foto_id, mudanca, self.recados.0.clone());
+    }
+
+    /// Quantas fotos têm mudança no ar ou esperando a vez.
+    fn mudando(&self) -> usize {
+        self.no_ar.len() + self.na_vez.len()
+    }
+
+    /// Guarda o que o gesto pôs nestas fotos — ver [`Self::na_mao`].
+    ///
+    /// Só nota, rejeição e levada: é o que a grade desenha e o que a tecla
+    /// seguinte lê para decidir. Preço e observação vivem no painel.
+    fn anotar_na_mao(
+        &mut self,
+        ids: &[String],
+        mudanca: &domain::services::pos_venda::MudancaDaFoto,
+    ) {
+        let nota = mudanca.nota.map(|n| n.and_then(|n| u8::try_from(n).ok()));
+        let levada = mudanca.estado.map(|e| e == EstadoNoBalcao::LevadaNoBalcao);
+        if nota.is_none() && mudanca.rejeitada.is_none() && levada.is_none() {
+            return;
+        }
+        let agora = std::time::Instant::now();
+        for id in ids {
+            let marca = self
+                .na_mao
+                .entry(id.clone())
+                .or_insert_with(|| MarcaDaMao::nova(agora));
+            marca.desde = agora;
+            if nota.is_some() {
+                marca.nota = nota;
+            }
+            if mudanca.rejeitada.is_some() {
+                marca.rejeitada = mudanca.rejeitada;
+            }
+            if levada.is_some() {
+                marca.levada = levada;
+            }
+        }
+    }
+
+    /// Esquece a marca da mão que a resposta já confirmou — ou que venceu
+    /// sem nada no ar. Com a foto ainda no ar, a marca fica.
+    fn conferir_a_mao<'a>(
+        &mut self,
+        fotos: impl Iterator<Item = (&'a str, Option<u8>, bool, bool)>,
+    ) {
+        let agora = std::time::Instant::now();
+        for (id, nota, rejeitada, levada) in fotos {
+            let Some(marca) = self.na_mao.get(id) else {
+                continue;
+            };
+            if self.no_ar.contains(id) || self.na_vez.contains_key(id) {
+                continue;
+            }
+            let confirmada = marca.nota.is_none_or(|n| n == nota)
+                && marca.rejeitada.is_none_or(|r| r == rejeitada)
+                && marca.levada.is_none_or(|l| l == levada);
+            if confirmada || agora.duration_since(marca.desde) > PRAZO_DA_MAO {
+                self.na_mao.remove(id);
+            }
+        }
+    }
+
+    /// Escreve a marca da mão por cima das fotos do site e refaz a grade.
+    fn pintar_a_mao_no_site(&mut self) {
+        let Some(aberta) = self.aberta.as_mut() else {
+            return;
+        };
+        let mut mudou = false;
+        for foto in &mut aberta.fotos {
+            if let Some(marca) = self.na_mao.get(&foto.id) {
+                mudou |= marca.no_site(foto);
+            }
+        }
+        if mudou {
+            self.do_site = aberta.fotos.iter().map(para_o_core).collect();
+            self.recompor_acervo();
+        }
     }
 
     /// Quantas fotos há em cada estado — o que o cabeçalho conta.
@@ -2001,7 +2126,23 @@ impl Detalhe {
     /// lados — linha no SQLite *e* linha no site —, e pôr as duas na grade
     /// mostraria a mesma foto duas vezes, com estados diferentes. Quem já subiu
     /// vale pela do site, que é a que tem preço, nota e negociação.
-    pub fn definir_locais(&mut self, fotos: Vec<acervo::Foto>, cx: &mut Context<Self>) {
+    pub fn definir_locais(&mut self, mut fotos: Vec<acervo::Foto>, cx: &mut Context<Self>) {
+        let _t = crate::regua::trecho("sessão: receber as locais");
+        // 🔑 A leitura do catálogo pode ter saído antes de a nota chegar ao
+        // disco: o que a mão pôs vale até o catálogo concordar.
+        self.conferir_a_mao(fotos.iter().map(|f| {
+            (
+                f.id.as_str(),
+                f.nota,
+                f.rejeitada,
+                f.estado == acervo::Estado::LevadaNoBalcao,
+            )
+        }));
+        for foto in &mut fotos {
+            if let Some(marca) = self.na_mao.get(&foto.id) {
+                marca.no_core(foto);
+            }
+        }
         if self.locais == fotos {
             return;
         }
@@ -2031,6 +2172,7 @@ impl Detalhe {
     /// `ordem`, quem já as tinha separado foi o servidor (que ordena por
     /// `ordem, criada_em`), e reordenar por id jogaria fora esse critério.
     fn recompor_acervo(&mut self) {
+        let _t = crate::regua::trecho("sessão: recompor a grade");
         self.reconhecer_as_que_subiram();
         let marcadas: Vec<String> = self
             .ids_marcados()
@@ -2634,6 +2776,7 @@ impl Detalhe {
     }
 
     pub fn colher(&mut self, cx: &mut Context<Self>) -> bool {
+        let _t = crate::regua::trecho("sessão: colher");
         let mut mudou = false;
         let mut abriu = false;
 
@@ -2656,6 +2799,7 @@ impl Detalhe {
         // catálogo local, e só. Enquanto isto dividia canal com o resto, uma
         // classificação feita durante o lote adiantava a barra em uma foto — e
         // 500 classificações a levavam ao fim com metade das fotos por gravar.
+        let mut entrou_foto = false;
         while let Ok(andamento) = self.andamentos.1.try_recv() {
             mudou = true;
             match andamento {
@@ -2670,6 +2814,7 @@ impl Detalhe {
                     if let Some(lote) = self.importacao.as_mut() {
                         lote.feitas += 1;
                     }
+                    entrou_foto = true;
                 }
                 // ⚠️ **A pulada conta como pronta.** Ela é a duplicata que já
                 // está no catálogo: não vai responder de novo, e fora da conta
@@ -2701,11 +2846,19 @@ impl Detalhe {
                 }
             }
             if self.importacao.is_some_and(|l| l.terminou()) {
-                // 🔑 **Quem relê o catálogo é a raiz** — ela é que tem a porta
-                // do acervo. Sem esta linha as fotos ficariam gravadas e
-                // invisíveis, que é o mesmo desfecho de não ter importado.
-                cx.emit(Pedido::CatalogoMudou);
+                entrou_foto = true;
             }
+        }
+        // 🔑 **Quem relê o catálogo é a raiz** — ela é que tem a porta do
+        // acervo. Sem esta linha as fotos ficariam gravadas e invisíveis, que é
+        // o mesmo desfecho de não ter importado.
+        //
+        // 🚨 **A cada foto, e não no fim do lote.** Só no fim, um lote de 500
+        // deixava a grade — e a tela do cliente — sem nada para mostrar até a
+        // última entrar, e o operador com o cliente na frente esperando. A raiz
+        // agrupa os pedidos: é uma releitura por respiro, não uma por foto.
+        if entrou_foto {
+            cx.emit(Pedido::CatalogoMudou);
         }
 
         while let Ok(recado) = self.recados.1.try_recv() {
@@ -2755,6 +2908,24 @@ impl Detalhe {
                         }
                     }
 
+                    // 🚨 **A releitura pedida antes do gesto não o desfaz.**
+                    // Com o ensaio subindo, a galeria é relida a cada foto que
+                    // chega ao site; sem isto a estrela recém-dada sumia na
+                    // próxima, e o segundo `X` decidia sobre o estado velho.
+                    self.conferir_a_mao(aberta.fotos.iter().map(|f| {
+                        (
+                            f.id.as_str(),
+                            f.nota,
+                            f.rejeitada,
+                            f.estado == EstadoDaFotoNoSite::LevadaNoBalcao,
+                        )
+                    }));
+                    for foto in &mut aberta.fotos {
+                        if let Some(marca) = self.na_mao.get(&foto.id) {
+                            marca.no_site(foto);
+                        }
+                    }
+
                     // 🔑 A conta é do core: recorte, contagens e ordem saem
                     // dele, e não de laços escritos aqui.
                     self.do_site = aberta.fotos.iter().map(para_o_core).collect();
@@ -2784,6 +2955,8 @@ impl Detalhe {
                     abriu = true;
                 }
                 Recado::Miniatura { foto_id, bytes } => {
+                    let _t =
+                        crate::regua::trecho("sessão: miniatura do site (decodificar e gravar)");
                     self.baixando = self.baixando.saturating_sub(1);
                     // Miniatura ilegível não derruba a grade: a célula fica sem
                     // imagem, com o nome do arquivo, que é melhor que nada.
@@ -2810,10 +2983,26 @@ impl Detalhe {
                 }
                 Recado::Sincronizou => {
                     self.avisando = false;
-                    self.mudando = self.mudando.saturating_sub(1);
-                    if self.mudando == 0 {
-                        // A rodada de mudanças acabou: reler a sessão é o que
-                        // traz de volta o que o site gravou nelas.
+                }
+                Recado::Negociou { foto_id, erro } => {
+                    self.no_ar.remove(&foto_id);
+                    if let Some(erro) = erro {
+                        // A recusa desfaz a marca da mão: a releitura abaixo
+                        // traz o que o site tem, e é isso que a grade mostra.
+                        if !self.na_vez.contains_key(&foto_id) {
+                            self.na_mao.remove(&foto_id);
+                        }
+                        self.erro = Some(erro.into());
+                    }
+                    // A vez desta foto: o que foi pedido enquanto a outra
+                    // estava no ar sai agora, numa ida só.
+                    if let (Some(proxima), Some(sessao)) =
+                        (self.na_vez.remove(&foto_id), self.sessao.clone())
+                    {
+                        self.despachar_mudanca(sessao, foto_id, proxima);
+                    } else if self.mudando() == 0 {
+                        // Nada mais no ar: reler a sessão é o que traz de volta
+                        // o que o site gravou (preço efetivo, contagens).
                         if let (Some(sessao), Some(id)) =
                             (self.sessao.clone(), self.galeria_id.clone())
                         {
@@ -2883,7 +3072,6 @@ impl Detalhe {
                 Recado::Falhou(erro) => {
                     self.carregando = false;
                     self.pedindo_link = false;
-                    self.mudando = self.mudando.saturating_sub(1);
                     self.erro = Some(erro.into());
                 }
                 _ => {}
@@ -2901,7 +3089,7 @@ impl Detalhe {
         // o laço quando um lote novo é pedido.
         let continua = self.carregando
             || self.escolhendo
-            || self.mudando > 0
+            || self.mudando() > 0
             || self.importando()
             || self.baixando > 0
             || self.avisando
@@ -3398,6 +3586,7 @@ fn reduzir(imagem: &image::DynamicImage, lado: u32) -> image::DynamicImage {
 
 impl Render for Detalhe {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let _t = crate::regua::trecho("sessão: render");
         // 🚨 **Antes de montar qualquer célula.** É o que tira o decode de dentro
         // do quadro; `celula` e `tira` daqui para baixo só leem da memória.
         self.medir_o_quadro(window);
@@ -3418,6 +3607,22 @@ impl Render for Detalhe {
         self.preparar_painel(window, cx);
         self.preparar_lote(window, cx);
         self.preparar_seletores(window, cx);
+        // 🔬 **Só nos testes: desligar partes da tela para medir o quadro**
+        // (`estresse::medir_as_partes_do_quadro`). Foi assim que se achou que
+        // a grade era ~70% dos 23 ms do quadro (25/set/2026). Fora dos testes
+        // `pular` é sempre `false` e some na compilação.
+        #[cfg(test)]
+        let pular =
+            |parte: &str| std::env::var("VLB_SEM").is_ok_and(|v| v.split(',').any(|p| p == parte));
+        #[cfg(not(test))]
+        let pular = |_: &str| false;
+        let cabecalho =
+            (!pular("cabecalho")).then(|| self.cabecalho(window, cx).into_any_element());
+        let envio = (!pular("envio")).then(|| self.envio(cx).into_any_element());
+        let barra = (!pular("barra")).then(|| self.barra_da_grade(cx).into_any_element());
+        let grade = (!pular("grade")).then(|| self.grade(cx).into_any_element());
+        let painel = (!pular("painel")).then(|| self.painel(cx).into_any_element());
+        let tira_el = (!pular("tira")).then(|| self.tira(cx).into_any_element());
 
         // 🎨 **As faixas do site**: o cabeçalho de 48 px, a barra da importação
         // e a dos recortes, cada uma com o traço de baixo, e a grade encostada
@@ -3431,11 +3636,14 @@ impl Render for Detalhe {
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .child(self.cabecalho(window, cx))
-            .children(self.detalhes(cx))
-            .children(self.atendimento(cx))
-            .child(self.envio(cx))
-            .child(self.barra_da_grade(cx))
+            .children(cabecalho)
+            // ⚡ Os "detalhes" e o atendimento eram montados **também aqui**,
+            // além de lá embaixo: a mesma camada absoluta duas vezes, na mesma
+            // posição e com o mesmo id (`detalhes-veu`) — a de cima escondida
+            // atrás da grade, pintada à toa a cada quadro. Fica só a de baixo,
+            // a que aparece (25/set/2026).
+            .children(envio)
+            .children(barra)
             .when_some(self.erro.clone(), |tela, erro| {
                 tela.child(
                     div()
@@ -3451,9 +3659,19 @@ impl Render for Detalhe {
                     .flex_1()
                     .min_h(px(0.))
                     .p(px(12.))
-                    .child(self.corpo(cx)),
+                    // A grade e o painel da foto, lado a lado — como na tela
+                    // do site.
+                    .child(
+                        div()
+                            .flex()
+                            .flex_1()
+                            .min_h(px(0.))
+                            .gap(px(8.))
+                            .children(grade)
+                            .children(painel),
+                    ),
             )
-            .child(self.tira(cx))
+            .children(tira_el)
             // 🪟 **As duas camadas do site, por cima da tela**: os "detalhes"
             // ancorados no botão que os abriu (o `Popover` de lá) e o
             // atendimento como gaveta que entra pela direita (o `Drawer`).
@@ -3572,7 +3790,11 @@ impl Detalhe {
             .overflow_hidden()
             .border_b_1()
             .border_color(borda)
-            .bg(crate::janela::fundo_da_barra(cx.theme().background, window, cx))
+            .bg(crate::janela::fundo_da_barra(
+                cx.theme().background,
+                window,
+                cx,
+            ))
             .child(
                 estilo::botao_do_menu("galeria-menu", cx)
                     .on_click(cx.listener(|_tela, _ev, _window, cx| cx.emit(Pedido::AlternarMenu))),
@@ -4267,17 +4489,6 @@ impl Detalhe {
         }
     }
 
-    /// A grade e o painel da foto, lado a lado — como na tela do site.
-    fn corpo(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .flex()
-            .flex_1()
-            .min_h(px(0.))
-            .gap(px(8.))
-            .child(self.grade(cx))
-            .child(self.painel(cx))
-    }
-
     fn grade(&self, cx: &mut Context<Self>) -> impl IntoElement {
         if self.acervo.total_visivel() == 0 {
             let frase = if self.aberta.is_none() && self.carregando {
@@ -4492,31 +4703,31 @@ impl Detalhe {
                     .children(miniatura)
                     // O selo do estado, no canto — como na tela do site, e
                     // agora com a cor do que ele diz (`crate::selos`).
+                    // 🚨 A importada não é "à venda": ela nem chegou ao
+                    // site. Ver `selos::selo_de_so_no_disco`.
+                    // ❌ A rejeitada diz isso antes de tudo (C21): é a
+                    // decisão que muda o que acontece com ela.
+                    //
+                    // ⚡ O selo se posiciona sozinho, sem uma caixa só para
+                    // ancorá-lo: um nó a menos por célula, em todo quadro.
                     .child(
-                        div()
-                            .absolute()
-                            .top(px(4.))
-                            .left(px(4.))
-                            // 🚨 A importada não é "à venda": ela nem chegou ao
-                            // site. Ver `selos::selo_de_so_no_disco`.
-                            // ❌ A rejeitada diz isso antes de tudo (C21): é a
-                            // decisão que muda o que acontece com ela.
-                            .child(if foto.rejeitada && !foto.apagada {
-                                selos::selo_de_rejeitada(cx).into_any_element()
-                            } else if self.ids_locais.contains(&foto.id) {
-                                selos::selo_de_so_no_disco(cx).into_any_element()
-                            } else {
-                                selos::selo_do_estado(foto.estado, foto.apagada, cx)
-                                    .into_any_element()
-                            }),
+                        if foto.rejeitada && !foto.apagada {
+                            selos::selo_de_rejeitada(cx)
+                        } else if self.ids_locais.contains(&foto.id) {
+                            selos::selo_de_so_no_disco(cx)
+                        } else {
+                            selos::selo_do_estado(foto.estado, foto.apagada, cx)
+                        }
+                        .absolute()
+                        .top(px(4.))
+                        .left(px(4.)),
                     )
                     // 📍 **Onde ela está**, no canto de baixo — como no site.
                     .child(
-                        div()
+                        selo_do_lugar(self.lugar_de(&foto.id))
                             .absolute()
                             .bottom(px(4.))
-                            .left(px(4.))
-                            .child(selo_do_lugar(self.lugar_de(&foto.id))),
+                            .left(px(4.)),
                     )
                     .when(marcada, |quadro| {
                         quadro.child(
@@ -5459,13 +5670,11 @@ impl Detalhe {
             );
             return;
         }
-        if mudanca.vazia() || self.mudando > 0 {
+        if mudanca.vazia() {
             return;
         }
         self.erro = None;
-        self.mudando = 1;
-        self.publicador
-            .negociar(sessao, foto_id, mudanca, self.recados.0.clone());
+        self.despachar_mudanca(sessao, foto_id, mudanca);
         self.acompanhar(cx);
         cx.notify();
     }
@@ -5950,7 +6159,6 @@ impl Detalhe {
                                     })
                                     .xsmall()
                                     .ghost()
-                                    .disabled(self.mudando > 0)
                                     .on_click(cx.listener(move |tela, _, _, cx| {
                                         tela.dar_nota(if nota_do_lote == Some(nota) { 0 } else { nota }, cx)
                                     }))
@@ -5965,7 +6173,7 @@ impl Detalhe {
                                         .debug_selector(|| "lote-marcar-levadas".into())
                                         .label("Marcar como levadas")
                                         .xsmall()
-                                        .disabled(editaveis + aguardando == 0 || self.mudando > 0)
+                                        .disabled(editaveis + aguardando == 0)
                                         .on_click(cx.listener(|tela, _, _, cx| {
                                             tela.marcar_como(EstadoNoBalcao::LevadaNoBalcao, cx)
                                         })),
@@ -5975,7 +6183,7 @@ impl Detalhe {
                                         .debug_selector(|| "lote-por-a-venda".into())
                                         .label("Pôr à venda")
                                         .xsmall()
-                                        .disabled(editaveis + aguardando == 0 || self.mudando > 0)
+                                        .disabled(editaveis + aguardando == 0)
                                         .on_click(cx.listener(|tela, _, _, cx| {
                                             tela.marcar_como(EstadoNoBalcao::Disponivel, cx)
                                         })),
@@ -5989,7 +6197,7 @@ impl Detalhe {
                                     Select::new(&campos.faixa)
                                         .xsmall()
                                         .placeholder("Escolha a faixa para todas…")
-                                        .disabled(editaveis == 0 || self.mudando > 0)
+                                        .disabled(editaveis == 0)
                                         .w_full(),
                                 ),
                         )
@@ -6041,7 +6249,7 @@ impl Detalhe {
                                         .debug_selector(|| "lote-preco-aplicar".into())
                                         .label("Aplicar")
                                         .xsmall()
-                                        .disabled(editaveis == 0 || self.mudando > 0)
+                                        .disabled(editaveis == 0)
                                         .on_click(cx.listener(|tela, _, _, cx| {
                                             tela.aplicar_preco_do_lote(cx)
                                         })),
@@ -6052,7 +6260,7 @@ impl Detalhe {
                                 .debug_selector(|| "lote-preco-voltar-faixa".into())
                                 .label("Remover preço fixado: usar a faixa")
                                 .xsmall()
-                                .disabled(editaveis == 0 || self.mudando > 0)
+                                .disabled(editaveis == 0)
                                 .on_click(cx.listener(|tela, _, _, cx| {
                                     tela.mudar_preco_do_lote(None, cx)
                                 })),
@@ -6064,7 +6272,7 @@ impl Detalhe {
                                 .xsmall()
                                 .danger()
                                 .ghost()
-                                .disabled(editaveis == 0 || self.mudando > 0)
+                                .disabled(editaveis == 0)
                                 .on_click(cx.listener(|tela, _, _, cx| {
                                     tela.apagar_marcadas_do_site(cx)
                                 })),
@@ -6677,7 +6885,7 @@ impl Detalhe {
 /// ⚠️ **A nuvem é discreta e o disco sozinho não**: o normal é a foto estar no
 /// acervo, e o que chama a atenção é o que ainda depende deste computador. Com
 /// ela nos dois lugares, o disco é informação de espaço, e fica cinza.
-fn selo_do_lugar(lugar: Lugar) -> impl IntoElement {
+fn selo_do_lugar(lugar: Lugar) -> gpui::Div {
     use crate::recursos::Icone;
     use gpui_component::Icon;
     let redondo = |icone: Icone, cor: gpui::Hsla, fundo: u32| {
@@ -6835,6 +7043,102 @@ fn sanear(texto: &str) -> String {
     // Espaço e ponto no fim somem no Windows, e um nome que termina em ponto
     // vira outro nome sem ninguém saber.
     limpo.trim().trim_end_matches('.').trim().to_string()
+}
+
+/// Quanto a marca da mão resiste a uma resposta que discorda, **sem nada no
+/// ar**. Passado isto, o gesto não pegou (o catálogo não gravou, o site
+/// recusou calado) e a grade volta a mostrar a verdade — melhor que uma
+/// estrela que só existe na tela.
+const PRAZO_DA_MAO: Duration = Duration::from_secs(20);
+
+/// O que a mão pôs numa foto e a resposta ainda não confirmou — ver
+/// `Detalhe::na_mao`. Cada campo `None` é "este gesto não mexeu nisto".
+#[derive(Debug, Clone)]
+struct MarcaDaMao {
+    nota: Option<Option<u8>>,
+    rejeitada: Option<bool>,
+    levada: Option<bool>,
+    desde: std::time::Instant,
+}
+
+impl MarcaDaMao {
+    fn nova(desde: std::time::Instant) -> Self {
+        Self {
+            nota: None,
+            rejeitada: None,
+            levada: None,
+            desde,
+        }
+    }
+
+    /// Escreve a marca na foto do site. Devolve se mudou alguma coisa.
+    ///
+    /// ⚠️ **A comprada não muda de estado**: ela nasce de pedido pago, e o
+    /// gesto já a deixou de fora antes de chegar aqui.
+    fn no_site(&self, foto: &mut FotoDaGaleria) -> bool {
+        let antes = (foto.nota, foto.rejeitada, foto.estado);
+        if let Some(nota) = self.nota {
+            foto.nota = nota;
+        }
+        if let Some(rejeitada) = self.rejeitada {
+            foto.rejeitada = rejeitada;
+        }
+        if let Some(levada) = self.levada {
+            if foto.estado != EstadoDaFotoNoSite::Comprada {
+                foto.estado = if levada {
+                    EstadoDaFotoNoSite::LevadaNoBalcao
+                } else {
+                    EstadoDaFotoNoSite::Disponivel
+                };
+            }
+        }
+        antes != (foto.nota, foto.rejeitada, foto.estado)
+    }
+
+    /// O mesmo, na foto que só existe no disco.
+    fn no_core(&self, foto: &mut acervo::Foto) {
+        if let Some(nota) = self.nota {
+            foto.nota = nota;
+        }
+        if let Some(rejeitada) = self.rejeitada {
+            foto.rejeitada = rejeitada;
+        }
+        if let Some(levada) = self.levada {
+            if foto.estado != acervo::Estado::Comprada {
+                foto.estado = if levada {
+                    acervo::Estado::LevadaNoBalcao
+                } else {
+                    acervo::Estado::Disponivel
+                };
+            }
+        }
+    }
+}
+
+/// Duas mudanças da mesma foto numa só: o que a segunda diz ganha, e o que
+/// ela não diz fica como a primeira pediu.
+fn fundir_mudancas(
+    antes: domain::services::pos_venda::MudancaDaFoto,
+    depois: domain::services::pos_venda::MudancaDaFoto,
+) -> domain::services::pos_venda::MudancaDaFoto {
+    let domain::services::pos_venda::MudancaDaFoto {
+        estado,
+        preco_negociado,
+        observacao_da_negociacao,
+        nota,
+        rejeitada,
+        produto_id,
+        preco_de_venda,
+    } = depois;
+    domain::services::pos_venda::MudancaDaFoto {
+        estado: estado.or(antes.estado),
+        preco_negociado: preco_negociado.or(antes.preco_negociado),
+        observacao_da_negociacao: observacao_da_negociacao.or(antes.observacao_da_negociacao),
+        nota: nota.or(antes.nota),
+        rejeitada: rejeitada.or(antes.rejeitada),
+        produto_id: produto_id.or(antes.produto_id),
+        preco_de_venda: preco_de_venda.or(antes.preco_de_venda),
+    }
 }
 
 fn para_o_core(foto: &FotoDaGaleria) -> acervo::Foto {
@@ -7929,6 +8233,210 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
+    /// A nota de uma foto como a grade a desenha agora.
+    fn nota_na_grade(tela: &Detalhe, id: &str) -> Option<u8> {
+        let p = tela.acervo.posicao_de(id).expect("a foto está na grade");
+        tela.acervo.visivel(p).expect("e visível").nota
+    }
+
+    /// Foca só esta foto, como o clique na grade.
+    fn focar_so(tela: &mut Detalhe, id: &str, cx: &mut Context<Detalhe>) {
+        let p = tela.acervo.posicao_de(id).expect("a foto está na grade");
+        tela.clicar(p, Modificadores::default(), cx);
+    }
+
+    /// 🚨 **Com a rede cheia, a tecla seguinte não é engolida** (dono,
+    /// 25/set/2026: *"não posso ficar bloqueado"*).
+    ///
+    /// O ensaio subindo ao R2 enche a rede, e o `PATCH` da nota demora
+    /// segundos. Até aqui a tela inteira esperava a rodada anterior
+    /// (`if … || self.mudando > 0 { return; }`): a nota da **outra** foto
+    /// desistia em silêncio, e a estrela só aparecia quando o site respondia.
+    #[gpui::test]
+    fn com_o_patch_no_ar_a_proxima_tecla_vale_e_a_estrela_aparece_na_hora(cx: &mut TestAppContext) {
+        let publicador = Arc::new(PublicadorDeMentira {
+            negociacao_demorada: true,
+            ..Arc::try_unwrap(publicador_com(
+                vec![
+                    foto("f1", EstadoDaFotoNoSite::Disponivel, Some(3)),
+                    foto("f2", EstadoDaFotoNoSite::Disponivel, Some(3)),
+                ],
+                false,
+            ))
+            .ok()
+            .expect("ninguém mais tem o publicador")
+        });
+        let janela = janela_com(
+            cx,
+            publicador.clone(),
+            Arc::new(SeletorDeMentira::default()),
+        );
+        entrar(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                focar_so(tela, "f1", cx);
+                tela.dar_nota(5, cx);
+                assert_eq!(
+                    nota_na_grade(tela, "f1"),
+                    Some(5),
+                    "a estrela tem de aparecer antes de o site responder"
+                );
+
+                // A outra foto não espera a primeira.
+                focar_so(tela, "f2", cx);
+                tela.dar_nota(4, cx);
+                assert_eq!(nota_na_grade(tela, "f2"), Some(4));
+
+                // A mesma foto espera a vez — na fila, sem desistir.
+                focar_so(tela, "f1", cx);
+                tela.dar_nota(2, cx);
+                assert_eq!(nota_na_grade(tela, "f1"), Some(2));
+            })
+            .expect("a janela deve estar aberta");
+
+        let ids: Vec<String> = publicador
+            .negociadas()
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(
+            ids,
+            ["f1", "f2"],
+            "a f2 tinha de sair na hora, e o segundo PATCH da f1 esperar o primeiro"
+        );
+
+        // A rede responde: a vez da f1 sai, e só ela.
+        publicador.responder();
+        colher_ate_parar(cx, &janela);
+        let negociadas = publicador.negociadas();
+        assert_eq!(negociadas.len(), 3, "{negociadas:?}");
+        assert_eq!(negociadas[2].0, "f1");
+        assert_eq!(negociadas[2].1.nota, Some(Some(2)), "vale a última tecla");
+
+        publicador.responder();
+        colher_ate_parar(cx, &janela);
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert_eq!(nota_na_grade(tela, "f1"), Some(2));
+                assert_eq!(nota_na_grade(tela, "f2"), Some(4));
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **A releitura pedida antes do gesto não apaga a estrela.**
+    ///
+    /// Com o ensaio subindo, a galeria é relida a cada foto que chega ao site.
+    /// Uma releitura que saiu antes do `PATCH` volta com a nota velha — e até
+    /// aqui ela trocava a grade inteira, a estrela sumia, e o gesto seguinte
+    /// decidia sobre o estado de antes.
+    #[gpui::test]
+    fn a_releitura_velha_nao_desfaz_a_nota_recem_dada(cx: &mut TestAppContext) {
+        let (janela, publicador) = janela(
+            cx,
+            vec![foto("f1", EstadoDaFotoNoSite::Disponivel, Some(3))],
+        );
+        entrar(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                focar_so(tela, "f1", cx);
+                tela.dar_nota(5, cx);
+            })
+            .expect("a janela deve estar aberta");
+        // O site ainda não gravou quando a releitura é servida.
+        publicador.fotos_da_sessao.lock().unwrap()[0].nota = Some(3);
+        janela
+            .update(cx, |tela, _window, cx| tela.reler(cx))
+            .expect("a janela deve estar aberta");
+        colher_ate_parar(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert_eq!(
+                    nota_na_grade(tela, "f1"),
+                    Some(5),
+                    "a releitura velha apagou a estrela recém-dada"
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        // 🔑 E a marca não mente para sempre: sem nada no ar, passado o
+        // prazo, vale o que o site diz.
+        janela
+            .update(cx, |tela, _window, cx| {
+                for marca in tela.na_mao.values_mut() {
+                    marca.desde -= PRAZO_DA_MAO + Duration::from_secs(1);
+                }
+                tela.reler(cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher_ate_parar(cx, &janela);
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert_eq!(nota_na_grade(tela, "f1"), Some(3));
+                assert!(tela.na_mao.is_empty());
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **A foto importada aparece enquanto o lote anda**, e não no fim.
+    ///
+    /// Até aqui só o fim do lote pedia a releitura do catálogo: numa
+    /// importação de 500, a grade (e a tela do cliente) ficava sem nada novo
+    /// até a última entrar. A raiz agrupa os pedidos — ver
+    /// `pedir_releitura_do_acervo` —, então pedir a cada foto não custa uma
+    /// varredura por foto.
+    #[gpui::test]
+    fn cada_foto_importada_pede_a_releitura_sem_esperar_o_lote(cx: &mut TestAppContext) {
+        let seletor = Arc::new(SeletorDeMentira {
+            escolha: std::sync::Mutex::new(caminhos_de_teste(4)),
+            ..Default::default()
+        });
+        let publicador = publicador_com(
+            vec![foto("a", EstadoDaFotoNoSite::Disponivel, Some(4))],
+            true,
+        );
+        let importador = Arc::new(ImportadorDeMentira::demorado());
+        let janela = janela_completa(cx, publicador.clone(), seletor.clone(), importador.clone());
+        entrar_demorado(cx, &janela, &publicador);
+
+        let tela = janela.root(cx).expect("a raiz da janela");
+        let releituras = Arc::new(std::sync::Mutex::new(0usize));
+        let _inscricao = cx.update({
+            let releituras = releituras.clone();
+            move |cx| {
+                cx.subscribe(&tela, move |_tela, pedido: &Pedido, _cx| {
+                    if matches!(pedido, Pedido::CatalogoMudou) {
+                        *releituras.lock().expect("as releituras") += 1;
+                    }
+                })
+            }
+        });
+
+        importar_pelo_modal(cx, &janela);
+        let colher = |cx: &mut TestAppContext| {
+            janela
+                .update(cx, |tela, _window, cx| tela.colher(cx))
+                .expect("a janela deve estar aberta")
+        };
+        colher(cx);
+        importador.responder_uma(); // Comecou
+        colher(cx);
+        assert_eq!(*releituras.lock().unwrap(), 0, "nada entrou ainda");
+
+        importador.responder_uma(); // a primeira foto
+        colher(cx);
+        assert_eq!(
+            *releituras.lock().unwrap(),
+            1,
+            "a primeira foto importada tinha de pedir a releitura já"
+        );
+        janela
+            .update(cx, |tela, _window, _cx| assert!(tela.importando()))
+            .expect("a janela deve estar aberta");
+    }
+
     /// 🔑 **A barra anda com o lote, e termina relendo a galeria.**
     ///
     /// ⚠️ **A falha conta como pronta.** Uma foto que o site recusou não
@@ -8783,7 +9291,8 @@ mod testes {
         // E o preço de venda sai como decimal com ponto, que é o que a API lê.
         janela
             .update(cx, |tela, window, cx| {
-                tela.mudando = 0;
+                // A resposta do PATCH anterior libera a vez da foto.
+                tela.colher(cx);
                 tela.preparar_painel(window, cx);
                 if let Some(campos) = tela.campos_do_painel.as_ref() {
                     campos
@@ -8845,7 +9354,8 @@ mod testes {
 
         janela
             .update(cx, |tela, window, cx| {
-                tela.mudando = 0;
+                // A resposta do PATCH anterior libera a vez da foto.
+                tela.colher(cx);
                 let preco = &tela.campos_do_lote.as_ref().unwrap().preco;
                 preco.update(cx, |campo, cx| campo.set_value("31,90", window, cx));
                 tela.aplicar_preco_do_lote(cx);

@@ -299,6 +299,27 @@ fn importar_classificar_e_levar_pelas_teclas(cx: &mut TestAppContext) {
     assert_eq!(negociadas.len(), 2);
     assert_eq!(negociadas[1].1.nota, Some(Some(5)));
 
+    // 🔑 **A levada continua levada**, na grade e no site: o `PATCH` grava, e
+    // a releitura não desfaz o gesto. É por isso que o `0` logo abaixo precisa
+    // da foto devolvida à venda antes — tirar a nota de uma levada é recusado
+    // (*"tire a marcação (P) antes"*), aqui e no servidor.
+    e.detalhe(cx, |tela, _w, _cx| {
+        assert_eq!(
+            tela.em_foco().map(|f| f.estado),
+            Some(biblioteca_core::acervo::Estado::LevadaNoBalcao),
+            "o B continua valendo depois da releitura"
+        );
+    });
+    e.teclar(cx, "b");
+    e.esperar(cx);
+    let negociadas = e.site.negociadas();
+    assert_eq!(
+        negociadas.len(),
+        3,
+        "o segundo B devolve à venda: {negociadas:?}"
+    );
+    assert_eq!(negociadas[2].1.estado, Some(EstadoNoBalcao::Disponivel));
+
     // 🚨 **O `0` numa foto do acervo tira a nota, e só isso** (contrato C22,
     // 2026-09-20). Até 18/set/2026 ele recusava ("use Apagar"); de lá até
     // 20/set ele abria a pergunta do resgate — o bruto de volta para cá e a
@@ -308,12 +329,12 @@ fn importar_classificar_e_levar_pelas_teclas(cx: &mut TestAppContext) {
     let negociadas = e.site.negociadas();
     assert_eq!(
         negociadas.len(),
-        3,
+        4,
         "o 0 é uma mudança da foto: {negociadas:?}"
     );
-    assert_eq!(negociadas[2].0, "d");
+    assert_eq!(negociadas[3].0, "d");
     assert_eq!(
-        negociadas[2].1.nota,
+        negociadas[3].1.nota,
         Some(None),
         "tirar a nota é `nota: null`"
     );
@@ -327,7 +348,7 @@ fn importar_classificar_e_levar_pelas_teclas(cx: &mut TestAppContext) {
     // antes — e, sem ele chegar ao catálogo, nada sai da nuvem.
     e.teclar(cx, "x");
     e.esperar(cx);
-    assert_eq!(e.site.negociadas().len(), 3, "nenhum PATCH de rejeição");
+    assert_eq!(e.site.negociadas().len(), 4, "nenhum PATCH de rejeição");
     assert_eq!(e.site.originais(), ["d"], "o bruto foi pedido primeiro");
     assert!(
         e.site.tiradas().is_empty(),
@@ -338,7 +359,7 @@ fn importar_classificar_e_levar_pelas_teclas(cx: &mut TestAppContext) {
     e.detalhe(cx, |tela, _w, cx| tela.focar_foto("c", cx));
     e.teclar(cx, "b");
     e.esperar(cx);
-    assert_eq!(e.site.negociadas().len(), 3, "a comprada fica de fora");
+    assert_eq!(e.site.negociadas().len(), 4, "a comprada fica de fora");
 }
 
 /// O que o catálogo desta máquina sabe da foto: (nota, sinalizador).

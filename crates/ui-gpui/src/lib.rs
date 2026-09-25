@@ -47,6 +47,7 @@ pub mod menu;
 pub mod pos_venda;
 /// Os ícones do site e as imagens da capa, embutidos.
 pub mod recursos;
+pub mod regua;
 pub mod revelacao;
 /// O trabalho que continua com a janela minimizada ou fechada (a bandeja).
 pub mod segundo_plano;

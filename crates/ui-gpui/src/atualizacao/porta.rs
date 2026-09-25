@@ -104,6 +104,13 @@ pub enum Aviso {
     Instalada(String),
     /// Não deu — e a tela mostra isso **sem** derrubar nada.
     Falhou(String),
+    /// A procura **pedida** não achou nada: esta é a versão mais recente.
+    ///
+    /// 🔑 Só a procura pedida responde isto. Na da abertura, "nada novo" é
+    /// silêncio — ninguém perguntou.
+    EmDia(String),
+    /// A procura **pedida** não conseguiu perguntar a servidor nenhum.
+    SemResposta(String),
 }
 
 /// Quem sabe procurar e instalar versão nova.
@@ -116,7 +123,11 @@ pub trait Atualizador: Send + Sync + 'static {
     ///
     /// Quando não há nada novo, **nada é enviado pelo canal**: silêncio é a
     /// resposta normal, e ela não merece interromper ninguém.
-    fn procurar(&self, canal: Sender<Aviso>);
+    ///
+    /// `pedida` é o operador que clicou em "Verificar atualizações": aí o
+    /// silêncio vira [`Aviso::EmDia`], e a falha vira [`Aviso::SemResposta`] —
+    /// houve um clique esperando resposta.
+    fn procurar(&self, canal: Sender<Aviso>, pedida: bool);
 
     /// Baixa, confere a assinatura e instala. A resposta chega pelo canal.
     fn instalar(&self, canal: Sender<Aviso>);
@@ -182,7 +193,7 @@ mod real {
     }
 
     impl Atualizador for AtualizadorDaWeb {
-        fn procurar(&self, canal: Sender<Aviso>) {
+        fn procurar(&self, canal: Sender<Aviso>, pedida: bool) {
             let atual = self.versao_atual.clone();
             // 🚨 Uma thread do sistema, e **não** `tokio::spawn`. O
             // `check_update` é bloqueante e monta um runtime próprio por dentro
@@ -194,22 +205,30 @@ mod real {
                 use super::super::compilar;
                 use super::super::novidades::{self, JeitoDaInstalacao};
                 let jeito = novidades::jeito_desta_instalacao();
+                // Algum servidor respondeu? Só a procura pedida usa isto, para
+                // não dizer "está em dia" sem ter perguntado a ninguém.
+                let mut respondeu = false;
+                let mut motivo_da_falha = None;
                 // A instalação compilada nunca recebe pacote: nem pergunta.
                 let pacote = if jeito == JeitoDaInstalacao::Compilado {
                     None
                 } else {
                     match AtualizadorDaWeb::consultar(&atual) {
-                        Ok(nova) => nova.map(|nova| VersaoNova {
-                            versao: nova.version.clone(),
-                            notas: nova.body.clone(),
-                            jeito: JeitoDeAtualizar::Pacote,
-                            novidades: None,
-                        }),
-                        // 🔑 A falha da **procura** não vai para a tela.
-                        // Ninguém pediu nada; avisar "não consegui checar
+                        Ok(nova) => {
+                            respondeu = true;
+                            nova.map(|nova| VersaoNova {
+                                versao: nova.version.clone(),
+                                notas: nova.body.clone(),
+                                jeito: JeitoDeAtualizar::Pacote,
+                                novidades: None,
+                            })
+                        }
+                        // 🔑 A falha da procura **da abertura** não vai para a
+                        // tela. Ninguém pediu nada; avisar "não consegui checar
                         // atualização" a cada abertura sem rede é ruído puro.
                         Err(motivo) => {
                             eprintln!("[atualização] {motivo}");
+                            motivo_da_falha = Some(motivo);
                             None
                         }
                     }
@@ -219,6 +238,7 @@ mod real {
                 } else {
                     novidades::buscar()
                 };
+                respondeu |= main.is_some();
                 let agora = compilar::agora();
                 let casa = compilar::casa();
                 let memoria = casa
@@ -229,10 +249,20 @@ mod real {
                     .as_ref()
                     .is_some_and(|c| compilar::ocupado(&c.join("atualizando.trava"), agora));
                 // Silêncio é a resposta normal: nada novo, nada na tela.
-                if let compilar::Decisao::Avisar { versao, automatico } =
-                    compilar::decidir(jeito, &atual, pacote, main, &memoria, ocupado, agora)
-                {
-                    let _ = canal.send(Aviso::Disponivel { versao, automatico });
+                match compilar::decidir(jeito, &atual, pacote, main, &memoria, ocupado, agora) {
+                    compilar::Decisao::Avisar { versao, automatico } => {
+                        let _ = canal.send(Aviso::Disponivel { versao, automatico });
+                    }
+                    _ if !pedida => {}
+                    _ if respondeu => {
+                        let _ = canal.send(Aviso::EmDia(atual));
+                    }
+                    _ => {
+                        let _ =
+                            canal.send(Aviso::SemResposta(motivo_da_falha.unwrap_or_else(|| {
+                                "nenhum servidor de atualização respondeu".into()
+                            })));
+                    }
                 }
             });
         }
@@ -346,10 +376,18 @@ pub mod mentira {
     }
 
     impl Atualizador for AtualizadorDeMentira {
-        fn procurar(&self, canal: Sender<Aviso>) {
+        fn procurar(&self, canal: Sender<Aviso>, pedida: bool) {
             *self.procuras.lock().expect("as procuras") += 1;
-            if let Some(aviso) = self.resposta.lock().expect("a resposta").clone() {
-                let _ = canal.send(aviso);
+            match self.resposta.lock().expect("a resposta").clone() {
+                Some(aviso) => {
+                    let _ = canal.send(aviso);
+                }
+                // O mesmo contrato do de verdade: a procura pedida não fica
+                // em silêncio.
+                None if pedida => {
+                    let _ = canal.send(Aviso::EmDia(env!("CARGO_PKG_VERSION").into()));
+                }
+                None => {}
             }
         }
 

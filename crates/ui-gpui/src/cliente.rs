@@ -787,6 +787,7 @@ impl Cliente {
 
 impl Render for Cliente {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let _t = crate::regua::trecho("tela do cliente: render");
         let info = self.mostrar_info.then(|| self.info()).flatten();
         let barra = tem_barra_propria(window);
         let mut janela = window.viewport_size();

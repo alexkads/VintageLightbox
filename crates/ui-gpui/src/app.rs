@@ -786,6 +786,17 @@ pub struct Aplicativo {
     /// o sintoma seria a grade nunca receber as fotos importadas, que é
     /// exatamente o defeito que esta ligação existe para consertar.
     _releitura: Option<gpui::Task<()>>,
+    /// Uma leitura do catálogo está no ar — a próxima espera por ela.
+    ///
+    /// 🚨 **Sem isto as leituras se empilhavam** durante a importação em
+    /// segundo plano: cada foto copiada pedia uma varredura do catálogo
+    /// inteiro, uma atrás da outra, e cada uma que voltava refazia as duas
+    /// grades na thread que desenha. A tecla do operador entrava na fila
+    /// atrás delas — era a classificação "travando" com o ensaio subindo.
+    relendo: bool,
+    /// Alguém pediu outra leitura enquanto uma estava no ar: ela sai quando
+    /// a do ar voltar, e **uma só**, por mais pedidos que tenham chegado.
+    reler_de_novo: bool,
     /// 🚨 A inscrição no fim da importação. Sem ela nada acusa: o lote entra no
     /// banco, o modal conta as fotos, e a grade continua vazia.
     _fim_da_importacao: gpui::Subscription,
@@ -816,7 +827,9 @@ impl Aplicativo {
         // avisar já passou. `procurar` devolve na hora; a resposta chega pelo
         // canal, e `esperar_aviso` é quem a recolhe.
         let avisos_de_versao = channel();
-        portas.atualizador.procurar(avisos_de_versao.0.clone());
+        portas
+            .atualizador
+            .procurar(avisos_de_versao.0.clone(), false);
         let atualizacao = Self::esperar_aviso(cx);
 
         // O mesmo cache de previews da Biblioteca: a importação grava miniatura
@@ -1228,6 +1241,8 @@ impl Aplicativo {
             releituras: channel(),
             reveladas,
             _releitura: None,
+            relendo: false,
+            reler_de_novo: false,
             _fim_da_importacao: fim_da_importacao,
             atualizador: portas.atualizador,
             atualizacao: faixa::Estado::default(),
@@ -1262,22 +1277,61 @@ impl Aplicativo {
                     if chegou {
                         cx.notify();
                     }
-                    (raiz.atualizacao.instalando, chegou)
+                    (
+                        raiz.atualizacao.instalando,
+                        raiz.atualizacao.verificando,
+                        chegou,
+                    )
                 }) else {
                     return;
                 };
                 match continua {
-                    (true, _) => ociosas = 0,
-                    (false, true) => return,
-                    (false, false) => {
+                    (true, _, _) => ociosas = 0,
+                    (false, _, true) => return,
+                    (false, verificando, false) => {
                         ociosas += 1;
-                        if ociosas >= 300 {
+                        // 🔑 A verificação pedida não pode morrer calada: a
+                        // faixa diria "Procurando…" para sempre. Ela espera
+                        // mais que a da abertura (o updater tenta cada
+                        // endereço por 15 s) e, no fim, diz que não deu.
+                        if verificando && ociosas >= 600 {
+                            let _ = raiz.update(cx, |raiz, cx| {
+                                raiz.atualizacao.receber(Aviso::SemResposta(
+                                    "o servidor demorou demais para responder".into(),
+                                ));
+                                cx.notify();
+                            });
+                            return;
+                        }
+                        if !verificando && ociosas >= 300 {
                             return;
                         }
                     }
                 }
             }
         })
+    }
+
+    /// "Verificar atualizações", do menu da conta: pergunta agora, e responde
+    /// na faixa **mesmo quando não há nada novo** — houve um clique esperando.
+    ///
+    /// ⚠️ Com uma instalação andando, ou uma já feita esperando o "Reabrir",
+    /// não pergunta de novo: a faixa já diz o que importa.
+    fn verificar_atualizacoes(&mut self, cx: &mut Context<Self>) {
+        let ocupada = self.atualizacao.instalando
+            || self.atualizacao.verificando
+            || matches!(self.atualizacao.aviso, Some(Aviso::Instalada(_)));
+        if !ocupada {
+            self.atualizacao.verificando = true;
+            self.atualizacao.aviso = None;
+            // Pedir de novo é querer ver a versão que se dispensou antes.
+            self.atualizacao.dispensada = None;
+            self.atualizacao.novidades_abertas = false;
+            self.atualizador
+                .procurar(self.avisos_de_versao.0.clone(), true);
+            self._atualizacao = Some(Self::esperar_aviso(cx));
+        }
+        cx.notify();
     }
 
     /// Roda o instalador para a versão anunciada.
@@ -1343,6 +1397,7 @@ impl Aplicativo {
             PedidoDeAtualizacao::BaixarInstalador => {
                 cx.open_url(crate::atualizacao::novidades::INSTALADOR_DO_WINDOWS)
             }
+            PedidoDeAtualizacao::Verificar => self.verificar_atualizacoes(cx),
         }
         cx.notify();
     }
@@ -1522,7 +1577,19 @@ impl Aplicativo {
     }
 
     fn reler_o_acervo(&mut self, cx: &mut Context<Self>) {
-        self.acervo.recarregar(self.releituras.0.clone());
+        // 🔑 **Uma leitura no ar por vez.** A que for pedida enquanto esta
+        // anda sai quando ela voltar — e já vê o que mudou no meio.
+        if self.relendo {
+            self.reler_de_novo = true;
+            return;
+        }
+        self.relendo = true;
+        {
+            // ⚠️ No teste, o acervo de mentira lê aqui mesmo; o de verdade
+            // lê numa tarefa do tokio e isto custa quase nada.
+            let _t = crate::regua::trecho("raiz: pedir a leitura do catálogo");
+            self.acervo.recarregar(self.releituras.0.clone());
+        }
 
         self._releitura = Some(cx.spawn(async move |raiz, cx| {
             for _ in 0..300 {
@@ -1530,9 +1597,12 @@ impl Aplicativo {
                     .timer(std::time::Duration::from_millis(100))
                     .await;
                 let Ok(chegou) = raiz.update(cx, |raiz, cx| {
-                    let Ok(mut fotos) = raiz.releituras.1.try_recv() else {
+                    // A mais nova, se sobrou alguma de uma espera que desistiu:
+                    // uma leitura velha por cima desfaria o que a mão fez.
+                    let Some(mut fotos) = raiz.releituras.1.try_iter().last() else {
                         return false;
                     };
+                    let _t = crate::regua::trecho("raiz: aplicar a leitura do catálogo");
                     raiz.com_o_espelho_do_gravador(&mut fotos);
                     // 🔑 **A tela da sessão recebe as locais deste ensaio.**
                     // Sem isto a foto importada ficaria gravada e invisível —
@@ -1545,6 +1615,7 @@ impl Aplicativo {
                     todas.extend(raiz.fotos_do_site.iter().cloned());
                     raiz.biblioteca
                         .update(cx, |tela, cx| tela.trocar_acervo(todas, cx));
+                    raiz.acabou_a_leitura(cx);
                     cx.notify();
                     true
                 }) else {
@@ -1554,7 +1625,18 @@ impl Aplicativo {
                     return;
                 }
             }
+            // Desistiu: a grade fica como estava, e a próxima leitura é livre.
+            let _ = raiz.update(cx, |raiz, cx| raiz.acabou_a_leitura(cx));
         }));
+    }
+
+    /// A leitura do ar voltou (ou desistiu): a pedida no meio sai agora,
+    /// **agrupada** — o respiro é o que deixa a tecla passar entre duas.
+    fn acabou_a_leitura(&mut self, cx: &mut Context<Self>) {
+        self.relendo = false;
+        if std::mem::take(&mut self.reler_de_novo) {
+            self.pedir_releitura_do_acervo(cx);
+        }
     }
 
     /// O que o assistente da nova sessão pede.
@@ -1572,7 +1654,9 @@ impl Aplicativo {
                 self.entrar_na_sessao(id, cx);
                 window.focus(&self.foco);
             }
-            PedidoDaNova::CatalogoMudou => self.reler_o_acervo(cx),
+            // ⚠️ **Agrupada**: durante a cópia em segundo plano isto chega a
+            // cada troca do catálogo, e reler é varrer o catálogo inteiro.
+            PedidoDaNova::CatalogoMudou => self.pedir_releitura_do_acervo(cx),
             PedidoDaNova::AlternarMenu => self.alternar_menu_lateral(cx),
             PedidoDaNova::RevelandoReceita => self.esperar_as_reveladas(cx),
             // 🔑 A cópia que continua depois de criar aparece na barra da
@@ -1597,6 +1681,7 @@ impl Aplicativo {
     /// terminou de subir; na grade da sessão ela entra como não classificada,
     /// que é o que o recorte "Sem nota" existe para encontrar.
     fn mostrar_as_locais_na_sessao(&mut self, fotos: &[PhotoViewModel], cx: &mut Context<Self>) {
+        let _t = crate::regua::trecho("raiz: separar as locais da sessão");
         let Some(galeria) = self.sessao_aberta.clone() else {
             return;
         };
@@ -1616,25 +1701,41 @@ impl Aplicativo {
             .iter()
             .filter_map(|f| f.pos_venda_foto_id.as_deref())
             .collect();
-        self.recem_subidas.retain(|id| {
-            fotos.iter().any(|f| {
-                &f.id == id
+        // ⚡ **Uma passada só pelo catálogo** (25/set/2026). Cada lembrança
+        // varria o catálogo inteiro (`retain` + `any`): com o R2 despejando
+        // fotos, eram dezenas de varreduras de 20 mil linhas por releitura,
+        // na thread que desenha — o custo crescia justo durante o envio.
+        let (ainda_subindo, ainda_sem_marca) = if self.recem_subidas.is_empty()
+            && self.rejeitadas_agora.is_empty()
+        {
+            Default::default()
+        } else {
+            let mut subindo = std::collections::HashSet::new();
+            let mut sem_marca = std::collections::HashSet::new();
+            for f in fotos {
+                if self.recem_subidas.contains(&f.id)
                     && f.pos_venda_foto_id
                         .as_deref()
                         .is_none_or(|remoto| !no_site.contains(remoto))
-            })
-        });
+                {
+                    subindo.insert(f.id.as_str());
+                }
+                if self.rejeitadas_agora.contains(&f.id) && f.flag != Some(REJEITADA_NO_CATALOGO) {
+                    sem_marca.insert(f.id.as_str());
+                }
+            }
+            (subindo, sem_marca)
+        };
+        self.recem_subidas
+            .retain(|id| ainda_subindo.contains(id.as_str()));
+        // A marca chegou ao catálogo: a lembrança já não é necessária.
+        self.rejeitadas_agora
+            .retain(|id| ainda_sem_marca.contains(id.as_str()));
         let subidas: std::collections::HashMap<String, String> = fotos
             .iter()
             .filter(|f| self.recem_subidas.contains(&f.id))
             .filter_map(|f| Some((f.id.clone(), f.pos_venda_foto_id.clone()?)))
             .collect();
-        // A marca chegou ao catálogo: a lembrança já não é necessária.
-        self.rejeitadas_agora.retain(|id| {
-            fotos
-                .iter()
-                .any(|f| &f.id == id && f.flag != Some(REJEITADA_NO_CATALOGO))
-        });
         let locais: Vec<biblioteca_core::acervo::Foto> = fotos
             .iter()
             .filter(|f| f.sessao_id.as_deref() == Some(galeria.as_str()))
@@ -2183,7 +2284,8 @@ impl Aplicativo {
             DetalhePedido::Exportar => self.exportar(cx),
             // 🔑 **A importação da sessão grava no catálogo local**, e as fotos
             // só aparecem depois desta releitura — a porta do acervo é daqui.
-            DetalhePedido::CatalogoMudou => self.reler_o_acervo(cx),
+            // Chega a cada foto importada: agrupada, como as outras.
+            DetalhePedido::CatalogoMudou => self.pedir_releitura_do_acervo(cx),
             // 🔑 **A Biblioteca é quem classifica**, mesmo quando o gesto veio
             // da grade da sessão: ela é a dona do catálogo.
             //
@@ -2801,8 +2903,11 @@ impl Aplicativo {
 
     /// Drena o que o site respondeu. Devolve se não há mais o que esperar.
     pub(crate) fn colher_sincronia(&mut self, cx: &mut Context<Self>) -> bool {
+        let _t = crate::regua::trecho("raiz: respostas do site");
         let mut mudou = false;
         while let Ok(recado) = self.sincronias.1.try_recv() {
+            // A conciliação só conta respostas: o id da negociada não é dela.
+            let recado = recado.sem_o_id();
             // 🔑 **Todo recado fecha o pedido que o gerou.** É a conta que
             // mantém o laço de pé até a última foto do lote responder — e o
             // `saturating_sub` é o que impede uma resposta a mais (um recado
@@ -5211,6 +5316,7 @@ impl Aplicativo {
 
 impl Render for Aplicativo {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let _t = crate::regua::trecho("raiz: render");
         // 🚨 A porta vem antes de tudo, inclusive das teclas: com o app inteiro
         // desenhado por baixo, as quinze teclas de triagem continuariam
         // chegando à Biblioteca por trás da tela de login.
@@ -7969,6 +8075,53 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
+    /// 🔄 **"Verificar atualizações" sempre responde.** A procura da abertura
+    /// fica calada quando não há nada novo; a pedida pelo menu da conta diz
+    /// "está em dia" — senão o clique parece não ter feito nada.
+    #[gpui::test]
+    fn verificar_atualizacoes_diz_que_esta_em_dia(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        let atualizador = Arc::new(AtualizadorDeMentira::default());
+        let portas = Portas {
+            atualizador: atualizador.clone(),
+            ..portas()
+        };
+
+        let janela = cx.add_window(|window, cx| {
+            Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas, window, cx)
+        });
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(1));
+        cx.run_until_parked();
+        janela
+            .update(cx, |app, _window, cx| {
+                assert_eq!(app.atualizacao.texto(), None, "a abertura fica calada");
+                app.verificar_atualizacoes(cx);
+                assert_eq!(
+                    app.atualizacao.texto().as_deref(),
+                    Some("Procurando versão nova…")
+                );
+            })
+            .expect("a janela deve estar aberta");
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(1));
+        cx.run_until_parked();
+
+        janela
+            .update(cx, |app, _window, _cx| {
+                assert_eq!(
+                    app.atualizacao.texto(),
+                    Some(format!(
+                        "Você está na versão mais recente ({}).",
+                        env!("CARGO_PKG_VERSION")
+                    ))
+                );
+            })
+            .expect("a janela deve estar aberta");
+        assert_eq!(*atualizador.procuras.lock().expect("as procuras"), 2);
+    }
+
     /// 🚨 **"Depois" some com o aviso desta versão, não com o da próxima.** Sem
     /// isto, quem clicar "Depois" uma vez deixa de ver a correção urgente que
     /// vier em seguida — e não há nada na tela que revele isso.
@@ -8528,6 +8681,139 @@ mod testes {
     ///   existir no site passam segundos, e o operador classifica dentro deles.
     ///   A nota vai para o catálogo, a subida já levou o que tinha (nada), e sem
     ///   a conciliação ela se perderia calada.
+    /// ⏱️ **Quanto uma releitura custa na thread que desenha**, com um
+    /// catálogo grande e uma sessão aberta. Não é afirmação — é régua:
+    ///
+    /// ```bash
+    /// cargo test --profile carga -p ui-gpui --lib medir_a_releitura -- --ignored --nocapture
+    /// ```
+    #[gpui::test]
+    #[ignore = "medição: rodar em --release, à mão"]
+    fn medir_a_releitura_com_o_catalogo_grande(cx: &mut TestAppContext) {
+        const CATALOGO: usize = 20_000;
+        const DA_SESSAO: usize = 500;
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        let fotos: Vec<PhotoViewModel> = (0..CATALOGO)
+            .map(|i| {
+                let mut f = foto(&format!("DSC_{i:05}.NEF"));
+                f.id = format!("id-{i:05}");
+                if i < DA_SESSAO {
+                    f.sessao_id = Some("g7".into());
+                }
+                f
+            })
+            .collect();
+        let catalogo = Arc::new(AcervoDeMentira::default());
+        *catalogo.fotos.lock().expect("as fotos") = fotos.clone();
+        let janela = cx.add_window({
+            let catalogo = catalogo.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    fotos,
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        acervo: catalogo,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+        janela
+            .update(cx, |app, _window, cx| {
+                app.entrar_na_conta(sessao_de_teste(), cx);
+                app.entrar_na_sessao("g7".into(), cx);
+            })
+            .expect("a janela deve estar aberta");
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(5));
+        cx.run_until_parked();
+
+        let mut tempos = Vec::new();
+        for _ in 0..10 {
+            janela
+                .update(cx, |app, _window, cx| app.reler_o_acervo(cx))
+                .expect("a janela deve estar aberta");
+            let inicio = std::time::Instant::now();
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(150));
+            cx.run_until_parked();
+            tempos.push(inicio.elapsed());
+        }
+        tempos.sort();
+        println!(
+            "⏱️ releitura, {CATALOGO} no catálogo e {DA_SESSAO} na sessão: mediana {:?}, pior {:?}",
+            tempos[tempos.len() / 2],
+            tempos[tempos.len() - 1]
+        );
+    }
+
+    /// 🚨 **Uma leitura do catálogo no ar por vez** (dono, 25/set/2026).
+    ///
+    /// A cópia em segundo plano pede uma releitura a cada troca do catálogo,
+    /// e cada uma era uma varredura inteira que, ao voltar, refazia as duas
+    /// grades na thread que desenha — em fila, uma atrás da outra, com a
+    /// tecla do operador esperando atrás delas. Agora a rajada vira a leitura
+    /// que já está no ar mais **uma**, quando ela voltar.
+    #[gpui::test]
+    fn a_rajada_de_releituras_vira_uma_no_ar_e_uma_depois(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        let catalogo = Arc::new(AcervoDeMentira::default());
+        *catalogo.fotos.lock().expect("as fotos") = acervo();
+
+        let janela = cx.add_window({
+            let catalogo = catalogo.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        acervo: catalogo,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(5));
+        cx.run_until_parked();
+        let antes = *catalogo.pedidos.lock().expect("os pedidos");
+
+        janela
+            .update(cx, |app, _window, cx| {
+                for _ in 0..5 {
+                    app.reler_o_acervo(cx);
+                }
+            })
+            .expect("a janela deve estar aberta");
+        assert_eq!(
+            *catalogo.pedidos.lock().expect("os pedidos") - antes,
+            1,
+            "cinco pedidos seguidos viraram cinco varreduras do catálogo"
+        );
+
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(5));
+        cx.run_until_parked();
+        assert_eq!(
+            *catalogo.pedidos.lock().expect("os pedidos") - antes,
+            2,
+            "os pedidos do meio saem juntos, numa leitura só, quando a do ar volta"
+        );
+        janela
+            .update(cx, |app, _window, _cx| {
+                assert!(!app.relendo, "e a próxima leitura fica livre");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
     #[gpui::test]
     fn a_rejeitada_fica_e_a_nota_da_corrida_alcanca_o_site(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();

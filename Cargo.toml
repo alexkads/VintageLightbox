@@ -159,6 +159,24 @@ inherits = "release"
 lto = "thin"
 codegen-units = 16
 
+# O perfil do teste de carga (`make carga`, 25/set/2026).
+#
+# 🔑 **Otimizado como o `release`, compilado como o `dev`.** Medir tempo de
+# tela pede `opt-level = 3` — em `debug` tudo custa até 57× mais, e a régua
+# mentiria. Mas o `release` (LTO completo, uma unidade) levava ~12 minutos
+# por mudança no `ui-gpui`, e uma hora por rodada de "mudar, medir, mudar"
+# (dono: *"prefiro teste de carga de no máximo 5 minutos"*). Sem LTO, com 16
+# unidades e incremental, só o que mudou recompila. Os `debug-assertions`
+# ficam desligados: é por eles que a carga sabe que está medindo de verdade.
+#
+# ⚠️ A primeira compilação ainda gera as dependências neste perfil — uma vez.
+[profile.carga]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true
+debug-assertions = false
+
 [profile.test]
 opt-level = 1
 

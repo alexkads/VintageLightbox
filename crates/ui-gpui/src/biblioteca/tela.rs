@@ -298,13 +298,22 @@ impl Biblioteca {
     /// (`2026/08/17/`), e uma árvore montada sobre o acervo velho não a teria —
     /// a foto estaria na grade e sem caminho até ela pela árvore.
     pub fn trocar_acervo(&mut self, fotos: Vec<PhotoViewModel>, cx: &mut Context<Self>) {
+        let _t = crate::regua::trecho("biblioteca: trocar o acervo");
         let principal = self.foto_selecionada().map(|foto| foto.id);
         let outras: std::collections::HashSet<String> = self
             .ids_selecionados()
             .into_iter()
             .collect::<std::collections::HashSet<_>>();
 
-        self.fotos = Arc::new(fotos);
+        // ⚡ **O acervo velho morre fora da thread que desenha** (25/set/2026).
+        // São milhares de fotos com dezenas de textos cada: soltá-las aqui
+        // custava 2–3 ms por releitura com 20 mil no catálogo (medido em
+        // `--release`), e durante a importação a releitura vem duas vezes por
+        // segundo.
+        let velho = std::mem::replace(&mut self.fotos, Arc::new(fotos));
+        cx.background_executor()
+            .spawn(async move { drop(velho) })
+            .detach();
         self.pastas = pastas_do_acervo(&self.fotos);
 
         self.refiltrar();
@@ -2149,6 +2158,7 @@ fn celula(
 
 impl Render for Biblioteca {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let _t = crate::regua::trecho("biblioteca: render");
         div()
             .flex()
             .flex_col()

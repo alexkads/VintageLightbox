@@ -57,7 +57,7 @@ else
 endif
 
 .DEFAULT_GOAL := ajuda
-.PHONY: ajuda sistema testar lint fmt rodar rodar-local medir icones mac mac-arm mac-intel \
+.PHONY: ajuda sistema testar carga perfil e2e cobertura lint fmt rodar rodar-local medir icones mac mac-arm mac-intel \
         linux linux-arm windows conferir-windows tudo publicar publicar-seco \
         web biblioteca faxina
 
@@ -83,7 +83,7 @@ ajuda: ## Lista os alvos disponiveis
 else
 
 ajuda: ## Lista os alvos disponiveis
-	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
+	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 ifeq ($(SISTEMA),linux)
 	@printf "  \033[36m%-16s\033[0m %s\n" "linux" "Gera .deb + .AppImage — voce esta no Linux, este alvo roda"
 	@printf "  \033[36m%-16s\033[0m %s\n" "windows" "Explica onde gerar o Windows (nao e aqui)"
@@ -108,6 +108,37 @@ sistema: ## Diz que sistema o Makefile detectou (e o que ele gera aqui)
 testar: ## Testes do workspace inteiro
 	@./scripts/faxina-se-preciso.sh
 	cargo test --workspace
+
+# O teste de carga: importacao longa + R2 lento + triagem sem parar, medido
+# com otimizacao de release (perfil `carga`, sem LTO). Teto de 5 minutos: se
+# passar disso, a rodada e cortada e o alvo falha.
+carga: ## Teste de carga da triagem durante importacao e envio ao R2 (ate 5 min)
+	VLB_CARGA=1 timeout 5m nice -n 10 cargo test --profile carga -j 6 -p ui-gpui --lib -- --nocapture --test-threads=1 carga::importacao
+
+# Os testes ponta a ponta SEM REDE (dono, 25/set/2026: *"esses testes e2e nao
+# podem bater em nada de producao"*). O `unshare -rn` roda tudo num namespace
+# de rede proprio, onde so existe a interface local (127.0.0.1): uma conexao
+# para fora falha na hora, e o teste que tentasse fica vermelho. A local fica
+# ligada de proposito: e onde os testes sobem os servidores FALSOS (o SSE do
+# tempo real, por exemplo), que testam o cliente HTTP de verdade sem produção.
+# Nao pede sudo.
+# O `--offline` impede o proprio cargo de procurar a internet.
+e2e: ## Testes ponta a ponta sem rede nenhuma: nada chega a producao (ate 10 min)
+	timeout 10m unshare -rn sh -c 'ip link set lo up && exec nice -n 10 cargo test --offline -j 6 -p ui-gpui --lib -- --test-threads=4 e2e::'
+
+# A cobertura dos e2e (cargo-llvm-cov), tambem sem rede. Usa o llvm-cov e o
+# llvm-profdata do sistema: o Rust do Fedora compila com o LLVM do sistema, e
+# as versoes tem de bater. Relatorio em target/cobertura/html/index.html.
+cobertura: ## Cobertura dos e2e, sem rede; relatorio HTML em target/cobertura (ate 20 min)
+	timeout 20m unshare -rn sh -c 'ip link set lo up && \
+		LLVM_COV=$$(command -v llvm-cov) LLVM_PROFDATA=$$(command -v llvm-profdata) \
+		exec nice -n 10 cargo llvm-cov --offline -j 6 -p ui-gpui --lib --html --output-dir target/cobertura \
+		-- --test-threads=4 e2e::'
+
+# O perf sobre a carga: as funcoes que mais seguram a tela. Cada etapa tem
+# teto (5 + 2 + 1 min). Pede `perf` e `perf_event_paranoid <= 1`.
+perfil: ## Onde a tela gasta tempo durante a carga (perf; ate 8 min)
+	@./scripts/perfil.sh
 
 # `-D warnings` como no CI. Sem ele este alvo passa com avisos que quebram o
 # push — verde local, vermelho no CI, que e o modo de falha mais caro.

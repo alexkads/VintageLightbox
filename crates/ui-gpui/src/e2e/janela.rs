@@ -156,7 +156,10 @@ fn conferir_o_cliente(janela: gpui::AnyWindowHandle, cx: &mut TestAppContext, on
         let b = visual
             .debug_bounds(botao)
             .unwrap_or_else(|| panic!("{onde}: o botão {botao} não está na tela do cliente"));
-        assert!(b.bottom() <= px(PRIMEIRA_LINHA), "{onde}: {botao} fora do alto ({b:?})");
+        assert!(
+            b.bottom() <= px(PRIMEIRA_LINHA),
+            "{onde}: {botao} fora do alto ({b:?})"
+        );
         assert!(
             b.right() >= largura - px(CANTO_DIREITO),
             "{onde}: {botao} fora do canto direito ({b:?})"
@@ -190,7 +193,10 @@ fn a_tela_do_cliente_tem_os_botoes_mesmo_em_tela_cheia(cx: &mut TestAppContext) 
         }
     });
     visual.run_until_parked();
-    assert!(visual.update(|window, _| window.is_fullscreen()), "entrou em tela cheia");
+    assert!(
+        visual.update(|window, _| window.is_fullscreen()),
+        "entrou em tela cheia"
+    );
     conferir_o_cliente(janela, cx, "cliente em tela cheia");
 
     // "Restaurar" em tela cheia sai dela — pelo clique de verdade.

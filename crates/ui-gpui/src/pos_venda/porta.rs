@@ -126,6 +126,17 @@ pub enum Recado {
     /// 🔑 **Notifica, não descreve.** Quem escuta só precisa saber que o
     /// catálogo mudou, para reler — os números estão no banco.
     Sincronizou,
+    /// O `PATCH` de **uma** foto voltou — com a frase, se o site recusou.
+    ///
+    /// 🔑 **Por que não o `Sincronizou`**: ele não diz de quem é, e a tela da
+    /// sessão manda as mudanças **foto a foto, em série só dentro da mesma
+    /// foto**. Sem o id, a única série possível era a da tela inteira — e era
+    /// ela que engolia a tecla seguinte enquanto a anterior não voltava, que é
+    /// o que acontece o tempo todo com o ensaio subindo ao R2 e a rede cheia.
+    Negociou {
+        foto_id: String,
+        erro: Option<String>,
+    },
     /// Não há sessão guardada (ou ela venceu): a tela mostra o convite a
     /// autorizar. **Não é falha** — é o estado normal da primeira abertura, e
     /// tratá-lo como erro pintaria de vermelho um app recém-instalado.
@@ -139,6 +150,20 @@ pub enum Recado {
         rotulo: &'static str,
         resultado: Result<serde_json::Value, String>,
     },
+}
+
+impl Recado {
+    /// O [`Recado::Negociou`] para quem só **conta** respostas — o balcão e a
+    /// conciliação da raiz: `Sincronizou` se passou, `Falhou` se não.
+    pub fn sem_o_id(self) -> Recado {
+        match self {
+            Recado::Negociou { erro: None, .. } => Recado::Sincronizou,
+            Recado::Negociou {
+                erro: Some(erro), ..
+            } => Recado::Falhou(erro),
+            outro => outro,
+        }
+    }
 }
 
 /// Um pedido JSON à API, com o rótulo que volta na resposta.
@@ -761,10 +786,11 @@ impl Publicador for PublicadorDaApi {
     ) {
         let controlador = self.controlador.clone();
         self.tokio.spawn(async move {
-            let recado = match controlador.mudar_foto(&sessao, &foto_id, &mudanca).await {
-                Ok(()) => Recado::Sincronizou,
-                Err(erro) => Recado::Falhou(erro),
-            };
+            let erro = controlador
+                .mudar_foto(&sessao, &foto_id, &mudanca)
+                .await
+                .err();
+            let recado = Recado::Negociou { foto_id, erro };
             let _ = canal.send(recado);
         });
     }
@@ -972,6 +998,9 @@ pub mod mentira {
         /// Segura também a cópia de trabalho (o passo 11) até `responder()` —
         /// para provar que um download no ar não conta como envio.
         pub copia_demorada: bool,
+        /// Segura a resposta do `PATCH` até `responder()` — a rede cheia com o
+        /// ensaio subindo ao R2, que é quando a tecla seguinte chega antes.
+        pub negociacao_demorada: bool,
         /// Com isto, a cópia de trabalho falha em vez de chegar.
         pub copia_falha: Option<String>,
     }
@@ -1558,11 +1587,50 @@ pub mod mentira {
             mudanca: MudancaDaFoto,
             canal: Sender<Recado>,
         ) {
+            // 🔑 **Como o site de verdade: o `PATCH` fica na foto**, e a
+            // releitura seguinte o devolve. Um site que responde "ok" e não
+            // grava faria a grade desfazer o gesto a cada releitura — e os
+            // testes passariam por um caminho que a produção não tem.
+            if let Some(foto) = self
+                .fotos_da_sessao
+                .lock()
+                .expect("as fotos")
+                .iter_mut()
+                .find(|f| f.id == foto_id)
+            {
+                if let Some(nota) = mudanca.nota {
+                    foto.nota = nota.and_then(|n| u8::try_from(n).ok());
+                }
+                if let Some(rejeitada) = mudanca.rejeitada {
+                    foto.rejeitada = rejeitada;
+                }
+                if let Some(estado) = mudanca.estado {
+                    foto.estado = match estado {
+                        EstadoNoBalcao::LevadaNoBalcao => {
+                            domain::services::pos_venda::EstadoDaFotoNoSite::LevadaNoBalcao
+                        }
+                        EstadoNoBalcao::Disponivel => {
+                            domain::services::pos_venda::EstadoDaFotoNoSite::Disponivel
+                        }
+                    };
+                }
+            }
             self.negociadas
                 .lock()
                 .expect("as negociadas")
-                .push((foto_id, mudanca));
-            let _ = canal.send(Recado::Sincronizou);
+                .push((foto_id.clone(), mudanca));
+            let recado = Recado::Negociou {
+                foto_id,
+                erro: None,
+            };
+            if self.negociacao_demorada {
+                self.guardados
+                    .lock()
+                    .expect("os guardados")
+                    .push((canal, recado));
+            } else {
+                let _ = canal.send(recado);
+            }
         }
 
         fn galerias(&self, _sessao: Sessao, canal: Sender<Recado>) {

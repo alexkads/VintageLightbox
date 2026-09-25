@@ -1095,56 +1095,56 @@ impl Aplicativo {
         // GNOME. Fora da parte que rola: guia demais não os empurra para fora.
         let controles = crate::janela::controles("janela-guias", frente, window, cx);
         let faixa = h_flex()
-                .on_children_prepainted(move |limites, _window, _cx| {
-                    *desenhadas.borrow_mut() = limites;
-                })
-                .id("faixa-das-guias")
-                .flex_1()
-                .min_w(px(0.))
-                .h_full()
-                .overflow_x_scroll()
-                .children(guias)
-                .child(
-                    div()
-                        .id("guia-nova")
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .size(px(ALTURA_DA_FAIXA))
-                        .text_color(apagado)
-                        .cursor_pointer()
-                        .hover(move |b| b.text_color(frente).bg(fundo_ativo.opacity(0.5)))
-                        .tooltip(|window, cx| {
-                            Tooltip::new("Abrir outra sessão numa guia").build(window, cx)
-                        })
-                        .child(Icon::new(Icone::Plus).size(px(16.)))
-                        .on_click(cx.listener(|raiz, _, window, cx| {
-                            raiz.abrir_guia_nova(window, cx);
-                        })),
-                )
-                .children(menu_do_roteiro.map(|(menu, ponto)| {
-                    gpui::deferred(gpui::anchored().position(ponto).child(menu)).with_priority(1)
-                }))
-                // 🔑 **Um menu para a faixa inteira**, como o da tira da
-                // Revelação: o `ContextMenu` guarda estado por id, e um por guia
-                // seriam vários com o mesmo. Fora de uma guia (no `+`, no vão),
-                // não há alvo e o menu não abre.
-                .context_menu(move |menu, window, cx| {
-                    let Some(dados) = esta
-                        .update(cx, |raiz, _cx| {
-                            raiz.edicao_das_guias
-                                .alvo_do_menu
-                                .take()
-                                .and_then(|id| raiz.menu_da_guia(&id))
-                        })
-                        .ok()
-                        .flatten()
-                    else {
-                        return menu;
-                    };
-                    montar_o_menu(menu, dados, esta.clone(), window, cx)
-                });
+            .on_children_prepainted(move |limites, _window, _cx| {
+                *desenhadas.borrow_mut() = limites;
+            })
+            .id("faixa-das-guias")
+            .flex_1()
+            .min_w(px(0.))
+            .h_full()
+            .overflow_x_scroll()
+            .children(guias)
+            .child(
+                div()
+                    .id("guia-nova")
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .size(px(ALTURA_DA_FAIXA))
+                    .text_color(apagado)
+                    .cursor_pointer()
+                    .hover(move |b| b.text_color(frente).bg(fundo_ativo.opacity(0.5)))
+                    .tooltip(|window, cx| {
+                        Tooltip::new("Abrir outra sessão numa guia").build(window, cx)
+                    })
+                    .child(Icon::new(Icone::Plus).size(px(16.)))
+                    .on_click(cx.listener(|raiz, _, window, cx| {
+                        raiz.abrir_guia_nova(window, cx);
+                    })),
+            )
+            .children(menu_do_roteiro.map(|(menu, ponto)| {
+                gpui::deferred(gpui::anchored().position(ponto).child(menu)).with_priority(1)
+            }))
+            // 🔑 **Um menu para a faixa inteira**, como o da tira da
+            // Revelação: o `ContextMenu` guarda estado por id, e um por guia
+            // seriam vários com o mesmo. Fora de uma guia (no `+`, no vão),
+            // não há alvo e o menu não abre.
+            .context_menu(move |menu, window, cx| {
+                let Some(dados) = esta
+                    .update(cx, |raiz, _cx| {
+                        raiz.edicao_das_guias
+                            .alvo_do_menu
+                            .take()
+                            .and_then(|id| raiz.menu_da_guia(&id))
+                    })
+                    .ok()
+                    .flatten()
+                else {
+                    return menu;
+                };
+                montar_o_menu(menu, dados, esta.clone(), window, cx)
+            });
         Some(
             h_flex()
                 .flex_none()

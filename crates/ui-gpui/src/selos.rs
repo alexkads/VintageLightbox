@@ -143,21 +143,36 @@ pub fn faixa(selos: &Selos, cx: &App) -> impl IntoElement {
 /// só as acesas desenhadas, distinguir 3 de 4 exige contar; com a régua inteira,
 /// é a proporção que se lê.
 pub fn estrelas(nota: i32, cx: &App) -> impl IntoElement {
-    let nota = nota.clamp(0, 5);
+    // ⚡ **Um texto só, com dois trechos de cor** (25/set/2026). Eram cinco
+    // caixas, cada uma com o seu "★": 11 nós de leiaute e 5 textos a medir
+    // **por célula**, e a grade da sessão desenha dezenas de células por
+    // quadro (`estresse_a_grade_da_sessao`).
+    // O espaço fino (U+200A) entre elas faz o papel do vão de 1 px.
+    const ENTRE: &str = "\u{200A}";
+    const TODAS: &str = "★\u{200A}★\u{200A}★\u{200A}★\u{200A}★";
+    let acesas = nota.clamp(0, 5) as usize;
+    let corte = match acesas {
+        0 => 0,
+        n => n * "★".len() + (n - 1) * ENTRE.len(),
+    };
+    let cor = |cor: Hsla| gpui::HighlightStyle {
+        color: Some(cor),
+        ..Default::default()
+    };
+    let mut trechos = Vec::with_capacity(2);
+    if corte > 0 {
+        trechos.push((0..corte, cor(cores::nota())));
+    }
+    if corte < TODAS.len() {
+        trechos.push((
+            corte..TODAS.len(),
+            cor(cx.theme().muted_foreground.opacity(0.25)),
+        ));
+    }
     div()
-        .flex()
-        .gap(px(1.))
+        .flex_none()
         .text_xs()
-        .children((1..=5).map(move |estrela| {
-            let acesa = estrela <= nota;
-            div()
-                .text_color(if acesa {
-                    cores::nota()
-                } else {
-                    cx.theme().muted_foreground.opacity(0.25)
-                })
-                .child("★")
-        }))
+        .child(gpui::StyledText::new(TODAS).with_highlights(trechos))
 }
 
 /// "levada" — o selo do balcão, na família âmbar.
@@ -256,7 +271,7 @@ fn cores_do_tom(tom: Tom, cx: &App) -> (Hsla, Hsla) {
 }
 
 /// Um selo: uma palavra, o tom dela, e nada mais.
-pub fn selo(tom: Tom, texto: impl Into<gpui::SharedString>, cx: &App) -> impl IntoElement {
+pub fn selo(tom: Tom, texto: impl Into<gpui::SharedString>, cx: &App) -> gpui::Div {
     let (fundo, frente) = cores_do_tom(tom, cx);
     div()
         .flex_none()
@@ -270,7 +285,7 @@ pub fn selo(tom: Tom, texto: impl Into<gpui::SharedString>, cx: &App) -> impl In
 }
 
 /// O selo do estado de uma foto do site, como a grade do ensaio o desenha.
-pub fn selo_do_estado(estado: Estado, apagada: bool, cx: &App) -> impl IntoElement {
+pub fn selo_do_estado(estado: Estado, apagada: bool, cx: &App) -> gpui::Div {
     let texto = if apagada {
         "Apagada".to_string()
     } else {
@@ -281,7 +296,7 @@ pub fn selo_do_estado(estado: Estado, apagada: bool, cx: &App) -> impl IntoEleme
 
 /// ❌ O selo da **rejeitada** — a tecla `X` (contrato C21). Em vermelho: é a
 /// decisão de deixá-la fora, e ela manda mais do que a situação de antes.
-pub fn selo_de_rejeitada(cx: &App) -> impl IntoElement {
+pub fn selo_de_rejeitada(cx: &App) -> gpui::Div {
     selo(Tom::Ruim, "Rejeitada", cx)
 }
 
@@ -292,7 +307,7 @@ pub fn selo_de_rejeitada(cx: &App) -> impl IntoElement {
 /// comprada), e a importada entra no menos errado dos três — mas o cliente não a
 /// vê, não pode comprá-la, e ela nem chegou ao storage. Quem olha a grade
 /// precisa saber a diferença: é ela que diz o que ainda falta fazer.
-pub fn selo_de_so_no_disco(cx: &App) -> impl IntoElement {
+pub fn selo_de_so_no_disco(cx: &App) -> gpui::Div {
     selo(Tom::Neutro, "No disco", cx)
 }
 
@@ -302,6 +317,23 @@ mod testes {
 
     fn foto() -> PhotoViewModel {
         PhotoViewModel::default()
+    }
+
+    /// O corte entre acesas e apagadas cai sempre numa fronteira de
+    /// caractere — o "★" tem 3 bytes e o espaço fino 3, e um corte no meio de
+    /// um deles derrubaria o desenho da grade inteira.
+    #[test]
+    fn as_estrelas_se_cortam_na_fronteira_certa() {
+        const TODAS: &str = "★\u{200A}★\u{200A}★\u{200A}★\u{200A}★";
+        for n in 1..=5usize {
+            let corte = n * "★".len() + (n - 1) * "\u{200A}".len();
+            assert!(TODAS.is_char_boundary(corte), "nota {n}");
+            assert_eq!(TODAS[..corte].matches('★').count(), n);
+            assert!(
+                TODAS[..corte].ends_with('★'),
+                "nota {n}: o vão fica com as apagadas"
+            );
+        }
     }
 
     #[test]

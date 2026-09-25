@@ -607,7 +607,12 @@ impl Aplicativo {
             // 🪟 **No Linux os botões de janela são estes.** Sem barra do
             // sistema, fechar e minimizar só existem se o app os desenhar; fora
             // do Linux a chamada não devolve nada.
-            .child(crate::janela::controles_da_tela("janela-app", frente, window, cx))
+            .child(crate::janela::controles_da_tela(
+                "janela-app",
+                frente,
+                window,
+                cx,
+            ))
     }
 
     /// O botão que abre e recolhe o menu (`SidebarTrigger`). A galeria usa o
@@ -813,6 +818,24 @@ impl Aplicativo {
                             .child("Backup de arquivos")
                             .on_click(cx.listener(|raiz, _, window, cx| {
                                 raiz.ir_para(Tela::Backup, window, cx);
+                            })),
+                    )
+                    // 🔄 A procura da abertura é silenciosa; esta responde
+                    // sempre, na faixa do rodapé — inclusive "está em dia".
+                    .child(
+                        item("conta-atualizacoes", Icone::RefreshCw)
+                            .debug_selector(|| "conta-atualizacoes".into())
+                            .child("Verificar atualizações")
+                            .child(
+                                div()
+                                    .ml_auto()
+                                    .text_xs()
+                                    .text_color(apagado)
+                                    .child(concat!("v", env!("CARGO_PKG_VERSION"))),
+                            )
+                            .on_click(cx.listener(|raiz, _, _window, cx| {
+                                raiz.menu_da_conta = false;
+                                raiz.verificar_atualizacoes(cx);
                             })),
                     )
                     .child(separador())

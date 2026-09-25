@@ -13,6 +13,9 @@
 //! | compilando | "Atualizando para a versão X em segundo plano — etapa" | Ver novidades |
 //! | instalada | "Versão X instalada…" | Reabrir agora |
 //! | falhou (compila) | "… a versão atual continua funcionando" | Tentar de novo · Como atualizar · Fechar |
+//! | verificando (pedido) | "Procurando versão nova…" | — |
+//! | em dia (pedido) | "Você está na versão mais recente (X)." | Fechar |
+//! | sem resposta (pedido) | "Não consegui verificar se há versão nova: …" | Tentar de novo · Fechar |
 //!
 //! ⚠️ **O "Depois" guarda a versão só nesta sessão** — uma correção que o
 //! fotógrafo dispensou uma vez precisa voltar a aparecer.
@@ -42,12 +45,17 @@ pub struct Estado {
     pub etapa: Option<String>,
     /// O diálogo das novidades está aberto.
     pub novidades_abertas: bool,
+    /// O operador pediu "Verificar atualizações" e a resposta não chegou.
+    pub verificando: bool,
 }
 
 impl Estado {
     /// Um aviso chegou da porta. Devolve `true` quando a compilação deve
     /// começar sozinha.
     pub fn receber(&mut self, aviso: Aviso) -> bool {
+        if !matches!(aviso, Aviso::Progresso(_)) {
+            self.verificando = false;
+        }
         match aviso {
             Aviso::Progresso(etapa) => {
                 self.etapa = Some(etapa);
@@ -64,6 +72,10 @@ impl Estado {
             fim @ (Aviso::Instalada(_) | Aviso::Falhou(_)) => {
                 self.instalando = false;
                 self.aviso = Some(fim);
+                false
+            }
+            resposta @ (Aviso::EmDia(_) | Aviso::SemResposta(_)) => {
+                self.aviso = Some(resposta);
                 false
             }
         }
@@ -102,6 +114,9 @@ impl Estado {
 
     /// O que a faixa diz, em uma linha.
     pub fn texto(&self) -> Option<String> {
+        if self.verificando {
+            return Some("Procurando versão nova…".into());
+        }
         Some(match self.visivel()? {
             Aviso::Disponivel { versao, .. }
                 if self.instalando && versao.jeito == JeitoDeAtualizar::Compilar =>
@@ -139,6 +154,10 @@ impl Estado {
                 env!("CARGO_PKG_VERSION")
             ),
             Aviso::Falhou(motivo) => format!("Não consegui atualizar: {motivo}"),
+            Aviso::EmDia(versao) => format!("Você está na versão mais recente ({versao})."),
+            Aviso::SemResposta(motivo) => {
+                format!("Não consegui verificar se há versão nova: {motivo}")
+            }
             Aviso::Progresso(_) => return None,
         })
     }
@@ -157,6 +176,8 @@ pub enum Pedido {
     TentarDeNovo,
     CopiarComando,
     BaixarInstalador,
+    /// "Verificar atualizações" (menu da conta) e o "Tentar de novo" dela.
+    Verificar,
 }
 
 /// Quem atende os botões da faixa.
@@ -187,6 +208,9 @@ fn botao(
 
 /// Os botões que cada estado oferece — `(id, rótulo, primário, pedido)`.
 pub fn botoes(estado: &Estado) -> Vec<(&'static str, &'static str, bool, Pedido)> {
+    if estado.verificando {
+        return Vec::new();
+    }
     let Some(aviso) = estado.visivel() else {
         return Vec::new();
     };
@@ -231,7 +255,16 @@ pub fn botoes(estado: &Estado) -> Vec<(&'static str, &'static str, bool, Pedido)
             ));
             lista.push(("atualizar-fechar", "Fechar", false, Pedido::Dispensar));
         }
-        Aviso::Falhou(_) => {
+        Aviso::Falhou(_) | Aviso::EmDia(_) => {
+            lista.push(("atualizar-fechar", "Fechar", false, Pedido::Dispensar));
+        }
+        Aviso::SemResposta(_) => {
+            lista.push((
+                "atualizar-verificar",
+                "Tentar de novo",
+                true,
+                Pedido::Verificar,
+            ));
             lista.push(("atualizar-fechar", "Fechar", false, Pedido::Dispensar));
         }
         Aviso::Progresso(_) => {}
@@ -654,6 +687,55 @@ mod testes {
             rotulos(&estado),
             ["Tentar de novo", "Como atualizar", "Fechar"]
         );
+    }
+
+    /// 🔑 **A verificação pedida sempre responde**: "procurando" enquanto
+    /// espera, e depois "está em dia" — nunca o silêncio da abertura.
+    #[test]
+    fn a_verificacao_pedida_diz_que_esta_em_dia() {
+        let mut estado = Estado {
+            verificando: true,
+            ..Default::default()
+        };
+        assert_eq!(estado.texto().as_deref(), Some("Procurando versão nova…"));
+        assert!(botoes(&estado).is_empty());
+        estado.receber(Aviso::EmDia("0.1.13".into()));
+        assert!(!estado.verificando);
+        assert_eq!(
+            estado.texto().as_deref(),
+            Some("Você está na versão mais recente (0.1.13).")
+        );
+        assert_eq!(rotulos(&estado), ["Fechar"]);
+    }
+
+    #[test]
+    fn a_verificacao_sem_resposta_oferece_tentar_de_novo() {
+        let estado = com(Aviso::SemResposta("sem internet".into()));
+        assert_eq!(
+            estado.texto().as_deref(),
+            Some("Não consegui verificar se há versão nova: sem internet")
+        );
+        assert_eq!(
+            botoes(&estado)
+                .into_iter()
+                .map(|(_, r, _, p)| (r, p))
+                .collect::<Vec<_>>(),
+            [
+                ("Tentar de novo", Pedido::Verificar),
+                ("Fechar", Pedido::Dispensar)
+            ]
+        );
+    }
+
+    /// A versão nova achada pela verificação pedida aparece como a da abertura.
+    #[test]
+    fn a_verificacao_que_acha_versao_mostra_a_faixa_de_sempre() {
+        let mut estado = Estado {
+            verificando: true,
+            ..Default::default()
+        };
+        estado.receber(nova("0.2.0"));
+        assert_eq!(estado.texto().as_deref(), Some("Versão 0.2.0 disponível"));
     }
 
     #[test]

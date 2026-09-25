@@ -28,6 +28,9 @@ pub const BASE_PADRAO: &str = "https://api.recordarfotos.com.br";
 /// Ver [`site_para`] para o que acontece quando ele não está escrito.
 pub const SITE_PADRAO: &str = "https://recordarfotos.com.br";
 
+/// O endereço que os testes enxergam no lugar do servidor — ver [`ler`].
+pub const SENTINELA_DOS_TESTES: &str = "http://127.0.0.1:9";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Configuracao {
     #[serde(default = "base_padrao")]
@@ -109,7 +112,20 @@ pub fn caminho() -> PathBuf {
 }
 
 /// A configuração, com a variável de ambiente por cima do arquivo.
+///
+/// 🚨 **Nos testes, nunca o arquivo real nem as variáveis** (25/set/2026): o
+/// arquivo real diz qual servidor o app de verdade usa, e nenhum teste pode
+/// ter o endereço de produção nas mãos. O sentinela é a porta 9 local
+/// ("discard"), que não aceita conexão — se algum dia um teste tentar falar
+/// com o servidor por fora de uma porta de mentira, ele falha na hora, em vez
+/// de chegar lá.
 pub fn ler() -> Configuracao {
+    if cfg!(test) {
+        return Configuracao {
+            base_url: SENTINELA_DOS_TESTES.to_string(),
+            site_url: Some(SENTINELA_DOS_TESTES.to_string()),
+        };
+    }
     let mut config = ler_de(&caminho()).unwrap_or_default();
     if let Ok(base) = std::env::var("VLB_POS_VENDA_URL") {
         if !base.trim().is_empty() {
@@ -149,6 +165,14 @@ pub fn gravar_em(caminho: &Path, config: &Configuracao) {
 mod testes {
     use super::*;
     use tempfile::TempDir;
+
+    /// 🚨 Nenhum teste enxerga o servidor de produção pela configuração.
+    #[test]
+    fn nos_testes_a_configuracao_nunca_e_producao() {
+        let config = ler();
+        assert_eq!(config.base_url, SENTINELA_DOS_TESTES);
+        assert!(!config.site().contains("recordarfotos"));
+    }
 
     #[test]
     fn a_configuracao_gravada_volta_igual_e_arquivo_ruim_vira_padrao() {

@@ -211,7 +211,7 @@ impl Balcao {
         let mut mudou = false;
         while let Ok(recado) = self.recados.1.try_recv() {
             mudou = true;
-            match recado {
+            match recado.sem_o_id() {
                 Recado::Sincronizou => {
                     self.gravadas += 1;
                     self.enviando = self.enviando.saturating_sub(1);

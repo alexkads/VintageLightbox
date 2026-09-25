@@ -246,8 +246,14 @@ fn sem_bandeja_no_sistema_e_sem_envio_fechar_encerra(cx: &mut TestAppContext) {
         },
     );
     let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
-    assert!(visual.simulate_close(), "a janela fecha — e fechar a principal encerra o app");
-    assert!(!plataforma::gestos().contains(&"esconder"), "não foi para uma bandeja que não existe");
+    assert!(
+        visual.simulate_close(),
+        "a janela fecha — e fechar a principal encerra o app"
+    );
+    assert!(
+        !plataforma::gestos().contains(&"esconder"),
+        "não foi para uma bandeja que não existe"
+    );
 }
 
 /// 🎬 **Sem bandeja e com envio no ar, fechar pergunta** — e "Esperar terminar
@@ -262,7 +268,10 @@ fn sem_bandeja_com_envio_fechar_pergunta_e_espera_a_fila_para_sair(cx: &mut Test
     let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
     visual.update(crate::segundo_plano::fechar_pelo_botao);
     voltas(cx);
-    assert!(e.raiz.update(cx, |_, _, _| ()).is_ok(), "a janela não fechou");
+    assert!(
+        e.raiz.update(cx, |_, _, _| ()).is_ok(),
+        "a janela não fechou"
+    );
     e.app(cx, |app, _w, _cx| {
         assert_eq!(app.saida_para_teste(), Some(Saida::Perguntando));
     });
@@ -288,7 +297,10 @@ fn sem_bandeja_minimizar_e_continuar_nao_sai(cx: &mut TestAppContext) {
     crate::bandeja::teste::fingir_sem_bandeja();
     let e = com_envio_na_fila(cx);
     let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
-    assert!(!visual.simulate_close(), "com envio no ar, não fecha calado");
+    assert!(
+        !visual.simulate_close(),
+        "com envio no ar, não fecha calado"
+    );
     // O botão chama `desistir_de_sair` e minimiza; a janela de teste do GPUI
     // não sabe minimizar (`unimplemented!`), então o cenário faz só a parte
     // do app.

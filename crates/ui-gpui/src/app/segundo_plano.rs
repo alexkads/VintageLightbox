@@ -103,8 +103,7 @@ impl Aplicativo {
             ),
             Saida::Esperando => (
                 format!("Saindo quando terminar — faltam {fotos}"),
-                "O app fecha sozinho assim que o último envio chegar ao site."
-                    .to_string(),
+                "O app fecha sozinho assim que o último envio chegar ao site.".to_string(),
             ),
         };
         let botoes = match saida {

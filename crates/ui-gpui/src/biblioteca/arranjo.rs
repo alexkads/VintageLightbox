@@ -37,7 +37,18 @@ pub const VERSAO: usize = 1;
 /// `develop_dock_state` são duas chaves separadas): arrumar a Revelação não pode
 /// mexer na Biblioteca, e um arquivo só faria a versão de uma invalidar o
 /// arranjo da outra.
+///
+/// 🚨 **Nos testes, um arquivo temporário por thread** (25/set/2026). Todo
+/// teste que monta o app passa por `montar_o_dock`, que lê e grava este
+/// arquivo: com o catálogo real, a suíte restaurava o arranjo de quem roda
+/// `cargo test` e podia gravar por cima dele.
 pub fn caminho(tela: &str) -> PathBuf {
+    if cfg!(test) {
+        let thread = format!("{:?}", std::thread::current().id()).replace(['(', ')'], "");
+        return std::env::temp_dir()
+            .join(format!("vlb-testes-{}", std::process::id()))
+            .join(format!("{thread}-arranjo-{tela}.json"));
+    }
     AppPaths::catalog_root().join(format!("arranjo-{tela}.json"))
 }
 

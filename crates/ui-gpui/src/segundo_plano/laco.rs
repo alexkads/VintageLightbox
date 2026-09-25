@@ -210,9 +210,11 @@ fn ao_fechar(window: &mut Window, cx: &mut App) -> bool {
         let raiz = cx
             .try_global::<SegundoPlano>()
             .and_then(|sp| sp.raiz.upgrade());
-        let pendente = raiz
-            .as_ref()
-            .is_some_and(|raiz| raiz.read(cx).retrato_do_segundo_plano(cx).ha_envio_pendente());
+        let pendente = raiz.as_ref().is_some_and(|raiz| {
+            raiz.read(cx)
+                .retrato_do_segundo_plano(cx)
+                .ha_envio_pendente()
+        });
         if !pendente {
             rastro("pedido de fechar: sem bandeja e sem envio, o app encerra");
             return true;
