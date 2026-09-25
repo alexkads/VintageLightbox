@@ -2480,7 +2480,7 @@ impl Render for Revelacao {
             self.espalhar_nos_sliders(window, cx);
         }
         self.acompanhar_a_resolucao(cx);
-        let cabecalho = self.cabecalho(cx);
+        let cabecalho = self.cabecalho(window, cx);
         let presets = self
             .presets_a_mostra
             .then(|| self.coluna_dos_presets(cx).into_any_element());
@@ -2528,7 +2528,7 @@ impl Revelacao {
     /// não há barra de aplicativo por cima (o editor é `fixed inset-0`), e a
     /// raiz esconde a dela enquanto a Revelação está no ar. Por isso o `✕` daqui
     /// é o único caminho de volta visível — e ele faz o mesmo que o `Esc`.
-    fn cabecalho(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn cabecalho(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         use crate::recursos::Icone;
         use gpui_component::Icon;
 
@@ -2791,6 +2791,15 @@ impl Revelacao {
                         cx.emit(PedidoDaRevelacao::SalvarNaGaleria);
                     }))
             })
+            // 🪟 A Revelação não tem o cabeçalho do app: sem a faixa das guias
+            // acima, os botões de janela moram aqui — ou, no GNOME, não havia
+            // como fechar nem minimizar com ela aberta (dono, 25/set/2026).
+            .child(crate::janela::controles_da_tela(
+                "janela-revelacao",
+                cx.theme().foreground,
+                window,
+                cx,
+            ))
             .into_any_element()
     }
 

@@ -59,6 +59,7 @@ mod cliente;
 mod conta;
 mod enquadrar;
 mod galeria;
+mod janela;
 mod lote;
 mod nova_sessao;
 mod revelacao;

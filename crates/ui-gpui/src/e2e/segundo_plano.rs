@@ -135,6 +135,24 @@ fn fechar_com_envio_vai_para_a_bandeja_e_o_envio_termina_la(cx: &mut TestAppCont
     assert_eq!(e.site.reveladas().len(), 1, "e o envio chegou");
 }
 
+/// 🎬 **O "Fechar" da barra do app faz o que o fechar do sistema faz.** No
+/// GNOME ele é o único que existe, e chamava `remove_window` direto — que não
+/// passa pelo `on_window_should_close`: o app encerrava em vez de ir para a
+/// bandeja (dono, 24/set/2026).
+#[gpui::test]
+fn o_fechar_da_barra_do_app_leva_a_bandeja_e_nao_encerra(cx: &mut TestAppContext) {
+    let e = com_envio_na_fila(cx);
+    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    visual.update(crate::segundo_plano::fechar_pelo_botao);
+    voltas(cx);
+    assert_eq!(bandeja(cx), (true, false), "foi para a bandeja, e não saiu");
+    assert!(plataforma::gestos().contains(&"esconder"));
+    assert!(
+        e.raiz.update(cx, |_, _, _| ()).is_ok(),
+        "a janela principal continua existindo"
+    );
+}
+
 /// 🎬 **Abrir de novo traz a janela da bandeja**, com o envio ainda no ar.
 #[gpui::test]
 fn reabrir_traz_a_janela_da_bandeja(cx: &mut TestAppContext) {
@@ -203,4 +221,84 @@ fn download_no_ar_nao_segura_a_janela(cx: &mut TestAppContext) {
     assert!(!visual.simulate_close(), "a janela vai para a bandeja");
     voltas(cx);
     assert_eq!(bandeja(cx), (true, false));
+}
+
+/// Clica no botão marcado com `debug_selector`, ou afirma que ele existe.
+fn aviso_na_tela(e: &Estudio, cx: &mut TestAppContext) -> bool {
+    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    visual.update(|window, _| window.refresh());
+    visual.run_until_parked();
+    visual.debug_bounds("aviso-de-saida").is_some()
+}
+
+/// 🎬 **Sem bandeja e sem envio, fechar fecha** (dono, 25/set/2026: *"eu não
+/// consigo fechar o sistema, pois o mesmo não vai pra bandeja no linux"*). No
+/// GNOME sem a extensão AppIndicator o ícone não aparece: ir para a bandeja
+/// era sumir sem o "Sair".
+#[gpui::test]
+fn sem_bandeja_no_sistema_e_sem_envio_fechar_encerra(cx: &mut TestAppContext) {
+    crate::bandeja::teste::fingir_sem_bandeja();
+    let e = abrir_o_ensaio(
+        cx,
+        Cenario {
+            segundo_plano: true,
+            ..Cenario::default()
+        },
+    );
+    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    assert!(visual.simulate_close(), "a janela fecha — e fechar a principal encerra o app");
+    assert!(!plataforma::gestos().contains(&"esconder"), "não foi para uma bandeja que não existe");
+}
+
+/// 🎬 **Sem bandeja e com envio no ar, fechar pergunta** — e "Esperar terminar
+/// e sair" sai sozinho quando a fila esvazia (dono, 25/set/2026: *"perguntar
+/// só se houver envio"*).
+#[gpui::test]
+fn sem_bandeja_com_envio_fechar_pergunta_e_espera_a_fila_para_sair(cx: &mut TestAppContext) {
+    use crate::app::Saida;
+
+    crate::bandeja::teste::fingir_sem_bandeja();
+    let e = com_envio_na_fila(cx);
+    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    visual.update(crate::segundo_plano::fechar_pelo_botao);
+    voltas(cx);
+    assert!(e.raiz.update(cx, |_, _, _| ()).is_ok(), "a janela não fechou");
+    e.app(cx, |app, _w, _cx| {
+        assert_eq!(app.saida_para_teste(), Some(Saida::Perguntando));
+    });
+    assert!(aviso_na_tela(&e, cx), "o aviso está desenhado");
+    assert_eq!(bandeja(cx), (false, false), "nem bandeja, nem saída ainda");
+
+    e.app(cx, |app, _w, cx| app.esperar_a_fila_e_sair(cx));
+    voltas(cx);
+    assert_eq!(bandeja(cx), (false, false), "com a fila no ar, espera");
+
+    e.site.responder();
+    voltas(cx);
+    e.app(cx, |app, _w, _cx| assert_eq!(app.sincronias_pendentes(), 0));
+    voltas(cx);
+    assert_eq!(bandeja(cx), (false, true), "a fila esvaziou e o app saiu");
+    assert_eq!(e.site.reveladas().len(), 1, "e o envio chegou antes");
+}
+
+/// 🎬 **"Minimizar e continuar" não sai** — e o envio termina com a janela
+/// minimizada.
+#[gpui::test]
+fn sem_bandeja_minimizar_e_continuar_nao_sai(cx: &mut TestAppContext) {
+    crate::bandeja::teste::fingir_sem_bandeja();
+    let e = com_envio_na_fila(cx);
+    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    assert!(!visual.simulate_close(), "com envio no ar, não fecha calado");
+    // O botão chama `desistir_de_sair` e minimiza; a janela de teste do GPUI
+    // não sabe minimizar (`unimplemented!`), então o cenário faz só a parte
+    // do app.
+    e.app(cx, |app, _w, cx| {
+        app.desistir_de_sair(cx);
+        assert_eq!(app.saida_para_teste(), None, "o aviso sai da frente");
+    });
+    e.site.responder();
+    voltas(cx);
+    voltas(cx);
+    assert_eq!(bandeja(cx), (false, false), "o app continua, sem sair");
+    assert_eq!(e.site.reveladas().len(), 1);
 }

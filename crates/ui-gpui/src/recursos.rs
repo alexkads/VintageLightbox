@@ -123,6 +123,12 @@ pub enum Icone {
     FolderOpen,
     File,
     RefreshCw,
+    // Os quatro da barra de janela, desenhados como os do Zed no Linux —
+    // traço fino de 16 px, e não o lucide do resto do app (`crate::janela`).
+    JanelaMinimizar,
+    JanelaMaximizar,
+    JanelaRestaurar,
+    JanelaFechar,
 }
 
 impl Icone {
@@ -199,6 +205,10 @@ impl Icone {
         Icone::FolderOpen,
         Icone::File,
         Icone::RefreshCw,
+        Icone::JanelaMinimizar,
+        Icone::JanelaMaximizar,
+        Icone::JanelaRestaurar,
+        Icone::JanelaFechar,
     ];
 
     fn arquivo(self) -> &'static str {
@@ -275,6 +285,10 @@ impl Icone {
             Icone::ShoppingBag => "shopping-bag",
             Icone::Ticket => "ticket",
             Icone::MonitorSmartphone => "monitor-smartphone",
+            Icone::JanelaMinimizar => "janela-minimizar",
+            Icone::JanelaMaximizar => "janela-maximizar",
+            Icone::JanelaRestaurar => "janela-restaurar",
+            Icone::JanelaFechar => "janela-fechar",
         }
     }
 }

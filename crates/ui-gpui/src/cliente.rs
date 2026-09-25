@@ -207,9 +207,14 @@ const ALTURA_DA_BARRA: f32 = 32.;
 ///
 /// No macOS, no Windows e no KDE a barra do sistema existe, e uma segunda
 /// seria duplicata — quem decide é [`crate::janela::app_desenha_a_barra`].
-/// Em tela cheia não há barra nenhuma: é a tela do cliente.
+/// 🚨 **Em tela cheia a barra fica** (dono, 25/set/2026: *"mesmo que estiver
+/// com tela cheia precisa ter o minimizar, restaurar e fechar, sempre precisa
+/// ter como arrastar essa tela para outro monitor, assim como é feito no
+/// Darktable"*). Até aqui ela sumia, e em tela cheia **nenhum** sistema mostra
+/// a dele: a tela ficava presa no monitor, sem botão e sem por onde pegar. Por
+/// isso a tela cheia liga a barra em qualquer sistema, e não só no GNOME.
 fn tem_barra_propria(window: &Window) -> bool {
-    !window.is_fullscreen() && crate::janela::app_desenha_a_barra(window)
+    window.is_fullscreen() || crate::janela::app_desenha_a_barra(window)
 }
 
 /// Como a janela estava quando saiu: é como ela volta.
@@ -933,7 +938,7 @@ impl Render for Cliente {
                         .text_xs()
                         .text_color(gpui::rgb(0xb4b4b4))
                         .child("Tela do cliente")
-                        .child(crate::janela::controles(
+                        .child(crate::janela::controles_mesmo_em_tela_cheia(
                             "janela-cliente",
                             gpui::rgb(0xb4b4b4).into(),
                             window,

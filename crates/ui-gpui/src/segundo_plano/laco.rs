@@ -39,6 +39,9 @@ struct SegundoPlano {
     pilha_local: bool,
     medida: Arc<Mutex<Medida>>,
     voltas: u32,
+    /// O operador pediu para sair quando a fila esvaziar — o "Esperar terminar
+    /// e sair" do aviso de saída, onde não há bandeja (`app/segundo_plano.rs`).
+    sair_ao_esvaziar: bool,
 }
 
 impl Global for SegundoPlano {}
@@ -98,6 +101,7 @@ pub fn ligar(raiz: WeakEntity<Aplicativo>, window: &mut Window, cx: &mut App) {
         pilha_local,
         medida: Arc::default(),
         voltas: 0,
+        sair_ao_esvaziar: false,
     });
 
     // Fechar leva para a bandeja, sempre (dono, 2026-09-21).
@@ -151,9 +155,51 @@ fn retrato(sp: &SegundoPlano, cx: &App) -> Option<frases::Retrato> {
     Some(r)
 }
 
+/// O "Fechar" da barra que o app desenha (`crate::janela::controles`).
+///
+/// 🚨 **Não é `remove_window` direto.** O `remove_window` do GPUI não passa
+/// pelo `on_window_should_close`, e é ali que mora a regra de fechar levar à
+/// bandeja: o botão da barra encerrava o app, enquanto o fechar do sistema o
+/// mantinha vivo (achado do dono no GNOME, 24/set/2026 — *"os botões não
+/// funcionam direito"*). Na janela principal o botão pergunta o mesmo que o
+/// sistema perguntaria; nas outras (a tela do cliente) fechar é fechar.
+pub fn fechar_pelo_botao(window: &mut Window, cx: &mut App) {
+    let principal = cx.try_global::<SegundoPlano>().map(|sp| sp.principal);
+    if principal == Some(window.window_handle()) && !ao_fechar(window, cx) {
+        return;
+    }
+    window.remove_window();
+}
+
 fn ao_fechar(window: &mut Window, cx: &mut App) -> bool {
     if !cx.has_global::<SegundoPlano>() {
         return true;
+    }
+    // 🚨 **Sem bandeja no sistema, não há para onde ir** (dono, 25/set/2026).
+    // No GNOME sem a extensão AppIndicator o ícone não aparece: "ir para a
+    // bandeja" era minimizar para sempre, sem o "Sair" à vista, e o app não
+    // tinha como ser encerrado (`bandeja::existe_no_sistema`).
+    //
+    // Mas fechar com envio no ar não pode ser calado: sem bandeja, o app
+    // **pergunta** (dono, no mesmo dia: *"quando não tiver como mostrar a
+    // bandeja, deve se adotar outra estratégia"*) — esperar a fila e sair,
+    // minimizar e continuar, ou sair mesmo assim. Com a fila vazia, fecha.
+    if !bandeja::existe_no_sistema() {
+        let raiz = cx
+            .try_global::<SegundoPlano>()
+            .and_then(|sp| sp.raiz.upgrade());
+        let pendente = raiz
+            .as_ref()
+            .is_some_and(|raiz| raiz.read(cx).retrato_do_segundo_plano(cx).ha_envio_pendente());
+        if !pendente {
+            rastro("pedido de fechar: sem bandeja e sem envio, o app encerra");
+            return true;
+        }
+        rastro("pedido de fechar: sem bandeja e com envio, pergunta");
+        if let Some(raiz) = raiz {
+            raiz.update(cx, |raiz, cx| raiz.perguntar_antes_de_sair(cx));
+        }
+        return false;
     }
     cx.update_global::<SegundoPlano, _>(|sp, cx| {
         rastro("pedido de fechar: para a bandeja");
@@ -246,6 +292,11 @@ fn volta(cx: &mut App) {
             rastro(&format!("{novas:?}"));
             sp.ultimas = Some(novas);
         }
+        // O "Esperar terminar e sair" do aviso de saída: a fila esvaziou.
+        if sp.sair_ao_esvaziar && !retrato.ha_envio_pendente() {
+            rastro("a fila esvaziou: saindo, como pedido");
+            return true;
+        }
         // O app não termina sozinho: sair é o "Sair" da bandeja (ou `⌘Q`).
         false
     });
@@ -255,6 +306,23 @@ fn volta(cx: &mut App) {
         SAIU.with(|s| s.set(true));
         cx.quit();
     }
+}
+
+/// O "Esperar terminar e sair" do aviso de saída: o laço encerra o app na
+/// primeira volta com a fila vazia. `false` desiste.
+pub fn sair_quando_a_fila_esvaziar(sim: bool, cx: &mut App) {
+    if cx.has_global::<SegundoPlano>() {
+        cx.update_global::<SegundoPlano, _>(|sp, _cx| sp.sair_ao_esvaziar = sim);
+    }
+}
+
+/// O "Sair mesmo assim": encerra agora. O que não subiu segue guardado no
+/// depósito, e sobe na próxima abertura — como no "Sair" da bandeja.
+pub fn sair_agora(cx: &mut App) {
+    rastro("saindo agora, a pedido");
+    #[cfg(test)]
+    SAIU.with(|s| s.set(true));
+    cx.quit();
 }
 
 #[cfg(test)]

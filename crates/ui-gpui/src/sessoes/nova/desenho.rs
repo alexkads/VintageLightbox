@@ -327,6 +327,7 @@ impl NovaSessao {
                     .gap(px(12.))
                     .border_b_1()
                     .border_color(borda)
+                    .bg(crate::janela::fundo_da_barra(cx.theme().background, window, cx))
                     .child(
                         estilo::botao_do_menu("nova-menu", cx).on_click(
                             cx.listener(|_, _, _, cx| cx.emit(PedidoDaNova::AlternarMenu)),
@@ -404,7 +405,7 @@ impl NovaSessao {
                             })
                         })
                     })
-                    .child(crate::janela::controles(
+                    .child(crate::janela::controles_da_tela(
                         "janela-nova-sessao",
                         texto,
                         window,

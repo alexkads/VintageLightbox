@@ -82,6 +82,15 @@ pub fn como_barra_de_titulo(
     elemento
         .id(id)
         .on_double_click(|_, window, cx| maximizar_ou_restaurar(window, cx))
+        // O botão direito abre o menu da janela **do sistema** (no GNOME:
+        // Minimizar, Maximizar, Mover, Redimensionar, Sempre no topo, Fechar),
+        // como na barra de qualquer app — e como o Zed faz. Só onde a barra é
+        // nossa: com a do sistema acima, o menu já está lá.
+        .on_mouse_down(MouseButton::Right, |evento, window, _| {
+            if app_desenha_a_barra(window) && window.window_controls().window_menu {
+                window.show_window_menu(evento.position);
+            }
+        })
         .on_mouse_down(
             MouseButton::Left,
             window.listener_for(&arrastando, |estado, _, _, _| estado.0 = true),
@@ -96,18 +105,29 @@ pub fn como_barra_de_titulo(
                 // Uma vez só: daqui em diante quem manda no ponteiro é o
                 // compositor, e o `mouse_up` que apagaria isto não chega mais.
                 estado.0 = false;
+                // Em tela cheia a janela não se move: sai dela primeiro, e o
+                // arrasto continua — é assim que a tela do cliente vai de um
+                // monitor para o outro (dono, 25/set/2026).
+                if window.is_fullscreen() {
+                    window.toggle_fullscreen();
+                }
                 window.start_window_move();
             }
         }))
 }
 
-/// Maximiza, ou restaura se já estiver maximizada.
+/// Maximiza, ou restaura se já estiver maximizada — e, em tela cheia, sai
+/// dela: é o "Restaurar" de quem está em tela cheia.
 ///
 /// ⚠️ **No macOS não é `zoom_window`.** O duplo clique na barra de título é
 /// configurável no sistema (`AppleActionOnDoubleClick`: aumentar/reduzir,
 /// minimizar ou nada), e `titlebar_double_click` é o que consulta essa
 /// preferência. Maximizar à força seria o app decidindo por quem já decidiu.
 pub fn maximizar_ou_restaurar(window: &mut Window, _cx: &mut App) {
+    if window.is_fullscreen() {
+        window.toggle_fullscreen();
+        return;
+    }
     #[cfg(target_os = "macos")]
     window.titlebar_double_click();
     #[cfg(not(target_os = "macos"))]
@@ -150,53 +170,140 @@ impl Render for Arrastando {
 /// `prefixo` entra no id de cada botão: duas barras na mesma janela com o mesmo
 /// id dividiriam estado sem querer.
 pub fn controles(prefixo: &'static str, cor: Hsla, window: &Window, cx: &App) -> Div {
-    if !app_desenha_a_barra(window) {
+    // Em tela cheia a janela principal é o app inteiro: os botões somem, como
+    // no Zed. A tela do cliente é diferente — ver [`controles_mesmo_em_tela_cheia`].
+    if !app_desenha_a_barra(window) || window.is_fullscreen() {
         return div();
     }
+    desenhar_controles(prefixo, cor, window, cx)
+}
 
-    // O fundo do hover: cinza do tema nos dois primeiros, vermelho no fechar —
-    // o mesmo contrato visual de qualquer barra de título, e o que distingue o
-    // botão que **encerra** dos que só mudam o tamanho.
-    let realce = cx.theme().secondary_hover;
-    let perigo = cx.theme().danger;
+/// Os botões de janela que **não somem em tela cheia** — os da tela do
+/// cliente.
+///
+/// # 🚨 Por que a tela do cliente é diferente
+///
+/// *"Na tela de visualização do cliente, mesmo que estiver com tela cheia
+/// precisa ter o minimizar, restaurar e fechar, sempre precisa ter como
+/// arrastar essa tela para outro monitor, assim como é feito no Darktable"*
+/// (dono, 25/set/2026). Ela vive no monitor virado para o cliente, quase
+/// sempre em tela cheia — e em tela cheia **nenhum** sistema mostra barra, nem
+/// o GNOME, nem o macOS, nem o Windows. Sem os nossos, o operador não tinha
+/// como tirá-la de lá nem levá-la ao monitor certo.
+///
+/// Em tela cheia, "Restaurar" **sai da tela cheia** (é a janela voltando ao
+/// tamanho de antes), e o arrasto da barra sai dela e já começa a mover
+/// ([`como_barra_de_titulo`]).
+pub fn controles_mesmo_em_tela_cheia(
+    prefixo: &'static str,
+    cor: Hsla,
+    window: &Window,
+    cx: &App,
+) -> Div {
+    if !(app_desenha_a_barra(window) || window.is_fullscreen()) {
+        return div();
+    }
+    desenhar_controles(prefixo, cor, window, cx)
+}
 
-    let (icone_do_meio, dica_do_meio) = if window.is_maximized() {
-        (Icone::Minimize2, "Restaurar")
+fn desenhar_controles(prefixo: &'static str, cor: Hsla, window: &Window, cx: &App) -> Div {
+    #[cfg(test)]
+    teste::DESENHADOS.with(|d| d.borrow_mut().insert(prefixo));
+
+    // 🔑 **O desenho é o do Zed no GNOME** (dono, 24/set/2026: *"faça
+    // igual"*): três círculos de 20 px, 12 px entre eles, traço fino, **sem
+    // fundo** até o ponteiro passar — e o mesmo cinza no realce dos três, o
+    // fechar incluso. Até aqui eram quadrados de 34×28 com os ícones do lucide
+    // e o fechar em vermelho, no jeito do Windows.
+    // (`crates/platform_title_bar/src/platforms/platform_linux.rs` no Zed.)
+    let (fundo, realce) = (gpui::transparent_black(), cx.theme().secondary_hover);
+
+    let (icone_do_meio, dica_do_meio) = if window.is_maximized() || window.is_fullscreen() {
+        (Icone::JanelaRestaurar, "Restaurar")
     } else {
-        (Icone::Maximize2, "Maximizar")
+        (Icone::JanelaMaximizar, "Maximizar")
     };
+    // O compositor diz o que sabe fazer (`xdg_toplevel.wm_capabilities`): um
+    // botão que ele não atende seria um botão que não faz nada. Fechar não se
+    // pergunta — é o app que fecha.
+    let suportados = window.window_controls();
 
     div()
         .flex()
         .flex_none()
         .items_center()
-        .child(botao(
-            SharedString::from(format!("{prefixo}-minimizar")),
-            Icone::Minus,
-            "Minimizar",
-            cor,
-            realce,
-            |window, _| window.minimize_window(),
-        ))
-        .child(botao(
-            SharedString::from(format!("{prefixo}-maximizar")),
-            icone_do_meio,
-            dica_do_meio,
-            cor,
-            realce,
-            maximizar_ou_restaurar,
-        ))
+        .gap(px(12.))
+        .px(px(12.))
+        .when(suportados.minimize, |d| {
+            d.child(botao(
+                SharedString::from(format!("{prefixo}-minimizar")),
+                "janela-minimizar",
+                Icone::JanelaMinimizar,
+                "Minimizar",
+                cor,
+                (fundo, realce),
+                |window, _| window.minimize_window(),
+            ))
+        })
+        .when(suportados.maximize, |d| {
+            d.child(botao(
+                SharedString::from(format!("{prefixo}-maximizar")),
+                "janela-maximizar",
+                icone_do_meio,
+                dica_do_meio,
+                cor,
+                (fundo, realce),
+                maximizar_ou_restaurar,
+            ))
+        })
         .child(botao(
             SharedString::from(format!("{prefixo}-fechar")),
-            Icone::X,
+            "janela-fechar",
+            Icone::JanelaFechar,
             "Fechar",
             cor,
-            perigo,
-            // 🚨 `remove_window`, e não `quit`: fechar a janela principal é o
-            // gesto de sair do app, mas quem decide o que fazer com as outras
-            // (a segunda tela, um modal do sistema) é o GPUI.
-            |window, _| window.remove_window(),
+            (fundo, realce),
+            // 🚨 O mesmo caminho do fechar do sistema: na janela principal ele
+            // leva à bandeja (dono, 21/set/2026), e não encerra o app.
+            crate::segundo_plano::fechar_pelo_botao,
         ))
+}
+
+/// A raiz do conteúdo da janela: **o clique não sobe até a moldura**.
+///
+/// # 🚨 A camada que comia os cliques com a janela maximizada
+///
+/// *"Quando o programa fica maximizado parece que tem uma camada na parte de
+/// baixo atrapalhando os cliques nos botões"* (dono, 25/set/2026). É a moldura
+/// do `gpui-component` (`window_border`, que o `Root` põe em volta de tudo):
+/// o `on_mouse_down` dela começa a **redimensionar** a janela sempre que o
+/// clique cai a menos de 12 px da borda — **sem olhar se a janela está
+/// maximizada**. Com a janela solta esses 12 px são a sombra, fora do
+/// conteúdo, e está certo. Maximizada, a sombra some, o conteúdo encosta na
+/// borda, e o botão a 12 px do rodapé (ou do alto, ou dos lados) passava o
+/// clique ao compositor: o GNOME tomava o ponteiro e o botão nunca recebia o
+/// `mouse_up`. O Zed não tem o defeito porque a moldura dele pula as bordas
+/// encostadas (`resize_edge(…, tiling)` em `workspace::client_side_decorations`).
+///
+/// Parar o clique aqui é seguro porque a área legítima de redimensionar — a
+/// sombra — **não é conteúdo**: ela continua chegando à moldura.
+pub fn raiz_do_conteudo(elemento: Div) -> Div {
+    elemento.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+}
+
+/// O fundo de um cabeçalho que é barra de título: `ativo` com a janela em
+/// foco, e o tom apagado do tema sem ele.
+///
+/// É o que o Zed faz (`title_bar_inactive_background`) e o que toda janela do
+/// GNOME faz — o único jeito de ver, com duas janelas lado a lado, qual delas
+/// recebe o teclado. Onde o sistema desenha a barra, é a dele que apaga, e
+/// esta não muda.
+pub fn fundo_da_barra(ativo: Hsla, window: &Window, cx: &App) -> Hsla {
+    if app_desenha_a_barra(window) && !window.is_window_active() {
+        cx.theme().muted
+    } else {
+        ativo
+    }
 }
 
 /// Se **o app** tem de desenhar a barra desta janela.
@@ -216,8 +323,99 @@ pub fn controles(prefixo: &'static str, cor: Hsla, window: &Window, cx: &App) ->
 /// pergunta a cada desenho, e não uma vez ao abrir.
 ///
 /// Fora do Linux o sistema sempre desenha; o `cfg!` só poupa a pergunta.
+///
+/// ⚠️ A resposta só é verdadeira se a janela **pediu** `Client` ao abrir —
+/// ver [`decoracoes_ao_abrir`].
 pub fn app_desenha_a_barra(window: &Window) -> bool {
+    #[cfg(test)]
+    if teste::FORCADA.with(|f| f.get()) {
+        return true;
+    }
     cfg!(target_os = "linux") && matches!(window.window_decorations(), Decorations::Client { .. })
+}
+
+/// Os botões de janela de uma **tela** — o cabeçalho do app, a barra da
+/// galeria, a da nova sessão, a da Revelação.
+///
+/// # 🚨 A regra: os botões moram na primeira linha da janela, e só nela
+///
+/// *"Tem tela que não tem o minimizar, maximizar e fechar"* (dono,
+/// 25/set/2026): cada tela punha os seus, e a Revelação não punha — com a
+/// janela maximizada no GNOME, não havia como fechar nem minimizar ali. E
+/// na galeria eles ficavam na **segunda** linha, debaixo da faixa das guias.
+/// O operador procurava no canto e não achava: *"o usuário se perde"*.
+///
+/// Agora, como no Zed, ficam sempre no canto de cima: **na faixa das guias
+/// quando ela está na tela** ([`marcar_faixa_com_controles`], chamada pela
+/// raiz antes de as telas se desenharem), e senão na barra da tela. O teste
+/// `e2e::janela` passa por todas as telas e afirma: um jogo, e no alto.
+pub fn controles_da_tela(prefixo: &'static str, cor: Hsla, window: &Window, cx: &App) -> Div {
+    let na_faixa = cx
+        .try_global::<FaixaComControles>()
+        .and_then(|f| f.0)
+        .is_some_and(|dona| dona == window.window_handle());
+    if na_faixa {
+        return div();
+    }
+    controles(prefixo, cor, window, cx)
+}
+
+/// A faixa das guias desta janela está na tela, com os botões de janela nela.
+struct FaixaComControles(Option<gpui::AnyWindowHandle>);
+
+impl gpui::Global for FaixaComControles {}
+
+/// Diz, a cada desenho da raiz, se os botões foram para a faixa das guias —
+/// **antes** de as telas se desenharem, que é quando elas perguntam.
+pub fn marcar_faixa_com_controles(sim: bool, window: &Window, cx: &mut App) {
+    cx.set_global(FaixaComControles(sim.then(|| window.window_handle())));
+}
+
+/// 🧪 O GPUI de teste não decora janela nenhuma: sem forçar, os botões nunca
+/// seriam desenhados e o teste de todas as telas não teria o que conferir.
+#[cfg(test)]
+pub mod teste {
+    use std::cell::{Cell, RefCell};
+    use std::collections::BTreeSet;
+
+    thread_local! {
+        pub(super) static FORCADA: Cell<bool> = const { Cell::new(false) };
+        pub(super) static DESENHADOS: RefCell<BTreeSet<&'static str>> =
+            const { RefCell::new(BTreeSet::new()) };
+    }
+
+    /// Faz de conta que é o GNOME: o app desenha a barra.
+    pub fn forcar_barra_do_app() {
+        FORCADA.with(|f| f.set(true));
+    }
+
+    /// Quais barras desenharam botões de janela desde a última pergunta —
+    /// pelo prefixo de cada uma. Duas no mesmo quadro são dois jogos.
+    pub fn barras_com_botoes() -> BTreeSet<&'static str> {
+        DESENHADOS.with(|d| std::mem::take(&mut *d.borrow_mut()))
+    }
+}
+
+/// O `window_decorations` de toda `WindowOptions` do app.
+///
+/// # 🚨 Sem isto, no GNOME, a janela nasce sem barra nenhuma
+///
+/// O GPUI 0.2.2, ao abrir a janela, chama
+/// `request_decorations(window_decorations.unwrap_or(Server))`, e no Wayland
+/// isso **grava `Server` no estado da janela mesmo quando o compositor não tem
+/// `xdg-decoration`** — que é o GNOME. A janela passa a dizer "o sistema
+/// desenha", [`app_desenha_a_barra`] responde que não, e ninguém desenha:
+/// nem o GNOME, nem o app. Foi o que aconteceu de 22 a 24/set/2026 (*"não
+/// aparece a barra!"*, dono), depois que a barra passou a perguntar à janela.
+///
+/// Pedindo `Client`, como o Zed pede, cada compositor responde por si: o
+/// GNOME não responde e a janela fica `Client` (o app desenha); o KDE atende
+/// o pedido e também fica `Client` — uma barra só, a nossa, como no Zed; e
+/// quem força a barra do sistema (um Sway configurado assim) devolve
+/// `ServerSide`, e a nossa some sozinha. Fora do Linux o campo não vale nada
+/// e fica `None`.
+pub fn decoracoes_ao_abrir() -> Option<gpui::WindowDecorations> {
+    cfg!(target_os = "linux").then_some(gpui::WindowDecorations::Client)
 }
 
 /// Em que área de trabalho o app está rodando.
@@ -288,10 +486,11 @@ impl AreaDeTrabalho {
 /// Um botão da barra: o quadrado com o ícone, o realce e o clique.
 fn botao(
     id: impl Into<gpui::ElementId>,
+    seletor: &'static str,
     icone: Icone,
     dica: &'static str,
     cor: Hsla,
-    realce: Hsla,
+    (fundo, realce): (Hsla, Hsla),
     acao: impl Fn(&mut Window, &mut App) + 'static,
 ) -> Stateful<Div> {
     div()
@@ -300,12 +499,14 @@ fn botao(
         .flex_none()
         .items_center()
         .justify_center()
-        .w(px(34.))
-        .h(px(28.))
-        .rounded(px(4.))
+        .debug_selector(move || seletor.to_string())
+        .size(px(20.))
+        .rounded_full()
         .cursor_pointer()
         .text_color(cor)
+        .bg(fundo)
         .hover(move |s| s.bg(realce))
+        .active(move |s| s.bg(realce.opacity(1.6)))
         .tooltip(move |window, cx| gpui_component::tooltip::Tooltip::new(dica).build(window, cx))
         // 🔑 O clique **para aqui**. Estes botões moram dentro da barra que
         // arrasta a janela: sem isto, apertar "fechar" começaria um arrasto e o
@@ -315,7 +516,7 @@ fn botao(
             cx.stop_propagation();
             acao(window, cx);
         })
-        .child(Icon::new(icone).size(px(15.)))
+        .child(Icon::new(icone).size(px(16.)))
 }
 
 #[cfg(test)]

@@ -35,6 +35,67 @@ const ABRIR: &str = "bandeja:abrir";
 const ABRIR_PASTA: &str = "bandeja:abrir-pasta";
 const SAIR: &str = "bandeja:sair";
 
+/// Se o sistema **mostra** ícone de bandeja — e, portanto, se o app pode ir
+/// para lá sem sumir.
+///
+/// # 🚨 O GNOME puro não tem bandeja
+///
+/// *"Eu não consigo fechar o sistema, pois o mesmo não vai pra bandeja no
+/// linux, agora mesmo não estou conseguindo nem matar o processo"* (dono,
+/// 25/set/2026). No Linux o ícone é um `StatusNotifierItem`, e só aparece se
+/// alguém o hospeda: o KDE, o XFCE, ou o GNOME **com a extensão AppIndicator**.
+/// Sem ela, o `tray-icon` cria o ícone sem erro nenhum e ninguém o desenha —
+/// fechar minimizava, o "Sair" da bandeja não existia na tela, e o app não
+/// tinha como ser encerrado.
+///
+/// Quem hospeda o ícone registra o nome `org.kde.StatusNotifierWatcher` no
+/// barramento da sessão; a pergunta é essa. Sem `gdbus` para perguntar, a
+/// resposta é "não": o pior caso vira um app que fecha ao fechar, e não um
+/// que não fecha nunca.
+#[cfg(not(test))]
+pub fn existe_no_sistema() -> bool {
+    if !cfg!(target_os = "linux") {
+        return true;
+    }
+    std::process::Command::new("gdbus")
+        .args([
+            "call",
+            "--session",
+            "--dest",
+            "org.freedesktop.DBus",
+            "--object-path",
+            "/org/freedesktop/DBus",
+            "--method",
+            "org.freedesktop.DBus.NameHasOwner",
+            "org.kde.StatusNotifierWatcher",
+        ])
+        .output()
+        .map(|saida| {
+            saida.status.success() && String::from_utf8_lossy(&saida.stdout).contains("true")
+        })
+        .unwrap_or(false)
+}
+
+/// 🧪 Na suíte a bandeja existe, a não ser que o cenário finja o GNOME puro.
+#[cfg(test)]
+pub fn existe_no_sistema() -> bool {
+    !teste::SEM_BANDEJA.with(std::cell::Cell::get)
+}
+
+/// 🧪 O GNOME sem a extensão, para o teste: por padrão a suíte tem bandeja.
+#[cfg(test)]
+pub mod teste {
+    use std::cell::Cell;
+
+    thread_local! {
+        pub(super) static SEM_BANDEJA: Cell<bool> = const { Cell::new(false) };
+    }
+
+    pub fn fingir_sem_bandeja() {
+        SEM_BANDEJA.with(|s| s.set(true));
+    }
+}
+
 /// O que o operador escolheu na janelinha.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Clique {

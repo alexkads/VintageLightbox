@@ -886,7 +886,11 @@ impl Aplicativo {
     ///
     /// 🔑 **Só aparece com guia aberta**: quem trabalha com uma sessão por vez
     /// não ganha uma faixa a mais na tela.
-    pub(super) fn faixa_das_guias(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    pub(super) fn faixa_das_guias(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<impl IntoElement> {
         let na_tela = match self.tela {
             Tela::Sessao | Tela::Sessoes => true,
             Tela::Revelacao => self.sessao_aberta.is_some(),
@@ -1086,18 +1090,18 @@ impl Aplicativo {
         let esta = cx.entity().downgrade();
         let desenhadas = self.edicao_das_guias.desenhadas.clone();
         let menu_do_roteiro = self.edicao_das_guias.menu_do_roteiro.clone();
-        Some(
-            h_flex()
+        // 🪟 **Com a faixa na tela, ela é a primeira linha da janela, e os
+        // botões de janela moram na ponta dela** — como no Zed e no Chrome do
+        // GNOME. Fora da parte que rola: guia demais não os empurra para fora.
+        let controles = crate::janela::controles("janela-guias", frente, window, cx);
+        let faixa = h_flex()
                 .on_children_prepainted(move |limites, _window, _cx| {
                     *desenhadas.borrow_mut() = limites;
                 })
                 .id("faixa-das-guias")
-                .flex_none()
-                .w_full()
-                .h(px(ALTURA_DA_FAIXA))
-                .bg(fundo_da_faixa)
-                .border_b_1()
-                .border_color(borda)
+                .flex_1()
+                .min_w(px(0.))
+                .h_full()
                 .overflow_x_scroll()
                 .children(guias)
                 .child(
@@ -1140,7 +1144,17 @@ impl Aplicativo {
                         return menu;
                     };
                     montar_o_menu(menu, dados, esta.clone(), window, cx)
-                }),
+                });
+        Some(
+            h_flex()
+                .flex_none()
+                .w_full()
+                .h(px(ALTURA_DA_FAIXA))
+                .bg(fundo_da_faixa)
+                .border_b_1()
+                .border_color(borda)
+                .child(faixa)
+                .child(controles),
         )
     }
 }

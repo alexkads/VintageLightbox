@@ -508,7 +508,7 @@ impl Aplicativo {
             .gap(px(8.))
             .border_b_1()
             .border_color(borda)
-            .bg(fundo)
+            .bg(crate::janela::fundo_da_barra(fundo, window, cx))
             .child(self.botao_do_menu(cx))
             .child(div().w(px(1.)).h(px(16.)).mr(px(4.)).bg(borda))
             .child(
@@ -522,7 +522,7 @@ impl Aplicativo {
             // 🪟 **No Linux os botões de janela são estes.** Sem barra do
             // sistema, fechar e minimizar só existem se o app os desenhar; fora
             // do Linux a chamada não devolve nada.
-            .child(crate::janela::controles("janela-app", frente, window, cx))
+            .child(crate::janela::controles_da_tela("janela-app", frente, window, cx))
     }
 
     /// O botão que abre e recolhe o menu (`SidebarTrigger`). A galeria usa o

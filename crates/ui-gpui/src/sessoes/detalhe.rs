@@ -3572,6 +3572,7 @@ impl Detalhe {
             .overflow_hidden()
             .border_b_1()
             .border_color(borda)
+            .bg(crate::janela::fundo_da_barra(cx.theme().background, window, cx))
             .child(
                 estilo::botao_do_menu("galeria-menu", cx)
                     .on_click(cx.listener(|_tela, _ev, _window, cx| cx.emit(Pedido::AlternarMenu))),
@@ -3710,7 +3711,7 @@ impl Detalhe {
             // 🪟 A tela da sessão não tem o cabeçalho do app: no Linux os botões
             // de janela têm de morar aqui, ou não existem enquanto ela estiver
             // aberta — que é onde o operador passa o dia.
-            .child(crate::janela::controles(
+            .child(crate::janela::controles_da_tela(
                 "janela-galeria",
                 texto,
                 window,

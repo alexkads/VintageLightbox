@@ -22,6 +22,7 @@ mod resolucao_cheia;
 mod roteiro;
 /// O que a raiz conta à bandeja (`crate::segundo_plano`).
 mod segundo_plano;
+pub use segundo_plano::Saida;
 
 pub use painel::Conta;
 
@@ -670,6 +671,9 @@ pub struct Aplicativo {
     /// lugar onde se entra e de onde se sai, e não uma quarta tela.
     configuracoes: Entity<Configuracoes>,
     configurando: bool,
+    /// O aviso de sair com envio no ar, onde o sistema não tem bandeja
+    /// (`app/segundo_plano.rs`).
+    saida: Option<segundo_plano::Saida>,
     /// A segunda tela, quando aberta. É uma **janela**, e não uma tela desta —
     /// as duas existem ao mesmo tempo, em monitores diferentes.
     cliente: Option<gpui::WindowHandle<Cliente>>,
@@ -1147,6 +1151,7 @@ impl Aplicativo {
             _sessao_escolhida: sessao_escolhida,
             configuracoes: cx.new(|_| Configuracoes::nova(previews_das_configuracoes)),
             configurando: false,
+            saida: None,
             cliente: None,
             previews: previews_do_cliente,
             _observador: observador,
@@ -3605,6 +3610,7 @@ impl Aplicativo {
             is_resizable: true,
             is_minimizable: false,
             window_background: gpui::WindowBackgroundAppearance::Opaque,
+            window_decorations: crate::janela::decoracoes_ao_abrir(),
             ..Default::default()
         };
 
@@ -3658,6 +3664,12 @@ impl Aplicativo {
 
     pub fn cliente_aberto(&self) -> bool {
         self.cliente.is_some()
+    }
+
+    /// A janela da tela do cliente, para o teste desenhá-la e clicar nela.
+    #[cfg(test)]
+    pub fn janela_do_cliente_para_teste(&self) -> Option<gpui::WindowHandle<Cliente>> {
+        self.cliente
     }
 
     /// Tela cheia na tela do cliente, a partir da janela principal.
@@ -5074,7 +5086,8 @@ impl Render for Aplicativo {
         // desenhado por baixo, as quinze teclas de triagem continuariam
         // chegando à Biblioteca por trás da tela de login.
         if self.sessao.is_none() {
-            return div()
+            crate::janela::marcar_faixa_com_controles(false, window, cx);
+            return crate::janela::raiz_do_conteudo(div())
                 .size_full()
                 .child(self.entrada.clone())
                 .into_any_element();
@@ -5082,6 +5095,12 @@ impl Render for Aplicativo {
 
         // 🧾 O caixa flutuante só existe na galeria e na revelação, e só ali
         // ele escuta as teclas F.
+        // 🪟 A faixa primeiro, e a marca antes de as telas se desenharem: com
+        // ela na tela, os botões de janela moram nela, e as barras de baixo
+        // não desenham os seus (`janela::controles_da_tela`).
+        let faixa_das_guias = self.faixa_das_guias(window, cx);
+        crate::janela::marcar_faixa_com_controles(faixa_das_guias.is_some(), window, cx);
+
         let com_caixa = matches!(self.tela, Tela::Sessao | Tela::Revelacao);
         self.caixa_flutuante
             .update(cx, |caixa, _| caixa.definir_visivel(com_caixa));
@@ -5090,7 +5109,10 @@ impl Render for Aplicativo {
             tela.definir_cliente_aberto(cliente_aberto, cx)
         });
 
-        div()
+        // A moldura da janela não recebe o clique do conteúdo — senão, com a
+        // janela maximizada, a borda de 12 px vira redimensionar
+        // (`janela::raiz_do_conteudo`).
+        crate::janela::raiz_do_conteudo(div())
             .key_context(CONTEXTO)
             .relative()
             .track_focus(&self.foco)
@@ -5276,7 +5298,7 @@ impl Render for Aplicativo {
                     .flex_1()
                     .min_w(px(0.))
                     .h_full()
-                    .children(self.faixa_das_guias(cx))
+                    .children(faixa_das_guias)
                     .when(self.tela.tem_cabecalho(), |coluna| {
                         coluna.child(self.cabecalho(window, cx))
                     })
@@ -5313,6 +5335,9 @@ impl Render for Aplicativo {
                 self.biblioteca.read(cx).confirmando_apagar(),
                 |raiz, quantas| raiz.child(self.aviso_de_apagar(quantas, cx)),
             )
+            .when_some(self.saida, |raiz, saida| {
+                raiz.child(self.aviso_de_saida(saida, cx))
+            })
             .when(false, |raiz| raiz)
             .when(self.configurando, |raiz| {
                 raiz.child(self.modal_de_configuracoes(cx))

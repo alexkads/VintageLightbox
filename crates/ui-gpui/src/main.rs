@@ -443,6 +443,10 @@ async fn main() {
                             ..Default::default()
                         }),
                         is_resizable: true,
+                        // No Linux, pede a barra desenhada pelo app — sem
+                        // isto o GNOME fica sem barra nenhuma
+                        // (`janela::decoracoes_ao_abrir`).
+                        window_decorations: ui_gpui::janela::decoracoes_ao_abrir(),
                         ..Default::default()
                     },
                     |window, cx| {
