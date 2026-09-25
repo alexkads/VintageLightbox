@@ -38,6 +38,17 @@ pub enum Passo {
     ConferirConta,
     /// `conferir_selecao 2` — falha se a janela real não tiver N fotos marcadas.
     ConferirSelecao(usize),
+    /// `conversa 1` — abre a N-ésima conversa da lista do chatbot.
+    Conversa(usize),
+    /// `conferir_chatbot 1` — falha se a lista do chatbot tiver menos de N
+    /// conversas lidas da API.
+    ConferirChatbot(usize),
+    /// `conferir_novidades 1` — falha se o chatbot não tiver ao menos N
+    /// conversas com mensagem nova (o tempo real chegou até a tela).
+    ConferirNovidades(usize),
+    /// `conferir_agenda 1` — falha se a agenda tiver menos de N agendamentos
+    /// lidos da API no período.
+    ConferirAgenda(usize),
     /// `menu` — abre ou recolhe o menu lateral.
     Menu,
     /// Liga ou desliga a linha de filtros por coluna da lista de sessões.
@@ -157,6 +168,10 @@ pub fn ler_roteiro(texto: &str) -> Result<Vec<Passo>, String> {
             "foco" => Passo::Foco(numero(0)?.max(1.0) as usize),
             "conferir_conta" => Passo::ConferirConta,
             "conferir_selecao" => Passo::ConferirSelecao(numero(0)? as usize),
+            "conversa" => Passo::Conversa(numero(0)? as usize),
+            "conferir_chatbot" => Passo::ConferirChatbot(numero(0)? as usize),
+            "conferir_novidades" => Passo::ConferirNovidades(numero(0)? as usize),
+            "conferir_agenda" => Passo::ConferirAgenda(numero(0)? as usize),
             "menu" => Passo::Menu,
             "filtros" => Passo::Filtros,
             "dados_do_cliente" => Passo::DadosDoCliente,
@@ -527,6 +542,20 @@ mod testes {
         assert_eq!(
             ler_roteiro("conferir_conta").unwrap(),
             vec![Passo::ConferirConta]
+        );
+        assert_eq!(
+            ler_roteiro(
+                "ir chatbot\nconferir_chatbot 1\nconversa 2\nconferir_novidades 1\nir agenda\nconferir_agenda 3"
+            )
+            .unwrap(),
+            vec![
+                Passo::Ir("chatbot".into()),
+                Passo::ConferirChatbot(1),
+                Passo::Conversa(2),
+                Passo::ConferirNovidades(1),
+                Passo::Ir("agenda".into()),
+                Passo::ConferirAgenda(3),
+            ]
         );
     }
 

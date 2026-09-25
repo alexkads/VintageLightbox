@@ -152,6 +152,10 @@ fn abrir_o_estudio(cx: &mut TestAppContext, fotos: Vec<PhotoViewModel>) -> Estud
                     acervo_de_arquivos: Arc::new(
                         crate::backup::porta::mentira::AcervoDeArquivosDeMentira::default(),
                     ),
+                    escuta: Arc::new(crate::tempo_real::porta::mentira::EscutaDeMentira::default()),
+                    avisador: Arc::new(
+                        crate::tempo_real::aviso::mentira::AvisadorDeMentira::default(),
+                    ),
                     escolha_do_backup: Arc::new(
                         crate::backup::escolha::mentira::EscolhaDeMentira::default(),
                     ),
@@ -728,6 +732,10 @@ fn nada_acontece_fora_de_uma_sessao(cx: &mut TestAppContext) {
                     atualizador: Arc::new(AtualizadorDeMentira::default()),
                     acervo_de_arquivos: Arc::new(
                         crate::backup::porta::mentira::AcervoDeArquivosDeMentira::default(),
+                    ),
+                    escuta: Arc::new(crate::tempo_real::porta::mentira::EscutaDeMentira::default()),
+                    avisador: Arc::new(
+                        crate::tempo_real::aviso::mentira::AvisadorDeMentira::default(),
                     ),
                     escolha_do_backup: Arc::new(
                         crate::backup::escolha::mentira::EscolhaDeMentira::default(),

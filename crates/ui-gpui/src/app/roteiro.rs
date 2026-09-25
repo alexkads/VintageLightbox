@@ -122,6 +122,9 @@ impl Aplicativo {
                 "caixa" => self.ir_para(Tela::Caixa, window, cx),
                 "retencao" => self.ir_para(Tela::Retencao, window, cx),
                 "nova" => self.ir_para(Tela::NovaSessao, window, cx),
+                "backup" => self.ir_para(Tela::Backup, window, cx),
+                "chatbot" => self.ir_para(Tela::Chatbot, window, cx),
+                "agenda" => self.ir_para(Tela::Agenda, window, cx),
                 outro => eprintln!("[roteiro] não sei ir para '{outro}'"),
             },
             Passo::AbrirSessao(posicao) => match self.sessoes.read(cx).id_na_posicao(*posicao) {
@@ -136,6 +139,42 @@ impl Aplicativo {
                 self.detalhe.update(cx, |tela, cx| {
                     tela.clicar(posicao, Default::default(), cx);
                 });
+            }
+            Passo::Conversa(posicao) => {
+                let chave = self
+                    .chatbot
+                    .read(cx)
+                    .visiveis()
+                    .get(posicao.saturating_sub(1))
+                    .map(|c| c.chave.clone());
+                match chave {
+                    Some(chave) => self.chatbot.update(cx, |t, cx| t.abrir(chave, cx)),
+                    None => eprintln!("[roteiro] o chatbot não tem a conversa {posicao}"),
+                }
+            }
+            Passo::ConferirChatbot(minimo) => {
+                let lidas = self.chatbot.read(cx).visiveis().len();
+                assert!(
+                    lidas >= *minimo,
+                    "[roteiro] o chatbot deveria listar ao menos {minimo} conversas, e lista {lidas}"
+                );
+                eprintln!("[roteiro] chatbot com {lidas} conversas");
+            }
+            Passo::ConferirNovidades(minimo) => {
+                let novidades = self.chatbot.read(cx).quantas_novidades();
+                assert!(
+                    novidades >= *minimo,
+                    "[roteiro] o chatbot deveria ter ao menos {minimo} conversas com mensagem nova, e tem {novidades}"
+                );
+                eprintln!("[roteiro] chatbot com {novidades} novidades");
+            }
+            Passo::ConferirAgenda(minimo) => {
+                let lidos = self.agenda.read(cx).ensaios.len();
+                assert!(
+                    lidos >= *minimo,
+                    "[roteiro] a agenda deveria ter ao menos {minimo} agendamentos, e tem {lidos}"
+                );
+                eprintln!("[roteiro] agenda com {lidos} agendamentos");
             }
             Passo::ConferirConta => {
                 assert!(

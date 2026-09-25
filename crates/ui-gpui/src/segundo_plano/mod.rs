@@ -34,7 +34,7 @@ pub mod vigia;
 pub(crate) use laco::estado_para_teste;
 pub use laco::{
     ao_reabrir, fechar_pelo_botao, gesto_de_roteiro, ligar, sair_agora,
-    sair_quando_a_fila_esvaziar,
+    sair_quando_a_fila_esvaziar, trazer_para_a_frente,
 };
 
 /// Liga o [`ao_reabrir`] na aplicação, sem quebrar a corrente de `main.rs`.

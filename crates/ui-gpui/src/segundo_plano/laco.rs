@@ -146,6 +146,28 @@ pub fn ao_reabrir(cx: &mut App) {
     });
 }
 
+/// O clique num aviso do sistema (chatbot, agenda) traz a janela para a
+/// frente — da bandeja, se estiver lá, e de minimizada ou atrás de outra
+/// janela nos outros casos. Sem o laço ligado (os testes) não faz nada: quem
+/// chama cuida do resto.
+pub fn trazer_para_a_frente(cx: &mut App) {
+    if !cx.has_global::<SegundoPlano>() {
+        return;
+    }
+    cx.update_global::<SegundoPlano, _>(|sp, cx| {
+        if sp.vigia.na_bandeja() {
+            mostrar_janela(sp, cx);
+            return;
+        }
+        if let Ok(mostrar) = sp
+            .principal
+            .update(cx, |_, window, _cx| janela::mostrar(window))
+        {
+            depois(cx, mostrar);
+        }
+    });
+}
+
 fn retrato(sp: &SegundoPlano, cx: &App) -> Option<frases::Retrato> {
     let raiz = sp.raiz.upgrade()?;
     let mut r = raiz.read(cx).retrato_do_segundo_plano(cx);

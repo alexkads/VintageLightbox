@@ -597,6 +597,8 @@ fn portas_com(
         acervo_de_arquivos: Arc::new(
             crate::backup::porta::mentira::AcervoDeArquivosDeMentira::default(),
         ),
+        escuta: Arc::new(crate::tempo_real::porta::mentira::EscutaDeMentira::default()),
+        avisador: Arc::new(crate::tempo_real::aviso::mentira::AvisadorDeMentira::default()),
         escolha_do_backup: Arc::new(crate::backup::escolha::mentira::EscolhaDeMentira::default()),
     }
 }

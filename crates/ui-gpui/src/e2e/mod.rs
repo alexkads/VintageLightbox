@@ -53,8 +53,10 @@
 //! | [`lote`] | sincronizar, zerar, a comprada, "Baixar JPEG" e "Salvar na galeria" |
 //! | [`segundo_plano`] | minimizar, fechar com envio pendente e sair quando a fila esvazia |
 
+mod agenda;
 mod atendimento;
 mod caixa;
+mod chatbot;
 mod cliente;
 mod conta;
 mod enquadrar;
@@ -374,6 +376,10 @@ pub(super) struct Estudio {
     /// O cache de prévias do app — é nele que a prévia **revelada local** mora,
     /// e é por ele que os cenários afirmam que a grade vai mostrar o efeito.
     pub previews: Arc<PreviewManager>,
+    /// 📡 Os fluxos do tempo real: o cenário manda o evento que quiser.
+    pub escuta: Arc<crate::tempo_real::porta::mentira::EscutaDeMentira>,
+    /// 🔔 Os avisos do sistema que o app deu, e o clique neles.
+    pub avisador: Arc<crate::tempo_real::aviso::mentira::AvisadorDeMentira>,
     _dir: TempDir,
 }
 
@@ -453,6 +459,8 @@ pub(super) fn abrir_o_app(cx: &mut TestAppContext, cenario: Cenario) -> Estudio 
     let guarda = Arc::new(GuardaDeMentira::default());
     let escolha = Arc::new(EscolhaDeMentira::com(cenario.arquivos_de_predefinicao));
 
+    let escuta = Arc::new(crate::tempo_real::porta::mentira::EscutaDeMentira::default());
+    let avisador = Arc::new(crate::tempo_real::aviso::mentira::AvisadorDeMentira::default());
     let portas = Portas {
         gravador: gravador.clone(),
         acervo: acervo.clone(),
@@ -474,6 +482,8 @@ pub(super) fn abrir_o_app(cx: &mut TestAppContext, cenario: Cenario) -> Estudio 
             crate::backup::porta::mentira::AcervoDeArquivosDeMentira::default(),
         ),
         escolha_do_backup: Arc::new(crate::backup::escolha::mentira::EscolhaDeMentira::default()),
+        escuta: escuta.clone(),
+        avisador: avisador.clone(),
     };
 
     let mut guardado = None;
@@ -509,6 +519,8 @@ pub(super) fn abrir_o_app(cx: &mut TestAppContext, cenario: Cenario) -> Estudio 
         folha,
         guarda,
         previews,
+        escuta,
+        avisador,
         _dir: dir,
     };
     estudio.esperar(cx);

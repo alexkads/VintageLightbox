@@ -5,6 +5,7 @@
 //! `docs/10-MIGRACAO-GPUI.md`. Hoje é a única interface, e o alvo deixou de ser
 //! o app antigo: é o Lightroom (`docs/00-OBJETIVO.md`).
 
+pub mod agenda;
 pub mod app;
 /// A atualização automática — o app não passa por loja e se atualiza sozinho.
 pub mod atualizacao;
@@ -15,6 +16,7 @@ pub mod bandeja;
 pub mod biblioteca;
 /// O caixa do balcão numa tela inteira, como a rota `/dashboard/caixa`.
 pub mod caixa;
+pub mod chatbot;
 pub mod cliente;
 pub mod configuracoes;
 /// Fotografar a janela e seguir um roteiro, só em build de depuração.

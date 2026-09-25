@@ -286,6 +286,18 @@ async fn main() {
         ui_gpui::backup::AcervoHttp::novo(api_do_site.clone(), tokio::runtime::Handle::current()),
     );
 
+    // 📡 O tempo real do chatbot: os fluxos SSE da API, com o mesmo cliente —
+    // e o mesmo token — das outras telas.
+    let escuta: Arc<dyn ui_gpui::tempo_real::Escuta> =
+        Arc::new(ui_gpui::tempo_real::EscutaHttp::nova(
+            api_do_site.clone(),
+            tokio::runtime::Handle::current(),
+        ));
+    // 🔔 O aviso do sistema: D-Bus no Linux (funciona sem a bandeja do GNOME),
+    // toast no Windows, Central de Notificações no macOS.
+    let avisador: Arc<dyn ui_gpui::tempo_real::Avisador> =
+        Arc::new(ui_gpui::tempo_real::AvisoDoSistema::default());
+
     // 🔑 *"Tinha que ter opção sem arrastar e soltar"* (dono, 2026-09-19): a
     // janela do sistema para escolher pasta ou arquivos do backup.
     let escolha_do_backup: Arc<dyn ui_gpui::backup::EscolhaDoBackup> = Arc::new(
@@ -476,6 +488,8 @@ async fn main() {
                                     atualizador: atualizador.clone(),
                                     acervo_de_arquivos: acervo_de_arquivos.clone(),
                                     escolha_do_backup: escolha_do_backup.clone(),
+                                    escuta: escuta.clone(),
+                                    avisador: avisador.clone(),
                                 },
                                 window,
                                 cx,

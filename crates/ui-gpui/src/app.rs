@@ -13,6 +13,7 @@
 //! no cabeçalho da lista.
 
 mod atalhos_da_revelacao;
+mod avisos;
 mod barra_do_pe;
 mod canto_dos_envios;
 mod guias;
@@ -39,6 +40,7 @@ use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::{ActiveTheme, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
 
+use crate::agenda::{Agenda, PedidoDaAgenda};
 use crate::atualizacao::faixa::{self, Pedido as PedidoDeAtualizacao};
 use crate::atualizacao::porta::{Atualizador, AtualizadorDaWeb, Aviso};
 use crate::balcao::tela::Balcao;
@@ -48,6 +50,7 @@ use crate::biblioteca::marcacao::Marcador;
 use crate::biblioteca::marcacao::REJEITADA_NO_CATALOGO;
 use crate::biblioteca::tela::Biblioteca;
 use crate::caixa::tela::{Caixa, PedidoDoCaixa};
+use crate::chatbot::{Chatbot, PedidoDoChatbot};
 use crate::cliente::{
     area_da_janela, estado_ao_abrir, monitor_do_cliente, monitor_lembrado, Cliente, Estado,
     Lembranca, ParaRevelar,
@@ -130,6 +133,11 @@ pub struct Portas {
     /// primeiro só escolhe pasta de importação, e o segundo filtra por extensão
     /// de foto — e um backup guarda PDF, planilha e recibo junto com o RAW.
     pub escolha_do_backup: Arc<dyn crate::backup::EscolhaDoBackup>,
+    /// 📡 Os fluxos de eventos da API (SSE) — o tempo real do chatbot.
+    pub escuta: Arc<dyn crate::tempo_real::Escuta>,
+    /// 🔔 O aviso do sistema operacional, para o operador com a janela atrás
+    /// de outra ou na bandeja.
+    pub avisador: Arc<dyn crate::tempo_real::Avisador>,
 }
 
 actions!(
@@ -368,6 +376,8 @@ pub fn init(cx: &mut gpui::App) {
         gpui::KeyBinding::new("ctrl-9", UltimaGuia, Some(CONTEXTO)),
     ]);
     atalhos_da_revelacao::ligar(cx);
+    crate::chatbot::ligar_teclas(cx);
+    crate::agenda::ligar_teclas(cx);
 }
 
 /// Os nomes das quatro cores, como o banco os guarda.
@@ -411,6 +421,10 @@ pub enum Tela {
     /// O porte do `dashboard.file-manager` do legado (paridade, `falta-storage`),
     /// com o nome que o dono pediu em 2026-09-18.
     Backup,
+    /// 💬 O painel do bot de atendimento — `/dashboard/chatbot` (2026-09-25).
+    Chatbot,
+    /// 📅 A agenda dos ensaios — `/dashboard/agendamentos` (2026-09-25).
+    Agenda,
 }
 pub struct Aplicativo {
     pub(crate) biblioteca: Entity<Biblioteca>,
@@ -445,6 +459,14 @@ pub struct Aplicativo {
     pub(crate) retencao: Entity<Retencao>,
     pub(crate) backup: Entity<crate::backup::Backup>,
     _pedido_da_retencao: gpui::Subscription,
+    /// 💬 O chatbot. Vive o tempo todo: escuta os cinco canais com a conta
+    /// dentro, esteja a tela na frente ou não.
+    pub(crate) chatbot: Entity<Chatbot>,
+    _pedido_do_chatbot: gpui::Subscription,
+    /// 📅 A agenda. Vive o tempo todo, como o chatbot.
+    pub(crate) agenda: Entity<Agenda>,
+    _pedido_da_agenda: gpui::Subscription,
+    avisador: Arc<dyn crate::tempo_real::Avisador>,
     /// O assistente da nova sessão.
     pub(crate) nova_sessao: Entity<NovaSessao>,
     _pedidos_da_nova: Vec<gpui::Subscription>,
@@ -925,6 +947,8 @@ impl Aplicativo {
         let publicador_do_detalhe = portas.publicador.clone();
         let publicador_do_caixa = portas.publicador.clone();
         let publicador_da_retencao = portas.publicador.clone();
+        let publicador_do_chatbot = portas.publicador.clone();
+        let publicador_da_agenda = portas.publicador.clone();
         let entrada = cx.new(|cx| {
             Entrada::nova(
                 portas.publicador,
@@ -1027,6 +1051,29 @@ impl Aplicativo {
                 cx,
             )
         });
+        let chatbot = {
+            let escuta = portas.escuta.clone();
+            cx.new(|cx| Chatbot::novo(publicador_do_chatbot, escuta, window, cx))
+        };
+        let pedido_do_chatbot = cx.subscribe_in(
+            &chatbot,
+            window,
+            |raiz, _tela, pedido: &PedidoDoChatbot, window, cx| {
+                raiz.atender_o_chatbot(pedido.clone(), window, cx)
+            },
+        );
+        let agenda = {
+            let escuta = portas.escuta.clone();
+            cx.new(|cx| Agenda::nova(publicador_da_agenda, escuta, window, cx))
+        };
+        let pedido_da_agenda = cx.subscribe_in(
+            &agenda,
+            window,
+            |raiz, _tela, pedido: &PedidoDaAgenda, window, cx| {
+                raiz.atender_a_agenda(pedido.clone(), window, cx)
+            },
+        );
+        let avisador = portas.avisador.clone();
         let retencao = cx.new(|cx| Retencao::nova(publicador_da_retencao, window, cx));
         let pedido_da_retencao = cx.subscribe_in(
             &retencao,
@@ -1096,6 +1143,11 @@ impl Aplicativo {
             retencao,
             backup,
             _pedido_da_retencao: pedido_da_retencao,
+            chatbot,
+            _pedido_do_chatbot: pedido_do_chatbot,
+            agenda,
+            _pedido_da_agenda: pedido_da_agenda,
+            avisador,
             nova_sessao,
             _pedidos_da_nova: pedidos_da_nova,
             menu_aberto: false,
@@ -4545,6 +4597,12 @@ impl Aplicativo {
             .update(cx, |tela, _cx| tela.definir_sessao(sessao.clone()));
         self.nova_sessao
             .update(cx, |tela, _cx| tela.definir_sessao(sessao.clone()));
+        // 💬 O chatbot passa a escutar já: o aviso tem de chegar com o
+        // operador em qualquer tela.
+        self.chatbot
+            .update(cx, |tela, cx| tela.definir_sessao(sessao.clone(), cx));
+        self.agenda
+            .update(cx, |tela, cx| tela.definir_sessao(sessao.clone(), cx));
         // 🔑 **Entrou: a primeira tela é a lista de sessões.** Na web é de
         // onde tudo parte, e abrir no catálogo global foi o que fez o app
         // parecer "aberto e estranho" para quem vinha de lá.
@@ -4718,7 +4776,9 @@ impl Aplicativo {
             | Tela::Caixa
             | Tela::Retencao
             | Tela::NovaSessao
-            | Tela::Backup => {}
+            | Tela::Backup
+            | Tela::Chatbot
+            | Tela::Agenda => {}
         }
     }
 
@@ -4750,7 +4810,9 @@ impl Aplicativo {
             | Tela::Sessoes
             | Tela::Caixa
             | Tela::Retencao
-            | Tela::NovaSessao => {}
+            | Tela::NovaSessao
+            | Tela::Chatbot
+            | Tela::Agenda => {}
         }
     }
 
@@ -4795,7 +4857,9 @@ impl Aplicativo {
             | Tela::Caixa
             | Tela::Retencao
             | Tela::NovaSessao
-            | Tela::Backup => cx.propagate(),
+            | Tela::Backup
+            | Tela::Chatbot
+            | Tela::Agenda => cx.propagate(),
         }
     }
 
@@ -5319,6 +5383,8 @@ impl Render for Aplicativo {
                             Tela::Retencao => self.retencao.clone().into_any_element(),
                             Tela::Backup => self.backup.clone().into_any_element(),
                             Tela::NovaSessao => self.nova_sessao.clone().into_any_element(),
+                            Tela::Chatbot => self.chatbot.clone().into_any_element(),
+                            Tela::Agenda => self.agenda.clone().into_any_element(),
                         }),
                     ),
             )
@@ -5655,6 +5721,8 @@ mod testes {
             escolha_do_backup: Arc::new(
                 crate::backup::escolha::mentira::EscolhaDeMentira::default(),
             ),
+            escuta: Arc::new(crate::tempo_real::porta::mentira::EscutaDeMentira::default()),
+            avisador: Arc::new(crate::tempo_real::aviso::mentira::AvisadorDeMentira::default()),
             // O padrão de mentira não devolve imagem nenhuma: quem quiser
             // afirmar sobre a reposição troca esta porta por
             // `RepositorDeMentira::que_devolve`.

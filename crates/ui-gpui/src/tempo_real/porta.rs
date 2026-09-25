@@ -250,10 +250,22 @@ pub mod mentira {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
 
+    /// Uma escuta aberta: os caminhos, os rótulos das fontes e o canal.
+    type Aberta = (Vec<&'static str>, Vec<&'static str>, Sender<Sinal>);
+
     #[derive(Default)]
     pub struct EscutaDeMentira {
-        pub canais: Mutex<Vec<(Vec<&'static str>, Sender<Sinal>)>>,
+        pub canais: Mutex<Vec<Aberta>>,
         pub largadas: Arc<AtomicUsize>,
+    }
+
+    fn fonte(sinal: &Sinal) -> &'static str {
+        match sinal {
+            Sinal::Conexao { fonte, .. }
+            | Sinal::Pronto { fonte }
+            | Sinal::Sincronizar { fonte }
+            | Sinal::Evento { fonte, .. } => fonte,
+        }
     }
 
     struct Contador(Arc<AtomicUsize>);
@@ -264,10 +276,27 @@ pub mod mentira {
     }
 
     impl EscutaDeMentira {
-        /// Manda um sinal pelo último canal aberto.
+        /// Manda um sinal pela escuta mais recente **da fonte dele** — o
+        /// chatbot e a agenda escutam ao mesmo tempo, cada um as suas.
         pub fn mandar(&self, sinal: Sinal) {
             let canais = self.canais.lock().unwrap();
-            let (_, canal) = canais.last().expect("ninguém escutou ainda");
+            let (_, _, canal) = canais
+                .iter()
+                .rev()
+                .find(|(_, fontes, _)| fontes.contains(&fonte(&sinal)))
+                .unwrap_or_else(|| panic!("ninguém escuta a fonte {}", fonte(&sinal)));
+            canal.send(sinal).unwrap();
+        }
+
+        /// Manda pelo canal da escuta que tem `fonte_da_escuta`, seja qual
+        /// for a fonte do sinal — para provar que sinal torto não derruba.
+        pub fn mandar_pela_escuta_de(&self, fonte_da_escuta: &str, sinal: Sinal) {
+            let canais = self.canais.lock().unwrap();
+            let (_, _, canal) = canais
+                .iter()
+                .rev()
+                .find(|(_, fontes, _)| fontes.contains(&fonte_da_escuta))
+                .expect("ninguém escuta essa fonte");
             canal.send(sinal).unwrap();
         }
 
@@ -275,12 +304,15 @@ pub mod mentira {
             self.canais.lock().unwrap().len()
         }
 
-        pub fn caminhos(&self) -> Vec<&'static str> {
+        /// Os caminhos da escuta mais recente que tem esta fonte.
+        pub fn caminhos_da_fonte(&self, fonte: &str) -> Vec<&'static str> {
             self.canais
                 .lock()
                 .unwrap()
-                .last()
-                .map(|(c, _)| c.clone())
+                .iter()
+                .rev()
+                .find(|(_, fontes, _)| fontes.contains(&fonte))
+                .map(|(c, _, _)| c.clone())
                 .unwrap_or_default()
         }
     }
@@ -292,10 +324,11 @@ pub mod mentira {
             fontes: Vec<(&'static str, &'static str)>,
             canal: Sender<Sinal>,
         ) -> Guarda {
-            self.canais
-                .lock()
-                .unwrap()
-                .push((fontes.iter().map(|(_, c)| *c).collect(), canal));
+            self.canais.lock().unwrap().push((
+                fontes.iter().map(|(_, c)| *c).collect(),
+                fontes.iter().map(|(f, _)| *f).collect(),
+                canal,
+            ));
             Guarda::nova(Contador(self.largadas.clone()))
         }
     }
@@ -318,7 +351,9 @@ mod testes {
 
     /// Um servidor que atende cada conexão com a resposta da vez (a última se
     /// repete) e anota o caminho pedido.
-    async fn servidor(respostas: Vec<&'static [u8]>) -> (String, Arc<std::sync::Mutex<Vec<String>>>) {
+    async fn servidor(
+        respostas: Vec<&'static [u8]>,
+    ) -> (String, Arc<std::sync::Mutex<Vec<String>>>) {
         let ouvinte = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let endereco = format!("http://{}", ouvinte.local_addr().unwrap());
         let pedidos = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -369,7 +404,10 @@ event: pronto\ndata: 1\n\n:keep-alive\n\ndata: {\"tipo\":\"mensagem_recebida\",\
     fn abre_entrega_o_evento_e_reconecta_quando_o_servidor_fecha() {
         let tokio = tokio::runtime::Runtime::new().unwrap();
         let (base, pedidos) = tokio.block_on(servidor(vec![FLUXO]));
-        let escuta = EscutaHttp::nova(Arc::new(PosVendaApiHttp::nova(base)), tokio.handle().clone());
+        let escuta = EscutaHttp::nova(
+            Arc::new(PosVendaApiHttp::nova(base)),
+            tokio.handle().clone(),
+        );
         let (envia, recebe) = channel();
         let _guarda = escuta.escutar(sessao(), vec![("whatsapp", "/whatsapp/eventos")], envia);
 
@@ -378,25 +416,42 @@ event: pronto\ndata: 1\n\n:keep-alive\n\ndata: {\"tipo\":\"mensagem_recebida\",\
         assert_eq!(
             sinais[..5],
             [
-                Sinal::Conexao { fonte: "whatsapp", estado: Conectando },
-                Sinal::Conexao { fonte: "whatsapp", estado: Conectado },
+                Sinal::Conexao {
+                    fonte: "whatsapp",
+                    estado: Conectando
+                },
+                Sinal::Conexao {
+                    fonte: "whatsapp",
+                    estado: Conectado
+                },
                 Sinal::Pronto { fonte: "whatsapp" },
                 Sinal::Evento {
                     fonte: "whatsapp",
                     dados: serde_json::json!({"tipo": "mensagem_recebida", "contato": "55"})
                 },
-                Sinal::Conexao { fonte: "whatsapp", estado: Reconectando },
+                Sinal::Conexao {
+                    fonte: "whatsapp",
+                    estado: Reconectando
+                },
             ]
         );
         // A reconexão é outra ida ao servidor, no mesmo caminho.
-        assert_eq!(sinais[5], Sinal::Conexao { fonte: "whatsapp", estado: Reconectando });
+        assert_eq!(
+            sinais[5],
+            Sinal::Conexao {
+                fonte: "whatsapp",
+                estado: Reconectando
+            }
+        );
         let prazo = std::time::Instant::now() + Duration::from_secs(5);
         while pedidos.lock().unwrap().len() < 2 && std::time::Instant::now() < prazo {
             std::thread::sleep(Duration::from_millis(20));
         }
         let pedidos = pedidos.lock().unwrap().clone();
         assert!(pedidos.len() >= 2, "reconectou: {pedidos:?}");
-        assert!(pedidos.iter().all(|p| p.starts_with("GET /api/v2/whatsapp/eventos ")));
+        assert!(pedidos
+            .iter()
+            .all(|p| p.starts_with("GET /api/v2/whatsapp/eventos ")));
     }
 
     /// Permissão negada não se cura tentando: `401` e `403` param a fonte, e as
@@ -407,15 +462,28 @@ event: pronto\ndata: 1\n\n:keep-alive\n\ndata: {\"tipo\":\"mensagem_recebida\",\
         let (base, pedidos) = tokio.block_on(servidor(vec![
             b"HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\n\r\n",
         ]));
-        let escuta = EscutaHttp::nova(Arc::new(PosVendaApiHttp::nova(base)), tokio.handle().clone());
+        let escuta = EscutaHttp::nova(
+            Arc::new(PosVendaApiHttp::nova(base)),
+            tokio.handle().clone(),
+        );
         let (envia, recebe) = channel();
-        let _guarda = escuta.escutar(sessao(), vec![("agenda", "/bookings/agenda/eventos")], envia);
+        let _guarda = escuta.escutar(
+            sessao(),
+            vec![("agenda", "/bookings/agenda/eventos")],
+            envia,
+        );
         let sinais = colher(&recebe, 2);
         assert_eq!(
             sinais,
             vec![
-                Sinal::Conexao { fonte: "agenda", estado: EstadoDaConexao::Conectando },
-                Sinal::Conexao { fonte: "agenda", estado: EstadoDaConexao::Recusado },
+                Sinal::Conexao {
+                    fonte: "agenda",
+                    estado: EstadoDaConexao::Conectando
+                },
+                Sinal::Conexao {
+                    fonte: "agenda",
+                    estado: EstadoDaConexao::Recusado
+                },
             ]
         );
         std::thread::sleep(Duration::from_millis(1500));
@@ -429,7 +497,10 @@ event: pronto\ndata: 1\n\n:keep-alive\n\ndata: {\"tipo\":\"mensagem_recebida\",\
     fn largar_a_guarda_para_tudo() {
         let tokio = tokio::runtime::Runtime::new().unwrap();
         let (base, pedidos) = tokio.block_on(servidor(vec![FLUXO]));
-        let escuta = EscutaHttp::nova(Arc::new(PosVendaApiHttp::nova(base)), tokio.handle().clone());
+        let escuta = EscutaHttp::nova(
+            Arc::new(PosVendaApiHttp::nova(base)),
+            tokio.handle().clone(),
+        );
         let (envia, recebe) = channel();
         let guarda = escuta.escutar(sessao(), vec![("whatsapp", "/whatsapp/eventos")], envia);
         colher(&recebe, 3);

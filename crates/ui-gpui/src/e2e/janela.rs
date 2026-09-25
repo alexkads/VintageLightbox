@@ -35,7 +35,7 @@ const PRIMEIRA_LINHA: f32 = 60.;
 const CANTO_DIREITO: f32 = 140.;
 
 /// As telas que a raiz troca por `ir_para` sem sessão aberta.
-const SEM_SESSAO: [Tela; 7] = [
+const SEM_SESSAO: [Tela; 9] = [
     Tela::Biblioteca,
     Tela::Impressao,
     Tela::Sessoes,
@@ -43,6 +43,8 @@ const SEM_SESSAO: [Tela; 7] = [
     Tela::Retencao,
     Tela::NovaSessao,
     Tela::Backup,
+    Tela::Chatbot,
+    Tela::Agenda,
 ];
 
 /// 🔒 Uma `Tela` nova tem de entrar em [`SEM_SESSAO`] ou num cenário abaixo —
@@ -56,7 +58,9 @@ fn toda_tela_esta_aqui(tela: Tela) {
         | Tela::Caixa
         | Tela::Retencao
         | Tela::NovaSessao
-        | Tela::Backup => {} // SEM_SESSAO
+        | Tela::Backup
+        | Tela::Chatbot
+        | Tela::Agenda => {} // SEM_SESSAO
         Tela::Sessao | Tela::Revelacao => {} // os cenários com sessão
     }
 }

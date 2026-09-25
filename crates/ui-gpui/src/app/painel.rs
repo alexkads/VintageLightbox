@@ -84,7 +84,7 @@ struct ItemDoMenu {
 }
 
 /// As seções que o app tem, em "Operação".
-const MENU: [ItemDoMenu; 3] = [
+const MENU: [ItemDoMenu; 5] = [
     ItemDoMenu {
         tela: Tela::Sessoes,
         titulo: "Sessões fotográficas",
@@ -102,6 +102,19 @@ const MENU: [ItemDoMenu; 3] = [
         titulo: "Backup de arquivos",
         icone: Icone::FolderOpen,
     },
+    // 💬 O bot de atendimento — `/dashboard/chatbot`, com o nome e o ícone do
+    // menu do site (`navegacao.ts`).
+    ItemDoMenu {
+        tela: Tela::Chatbot,
+        titulo: "Chatbot",
+        icone: Icone::Inbox,
+    },
+    // 📅 A agenda — `/dashboard/agendamentos`, o nome e o ícone do site.
+    ItemDoMenu {
+        tela: Tela::Agenda,
+        titulo: "Agendamentos",
+        icone: Icone::CalendarDays,
+    },
 ];
 
 impl Tela {
@@ -111,6 +124,8 @@ impl Tela {
         match self {
             Tela::Caixa => Tela::Caixa,
             Tela::Backup => Tela::Backup,
+            Tela::Chatbot => Tela::Chatbot,
+            Tela::Agenda => Tela::Agenda,
             _ => Tela::Sessoes,
         }
     }
@@ -122,6 +137,53 @@ impl Tela {
 }
 
 impl Aplicativo {
+    /// O número de conversas com novidade, no item "Chatbot" do menu — e o
+    /// vermelho quando há quem pediu atendente. `None` quando não há nada.
+    fn selo_do_chatbot(&self, aberto: bool, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let chatbot = self.chatbot.read(cx);
+        let (novidades, esperando) = (chatbot.quantas_novidades(), chatbot.alguem_esperando());
+        if novidades == 0 && !esperando {
+            return None;
+        }
+        let cor: gpui::Hsla = if esperando {
+            gpui::rgb(0xef4444).into()
+        } else {
+            gpui::rgb(0x16a34a).into()
+        };
+        let selo = div()
+            .id("menu-selo-do-chatbot")
+            .debug_selector(|| "menu-selo-do-chatbot".into())
+            .flex()
+            .items_center()
+            .justify_center()
+            .min_w(px(16.))
+            .h(px(16.))
+            .px(px(4.))
+            .rounded_full()
+            .bg(cor)
+            .text_color(gpui::white())
+            .text_xs()
+            .child(if novidades > 0 {
+                novidades.to_string()
+            } else {
+                "!".into()
+            });
+        Some(if aberto {
+            div()
+                .absolute()
+                .right(px(8.))
+                .child(selo)
+                .into_any_element()
+        } else {
+            div()
+                .absolute()
+                .top(px(-2.))
+                .right(px(-2.))
+                .child(selo)
+                .into_any_element()
+        })
+    }
+
     /// Troca de tela pelo menu, pelo cabeçalho ou pela barra de uma tela.
     ///
     /// 🔑 **Sair da galeria é sair da sessão**, como mudar de rota no site: a
@@ -130,6 +192,16 @@ impl Aplicativo {
     /// não passam por aqui.
     pub fn ir_para(&mut self, tela: Tela, window: &mut Window, cx: &mut Context<Self>) {
         self.menu_da_conta = false;
+        // 💬 O chatbot só relê com a tela na frente; escondido, ele só acende
+        // as novidades e avisa.
+        if (self.tela == Tela::Chatbot) != (tela == Tela::Chatbot) {
+            let visivel = tela == Tela::Chatbot;
+            self.chatbot.update(cx, |t, cx| t.mostrar(visivel, cx));
+        }
+        if (self.tela == Tela::Agenda) != (tela == Tela::Agenda) {
+            let visivel = tela == Tela::Agenda;
+            self.agenda.update(cx, |t, cx| t.mostrar(visivel, cx));
+        }
         // 🎞️ O menu lateral também está na Revelação: sair dela por ele grava
         // o pendente, e a guia da sessão guarda a Revelação para voltar nela.
         // Para a galeria da mesma sessão é só sair: a guia fica na frente.
@@ -214,6 +286,15 @@ impl Aplicativo {
         self.guardar_guias();
         let (canal, _) = std::sync::mpsc::channel();
         self.publicador.sair(canal);
+        // Os fluxos do chatbot eram da conta que saiu.
+        self.chatbot.update(cx, |t, cx| {
+            t.mostrar(false, cx);
+            t.sair(cx);
+        });
+        self.agenda.update(cx, |t, cx| {
+            t.mostrar(false, cx);
+            t.sair(cx);
+        });
         self.sessao = None;
         self.conta = None;
         self.tela = Tela::Sessoes;
@@ -319,6 +400,12 @@ impl Aplicativo {
                         raiz.ir_para(destino, window, cx);
                     }))
                     .child(Icon::new(item.icone).size(px(16.)));
+                // 💬 O chatbot mostra quantas conversas têm mensagem nova, e
+                // pinta de vermelho quando alguém pediu atendente.
+                let selo = (item.tela == Tela::Chatbot)
+                    .then(|| self.selo_do_chatbot(aberto, cx))
+                    .flatten();
+                let base = base.relative().children(selo);
                 if aberto {
                     base.px(px(8.)).child(titulo).into_any_element()
                 } else {

@@ -10,7 +10,8 @@
 
 pub mod aviso;
 pub mod porta;
+pub mod preferencias;
 pub mod sse;
 
-pub use aviso::{Aviso, AvisoDoSistema, Avisador};
-pub use porta::{EstadoDaConexao, Escuta, EscutaHttp, Guarda, Sinal};
+pub use aviso::{Avisador, Aviso, AvisoDoSistema};
+pub use porta::{Escuta, EscutaHttp, EstadoDaConexao, Guarda, Sinal};
