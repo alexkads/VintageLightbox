@@ -227,6 +227,7 @@ curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/main/scrip
 | A janela não abre (Linux) | Falta um driver Vulkan: instalar `mesa-vulkan-drivers` (ou o da sua placa de vídeo) |
 | A compilação morre por falta de memória (`SIGKILL`) | Fechar outros programas e repetir; o instalador já compila só o binário do app |
 | A compilação para por falta de espaço | Liberar alguns GiB e repetir |
+| O aviso de mensagem nova (chatbot) ou de agendamento não aparece | Confira o sino no alto da tela **Chatbot**: riscado, os avisos do sistema estão desligados (o toast dentro do app continua). Depois, o **Não perturbe** do sistema. Com a janela na frente o aviso é dentro do app, e não do sistema |
 
 ## Validação do instalador
 

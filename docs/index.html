@@ -250,7 +250,8 @@ VLB_POS_VENDA_URL=http://localhost:8080 VLB_SITE_URL=http://localhost:8001 cargo
     <li><strong>Entrada:</strong> a capa do estúdio, com o botão para entrar pela conta RecordarFotos no
         navegador.</li>
     <li><strong>Moldura:</strong> menu lateral recolhível (<kbd>⌘</kbd> <kbd>B</kbd>, ou
-        <kbd>Ctrl</kbd> <kbd>B</kbd>) com <strong>Sessões fotográficas</strong> e <strong>Caixa</strong>,
+        <kbd>Ctrl</kbd> <kbd>B</kbd>) com <strong>Sessões fotográficas</strong>, <strong>Caixa</strong>,
+        <strong>Backup de arquivos</strong>, <strong>Chatbot</strong> e <strong>Agendamentos</strong>,
         cabeçalho no topo e, embaixo, o menu da conta, com o tema <strong>Claro</strong>,
         <strong>Escuro</strong> ou <strong>Sistema</strong> e o <strong>Sair</strong>.</li>
     <li><strong>Sessões fotográficas:</strong> os cartões de totais, os recortes e a lista em tabela. No
@@ -264,6 +265,19 @@ VLB_POS_VENDA_URL=http://localhost:8080 VLB_SITE_URL=http://localhost:8001 cargo
         <strong>Tela do cliente</strong>. Com fotos marcadas, aparecem <strong>Negociação…</strong> e
         <strong>Imprimir…</strong>. No canto, a fila de envios e os recusados.</li>
     <li><strong>Caixa:</strong> o PDV do balcão, o mesmo do painel, com as teclas F (abaixo).</li>
+    <li><strong>Chatbot:</strong> o painel do bot de atendimento, o mesmo do site — WhatsApp, Instagram,
+        Messenger, Telegram e o chat do site numa lista só. Abra a conversa, <strong>Assumir</strong> cala o
+        bot e você responde; <strong>Devolver ao bot</strong> religa. No alto, <strong>🚨 Urgentes</strong>
+        (vira <strong>Esperando você</strong> quando alguém pede atendente) e o sino dos avisos.
+        <strong>Mensagem nova chega em qualquer tela:</strong> com a janela na frente, um aviso dentro do
+        app e o número no item <strong>Chatbot</strong> do menu; com ela atrás ou na bandeja, um aviso do
+        sistema — no Linux, clicar nele abre a conversa.</li>
+    <li><strong>Agendamentos:</strong> a agenda do estúdio, a mesma do site: os indicadores, o calendário
+        (<strong>Mês</strong>, <strong>Semana</strong>, <strong>Dia</strong>, <strong>Agenda</strong>,
+        <strong>Ano</strong>, <strong>Estação</strong>), os agendamentos de hoje e, em cada um,
+        <strong>Reagendar</strong>, <strong>Atendimento</strong>, <strong>Excluir</strong>,
+        <strong>Descancelar</strong> e <strong>Mensagem</strong>. As datas se escrevem
+        <code>dd/mm/aaaa hh:mm</code>. Agendamento novo e cancelamento avisam como no chatbot.</li>
     <li><strong>Tela do cliente:</strong> abre em janela própria e ocupa o outro monitor. Acompanha a foto
         em foco na galeria e a aberta na revelação, com transição entre as fotos, e mostra a foto
         revelada, sem marca d'água.</li>
@@ -293,6 +307,9 @@ VLB_POS_VENDA_URL=http://localhost:8080 VLB_SITE_URL=http://localhost:8001 cargo
       <tr><td></td><td><kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>C</kbd> · <kbd>⌘</kbd> <kbd>⇧</kbd> <kbd>V</kbd></td><td>Copiar · colar a revelação</td></tr>
       <tr><td>Tela do cliente</td><td><kbd>Esc</kbd> · <kbd>I</kbd></td><td>Fecha · mostra ou esconde as informações</td></tr>
       <tr><td>Importação</td><td><kbd>Espaço</kbd> · <kbd>↑</kbd> <kbd>↓</kbd> · <kbd>Enter</kbd></td><td>Marca a foto · anda · confirma</td></tr>
+      <tr><td>Chatbot</td><td><kbd>Enter</kbd> · <kbd>⇧</kbd> <kbd>Enter</kbd></td><td>Envia a mensagem · quebra a linha</td></tr>
+      <tr><td></td><td><kbd>Enter</kbd> na busca</td><td>Busca nos cinco canais</td></tr>
+      <tr><td>Agendamentos</td><td><kbd>Esc</kbd></td><td>Volta um passo: do formulário aos detalhes, e fecha</td></tr>
       <tr><td>Caixa</td><td><kbd>F1</kbd> · <kbd>F2</kbd> · <kbd>F3</kbd></td><td>Atalhos · desconto · pessoas</td></tr>
       <tr><td></td><td><kbd>F4</kbd></td><td>Finalizar (no pagamento, conclui a venda)</td></tr>
       <tr><td></td><td><kbd>F6</kbd> · <kbd>F7</kbd> · <kbd>F8</kbd></td><td>Sangria e suprimento · vendas · abrir ou fechar o caixa</td></tr>
@@ -420,6 +437,7 @@ sh instalar.cmd</code></pre>
       <tr><td>Atualizou, mas continua igual</td><td>Faltou reabrir. Clique em <strong>Reabrir agora</strong> na faixa, ou saia pela bandeja (<strong>Sair</strong>) e abra de novo.</td></tr>
       <tr><td>A tela do cliente abre preta</td><td>Atualize o app (repita a instalação).</td></tr>
       <tr><td>A tela do cliente não vai para o outro monitor</td><td>Confira se o segundo monitor está <strong>estendido</strong>, e não espelhado. No Linux com Wayland o sistema não deixa o app escolher o monitor: arraste a janela uma vez.</td></tr>
+      <tr><td>O aviso de mensagem nova (chatbot) ou de agendamento não aparece</td><td>Confira o sino no alto da tela <strong>Chatbot</strong>: riscado, os avisos do sistema estão desligados (o aviso dentro do app continua). Depois, o <strong>Não perturbe</strong> do sistema. Com a janela na frente o aviso é dentro do app, e não do sistema.</td></tr>
       <tr><td>A lista aparece vazia ou dá erro ao entrar</td><td>Confira a internet: as telas vêm do app, mas os dados vêm da RecordarFotos. As fotos já importadas continuam no catálogo.</td></tr>
     </tbody>
   </table>
