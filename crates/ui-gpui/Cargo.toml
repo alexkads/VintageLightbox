@@ -108,6 +108,12 @@ cargo-packager-updater = { version = "0.2", default-features = false, features =
 # ⚠️ Sem `libxdo`: ele só serve aos itens Copiar/Colar do menu, que a bandeja
 # não tem, e seria mais uma biblioteca do sistema para instalar no Linux.
 tray-icon = { version = "0.24", default-features = false, features = ["gtk"] }
+# 🔔 O aviso do sistema (`tempo_real/aviso.rs`): mensagem nova no chatbot e
+# agendamento novo chegam ao operador com o app escondido ou na bandeja (dono,
+# 2026-09-25). No Linux ele fala D-Bus com o servidor de notificações — o do
+# GNOME existe **sem** a extensão da bandeja, que é o que o balcão Fedora não
+# tem. O `zbus` 5 que ele traz é o que o `ashpd` do `rfd` já traz.
+notify-rust = "4.18"
 # 📦 O zip de "baixar a pasta compactada" (`/dashboard/backup`).
 #
 # `default-features = false`: sem deflate, sem bzip2, sem zstd. JPEG, WebP e RAW

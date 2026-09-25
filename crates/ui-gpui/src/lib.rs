@@ -53,3 +53,4 @@ pub mod segundo_plano;
 pub mod selos;
 pub mod sessoes;
 pub mod tema;
+pub mod tempo_real;
