@@ -11,6 +11,7 @@
 //! | Faixa de 56 px com o botão do menu e o assunto da página | `CabecalhoDoDashboard` + `NoCabecalho` | [`Aplicativo::cabecalho`] |
 //! | A galeria não tem essa faixa: o botão do menu vai para a barra dela | `eAGaleriaDeUmaSessao` | `Detalhe`, pedido `AlternarMenu` |
 //! | Conta, tema (Claro, Escuro, Sistema) e Sair | `MenuDoUsuario` | [`Aplicativo::menu_da_conta`] |
+//! | "Backup de arquivos" (no site, em "Conteúdo") | `navegacao.ts` | no menu da conta, e não no lateral |
 //! | "N envios na fila" e "N envios recusados", no canto | `FilaDeEnviosDoApp` | [`Aplicativo::canto_dos_envios`] |
 //!
 //! 🔑 **O que não está pronto no app não aparece nele**: o menu tem só as
@@ -84,7 +85,11 @@ struct ItemDoMenu {
 }
 
 /// As seções que o app tem, em "Operação".
-const MENU: [ItemDoMenu; 5] = [
+///
+/// 📦 O "Backup de arquivos" não está aqui: fica no menu da conta (dono,
+/// 2026-09-25: *"não é tão utilizado no dia a dia"*). O menu lateral é o que o
+/// balcão usa o dia inteiro.
+const MENU: [ItemDoMenu; 4] = [
     ItemDoMenu {
         tela: Tela::Sessoes,
         titulo: "Sessões fotográficas",
@@ -94,13 +99,6 @@ const MENU: [ItemDoMenu; 5] = [
         tela: Tela::Caixa,
         titulo: "Caixa",
         icone: Icone::Calculator,
-    },
-    // 📦 O acervo de arquivos no R2 — `/dashboard/backup` no site, portado do
-    // `file-manager` do legado em 2026-09-18.
-    ItemDoMenu {
-        tela: Tela::Backup,
-        titulo: "Backup de arquivos",
-        icone: Icone::FolderOpen,
     },
     // 💬 O bot de atendimento — `/dashboard/chatbot`, com o nome e o ícone do
     // menu do site (`navegacao.ts`).
@@ -804,6 +802,17 @@ impl Aplicativo {
                                 cx.open_url(&format!("{}/loja", site.trim_end_matches('/')));
                                 raiz.menu_da_conta = false;
                                 cx.notify();
+                            })),
+                    )
+                    // 📦 O acervo de arquivos no R2 — `/dashboard/backup` no
+                    // site, portado do `file-manager` do legado em 2026-09-18.
+                    // Aqui, e não no menu lateral: é de uso de vez em quando.
+                    .child(
+                        item("conta-backup", Icone::FolderOpen)
+                            .debug_selector(|| "conta-backup".into())
+                            .child("Backup de arquivos")
+                            .on_click(cx.listener(|raiz, _, window, cx| {
+                                raiz.ir_para(Tela::Backup, window, cx);
                             })),
                     )
                     .child(separador())

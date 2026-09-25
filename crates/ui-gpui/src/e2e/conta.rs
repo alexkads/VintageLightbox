@@ -115,3 +115,32 @@ fn da_porta_ao_sair_pela_conta(cx: &mut TestAppContext) {
         "o chaveiro foi esquecido"
     );
 }
+
+/// 📦 **O Backup mora no menu da conta**, e não no lateral (dono, 2026-09-25:
+/// *"não é tão utilizado no dia a dia"*). O menu lateral fica com o que o
+/// balcão usa o dia inteiro; o Backup se abre pelo retrato da conta, com um
+/// clique de verdade.
+#[gpui::test]
+fn o_backup_se_abre_pelo_menu_da_conta(cx: &mut TestAppContext) {
+    use super::chatbot::{clicar, desenhado};
+
+    let e = abrir_o_app(cx, Cenario::default());
+    e.entrar_na_conta(cx);
+    e.teclar(cx, "cmd-b");
+
+    assert!(
+        desenhado(&e, cx, "menu-Chatbot"),
+        "o menu lateral está na tela"
+    );
+    assert!(
+        !desenhado(&e, cx, "menu-Backup de arquivos"),
+        "o Backup saiu do menu lateral"
+    );
+
+    e.app(cx, |app, _w, cx| app.alternar_menu_da_conta(cx));
+    clicar(&e, cx, "conta-backup");
+    e.app(cx, |app, _w, _cx| {
+        assert_eq!(app.tela(), Tela::Backup);
+        assert!(!app.menu_da_conta_aberto(), "abrir o Backup fecha o menu");
+    });
+}
