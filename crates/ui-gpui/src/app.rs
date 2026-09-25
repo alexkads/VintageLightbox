@@ -1236,47 +1236,89 @@ impl Aplicativo {
         }
     }
 
-    /// Recolhe o próximo aviso de atualização e o põe na faixa.
+    /// Recolhe os avisos de atualização e os põe na faixa.
     ///
-    /// ⚠️ **O laço acaba.** Como o da releitura, ele morre na primeira resposta
-    /// e desiste depois de 60s — a procura por versão nova é acessória, e um
-    /// laço eterno acordaria a cada 200ms pelo resto da sessão para não dizer
-    /// nada. A instalação começa um laço novo.
+    /// ⚠️ **O laço acaba.** Sem nada em andamento ele morre na primeira
+    /// resposta e desiste depois de 60 s — a procura é acessória, e um laço
+    /// eterno acordaria a cada 200 ms pelo resto da sessão para não dizer nada.
+    /// Com a compilação rodando ele segue enquanto ela durar, e morre no fim.
     fn esperar_aviso(cx: &mut Context<Self>) -> gpui::Task<()> {
         cx.spawn(async move |raiz, cx| {
-            for _ in 0..300 {
+            let mut ociosas = 0u32;
+            loop {
                 cx.background_executor()
                     .timer(std::time::Duration::from_millis(200))
                     .await;
-                let Ok(chegou) = raiz.update(cx, |raiz, cx| {
-                    let Ok(aviso) = raiz.avisos_de_versao.1.try_recv() else {
-                        return false;
-                    };
-                    raiz.atualizacao.instalando = false;
-                    raiz.atualizacao.aviso = Some(aviso);
-                    cx.notify();
-                    true
+                let Ok(continua) = raiz.update(cx, |raiz, cx| {
+                    let mut chegou = false;
+                    while let Ok(aviso) = raiz.avisos_de_versao.1.try_recv() {
+                        chegou = true;
+                        // 🔑 **Tudo automático**: a versão que compila começa
+                        // sozinha, sem clique.
+                        if raiz.atualizacao.receber(aviso) {
+                            raiz.comecar_a_compilar();
+                        }
+                    }
+                    if chegou {
+                        cx.notify();
+                    }
+                    (raiz.atualizacao.instalando, chegou)
                 }) else {
                     return;
                 };
-                if chegou {
-                    return;
+                match continua {
+                    (true, _) => ociosas = 0,
+                    (false, true) => return,
+                    (false, false) => {
+                        ociosas += 1;
+                        if ociosas >= 300 {
+                            return;
+                        }
+                    }
                 }
             }
         })
     }
 
+    /// Roda o instalador para a versão anunciada.
+    fn comecar_a_compilar(&mut self) {
+        let Some(versao) = self.atualizacao.versao.clone() else {
+            return;
+        };
+        self.atualizacao.instalando = true;
+        self.atualizacao.etapa = None;
+        self.atualizacao.aviso = Some(Aviso::Disponivel {
+            versao: versao.clone(),
+            automatico: true,
+        });
+        self.atualizador
+            .compilar(versao.versao, self.avisos_de_versao.0.clone());
+    }
+
     /// O que cada botão da faixa faz.
     fn atender(&mut self, pedido: PedidoDeAtualizacao, cx: &mut Context<Self>) {
+        use crate::atualizacao::porta::JeitoDeAtualizar;
+        let jeito = self.atualizacao.versao.as_ref().map(|v| v.jeito);
         match pedido {
-            PedidoDeAtualizacao::Instalar => {
+            PedidoDeAtualizacao::Instalar | PedidoDeAtualizacao::TentarDeNovo
+                if jeito == Some(JeitoDeAtualizar::Compilar) =>
+            {
+                self.atualizacao.novidades_abertas = false;
+                self.comecar_a_compilar();
+                self._atualizacao = Some(Self::esperar_aviso(cx));
+            }
+            PedidoDeAtualizacao::Instalar | PedidoDeAtualizacao::TentarDeNovo => {
                 // A faixa troca para "Baixando…" **antes** de o download
                 // começar: sem isto, um clique num pacote de 60 MB não muda
                 // nada na tela por meio minuto, e o gesto seguinte é clicar de
                 // novo — duas instalações da mesma versão em paralelo.
+                self.atualizacao.novidades_abertas = false;
                 self.atualizacao.instalando = true;
                 self.atualizador.instalar(self.avisos_de_versao.0.clone());
                 self._atualizacao = Some(Self::esperar_aviso(cx));
+            }
+            PedidoDeAtualizacao::Reabrir if jeito == Some(JeitoDeAtualizar::Compilar) => {
+                crate::atualizacao::compilar::reabrir_o_instalado()
             }
             PedidoDeAtualizacao::Reabrir => AtualizadorDaWeb::reabrir(),
             PedidoDeAtualizacao::Dispensar => {
@@ -1284,11 +1326,22 @@ impl Aplicativo {
                 // não pode calar a 0.3.0, que pode ser justamente a correção
                 // que ele precisa. E some só nesta abertura — na próxima o
                 // aviso volta.
-                if let Some(Aviso::Disponivel(nova)) = &self.atualizacao.aviso {
-                    self.atualizacao.dispensada = Some(nova.versao.clone());
+                if let Some(Aviso::Disponivel { versao, .. }) = &self.atualizacao.aviso {
+                    self.atualizacao.dispensada = Some(versao.versao.clone());
                 } else {
                     self.atualizacao.aviso = None;
                 }
+            }
+            PedidoDeAtualizacao::VerNovidades => self.atualizacao.novidades_abertas = true,
+            PedidoDeAtualizacao::FecharNovidades => self.atualizacao.novidades_abertas = false,
+            PedidoDeAtualizacao::CopiarComando => {
+                cx.write_to_clipboard(gpui::ClipboardItem::new_string(
+                    crate::atualizacao::novidades::COMANDO_DO_INSTALADOR.into(),
+                ));
+                self.avisar_em_toast("Comando copiado.".into(), false, cx);
+            }
+            PedidoDeAtualizacao::BaixarInstalador => {
+                cx.open_url(crate::atualizacao::novidades::INSTALADOR_DO_WINDOWS)
             }
         }
         cx.notify();
@@ -1361,6 +1414,18 @@ impl Aplicativo {
                         .bg(cor),
                 )
                 .into_any_element(),
+        )
+    }
+
+    /// O diálogo "Novidades da versão X", quando pedido.
+    fn novidades_da_versao(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        let agir = cx.listener(|este, pedido: &PedidoDeAtualizacao, _window, cx| {
+            este.atender(*pedido, cx);
+        });
+        faixa::desenhar_novidades(
+            &self.atualizacao,
+            cx,
+            Arc::new(move |pedido, window, app| agir(&pedido, window, app)),
         )
     }
 
@@ -5418,6 +5483,8 @@ impl Render for Aplicativo {
             .when_some(self.faixa_de_atualizacao(cx), |raiz, faixa| {
                 raiz.child(faixa)
             })
+            // As novidades da versão: por cima de tudo, só quando pedidas.
+            .children(self.novidades_da_versao(cx))
             // 📏 A barra do pé: por cima da tela e dos modais, sem pegar clique
             // (não tem `on_mouse_*`, e três pixels não tapam nada).
             .children(self.barra_do_pe(cx))
@@ -7924,11 +7991,15 @@ mod testes {
                 assert_eq!(app.atualizacao.texto(), None, "a 0.2.0 sai da vista");
 
                 // A 0.3.0 chega depois, pelo mesmo canal.
-                app.atualizacao.aviso =
-                    Some(Aviso::Disponivel(crate::atualizacao::porta::VersaoNova {
+                app.atualizacao.aviso = Some(Aviso::Disponivel {
+                    versao: crate::atualizacao::porta::VersaoNova {
                         versao: "0.3.0".into(),
                         notas: None,
-                    }));
+                        jeito: crate::atualizacao::porta::JeitoDeAtualizar::Pacote,
+                        novidades: None,
+                    },
+                    automatico: false,
+                });
                 assert_eq!(
                     app.atualizacao.texto().as_deref(),
                     Some("Versão 0.3.0 disponível"),
@@ -7936,6 +8007,151 @@ mod testes {
                 );
             })
             .expect("a janela deve estar aberta");
+    }
+
+    /// O atualizador de mentira com uma versão do `main` que compila.
+    fn portas_com_versao_do_main(
+        automatico: bool,
+        andamento: Vec<Aviso>,
+    ) -> (Portas, Arc<AtualizadorDeMentira>) {
+        use crate::atualizacao::novidades::Novidades;
+        let atualizador = Arc::new(AtualizadorDeMentira::default());
+        *atualizador.resposta.lock().unwrap() = Some(Aviso::Disponivel {
+            versao: crate::atualizacao::compilar::aviso_de_compilar(
+                "0.1.13",
+                Some(Novidades {
+                    versao: "0.1.13".into(),
+                    titulo: "Chatbot e Agendamentos".into(),
+                    importante: true,
+                    novidades: vec!["o chatbot".into()],
+                    por_que_atualizar: "para não perder cliente".into(),
+                }),
+            ),
+            automatico,
+        });
+        *atualizador.andamento_da_compilacao.lock().unwrap() = andamento;
+        (
+            Portas {
+                atualizador: atualizador.clone(),
+                ..portas()
+            },
+            atualizador,
+        )
+    }
+
+    fn deixar_o_relogio_andar(cx: &mut TestAppContext) {
+        for _ in 0..10 {
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(250));
+            cx.run_until_parked();
+        }
+    }
+
+    /// 🔑 **Tudo automático**: a versão do `main` começa a compilar sem clique,
+    /// a faixa conta a etapa, e no fim diz que ela entra na próxima abertura.
+    #[gpui::test]
+    fn a_versao_do_main_compila_sozinha_e_avisa_o_fim(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        let (portas, atualizador) = portas_com_versao_do_main(
+            true,
+            vec![
+                Aviso::Progresso("compilando".into()),
+                Aviso::Instalada("0.1.13".into()),
+            ],
+        );
+        let janela = cx.add_window(|window, cx| {
+            Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas, window, cx)
+        });
+        deixar_o_relogio_andar(cx);
+        assert_eq!(
+            *atualizador.compilacoes.lock().unwrap(),
+            vec!["0.1.13".to_string()],
+            "começou sozinha, uma vez"
+        );
+        janela
+            .update(cx, |app, _window, cx| {
+                assert_eq!(
+                    app.atualizacao.texto().as_deref(),
+                    Some("Versão 0.1.13 instalada. Ela entra na próxima vez que o app abrir — ou reabra agora.")
+                );
+                app.atender(PedidoDeAtualizacao::VerNovidades, cx);
+                assert!(app.atualizacao.novidades_abertas);
+                app.atender(PedidoDeAtualizacao::CopiarComando, cx);
+                app.atender(PedidoDeAtualizacao::FecharNovidades, cx);
+                assert!(!app.atualizacao.novidades_abertas);
+            })
+            .unwrap();
+        assert_eq!(
+            cx.read_from_clipboard().and_then(|c| c.text()).as_deref(),
+            Some(crate::atualizacao::novidades::COMANDO_DO_INSTALADOR)
+        );
+    }
+
+    /// 🔑 **A falha não derruba nada**: a faixa diz que a versão aberta
+    /// continua, e "Tentar de novo" roda o instalador outra vez.
+    #[gpui::test]
+    fn a_compilacao_que_falha_diz_que_nada_se_perdeu_e_tenta_de_novo(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        let (portas, atualizador) =
+            portas_com_versao_do_main(true, vec![Aviso::Falhou("o instalador parou".into())]);
+        let janela = cx.add_window(|window, cx| {
+            Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas, window, cx)
+        });
+        deixar_o_relogio_andar(cx);
+        janela
+            .update(cx, |app, _window, cx| {
+                let texto = app.atualizacao.texto().unwrap();
+                assert!(texto.contains("continua funcionando"), "{texto}");
+                assert!(!app.atualizacao.instalando);
+                *atualizador.andamento_da_compilacao.lock().unwrap() =
+                    vec![Aviso::Instalada("0.1.13".into())];
+                app.atender(PedidoDeAtualizacao::TentarDeNovo, cx);
+                assert!(app.atualizacao.instalando, "a faixa troca na hora");
+            })
+            .unwrap();
+        deixar_o_relogio_andar(cx);
+        assert_eq!(atualizador.compilacoes.lock().unwrap().len(), 2);
+        janela
+            .update(cx, |app, _window, _cx| {
+                assert!(app
+                    .atualizacao
+                    .texto()
+                    .unwrap()
+                    .starts_with("Versão 0.1.13 instalada."));
+            })
+            .unwrap();
+    }
+
+    /// Sem o "automático" (falhou há pouco, ou há outro instalador rodando),
+    /// a versão aparece e espera o clique — sem compilar sozinha.
+    #[gpui::test]
+    fn sem_o_automatico_a_compilacao_espera_o_clique(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        let (portas, atualizador) =
+            portas_com_versao_do_main(false, vec![Aviso::Instalada("0.1.13".into())]);
+        let janela = cx.add_window(|window, cx| {
+            Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas, window, cx)
+        });
+        deixar_o_relogio_andar(cx);
+        assert!(atualizador.compilacoes.lock().unwrap().is_empty());
+        janela
+            .update(cx, |app, _window, cx| {
+                assert_eq!(
+                    app.atualizacao.texto().as_deref(),
+                    Some("Atualização importante: versão 0.1.13 — Chatbot e Agendamentos")
+                );
+                app.atender(PedidoDeAtualizacao::Instalar, cx);
+            })
+            .unwrap();
+        deixar_o_relogio_andar(cx);
+        assert_eq!(
+            atualizador.compilacoes.lock().unwrap().len(),
+            1,
+            "o clique compila"
+        );
     }
 
     /// Clicar "Atualizar" pede a instalação **e** muda a frase na hora — sem

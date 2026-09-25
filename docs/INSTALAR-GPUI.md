@@ -127,13 +127,19 @@ que mudou.
 O download é validado antes de substituir o código anterior, e, se o conteúdo não mudou, o
 instalador preserva os arquivos e suas datas para não recompilar à toa.
 
-O app GPUI também tem **atualização automática**. Ao abrir, ele lê o `latest.json` publicado,
-primeiro no R2 da Recordar Fotos e, se ele falhar, no GitHub Pages. Se houver versão maior que a
-instalada, mostra a faixa *"Versão X disponível"* com **Atualizar**, que baixa, confere a
-assinatura e instala. Depois vem **Reabrir agora**.
+O app GPUI **se atualiza sozinho** (desde a 0.1.13). Ao abrir, ele lê a versão do `main`
+(`docs/novidades.json`) e, quando foi instalado por pacote, também o `latest.json` do R2:
 
-Compilado do `main`, o app costuma estar à frente da versão publicada e não vê atualização;
-para acompanhar o `main`, repita a instalação.
+- **Instalado compilando:** a atualização começa sozinha, em segundo plano — o app roda este mesmo
+  instalador, que compila o `main` nesta máquina. A faixa do rodapé diz a etapa.
+- **Instalado por pacote:** **Atualizar** baixa o pacote assinado; sem pacote da versão para o
+  sistema, o app compila, como acima.
+- **Ver novidades** mostra o que mudou e por que atualizar. No fim, **Reabrir agora**, ou a versão
+  nova entra na próxima abertura.
+
+**Nada se corrompe:** o instalado só é trocado depois de o binário novo compilar e responder
+`--versao`; o anterior fica como `.anterior`, e uma troca que falha no meio o devolve. Uma falha
+deixa a versão aberta funcionando, e o registro fica em `~/.vintagelightbox/registros/`.
 
 ## Opções (para quem sabe o que está fazendo)
 

@@ -64,6 +64,15 @@ fn cofre_da_sessao(pilha_local: bool) -> Arc<dyn domain::services::pos_venda::Co
 
 #[tokio::main]
 async fn main() {
+    // 🔄 `--versao`: responde a versão e sai, **antes** de janela, catálogo,
+    // rede ou a trava de uma cópia só. É a prova de vida que o instalador pede
+    // ao binário novo antes de trocar o instalado, e a conferência que a
+    // atualização automática faz no fim (`atualizacao::compilar`). Um binário
+    // que não chega aqui não substitui o que funciona.
+    if std::env::args().skip(1).any(|a| a == "--versao") {
+        println!("{}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
     // Onde está rodando — no Linux, a área de trabalho muda quem desenha a
     // barra das janelas (`janela::app_desenha_a_barra`).
     if cfg!(target_os = "linux") {

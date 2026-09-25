@@ -41,6 +41,36 @@ fn main() {
     std::fs::write(saida, tabela).unwrap();
 
     icone_do_executavel(raiz);
+    jeito_de_instalar();
+}
+
+/// 🔄 **Como este binário vai ser atualizado** — gravado nele, em
+/// `VLB_JEITO_DE_INSTALAR`, e lido por `atualizacao::porta::jeito_desta_instalacao`.
+///
+/// | Perfil | Quem compila | Como atualiza |
+/// |---|---|---|
+/// | `instalador` | `scripts/instalar-vintagelightbox-gpui.cmd`, no balcão | repetindo o instalador (compila o `main`) |
+/// | `release` | `scripts/empacotar.sh`, o pacote assinado | a faixa baixa e instala sozinha |
+/// | `debug` | quem desenvolve | `git pull` |
+///
+/// 🔑 **Pelo diretório de saída, e não por variável do instalador.** O
+/// balcão roda a cópia do instalador que baixou um dia, e uma variável nova
+/// nele só valeria para quem baixasse de novo. O perfil `instalador` já existe
+/// em todas as cópias — e o cargo põe o nome do perfil no caminho do `OUT_DIR`.
+fn jeito_de_instalar() {
+    let saida = std::env::var("OUT_DIR").unwrap_or_default();
+    let perfis: Vec<&str> = std::path::Path::new(&saida)
+        .components()
+        .filter_map(|c| c.as_os_str().to_str())
+        .collect();
+    let jeito = if perfis.contains(&"instalador") {
+        "compilado"
+    } else if perfis.contains(&"release") {
+        "pacote"
+    } else {
+        "desenvolvimento"
+    };
+    println!("cargo:rustc-env=VLB_JEITO_DE_INSTALAR={jeito}");
 }
 
 /// 🪟 **O ícone do `.exe` no Windows** (dono, 18/set/2026: *"no Windows não

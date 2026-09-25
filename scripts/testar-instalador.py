@@ -123,7 +123,10 @@ while [ "$#" -gt 0 ]; do
 done
 fonte="$(dirname "$manifesto")"
 mkdir -p "$CARGO_TARGET_DIR/$perfil"
-printf '#!/bin/sh\\nexit 0\\n' > "$CARGO_TARGET_DIR/$perfil/$bin"
+# O binário falso responde `--versao` como o de verdade (a prova de vida que o
+# instalador pede antes de trocar o instalado). TEST_VERSAO_EXIT simula um
+# binário novo que não abre.
+printf '#!/bin/sh\\nif [ "$1" = "--versao" ]; then [ "${TEST_VERSAO_EXIT:-0}" -eq 0 ] || exit "$TEST_VERSAO_EXIT"; echo 9.9.9; fi\\nexit 0\\n' > "$CARGO_TARGET_DIR/$perfil/$bin"
 chmod +x "$CARGO_TARGET_DIR/$perfil/$bin"
 [ -f "$fonte/Cargo.lock" ] || echo '# lock local' > "$fonte/Cargo.lock"
 ''')
@@ -326,6 +329,56 @@ class CasosDoInstalador:
         self.assertIn(f"Exec={self.destino}/bin/{nome}", atalho)
         self.assertIn(f"Icon={nome}", atalho)
         self.assertNotIn("#@", atalho)
+
+    def test_linux_troca_sem_corromper_e_guarda_o_anterior(self):
+        """O novo entra por renomeação e o instalado fica como `.anterior`."""
+        self.mock("uname", "echo Linux")
+        nome = f"vintagelightbox-{self.app}"
+        instalado = self.destino / "bin" / nome
+        instalado.parent.mkdir(parents=True)
+        instalado.write_text("o app que funciona\n")
+        result = self.run_installer(piped=True)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("o app novo responde a versão 9.9.9", result.stdout)
+        self.assertIn("--versao", instalado.read_text(), "o novo está no lugar")
+        anterior = self.destino / "bin" / f"{nome}.anterior"
+        self.assertEqual(anterior.read_text(), "o app que funciona\n", "o anterior ficou guardado")
+        self.assertFalse((self.destino / "bin" / f".{nome}.novo").exists(), "sem resto da troca")
+
+    def test_linux_binario_novo_que_nao_abre_nao_toca_no_instalado(self):
+        """🔑 O que funciona só é trocado depois de o novo provar que abre."""
+        self.mock("uname", "echo Linux")
+        self.env["TEST_VERSAO_EXIT"] = "3"
+        nome = f"vintagelightbox-{self.app}"
+        instalado = self.destino / "bin" / nome
+        instalado.parent.mkdir(parents=True)
+        instalado.write_text("o app que funciona\n")
+        result = self.run_installer(piped=True)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("o app novo não abriu (--versao); o instalado continua como estava", result.stdout)
+        self.assertEqual(instalado.read_text(), "o app que funciona\n", "intacto")
+        self.assertFalse((self.destino / "bin" / f"{nome}.anterior").exists())
+
+    def test_macos_troca_sem_corromper_e_guarda_o_anterior(self):
+        """No macOS o `.app` inteiro vira `.anterior`, e o novo entra por `mv`."""
+        app = self.app_mac()
+        (app / "Contents/MacOS").mkdir(parents=True)
+        (app / "Contents/MacOS/marca").write_text("o app que funciona\n")
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        anterior = app.parent / f"{app.name}.anterior"
+        self.assertEqual((anterior / "Contents/MacOS/marca").read_text(), "o app que funciona\n")
+        self.assertFalse((app / "Contents/MacOS/marca").exists(), "o novo está no lugar")
+        self.assertFalse((app.parent / f".{app.name}.novo").exists(), "sem resto da troca")
+
+    def test_macos_binario_novo_que_nao_abre_nao_toca_no_instalado(self):
+        self.env["TEST_VERSAO_EXIT"] = "3"
+        app = self.app_mac()
+        (app / "Contents/MacOS").mkdir(parents=True)
+        (app / "Contents/MacOS/marca").write_text("o app que funciona\n")
+        result = self.run_installer()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertEqual((app / "Contents/MacOS/marca").read_text(), "o app que funciona\n")
 
     def test_linux_seco_lista_pacotes_que_faltam(self):
         self.mock("uname", "echo Linux")
@@ -567,7 +620,14 @@ class Estrutura(unittest.TestCase):
                     self.assertEqual(linhas.count(marca), 1, marca)
                 cmd = linhas[:ordem[0]]
                 self.assertIn("exit /b %VLB_RESULTADO%", cmd)
-                self.assertIn("pause", cmd)
+                # Dois cliques esperam uma tecla no fim; o app, que roda o
+                # instalador sem janela, pede `VLB_SEM_PAUSA=1` — senão o
+                # processo ficaria preso no `pause` para sempre.
+                if script.name == APPS["gpui"]["script"].name:
+                    self.assertIn('if not "%VLB_SEM_PAUSA%"=="1" pause', cmd)
+                else:
+                    # O despachante do endereço antigo: o app nunca o roda.
+                    self.assertIn("pause", cmd)
                 # O cmd baixa a versao mais nova DESTE arquivo, e nao de outro.
                 propria = f"/main/scripts/{script.name}'"
                 self.assertTrue(any(propria in l for l in cmd if l.startswith("powershell ")), propria)
@@ -624,6 +684,49 @@ foreach ($arquivo in $args) {
 '''
         result = self.pwsh(codigo, *TODOS)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def troca_do_windows(self, preparar):
+        """Roda, no PowerShell de verdade, o trecho exato da troca do instalador
+        gerado: do `$exe = Join-Path $Destino` até antes do ícone."""
+        texto = APPS["gpui"]["script"].read_text()
+        inicio = texto.index('$exe = Join-Path $Destino')
+        fim = texto.index('Copy-Item (Join-Path $Fonte "empacotamento\\icones\\icone.ico")', inicio)
+        destino = self.base / "Programs"
+        mingw = self.base / "mingw"
+        destino.mkdir()
+        mingw.mkdir()
+        (destino / "VintageLightbox-GPUI.exe").write_text("o que funciona")
+        (destino / "libgcc_s_seh-1.dll").write_text("dll velha")
+        (mingw / "libgcc_s_seh-1.dll").write_text("dll nova")
+        binario = self.base / "novo.exe"
+        binario.write_text("o novo")
+        preparar(binario, destino, mingw)
+        codigo = (
+            "$ErrorActionPreference = 'Stop'\n"
+            f"$Destino = '{destino}'\n$mingw = '{mingw}'\n$binario = '{binario}'\n"
+            + texto[inicio:fim]
+        )
+        return self.pwsh(codigo), destino
+
+    def test_troca_do_windows_guarda_o_anterior(self):
+        """🔑 O instalado vira `.anterior` e o novo entra — exe e DLLs."""
+        result, destino = self.troca_do_windows(lambda *_: None)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((destino / "VintageLightbox-GPUI.exe").read_text(), "o novo")
+        self.assertEqual((destino / "VintageLightbox-GPUI.exe.anterior").read_text(), "o que funciona")
+        self.assertEqual((destino / "libgcc_s_seh-1.dll").read_text(), "dll nova")
+        self.assertEqual((destino / "libgcc_s_seh-1.dll.anterior").read_text(), "dll velha")
+
+    def test_troca_do_windows_que_falha_devolve_o_anterior(self):
+        """🔑 Uma cópia que falha no meio devolve o que funcionava."""
+        def sem_binario(binario, *_):
+            binario.unlink()
+        result, destino = self.troca_do_windows(sem_binario)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("a troca falhou e a versao anterior foi devolvida", result.stdout + result.stderr)
+        self.assertEqual((destino / "VintageLightbox-GPUI.exe").read_text(), "o que funciona")
+        self.assertFalse((destino / "VintageLightbox-GPUI.exe.anterior").exists())
+        self.assertEqual((destino / "libgcc_s_seh-1.dll").read_text(), "dll velha", "a DLL nem foi tocada")
 
     def test_funcoes_do_powershell(self):
         # Analise o bloco real e execute suas funcoes com executaveis reais.

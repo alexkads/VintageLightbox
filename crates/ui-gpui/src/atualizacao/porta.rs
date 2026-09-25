@@ -68,19 +68,38 @@ pub fn enderecos() -> Vec<&'static str> {
 /// conexão lenta de balcão — por isso `instalar` o tira antes de baixar.
 const ESPERA_DA_PROCURA: std::time::Duration = std::time::Duration::from_secs(15);
 
+/// Como a versão nova chega a esta máquina.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JeitoDeAtualizar {
+    /// O pacote assinado do `latest.json`: baixa, confere e instala.
+    Pacote,
+    /// O instalador de sempre, rodado pelo app: compila o `main` aqui
+    /// ([`super::compilar`]).
+    Compilar,
+}
+
 /// O que a tela precisa saber sobre uma versão nova.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VersaoNova {
     pub versao: String,
     /// O texto do lançamento, quando o manifesto traz um.
     pub notas: Option<String>,
+    pub jeito: JeitoDeAtualizar,
+    /// O que mudou e por que atualizar (`docs/novidades.json`).
+    pub novidades: Option<super::novidades::Novidades>,
 }
 
 /// O que a porta responde à tela.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Aviso {
-    /// Há versão nova esperando decisão.
-    Disponivel(VersaoNova),
+    /// Há versão nova. `automatico` diz se a compilação começa sozinha
+    /// ([`super::compilar::decidir`]).
+    Disponivel {
+        versao: VersaoNova,
+        automatico: bool,
+    },
+    /// A compilação anunciou uma etapa ("compilando", "instalando em …").
+    Progresso(String),
     /// A instalação terminou; falta reabrir o app.
     Instalada(String),
     /// Não deu — e a tela mostra isso **sem** derrubar nada.
@@ -101,6 +120,10 @@ pub trait Atualizador: Send + Sync + 'static {
 
     /// Baixa, confere a assinatura e instala. A resposta chega pelo canal.
     fn instalar(&self, canal: Sender<Aviso>);
+
+    /// Roda o instalador, que compila o `main` nesta máquina. As etapas
+    /// chegam como [`Aviso::Progresso`]; o fim, como `Instalada` ou `Falhou`.
+    fn compilar(&self, versao: String, canal: Sender<Aviso>);
 }
 
 pub use real::AtualizadorDaWeb;
@@ -168,21 +191,48 @@ mod real {
             // blocking is not allowed*. É a única porta da casa que não usa a
             // `Handle` — por isso, e não por esquecimento.
             std::thread::spawn(move || {
-                match AtualizadorDaWeb::consultar(&atual) {
-                    // Silêncio é a resposta normal: nada novo, nada na tela.
-                    Ok(None) => {}
-                    Ok(Some(nova)) => {
-                        let _ = canal.send(Aviso::Disponivel(VersaoNova {
+                use super::super::compilar;
+                use super::super::novidades::{self, JeitoDaInstalacao};
+                let jeito = novidades::jeito_desta_instalacao();
+                // A instalação compilada nunca recebe pacote: nem pergunta.
+                let pacote = if jeito == JeitoDaInstalacao::Compilado {
+                    None
+                } else {
+                    match AtualizadorDaWeb::consultar(&atual) {
+                        Ok(nova) => nova.map(|nova| VersaoNova {
                             versao: nova.version.clone(),
                             notas: nova.body.clone(),
-                        }));
+                            jeito: JeitoDeAtualizar::Pacote,
+                            novidades: None,
+                        }),
+                        // 🔑 A falha da **procura** não vai para a tela.
+                        // Ninguém pediu nada; avisar "não consegui checar
+                        // atualização" a cada abertura sem rede é ruído puro.
+                        Err(motivo) => {
+                            eprintln!("[atualização] {motivo}");
+                            None
+                        }
                     }
-                    // 🔑 A falha da **procura** não vai para a tela. Ninguém
-                    // pediu nada; avisar "não consegui checar atualização" a
-                    // cada abertura sem rede é ruído puro. A falha da
-                    // **instalação** vai, porque ali houve um clique esperando
-                    // resposta.
-                    Err(motivo) => eprintln!("[atualização] {motivo}"),
+                };
+                let main = if jeito == JeitoDaInstalacao::Desenvolvimento {
+                    None
+                } else {
+                    novidades::buscar()
+                };
+                let agora = compilar::agora();
+                let casa = compilar::casa();
+                let memoria = casa
+                    .as_ref()
+                    .map(|c| compilar::ler_memoria(&c.join("atualizacao.json")))
+                    .unwrap_or_default();
+                let ocupado = casa
+                    .as_ref()
+                    .is_some_and(|c| compilar::ocupado(&c.join("atualizando.trava"), agora));
+                // Silêncio é a resposta normal: nada novo, nada na tela.
+                if let compilar::Decisao::Avisar { versao, automatico } =
+                    compilar::decidir(jeito, &atual, pacote, main, &memoria, ocupado, agora)
+                {
+                    let _ = canal.send(Aviso::Disponivel { versao, automatico });
                 }
             });
         }
@@ -207,6 +257,20 @@ mod real {
                     Err(motivo) => Aviso::Falhou(motivo),
                 };
                 let _ = canal.send(aviso);
+            });
+        }
+
+        fn compilar(&self, versao: String, canal: Sender<Aviso>) {
+            std::thread::spawn(move || {
+                use super::super::compilar::{self, Andamento};
+                compilar::rodar(&versao, &|andamento| {
+                    let aviso = match andamento {
+                        Andamento::Etapa(etapa) => Aviso::Progresso(etapa),
+                        Andamento::Instalada(versao) => Aviso::Instalada(versao),
+                        Andamento::Falhou(motivo) => Aviso::Falhou(motivo),
+                    };
+                    let _ = canal.send(aviso);
+                });
             });
         }
     }
@@ -257,15 +321,24 @@ pub mod mentira {
         pub desfecho: Mutex<Option<Aviso>>,
         pub procuras: Mutex<usize>,
         pub instalacoes: Mutex<usize>,
+        /// As versões que `compilar` recebeu, em ordem.
+        pub compilacoes: Mutex<Vec<String>>,
+        /// O que `compilar` envia, em ordem (etapas e o fim).
+        pub andamento_da_compilacao: Mutex<Vec<Aviso>>,
     }
 
     impl AtualizadorDeMentira {
         pub fn com_versao(versao: &str) -> Self {
             Self {
-                resposta: Mutex::new(Some(Aviso::Disponivel(VersaoNova {
-                    versao: versao.into(),
-                    notas: None,
-                }))),
+                resposta: Mutex::new(Some(Aviso::Disponivel {
+                    versao: VersaoNova {
+                        versao: versao.into(),
+                        notas: None,
+                        jeito: JeitoDeAtualizar::Pacote,
+                        novidades: None,
+                    },
+                    automatico: false,
+                })),
                 desfecho: Mutex::new(Some(Aviso::Instalada(versao.into()))),
                 ..Default::default()
             }
@@ -283,6 +356,21 @@ pub mod mentira {
         fn instalar(&self, canal: Sender<Aviso>) {
             *self.instalacoes.lock().expect("as instalações") += 1;
             if let Some(aviso) = self.desfecho.lock().expect("o desfecho").clone() {
+                let _ = canal.send(aviso);
+            }
+        }
+
+        fn compilar(&self, versao: String, canal: Sender<Aviso>) {
+            self.compilacoes
+                .lock()
+                .expect("as compilações")
+                .push(versao);
+            for aviso in self
+                .andamento_da_compilacao
+                .lock()
+                .expect("o andamento")
+                .clone()
+            {
                 let _ = canal.send(aviso);
             }
         }

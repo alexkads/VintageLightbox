@@ -18,7 +18,7 @@ set "VLB_SCRIPT=%~f0"
 powershell -NoProfile -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; try { $t=$null; if ($env:VLB_SECO -ne '1') { try { $t=(Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 'https://raw.githubusercontent.com/alexkads/VintageLightbox/main/scripts/@@ARQUIVO@@').Content } catch { } }; if (-not $t) { $t=[IO.File]::ReadAllText($env:VLB_SCRIPT) }; $n=[char]10; $i=$t.IndexOf($n+'#==POWERSHELL=='); if ($i -lt 0) { throw 'instalador invalido: falta o bloco PowerShell' }; $f=$t.IndexOf($n+'#==FIM-POWERSHELL==',$i); if ($f -le $i) { throw 'instalador incompleto' }; Invoke-Expression $t.Substring($i, $f-$i) } catch { Write-Host ''; Write-Host ('X ' + $_) -ForegroundColor Red; exit 1 }"
 set "VLB_RESULTADO=%ERRORLEVEL%"
 echo.
-pause
+if not "%VLB_SEM_PAUSA%"=="1" pause
 exit /b %VLB_RESULTADO%
 ::FIM-DO-CMD
 #
@@ -434,19 +434,57 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path $binario)) {
     throw "a compilacao falhou, ou nao deixou $binario"
 }
 
+# ── Conferir o binario novo antes de tocar no instalado ──────────────────────
+# 🔑 **O que funciona nao e tocado ate o novo provar que abre** (dono,
+#    2026-09-25: "nao pode corromper a aplicacao que ja esta funcionando").
+#    `--versao` responde e sai antes de janela, catalogo e rede.
+Diga "conferindo o app novo"
+$env:PATH = "$mingw;$env:PATH"
+$global:LASTEXITCODE = 0
+$resposta = (& $binario --versao 2>$null | Select-Object -First 1)
+if ($LASTEXITCODE -ne 0 -or -not "$resposta".Trim()) {
+    throw "o app novo nao abriu (--versao); o instalado continua como estava"
+}
+Ok "o app novo responde a versao $("$resposta".Trim())"
+
 # ── Instalar ─────────────────────────────────────────────────────────────────
 Diga "instalando em $Destino"
 New-Item -ItemType Directory -Force -Path $Destino | Out-Null
 $exe = Join-Path $Destino "@@PASTA_WIN@@.exe"
-Copy-Item $binario $exe -Force
-Copy-Item (Join-Path $Fonte "empacotamento\icones\icone.ico") (Join-Path $Destino "icone.ico") -Force
 
-# O executavel liga com as DLLs do MinGW (libstdc++, libgcc, winpthread). Fora
-# do PATH do MSYS2 ele nao abriria, entao elas vao junto.
-foreach ($dll in "libstdc++-6.dll", "libgcc_s_seh-1.dll", "libwinpthread-1.dll") {
-    $origem = Join-Path $mingw $dll
-    if (Test-Path $origem) { Copy-Item $origem $Destino -Force }
+# 🔑 **Trocar sem corromper.** Com o app aberto, o Windows nao deixa
+#    sobrescrever o .exe nem as DLLs que ele carregou, mas deixa renomear. O
+#    instalado vira `.anterior`, o novo entra no lugar, e qualquer falha no
+#    meio devolve os anteriores: o que funcionava continua funcionando.
+$afastados = @()
+function Afastar($arquivo) {
+    if (-not (Test-Path $arquivo)) { return }
+    $anterior = "$arquivo.anterior"
+    Remove-Item $anterior -Force -ErrorAction SilentlyContinue
+    if (Test-Path $anterior) { $anterior = "$arquivo.anterior-$(Get-Date -Format yyyyMMddHHmmss)" }
+    Move-Item $arquivo $anterior -Force
+    $script:afastados += ,@($arquivo, $anterior)
 }
+try {
+    Afastar $exe
+    Copy-Item $binario $exe -Force
+    # O executavel liga com as DLLs do MinGW (libstdc++, libgcc, winpthread).
+    # Fora do PATH do MSYS2 ele nao abriria, entao elas vao junto.
+    foreach ($dll in "libstdc++-6.dll", "libgcc_s_seh-1.dll", "libwinpthread-1.dll") {
+        $origem = Join-Path $mingw $dll
+        if (Test-Path $origem) {
+            Afastar (Join-Path $Destino $dll)
+            Copy-Item $origem $Destino -Force
+        }
+    }
+} catch {
+    foreach ($par in $afastados) {
+        Remove-Item $par[0] -Force -ErrorAction SilentlyContinue
+        Move-Item $par[1] $par[0] -Force -ErrorAction SilentlyContinue
+    }
+    throw "a troca falhou e a versao anterior foi devolvida: $_"
+}
+Copy-Item (Join-Path $Fonte "empacotamento\icones\icone.ico") (Join-Path $Destino "icone.ico") -Force
 
 $atalho = Join-Path ([Environment]::GetFolderPath("Programs")) "$Nome.lnk"
 $shell = New-Object -ComObject WScript.Shell
@@ -1121,6 +1159,20 @@ fi
 VERSAO="$(sed -n '/^\[workspace\.package\]/,/^\[/p' "$FONTE/Cargo.toml" 2>/dev/null | sed -n 's/^version *= *"\(.*\)"/\1/p' | head -1)"
 [ -n "$VERSAO" ] || VERSAO="0.0.0"
 
+# ── Conferir o binário novo antes de tocar no instalado ───────────────────────
+# 🔑 **O que funciona não é tocado até o novo provar que abre** (dono,
+#    2026-09-25: "não pode corromper a aplicação que já está funcionando").
+#    `--versao` responde e sai antes de janela, catálogo e rede.
+if [ "$SECO" -eq 0 ]; then
+  diga "conferindo o app novo"
+  RESPOSTA="$("$BINARIO" --versao 2>/dev/null | head -1)"
+  if [ -z "$RESPOSTA" ]; then
+    erro "o app novo não abriu (--versao); o instalado continua como estava"
+    exit 1
+  fi
+  echo "   o app novo responde a versão $RESPOSTA"
+fi
+
 # ── Instalar ──────────────────────────────────────────────────────────────────
 if [ "$SISTEMA" = "Darwin" ]; then
   [ -n "$DESTINO" ] || { if [ -w /Applications ]; then DESTINO="/Applications"; else DESTINO="$HOME/Applications"; fi; }
@@ -1187,8 +1239,22 @@ PLIST
   codesign --force --sign - "$APP" >/dev/null 2>&1 \
     || aviso "não consegui assinar ad-hoc — o macOS vai repetir os pedidos de permissão."
   mkdir -p "$DESTINO"
-  rm -rf "$DESTINO/$NOME.app"
-  ditto "$APP" "$DESTINO/$NOME.app"
+  # 🔑 **Trocar sem corromper.** O novo vai ao lado com outro nome; o
+  #    instalado vira `.anterior`; o novo entra por renomeação. Se algo falhar
+  #    no meio, o anterior volta ao lugar.
+  NOVO_APP="$DESTINO/.$NOME.app.novo"
+  rm -rf "$NOVO_APP"
+  ditto "$APP" "$NOVO_APP" || { rm -rf "$NOVO_APP"; erro "não consegui copiar o app novo; o instalado continua como estava"; exit 1; }
+  rm -rf "$DESTINO/$NOME.app.anterior"
+  if [ -d "$DESTINO/$NOME.app" ]; then
+    mv "$DESTINO/$NOME.app" "$DESTINO/$NOME.app.anterior" \
+      || { rm -rf "$NOVO_APP"; erro "não consegui afastar o app instalado; ele continua como estava"; exit 1; }
+  fi
+  if ! mv "$NOVO_APP" "$DESTINO/$NOME.app"; then
+    [ -d "$DESTINO/$NOME.app.anterior" ] && mv "$DESTINO/$NOME.app.anterior" "$DESTINO/$NOME.app"
+    erro "a troca falhou e a versão anterior foi devolvida"
+    exit 1
+  fi
   printf "\n${V}✅ %s %s instalado em %s${Z}\n\n" "$NOME" "$VERSAO" "$DESTINO"
   printf "   ${N}Abra pelo Launchpad, ou:${Z}  open -a \"%s\"\n" "$NOME"
 else
@@ -1199,7 +1265,17 @@ else
     exit 0
   fi
   mkdir -p "$DESTINO/bin" "$DESTINO/share/applications" "$DESTINO/share/icons/hicolor/256x256/apps"
-  install -m 755 "$BINARIO" "$DESTINO/bin/$NOME_LINUX"
+  # 🔑 **Trocar sem corromper.** O novo é copiado ao lado; o instalado fica
+  #    como `.anterior`; o novo entra por `mv`, que é atômico no mesmo disco —
+  #    não há instante sem app. O app aberto segue com o arquivo antigo.
+  NOVO_BIN="$DESTINO/bin/.$NOME_LINUX.novo"
+  install -m 755 "$BINARIO" "$NOVO_BIN" \
+    || { rm -f "$NOVO_BIN"; erro "não consegui copiar o app novo; o instalado continua como estava"; exit 1; }
+  if [ -f "$DESTINO/bin/$NOME_LINUX" ]; then
+    cp -p "$DESTINO/bin/$NOME_LINUX" "$DESTINO/bin/$NOME_LINUX.anterior" 2>/dev/null || true
+  fi
+  mv -f "$NOVO_BIN" "$DESTINO/bin/$NOME_LINUX" \
+    || { rm -f "$NOVO_BIN"; erro "a troca falhou; o instalado continua como estava"; exit 1; }
   cp "$FONTE/empacotamento/icones/256x256.png" "$DESTINO/share/icons/hicolor/256x256/apps/$NOME_LINUX.png"
   cat > "$DESTINO/share/applications/$NOME_LINUX.desktop" <<DESKTOP
 [Desktop Entry]

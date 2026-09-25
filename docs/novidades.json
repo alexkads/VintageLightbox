@@ -1,0 +1,12 @@
+{
+  "versao": "0.1.13",
+  "titulo": "O Chatbot e os Agendamentos agora estão no app, com aviso de mensagem nova e de agendamento novo em qualquer tela.",
+  "importante": true,
+  "novidades": [
+    "Chatbot: as conversas do WhatsApp, Instagram, Messenger, Telegram e do chat do site numa lista só, como no painel do site. Dá para assumir a conversa, responder, usar as respostas rápidas e cuidar das urgências sem sair do app.",
+    "Agendamentos: a agenda do estúdio com mês, semana, dia, agenda, ano e estação, os agendamentos de hoje, e em cada um Reagendar, Registrar atendimento, Excluir e Descancelar.",
+    "Aviso na hora: mensagem nova de cliente e agendamento novo ou cancelado aparecem mesmo com você na triagem ou no caixa. Com o app atrás de outra janela ou na bandeja, vem um aviso do sistema.",
+    "Atualização automática: daqui em diante o app avisa sozinho quando há versão nova, mostra o que mudou e se atualiza em segundo plano, sem precisar rodar o instalador à mão."
+  ],
+  "por_que_atualizar": "Cliente que escreve no WhatsApp ou pede atendente no site e não recebe resposta desiste. Com esta versão o balcão fica sabendo na hora, sem abrir o navegador. E ela traz a atualização automática: as próximas versões chegam sozinhas, e se alguma não der certo, a versão que você usa continua funcionando."
+}

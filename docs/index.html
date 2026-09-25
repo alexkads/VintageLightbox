@@ -323,27 +323,33 @@ VLB_POS_VENDA_URL=http://localhost:8080 VLB_SITE_URL=http://localhost:8001 cargo
 
   <h3 id="atualizar">Atualizar</h3>
   <p class="texto">
-    <strong>O app avisa quando há versão nova.</strong> Toda vez que ele abre, procura uma. Se achar,
-    aparece no alto a faixa <em>“Versão X disponível”</em>, com o que mudou, e dois botões:
+    <strong>O app se atualiza sozinho.</strong> Toda vez que ele abre, confere se há versão nova. Se
+    houver, aparece no rodapé a faixa com a versão e o que ela traz — em destaque quando a
+    atualização é importante — e o botão <strong>Ver novidades</strong>, que mostra o que mudou e
+    por que vale atualizar.
   </p>
   <ol class="texto">
-    <li><strong>Atualizar</strong> baixa a versão nova e confere se ela foi mesmo publicada pela
-        Recordar Fotos. Só então instala. Um arquivo trocado no caminho é recusado.</li>
-    <li>No fim, a faixa diz <em>“Versão X instalada”</em>. Clique em <strong>Reabrir agora</strong>
-        para começar a usá-la. Até reabrir, a versão que está aberta continua sendo a antiga.</li>
-    <li><strong>Depois</strong> esconde o aviso até você fechar o app. Na próxima vez que abrir, ele
-        aparece de novo.</li>
+    <li><strong>Instalou pelo arquivo que compila no computador</strong> (o caso da maior parte dos
+        balcões)? A atualização <strong>começa sozinha</strong>, em segundo plano: o app roda o mesmo
+        instalador de sempre, que baixa o código novo e compila nesta máquina. A faixa diz em que
+        etapa está. Pode continuar trabalhando — leva alguns minutos.</li>
+    <li><strong>Instalou pelo pacote?</strong> Clique em <strong>Atualizar</strong>: o app baixa a
+        versão nova e confere se ela foi mesmo publicada pela Recordar Fotos antes de instalar. Se
+        ainda não há pacote dessa versão para o seu sistema, o app compila, como no item acima.</li>
+    <li>No fim, a faixa diz <em>“Versão X instalada”</em>. Ela entra na próxima vez que o app abrir, ou
+        agora mesmo, em <strong>Reabrir agora</strong>.</li>
   </ol>
   <p class="texto">
-    Se nada aparece, é porque não há versão nova, ou porque ela não é para o seu sistema: o app não
-    interrompe ninguém para dizer que está tudo em dia. O catálogo e as fotos não mudam com a
-    atualização.
+    <strong>Nada se perde se a atualização falhar.</strong> O app instalado só é trocado depois de a
+    versão nova compilar e provar que abre, e a anterior fica guardada ao lado
+    (<code>.anterior</code>). Se algo der errado, a faixa diz que a versão que você usa continua
+    funcionando, onde está o registro, e oferece <strong>Tentar de novo</strong> — sozinho, o app só
+    tenta de novo no dia seguinte. O catálogo e as fotos não mudam com a atualização.
   </p>
   <p class="texto">
-    <strong>Instalou pelo arquivo que compila no computador?</strong> Então atualizar é
-    <strong>repetir o passo da instalação</strong>: dois cliques no arquivo no Windows, ou a mesma
-    linha no Terminal. Feche o app antes (pela bandeja, <strong>Sair</strong>). A partir da segunda
-    vez leva poucos minutos, e o que estava no catálogo continua lá.
+    Se nada aparece, é porque está tudo em dia: o app não interrompe ninguém para dizer isso. Ainda
+    dá para atualizar à mão, repetindo o passo da instalação (dois cliques no arquivo no Windows, ou
+    a mesma linha no Terminal).
   </p>
   <p class="texto" style="font-size:.95em;color:var(--suave)">
     As versões ficam num servidor da Recordar Fotos e, se ele não responder, numa cópia no GitHub.
