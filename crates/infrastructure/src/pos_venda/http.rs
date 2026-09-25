@@ -43,6 +43,12 @@ use crate::pos_venda::autorizacao::{abrir_no_navegador, PedidoDeAutorizacao};
 /// morta pendurada para sempre.
 const TEMPO_LIMITE: Duration = Duration::from_secs(180);
 
+/// O teto de um fluxo de eventos ([`PosVendaApiHttp::escutar`]). Não é o que
+/// acusa conexão morta — isso é o silêncio. É só para nenhum fluxo viver para
+/// sempre: passada meia hora ele fecha, e quem escuta reconecta com o token de
+/// agora.
+const TETO_DO_FLUXO: Duration = Duration::from_secs(30 * 60);
+
 /// Onde o **site** mora — é ele que autentica, e não a API.
 ///
 /// Sobrescrito por `VLB_SITE_URL`, para apontar a homologação sem recompilar.
@@ -973,6 +979,74 @@ impl PosVendaApiHttp {
             tipo,
             bytes,
         })
+    }
+
+    /// Um fluxo de eventos (SSE) da API, entregue pedaço a pedaço a
+    /// `ao_chegar` conforme chega — o tempo real do painel do chatbot
+    /// (`/whatsapp/eventos` e os irmãos).
+    ///
+    /// Volta `Ok` quando o servidor fecha o fluxo, e erro quando ele recusa,
+    /// quando a rede cai ou quando o fluxo fica calado mais que
+    /// `silencio_maximo`. Nos três casos quem chama reconecta: esta função não
+    /// tenta de novo, porque quem sabe a pausa entre tentativas é a tela.
+    ///
+    /// # Por que o silêncio, e não o teto de 180 s
+    ///
+    /// O [`TEMPO_LIMITE`] do cliente vale para o pedido **inteiro**, corpo
+    /// incluído: um fluxo que dura horas seria cortado aos três minutos. Aqui o
+    /// teto do pedido é trocado por um de meia hora, e o que acusa a conexão
+    /// morta é o silêncio. O servidor manda `keep-alive` a cada 15 s
+    /// (`tempo_real.rs` do backend); três sem chegar é Wi-Fi que caiu sem
+    /// avisar, e sem esta conta o painel ficaria "conectado" a um cano mudo.
+    ///
+    /// 🔒 Mesma regra de caminho de [`PosVendaApiHttp::chamar`]: relativo a
+    /// `/api/v2`, nunca endereço completo.
+    pub async fn escutar(
+        &self,
+        sessao: &Sessao,
+        caminho: &str,
+        silencio_maximo: Duration,
+        mut ao_chegar: impl FnMut(&[u8]) + Send,
+    ) -> DomainResult<()> {
+        use futures::StreamExt;
+
+        if !caminho.starts_with('/') || caminho.contains("://") || caminho.contains("..") {
+            return Err(DomainError::InvalidOperation(format!(
+                "caminho de API recusado: {caminho}"
+            )));
+        }
+        let resposta = self
+            .client
+            .get(self.url(caminho))
+            .bearer_auth(self.token(sessao).await?)
+            .header(reqwest::header::ACCEPT, "text/event-stream")
+            .timeout(TETO_DO_FLUXO)
+            .send()
+            .await
+            .map_err(rede)?;
+        if resposta.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(DomainError::AcessoRecusado);
+        }
+        if !resposta.status().is_success() {
+            return Err(DomainError::InfrastructureError(format!(
+                "o site respondeu {} ao fluxo {caminho}",
+                resposta.status().as_u16()
+            )));
+        }
+        let mut fluxo = resposta.bytes_stream();
+        loop {
+            match tokio::time::timeout(silencio_maximo, fluxo.next()).await {
+                Err(_) => {
+                    return Err(DomainError::InfrastructureError(format!(
+                        "o fluxo {caminho} ficou calado por {}s",
+                        silencio_maximo.as_secs()
+                    )))
+                }
+                Ok(None) => return Ok(()),
+                Ok(Some(Err(erro))) => return Err(rede(erro)),
+                Ok(Some(Ok(pedaco))) => ao_chegar(&pedaco),
+            }
+        }
     }
 
     /// `PUT` numa URL **assinada**, lendo o arquivo **do disco** e relatando
@@ -2140,6 +2214,115 @@ mod tests {
         assert!(
             matches!(erro, DomainError::NaoEncontradoNoSite(_)),
             "a foto que saiu do site tem desfecho próprio: {erro}"
+        );
+    }
+
+    /// O fluxo chega inteiro a quem escuta, com o token, e o fim do fluxo é
+    /// `Ok` — é o que manda a tela reconectar em vez de dar a conexão por
+    /// perdida.
+    #[tokio::test]
+    async fn o_fluxo_de_eventos_chega_a_quem_escuta_e_o_fim_e_ok() {
+        let servidor = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/whatsapp/eventos"))
+            .and(header("authorization", "Bearer tok"))
+            .and(header("accept", "text/event-stream"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(
+                        "event: pronto\ndata: 1\n\ndata: {\"tipo\":\"mensagem_recebida\"}\n\n",
+                    ),
+            )
+            .mount(&servidor)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/instagram/eventos"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&servidor)
+            .await;
+
+        let api = PosVendaApiHttp::nova(servidor.uri());
+        let mut recebido = Vec::new();
+        api.escutar(
+            &sessao_valida(),
+            "/whatsapp/eventos",
+            Duration::from_secs(5),
+            |pedaco| recebido.extend_from_slice(pedaco),
+        )
+        .await
+        .unwrap();
+        let texto = String::from_utf8(recebido).unwrap();
+        assert!(texto.starts_with("event: pronto"));
+        assert!(texto.contains("mensagem_recebida"));
+
+        // Sessão recusada tem desfecho próprio: reconectar em laço não cura.
+        let erro = api
+            .escutar(
+                &sessao_valida(),
+                "/instagram/eventos",
+                Duration::from_secs(5),
+                |_| {},
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(erro, DomainError::AcessoRecusado), "{erro}");
+
+        let erro = api
+            .escutar(
+                &sessao_valida(),
+                "https://outro/x",
+                Duration::from_secs(5),
+                |_| {},
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(erro, DomainError::InvalidOperation(_)), "{erro}");
+    }
+
+    /// 🔑 **O cano mudo.** Um servidor que responde o cabeçalho e depois se
+    /// cala (Wi-Fi que caiu sem fechar a conexão) tem de virar erro no prazo do
+    /// silêncio — sem isto o painel mostraria "Tempo real" para sempre, sem
+    /// receber nada.
+    #[tokio::test]
+    async fn o_fluxo_calado_alem_do_prazo_vira_erro() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let ouvinte = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endereco = ouvinte.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut conexao, _) = ouvinte.accept().await.unwrap();
+            let mut pedido = [0u8; 2048];
+            let _ = conexao.read(&mut pedido).await;
+            let _ = conexao
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\n\
+                      transfer-encoding: chunked\r\n\r\n\
+                      f\r\nevent: pronto\n\n\r\n",
+                )
+                .await;
+            // E nunca mais nada — nem fecha.
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            drop(conexao);
+        });
+
+        let api = PosVendaApiHttp::nova(format!("http://{endereco}"));
+        let mut recebido = Vec::new();
+        let inicio = std::time::Instant::now();
+        let erro = api
+            .escutar(
+                &sessao_valida(),
+                "/whatsapp/eventos",
+                Duration::from_millis(300),
+                |pedaco| recebido.extend_from_slice(pedaco),
+            )
+            .await
+            .unwrap_err();
+        assert!(erro.to_string().contains("calado"), "{erro}");
+        assert!(inicio.elapsed() < Duration::from_secs(5));
+        assert_eq!(
+            recebido, b"event: pronto\n\n",
+            "o que chegou antes do silêncio foi entregue"
         );
     }
 }
