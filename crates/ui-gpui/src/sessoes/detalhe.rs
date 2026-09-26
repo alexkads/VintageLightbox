@@ -1560,6 +1560,35 @@ impl Detalhe {
         cx.notify();
     }
 
+    /// Um gesto de classificação (nota, `P`, `X`) **só nestas fotos** (ids da
+    /// grade), sem mexer na seleção.
+    ///
+    /// 🔑 **É o Comparar da Revelação** (`⇧C`, dono, 2026-09-26): lá a nota e
+    /// as teclas valem para a foto escolhida, que quase nunca é a seleção da
+    /// grade. Reescrever os três gestos por id seria a segunda cópia das regras
+    /// deles — os avisos, a levada que exige nota, o resgate da nuvem. Então a
+    /// seleção é trocada pelos ids, o gesto de sempre roda, e ela volta como
+    /// estava: os três calculam os alvos na hora, antes de qualquer resposta.
+    ///
+    /// ⚠️ Só as fotos que o recorte mostra: é por posição na grade que a
+    /// seleção existe.
+    pub fn nas_fotos<R>(
+        &mut self,
+        ids: &[String],
+        cx: &mut Context<Self>,
+        gesto: impl FnOnce(&mut Self, &mut Context<Self>) -> R,
+    ) -> R {
+        let antes = self.selecao.clone();
+        self.selecao.limpar_tudo();
+        for posicao in ids.iter().filter_map(|id| self.acervo.posicao_de(id)) {
+            self.selecao.marcar(posicao);
+        }
+        let feito = gesto(self, cx);
+        self.selecao = antes;
+        cx.notify();
+        feito
+    }
+
     /// As teclas `1`–`5` dão a nota; o `0` **tira** — e só isso.
     ///
     /// # 🔄 O `0` deixou de apagar foto (contrato C22, 2026-09-20)
@@ -8322,6 +8351,38 @@ mod testes {
                 assert_eq!(nota_na_grade(tela, "f2"), Some(4));
             })
             .expect("a janela deve estar aberta");
+    }
+
+    /// 🔑 **O Comparar classifica a escolhida, e não a seleção da grade.**
+    ///
+    /// A nota da Revelação no `⇧C` vai por `nas_fotos`: só a foto pedida recebe
+    /// o `PATCH`, e as marcadas continuam marcadas — são o lote que o operador
+    /// montou para outra coisa.
+    #[gpui::test]
+    fn nas_fotos_classifica_so_a_pedida_e_devolve_a_selecao(cx: &mut TestAppContext) {
+        let (janela, publicador) = janela(
+            cx,
+            vec![
+                foto("a", EstadoDaFotoNoSite::Disponivel, Some(1)),
+                foto("b", EstadoDaFotoNoSite::Disponivel, Some(1)),
+                foto("c", EstadoDaFotoNoSite::Disponivel, Some(1)),
+            ],
+        );
+        entrar(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.marcar_ids(&["a".to_string(), "c".to_string()], cx);
+                tela.nas_fotos(&["b".to_string()], cx, |tela, cx| tela.dar_nota(4, cx));
+                assert_eq!(tela.marcadas(), ["a", "c"], "a seleção volta como estava");
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        let negociadas = publicador.negociadas();
+        assert_eq!(negociadas.len(), 1, "{negociadas:?}");
+        assert_eq!(negociadas[0].0, "b");
+        assert_eq!(negociadas[0].1.nota, Some(Some(4)));
     }
 
     /// 🚨 **A releitura pedida antes do gesto não apaga a estrela.**
