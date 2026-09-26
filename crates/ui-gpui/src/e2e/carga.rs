@@ -40,7 +40,7 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use domain::services::pos_venda::EstadoDaFotoNoSite;
-use gpui::TestAppContext;
+use gpui_kit::TestAppContext;
 
 use super::{abrir_o_ensaio, do_site, local, Cenario};
 
@@ -64,7 +64,7 @@ const VOLTA: Duration = Duration::from_millis(150);
 /// Um quadro a 60 fps: a tecla tem de caber aqui para parecer instantânea.
 const UM_QUADRO: Duration = Duration::from_micros(16_700);
 
-#[gpui::test]
+#[gpui_kit::test]
 fn importacao_longa_com_o_r2_lento_nao_trava_a_triagem(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(
         cx,

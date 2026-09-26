@@ -18,10 +18,8 @@
 
 use std::sync::Arc;
 
-use gpui::{
-    px, size, AnyWindowHandle, App, AppContext, Application, Bounds, WindowBounds, WindowOptions,
-};
-use gpui_component::Root;
+use gpui_kit::component::Root;
+use gpui_kit::{px, size, AnyWindowHandle, App, AppContext, Bounds, WindowBounds, WindowOptions};
 use infrastructure::cache::preview_manager::PreviewManager;
 use infrastructure::paths::AppPaths;
 
@@ -417,7 +415,7 @@ async fn main() {
             tokio::runtime::Handle::current(),
         ));
 
-    Application::new()
+    gpui_kit::application()
         .with_assets(ui_gpui::recursos::Recursos)
         // Com o app na bandeja, o ícone do Dock (ou abri-lo de novo) traz a janela.
         .reabrir_da_bandeja()
@@ -426,7 +424,7 @@ async fn main() {
             // registro de temas e os estados globais de campo de texto, menu,
             // diálogo e lista. Sem ele, o primeiro componente do `gpui-component`
             // que a tela usar entra num `cx.global::<...>()` que não existe.
-            gpui_component::init(cx);
+            gpui_kit::init(cx);
             // Devolve à GPU as texturas das imagens que saíram de uso — sem
             // isso a memória de vídeo só cresce (`imagem::coleta`).
             ui_gpui::imagem::coleta::ligar(cx);
@@ -459,7 +457,7 @@ async fn main() {
                         // pedido no GPUI 0.2.2; os outros são maximizados logo
                         // abaixo, depois de a janela existir.
                         window_bounds: Some(WindowBounds::Maximized(bounds)),
-                        titlebar: Some(gpui::TitlebarOptions {
+                        titlebar: Some(gpui_kit::TitlebarOptions {
                             title: Some(ui_gpui::menu::NOME.into()),
                             ..Default::default()
                         }),
@@ -530,7 +528,7 @@ async fn main() {
             // processo. O porquê do critério ser a janela principal, e não "sobrou
             // alguma janela", está em `ui_gpui::encerramento`.
             let principal = AnyWindowHandle::from(principal);
-            cx.on_window_closed(move |cx| {
+            cx.on_window_closed(move |cx, _janela| {
                 if ui_gpui::encerramento::deve_encerrar(&principal, &cx.windows()) {
                     cx.quit();
                 }

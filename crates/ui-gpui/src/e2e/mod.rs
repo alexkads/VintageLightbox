@@ -78,10 +78,10 @@ use domain::entities::Preset;
 use domain::services::pos_venda::{
     EstadoDaFotoNoSite, Estudio as EstudioDoSite, FotoDaGaleria, GaleriaDoPainel, Produto, Sessao,
 };
-use gpui::{
+use gpui_kit::component::Root;
+use gpui_kit::{
     AppContext as _, Context, Entity, TestAppContext, VisualTestContext, Window, WindowHandle,
 };
-use gpui_component::Root;
 use image::{DynamicImage, Rgba, RgbaImage};
 use infrastructure::cache::preview_manager::PreviewManager;
 use serde_json::{json, Value};
@@ -387,7 +387,7 @@ pub(super) struct Estudio {
 /// Abre o app **na porta**, sem conta — o passo zero de todo cenário.
 pub(super) fn abrir_o_app(cx: &mut TestAppContext, cenario: Cenario) -> Estudio {
     cx.update(|cx| {
-        gpui_component::init(cx);
+        gpui_kit::init(cx);
         crate::tema::aplicar(crate::tema::Escolha::Claro, None, cx);
         crate::app::init(cx);
         crate::importacao::tela::init(cx);
@@ -637,8 +637,8 @@ impl Estudio {
     /// Espaço e o `\` da Revelação fazem coisas diferentes ao soltar.
     pub fn soltar(&self, cx: &mut TestAppContext, tecla: &str) {
         let mut visual = VisualTestContext::from_window(self.raiz.into(), cx);
-        visual.simulate_event(gpui::KeyUpEvent {
-            keystroke: gpui::Keystroke::parse(tecla).expect("uma tecla válida"),
+        visual.simulate_event(gpui_kit::KeyUpEvent {
+            keystroke: gpui_kit::Keystroke::parse(tecla).expect("uma tecla válida"),
         });
         cx.run_until_parked();
     }

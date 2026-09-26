@@ -14,7 +14,7 @@
 
 use std::path::{Path, PathBuf};
 
-use gpui_component::dock::DockAreaState;
+use gpui_kit::component::dock::DockAreaState;
 use infrastructure::paths::AppPaths;
 
 /// A versão do arranjo.

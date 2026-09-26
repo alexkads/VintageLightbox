@@ -3,7 +3,7 @@
 use biblioteca_core::acervo::{Estado, Filtro};
 use biblioteca_core::negociacao::Tipo;
 use domain::services::pos_venda::{EstadoNoBalcao, MudancaDaGaleria, Produto};
-use gpui::{Modifiers, TestAppContext, VisualTestContext};
+use gpui_kit::{Modifiers, TestAppContext, VisualTestContext};
 
 use super::{abrir_o_app, abrir_o_ensaio, local, Cenario, Estudio, GALERIA};
 use crate::app::Tela;
@@ -27,7 +27,7 @@ fn clicar_com(e: &Estudio, cx: &mut TestAppContext, alvo: &'static str, teclas: 
 /// A marcação feita na grade e na tira alimenta o mesmo editor de lote.
 /// Os controles são acionados pela janela; asserções inspecionam somente o
 /// contrato de PATCH recebido pelo site de memória.
-#[gpui::test]
+#[gpui_kit::test]
 fn faixa_e_preco_em_lote_pela_grade_e_filmstrip(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(
         cx,
@@ -138,7 +138,7 @@ fn faixa_e_preco_em_lote_pela_grade_e_filmstrip(cx: &mut TestAppContext) {
 
     e.app(cx, |app, window, cx| app.fechar_balcao(window, cx));
     let visual = VisualTestContext::from_window(e.raiz.into(), cx);
-    visual.simulate_resize(gpui::size(gpui::px(1600.), gpui::px(1100.)));
+    visual.simulate_resize(gpui_kit::size(gpui_kit::px(1600.), gpui_kit::px(1100.)));
     clicar(&e, cx, "lote-apagar");
     assert!(e.site.tiradas().is_empty(), "apagar exige confirmação");
     clicar(&e, cx, "apagar-confirmar");
@@ -152,7 +152,7 @@ fn faixa_e_preco_em_lote_pela_grade_e_filmstrip(cx: &mut TestAppContext) {
 /// galeria**. Quem importa mais fotos dentro da sessão espera o mesmo visual — e
 /// era o que não acontecia: o serviço da receita só atendia o assistente, e a
 /// leva seguinte entrava crua (achado do dono, 17/set/2026).
-#[gpui::test]
+#[gpui_kit::test]
 fn a_foto_importada_na_sessao_recebe_a_receita_padrao(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(
         cx,
@@ -191,7 +191,7 @@ fn a_foto_importada_na_sessao_recebe_a_receita_padrao(cx: &mut TestAppContext) {
 /// assim que entra no ensaio. A faixa da barra vale para o que **entrar depois**
 /// dela — como no site, onde ela é escolhida antes de arrastar os arquivos. Para
 /// a que já subiu, a faixa é uma mudança da foto, no painel.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_faixa_da_barra_sobe_com_a_foto_que_entra_depois(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     e.esperar(cx);
@@ -223,7 +223,7 @@ fn a_faixa_da_barra_sobe_com_a_foto_que_entra_depois(cx: &mut TestAppContext) {
 /// sistema, o lote vai para o catálogo **local** com o carimbo do ensaio e
 /// **sobe sozinho** (C20), a nota marca a foto (C22), o `X` a rejeita sem
 /// apagar nada (C21) e o `B` leva a do site.
-#[gpui::test]
+#[gpui_kit::test]
 fn importar_classificar_e_levar_pelas_teclas(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
 
@@ -385,7 +385,7 @@ fn no_catalogo(e: &Estudio, cx: &mut TestAppContext, id: &str) -> (i32, Option<i
 /// nota, e o gesto mais comum da sessão — dar nota e rejeitar durante a
 /// importação — deixava de ter efeito. Aqui as teclas de verdade passam pela
 /// grade da sessão até o catálogo, e o cenário afirma o que **ficou gravado**.
-#[gpui::test]
+#[gpui_kit::test]
 fn classificar_e_rejeitar_a_foto_que_ainda_nao_subiu(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     let id = "id-DSC_101.jpg";
@@ -450,7 +450,7 @@ fn classificar_e_rejeitar_a_foto_que_ainda_nao_subiu(cx: &mut TestAppContext) {
 
 /// 🔑 **A seleção em lote classifica e rejeita todas de uma vez**, na foto
 /// local — uma tecla, um desfecho (`⌘A` e depois a tecla).
-#[gpui::test]
+#[gpui_kit::test]
 fn classificar_e_rejeitar_o_lote_de_fotos_locais(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     e.detalhe(cx, |tela, _w, cx| {
@@ -480,7 +480,7 @@ fn classificar_e_rejeitar_o_lote_de_fotos_locais(cx: &mut TestAppContext) {
 ///
 /// A classificada sobe com a nota dela; a sem nota sobe sem nota — o `0` do
 /// catálogo nunca atravessa como classificação —, e a rejeitada não sobe.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_subida_leva_a_nota_e_segura_a_rejeitada(cx: &mut TestAppContext) {
     let e = abrir_o_app(cx, Cenario::default());
     e.entrar_na_conta(cx);
@@ -533,7 +533,7 @@ fn a_subida_leva_a_nota_e_segura_a_rejeitada(cx: &mut TestAppContext) {
 /// terminar a subida, a releitura do catálogo tirava a foto das locais (ela
 /// ganhou id remoto), mas ninguém relia a galeria do site. A grade ia a
 /// "Todas 0", e o operador apertava `3` e `X` sobre nada.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_foto_que_subiu_continua_na_grade_e_aceita_a_nota(cx: &mut TestAppContext) {
     let e = abrir_o_app(cx, Cenario::default());
     let acervo = e.acervo.clone();
@@ -589,7 +589,7 @@ fn a_foto_que_subiu_continua_na_grade_e_aceita_a_nota(cx: &mut TestAppContext) {
 /// ensaio sobe desta máquina e a cópia local continua (C20.1).
 ///
 /// E tirar a rejeição a sobe de novo, sozinha.
-#[gpui::test]
+#[gpui_kit::test]
 fn rejeitar_a_da_nuvem_com_copia_aqui_e_desfazer(cx: &mut TestAppContext) {
     let e = abrir_o_app(cx, Cenario::default());
     // A cópia daqui da foto `d` do site.
@@ -675,7 +675,7 @@ fn rejeitar_a_da_nuvem_com_copia_aqui_e_desfazer(cx: &mut TestAppContext) {
 /// ❌ **Rejeitar a foto da nuvem sem cópia aqui: o bruto vem antes**
 /// (2026-09-21, o resgate de 18/09 readaptado). A nuvem só perde a foto depois
 /// de o arquivo estar gravado e catalogado aqui; sem o bruto, nada sai.
-#[gpui::test]
+#[gpui_kit::test]
 fn rejeitar_a_da_nuvem_sem_copia_traz_o_bruto_antes(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(
         cx,
@@ -728,7 +728,7 @@ fn rejeitar_a_da_nuvem_sem_copia_traz_o_bruto_antes(cx: &mut TestAppContext) {
 /// 🎬 **Recortes, zoom e marcação**: os chips recortam, a seleção limpa ao
 /// trocar de recorte, `⌘A`/`⌘D` marcam e desmarcam, as setas andam, e o zoom
 /// da grade anda dentro dos limites.
-#[gpui::test]
+#[gpui_kit::test]
 fn recortes_zoom_e_marcacao_da_grade(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
 
@@ -775,7 +775,10 @@ fn recortes_zoom_e_marcacao_da_grade(cx: &mut TestAppContext) {
     });
     // Numa janela estreita a grade tem mais de uma linha, e ↓ desce uma
     // linha inteira — o passo é o número de colunas que cabem.
-    cx.simulate_window_resize(e.raiz.into(), gpui::size(gpui::px(760.), gpui::px(700.)));
+    cx.simulate_window_resize(
+        e.raiz.into(),
+        gpui_kit::size(gpui_kit::px(760.), gpui_kit::px(700.)),
+    );
     cx.run_until_parked();
     let colunas = e.detalhe(cx, |tela, window, _cx| tela.colunas_visiveis(window));
     assert!(
@@ -816,7 +819,7 @@ fn recortes_zoom_e_marcacao_da_grade(cx: &mut TestAppContext) {
 /// 🤝 **O acerto de uma foto volta preenchido** — "Negociação desta foto" do
 /// painel, como o `NegociacaoDaFoto` do site: salvar fecha o diálogo, a sessão
 /// relê, e reabrir mostra o tipo, o site e o cupom gravados, com "Remover".
-#[gpui::test]
+#[gpui_kit::test]
 fn o_acerto_da_foto_volta_preenchido(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
 
@@ -855,7 +858,7 @@ fn o_acerto_da_foto_volta_preenchido(cx: &mut TestAppContext) {
 /// que sumiu, e a nota, o `B` e as setas morriam até o próximo clique (dono,
 /// 2026-09-26). Cada caminho de saída é conferido pela tecla, e não pelo foco:
 /// é a tecla que o operador sente.
-#[gpui::test]
+#[gpui_kit::test]
 fn todo_jeito_de_fechar_a_negociacao_devolve_as_teclas(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     let aditivo = Modifiers {
@@ -878,7 +881,7 @@ fn todo_jeito_de_fechar_a_negociacao_devolve_as_teclas(cx: &mut TestAppContext) 
             let veu = visual
                 .debug_bounds("balcao-veu")
                 .expect("o véu está na tela");
-            let canto = veu.origin + gpui::point(gpui::px(8.), gpui::px(8.));
+            let canto = veu.origin + gpui_kit::point(gpui_kit::px(8.), gpui_kit::px(8.));
             visual.simulate_click(canto, Modifiers::none());
             visual.run_until_parked();
         }),
@@ -920,12 +923,12 @@ fn todo_jeito_de_fechar_a_negociacao_devolve_as_teclas(cx: &mut TestAppContext) 
 /// ([`Estudio::teclas_vivas`]), e a nota tem de chegar à foto.
 ///
 /// Diálogo novo na galeria entra nesta lista.
-#[gpui::test]
+#[gpui_kit::test]
 fn todo_dialogo_da_galeria_devolve_as_teclas(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     // O "Apagar do site" fica no fim da coluna do lote.
     VisualTestContext::from_window(e.raiz.into(), cx)
-        .simulate_resize(gpui::size(gpui::px(1600.), gpui::px(1100.)));
+        .simulate_resize(gpui_kit::size(gpui_kit::px(1600.), gpui_kit::px(1100.)));
     let aditivo = Modifiers {
         #[cfg(target_os = "macos")]
         platform: true,
@@ -972,7 +975,7 @@ fn todo_dialogo_da_galeria_devolve_as_teclas(cx: &mut TestAppContext) {
 
 /// 🎬 **Negociar e imprimir as marcadas**: os botões da barra levam a seleção
 /// da grade ao diálogo do balcão — pelo id do site, direto — e à folha.
-#[gpui::test]
+#[gpui_kit::test]
 fn negociar_e_imprimir_as_marcadas(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
 
@@ -1039,7 +1042,7 @@ fn negociar_e_imprimir_as_marcadas(cx: &mut TestAppContext) {
 
 /// 🎬 **Exportar**: o botão da barra abre o modal com a grade, a pasta vem do
 /// seletor, e o lote vai para o exportador — nada de pasta real.
-#[gpui::test]
+#[gpui_kit::test]
 fn exportar_pelo_botao_da_barra(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     let pasta = tempfile::TempDir::new().expect("pasta de destino");
@@ -1072,7 +1075,7 @@ fn exportar_pelo_botao_da_barra(cx: &mut TestAppContext) {
 
 /// 🎬 **O fim da sessão**: editar os dados do cliente, copiar o link (que vai
 /// para a área de transferência) e avisar o cliente.
-#[gpui::test]
+#[gpui_kit::test]
 fn dados_do_cliente_link_e_aviso(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
 
@@ -1141,7 +1144,7 @@ fn dados_do_cliente_link_e_aviso(cx: &mut TestAppContext) {
 
 /// 🎬 **A sessão sem e-mail**: o link pede o contato, grava o e-mail e segue o
 /// gesto — sem um segundo clique.
-#[gpui::test]
+#[gpui_kit::test]
 fn o_link_de_uma_sessao_sem_email_pede_o_contato(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     e.app(cx, |app, _w, cx| app.entrar_na_sessao("g2".into(), cx));
@@ -1165,7 +1168,7 @@ fn o_link_de_uma_sessao_sem_email_pede_o_contato(cx: &mut TestAppContext) {
 
 /// 🎬 **`Esc` na galeria não mexe na grade.** O recorte e a seleção que o
 /// operador escolheu ficam — o `Esc` é da Revelação e das ferramentas dela.
-#[gpui::test]
+#[gpui_kit::test]
 fn esc_na_galeria_nao_troca_o_recorte_nem_a_selecao(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     // A tira da Revelação tem outro recorte e outra seleção.
@@ -1194,7 +1197,7 @@ fn esc_na_galeria_nao_troca_o_recorte_nem_a_selecao(cx: &mut TestAppContext) {
 /// 🎬 **"Importar fotos" abre o modal do quadro**, o mesmo da etapa 2 da nova
 /// sessão (dono, 22/set/2026). Esc e "Cancelar" fecham sem importar nada, e o
 /// "Escolher fotos" do modal é que traz as fotos.
-#[gpui::test]
+#[gpui_kit::test]
 fn importar_fotos_abre_o_modal_e_esc_ou_cancelar_fecham_sem_importar(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     let antes = e.detalhe(cx, |tela, _w, _cx| tela.ids_visiveis().len());
@@ -1235,7 +1238,7 @@ fn importar_fotos_abre_o_modal_e_esc_ou_cancelar_fecham_sem_importar(cx: &mut Te
 /// foco ela mostra os Atalhos; focar uma foto não muda as colunas da grade; o
 /// botão do canto a recolhe numa faixa e a faixa a abre de volta — tudo pelo
 /// clique de verdade.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_coluna_da_foto_fica_reservada_mostra_os_atalhos_e_se_recolhe(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     let sem_foco = e.detalhe(cx, |tela, w, _cx| {
@@ -1280,7 +1283,7 @@ fn a_coluna_da_foto_fica_reservada_mostra_os_atalhos_e_se_recolhe(cx: &mut TestA
 /// O botão do cabeçalho abre o modal por cima da galeria; a recusa do e-mail
 /// aparece embaixo do campo dele; "Cancelar" fecha sem gravar — tudo pelo
 /// clique de verdade.
-#[gpui::test]
+#[gpui_kit::test]
 fn os_dados_do_cliente_abrem_num_modal_e_a_recusa_fica_no_campo(cx: &mut TestAppContext) {
     use biblioteca_core::dados_do_cliente::Campo;
     let e = abrir_o_ensaio(cx, Cenario::default());
@@ -1318,7 +1321,7 @@ fn os_dados_do_cliente_abrem_num_modal_e_a_recusa_fica_no_campo(cx: &mut TestApp
 /// 24/set/2026). O zoom diz quantas colunas cabem; a célula estica até a
 /// última encostar na borda — sem a sobra à direita que mudava a cada passo
 /// do zoom.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_grade_da_sessao_fecha_a_linha_na_largura_dela(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     // Dois quadros: o primeiro mede a grade, o segundo desenha com a medida.

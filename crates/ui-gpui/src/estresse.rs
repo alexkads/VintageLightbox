@@ -38,7 +38,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use adapters::view_models::PhotoViewModel;
-use gpui::TestAppContext;
+use gpui_kit::TestAppContext;
 use image::{DynamicImage, Rgba, RgbaImage};
 use infrastructure::cache::preview_manager::PreviewManager;
 use tempfile::TempDir;
@@ -642,11 +642,11 @@ fn previews_descartaveis() -> (Arc<PreviewManager>, TempDir) {
 /// então o cenário prende as duas coisas: classificar 10.000 não faz pedido
 /// nenhum, e o ensaio de 10.000 sobe de três em três, com o contador que prende
 /// o G9 voltando a zero.
-#[gpui::test]
+#[gpui_kit::test]
 fn estresse_a_biblioteca_com_dez_mil_fotos(cx: &mut TestAppContext) {
     const N: usize = 10_000;
     let (previews, _dir) = previews_descartaveis();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let publicador = Arc::new(PublicadorDeMentira::default());
     let fotos: Vec<PhotoViewModel> = (0..N).map(|i| foto(i, false)).collect();
     let memoria_antes = memoria_em_mb();
@@ -825,16 +825,20 @@ fn estresse_a_biblioteca_com_dez_mil_fotos(cx: &mut TestAppContext) {
         .expect("a janela aberta");
 
     // E desenhar a grade inteira: só as linhas visíveis custam.
-    let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
-    let tamanho = gpui::size(gpui::px(1600.), gpui::px(1000.));
-    visual.draw(gpui::Point::default(), tamanho, |_w, _cx| gpui::Empty);
+    let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+    let tamanho = gpui_kit::size(gpui_kit::px(1600.), gpui_kit::px(1000.));
+    visual.draw(gpui_kit::Point::default(), tamanho, |_w, _cx| {
+        gpui_kit::Empty
+    });
     let quadros = 20;
     let inicio = Instant::now();
     for _ in 0..quadros {
         janela
             .update(&mut visual, |_app, _w, cx| cx.notify())
             .expect("a janela aberta");
-        visual.draw(gpui::Point::default(), tamanho, |_w, _cx| gpui::Empty);
+        visual.draw(gpui_kit::Point::default(), tamanho, |_w, _cx| {
+            gpui_kit::Empty
+        });
     }
     let por_quadro = inicio.elapsed() / quadros;
     relatar(
@@ -855,7 +859,7 @@ fn revelacao_com_lote(
     cx: &mut TestAppContext,
     n: usize,
     publicador: Arc<PublicadorDeMentira>,
-) -> (gpui::WindowHandle<Aplicativo>, TempDir) {
+) -> (gpui_kit::WindowHandle<Aplicativo>, TempDir) {
     revelacao_com_lote_e_acervo(cx, n, publicador, Arc::new(AcervoDeMentira::default()))
 }
 
@@ -869,7 +873,7 @@ fn revelacao_com_lote_e_acervo(
     n: usize,
     publicador: Arc<PublicadorDeMentira>,
     acervo: Arc<AcervoDeMentira>,
-) -> (gpui::WindowHandle<Aplicativo>, TempDir) {
+) -> (gpui_kit::WindowHandle<Aplicativo>, TempDir) {
     use crate::revelacao::sincronizacao::Escolha;
 
     let (previews, dir) = previews_descartaveis();
@@ -877,7 +881,7 @@ fn revelacao_com_lote_e_acervo(
     previews
         .save_preview("id-00000", &cinza(16))
         .expect("gravar preview");
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let fotos: Vec<PhotoViewModel> = (0..n).map(|i| foto(i, true)).collect();
     let janela = cx.add_window(move |window, cx| {
         Aplicativo::ja_dentro(
@@ -915,7 +919,7 @@ fn revelacao_com_lote_e_acervo(
 /// o canto dos envios e a bandeja. **Elas não podem discordar.**
 fn conferir_os_contadores(
     app: &Aplicativo,
-    cx: &gpui::App,
+    cx: &gpui_kit::App,
     esperadas: usize,
     total: usize,
     respondidas: usize,
@@ -946,7 +950,7 @@ fn conferir_os_contadores(
 /// janela no meio. Os quatro números que falam do envio — o contador da raiz, o
 /// "Salvando k/N" do botão, a bandeja e a decisão do G9 — têm de andar juntos,
 /// nunca negativos, e zerar no fim; e a janela escondida tem de poder sair.
-#[gpui::test]
+#[gpui_kit::test]
 fn estresse_salvar_trezentas_na_galeria_com_desordem_e_falhas(cx: &mut TestAppContext) {
     const N: usize = 300;
     let publicador = Arc::new(PublicadorDeMentira {
@@ -1129,7 +1133,7 @@ fn estresse_salvar_trezentas_na_galeria_com_desordem_e_falhas(cx: &mut TestAppCo
 /// O que ele prende, além dos números: nenhuma foto sobe duas vezes de graça,
 /// o teto de [`EM_VOO`] vale o tempo todo (é ele que segura a memória), e os
 /// contadores voltam a zero mesmo com recuo e repetição no meio.
-#[gpui::test]
+#[gpui_kit::test]
 fn estresse_o_lote_sobrevive_a_rede_ruim(cx: &mut TestAppContext) {
     const N: usize = 400;
     let publicador = Arc::new(PublicadorDeMentira {
@@ -1276,7 +1280,7 @@ fn estresse_o_lote_sobrevive_a_rede_ruim(cx: &mut TestAppContext) {
 /// desistia em 30 s por resposta: a que chegasse depois ficava no canal sem
 /// ninguém para lê-la — o botão preso em "Salvando 0/1", o salvar recusando
 /// qualquer clique novo, e o G9 segurando a janela escondida para sempre.
-#[gpui::test]
+#[gpui_kit::test]
 fn estresse_a_resposta_atrasada_ainda_zera_o_contador(cx: &mut TestAppContext) {
     let publicador = Arc::new(PublicadorDeMentira {
         demorada: true,
@@ -1337,7 +1341,7 @@ fn sessao_com(
     cx: &mut TestAppContext,
     n: usize,
 ) -> (
-    gpui::WindowHandle<Aplicativo>,
+    gpui_kit::WindowHandle<Aplicativo>,
     Arc<PublicadorDeMentira>,
     TempDir,
     Duration,
@@ -1345,7 +1349,7 @@ fn sessao_com(
     use domain::services::pos_venda::GaleriaDoPainel;
 
     let (previews, dir) = previews_descartaveis();
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let publicador = Arc::new(PublicadorDeMentira {
         galerias: std::sync::Mutex::new(vec![GaleriaDoPainel {
             id: "g1".into(),
@@ -1408,12 +1412,14 @@ fn sessao_com(
 /// lado), e um quadro atropelado pelo sistema não diz nada sobre a grade.
 fn quadro_da_sessao(
     cx: &mut TestAppContext,
-    janela: gpui::WindowHandle<Aplicativo>,
+    janela: gpui_kit::WindowHandle<Aplicativo>,
     quadros: usize,
 ) -> Duration {
-    let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
-    let tamanho = gpui::size(gpui::px(1600.), gpui::px(1000.));
-    visual.draw(gpui::Point::default(), tamanho, |_w, _cx| gpui::Empty);
+    let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+    let tamanho = gpui_kit::size(gpui_kit::px(1600.), gpui_kit::px(1000.));
+    visual.draw(gpui_kit::Point::default(), tamanho, |_w, _cx| {
+        gpui_kit::Empty
+    });
     let mut tempos: Vec<Duration> = (0..quadros)
         .map(|_| {
             let inicio = Instant::now();
@@ -1422,7 +1428,9 @@ fn quadro_da_sessao(
                     app.detalhe.update(cx, |_d, cx| cx.notify())
                 })
                 .expect("a janela aberta");
-            visual.draw(gpui::Point::default(), tamanho, |_w, _cx| gpui::Empty);
+            visual.draw(gpui_kit::Point::default(), tamanho, |_w, _cx| {
+                gpui_kit::Empty
+            });
             inicio.elapsed()
         })
         .collect();
@@ -1449,12 +1457,12 @@ const TETO_DE_MINIATURAS: usize = 160;
 /// passa do orçamento (medido: 30 ms). Por isso há duas entradas: a da suíte,
 /// com 300 fotos, confere pedidos, contadores e o teto de memória sem afirmar
 /// tempo; a pesada (`--ignored`) acrescenta 2.000 e 10.000 e o tempo.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_grade_da_sessao_tem_teto_e_contas_certas(cx: &mut TestAppContext) {
     percorrer_a_sessao(cx, &[300], false);
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 #[ignore = "pesado: 10.000 fotos e tempo de quadro afirmado — rode com --ignored --nocapture"]
 fn estresse_a_grade_da_sessao(cx: &mut TestAppContext) {
     percorrer_a_sessao(cx, &[300, 2_000, 10_000], true);
@@ -1607,7 +1615,7 @@ fn percorrer_a_sessao(cx: &mut TestAppContext, tamanhos: &[usize], afirmar_tempo
 /// 3. **a seleção do operador sobrevive às duzentas** — era `limpar_tudo` a
 ///    cada resposta;
 /// 4. **as releituras são poucas** — agrupadas pelo respiro, e não uma por foto.
-#[gpui::test]
+#[gpui_kit::test]
 fn estresse_a_galeria_de_pe_durante_duzentas_revelacoes(cx: &mut TestAppContext) {
     const N: usize = 300;
     const LOTE: usize = 200;
@@ -1968,7 +1976,7 @@ fn estresse_o_motor_em_vinte_e_quatro_mp() {
 /// ```bash
 /// cargo test --profile carga -p ui-gpui --lib -- --ignored --nocapture medir_as_partes_do_quadro
 /// ```
-#[gpui::test]
+#[gpui_kit::test]
 #[ignore = "medição: rodar à mão, no perfil carga"]
 fn medir_as_partes_do_quadro(cx: &mut TestAppContext) {
     let (janela, _publicador, _dir, _abrir) = sessao_com(cx, 300);

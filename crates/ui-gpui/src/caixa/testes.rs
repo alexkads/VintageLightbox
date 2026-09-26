@@ -13,7 +13,7 @@ use domain::services::pos_venda::{
     EstadoNoBalcao, MudancaDaFoto, MudancaDaGaleria, NovaGaleria, Sessao,
 };
 use domain::value_objects::CropSettings;
-use gpui::{Entity, TestAppContext, WindowHandle};
+use gpui_kit::{Entity, TestAppContext, WindowHandle};
 use infrastructure::gpu_adjustments::Ajustes;
 use serde_json::{json, Value};
 
@@ -225,17 +225,17 @@ impl Publicador for PublicadorDoCaixa {
 /// A janela com o `Root` por baixo, como no app: o campo de texto do
 /// `gpui-component` o procura ao ganhar o foco.
 struct Janela {
-    raiz: WindowHandle<gpui_component::Root>,
+    raiz: WindowHandle<gpui_kit::component::Root>,
     tela: Entity<Caixa>,
 }
 
 fn janela(cx: &mut TestAppContext, publicador: Arc<PublicadorDoCaixa>) -> Janela {
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let mut tela = None;
     let raiz = cx.add_window(|window, cx| {
         let caixa = cx.new(|cx| Caixa::nova(publicador, window, cx));
         tela = Some(caixa.clone());
-        gpui_component::Root::new(caixa, window, cx)
+        gpui_kit::component::Root::new(caixa, window, cx)
     });
     let janela = Janela {
         raiz,
@@ -288,7 +288,7 @@ fn aberta_na_sessao(cx: &mut TestAppContext, publicador: &Arc<PublicadorDoCaixa>
     j
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn a_carga_escolhe_o_estudio_filtra_ordena_e_monta_o_cupom(cx: &mut TestAppContext) {
     let publicador = Arc::new(PublicadorDoCaixa::default());
     let j = aberta_na_sessao(cx, &publicador);
@@ -314,7 +314,7 @@ fn a_carga_escolhe_o_estudio_filtra_ordena_e_monta_o_cupom(cx: &mut TestAppConte
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn a_sessao_de_outro_estudio_e_a_excluida_viram_aviso(cx: &mut TestAppContext) {
     let publicador = Arc::new(PublicadorDoCaixa::default());
     let j = janela(cx, publicador.clone());
@@ -347,7 +347,7 @@ fn a_sessao_de_outro_estudio_e_a_excluida_viram_aviso(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn o_caixa_que_nao_responde_fica_indisponivel_e_as_teclas_recusam(cx: &mut TestAppContext) {
     let publicador = Arc::new(PublicadorDoCaixa {
         caixa_falha: true,
@@ -364,7 +364,7 @@ fn o_caixa_que_nao_responde_fica_indisponivel_e_as_teclas_recusam(cx: &mut TestA
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn f8_com_o_caixa_fechado_abre_e_grava_o_fundo(cx: &mut TestAppContext) {
     let publicador = Arc::new(PublicadorDoCaixa::default());
     let j = janela(cx, publicador.clone());
@@ -404,7 +404,7 @@ fn f8_com_o_caixa_fechado_abre_e_grava_o_fundo(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn f4_pede_os_nomes_antes_e_a_venda_sai_como_o_backend_espera(cx: &mut TestAppContext) {
     let publicador = Arc::new(PublicadorDoCaixa::default());
     let j = aberta_na_sessao(cx, &publicador);
@@ -473,7 +473,7 @@ fn f4_pede_os_nomes_antes_e_a_venda_sai_como_o_backend_espera(cx: &mut TestAppCo
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn a_sangria_confere_e_grava(cx: &mut TestAppContext) {
     let publicador = Arc::new(PublicadorDoCaixa::default());
     let j = aberta_na_sessao(cx, &publicador);
@@ -503,7 +503,7 @@ fn a_sangria_confere_e_grava(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn o_estorno_devolve_e_des_sinaliza_foto_a_foto(cx: &mut TestAppContext) {
     let publicador = Arc::new(PublicadorDoCaixa::default());
     let j = aberta_na_sessao(cx, &publicador);
@@ -539,7 +539,7 @@ fn o_estorno_devolve_e_des_sinaliza_foto_a_foto(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn o_estorno_sem_foto_escolhida_nao_sai(cx: &mut TestAppContext) {
     let publicador = Arc::new(PublicadorDoCaixa::default());
     let j = aberta_na_sessao(cx, &publicador);
@@ -554,7 +554,7 @@ fn o_estorno_sem_foto_escolhida_nao_sai(cx: &mut TestAppContext) {
     assert!(publicador.gravacoes().is_empty());
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn o_fechamento_conta_as_cegas_confere_e_so_depois_fecha(cx: &mut TestAppContext) {
     let publicador = Arc::new(PublicadorDoCaixa::default());
     let j = aberta_na_sessao(cx, &publicador);
@@ -590,7 +590,7 @@ fn o_fechamento_conta_as_cegas_confere_e_so_depois_fecha(cx: &mut TestAppContext
     assert_eq!(publicador.gravacoes().len(), 2);
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn as_teclas_f_esperam_com_dialogo_aberto(cx: &mut TestAppContext) {
     let publicador = Arc::new(PublicadorDoCaixa::default());
     let j = aberta_na_sessao(cx, &publicador);
@@ -608,7 +608,7 @@ fn as_teclas_f_esperam_com_dialogo_aberto(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn abrir_sessao_pede_a_galeria_a_raiz(cx: &mut TestAppContext) {
     let publicador = Arc::new(PublicadorDoCaixa::default());
     let j = aberta_na_sessao(cx, &publicador);

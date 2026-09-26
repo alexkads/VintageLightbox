@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 
-use gpui::RenderImage;
+use gpui_kit::RenderImage;
 use image::DynamicImage;
 use infrastructure::gpu_adjustments::Ajustes;
 

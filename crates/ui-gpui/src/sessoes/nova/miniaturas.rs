@@ -29,7 +29,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 
-use gpui::RenderImage;
+use gpui_kit::RenderImage;
 use image::DynamicImage;
 use infrastructure::cache::preview_manager::PreviewManager;
 

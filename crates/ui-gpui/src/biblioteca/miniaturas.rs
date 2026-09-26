@@ -11,7 +11,7 @@
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
-use gpui::RenderImage;
+use gpui_kit::RenderImage;
 use infrastructure::cache::preview_manager::PreviewManager;
 use lru::LruCache;
 

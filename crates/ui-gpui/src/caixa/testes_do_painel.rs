@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use domain::services::pos_venda::{EstadoDaFotoNoSite, FotoDaGaleria, GaleriaDoPainel, Sessao};
-use gpui::{Entity, TestAppContext, WindowHandle};
+use gpui_kit::{Entity, TestAppContext, WindowHandle};
 use infrastructure::cache::preview_manager::PreviewManager;
 use serde_json::{json, Value};
 
@@ -104,14 +104,14 @@ fn publicador() -> Arc<PublicadorDeMentira> {
 }
 
 struct Montagem {
-    raiz: WindowHandle<gpui_component::Root>,
+    raiz: WindowHandle<gpui_kit::component::Root>,
     caixa: Entity<Caixa>,
     detalhe: Entity<Detalhe>,
     publicador: Arc<PublicadorDeMentira>,
 }
 
 fn montar(cx: &mut TestAppContext) -> Montagem {
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let publicador = publicador();
     let dir = tempfile::TempDir::new().expect("diretório temporário");
     let previews = Arc::new(PreviewManager::new_with_path(dir.path().to_path_buf()));
@@ -137,7 +137,7 @@ fn montar(cx: &mut TestAppContext) -> Montagem {
         });
         let caixa = cx.new(|cx| Caixa::painel(para_janela.clone(), detalhe.clone(), window, cx));
         guardados = Some((caixa.clone(), detalhe));
-        gpui_component::Root::new(caixa, window, cx)
+        gpui_kit::component::Root::new(caixa, window, cx)
     });
     let (caixa, detalhe) = guardados.expect("as telas criadas");
     let m = Montagem {
@@ -209,7 +209,7 @@ fn no_cupom(
     t.teclar_no_painel(tecla, shift, false, None, true, false, w, cx)
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn o_painel_segue_a_galeria_aberta_e_monta_o_cupom(cx: &mut TestAppContext) {
     let m = aberto(cx);
     na_janela(cx, &m, |t, _, _| {
@@ -233,7 +233,7 @@ fn o_painel_segue_a_galeria_aberta_e_monta_o_cupom(cx: &mut TestAppContext) {
     assert!(!rotulos.contains(&"galerias") && !rotulos.contains(&"estudios"));
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn f9_minimiza_e_as_letras_nao_chegam_a_grade(cx: &mut TestAppContext) {
     let m = aberto(cx);
     na_janela(cx, &m, |t, w, cx| {
@@ -260,7 +260,7 @@ fn f9_minimiza_e_as_letras_nao_chegam_a_grade(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn no_pagamento_os_numeros_escolhem_a_forma_e_nao_dao_nota(cx: &mut TestAppContext) {
     let m = aberto(cx);
     na_janela(cx, &m, |t, w, cx| {
@@ -290,7 +290,7 @@ fn no_pagamento_os_numeros_escolhem_a_forma_e_nao_dao_nota(cx: &mut TestAppConte
     assert!(gravacoes(&m).is_empty());
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn a_edicao_rapida_grava_a_cortesia_e_a_galeria_se_rele(cx: &mut TestAppContext) {
     let m = aberto(cx);
     let aberturas_antes = m.publicador.abertas.lock().unwrap().len();
@@ -326,7 +326,7 @@ fn a_edicao_rapida_grava_a_cortesia_e_a_galeria_se_rele(cx: &mut TestAppContext)
         .any(|p| p.rotulo == "galeria-viva"));
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn shift_apaga_a_negociacao_de_todos_os_itens(cx: &mut TestAppContext) {
     let m = aberto(cx);
     na_janela(cx, &m, |t, w, cx| {
@@ -345,7 +345,7 @@ fn shift_apaga_a_negociacao_de_todos_os_itens(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn o_tipo_de_ensaio_vai_para_a_foto(cx: &mut TestAppContext) {
     let m = aberto(cx);
     na_janela(cx, &m, |t, w, cx| {
@@ -364,7 +364,7 @@ fn o_tipo_de_ensaio_vai_para_a_foto(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn n_sem_item_negocia_o_cupom_inteiro_pelo_dialogo(cx: &mut TestAppContext) {
     let m = aberto(cx);
     na_janela(cx, &m, |t, w, cx| {
@@ -384,7 +384,7 @@ fn n_sem_item_negocia_o_cupom_inteiro_pelo_dialogo(cx: &mut TestAppContext) {
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn sem_estudio_o_painel_diz_onde_escolher(cx: &mut TestAppContext) {
     let m = montar(cx);
     let mut sem = galeria_json();

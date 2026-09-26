@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use gpui::{TestAppContext, VisualTestContext};
+use gpui_kit::{TestAppContext, VisualTestContext};
 
 use super::{abrir_o_ensaio, Cenario, Estudio};
 use crate::revelacao::tela::PedidoDaRevelacao;
@@ -53,7 +53,7 @@ fn com_envio_na_fila(cx: &mut TestAppContext) -> Estudio {
 
 /// 🎬 **Minimizar leva à bandeja, e voltar tira.** O trabalho não para: a
 /// janela minimizada continua sendo a mesma.
-#[gpui::test]
+#[gpui_kit::test]
 fn minimizar_vai_para_a_bandeja_e_voltar_tira(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(
         cx,
@@ -102,7 +102,7 @@ fn minimizar_vai_para_a_bandeja_e_voltar_tira(cx: &mut TestAppContext) {
 /// sem aviso, e sem o app sair quando a fila esvazia (dono, 2026-09-21:
 /// *"quero que o sistema fique na bandeja ao fechar, assim podemos continuar
 /// com os processos em segundo plano"*). Fecha junto a tela do cliente.
-#[gpui::test]
+#[gpui_kit::test]
 fn fechar_com_envio_vai_para_a_bandeja_e_o_envio_termina_la(cx: &mut TestAppContext) {
     let e = com_envio_na_fila(cx);
     e.app(cx, |app, _w, cx| {
@@ -139,7 +139,7 @@ fn fechar_com_envio_vai_para_a_bandeja_e_o_envio_termina_la(cx: &mut TestAppCont
 /// GNOME ele é o único que existe, e chamava `remove_window` direto — que não
 /// passa pelo `on_window_should_close`: o app encerrava em vez de ir para a
 /// bandeja (dono, 24/set/2026).
-#[gpui::test]
+#[gpui_kit::test]
 fn o_fechar_da_barra_do_app_leva_a_bandeja_e_nao_encerra(cx: &mut TestAppContext) {
     let e = com_envio_na_fila(cx);
     let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
@@ -154,7 +154,7 @@ fn o_fechar_da_barra_do_app_leva_a_bandeja_e_nao_encerra(cx: &mut TestAppContext
 }
 
 /// 🎬 **Abrir de novo traz a janela da bandeja**, com o envio ainda no ar.
-#[gpui::test]
+#[gpui_kit::test]
 fn reabrir_traz_a_janela_da_bandeja(cx: &mut TestAppContext) {
     let e = com_envio_na_fila(cx);
     let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
@@ -181,7 +181,7 @@ fn reabrir_traz_a_janela_da_bandeja(cx: &mut TestAppContext) {
 /// 🎬 **Download no ar não é envio**: a foto `d` não tem cópia no cache e a
 /// rede a segura, mas a bandeja não diz "Subindo" e fechar fecha — o G9 só
 /// vale para envio (achado pelo estresse, 17/set/2026).
-#[gpui::test]
+#[gpui_kit::test]
 fn download_no_ar_nao_segura_a_janela(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(
         cx,
@@ -235,7 +235,7 @@ fn aviso_na_tela(e: &Estudio, cx: &mut TestAppContext) -> bool {
 /// consigo fechar o sistema, pois o mesmo não vai pra bandeja no linux"*). No
 /// GNOME sem a extensão AppIndicator o ícone não aparece: ir para a bandeja
 /// era sumir sem o "Sair".
-#[gpui::test]
+#[gpui_kit::test]
 fn sem_bandeja_no_sistema_e_sem_envio_fechar_encerra(cx: &mut TestAppContext) {
     crate::bandeja::teste::fingir_sem_bandeja();
     let e = abrir_o_ensaio(
@@ -259,7 +259,7 @@ fn sem_bandeja_no_sistema_e_sem_envio_fechar_encerra(cx: &mut TestAppContext) {
 /// 🎬 **Sem bandeja e com envio no ar, fechar pergunta** — e "Esperar terminar
 /// e sair" sai sozinho quando a fila esvazia (dono, 25/set/2026: *"perguntar
 /// só se houver envio"*).
-#[gpui::test]
+#[gpui_kit::test]
 fn sem_bandeja_com_envio_fechar_pergunta_e_espera_a_fila_para_sair(cx: &mut TestAppContext) {
     use crate::app::Saida;
 
@@ -292,7 +292,7 @@ fn sem_bandeja_com_envio_fechar_pergunta_e_espera_a_fila_para_sair(cx: &mut Test
 
 /// 🎬 **"Minimizar e continuar" não sai** — e o envio termina com a janela
 /// minimizada.
-#[gpui::test]
+#[gpui_kit::test]
 fn sem_bandeja_minimizar_e_continuar_nao_sai(cx: &mut TestAppContext) {
     crate::bandeja::teste::fingir_sem_bandeja();
     let e = com_envio_na_fila(cx);

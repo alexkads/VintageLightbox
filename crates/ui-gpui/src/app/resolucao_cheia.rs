@@ -18,7 +18,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
-use gpui::{Context, Task};
+use gpui_kit::{Context, Task};
 
 use super::Aplicativo;
 use crate::pos_venda::porta::{PedidoDeFoto, Recado};

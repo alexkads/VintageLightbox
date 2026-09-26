@@ -12,7 +12,7 @@
 //! É a regra do site (`tempo-real.ts`): o toast quando a conversa não está
 //! na tela, e a `Notification` só com a aba escondida.
 
-use gpui::{Context, Window};
+use gpui_kit::{Context, Window};
 
 use super::{Aplicativo, Tela};
 use crate::agenda::PedidoDaAgenda;

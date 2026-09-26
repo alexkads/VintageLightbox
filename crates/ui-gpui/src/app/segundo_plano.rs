@@ -1,9 +1,9 @@
 //! O que a raiz conta à bandeja (`crate::segundo_plano`), e o que a bandeja
 //! pede a ela.
 
-use gpui::{div, prelude::*, px, App, Context};
-use gpui_component::button::{Button, ButtonVariants};
-use gpui_component::{ActiveTheme, Sizable};
+use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::{ActiveTheme, Sizable};
+use gpui_kit::{div, prelude::*, px, App, Context};
 
 use super::Aplicativo;
 use crate::segundo_plano::frases::Retrato;
@@ -202,15 +202,15 @@ impl Aplicativo {
 
 #[cfg(test)]
 mod testes {
-    use gpui::TestAppContext;
+    use gpui_kit::TestAppContext;
 
     use crate::app::testes::{acervo, portas, previews_descartaveis};
     use crate::app::Aplicativo;
 
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_retrato_conta_o_que_a_raiz_espera_do_site(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
         let janela = cx.add_window(|window, cx| {
             Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
         });

@@ -13,9 +13,9 @@
 
 use std::sync::Arc;
 
-use gpui::{div, prelude::*, px, App, Context, SharedString, Window};
-use gpui_component::button::{Button, ButtonVariants};
-use gpui_component::{ActiveTheme, Disableable, Sizable};
+use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::{ActiveTheme, Disableable, Sizable};
+use gpui_kit::{div, prelude::*, px, App, Context, SharedString, Window};
 use infrastructure::cache::preview_manager::{CacheStats, PreviewManager};
 
 /// Tamanho em bytes, do jeito que se lê.
@@ -226,7 +226,7 @@ fn plural(quantos: u64) -> &'static str {
 mod testes {
     use super::*;
 
-    use gpui::TestAppContext;
+    use gpui_kit::TestAppContext;
     use image::{DynamicImage, Rgba, RgbaImage};
     use tempfile::TempDir;
 
@@ -272,12 +272,12 @@ mod testes {
     /// compila: "Limpar miniaturas" levaria junto os previews grandes, que são
     /// os caros de refazer (cada um é um RAW aberto de novo). Nada falharia — o
     /// número simplesmente cairia mais do que devia.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn cada_botao_apaga_so_a_sua_parte(cx: &mut TestAppContext) {
         let (cache, _dir) = cache_com(3, 2);
         // O tema global do `gpui-component` — o `render` o lê, e sem ele a
         // janela morre no primeiro quadro.
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
         let janela = cx.add_window(|_window, cx| {
             let mut tela = Configuracoes::nova(cache);
             tela.atualizar(cx);
@@ -307,10 +307,10 @@ mod testes {
     }
 
     /// "Limpar tudo" leva os dois.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn limpar_tudo_esvazia_o_cache(cx: &mut TestAppContext) {
         let (cache, _dir) = cache_com(2, 2);
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
         let janela = cx.add_window(|_window, cx| {
             let mut tela = Configuracoes::nova(cache);
             tela.atualizar(cx);
@@ -334,10 +334,10 @@ mod testes {
     /// Sem a releitura, os três botões apagam de verdade e a tela continua
     /// mostrando o tamanho de antes — e a conclusão de quem olha é que o botão
     /// não funcionou. Clicar de novo (e de novo) é o desfecho.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_numero_e_relido_depois_de_limpar(cx: &mut TestAppContext) {
         let (cache, _dir) = cache_com(4, 0);
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
         let janela = cx.add_window(|_window, cx| {
             let mut tela = Configuracoes::nova(cache);
             tela.atualizar(cx);

@@ -42,7 +42,7 @@ pub trait ReabrirDaBandeja {
     fn reabrir_da_bandeja(self) -> Self;
 }
 
-impl ReabrirDaBandeja for gpui::Application {
+impl ReabrirDaBandeja for gpui_kit::Application {
     fn reabrir_da_bandeja(self) -> Self {
         self.on_reopen(ao_reabrir);
         self

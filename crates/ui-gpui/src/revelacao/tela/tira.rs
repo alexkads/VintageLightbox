@@ -19,13 +19,13 @@ use adapters::view_models::PhotoViewModel;
 use biblioteca_core::acervo::{self, Contagens, Estado, Filtro};
 use biblioteca_core::selecao::Modificadores;
 use domain::services::PreviewType;
-use gpui::{
+use gpui_kit::component::menu::{ContextMenuExt, PopupMenuItem};
+use gpui_kit::component::tooltip::Tooltip;
+use gpui_kit::component::{ActiveTheme, Icon, WindowExt};
+use gpui_kit::{
     canvas, div, img, prelude::*, px, AnyElement, Context, MouseButton, Pixels, SharedString,
     Window,
 };
-use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
-use gpui_component::tooltip::Tooltip;
-use gpui_component::{ActiveTheme, Icon, WindowExt};
 
 use crate::biblioteca::miniaturas::Miniatura;
 use crate::imagem::para_gpui;
@@ -91,8 +91,8 @@ pub(super) struct EstadoDaTira {
     primeira_desenhada: usize,
     /// O menu aberto pelo roteiro de depuração, e onde.
     menu_do_roteiro: Option<(
-        gpui::Entity<gpui_component::menu::PopupMenu>,
-        gpui::Point<Pixels>,
+        gpui_kit::Entity<gpui_kit::component::menu::PopupMenu>,
+        gpui_kit::Point<Pixels>,
     )>,
 }
 
@@ -790,7 +790,7 @@ impl Revelacao {
                                 .when(aceso, |chip| {
                                     chip.border_color(tema::cores::quente())
                                         .bg(tema::cores::quente())
-                                        .text_color(gpui::black())
+                                        .text_color(gpui_kit::black())
                                 })
                                 .when(!aceso, |chip| {
                                     chip.border_color(borda)
@@ -817,7 +817,10 @@ impl Revelacao {
     /// 🚨 **O arrasto é escutado na janela**, como o `setPointerCapture` do
     /// site: numa barra de 6px o primeiro movimento rápido sai dela.
     fn puxador_da_tira(&self, cx: &mut Context<Self>) -> AnyElement {
-        let ouvinte = cx.entity();
+        // Fraca: o quadro desenhado guarda o `canvas`, e uma referência forte
+        // ali mantinha a Revelação viva depois de a janela fechar (o gpui-kit
+        // 0.6 acusa isso como vazamento nos testes).
+        let ouvinte = cx.entity().downgrade();
         let arrastando = self.tira.arrasto.is_some();
         let tema = cx.theme();
         let (fundo, hover, traco) = (tema.background, tema.muted, tema.muted_foreground);
@@ -835,7 +838,7 @@ impl Revelacao {
             .border_color(tema.border)
             .bg(fundo)
             .hover(move |s| s.bg(hover))
-            .cursor(gpui::CursorStyle::ResizeUpDown)
+            .cursor(gpui_kit::CursorStyle::ResizeUpDown)
             .tooltip(|window, cx| {
                 Tooltip::new("Arraste para mudar o tamanho das miniaturas").build(window, cx)
             })
@@ -849,7 +852,7 @@ impl Revelacao {
             )
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|tela, evento: &gpui::MouseDownEvent, _w, cx| {
+                cx.listener(|tela, evento: &gpui_kit::MouseDownEvent, _w, cx| {
                     tela.tira.arrasto = Some((evento.position.y, tela.tira.altura));
                     cx.notify();
                 }),
@@ -862,11 +865,11 @@ impl Revelacao {
                     }
                     window.on_mouse_event({
                         let esta = ouvinte.clone();
-                        move |evento: &gpui::MouseMoveEvent, fase, _window, cx| {
+                        move |evento: &gpui_kit::MouseMoveEvent, fase, _window, cx| {
                             if !fase.bubble() {
                                 return;
                             }
-                            esta.update(cx, |tela, cx| {
+                            let _ = esta.update(cx, |tela, cx| {
                                 let Some((y, altura)) = tela.tira.arrasto else {
                                     return;
                                 };
@@ -883,11 +886,11 @@ impl Revelacao {
                     });
                     window.on_mouse_event({
                         let esta = ouvinte.clone();
-                        move |_evento: &gpui::MouseUpEvent, fase, _window, cx| {
+                        move |_evento: &gpui_kit::MouseUpEvent, fase, _window, cx| {
                             if !fase.bubble() {
                                 return;
                             }
-                            esta.update(cx, |tela, cx| {
+                            let _ = esta.update(cx, |tela, cx| {
                                 if tela.tira.arrasto.take().is_some() {
                                     altura_da_tira::guardar(QUAL, tela.tira.altura);
                                     // A miniatura da aberta volta no tamanho novo.
@@ -969,12 +972,12 @@ impl Revelacao {
             .border_2()
             .cursor_pointer()
             .when(escolhida, |t| t.border_color(ambar))
-            .when(candidata, |t| t.border_color(gpui::rgb(0x38bdf8)))
+            .when(candidata, |t| t.border_color(gpui_kit::rgb(0x38bdf8)))
             .when(!escolhida && !candidata && marcada, |t| {
                 t.border_color(ambar.opacity(0.4))
             })
             .when(!escolhida && !candidata && !marcada, |t| {
-                t.border_color(gpui::transparent_black())
+                t.border_color(gpui_kit::transparent_black())
                     .hover(move |s| s.border_color(borda))
             })
             .tooltip(move |window, cx| Tooltip::new(texto_da_dica.clone()).build(window, cx))
@@ -994,7 +997,7 @@ impl Revelacao {
                         .max_w_full()
                         .max_h_full()
                         // `object-contain`: o recorte da foto enquadrada fica inteiro.
-                        .object_fit(gpui::ObjectFit::Contain)
+                        .object_fit(gpui_kit::ObjectFit::Contain)
                         // A apagada desbota, como na tira da galeria.
                         .when(c.apagada, |i| i.opacity(0.4)),
                 ),
@@ -1031,9 +1034,9 @@ impl Revelacao {
                         .right(px(4.))
                         .size(px(8.))
                         .rounded_full()
-                        .bg(gpui::rgb(0x00d492))
+                        .bg(gpui_kit::rgb(0x00d492))
                         .border_1()
-                        .border_color(gpui::black().opacity(0.4)),
+                        .border_color(gpui_kit::black().opacity(0.4)),
                 )
             })
             .when(nao_salva, |t| {
@@ -1070,19 +1073,19 @@ impl Revelacao {
                         .py(px(2.))
                         .text_center()
                         .text_size(px(10.))
-                        .bg(gpui::black().opacity(0.7))
-                        .text_color(gpui::rgb(0xd4d4d4))
+                        .bg(gpui_kit::black().opacity(0.7))
+                        .text_color(gpui_kit::rgb(0xd4d4d4))
                         .child(if c.apagada { "apagada" } else { "comprada" }),
                 )
             })
             .on_mouse_down(
                 MouseButton::Right,
-                cx.listener(move |tela, _ev: &gpui::MouseDownEvent, _w, _cx| {
+                cx.listener(move |tela, _ev: &gpui_kit::MouseDownEvent, _w, _cx| {
                     tela.tira.menu = Some(posicao);
                 }),
             )
             .on_click(
-                cx.listener(move |tela, evento: &gpui::ClickEvent, window, cx| {
+                cx.listener(move |tela, evento: &gpui_kit::ClickEvent, window, cx| {
                     let m = evento.modifiers();
                     // 🚨 Ctrl **e** Cmd acrescentam, como na web (`ctrlKey ||
                     // metaKey`): no macOS o Ctrl+clique chega com `control`.
@@ -1104,10 +1107,10 @@ impl Revelacao {
     fn rolar_a_tira(&mut self, direcao: f32, cx: &mut Context<Self>) {
         let largura = f32::from(self.rolagem_da_tira.bounds().size.width);
         let passo = (largura * 0.8).max(200.0);
-        let maximo = self.rolagem_da_tira.max_offset().width;
+        let maximo = self.rolagem_da_tira.max_offset().x;
         let atual = self.rolagem_da_tira.offset();
         let x = (atual.x - px(direcao * passo)).min(px(0.)).max(-maximo);
-        self.rolagem_da_tira.set_offset(gpui::point(x, atual.y));
+        self.rolagem_da_tira.set_offset(gpui_kit::point(x, atual.y));
         cx.notify();
     }
 
@@ -1131,10 +1134,10 @@ impl Revelacao {
             .items_center()
             .justify_center()
             .cursor_pointer()
-            .bg(gpui::linear_gradient(
+            .bg(gpui_kit::linear_gradient(
                 if esquerda { 90.0 } else { 270.0 },
-                gpui::linear_color_stop(fundo, 0.0),
-                gpui::linear_color_stop(fundo.opacity(0.0), 1.0),
+                gpui_kit::linear_color_stop(fundo, 0.0),
+                gpui_kit::linear_color_stop(fundo.opacity(0.0), 1.0),
             ))
             .text_color(texto.opacity(0.9))
             .hover(move |s| s.text_color(texto))
@@ -1186,10 +1189,10 @@ impl Revelacao {
             // dele fica a `VAO + i·passo + largura/2` do começo da faixa.
             let centro = VAO + indice as f32 * (largura + VAO) + largura / 2.;
             let alvo = px(f32::from(caixa.size.width) / 2. - centro);
-            let maximo = self.rolagem_da_tira.max_offset().width;
+            let maximo = self.rolagem_da_tira.max_offset().x;
             let x = alvo.min(px(0.)).max(-maximo);
             let atual = self.rolagem_da_tira.offset();
-            self.rolagem_da_tira.set_offset(gpui::point(x, atual.y));
+            self.rolagem_da_tira.set_offset(gpui_kit::point(x, atual.y));
         }
         self.tira.centrar -= 1;
         cx.on_next_frame(window, |_tela, _window, cx| cx.notify());
@@ -1260,7 +1263,7 @@ impl Revelacao {
         }
 
         let deslocamento = -self.rolagem_da_tira.offset().x;
-        let maximo = self.rolagem_da_tira.max_offset().width;
+        let maximo = self.rolagem_da_tira.max_offset().x;
         let tem_antes = deslocamento > px(4.);
         let tem_depois = maximo > px(4.) && deslocamento < maximo - px(4.);
 
@@ -1281,15 +1284,15 @@ impl Revelacao {
                     // 🔑 A roda vertical rola na horizontal — o `wheel` com
                     // `passive: false` do site.
                     .on_scroll_wheel(cx.listener(
-                        |tela, evento: &gpui::ScrollWheelEvent, window, cx| {
+                        |tela, evento: &gpui_kit::ScrollWheelEvent, window, cx| {
                             let delta = evento.delta.pixel_delta(window.line_height());
                             if delta.y.abs() <= delta.x.abs() {
                                 return;
                             }
-                            let maximo = tela.rolagem_da_tira.max_offset().width;
+                            let maximo = tela.rolagem_da_tira.max_offset().x;
                             let atual = tela.rolagem_da_tira.offset();
                             let x = (atual.x + delta.y).min(px(0.)).max(-maximo);
-                            tela.rolagem_da_tira.set_offset(gpui::point(x, atual.y));
+                            tela.rolagem_da_tira.set_offset(gpui_kit::point(x, atual.y));
                             cx.stop_propagation();
                             cx.notify();
                         },
@@ -1336,7 +1339,7 @@ impl Revelacao {
                 .child(self.puxador_da_tira(cx))
                 .child(faixa)
                 .children(self.tira.menu_do_roteiro.as_ref().map(|(menu, ponto)| {
-                    gpui::deferred(gpui::anchored().position(*ponto).child(menu.clone()))
+                    gpui_kit::deferred(gpui_kit::anchored().position(*ponto).child(menu.clone()))
                         .with_priority(1)
                 }))
                 .into_any_element(),
@@ -1348,7 +1351,10 @@ impl Revelacao {
     /// O centro da `k`-ésima miniatura desenhada, na janela — onde um teste dá o
     /// botão direito. `None` antes do primeiro desenho.
     #[cfg(test)]
-    pub(crate) fn centro_da_miniatura(&self, k: usize) -> Option<gpui::Point<gpui::Pixels>> {
+    pub(crate) fn centro_da_miniatura(
+        &self,
+        k: usize,
+    ) -> Option<gpui_kit::Point<gpui_kit::Pixels>> {
         let primeira = self.tira.primeira_desenhada;
         let elemento = k.checked_sub(primeira)? + usize::from(primeira > 0);
         Some(self.rolagem_da_tira.bounds_for_item(elemento)?.center())
@@ -1403,10 +1409,10 @@ impl Revelacao {
                 }
             }
             "rolar" => {
-                let maximo = self.rolagem_da_tira.max_offset().width;
+                let maximo = self.rolagem_da_tira.max_offset().x;
                 let atual = self.rolagem_da_tira.offset();
                 let x = px(-numero).min(px(0.)).max(-maximo);
-                self.rolagem_da_tira.set_offset(gpui::point(x, atual.y));
+                self.rolagem_da_tira.set_offset(gpui_kit::point(x, atual.y));
                 cx.notify();
             }
             // ⚠️ O `ContextMenu` não abre por fora, e o `dispatch_event` da
@@ -1429,10 +1435,11 @@ impl Revelacao {
                     return;
                 };
                 let esta = cx.entity().downgrade();
-                let menu =
-                    gpui_component::menu::PopupMenu::build(window, cx, move |menu, _w, _cx| {
-                        montar_o_menu(menu, dados, esta)
-                    });
+                let menu = gpui_kit::component::menu::PopupMenu::build(
+                    window,
+                    cx,
+                    move |menu, _w, _cx| montar_o_menu(menu, dados, esta),
+                );
                 let ponto = item.center() + self.rolagem_da_tira.offset();
                 self.tira.menu_do_roteiro = Some((menu, ponto));
                 cx.notify();
@@ -1451,15 +1458,15 @@ impl Revelacao {
 /// 🔑 Curto de propósito: as ações de acervo (nota, levada, apagar) são da
 /// galeria; aqui o assunto é o lote que vai receber os ajustes.
 fn montar_o_menu(
-    menu: gpui_component::menu::PopupMenu,
+    menu: gpui_kit::component::menu::PopupMenu,
     dados: Menu,
-    esta: gpui::WeakEntity<Revelacao>,
-) -> gpui_component::menu::PopupMenu {
+    esta: gpui_kit::WeakEntity<Revelacao>,
+) -> gpui_kit::component::menu::PopupMenu {
     let clicada = dados.clicada;
     let n_alvos = dados.alvos.len();
     let com = |f: fn(&mut Revelacao, &mut Window, &mut Context<Revelacao>)| {
         let esta = esta.clone();
-        move |_ev: &gpui::ClickEvent, window: &mut Window, cx: &mut gpui::App| {
+        move |_ev: &gpui_kit::ClickEvent, window: &mut Window, cx: &mut gpui_kit::App| {
             let _ = esta.update(cx, |tela, cx| f(tela, window, cx));
         }
     };

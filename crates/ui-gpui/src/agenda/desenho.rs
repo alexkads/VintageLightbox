@@ -8,12 +8,12 @@
 //! nenhum. Está na lista de divergências (`FLUXO_UNICO`, §14).
 
 use chrono::{Datelike, NaiveDate, Utc};
-use gpui::{
+use gpui_kit::component::input::{Input, Textarea};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
+use gpui_kit::{
     div, prelude::*, px, rgb, AnyElement, Context, FontWeight, Hsla, MouseButton, SharedString,
     Window,
 };
-use gpui_component::input::Input;
-use gpui_component::{h_flex, v_flex, ActiveTheme, Icon};
 
 use super::modelo::{self, Ensaio, Visao};
 use super::tela::{Agenda, Modo};
@@ -25,7 +25,10 @@ use crate::tempo_real::EstadoDaConexao;
 /// O contexto de teclas do diálogo (o Esc que volta um passo).
 pub const DIALOGO: &str = "DialogoDaAgenda";
 
-fn marcado(botao: gpui::Stateful<gpui::Div>, nome: impl Into<String>) -> gpui::Stateful<gpui::Div> {
+fn marcado(
+    botao: gpui_kit::Stateful<gpui_kit::Div>,
+    nome: impl Into<String>,
+) -> gpui_kit::Stateful<gpui_kit::Div> {
     let nome = nome.into();
     botao.debug_selector(move || nome.clone())
 }
@@ -53,7 +56,7 @@ impl Render for Agenda {
             // O Esc de dentro de um campo é do campo; ele o repassa, e aqui
             // vira o mesmo "voltar um passo".
             .on_action(
-                cx.listener(|tela, _: &gpui_component::input::Escape, window, cx| {
+                cx.listener(|tela, _: &gpui_kit::component::input::Escape, window, cx| {
                     tela.voltar(window, cx)
                 }),
             )
@@ -343,7 +346,7 @@ impl Agenda {
         ensaio: &Ensaio,
         id: String,
         cx: &mut Context<Self>,
-    ) -> gpui::Stateful<gpui::Div> {
+    ) -> gpui_kit::Stateful<gpui_kit::Div> {
         let e = ensaio.clone();
         let c = cor(ensaio.status.cor());
         div()
@@ -789,7 +792,7 @@ impl Agenda {
                         .h_full()
                         .rounded_full()
                         .bg(primario)
-                        .w(gpui::relative(taxa as f32 / 100.)),
+                        .w(gpui_kit::relative(taxa as f32 / 100.)),
                 ),
             )
             .child(div().text_xs().text_color(apagado).child(format!(
@@ -1090,7 +1093,7 @@ impl Agenda {
 
     fn campo(
         rotulo: &'static str,
-        campo: &gpui::Entity<gpui_component::input::InputState>,
+        campo: &gpui_kit::Entity<gpui_kit::component::input::InputState>,
     ) -> impl IntoElement {
         v_flex()
             .gap(px(4.))
@@ -1175,7 +1178,16 @@ impl Agenda {
             .child(Self::campo("Valor pago (R$)", &self.valor))
             .child(Self::campo("Hora de entrada", &self.entrada))
             .child(Self::campo("Hora de saída", &self.saida))
-            .child(Self::campo("Observações do atendimento", &self.observacoes))
+            .child(
+                v_flex()
+                    .gap(px(4.))
+                    .child(
+                        div()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child("Observações do atendimento"),
+                    )
+                    .child(Textarea::new(&self.observacoes)),
+            )
             .when_some(erro, |d, erro| {
                 d.child(div().text_color(perigo).child(erro))
             })

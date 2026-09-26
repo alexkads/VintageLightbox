@@ -40,20 +40,21 @@
 //! cliente —, e a saída grava o pendente pela porta de sempre
 //! (`sair_da_revelacao`).
 
+use crate::campo::TrocarValor as _;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 use adapters::view_models::PhotoViewModel;
 use biblioteca_core::acervo::Filtro;
 use domain::value_objects::{ColorLabel, CropSettings};
-use gpui::{
+use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
+use gpui_kit::component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
+use gpui_kit::component::tooltip::Tooltip;
+use gpui_kit::component::{h_flex, ActiveTheme, Icon, Sizable};
+use gpui_kit::{
     div, prelude::*, px, Context, DragMoveEvent, Entity, FontWeight, MouseButton, SharedString,
     Subscription, WeakEntity, Window,
 };
-use gpui_component::input::{Escape, Input, InputEvent, InputState};
-use gpui_component::menu::{ContextMenuExt, PopupMenu, PopupMenuItem};
-use gpui_component::tooltip::Tooltip;
-use gpui_component::{h_flex, ActiveTheme, Icon, Sizable};
 use serde::{Deserialize, Serialize};
 
 use super::{Aplicativo, Tela};
@@ -391,9 +392,9 @@ pub(super) struct Edicao {
     renome: crate::modal::Modal<Renome>,
     /// Onde cada guia foi desenhada no último quadro — o roteiro de depuração
     /// abre o menu sobre ela.
-    desenhadas: std::rc::Rc<std::cell::RefCell<Vec<gpui::Bounds<gpui::Pixels>>>>,
+    desenhadas: std::rc::Rc<std::cell::RefCell<Vec<gpui_kit::Bounds<gpui_kit::Pixels>>>>,
     /// O menu aberto pelo roteiro de depuração, e onde.
-    menu_do_roteiro: Option<(Entity<PopupMenu>, gpui::Point<gpui::Pixels>)>,
+    menu_do_roteiro: Option<(Entity<PopupMenu>, gpui_kit::Point<gpui_kit::Pixels>)>,
 }
 
 struct Renome {
@@ -477,7 +478,7 @@ impl Aplicativo {
     pub fn ir_para_a_guia(
         &mut self,
         id: String,
-        window: &mut gpui::Window,
+        window: &mut gpui_kit::Window,
         cx: &mut Context<Self>,
     ) {
         // A guia da frente não faz nada, nem na Revelação: é a aba ativa do
@@ -493,14 +494,19 @@ impl Aplicativo {
         if let Some(revelada) = revelada {
             self.voltar_a_revelacao(revelada, window, cx);
         }
-        window.focus(&self.foco);
+        window.focus(&self.foco, cx);
     }
 
     /// O `×` da guia (ou `Cmd+W`).
     ///
     /// 🔑 **Fechar a guia da frente leva à vizinha**; fechar a última leva à
     /// lista de sessões, que é a "página nova" deste app.
-    pub fn fechar_guia(&mut self, id: String, window: &mut gpui::Window, cx: &mut Context<Self>) {
+    pub fn fechar_guia(
+        &mut self,
+        id: String,
+        window: &mut gpui_kit::Window,
+        cx: &mut Context<Self>,
+    ) {
         let da_frente = self.sessao_aberta.as_deref() == Some(id.as_str());
         if da_frente {
             self.largar_a_revelacao(cx);
@@ -562,7 +568,7 @@ impl Aplicativo {
     fn voltar_a_revelacao(
         &mut self,
         revelada: RevelacaoEstacionada,
-        window: &mut gpui::Window,
+        window: &mut gpui_kit::Window,
         cx: &mut Context<Self>,
     ) {
         let intacta = {
@@ -587,7 +593,7 @@ impl Aplicativo {
     }
 
     /// O `+` da faixa e o `⌘T`: a lista de sessões, que é a "página nova".
-    fn abrir_guia_nova(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) {
+    fn abrir_guia_nova(&mut self, window: &mut gpui_kit::Window, cx: &mut Context<Self>) {
         self.ir_para(Tela::Sessoes, window, cx);
     }
 
@@ -595,7 +601,7 @@ impl Aplicativo {
     pub fn andar_nas_guias(
         &mut self,
         passo: isize,
-        window: &mut gpui::Window,
+        window: &mut gpui_kit::Window,
         cx: &mut Context<Self>,
     ) {
         if let Some(id) = self.guias.vizinha(self.sessao_aberta.as_deref(), passo) {
@@ -603,7 +609,12 @@ impl Aplicativo {
         }
     }
 
-    pub fn guia_na_posicao(&mut self, n: usize, window: &mut gpui::Window, cx: &mut Context<Self>) {
+    pub fn guia_na_posicao(
+        &mut self,
+        n: usize,
+        window: &mut gpui_kit::Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(id) = self.guias.na_posicao(n) {
             self.ir_para_a_guia(id, window, cx);
         }
@@ -640,9 +651,9 @@ impl Aplicativo {
     /// abrir guia, ali, é pelo mouse.
     pub(super) fn ouvir_atalhos_das_guias(
         &self,
-        raiz: gpui::Div,
+        raiz: gpui_kit::Div,
         cx: &mut Context<Self>,
-    ) -> gpui::Div {
+    ) -> gpui_kit::Div {
         let raiz = match self.tela {
             Tela::Sessao | Tela::Sessoes => raiz
                 .on_action(cx.listener(|raiz, _: &super::GuiaNova, window, cx| {
@@ -709,7 +720,7 @@ impl Aplicativo {
         };
         let nome = guia.nome().unwrap_or_default().to_string();
         let campo = cx.new(|cx| InputState::new(window, cx).placeholder("Nome da guia"));
-        campo.update(cx, |campo, cx| campo.set_value(nome, window, cx));
+        campo.update(cx, |campo, cx| campo.trocar_valor(nome, window, cx));
         let assinatura = cx.subscribe_in(
             &campo,
             window,
@@ -726,13 +737,13 @@ impl Aplicativo {
         });
         // O nome inteiro selecionado: digitar já troca, como no Finder. Só
         // depois de o campo ser desenhado — antes, a ação não acha a quem chegar.
-        let foco = gpui::Focusable::focus_handle(campo.read(cx), cx);
+        let foco = gpui_kit::Focusable::focus_handle(campo.read(cx), cx);
         cx.spawn_in(window, async move |_raiz, cx| {
             cx.background_executor()
                 .timer(std::time::Duration::from_millis(50))
                 .await;
             let _ = cx.update(|window, cx| {
-                foco.dispatch_action(&gpui_component::input::SelectAll, window, cx);
+                foco.dispatch_action(&gpui_kit::component::input::SelectAll, window, cx);
             });
         })
         .detach();
@@ -760,7 +771,7 @@ impl Aplicativo {
         cx: &mut Context<Self>,
     ) {
         let renome = match window {
-            Some(window) => self.edicao_das_guias.renome.fechar(window),
+            Some(window) => self.edicao_das_guias.renome.fechar(window, cx),
             None => self.edicao_das_guias.renome.largar(),
         };
         let Some(renome) = renome else {
@@ -772,7 +783,7 @@ impl Aplicativo {
 
     /// Esc: a guia fica com o nome que tinha.
     pub fn cancelar_renome_da_guia(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.edicao_das_guias.renome.fechar(window).is_some() {
+        if self.edicao_das_guias.renome.fechar(window, cx).is_some() {
             cx.notify();
         }
     }
@@ -1011,7 +1022,7 @@ impl Aplicativo {
                     g.tooltip(move |window, cx| Tooltip::new(dica.clone()).build(window, cx))
                 })
                 .on_click(
-                    cx.listener(move |raiz, evento: &gpui::ClickEvent, window, cx| {
+                    cx.listener(move |raiz, evento: &gpui_kit::ClickEvent, window, cx| {
                         if raiz.renomeando_guia_para_teste() == Some(id_clique.as_str()) {
                             return;
                         }
@@ -1142,7 +1153,8 @@ impl Aplicativo {
                     })),
             )
             .children(menu_do_roteiro.map(|(menu, ponto)| {
-                gpui::deferred(gpui::anchored().position(ponto).child(menu)).with_priority(1)
+                gpui_kit::deferred(gpui_kit::anchored().position(ponto).child(menu))
+                    .with_priority(1)
             }))
             // 🔑 **Um menu para a faixa inteira**, como o da tira da
             // Revelação: o `ContextMenu` guarda estado por id, e um por guia
@@ -1194,7 +1206,7 @@ fn montar_o_menu(
     type Gesto = fn(&mut Aplicativo, String, &mut Window, &mut Context<Aplicativo>);
     let com = |gesto: Gesto| {
         let (esta, id) = (esta.clone(), dados.id.clone());
-        move |_ev: &gpui::ClickEvent, window: &mut Window, cx: &mut gpui::App| {
+        move |_ev: &gpui_kit::ClickEvent, window: &mut Window, cx: &mut gpui_kit::App| {
             let _ = esta.update(cx, |raiz, cx| gesto(raiz, id.clone(), window, cx));
         }
     };
@@ -1223,7 +1235,7 @@ fn montar_o_menu(
             let id = id_cor.clone();
             let pintar = move |cor: Option<ColorLabel>| {
                 let (esta, id) = (esta.clone(), id.clone());
-                move |_ev: &gpui::ClickEvent, _window: &mut Window, cx: &mut gpui::App| {
+                move |_ev: &gpui_kit::ClickEvent, _window: &mut Window, cx: &mut gpui_kit::App| {
                     let _ = esta.update(cx, |raiz, cx| raiz.colorir_guia(&id, cor, cx));
                 }
             };

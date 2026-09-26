@@ -22,8 +22,8 @@
 
 use biblioteca_core::sessoes::FaixaDeDatas;
 use chrono::{Datelike, NaiveDate};
-use gpui::{div, prelude::*, px, SharedString};
-use gpui_component::{h_flex, v_flex, ActiveTheme};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme};
+use gpui_kit::{div, prelude::*, px, SharedString};
 
 /// Os meses, como o Brasil os escreve.
 const MESES: [&str; 12] = [
@@ -187,9 +187,11 @@ pub fn calendario<T: 'static>(
     estado: &EstadoDoPeriodo,
     faixa: Option<&FaixaDeDatas>,
     hoje: NaiveDate,
-    cx: &mut gpui::Context<T>,
-    escolher: impl Fn(&mut T, NaiveDate, &mut gpui::Window, &mut gpui::Context<T>) + Clone + 'static,
-) -> gpui::AnyElement {
+    cx: &mut gpui_kit::Context<T>,
+    escolher: impl Fn(&mut T, NaiveDate, &mut gpui_kit::Window, &mut gpui_kit::Context<T>)
+        + Clone
+        + 'static,
+) -> gpui_kit::AnyElement {
     let tema = cx.theme().clone();
     let lado = px(30.);
     let semana = h_flex().gap(px(2.)).children(DIAS.iter().map(|d| {
@@ -202,7 +204,7 @@ pub fn calendario<T: 'static>(
             .child(*d)
     }));
 
-    let mut linhas: Vec<gpui::AnyElement> = Vec::new();
+    let mut linhas: Vec<gpui_kit::AnyElement> = Vec::new();
     for semana_de_dias in dias_da_grade(estado.mes).chunks(7) {
         let mut linha = h_flex().gap(px(2.));
         for dia in semana_de_dias {

@@ -18,7 +18,7 @@ pub mod tela;
 
 pub use tela::{Chatbot, PedidoDoChatbot};
 
-gpui::actions!(chatbot, [EnviarMensagem]);
+gpui_kit::actions!(chatbot, [EnviarMensagem]);
 
 /// As teclas do compositor: **Enter envia, Shift+Enter quebra linha**, como no
 /// site.
@@ -27,15 +27,20 @@ gpui::actions!(chatbot, [EnviarMensagem]);
 /// Enter **antes** de avisar a tela — interceptar o aviso chegaria tarde. Por
 /// isso o Enter é religado aqui, no contexto do compositor acima do campo, e o
 /// Shift+Enter passa a ser o Enter do próprio campo (o que quebra a linha).
-/// Chamado depois do `gpui_component::init`: entre ligações do mesmo nível, a
+/// Chamado depois do `gpui_kit::init`: entre ligações do mesmo nível, a
 /// mais nova vale.
-pub fn ligar_teclas(cx: &mut gpui::App) {
+pub fn ligar_teclas(cx: &mut gpui_kit::App) {
     let contexto = format!("{} > Input", desenho::COMPOSITOR);
     cx.bind_keys([
-        gpui::KeyBinding::new("enter", EnviarMensagem, Some(&contexto)),
-        gpui::KeyBinding::new(
+        gpui_kit::KeyBinding::new("enter", EnviarMensagem, Some(&contexto)),
+        gpui_kit::KeyBinding::new(
             "shift-enter",
-            gpui_component::input::Enter { secondary: false },
+            // `shift: true` é o que faz o 0.6 inserir a quebra de linha
+            // num campo de várias linhas.
+            gpui_kit::component::input::Enter {
+                secondary: false,
+                shift: true,
+            },
             Some(&contexto),
         ),
     ]);

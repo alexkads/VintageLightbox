@@ -2,7 +2,7 @@
 //! "Baixar JPEG" e "Salvar na galeria e sair".
 
 use domain::services::PreviewType;
-use gpui::TestAppContext;
+use gpui_kit::TestAppContext;
 
 use super::{abrir_o_ensaio, Cenario};
 use crate::app::Tela;
@@ -18,7 +18,7 @@ fn botao(e: &super::Estudio, cx: &mut TestAppContext, pedido: PedidoDaRevelacao)
 /// "Sincronizar" confirma pelo Enter, a receita vai para as marcadas (menos a
 /// comprada) sem subir nada, e o "Zerar N fotos" devolve todas ao neutro —
 /// inclusive o enquadramento.
-#[gpui::test]
+#[gpui_kit::test]
 fn sincronizar_e_zerar_as_marcadas(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     e.revelar_a_do_site(cx, "a");
@@ -126,7 +126,7 @@ fn sincronizar_e_zerar_as_marcadas(cx: &mut TestAppContext) {
 
 /// 🎬 **A comprada não se revela**: abre, mostra, e nada dela vai ao banco
 /// nem ao site — nem pelo Enquadrar do teclado, nem pelo Salvar.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_foto_comprada_fica_travada(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     e.revelar_a_do_site(cx, "c");
@@ -154,7 +154,7 @@ fn a_foto_comprada_fica_travada(cx: &mut TestAppContext) {
 /// 🎬 **"Baixar JPEG"**: a foto do site é revelada em resolução cheia pelo
 /// site com o que está na tela, e o arquivo cai na pasta de downloads — a de
 /// teste. A foto que só está no disco sai pela exportação local.
-#[gpui::test]
+#[gpui_kit::test]
 fn baixar_jpeg_da_foto_do_site_e_da_local(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     e.revelar_a_do_site(cx, "a");
@@ -214,7 +214,7 @@ fn baixar_jpeg_da_foto_do_site_e_da_local(cx: &mut TestAppContext) {
 /// 🎬 **"Salvar na galeria e sair"**: sobe a aberta e as que o "Sincronizar"
 /// deixou na fila, espera o lote inteiro, esvazia o depósito e volta para a
 /// sessão.
-#[gpui::test]
+#[gpui_kit::test]
 fn salvar_na_galeria_sobe_o_lote_e_sai(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(
         cx,
@@ -314,7 +314,7 @@ fn salvar_na_galeria_sobe_o_lote_e_sai(cx: &mut TestAppContext) {
 /// o editor esperando uma resposta que pode demorar segundos é o que o dono
 /// pediu para acabar (18/set/2026). O que protege o trabalho não é a tela
 /// parada — é a receita continuar aqui.
-#[gpui::test]
+#[gpui_kit::test]
 fn salvar_na_galeria_com_falha_deixa_a_receita_no_deposito(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(
         cx,
@@ -370,7 +370,7 @@ fn salvar_na_galeria_com_falha_deixa_a_receita_no_deposito(cx: &mut TestAppConte
 ///
 /// Os quatro estados aqui são os quatro `title` do `<Button>` da web:
 /// nada a salvar · esta foto · esta e mais N · a comprada e as N atrás dela.
-#[gpui::test]
+#[gpui_kit::test]
 fn o_botao_de_salvar_conta_o_que_ha_para_salvar(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(
         cx,
@@ -477,7 +477,7 @@ fn o_botao_de_salvar_conta_o_que_ha_para_salvar(cx: &mut TestAppContext) {
 /// de 18/set/2026: o editor fecha na hora, então não há botão onde contar. O
 /// que resta é o aviso — e ele é **por lote**: com vinte fotos, vinte toasts
 /// seriam vinte interrupções para quem já está com o próximo cliente.
-#[gpui::test]
+#[gpui_kit::test]
 fn o_lote_avisa_uma_vez_so_quando_termina(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(
         cx,
@@ -540,7 +540,7 @@ fn o_lote_avisa_uma_vez_so_quando_termina(cx: &mut TestAppContext) {
 /// `render` desenha no topo ao centro. Antes disso era o `push_notification` do
 /// `gpui-component`, cuja lista mora fixa em `top_4().right_4()` — por cima de
 /// "Tela do cliente", "Baixar JPEG" e "Salvar na galeria e sair".
-#[gpui::test]
+#[gpui_kit::test]
 fn o_aviso_de_sucesso_fica_no_topo_e_some_sozinho(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     e.revelar_a_do_site(cx, "a");
@@ -590,7 +590,7 @@ fn o_aviso_de_sucesso_fica_no_topo_e_some_sozinho(cx: &mut TestAppContext) {
 /// resolveu do mesmo jeito: uma prévia revelada **local**, que a grade consulta
 /// antes da URL do servidor e que é apagada quando a foto sobe — porque daí em
 /// diante quem é mais novo é o site.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_previa_local_revelada_nasce_ao_sair_e_morre_quando_a_foto_sobe(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(
         cx,
@@ -642,7 +642,7 @@ fn a_previa_local_revelada_nasce_ao_sair_e_morre_quando_a_foto_sobe(cx: &mut Tes
 /// ⚠️ **O que este cenário alcança é o pedido**, e não o pixel: a thread do
 /// serviço roda com `motor = None` em teste (nenhum cenário abre GPU), e quem
 /// prova o cache é `a_receita_pronta_so_faz_o_cache`, em `receita_padrao.rs`.
-#[gpui::test]
+#[gpui_kit::test]
 fn sincronizar_pede_a_previa_local_das_marcadas(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     e.revelar_a_do_site(cx, "a");
@@ -678,7 +678,7 @@ fn sincronizar_pede_a_previa_local_das_marcadas(cx: &mut TestAppContext) {
 /// O cenário estressa as seis coisas que o gesto toca de uma vez:
 /// o rótulo do botão, quem entra no lote, o enquadramento, o histórico da
 /// aberta, a prévia local de cada uma e a fila de envio.
-#[gpui::test]
+#[gpui_kit::test]
 fn zerar_as_marcadas_limpa_receita_enquadramento_e_previas(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     e.revelar_a_do_site(cx, "a");
@@ -798,7 +798,7 @@ fn zerar_as_marcadas_limpa_receita_enquadramento_e_previas(cx: &mut TestAppConte
 /// a única do lote que o "Sincronizar" **pula** — já está com a receita, foi
 /// dela que ela saiu —, então ninguém avisava a grade a respeito dela. A prévia
 /// local é gravada ao sair do editor; o que faltava era o recado.
-#[gpui::test]
+#[gpui_kit::test]
 fn ao_sair_da_revelacao_a_grade_relê_a_foto_que_estava_no_palco(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     e.revelar_a_do_site(cx, "a");
@@ -946,7 +946,7 @@ fn o_ensaio_subindo(cx: &mut TestAppContext) -> super::Estudio {
 ///
 /// E, em cada passo, o que não pode acontecer: a edição cair noutra foto, a
 /// foto intocada subir de novo, e a tira duplicar a foto que mudou de casa.
-#[gpui::test]
+#[gpui_kit::test]
 fn revelar_a_foto_que_ainda_sobe_e_salvar_nao_desfaz_a_edicao(cx: &mut TestAppContext) {
     let e = o_ensaio_subindo(cx);
 
@@ -1070,7 +1070,7 @@ fn revelar_a_foto_que_ainda_sobe_e_salvar_nao_desfaz_a_edicao(cx: &mut TestAppCo
 /// cópia local. A conciliação da subida já tinha passado (as duas receitas
 /// eram iguais), e o ajuste caiu na linha local — que a grade não mostra mais
 /// e o "Salvar" não levava. O servidor ficou com a receita da importação.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_foto_termina_de_subir_com_a_revelacao_aberta_e_o_ajuste_vai_ao_site(cx: &mut TestAppContext) {
     let e = o_ensaio_subindo(cx);
     let (aberta, _, _) = reabrir(&e, cx, "id-DSC_102.jpg");
@@ -1292,7 +1292,7 @@ fn gravada(e: &super::Estudio, id: &str) -> (f32, f32) {
 /// ficou nos sliders do neutro, e o primeiro ajuste gravou a foto inteira a
 /// partir deles: exposição −0,5 e contraste **1,0**, e não 1,25. A foto subiu
 /// assim, com o site e o catálogo de acordo — e errados.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_receita_padrao_que_chega_com_a_revelacao_aberta_nao_some_no_primeiro_ajuste(
     cx: &mut TestAppContext,
 ) {
@@ -1351,7 +1351,7 @@ fn a_receita_padrao_que_chega_com_a_revelacao_aberta_nao_some_no_primeiro_ajuste
 /// cópia do catálogo que a grade guarda, que ninguém tinha relido. A foto
 /// abriu no neutro, com o catálogo já em 1,25, e o ajuste gravou o neutro por
 /// cima.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_receita_padrao_que_chegou_antes_de_abrir_a_revelacao_vale_no_primeiro_ajuste(
     cx: &mut TestAppContext,
 ) {
@@ -1411,7 +1411,7 @@ fn a_receita_padrao_que_chegou_antes_de_abrir_a_revelacao_vale_no_primeiro_ajust
 /// gravava a foto **inteira** quando chegava a vez dela, e o ajuste sumia.
 /// Agora ela entra só no que o operador não mexeu, a tela mostra as duas, e o
 /// `⌘Z` tira o ajuste — e não a receita.
-#[gpui::test]
+#[gpui_kit::test]
 fn o_ajuste_feito_enquanto_a_receita_padrao_espera_nao_e_apagado_por_ela(cx: &mut TestAppContext) {
     let e = revelando_antes_da_receita_padrao(cx);
     chega_a_receita_padrao(&e, cx, Some("id-DSC_102.jpg"));
@@ -1457,7 +1457,7 @@ fn o_ajuste_feito_enquanto_a_receita_padrao_espera_nao_e_apagado_por_ela(cx: &mu
 /// O operador ajusta a foto que espera a receita, volta para a sessão e abre
 /// outra. A tira nova não guarda o que a de antes sabia; sem a mescla no
 /// serviço, a receita apagaria o ajuste sem ninguém olhando.
-#[gpui::test]
+#[gpui_kit::test]
 fn o_ajuste_sobrevive_a_receita_padrao_mesmo_com_a_revelacao_em_outra_foto(
     cx: &mut TestAppContext,
 ) {

@@ -22,20 +22,21 @@
 //! juntos — gravar "Parceiro" antes de haver parceiro é o que o site recusa —,
 //! então eles se editam aqui e vão num gesto só, o "Gravar".
 
+use crate::campo::TrocarValor as _;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
 use domain::entities::Preset;
 use domain::services::pos_venda::{GaleriaAberta, MudancaDaGaleria, ResumoSimples, Sessao};
-use gpui::{
+use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
+use gpui_kit::{
     div, img, prelude::*, px, AnyElement, App, Context, Entity, EventEmitter, FocusHandle,
     Focusable, FontWeight, Hsla, KeyDownEvent, RenderImage, SharedString, Subscription, Task,
     Window,
 };
-use gpui_component::input::{Input, InputEvent, InputState};
-use gpui_component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
-use gpui_component::{h_flex, v_flex, ActiveTheme, Icon};
 use image::DynamicImage;
 
 use super::associacao::{Associador, Cartao, EventoDaAssociacao};
@@ -58,7 +59,7 @@ const COLUNAS_DOS_PRESETS: usize = 4;
 const LARGURA: f32 = 576.;
 
 fn cor(hex: u32) -> Hsla {
-    gpui::rgb(hex).into()
+    gpui_kit::rgb(hex).into()
 }
 
 // ── Os valores ───────────────────────────────────────────────────────────
@@ -400,7 +401,7 @@ impl Atendimento {
 
     fn fechar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.associador.update(cx, |a, _| a.largar());
-        self.devolver.devolver(window);
+        self.devolver.devolver(window, cx);
         cx.emit(EventoDoAtendimento::Fechou);
     }
 
@@ -720,7 +721,7 @@ impl Atendimento {
 // ── O desenho ────────────────────────────────────────────────────────────
 
 /// Uma seção da gaveta: o título pequeno e o corpo — o `Secao` do site.
-fn secao(titulo: &'static str, corpo: impl IntoElement) -> gpui::Div {
+fn secao(titulo: &'static str, corpo: impl IntoElement) -> gpui_kit::Div {
     v_flex()
         .gap(px(8.))
         .child(
@@ -787,7 +788,7 @@ impl Atendimento {
                 let texto = self.origem.detalhe.clone();
                 campo.update(cx, |c, cx| {
                     if c.value().as_ref() != texto {
-                        c.set_value(texto, window, cx)
+                        c.trocar_valor(texto, window, cx)
                     }
                 });
             }
@@ -800,7 +801,7 @@ impl Atendimento {
         }
         if std::mem::take(&mut self.tomar_foco) {
             self.devolver.lembrar(window, cx);
-            window.focus(&self.foco);
+            window.focus(&self.foco, cx);
         }
     }
 
@@ -967,7 +968,11 @@ impl Atendimento {
                         .overflow_hidden()
                         .bg(tema.muted)
                         .when_some(amostra, |c, imagem| {
-                            c.child(img(imagem).size_full().object_fit(gpui::ObjectFit::Cover))
+                            c.child(
+                                img(imagem)
+                                    .size_full()
+                                    .object_fit(gpui_kit::ObjectFit::Cover),
+                            )
                         }),
                 )
                 .when(marcado, |c| {
@@ -989,7 +994,7 @@ impl Atendimento {
                 .child(div().text_xs().line_clamp(2).child(nome))
                 .on_click(cx.listener(move |tela, _, window, cx| {
                     tela.foco_do_preset = indice;
-                    window.focus(&tela.foco_dos_presets);
+                    window.focus(&tela.foco_dos_presets, cx);
                     tela.escolher_preset(id.clone(), cx);
                 }))
                 .into_any_element();
@@ -1093,7 +1098,7 @@ impl Render for Atendimento {
             .size_full()
             .bg(tema::cores::veu().opacity(0.5))
             .on_mouse_down(
-                gpui::MouseButton::Left,
+                gpui_kit::MouseButton::Left,
                 cx.listener(|tela, _, window, cx| tela.fechar(window, cx)),
             )
             .child(

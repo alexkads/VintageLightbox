@@ -17,12 +17,12 @@
 //! 🔑 **O que não está pronto no app não aparece nele**: o menu tem só as
 //! seções que o app já atende, e nenhuma a mais.
 
-use gpui::{
+use gpui_kit::component::tooltip::Tooltip;
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
+use gpui_kit::{
     canvas, div, prelude::*, px, AnyElement, Context, FontWeight, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, SharedString, Window,
 };
-use gpui_component::tooltip::Tooltip;
-use gpui_component::{h_flex, v_flex, ActiveTheme, Icon};
 
 use super::{Aplicativo, Tela};
 use crate::estilo;
@@ -155,10 +155,10 @@ impl Aplicativo {
         if novidades == 0 && !esperando {
             return None;
         }
-        let cor: gpui::Hsla = if esperando {
-            gpui::rgb(0xef4444).into()
+        let cor: gpui_kit::Hsla = if esperando {
+            gpui_kit::rgb(0xef4444).into()
         } else {
-            gpui::rgb(0x16a34a).into()
+            gpui_kit::rgb(0x16a34a).into()
         };
         let selo = div()
             .id("menu-selo-do-chatbot")
@@ -171,7 +171,7 @@ impl Aplicativo {
             .px(px(4.))
             .rounded_full()
             .bg(cor)
-            .text_color(gpui::white())
+            .text_color(gpui_kit::white())
             .text_xs()
             .child(if novidades > 0 {
                 novidades.to_string()
@@ -241,7 +241,7 @@ impl Aplicativo {
             _ => {}
         }
         self.tela = tela;
-        window.focus(&self.foco);
+        window.focus(&self.foco, cx);
         cx.notify();
     }
 
@@ -543,7 +543,7 @@ impl Aplicativo {
             )
     }
 
-    fn nome_e_email(&self, apagado: gpui::Hsla) -> impl IntoElement {
+    fn nome_e_email(&self, apagado: gpui_kit::Hsla) -> impl IntoElement {
         let (nome, email) = match &self.conta {
             Some(conta) => (conta.exibido().to_string(), conta.email.clone()),
             None => ("Conta RecordarFotos".to_string(), "carregando…".to_string()),

@@ -19,6 +19,7 @@
 //! A etapa 1 é sempre "feita" (o app já é o aplicativo), e o assistente abre
 //! na etapa 2.
 
+use crate::campo::TrocarValor as _;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -31,12 +32,12 @@ use domain::entities::Preset;
 use domain::services::pos_venda::{Estudio, GaleriaDoPainel, Produto, Sessao};
 use domain::services::PreviewType;
 use domain::value_objects::{ImportMode, ImportOptions, OrganizationStrategy, RenamePattern};
-use gpui::{
+use gpui_kit::component::input::{InputEvent, InputState};
+use gpui_kit::component::select::{SearchableVec, SelectEvent, SelectItem, SelectState};
+use gpui_kit::{
     prelude::*, App, Context, Entity, EventEmitter, FocusHandle, Focusable, RenderImage,
     ScrollHandle, SharedString, Subscription, Task, Window,
 };
-use gpui_component::input::{InputEvent, InputState};
-use gpui_component::select::{SearchableVec, SelectEvent, SelectItem, SelectState};
 use infrastructure::cache::preview_manager::PreviewManager;
 
 use super::amostras::Amostras;
@@ -577,7 +578,7 @@ impl NovaSessao {
         }
         self.reler_fotos();
         self.acompanhar(window, cx);
-        window.focus(&self.foco);
+        window.focus(&self.foco, cx);
         cx.notify();
     }
 
@@ -672,7 +673,7 @@ impl NovaSessao {
         ] {
             entidade.update(cx, |estado, cx| {
                 if estado.value() != valor.as_str() {
-                    estado.set_value(valor, window, cx);
+                    estado.trocar_valor(valor, window, cx);
                 }
             });
         }
@@ -752,8 +753,8 @@ impl NovaSessao {
         self.busca.largar();
         self.guardar();
         self.rolagem
-            .set_offset(gpui::point(gpui::px(0.), gpui::px(0.)));
-        window.focus(&self.foco);
+            .set_offset(gpui_kit::point(gpui_kit::px(0.), gpui_kit::px(0.)));
+        window.focus(&self.foco, cx);
         cx.notify();
     }
 
@@ -824,11 +825,11 @@ impl NovaSessao {
             Campo::Email => self.email.update(cx, |c, cx| c.focus(window, cx)),
             Campo::Produto => {
                 let foco = self.escolha_do_produto.focus_handle(cx);
-                window.focus(&foco);
+                window.focus(&foco, cx);
             }
             Campo::Estudio => {
                 let foco = self.escolha_do_estudio.focus_handle(cx);
-                window.focus(&foco);
+                window.focus(&foco, cx);
             }
             Campo::Parceiro => {}
         }
@@ -1218,7 +1219,7 @@ impl NovaSessao {
     }
 
     pub fn fechar_busca(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.busca.fechar(window);
+        self.busca.fechar(window, cx);
         cx.notify();
     }
 
@@ -1329,7 +1330,7 @@ impl NovaSessao {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.busca.fechar(window);
+        self.busca.fechar(window, cx);
         self.associar(item, window, cx);
     }
 
@@ -1390,7 +1391,7 @@ impl NovaSessao {
         };
         let nome_campo = campo("", window, cx);
         if let Some(nome) = nome {
-            nome_campo.update(cx, |c, cx| c.set_value(nome, window, cx));
+            nome_campo.update(cx, |c, cx| c.trocar_valor(nome, window, cx));
         }
         let opcoes: Vec<Opcao> = assoc::TIPOS_DE_PARCEIRO
             .iter()
@@ -1546,7 +1547,7 @@ impl NovaSessao {
         let Some(parceiro) = self.cadastro.as_ref().and_then(|c| c.existente.clone()) else {
             return;
         };
-        self.busca.fechar(window);
+        self.busca.fechar(window, cx);
         self.associar(ItemDaBusca::Parceiro(parceiro), window, cx);
     }
 

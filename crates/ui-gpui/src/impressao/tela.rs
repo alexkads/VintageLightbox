@@ -21,13 +21,13 @@
 use std::sync::{Arc, Mutex};
 
 use adapters::view_models::PhotoViewModel;
-use gpui::{
+use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
+use gpui_kit::component::{ActiveTheme, Disableable, Selectable, Sizable};
+use gpui_kit::{
     canvas, div, img, prelude::*, px, uniform_list, App, Context, Entity, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, SharedString, Subscription, Window,
 };
-use gpui_component::button::{Button, ButtonVariants};
-use gpui_component::slider::{Slider, SliderEvent, SliderState};
-use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
 
 use crate::biblioteca::grade::{colunas_que_cabem, fotos_da_linha, linhas_necessarias};
@@ -98,7 +98,7 @@ pub struct Impressao {
     /// papel** — o mesmo defeito que o papel com a forma da janela tem, de novo.
     deslocamentos: std::collections::HashMap<usize, (f32, f32)>,
     /// A célula em arrasto e a última posição do ponteiro.
-    arrasto: Option<(usize, gpui::Point<gpui::Pixels>)>,
+    arrasto: Option<(usize, gpui_kit::Point<gpui_kit::Pixels>)>,
     margem: Entity<SliderState>,
     espaco: Entity<SliderState>,
     /// 🚨 As assinaturas moram aqui. `Subscription` descartada cancela a
@@ -121,7 +121,7 @@ pub struct Impressao {
     gerando: bool,
     esperando_pasta: bool,
     colhendo: bool,
-    _colheita: Option<gpui::Task<()>>,
+    _colheita: Option<gpui_kit::Task<()>>,
     /// O que dizer depois — onde o PDF foi parar, ou por que não foi.
     aviso: Option<SharedString>,
 }
@@ -154,7 +154,11 @@ impl Impressao {
             &margem,
             window,
             |tela: &mut Self, _estado, evento: &SliderEvent, _window, cx| {
-                let SliderEvent::Change(valor) = evento;
+                // O `Release` (novo no gpui-kit 0.6) chega depois do último `Change`
+                // com o mesmo valor: tratá-lo gravaria duas vezes.
+                let SliderEvent::Change(valor) = evento else {
+                    return;
+                };
                 tela.leiaute.margem_mm = valor.start();
                 cx.notify();
             },
@@ -163,7 +167,11 @@ impl Impressao {
             &espaco,
             window,
             |tela: &mut Self, _estado, evento: &SliderEvent, _window, cx| {
-                let SliderEvent::Change(valor) = evento;
+                // O `Release` (novo no gpui-kit 0.6) chega depois do último `Change`
+                // com o mesmo valor: tratá-lo gravaria duas vezes.
+                let SliderEvent::Change(valor) = evento else {
+                    return;
+                };
                 tela.leiaute.espaco_mm = valor.start();
                 cx.notify();
             },
@@ -336,7 +344,7 @@ impl Impressao {
     fn comecar_arrasto(
         &mut self,
         celula: usize,
-        posicao: gpui::Point<gpui::Pixels>,
+        posicao: gpui_kit::Point<gpui_kit::Pixels>,
         cx: &mut Context<Self>,
     ) {
         self.arrasto = Some((celula, posicao));
@@ -350,7 +358,7 @@ impl Impressao {
     /// desalinhar o dedo da foto no gesto seguinte.
     fn mover_arrasto(
         &mut self,
-        posicao: gpui::Point<gpui::Pixels>,
+        posicao: gpui_kit::Point<gpui_kit::Pixels>,
         espaco: (f32, f32),
         cx: &mut Context<Self>,
     ) {
@@ -417,7 +425,7 @@ impl Impressao {
         let celulas = self.leiaute.celulas();
         let fotos = self.fotos_da_folha();
 
-        let desenhadas: Vec<gpui::AnyElement> = celulas
+        let desenhadas: Vec<gpui_kit::AnyElement> = celulas
             .iter()
             .enumerate()
             .map(|(indice, celula)| {
@@ -444,7 +452,7 @@ impl Impressao {
                     .relative()
                     .w(px(largura_mm * escala))
                     .h(px(altura_mm * escala))
-                    .bg(gpui::white())
+                    .bg(gpui_kit::white())
                     .shadow_md()
                     .children(desenhadas)
                     // Enquanto há arrasto, quem escuta o ponteiro é a janela.
@@ -700,7 +708,7 @@ impl Impressao {
         foto: Option<&PhotoViewModel>,
         escala: f32,
         cx: &mut Context<Self>,
-    ) -> gpui::AnyElement {
+    ) -> gpui_kit::AnyElement {
         let moldura = div()
             .absolute()
             .left(px(celula.x * escala))
@@ -716,8 +724,8 @@ impl Impressao {
             // O contorno da célula vazia é o do legado: cinza claro sobre o
             // branco do papel, para a grade ser visível antes de haver foto.
             .border_1()
-            .border_color(gpui::rgb(0xd0d0d0))
-            .bg(gpui::rgb(0xf0f0f0));
+            .border_color(gpui_kit::rgb(0xd0d0d0))
+            .bg(gpui_kit::rgb(0xf0f0f0));
 
         let Some(foto) = foto else {
             return moldura.into_any_element();
@@ -987,9 +995,9 @@ fn escolha(
     previews: &PreviewManager,
     cache: &Mutex<CacheDeMiniaturas>,
     escolhida: bool,
-    ao_clicar: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
+    ao_clicar: impl Fn(&gpui_kit::ClickEvent, &mut Window, &mut gpui_kit::App) + 'static,
     cx: &App,
-) -> gpui::AnyElement {
+) -> gpui_kit::AnyElement {
     let miniatura = cache
         .lock()
         .expect("o cache de miniaturas não deve estar envenenado")
@@ -1061,7 +1069,7 @@ fn botao(
     id: &str,
     texto: &str,
     aceso: bool,
-    ao_clicar: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
+    ao_clicar: impl Fn(&gpui_kit::ClickEvent, &mut Window, &mut gpui_kit::App) + 'static,
 ) -> Button {
     Button::new(SharedString::from(id.to_string()))
         .label(SharedString::from(texto.to_string()))
@@ -1080,8 +1088,8 @@ fn contador(
     id: &str,
     rotulo: &str,
     valor: u8,
-    ao_diminuir: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
-    ao_aumentar: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
+    ao_diminuir: impl Fn(&gpui_kit::ClickEvent, &mut Window, &mut gpui_kit::App) + 'static,
+    ao_aumentar: impl Fn(&gpui_kit::ClickEvent, &mut Window, &mut gpui_kit::App) + 'static,
     cx: &App,
 ) -> impl IntoElement {
     div()
@@ -1143,7 +1151,7 @@ fn medida(rotulo: &str, valor: f32, estado: &Entity<SliderState>, cx: &App) -> i
 mod testes {
     use super::*;
 
-    use gpui::TestAppContext;
+    use gpui_kit::TestAppContext;
     use tempfile::TempDir;
 
     fn previews_descartaveis() -> (Arc<PreviewManager>, TempDir) {
@@ -1174,9 +1182,9 @@ mod testes {
         ]
     }
 
-    fn tela(cx: &mut TestAppContext) -> (gpui::WindowHandle<Impressao>, TempDir) {
+    fn tela(cx: &mut TestAppContext) -> (gpui_kit::WindowHandle<Impressao>, TempDir) {
         let (previews, dir) = previews_descartaveis();
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
         let janela = cx.add_window(|window, cx| {
             Impressao::nova(
                 previews,
@@ -1199,10 +1207,10 @@ mod testes {
     /// 🔑 **E manda os ids na ordem da coleção**, que é a ordem que a prévia
     /// desenha. Mandar a ordem do acervo faria o papel sair diferente da tela
     /// que acabou de ser conferida — e a folha só se confere depois de impressa.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn imprimir_manda_a_folha_na_ordem_da_colecao(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
 
         let folha = Arc::new(porta::mentira::FolhaDeMentira::default());
         let janela = cx.add_window({
@@ -1250,10 +1258,10 @@ mod testes {
     /// ⚠️ **Sem foto escolhida não sai folha.** Um PDF de zero páginas é um
     /// arquivo que não abre em leitor nenhum, e apareceria no disco como se
     /// tivesse dado certo.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn sem_escolha_nao_gera_folha(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
 
         let folha = Arc::new(porta::mentira::FolhaDeMentira::default());
         let janela = cx.add_window({
@@ -1280,7 +1288,7 @@ mod testes {
         assert!(folha.pedidos().is_empty());
     }
 
-    #[gpui::test]
+    #[gpui_kit::test]
     fn abrir_comeca_com_a_foto_selecionada(cx: &mut TestAppContext) {
         let (janela, _dir) = tela(cx);
 
@@ -1297,7 +1305,7 @@ mod testes {
     /// Sem seleção a coleção começa vazia — e zero foto é **zero folha**.
     ///
     /// Uma folha em branco na tela diria que há algo para imprimir.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn sem_selecao_nao_ha_folha(cx: &mut TestAppContext) {
         let (janela, _dir) = tela(cx);
 
@@ -1313,7 +1321,7 @@ mod testes {
     }
 
     /// Os botões de coleção contam sobre o que a Biblioteca estava mostrando.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn os_botoes_de_colecao_escolhem_sobre_o_acervo_visivel(cx: &mut TestAppContext) {
         let (janela, _dir) = tela(cx);
 
@@ -1339,7 +1347,7 @@ mod testes {
     /// é a do hash. Como é a posição na lista que decide em qual célula a foto
     /// cai, inverter e desinverter reembaralha a folha inteira sem ninguém ter
     /// tocado no leiaute — e o desenho novo parece tão certo quanto o anterior.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn inverter_duas_vezes_devolve_a_mesma_ordem(cx: &mut TestAppContext) {
         let (janela, _dir) = tela(cx);
 
@@ -1375,7 +1383,7 @@ mod testes {
     ///
     /// Sem isso, apertar "+" numa grade que não está escolhida mudaria o número
     /// na tela e não mudaria a folha — o controle responderia sem responder.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn mexer_na_grade_escolhe_o_modelo_personalizado(cx: &mut TestAppContext) {
         let (janela, _dir) = tela(cx);
 
@@ -1394,7 +1402,7 @@ mod testes {
 
     /// O leiaute sobrevive a sair e voltar: papel e margem são escolhas sobre o
     /// papel, e não sobre a foto.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn abrir_de_novo_nao_desfaz_o_leiaute(cx: &mut TestAppContext) {
         let (janela, _dir) = tela(cx);
 
@@ -1420,7 +1428,7 @@ mod testes {
     /// permite montar a folha na ordem em que se clicou — é o `push` do legado.
     /// Inserir na ordem do acervo tiraria de quem escolhe a única forma que
     /// existe hoje de dizer o que vai onde.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn clicar_na_faixa_poe_no_fim_e_tira_de_onde_estiver(cx: &mut TestAppContext) {
         let (janela, _dir) = tela(cx);
 
@@ -1449,7 +1457,7 @@ mod testes {
     /// ⚠️ A marcação é lida da coleção inteira, e não das fotos da folha — lê-la
     /// da folha faria tudo que passa da primeira página parecer não escolhido, e
     /// o clique seguinte tiraria da coleção o que quem clicou queria acrescentar.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_marcacao_vale_para_a_colecao_inteira_e_nao_so_para_a_primeira_folha(
         cx: &mut TestAppContext,
     ) {
@@ -1478,7 +1486,7 @@ mod testes {
     /// desaparece atrás do `overflow_hidden`, a célula fica igual a uma vazia, e
     /// quem arrastou não tem como saber para que lado ela foi nem como trazê-la
     /// de volta.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_empurrao_para_no_limite_da_celula(cx: &mut TestAppContext) {
         let (janela, _dir) = tela(cx);
 
@@ -1492,8 +1500,8 @@ mod testes {
                 // Escala 1 mm = 1 px deixa a conta legível.
                 let espaco = impressao.leiaute().papel_mm();
 
-                impressao.comecar_arrasto(0, gpui::point(px(0.), px(0.)), cx);
-                impressao.mover_arrasto(gpui::point(px(9999.), px(9999.)), espaco, cx);
+                impressao.comecar_arrasto(0, gpui_kit::point(px(0.), px(0.)), cx);
+                impressao.mover_arrasto(gpui_kit::point(px(9999.), px(9999.)), espaco, cx);
 
                 let (x, y) = impressao.deslocamento_de(0);
                 assert!(
@@ -1502,7 +1510,7 @@ mod testes {
                 );
 
                 // E para o outro lado, pelo mesmo limite.
-                impressao.mover_arrasto(gpui::point(px(-9999.), px(-9999.)), espaco, cx);
+                impressao.mover_arrasto(gpui_kit::point(px(-9999.), px(-9999.)), espaco, cx);
                 let (x, y) = impressao.deslocamento_de(0);
                 assert!((x + limite_x).abs() < 1e-3 && (y + limite_y).abs() < 1e-3);
             })
@@ -1514,7 +1522,7 @@ mod testes {
     /// O ouvinte é da **janela**, e não da célula: ele recebe todo movimento do
     /// ponteiro enquanto está ligado. Sem esta guarda, passar o mouse pela folha
     /// depois de soltar continuaria empurrando a foto.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn sem_arrasto_o_ponteiro_nao_empurra_nada(cx: &mut TestAppContext) {
         let (janela, _dir) = tela(cx);
 
@@ -1523,7 +1531,7 @@ mod testes {
                 impressao.abrir(acervo(), vec!["id-a.jpg".to_string()], cx);
                 let espaco = impressao.leiaute().papel_mm();
 
-                impressao.mover_arrasto(gpui::point(px(50.), px(50.)), espaco, cx);
+                impressao.mover_arrasto(gpui_kit::point(px(50.), px(50.)), espaco, cx);
 
                 assert_eq!(impressao.deslocamento_de(0), (0.0, 0.0));
                 assert!(!impressao.tem_deslocamento());
@@ -1533,7 +1541,7 @@ mod testes {
 
     /// "Redefinir posições" desfaz todos os empurrões — e some quando não há
     /// nenhum, como no legado.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn redefinir_posicoes_devolve_todas_as_fotos_ao_centro(cx: &mut TestAppContext) {
         let (janela, _dir) = tela(cx);
 
@@ -1543,8 +1551,8 @@ mod testes {
                 assert!(!impressao.tem_deslocamento(), "nasce sem botão");
 
                 let espaco = impressao.leiaute().papel_mm();
-                impressao.comecar_arrasto(0, gpui::point(px(0.), px(0.)), cx);
-                impressao.mover_arrasto(gpui::point(px(10.), px(4.)), espaco, cx);
+                impressao.comecar_arrasto(0, gpui_kit::point(px(0.), px(0.)), cx);
+                impressao.mover_arrasto(gpui_kit::point(px(10.), px(4.)), espaco, cx);
                 assert!(impressao.tem_deslocamento());
 
                 impressao.redefinir_posicoes(cx);
@@ -1560,7 +1568,7 @@ mod testes {
     /// É o defeito do legado medido do lado de cá: lá a folha é `0,8 × 0,9` do
     /// espaço disponível, então esticar a janela na horizontal engorda o papel.
     /// Aqui a única coisa que a janela decide é a escala.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_janela_muda_o_tamanho_da_folha_e_nao_a_forma(cx: &mut TestAppContext) {
         let (janela, _dir) = tela(cx);
 
@@ -1570,9 +1578,9 @@ mod testes {
             })
             .expect("a janela deve estar aberta");
 
-        let visual = gpui::VisualTestContext::from_window(janela.into(), cx);
-        let mut forma = |visual: &gpui::VisualTestContext, largura, altura| {
-            visual.simulate_resize(gpui::size(px(largura), px(altura)));
+        let visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        let mut forma = |visual: &gpui_kit::VisualTestContext, largura, altura| {
+            visual.simulate_resize(gpui_kit::size(px(largura), px(altura)));
             janela
                 .update(cx, |impressao, window, _cx| {
                     let escala = impressao
@@ -1599,7 +1607,7 @@ mod testes {
     /// A assinatura é a peça que some sem avisar: um `let _ = cx.subscribe(...)`
     /// compila, o slider se move, e a folha não muda. É o mesmo defeito que a
     /// busca da Biblioteca teve.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn arrastar_a_margem_muda_a_folha(cx: &mut TestAppContext) {
         let (janela, _dir) = tela(cx);
 
@@ -1611,7 +1619,7 @@ mod testes {
                 // inscrição morta. Foi o que custou dois testes na fase 2.
                 impressao.margem.update(cx, |_, cx| {
                     cx.emit(SliderEvent::Change(
-                        gpui_component::slider::SliderValue::Single(25.0),
+                        gpui_kit::component::slider::SliderValue::Single(25.0),
                     ));
                 });
             })

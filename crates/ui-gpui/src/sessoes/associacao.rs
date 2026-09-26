@@ -16,18 +16,19 @@
 //! decide o que fazer com a escolha — o assistente põe no rascunho, a gaveta
 //! manda um `PATCH`.
 
+use crate::campo::TrocarValor as _;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use domain::services::pos_venda::Sessao;
-use gpui::{
+use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
+use gpui_kit::{
     div, prelude::*, px, relative, AnyElement, Context, Div, Entity, EventEmitter, FontWeight,
     Hsla, SharedString, Subscription, Task, Window,
 };
-use gpui_component::input::{Input, InputEvent, InputState};
-use gpui_component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
-use gpui_component::{h_flex, v_flex, ActiveTheme, Icon};
 
 use super::nova::associacoes::{
     self as assoc, AgendamentoEscolhido, CompraEscolhida, ParceiroEscolhido, VoucherEscolhido,
@@ -48,7 +49,7 @@ const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(50);
 const SO_RECORRENTE: &str = "Cadastre apenas se for um parceiro recorrente";
 
 fn cor(hex: u32) -> Hsla {
-    gpui::rgb(hex).into()
+    gpui_kit::rgb(hex).into()
 }
 
 // ── O cartão ─────────────────────────────────────────────────────────────
@@ -406,7 +407,7 @@ impl Associador {
     }
 
     pub fn fechar_busca(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.busca.fechar(window);
+        self.busca.fechar(window, cx);
         // O cadastro aberto no rodapé do modal sai junto com ele.
         self.cadastro = None;
         cx.notify();
@@ -519,7 +520,7 @@ impl Associador {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.busca.fechar(window);
+        self.busca.fechar(window, cx);
         self.cadastro = None;
         cx.emit(EventoDaAssociacao::Escolheu(Box::new(item)));
         cx.notify();
@@ -545,7 +546,7 @@ impl Associador {
             |window: &mut Window, cx: &mut Context<Self>| cx.new(|cx| InputState::new(window, cx));
         let nome_campo = campo(window, cx);
         if let Some(nome) = nome {
-            nome_campo.update(cx, |c, cx| c.set_value(nome, window, cx));
+            nome_campo.update(cx, |c, cx| c.trocar_valor(nome, window, cx));
         }
         let opcoes: Vec<TipoDeParceiro> = assoc::TIPOS_DE_PARCEIRO
             .iter()
@@ -1119,11 +1120,11 @@ impl Associador {
             .bg(tema::cores::veu())
             .occlude()
             .on_mouse_down(
-                gpui::MouseButton::Left,
+                gpui_kit::MouseButton::Left,
                 cx.listener(|tela, _, window, cx| tela.fechar_busca(window, cx)),
             )
             .on_key_down(
-                cx.listener(|tela, evento: &gpui::KeyDownEvent, window, cx| {
+                cx.listener(|tela, evento: &gpui_kit::KeyDownEvent, window, cx| {
                     if evento.keystroke.key == "escape" {
                         cx.stop_propagation();
                         tela.fechar_busca(window, cx);
@@ -1142,7 +1143,9 @@ impl Associador {
                     .border_color(tema.border)
                     .bg(tema.background)
                     .shadow_lg()
-                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
+                        cx.stop_propagation()
+                    })
                     .child(
                         h_flex()
                             .child(

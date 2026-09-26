@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use gpui::{px, size, DevicePixels, Pixels, RenderImage, Size};
+use gpui_kit::{px, size, DevicePixels, Pixels, RenderImage, Size};
 // `Frame` vem do **crate `image`**, e não do `gpui`: lá ele é reexportado de
 // forma privada. É a mesma peça que a `infrastructure` já usa, e é por isso que
 // as duas versões do `image` precisam ser a mesma na árvore (§3.2).
@@ -91,7 +91,7 @@ pub mod coleta {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
-    use gpui::{App, RenderImage};
+    use gpui_kit::{App, RenderImage};
 
     /// De quanto em quanto tempo o registro é varrido.
     pub const INTERVALO: Duration = Duration::from_millis(250);
@@ -172,9 +172,9 @@ pub mod coleta {
     pub fn ligar(cx: &mut App) {
         cx.spawn(async move |cx| loop {
             cx.background_executor().timer(INTERVALO).await;
-            if cx.update(recolher).is_err() {
-                return;
-            }
+            // No gpui-kit 0.6 o `update` não devolve erro: a tarefa é cancelada
+            // quando o app termina, e o laço morre junto.
+            cx.update(recolher);
         })
         .detach();
     }
@@ -185,7 +185,7 @@ pub mod coleta {
     }
 
     #[cfg(test)]
-    pub(crate) fn registrada_por_id(id: gpui::ImageId) -> bool {
+    pub(crate) fn registrada_por_id(id: gpui_kit::ImageId) -> bool {
         VIVAS
             .lock()
             .map(|vivas| vivas.iter().any(|(viva, _)| viva.id == id))
@@ -409,8 +409,8 @@ mod tests {
     /// 🚨 A imagem que saiu de uso volta para a GPU — e a que ainda está em uso
     /// fica. Sem isso o atlas só cresce, e numa Haswell a memória de vídeo
     /// acaba no meio de um arrasto de exposição.
-    #[gpui::test]
-    fn a_imagem_que_ninguem_segura_sai_da_gpu(cx: &mut gpui::TestAppContext) {
+    #[gpui_kit::test]
+    fn a_imagem_que_ninguem_segura_sai_da_gpu(cx: &mut gpui_kit::TestAppContext) {
         let em_uso = para_gpui(um_pixel(1, 2, 3, 255));
         let solta = para_gpui(um_pixel(4, 5, 6, 255));
         let id_da_solta = solta.id;
@@ -646,7 +646,7 @@ mod a_moldura_manda {
 mod a_moldura_medida {
     use std::sync::{Arc, Mutex};
 
-    use gpui::{
+    use gpui_kit::{
         div, img, prelude::*, px, AnyElement, App, Bounds, Context, ObjectFit, Pixels, Render,
         RenderImage, TestAppContext, Window,
     };
@@ -725,7 +725,7 @@ mod a_moldura_medida {
             forma,
             medida: guardada,
         });
-        gpui::VisualTestContext::from_window(janela.into(), cx).run_until_parked();
+        gpui_kit::VisualTestContext::from_window(janela.into(), cx).run_until_parked();
         let lida = *medida.lock().expect("o cadeado do teste");
         lida.expect("a moldura desenhou a foto")
     }
@@ -737,7 +737,7 @@ mod a_moldura_medida {
     /// ⚠️ Este teste afirma o **errado de propósito**: é ele que prova que o
     /// contorno ainda é necessário. No dia em que falhar, o GPUI mudou e
     /// `max_w_full`/`max_h_full` podem voltar a ser `size_full`.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_size_full_estoura_a_moldura(cx: &mut TestAppContext) {
         let (_, altura_da_moldura) = moldura();
         let retrato = medir(cx, Forma::SizeFull, 240, 320);
@@ -759,7 +759,7 @@ mod a_moldura_medida {
     /// entre a proporção da foto e a da moldura, e o catálogo de medição só
     /// tinha fotos na proporção da moldura. É por isso que `semear-catalogo`
     /// passou a gerar uma em cada três em pé.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_paisagem_quase_nao_sofre_e_por_isso_ninguem_via(cx: &mut TestAppContext) {
         let (_, altura_da_moldura) = moldura();
         let paisagem = medir(cx, Forma::SizeFull, 320, 240);
@@ -783,7 +783,7 @@ mod a_moldura_medida {
 
     /// ✅ **A correção.** Com `max_w_full`/`max_h_full` o elemento nunca passa
     /// da moldura — nem em pé, nem deitado.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn com_max_full_nada_passa_da_moldura(cx: &mut TestAppContext) {
         for (largura, altura, qual) in [
             (240, 320, "em pé"),

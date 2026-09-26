@@ -18,7 +18,7 @@
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
-use gpui::AppContext as _;
+use gpui_kit::AppContext as _;
 
 use adapters::controllers::ImportController;
 use domain::value_objects::ImportOptions;
@@ -142,11 +142,11 @@ impl Explorador for ExploradorDoDisco {
 pub trait SeletorDePasta: Send + Sync + 'static {
     /// Responde **sempre**: `OrigemEscolhida` ou `SemEscolha`. Silêncio deixaria
     /// a tela esperando uma pasta que nunca vem.
-    fn escolher(&self, canal: Sender<Recado>, cx: &mut gpui::App);
+    fn escolher(&self, canal: Sender<Recado>, cx: &mut gpui_kit::App);
 
     /// O mesmo, para a pasta de destino. Responde `DestinoEscolhido` ou
     /// `SemEscolha`.
-    fn escolher_destino(&self, canal: Sender<Recado>, cx: &mut gpui::App);
+    fn escolher_destino(&self, canal: Sender<Recado>, cx: &mut gpui_kit::App);
 }
 
 /// O seletor do sistema, pelo diálogo do próprio GPUI.
@@ -196,9 +196,9 @@ impl SeletorNativo {
         rotulo: &'static str,
         canal: Sender<Recado>,
         como: fn(String) -> Recado,
-        cx: &mut gpui::App,
+        cx: &mut gpui_kit::App,
     ) {
-        let escolha = cx.prompt_for_paths(gpui::PathPromptOptions {
+        let escolha = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
             files: false,
             directories: true,
             multiple: false,
@@ -227,11 +227,11 @@ impl SeletorNativo {
 }
 
 impl SeletorDePasta for SeletorNativo {
-    fn escolher(&self, canal: Sender<Recado>, cx: &mut gpui::App) {
+    fn escolher(&self, canal: Sender<Recado>, cx: &mut gpui_kit::App) {
         Self::pedir("Escolher a origem", canal, Recado::OrigemEscolhida, cx);
     }
 
-    fn escolher_destino(&self, canal: Sender<Recado>, cx: &mut gpui::App) {
+    fn escolher_destino(&self, canal: Sender<Recado>, cx: &mut gpui_kit::App) {
         Self::pedir("Escolher o destino", canal, Recado::DestinoEscolhido, cx);
     }
 }
@@ -568,7 +568,7 @@ pub mod mentira {
     }
 
     impl SeletorDePasta for SeletorDeMentira {
-        fn escolher(&self, canal: Sender<Recado>, _cx: &mut gpui::App) {
+        fn escolher(&self, canal: Sender<Recado>, _cx: &mut gpui_kit::App) {
             let recado = match self.escolha.lock().expect("a escolha").clone() {
                 Some(caminho) => Recado::OrigemEscolhida(caminho),
                 None => Recado::SemEscolha,
@@ -576,7 +576,7 @@ pub mod mentira {
             let _ = canal.send(recado);
         }
 
-        fn escolher_destino(&self, canal: Sender<Recado>, _cx: &mut gpui::App) {
+        fn escolher_destino(&self, canal: Sender<Recado>, _cx: &mut gpui_kit::App) {
             let recado = match self.escolha.lock().expect("a escolha").clone() {
                 Some(caminho) => Recado::DestinoEscolhido(caminho),
                 None => Recado::SemEscolha,

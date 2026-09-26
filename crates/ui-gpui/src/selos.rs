@@ -26,8 +26,8 @@
 use adapters::view_models::PhotoViewModel;
 use biblioteca_core::acervo::Estado;
 use biblioteca_core::sessoes::Situacao;
-use gpui::{div, prelude::*, px, App, Hsla};
-use gpui_component::ActiveTheme;
+use gpui_kit::component::ActiveTheme;
+use gpui_kit::{div, prelude::*, px, App, Hsla};
 
 use crate::tema::cores;
 
@@ -155,7 +155,7 @@ pub fn estrelas(nota: i32, cx: &App) -> impl IntoElement {
         0 => 0,
         n => n * "★".len() + (n - 1) * ENTRE.len(),
     };
-    let cor = |cor: Hsla| gpui::HighlightStyle {
+    let cor = |cor: Hsla| gpui_kit::HighlightStyle {
         color: Some(cor),
         ..Default::default()
     };
@@ -172,7 +172,7 @@ pub fn estrelas(nota: i32, cx: &App) -> impl IntoElement {
     div()
         .flex_none()
         .text_xs()
-        .child(gpui::StyledText::new(TODAS).with_highlights(trechos))
+        .child(gpui_kit::StyledText::new(TODAS).with_highlights(trechos))
 }
 
 /// "levada" — o selo do balcão, na família âmbar.
@@ -271,7 +271,7 @@ fn cores_do_tom(tom: Tom, cx: &App) -> (Hsla, Hsla) {
 }
 
 /// Um selo: uma palavra, o tom dela, e nada mais.
-pub fn selo(tom: Tom, texto: impl Into<gpui::SharedString>, cx: &App) -> gpui::Div {
+pub fn selo(tom: Tom, texto: impl Into<gpui_kit::SharedString>, cx: &App) -> gpui_kit::Div {
     let (fundo, frente) = cores_do_tom(tom, cx);
     div()
         .flex_none()
@@ -285,7 +285,7 @@ pub fn selo(tom: Tom, texto: impl Into<gpui::SharedString>, cx: &App) -> gpui::D
 }
 
 /// O selo do estado de uma foto do site, como a grade do ensaio o desenha.
-pub fn selo_do_estado(estado: Estado, apagada: bool, cx: &App) -> gpui::Div {
+pub fn selo_do_estado(estado: Estado, apagada: bool, cx: &App) -> gpui_kit::Div {
     let texto = if apagada {
         "Apagada".to_string()
     } else {
@@ -296,7 +296,7 @@ pub fn selo_do_estado(estado: Estado, apagada: bool, cx: &App) -> gpui::Div {
 
 /// ❌ O selo da **rejeitada** — a tecla `X` (contrato C21). Em vermelho: é a
 /// decisão de deixá-la fora, e ela manda mais do que a situação de antes.
-pub fn selo_de_rejeitada(cx: &App) -> gpui::Div {
+pub fn selo_de_rejeitada(cx: &App) -> gpui_kit::Div {
     selo(Tom::Ruim, "Rejeitada", cx)
 }
 
@@ -307,7 +307,7 @@ pub fn selo_de_rejeitada(cx: &App) -> gpui::Div {
 /// comprada), e a importada entra no menos errado dos três — mas o cliente não a
 /// vê, não pode comprá-la, e ela nem chegou ao storage. Quem olha a grade
 /// precisa saber a diferença: é ela que diz o que ainda falta fazer.
-pub fn selo_de_so_no_disco(cx: &App) -> gpui::Div {
+pub fn selo_de_so_no_disco(cx: &App) -> gpui_kit::Div {
     selo(Tom::Neutro, "No disco", cx)
 }
 

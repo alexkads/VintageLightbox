@@ -20,13 +20,13 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use gpui::{
+use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::{ActiveTheme, Disableable, Selectable, Sizable};
+use gpui_kit::{
     actions, div, img, prelude::*, px, uniform_list, ClickEvent, Context, EventEmitter,
     FocusHandle, SharedString, Task, UniformListScrollHandle, Window,
 };
-use gpui_component::button::{Button, ButtonVariants};
-use gpui_component::checkbox::Checkbox;
-use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
 
 use domain::value_objects::{ImportMode, OrganizationStrategy, RenamePattern};
@@ -51,16 +51,16 @@ actions!(
 /// Biblioteca desenhada atrás e o `Enter` de qualquer campo de texto futuro.
 const CONTEXTO: &str = "Importacao";
 
-pub fn init(cx: &mut gpui::App) {
+pub fn init(cx: &mut gpui_kit::App) {
     cx.bind_keys([
-        gpui::KeyBinding::new("cmd-a", MarcarTudo, Some(CONTEXTO)),
+        gpui_kit::KeyBinding::new("cmd-a", MarcarTudo, Some(CONTEXTO)),
         // Ctrl também: em Windows e Linux é a única tecla de "marcar tudo", e
         // sem ela a caixa da importação só respondia no Mac.
-        gpui::KeyBinding::new("ctrl-a", MarcarTudo, Some(CONTEXTO)),
-        gpui::KeyBinding::new("space", AlternarFoco, Some(CONTEXTO)),
-        gpui::KeyBinding::new("down", DescerFoco, Some(CONTEXTO)),
-        gpui::KeyBinding::new("up", SubirFoco, Some(CONTEXTO)),
-        gpui::KeyBinding::new("enter", Confirmar, Some(CONTEXTO)),
+        gpui_kit::KeyBinding::new("ctrl-a", MarcarTudo, Some(CONTEXTO)),
+        gpui_kit::KeyBinding::new("space", AlternarFoco, Some(CONTEXTO)),
+        gpui_kit::KeyBinding::new("down", DescerFoco, Some(CONTEXTO)),
+        gpui_kit::KeyBinding::new("up", SubirFoco, Some(CONTEXTO)),
+        gpui_kit::KeyBinding::new("enter", Confirmar, Some(CONTEXTO)),
     ]);
 }
 
@@ -161,8 +161,8 @@ impl Importacao {
     /// Põe o foco no modal. Chamado quando ele aparece — `track_focus` rastreia,
     /// não concede, e foi o que deixou o `Esc` da Revelação morto por dois
     /// commits.
-    pub fn focar(&self, window: &mut Window) {
-        window.focus(&self.foco);
+    pub fn focar(&self, window: &mut Window, cx: &mut gpui_kit::App) {
+        window.focus(&self.foco, cx);
     }
 
     fn ao_marcar_tudo(&mut self, _acao: &MarcarTudo, _window: &mut Window, cx: &mut Context<Self>) {
@@ -205,7 +205,7 @@ impl Importacao {
         };
         if let Some(posicao) = self.estado.visiveis().iter().position(|i| *i == focado) {
             self.rolagem
-                .scroll_to_item(posicao, gpui::ScrollStrategy::Top);
+                .scroll_to_item(posicao, gpui_kit::ScrollStrategy::Top);
         }
     }
 
@@ -819,7 +819,7 @@ impl Importacao {
     ///
     /// ⚠️ **Ele só aparece com foto marcada**, como no legado: um aviso sobre
     /// apagar nada é ruído, e ruído é o que ensina a ignorar aviso.
-    fn avisos(&self, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
+    fn avisos(&self, cx: &mut Context<Self>) -> Vec<gpui_kit::AnyElement> {
         avisos_do_painel(
             self.estado.opcoes.mode,
             self.estado.marcados(),
@@ -973,7 +973,7 @@ impl Importacao {
                     .collect()
             },
         )
-        .track_scroll(self.rolagem.clone())
+        .track_scroll(&self.rolagem)
         .flex_1()
         .h_full()
     }
@@ -1279,7 +1279,7 @@ pub fn avisos_do_painel(modo: ImportMode, marcados: usize, duplicados: usize) ->
 }
 
 /// Uma faixa de aviso, com a cor dizendo a gravidade.
-fn faixa_de_aviso(texto: &str, cor: gpui::Hsla, cx: &gpui::App) -> impl IntoElement {
+fn faixa_de_aviso(texto: &str, cor: gpui_kit::Hsla, cx: &gpui_kit::App) -> impl IntoElement {
     div()
         .mt(px(6.))
         .px(px(6.))
@@ -1341,7 +1341,7 @@ mod testes {
         assert_eq!(Aviso::JaNoCatalogo(3).texto(), "3 já estão no catálogo");
     }
 
-    use gpui::TestAppContext;
+    use gpui_kit::TestAppContext;
 
     use super::super::estado::Origem;
     use super::super::explorador::mentira::{
@@ -1352,7 +1352,7 @@ mod testes {
         cx: &mut TestAppContext,
         explorador: Arc<ExploradorDeMentira>,
         importador: Arc<ImportadorDeMentira>,
-    ) -> gpui::WindowHandle<Importacao> {
+    ) -> gpui_kit::WindowHandle<Importacao> {
         com_seletor(
             cx,
             explorador,
@@ -1366,8 +1366,8 @@ mod testes {
         explorador: Arc<ExploradorDeMentira>,
         importador: Arc<ImportadorDeMentira>,
         seletor: Arc<SeletorDeMentira>,
-    ) -> gpui::WindowHandle<Importacao> {
-        cx.update(gpui_component::init);
+    ) -> gpui_kit::WindowHandle<Importacao> {
+        cx.update(gpui_kit::init);
         let dir = tempfile::TempDir::new().expect("diretório temporário");
         let previews = Arc::new(PreviewManager::new_with_path(dir.path().to_path_buf()));
         // O `TempDir` é solto de propósito: ele vive o teste inteiro dentro do
@@ -1388,7 +1388,7 @@ mod testes {
     }
 
     /// Deixa a colheita rodar até drenar o que já chegou.
-    fn colher(cx: &mut TestAppContext, janela: &gpui::WindowHandle<Importacao>) {
+    fn colher(cx: &mut TestAppContext, janela: &gpui_kit::WindowHandle<Importacao>) {
         for _ in 0..10 {
             let _ = janela.update(cx, |tela, _window, cx| tela.colher(cx));
             cx.run_until_parked();
@@ -1408,7 +1408,7 @@ mod testes {
     /// A grade tem de aparecer cheia **antes** dos metadados. Se a tela esperasse
     /// o EXIF para mostrar a primeira célula, um cartão de 2.000 RAWs ficaria
     /// minutos em branco.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn varrer_enche_a_grade_antes_de_detalhar(cx: &mut TestAppContext) {
         let explorador = Arc::new(ExploradorDeMentira::responde(
             "/cartao",
@@ -1449,7 +1449,7 @@ mod testes {
     /// O seletor é uma janela do sistema e responde quando quiser — inclusive
     /// depois de a tela já ter parado de esperar qualquer outra coisa. É por isso
     /// que escolher liga o laço de colheita antes de abrir o diálogo.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn escolher_pasta_dispara_a_varredura(cx: &mut TestAppContext) {
         let explorador = Arc::new(ExploradorDeMentira::responde(
             "/escolhida",
@@ -1489,7 +1489,7 @@ mod testes {
     /// Sem o recado de desistência, a tela esperaria para sempre uma pasta que
     /// nunca vem — e o laço acordaria a cada 100ms pelo resto da sessão, com o
     /// modal fechado e ninguém olhando.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn desistir_do_seletor_solta_o_laco(cx: &mut TestAppContext) {
         let janela = com_seletor(
             cx,
@@ -1515,7 +1515,7 @@ mod testes {
     }
 
     /// Trocar de origem esquece a listagem anterior antes de pedir a nova.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn trocar_de_origem_limpa_a_grade(cx: &mut TestAppContext) {
         let explorador = Arc::new(ExploradorDeMentira::responde("/a", &["/a/1.NEF"]));
         let janela = janela(cx, explorador, Arc::new(ImportadorDeMentira::default()));
@@ -1543,7 +1543,7 @@ mod testes {
     /// Detectar cartão é ir ao sistema de arquivos, e a resposta pode chegar com
     /// uma varredura já em curso: quem abriu o modal e escolheu pasta pelo
     /// seletor não pode ver a grade se esvaziar porque um cartão foi encontrado.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn as_origens_chegam_sem_derrubar_a_grade(cx: &mut TestAppContext) {
         let explorador = Arc::new(ExploradorDeMentira::responde("/cartao", &["/cartao/a.NEF"]));
         explorador.cartoes.lock().expect("os cartões").push(Origem {
@@ -1571,7 +1571,7 @@ mod testes {
     }
 
     /// Clicar num cartão troca a origem e revarre.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn clicar_num_cartao_varre_ele(cx: &mut TestAppContext) {
         let explorador = Arc::new(ExploradorDeMentira::responde(
             "/Volumes/NIKON",
@@ -1602,7 +1602,7 @@ mod testes {
     /// No legado, o duplo clique **alternava a marcação**, contradizendo o clique
     /// simples; foi um dos consertos da reescrita de 15/ago, e vale portar o
     /// conserto, e não o defeito.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_lupa_abre_e_fecha_sem_mexer_na_marcacao(cx: &mut TestAppContext) {
         let explorador = Arc::new(ExploradorDeMentira::responde(
             "/cartao",
@@ -1638,7 +1638,7 @@ mod testes {
     }
 
     /// A lupa de outra célula troca de foto em vez de fechar.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_lupa_troca_de_foto(cx: &mut TestAppContext) {
         let explorador = Arc::new(ExploradorDeMentira::responde(
             "/cartao",
@@ -1668,14 +1668,14 @@ mod testes {
     /// lembrança do que já foi pedido, seriam 60 pedidos por segundo por célula
     /// visível — cada um abrindo o arquivo no cartão. É o tipo de laço que só
     /// aparece quando o cartão fica lento, e aí parece problema do cartão.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_miniatura_e_pedida_uma_vez_so(cx: &mut TestAppContext) {
         let explorador = Arc::new(ExploradorDeMentira::responde(
             "/cartao",
             &["/cartao/a.NEF", "/cartao/b.NEF"],
         ));
         let gerador = Arc::new(GeradorDeMentira::default());
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
 
         let janela = cx.add_window({
             let gerador = gerador.clone();
@@ -1736,7 +1736,7 @@ mod testes {
     /// 🔑 As miniaturas pedidas eram da listagem anterior. Guardá-las faria a
     /// grade nova nunca pedir as dela, se algum caminho se repetisse — o que
     /// acontece ao revarrer a mesma pasta com "incluir subpastas" trocado.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn trocar_de_origem_esquece_os_pedidos(cx: &mut TestAppContext) {
         let explorador = Arc::new(ExploradorDeMentira::responde("/cartao", &["/cartao/a.NEF"]));
         let janela = janela(cx, explorador, Arc::new(ImportadorDeMentira::default()));
@@ -1759,14 +1759,14 @@ mod testes {
     /// existem, e uma ligação que não casa **não falha** — ela simplesmente não
     /// faz nada. Foi assim que o `Esc` da Revelação ficou dois commits morto, e
     /// por isso este teste aperta as teclas de verdade.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn as_teclas_do_modal_chegam(cx: &mut TestAppContext) {
         let explorador = Arc::new(ExploradorDeMentira::responde(
             "/cartao",
             &["/cartao/a.NEF", "/cartao/b.NEF", "/cartao/c.NEF"],
         ));
         let importador = Arc::new(ImportadorDeMentira::default());
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
         cx.update(init);
 
         let janela = cx.add_window({
@@ -1790,13 +1790,13 @@ mod testes {
 
         janela
             .update(cx, |tela, window, cx| {
-                tela.focar(window);
+                tela.focar(window, cx);
                 tela.abrir_origem("/cartao".into(), cx);
             })
             .expect("a janela deve estar aberta");
         colher(cx, &janela);
 
-        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
 
         // ⌘A com tudo marcado desmarca tudo.
         visual.simulate_keystrokes("cmd-a");
@@ -1829,7 +1829,7 @@ mod testes {
     ///
     /// A guarda do botão não vale para a tecla — tecla não passa por botão
     /// desligado, e sem repetir a checagem o `Enter` copiaria tudo de novo.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn enter_durante_a_importacao_nao_repete_o_lote(cx: &mut TestAppContext) {
         let explorador = Arc::new(ExploradorDeMentira::responde("/cartao", &["/cartao/a.NEF"]));
         let importador = Arc::new(ImportadorDeMentira::default());
@@ -1854,7 +1854,7 @@ mod testes {
     }
 
     /// 🚨 Shift+clique marca o intervalo a partir da âncora.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn shift_clique_marca_o_intervalo(cx: &mut TestAppContext) {
         let explorador = Arc::new(ExploradorDeMentira::responde(
             "/cartao",
@@ -1893,7 +1893,7 @@ mod testes {
     /// Coerência com o que a grade mostra: se a importação vai pular, a marcação
     /// tem de dizer isso antes de o botão ser apertado — senão o rodapé promete
     /// 40 fotos e entram 32, e a diferença só aparece no fim.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn pular_duplicatas_desmarca_na_hora(cx: &mut TestAppContext) {
         let explorador = Arc::new(ExploradorDeMentira::responde(
             "/cartao",
@@ -1927,7 +1927,7 @@ mod testes {
     }
 
     /// A pasta de destino escolhida entra nas opções da importação.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_destino_escolhido_chega_a_importacao(cx: &mut TestAppContext) {
         let explorador = Arc::new(ExploradorDeMentira::responde("/cartao", &["/cartao/a.NEF"]));
         let importador = Arc::new(ImportadorDeMentira::default());
@@ -1975,7 +1975,7 @@ mod testes {
     /// `source_root` é o que o `PreserveStructure` usa para saber que estrutura
     /// preservar; sem ele, a organização por estrutura de origem não tem de onde
     /// partir e joga tudo numa pasta só.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn importar_leva_o_que_esta_marcado(cx: &mut TestAppContext) {
         let explorador = Arc::new(ExploradorDeMentira::responde(
             "/cartao",
@@ -2013,7 +2013,7 @@ mod testes {
     }
 
     /// Sem nada marcado, importar não faz nada.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn importar_sem_marcacao_nao_faz_nada(cx: &mut TestAppContext) {
         let explorador = Arc::new(ExploradorDeMentira::responde("/cartao", &["/cartao/a.NEF"]));
         let importador = Arc::new(ImportadorDeMentira::default());
@@ -2041,7 +2041,7 @@ mod testes {
     ///
     /// Dois cliques seguidos importariam o lote duas vezes — e com "pular
     /// duplicatas" desligado, a segunda passada copiaria cada arquivo de novo.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn nao_da_para_importar_duas_vezes_ao_mesmo_tempo(cx: &mut TestAppContext) {
         let explorador = Arc::new(ExploradorDeMentira::responde("/cartao", &["/cartao/a.NEF"]));
         let importador = Arc::new(ImportadorDeMentira::default());
@@ -2077,7 +2077,7 @@ mod testes {
     ///
     /// Um laço eterno acordaria a cada 100ms pelo resto da sessão, com o modal
     /// fechado e ninguém olhando.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_colheita_para_quando_nao_ha_o_que_esperar(cx: &mut TestAppContext) {
         let explorador = Arc::new(ExploradorDeMentira::responde("/cartao", &["/cartao/a.NEF"]));
         let janela = janela(cx, explorador, Arc::new(ImportadorDeMentira::default()));
@@ -2142,7 +2142,7 @@ mod testes {
     /// as levantava — era o item 11 da fila. O que este teste prende é o
     /// caminho inteiro: o botão escreve no mesmo `Freios` que o importador
     /// recebeu, e não numa cópia da tela.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn pausar_e_retomar_chegam_ao_importador(cx: &mut TestAppContext) {
         let importador = Arc::new(ImportadorDeMentira::default());
         let janela = janela(
@@ -2193,7 +2193,7 @@ mod testes {
     /// cancelamento deixasse a pausa levantada, as tarefas continuariam
     /// dormindo e o lote nunca contaria que desistiu — o defeito que o teste
     /// `cancelar_enquanto_pausado_termina_o_lote` prende do outro lado.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn cancelar_solta_a_pausa_e_nao_volta_atras(cx: &mut TestAppContext) {
         let importador = Arc::new(ImportadorDeMentira::default());
         let janela = janela(
@@ -2232,7 +2232,7 @@ mod testes {
     }
 
     /// Um lote novo não herda os freios do anterior.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn cada_lote_comeca_com_os_freios_soltos(cx: &mut TestAppContext) {
         let importador = Arc::new(ImportadorDeMentira::default());
         let janela = janela(

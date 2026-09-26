@@ -1,6 +1,6 @@
 //! 🧭 O assistente de sete etapas da nova sessão (a rota `nova` do site).
 
-use gpui::TestAppContext;
+use gpui_kit::TestAppContext;
 use serde_json::json;
 
 use super::{abrir_o_app, Cenario, Estudio};
@@ -46,7 +46,7 @@ fn foto_no_rascunho(e: &Estudio, id: &str, rascunho: &str) {
 /// 🎬 **Do começo ao fim**: fotos com a receita padrão, a etapa 3 que só
 /// segura sem preço e estúdio, "Criar" que leva à pendência, o agendamento que
 /// completa o contato, e a sessão criada com as fotos passando para ela.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_sessao_nasce_com_o_atendimento_e_as_fotos(cx: &mut TestAppContext) {
     let e = abrir_o_app(cx, Cenario::default());
     e.site.responder_json(
@@ -208,7 +208,7 @@ fn a_sessao_nasce_com_o_atendimento_e_as_fotos(cx: &mut TestAppContext) {
 /// Com o cartão ainda copiando, "Criar" cria a galeria e entra na sessão na
 /// hora; a barra da sessão mostra a cópia, e as fotos que terminam depois
 /// passam para ela e sobem (C20) — sem o operador sair de onde classifica.
-#[gpui::test]
+#[gpui_kit::test]
 fn criar_com_a_copia_correndo_entra_na_sessao_e_o_resto_chega(cx: &mut TestAppContext) {
     let e = abrir_o_app(
         cx,
@@ -330,7 +330,7 @@ fn criar_com_a_copia_correndo_entra_na_sessao_e_o_resto_chega(cx: &mut TestAppCo
 
 /// 🧯 O site recusa: a frase dele aparece, com o caminho para a etapa, e
 /// nenhuma galeria fica registrada no rascunho.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_recusa_do_site_leva_a_etapa(cx: &mut TestAppContext) {
     let e = abrir_o_app(cx, Cenario::default());
     e.entrar_na_conta(cx);
@@ -378,7 +378,7 @@ fn a_recusa_do_site_leva_a_etapa(cx: &mut TestAppContext) {
 
 /// 🗑️ "Descartar" apaga as fotos do rascunho e começa outro; "Voltar"
 /// guarda, e a volta pergunta se retoma.
-#[gpui::test]
+#[gpui_kit::test]
 fn descartar_apaga_e_voltar_guarda(cx: &mut TestAppContext) {
     let e = abrir_o_app(cx, Cenario::default());
     e.entrar_na_conta(cx);
@@ -431,7 +431,7 @@ fn descartar_apaga_e_voltar_guarda(cx: &mut TestAppContext) {
 /// rascunho sem passar pelo campo. O caminho do operador — foco no `Input`,
 /// tecla, `InputEvent::Change` — nunca foi exercido (dono, 20/set/2026: *"não
 /// consigo digitar o título como se tivesse um bug no input"*).
-#[gpui::test]
+#[gpui_kit::test]
 fn o_titulo_aceita_o_teclado(cx: &mut TestAppContext) {
     let e = abrir_o_app(cx, Cenario::default());
     e.entrar_na_conta(cx);
@@ -471,7 +471,7 @@ fn o_titulo_aceita_o_teclado(cx: &mut TestAppContext) {
 /// Produtos e estúdios chegam da rede logo depois — e `atualizar_escolhas`
 /// refaz os dois `Select` passando a janela. Se isso mover o foco, o resto do
 /// que ele digitou cai fora do campo.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_lista_que_chega_nao_rouba_o_foco_do_titulo(cx: &mut TestAppContext) {
     let e = abrir_o_app(
         cx,
@@ -521,7 +521,7 @@ fn a_lista_que_chega_nao_rouba_o_foco_do_titulo(cx: &mut TestAppContext) {
 /// Os testes daqui punham o foco por `criar()` (a pendência leva ao campo) ou
 /// escreviam no rascunho por `digitar(...)`. Nenhum clicava no campo, que é
 /// como o operador chega nele.
-#[gpui::test]
+#[gpui_kit::test]
 fn clicar_no_titulo_e_digitar(cx: &mut TestAppContext) {
     let e = abrir_o_app(cx, Cenario::default());
     e.entrar_na_conta(cx);
@@ -532,12 +532,12 @@ fn clicar_no_titulo_e_digitar(cx: &mut TestAppContext) {
     });
     e.esperar(cx);
 
-    let mut visual = gpui::VisualTestContext::from_window(e.raiz.into(), cx);
+    let mut visual = gpui_kit::VisualTestContext::from_window(e.raiz.into(), cx);
     visual.run_until_parked();
     let onde = visual
         .debug_bounds("nova-titulo")
         .expect("o campo do título está desenhado");
-    visual.simulate_click(onde.center(), gpui::Modifiers::none());
+    visual.simulate_click(onde.center(), gpui_kit::Modifiers::none());
     visual.run_until_parked();
 
     e.teclar(cx, "b o d a s");
@@ -562,7 +562,7 @@ fn clicar_no_titulo_e_digitar(cx: &mut TestAppContext) {
 /// input"*, com a bandeja marcando 54 → 55 → 60 fotos esperando nota: as fotos
 /// entravam enquanto ele escrevia. A cada leva a tela relê o catálogo, refaz
 /// `self.fotos` e aplica a receita — e a colheita acorda a ~10 Hz.
-#[gpui::test]
+#[gpui_kit::test]
 fn digitar_o_titulo_com_a_importacao_correndo(cx: &mut TestAppContext) {
     let e = abrir_o_app(cx, Cenario::default());
     e.entrar_na_conta(cx);
@@ -589,12 +589,12 @@ fn digitar_o_titulo_com_a_importacao_correndo(cx: &mut TestAppContext) {
     });
 
     // Clica no campo e digita enquanto o catálogo ainda está se mexendo.
-    let mut visual = gpui::VisualTestContext::from_window(e.raiz.into(), cx);
+    let mut visual = gpui_kit::VisualTestContext::from_window(e.raiz.into(), cx);
     visual.run_until_parked();
     let onde = visual
         .debug_bounds("nova-titulo")
         .expect("o campo do título está desenhado");
-    visual.simulate_click(onde.center(), gpui::Modifiers::none());
+    visual.simulate_click(onde.center(), gpui_kit::Modifiers::none());
     visual.run_until_parked();
 
     for tecla in ["b", "o", "d", "a", "s"] {
@@ -623,7 +623,7 @@ fn digitar_o_titulo_com_a_importacao_correndo(cx: &mut TestAppContext) {
 /// (`sessoes::nova::miniaturas`), que a devolve por canal. O ganho é a linha da
 /// interface livre; o risco é a grade ficar cinza para sempre se ninguém
 /// colher. Este teste é o que separa os dois.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_grade_do_assistente_recebe_as_miniaturas_lidas_na_thread(cx: &mut TestAppContext) {
     let e = abrir_o_app(cx, Cenario::default());
     e.entrar_na_conta(cx);
@@ -654,7 +654,7 @@ fn a_grade_do_assistente_recebe_as_miniaturas_lidas_na_thread(cx: &mut TestAppCo
     for _ in 0..80 {
         e.esperar(cx);
         {
-            let visual = gpui::VisualTestContext::from_window(e.raiz.into(), cx);
+            let visual = gpui_kit::VisualTestContext::from_window(e.raiz.into(), cx);
             visual.run_until_parked();
         }
         quantas = e.app(cx, |app, _w, cx| {

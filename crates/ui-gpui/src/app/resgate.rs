@@ -43,7 +43,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use domain::value_objects::{ImportMode, ImportOptions};
-use gpui::{AsyncApp, Context};
+use gpui_kit::{AsyncApp, Context};
 
 use super::Aplicativo;
 use crate::biblioteca::marcacao::{Marca, REJEITADA_NO_CATALOGO};
@@ -148,7 +148,7 @@ impl Aplicativo {
 
 /// O caminho de **uma** foto. `Err` é "ficou na nuvem, como estava".
 async fn rejeitar_uma(
-    raiz: &gpui::WeakEntity<Aplicativo>,
+    raiz: &gpui_kit::WeakEntity<Aplicativo>,
     foto: &AFotoQueVolta,
     cx: &mut AsyncApp,
 ) -> Result<(), ()> {
@@ -218,7 +218,7 @@ async fn rejeitar_uma(
 /// B · 1–3: o BRUTO vem, é gravado e catalogado, e os PARÂMETROS voltam com
 /// ele. Devolve o id da cópia nova no catálogo.
 async fn trazer_para_ca(
-    raiz: &gpui::WeakEntity<Aplicativo>,
+    raiz: &gpui_kit::WeakEntity<Aplicativo>,
     foto: &AFotoQueVolta,
     sessao: &domain::services::pos_venda::Sessao,
     galeria: &str,
@@ -364,7 +364,7 @@ async fn esperar_o_lote(canal: &Receiver<Andamento>, cx: &mut AsyncApp) -> Resul
 
 /// Relê o catálogo e devolve a primeira foto que satisfaz `achar`.
 async fn reler_e_achar(
-    raiz: &gpui::WeakEntity<Aplicativo>,
+    raiz: &gpui_kit::WeakEntity<Aplicativo>,
     achar: impl Fn(&adapters::view_models::PhotoViewModel) -> bool,
     cx: &mut AsyncApp,
 ) -> Option<String> {
@@ -383,7 +383,7 @@ async fn reler_e_achar(
 
 /// A cópia desta foto do site no catálogo daqui, se houver.
 async fn achar_a_copia(
-    raiz: &gpui::WeakEntity<Aplicativo>,
+    raiz: &gpui_kit::WeakEntity<Aplicativo>,
     no_site: &str,
     cx: &mut AsyncApp,
 ) -> Option<String> {
@@ -397,7 +397,7 @@ async fn achar_a_copia(
 
 /// A foto que acabou de entrar, pelo caminho do arquivo.
 async fn achar_pelo_caminho(
-    raiz: &gpui::WeakEntity<Aplicativo>,
+    raiz: &gpui_kit::WeakEntity<Aplicativo>,
     arquivo: &str,
     cx: &mut AsyncApp,
 ) -> Result<String, ()> {

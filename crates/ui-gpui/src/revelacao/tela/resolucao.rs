@@ -12,7 +12,7 @@
 
 use std::time::Duration;
 
-use gpui::{Context, Task};
+use gpui_kit::{Context, Task};
 
 use super::{Origem, PedidoDaRevelacao, Revelacao};
 use crate::revelacao::zoom;

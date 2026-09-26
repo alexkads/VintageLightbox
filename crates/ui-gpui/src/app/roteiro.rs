@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use gpui::{px, size, Context, Window};
+use gpui_kit::{px, size, Context, Window};
 
 use super::{Aplicativo, Tela};
 use crate::depuracao::{self, Passo};
@@ -351,7 +351,7 @@ impl Aplicativo {
                         cx.background_executor()
                             .timer(Duration::from_millis(50))
                             .await;
-                        let _ = cx.update(|cx| crate::segundo_plano::gesto_de_roteiro(&gesto, cx));
+                        cx.update(|cx| crate::segundo_plano::gesto_de_roteiro(&gesto, cx));
                     })
                     .detach();
                 }
@@ -362,7 +362,7 @@ impl Aplicativo {
                 self.detalhe
                     .update(cx, |tela, cx| tela.enviar_arquivos(fotos, cx));
             }
-            Passo::Tecla(tecla) => match gpui::Keystroke::parse(tecla) {
+            Passo::Tecla(tecla) => match gpui_kit::Keystroke::parse(tecla) {
                 // 🚨 **Adiada**: o despacho chega a esta mesma raiz, que está
                 // emprestada ao passo agora.
                 Ok(tecla) => window.defer(cx, move |window, cx| {

@@ -25,6 +25,7 @@
 //! estúdio subiu aparece aqui, e a que a retenção apagou aparece como apagada —
 //! coisas que o catálogo local não tem como saber.
 
+use crate::campo::TrocarValor as _;
 use std::num::NonZeroUsize;
 use std::ops::Range;
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -42,16 +43,16 @@ use domain::services::pos_venda::{
     MudancaDaGaleria, Produto, Sessao,
 };
 use domain::services::PreviewType;
-use gpui::{
+use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::progress::Progress;
+use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
+use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
+use gpui_kit::component::{ActiveTheme, Disableable, Sizable};
+use gpui_kit::{
     canvas, div, img, prelude::*, px, App, Context, Entity, EventEmitter, Focusable, SharedString,
     Task, Window,
 };
-use gpui_component::button::{Button, ButtonVariants};
-use gpui_component::input::{Input, InputEvent, InputState};
-use gpui_component::progress::Progress;
-use gpui_component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
-use gpui_component::slider::{Slider, SliderEvent, SliderState};
-use gpui_component::{ActiveTheme, Disableable, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
 
 use super::altura_da_tira;
@@ -456,8 +457,8 @@ pub struct Detalhe {
     /// inteiro a cada quadro: 76 ms com 300 fotos e 537 ms com 2.000 (estresse,
     /// 17/set/2026). As linhas de fora viram espaçadores do mesmo tamanho —
     /// ver [`Detalhe::grade`].
-    rolagem_da_grade: gpui::ScrollHandle,
-    rolagem_da_tira: gpui::ScrollHandle,
+    rolagem_da_grade: gpui_kit::ScrollHandle,
+    rolagem_da_tira: gpui_kit::ScrollHandle,
     /// A largura da grade no último quadro — ver [`MedidaDaGrade`].
     medida_da_grade: Option<MedidaDaGrade>,
     /// A altura de uma linha de texto `text_xs` — a célula tem duas.
@@ -487,7 +488,7 @@ pub struct Detalhe {
     /// A altura da tira, que **é** o zoom das miniaturas dela.
     altura_da_tira: f32,
     /// O arrasto do puxador: onde o ponteiro desceu e qual era a altura ali.
-    arrasto_da_tira: Option<(gpui::Pixels, f32)>,
+    arrasto_da_tira: Option<(gpui_kit::Pixels, f32)>,
     /// O foco do quadro anterior — só rola quando ele **muda**.
     ///
     /// ⚠️ Rolar a cada quadro prenderia a barra: o operador não conseguiria
@@ -584,16 +585,17 @@ pub struct Detalhe {
     /// chega, a célula continua com a imagem de antes: a do id local é
     /// herdada pelo id do site já enquanto a local está na grade
     /// ([`Self::subiu_como`]). Ver `lembrar_as_imagens`.
-    imagens_vistas: std::collections::HashMap<String, Arc<gpui::RenderImage>>,
+    imagens_vistas: std::collections::HashMap<String, Arc<gpui_kit::RenderImage>>,
     /// As trocas de imagem em andamento: foto → a imagem de antes, quando
     /// começou e um número para a animação recomeçar só nesta troca.
-    trocas: std::collections::HashMap<String, (Arc<gpui::RenderImage>, std::time::Instant, u64)>,
+    trocas:
+        std::collections::HashMap<String, (Arc<gpui_kit::RenderImage>, std::time::Instant, u64)>,
     /// O contador das trocas — o id de cada animação.
     proxima_troca: u64,
     /// A imagem das locais perto da vista, pelo **nome do arquivo** — o que a
     /// local e a do site têm em comum quando ela sobe. Ver
     /// `lembrar_as_imagens`.
-    imagens_por_arquivo: std::collections::HashMap<String, Arc<gpui::RenderImage>>,
+    imagens_por_arquivo: std::collections::HashMap<String, Arc<gpui_kit::RenderImage>>,
     /// Os controles do painel da foto em foco — ver [`CamposDoPainel`].
     campos_do_painel: Option<CamposDoPainel>,
     /// Controles da seleção compartilhada pela grade e pela tira.
@@ -606,7 +608,7 @@ pub struct Detalhe {
     /// As trocas da gaveta que foram ao site e ainda não voltaram, com a
     /// frase de quando voltarem certas.
     atendimento_gravando: std::collections::VecDeque<&'static str>,
-    _assinatura_do_atendimento: gpui::Subscription,
+    _assinatura_do_atendimento: gpui_kit::Subscription,
     /// A sanfona "Faixa, negociação e preço" do painel — **fechada por
     /// padrão**, como no site (`PainelColapsavel`, `padrao={false}`): o que se
     /// faz a cada foto fica em cima; o que se faz uma vez por atendimento, atrás
@@ -634,7 +636,7 @@ pub struct Detalhe {
     /// ([`Detalhe::definir_origem`]); sem elas o modal mostra só o
     /// "Escolher fotos".
     origem: Option<Entity<OrigemDasFotos>>,
-    _assinaturas_da_origem: Vec<gpui::Subscription>,
+    _assinaturas_da_origem: Vec<gpui_kit::Subscription>,
     /// 🧪 O registro dos avisos de "esta foto mudou, releia".
     #[cfg(test)]
     reveladas_avisadas: Vec<String>,
@@ -648,7 +650,7 @@ pub struct Detalhe {
     /// `estudio-da-galeria.tsx`).
     escolha_do_estudio: Option<Entity<SelectState<SearchableVec<OpcaoDaFaixa>>>>,
     /// As assinaturas dos dois — sem elas o `Confirm` não chega a lugar nenhum.
-    _escolhas_da_barra: Vec<gpui::Subscription>,
+    _escolhas_da_barra: Vec<gpui_kit::Subscription>,
     /// Quem grava a foto **no catálogo local** — o SQLite desta máquina.
     ///
     /// 🚨 **A importação não sobe nada**, e essa é a regra do dono (8/set/2026):
@@ -721,7 +723,7 @@ struct CamposDoCliente {
     email: Entity<InputState>,
     whatsapp: Entity<InputState>,
     /// Enter grava — as inscrições vivem enquanto os campos viverem.
-    _enter: [gpui::Subscription; 3],
+    _enter: [gpui_kit::Subscription; 3],
 }
 
 /// Um campo já com o valor que a sessão tem.
@@ -744,7 +746,7 @@ impl SelectItem for OpcaoDaFaixa {
         &self.id
     }
 
-    fn display_title(&self) -> Option<gpui::AnyElement> {
+    fn display_title(&self) -> Option<gpui_kit::AnyElement> {
         None
     }
 }
@@ -760,14 +762,14 @@ struct CamposDoPainel {
     foto_id: String,
     faixa: Entity<SelectState<SearchableVec<OpcaoDaFaixa>>>,
     preco: Entity<InputState>,
-    _assinaturas: Vec<gpui::Subscription>,
+    _assinaturas: Vec<gpui_kit::Subscription>,
 }
 
 struct CamposDoLote {
     ids: Vec<String>,
     faixa: Entity<SelectState<SearchableVec<OpcaoDaFaixa>>>,
     preco: Entity<InputState>,
-    _assinaturas: Vec<gpui::Subscription>,
+    _assinaturas: Vec<gpui_kit::Subscription>,
 }
 
 fn campo_preenchido(
@@ -778,7 +780,7 @@ fn campo_preenchido(
 ) -> Entity<InputState> {
     let estado = cx.new(|cx| InputState::new(window, cx).placeholder(dica));
     let valor = valor.to_string();
-    estado.update(cx, |campo, cx| campo.set_value(valor, window, cx));
+    estado.update(cx, |campo, cx| campo.trocar_valor(valor, window, cx));
     estado
 }
 
@@ -807,8 +809,8 @@ impl Detalhe {
             arrastando: false,
             acervo: Acervo::novo(),
             selecao: Selecao::nova(),
-            rolagem_da_grade: gpui::ScrollHandle::new(),
-            rolagem_da_tira: gpui::ScrollHandle::new(),
+            rolagem_da_grade: gpui_kit::ScrollHandle::new(),
+            rolagem_da_tira: gpui_kit::ScrollHandle::new(),
             medida_da_grade: None,
             linha_de_texto: 16.0,
             linha_medida: None,
@@ -1203,7 +1205,11 @@ impl Detalhe {
         // precisa da janela, e exigi-la obrigaria a raiz a construir o Detalhe
         // dentro de um `cx.new` com `window` — que ela não tem ali.
         cx.subscribe(&slider, |tela, _estado, evento: &SliderEvent, cx| {
-            let SliderEvent::Change(valor) = evento;
+            // O `Release` (novo no gpui-kit 0.6) chega depois do último `Change`
+            // com o mesmo valor: tratá-lo gravaria duas vezes.
+            let SliderEvent::Change(valor) = evento else {
+                return;
+            };
             let novo = valor.start().clamp(ZOOM_MINIMO, tela.zoom_maximo);
             if novo != tela.zoom {
                 tela.zoom = novo;
@@ -1430,7 +1436,7 @@ impl Detalhe {
             let alvo = (vista / 2. - meio).clamp((vista - conteudo).min(0.), 0.);
             if (alvo - y).abs() >= 1. {
                 self.rolagem_da_grade
-                    .set_offset(gpui::point(atual.x, px(alvo)));
+                    .set_offset(gpui_kit::point(atual.x, px(alvo)));
             }
             return;
         }
@@ -1442,7 +1448,7 @@ impl Detalhe {
             return;
         };
         self.rolagem_da_grade
-            .set_offset(gpui::point(atual.x, px(novo)));
+            .set_offset(gpui_kit::point(atual.x, px(novo)));
     }
 
     /// A distância de uma linha da grade à seguinte.
@@ -1498,7 +1504,7 @@ impl Detalhe {
             return;
         };
         self.rolagem_da_tira
-            .set_offset(gpui::point(px(novo), atual.y));
+            .set_offset(gpui_kit::point(px(novo), atual.y));
     }
 
     /// A largura de uma miniatura da tira — a altura dela é o zoom.
@@ -2539,7 +2545,7 @@ impl Detalhe {
     }
 
     pub fn fechar_formulario_do_cliente(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.dados_do_cliente.fechar(window);
+        self.dados_do_cliente.fechar(window, cx);
         cx.notify();
     }
 
@@ -2579,7 +2585,7 @@ impl Detalhe {
         for (campo, valor) in pares {
             if let Some(valor) = valor {
                 let valor = valor.to_string();
-                campo.update(cx, |c, cx| c.set_value(valor, window, cx));
+                campo.update(cx, |c, cx| c.trocar_valor(valor, window, cx));
             }
         }
     }
@@ -2636,7 +2642,11 @@ impl Detalhe {
         // numa janela sem `Root` (as de teste desta tela) o foco derrubava a
         // pintura. No app a primeira camada é sempre o `Root` (`main.rs`). O
         // foco é conforto — gravar e o Enter não dependem dele.
-        if window.root::<gpui_component::Root>().flatten().is_some() {
+        if window
+            .root::<gpui_kit::component::Root>()
+            .flatten()
+            .is_some()
+        {
             let foco = foco.read(cx).focus_handle(cx);
             self.dados_do_cliente.focar(&foco, window, cx);
         }
@@ -3081,7 +3091,7 @@ impl Detalhe {
                 }
                 Recado::Link(link) => {
                     self.pedindo_link = false;
-                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(link.url.clone()));
+                    cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(link.url.clone()));
                     self.link = Some(link);
                 }
                 Recado::FaltaEmail { gesto, frase } => {
@@ -3508,7 +3518,7 @@ impl Detalhe {
     /// A imagem da célula: a miniatura pronta, ou a última desenhada enquanto
     /// ela não chega — e, numa troca, a de antes por baixo da nova, que surge
     /// por cima dela.
-    fn imagem_da_celula(&self, foto_id: &str, opacidade: f32) -> Option<gpui::AnyElement> {
+    fn imagem_da_celula(&self, foto_id: &str, opacidade: f32) -> Option<gpui_kit::AnyElement> {
         let chave = self.chave_da_foto(foto_id);
         // No zoom grande, a prévia grande — quando já está na memória.
         let grande = self
@@ -3531,7 +3541,7 @@ impl Detalhe {
         // elemento fica maior que o quadro e o `overflow_hidden` transforma o
         // `Contain` em corte — a mesma armadilha que cortava a tela do cliente
         // (`cliente::camada`, 17/set/2026).
-        use gpui::AnimationExt as _;
+        use gpui_kit::AnimationExt as _;
         let nova = img(imagem).max_w_full().max_h_full();
         let troca = pronta.and(self.trocas.get(foto_id));
         let Some((velha, _, numero)) = troca else {
@@ -3560,7 +3570,7 @@ impl Detalhe {
                 )
                 .child(nova.with_animation(
                     SharedString::from(format!("troca-{foto_id}-{numero}")),
-                    gpui::Animation::new(DURACAO_DA_TROCA).with_easing(gpui::ease_in_out),
+                    gpui_kit::Animation::new(DURACAO_DA_TROCA).with_easing(gpui_kit::ease_in_out),
                     move |imagem, delta| imagem.opacity(delta * opacidade),
                 ))
                 .into_any_element(),
@@ -3644,7 +3654,7 @@ impl Detalhe {
             });
         }
         let mut texto = window.text_style();
-        texto.font_size = gpui::rems(0.75).into();
+        texto.font_size = gpui_kit::rems(0.75).into();
         self.linha_de_texto = f32::from(texto.line_height_in_pixels(window.rem_size()));
 
         let janela = window.viewport_size();
@@ -3775,7 +3785,7 @@ impl Render for Detalhe {
             // dentro dele (ver o comentário acima).
             .children(
                 self.modal_de_importacao(cx)
-                    .map(|modal| gpui::deferred(modal).with_priority(2)),
+                    .map(|modal| gpui_kit::deferred(modal).with_priority(2)),
             )
             // 🔑 **A janela de escolher as fotos do cartão também é
             // diferida**, pelo mesmo motivo do modal: o caixa flutuante é
@@ -3785,7 +3795,7 @@ impl Render for Detalhe {
                 self.origem
                     .clone()
                     .and_then(|origem| origem.update(cx, |origem, cx| origem.dialogo(window, cx)))
-                    .map(|dialogo| gpui::deferred(dialogo).with_priority(2)),
+                    .map(|dialogo| gpui_kit::deferred(dialogo).with_priority(2)),
             )
             // 🔑 **Os diálogos também são diferidos** (dono, 24/set/2026, no
             // modal dos dados do cliente). Eles vinham antes da grade na
@@ -3793,11 +3803,11 @@ impl Render for Detalhe {
             // nada, e o caixa flutuante cobria o "Gravar".
             .children(
                 self.dialogo_de_apagar(cx)
-                    .map(|dialogo| gpui::deferred(dialogo).with_priority(2)),
+                    .map(|dialogo| gpui_kit::deferred(dialogo).with_priority(2)),
             )
             .children(
                 self.formulario_do_cliente(cx)
-                    .map(|dialogo| gpui::deferred(dialogo).with_priority(2)),
+                    .map(|dialogo| gpui_kit::deferred(dialogo).with_priority(2)),
             )
     }
 }
@@ -3813,7 +3823,7 @@ impl Detalhe {
     fn cabecalho(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         use crate::estilo;
         use crate::recursos::Icone;
-        use gpui_component::Icon;
+        use gpui_kit::component::Icon;
 
         let (levadas, a_venda, compradas) = self.contagem();
         let titulo = self
@@ -3852,7 +3862,8 @@ impl Detalhe {
         );
         let sem_galeria = self.aberta.is_none();
 
-        let selo = |cores: (gpui::Hsla, gpui::Hsla, gpui::Hsla), rotulo: &'static str| {
+        let selo = |cores: (gpui_kit::Hsla, gpui_kit::Hsla, gpui_kit::Hsla),
+                    rotulo: &'static str| {
             let (fundo, _, frente) = cores;
             div()
                 .flex_none()
@@ -3912,7 +3923,7 @@ impl Detalhe {
                         div()
                             .max_w(px(320.))
                             .text_sm()
-                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .font_weight(gpui_kit::FontWeight::MEDIUM)
                             .truncate()
                             .child(titulo),
                     )
@@ -3953,7 +3964,7 @@ impl Detalhe {
                             ))
                             // A seta do `ChevronDown` do site, que vira quando abre.
                             .child(Icon::new(Icone::ChevronDown).size(px(14.)).rotate(
-                                gpui::radians(if self.detalhes_abertos {
+                                gpui_kit::radians(if self.detalhes_abertos {
                                     std::f32::consts::PI
                                 } else {
                                     0.
@@ -3966,7 +3977,7 @@ impl Detalhe {
                     )
                     .children(
                         self.painel_dos_detalhes(cx)
-                            .map(|painel| gpui::deferred(painel).with_priority(1)),
+                            .map(|painel| gpui_kit::deferred(painel).with_priority(1)),
                     ),
             )
             // 📋 **Atendimento** — o que o assistente coletou nas sete etapas.
@@ -4067,7 +4078,7 @@ impl Detalhe {
         use crate::estilo;
         use crate::recursos::Icone;
         use dados_do_cliente::Campo;
-        use gpui_component::Icon;
+        use gpui_kit::component::Icon;
         let formulario = self.dados_do_cliente.aberto()?;
         let campos = formulario.campos.as_ref()?;
         let gravando = self.gravando_dados.is_some();
@@ -4113,7 +4124,7 @@ impl Detalhe {
                         .flex()
                         .gap(px(4.))
                         .text_sm()
-                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .font_weight(gpui_kit::FontWeight::MEDIUM)
                         .child(rotulo)
                         .when(obrigatorio, |r| {
                             r.child(div().text_color(perigo).child("*"))
@@ -4136,7 +4147,9 @@ impl Detalhe {
                         .relative()
                         .w(px(480.))
                         .debug_selector(|| "dados-do-cliente".into())
-                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
+                            cx.stop_propagation()
+                        })
                         .child(
                             div().absolute().top(px(10.)).right(px(10.)).child(
                                 Button::new("sessao-cliente-fechar")
@@ -4229,7 +4242,7 @@ impl Detalhe {
     fn envio(&self, cx: &mut Context<Self>) -> impl IntoElement {
         use crate::estilo;
         use crate::recursos::Icone;
-        use gpui_component::Icon;
+        use gpui_kit::component::Icon;
 
         let lote = self.importacao;
         let ocupado = self.importando();
@@ -4304,12 +4317,12 @@ impl Detalhe {
             .border_color(if self.arrastando { primaria } else { borda })
             .when(self.arrastando, |d| d.bg(acento))
             .on_drag_move(
-                cx.listener(|tela, _ev: &gpui::DragMoveEvent<()>, _window, cx| {
+                cx.listener(|tela, _ev: &gpui_kit::DragMoveEvent<()>, _window, cx| {
                     tela.destacar(true, cx)
                 }),
             )
             .on_drop(
-                cx.listener(|tela, arrastados: &gpui::ExternalPaths, _window, cx| {
+                cx.listener(|tela, arrastados: &gpui_kit::ExternalPaths, _window, cx| {
                     tela.destacar(false, cx);
                     // 🔑 Uma pasta solta vira o conteúdo dela.
                     let fotos = super::arquivos::so_as_fotos(arrastados.paths());
@@ -4372,7 +4385,11 @@ impl Detalhe {
                     )
                     // 🔑 **A barra só existe enquanto o lote corre.**
                     .when_some(lote.filter(|l| !l.terminou()), |linha, l| {
-                        linha.child(Progress::new().value(l.porcento()).h(px(4.)))
+                        linha.child(
+                            Progress::new("progresso-do-lote")
+                                .value(l.porcento())
+                                .h(px(4.)),
+                        )
                     }),
             )
     }
@@ -4381,7 +4398,7 @@ impl Detalhe {
     fn barra_da_grade(&self, cx: &mut Context<Self>) -> impl IntoElement {
         use crate::estilo;
         use crate::recursos::Icone;
-        use gpui_component::Icon;
+        use gpui_kit::component::Icon;
 
         let contagens = self.contagens();
         let ativo = self.filtro();
@@ -4473,7 +4490,7 @@ impl Detalhe {
                             )
                         };
                         move |w, cx| {
-                            gpui_component::tooltip::Tooltip::new(texto.clone()).build(w, cx)
+                            gpui_kit::component::tooltip::Tooltip::new(texto.clone()).build(w, cx)
                         }
                     })
                     .on_click(
@@ -4648,7 +4665,7 @@ impl Detalhe {
         };
         let posicoes = (de * colunas).min(total)..(ate * colunas).min(total);
         let quantas = posicoes.len();
-        let mut filhos: Vec<gpui::AnyElement> = Vec::with_capacity(quantas + 2);
+        let mut filhos: Vec<gpui_kit::AnyElement> = Vec::with_capacity(quantas + 2);
         if de > 0 {
             filhos.push(espacador(de));
         }
@@ -4672,7 +4689,7 @@ impl Detalhe {
         // ⚠️ Com `track_scroll`, o GPUI guarda as caixas dos filhos na alça da
         // rolagem, e não na lista que o ouvinte recebe (que chega vazia).
         let rolagem = self.rolagem_da_grade.clone();
-        let conferir = move |_: Vec<gpui::Bounds<gpui::Pixels>>,
+        let conferir = move |_: Vec<gpui_kit::Bounds<gpui_kit::Pixels>>,
                              window: &mut Window,
                              _cx: &mut App| {
             let celulas: Vec<_> = (pular..pular + quantas)
@@ -4715,8 +4732,8 @@ impl Detalhe {
             // 🔑 **Ctrl + roda dá zoom**, e é o que o site promete no `title` do
             // controle de tamanho. Sem o modificador a roda rola, que é o que
             // ela tem de fazer.
-            .on_scroll_wheel(
-                cx.listener(|tela, evento: &gpui::ScrollWheelEvent, window, cx| {
+            .on_scroll_wheel(cx.listener(
+                |tela, evento: &gpui_kit::ScrollWheelEvent, window, cx| {
                     if !evento.modifiers.secondary() {
                         return;
                     }
@@ -4730,8 +4747,8 @@ impl Detalhe {
                         -PASSO_DO_ZOOM
                     };
                     tela.ajustar_zoom(passo, window, cx);
-                }),
-            )
+                },
+            ))
             .flex_1()
             .min_w(px(0.))
             .flex()
@@ -4770,7 +4787,7 @@ impl Detalhe {
             .gap(px(2.))
             .cursor_pointer()
             .on_click(
-                cx.listener(move |tela, evento: &gpui::ClickEvent, _window, cx| {
+                cx.listener(move |tela, evento: &gpui_kit::ClickEvent, _window, cx| {
                     if evento.click_count() >= 2 {
                         tela.selecao
                             .clicar(posicao, false, Modificadores::default());
@@ -4807,7 +4824,7 @@ impl Detalhe {
                     } else if marcada {
                         cores::quente()
                     } else {
-                        gpui::transparent_black()
+                        gpui_kit::transparent_black()
                     })
                     .children(miniatura)
                     // O selo do estado, no canto — como na tela do site, e
@@ -4866,8 +4883,8 @@ impl Detalhe {
                                         .truncate()
                                         .px(px(6.))
                                         .rounded_full()
-                                        .bg(gpui::rgb(0xffb900))
-                                        .text_color(gpui::black())
+                                        .bg(gpui_kit::rgb(0xffb900))
+                                        .text_color(gpui_kit::black())
                                         .text_size(px(10.))
                                         .line_height(px(20.))
                                         .child(SharedString::from(format!("🤝 {etiqueta}"))),
@@ -5131,19 +5148,19 @@ impl Detalhe {
 
         // O `<strong>`, o `text-muted-foreground` e o `<Link>` do site.
         let pintar = move |t: &Texto| {
-            gpui::StyledText::new(t.texto.clone()).with_highlights(t.trechos.iter().map(
+            gpui_kit::StyledText::new(t.texto.clone()).with_highlights(t.trechos.iter().map(
                 |(faixa, tom)| {
                     let estilo = match tom {
-                        Tom::Forte => gpui::HighlightStyle {
-                            font_weight: Some(gpui::FontWeight::BOLD),
+                        Tom::Forte => gpui_kit::HighlightStyle {
+                            font_weight: Some(gpui_kit::FontWeight::BOLD),
                             ..Default::default()
                         },
-                        Tom::Apagado => gpui::HighlightStyle {
+                        Tom::Apagado => gpui_kit::HighlightStyle {
                             color: Some(apagado),
                             ..Default::default()
                         },
-                        Tom::Link => gpui::HighlightStyle {
-                            underline: Some(gpui::UnderlineStyle {
+                        Tom::Link => gpui_kit::HighlightStyle {
+                            underline: Some(gpui_kit::UnderlineStyle {
                                 thickness: px(1.),
                                 ..Default::default()
                             }),
@@ -5210,7 +5227,7 @@ impl Detalhe {
             // `align="end"` do `PopoverContent` do site.
             div()
                 .absolute()
-                .top(gpui::relative(1.))
+                .top(gpui_kit::relative(1.))
                 .right_0()
                 .pt(px(4.))
                 .child(
@@ -5277,7 +5294,7 @@ impl Detalhe {
                                         .debug_selector(move || format!("detalhes-rodape-{i}"))
                                         .when(i == 1, |d| d.mt(px(4.)))
                                         .child(
-                                            gpui::InteractiveText::new(
+                                            gpui_kit::InteractiveText::new(
                                                 ("detalhes-rodape", i),
                                                 pintar(t),
                                             )
@@ -5465,7 +5482,7 @@ impl Detalhe {
         let quadro = super::quadro_de_importacao::quadro_de_importacao(
             "Mais fotos para esta sessão",
             super::quadro_de_importacao::descricao_na_sessao(estado),
-            gpui_component::h_flex()
+            gpui_kit::component::h_flex()
                 .gap(px(8.))
                 .child(
                     crate::estilo::botao_primario("importar-escolher-fotos", cx)
@@ -5489,7 +5506,7 @@ impl Detalhe {
                 .id("importar-veu")
                 .on_click(cx.listener(|tela, _ev, _w, cx| tela.fechar_a_importacao(cx)))
                 .on_drop(
-                    cx.listener(|tela, arrastados: &gpui::ExternalPaths, _window, cx| {
+                    cx.listener(|tela, arrastados: &gpui_kit::ExternalPaths, _window, cx| {
                         tela.fechar_a_importacao(cx);
                         let fotos = super::arquivos::so_as_fotos(arrastados.paths());
                         tela.enviar_arquivos(fotos, cx);
@@ -5498,15 +5515,17 @@ impl Detalhe {
                 .child(
                     crate::estilo::caixa_do_dialogo(cx)
                         .w(px(560.))
-                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
+                            cx.stop_propagation()
+                        })
                         .child(
-                            gpui_component::h_flex()
+                            gpui_kit::component::h_flex()
                                 .gap(px(8.))
                                 .items_center()
                                 .text_lg()
-                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                                 .child(
-                                    gpui_component::Icon::new(crate::recursos::Icone::Upload)
+                                    gpui_kit::component::Icon::new(crate::recursos::Icone::Upload)
                                         .size(px(18.)),
                                 )
                                 .child("Importar fotos"),
@@ -5551,7 +5570,9 @@ impl Detalhe {
                 .child(
                     crate::estilo::caixa_do_dialogo(cx)
                         .w(px(460.))
-                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
+                            cx.stop_propagation()
+                        })
                         .child(crate::estilo::cabecalho_do_dialogo(
                             titulo,
                             SharedString::from(descricao),
@@ -5793,7 +5814,7 @@ impl Detalhe {
             .preco_de_venda
             .map(|centavos| format!("{},{:02}", centavos / 100, centavos % 100))
             .unwrap_or_default();
-        preco.update(cx, |campo, cx| campo.set_value(valor, window, cx));
+        preco.update(cx, |campo, cx| campo.trocar_valor(valor, window, cx));
 
         let mut assinaturas = Vec::new();
         assinaturas.push(cx.subscribe_in(
@@ -5972,9 +5993,9 @@ impl Detalhe {
     /// 🗂️ **A coluna da direita, sempre reservada** — ver [`super::paineis`].
     /// Com foto em foco, o painel dela; sem, os Atalhos, como no site. O botão
     /// do canto a recolhe numa faixa estreita, e a faixa a abre de volta.
-    fn painel(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+    fn painel(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         use crate::recursos::Icone;
-        use gpui_component::Icon;
+        use gpui_kit::component::Icon;
         let (borda, raio) = (cx.theme().border, cx.theme().radius);
         if self.paineis.coluna_recolhida() {
             return div()
@@ -6060,7 +6081,7 @@ impl Detalhe {
     /// esta grade faz: o laço de arrastar e o `Enter` da prévia são do site.
     fn atalhos(&self, cx: &mut Context<Self>) -> impl IntoElement {
         use crate::recursos::Icone;
-        use gpui_component::Icon;
+        use gpui_kit::component::Icon;
         let apagado = cx.theme().muted_foreground;
         let aberto = self.paineis.atalhos_abertos();
         let tecla = |t: &'static str| {
@@ -6137,7 +6158,7 @@ impl Detalhe {
 
     fn painel_da_foto(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         use crate::recursos::Icone;
-        use gpui_component::Icon;
+        use gpui_kit::component::Icon;
         let foto = self.em_foco()?;
         let posicao = self.selecao.foco()? + 1;
         let negociada = foto.tem_negociacao();
@@ -6600,7 +6621,7 @@ impl Detalhe {
                 .h(px(1.))
                 .into_any_element()
         };
-        let mut itens: Vec<gpui::AnyElement> = Vec::with_capacity(ate - de + 2);
+        let mut itens: Vec<gpui_kit::AnyElement> = Vec::with_capacity(ate - de + 2);
         if de > 0 {
             itens.push(espacador(de));
         }
@@ -6615,7 +6636,7 @@ impl Detalhe {
 
         // As pontas: só há sombra onde ainda há foto fora da vista.
         let deslocamento = -self.rolagem_da_tira.offset().x;
-        let maximo = self.rolagem_da_tira.max_offset().width;
+        let maximo = self.rolagem_da_tira.max_offset().x;
         let tem_antes = deslocamento > px(4.);
         let tem_depois = maximo - deslocamento > px(4.);
 
@@ -6707,14 +6728,14 @@ impl Detalhe {
                             // que a mão faz sobre uma faixa, e o mesmo que o
                             // site escuta com `passive: false`.
                             .on_scroll_wheel(cx.listener(
-                                move |tela, evento: &gpui::ScrollWheelEvent, window, cx| {
+                                move |tela, evento: &gpui_kit::ScrollWheelEvent, window, cx| {
                                     let delta = evento.delta.pixel_delta(window.line_height());
                                     if delta.y.abs() <= delta.x.abs() {
                                         return;
                                     }
                                     let atual = tela.rolagem_da_tira.offset();
                                     tela.rolagem_da_tira
-                                        .set_offset(gpui::point(atual.x + delta.y, atual.y));
+                                        .set_offset(gpui_kit::point(atual.x + delta.y, atual.y));
                                     cx.notify();
                                 },
                             ))
@@ -6733,7 +6754,7 @@ impl Detalhe {
         lado: f32,
         largura: f32,
         cx: &mut Context<Self>,
-    ) -> gpui::AnyElement {
+    ) -> gpui_kit::AnyElement {
         let em_foco = self.selecao.foco() == Some(posicao);
         let marcada = self.selecao.tem(posicao);
         let miniatura = match self.miniaturas.espiar(&self.chave_da_foto(&foto.id)) {
@@ -6770,7 +6791,7 @@ impl Detalhe {
             } else if marcada {
                 cx.theme().primary.opacity(0.5)
             } else {
-                gpui::transparent_black()
+                gpui_kit::transparent_black()
             })
             .cursor_pointer()
             .when_some(miniatura, |celula, imagem| {
@@ -6795,7 +6816,7 @@ impl Detalhe {
                         // Biblioteca já tinha tomado ao lado — *"num estúdio
                         // de retrato o recorte centralizado tira a cabeça
                         // primeiro"* —, e as duas tarjas de fundo são o preço.
-                        .object_fit(gpui::ObjectFit::Contain)
+                        .object_fit(gpui_kit::ObjectFit::Contain)
                         .when(foto.apagada, |imagem| imagem.opacity(0.4)),
                 )
             })
@@ -6831,13 +6852,13 @@ impl Detalhe {
                         .py(px(1.))
                         .text_center()
                         .text_xs()
-                        .bg(gpui::black().opacity(0.7))
+                        .bg(gpui_kit::black().opacity(0.7))
                         .text_color(cx.theme().foreground)
                         .child("comprada"),
                 )
             })
             .on_click(
-                cx.listener(move |tela, evento: &gpui::ClickEvent, _window, cx| {
+                cx.listener(move |tela, evento: &gpui_kit::ClickEvent, _window, cx| {
                     if evento.click_count() >= 2 {
                         tela.selecao
                             .clicar(posicao, false, Modificadores::default());
@@ -6881,7 +6902,7 @@ impl Detalhe {
             .border_t_1()
             .border_color(cx.theme().border)
             .bg(cx.theme().muted)
-            .cursor(gpui::CursorStyle::ResizeUpDown)
+            .cursor(gpui_kit::CursorStyle::ResizeUpDown)
             .child(
                 div()
                     .h(px(2.))
@@ -6890,8 +6911,8 @@ impl Detalhe {
                     .bg(cx.theme().border),
             )
             .on_mouse_down(
-                gpui::MouseButton::Left,
-                cx.listener(|tela, evento: &gpui::MouseDownEvent, _w, cx| {
+                gpui_kit::MouseButton::Left,
+                cx.listener(|tela, evento: &gpui_kit::MouseDownEvent, _w, cx| {
                     tela.arrasto_da_tira = Some((evento.position.y, tela.altura_da_tira));
                     cx.notify();
                 }),
@@ -6904,7 +6925,7 @@ impl Detalhe {
                     }
                     window.on_mouse_event({
                         let esta = ouvinte.clone();
-                        move |evento: &gpui::MouseMoveEvent, fase, _window, cx| {
+                        move |evento: &gpui_kit::MouseMoveEvent, fase, _window, cx| {
                             if !fase.bubble() {
                                 return;
                             }
@@ -6925,7 +6946,7 @@ impl Detalhe {
                     });
                     window.on_mouse_event({
                         let esta = ouvinte.clone();
-                        move |_evento: &gpui::MouseUpEvent, fase, _window, cx| {
+                        move |_evento: &gpui_kit::MouseUpEvent, fase, _window, cx| {
                             if !fase.bubble() {
                                 return;
                             }
@@ -6947,20 +6968,20 @@ impl Detalhe {
 /// ⚠️ **A nuvem é discreta e o disco sozinho não**: o normal é a foto estar no
 /// acervo, e o que chama a atenção é o que ainda depende deste computador. Com
 /// ela nos dois lugares, o disco é informação de espaço, e fica cinza.
-fn selo_do_lugar(lugar: Lugar) -> gpui::Div {
+fn selo_do_lugar(lugar: Lugar) -> gpui_kit::Div {
     use crate::recursos::Icone;
-    use gpui_component::Icon;
-    let redondo = |icone: Icone, cor: gpui::Hsla, fundo: u32| {
+    use gpui_kit::component::Icon;
+    let redondo = |icone: Icone, cor: gpui_kit::Hsla, fundo: u32| {
         div()
             .size(px(22.))
             .rounded_full()
             .flex()
             .items_center()
             .justify_center()
-            .bg(gpui::rgba(fundo))
+            .bg(gpui_kit::rgba(fundo))
             .child(Icon::new(icone).size(px(13.)).text_color(cor))
     };
-    let cinza: gpui::Hsla = gpui::rgb(0xa3a3a3).into();
+    let cinza: gpui_kit::Hsla = gpui_kit::rgb(0xa3a3a3).into();
     div()
         .flex()
         .gap(px(4.))
@@ -6987,7 +7008,7 @@ fn pilula(
     quantas: Option<usize>,
     acesa: bool,
     cx: &App,
-) -> gpui::Stateful<gpui::Div> {
+) -> gpui_kit::Stateful<gpui_kit::Div> {
     let tema = cx.theme();
     let (borda, apagado, acento) = (tema.border, tema.muted_foreground, tema.accent);
     div()
@@ -7040,10 +7061,10 @@ fn sombra(esquerda: bool, cx: &App) -> impl IntoElement {
         .w(px(28.))
         .when(esquerda, |lado| lado.left_0())
         .when(!esquerda, |lado| lado.right_0())
-        .bg(gpui::linear_gradient(
+        .bg(gpui_kit::linear_gradient(
             if esquerda { 90.0 } else { 270.0 },
-            gpui::linear_color_stop(fundo, 0.0),
-            gpui::linear_color_stop(fundo.opacity(0.0), 1.0),
+            gpui_kit::linear_color_stop(fundo, 0.0),
+            gpui_kit::linear_color_stop(fundo.opacity(0.0), 1.0),
         ))
 }
 
@@ -7235,7 +7256,7 @@ mod testes {
     use crate::importacao::explorador::mentira::ImportadorDeMentira;
     use crate::pos_venda::porta::mentira::PublicadorDeMentira;
     use crate::sessoes::arquivos::mentira::SeletorDeMentira;
-    use gpui::TestAppContext;
+    use gpui_kit::TestAppContext;
 
     fn foto(id: &str, estado: EstadoDaFotoNoSite, nota: Option<u8>) -> FotoDaGaleria {
         FotoDaGaleria {
@@ -7260,7 +7281,7 @@ mod testes {
     fn janela(
         cx: &mut TestAppContext,
         fotos: Vec<FotoDaGaleria>,
-    ) -> (gpui::WindowHandle<Detalhe>, Arc<PublicadorDeMentira>) {
+    ) -> (gpui_kit::WindowHandle<Detalhe>, Arc<PublicadorDeMentira>) {
         let publicador = publicador_com(fotos, false);
         let janela = janela_com(
             cx,
@@ -7299,7 +7320,7 @@ mod testes {
         cx: &mut TestAppContext,
         publicador: Arc<PublicadorDeMentira>,
         seletor: Arc<SeletorDeMentira>,
-    ) -> gpui::WindowHandle<Detalhe> {
+    ) -> gpui_kit::WindowHandle<Detalhe> {
         janela_completa(
             cx,
             publicador,
@@ -7313,7 +7334,7 @@ mod testes {
         publicador: Arc<PublicadorDeMentira>,
         seletor: Arc<SeletorDeMentira>,
         importador: Arc<ImportadorDeMentira>,
-    ) -> gpui::WindowHandle<Detalhe> {
+    ) -> gpui_kit::WindowHandle<Detalhe> {
         let dir = tempfile::TempDir::new().expect("diretório temporário");
         let previews = Arc::new(PreviewManager::new_with_path(dir.path().to_path_buf()));
         std::mem::forget(dir);
@@ -7330,8 +7351,8 @@ mod testes {
         seletor: Arc<SeletorDeMentira>,
         importador: Arc<ImportadorDeMentira>,
         previews: Arc<PreviewManager>,
-    ) -> gpui::WindowHandle<Detalhe> {
-        cx.update(gpui_component::init);
+    ) -> gpui_kit::WindowHandle<Detalhe> {
+        cx.update(gpui_kit::init);
         cx.add_window(move |_window, cx| {
             let mut tela = Detalhe::nova(publicador, seletor, importador, previews, cx);
             tela.definir_sessao(Sessao {
@@ -7366,7 +7387,7 @@ mod testes {
     /// seletor.
     fn importar_pelo_modal(
         cx: &mut TestAppContext,
-        janela: &gpui::WindowHandle<Detalhe>,
+        janela: &gpui_kit::WindowHandle<Detalhe>,
     ) -> std::time::Duration {
         clicar(cx, janela, "detalhe-importar");
         janela
@@ -7385,16 +7406,16 @@ mod testes {
 
     fn clicar(
         cx: &mut TestAppContext,
-        janela: &gpui::WindowHandle<Detalhe>,
+        janela: &gpui_kit::WindowHandle<Detalhe>,
         alvo: &'static str,
     ) -> std::time::Duration {
-        let mut visual = gpui::VisualTestContext::from_window((*janela).into(), cx);
+        let mut visual = gpui_kit::VisualTestContext::from_window((*janela).into(), cx);
         visual.run_until_parked();
         let onde = visual
             .debug_bounds(alvo)
             .unwrap_or_else(|| panic!("o botão {alvo} não está desenhado na tela"));
         let comeco = std::time::Instant::now();
-        visual.simulate_click(onde.center(), gpui::Modifiers::none());
+        visual.simulate_click(onde.center(), gpui_kit::Modifiers::none());
         let gasto = comeco.elapsed();
         visual.run_until_parked();
         gasto
@@ -7408,7 +7429,7 @@ mod testes {
     /// **locais** só quando a raiz mandasse outras — se a sessão nova não
     /// tivesse nenhuma foto no disco, as da anterior ficavam na tela para
     /// sempre. O estado honesto enquanto se lê a nova é o vazio.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn entrar_noutra_sessao_nao_deixa_a_anterior_na_tela(cx: &mut TestAppContext) {
         let (janela, _publicador) =
             janela(cx, vec![foto("a", EstadoDaFotoNoSite::Disponivel, Some(5))]);
@@ -7460,14 +7481,14 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
-    fn colher_ate_parar(cx: &mut TestAppContext, janela: &gpui::WindowHandle<Detalhe>) {
+    fn colher_ate_parar(cx: &mut TestAppContext, janela: &gpui_kit::WindowHandle<Detalhe>) {
         for _ in 0..20 {
             let _ = janela.update(cx, |tela, _window, cx| tela.colher(cx));
             cx.run_until_parked();
         }
     }
 
-    fn entrar(cx: &mut TestAppContext, janela: &gpui::WindowHandle<Detalhe>) {
+    fn entrar(cx: &mut TestAppContext, janela: &gpui_kit::WindowHandle<Detalhe>) {
         janela
             .update(cx, |tela, _window, cx| tela.entrar("g1".into(), cx))
             .expect("a janela deve estar aberta");
@@ -7507,7 +7528,7 @@ mod testes {
     /// sessão."* O "Copiar link" numa sessão sem contato **não pede o link**:
     /// abre o pedido de contato, grava por `PATCH` só o e-mail e segue com o
     /// gesto — o link sai sem um segundo clique.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn copiar_o_link_sem_email_pede_o_contato_grava_e_segue_o_gesto(cx: &mut TestAppContext) {
         let (janela, publicador) = janela(cx, vec![]);
         tirar_o_contato(&publicador);
@@ -7533,7 +7554,7 @@ mod testes {
                     .is_some_and(|f| f.erro.is_some()));
 
                 email.update(cx, |campo, cx| {
-                    campo.set_value("ana@exemplo.com", window, cx)
+                    campo.trocar_valor("ana@exemplo.com", window, cx)
                 });
                 tela.gravar_dados_do_cliente(cx);
             })
@@ -7568,7 +7589,7 @@ mod testes {
     /// 🔚 A tela velha acha que há contato e o site responde `422`: o mesmo
     /// pedido de contato abre, com a frase do site — e a colheita não fica
     /// presa esperando um aviso que não vem.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_422_do_site_abre_o_mesmo_pedido_de_contato(cx: &mut TestAppContext) {
         let (janela, publicador) = janela(cx, vec![]);
         tirar_o_contato(&publicador);
@@ -7605,7 +7626,7 @@ mod testes {
     /// 🚨 **Só com WhatsApp o link também pede o e-mail** (usuários em
     /// produção, 2026-09-13: *"ensaios sem e-mail estão gerando problema ao
     /// gerar o link"*). O WhatsApp vem preenchido e o PATCH leva só o e-mail.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn so_com_whatsapp_o_link_pede_o_email(cx: &mut TestAppContext) {
         let (janela, publicador) = janela(cx, vec![]);
         {
@@ -7631,7 +7652,7 @@ mod testes {
                 assert!(tela.gravando_dados.is_none());
 
                 email.update(cx, |campo, cx| {
-                    campo.set_value("ana@exemplo.com", window, cx)
+                    campo.trocar_valor("ana@exemplo.com", window, cx)
                 });
                 tela.gravar_dados_do_cliente(cx);
             })
@@ -7657,7 +7678,7 @@ mod testes {
     /// ✏️ *"Dentro da sessão precisa ser possível mudar o Título, email e o
     /// whatsapp."* — dono, 2026-09-13. Os campos vêm com o que a sessão tem, e
     /// o `PATCH` leva só o que mudou.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn editar_os_dados_do_cliente_manda_so_o_que_mudou(cx: &mut TestAppContext) {
         let (janela, publicador) = janela(cx, vec![]);
         entrar(cx, &janela);
@@ -7668,7 +7689,9 @@ mod testes {
                 let (titulo, email, _) = campos_do_cliente(tela, window, cx);
                 assert_eq!(titulo.read(cx).value().to_string(), "Ensaio");
                 assert_eq!(email.read(cx).value().to_string(), "ana@x.com");
-                titulo.update(cx, |campo, cx| campo.set_value("Ensaio da Ana", window, cx));
+                titulo.update(cx, |campo, cx| {
+                    campo.trocar_valor("Ensaio da Ana", window, cx)
+                });
                 tela.gravar_dados_do_cliente(cx);
             })
             .expect("a janela deve estar aberta");
@@ -7701,7 +7724,7 @@ mod testes {
 
     /// ✏️ Na edição o título vazio não grava, e o **último contato se apaga** —
     /// ele só é exigido no fim da sessão.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn na_edicao_titulo_vazio_nao_grava_e_o_ultimo_contato_se_apaga(cx: &mut TestAppContext) {
         let (janela, publicador) = janela(cx, vec![]);
         entrar(cx, &janela);
@@ -7711,12 +7734,12 @@ mod testes {
                 tela.editar_dados_do_cliente(cx);
                 let (titulo, email, _) = campos_do_cliente(tela, window, cx);
 
-                titulo.update(cx, |campo, cx| campo.set_value("   ", window, cx));
+                titulo.update(cx, |campo, cx| campo.trocar_valor("   ", window, cx));
                 tela.gravar_dados_do_cliente(cx);
                 assert!(tela.gravando_dados.is_none(), "título vazio não vai à rede");
 
-                titulo.update(cx, |campo, cx| campo.set_value("Ensaio", window, cx));
-                email.update(cx, |campo, cx| campo.set_value("", window, cx));
+                titulo.update(cx, |campo, cx| campo.trocar_valor("Ensaio", window, cx));
+                email.update(cx, |campo, cx| campo.trocar_valor("", window, cx));
                 tela.gravar_dados_do_cliente(cx);
             })
             .expect("a janela deve estar aberta");
@@ -7744,7 +7767,7 @@ mod testes {
     /// Até ali a sem nota ficava fora de "À venda" (regra de 2026-09-05). Agora
     /// ela conta nos dois recortes — "À venda" e "Sem nota" —, e quem fica fora
     /// da venda é só a rejeitada.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_sem_nota_esta_a_venda(cx: &mut TestAppContext) {
         let (janela, _) = janela(
             cx,
@@ -7777,7 +7800,7 @@ mod testes {
     ///
     /// A seleção fala em **posição**, e o recorte muda quem está em cada uma:
     /// mantê-la faria a próxima ação em lote cair em fotos que ninguém marcou.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn trocar_o_recorte_limpa_a_selecao(cx: &mut TestAppContext) {
         let (janela, _) = janela(
             cx,
@@ -7805,7 +7828,7 @@ mod testes {
     /// atrás dela — mudar o estado mudaria o que já foi pago — e a apagada não
     /// tem arquivo. Mandar assim mesmo traria um erro por foto, com o cliente na
     /// frente.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_lote_nao_toca_na_comprada(cx: &mut TestAppContext) {
         let (janela, publicador) = janela(
             cx,
@@ -7850,7 +7873,7 @@ mod testes {
     /// tira** — o gesto do cabeçalho da web. Começa pela primeira que ainda pode
     /// ser revelada: a comprada fica na tira, marcada, mas não é por ela que se
     /// começa. A apagada nem entra: não tem arquivo.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_botao_da_barra_leva_a_sessao_inteira(cx: &mut TestAppContext) {
         let (janela, _) = janela(
             cx,
@@ -7887,7 +7910,7 @@ mod testes {
 
     /// O botão do painel abre **a foto em foco**, e a sessão vai junto: a
     /// posição é a dela na lista da tira, não na grade filtrada.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_botao_do_painel_abre_a_do_foco_com_a_sessao_na_tira(cx: &mut TestAppContext) {
         let (janela, _) = janela(
             cx,
@@ -7918,7 +7941,7 @@ mod testes {
 
     /// Só compradas: o botão da barra ainda entra — a tira mostra o que há —,
     /// e só apagadas (ou nada) é o único caso em que ele fica desligado.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn sem_o_que_revelar_o_botao_desliga(cx: &mut TestAppContext) {
         let (so_apagadas, _) = janela(cx, vec![apagada("a"), apagada("b")]);
         entrar(cx, &so_apagadas);
@@ -7946,7 +7969,7 @@ mod testes {
     /// Entra numa galeria cujo publicador segura as respostas.
     fn entrar_demorado(
         cx: &mut TestAppContext,
-        janela: &gpui::WindowHandle<Detalhe>,
+        janela: &gpui_kit::WindowHandle<Detalhe>,
         publicador: &PublicadorDeMentira,
     ) {
         janela
@@ -7980,7 +8003,7 @@ mod testes {
     /// *"a importação não vai imediatamente para o storage, pois o cliente
     /// precisa classificar"*; hoje o ensaio **vai** para a nuvem sozinho (C20),
     /// só que pela fila da raiz, e não por esta tela.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_clique_no_importar_grava_no_catalogo_e_nao_sobe_nada(cx: &mut TestAppContext) {
         let seletor = Arc::new(SeletorDeMentira::escolhe(&["/fotos/a.jpg", "/fotos/b.NEF"]));
         let publicador = publicador_com(
@@ -8036,7 +8059,7 @@ mod testes {
     /// "Escolher pasta…", a janela de escolher com uma foto desmarcada, e o
     /// "Importar" — e as marcadas chegam ao catálogo com o carimbo da galeria,
     /// pelo mesmo `enviar_arquivos` do soltar arquivos.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn do_cartao_ou_pasta_no_modal_importa_as_marcadas_na_sessao(cx: &mut TestAppContext) {
         use crate::importacao::explorador::mentira::{
             ExploradorDeMentira, GeradorDeMentira, SeletorDeMentira as SeletorDePastaDeMentira,
@@ -8146,7 +8169,7 @@ mod testes {
     /// muito diferente"): clicar dentro do painel não o fecha, o rodapé conta
     /// o último e-mail e os anteriores, e o "política de retenção" pede a tela
     /// da retenção à raiz — o `<Link>` do site para `configuracoes`.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn os_detalhes_contam_os_avisos_e_levam_a_politica_de_retencao(cx: &mut TestAppContext) {
         let publicador = publicador_com(
             vec![foto("a", EstadoDaFotoNoSite::Disponivel, Some(4))],
@@ -8187,7 +8210,7 @@ mod testes {
 
         // Com um aviso anterior, o link desce sozinho para a última linha, e
         // começa logo depois do "· ".
-        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
         visual.run_until_parked();
         for linha in ["detalhes-rodape-0", "detalhes-rodape-1"] {
             assert!(
@@ -8199,8 +8222,8 @@ mod testes {
             .debug_bounds("detalhes-rodape-2")
             .expect("a linha da política não foi desenhada");
         visual.simulate_click(
-            gpui::point(link.origin.x + px(40.), link.center().y),
-            gpui::Modifiers::none(),
+            gpui_kit::point(link.origin.x + px(40.), link.center().y),
+            gpui_kit::Modifiers::none(),
         );
         visual.run_until_parked();
 
@@ -8221,7 +8244,7 @@ mod testes {
     /// Ele desceu da barra do app em 8/set/2026 e, com a mudança, deixou de
     /// chamar um método: agora emite um `Pedido`. Uma ligação a mais para se
     /// perder — e o desfecho de perdê-la é um botão que não responde.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_clique_no_exportar_pede_a_exportacao(cx: &mut TestAppContext) {
         let (janela, _) = janela(
             cx,
@@ -8270,7 +8293,7 @@ mod testes {
     /// 0 { return; }`, e `enviando` era o mesmo contador da importação. Durante
     /// o lote, apertar `4` ou `P` não fazia nada: sem erro, sem aviso, e sem
     /// nenhuma pista de que a culpa era da importação.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn com_a_importacao_correndo_classificar_sinalizar_e_revelar_continuam(
         cx: &mut TestAppContext,
     ) {
@@ -8385,7 +8408,7 @@ mod testes {
     /// segundos. Até aqui a tela inteira esperava a rodada anterior
     /// (`if … || self.mudando > 0 { return; }`): a nota da **outra** foto
     /// desistia em silêncio, e a estrela só aparecia quando o site respondia.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn com_o_patch_no_ar_a_proxima_tecla_vale_e_a_estrela_aparece_na_hora(cx: &mut TestAppContext) {
         let publicador = Arc::new(PublicadorDeMentira {
             negociacao_demorada: true,
@@ -8462,7 +8485,7 @@ mod testes {
     /// A nota da Revelação no `⇧C` vai por `nas_fotos`: só a foto pedida recebe
     /// o `PATCH`, e as marcadas continuam marcadas — são o lote que o operador
     /// montou para outra coisa.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn nas_fotos_classifica_so_a_pedida_e_devolve_a_selecao(cx: &mut TestAppContext) {
         let (janela, publicador) = janela(
             cx,
@@ -8495,7 +8518,7 @@ mod testes {
     /// Uma releitura que saiu antes do `PATCH` volta com a nota velha — e até
     /// aqui ela trocava a grade inteira, a estrela sumia, e o gesto seguinte
     /// decidia sobre o estado de antes.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_releitura_velha_nao_desfaz_a_nota_recem_dada(cx: &mut TestAppContext) {
         let (janela, publicador) = janela(
             cx,
@@ -8552,7 +8575,7 @@ mod testes {
     /// até a última entrar. A raiz agrupa os pedidos — ver
     /// `pedir_releitura_do_acervo` —, então pedir a cada foto não custa uma
     /// varredura por foto.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn cada_foto_importada_pede_a_releitura_sem_esperar_o_lote(cx: &mut TestAppContext) {
         let seletor = Arc::new(SeletorDeMentira {
             escolha: std::sync::Mutex::new(caminhos_de_teste(4)),
@@ -8607,7 +8630,7 @@ mod testes {
     /// ⚠️ **A falha conta como pronta.** Uma foto que o site recusou não
     /// responde de novo: deixá-la fora da conta prenderia a barra em 499 de 500
     /// para sempre — e o "importando…" nunca sairia da tela.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_barra_anda_com_o_lote_e_a_falha_conta_como_pronta(cx: &mut TestAppContext) {
         let seletor = Arc::new(SeletorDeMentira {
             escolha: std::sync::Mutex::new(caminhos_de_teste(4)),
@@ -8722,7 +8745,7 @@ mod testes {
     /// lição que o `demorada` do publicador já tinha ensinado
     /// (`docs/07-E2E-TESTING.md` §4): o teste que não deixa o tempo passar não
     /// pode ver um defeito que só existe no tempo.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn escolher_as_fotos_com_calma_ainda_sobe_o_lote(cx: &mut TestAppContext) {
         let seletor = Arc::new(SeletorDeMentira::demorado(&[
             "/fotos/a.jpg",
@@ -8770,7 +8793,7 @@ mod testes {
     /// vazia** deixaria o laço acordando a cada 100 ms para sempre depois de um
     /// `Cancelar` — sem sintoma nenhum além do ventilador. Desistir é um gesto
     /// legítimo, e o seletor responde a ele com lista vazia.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn fechar_a_janela_sem_escolher_deixa_a_colheita_parar(cx: &mut TestAppContext) {
         let seletor = Arc::new(SeletorDeMentira::demorado(&[]));
         let publicador = publicador_com(Vec::new(), false);
@@ -8818,7 +8841,7 @@ mod testes {
     ///
     /// "Como conheceu" e o corte padrão vão num `PATCH` com **só** o que mudou —
     /// e trocar a resposta limpa o parceiro, que é o que o site recusaria.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_atendimento_corrige_a_origem_e_o_corte(cx: &mut TestAppContext) {
         let publicador = publicador_com(Vec::new(), false);
         {
@@ -8900,7 +8923,7 @@ mod testes {
     /// andava uma casa (dono, 21/set/2026: *"estou vendo o problema de
     /// pisca-pisca"*). Mesma `ordem` e mesmo nome base — a câmera grava `.JPG`,
     /// a subida manda `.jpg`.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_do_site_que_chega_antes_do_aviso_nao_duplica_a_foto(cx: &mut TestAppContext) {
         let mut do_site = foto("s1", EstadoDaFotoNoSite::Disponivel, None);
         do_site.arquivo = "DSC_2700.jpg".into();
@@ -8936,7 +8959,7 @@ mod testes {
     /// *"eu não posso impedir o atendente de fazer as marcações"*). Antes dava
     /// "espere o envio terminar"; agora a marca vai para o catálogo, sem erro,
     /// e o segundo `B` desfaz — a local mostra a levada na hora.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_b_marca_a_foto_que_ainda_sobe(cx: &mut TestAppContext) {
         let (janela, publicador) = janela(cx, Vec::new());
         entrar(cx, &janela);
@@ -9004,7 +9027,7 @@ mod testes {
     /// web. Aqui o que se prende é o desenho novo: a do site vai num `PATCH`, a
     /// que ainda sobe vai para o catálogo local, e **nada é apagado em lugar
     /// nenhum**.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_x_rejeita_a_do_site_no_patch_e_a_local_no_catalogo(cx: &mut TestAppContext) {
         let (janela, publicador) = janela(
             cx,
@@ -9106,7 +9129,7 @@ mod testes {
     /// no intervalo em que a do site ainda não voltou, a local continua na
     /// grade e a tecla vai ao site com o id novo; quando a do site chega, a
     /// seleção passa para ela.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_foto_que_sobe_no_meio_da_classificacao_nao_perde_o_gesto(cx: &mut TestAppContext) {
         let (janela, publicador) = janela(
             cx,
@@ -9165,7 +9188,7 @@ mod testes {
     /// a do site sem cópia aqui é só nuvem; com cópia, nuvem e disco; a local
     /// na fila está indo; a local fora da fila (a rejeitada) está só no disco;
     /// e a que acabou de subir já é nuvem, ainda com os bytes aqui.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_selo_do_lugar_diz_onde_a_foto_esta(cx: &mut TestAppContext) {
         let (janela, _publicador) = janela(
             cx,
@@ -9208,7 +9231,7 @@ mod testes {
     /// O `P` com uma rejeitada na seleção marca as outras e diz qual ficou de
     /// fora — a mesma recusa do servidor, feita antes da ida e separando em vez
     /// de bloquear, como a da sem nota.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_rejeitada_tem_recorte_e_nao_vai_ao_balcao(cx: &mut TestAppContext) {
         let mut rejeitada = foto("r1", EstadoDaFotoNoSite::Disponivel, Some(4));
         rejeitada.rejeitada = true;
@@ -9258,7 +9281,7 @@ mod testes {
     /// ❌ **A levada no balcão não é rejeitada** (2026-09-21): rejeitar tira da
     /// nuvem, e ela tem a venda do balcão em andamento. Fica de fora com aviso,
     /// e as outras da seleção seguem.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_x_nao_rejeita_a_levada_no_balcao(cx: &mut TestAppContext) {
         let (janela, publicador) = janela(
             cx,
@@ -9298,7 +9321,7 @@ mod testes {
     /// A mesma regra do `P`: só desfaz quando **todas** as marcadas já estão
     /// rejeitadas. Com uma rejeitada e uma não, o `X` rejeita as duas — uma
     /// tecla, um desfecho, e não metade da seleção para cada lado.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_x_desfaz_so_quando_todas_ja_estao_rejeitadas(cx: &mut TestAppContext) {
         let rejeitada = |id: &str| {
             let mut f = foto(id, EstadoDaFotoNoSite::Disponivel, Some(4));
@@ -9350,7 +9373,7 @@ mod testes {
     ///
     /// O diálogo é o `useConfirmacao` do site: o balcão é tela de dedo rápido, e
     /// o `DELETE` leva os arquivos junto.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn apagar_no_painel_pede_confirmacao_no_dialogo(cx: &mut TestAppContext) {
         let (janela, _) = janela(
             cx,
@@ -9395,7 +9418,7 @@ mod testes {
     /// O que o assistente coletou nas sete etapas ficava só no banco: a sessão
     /// abria sem dizer se havia agendamento, voucher, compra, como conheceu ou
     /// receita padrão — e o estúdio não tinha onde ser corrigido.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_cabecalho_mostra_o_atendimento_e_troca_o_estudio(cx: &mut TestAppContext) {
         let publicador = publicador_com(
             vec![foto("f1", EstadoDaFotoNoSite::Disponivel, Some(4))],
@@ -9453,7 +9476,7 @@ mod testes {
     /// registra o que **entrou no balcão** — outra conta. A faixa decide o preço
     /// da foto na galeria do cliente, e o preço de venda o substitui; sem os
     /// dois, uma leva que subiu na faixa errada só se conserta pelo site.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_painel_muda_a_faixa_e_o_preco_de_venda(cx: &mut TestAppContext) {
         let (janela, publicador) = janela(
             cx,
@@ -9487,7 +9510,7 @@ mod testes {
                 if let Some(campos) = tela.campos_do_painel.as_ref() {
                     campos
                         .preco
-                        .update(cx, |campo, cx| campo.set_value("19,90", window, cx));
+                        .update(cx, |campo, cx| campo.trocar_valor("19,90", window, cx));
                 }
                 tela.aplicar_preco_de_venda(cx);
             })
@@ -9502,7 +9525,7 @@ mod testes {
         );
     }
 
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_selecao_da_grade_e_da_tira_muda_faixa_e_preco_sem_tocar_na_comprada(
         cx: &mut TestAppContext,
     ) {
@@ -9547,7 +9570,7 @@ mod testes {
                 // A resposta do PATCH anterior libera a vez da foto.
                 tela.colher(cx);
                 let preco = &tela.campos_do_lote.as_ref().unwrap().preco;
-                preco.update(cx, |campo, cx| campo.set_value("31,90", window, cx));
+                preco.update(cx, |campo, cx| campo.trocar_valor("31,90", window, cx));
                 tela.aplicar_preco_do_lote(cx);
             })
             .expect("a janela deve estar aberta");
@@ -9565,7 +9588,7 @@ mod testes {
     /// **dois caches diferentes**: o serviço gravava a revelada com
     /// `save_preview` (`Large`) e a grade procurava por `get_thumbnail`
     /// (`Thumbnail`), na chave do bruto. Achado do dono, 17/set/2026.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_grade_mostra_a_revelada_da_receita_padrao(cx: &mut TestAppContext) {
         let dir = tempfile::TempDir::new().expect("diretório temporário");
         let previews = Arc::new(PreviewManager::new_with_path(dir.path().to_path_buf()));
@@ -9612,7 +9635,7 @@ mod testes {
     /// atualização aparecia, ao preço de a galeria piscar em branco. Agora que
     /// a grade fica de pé, quem pede a nova é `revelada_subiu`, **só para esta
     /// foto**.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_foto_que_subiu_pede_a_miniatura_de_novo(cx: &mut TestAppContext) {
         let (janela, publicador) = janela(
             cx,
@@ -9650,7 +9673,7 @@ mod testes {
     /// operador. Gravada e invisível é o mesmo desfecho de não ter importado —
     /// e foi o que a tela mostrou no dia em que a importação subia direto:
     /// *"Nenhuma foto nesta sessão ainda"*, com 21 arquivos no disco.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_foto_importada_entra_na_grade_sem_nota(cx: &mut TestAppContext) {
         let (janela, _) = janela(
             cx,
@@ -9704,7 +9727,7 @@ mod testes {
     /// que este teste segura é que a tela **diz isso**, em vez de não fazer nada
     /// — o silêncio é a pior resposta possível a um gesto que o operador acabou
     /// de fazer com o cliente ao lado.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_nota_da_importada_vai_ao_catalogo_e_sinalizar_avisa(cx: &mut TestAppContext) {
         let (janela, publicador) = janela(cx, Vec::new());
         entrar(cx, &janela);
@@ -9775,7 +9798,7 @@ mod testes {
     /// `YYYY/MM/DD` da EXIF, e `Standard` renomearia para
     /// `photo-2026-09-08-001.jpg` — um nome que ninguém procura e que também não
     /// é estável.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_importacao_copia_para_a_pasta_previsivel_do_ensaio(cx: &mut TestAppContext) {
         let seletor = Arc::new(SeletorDeMentira::escolhe(&[
             "/Volumes/NIKON D750/DCIM/DSC_2571.jpg",
@@ -9851,7 +9874,7 @@ mod testes {
     /// ⚠️ **E não falha**: `espiar` devolve `None`, a célula desenha o retângulo
     /// vazio, e o resto da linha continua certo. É o pior formato de defeito —
     /// tudo funciona, menos a única coisa que o operador foi ver.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_foto_importada_nao_aparece_preta(cx: &mut TestAppContext) {
         let dir = tempfile::TempDir::new().expect("diretório temporário");
         let previews = Arc::new(PreviewManager::new_with_path(dir.path().to_path_buf()));
@@ -9898,7 +9921,7 @@ mod testes {
     /// Ao subir, a foto troca o id do catálogo pelo do site, e a miniatura do
     /// site ainda não baixou. A célula nova herda a imagem da local; quando a
     /// do site chega, as duas se cruzam numa troca suave.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_foto_que_sobe_nao_fica_preta_na_troca(cx: &mut TestAppContext) {
         let dir = tempfile::TempDir::new().expect("diretório temporário");
         let previews = Arc::new(PreviewManager::new_with_path(dir.path().to_path_buf()));
@@ -9987,15 +10010,15 @@ mod testes {
     /// mínimo deveria ser 1 na galeria de fotos dentro da sessão"*). O topo do
     /// slider acompanha a largura da grade; com o teto fixo em 320 px, uma
     /// janela larga parava em três por linha.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_topo_do_zoom_e_uma_foto_por_linha(cx: &mut TestAppContext) {
         let fotos = (0..12)
             .map(|i| foto(&format!("f{i:02}"), EstadoDaFotoNoSite::Disponivel, None))
             .collect();
         let (janela, _publicador) = janela(cx, fotos);
         entrar(cx, &janela);
-        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
-        let desenhar = |visual: &mut gpui::VisualTestContext| {
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        let desenhar = |visual: &mut gpui_kit::VisualTestContext| {
             for _ in 0..3 {
                 janela
                     .update(visual, |_tela, _w, cx| cx.notify())
@@ -10027,15 +10050,15 @@ mod testes {
     /// (dono, 2026-09-22: *"a foto precisa se auto centralizar no scroll
     /// vertical"*). A célula não passa da altura visível, e andar até uma foto
     /// a põe no centro.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn uma_por_linha_centraliza_a_foto_em_foco(cx: &mut TestAppContext) {
         let fotos = (0..8)
             .map(|i| foto(&format!("f{i:02}"), EstadoDaFotoNoSite::Disponivel, None))
             .collect();
         let (janela, _publicador) = janela(cx, fotos);
         entrar(cx, &janela);
-        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
-        let desenhar = |visual: &mut gpui::VisualTestContext| {
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        let desenhar = |visual: &mut gpui_kit::VisualTestContext| {
             for _ in 0..4 {
                 janela
                     .update(visual, |_tela, _w, cx| cx.notify())
@@ -10077,7 +10100,7 @@ mod testes {
     /// seta até a última tem de levar as duas até ela, e a volta até a
     /// primeira tem de trazê-las ao começo — com o quadro montando poucas
     /// células, e não 400.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_grade_e_a_tira_seguem_o_foco_sem_montar_tudo(cx: &mut TestAppContext) {
         const N: usize = 400;
         let fotos = (0..N)
@@ -10085,8 +10108,8 @@ mod testes {
             .collect();
         let (janela, _publicador) = janela(cx, fotos);
         entrar(cx, &janela);
-        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
-        let desenhar = |visual: &mut gpui::VisualTestContext| {
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        let desenhar = |visual: &mut gpui_kit::VisualTestContext| {
             for _ in 0..3 {
                 janela
                     .update(visual, |_tela, _w, cx| cx.notify())

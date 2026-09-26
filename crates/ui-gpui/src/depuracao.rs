@@ -238,7 +238,7 @@ fn nome_valido(nome: &str) -> bool {
 
 /// Grava em `destino` (PNG) o que a janela mostra agora.
 #[cfg(target_os = "macos")]
-pub fn fotografar(window: &gpui::Window, destino: &Path) -> Result<(), String> {
+pub fn fotografar(window: &gpui_kit::Window, destino: &Path) -> Result<(), String> {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
     let alca = HasWindowHandle::window_handle(window).map_err(|e| e.to_string())?;
@@ -256,7 +256,7 @@ pub fn fotografar(window: &gpui::Window, destino: &Path) -> Result<(), String> {
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn fotografar(_window: &gpui::Window, _destino: &Path) -> Result<(), String> {
+pub fn fotografar(_window: &gpui_kit::Window, _destino: &Path) -> Result<(), String> {
     Err("a foto da janela só existe no macOS".into())
 }
 

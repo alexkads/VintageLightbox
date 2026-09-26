@@ -51,11 +51,11 @@
 //!   (`segundo_plano/janela.rs` registra a lição, conferida em 17/set/2026).
 //!   Fica para quando houver uma máquina de cada para conferir.
 
-use gpui::{
+use gpui_kit::component::{ActiveTheme as _, Icon, InteractiveElementExt as _};
+use gpui_kit::{
     div, prelude::*, px, App, Decorations, Div, Hsla, InteractiveElement, MouseButton,
     SharedString, Stateful, Window,
 };
-use gpui_component::{ActiveTheme as _, Icon, InteractiveElementExt as _};
 
 use crate::recursos::Icone;
 
@@ -141,7 +141,7 @@ pub fn maximizar_ou_restaurar(window: &mut Window, _cx: &mut App) {
 struct Arrastando(bool);
 
 impl Render for Arrastando {
-    fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, _: &mut gpui_kit::Context<Self>) -> impl IntoElement {
         div()
     }
 }
@@ -216,7 +216,7 @@ fn desenhar_controles(prefixo: &'static str, cor: Hsla, window: &Window, cx: &Ap
     // fechar incluso. Até aqui eram quadrados de 34×28 com os ícones do lucide
     // e o fechar em vermelho, no jeito do Windows.
     // (`crates/platform_title_bar/src/platforms/platform_linux.rs` no Zed.)
-    let (fundo, realce) = (gpui::transparent_black(), cx.theme().secondary_hover);
+    let (fundo, realce) = (gpui_kit::transparent_black(), cx.theme().secondary_hover);
 
     let (icone_do_meio, dica_do_meio) = if window.is_maximized() || window.is_fullscreen() {
         (Icone::JanelaRestaurar, "Restaurar")
@@ -361,9 +361,9 @@ pub fn controles_da_tela(prefixo: &'static str, cor: Hsla, window: &Window, cx: 
 }
 
 /// A faixa das guias desta janela está na tela, com os botões de janela nela.
-struct FaixaComControles(Option<gpui::AnyWindowHandle>);
+struct FaixaComControles(Option<gpui_kit::AnyWindowHandle>);
 
-impl gpui::Global for FaixaComControles {}
+impl gpui_kit::Global for FaixaComControles {}
 
 /// Diz, a cada desenho da raiz, se os botões foram para a faixa das guias —
 /// **antes** de as telas se desenharem, que é quando elas perguntam.
@@ -414,8 +414,8 @@ pub mod teste {
 /// quem força a barra do sistema (um Sway configurado assim) devolve
 /// `ServerSide`, e a nossa some sozinha. Fora do Linux o campo não vale nada
 /// e fica `None`.
-pub fn decoracoes_ao_abrir() -> Option<gpui::WindowDecorations> {
-    cfg!(target_os = "linux").then_some(gpui::WindowDecorations::Client)
+pub fn decoracoes_ao_abrir() -> Option<gpui_kit::WindowDecorations> {
+    cfg!(target_os = "linux").then_some(gpui_kit::WindowDecorations::Client)
 }
 
 /// Em que área de trabalho o app está rodando.
@@ -485,7 +485,7 @@ impl AreaDeTrabalho {
 
 /// Um botão da barra: o quadrado com o ícone, o realce e o clique.
 fn botao(
-    id: impl Into<gpui::ElementId>,
+    id: impl Into<gpui_kit::ElementId>,
     seletor: &'static str,
     icone: Icone,
     dica: &'static str,
@@ -507,7 +507,9 @@ fn botao(
         .bg(fundo)
         .hover(move |s| s.bg(realce))
         .active(move |s| s.bg(realce.opacity(1.6)))
-        .tooltip(move |window, cx| gpui_component::tooltip::Tooltip::new(dica).build(window, cx))
+        .tooltip(move |window, cx| {
+            gpui_kit::component::tooltip::Tooltip::new(dica).build(window, cx)
+        })
         // 🔑 O clique **para aqui**. Estes botões moram dentro da barra que
         // arrasta a janela: sem isto, apertar "fechar" começaria um arrasto e o
         // compositor levaria o ponteiro embora antes do clique acontecer.

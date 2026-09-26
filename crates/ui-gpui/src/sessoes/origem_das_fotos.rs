@@ -23,13 +23,13 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
-use gpui::{
+use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
+use gpui_kit::{
     div, img, prelude::*, px, relative, AnyElement, ClickEvent, Context, Div, Entity, EventEmitter,
     FocusHandle, FontWeight, RenderImage, SharedString, Stateful, Subscription, Task, Window,
 };
-use gpui_component::checkbox::Checkbox;
-use gpui_component::slider::{Slider, SliderEvent, SliderState};
-use gpui_component::{h_flex, v_flex, ActiveTheme, Icon};
 use infrastructure::cache::preview_manager::PreviewManager;
 
 use crate::estilo;
@@ -124,7 +124,11 @@ impl OrigemDasFotos {
                 .default_value(1.0)
         });
         let assinatura = cx.subscribe(&zoom, |origem, _, evento: &SliderEvent, cx| {
-            let SliderEvent::Change(valor) = evento;
+            // O `Release` (novo no gpui-kit 0.6) chega depois do último `Change`
+            // com o mesmo valor: tratá-lo gravaria duas vezes.
+            let SliderEvent::Change(valor) = evento else {
+                return;
+            };
             origem.zoom_valor = valor.start();
             cx.notify();
         });
@@ -191,7 +195,7 @@ impl OrigemDasFotos {
         if self.selecao.is_none() {
             self.devolver_foco = window.focused(cx);
         }
-        window.focus(&self.foco);
+        window.focus(&self.foco, cx);
         self.miniaturas.clear();
         self.metadados.clear();
         self.gerando_miniaturas = false;
@@ -208,13 +212,13 @@ impl OrigemDasFotos {
     }
 
     /// A janela fechou: o foco volta a quem o tinha.
-    fn fechar_selecao(&mut self, window: &mut Window) {
+    fn fechar_selecao(&mut self, window: &mut Window, cx: &mut gpui_kit::App) {
         self.selecao = None;
         self.varrendo = false;
         self.gerando_miniaturas = false;
         self.minimizada = false;
         if let Some(foco) = self.devolver_foco.take() {
-            window.focus(&foco);
+            window.focus(&foco, cx);
         }
     }
 
@@ -288,7 +292,7 @@ impl OrigemDasFotos {
     }
 
     pub fn cancelar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.fechar_selecao(window);
+        self.fechar_selecao(window, cx);
         cx.notify();
     }
 
@@ -316,7 +320,7 @@ impl OrigemDasFotos {
             .into_iter()
             .filter_map(|(caminho, marcado)| marcado.then_some(caminho))
             .collect();
-        self.fechar_selecao(window);
+        self.fechar_selecao(window, cx);
         cx.notify();
         if !fotos.is_empty() {
             cx.emit(EventoDaOrigem::Escolhidas(fotos));
@@ -405,7 +409,7 @@ impl OrigemDasFotos {
                         })
                         .collect();
                     if fotos.is_empty() {
-                        self.fechar_selecao(window);
+                        self.fechar_selecao(window, cx);
                         self.avisar(format!("Nenhuma foto em {nome}."), false, cx);
                     } else {
                         self.gerando_miniaturas = true;
@@ -427,7 +431,7 @@ impl OrigemDasFotos {
                     self.escolhendo = false;
                     self.varrendo = false;
                     if self.selecao.as_ref().is_some_and(|s| s.lendo) {
-                        self.fechar_selecao(window);
+                        self.fechar_selecao(window, cx);
                     }
                     self.avisar(erro, true, cx);
                 }
@@ -592,7 +596,7 @@ impl OrigemDasFotos {
                 .border_color(tema.border)
                 .bg(tema.background)
                 .shadow_lg()
-                .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 // 🔑 **O foco é do diálogo**, e os atalhos de marcar também —
                 // nas duas telas. `Cmd/Ctrl+A` e `Cmd/Ctrl+D` chegam como ação
                 // (a raiz as liga a `SelecionarTudo` e `LimparSelecao`), e o
@@ -642,7 +646,7 @@ impl OrigemDasFotos {
                                         .cursor_pointer()
                                         .hover(|d| d.bg(tema.accent))
                                         .tooltip(|window, cx| {
-                                            gpui_component::tooltip::Tooltip::new("Minimizar")
+                                            gpui_kit::component::tooltip::Tooltip::new("Minimizar")
                                                 .build(window, cx)
                                         })
                                         .child(Icon::new(Icone::Minus).size(px(17.)))
@@ -658,7 +662,7 @@ impl OrigemDasFotos {
                                         .cursor_pointer()
                                         .hover(|d| d.bg(tema.accent))
                                         .tooltip(move |window, cx| {
-                                            gpui_component::tooltip::Tooltip::new(if maximizada {
+                                            gpui_kit::component::tooltip::Tooltip::new(if maximizada {
                                                 "Restaurar tamanho"
                                             } else {
                                                 "Maximizar"
@@ -803,7 +807,7 @@ impl OrigemDasFotos {
                                                             .when_some(miniatura, |quadro, imagem| {
                                                                 quadro.child(
                                                                     img(imagem).size_full().object_fit(
-                                                                        gpui::ObjectFit::Cover,
+                                                                        gpui_kit::ObjectFit::Cover,
                                                                     ),
                                                                 )
                                                             })

@@ -9,16 +9,17 @@
 //! filtro valendo, para ninguém ficar com a lista recortada sem ver por quê.
 //! Nove campos vazios sob o cabeçalho seriam nove alvos de clique acidental.
 
+use crate::campo::TrocarValor as _;
 use std::collections::HashMap;
 
 use biblioteca_core::filtro_de_coluna::{
     ler_dia, ler_numero, Coluna, FiltroDeColuna, Operador, Tipo,
 };
 use biblioteca_core::sessoes::Situacao;
-use gpui::{prelude::*, px, App, Entity, SharedString, Window};
-use gpui_component::input::{Input, InputState};
-use gpui_component::select::{SearchableVec, Select, SelectItem, SelectState};
-use gpui_component::Sizable;
+use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::select::{SearchableVec, Select, SelectItem, SelectState};
+use gpui_kit::component::Sizable;
+use gpui_kit::{prelude::*, px, App, Entity, SharedString, Window};
 
 /// Uma opção de lista: o valor que se lê e o rótulo que se vê.
 #[derive(Debug, Clone)]
@@ -38,7 +39,7 @@ impl SelectItem for Opcao {
         &self.valor
     }
 
-    fn display_title(&self) -> Option<gpui::AnyElement> {
+    fn display_title(&self) -> Option<gpui_kit::AnyElement> {
         None
     }
 }
@@ -59,7 +60,7 @@ fn simbolo(operador: Operador) -> String {
 }
 
 impl FiltrosDaLista {
-    pub fn novos<T: 'static>(window: &mut Window, cx: &mut gpui::Context<T>) -> Self {
+    pub fn novos<T: 'static>(window: &mut Window, cx: &mut gpui_kit::Context<T>) -> Self {
         let mut textos = HashMap::new();
         let mut operadores = HashMap::new();
         for coluna in Coluna::TODAS {
@@ -176,9 +177,9 @@ impl FiltrosDaLista {
     }
 
     /// O × ao lado de "Filtros": todos os campos em branco.
-    pub fn limpar<T: 'static>(&self, window: &mut Window, cx: &mut gpui::Context<T>) {
+    pub fn limpar<T: 'static>(&self, window: &mut Window, cx: &mut gpui_kit::Context<T>) {
         for campo in self.textos.values().chain([&self.de, &self.ate]) {
-            campo.update(cx, |estado, cx| estado.set_value("", window, cx));
+            campo.update(cx, |estado, cx| estado.trocar_valor("", window, cx));
         }
         for lista in self.operadores.values() {
             lista.update(cx, |estado, cx| {
@@ -191,34 +192,34 @@ impl FiltrosDaLista {
     }
 
     /// O campo da coluna, para a linha sob o cabeçalho.
-    pub fn campo(&self, coluna: Coluna) -> gpui::AnyElement {
+    pub fn campo(&self, coluna: Coluna) -> gpui_kit::AnyElement {
         let seletor = move || format!("filtro-{coluna:?}");
         match coluna.tipo() {
-            Tipo::Texto => gpui::div()
+            Tipo::Texto => gpui_kit::div()
                 .w_full()
                 .debug_selector(seletor)
                 .child(Input::new(&self.textos[&coluna]).xsmall())
                 .into_any_element(),
-            Tipo::Numero | Tipo::Dinheiro => gpui::div()
+            Tipo::Numero | Tipo::Dinheiro => gpui_kit::div()
                 .w_full()
                 .flex()
                 .items_center()
                 .gap(px(2.))
                 .debug_selector(seletor)
                 .child(
-                    gpui::div()
+                    gpui_kit::div()
                         .w(px(44.))
                         .flex_none()
                         .child(Select::new(&self.operadores[&coluna]).xsmall()),
                 )
                 .child(
-                    gpui::div()
+                    gpui_kit::div()
                         .flex_1()
                         .min_w(px(0.))
                         .child(Input::new(&self.textos[&coluna]).xsmall()),
                 )
                 .into_any_element(),
-            Tipo::Data => gpui::div()
+            Tipo::Data => gpui_kit::div()
                 .w_full()
                 .flex()
                 .flex_col()
@@ -227,7 +228,7 @@ impl FiltrosDaLista {
                 .child(Input::new(&self.de).xsmall())
                 .child(Input::new(&self.ate).xsmall())
                 .into_any_element(),
-            Tipo::Escolha => gpui::div()
+            Tipo::Escolha => gpui_kit::div()
                 .w_full()
                 .debug_selector(seletor)
                 .child(Select::new(&self.situacao).xsmall())
@@ -242,14 +243,14 @@ impl FiltrosDaLista {
         coluna: Coluna,
         texto: &str,
         window: &mut Window,
-        cx: &mut gpui::Context<T>,
+        cx: &mut gpui_kit::Context<T>,
     ) {
         let texto = texto.to_string();
         let campo = match coluna.tipo() {
             Tipo::Data => &self.de,
             _ => &self.textos[&coluna],
         };
-        campo.update(cx, |estado, cx| estado.set_value(texto, window, cx));
+        campo.update(cx, |estado, cx| estado.trocar_valor(texto, window, cx));
     }
 
     /// 🧪 Escolhe o operador da coluna numérica.
@@ -259,7 +260,7 @@ impl FiltrosDaLista {
         coluna: Coluna,
         operador: Operador,
         window: &mut Window,
-        cx: &mut gpui::Context<T>,
+        cx: &mut gpui_kit::Context<T>,
     ) {
         self.operadores[&coluna].update(cx, |estado, cx| {
             estado.set_selected_value(&simbolo(operador), window, cx)

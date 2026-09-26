@@ -27,8 +27,8 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use biblioteca_core::comparar::{self, Comparacao, Lado};
-use gpui::{div, img, prelude::*, px, Context, ObjectFit, RenderImage, SharedString, Window};
-use gpui_component::ActiveTheme;
+use gpui_kit::component::ActiveTheme;
+use gpui_kit::{div, img, prelude::*, px, Context, ObjectFit, RenderImage, SharedString, Window};
 use infrastructure::transformacao;
 
 use super::super::cache;
@@ -338,7 +338,7 @@ impl Revelacao {
     /// 🔑 **O clique escolhe a metade avaliada** — a de borda âmbar, que recebe
     /// a nota, o `P` e o `X`. As fotos não trocam de lado. Sem zoom e sem
     /// gestos: aqui se escolhe, não se ajusta.
-    pub(super) fn palco_do_comparar(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+    pub(super) fn palco_do_comparar(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         let Some(c) = self.comparacao.as_ref() else {
             return div().into_any_element();
         };
@@ -348,92 +348,91 @@ impl Revelacao {
         let largura = ((f32::from(self.palco.size.width) - 12.) / 2.).max(1.);
         let altura = f32::from(self.palco.size.height).max(1.);
 
-        let metade =
-            |lado: Lado, cx: &mut Context<Self>| {
-                let posicao = *c.par.foto(lado);
-                let ativa = c.par.ativa == lado;
-                let foto = self.acervo.get(posicao);
-                let imagem = if posicao == self.posicao {
-                    self.aberta.as_ref().and_then(|a| a.desenhada.clone())
-                } else {
-                    c.imagens.get(&posicao).cloned()
-                };
-                let na_tira = c
-                    .tira
-                    .iter()
-                    .position(|p| *p == posicao)
-                    .map_or(0, |i| i + 1);
-                let nome = foto.map(|f| f.name.clone()).unwrap_or_default();
-                let nota = foto.map_or(0, |f| f.rating.clamp(0, 5) as usize);
-                let conteudo = match imagem {
-                    Some(imagem) => {
-                        let tamanho = imagem.size(0);
-                        let (x, y, w, h) = crate::revelacao::corte::area_da_foto(
-                            (largura, altura),
-                            (tamanho.width.0 as f32, tamanho.height.0 as f32),
-                        );
-                        img(imagem)
-                            .absolute()
-                            .left(px(x))
-                            .top(px(y))
-                            .w(px(w))
-                            .h(px(h))
-                            .object_fit(ObjectFit::Fill)
-                            .into_any_element()
-                    }
-                    None => div()
-                        .size_full()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_sm()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(SharedString::from(format!("Preparando {nome}…")))
-                        .into_any_element(),
-                };
-                div()
-                    .id(SharedString::from(format!("comparar-{lado:?}")))
-                    .relative()
-                    .flex_1()
-                    .h_full()
-                    .min_w(px(0.))
-                    .overflow_hidden()
-                    .border_4()
-                    .rounded(px(4.))
-                    .border_color(if ativa {
-                        gpui::rgb(0xfbbf24).into()
-                    } else {
-                        gpui::transparent_black()
-                    })
-                    .cursor_pointer()
-                    .on_click(cx.listener(move |tela, _, _w, cx| tela.ativar_no_comparar(lado, cx)))
-                    .child(conteudo)
-                    // 🚨 **Sobre a foto, fixo nos dois temas**: o texto se lê
-                    // contra a foto, e não contra o tema.
-                    .child(
-                        div()
-                            .absolute()
-                            .bottom_0()
-                            .left_0()
-                            .right_0()
-                            .flex()
-                            .justify_between()
-                            .gap(px(8.))
-                            .px(px(12.))
-                            .py(px(6.))
-                            .bg(gpui::rgba(0x000000b3))
-                            .text_xs()
-                            .text_color(gpui::rgb(0xe5e5e5))
-                            .child(SharedString::from(format!("{na_tira} / {total}  {nome}")))
-                            .child(div().text_color(gpui::rgb(0xfbbf24)).child(
-                                SharedString::from(format!(
-                                    "{}{}",
-                                    "★".repeat(nota),
-                                    "☆".repeat(5 - nota)
-                                )),
-                            )),
-                    )
+        let metade = |lado: Lado, cx: &mut Context<Self>| {
+            let posicao = *c.par.foto(lado);
+            let ativa = c.par.ativa == lado;
+            let foto = self.acervo.get(posicao);
+            let imagem = if posicao == self.posicao {
+                self.aberta.as_ref().and_then(|a| a.desenhada.clone())
+            } else {
+                c.imagens.get(&posicao).cloned()
             };
+            let na_tira = c
+                .tira
+                .iter()
+                .position(|p| *p == posicao)
+                .map_or(0, |i| i + 1);
+            let nome = foto.map(|f| f.name.clone()).unwrap_or_default();
+            let nota = foto.map_or(0, |f| f.rating.clamp(0, 5) as usize);
+            let conteudo = match imagem {
+                Some(imagem) => {
+                    let tamanho = imagem.size(0);
+                    let (x, y, w, h) = crate::revelacao::corte::area_da_foto(
+                        (largura, altura),
+                        (tamanho.width.0 as f32, tamanho.height.0 as f32),
+                    );
+                    img(imagem)
+                        .absolute()
+                        .left(px(x))
+                        .top(px(y))
+                        .w(px(w))
+                        .h(px(h))
+                        .object_fit(ObjectFit::Fill)
+                        .into_any_element()
+                }
+                None => div()
+                    .size_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_sm()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(SharedString::from(format!("Preparando {nome}…")))
+                    .into_any_element(),
+            };
+            div()
+                .id(SharedString::from(format!("comparar-{lado:?}")))
+                .relative()
+                .flex_1()
+                .h_full()
+                .min_w(px(0.))
+                .overflow_hidden()
+                .border_4()
+                .rounded(px(4.))
+                .border_color(if ativa {
+                    gpui_kit::rgb(0xfbbf24).into()
+                } else {
+                    gpui_kit::transparent_black()
+                })
+                .cursor_pointer()
+                .on_click(cx.listener(move |tela, _, _w, cx| tela.ativar_no_comparar(lado, cx)))
+                .child(conteudo)
+                // 🚨 **Sobre a foto, fixo nos dois temas**: o texto se lê
+                // contra a foto, e não contra o tema.
+                .child(
+                    div()
+                        .absolute()
+                        .bottom_0()
+                        .left_0()
+                        .right_0()
+                        .flex()
+                        .justify_between()
+                        .gap(px(8.))
+                        .px(px(12.))
+                        .py(px(6.))
+                        .bg(gpui_kit::rgba(0x000000b3))
+                        .text_xs()
+                        .text_color(gpui_kit::rgb(0xe5e5e5))
+                        .child(SharedString::from(format!("{na_tira} / {total}  {nome}")))
+                        .child(div().text_color(gpui_kit::rgb(0xfbbf24)).child(
+                            SharedString::from(format!(
+                                "{}{}",
+                                "★".repeat(nota),
+                                "☆".repeat(5 - nota)
+                            )),
+                        )),
+                )
+        };
 
         div()
             .absolute()

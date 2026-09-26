@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use gpui::{App, BorrowAppContext, Global, WeakEntity, Window};
+use gpui_kit::{App, BorrowAppContext, Global, WeakEntity, Window};
 
 use super::frases::{self, Linhas};
 use super::janela;
@@ -29,7 +29,7 @@ struct Medida {
 }
 
 struct SegundoPlano {
-    principal: gpui::AnyWindowHandle,
+    principal: gpui_kit::AnyWindowHandle,
     raiz: WeakEntity<Aplicativo>,
     /// `None` até a primeira ida à bandeja; `Err` se o sistema recusou.
     icone: Option<Result<Icone, String>>,
@@ -109,9 +109,9 @@ pub fn ligar(raiz: WeakEntity<Aplicativo>, window: &mut Window, cx: &mut App) {
 
     cx.spawn(async move |cx| loop {
         cx.background_executor().timer(PASSO).await;
-        if cx.update(volta).is_err() {
-            return;
-        }
+        // No gpui-kit 0.6 o `update` não devolve erro: a tarefa é cancelada
+        // quando o app termina, e o laço morre junto.
+        cx.update(volta);
     })
     .detach();
 }

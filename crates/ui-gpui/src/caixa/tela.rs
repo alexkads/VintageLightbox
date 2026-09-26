@@ -32,12 +32,12 @@ use biblioteca_core::caixa::{
 };
 use biblioteca_core::dinheiro;
 use domain::services::pos_venda::Sessao;
-use gpui::{
+use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
+use gpui_kit::{
     div, prelude::*, px, AnyElement, App, ClickEvent, Context, Div, EventEmitter, FocusHandle,
     FontWeight, Hsla, SharedString, Task, Window,
 };
-use gpui_component::input::{Input, InputState};
-use gpui_component::{h_flex, v_flex, ActiveTheme, Icon};
 use serde::{Deserialize, Serialize};
 
 use super::dados::{
@@ -57,7 +57,7 @@ const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(100);
 const PAGINA_DO_CATALOGO: usize = 200;
 const MAXIMO_DE_PAGINAS: usize = 20;
 
-gpui::actions!(
+gpui_kit::actions!(
     caixa,
     [
         // As teclas F do PDV, na tela inteira.
@@ -100,7 +100,7 @@ pub(super) const DIALOGO: &str = "CaixaDialogo";
 /// As teclas da tela. A raiz chama uma vez; [`Caixa::nova`] também chama, para
 /// a tela funcionar sozinha nos testes — ligação repetida é inofensiva.
 pub fn init(cx: &mut App) {
-    use gpui::KeyBinding;
+    use gpui_kit::KeyBinding;
     const SEM_CAMPO: &str = "CaixaDialogo && !Input";
     cx.bind_keys([
         KeyBinding::new("f1", TeclaF1, Some(CONTEXTO)),
@@ -315,7 +315,7 @@ pub struct Caixa {
     pub(super) foco_do_dialogo: FocusHandle,
     /// Pôr o foco na tela no próximo quadro (a tela apareceu, um diálogo fechou).
     pub(super) pedir_foco: bool,
-    busca: gpui::Entity<InputState>,
+    busca: gpui_kit::Entity<InputState>,
     menu_do_estudio: bool,
     // O PDV.
     pub(super) desconto: DescontoNoTotal,
@@ -334,7 +334,7 @@ pub struct Caixa {
     /// As fotos de um estorno voltando a "à venda".
     pub(super) des_sinalizacao: Option<DesSinalizacao>,
     /// Um campo a receber o foco no próximo quadro.
-    pub(super) foco_pendente: Option<gpui::Entity<InputState>>,
+    pub(super) foco_pendente: Option<gpui_kit::Entity<InputState>>,
     /// A rota inteira, ou o painel flutuante da galeria.
     pub(super) modo: Modo,
     /// Uma mudança de faixa ou de negociação em várias fotos, no ar.
@@ -1088,10 +1088,10 @@ pub(super) fn codificar(texto: &str) -> String {
 
 /// Um rótulo com a tecla ao lado (`Desconto F2`).
 pub(super) fn com_tecla(
-    botao: gpui::Stateful<Div>,
+    botao: gpui_kit::Stateful<Div>,
     texto: &str,
     tecla: &str,
-) -> gpui::Stateful<Div> {
+) -> gpui_kit::Stateful<Div> {
     botao
         .child(texto.to_string())
         .child(estilo::tecla(tecla.to_string()))
@@ -1105,7 +1105,7 @@ impl Render for Caixa {
         if self.pedir_foco {
             self.pedir_foco = false;
             if self.dialogo.is_none() {
-                window.focus(&self.foco);
+                window.focus(&self.foco, cx);
             }
         }
         self.aplicar_pendencias_do_dialogo(window, cx);
@@ -1233,7 +1233,7 @@ impl Caixa {
                     .px(px(0.))
                     .child(Icon::new(Icone::Keyboard).size(px(16.)))
                     .tooltip(|window, cx| {
-                        gpui_component::tooltip::Tooltip::new("Atalhos (F1)").build(window, cx)
+                        gpui_kit::component::tooltip::Tooltip::new("Atalhos (F1)").build(window, cx)
                     })
                     .on_click(cx.listener(|t, _: &ClickEvent, w, cx| {
                         t.abrir_dialogo(TipoDeDialogo::Atalhos, w, cx)
@@ -1290,50 +1290,52 @@ impl Caixa {
             }));
 
         let menu = self.menu_do_estudio.then(|| {
-            gpui::deferred(
-                gpui::anchored().snap_to_window_with_margin(px(8.)).child(
-                    v_flex()
-                        .id("caixa-estudios")
-                        .occlude()
-                        .mt(px(4.))
-                        .w(px(224.))
-                        .p(px(4.))
-                        .rounded(px(8.))
-                        .border_1()
-                        .border_color(borda)
-                        .bg(fundo_do_menu)
-                        .shadow_md()
-                        .on_mouse_down_out(cx.listener(|t, _, _, cx| {
-                            t.menu_do_estudio = false;
-                            cx.notify();
-                        }))
-                        .children(estudios.into_iter().map(|e| {
-                            let escolhido = atual.as_deref() == Some(e.id.as_str());
-                            let id = e.id.clone();
-                            h_flex()
-                                .id(SharedString::from(format!("caixa-estudio-{}", e.id)))
-                                .h(px(32.))
-                                .px(px(8.))
-                                .gap(px(8.))
-                                .rounded(px(6.))
-                                .justify_between()
-                                .cursor_pointer()
-                                .hover(move |s| s.bg(acento))
-                                .child(div().truncate().child(e.nome))
-                                .when(escolhido, |d| {
-                                    d.child(Icon::new(Icone::Check).size(px(16.)))
-                                })
-                                .on_click(cx.listener(move |t, _: &ClickEvent, _, cx| {
-                                    t.menu_do_estudio = false;
-                                    if Some(&id)
-                                        != t.vista.as_ref().and_then(|v| v.estudio_id.as_ref())
-                                    {
-                                        t.navegar(Some(id.clone()), None, cx);
-                                    }
-                                    cx.notify();
-                                }))
-                        })),
-                ),
+            gpui_kit::deferred(
+                gpui_kit::anchored()
+                    .snap_to_window_with_margin(px(8.))
+                    .child(
+                        v_flex()
+                            .id("caixa-estudios")
+                            .occlude()
+                            .mt(px(4.))
+                            .w(px(224.))
+                            .p(px(4.))
+                            .rounded(px(8.))
+                            .border_1()
+                            .border_color(borda)
+                            .bg(fundo_do_menu)
+                            .shadow_md()
+                            .on_mouse_down_out(cx.listener(|t, _, _, cx| {
+                                t.menu_do_estudio = false;
+                                cx.notify();
+                            }))
+                            .children(estudios.into_iter().map(|e| {
+                                let escolhido = atual.as_deref() == Some(e.id.as_str());
+                                let id = e.id.clone();
+                                h_flex()
+                                    .id(SharedString::from(format!("caixa-estudio-{}", e.id)))
+                                    .h(px(32.))
+                                    .px(px(8.))
+                                    .gap(px(8.))
+                                    .rounded(px(6.))
+                                    .justify_between()
+                                    .cursor_pointer()
+                                    .hover(move |s| s.bg(acento))
+                                    .child(div().truncate().child(e.nome))
+                                    .when(escolhido, |d| {
+                                        d.child(Icon::new(Icone::Check).size(px(16.)))
+                                    })
+                                    .on_click(cx.listener(move |t, _: &ClickEvent, _, cx| {
+                                        t.menu_do_estudio = false;
+                                        if Some(&id)
+                                            != t.vista.as_ref().and_then(|v| v.estudio_id.as_ref())
+                                        {
+                                            t.navegar(Some(id.clone()), None, cx);
+                                        }
+                                        cx.notify();
+                                    }))
+                            })),
+                    ),
             )
             .with_priority(1)
         });
@@ -1546,7 +1548,7 @@ impl Caixa {
                         .child("Abrir sessão")
                         .child(Icon::new(Icone::ExternalLink).size(px(14.)))
                         .tooltip(|window, cx| {
-                            gpui_component::tooltip::Tooltip::new(
+                            gpui_kit::component::tooltip::Tooltip::new(
                                 "Abrir a sessão para sinalizar ou negociar fotos",
                             )
                             .build(window, cx)
@@ -1967,14 +1969,14 @@ impl Caixa {
             (tema.popover, tema.border, tema.foreground, tema.danger);
         let tamanho = window.viewport_size();
         Some(
-            gpui::deferred(
-                gpui::anchored()
-                    .anchor(gpui::Corner::BottomRight)
-                    .position(gpui::point(
+            gpui_kit::deferred(
+                gpui_kit::anchored()
+                    .anchor(gpui_kit::Anchor::BottomRight)
+                    .position(gpui_kit::point(
                         tamanho.width - px(16.),
                         tamanho.height - px(16.),
                     ))
-                    .position_mode(gpui::AnchoredPositionMode::Window)
+                    .position_mode(gpui_kit::AnchoredPositionMode::Window)
                     .child(
                         v_flex()
                             .gap(px(8.))
@@ -2008,7 +2010,7 @@ impl Caixa {
 
 /// O `bg-emerald-500` da bolinha de "Caixa aberto".
 fn esmeralda_500() -> Hsla {
-    gpui::rgb(0x00bc7d).into()
+    gpui_kit::rgb(0x00bc7d).into()
 }
 
 #[cfg(test)]

@@ -25,13 +25,13 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use gpui::{
+use gpui_kit::component::button::Button;
+use gpui_kit::component::slider::Slider;
+use gpui_kit::component::{ActiveTheme, Disableable, Icon, Sizable};
+use gpui_kit::{
     canvas, div, prelude::*, px, AnyElement, Bounds, Context, DragMoveEvent, Empty, Hsla,
     MouseButton, MouseDownEvent, MouseUpEvent, PathBuilder, Pixels, SharedString, Window,
 };
-use gpui_component::button::Button;
-use gpui_component::slider::Slider;
-use gpui_component::{ActiveTheme, Disableable, Icon, Sizable};
 
 use super::{Aberta, Controle, PedidoDaRevelacao, Revelacao};
 use crate::recursos::Icone;
@@ -74,7 +74,7 @@ pub(super) struct EstadoDoPainel {
     /// em coordenada de janela.
     area_da_curva: Rc<Cell<Bounds<Pixels>>>,
     /// A rolagem da coluna, para o roteiro de depuração.
-    rolagem: gpui::ScrollHandle,
+    rolagem: gpui_kit::ScrollHandle,
 }
 
 impl Default for EstadoDoPainel {
@@ -92,7 +92,7 @@ impl Default for EstadoDoPainel {
             canal: Canal::Rgb,
             no_arrastado: None,
             area_da_curva: Rc::new(Cell::new(Bounds::default())),
-            rolagem: gpui::ScrollHandle::new(),
+            rolagem: gpui_kit::ScrollHandle::new(),
         }
     }
 }
@@ -169,7 +169,7 @@ impl Render for SemFantasma {
 struct ArrastoDoNo;
 
 /// O ponto âmbar de "alterado" — `size-1.5 rounded-full bg-amber-400`.
-fn ponto_ambar() -> gpui::Div {
+fn ponto_ambar() -> gpui_kit::Div {
     div()
         .size(px(6.))
         .flex_none()
@@ -324,10 +324,10 @@ impl Revelacao {
             "rolar" => {
                 let rolagem = &self.estado_do_painel.rolagem;
                 let alvo = match resto {
-                    "fim" => f32::from(rolagem.max_offset().height),
+                    "fim" => f32::from(rolagem.max_offset().y),
                     numero => numero.parse().unwrap_or(0.0),
                 };
-                rolagem.set_offset(gpui::point(px(0.), px(-alvo)));
+                rolagem.set_offset(gpui_kit::point(px(0.), px(-alvo)));
             }
             outro => eprintln!("[roteiro] não sei fazer 'painel {outro}'"),
         }
@@ -422,15 +422,15 @@ impl Revelacao {
                 .line_height(px(15.))
                 .text_color(cx.theme().muted_foreground)
                 .child(
-                    gpui::StyledText::new(
+                    gpui_kit::StyledText::new(
                         "Esta foto foi comprada. O cliente já pode ter baixado o original, \
                          então ela não se revela — dá para ver e baixar, não para salvar.",
                     )
                     .with_highlights([(
                         14..22,
-                        gpui::HighlightStyle {
+                        gpui_kit::HighlightStyle {
                             color: Some(cx.theme().foreground),
-                            font_weight: Some(gpui::FontWeight::BOLD),
+                            font_weight: Some(gpui_kit::FontWeight::BOLD),
                             ..Default::default()
                         },
                     )]),
@@ -547,7 +547,7 @@ impl Revelacao {
                         .hover(|a| a.text_color(cx.theme().foreground))
                 })
                 .tooltip(move |window, cx| {
-                    gpui_component::tooltip::Tooltip::new(dica).build(window, cx)
+                    gpui_kit::component::tooltip::Tooltip::new(dica).build(window, cx)
                 })
                 .child(rotulo)
                 .when(marcada, |a| a.child(ponto_ambar()))
@@ -589,7 +589,7 @@ impl Revelacao {
         chave: String,
         padrao: bool,
         cx: &mut Context<Self>,
-    ) -> gpui::Stateful<gpui::Div> {
+    ) -> gpui_kit::Stateful<gpui_kit::Div> {
         div()
             .id(SharedString::from(format!("sanfona-{chave}")))
             .flex()
@@ -599,7 +599,7 @@ impl Revelacao {
             .py(px(8.))
             .cursor_pointer()
             .text_xs()
-            .font_weight(gpui::FontWeight::MEDIUM)
+            .font_weight(gpui_kit::FontWeight::MEDIUM)
             .text_color(cx.theme().foreground)
             .child(
                 Icon::new(if aberto {
@@ -760,7 +760,7 @@ impl Revelacao {
                         div()
                             .id(SharedString::from(format!("rotulo-{indice}")))
                             .tooltip(|window, cx| {
-                                gpui_component::tooltip::Tooltip::new(
+                                gpui_kit::component::tooltip::Tooltip::new(
                                     "Duplo clique volta ao neutro",
                                 )
                                 .build(window, cx)
@@ -772,7 +772,7 @@ impl Revelacao {
                             })
                             .child(definicao.rotulo)
                             .on_click(cx.listener(
-                                move |tela, evento: &gpui::ClickEvent, window, cx| {
+                                move |tela, evento: &gpui_kit::ClickEvent, window, cx| {
                                     if evento.click_count() >= 2 && tela.controles_ligados() {
                                         tela.devolver_ao_neutro(indice, window, cx);
                                     }
@@ -822,7 +822,7 @@ impl Revelacao {
         let alturas = canal.alturas(&self.ajustes);
         let cor_do_canal = |c: Canal, cx: &Context<Self>| -> Hsla {
             match c.cor() {
-                Some(hex) => gpui::rgb(hex).into(),
+                Some(hex) => gpui_kit::rgb(hex).into(),
                 None => cx.theme().foreground,
             }
         };
@@ -870,7 +870,8 @@ impl Revelacao {
             .text_size(px(11.))
             .text_color(cx.theme().muted_foreground)
             .tooltip(|window, cx| {
-                gpui_component::tooltip::Tooltip::new("Devolve este canal à reta").build(window, cx)
+                gpui_kit::component::tooltip::Tooltip::new("Devolve este canal à reta")
+                    .build(window, cx)
             })
             .when(!ligado || neutro, |z| z.opacity(0.4))
             .when(ligado && !neutro, |z| {
@@ -909,9 +910,9 @@ impl Revelacao {
                 let para_y = |nivel: f32| {
                     y0 + (MARGEM_DA_CURVA + area_util - nivel / 255.0 * area_util) * escala
                 };
-                let ponto = |x: f32, y: f32| gpui::point(px(x), px(y));
+                let ponto = |x: f32, y: f32| gpui_kit::point(px(x), px(y));
 
-                window.paint_quad(gpui::fill(bounds, fundo).corner_radii(px(4.)));
+                window.paint_quad(gpui_kit::fill(bounds, fundo).corner_radii(px(4.)));
 
                 // A grade dos quartos de tom, e a diagonal do neutro por baixo.
                 for f in [0.25, 0.5, 0.75] {
@@ -957,10 +958,10 @@ impl Revelacao {
                     let cx_ = para_x(i as f32 * 255.0 / (PONTOS_DA_CURVA - 1) as f32);
                     let cy_ = para_y(*altura);
                     window.paint_quad(
-                        gpui::fill(
+                        gpui_kit::fill(
                             Bounds {
                                 origin: ponto(cx_ - raio, cy_ - raio),
-                                size: gpui::size(px(raio * 2.0), px(raio * 2.0)),
+                                size: gpui_kit::size(px(raio * 2.0), px(raio * 2.0)),
                             },
                             cor,
                         )
@@ -1117,7 +1118,7 @@ impl Revelacao {
             canvas(
                 |_bounds, _window, _cx| {},
                 move |bounds, _prepaint, window, _cx| {
-                    window.paint_quad(gpui::fill(bounds, fundo));
+                    window.paint_quad(gpui_kit::fill(bounds, fundo));
                     if barras.is_empty() {
                         return;
                     }
@@ -1127,18 +1128,18 @@ impl Revelacao {
                         let x = f32::from(bounds.origin.x) + i as f32 * largura;
                         // Os três canais somam luz onde se sobrepõem.
                         for (altura, cor) in [
-                            (r, gpui::rgba(0xff000064)),
-                            (g, gpui::rgba(0x00ff0064)),
-                            (b, gpui::rgba(0x0000ff64)),
+                            (r, gpui_kit::rgba(0xff000064)),
+                            (g, gpui_kit::rgba(0x00ff0064)),
+                            (b, gpui_kit::rgba(0x0000ff64)),
                         ] {
                             let alta = (altura * ALTURA).min(ALTURA);
                             if alta <= 0.0 {
                                 continue;
                             }
-                            window.paint_quad(gpui::fill(
+                            window.paint_quad(gpui_kit::fill(
                                 Bounds {
-                                    origin: gpui::point(px(x), px(base - alta)),
-                                    size: gpui::size(px(largura.max(1.0)), px(alta)),
+                                    origin: gpui_kit::point(px(x), px(base - alta)),
+                                    size: gpui_kit::size(px(largura.max(1.0)), px(alta)),
                                 },
                                 cor,
                             ));
@@ -1163,14 +1164,14 @@ impl Revelacao {
             canvas(
                 |_bounds, _window, _cx| {},
                 move |bounds, _prepaint, window, _cx| {
-                    window.paint_quad(gpui::fill(bounds, fundo));
+                    window.paint_quad(gpui_kit::fill(bounds, fundo));
 
                     let x0 = f32::from(bounds.origin.x);
                     let y0 = f32::from(bounds.origin.y);
                     let largura = f32::from(bounds.size.width);
                     let altura = f32::from(bounds.size.height);
                     let ponto = |t: f32, v: f32| {
-                        gpui::point(px(x0 + t * largura), px(y0 + (1.0 - v) * altura))
+                        gpui_kit::point(px(x0 + t * largura), px(y0 + (1.0 - v) * altura))
                     };
 
                     let mut diagonal = PathBuilder::stroke(px(1.)).dash_array(&[px(2.), px(3.)]);
@@ -1262,7 +1263,7 @@ impl Revelacao {
 /// O nó mais perto do ponteiro, se algum estiver ao alcance.
 fn no_sob_o_ponteiro(
     limites: Bounds<Pixels>,
-    ponteiro: gpui::Point<Pixels>,
+    ponteiro: gpui_kit::Point<Pixels>,
     alturas: &[f32; PONTOS_DA_CURVA],
 ) -> Option<usize> {
     let escala = f32::from(limites.size.width) / LADO_DA_CURVA;
@@ -1288,7 +1289,7 @@ fn no_sob_o_ponteiro(
 
 /// A altura (0–255, inteira) que o ponteiro pede — a conta de
 /// `alturaDoEvento` do site.
-fn altura_do_ponteiro(limites: Bounds<Pixels>, ponteiro: gpui::Point<Pixels>) -> f32 {
+fn altura_do_ponteiro(limites: Bounds<Pixels>, ponteiro: gpui_kit::Point<Pixels>) -> f32 {
     let lado = f32::from(limites.size.height).max(1.0);
     let area_util = LADO_DA_CURVA - MARGEM_DA_CURVA * 2.0;
     let y = (f32::from(ponteiro.y) - f32::from(limites.origin.y)) / lado * LADO_DA_CURVA;
@@ -1303,27 +1304,27 @@ mod testes {
 
     fn quadro() -> Bounds<Pixels> {
         Bounds {
-            origin: gpui::point(px(100.), px(50.)),
-            size: gpui::size(px(260.), px(260.)),
+            origin: gpui_kit::point(px(100.), px(50.)),
+            size: gpui_kit::size(px(260.), px(260.)),
         }
     }
 
     #[test]
     fn o_ponteiro_no_topo_pede_255_e_no_pe_pede_0() {
         assert_eq!(
-            altura_do_ponteiro(quadro(), gpui::point(px(0.), px(58.))),
+            altura_do_ponteiro(quadro(), gpui_kit::point(px(0.), px(58.))),
             255.0
         );
         assert_eq!(
-            altura_do_ponteiro(quadro(), gpui::point(px(0.), px(302.))),
+            altura_do_ponteiro(quadro(), gpui_kit::point(px(0.), px(302.))),
             0.0
         );
         assert_eq!(
-            altura_do_ponteiro(quadro(), gpui::point(px(0.), px(0.))),
+            altura_do_ponteiro(quadro(), gpui_kit::point(px(0.), px(0.))),
             255.0
         );
         assert_eq!(
-            altura_do_ponteiro(quadro(), gpui::point(px(0.), px(999.))),
+            altura_do_ponteiro(quadro(), gpui_kit::point(px(0.), px(999.))),
             0.0
         );
     }
@@ -1332,9 +1333,9 @@ mod testes {
     fn o_clique_pega_o_no_mais_perto() {
         let neutra = curva::curva_neutra();
         // O nó do meio fica em (8 + 122, 8 + 122) do quadro.
-        let no = no_sob_o_ponteiro(quadro(), gpui::point(px(231.), px(179.)), &neutra);
+        let no = no_sob_o_ponteiro(quadro(), gpui_kit::point(px(231.), px(179.)), &neutra);
         assert_eq!(no, Some(4));
-        let longe = no_sob_o_ponteiro(quadro(), gpui::point(px(231.), px(60.)), &neutra);
+        let longe = no_sob_o_ponteiro(quadro(), gpui_kit::point(px(231.), px(60.)), &neutra);
         assert_eq!(longe, None);
     }
 

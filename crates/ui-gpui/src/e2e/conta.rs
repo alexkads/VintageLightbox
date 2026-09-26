@@ -1,7 +1,7 @@
 //! 🚪 A porta, a conta e a moldura do painel.
 
-use gpui::TestAppContext;
-use gpui_component::ActiveTheme;
+use gpui_kit::component::ActiveTheme;
+use gpui_kit::TestAppContext;
 
 use super::{abrir_o_app, sessao, Cenario, GALERIA};
 use crate::app::Tela;
@@ -13,7 +13,7 @@ use crate::tema::Escolha;
 /// 🔑 O `⌘B` é apertado de verdade — uma ligação que não casa não falha, só
 /// não faz nada. E o tema é conferido no `Theme` global, que é o que a tela
 /// pinta, e não só no campo da escolha.
-#[gpui::test]
+#[gpui_kit::test]
 fn da_porta_ao_sair_pela_conta(cx: &mut TestAppContext) {
     let e = abrir_o_app(cx, Cenario::default());
 
@@ -120,7 +120,7 @@ fn da_porta_ao_sair_pela_conta(cx: &mut TestAppContext) {
 /// *"não é tão utilizado no dia a dia"*). O menu lateral fica com o que o
 /// balcão usa o dia inteiro; o Backup se abre pelo retrato da conta, com um
 /// clique de verdade.
-#[gpui::test]
+#[gpui_kit::test]
 fn o_backup_se_abre_pelo_menu_da_conta(cx: &mut TestAppContext) {
     use super::chatbot::{clicar, desenhado};
 

@@ -19,11 +19,11 @@ pub mod tela;
 
 pub use tela::{Agenda, PedidoDaAgenda};
 
-gpui::actions!(agenda, [VoltarNaAgenda]);
+gpui_kit::actions!(agenda, [VoltarNaAgenda]);
 
 /// O Esc do diálogo: formulário → detalhes → fechar, como no site.
-pub fn ligar_teclas(cx: &mut gpui::App) {
-    cx.bind_keys([gpui::KeyBinding::new(
+pub fn ligar_teclas(cx: &mut gpui_kit::App) {
+    cx.bind_keys([gpui_kit::KeyBinding::new(
         "escape",
         VoltarNaAgenda,
         Some(desenho::DIALOGO),

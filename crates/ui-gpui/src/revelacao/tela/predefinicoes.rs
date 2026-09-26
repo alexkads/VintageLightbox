@@ -18,6 +18,7 @@
 //! mora em [`crate::revelacao::presets`] e [`crate::revelacao::lightroom`], sem
 //! tela; aqui é só o desenho e os gestos.
 
+use crate::campo::TrocarValor as _;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -26,16 +27,16 @@ use std::time::Duration;
 #[cfg(test)]
 use domain::entities::preset::PresetAdjustments;
 use domain::entities::{Preset, PresetId};
-use gpui::Div;
-use gpui::{
-    actions, anchored, canvas, deferred, div, point, prelude::*, px, relative, rgb,
-    AnchoredPositionMode, AnyElement, App, Context, Corner, CursorStyle, DragMoveEvent, Entity,
+use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
+use gpui_kit::component::tooltip::Tooltip;
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon, Sizable};
+use gpui_kit::Div;
+use gpui_kit::{
+    actions, anchored, canvas, deferred, div, point, prelude::*, px, relative, rgb, Anchor,
+    AnchoredPositionMode, AnyElement, App, Context, CursorStyle, DragMoveEvent, Entity,
     FocusHandle, FontWeight, HighlightStyle, Hsla, KeyBinding, MouseButton, Pixels, SharedString,
     Size, Stateful, StyledText, Subscription, Window,
 };
-use gpui_component::input::{Escape, Input, InputEvent, InputState};
-use gpui_component::tooltip::Tooltip;
-use gpui_component::{h_flex, v_flex, ActiveTheme, Icon, Sizable};
 
 use super::Revelacao;
 use crate::modal::Modal;
@@ -68,7 +69,7 @@ const CONTEXTO_DA_ALCA: &str = "AlcaDaPredefinicao";
 
 /// Marca que as teclas da alça já foram ligadas neste app.
 struct AtalhosLigados;
-impl gpui::Global for AtalhosLigados {}
+impl gpui_kit::Global for AtalhosLigados {}
 
 /// Liga ↑ e ↓ na alça — uma vez por app.
 ///
@@ -285,9 +286,9 @@ impl Revelacao {
     /// salvar dois com o mesmo nome.
     pub fn alternar_formulario_de_preset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.nome_do_preset
-            .update(cx, |campo, cx| campo.set_value("", window, cx));
+            .update(cx, |campo, cx| campo.trocar_valor("", window, cx));
         if self.predefinicoes.criando.esta_aberto() {
-            self.predefinicoes.criando.fechar(window);
+            self.predefinicoes.criando.fechar(window, cx);
         } else {
             self.predefinicoes.criando.abrir((), window, cx);
             self.nome_do_preset
@@ -297,7 +298,7 @@ impl Revelacao {
     }
 
     pub fn cancelar_formulario_de_preset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.predefinicoes.criando.fechar(window);
+        self.predefinicoes.criando.fechar(window, cx);
         cx.notify();
     }
 
@@ -344,10 +345,10 @@ impl Revelacao {
         );
         self.presets.push(novo);
 
-        self.predefinicoes.criando.fechar(window);
+        self.predefinicoes.criando.fechar(window, cx);
         self.preset_inteiro = false;
         self.nome_do_preset
-            .update(cx, |campo, cx| campo.set_value("", window, cx));
+            .update(cx, |campo, cx| campo.trocar_valor("", window, cx));
         cx.notify();
     }
 
@@ -441,14 +442,14 @@ impl Revelacao {
         let nome = preset.name.clone();
         self.predefinicoes.renomeando.abrir(id, window, cx);
         self.renome_do_preset.update(cx, |campo, cx| {
-            campo.set_value(nome, window, cx);
+            campo.trocar_valor(nome, window, cx);
             campo.focus(window, cx);
         });
         cx.notify();
     }
 
     pub fn cancelar_renome(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.predefinicoes.renomeando.fechar(window);
+        self.predefinicoes.renomeando.fechar(window, cx);
         cx.notify();
     }
 
@@ -503,7 +504,7 @@ impl Revelacao {
             .foco_da_pergunta
             .get_or_insert_with(|| cx.focus_handle())
             .clone();
-        window.focus(&foco);
+        window.focus(&foco, cx);
         cx.notify();
     }
 
@@ -514,7 +515,7 @@ impl Revelacao {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some((id, _)) = self.predefinicoes.pergunta.fechar(window) else {
+        let Some((id, _)) = self.predefinicoes.pergunta.fechar(window, cx) else {
             return;
         };
         if apagar {
@@ -693,7 +694,7 @@ impl Revelacao {
         match comando {
             "criar" => self.alternar_formulario_de_preset(window, cx),
             "nome" => self.nome_do_preset.update(cx, |campo, cx| {
-                campo.set_value(argumento.to_string(), window, cx)
+                campo.trocar_valor(argumento.to_string(), window, cx)
             }),
             "zerar" => self.alternar_preset_inteiro(cx),
             "renomear" => {
@@ -865,7 +866,7 @@ impl Revelacao {
                             .occlude()
                             .w(tamanho.width)
                             .h(tamanho.height)
-                            .bg(gpui::black().opacity(0.1))
+                            .bg(gpui_kit::black().opacity(0.1))
                             .flex()
                             .items_center()
                             .justify_center()
@@ -940,7 +941,7 @@ impl Revelacao {
                                             .child(
                                                 botao_da_pergunta("confirmar-apagar", "Apagar", cx)
                                                     .bg(perigo)
-                                                    .text_color(gpui::white())
+                                                    .text_color(gpui_kit::white())
                                                     .hover(move |s| s.bg(perigo.opacity(0.9)))
                                                     .on_click(cx.listener(
                                                         |tela, _ev, window, cx| {
@@ -971,7 +972,7 @@ impl Revelacao {
         Some(
             deferred(
                 anchored()
-                    .anchor(Corner::BottomRight)
+                    .anchor(Anchor::BottomRight)
                     .position(point(tamanho.width - px(16.), tamanho.height - px(16.)))
                     .position_mode(AnchoredPositionMode::Window)
                     .child(v_flex().gap(px(8.)).w(px(356.)).children(
@@ -1665,7 +1666,7 @@ fn botao_pequeno(
 ) -> Stateful<Div> {
     let tema = cx.theme();
     let (fundo, texto, pairando): (Hsla, Hsla, Hsla) = if destaque {
-        (cores::quente(), gpui::black(), rgb(0xffd230).into())
+        (cores::quente(), gpui_kit::black(), rgb(0xffd230).into())
     } else {
         (
             tema.muted,

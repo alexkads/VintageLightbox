@@ -50,9 +50,9 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use gpui::{App, Window, WindowAppearance};
-use gpui_component::button::ButtonCustomVariant;
-use gpui_component::{Theme, ThemeConfig, ThemeMode};
+use gpui_kit::component::button::ButtonCustomVariant;
+use gpui_kit::component::{Theme, ThemeConfig, ThemeMode};
+use gpui_kit::{App, Window, WindowAppearance};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -269,7 +269,7 @@ pub fn guardar_escolha(arquivo: &Path, escolha: Escolha) {
 
 /// Instala os dois temas do site e liga o modo da escolha.
 ///
-/// Chamar **depois** de `gpui_component::init`, que é quem cria o `Theme`
+/// Chamar **depois** de `gpui_kit::init`, que é quem cria o `Theme`
 /// global.
 pub fn aplicar(escolha: Escolha, window: Option<&mut Window>, cx: &mut App) {
     let aparencia = window
@@ -289,11 +289,11 @@ pub fn aplicar(escolha: Escolha, window: Option<&mut Window>, cx: &mut App) {
 pub mod cores {
     use super::{paleta, paleta_atual, ESCURO_AGORA};
     use domain::value_objects::ColorLabel;
-    use gpui::Hsla;
+    use gpui_kit::Hsla;
     use std::sync::atomic::Ordering;
 
     fn cor(rgb: u32) -> Hsla {
-        gpui::rgb(rgb).into()
+        gpui_kit::rgb(rgb).into()
     }
 
     fn escuro() -> bool {
@@ -420,7 +420,7 @@ pub mod cores {
 
     /// O véu atrás de um diálogo: `bg-black/50` do site.
     pub fn veu() -> Hsla {
-        gpui::rgba(0x00000080).into()
+        gpui_kit::rgba(0x00000080).into()
     }
 
     /// A estrela acesa.
@@ -440,7 +440,7 @@ pub mod cores {
 
     /// Claro ou escuro sobre uma cor — o que tiver mais contraste (WCAG).
     pub fn texto_sobre(fundo: Hsla) -> Hsla {
-        let claro: Hsla = gpui::rgb(0xffffff).into();
+        let claro: Hsla = gpui_kit::rgb(0xffffff).into();
         let escuro: Hsla = cor(paleta::SOBRE_CLARO);
         if contraste(fundo, escuro) >= contraste(fundo, claro) {
             escuro
@@ -456,7 +456,7 @@ pub mod cores {
     }
 
     fn luminancia(cor: Hsla) -> f32 {
-        let rgba = gpui::Rgba::from(cor);
+        let rgba = gpui_kit::Rgba::from(cor);
         let linear = |c: f32| {
             if c <= 0.03928 {
                 c / 12.92
@@ -484,9 +484,8 @@ pub fn botao_quente(cx: &App) -> ButtonCustomVariant {
     ButtonCustomVariant::new(cx)
         .color(cores::quente())
         .foreground(cores::sobre_quente())
-        .border(cores::quente())
-        .hover(gpui::rgb(AMBAR_300).into())
-        .active(gpui::rgb(AMBAR_500).into())
+        .hover(gpui_kit::rgb(AMBAR_300).into())
+        .active(gpui_kit::rgb(AMBAR_500).into())
 }
 
 fn tema_do_site(modo: ThemeMode) -> ThemeConfig {
@@ -558,7 +557,6 @@ fn cores(p: &paleta::Paleta) -> Vec<(&'static str, u32)> {
         ("drag.border", AZUL_500),
         ("drop_target.background", AZUL_500),
         ("accordion.background", p.fundo),
-        ("accordion.hover.background", p.acento),
         ("group_box.background", p.cartao),
         ("group_box.foreground", p.texto),
         ("group_box.title.foreground", p.texto_apagado),
@@ -582,7 +580,6 @@ fn cores(p: &paleta::Paleta) -> Vec<(&'static str, u32)> {
         ("scrollbar.thumb.hover.background", p.anel),
         ("title_bar.background", p.fundo),
         ("title_bar.border", p.borda),
-        ("tiles.background", p.poco),
         ("danger.background", p.destrutiva),
         ("danger.hover.background", p.destrutiva),
         ("danger.active.background", p.destrutiva),
@@ -800,8 +797,8 @@ mod testes {
             ("âmbar", AMBAR_400),
             ("nota", NOTA),
         ] {
-            let texto = cores::texto_sobre(gpui::rgb(fundo).into());
-            let rgba = gpui::Rgba::from(texto);
+            let texto = cores::texto_sobre(gpui_kit::rgb(fundo).into());
+            let rgba = gpui_kit::Rgba::from(texto);
             let como_u32 = ((rgba.r * 255.).round() as u32) << 16
                 | ((rgba.g * 255.).round() as u32) << 8
                 | (rgba.b * 255.).round() as u32;

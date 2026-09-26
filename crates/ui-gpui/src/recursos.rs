@@ -11,8 +11,8 @@
 
 use std::borrow::Cow;
 
-use gpui::{AssetSource, SharedString};
-use gpui_component::IconNamed;
+use gpui_kit::component::IconNamed;
+use gpui_kit::{AssetSource, SharedString};
 
 /// `(caminho, bytes)`, gerado pelo `build.rs`.
 static ARQUIVOS: &[(&str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/recursos.rs"));
@@ -21,14 +21,14 @@ static ARQUIVOS: &[(&str, &[u8])] = include!(concat!(env!("OUT_DIR"), "/recursos
 pub struct Recursos;
 
 impl AssetSource for Recursos {
-    fn load(&self, caminho: &str) -> gpui::Result<Option<Cow<'static, [u8]>>> {
+    fn load(&self, caminho: &str) -> gpui_kit::Result<Option<Cow<'static, [u8]>>> {
         Ok(ARQUIVOS
             .iter()
             .find(|(nome, _)| *nome == caminho)
             .map(|(_, bytes)| Cow::Borrowed(*bytes)))
     }
 
-    fn list(&self, pasta: &str) -> gpui::Result<Vec<SharedString>> {
+    fn list(&self, pasta: &str) -> gpui_kit::Result<Vec<SharedString>> {
         Ok(ARQUIVOS
             .iter()
             .filter(|(nome, _)| nome.starts_with(pasta))
@@ -363,7 +363,7 @@ mod testes {
     /// Os que o `gpui-component` procura pelo nome dele.
     #[test]
     fn os_icones_do_gpui_component_existem() {
-        use gpui_component::IconName;
+        use gpui_kit::component::IconName;
         for icone in [
             IconName::Close,
             IconName::ChevronDown,

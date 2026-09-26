@@ -1,6 +1,6 @@
 //! 🔍 O zoom da Revelação, a folha de atalhos e o bruto em resolução cheia.
 
-use gpui::TestAppContext;
+use gpui_kit::TestAppContext;
 
 use super::{abrir_o_ensaio, Cenario};
 use crate::revelacao::zoom::Nivel;
@@ -11,11 +11,14 @@ use crate::revelacao::zoom::Nivel;
 /// abrir, o lado do bruto é medido (um download); ampliada além da cópia, o
 /// palco troca para o bruto **sem baixar de novo**; de volta ao encaixe, a
 /// cópia volta.
-#[gpui::test]
+#[gpui_kit::test]
 fn teclas_do_zoom_e_o_bruto_em_resolucao_cheia(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     // Uma janela de notebook: a foto ampliada passa da área.
-    cx.simulate_window_resize(e.raiz.into(), gpui::size(gpui::px(900.), gpui::px(640.)));
+    cx.simulate_window_resize(
+        e.raiz.into(),
+        gpui_kit::size(gpui_kit::px(900.), gpui_kit::px(640.)),
+    );
     e.revelar_a_do_site(cx, "a");
     e.esperar(cx);
 
@@ -125,10 +128,13 @@ fn teclas_do_zoom_e_o_bruto_em_resolucao_cheia(cx: &mut TestAppContext) {
 /// medida fica guardado para o zoom. Por isso o cenário mede `a` (a primeira
 /// da tira) e `b`, que toma o lugar na mão, e volta para `a`: aí o zoom
 /// precisa baixar de novo, e é essa ida que o site recusa.
-#[gpui::test]
+#[gpui_kit::test]
 fn sem_o_bruto_a_tela_fica_na_copia(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
-    cx.simulate_window_resize(e.raiz.into(), gpui::size(gpui::px(900.), gpui::px(640.)));
+    cx.simulate_window_resize(
+        e.raiz.into(),
+        gpui_kit::size(gpui_kit::px(900.), gpui_kit::px(640.)),
+    );
     e.revelar_a_do_site(cx, "b");
     e.esperar(cx);
     assert_eq!(e.site.originais(), vec!["a".to_string(), "b".to_string()]);

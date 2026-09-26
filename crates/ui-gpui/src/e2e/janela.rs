@@ -19,7 +19,7 @@
 //! 🔑 A lista de telas é conferida pelo compilador ([`toda_tela_esta_aqui`]):
 //! uma `Tela` nova que não entre aqui não compila.
 
-use gpui::{px, TestAppContext, VisualTestContext};
+use gpui_kit::{px, TestAppContext, VisualTestContext};
 
 use super::{abrir_o_app, abrir_o_ensaio, Cenario, Estudio};
 use crate::app::Tela;
@@ -106,7 +106,7 @@ fn ir(e: &Estudio, cx: &mut TestAppContext, tela: Tela) {
 
 /// 🎬 **A porta** — a primeira tela que o app mostra, e a que não tem
 /// cabeçalho: os botões moram por cima da capa.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_tela_de_entrada_tem_os_botoes_de_janela(cx: &mut TestAppContext) {
     teste::forcar_barra_do_app();
     let e = abrir_o_app(cx, Cenario::default());
@@ -115,7 +115,7 @@ fn a_tela_de_entrada_tem_os_botoes_de_janela(cx: &mut TestAppContext) {
 
 /// 🎬 **Toda tela do menu, sem sessão aberta** — o cabeçalho do app, ou a
 /// barra da própria tela onde ele não existe (a nova sessão).
-#[gpui::test]
+#[gpui_kit::test]
 fn toda_tela_sem_sessao_tem_os_botoes_de_janela(cx: &mut TestAppContext) {
     teste::forcar_barra_do_app();
     let e = abrir_o_app(cx, Cenario::default());
@@ -129,7 +129,7 @@ fn toda_tela_sem_sessao_tem_os_botoes_de_janela(cx: &mut TestAppContext) {
 /// 🎬 **Com sessão aberta em guia** — a galeria, a lista de sessões e a
 /// Revelação têm a faixa das guias em cima: os botões moram nela, e a barra de
 /// baixo não repete.
-#[gpui::test]
+#[gpui_kit::test]
 fn com_guia_aberta_os_botoes_ficam_na_faixa_das_guias(cx: &mut TestAppContext) {
     teste::forcar_barra_do_app();
     let e = abrir_o_ensaio(cx, Cenario::default());
@@ -147,7 +147,7 @@ fn com_guia_aberta_os_botoes_ficam_na_faixa_das_guias(cx: &mut TestAppContext) {
 }
 
 /// Desenha a tela do cliente e afirma: os três botões, no alto, à direita.
-fn conferir_o_cliente(janela: gpui::AnyWindowHandle, cx: &mut TestAppContext, onde: &str) {
+fn conferir_o_cliente(janela: gpui_kit::AnyWindowHandle, cx: &mut TestAppContext, onde: &str) {
     let mut visual = VisualTestContext::from_window(janela, cx);
     visual.update(|window, _| window.refresh());
     visual.run_until_parked();
@@ -170,7 +170,7 @@ fn conferir_o_cliente(janela: gpui::AnyWindowHandle, cx: &mut TestAppContext, on
 /// 🎬 **A tela do cliente tem os botões em janela e em tela cheia** — e, em
 /// tela cheia, "Restaurar" sai dela (dono, 25/set/2026: *"mesmo que estiver
 /// com tela cheia precisa ter o minimizar, restaurar e fechar"*).
-#[gpui::test]
+#[gpui_kit::test]
 fn a_tela_do_cliente_tem_os_botoes_mesmo_em_tela_cheia(cx: &mut TestAppContext) {
     use crate::sessoes::detalhe::Pedido;
 
@@ -180,7 +180,7 @@ fn a_tela_do_cliente_tem_os_botoes_mesmo_em_tela_cheia(cx: &mut TestAppContext) 
         tela.focar_foto("a", cx);
         cx.emit(Pedido::TelaDoCliente);
     });
-    let janela: gpui::AnyWindowHandle = e
+    let janela: gpui_kit::AnyWindowHandle = e
         .app(cx, |app, _w, _cx| app.janela_do_cliente_para_teste())
         .expect("a tela do cliente abriu")
         .into();
@@ -204,7 +204,7 @@ fn a_tela_do_cliente_tem_os_botoes_mesmo_em_tela_cheia(cx: &mut TestAppContext) 
     let restaurar = visual
         .debug_bounds("janela-maximizar")
         .expect("o botão do meio está lá");
-    visual.simulate_click(restaurar.center(), gpui::Modifiers::none());
+    visual.simulate_click(restaurar.center(), gpui_kit::Modifiers::none());
     visual.run_until_parked();
     assert!(
         !visual.update(|window, _| window.is_fullscreen()),

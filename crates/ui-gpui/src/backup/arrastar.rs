@@ -1,7 +1,7 @@
 //! O que foi arrastado — **inclusive pasta**.
 //!
 //! O par nativo de `backup/arrastar.ts` do site. Lá é preciso percorrer a API de
-//! *entries* do navegador; aqui o `gpui::ExternalPaths` já traz caminhos de
+//! *entries* do navegador; aqui o `gpui_kit::ExternalPaths` já traz caminhos de
 //! verdade, e percorrer é ler o disco.
 //!
 //! 🔑 **É a diferença que o dono pediu** (2026-09-18: *"para arrastar pastas os

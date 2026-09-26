@@ -25,11 +25,14 @@ default-run = "ui-gpui"
 # feature para não depender do Xcode (dono, 2026-09-17). Quem compila é o
 # Metal do próprio macOS, na abertura. O pacote do `make empacotar` continua
 # com os shaders prontos.
-shaders-em-tempo-de-execucao = ["gpui/runtime_shaders"]
+shaders-em-tempo-de-execucao = ["dep:gpui_platform", "gpui_platform/runtime_shaders"]
 
 [dependencies]
-gpui = "0.2.2"
-gpui-component = "0.5.1"
+# gpui-kit como a documentação manda (https://gpui-kit.com/docs/getting-started):
+# sem os recursos padrão, porque o app traz os próprios (`recursos::Recursos`).
+gpui-kit = { version = "0.6", default-features = false, features = ["component"] }
+# Só para a feature dos shaders em tempo de execução, que o gpui-kit não expõe.
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.6", optional = true }
 
 # As quatro camadas internas, intactas. Nenhuma delas sabe que a interface
 # mudou — é o que torna trocar de interface barato (§2.1).
@@ -161,4 +164,4 @@ tempfile = "3.8"
 # grava backtrace a cada handle de entidade. Num app onde a fase 1 quase
 # condenou o framework por medir fluidez no perfil errado, carregar detector de
 # vazamento no binário do produto é repetir o mesmo erro de outro jeito.
-gpui = { version = "0.2.2", features = ["test-support"] }
+gpui-kit = { version = "0.6", default-features = false, features = ["component", "test-support"] }

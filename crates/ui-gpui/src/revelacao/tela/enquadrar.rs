@@ -17,11 +17,11 @@
 //! | proporção | remodela o retângulo na hora, mantendo a área |
 
 use domain::value_objects::CropSettings;
-use gpui::{
+use gpui_kit::component::{h_flex, slider::Slider, v_flex, ActiveTheme, Icon};
+use gpui_kit::{
     canvas, div, point, prelude::*, px, AnyElement, Bounds, Context, CursorStyle, MouseButton,
     MouseDownEvent, PathBuilder, Pixels, Point, SharedString, Window,
 };
-use gpui_component::{h_flex, slider::Slider, v_flex, ActiveTheme, Icon};
 
 use super::Revelacao;
 use crate::estilo;
@@ -419,7 +419,7 @@ impl Revelacao {
             r.h * escala,
         );
 
-        let veu = gpui::rgba(0x00000099);
+        let veu = gpui_kit::rgba(0x00000099);
         // Quatro faixas até a borda do palco — o `shadow 9999px` do site.
         let (pw, ph) = (
             f32::from(self.palco.size.width),
@@ -445,7 +445,7 @@ impl Revelacao {
         });
 
         // A grade de terços: branco a 50 %, com a camada a 60 %.
-        let linha = gpui::rgba(0xffffff4d);
+        let linha = gpui_kit::rgba(0xffffff4d);
         let grade = (1..3).flat_map(|i| {
             let f = i as f32 / 3.;
             [
@@ -485,9 +485,9 @@ impl Revelacao {
                 .top(px(h * fy - LADO_DA_ALCA / 2.))
                 .size(px(LADO_DA_ALCA))
                 .rounded(px(2.))
-                .bg(gpui::white())
+                .bg(gpui_kit::white())
                 .border_1()
-                .border_color(gpui::rgba(0x17171799))
+                .border_color(gpui_kit::rgba(0x17171799))
                 .shadow_sm()
                 .cursor(cursor)
                 .on_mouse_down(
@@ -513,7 +513,7 @@ impl Revelacao {
                         .w(px(w))
                         .h(px(h))
                         .border_1()
-                        .border_color(gpui::rgba(0xffffffcc))
+                        .border_color(gpui_kit::rgba(0xffffffcc))
                         .cursor(CursorStyle::OpenHand)
                         .on_mouse_down(
                             MouseButton::Left,
@@ -539,11 +539,11 @@ impl Revelacao {
             .is_some_and(|e| e.transferidor.is_some());
         // No claro a faixa é mais densa: fora da foto ela cai sobre o poço claro.
         let faixa = if cx.theme().mode.is_dark() {
-            gpui::rgba(0x00000073)
+            gpui_kit::rgba(0x00000073)
         } else {
-            gpui::rgba(0x000000b3)
+            gpui_kit::rgba(0x000000b3)
         };
-        let ambar = gpui::rgb(0xfbbf24);
+        let ambar = gpui_kit::rgb(0xfbbf24);
 
         div()
             .absolute()
@@ -592,11 +592,11 @@ impl Revelacao {
                                     let de = ponto_do_arco(a, RAIO);
                                     let ate = ponto_do_arco(a, RAIO - if grande { 8. } else { 4. });
                                     let cor = if a.abs() < 0.01 {
-                                        gpui::rgba(0xffffffe6)
+                                        gpui_kit::rgba(0xffffffe6)
                                     } else if grande {
-                                        gpui::rgba(0xffffff99)
+                                        gpui_kit::rgba(0xffffff99)
                                     } else {
-                                        gpui::rgba(0xffffff59)
+                                        gpui_kit::rgba(0xffffff59)
                                     };
                                     let mut traco =
                                         PathBuilder::stroke(px(if grande { 1.5 } else { 1. }));
@@ -631,9 +631,9 @@ impl Revelacao {
                             .font_family("Menlo")
                             .text_size(px(11.))
                             .text_color(if angulo == 0. {
-                                gpui::rgba(0xffffff99).into()
+                                gpui_kit::rgba(0xffffff99).into()
                             } else {
-                                gpui::Hsla::from(ambar)
+                                gpui_kit::Hsla::from(ambar)
                             })
                             .child(rotulo_do_angulo(angulo)),
                     ),
@@ -670,7 +670,7 @@ impl Revelacao {
                 .border_color(borda)
                 .cursor_pointer()
                 .when(ligado, |b| {
-                    b.bg(gpui::rgb(0xfbbf24)).text_color(gpui::black())
+                    b.bg(gpui_kit::rgb(0xfbbf24)).text_color(gpui_kit::black())
                 })
                 .when(!ligado, |b| {
                     b.text_color(frente.opacity(0.9))
@@ -691,22 +691,22 @@ impl Revelacao {
                             .gap(px(4.))
                             .child(
                                 botao("corte-girar-esquerda", Icone::RotateCcw, false)
-                                    .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new("Girar à esquerda").build(w, cx))
+                                    .tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new("Girar à esquerda").build(w, cx))
                                     .on_click(cx.listener(|tela, _, _, cx| tela.girar_a_esquerda(cx))),
                             )
                             .child(
                                 botao("corte-girar", Icone::RotateCw, false)
-                                    .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new("Girar à direita").build(w, cx))
+                                    .tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new("Girar à direita").build(w, cx))
                                     .on_click(cx.listener(|tela, _, _, cx| tela.girar(cx))),
                             )
                             .child(
                                 botao("corte-espelho-h", Icone::FlipHorizontal, atual.flip_horizontal())
-                                    .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new("Espelhar na horizontal").build(w, cx))
+                                    .tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new("Espelhar na horizontal").build(w, cx))
                                     .on_click(cx.listener(|tela, _, _, cx| tela.espelhar_horizontal(cx))),
                             )
                             .child(
                                 botao("corte-espelho-v", Icone::FlipVertical, atual.flip_vertical())
-                                    .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new("Espelhar na vertical").build(w, cx))
+                                    .tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new("Espelhar na vertical").build(w, cx))
                                     .on_click(cx.listener(|tela, _, _, cx| tela.espelhar_vertical(cx))),
                             ),
                     ),
@@ -722,7 +722,7 @@ impl Revelacao {
                                 div()
                                     .id("corte-angulo-rotulo")
                                     .text_color(if angulo != 0. { frente } else { mudo })
-                                    .tooltip(|w, cx| gpui_component::tooltip::Tooltip::new("Duplo clique volta ao neutro").build(w, cx))
+                                    .tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new("Duplo clique volta ao neutro").build(w, cx))
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(|tela, evento: &MouseDownEvent, window, cx| {
@@ -890,8 +890,8 @@ impl Revelacao {
                     let t = if fase <= 1. { fase } else { 2. - fase };
                     let valor = min + (max - min) * (0.25 + 0.5 * t);
                     estado.update(cx, |_, cx| {
-                        cx.emit(gpui_component::slider::SliderEvent::Change(
-                            gpui_component::slider::SliderValue::Single(valor),
+                        cx.emit(gpui_kit::component::slider::SliderEvent::Change(
+                            gpui_kit::component::slider::SliderValue::Single(valor),
                         ))
                     });
                 }

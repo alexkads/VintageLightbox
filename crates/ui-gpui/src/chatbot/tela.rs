@@ -19,6 +19,7 @@
 //! - `pronto` depois de reconectar e `sincronizar` → releitura na hora;
 //! - de segurança: a cada 300 s conectado, a cada 15 s sem conexão.
 
+use crate::campo::TrocarValor as _;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -27,8 +28,8 @@ use std::time::{Duration, Instant};
 
 use crate::modal::Modal;
 use domain::services::pos_venda::Sessao;
-use gpui::{prelude::*, Context, Entity, EventEmitter, SharedString, Task, Window};
-use gpui_component::input::{InputEvent, InputState};
+use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
+use gpui_kit::{prelude::*, Context, Entity, EventEmitter, SharedString, Task, Window};
 use serde_json::Value;
 
 use super::modelo::{
@@ -181,7 +182,7 @@ pub struct Chatbot {
     // ── A conversa aberta ──
     pub(crate) pendentes: Vec<Pendente>,
     proximo_pendente: u64,
-    pub(crate) compositor: Entity<InputState>,
+    pub(crate) compositor: Entity<TextareaState>,
     pub(crate) respostas_abertas: bool,
     pub(crate) mais_acoes: bool,
     /// Trocou de conversa: o campo esvazia no próximo desenho (esvaziar pede a
@@ -190,14 +191,14 @@ pub struct Chatbot {
     /// O histórico rola até o fim quando a conversa ou o número de balões
     /// muda — e só então: quem subiu para ler não é puxado de volta a cada
     /// desenho.
-    pub(crate) rolagem: gpui::ScrollHandle,
+    pub(crate) rolagem: gpui_kit::ScrollHandle,
     pub(crate) rolagem_vista: Option<(Chave, usize, usize)>,
 
     // ── Diálogos ──
     /// No contrato de [`Modal`]: "Quem assume", "Resolver" e "Excluir"
     /// têm campo, e fechar com o foco nele matava as teclas da tela.
     pub(crate) dialogo: Modal<Dialogo>,
-    pub(crate) notas: Entity<InputState>,
+    pub(crate) notas: Entity<TextareaState>,
     pub(crate) nome_do_atendente: Entity<InputState>,
     pub(crate) confirmacao: Entity<InputState>,
     pub(crate) em_acao: bool,
@@ -222,7 +223,7 @@ pub struct Chatbot {
     /// Já houve um `pronto`: o próximo é reconexão, e relê.
     ja_abriu: HashSet<&'static str>,
     _vigia: Option<Task<()>>,
-    _assinaturas: Vec<gpui::Subscription>,
+    _assinaturas: Vec<gpui_kit::Subscription>,
 }
 
 impl Chatbot {
@@ -235,12 +236,12 @@ impl Chatbot {
         let busca =
             cx.new(|cx| InputState::new(window, cx).placeholder("Buscar nos cinco canais…"));
         let compositor = cx.new(|cx| {
-            InputState::new(window, cx)
+            TextareaState::new(window, cx)
                 .auto_grow(1, 6)
                 .placeholder("Escrever para o cliente…")
         });
         let notas = cx.new(|cx| {
-            InputState::new(window, cx).auto_grow(5, 8).placeholder(
+            TextareaState::new(window, cx).auto_grow(5, 8).placeholder(
                 "Ex.: cliente atendido, dúvida sobre o voucher esclarecida, novo código enviado…",
             )
         });
@@ -292,7 +293,7 @@ impl Chatbot {
             respostas_abertas: false,
             mais_acoes: false,
             limpar_compositor: false,
-            rolagem: gpui::ScrollHandle::new(),
+            rolagem: gpui_kit::ScrollHandle::new(),
             rolagem_vista: None,
             dialogo: Modal::default(),
             notas,
@@ -899,7 +900,7 @@ impl Chatbot {
     /// O X de "Limpar busca".
     pub fn limpar_busca(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.busca
-            .update(cx, |campo, cx| campo.set_value("", window, cx));
+            .update(cx, |campo, cx| campo.trocar_valor("", window, cx));
         self.aplicar_busca(cx);
     }
 
@@ -963,7 +964,7 @@ impl Chatbot {
         }
         // O campo esvazia na hora: o balão pendente já está na conversa.
         self.compositor
-            .update(cx, |campo, cx| campo.set_value("", window, cx));
+            .update(cx, |campo, cx| campo.trocar_valor("", window, cx));
         self.despachar(texto, None, cx);
     }
 
@@ -1031,7 +1032,7 @@ impl Chatbot {
         if atender && conversa.chave.canal == Canal::Web {
             let nome = self.preferencias.atendente.clone();
             self.nome_do_atendente
-                .update(cx, |campo, cx| campo.set_value(nome, window, cx));
+                .update(cx, |campo, cx| campo.trocar_valor(nome, window, cx));
             self.dialogo
                 .abrir(Dialogo::QuemAssume(conversa.chave), window, cx);
             cx.notify();
@@ -1050,7 +1051,7 @@ impl Chatbot {
             self.preferencias.atendente = nome.clone();
             preferencias::guardar(&self.arquivo_de_preferencias, &self.preferencias);
         }
-        self.dialogo.fechar(window);
+        self.dialogo.fechar(window, cx);
         self.mandar_alternancia(chave, true, Some(nome), cx);
     }
 
@@ -1095,7 +1096,7 @@ impl Chatbot {
         let Some(chave) = self.aberta.clone() else {
             return;
         };
-        cx.write_to_clipboard(gpui::ClipboardItem::new_string(chave.id.clone()));
+        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(chave.id.clone()));
         let texto = match chave.canal {
             Canal::WhatsApp => "Número copiado.",
             Canal::Instagram => "IGSID copiado.",
@@ -1119,13 +1120,13 @@ impl Chatbot {
             return;
         };
         self.confirmacao
-            .update(cx, |campo, cx| campo.set_value("", window, cx));
+            .update(cx, |campo, cx| campo.trocar_valor("", window, cx));
         self.dialogo
             .abrir(Dialogo::ExcluirHistorico(chave), window, cx);
         cx.notify();
     }
 
-    pub fn exclusao_confirmada(&self, cx: &gpui::App) -> bool {
+    pub fn exclusao_confirmada(&self, cx: &gpui_kit::App) -> bool {
         self.confirmacao.read(cx).value().as_ref() == pedidos::CONFIRMACAO_DE_EXCLUSAO
     }
 
@@ -1161,7 +1162,7 @@ impl Chatbot {
                 self.dialogo.abrir(Dialogo::Urgencias, window, cx)
             }
             _ => {
-                self.dialogo.fechar(window);
+                self.dialogo.fechar(window, cx);
             }
         }
         cx.notify();
@@ -1178,7 +1179,7 @@ impl Chatbot {
         cx: &mut Context<Self>,
     ) {
         self.notas
-            .update(cx, |campo, cx| campo.set_value("", window, cx));
+            .update(cx, |campo, cx| campo.trocar_valor("", window, cx));
         self.dialogo.abrir(Dialogo::Resolver(urgencia), window, cx);
         cx.notify();
     }

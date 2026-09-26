@@ -7,8 +7,9 @@
 //! soltar, e a predefinição arrastada passa pelo mesmo `soltar`. Um gancho que
 //! escrevesse no campo daria um teste que passa com a inscrição morta.
 
-use gpui::{px, Bounds, Context, Window};
-use gpui_component::slider::{SliderEvent, SliderValue};
+use crate::campo::TrocarValor as _;
+use gpui_kit::component::slider::{SliderEvent, SliderValue};
+use gpui_kit::{px, Bounds, Context, Window};
 
 use super::Revelacao;
 use crate::revelacao::controles::Definicao;
@@ -21,8 +22,8 @@ impl Revelacao {
     /// O palco com este tamanho, como o `canvas` o mediria no quadro.
     pub(crate) fn medir_o_palco(&mut self, largura: f32, altura: f32) {
         self.palco = Bounds::new(
-            gpui::point(px(0.), px(0.)),
-            gpui::size(px(largura), px(altura)),
+            gpui_kit::point(px(0.), px(0.)),
+            gpui_kit::size(px(largura), px(altura)),
         );
     }
 
@@ -41,7 +42,7 @@ impl Revelacao {
     }
 
     /// Onde o slider está desenhado.
-    pub(crate) fn valor_do_slider(&self, controle: usize, cx: &gpui::App) -> f32 {
+    pub(crate) fn valor_do_slider(&self, controle: usize, cx: &gpui_kit::App) -> f32 {
         self.controles[controle].estado.read(cx).value().start()
     }
 
@@ -82,9 +83,9 @@ impl Revelacao {
         };
         let escala = area.2 / espaco.0;
         let (x0, y0) = (area.0 + area.2 / 2., area.1 + area.3 / 2.);
-        self.comecar_arrasto(alca, gpui::point(px(x0), px(y0)), cx);
+        self.comecar_arrasto(alca, gpui_kit::point(px(x0), px(y0)), cx);
         self.mover_no_corte(
-            gpui::point(px(x0 + dx * escala), px(y0 + dy * escala)),
+            gpui_kit::point(px(x0 + dx * escala), px(y0 + dy * escala)),
             window,
             cx,
         );
@@ -115,7 +116,7 @@ impl Revelacao {
     }
 
     /// As predefinições que a coluna mostra: `(do sistema, minhas)`, em nome.
-    pub(crate) fn coluna_de_predefinicoes(&self, cx: &gpui::App) -> (Vec<String>, Vec<String>) {
+    pub(crate) fn coluna_de_predefinicoes(&self, cx: &gpui_kit::App) -> (Vec<String>, Vec<String>) {
         let (sistema, minhas) = self.grupos_da_coluna(cx);
         (
             sistema.iter().map(|p| p.name.clone()).collect(),
@@ -159,7 +160,7 @@ impl Revelacao {
     ) {
         let nome = nome.to_string();
         self.nome_do_preset
-            .update(cx, |campo, cx| campo.set_value(nome, window, cx));
+            .update(cx, |campo, cx| campo.trocar_valor(nome, window, cx));
     }
 
     pub(crate) fn formulario_de_predefinicao_aberto(&self) -> bool {

@@ -5,8 +5,9 @@
 //! no dia de hoje, como a do site, e o teste precisa que eles estejam no mês
 //! visível e na lista "Agendamentos de hoje".
 
+use crate::campo::TrocarValor as _;
 use chrono::{DateTime, Duration, NaiveDate, TimeZone, Utc};
-use gpui::{Context, TestAppContext, VisualTestContext, Window};
+use gpui_kit::{Context, TestAppContext, VisualTestContext, Window};
 use serde_json::{json, Value};
 
 use super::chatbot::{clicar, desenhado, passo, toasts};
@@ -134,17 +135,17 @@ fn leituras_da_agenda(e: &Estudio) -> usize {
     pedidos(e).iter().filter(|p| p.rotulo == "agenda").count()
 }
 
-fn escrever(
+fn escrever<M: gpui_kit::component::input::InputModeKind>(
     e: &Estudio,
     cx: &mut TestAppContext,
-    campo: fn(&Agenda) -> &gpui::Entity<gpui_component::input::InputState>,
+    campo: fn(&Agenda) -> &gpui_kit::Entity<gpui_kit::base::input::InputBaseState<M>>,
     texto: &str,
 ) {
     agenda(e, cx, |t, w, cx| {
         let texto = texto.to_string();
         campo(t)
             .clone()
-            .update(cx, |c, cx| c.set_value(texto, w, cx));
+            .update(cx, |c, cx| c.trocar_valor(texto, w, cx));
     });
 }
 
@@ -160,7 +161,7 @@ fn periodo(visao: Visao, dia: NaiveDate) -> String {
 // ── Abrir e navegar ────────────────────────────────────────────────────────
 
 /// Escutar começa na entrada; ler, só na tela — como o chatbot.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_conta_entra_e_a_agenda_escuta_sem_ler(cx: &mut TestAppContext) {
     let e = entrar(cx);
     assert_eq!(e.escuta.abertas(), 2, "o chatbot e a agenda");
@@ -173,7 +174,7 @@ fn a_conta_entra_e_a_agenda_escuta_sem_ler(cx: &mut TestAppContext) {
 
 /// Pelo menu: os quatro pedidos do site, o mês de hoje com a folga de uma
 /// semana, os estúdios só ativos, e o "+ 2 mais" que abre o dia.
-#[gpui::test]
+#[gpui_kit::test]
 fn pelo_menu_le_os_quatro_e_mostra_o_mes(cx: &mut TestAppContext) {
     let e = abrir_a_agenda(cx);
     e.app(cx, |app, _w, _cx| assert_eq!(app.tela(), Tela::Agenda));
@@ -208,7 +209,7 @@ fn pelo_menu_le_os_quatro_e_mostra_o_mes(cx: &mut TestAppContext) {
 
 /// Anterior, Próximo, Hoje e as seis visões pedem o período de cada uma; o
 /// dia clicado no ano abre a visão de dia, e o nome do mês, a de mês.
-#[gpui::test]
+#[gpui_kit::test]
 fn navegar_pede_o_periodo_de_cada_visao(cx: &mut TestAppContext) {
     let e = abrir_a_agenda(cx);
     clicar(&e, cx, "agenda-proximo");
@@ -252,7 +253,7 @@ fn navegar_pede_o_periodo_de_cada_visao(cx: &mut TestAppContext) {
 }
 
 /// O seletor de estúdio recorta a agenda e o "hoje" — e não os indicadores.
-#[gpui::test]
+#[gpui_kit::test]
 fn o_estudio_recorta_a_agenda_e_nao_os_indicadores(cx: &mut TestAppContext) {
     let e = abrir_a_agenda(cx);
     clicar(&e, cx, "agenda-seletor");
@@ -294,7 +295,7 @@ fn o_estudio_recorta_a_agenda_e_nao_os_indicadores(cx: &mut TestAppContext) {
 /// Reagendar: os campos chegam preenchidos no fuso do estúdio; término antes
 /// do início não sai; certo, vai em UTC e fecha com o toast do site. O `409`
 /// fica no formulário com a frase do site.
-#[gpui::test]
+#[gpui_kit::test]
 fn reagendar_valida_as_datas_e_manda_em_utc(cx: &mut TestAppContext) {
     let e = abrir_a_agenda(cx);
     clicar(&e, cx, "agenda-evento-e1");
@@ -363,7 +364,7 @@ fn reagendar_valida_as_datas_e_manda_em_utc(cx: &mut TestAppContext) {
 
 /// Registrar atendimento: o valor chega em reais, "dez" não passa, saída
 /// antes da entrada não passa; certo, manda só o preenchido.
-#[gpui::test]
+#[gpui_kit::test]
 fn registrar_atendimento_valida_e_manda_so_o_preenchido(cx: &mut TestAppContext) {
     let e = abrir_a_agenda(cx);
     clicar(&e, cx, "agenda-evento-e1");
@@ -416,7 +417,7 @@ fn registrar_atendimento_valida_e_manda_so_o_preenchido(cx: &mut TestAppContext)
 }
 
 /// Excluir pergunta antes; "Cancelar" volta aos detalhes sem mandar nada.
-#[gpui::test]
+#[gpui_kit::test]
 fn excluir_pergunta_antes_e_usa_a_rota_do_painel(cx: &mut TestAppContext) {
     let e = abrir_a_agenda(cx);
     clicar(&e, cx, "agenda-evento-e1");
@@ -436,7 +437,7 @@ fn excluir_pergunta_antes_e_usa_a_rota_do_painel(cx: &mut TestAppContext) {
 /// 🔧 **Descancelar pela lista de hoje** — e a resposta `{id, status}` é
 /// sucesso. No site a mesma resposta era lida como o agendamento inteiro, e
 /// um descancelamento que deu certo aparecia como erro.
-#[gpui::test]
+#[gpui_kit::test]
 fn descancelar_pela_lista_de_hoje_aceita_a_resposta_curta(cx: &mut TestAppContext) {
     let e = abrir_a_agenda(cx);
     assert!(
@@ -463,7 +464,7 @@ fn descancelar_pela_lista_de_hoje_aceita_a_resposta_curta(cx: &mut TestAppContex
 }
 
 /// O Esc volta um passo: formulário → detalhes → fechado.
-#[gpui::test]
+#[gpui_kit::test]
 fn o_esc_volta_um_passo(cx: &mut TestAppContext) {
     let e = abrir_a_agenda(cx);
     clicar(&e, cx, "agenda-evento-e1");
@@ -493,7 +494,7 @@ fn criado(id: &str, quando: DateTime<Utc>, estudio: Option<&str>) -> Sinal {
 /// 🔔 Agendamento novo com o operador em outra tela: toast com os textos do
 /// site; com a janela atrás, aviso do sistema, e o clique abre a agenda e o
 /// ensaio.
-#[gpui::test]
+#[gpui_kit::test]
 fn agendamento_novo_avisa_e_o_clique_abre_o_ensaio(cx: &mut TestAppContext) {
     let e = entrar(cx);
     let quando = as_(1, 9, 0);
@@ -556,7 +557,7 @@ fn agendamento_novo_avisa_e_o_clique_abre_o_ensaio(cx: &mut TestAppContext) {
 /// Com a tela na frente, o evento relevante relê (400 ms, uma vez por
 /// rajada); o de outro estúdio com o filtro ligado, não; e o relógio de
 /// segurança é o do site.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_releitura_segue_a_relevancia_e_o_relogio(cx: &mut TestAppContext) {
     let e = abrir_a_agenda(cx);
     let mut n = leituras_da_agenda(&e);
@@ -616,7 +617,7 @@ fn a_releitura_segue_a_relevancia_e_o_relogio(cx: &mut TestAppContext) {
 }
 
 /// 🔔 O sino é um só: desligado no chatbot, cala o aviso da agenda.
-#[gpui::test]
+#[gpui_kit::test]
 fn o_sino_do_chatbot_vale_para_a_agenda(cx: &mut TestAppContext) {
     let e = entrar(cx);
     let arquivo = e.app(cx, |app, _w, cx| {
@@ -634,7 +635,7 @@ fn o_sino_do_chatbot_vale_para_a_agenda(cx: &mut TestAppContext) {
 
 /// A agenda que não carrega dá lugar ao aviso do site; os indicadores
 /// também, cada um no seu lugar.
-#[gpui::test]
+#[gpui_kit::test]
 fn falha_de_leitura_vira_aviso_no_lugar(cx: &mut TestAppContext) {
     let e = entrar(cx);
     e.site
@@ -650,7 +651,7 @@ fn falha_de_leitura_vira_aviso_no_lugar(cx: &mut TestAppContext) {
 }
 
 /// Sair da conta fecha o fluxo da agenda também.
-#[gpui::test]
+#[gpui_kit::test]
 fn sair_da_conta_fecha_a_agenda(cx: &mut TestAppContext) {
     let e = abrir_a_agenda(cx);
     e.app(cx, |app, _w, cx| app.sair_da_conta(cx));

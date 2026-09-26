@@ -16,6 +16,7 @@ pub mod bandeja;
 pub mod biblioteca;
 /// O caixa do balcão numa tela inteira, como a rota `/dashboard/caixa`.
 pub mod caixa;
+pub mod campo;
 pub mod chatbot;
 pub mod cliente;
 pub mod configuracoes;

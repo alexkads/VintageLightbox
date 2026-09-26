@@ -11,7 +11,7 @@
 //!
 //! No Windows e no Linux o GPUI não desenha menu de app, e nada aqui aparece.
 
-use gpui::{actions, App, Menu, MenuItem};
+use gpui_kit::{actions, App, Menu, MenuItem};
 
 actions!(
     vintagelightbox_menu,
@@ -43,9 +43,9 @@ pub fn instalar(cx: &mut App) {
     cx.on_action(|_: &MostrarTodos, cx| cx.unhide_other_apps());
     cx.on_action(|_: &Sair, cx| cx.quit());
     cx.bind_keys([
-        gpui::KeyBinding::new("cmd-h", Ocultar, None),
-        gpui::KeyBinding::new("alt-cmd-h", OcultarOsOutros, None),
-        gpui::KeyBinding::new("cmd-q", Sair, None),
+        gpui_kit::KeyBinding::new("cmd-h", Ocultar, None),
+        gpui_kit::KeyBinding::new("alt-cmd-h", OcultarOsOutros, None),
+        gpui_kit::KeyBinding::new("cmd-q", Sair, None),
     ]);
     cx.set_menus(vec![Menu {
         name: NOME.into(),
@@ -58,6 +58,7 @@ pub fn instalar(cx: &mut App) {
             MenuItem::separator(),
             MenuItem::action(format!("Sair do {NOME}"), Sair),
         ],
+        disabled: false,
     }]);
 }
 

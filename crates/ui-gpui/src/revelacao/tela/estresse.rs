@@ -11,7 +11,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use gpui::{px, Bounds, TestAppContext};
+use gpui_kit::{px, Bounds, TestAppContext};
 use image::{DynamicImage, Rgb, RgbImage};
 use tempfile::TempDir;
 
@@ -55,8 +55,8 @@ fn janela(
     cx: &mut TestAppContext,
     previews: Arc<PreviewManager>,
     gravador: Arc<GravadorDeMentira>,
-) -> gpui::WindowHandle<Revelacao> {
-    cx.update(gpui_component::init);
+) -> gpui_kit::WindowHandle<Revelacao> {
+    cx.update(gpui_kit::init);
     cx.add_window(move |window, cx| {
         Revelacao::nova(
             previews,
@@ -92,21 +92,21 @@ fn vizinhas_prontas(tela: &Revelacao, raio: usize) -> (usize, usize) {
     (prontas, ate - de + 1)
 }
 
-fn desenhar(visual: &mut gpui::VisualTestContext, largura: f32, altura: f32) {
+fn desenhar(visual: &mut gpui_kit::VisualTestContext, largura: f32, altura: f32) {
     visual.draw(
-        gpui::Point::default(),
-        gpui::size(px(largura), px(altura)),
-        |_window, _cx| gpui::Empty,
+        gpui_kit::Point::default(),
+        gpui_kit::size(px(largura), px(altura)),
+        |_window, _cx| gpui_kit::Empty,
     );
 }
 
 /// Quanto custa um quadro da Revelação com a tira de `n` fotos.
 fn medir_o_quadro(
     cx: &mut TestAppContext,
-    janela: gpui::WindowHandle<Revelacao>,
+    janela: gpui_kit::WindowHandle<Revelacao>,
     quadros: u32,
 ) -> Duration {
-    let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+    let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
     desenhar(&mut visual, 2000., 1300.);
     visual.run_until_parked();
     let inicio = Instant::now();
@@ -126,7 +126,7 @@ fn medir_o_quadro(
 /// fica guardado tem de ser **o que está perto do palco** — é para lá que a
 /// seta vai e é o que o olho vê —, e o carregamento de cada troca tem de ser
 /// pequeno, e não o acervo inteiro de novo.
-#[gpui::test]
+#[gpui_kit::test]
 fn estresse_a_tira_com_dez_mil_fotos(cx: &mut TestAppContext) {
     const N: usize = 10_000;
     let (previews, _dir) = previews_descartaveis();
@@ -266,7 +266,7 @@ fn estresse_a_tira_com_dez_mil_fotos(cx: &mut TestAppContext) {
 
 /// 🔑 **O quadro da Revelação, por tamanho de tira.** Régua, não asserção de
 /// fluidez: o perfil de teste não é o `--release`.
-#[gpui::test]
+#[gpui_kit::test]
 #[ignore = "régua — rode com --ignored --nocapture"]
 fn estresse_medir_o_quadro_por_tamanho_de_tira(cx: &mut TestAppContext) {
     let (previews, _dir) = previews_descartaveis();
@@ -300,7 +300,7 @@ fn mexer(tela: &mut Revelacao, controle: usize, valor: f32, cx: &mut Context<Rev
     let estado = tela.controles[controle].estado.clone();
     estado.update(cx, |_, cx| {
         cx.emit(SliderEvent::Change(
-            gpui_component::slider::SliderValue::Single(valor),
+            gpui_kit::component::slider::SliderValue::Single(valor),
         ));
     });
 }
@@ -312,7 +312,7 @@ fn mexer(tela: &mut Revelacao, controle: usize, valor: f32, cx: &mut Context<Rev
 /// controles diferentes se o dedo escorrega. Uma gravação por evento seria um
 /// `UPDATE` por milímetro; um passo por evento esvaziaria o `Cmd+Z` em meio
 /// segundo.
-#[gpui::test]
+#[gpui_kit::test]
 fn estresse_mil_eventos_de_slider_por_gesto(cx: &mut TestAppContext) {
     const GESTOS: usize = 30;
     const EVENTOS: usize = 1_000;
@@ -447,7 +447,7 @@ fn estresse_mil_eventos_de_slider_por_gesto(cx: &mut TestAppContext) {
 /// que volta é **da foto que saiu**. Colhê-lo depois da troca punha no palco
 /// a imagem de uma foto sob o nome de outra — e numa foto nova sem ajuste
 /// nenhum, ninguém pediria outra revelação para corrigir.
-#[gpui::test]
+#[gpui_kit::test]
 fn estresse_a_revelacao_atrasada_nao_pinta_a_foto_nova(cx: &mut TestAppContext) {
     let (previews, _dir) = previews_descartaveis();
     // Tamanhos diferentes: é por eles que se sabe de quem é a imagem.
@@ -516,7 +516,7 @@ fn estresse_a_revelacao_atrasada_nao_pinta_a_foto_nova(cx: &mut TestAppContext) 
 /// A thread do [`Processador`] abre o dispositivo em paralelo, e `disponivel()`
 /// responde `None` enquanto isso: tratar `None` como "não tem" faria todo caso
 /// que depende da GPU passar em branco, em toda máquina.
-fn esperar_a_gpu(cx: &mut TestAppContext, janela: gpui::WindowHandle<Revelacao>) -> bool {
+fn esperar_a_gpu(cx: &mut TestAppContext, janela: gpui_kit::WindowHandle<Revelacao>) -> bool {
     let prazo = Instant::now() + Duration::from_secs(20);
     loop {
         let disponivel = janela
@@ -532,7 +532,10 @@ fn esperar_a_gpu(cx: &mut TestAppContext, janela: gpui::WindowHandle<Revelacao>)
 }
 
 /// Deixa a GPU responder de verdade e colhe. Devolve se a foto já está no palco.
-fn deixar_a_gpu_responder(cx: &mut TestAppContext, janela: gpui::WindowHandle<Revelacao>) -> bool {
+fn deixar_a_gpu_responder(
+    cx: &mut TestAppContext,
+    janela: gpui_kit::WindowHandle<Revelacao>,
+) -> bool {
     std::thread::sleep(Duration::from_millis(2));
     cx.executor().advance_clock(INTERVALO_DE_COLHEITA * 2);
     cx.run_until_parked();
@@ -559,7 +562,7 @@ fn deixar_a_gpu_responder(cx: &mut TestAppContext, janela: gpui::WindowHandle<Re
 /// enquanto ele servia em 100% das setas.
 fn esperar_a_foto(
     cx: &mut TestAppContext,
-    janela: gpui::WindowHandle<Revelacao>,
+    janela: gpui_kit::WindowHandle<Revelacao>,
     passo: i32,
     onde: &str,
 ) -> Option<Duration> {
@@ -638,7 +641,7 @@ fn esperar_a_foto(
 /// 3. **ida com pausa** — a seta apertada depois de um instante de folga, como
 ///    quem olha a foto antes de andar. É o caso real, e o que a antecipação
 ///    existe para resolver.
-#[gpui::test]
+#[gpui_kit::test]
 fn estresse_percorrer_a_tira_de_fotos_reveladas(cx: &mut TestAppContext) {
     const FOTOS: usize = 40;
 
@@ -762,7 +765,7 @@ fn estresse_percorrer_a_tira_de_fotos_reveladas(cx: &mut TestAppContext) {
 /// Sessenta arrastos de alça com trezentos movimentos cada — muitos deles fora
 /// do palco —, trocas de proporção no meio, o transferidor girando de ponta a
 /// ponta e o slider do ângulo com mil eventos.
-#[gpui::test]
+#[gpui_kit::test]
 fn estresse_o_enquadrar_arrastado_sem_parar(cx: &mut TestAppContext) {
     let (previews, _dir) = previews_descartaveis();
     // A cópia de trabalho de verdade: é nela que o endireitar gira a foto na CPU.
@@ -793,7 +796,10 @@ fn estresse_o_enquadrar_arrastado_sem_parar(cx: &mut TestAppContext) {
     let movimentos_de_alca = janela
         .update(cx, |tela, window, cx| {
             tela.abrir(foto(1), window, cx);
-            tela.palco = Bounds::new(gpui::point(px(0.), px(0.)), gpui::size(px(1200.), px(800.)));
+            tela.palco = Bounds::new(
+                gpui_kit::point(px(0.), px(0.)),
+                gpui_kit::size(px(1200.), px(800.)),
+            );
             tela.alternar_corte(window, cx);
             assert!(tela.cortando());
 
@@ -816,11 +822,11 @@ fn estresse_o_enquadrar_arrastado_sem_parar(cx: &mut TestAppContext) {
                 };
                 let x0 = g.entre(0., 1200.);
                 let y0 = g.entre(0., 800.);
-                tela.comecar_arrasto(alca, gpui::point(px(x0), px(y0)), cx);
+                tela.comecar_arrasto(alca, gpui_kit::point(px(x0), px(y0)), cx);
                 for _ in 0..300 {
                     let x = g.entre(-600., 1800.);
                     let y = g.entre(-400., 1200.);
-                    tela.mover_no_corte(gpui::point(px(x), px(y)), window, cx);
+                    tela.mover_no_corte(gpui_kit::point(px(x), px(y)), window, cx);
                     movimentos += 1;
                 }
                 valido(tela);
@@ -853,7 +859,7 @@ fn estresse_o_enquadrar_arrastado_sem_parar(cx: &mut TestAppContext) {
     // (o app de verdade desenha no próximo quadro do monitor). Por isso cada
     // `update` aqui leva os quatro movimentos de um quadro, e a medida é do
     // quadro inteiro: os eventos e o desenho.
-    let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+    let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
     desenhar(&mut visual, 1600., 1000.);
     let mut desenhando = Duration::ZERO;
     let mut quadros = 0u32;
@@ -879,7 +885,7 @@ fn estresse_o_enquadrar_arrastado_sem_parar(cx: &mut TestAppContext) {
             janela
                 .update(&mut visual, |tela, window, cx| {
                     for x in xs {
-                        tela.mover_no_corte(gpui::point(px(x), px(0.)), window, cx);
+                        tela.mover_no_corte(gpui_kit::point(px(x), px(0.)), window, cx);
                     }
                 })
                 .expect("a janela aberta");
@@ -889,7 +895,7 @@ fn estresse_o_enquadrar_arrastado_sem_parar(cx: &mut TestAppContext) {
         let final_ = 600. + g.entre(-200., 200.);
         janela
             .update(&mut visual, |tela, window, cx| {
-                tela.mover_no_corte(gpui::point(px(final_), px(0.)), window, cx);
+                tela.mover_no_corte(gpui_kit::point(px(final_), px(0.)), window, cx);
                 valido(tela);
                 let angulo_antes = tela.corte_atual().angle();
                 tela.soltar_no_corte(cx);
@@ -922,7 +928,7 @@ fn estresse_o_enquadrar_arrastado_sem_parar(cx: &mut TestAppContext) {
                 let valor = ((i as f32) * 0.37).sin() * ANGULO_MAXIMO;
                 estado.update(cx, |_, cx| {
                     cx.emit(SliderEvent::Change(
-                        gpui_component::slider::SliderValue::Single(valor),
+                        gpui_kit::component::slider::SliderValue::Single(valor),
                     ));
                 });
             }
@@ -979,7 +985,7 @@ fn estresse_o_enquadrar_arrastado_sem_parar(cx: &mut TestAppContext) {
 
 /// 🚨 **Centenas de gestos de zoom, trocas de foto e o bruto chegando fora de
 /// ordem: nada pinta a foto errada, nada grava, nada escapa.**
-#[gpui::test]
+#[gpui_kit::test]
 fn estresse_zoom_com_bruto_fora_de_ordem(cx: &mut TestAppContext) {
     const FOTOS: usize = 12;
     let (previews, _dir) = previews_descartaveis();
@@ -997,7 +1003,10 @@ fn estresse_zoom_com_bruto_fora_de_ordem(cx: &mut TestAppContext) {
     janela
         .update(cx, |tela, window, cx| {
             tela.abrir_no_acervo((0..FOTOS).map(foto).collect(), 0, window, cx);
-            tela.palco = Bounds::new(gpui::point(px(0.), px(0.)), gpui::size(px(1200.), px(800.)));
+            tela.palco = Bounds::new(
+                gpui_kit::point(px(0.), px(0.)),
+                gpui_kit::size(px(1200.), px(800.)),
+            );
             tela.definir_lado_do_bruto("id-00000", 6000., cx);
         })
         .expect("a janela aberta");

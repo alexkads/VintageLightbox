@@ -2,7 +2,7 @@
 //! ponto e as predefinições.
 
 use biblioteca_core::acervo::{Estado, Filtro};
-use gpui::TestAppContext;
+use gpui_kit::TestAppContext;
 
 use super::{abrir_o_ensaio, Cenario};
 use crate::app::Tela;
@@ -14,7 +14,7 @@ use crate::revelacao::presets::ordem::Grupo;
 ///
 /// Cada gesto de slider é **um** passo do `⌘Z`, e o `⇧⌘Z` volta um a um —
 /// com as teclas de verdade, nas duas plataformas.
-#[gpui::test]
+#[gpui_kit::test]
 fn andar_pela_tira_revelar_e_desfazer_um_gesto_por_vez(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     e.revelar_a_do_site(cx, "a");
@@ -104,7 +104,7 @@ fn andar_pela_tira_revelar_e_desfazer_um_gesto_por_vez(cx: &mut TestAppContext) 
 }
 
 /// 🎬 **As abas sRGB e RGB, e a curva por ponto.**
-#[gpui::test]
+#[gpui_kit::test]
 fn abas_de_espaco_e_curva_por_ponto(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     e.revelar_a_do_site(cx, "b");
@@ -188,7 +188,7 @@ const LRTEMPLATE: &str = r#"s = {
 /// 🎬 **Predefinições, de ponta a ponta**: prever sem mexer, aplicar com
 /// desfazer, criar, renomear, reordenar, importar do Lightroom e do
 /// darktable, e apagar com a pergunta — confirmada pelo Enter.
-#[gpui::test]
+#[gpui_kit::test]
 fn predefinicoes_prever_aplicar_criar_renomear_reordenar_importar_e_apagar(
     cx: &mut TestAppContext,
 ) {
@@ -336,9 +336,9 @@ fn predefinicoes_prever_aplicar_criar_renomear_reordenar_importar_e_apagar(
 /// Com o ensaio subindo e a Revelação aberta, o mouse de verdade agarra a alça,
 /// leva o canto 400 px para a direita e 300 px para cima e solta: o canto vai
 /// junto, e fica. Soltar sem a alça apertada não mexe em nada.
-#[gpui::test]
+#[gpui_kit::test]
 fn o_canto_dos_envios_se_arrasta_para_fora_da_tira(cx: &mut TestAppContext) {
-    use gpui::{point, px, Modifiers, MouseButton};
+    use gpui_kit::{point, px, Modifiers, MouseButton};
 
     let e = abrir_o_ensaio(
         cx,
@@ -353,7 +353,7 @@ fn o_canto_dos_envios_se_arrasta_para_fora_da_tira(cx: &mut TestAppContext) {
         assert_eq!(app.canto_dos_envios_para_teste(), (0., 0.), "nasce no pé");
     });
 
-    let mut visual = gpui::VisualTestContext::from_window(e.raiz.into(), cx);
+    let mut visual = gpui_kit::VisualTestContext::from_window(e.raiz.into(), cx);
     let antes = visual
         .debug_bounds("canto-dos-envios")
         .expect("o canto aparece na Revelação");
@@ -376,7 +376,7 @@ fn o_canto_dos_envios_se_arrasta_para_fora_da_tira(cx: &mut TestAppContext) {
         assert_eq!(app.tela(), Tela::Revelacao, "arrastar não sai do editor");
         assert_eq!(app.canto_dos_envios_para_teste(), (400., -300.));
     });
-    let mut visual = gpui::VisualTestContext::from_window(e.raiz.into(), cx);
+    let mut visual = gpui_kit::VisualTestContext::from_window(e.raiz.into(), cx);
     let depois = visual
         .debug_bounds("canto-dos-envios")
         .expect("o canto continua à vista");

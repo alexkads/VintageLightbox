@@ -5,12 +5,13 @@
 //! Por cima, os diálogos (urgências, resolver, descartar, quem assume,
 //! excluir histórico).
 
-use gpui::{
+use crate::campo::TrocarValor as _;
+use gpui_kit::component::input::{Input, Textarea};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
+use gpui_kit::{
     div, prelude::*, px, rgb, AnyElement, Context, FontWeight, Hsla, MouseButton, SharedString,
     Window,
 };
-use gpui_component::input::Input;
-use gpui_component::{h_flex, v_flex, ActiveTheme, Icon};
 
 use super::modelo::{self, Canal, Conversa, FiltroDeCanal, Mensagem, Status, Urgencia};
 use super::tela::{Chatbot, Dialogo, Pendente};
@@ -75,7 +76,7 @@ fn avatar(conversa: &Conversa, lado: f32, redondo: bool) -> impl IntoElement {
         .size(px(lado))
         .rounded(if redondo { px(lado / 2.) } else { px(8.) })
         .bg(cor)
-        .text_color(gpui::white())
+        .text_color(gpui_kit::white())
         .font_weight(FontWeight::SEMIBOLD)
         .when(conversa.atendimento_humano, |d| {
             d.border_2().border_color(ambar())
@@ -84,12 +85,15 @@ fn avatar(conversa: &Conversa, lado: f32, redondo: bool) -> impl IntoElement {
 }
 
 /// Marca o botão para o teste clicar onde o dedo clica (`debug_selector`).
-fn marcado(botao: gpui::Stateful<gpui::Div>, nome: impl Into<String>) -> gpui::Stateful<gpui::Div> {
+fn marcado(
+    botao: gpui_kit::Stateful<gpui_kit::Div>,
+    nome: impl Into<String>,
+) -> gpui_kit::Stateful<gpui_kit::Div> {
     let nome = nome.into();
     botao.debug_selector(move || nome.clone())
 }
 
-fn selo(texto: impl Into<SharedString>, cx: &gpui::App) -> gpui::Div {
+fn selo(texto: impl Into<SharedString>, cx: &gpui_kit::App) -> gpui_kit::Div {
     estilo::selo_contorno(cx).child(texto.into())
 }
 
@@ -97,7 +101,7 @@ impl Render for Chatbot {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if std::mem::take(&mut self.limpar_compositor) {
             self.compositor
-                .update(cx, |campo, cx| campo.set_value("", window, cx));
+                .update(cx, |campo, cx| campo.trocar_valor("", window, cx));
         }
         let tema = cx.theme();
         let (fundo, texto) = (tema.background, tema.foreground);
@@ -199,7 +203,7 @@ impl Chatbot {
                     div()
                         .px(px(6.))
                         .rounded_full()
-                        .bg(gpui::white().opacity(0.25))
+                        .bg(gpui_kit::white().opacity(0.25))
                         .text_xs()
                         .child(total.to_string()),
                 )
@@ -211,7 +215,7 @@ impl Chatbot {
                         Icon::new(if ligados { Icone::Bell } else { Icone::BellOff }).size(px(16.)),
                     )
                     .tooltip(move |window, cx| {
-                        gpui_component::tooltip::Tooltip::new(if ligados {
+                        gpui_kit::component::tooltip::Tooltip::new(if ligados {
                             "Desligar notificações"
                         } else {
                             "Ligar notificações do sistema"
@@ -358,7 +362,7 @@ impl Chatbot {
                                     .flex_1()
                                     .key_context("BuscaDoChatbot")
                                     .on_action(cx.listener(
-                                        |tela, _: &gpui_component::input::Enter, _, cx| {
+                                        |tela, _: &gpui_kit::component::input::Enter, _, cx| {
                                             tela.aplicar_busca(cx)
                                         },
                                     ))
@@ -374,7 +378,7 @@ impl Chatbot {
                                     )
                                     .child(Icon::new(Icone::X).size(px(14.)))
                                     .tooltip(|window, cx| {
-                                        gpui_component::tooltip::Tooltip::new("Limpar busca")
+                                        gpui_kit::component::tooltip::Tooltip::new("Limpar busca")
                                             .build(window, cx)
                                     })
                                     .on_click(cx.listener(
@@ -494,7 +498,7 @@ impl Chatbot {
                     .px(px(6.))
                     .rounded(px(6.))
                     .bg(vermelho())
-                    .text_color(gpui::white())
+                    .text_color(gpui_kit::white())
                     .text_xs()
                     .child(format!("{} sem resposta", conversa.sem_resposta))
                     .into_any_element(),
@@ -720,7 +724,7 @@ impl Chatbot {
                     .child("Assumir")
                 }
                 .tooltip(move |window, cx| {
-                    gpui_component::tooltip::Tooltip::new(if atendendo {
+                    gpui_kit::component::tooltip::Tooltip::new(if atendendo {
                         "Devolver a conversa ao bot"
                     } else if canal == Canal::WhatsApp {
                         "Pausar o bot neste contato e responder à mão"
@@ -738,7 +742,7 @@ impl Chatbot {
                 )
                 .child(Icon::new(Icone::EllipsisVertical).size(px(16.)))
                 .tooltip(|window, cx| {
-                    gpui_component::tooltip::Tooltip::new("Mais ações").build(window, cx)
+                    gpui_kit::component::tooltip::Tooltip::new("Mais ações").build(window, cx)
                 })
                 .on_click(cx.listener(|tela, _, _, cx| tela.alternar_mais_acoes(cx))),
             )
@@ -1130,12 +1134,12 @@ impl Chatbot {
                         botao
                             .child(Icon::new(Icone::Zap).size(px(16.)))
                             .tooltip(|window, cx| {
-                                gpui_component::tooltip::Tooltip::new("Respostas rápidas")
+                                gpui_kit::component::tooltip::Tooltip::new("Respostas rápidas")
                                     .build(window, cx)
                             })
                             .on_click(cx.listener(|tela, _, _, cx| tela.alternar_respostas(cx)))
                     })
-                    .child(div().flex_1().child(Input::new(&self.compositor)))
+                    .child(div().flex_1().child(Textarea::new(&self.compositor)))
                     .child(estilo::desligado(
                         marcado(
                             estilo::botao_primario("chatbot-enviar", cx),
@@ -1143,7 +1147,7 @@ impl Chatbot {
                         )
                         .child(Icon::new(Icone::Send).size(px(16.)))
                         .tooltip(|window, cx| {
-                            gpui_component::tooltip::Tooltip::new("Enviar").build(window, cx)
+                            gpui_kit::component::tooltip::Tooltip::new("Enviar").build(window, cx)
                         })
                         .on_click(
                             cx.listener(|tela, _, window, cx| tela.enviar_o_escrito(window, cx)),
@@ -1196,7 +1200,7 @@ impl Chatbot {
                     div()
                         .key_context("QuemAssume")
                         .on_action(cx.listener(
-                            |tela, _: &gpui_component::input::Enter, window, cx| {
+                            |tela, _: &gpui_kit::component::input::Enter, window, cx| {
                                 tela.confirmar_quem_assume(window, cx)
                             },
                         ))
@@ -1463,7 +1467,7 @@ impl Chatbot {
                     .child(div().text_xs().text_color(apagado).child(
                         "Como a situação foi resolvida. É o que fica no histórico do contato — e o que explica, meses depois, por que esta urgência saiu da fila.",
                     ))
-                    .child(Input::new(&self.notas)),
+                    .child(Textarea::new(&self.notas)),
             )
             .child(
                 estilo::rodape_do_dialogo()

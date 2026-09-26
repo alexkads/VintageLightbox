@@ -19,12 +19,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use domain::services::pos_venda::Sessao;
-use gpui::{
+use gpui_kit::component::progress::Progress;
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
+use gpui_kit::{
     div, img, prelude::*, px, Context, FocusHandle, KeyDownEvent, RenderImage, SharedString, Task,
     Window,
 };
-use gpui_component::progress::Progress;
-use gpui_component::{h_flex, v_flex, ActiveTheme, Icon};
 
 use crate::estilo;
 use crate::recursos::Icone;
@@ -1107,7 +1107,7 @@ impl Backup {
                                 div()
                                     .size(px(16.))
                                     .rounded(px(8.))
-                                    .bg(gpui::white())
+                                    .bg(gpui_kit::white())
                                     .ml(if ligado { px(16.) } else { px(0.) }),
                             ),
                     )
@@ -1158,7 +1158,7 @@ impl Backup {
             .border_dashed()
             .border_color(if self.arrastando { primaria } else { borda })
             .on_drag_move(
-                cx.listener(|tela, _ev: &gpui::DragMoveEvent<()>, _window, cx| {
+                cx.listener(|tela, _ev: &gpui_kit::DragMoveEvent<()>, _window, cx| {
                     if !tela.arrastando {
                         tela.arrastando = true;
                         cx.notify();
@@ -1166,7 +1166,7 @@ impl Backup {
                 }),
             )
             .on_drop(
-                cx.listener(|tela, arrastados: &gpui::ExternalPaths, window, cx| {
+                cx.listener(|tela, arrastados: &gpui_kit::ExternalPaths, window, cx| {
                     tela.arrastando = false;
                     tela.receber(arrastados.paths().to_vec(), window, cx);
                 }),
@@ -1197,7 +1197,7 @@ impl Backup {
                             "Lendo e convertendo… {feitos} de {total}"
                         ))))
                         .child(
-                            Progress::new()
+                            Progress::new("progresso-do-acervo")
                                 .value(if total == 0 {
                                     0.
                                 } else {
@@ -1230,7 +1230,11 @@ impl Backup {
                                 )))
                                 .child(SharedString::from(format!("{}%", andamento.porcento))),
                         )
-                        .child(Progress::new().value(andamento.porcento as f32).h(px(6.)))
+                        .child(
+                            Progress::new("progresso-do-backup")
+                                .value(andamento.porcento as f32)
+                                .h(px(6.)),
+                        )
                         .children(self.pecas.iter().map(|peca| {
                             h_flex()
                                 .w_full()
@@ -1251,7 +1255,7 @@ impl Backup {
                                 })
                                 .when(peca.erro.is_none(), |l| {
                                     l.child(
-                                        Progress::new()
+                                        Progress::new(("progresso-da-peca", peca.id))
                                             .value(if peca.bytes == 0 {
                                                 0.
                                             } else {
@@ -1329,7 +1333,7 @@ impl Backup {
         // zoom multiplica os dois lados.
         let moldura = window.viewport_size();
         let cabe = crate::imagem::cabe_em(
-            gpui::size(moldura.width, moldura.height - px(48.)),
+            gpui_kit::size(moldura.width, moldura.height - px(48.)),
             imagem.size(0),
         );
 
@@ -1338,7 +1342,7 @@ impl Backup {
                 .id("backup-previa")
                 .absolute()
                 .inset_0()
-                .bg(gpui::black().opacity(0.9))
+                .bg(gpui_kit::black().opacity(0.9))
                 .on_click(cx.listener(|tela, _ev, _window, cx| tela.fechar_a_previa(cx)))
                 .child(
                     h_flex()
@@ -1348,8 +1352,8 @@ impl Backup {
                         .gap(px(8.))
                         .px(px(16.))
                         .py(px(8.))
-                        .bg(gpui::black().opacity(0.6))
-                        .text_color(gpui::white())
+                        .bg(gpui_kit::black().opacity(0.6))
+                        .text_color(gpui_kit::white())
                         .child(
                             div()
                                 .flex_1()
@@ -1432,7 +1436,7 @@ impl Backup {
         )
     }
 
-    fn lista(&self, apagado: gpui::Hsla, cx: &mut Context<Self>) -> impl IntoElement {
+    fn lista(&self, apagado: gpui_kit::Hsla, cx: &mut Context<Self>) -> impl IntoElement {
         let borda = cx.theme().border;
         v_flex()
             .id("backup-lista")
@@ -1524,7 +1528,7 @@ mod testes {
     use super::*;
     use crate::backup::escolha::mentira::EscolhaDeMentira;
     use crate::backup::porta::mentira::AcervoDeArquivosDeMentira;
-    use gpui::TestAppContext;
+    use gpui_kit::TestAppContext;
 
     fn sessao() -> Sessao {
         Sessao {
@@ -1558,7 +1562,7 @@ mod testes {
     /// sozinho. Quando a leitura e a conversão demoram (uma foto de verdade), o
     /// primeiro `try_recv` vem vazio, o laço dorme, e a tela fica parada sem
     /// nada ter dado errado. Foi o que este teste acusou.
-    fn assentar(visual: &mut gpui::VisualTestContext) {
+    fn assentar(visual: &mut gpui_kit::VisualTestContext) {
         for _ in 0..60 {
             visual.run_until_parked();
             visual
@@ -1571,7 +1575,7 @@ mod testes {
     fn tela(
         cx: &mut TestAppContext,
         acervo: Arc<AcervoDeArquivosDeMentira>,
-    ) -> (gpui::WindowHandle<Backup>, gpui::VisualTestContext) {
+    ) -> (gpui_kit::WindowHandle<Backup>, gpui_kit::VisualTestContext) {
         com_escolha(cx, acervo, Arc::new(EscolhaDeMentira::default()))
     }
 
@@ -1579,13 +1583,13 @@ mod testes {
         cx: &mut TestAppContext,
         acervo: Arc<AcervoDeArquivosDeMentira>,
         escolha: Arc<EscolhaDeMentira>,
-    ) -> (gpui::WindowHandle<Backup>, gpui::VisualTestContext) {
+    ) -> (gpui_kit::WindowHandle<Backup>, gpui_kit::VisualTestContext) {
         // O `gpui-component` guarda o tema num estado global; sem ele, o
         // primeiro `cx.theme()` do `render` derruba o teste com "no state of
         // type Theme exists" — um erro que não fala de tema nenhum.
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
         let janela = cx.add_window(|_window, cx| Backup::novo(acervo, escolha, cx));
-        let visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        let visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
         janela
             .update(cx, |tela, _window, _cx| {
                 tela.sessao = Some(sessao());
@@ -1598,7 +1602,7 @@ mod testes {
     /// sair conforme abrem vagas — a primeira versão desta tela despachava os
     /// três primeiros e parava, e a fila ficava pendurada para sempre sem erro
     /// nenhum. `SIMULTANEOS` sem uso foi o que denunciou.
-    #[gpui::test]
+    #[gpui_kit::test]
     async fn a_fila_inteira_sobe_mesmo_passando_do_limite(cx: &mut TestAppContext) {
         let acervo = Arc::new(AcervoDeArquivosDeMentira::default());
         let (janela, mut visual) = tela(cx, acervo.clone());
@@ -1625,7 +1629,7 @@ mod testes {
     }
 
     /// 🔑 A árvore arrastada é preservada, e a pasta aberta entra na frente.
-    #[gpui::test]
+    #[gpui_kit::test]
     async fn o_caminho_enviado_guarda_a_arvore_e_a_pasta_aberta(cx: &mut TestAppContext) {
         let acervo = Arc::new(AcervoDeArquivosDeMentira::default());
         let (janela, mut visual) = tela(cx, acervo.clone());
@@ -1645,7 +1649,7 @@ mod testes {
 
     /// ⚠️ **A falha de uma não interrompe a fila** — a mesma regra da
     /// exportação em lote.
-    #[gpui::test]
+    #[gpui_kit::test]
     async fn a_falha_de_uma_nao_derruba_as_outras(cx: &mut TestAppContext) {
         let acervo = Arc::new(AcervoDeArquivosDeMentira::default());
         *acervo.falham.lock().unwrap() = 2;
@@ -1671,7 +1675,7 @@ mod testes {
 
     /// 🚨 O lote inteiro cai quando o backend recusa a assinatura: marcar só uma
     /// deixaria as outras penduradas esperando uma assinatura que não vem.
-    #[gpui::test]
+    #[gpui_kit::test]
     async fn a_recusa_da_assinatura_derruba_o_lote(cx: &mut TestAppContext) {
         let acervo = Arc::new(AcervoDeArquivosDeMentira::default());
         *acervo.recusa_a_assinatura.lock().unwrap() =
@@ -1698,7 +1702,7 @@ mod testes {
 
     /// 🔑 **Os dois sobem** — o original e o WebP ao lado (decisão do dono,
     /// 2026-09-18). E o convertido é irmão, com o nome trocado.
-    #[gpui::test]
+    #[gpui_kit::test]
     async fn a_imagem_sobe_com_o_webp_ao_lado(cx: &mut TestAppContext) {
         let acervo = Arc::new(AcervoDeArquivosDeMentira::default());
         let (janela, mut visual) = tela(cx, acervo.clone());
@@ -1729,7 +1733,7 @@ mod testes {
     }
 
     /// Com o interruptor desligado, só o original sobe.
-    #[gpui::test]
+    #[gpui_kit::test]
     async fn sem_converter_sobe_so_o_original(cx: &mut TestAppContext) {
         let acervo = Arc::new(AcervoDeArquivosDeMentira::default());
         let (janela, mut visual) = tela(cx, acervo.clone());
@@ -1755,7 +1759,7 @@ mod testes {
     }
     /// 🔑 **A opção sem arrastar** (dono, 2026-09-19). O que a janela do
     /// sistema devolve entra pelo mesmo caminho do arrasto.
-    #[gpui::test]
+    #[gpui_kit::test]
     async fn escolher_pasta_sobe_sem_arrastar_nada(cx: &mut TestAppContext) {
         let acervo = Arc::new(AcervoDeArquivosDeMentira::default());
         let escolha = Arc::new(EscolhaDeMentira::default());
@@ -1773,7 +1777,7 @@ mod testes {
     }
 
     /// Escolher arquivos avulsos: cada um sobe com o próprio nome.
-    #[gpui::test]
+    #[gpui_kit::test]
     async fn escolher_arquivos_sobe_os_avulsos(cx: &mut TestAppContext) {
         let acervo = Arc::new(AcervoDeArquivosDeMentira::default());
         let escolha = Arc::new(EscolhaDeMentira::default());
@@ -1802,7 +1806,7 @@ mod testes {
 
     /// ⚠️ **Fechar a janela do sistema não é erro.** Lista vazia é desistência,
     /// e um aviso vermelho ali ensinaria o operador a ignorar avisos.
-    #[gpui::test]
+    #[gpui_kit::test]
     async fn desistir_da_escolha_nao_vira_erro(cx: &mut TestAppContext) {
         let acervo = Arc::new(AcervoDeArquivosDeMentira::default());
         let escolha = Arc::new(EscolhaDeMentira::default());
@@ -1848,7 +1852,7 @@ mod testes {
 
     /// 🔑 **Visualizar a foto** (dono, 2026-09-19). Os bytes vêm pelo link
     /// assinado e viram textura.
-    #[gpui::test]
+    #[gpui_kit::test]
     async fn a_foto_abre_na_previa(cx: &mut TestAppContext) {
         let acervo = Arc::new(AcervoDeArquivosDeMentira::default());
         acervo
@@ -1878,7 +1882,7 @@ mod testes {
 
     /// 🚨 **Girar roda os pixels**, porque o `Img` do GPUI não gira: 400×300
     /// vira 300×400.
-    #[gpui::test]
+    #[gpui_kit::test]
     async fn girar_troca_os_lados_da_foto(cx: &mut TestAppContext) {
         let acervo = Arc::new(AcervoDeArquivosDeMentira::default());
         acervo
@@ -1908,7 +1912,7 @@ mod testes {
 
     /// 🔑 As setas percorrem **as fotos**, e pulam o que não é foto: um PDF no
     /// meio abriria um quadro vazio.
-    #[gpui::test]
+    #[gpui_kit::test]
     async fn as_setas_pulam_o_que_nao_e_foto(cx: &mut TestAppContext) {
         let acervo = Arc::new(AcervoDeArquivosDeMentira::default());
         for nome in ["a.png", "c.png"] {
@@ -1946,7 +1950,7 @@ mod testes {
 
     /// 📦 **Baixar a pasta compactada** (dono, 2026-09-19): o zip sai no
     /// destino escolhido, com os caminhos da árvore dentro.
-    #[gpui::test]
+    #[gpui_kit::test]
     async fn a_pasta_baixa_compactada(cx: &mut TestAppContext) {
         let acervo = Arc::new(AcervoDeArquivosDeMentira::default());
         acervo.arvores.lock().unwrap().insert(
@@ -2005,7 +2009,7 @@ mod testes {
     }
 
     /// ⚠️ **Desistir do diálogo não cria arquivo nenhum.**
-    #[gpui::test]
+    #[gpui_kit::test]
     async fn desistir_do_destino_nao_deixa_zip_pela_metade(cx: &mut TestAppContext) {
         let acervo = Arc::new(AcervoDeArquivosDeMentira::default());
         acervo.arvores.lock().unwrap().insert(
@@ -2040,7 +2044,7 @@ mod testes {
     }
 
     /// Pasta vazia diz o que é, em vez de abrir um diálogo de salvar para nada.
-    #[gpui::test]
+    #[gpui_kit::test]
     async fn pasta_vazia_nao_abre_dialogo(cx: &mut TestAppContext) {
         let acervo = Arc::new(AcervoDeArquivosDeMentira::default());
         let escolha = Arc::new(EscolhaDeMentira::default());
@@ -2071,7 +2075,7 @@ mod testes {
     /// envia. Uma peça que voltasse a carregar `Vec<u8>` não caberia no tipo, e
     /// é isso que se confere aqui — junto com o tamanho, que continua sendo
     /// lido do disco para a barra andar por bytes.
-    #[gpui::test]
+    #[gpui_kit::test]
     async fn a_fila_guarda_caminhos_e_nao_o_conteudo(cx: &mut TestAppContext) {
         let acervo = Arc::new(AcervoDeArquivosDeMentira::default());
         let (janela, mut visual) = tela(cx, acervo.clone());
@@ -2108,7 +2112,7 @@ mod testes {
     /// do outro, e o primeiro a terminar apagava os arquivos do segundo. Foi o
     /// que fez este arquivo de testes falhar de um jeito que parecia conversão
     /// quebrada — e não era.
-    #[gpui::test]
+    #[gpui_kit::test]
     async fn dois_envios_seguidos_nao_disputam_a_pasta_temporaria(cx: &mut TestAppContext) {
         let acervo = Arc::new(AcervoDeArquivosDeMentira::default());
         let (janela, mut visual) = tela(cx, acervo.clone());

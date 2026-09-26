@@ -19,16 +19,16 @@ use adapters::view_models::PhotoViewModel;
 use domain::entities::Preset;
 use domain::services::PreviewType;
 use domain::value_objects::CropSettings;
-use gpui::AnimationExt;
-use gpui::{
+use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::input::{InputEvent, InputState};
+use gpui_kit::component::slider::{SliderEvent, SliderState};
+use gpui_kit::component::tooltip::Tooltip;
+use gpui_kit::component::{ActiveTheme, Disableable, Selectable, Sizable, WindowExt};
+use gpui_kit::AnimationExt;
+use gpui_kit::{
     canvas, div, prelude::*, px, AnyElement, Bounds, Context, Entity, MouseButton, MouseMoveEvent,
     MouseUpEvent, Pixels, RenderImage, SharedString, Subscription, Task, Window,
 };
-use gpui_component::button::{Button, ButtonVariants};
-use gpui_component::input::{InputEvent, InputState};
-use gpui_component::slider::{SliderEvent, SliderState};
-use gpui_component::tooltip::Tooltip;
-use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable, WindowExt};
 use infrastructure::cache::preview_manager::PreviewManager;
 
 use crate::biblioteca::miniaturas::CacheDeMiniaturas;
@@ -195,7 +195,7 @@ pub struct Revelacao {
     /// uma leitura de memória por item — a razão caiu.
     miniaturas_da_tira: CacheDeMiniaturas,
     /// A rolagem da tira, para ela seguir a foto aberta.
-    rolagem_da_tira: gpui::ScrollHandle,
+    rolagem_da_tira: gpui_kit::ScrollHandle,
     /// A posição que a tira já mostrou — só rola quando muda.
     ultima_na_tira: Option<usize>,
     /// Onde estamos nela.
@@ -498,7 +498,11 @@ impl Revelacao {
                 &estado,
                 window,
                 move |tela: &mut Self, _estado, evento: &SliderEvent, _window, cx| {
-                    let SliderEvent::Change(valor) = evento;
+                    // O `Release` (novo no gpui-kit 0.6) chega depois do último `Change`
+                    // com o mesmo valor: tratá-lo gravaria duas vezes.
+                    let SliderEvent::Change(valor) = evento else {
+                        return;
+                    };
                     (definicao.aplicar)(&mut tela.ajustes, valor.start());
                     tela.pedir_revelacao(cx);
                     tela.adiar_gravacao(cx);
@@ -553,7 +557,11 @@ impl Revelacao {
             &angulo,
             window,
             move |tela: &mut Self, _estado, evento: &SliderEvent, _window, cx| {
-                let SliderEvent::Change(valor) = evento;
+                // O `Release` (novo no gpui-kit 0.6) chega depois do último `Change`
+                // com o mesmo valor: tratá-lo gravaria duas vezes.
+                let SliderEvent::Change(valor) = evento else {
+                    return;
+                };
                 tela.angulo_do_slider(valor.start(), cx);
             },
         ));
@@ -566,7 +574,7 @@ impl Revelacao {
             miniaturas_da_tira: CacheDeMiniaturas::nova(
                 NonZeroUsize::new(MINIATURAS_DA_TIRA).expect("não é zero"),
             ),
-            rolagem_da_tira: gpui::ScrollHandle::new(),
+            rolagem_da_tira: gpui_kit::ScrollHandle::new(),
             ultima_na_tira: None,
             posicao: 0,
             marcadas: BTreeSet::new(),
@@ -1075,15 +1083,17 @@ impl Revelacao {
         }
         let esta = cx.entity();
 
-        window.open_dialog(cx, move |dialogo, _window, cx| {
+        // O `AlertDialog` do gpui-kit 0.6 é o que o `Dialog::confirm()` do 0.5
+        // fazia: OK e Cancelar, sem o botão de fechar e sem fechar pelo véu.
+        window.open_alert_dialog(cx, move |dialogo, _window, cx| {
             let escolha = esta.read(cx).escolha_da_sincronizacao();
             let tudo = escolha.tudo();
             let para_tudo = esta.clone();
             let para_ok = esta.clone();
 
             dialogo
-                .title(SharedString::from(format!("Sincronizar {quantas} fotos")))
                 .confirm()
+                .title(SharedString::from(format!("Sincronizar {quantas} fotos")))
                 .child(
                     div().text_xs().child(
                         "O que estiver marcado vai desta foto para as outras escolhidas na tira. \
@@ -1140,7 +1150,12 @@ impl Revelacao {
                     "A receita vai para cada foto marcada. Elas sobem para a galeria \
                      quando você salvar.",
                 ))
-                .on_ok(move |_ev, _window, cx| {
+                // 🚨 **Fecha na hora, e devolve `false`.** Deixado à biblioteca,
+                // o gpui-kit 0.6 fecha com animação e só devolve o foco depois
+                // dela — nesse meio tempo o foco fica num diálogo que já saiu da
+                // tela, e a rede da raiz o apanha (o `sincronizar_e_zerar` acusou).
+                // O `close_dialog` direto devolve o foco no mesmo quadro.
+                .on_ok(move |_ev, window, cx| {
                     para_ok.update(cx, |tela, cx| {
                         let escolha = tela.escolha_da_sincronizacao();
                         // Nada marcado é nada a fazer — o site desliga o botão;
@@ -1151,7 +1166,12 @@ impl Revelacao {
                         sincronizacao::gravar(&escolha);
                         cx.emit(PedidoDaRevelacao::Sincronizar);
                     });
-                    true
+                    window.close_dialog(cx);
+                    false
+                })
+                .on_cancel(|_ev, window, cx| {
+                    window.close_dialog(cx);
+                    false
                 })
         });
     }
@@ -2264,7 +2284,7 @@ impl Revelacao {
         continua
     }
 
-    fn palco(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+    fn palco(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
         if self.comparacao.is_some() {
             return self.palco_do_comparar(cx);
         }
@@ -2342,8 +2362,8 @@ impl Revelacao {
                                 // GPUI reaproveita o estado da animação
                                 // anterior e a segunda troca nasce no fim.
                                 SharedString::from(format!("cruzamento-{}", self.cruzamento)),
-                                gpui::Animation::new(CRUZAMENTO_DA_FOTO)
-                                    .with_easing(gpui::ease_out_quint()),
+                                gpui_kit::Animation::new(CRUZAMENTO_DA_FOTO)
+                                    .with_easing(gpui_kit::ease_out_quint()),
                                 |foto, quanto| foto.opacity(quanto),
                             )
                             .into_any_element(),
@@ -2500,7 +2520,7 @@ pub enum PedidoDaRevelacao {
     QueroOBruto,
 }
 
-impl gpui::EventEmitter<PedidoDaRevelacao> for Revelacao {}
+impl gpui_kit::EventEmitter<PedidoDaRevelacao> for Revelacao {}
 
 impl Render for Revelacao {
     /// A tela inteira, no desenho do editor do site (`editor.tsx`).
@@ -2545,7 +2565,7 @@ impl Render for Revelacao {
         // colunas ficam esmaecidas e sem clique, como no site (`inert`).
         let comparando = self.comparacao.is_some();
         let fundo = cx.theme().background;
-        let calar = move |coluna: gpui::AnyElement| {
+        let calar = move |coluna: gpui_kit::AnyElement| {
             // Sem tamanho próprio: a coluna das predefinições tem largura fixa e
             // `flex_none` numa linha flex, e o invólucro não pode esticá-la.
             div()
@@ -2614,7 +2634,7 @@ impl Revelacao {
     /// é o único caminho de volta visível — e ele faz o mesmo que o `Esc`.
     fn cabecalho(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         use crate::recursos::Icone;
-        use gpui_component::Icon;
+        use gpui_kit::component::Icon;
 
         // 🔑 "i/n" conta **a tira** (o recorte), como o site: as setas andam
         // por ela.
@@ -2912,7 +2932,7 @@ fn pilula(
     ligada: bool,
     desligada: bool,
     cx: &mut Context<Revelacao>,
-) -> gpui::Stateful<gpui::Div> {
+) -> gpui_kit::Stateful<gpui_kit::Div> {
     let (fundo, texto) = (cx.theme().muted, cx.theme().foreground);
     div()
         .id(id)
@@ -2924,7 +2944,7 @@ fn pilula(
         .rounded(px(4.))
         .text_xs()
         .when(ligada, |b| {
-            b.bg(gpui::rgb(0xfbbf24)).text_color(gpui::black())
+            b.bg(gpui_kit::rgb(0xfbbf24)).text_color(gpui_kit::black())
         })
         .when(!ligada, |b| {
             b.bg(fundo)
@@ -2952,9 +2972,10 @@ pub(crate) fn tem_o_que_zerar(foto: &PhotoViewModel) -> bool {
 mod testes {
     use super::*;
     use crate::biblioteca::miniaturas::Miniatura;
+    use crate::campo::TrocarValor as _;
     use biblioteca_core::selecao::Modificadores;
 
-    use gpui::TestAppContext;
+    use gpui_kit::TestAppContext;
     use image::{DynamicImage, Rgba, RgbaImage};
     use tempfile::TempDir;
 
@@ -2965,7 +2986,7 @@ mod testes {
     use super::super::persistencia::mentira::GravadorDeMentira;
     use super::super::presets::mentira::GuardaDeMentira;
     use super::super::presets::ordem::Grupo;
-    use gpui::App;
+    use gpui_kit::App;
 
     fn previews_descartaveis() -> (Arc<PreviewManager>, TempDir) {
         let dir = TempDir::new().expect("criar diretório temporário");
@@ -3000,7 +3021,7 @@ mod testes {
     fn janela(
         cx: &mut TestAppContext,
         previews: Arc<PreviewManager>,
-    ) -> gpui::WindowHandle<Revelacao> {
+    ) -> gpui_kit::WindowHandle<Revelacao> {
         com_gravador(cx, previews, Arc::new(GravadorDeMentira::default()))
     }
 
@@ -3008,7 +3029,7 @@ mod testes {
         cx: &mut TestAppContext,
         previews: Arc<PreviewManager>,
         gravador: Arc<GravadorDeMentira>,
-    ) -> gpui::WindowHandle<Revelacao> {
+    ) -> gpui_kit::WindowHandle<Revelacao> {
         com_presets(cx, previews, gravador, Vec::new())
     }
 
@@ -3017,7 +3038,7 @@ mod testes {
         previews: Arc<PreviewManager>,
         gravador: Arc<GravadorDeMentira>,
         presets: Vec<Preset>,
-    ) -> gpui::WindowHandle<Revelacao> {
+    ) -> gpui_kit::WindowHandle<Revelacao> {
         com_guarda(
             cx,
             previews,
@@ -3033,7 +3054,7 @@ mod testes {
         gravador: Arc<GravadorDeMentira>,
         guarda: Arc<GuardaDeMentira>,
         presets: Vec<Preset>,
-    ) -> gpui::WindowHandle<Revelacao> {
+    ) -> gpui_kit::WindowHandle<Revelacao> {
         com_escolha(
             cx,
             previews,
@@ -3052,8 +3073,8 @@ mod testes {
         guarda: Arc<GuardaDeMentira>,
         escolha: Arc<dyn EscolhaDePresets>,
         presets: Vec<Preset>,
-    ) -> gpui::WindowHandle<Revelacao> {
-        cx.update(gpui_component::init);
+    ) -> gpui_kit::WindowHandle<Revelacao> {
+        cx.update(gpui_kit::init);
         cx.add_window(move |window, cx| {
             Revelacao::nova(previews, gravador, guarda, escolha, presets, window, cx)
         })
@@ -3075,7 +3096,7 @@ mod testes {
     ///
     /// O `canvas` do palco grava as próprias bounds em `self.palco` — é essa
     /// medida que este teste cobra.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_palco_tem_tamanho_depois_de_desenhado(cx: &mut TestAppContext) {
         let (previews, dir) = previews_descartaveis();
         previews
@@ -3092,11 +3113,11 @@ mod testes {
 
         // Desenhar de verdade: é o `canvas` da fase de pintura que mede, e ele
         // só roda quando a janela é pintada.
-        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
         visual.draw(
-            gpui::Point::default(),
-            gpui::size(px(1200.), px(800.)),
-            |_window, _cx| gpui::Empty,
+            gpui_kit::Point::default(),
+            gpui_kit::size(px(1200.), px(800.)),
+            |_window, _cx| gpui_kit::Empty,
         );
         visual.run_until_parked();
 
@@ -3119,7 +3140,7 @@ mod testes {
     /// frase — sem botão, sem recuperação, sem nada acontecendo. Este teste
     /// cobra a lista que a raiz usa para repor: a foto sem cache tem de
     /// aparecer nela, com o caminho do arquivo.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_foto_sem_cache_entra_na_lista_de_reposicao(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         let janela = janela(cx, previews);
@@ -3146,7 +3167,7 @@ mod testes {
     /// grande abre o palco cheio com a tira preta ao lado — e era exatamente
     /// esse o estado que ninguém repunha, porque a única pergunta feita era
     /// sobre o palco.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn so_o_preview_grande_nao_basta(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -3172,7 +3193,7 @@ mod testes {
     /// está na tela — a única que alguém está olhando — esperar as anteriores
     /// todas; do centro para fora ela sai primeiro, e as seguintes chegam na
     /// ordem em que a seta vai pedi-las.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_reposicao_comeca_pelo_palco_e_vai_para_fora(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         let janela = janela(cx, previews);
@@ -3204,7 +3225,7 @@ mod testes {
     /// O bruto dela vem da cópia de trabalho do storage — o passo 11. Mandá-la
     /// ao repositor faria ele abrir um caminho vazio, uma vez por foto, e
     /// encher a tela de avisos por uma reposição que nunca poderia dar certo.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_foto_do_site_fica_de_fora_da_reposicao(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         let janela = janela(cx, previews);
@@ -3236,7 +3257,7 @@ mod testes {
     /// resultado: sem o esquecimento, a célula continuaria preta depois de a
     /// miniatura voltar ao cache — e a reposição inteira pareceria não ter
     /// acontecido.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_miniatura_reposta_faz_a_celula_da_tira_reler(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         let janela = janela(cx, previews.clone());
@@ -3275,7 +3296,7 @@ mod testes {
     /// cheia, andar uma foto custava um salto **por foto do ensaio** só para
     /// descobrir que não havia nada a fazer, e trocar de foto ficou
     /// "extremamente lento" sem que nada do que desenha tivesse mudado.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_tira_carregada_nao_pede_nada_ao_trocar_de_foto(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         for nome in ["a.jpg", "b.jpg", "c.jpg"] {
@@ -3330,7 +3351,7 @@ mod testes {
     /// ```bash
     /// cargo test --release -p ui-gpui -- --ignored --nocapture medir_o_quadro
     /// ```
-    #[gpui::test]
+    #[gpui_kit::test]
     #[ignore = "régua, não asserção — roda à mão com --nocapture"]
     fn medir_o_quadro_da_revelacao(cx: &mut TestAppContext) {
         const QUADROS: usize = 40;
@@ -3361,11 +3382,11 @@ mod testes {
                 })
                 .expect("a janela deve estar aberta");
 
-            let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+            let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
             visual.draw(
-                gpui::Point::default(),
-                gpui::size(px(2000.), px(1300.)),
-                |_window, _cx| gpui::Empty,
+                gpui_kit::Point::default(),
+                gpui_kit::size(px(2000.), px(1300.)),
+                |_window, _cx| gpui_kit::Empty,
             );
             visual.run_until_parked();
 
@@ -3376,9 +3397,9 @@ mod testes {
                     .update(cx, |_tela, _window, cx| cx.notify())
                     .expect("a janela deve estar aberta");
                 visual.draw(
-                    gpui::Point::default(),
-                    gpui::size(px(2000.), px(1300.)),
-                    |_window, _cx| gpui::Empty,
+                    gpui_kit::Point::default(),
+                    gpui_kit::size(px(2000.), px(1300.)),
+                    |_window, _cx| gpui_kit::Empty,
                 );
             }
             let por_quadro = inicio.elapsed().as_secs_f64() * 1000.0 / QUADROS as f64;
@@ -3397,7 +3418,7 @@ mod testes {
     /// predefinição ou desfazer substitui a foto inteira de um quadro para o
     /// outro, e o olho lê o salto como travada. O palco guarda a foto que sai
     /// para desenhar as duas empilhadas enquanto a nova ganha opacidade.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn desfazer_cruza_a_foto_em_vez_de_trocar_seca(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -3436,7 +3457,7 @@ mod testes {
     /// O `ElementId` da animação é o que o GPUI usa para achar o estado dela.
     /// Repetido, a segunda troca nasce no fim da animação — sem erro nenhum, e
     /// com a impressão de que o efeito "às vezes não funciona".
-    #[gpui::test]
+    #[gpui_kit::test]
     fn cada_cruzamento_tem_um_id_proprio(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -3469,7 +3490,7 @@ mod testes {
     /// continua colorida, lado a lado, na mesma tela — com a imagem que o
     /// importador gravou. Numa sequência de vinte fotos a tira é o que diz onde
     /// ele parou, e era a única coisa ali que não acompanhava o trabalho.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_tira_passa_a_mostrar_a_foto_revelada(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -3517,7 +3538,7 @@ mod testes {
     /// Quando a prévia local de um lote inteiro é trocada, cada célula esquecida
     /// desenha o vazio até algo disparar o carregamento; o que disparava era
     /// trocar de foto, que é o gesto que o operador não tinha por que fazer.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn esquecer_a_miniatura_manda_reler_na_mesma_passada(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         for nome in ["retrato.jpg", "paisagem.jpg"] {
@@ -3582,7 +3603,7 @@ mod testes {
         cx.run_until_parked();
     }
 
-    #[gpui::test]
+    #[gpui_kit::test]
     fn abrir_traz_o_preview_do_cache(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -3608,7 +3629,7 @@ mod testes {
     /// aparecia com os sliders no neutro, e "sincronizar" a partir dela mandava
     /// o neutro às outras. A miniatura fica só como espera na tela; a origem
     /// chega pela cópia de trabalho (`receber_pixels`).
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_foto_do_site_espera_a_copia_de_trabalho_em_vez_de_usar_a_miniatura(
         cx: &mut TestAppContext,
     ) {
@@ -3652,7 +3673,7 @@ mod testes {
     /// separada da miniatura da galeria, que continua sendo outra imagem. Sem
     /// isso, cada seta era um download: foi o *"voltou a ficar lento"* de
     /// 8/set, um dia depois de o cache ser desligado para esta foto.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_copia_de_trabalho_do_site_fica_no_cache_e_a_volta_nao_baixa(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         // A imagem da galeria, na chave da grade: é a revelada, e não serve de
@@ -3699,7 +3720,7 @@ mod testes {
     }
 
     /// Foto sem nada no cache abre assim mesmo — e sem origem para revelar.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn foto_sem_cache_abre_sem_imagem(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         let janela = janela(cx, previews);
@@ -3722,7 +3743,7 @@ mod testes {
     /// `set_value` daria um teste que passa com o assinante morto.
     fn arrastar(
         cx: &mut TestAppContext,
-        janela: &gpui::WindowHandle<Revelacao>,
+        janela: &gpui_kit::WindowHandle<Revelacao>,
         controle: usize,
         valor: f32,
     ) {
@@ -3731,7 +3752,7 @@ mod testes {
                 let estado = tela.controles[controle].estado.clone();
                 estado.update(cx, |_, cx| {
                     cx.emit(SliderEvent::Change(
-                        gpui_component::slider::SliderValue::Single(valor),
+                        gpui_kit::component::slider::SliderValue::Single(valor),
                     ));
                 });
             })
@@ -3745,7 +3766,7 @@ mod testes {
     /// `Subscription` guardadas num `Vec`, e descartá-las faz **todos** os
     /// sliders se moverem sem mover a foto — sem erro, sem aviso, arrastando
     /// normalmente.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn arrastar_o_slider_escreve_nos_ajustes(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -3784,7 +3805,7 @@ mod testes {
     ///
     /// ⚠️ **A crua continua guardada**: ela é o "antes" do `\`, e some da tela
     /// sem sair da memória.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn abrir_uma_foto_revelada_nao_mostra_a_crua_antes(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -3825,7 +3846,7 @@ mod testes {
     /// resultado do motor é a própria origem: segurar a tela ali seria um palco
     /// preto em troca de nada — e é o que separa esta regra de "nunca desenhar
     /// a crua".
-    #[gpui::test]
+    #[gpui_kit::test]
     fn no_neutro_a_foto_aparece_sem_esperar_a_gpu(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -3855,7 +3876,7 @@ mod testes {
     ///
     /// Aqui a revelação é posta no cache à mão: o que se prova é o caminho, e
     /// não a GPU (que nem sempre existe em quem roda `cargo test`).
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_revelacao_guardada_dispensa_a_gpu(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -3905,7 +3926,7 @@ mod testes {
     /// é miss, e a GPU é chamada. Sem isto, mexer num slider e voltar à foto
     /// traria a revelação de antes do gesto — certa na aparência, errada no
     /// conteúdo.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_revelacao_guardada_com_outra_receita_nao_serve(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -3952,7 +3973,7 @@ mod testes {
     /// ⚠️ Prova o **pedido**, e não o resultado: o resultado depende de haver
     /// GPU, e o que esta tela controla é enfileirar o trabalho certo na hora
     /// certa.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_proxima_foto_e_revelada_antes_da_seta(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         for nome in ["id-a.jpg", "id-b.jpg"] {
@@ -3997,7 +4018,7 @@ mod testes {
     /// a piscada no filmstrip ao trocar de guia). A sessão de uma foto
     /// encolhia o cache para uma vaga, e as miniaturas da guia de antes eram
     /// relidas do disco na volta.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_sessao_pequena_nao_joga_fora_as_miniaturas_da_outra(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         for nome in ["id-a.jpg", "id-b.jpg", "id-c.jpg"] {
@@ -4036,7 +4057,7 @@ mod testes {
     /// 🚨 **A tira fica com uma foto só** (dono, 24/set/2026): com as guias,
     /// a sessão de uma foto ao lado da de oito trocava a moldura da Revelação
     /// a cada troca de guia. O site desenha a tira sempre.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_tira_fica_com_uma_foto_so(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -4061,7 +4082,7 @@ mod testes {
     /// ⚠️ **No neutro não há o que antecipar.** Sem receita a foto aparece
     /// direto da prévia: adiantar a ida à GPU seria gastar a placa para poupar
     /// uma ida que não existe.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_proxima_no_neutro_nao_vira_pedido(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         for nome in ["id-a.jpg", "id-b.jpg"] {
@@ -4090,7 +4111,7 @@ mod testes {
     /// trabalhou. Não é "faltou uma tela": é o trabalho dele sumindo da vista,
     /// com o arquivo cru na frente. E o painel diria a mesma mentira, com os 42
     /// sliders parados no meio.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn abrir_uma_foto_ja_revelada_traz_os_ajustes_dela(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -4138,7 +4159,7 @@ mod testes {
     /// um por campo, cada um com a foto meio carregada — em vez do único que
     /// `abrir` faz de propósito. O sintoma seria a Revelação demorar para abrir,
     /// sem nenhuma pista do porquê.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn abrir_sem_edicao_nao_pede_nada_a_gpu(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -4163,7 +4184,7 @@ mod testes {
     /// o neutro. Herdar o slider da foto anterior aplicaria a revelação de uma
     /// foto em outra, e a segunda abriria alterada sem ninguém tocar em nada — o
     /// tipo de coisa que se atribui ao motor de cor.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn abrir_outra_foto_nao_herda_o_arrasto_da_anterior(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         for id in ["id-a.jpg", "id-b.jpg"] {
@@ -4204,7 +4225,7 @@ mod testes {
     /// por segundo enquanto o dedo se move. E gravar antes da pausa não é só
     /// desperdício: são dezenas de escritas concorrentes na mesma linha, cuja
     /// ordem de chegada ninguém controla.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_arrasto_inteiro_vira_uma_gravacao_so(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -4244,7 +4265,7 @@ mod testes {
     /// trocasse os ajustes primeiro, a espera pendente sairia depois com os
     /// valores da foto nova e o id da... também nova — e a revelação da primeira
     /// simplesmente sumiria, sem erro nenhum.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn trocar_de_foto_grava_a_anterior_antes(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         for id in ["id-a.jpg", "id-b.jpg"] {
@@ -4285,7 +4306,7 @@ mod testes {
     /// Pedido do dono em 2026-09-11: o botão precisa funcionar com a tira
     /// inteira marcada. Três condições decidem quem entra, e nenhuma delas é
     /// visível na tela depois do clique — por isso ficam presas aqui.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_zerar_em_lote_pega_as_marcadas_com_ajuste(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         for id in ["id-a.jpg", "id-b.jpg", "id-c.jpg", "id-d.jpg"] {
@@ -4325,7 +4346,7 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
-    #[gpui::test]
+    #[gpui_kit::test]
     fn andar_e_voltar_preserva_o_que_foi_ajustado(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         for id in ["id-a.jpg", "id-b.jpg"] {
@@ -4362,7 +4383,7 @@ mod testes {
     /// não sabe cortar, o que piora o risco: mexer num slider aqui apagaria,
     /// calado, o enquadramento feito no app de egui. O corte é lido da foto e
     /// devolvido igual.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn gravar_devolve_o_corte_que_a_foto_ja_tinha(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -4406,7 +4427,7 @@ mod testes {
     /// 🔑 Se abrir gravasse, o app novo reescreveria os 46 campos de toda foto
     /// que alguém apenas olhasse — inclusive os 18 que ele mostra mas não aplica.
     /// Uma passada pela biblioteca viraria uma edição em massa que ninguém pediu.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn abrir_e_nao_mexer_em_nada_nao_grava(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -4438,7 +4459,7 @@ mod testes {
     /// deixasse a barra onde estava daria um painel mentindo sobre a foto, e um
     /// que não gravasse deixaria o banco com o estado desfeito — que volta na
     /// próxima abertura, como se o `Cmd+Z` não tivesse acontecido.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn desfazer_volta_o_slider_a_foto_e_o_banco(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -4488,7 +4509,7 @@ mod testes {
     /// passos e o `Cmd+Z` desfaz um milímetro por vez — com o teto de 20, o resto
     /// do histórico já foi embora. E o número de passos de lá depende da taxa de
     /// quadros do monitor.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn um_arrasto_inteiro_e_um_passo_so_de_desfazer(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -4525,7 +4546,7 @@ mod testes {
     /// desfaria o passo **anterior** e deixaria o arrasto de agora pendente — que
     /// gravaria 500 ms depois, por cima do que acabou de ser desfeito. O sintoma é
     /// o pior: o `Cmd+Z` parece funcionar e depois se desfaz sozinho.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn desfazer_no_meio_da_espera_fecha_o_gesto_primeiro(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -4575,7 +4596,7 @@ mod testes {
     /// 🚨 O erro que este teste pega é renomear só no banco: `self.presets` é o
     /// que a coluna desenha, e o nome antigo continuaria ali até a próxima
     /// abertura — com o operador renomeando de novo, achando que não pegou.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn renomear_troca_o_nome_na_lista_e_no_banco(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         let guarda = Arc::new(GuardaDeMentira::default());
@@ -4625,7 +4646,7 @@ mod testes {
     /// predefinição apagada, a foto continuaria mostrando uma que não existe
     /// mais — e sair com o ponteiro não a desfaria, porque a linha sumiu antes
     /// de o `on_hover` de saída chegar.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn apagar_tira_da_lista_e_desfaz_a_previa(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -4673,7 +4694,7 @@ mod testes {
     /// 🔑 **As novas entram na lista da tela na hora.** Elas já vão ao banco
     /// pela porta, mas quem acabou de importar quer aplicá-las agora — esperar a
     /// próxima abertura do app é o mesmo que não ter importado.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn importar_do_lightroom_traduz_grava_e_entra_na_lista(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         let guarda = Arc::new(GuardaDeMentira::default());
@@ -4751,7 +4772,7 @@ mod testes {
     ///
     /// Reimportar a mesma pasta é gesto comum — e sobrescrever apagaria o ajuste
     /// que o fotógrafo fez em cima da predefinição depois de importá-la.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn reimportar_a_mesma_pasta_nao_sobrescreve(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         let guarda = Arc::new(GuardaDeMentira::default());
@@ -4796,7 +4817,7 @@ mod testes {
 
     /// Desistir do seletor não deixa relatório: ninguém precisa ler "0 arquivos
     /// lidos" por ter fechado uma janela.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn desistir_do_seletor_nao_deixa_relatorio(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         let janela = com_escolha(
@@ -4825,7 +4846,7 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
-    #[gpui::test]
+    #[gpui_kit::test]
     fn trocar_de_foto_comeca_um_historico_novo(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         for id in ["id-a.jpg", "id-b.jpg"] {
@@ -4867,7 +4888,7 @@ mod testes {
     /// `self.ajustes`, passar o ponteiro pela lista deixaria a foto alterada —
     /// e o `Cmd+Z` não teria o que desfazer, porque nenhum gesto foi
     /// registrado.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_previa_muda_a_foto_e_nao_os_ajustes(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -4913,7 +4934,7 @@ mod testes {
         assert!(gravador.gravado().is_empty(), "e nada disso chega ao banco");
     }
 
-    #[gpui::test]
+    #[gpui_kit::test]
     fn refazer_alcanca_o_que_o_desfazer_deixou(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -4946,7 +4967,7 @@ mod testes {
     /// 🔑 **Cmd+A, Cmd+D, Ctrl e Shift no clique montam o lote na tira** — as
     /// regras do site (`escolherNaTira`): nenhum deles troca a foto aberta, a
     /// aberta nunca sai do lote, e trocar de foto recomeça.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_marcacao_da_tira_segue_o_site(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         let janela = janela(cx, previews);
@@ -5008,7 +5029,7 @@ mod testes {
 
     /// 🔑 **A tira segue o site**: a seta anda sobre o recorte, o lote fica ao
     /// trocar dentro dele, e o `Cmd+A` marca só o que a tira mostra.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_tira_recorta_e_guarda_o_lote(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         let janela = janela(cx, previews);
@@ -5057,7 +5078,7 @@ mod testes {
     }
 
     /// A raiz gravou nas marcadas; as cópias da tira têm de dizer o mesmo.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn as_sincronizadas_atualizam_as_copias_da_tira(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         let janela = janela(cx, previews);
@@ -5089,7 +5110,7 @@ mod testes {
     /// Os quatro juntos: um preset que mudasse `ajustes` sem mover as barras
     /// deixaria o painel mentindo; sem passo de histórico, o `Cmd+Z` pularia por
     /// cima dele; sem gravação, ele sumiria na próxima abertura.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn aplicar_preset_move_os_sliders_o_historico_e_o_banco(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -5132,7 +5153,7 @@ mod testes {
     /// Os quatro juntos, como no preset: os ajustes, a barra, o histórico e o
     /// banco. Um automático que mudasse `ajustes` sem mover a barra deixaria o
     /// painel mentindo sobre a foto que ele mesmo acabou de mudar.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_tom_automatico_move_os_sliders_o_historico_e_o_banco(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -5169,7 +5190,7 @@ mod testes {
 
     /// Sem foto não há histograma — e um passo de histórico sobre nada seria um
     /// `Cmd+Z` que não desfaz coisa nenhuma.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_tom_automatico_sem_foto_nao_faz_nada(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         let gravador = Arc::new(GravadorDeMentira::default());
@@ -5195,7 +5216,7 @@ mod testes {
     /// verdade por acidente — `PresetAdjustments` não tinha campo de HSL para
     /// escrever —, e agora é verdade por decisão: campo ausente do mapa não é
     /// tocado. Quem quiser apagar guarda os 53, e é escolha de quem salva.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_preset_nao_apaga_o_que_ele_nao_menciona(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -5235,7 +5256,7 @@ mod testes {
     /// 🚨 **A prévia de uma predefinição que substitui parte do neutro** — e é
     /// a mesma foto que o clique dá. Somando sempre, "Preto e branco" sobre uma
     /// sépia mostrava âmbar no ponteiro e cinza depois do clique.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_previa_que_substitui_e_a_mesma_foto_do_clique(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -5283,7 +5304,7 @@ mod testes {
     /// 🚨 **Sem nada fora do neutro não salva** — a menos que a caixa "zerar os
     /// outros" esteja marcada. O diálogo antigo tinha o OK sempre ligado e
     /// gravava uma predefinição vazia.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_formulario_so_salva_o_que_tem_o_que_guardar(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -5304,7 +5325,7 @@ mod testes {
                 tela.alternar_formulario_de_preset(window, cx);
                 assert!(tela.predefinicoes.criando.esta_aberto());
                 tela.nome_do_preset
-                    .update(cx, |estado, cx| estado.set_value("Nada", window, cx));
+                    .update(cx, |estado, cx| estado.trocar_valor("Nada", window, cx));
 
                 tela.salvar_preset(window, cx);
                 assert!(tela.presets.is_empty(), "nada fora do neutro");
@@ -5339,7 +5360,7 @@ mod testes {
     /// 🚨 **Apagar pergunta antes** — "Apagar "X"? A predefinição sai da
     /// lista." —, e só "Apagar" apaga. É o único gesto da coluna que não se
     /// desfaz.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn apagar_pergunta_e_so_o_sim_apaga(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         let minha = Preset::user(
@@ -5376,7 +5397,7 @@ mod testes {
     }
 
     /// O aviso de "entrou nas predefinições" aparece no canto e some sozinho.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_aviso_de_salvar_some_sozinho(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -5388,7 +5409,7 @@ mod testes {
                 tela.abrir(foto("retrato.jpg"), window, cx);
                 tela.alternar_preset_inteiro(cx);
                 tela.nome_do_preset
-                    .update(cx, |estado, cx| estado.set_value("Neutro", window, cx));
+                    .update(cx, |estado, cx| estado.trocar_valor("Neutro", window, cx));
                 tela.salvar_preset(window, cx);
                 assert_eq!(
                     tela.predefinicoes
@@ -5412,7 +5433,7 @@ mod testes {
 
     /// Renomear no lugar: a linha vira campo com o nome de agora, e confirmar
     /// fecha o campo.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn renomear_no_lugar_comeca_com_o_nome_e_fecha_ao_confirmar(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         let minha = Preset::user(
@@ -5454,7 +5475,7 @@ mod testes {
 
     /// Reordenar: ↑ ↓ andam uma posição, soltar põe antes ou depois, e "ordem
     /// padrão" desfaz. Com a busca ativa, nada se move.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn reordenar_anda_solta_e_volta_a_ordem_padrao(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -5499,12 +5520,12 @@ mod testes {
 
                 // Com a busca ativa, não se reordena.
                 tela.busca_de_presets
-                    .update(cx, |campo, cx| campo.set_value("a", window, cx));
+                    .update(cx, |campo, cx| campo.trocar_valor("a", window, cx));
                 let antes = nomes(tela, cx);
                 tela.deslocar_preset(Grupo::Sistema, "sistema:recordarfotos-pb", 1, cx);
                 assert_eq!(nomes(tela, cx), antes);
                 tela.busca_de_presets
-                    .update(cx, |campo, cx| campo.set_value("", window, cx));
+                    .update(cx, |campo, cx| campo.trocar_valor("", window, cx));
 
                 tela.definir_ordem_dos_presets(Grupo::Sistema, None, cx);
                 assert_eq!(nomes(tela, cx)[0], "Preto e branco clássico");
@@ -5515,7 +5536,7 @@ mod testes {
     /// Sem foto pronta (ou com a revelação travada no site) a coluna trava: o
     /// `+`, a prévia, o aplicar e o reordenar — o `desabilitado` do site. A
     /// levada no balcão continua revelável.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn sem_foto_ou_com_foto_vendida_a_coluna_trava(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -5553,7 +5574,7 @@ mod testes {
     ///
     /// Os dois: se ele fosse só guardado, quem acabou de salvar não veria nada
     /// acontecer e salvaria de novo.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn salvar_preset_guarda_os_ajustes_e_aparece_na_lista(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -5580,7 +5601,7 @@ mod testes {
         janela
             .update(cx, |tela, window, cx| {
                 tela.nome_do_preset.update(cx, |estado, cx| {
-                    estado.set_value("Retrato claro", window, cx)
+                    estado.trocar_valor("Retrato claro", window, cx)
                 });
                 tela.salvar_preset(window, cx);
 
@@ -5616,7 +5637,7 @@ mod testes {
     /// e o use case criava outro ao gravar. Enquanto salvar era o único gesto,
     /// ninguém notava — com renomear e apagar, o comando ia para um id que a
     /// tabela não tem, a linha sumia da tela e voltava na abertura seguinte.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_predefinicao_salva_tem_o_mesmo_id_na_tela_e_no_banco(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -5643,7 +5664,7 @@ mod testes {
         janela
             .update(cx, |tela, window, cx| {
                 tela.nome_do_preset
-                    .update(cx, |estado, cx| estado.set_value("Claro", window, cx));
+                    .update(cx, |estado, cx| estado.trocar_valor("Claro", window, cx));
                 tela.salvar_preset(window, cx);
 
                 let na_tela = tela.presets[0].id;
@@ -5661,7 +5682,7 @@ mod testes {
     /// O legado aceita, e o resultado é uma linha sem rótulo na lista — que não
     /// dá para distinguir das outras nem para apagar, porque apagar preset não
     /// existe em nenhum dos dois apps.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn preset_sem_nome_nao_e_salvo(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         let guarda = Arc::new(GuardaDeMentira::default());
@@ -5676,7 +5697,7 @@ mod testes {
         janela
             .update(cx, |tela, window, cx| {
                 tela.nome_do_preset
-                    .update(cx, |estado, cx| estado.set_value("   ", window, cx));
+                    .update(cx, |estado, cx| estado.trocar_valor("   ", window, cx));
                 tela.salvar_preset(window, cx);
 
                 assert!(tela.presets.is_empty());
@@ -5691,7 +5712,7 @@ mod testes {
     /// Abrir o `R` numa foto já cortada e ver o retângulo cobrindo tudo faria
     /// parecer que o corte se perdeu; e aplicar dali apagaria o enquadramento de
     /// verdade.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_corte_comeca_de_onde_a_foto_parou(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -5728,7 +5749,7 @@ mod testes {
     ///
     /// Não há "Cancelar": cada gesto já é o enquadramento da foto, e quem se
     /// arrepende usa `⌘Z`.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn sair_do_enquadrar_mantem_o_que_foi_feito(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -5764,7 +5785,7 @@ mod testes {
     ///
     /// O palco tem 80 px para uma foto de 8: cada 10 px de arrasto é um pixel
     /// da foto.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn arrastar_a_alca_grava_ao_soltar(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -5777,15 +5798,18 @@ mod testes {
         janela
             .update(cx, |tela, window, cx| {
                 tela.abrir(foto("retrato.jpg"), window, cx);
-                tela.palco = Bounds::new(gpui::point(px(0.), px(0.)), gpui::size(px(80.), px(80.)));
+                tela.palco = Bounds::new(
+                    gpui_kit::point(px(0.), px(0.)),
+                    gpui_kit::size(px(80.), px(80.)),
+                );
                 tela.alternar_corte(window, cx);
 
                 tela.comecar_arrasto(
                     Some(corte::Alca::Esquerda),
-                    gpui::point(px(0.), px(40.)),
+                    gpui_kit::point(px(0.), px(40.)),
                     cx,
                 );
-                tela.mover_no_corte(gpui::point(px(20.), px(40.)), window, cx);
+                tela.mover_no_corte(gpui_kit::point(px(20.), px(40.)), window, cx);
                 assert!(
                     gravador.gravado().is_empty(),
                     "no meio do arrasto não grava"
@@ -5804,7 +5828,7 @@ mod testes {
     }
 
     /// 🚨 O endireitar encolhe o retângulo para caber, e cresce de volta.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn endireitar_encolhe_e_volta(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         let mut grande = RgbaImage::new(100, 80);
@@ -5839,7 +5863,7 @@ mod testes {
 
     /// 🚨 A foto comprada no site não se revela: nada dela vai para o banco,
     /// e o Enquadrar não abre pelo botão.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_foto_comprada_nao_grava(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -5872,7 +5896,7 @@ mod testes {
     ///
     /// Sem imagem não há onde pôr o retângulo, e o overlay sobre o vazio daria
     /// oito alças flutuando em lugar nenhum — clicáveis, inclusive.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn foto_sem_cache_nao_entra_no_modo_de_corte(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         let janela = janela(cx, previews);
@@ -5891,7 +5915,7 @@ mod testes {
     /// O retângulo é da foto que estava na tela. Mantê-lo aberto aplicaria, no
     /// clique seguinte, o enquadramento de uma foto na outra — o mesmo defeito
     /// que a cópia da seleção e o histórico por foto já impedem nas outras pontas.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn trocar_de_foto_fecha_o_modo_de_corte(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         for id in ["id-a.jpg", "id-b.jpg"] {
@@ -5916,7 +5940,7 @@ mod testes {
     /// É a última divergência visível que sobrava em relação ao legado: até aqui
     /// a Revelação nova mostrava a foto inteira, e quem tinha enquadrado no app
     /// de egui via o corte desaparecer ao abrir no novo.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_foto_abre_com_o_corte_aplicado(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         // 16×16 para a metade dar 8×8 redondo.
@@ -5958,7 +5982,7 @@ mod testes {
     /// É o `apply_crop_clip` do legado. Sem isso, entrar no corte mostraria só o
     /// pedaço já cortado — e não haveria como aumentar o enquadramento de volta,
     /// porque o resto da foto não estaria na tela.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_modo_de_corte_mostra_a_foto_inteira(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         let mut grande = RgbaImage::new(16, 16);
@@ -6004,7 +6028,7 @@ mod testes {
     /// exposição e mantinha o corte novo, como se enquadrar não fosse editar. O
     /// legado erra pior — o `EditSnapshot` de lá tem o campo do corte, grava
     /// nele e nunca o lê de volta.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn desfazer_depois_de_cortar_devolve_o_enquadramento(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         let mut grande = RgbaImage::new(16, 16);
@@ -6057,7 +6081,7 @@ mod testes {
     /// passo com o enquadramento antigo, e só então o corte vira o seguinte.
     /// Fechar na ordem inversa colaria o corte novo num ajuste velho, e um
     /// `Cmd+Z` pularia por cima do enquadramento sem nunca o desfazer.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_gesto_pendente_e_o_corte_sao_dois_passos(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         let mut grande = RgbaImage::new(16, 16);
@@ -6101,7 +6125,7 @@ mod testes {
     ///
     /// Um botão que mexe no estado sem reprocessar a imagem parece quebrado — e o
     /// defeito só apareceria ao aplicar, quando a foto saltasse de orientação.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn girar_muda_a_foto_na_tela(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         // 16×8: deitada, para o giro trocar largura por altura de forma visível.
@@ -6138,7 +6162,7 @@ mod testes {
     ///
     /// Numa foto já endireitada, uma barra no meio diria que ela está reta — e o
     /// primeiro toque nela desfaria o endireitamento sem aviso.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_slider_de_angulo_abre_no_angulo_da_foto(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -6164,7 +6188,7 @@ mod testes {
     }
 
     /// A proporção remodela o retângulo na hora, e vale para o arrasto seguinte.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn travar_a_proporcao_remodela_e_muda_o_arrasto(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         let mut deitada = RgbaImage::new(160, 80);
@@ -6179,8 +6203,10 @@ mod testes {
         janela
             .update(cx, |tela, window, cx| {
                 tela.abrir(foto("retrato.jpg"), window, cx);
-                tela.palco =
-                    Bounds::new(gpui::point(px(0.), px(0.)), gpui::size(px(160.), px(80.)));
+                tela.palco = Bounds::new(
+                    gpui_kit::point(px(0.), px(0.)),
+                    gpui_kit::size(px(160.), px(80.)),
+                );
                 tela.alternar_corte(window, cx);
                 tela.travar_proporcao(Some(1.), cx);
 
@@ -6194,10 +6220,10 @@ mod testes {
                 // Encolhe pela esquerda: a altura acompanha a largura.
                 tela.comecar_arrasto(
                     Some(corte::Alca::Esquerda),
-                    gpui::point(px(40.), px(40.)),
+                    gpui_kit::point(px(40.), px(40.)),
                     cx,
                 );
-                tela.mover_no_corte(gpui::point(px(60.), px(40.)), window, cx);
+                tela.mover_no_corte(gpui_kit::point(px(60.), px(40.)), window, cx);
                 tela.soltar_no_corte(cx);
                 let (w, h) = quadrado(tela);
                 assert!((w - h).abs() <= 1., "1:1 depois do arrasto: {w} × {h}");
@@ -6211,7 +6237,7 @@ mod testes {
     /// Um histograma calculado da foto crua descreveria uma imagem que ninguém
     /// está vendo — e o instrumento que existe para dizer "as altas luzes
     /// estouraram" passaria a dizer isso da foto errada.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_histograma_acompanha_o_que_esta_na_tela(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -6258,7 +6284,7 @@ mod testes {
     }
 
     /// Sem foto não há histograma — e não há divisão por zero em lugar nenhum.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn sem_foto_nao_ha_histograma(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         let janela = janela(cx, previews);
@@ -6275,7 +6301,7 @@ mod testes {
     /// Se ele zerasse os sliders para mostrar o original, voltar do "antes"
     /// exigiria refazer a revelação inteira — e o `\\` seria a tecla mais cara do
     /// app em vez da mais barata.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_antes_troca_a_foto_e_nao_os_ajustes(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -6314,7 +6340,7 @@ mod testes {
     /// O erro fácil aqui é chamar `redefinir_ajustes` de dentro do duplo
     /// clique: os dois "voltam ao neutro", e o teste que só olhasse o controle
     /// clicado passaria com os outros 52 apagados junto.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_duplo_clique_devolve_so_aquele_controle(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -6361,7 +6387,7 @@ mod testes {
     /// de histórico idêntico ao anterior e mandaria um `UPDATE` ao banco — e o
     /// `Cmd+Z` seguinte pareceria não fazer nada, porque desfaria um passo que
     /// não mudou nada.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn duplo_clique_no_neutro_nao_grava(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -6388,7 +6414,7 @@ mod testes {
     /// contar "quantos são diferentes de zero" acusaria dois ajustes numa foto
     /// que ninguém tocou — com o ponto âmbar aceso em Básico e Detalhe desde a
     /// abertura.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_cabecalho_e_o_ponto_ambar_contam_o_que_saiu_do_neutro(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -6428,7 +6454,7 @@ mod testes {
 
     /// 🚨 **Foto comprada não se zera** — o `podeRevelar` do site. E uma foto
     /// só enquadrada conta como "fora do neutro" para o botão.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn foto_comprada_nao_se_zera_e_a_so_enquadrada_conta(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         for id in ["id-comprada.jpg", "id-girada.jpg"] {
@@ -6481,7 +6507,7 @@ mod testes {
     /// 2026-09-12, `editor.tsx:2106`). E o corte vai ao banco **escrito** como a
     /// foto inteira: o `Corte::default` quer dizer "não mexa", e deixaria o
     /// recorte de antes de pé.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn zerar_tudo_zera_os_ajustes_e_o_enquadramento(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -6540,7 +6566,7 @@ mod testes {
     /// misturar os dois conjuntos. Um `ajustes` que só recebesse os campos
     /// gravados na foto nova manteria os da anterior nos demais — e a segunda
     /// abriria com metade da revelação da primeira.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn abrir_outra_revelada_troca_os_ajustes_inteiros(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         for id in ["id-a.jpg", "id-b.jpg"] {

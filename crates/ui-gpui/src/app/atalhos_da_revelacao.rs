@@ -21,7 +21,7 @@
 //! foto aberta, que ali divide o palco com outra. Só o `?` e o próprio `⇧C`
 //! passam — é a lista do `decidirAtalho` do site com `comparando`.
 
-use gpui::{actions, prelude::*, Context, Div, KeyBinding, KeyUpEvent, Window};
+use gpui_kit::{actions, prelude::*, Context, Div, KeyBinding, KeyUpEvent, Window};
 
 use super::{Aplicativo, Tela, CONTEXTO, SEM_CAMPO_DE_TEXTO};
 use crate::revelacao::tela::Revelacao;
@@ -51,7 +51,7 @@ actions!(
     ]
 );
 
-pub(super) fn ligar(cx: &mut gpui::App) {
+pub(super) fn ligar(cx: &mut gpui_kit::App) {
     let solta = Some(SEM_CAMPO_DE_TEXTO);
     let com_modificador = Some(CONTEXTO);
     cx.bind_keys([

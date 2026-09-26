@@ -40,8 +40,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use domain::services::pos_venda::Sessao;
-use gpui::{div, prelude::*, px, Context, EventEmitter, SharedString, Task, Window};
-use gpui_component::ActiveTheme;
+use gpui_kit::component::ActiveTheme;
+use gpui_kit::{div, prelude::*, px, Context, EventEmitter, SharedString, Task, Window};
 
 use crate::pos_venda::config::Configuracao;
 use crate::pos_venda::porta::{Publicador, Recado};
@@ -217,7 +217,7 @@ impl Entrada {
 /// porque o GPUI não tem filtro de imagem) e o selo estão embutidos
 /// (`imagens/`), e as serifadas são as que o macOS já tem.
 mod capa {
-    use gpui::{rgb, rgba, Hsla};
+    use gpui_kit::{rgb, rgba, Hsla};
 
     pub const FUNDO: u32 = 0x140d09;
     pub const TEXTO: u32 = 0xf3e6cf;
@@ -243,17 +243,17 @@ mod capa {
 
 impl Entrada {
     /// Uma faixa do véu horizontal da capa, de `de` a `ate` (0–1 da largura).
-    fn faixa(de: f32, ate: f32, alfa_de: f32, alfa_ate: f32) -> gpui::Div {
+    fn faixa(de: f32, ate: f32, alfa_de: f32, alfa_ate: f32) -> gpui_kit::Div {
         div()
             .absolute()
             .top_0()
             .bottom_0()
-            .left(gpui::relative(de))
-            .w(gpui::relative(ate - de))
-            .bg(gpui::linear_gradient(
+            .left(gpui_kit::relative(de))
+            .w(gpui_kit::relative(ate - de))
+            .bg(gpui_kit::linear_gradient(
                 90.,
-                gpui::linear_color_stop(capa::veu(alfa_de), 0.),
-                gpui::linear_color_stop(capa::veu(alfa_ate), 1.),
+                gpui_kit::linear_color_stop(capa::veu(alfa_de), 0.),
+                gpui_kit::linear_color_stop(capa::veu(alfa_ate), 1.),
             ))
     }
 }
@@ -261,11 +261,11 @@ impl Entrada {
 impl Render for Entrada {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         use capa::cor;
-        use gpui::{
+        use gpui_kit::component::{h_flex, v_flex, Icon};
+        use gpui_kit::{
             img, linear_color_stop, linear_gradient, relative, Animation, AnimationExt, FontWeight,
             ObjectFit, StyledImage,
         };
-        use gpui_component::{h_flex, v_flex, Icon};
 
         use crate::recursos::Icone;
 
@@ -314,7 +314,9 @@ impl Render for Entrada {
                         "entrada-girando",
                         Animation::new(std::time::Duration::from_secs(1)).repeat(),
                         |icone, delta| {
-                            icone.transform(gpui::Transformation::rotate(gpui::percentage(delta)))
+                            icone.transform(gpui_kit::Transformation::rotate(gpui_kit::percentage(
+                                delta,
+                            )))
                         },
                     ),
                 )
@@ -433,7 +435,7 @@ impl Render for Entrada {
             .with_animation(
                 "entrada-surgir",
                 Animation::new(std::time::Duration::from_millis(900))
-                    .with_easing(gpui::ease_out_quint()),
+                    .with_easing(gpui_kit::ease_out_quint()),
                 |conteudo, delta| conteudo.opacity(delta).mt(px(14. * (1. - delta))),
             );
 
@@ -551,7 +553,7 @@ mod testes {
     use super::*;
 
     use crate::pos_venda::porta::mentira::PublicadorDeMentira;
-    use gpui::TestAppContext;
+    use gpui_kit::TestAppContext;
 
     /// A tela já com a retomada resolvida — que é como o operador a encontra.
     ///
@@ -563,8 +565,8 @@ mod testes {
     fn tela(
         publicador: Arc<PublicadorDeMentira>,
         cx: &mut TestAppContext,
-    ) -> gpui::WindowHandle<Entrada> {
-        cx.update(gpui_component::init);
+    ) -> gpui_kit::WindowHandle<Entrada> {
+        cx.update(gpui_kit::init);
         let janela = cx.add_window(|window, cx| {
             Entrada::nova(publicador, Configuracao::default(), window, cx)
         });
@@ -584,7 +586,7 @@ mod testes {
     /// onde o app desenha a própria janela — nem fechar dava, porque a tela de
     /// entrada não tinha barra. O caminho que trouxe a queixa nem chegava ao
     /// prazo: o site recusava com 403 e nada voltava.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn desistir_da_espera_devolve_o_convite(cx: &mut TestAppContext) {
         let publicador = Arc::new(PublicadorDeMentira {
             // A rede que não responde: é o que põe a tela no estado de espera.
@@ -615,7 +617,7 @@ mod testes {
     /// A tarefa que espera o navegador não se cancela daqui: ela segue de pé até
     /// o prazo dela. Sem trocar o canal, o operador que desistiu veria o app
     /// entrar sozinho minutos depois — com a conta que ele decidiu não usar.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_que_volta_depois_de_desistir_nao_entra(cx: &mut TestAppContext) {
         let publicador = Arc::new(PublicadorDeMentira {
             demorada: true,

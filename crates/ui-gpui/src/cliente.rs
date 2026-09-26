@@ -26,11 +26,11 @@ use std::time::Duration;
 use adapters::view_models::PhotoViewModel;
 use biblioteca_core::comparar::Lado;
 use domain::value_objects::CropSettings;
-use gpui::{
+use gpui_kit::component::InteractiveElementExt as _;
+use gpui_kit::{
     actions, div, ease_in_out, img, point, prelude::*, px, size, Animation, AnimationExt, Bounds,
     Context, FocusHandle, Pixels, RenderImage, SharedString, Size, Task, Window,
 };
-use gpui_component::InteractiveElementExt as _;
 use infrastructure::transformacao;
 
 use crate::revelacao::processador::{Ajustes, Pedido, Processador};
@@ -111,38 +111,38 @@ const CONTEXTO: &str = "Cliente";
 pub const ATALHO_DA_TELA_CHEIA: &str = "secondary-shift-f";
 
 /// O atalho como aparece nos botões — `⌘⇧F` no Mac, `Ctrl+Shift+F` no resto.
-pub fn tecla_da_tela_cheia() -> gpui_component::kbd::Kbd {
-    gpui_component::kbd::Kbd::new(
-        gpui::Keystroke::parse(ATALHO_DA_TELA_CHEIA).expect("o atalho é válido"),
+pub fn tecla_da_tela_cheia() -> gpui_kit::component::kbd::Kbd {
+    gpui_kit::component::kbd::Kbd::new(
+        gpui_kit::Keystroke::parse(ATALHO_DA_TELA_CHEIA).expect("o atalho é válido"),
     )
 }
 
 /// O mesmo atalho, em texto.
 pub fn texto_da_tela_cheia() -> String {
-    gpui_component::kbd::Kbd::format(
-        &gpui::Keystroke::parse(ATALHO_DA_TELA_CHEIA).expect("o atalho é válido"),
+    gpui_kit::component::kbd::Kbd::format(
+        &gpui_kit::Keystroke::parse(ATALHO_DA_TELA_CHEIA).expect("o atalho é válido"),
     )
 }
 
-pub fn init(cx: &mut gpui::App) {
+pub fn init(cx: &mut gpui_kit::App) {
     cx.bind_keys([
-        gpui::KeyBinding::new("escape", FecharCliente, Some(CONTEXTO)),
+        gpui_kit::KeyBinding::new("escape", FecharCliente, Some(CONTEXTO)),
         // `I` liga e desliga o rodapé com nome e nota, como no legado.
-        gpui::KeyBinding::new("i", AlternarInfoDoCliente, Some(CONTEXTO)),
+        gpui_kit::KeyBinding::new("i", AlternarInfoDoCliente, Some(CONTEXTO)),
         // 🔑 **`F` (ou `⌘⇧F`/`Ctrl+Shift+F`) põe e tira a tela cheia, na
         // própria janela** —
         // o gesto do darktable (dono, 22/set/2026). Arrastar até o monitor do
         // cliente e apertar `F` é o caminho que funciona até no GNOME, onde o
         // app não escolhe monitor nenhum. `J` era a troca de modo antiga e
         // continua valendo, para não trair a mão de quem já a usava.
-        gpui::KeyBinding::new("f", AlternarTelaCheiaDoCliente, Some(CONTEXTO)),
+        gpui_kit::KeyBinding::new("f", AlternarTelaCheiaDoCliente, Some(CONTEXTO)),
         // Sem `F11`: o teclado do Mac do dono não tem F1–F12 (22/set/2026).
-        gpui::KeyBinding::new(
+        gpui_kit::KeyBinding::new(
             ATALHO_DA_TELA_CHEIA,
             AlternarTelaCheiaDoCliente,
             Some(CONTEXTO),
         ),
-        gpui::KeyBinding::new("j", AlternarTelaCheiaDoCliente, Some(CONTEXTO)),
+        gpui_kit::KeyBinding::new("j", AlternarTelaCheiaDoCliente, Some(CONTEXTO)),
     ]);
 }
 
@@ -441,7 +441,7 @@ pub struct Cliente {
     /// Onde a lembrança desta tela é gravada. `None` nos testes que não a
     /// conferem.
     arquivo: Option<std::path::PathBuf>,
-    _limites: Option<gpui::Subscription>,
+    _limites: Option<gpui_kit::Subscription>,
 }
 
 impl Cliente {
@@ -451,7 +451,7 @@ impl Cliente {
         cx: &mut Context<Self>,
     ) -> Self {
         let foco = cx.focus_handle();
-        window.focus(&foco);
+        window.focus(&foco, cx);
         // 🔑 Mover ou redimensionar é o que grava: fechar pelo `X`, pelo `Esc`
         // ou pelo botão do app não passa todos pelo mesmo lugar, e o último
         // lugar onde ela esteve é o último movimento.
@@ -503,12 +503,12 @@ impl Cliente {
             agora.monitor = Some(uuid.to_string());
         }
         agora.estado = Some(match window.window_bounds() {
-            gpui::WindowBounds::Windowed(limites) => {
+            gpui_kit::WindowBounds::Windowed(limites) => {
                 agora.lembrar_limites(limites);
                 Estado::Janela
             }
-            gpui::WindowBounds::Maximized(_) => Estado::Maximizada,
-            gpui::WindowBounds::Fullscreen(_) => Estado::TelaCheia,
+            gpui_kit::WindowBounds::Maximized(_) => Estado::Maximizada,
+            gpui_kit::WindowBounds::Fullscreen(_) => Estado::TelaCheia,
         });
         if agora != antes {
             agora.gravar(arquivo);
@@ -955,7 +955,7 @@ impl Render for Cliente {
                 // foto é julgada por quem paga por ela; qualquer entorno claro muda
                 // como a foto é percebida. É a mesma razão de o tema do app inteiro
                 // não poder acompanhar o claro/escuro do sistema.
-                .bg(gpui::black())
+                .bg(gpui_kit::black())
                 .flex()
                 .items_center()
                 .justify_center()
@@ -982,7 +982,7 @@ impl Render for Cliente {
                         .px(px(10.))
                         .py(px(6.))
                         .rounded(px(4.))
-                        .bg(gpui::rgba(0x000000b4))
+                        .bg(gpui_kit::rgba(0x000000b4))
                         .flex()
                         .flex_col()
                         .gap(px(2.))
@@ -994,10 +994,15 @@ impl Render for Cliente {
                                 .children(info.posicao.map(|posicao| {
                                     div()
                                         .text_sm()
-                                        .text_color(gpui::rgb(0x9a9a9a))
+                                        .text_color(gpui_kit::rgb(0x9a9a9a))
                                         .child(posicao)
                                 }))
-                                .child(div().text_sm().text_color(gpui::white()).child(info.nome)),
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .text_color(gpui_kit::white())
+                                        .child(info.nome),
+                                ),
                         )
                         .child(
                             div()
@@ -1007,13 +1012,13 @@ impl Render for Cliente {
                                 .child(
                                     div()
                                         .text_xs()
-                                        .text_color(gpui::rgb(0xfbbf24))
+                                        .text_color(gpui_kit::rgb(0xfbbf24))
                                         .child(info.cheias),
                                 )
                                 .child(
                                     div()
                                         .text_xs()
-                                        .text_color(gpui::rgb(0x4a4a4a))
+                                        .text_color(gpui_kit::rgb(0x4a4a4a))
                                         .child(info.vazias),
                                 )
                                 .when(info.escolhida, |linha| {
@@ -1021,9 +1026,9 @@ impl Render for Cliente {
                                         div()
                                             .px(px(6.))
                                             .rounded(px(999.))
-                                            .bg(gpui::rgb(0xfbbf24))
+                                            .bg(gpui_kit::rgb(0xfbbf24))
                                             .text_xs()
-                                            .text_color(gpui::black())
+                                            .text_color(gpui_kit::black())
                                             .child("Escolhida"),
                                     )
                                 }),
@@ -1041,9 +1046,9 @@ impl Render for Cliente {
                         .px(px(8.))
                         .py(px(4.))
                         .rounded(px(4.))
-                        .bg(gpui::rgba(0x00000078))
+                        .bg(gpui_kit::rgba(0x00000078))
                         .text_xs()
-                        .text_color(gpui::rgb(0xb4b4b4))
+                        .text_color(gpui_kit::rgb(0xb4b4b4))
                         // 🔑 **O `F` aparece aqui porque é a saída de um problema
                         // que não se vê**: a tela no monitor errado. Em janela,
                         // arrasta-se até o certo e aperta-se `F` lá.
@@ -1068,11 +1073,11 @@ impl Cliente {
     /// A janela em volta do palco: o foco, as teclas e a barra própria.
     fn moldura(
         &self,
-        palco: gpui::AnyElement,
+        palco: gpui_kit::AnyElement,
         barra: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> gpui::AnyElement {
+    ) -> gpui_kit::AnyElement {
         div()
             .key_context(CONTEXTO)
             .track_focus(&self.foco)
@@ -1080,7 +1085,7 @@ impl Cliente {
             .on_action(cx.listener(Self::ao_alternar_tela_cheia))
             .on_action(cx.listener(Self::ao_fechar))
             .size_full()
-            .bg(gpui::black())
+            .bg(gpui_kit::black())
             .flex()
             .flex_col()
             .when(barra, |coluna| {
@@ -1094,13 +1099,13 @@ impl Cliente {
                         .justify_between()
                         .pl(px(12.))
                         .pr(px(4.))
-                        .bg(gpui::rgb(0x161616))
+                        .bg(gpui_kit::rgb(0x161616))
                         .text_xs()
-                        .text_color(gpui::rgb(0xb4b4b4))
+                        .text_color(gpui_kit::rgb(0xb4b4b4))
                         .child("Tela do cliente")
                         .child(crate::janela::controles_mesmo_em_tela_cheia(
                             "janela-cliente",
-                            gpui::rgb(0xb4b4b4).into(),
+                            gpui_kit::rgb(0xb4b4b4).into(),
                             window,
                             cx,
                         )),
@@ -1134,9 +1139,9 @@ impl Cliente {
                 .border_4()
                 .rounded(px(4.))
                 .border_color(if ativa {
-                    gpui::rgb(0xfbbf24).into()
+                    gpui_kit::rgb(0xfbbf24).into()
                 } else {
-                    gpui::transparent_black()
+                    gpui_kit::transparent_black()
                 })
                 .children(metade.imagem.clone().map(|imagem| {
                     let base = crate::imagem::cabe_em(meia, imagem.size(0));
@@ -1154,24 +1159,24 @@ impl Cliente {
                             .px(px(10.))
                             .py(px(6.))
                             .rounded(px(4.))
-                            .bg(gpui::rgba(0x000000b4))
+                            .bg(gpui_kit::rgba(0x000000b4))
                             .flex()
                             .items_center()
                             .gap(px(8.))
                             .text_sm()
                             .children(metade.posicao.map(|(i, total)| {
                                 div()
-                                    .text_color(gpui::rgb(0x9a9a9a))
+                                    .text_color(gpui_kit::rgb(0x9a9a9a))
                                     .child(SharedString::from(format!("{i} / {total}")))
                             }))
                             .child(
                                 div()
-                                    .text_color(gpui::white())
+                                    .text_color(gpui_kit::white())
                                     .child(SharedString::from(metade.foto.name.clone())),
                             )
                             .child(
                                 div()
-                                    .text_color(gpui::rgb(0xfbbf24))
+                                    .text_color(gpui_kit::rgb(0xfbbf24))
                                     .child(SharedString::from("★".repeat(nota))),
                             )
                             .when(metade.foto.comprada, |linha| {
@@ -1179,9 +1184,9 @@ impl Cliente {
                                     div()
                                         .px(px(6.))
                                         .rounded(px(999.))
-                                        .bg(gpui::rgb(0xfbbf24))
+                                        .bg(gpui_kit::rgb(0xfbbf24))
                                         .text_xs()
-                                        .text_color(gpui::black())
+                                        .text_color(gpui_kit::black())
                                         .child("Escolhida"),
                                 )
                             }),
@@ -1192,7 +1197,7 @@ impl Cliente {
             .id("palco-do-cliente")
             .flex_1()
             .w_full()
-            .bg(gpui::black())
+            .bg(gpui_kit::black())
             .flex()
             .gap(px(VAO))
             .p(px(VAO))
@@ -1205,7 +1210,7 @@ impl Cliente {
 mod testes {
     use super::*;
 
-    use gpui::TestAppContext;
+    use gpui_kit::TestAppContext;
 
     fn foto(nome: &str, nota: i32) -> PhotoViewModel {
         PhotoViewModel {
@@ -1243,7 +1248,7 @@ mod testes {
     /// dono não as tem).
     #[test]
     fn o_atalho_da_tela_cheia_e_uma_combinacao() {
-        let tecla = gpui::Keystroke::parse(ATALHO_DA_TELA_CHEIA).expect("válido");
+        let tecla = gpui_kit::Keystroke::parse(ATALHO_DA_TELA_CHEIA).expect("válido");
 
         assert_eq!(tecla.key, "f");
         assert!(tecla.modifiers.shift);
@@ -1506,7 +1511,7 @@ mod testes {
     ///
     /// 🔑 **As vazias entram**, e é a diferença que a web trouxe: a nota se lê
     /// de longe sem contar o que não está lá.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_rodape_mostra_a_posicao_o_nome_e_as_cinco_estrelas(cx: &mut TestAppContext) {
         let janela = cx.add_window(|window, cx| Cliente::novo(None, window, cx));
 
@@ -1532,7 +1537,7 @@ mod testes {
     }
 
     /// A foto que o cliente já disse que leva aparece marcada.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_levada_no_balcao_aparece_como_escolhida(cx: &mut TestAppContext) {
         let janela = cx.add_window(|window, cx| Cliente::novo(None, window, cx));
 
@@ -1565,7 +1570,7 @@ mod testes {
     }
 
     /// ✨ Trocar de foto **guarda a anterior**: é ela que sai enquanto a nova entra.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_foto_que_sai_fica_para_o_cruzamento(cx: &mut TestAppContext) {
         let janela = cx.add_window(|window, cx| Cliente::novo(None, window, cx));
 
@@ -1602,7 +1607,7 @@ mod testes {
     /// ponteiro. Se fosse, toda republicação contaria como troca e a foto
     /// piscaria — com o teste passando, porque o teste também usaria `Arc`s
     /// diferentes.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn continuar_na_mesma_foto_nao_cruza_nada(cx: &mut TestAppContext) {
         let janela = cx.add_window(|window, cx| Cliente::novo(None, window, cx));
 
@@ -1637,7 +1642,7 @@ mod testes {
     ///
     /// Ela tem contexto e foco próprios — e ligação que não casa **não falha**,
     /// ela só não faz nada. É o defeito que custou dois commits na Revelação.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_tecla_i_liga_e_desliga_o_rodape(cx: &mut TestAppContext) {
         cx.update(init);
         let janela = cx.add_window(|window, cx| Cliente::novo(None, window, cx));
@@ -1648,7 +1653,7 @@ mod testes {
             })
             .expect("a janela deve estar aberta");
 
-        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
         visual.simulate_keystrokes("i");
 
         janela

@@ -21,7 +21,7 @@
 //! | [`a_tira_da_revelacao_segue_o_recorte_da_grade`] | a revelação abre na foto certa, a tira tem as do recorte na ordem, e andar troca a foto aberta |
 //! | [`a_tela_do_cliente_mostra_a_foto_da_vez_em_cada_tela`] | o cliente acompanha grade → revelação → gesto → volta, sempre com a foto certa |
 
-use gpui::TestAppContext;
+use gpui_kit::TestAppContext;
 
 use super::{abrir_o_ensaio, Cenario};
 use crate::app::Tela;
@@ -51,7 +51,7 @@ fn recortar(e: &super::Estudio, cx: &mut TestAppContext, filtro: Filtro) {
 /// O cenário padrão tem quatro do site — duas levadas (`a`, `b`), uma à venda
 /// (`d`) e uma comprada (`c`) — e duas locais, que ainda não subiram e por isso
 /// entram sem nota.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_grade_mostra_as_fotos_certas_em_cada_recorte(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
 
@@ -133,7 +133,7 @@ fn a_grade_mostra_as_fotos_certas_em_cada_recorte(cx: &mut TestAppContext) {
 /// acabou de nascer no site**; o `P` alterna o estado da do site; a faixa e o
 /// preço de venda vão num `PATCH` com só o que mudou; apagar pergunta antes e
 /// some com ela.
-#[gpui::test]
+#[gpui_kit::test]
 fn classificar_sinalizar_e_o_painel_acompanham_a_foto(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     e.esperar(cx);
@@ -222,7 +222,7 @@ fn classificar_sinalizar_e_o_painel_acompanham_a_foto(cx: &mut TestAppContext) {
 ///
 /// Entrar pela foto em foco abre **ela**; a tira traz as do recorte; as setas
 /// andam por elas, e a foto aberta acompanha.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_tira_da_revelacao_segue_o_recorte_da_grade(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
 
@@ -269,7 +269,7 @@ fn a_tira_da_revelacao_segue_o_recorte_da_grade(cx: &mut TestAppContext) {
 ///
 /// É o que o cliente vê do outro lado do balcão: a foto em foco na grade, a
 /// aberta na revelação, o gesto ao vivo — e nunca a de antes.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_tela_do_cliente_mostra_a_foto_da_vez_em_cada_tela(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
 

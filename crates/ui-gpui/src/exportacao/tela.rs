@@ -23,9 +23,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use adapters::view_models::PhotoViewModel;
-use gpui::{div, prelude::*, px, Context, SharedString, Task, Window};
-use gpui_component::button::{Button, ButtonVariants};
-use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
+use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::{ActiveTheme, Disableable, Selectable, Sizable};
+use gpui_kit::{div, prelude::*, px, Context, SharedString, Task, Window};
 
 use domain::value_objects::{ExportOptions, FilePath, Watermark, WatermarkPosition};
 
@@ -394,7 +394,7 @@ fn nome(caminho: &std::path::Path) -> String {
         .unwrap_or_default()
 }
 
-impl gpui::Render for Exportacao {
+impl gpui_kit::Render for Exportacao {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let pasta: SharedString = match &self.pasta {
             Some(p) => p.to_string_lossy().to_string().into(),

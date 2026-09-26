@@ -7,18 +7,19 @@
 //! só lê e grava `GET/PUT /pos-venda/configuracao`. As faixas e as frases de
 //! erro são as do site, em [`biblioteca_core::retencao`].
 
+use crate::campo::TrocarValor as _;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
 use biblioteca_core::retencao::{self, Politica, Prazo};
 use domain::services::pos_venda::Sessao;
-use gpui::{
+use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
+use gpui_kit::{
     div, prelude::*, px, Context, Entity, EventEmitter, FontWeight, SharedString, Task, Window,
 };
-use gpui_component::checkbox::Checkbox;
-use gpui_component::input::{Input, InputState};
-use gpui_component::{h_flex, v_flex, ActiveTheme, Icon};
 
 use crate::estilo;
 use crate::pos_venda::porta::{PedidoJson, Publicador, Recado};
@@ -214,7 +215,7 @@ impl Retencao {
                 .and_then(|v| v.as_i64())
                 .map(|n| n.to_string())
                 .unwrap_or_default();
-            self.campos[i].update(cx, |campo, cx| campo.set_value(numero, window, cx));
+            self.campos[i].update(cx, |campo, cx| campo.trocar_valor(numero, window, cx));
         }
         let marcado = |campo: &str| valor.get(campo).and_then(|v| v.as_bool()).unwrap_or(false);
         self.apagar_automaticamente = marcado("apagar_automaticamente");
@@ -239,7 +240,7 @@ impl Retencao {
     ) {
         for (campo, valor) in self.campos.iter().zip(valores) {
             let valor = valor.to_string();
-            campo.update(cx, |c, cx| c.set_value(valor, window, cx));
+            campo.update(cx, |c, cx| c.trocar_valor(valor, window, cx));
         }
     }
 }
@@ -450,7 +451,7 @@ impl Retencao {
 mod testes {
     use super::*;
     use crate::pos_venda::porta::mentira::PublicadorDeMentira;
-    use gpui::TestAppContext;
+    use gpui_kit::TestAppContext;
 
     fn sessao() -> Sessao {
         Sessao {
@@ -464,8 +465,8 @@ mod testes {
     fn janela(
         cx: &mut TestAppContext,
         publicador: Arc<PublicadorDeMentira>,
-    ) -> gpui::WindowHandle<Retencao> {
-        cx.update(gpui_component::init);
+    ) -> gpui_kit::WindowHandle<Retencao> {
+        cx.update(gpui_kit::init);
         cx.add_window(move |window, cx| {
             let mut tela = Retencao::nova(publicador, window, cx);
             tela.definir_sessao(sessao());
@@ -474,13 +475,13 @@ mod testes {
         })
     }
 
-    fn colher(cx: &mut TestAppContext, janela: &gpui::WindowHandle<Retencao>) {
+    fn colher(cx: &mut TestAppContext, janela: &gpui_kit::WindowHandle<Retencao>) {
         for _ in 0..5 {
             let _ = janela.update(cx, |tela, window, cx| tela.colher(window, cx));
         }
     }
 
-    #[gpui::test]
+    #[gpui_kit::test]
     fn abre_com_a_politica_do_servidor_e_so_grava_o_que_passa(cx: &mut TestAppContext) {
         let publicador = Arc::new(PublicadorDeMentira::default());
         publicador.responder_json(
@@ -538,7 +539,7 @@ mod testes {
             .unwrap();
     }
 
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_falha_da_leitura_ocupa_o_lugar_do_formulario(cx: &mut TestAppContext) {
         let janela = janela(cx, Arc::new(PublicadorDeMentira::default()));
         colher(cx, &janela);

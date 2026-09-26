@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use domain::services::pos_venda::{EstadoDaFotoNoSite, FotoDaGaleria, GaleriaDoPainel, Sessao};
-use gpui::{TestAppContext, WindowHandle};
+use gpui_kit::{TestAppContext, WindowHandle};
 use infrastructure::cache::preview_manager::PreviewManager;
 use serde_json::{json, Value};
 
@@ -111,7 +111,7 @@ fn publicador() -> Arc<PublicadorDeMentira> {
 }
 
 struct Montagem {
-    raiz: WindowHandle<gpui_component::Root>,
+    raiz: WindowHandle<gpui_kit::component::Root>,
     caixa: Entity<Caixa>,
     detalhe: Entity<Detalhe>,
     publicador: Arc<PublicadorDeMentira>,
@@ -161,7 +161,7 @@ fn rede_sem_o_lote(cx: &mut TestAppContext, m: &Montagem) {
 }
 
 fn montar(cx: &mut TestAppContext) -> Montagem {
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let publicador = publicador();
     let dir = tempfile::TempDir::new().expect("diretório temporário");
     let previews = Arc::new(PreviewManager::new_with_path(dir.path().to_path_buf()));
@@ -186,7 +186,7 @@ fn montar(cx: &mut TestAppContext) -> Montagem {
         });
         let caixa = cx.new(|cx| Caixa::painel(para_janela.clone(), detalhe.clone(), window, cx));
         guardados = Some((caixa.clone(), detalhe));
-        gpui_component::Root::new(caixa, window, cx)
+        gpui_kit::component::Root::new(caixa, window, cx)
     });
     let (caixa, detalhe) = guardados.expect("as telas criadas");
     let m = Montagem {
@@ -216,7 +216,7 @@ fn patches(m: &Montagem) -> Vec<String> {
 
 /// 🚨 **Cortesia nas 400 fotos do cupom: quatro no ar por vez, cada foto uma
 /// vez, e o lote termina mesmo com respostas fora de ordem e falhas.**
-#[gpui::test]
+#[gpui_kit::test]
 fn estresse_negociar_quatrocentas_de_quatro_em_quatro(cx: &mut TestAppContext) {
     let m = montar(cx);
 
@@ -237,9 +237,11 @@ fn estresse_negociar_quatrocentas_de_quatro_em_quatro(cx: &mut TestAppContext) {
 
     // Um quadro do painel com o cupom inteiro.
     let quadro = {
-        let mut visual = gpui::VisualTestContext::from_window(m.raiz.into(), cx);
-        let tamanho = gpui::size(gpui::px(1600.), gpui::px(1000.));
-        visual.draw(gpui::Point::default(), tamanho, |_w, _cx| gpui::Empty);
+        let mut visual = gpui_kit::VisualTestContext::from_window(m.raiz.into(), cx);
+        let tamanho = gpui_kit::size(gpui_kit::px(1600.), gpui_kit::px(1000.));
+        visual.draw(gpui_kit::Point::default(), tamanho, |_w, _cx| {
+            gpui_kit::Empty
+        });
         let inicio = Instant::now();
         for _ in 0..5 {
             let caixa = m.caixa.clone();
@@ -248,7 +250,9 @@ fn estresse_negociar_quatrocentas_de_quatro_em_quatro(cx: &mut TestAppContext) {
                     caixa.update(cx, |_t, cx| cx.notify())
                 })
                 .expect("a janela aberta");
-            visual.draw(gpui::Point::default(), tamanho, |_w, _cx| gpui::Empty);
+            visual.draw(gpui_kit::Point::default(), tamanho, |_w, _cx| {
+                gpui_kit::Empty
+            });
         }
         inicio.elapsed() / 10
     };

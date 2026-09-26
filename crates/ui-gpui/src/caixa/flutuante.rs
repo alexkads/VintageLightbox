@@ -29,6 +29,7 @@
 //! sinalizaria a foto e o `1` do pagamento daria nota —, e aqui é o mesmo: com
 //! o foco no painel, nenhuma letra chega às ligações da grade.
 
+use crate::campo::TrocarValor as _;
 use std::cell::Cell;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
@@ -40,13 +41,13 @@ use std::sync::Arc;
 use biblioteca_core::caixa::{self as regras, ItemDoCupom, TipoDeMovimento};
 use biblioteca_core::dinheiro;
 use biblioteca_core::negociacao::{self, Negociacao, Tipo, PARCEIROS};
-use gpui::{
+use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
+use gpui_kit::{
     canvas, div, prelude::*, px, AnyElement, AnyWindowHandle, ClickEvent, Context, Div, Entity,
     FocusHandle, Focusable, FontWeight, Hsla, KeystrokeEvent, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, ScrollHandle, SharedString, Stateful, Subscription, Window,
 };
-use gpui_component::input::{Input, InputState};
-use gpui_component::{h_flex, v_flex, ActiveTheme, Icon};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -572,7 +573,7 @@ impl Caixa {
         p.em_foco = Some(foto.to_string());
         let (detalhe, foco) = (p.detalhe.clone(), p.foco_do_cupom.clone());
         detalhe.update(cx, |d, cx| d.focar_foto(foto, cx));
-        window.focus(&foco);
+        window.focus(&foco, cx);
         cx.notify();
     }
 
@@ -609,7 +610,7 @@ impl Caixa {
             .map(|i| dinheiro::formatar_campo(i.cobrado))
             .unwrap_or_default();
         let valor = cx.new(|cx| InputState::new(window, cx).placeholder("0,00"));
-        valor.update(cx, |c, cx| c.set_value(valor_inicial, window, cx));
+        valor.update(cx, |c, cx| c.trocar_valor(valor_inicial, window, cx));
         let cupom = cx.new(|cx| InputState::new(window, cx).placeholder("o código do cliente"));
         if let Some(p) = self.painel_mut() {
             p.editando = Some(EdicaoRapida {
@@ -634,7 +635,7 @@ impl Caixa {
         if let Some(p) = self.painel_mut() {
             p.editando = None;
             let foco = p.foco_do_cupom.clone();
-            window.focus(&foco);
+            window.focus(&foco, cx);
         }
         cx.notify();
     }
@@ -669,7 +670,7 @@ impl Caixa {
             Some(ModoRapido::Parceiro) => e.cupom.read(cx).focus_handle(cx),
             None => p.foco_do_cupom.clone(),
         };
-        window.focus(&foco);
+        window.focus(&foco, cx);
         cx.notify();
     }
 
@@ -1218,7 +1219,7 @@ impl Caixa {
         } else if let Some(c) = &v.caixa {
             (
                 format!("Caixa aberto · {}", dados::hora_br(&c.aberto_em)),
-                gpui::rgb(0x00bc7d).into(),
+                gpui_kit::rgb(0x00bc7d).into(),
             )
         } else {
             (
@@ -1262,7 +1263,8 @@ impl Caixa {
                     .rounded_full()
                     .bg(cor)
                     .tooltip(move |window, cx| {
-                        gpui_component::tooltip::Tooltip::new(situacao.clone()).build(window, cx)
+                        gpui_kit::component::tooltip::Tooltip::new(situacao.clone())
+                            .build(window, cx)
                     }),
             )
             .child(
@@ -1299,7 +1301,7 @@ impl Caixa {
                     .hover(move |s| s.bg(realce).text_color(frente))
                     .child(Icon::new(Icone::Maximize2).size(px(16.)))
                     .tooltip(|window, cx| {
-                        gpui_component::tooltip::Tooltip::new("Abrir o caixa (F9)")
+                        gpui_kit::component::tooltip::Tooltip::new("Abrir o caixa (F9)")
                             .build(window, cx)
                     })
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -1339,7 +1341,7 @@ impl Caixa {
                 .hover(move |s| s.bg(realce).text_color(frente))
                 .child(Icon::new(icone).size(px(16.)))
                 .tooltip(move |window, cx| {
-                    gpui_component::tooltip::Tooltip::new(dica).build(window, cx)
+                    gpui_kit::component::tooltip::Tooltip::new(dica).build(window, cx)
                 })
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         };
@@ -1741,7 +1743,7 @@ impl Caixa {
 
         v_flex()
             .id("caixa-cupom")
-            .flex_shrink()
+            .flex_shrink_1()
             .min_h(px(0.))
             .overflow_y_scroll()
             .track_scroll(&rolagem)
@@ -2401,7 +2403,7 @@ impl Caixa {
     }
 
     /// O diálogo de negociação acabou de gravar.
-    fn negociacao_terminou(&mut self, fechar: bool, cx: &mut gpui::App) {
+    fn negociacao_terminou(&mut self, fechar: bool, cx: &mut gpui_kit::App) {
         if let Some(Dialogo::Negociacao(form)) = self.dialogo.as_mut() {
             form.enviando = false;
             if fechar {

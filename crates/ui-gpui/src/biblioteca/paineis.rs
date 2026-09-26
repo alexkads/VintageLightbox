@@ -21,11 +21,11 @@
 //! `WeakEntity` na volta, o ciclo se abre; quando ela não puder ser lida (a
 //! janela fechando), o painel desenha vazio em vez de derrubar o app.
 
-use gpui::{
+use gpui_kit::component::dock::{BasePanel, Panel, PanelEvent};
+use gpui_kit::{
     div, prelude::*, AnyElement, App, Context, EventEmitter, FocusHandle, Focusable, Render,
     SharedString, WeakEntity, Window,
 };
-use gpui_component::dock::{Panel, PanelEvent};
 
 use super::tela::Biblioteca;
 
@@ -115,13 +115,11 @@ impl Focusable for PainelDaBiblioteca {
 
 impl EventEmitter<PanelEvent> for PainelDaBiblioteca {}
 
-impl Panel for PainelDaBiblioteca {
+/// O comportamento do painel (nome, fechar) é do `gpui-base`; o desenho (título)
+/// é do `gpui-component` — a divisão que o gpui-kit 0.6 fez no `Panel`.
+impl BasePanel for PainelDaBiblioteca {
     fn panel_name(&self) -> &'static str {
         self.qual.nome()
-    }
-
-    fn title(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        SharedString::from(self.qual.titulo())
     }
 
     /// ⚠️ **Nenhum painel fecha.**
@@ -132,6 +130,12 @@ impl Panel for PainelDaBiblioteca {
     /// única forma de perder um painel sem querer.
     fn closable(&self, _cx: &App) -> bool {
         false
+    }
+}
+
+impl Panel for PainelDaBiblioteca {
+    fn title(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        SharedString::from(self.qual.titulo())
     }
 }
 

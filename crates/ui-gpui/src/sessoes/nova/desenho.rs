@@ -4,14 +4,14 @@
 
 use std::sync::Arc;
 
-use gpui::{
+use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::progress::Progress;
+use gpui_kit::component::select::Select;
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
+use gpui_kit::{
     div, img, prelude::*, px, relative, AnyElement, App, Context, Div, Entity, FontWeight, Hsla,
     KeyDownEvent, RenderImage, SharedString, Stateful, Window,
 };
-use gpui_component::input::{Input, InputState};
-use gpui_component::progress::Progress;
-use gpui_component::select::Select;
-use gpui_component::{h_flex, v_flex, ActiveTheme, Icon};
 
 use super::associacoes::{self as assoc};
 use super::estado::{self, EstadoDaEtapa};
@@ -26,7 +26,7 @@ const VERMELHO: u32 = 0xdc2626;
 const AMBAR: u32 = 0xf59e0b;
 
 fn cor(hex: u32) -> Hsla {
-    gpui::rgb(hex).into()
+    gpui_kit::rgb(hex).into()
 }
 
 /// O rótulo de um campo, com `*` vermelho quando obrigatório.
@@ -179,12 +179,12 @@ impl Render for NovaSessao {
             // (`sessoes::origem_das_fotos`): o modal tem o foco e responde à
             // ação antes desta tela e da raiz (dono, 2026-09-21).
             .on_drag_move(cx.listener(
-                |tela, _: &gpui::DragMoveEvent<gpui::ExternalPaths>, _, cx| {
+                |tela, _: &gpui_kit::DragMoveEvent<gpui_kit::ExternalPaths>, _, cx| {
                     tela.destacar(true, cx);
                 },
             ))
             .on_drop(
-                cx.listener(|tela, arrastados: &gpui::ExternalPaths, window, cx| {
+                cx.listener(|tela, arrastados: &gpui_kit::ExternalPaths, window, cx| {
                     let fotos = crate::sessoes::arquivos::so_as_fotos(arrastados.paths());
                     if fotos.is_empty() {
                         tela.destacar(false, cx);
@@ -482,7 +482,7 @@ impl NovaSessao {
                     match situacao {
                         EstadoDaEtapa::Preenchida => base
                             .bg(cor(ESMERALDA))
-                            .text_color(gpui::white())
+                            .text_color(gpui_kit::white())
                             .child(Icon::new(Icone::Check).size(px(16.))),
                         EstadoDaEtapa::Pendente => base
                             .border_1()
@@ -797,7 +797,7 @@ impl NovaSessao {
                 )
                 .child(
                     div().flex_1().child(
-                        Progress::new()
+                        Progress::new("progresso-da-importacao")
                             .value(if de == 0 {
                                 0.
                             } else {
@@ -926,10 +926,14 @@ impl NovaSessao {
                             .rounded(px(6.))
                             .overflow_hidden()
                             .bg(tema.muted)
-                            .child(img(imagem).size_full().object_fit(gpui::ObjectFit::Cover))
+                            .child(
+                                img(imagem)
+                                    .size_full()
+                                    .object_fit(gpui_kit::ObjectFit::Cover),
+                            )
                             .id(SharedString::from(format!("nova-miniatura-{nome}")))
                             .tooltip(move |window, cx| {
-                                gpui_component::tooltip::Tooltip::new(nome.clone())
+                                gpui_kit::component::tooltip::Tooltip::new(nome.clone())
                                     .build(window, cx)
                             })
                     })),
@@ -984,7 +988,11 @@ impl NovaSessao {
                         .overflow_hidden()
                         .bg(tema.muted)
                         .when_some(amostra, |c, imagem| {
-                            c.child(img(imagem).size_full().object_fit(gpui::ObjectFit::Cover))
+                            c.child(
+                                img(imagem)
+                                    .size_full()
+                                    .object_fit(gpui_kit::ObjectFit::Cover),
+                            )
                         }),
                 )
                 .when(marcado, |c| {
@@ -1006,7 +1014,7 @@ impl NovaSessao {
                 .child(div().text_xs().line_clamp(2).child(nome))
                 .on_click(cx.listener(move |tela, _, window, cx| {
                     tela.foco_do_preset = indice;
-                    window.focus(&tela.foco);
+                    window.focus(&tela.foco, cx);
                     tela.escolher_preset(id.clone(), cx);
                 }))
         };
@@ -1935,7 +1943,7 @@ impl NovaSessao {
             .bg(tema::cores::veu())
             .occlude()
             .on_mouse_down(
-                gpui::MouseButton::Left,
+                gpui_kit::MouseButton::Left,
                 cx.listener(|tela, _, window, cx| tela.fechar_busca(window, cx)),
             )
     }
@@ -2004,7 +2012,9 @@ impl NovaSessao {
                 .border_color(tema.border)
                 .bg(tema.background)
                 .shadow_lg()
-                .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
+                    cx.stop_propagation()
+                })
                 .child(
                     div()
                         .text_lg()
@@ -2125,7 +2135,9 @@ impl NovaSessao {
                 .border_color(tema.border)
                 .bg(tema.background)
                 .shadow_lg()
-                .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
+                    cx.stop_propagation()
+                })
                 .child(
                     h_flex()
                         .child(

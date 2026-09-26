@@ -15,6 +15,7 @@
 //!    ao campo; tratada como zero, faria o rodapé anunciar menos do que o real
 //!    sem nada dizendo por quê.
 
+use crate::campo::TrocarValor as _;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
@@ -30,13 +31,13 @@ use biblioteca_core::sessoes::{
 use domain::services::pos_venda::{Estudio, GaleriaDoPainel, NovaGaleria, Produto, Sessao};
 
 use super::periodo;
-use gpui::{
+use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::{ActiveTheme, Disableable, Selectable, Sizable};
+use gpui_kit::{
     div, prelude::*, px, AnyElement, App, Context, EventEmitter, Hsla, MouseButton, SharedString,
     Task, Window,
 };
-use gpui_component::button::{Button, ButtonVariants};
-use gpui_component::input::{Input, InputEvent, InputState};
-use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
 use infrastructure::paths::AppPaths;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -102,13 +103,13 @@ struct Exclusao {
     galeria_id: String,
     titulo: String,
     disponiveis: u32,
-    frase: gpui::Entity<InputState>,
+    frase: gpui_kit::Entity<InputState>,
     enviando: bool,
     quem_tem: QuemTemFotos,
     /// Quem tinha o foco ao abrir: o campo da frase some com o diálogo, e o
     /// foco num elemento que ninguém desenha mata todos os atalhos.
-    devolver: Option<(gpui::FocusHandle, gpui::AnyWindowHandle)>,
-    _campo: gpui::Subscription,
+    devolver: Option<(gpui_kit::FocusHandle, gpui_kit::AnyWindowHandle)>,
+    _campo: gpui_kit::Subscription,
 }
 
 /// "Restaurar “X”?" aberta, e se o pedido já saiu.
@@ -212,7 +213,7 @@ pub struct Sessoes {
     /// 🔑 **A tela guarda a imagem pronta**, e não os bytes: decodificar a cada
     /// quadro é o defeito que a grade da sessão já pagou duas vezes
     /// (`docs/08-CACHE-ARCHITECTURE.md`).
-    capas: std::collections::HashMap<String, Arc<gpui::RenderImage>>,
+    capas: std::collections::HashMap<String, Arc<gpui_kit::RenderImage>>,
     /// Os estúdios cuja capa já foi pedida — uma vez cada.
     capas_pedidas: std::collections::HashSet<String>,
     /// A pergunta da entrada está na tela? (`Some` enquanto ela espera resposta.)
@@ -223,7 +224,7 @@ pub struct Sessoes {
     escolhendo_estudio: bool,
     /// Qual sessão está aberta para receber fotos.
     aberta: Option<String>,
-    busca: gpui::Entity<InputState>,
+    busca: gpui_kit::Entity<InputState>,
     situacao: Option<Situacao>,
     /// O "Filtros" do site: um campo por coluna, sob o cabeçalho.
     filtros: super::filtros_da_lista::FiltrosDaLista,
@@ -255,9 +256,9 @@ pub struct Sessoes {
 
 /// Os campos de abrir uma sessão nova.
 struct Nova {
-    titulo: gpui::Entity<InputState>,
-    email: gpui::Entity<InputState>,
-    whatsapp: gpui::Entity<InputState>,
+    titulo: gpui_kit::Entity<InputState>,
+    email: gpui_kit::Entity<InputState>,
+    whatsapp: gpui_kit::Entity<InputState>,
     produto_id: Option<String>,
     estudio_id: Option<String>,
     enviando: bool,
@@ -460,7 +461,7 @@ impl Sessoes {
             .focused(cx)
             .map(|foco| (foco, window.window_handle()));
         // O foco vai direto ao campo: é a única coisa a fazer além de cancelar.
-        window.focus(&gpui::Focusable::focus_handle(frase.read(cx), cx));
+        window.focus(&gpui_kit::Focusable::focus_handle(frase.read(cx), cx), cx);
         self.exclusao = Some(Exclusao {
             galeria_id: galeria.id.clone(),
             titulo: galeria.titulo.clone(),
@@ -515,7 +516,7 @@ impl Sessoes {
         // falharia.
         if let Some((foco, janela)) = aberta.devolver {
             cx.defer(move |cx| {
-                let _ = janela.update(cx, |_, window, _| window.focus(&foco));
+                let _ = janela.update(cx, |_, window, cx| window.focus(&foco, cx));
             });
         }
         cx.notify();
@@ -846,7 +847,7 @@ impl Sessoes {
 
     pub fn limpar_filtros(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.busca
-            .update(cx, |estado, cx| estado.set_value("", window, cx));
+            .update(cx, |estado, cx| estado.trocar_valor("", window, cx));
         self.situacao = None;
         // 📅 **O "limpar" volta ao padrão, e não ao arquivo inteiro**: a lista
         // abre em hoje, e é para hoje que ela volta. Ver o arquivo é uma
@@ -1047,9 +1048,9 @@ impl Sessoes {
         };
         let (titulo, email) = (titulo.to_string(), email.to_string());
         nova.titulo
-            .update(cx, |estado, cx| estado.set_value(titulo, window, cx));
+            .update(cx, |estado, cx| estado.trocar_valor(titulo, window, cx));
         nova.email
-            .update(cx, |estado, cx| estado.set_value(email, window, cx));
+            .update(cx, |estado, cx| estado.trocar_valor(email, window, cx));
     }
 
     /// 🧪 Digita na busca, como quem escreve no campo.
@@ -1057,7 +1058,7 @@ impl Sessoes {
     pub(crate) fn buscar(&mut self, texto: &str, window: &mut Window, cx: &mut Context<Self>) {
         let texto = texto.to_string();
         self.busca
-            .update(cx, |estado, cx| estado.set_value(texto, window, cx));
+            .update(cx, |estado, cx| estado.trocar_valor(texto, window, cx));
         cx.notify();
     }
 
@@ -1358,7 +1359,7 @@ impl Sessoes {
     /// cobrindo (`object-cover`), e a inicial no fundo `muted` quando não há
     /// foto. O site faz o mesmo no agendamento, com um gradiente no lugar da
     /// inicial.
-    fn capa_do_estudio(&self, estudio: &Estudio, lado: f32, cx: &App) -> gpui::AnyElement {
+    fn capa_do_estudio(&self, estudio: &Estudio, lado: f32, cx: &App) -> gpui_kit::AnyElement {
         let tema = cx.theme();
         let moldura = div()
             .flex_none()
@@ -1369,9 +1370,9 @@ impl Sessoes {
         match self.capas.get(&estudio.id) {
             Some(imagem) => moldura
                 .child(
-                    gpui::img(imagem.clone())
+                    gpui_kit::img(imagem.clone())
                         .size_full()
-                        .object_fit(gpui::ObjectFit::Cover),
+                        .object_fit(gpui_kit::ObjectFit::Cover),
                 )
                 .into_any_element(),
             None => moldura
@@ -1379,7 +1380,7 @@ impl Sessoes {
                 .items_center()
                 .justify_center()
                 .text_color(tema.muted_foreground)
-                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                 .child(SharedString::from(
                     estudio
                         .nome
@@ -1465,7 +1466,7 @@ impl Sessoes {
     /// fecha ao clique fora, como um popover.
     fn popover_do_periodo(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         use crate::recursos::Icone;
-        use gpui_component::Icon;
+        use gpui_kit::component::Icon;
 
         let estado = self.calendario.as_ref()?;
         let hoje = hoje_no_estudio();
@@ -1495,28 +1496,35 @@ impl Sessoes {
                         .bg(tema.popover)
                         .text_color(tema.popover_foreground)
                         .shadow_lg()
-                        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .child(gpui_component::v_flex().gap(px(2.)).w(px(120.)).children(
-                            periodo::atalhos(hoje).into_iter().map(|(rotulo, faixa)| {
-                                crate::estilo::botao_fantasma(
-                                    SharedString::from(format!("periodo-{rotulo}")),
-                                    cx,
-                                )
-                                .w_full()
-                                .justify_start()
-                                .child(rotulo)
-                                .on_click(cx.listener(
-                                    move |tela, _ev, _w, cx| {
-                                        tela.escolher_periodo(faixa.clone(), cx)
-                                    },
-                                ))
-                            }),
-                        ))
+                        .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
+                            cx.stop_propagation()
+                        })
                         .child(
-                            gpui_component::v_flex()
+                            gpui_kit::component::v_flex()
+                                .gap(px(2.))
+                                .w(px(120.))
+                                .children(periodo::atalhos(hoje).into_iter().map(
+                                    |(rotulo, faixa)| {
+                                        crate::estilo::botao_fantasma(
+                                            SharedString::from(format!("periodo-{rotulo}")),
+                                            cx,
+                                        )
+                                        .w_full()
+                                        .justify_start()
+                                        .child(rotulo)
+                                        .on_click(
+                                            cx.listener(move |tela, _ev, _w, cx| {
+                                                tela.escolher_periodo(faixa.clone(), cx)
+                                            }),
+                                        )
+                                    },
+                                )),
+                        )
+                        .child(
+                            gpui_kit::component::v_flex()
                                 .gap(px(8.))
                                 .child(
-                                    gpui_component::h_flex()
+                                    gpui_kit::component::h_flex()
                                         .items_center()
                                         .justify_between()
                                         .child(
@@ -1534,7 +1542,7 @@ impl Sessoes {
                                         .child(
                                             div()
                                                 .text_sm()
-                                                .font_weight(gpui::FontWeight::MEDIUM)
+                                                .font_weight(gpui_kit::FontWeight::MEDIUM)
                                                 .child(SharedString::from(periodo::titulo_do_mes(
                                                     estado.mes,
                                                 ))),
@@ -1587,7 +1595,7 @@ impl Sessoes {
                         cx,
                     ))
                     .child(
-                        gpui_component::v_flex()
+                        gpui_kit::component::v_flex()
                             .gap(px(8.))
                             // 🏢 **"Todos os estúdios", no topo** (dono,
                             // 18/set/2026: *"tem que ter opção de trazer todos
@@ -1615,7 +1623,7 @@ impl Sessoes {
                                         .items_center()
                                         .justify_center()
                                         .child(
-                                            gpui_component::Icon::new(
+                                            gpui_kit::component::Icon::new(
                                                 crate::recursos::Icone::Building2,
                                             )
                                             .size(px(18.))
@@ -1623,12 +1631,12 @@ impl Sessoes {
                                         ),
                                 )
                                 .child(
-                                    gpui_component::v_flex()
+                                    gpui_kit::component::v_flex()
                                         .gap(px(2.))
                                         .items_start()
                                         .child(
                                             div()
-                                                .font_weight(gpui::FontWeight::MEDIUM)
+                                                .font_weight(gpui_kit::FontWeight::MEDIUM)
                                                 .child("Todos os estúdios"),
                                         )
                                         .child(
@@ -1662,12 +1670,12 @@ impl Sessoes {
                                 .gap(px(12.))
                                 .child(self.capa_do_estudio(estudio, LADO_DA_CAPA as f32, cx))
                                 .child(
-                                    gpui_component::v_flex()
+                                    gpui_kit::component::v_flex()
                                         .gap(px(2.))
                                         .items_start()
                                         .child(
                                             div()
-                                                .font_weight(gpui::FontWeight::MEDIUM)
+                                                .font_weight(gpui_kit::FontWeight::MEDIUM)
                                                 .child(SharedString::from(estudio.nome.clone())),
                                         )
                                         .child(
@@ -1695,7 +1703,7 @@ impl Sessoes {
     /// Todo administrador vê; **só o SuperAdmin restaura**.
     fn tabela_de_excluidas(&self, cx: &mut Context<Self>) -> AnyElement {
         use crate::recursos::Icone;
-        use gpui_component::Icon;
+        use gpui_kit::component::Icon;
 
         let tema = cx.theme();
         let (borda, apagado) = (tema.border, tema.muted_foreground);
@@ -1715,7 +1723,7 @@ impl Sessoes {
                 "Sessões excluídas saem da lista e do link do cliente, mas nada é apagado.",
             ));
         let Some(excluidas) = self.excluidas.as_ref() else {
-            return gpui_component::v_flex()
+            return gpui_kit::component::v_flex()
                 .gap(px(12.))
                 .child(aviso)
                 .child(crate::estilo::aviso(
@@ -1726,7 +1734,7 @@ impl Sessoes {
                 .into_any_element();
         };
         if excluidas.is_empty() {
-            return gpui_component::v_flex()
+            return gpui_kit::component::v_flex()
                 .gap(px(12.))
                 .child(aviso)
                 .child(
@@ -1758,7 +1766,7 @@ impl Sessoes {
         };
         let cabecalho = linha()
             .h(px(40.))
-            .font_weight(gpui::FontWeight::MEDIUM)
+            .font_weight(gpui_kit::FontWeight::MEDIUM)
             .child(div().flex_1().min_w(px(200.)).child("Sessão"))
             .child(div().w(px(EXCLUIDA)).flex_none().child("Excluída"))
             .child(
@@ -1782,7 +1790,7 @@ impl Sessoes {
                 Some(lista) if lista.is_empty() => {
                     div().text_color(apagado).child("—").into_any_element()
                 }
-                Some(lista) => gpui_component::v_flex()
+                Some(lista) => gpui_kit::component::v_flex()
                     .gap(px(2.))
                     .text_xs()
                     .children(lista.iter().map(|m| {
@@ -1803,12 +1811,12 @@ impl Sessoes {
                 .min_h(px(52.))
                 .py(px(6.))
                 .child(
-                    gpui_component::v_flex()
+                    gpui_kit::component::v_flex()
                         .flex_1()
                         .min_w(px(200.))
                         .child(
                             div()
-                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .font_weight(gpui_kit::FontWeight::MEDIUM)
                                 .truncate()
                                 .child(g.titulo.clone()),
                         )
@@ -1821,7 +1829,7 @@ impl Sessoes {
                         ),
                 )
                 .child(
-                    gpui_component::v_flex()
+                    gpui_kit::component::v_flex()
                         .w(px(EXCLUIDA))
                         .flex_none()
                         .text_xs()
@@ -1830,7 +1838,7 @@ impl Sessoes {
                         .child(div().truncate().child(format!("por {}", g.excluida_por))),
                 )
                 .child(
-                    gpui_component::v_flex()
+                    gpui_kit::component::v_flex()
                         .w(px(ACERVO))
                         .flex_none()
                         .items_end()
@@ -1872,7 +1880,7 @@ impl Sessoes {
                 })
         });
 
-        gpui_component::v_flex()
+        gpui_kit::component::v_flex()
             .gap(px(12.))
             .flex_1()
             .min_h(px(0.))
@@ -1953,7 +1961,7 @@ impl Sessoes {
     fn dialogo_de_exclusao(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         use crate::estilo;
         use crate::recursos::Icone;
-        use gpui_component::Icon;
+        use gpui_kit::component::Icon;
 
         let aberta = self.exclusao.as_ref()?;
         let tema = cx.theme();
@@ -2005,7 +2013,7 @@ impl Sessoes {
                         })
                         .collect(),
                 };
-                gpui_component::v_flex()
+                gpui_kit::component::v_flex()
                     .gap(px(6.))
                     .p(px(12.))
                     .rounded(px(8.))
@@ -2019,7 +2027,7 @@ impl Sessoes {
                             .flex()
                             .items_center()
                             .gap(px(8.))
-                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .font_weight(gpui_kit::FontWeight::MEDIUM)
                             .child(Icon::new(Icone::HardDrive).size(px(16.)))
                             .child("Fotos desta sessão fora do servidor"),
                     )
@@ -2048,12 +2056,14 @@ impl Sessoes {
                 estilo::caixa_do_dialogo(cx)
                     .id("dialogo-de-exclusao")
                     .w(px(512.))
-                    .on_key_down(cx.listener(|tela, ev: &gpui::KeyDownEvent, _window, cx| {
-                        if ev.keystroke.key == "escape" {
-                            cx.stop_propagation();
-                            tela.cancelar_exclusao(cx);
-                        }
-                    }))
+                    .on_key_down(
+                        cx.listener(|tela, ev: &gpui_kit::KeyDownEvent, _window, cx| {
+                            if ev.keystroke.key == "escape" {
+                                cx.stop_propagation();
+                                tela.cancelar_exclusao(cx);
+                            }
+                        }),
+                    )
                     .child(estilo::cabecalho_do_dialogo(
                         "Excluir a sessão",
                         descricao,
@@ -2062,7 +2072,7 @@ impl Sessoes {
                     ))
                     .child(quem_tem)
                     .child(
-                        gpui_component::v_flex()
+                        gpui_kit::component::v_flex()
                             .gap(px(6.))
                             .child(
                                 div()
@@ -2071,7 +2081,7 @@ impl Sessoes {
                                     .items_center()
                                     .gap(px(4.))
                                     .text_sm()
-                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .font_weight(gpui_kit::FontWeight::MEDIUM)
                                     .child("Para confirmar, digite")
                                     .child(
                                         div()
@@ -2107,7 +2117,7 @@ impl Sessoes {
     fn barra(&self, contagens: &sessoes::Contagens, cx: &mut Context<Self>) -> impl IntoElement {
         use crate::estilo;
         use crate::recursos::Icone;
-        use gpui_component::Icon;
+        use gpui_kit::component::Icon;
 
         let filtrando = self.filtrando(cx);
         let ativa = self.situacao;
@@ -2337,7 +2347,7 @@ impl Sessoes {
                 .child(
                     div()
                         .text_2xl()
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                         .when(destaque, |d| d.text_color(texto_bom))
                         .child(valor),
                 )
@@ -2472,7 +2482,7 @@ impl Sessoes {
 
     fn formulario(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let nova = self.nova.as_ref()?;
-        let campo = |rotulo: &str, estado: &gpui::Entity<InputState>| {
+        let campo = |rotulo: &str, estado: &gpui_kit::Entity<InputState>| {
             div()
                 .flex()
                 .flex_col()
@@ -2618,7 +2628,7 @@ impl Sessoes {
             .border_b_1()
             .border_color(borda)
             .text_sm()
-            .font_weight(gpui::FontWeight::MEDIUM)
+            .font_weight(gpui_kit::FontWeight::MEDIUM)
             .child(flexivel(GALERIA).child("Galeria"))
             .child(flexivel(CONTATO).child("Contato"))
             .child(div().w(px(SITUACAO)).flex_none().child("Situação"))
@@ -2699,7 +2709,7 @@ impl Sessoes {
                 .on_click(cx.listener(move |tela, _ev, _window, cx| tela.abrir(id.clone(), cx)))
                 .child(
                     flexivel(GALERIA)
-                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .font_weight(gpui_kit::FontWeight::MEDIUM)
                         .truncate()
                         .child(sessao.titulo.clone()),
                 )
@@ -2822,7 +2832,7 @@ impl Sessoes {
 /// efeito colateral de abrir a galeria.
 fn lixeira(sessao: &SessaoFotografica, apagado: Hsla, cx: &Context<Sessoes>) -> AnyElement {
     use crate::recursos::Icone;
-    use gpui_component::Icon;
+    use gpui_kit::component::Icon;
 
     let id = sessao.id.clone();
     let caixa = div()
@@ -2842,7 +2852,7 @@ fn lixeira(sessao: &SessaoFotografica, apagado: Hsla, cx: &Context<Sessoes>) -> 
             .text_color(apagado.opacity(0.4))
             .on_click(|_, _, cx| cx.stop_propagation())
             .tooltip(move |window, cx| {
-                gpui_component::tooltip::Tooltip::new(dica.clone()).build(window, cx)
+                gpui_kit::component::tooltip::Tooltip::new(dica.clone()).build(window, cx)
             })
             .child(Icon::new(Icone::Trash2).size(px(16.)))
             .into_any_element();
@@ -2853,7 +2863,7 @@ fn lixeira(sessao: &SessaoFotografica, apagado: Hsla, cx: &Context<Sessoes>) -> 
         .cursor_pointer()
         .hover(move |s| s.bg(perigo.opacity(0.1)).text_color(perigo))
         .tooltip(|window, cx| {
-            gpui_component::tooltip::Tooltip::new("Excluir esta sessão").build(window, cx)
+            gpui_kit::component::tooltip::Tooltip::new("Excluir esta sessão").build(window, cx)
         })
         .on_click(cx.listener(move |tela, _ev, window, cx| {
             cx.stop_propagation();
@@ -2902,7 +2912,7 @@ fn celula_do_caixa(
                 .bg(fundo)
                 .text_color(texto)
                 .text_xs()
-                .font_weight(gpui::FontWeight::MEDIUM)
+                .font_weight(gpui_kit::FontWeight::MEDIUM)
                 .cursor_pointer()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(cx.listener(move |_tela, _ev, _window, cx| {
@@ -2947,7 +2957,7 @@ mod testes {
     use super::*;
     use crate::pos_venda::porta::mentira::PublicadorDeMentira;
     use domain::services::pos_venda::ContagemDeFotos as ContagemDaApi;
-    use gpui::TestAppContext;
+    use gpui_kit::TestAppContext;
     use std::sync::Mutex;
 
     fn galeria(id: &str, titulo: &str, email: Option<&str>) -> GaleriaDoPainel {
@@ -2981,19 +2991,19 @@ mod testes {
     fn janela(
         cx: &mut TestAppContext,
         publicador: Arc<PublicadorDeMentira>,
-    ) -> gpui::WindowHandle<Sessoes> {
-        cx.update(gpui_component::init);
+    ) -> gpui_kit::WindowHandle<Sessoes> {
+        cx.update(gpui_kit::init);
         cx.add_window(move |window, cx| Sessoes::nova(publicador, window, cx))
     }
 
-    fn colher(cx: &mut TestAppContext, janela: &gpui::WindowHandle<Sessoes>) {
+    fn colher(cx: &mut TestAppContext, janela: &gpui_kit::WindowHandle<Sessoes>) {
         for _ in 0..10 {
             let _ = janela.update(cx, |tela, _window, cx| tela.colher(cx));
             cx.run_until_parked();
         }
     }
 
-    fn com_sessao(cx: &mut TestAppContext, janela: &gpui::WindowHandle<Sessoes>) {
+    fn com_sessao(cx: &mut TestAppContext, janela: &gpui_kit::WindowHandle<Sessoes>) {
         janela
             .update(cx, |tela, _window, cx| {
                 tela.definir_sessao(
@@ -3017,7 +3027,7 @@ mod testes {
     /// `SessaoFotografica` com os campos certos nos lugares certos. Trocar
     /// `disponiveis` por `compradas` na cópia não faria nada falhar — daria a
     /// situação certa com o número errado.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_lista_chega_e_a_busca_acha_como_no_site(cx: &mut TestAppContext) {
         let publicador = Arc::new(PublicadorDeMentira {
             galerias: Mutex::new(vec![
@@ -3042,7 +3052,7 @@ mod testes {
 
                 // "joao" acha "João" — a normalização é a do core.
                 tela.busca
-                    .update(cx, |estado, cx| estado.set_value("joao", window, cx));
+                    .update(cx, |estado, cx| estado.trocar_valor("joao", window, cx));
                 let achadas = sessoes::filtrar(&todas, &tela.criterio(cx), 0);
                 assert_eq!(achadas.len(), 1);
                 assert_eq!(achadas[0].titulo, "Ensaio do João");
@@ -3059,7 +3069,7 @@ mod testes {
     /// "Filtros", clicado de verdade, liga a linha; texto acha sem acento,
     /// número pergunta "quanto" com o operador escolhido, e o "Limpar" da barra
     /// apaga os campos junto com o resto.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn os_filtros_de_coluna_recortam_a_lista_como_no_site(cx: &mut TestAppContext) {
         use biblioteca_core::filtro_de_coluna::{Coluna, Operador};
         let publicador = Arc::new(PublicadorDeMentira {
@@ -3078,12 +3088,12 @@ mod testes {
             })
             .expect("a janela deve estar aberta");
 
-        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
         visual.run_until_parked();
         let botao = visual
             .debug_bounds("sessoes-filtros")
             .expect("o botão Filtros está na barra");
-        visual.simulate_click(botao.center(), gpui::Modifiers::none());
+        visual.simulate_click(botao.center(), gpui_kit::Modifiers::none());
         visual.run_until_parked();
         assert!(
             visual.debug_bounds("filtro-Galeria").is_some(),
@@ -3121,7 +3131,7 @@ mod testes {
     /// sessão sai, e o contato é pedido no fim. Sem título, ou com o e-mail
     /// escrito pela metade, não sai — o site recusaria, e deixar sair daqui
     /// gastaria uma ida à rede para trazer de volta um erro que a tela já sabia.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn abrir_sessao_exige_so_o_titulo_e_recusa_email_pela_metade(cx: &mut TestAppContext) {
         let publicador = Arc::new(PublicadorDeMentira::default());
         let janela = janela(cx, publicador.clone());
@@ -3152,10 +3162,10 @@ mod testes {
                 // Com título e o e-mail pela metade: também não.
                 let nova = tela.nova.as_ref().expect("o formulário está aberto");
                 nova.titulo.update(cx, |estado, cx| {
-                    estado.set_value("Ensaio da Ana", window, cx)
+                    estado.trocar_valor("Ensaio da Ana", window, cx)
                 });
                 nova.email
-                    .update(cx, |estado, cx| estado.set_value("ana@", window, cx));
+                    .update(cx, |estado, cx| estado.trocar_valor("ana@", window, cx));
                 tela.erro = None;
                 tela.criar(cx);
                 assert!(tela.erro.is_some(), "e-mail pela metade é recusado");
@@ -3172,7 +3182,7 @@ mod testes {
             .update(cx, |tela, window, cx| {
                 let nova = tela.nova.as_ref().expect("o formulário continua aberto");
                 nova.email
-                    .update(cx, |estado, cx| estado.set_value("", window, cx));
+                    .update(cx, |estado, cx| estado.trocar_valor("", window, cx));
                 tela.erro = None;
                 tela.criar(cx);
                 assert!(tela.erro.is_some(), "sem estúdio não sai");
@@ -3210,7 +3220,7 @@ mod testes {
     /// estúdio."* — dono, 2026-09-13. A criação do desktop não tem preset nem
     /// corte; o estúdio escolhido volta sugerido na próxima sessão — e some da
     /// sugestão se deixar de estar ativo.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_ultimo_estudio_volta_sugerido_na_proxima_sessao(cx: &mut TestAppContext) {
         let publicador = Arc::new(PublicadorDeMentira::default());
         let janela = janela(cx, publicador);
@@ -3228,7 +3238,7 @@ mod testes {
                 tela.comecar_nova(window, cx);
                 let nova = tela.nova.as_ref().expect("o formulário está aberto");
                 nova.titulo.update(cx, |estado, cx| {
-                    estado.set_value("Ensaio da Ana", window, cx)
+                    estado.trocar_valor("Ensaio da Ana", window, cx)
                 });
                 tela.escolher_estudio("s1".into(), cx);
                 tela.criar(cx);
@@ -3265,7 +3275,7 @@ mod testes {
     /// seguinte adivinha o estúdio pela última sessão criada, que é a de
     /// qualquer balcão — e o operador de Canela cria sessão em Gramado sem
     /// perceber.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_entrada_exige_o_estudio_e_a_escolha_fica(cx: &mut TestAppContext) {
         let publicador = Arc::new(PublicadorDeMentira {
             estudios: vec![estudio()],
@@ -3309,7 +3319,7 @@ mod testes {
     /// 18/set/2026: *"na listagem de sessões por padrão deve estar filtrado
     /// como hoje, mas com opção de selecionar o dia ou mesmo range de um
     /// período"*).
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_lista_abre_em_hoje_e_o_periodo_recorta(cx: &mut TestAppContext) {
         let hoje = super::hoje_no_estudio();
         let ontem = hoje - chrono::Duration::days(1);
@@ -3378,7 +3388,7 @@ mod testes {
     ///
     /// A sessão **sem** estúdio aparece em todas: são as de antes de o campo
     /// existir, e escondê-las de todo mundo seria perdê-las de vista.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_lista_mostra_so_as_sessoes_do_estudio_escolhido(cx: &mut TestAppContext) {
         let de_gramado = |id: &str, estudio: Option<&str>| {
             let mut g = galeria(id, "Ensaio", None);
@@ -3435,7 +3445,7 @@ mod testes {
     /// 🔑 **O estúdio de trabalho sobrevive à escolha**: criar sessão e abrir o
     /// caixa continuam no último escolhido — não existe "criar sessão em
     /// todos".
-    #[gpui::test]
+    #[gpui_kit::test]
     fn todos_os_estudios_mostra_a_lista_inteira_e_marca_a_sem_estudio(cx: &mut TestAppContext) {
         let com_estudio = |id: &str, estudio: Option<&str>| {
             let mut g = galeria(id, "Ensaio", None);
@@ -3512,7 +3522,7 @@ mod testes {
     /// ⚠️ **Sem estúdio cadastrado não se pergunta nada**: um diálogo sem opção
     /// e sem saída é pior do que a ausência dele — e quem está começando ainda
     /// não cadastrou estúdio nenhum.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn sem_estudio_cadastrado_a_entrada_nao_pergunta(cx: &mut TestAppContext) {
         let publicador = Arc::new(PublicadorDeMentira::default());
         let janela = janela(cx, publicador);
@@ -3536,7 +3546,7 @@ mod testes {
     /// Quem acabou de cadastrar o cliente vai subir foto nele agora, e não daqui
     /// a três telas. É o mesmo encadeamento que "criar coleção leva a seleção
     /// junto" tem na Biblioteca.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_sessao_recem_aberta_ja_fica_escolhida(cx: &mut TestAppContext) {
         let publicador = Arc::new(PublicadorDeMentira::default());
         let janela = janela(cx, publicador);
@@ -3554,10 +3564,10 @@ mod testes {
                 tela.comecar_nova(window, cx);
                 let nova = tela.nova.as_ref().expect("o formulário está aberto");
                 nova.titulo.update(cx, |estado, cx| {
-                    estado.set_value("Ensaio da Ana", window, cx)
+                    estado.trocar_valor("Ensaio da Ana", window, cx)
                 });
                 nova.email.update(cx, |estado, cx| {
-                    estado.set_value("ana@exemplo.com", window, cx)
+                    estado.trocar_valor("ana@exemplo.com", window, cx)
                 });
                 tela.escolher_estudio("s1".into(), cx);
                 tela.criar(cx);
@@ -3580,15 +3590,15 @@ mod testes {
         cx: &mut TestAppContext,
         publicador: Arc<PublicadorDeMentira>,
     ) -> (
-        gpui::WindowHandle<gpui_component::Root>,
-        gpui::Entity<Sessoes>,
+        gpui_kit::WindowHandle<gpui_kit::component::Root>,
+        gpui_kit::Entity<Sessoes>,
     ) {
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
         let mut tela = None;
         let raiz = cx.add_window(|window, cx| {
             let sessoes = cx.new(|cx| Sessoes::nova(publicador, window, cx));
             tela = Some(sessoes.clone());
-            gpui_component::Root::new(sessoes, window, cx)
+            gpui_kit::component::Root::new(sessoes, window, cx)
         });
         let tela = tela.expect("a tela criada");
         na_tela(cx, &raiz, &tela, |t, _, cx| {
@@ -3608,8 +3618,8 @@ mod testes {
 
     fn na_tela<R>(
         cx: &mut TestAppContext,
-        raiz: &gpui::WindowHandle<gpui_component::Root>,
-        tela: &gpui::Entity<Sessoes>,
+        raiz: &gpui_kit::WindowHandle<gpui_kit::component::Root>,
+        tela: &gpui_kit::Entity<Sessoes>,
         f: impl FnOnce(&mut Sessoes, &mut Window, &mut Context<Sessoes>) -> R,
     ) -> R {
         let r = raiz
@@ -3623,8 +3633,8 @@ mod testes {
 
     fn colher_na_raiz(
         cx: &mut TestAppContext,
-        raiz: &gpui::WindowHandle<gpui_component::Root>,
-        tela: &gpui::Entity<Sessoes>,
+        raiz: &gpui_kit::WindowHandle<gpui_kit::component::Root>,
+        tela: &gpui_kit::Entity<Sessoes>,
     ) {
         for _ in 0..10 {
             na_tela(cx, raiz, tela, |t, _, cx| {
@@ -3635,7 +3645,7 @@ mod testes {
 
     /// 🗑️ A sessão com foto paga não abre o diálogo, e quem não é SuperAdmin
     /// nem chega a ele — as duas travas do `ExcluirGaleria` do site.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn so_o_super_admin_exclui_e_so_sessao_sem_venda(cx: &mut TestAppContext) {
         let publicador = Arc::new(PublicadorDeMentira::default());
         let (raiz, tela) = janela_com_raiz(cx, publicador);
@@ -3660,7 +3670,7 @@ mod testes {
     /// 🗑️ O caminho inteiro: o relato das máquinas chega, a frase errada não
     /// manda nada, a certa manda o `DELETE` com ela, e o diálogo fecha
     /// devolvendo o foco a quem o tinha.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn excluir_exige_a_frase_e_manda_o_delete_com_ela(cx: &mut TestAppContext) {
         let publicador = Arc::new(PublicadorDeMentira::default());
         publicador.responder_json(
@@ -3674,7 +3684,7 @@ mod testes {
         let (raiz, tela) = janela_com_raiz(cx, publicador.clone());
         let foco_de_antes = na_tela(cx, &raiz, &tela, |_, window, cx| {
             let foco = cx.focus_handle();
-            window.focus(&foco);
+            window.focus(&foco, cx);
             foco
         });
 
@@ -3695,7 +3705,9 @@ mod testes {
                 _ => panic!("o relato chegou e a tela precisa dizê-lo"),
             }
             let frase = aberta.frase.clone();
-            frase.update(cx, |c, cx| c.set_value("confirmar exclusão!", window, cx));
+            frase.update(cx, |c, cx| {
+                c.trocar_valor("confirmar exclusão!", window, cx)
+            });
             tela.confirmar_exclusao(cx);
         });
         assert!(
@@ -3708,7 +3720,9 @@ mod testes {
 
         na_tela(cx, &raiz, &tela, |tela, window, cx| {
             let frase = tela.exclusao.as_ref().expect("segue aberto").frase.clone();
-            frase.update(cx, |c, cx| c.set_value(" CONFIRMAR EXCLUSÃO! ", window, cx));
+            frase.update(cx, |c, cx| {
+                c.trocar_valor(" CONFIRMAR EXCLUSÃO! ", window, cx)
+            });
             tela.confirmar_exclusao(cx);
         });
         colher_na_raiz(cx, &raiz, &tela);
@@ -3778,7 +3792,7 @@ mod testes {
     }
 
     /// 🗑️ Restaurar: só o SuperAdmin, pergunta antes, manda o `POST` e relê.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn restaurar_pergunta_antes_e_manda_o_post(cx: &mut TestAppContext) {
         let publicador = Arc::new(PublicadorDeMentira::default());
         publicador.responder_json(

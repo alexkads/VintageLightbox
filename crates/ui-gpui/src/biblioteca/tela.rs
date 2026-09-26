@@ -3,17 +3,20 @@
 //! Junta as três peças: as fotos que o `LibraryController` traz do catálogo, as
 //! contas de [`super::grade`] e as miniaturas de [`super::miniaturas`].
 
+use crate::campo::TrocarValor as _;
 use std::sync::{Arc, Mutex};
 
 use adapters::view_models::PhotoViewModel;
-use gpui::{
+use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants};
+use gpui_kit::component::dock::{
+    panel_handle, register_panel, DockArea, DockEvent, DockLayout, DockSkin,
+};
+use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::{ActiveTheme, Selectable, Sizable};
+use gpui_kit::{
     div, img, prelude::*, px, uniform_list, AnyElement, App, Context, Entity, SharedString,
     Subscription, Window,
 };
-use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants};
-use gpui_component::dock::{register_panel, DockArea, DockEvent, DockItem, PanelView};
-use gpui_component::input::{Input, InputEvent, InputState};
-use gpui_component::{ActiveTheme, Selectable, Sizable};
 use infrastructure::cache::preview_manager::PreviewManager;
 
 use super::arranjo;
@@ -108,7 +111,7 @@ pub struct Biblioteca {
         std::sync::mpsc::Receiver<colecoes::Recado>,
     ),
     colhendo_colecoes: bool,
-    _colheita_de_colecoes: Option<gpui::Task<()>>,
+    _colheita_de_colecoes: Option<gpui_kit::Task<()>>,
     /// As fotos que vão para a coleção assim que ela nascer.
     ///
     /// 🔑 A criação é assíncrona e o id só existe do outro lado; guardar a
@@ -145,7 +148,7 @@ pub struct Biblioteca {
     dock: Option<Entity<DockArea>>,
     /// A gravação adiada do arranjo. Guardada porque **descartá-la cancela** —
     /// é o que faz um arrasto inteiro de divisória virar uma escrita só.
-    _arranjo: Option<gpui::Task<()>>,
+    _arranjo: Option<gpui_kit::Task<()>>,
     /// Em qual arquivo o arranjo é gravado. Definido ao montar o dock.
     arranjo_em: std::path::PathBuf,
     /// Quantas colunas a grade tem. `None` é **automático** — quantas couberem
@@ -373,8 +376,9 @@ impl Biblioteca {
     ) {
         let arquivo_para_ler = arquivo.clone();
         self.arranjo_em = arquivo;
-        let dock = cx.new(|cx| DockArea::new("biblioteca", Some(arranjo::VERSAO), window, cx));
-        let fraca = dock.downgrade();
+        // A `DockSkin` é o desenho do gpui-component sobre a dock do
+        // `gpui-base`; sem ela a dock funciona, mas não desenha nada.
+        let (dock, _pele) = DockSkin::dock_area("biblioteca", Some(arranjo::VERSAO), window, cx);
 
         // 🚨 **Restaurar um arranjo salvo passa por aqui.** O `DockArea` guarda
         // só o **nome** de cada painel; quem sabe construí-lo de volta é este
@@ -389,52 +393,35 @@ impl Biblioteca {
             Qual::Filmstrip,
         ] {
             let acervo = eu.downgrade();
-            register_panel(
-                cx,
-                qual.nome(),
-                move |_dock, _estado, _info, _window, cx| {
-                    let acervo = acervo.clone();
-                    Box::new(cx.new(|cx| PainelDaBiblioteca::novo(qual, acervo, cx)))
-                },
-            );
+            register_panel(cx, qual.nome(), move |_contexto, _window, cx| {
+                let acervo = acervo.clone();
+                panel_handle(cx.new(|cx| PainelDaBiblioteca::novo(qual, acervo, cx)))
+            });
         }
 
-        let painel = |qual: Qual, eu: &Entity<Self>, cx: &mut gpui::App| {
+        let painel = |qual: Qual, eu: &Entity<Self>, cx: &mut gpui_kit::App| {
             let acervo = eu.downgrade();
-            let entidade = cx.new(|cx| PainelDaBiblioteca::novo(qual, acervo, cx));
-            std::sync::Arc::new(entidade) as std::sync::Arc<dyn PanelView>
+            panel_handle(cx.new(|cx| PainelDaBiblioteca::novo(qual, acervo, cx)))
         };
-
-        let pastas = DockItem::tabs(vec![painel(Qual::Pastas, eu, cx)], &fraca, window, cx);
-        let grade = DockItem::tabs(vec![painel(Qual::Grade, eu, cx)], &fraca, window, cx);
-        let filmstrip = DockItem::tabs(vec![painel(Qual::Filmstrip, eu, cx)], &fraca, window, cx);
-        let informacoes =
-            DockItem::tabs(vec![painel(Qual::Informacoes, eu, cx)], &fraca, window, cx);
+        let (pastas, grade, filmstrip, informacoes) = (
+            painel(Qual::Pastas, eu, cx),
+            painel(Qual::Grade, eu, cx),
+            painel(Qual::Filmstrip, eu, cx),
+            painel(Qual::Informacoes, eu, cx),
+        );
+        let aba = |painel, cx: &gpui_kit::App| DockLayout::tabs().panel_view(painel, cx);
 
         // O meio é uma coluna: a grade em cima, o filmstrip embaixo. As duas
         // laterais nascem com a largura que elas tinham fixas — quem arrastar
         // depois muda, e é esse o ponto.
-        let meio = DockItem::split_with_sizes(
-            gpui::Axis::Vertical,
-            vec![grade, filmstrip],
-            vec![None, Some(px(ALTURA_DO_FILMSTRIP))],
-            &fraca,
-            window,
-            cx,
-        );
+        let meio = DockLayout::v_split()
+            .child(aba(grade, cx), None)
+            .child(aba(filmstrip, cx), Some(px(ALTURA_DO_FILMSTRIP)));
 
-        let centro = DockItem::split_with_sizes(
-            gpui::Axis::Horizontal,
-            vec![pastas, meio, informacoes],
-            vec![
-                Some(px(LADO_DA_ARVORE)),
-                None,
-                Some(px(LADO_DAS_INFORMACOES)),
-            ],
-            &fraca,
-            window,
-            cx,
-        );
+        let centro = DockLayout::h_split()
+            .child(aba(pastas, cx), Some(px(LADO_DA_ARVORE)))
+            .child(meio, None)
+            .child(aba(informacoes, cx), Some(px(LADO_DAS_INFORMACOES)));
 
         dock.update(cx, |area, cx| {
             area.set_center(centro, window, cx);
@@ -905,13 +892,13 @@ impl Biblioteca {
     /// fica apontando um elemento que não é mais renderizado, e as teclas da raiz
     /// param de chegar.
     #[cfg(test)]
-    pub fn focar_busca(&self, window: &mut Window, cx: &mut gpui::App) {
-        use gpui::Focusable;
-        window.focus(&self.busca.read(cx).focus_handle(cx));
+    pub fn focar_busca(&self, window: &mut Window, cx: &mut gpui_kit::App) {
+        use gpui_kit::Focusable;
+        window.focus(&self.busca.read(cx).focus_handle(cx), cx);
     }
 
     #[cfg(test)]
-    pub fn texto_da_busca(&self, cx: &gpui::App) -> String {
+    pub fn texto_da_busca(&self, cx: &gpui_kit::App) -> String {
         self.busca.read(cx).value().to_string()
     }
 
@@ -1440,7 +1427,7 @@ impl Biblioteca {
                 nota_atual == n,
                 cx.listener(
                     move |this: &mut Self,
-                          _ev: &gpui::ClickEvent,
+                          _ev: &gpui_kit::ClickEvent,
                           _window,
                           cx: &mut Context<Self>| {
                         this.filtros.nota_minima = NotaMinima(n);
@@ -1460,7 +1447,10 @@ impl Biblioteca {
             "auto".to_string(),
             escolhidas.is_none(),
             cx.listener(
-                move |this: &mut Self, _ev: &gpui::ClickEvent, _window, cx: &mut Context<Self>| {
+                move |this: &mut Self,
+                      _ev: &gpui_kit::ClickEvent,
+                      _window,
+                      cx: &mut Context<Self>| {
                     this.escolher_colunas(None, cx);
                 },
             ),
@@ -1472,7 +1462,7 @@ impl Biblioteca {
                 escolhidas == Some(quantas),
                 cx.listener(
                     move |this: &mut Self,
-                          _ev: &gpui::ClickEvent,
+                          _ev: &gpui_kit::ClickEvent,
                           _window,
                           cx: &mut Context<Self>| {
                         this.escolher_colunas(Some(quantas), cx);
@@ -1494,7 +1484,7 @@ impl Biblioteca {
                 sinalizador_atual == qual,
                 cx.listener(
                     move |this: &mut Self,
-                          _ev: &gpui::ClickEvent,
+                          _ev: &gpui_kit::ClickEvent,
                           _window,
                           cx: &mut Context<Self>| {
                         this.filtros.sinalizador = qual;
@@ -1520,7 +1510,7 @@ impl Biblioteca {
                 compra_atual == qual,
                 cx.listener(
                     move |this: &mut Self,
-                          _ev: &gpui::ClickEvent,
+                          _ev: &gpui_kit::ClickEvent,
                           _window,
                           cx: &mut Context<Self>| {
                         this.filtros.compra = qual;
@@ -1538,7 +1528,7 @@ impl Biblioteca {
             "todas".to_string(),
             self.filtros.cor.is_none(),
             cx.listener(
-                |this: &mut Self, _ev: &gpui::ClickEvent, _window, cx: &mut Context<Self>| {
+                |this: &mut Self, _ev: &gpui_kit::ClickEvent, _window, cx: &mut Context<Self>| {
                     this.filtros.cor = None;
                     this.refiltrar();
                     cx.notify();
@@ -1554,7 +1544,7 @@ impl Biblioteca {
                 aceso,
                 cx.listener(
                     move |this: &mut Self,
-                          _ev: &gpui::ClickEvent,
+                          _ev: &gpui_kit::ClickEvent,
                           _window,
                           cx: &mut Context<Self>| {
                         this.filtros.cor = if aceso { None } else { Some(valor.to_string()) };
@@ -1823,7 +1813,7 @@ impl Biblioteca {
                     )
                     .on_click(cx.listener(
                         move |this: &mut Self,
-                              _ev: &gpui::ClickEvent,
+                              _ev: &gpui_kit::ClickEvent,
                               _window,
                               cx: &mut Context<Self>| {
                             // A faixa **seleciona**, não alterna: quem clica no
@@ -1868,7 +1858,7 @@ impl Biblioteca {
             format!("Todas ({})", self.fotos.len()),
             escolhida.is_none(),
             cx.listener(
-                |this: &mut Self, _ev: &gpui::ClickEvent, _window, cx: &mut Context<Self>| {
+                |this: &mut Self, _ev: &gpui_kit::ClickEvent, _window, cx: &mut Context<Self>| {
                     this.filtros.pasta = None;
                     this.refiltrar();
                     cx.notify();
@@ -1887,7 +1877,7 @@ impl Biblioteca {
                 aceso,
                 cx.listener(
                     move |this: &mut Self,
-                          _ev: &gpui::ClickEvent,
+                          _ev: &gpui_kit::ClickEvent,
                           _window,
                           cx: &mut Context<Self>| {
                         // Clicar de novo na pasta acesa desfaz a escolha: sem isso,
@@ -1997,7 +1987,7 @@ fn botao(
     id: String,
     texto: String,
     aceso: bool,
-    ao_clicar: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
+    ao_clicar: impl Fn(&gpui_kit::ClickEvent, &mut Window, &mut gpui_kit::App) + 'static,
 ) -> Button {
     Button::new(SharedString::from(id))
         .label(SharedString::from(texto))
@@ -2026,7 +2016,7 @@ fn botao_de_etiqueta(
     valor: &str,
     rotulo: &str,
     aceso: bool,
-    ao_clicar: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
+    ao_clicar: impl Fn(&gpui_kit::ClickEvent, &mut Window, &mut gpui_kit::App) + 'static,
     cx: &App,
 ) -> Button {
     // ⚠️ Etiqueta sem cor conhecida não deveria chegar aqui — a lista é a do
@@ -2035,26 +2025,34 @@ fn botao_de_etiqueta(
         return botao(id, rotulo.to_string(), aceso, ao_clicar);
     };
 
-    let variante = if aceso {
-        ButtonCustomVariant::new(cx)
-            .color(cor)
-            .foreground(cores::texto_sobre(cor))
-            .border(cor)
-            .hover(cor.opacity(0.85))
-            .active(cor)
+    // A borda vai no botão, e não na variante: no gpui-kit 0.6 a variante
+    // própria não desenha borda nenhuma, e o estilo do botão vale por cima.
+    let (variante, borda) = if aceso {
+        (
+            ButtonCustomVariant::new(cx)
+                .color(cor)
+                .foreground(cores::texto_sobre(cor))
+                .hover(cor.opacity(0.85))
+                .active(cor),
+            cor,
+        )
     } else {
-        ButtonCustomVariant::new(cx)
-            .color(cx.theme().secondary)
-            .foreground(cor)
-            .border(cx.theme().border)
-            .hover(cx.theme().secondary_hover)
-            .active(cx.theme().secondary_active)
+        (
+            ButtonCustomVariant::new(cx)
+                .color(cx.theme().secondary)
+                .foreground(cor)
+                .hover(cx.theme().secondary_hover)
+                .active(cx.theme().secondary_active),
+            cx.theme().border,
+        )
     };
 
     Button::new(SharedString::from(id))
         .label(SharedString::from(rotulo.to_string()))
         .xsmall()
         .custom(variante)
+        .border_1()
+        .border_color(borda)
         .selected(aceso)
         .on_click(ao_clicar)
 }
@@ -2069,9 +2067,9 @@ fn celula(
     // são a mesma; em lote, é a última clicada, e sem distingui-la ninguém sabe
     // qual das dez vai abrir ao apertar "Revelação".
     principal: bool,
-    ao_clicar: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
+    ao_clicar: impl Fn(&gpui_kit::ClickEvent, &mut Window, &mut gpui_kit::App) + 'static,
     cx: &App,
-) -> gpui::AnyElement {
+) -> gpui_kit::AnyElement {
     let miniatura = cache
         .lock()
         .expect("o cache de miniaturas não deve estar envenenado")
@@ -2266,9 +2264,9 @@ impl Biblioteca {
                                     // por isso que o clique fica na célula
                                     // inteira: `Cmd` alterna uma, `Shift` estende
                                     // o intervalo, e sem eles é seleção única.
-                                    move |evento: &gpui::ClickEvent,
+                                    move |evento: &gpui_kit::ClickEvent,
                                           _window,
-                                          cx: &mut gpui::App| {
+                                          cx: &mut gpui_kit::App| {
                                         let modificadores = evento.modifiers();
                                         eu.update(cx, |tela, cx| {
                                             if modificadores.secondary() {
@@ -2389,7 +2387,7 @@ impl Biblioteca {
                                 let nome = tela.nome_da_colecao.read(cx).value().to_string();
                                 tela.criar_colecao(nome, cx);
                                 tela.nome_da_colecao.update(cx, |campo, cx| {
-                                    campo.set_value("", window, cx);
+                                    campo.trocar_valor("", window, cx);
                                 });
                             })),
                     ),
@@ -2448,7 +2446,7 @@ mod testes {
 
     use super::super::marcacao::mentira::MarcadorDeMentira;
 
-    use gpui::TestAppContext;
+    use gpui_kit::TestAppContext;
     use tempfile::TempDir;
 
     /// O primeiro teste de tela do projeto em `TestAppContext`.
@@ -2474,10 +2472,10 @@ mod testes {
     fn tela_com_colecoes(
         cx: &mut TestAppContext,
         porta: Arc<colecoes::mentira::ColecoesDeMentira>,
-    ) -> gpui::WindowHandle<Biblioteca> {
+    ) -> gpui_kit::WindowHandle<Biblioteca> {
         let (previews, dir) = previews_descartaveis();
         std::mem::forget(dir);
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
         cx.add_window(move |window, cx| {
             Biblioteca::nova(acervo(), previews, marcador(), porta, window, cx)
         })
@@ -2489,10 +2487,10 @@ mod testes {
     /// centenas numa sessão de 800 fotos. Sem o passo de confirmação, um dedo
     /// fora do lugar tira fotos do catálogo em lote — e leva a revelação delas
     /// junto, porque os 46 ajustes moram na linha da foto.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_tecla_de_apagar_sozinha_nao_apaga(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
         let marcador = Arc::new(MarcadorDeMentira::default());
 
         let janela = cx.add_window({
@@ -2520,10 +2518,10 @@ mod testes {
     }
 
     /// ⚠️ **Cancelar não apaga nada**, e é o caminho que mais se usa num aviso.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn cancelar_o_aviso_nao_apaga(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
         let marcador = Arc::new(MarcadorDeMentira::default());
 
         let janela = cx.add_window({
@@ -2552,10 +2550,10 @@ mod testes {
     /// 🔑 A grade é atualizada em memória, e não relida: apagar 40 fotos e
     /// esperar a releitura deixaria a grade mostrando o que já não existe — e
     /// clicar numa delas abriria a Revelação numa foto sem linha no banco.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn apagar_confirmado_tira_a_selecao_do_catalogo_e_da_grade(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
         let marcador = Arc::new(MarcadorDeMentira::default());
 
         let janela = cx.add_window({
@@ -2597,7 +2595,7 @@ mod testes {
     /// repositório e os três use cases estavam prontos e testados há meses —
     /// **faltava o controller e faltava a tela**, e sem os dois nada disso era
     /// alcançável por um clique.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn abrir_uma_colecao_filtra_a_grade(cx: &mut TestAppContext) {
         let porta = Arc::new(colecoes::mentira::ColecoesDeMentira::com(vec![
             adapters::controllers::CollectionViewModel {
@@ -2644,7 +2642,7 @@ mod testes {
     /// Uma coleção nova e vazia obrigaria a selecionar de novo o que já estava
     /// selecionado, e é exatamente com uma seleção na mão que alguém decide
     /// criar o ensaio de um cliente.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn criar_colecao_leva_a_selecao_junto(cx: &mut TestAppContext) {
         let porta = Arc::new(colecoes::mentira::ColecoesDeMentira::default());
         let janela = tela_com_colecoes(cx, porta.clone());
@@ -2688,7 +2686,7 @@ mod testes {
     /// Uma coleção sem nome aparece na lista como um botão em branco, e a única
     /// forma de descobrir o que tem dentro é abrir — num painel que existe para
     /// dizer o que tem onde.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn nome_vazio_nao_cria_colecao(cx: &mut TestAppContext) {
         let porta = Arc::new(colecoes::mentira::ColecoesDeMentira::default());
         let janela = tela_com_colecoes(cx, porta.clone());
@@ -2750,12 +2748,12 @@ mod testes {
         cx: &mut TestAppContext,
         fotos: Vec<PhotoViewModel>,
     ) -> (
-        gpui::WindowHandle<Biblioteca>,
+        gpui_kit::WindowHandle<Biblioteca>,
         Arc<MarcadorDeMentira>,
         TempDir,
     ) {
         let (previews, dir) = previews_descartaveis();
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
         let marcador = Arc::new(MarcadorDeMentira::default());
         let janela = cx.add_window({
             let marcador = marcador.clone();
@@ -2788,7 +2786,7 @@ mod testes {
     /// Antes de 20/set/2026 subia o índice *dentro do gesto*: classificar foto a
     /// foto mandava `0` em todas, e a galeria do cliente ordenava pela hora de
     /// chegada do upload — o acaso, com três envios no ar ao mesmo tempo.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_ordem_que_sobe_e_a_posicao_no_acervo(cx: &mut TestAppContext) {
         let (janela, _marcador, _dir) = tela_com(cx, acervo());
 
@@ -2812,7 +2810,7 @@ mod testes {
 
     /// Um id que não está no acervo simplesmente não aparece — quem chama
     /// decide o que fazer, e no `app.rs` isso é ir para depois do fim.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn ordem_no_acervo_ignora_quem_nao_esta_la(cx: &mut TestAppContext) {
         let (janela, _marcador, _dir) = tela_com(cx, acervo());
 
@@ -2831,11 +2829,11 @@ mod testes {
     /// que cabem, e o sintoma é a última coluna cortada pela borda — o mesmo
     /// defeito que a árvore de pastas causou quando entrou. Sem este teste, o
     /// painel novo passaria despercebido até alguém abrir numa janela estreita.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_grade_desconta_as_duas_colunas_laterais(cx: &mut TestAppContext) {
         let (janela, _marcador, _dir) = tela_com(cx, acervo_grande());
-        let visual = gpui::VisualTestContext::from_window(janela.into(), cx);
-        visual.simulate_resize(gpui::size(px(1200.), px(800.)));
+        let visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_resize(gpui_kit::size(px(1200.), px(800.)));
 
         janela
             .update(cx, |_tela, window, _cx| {
@@ -2856,7 +2854,7 @@ mod testes {
     /// inscrição descartada, o evento não sendo `LayoutChanged`, a espera nunca
     /// terminando) e nada avisaria — o arquivo simplesmente não apareceria, e só
     /// na abertura seguinte alguém notaria que a tela voltou ao padrão.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn mexer_no_arranjo_grava_o_arquivo(cx: &mut TestAppContext) {
         let (janela, _marcador, _dir) = tela_com(cx, acervo_grande());
         let pasta = TempDir::new().expect("diretório temporário");
@@ -2876,7 +2874,7 @@ mod testes {
             .update(cx, |tela, _window, cx| {
                 let dock = tela.dock.as_ref().expect("o dock foi montado").clone();
                 dock.update(cx, |_area, cx| {
-                    cx.emit(gpui_component::dock::DockEvent::LayoutChanged);
+                    cx.emit(gpui_kit::component::dock::DockEvent::LayoutChanged);
                 });
             })
             .expect("a janela deve estar aberta");
@@ -2916,30 +2914,38 @@ mod testes {
     /// dentro: um teste que gravasse, carregasse e comparasse os dois retratos
     /// passaria com o registro faltando inteiro. Conferido — foi o primeiro
     /// jeito que escrevi, e ele passava com o `register_panel` removido.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_arranjo_gravado_volta_com_os_quatro_paineis(cx: &mut TestAppContext) {
         let (janela, _marcador, _dir) = tela_com(cx, acervo_grande());
 
-        /// Os nomes dos painéis **vivos** dentro do dock.
-        fn vivos(item: &gpui_component::dock::DockItem, cx: &gpui::App) -> Vec<&'static str> {
-            use gpui_component::dock::DockItem;
-            match item {
-                DockItem::Tabs { items, .. } => {
-                    items.iter().map(|view| view.panel_name(cx)).collect()
-                }
-                DockItem::Split { items, .. } => {
-                    items.iter().flat_map(|filho| vivos(filho, cx)).collect()
-                }
-                DockItem::Panel { view, .. } => vec![view.panel_name(cx)],
-                DockItem::Tiles { .. } => Vec::new(),
+        /// Os nomes dos painéis **vivos** dentro do dock — um painel que o
+        /// registro não soube reconstruir responde `InvalidPanel`.
+        fn vivos(
+            area: &gpui_kit::component::dock::DockArea,
+            cx: &gpui_kit::App,
+        ) -> Vec<&'static str> {
+            use gpui_kit::component::dock::{DockPlacement, PaneRef};
+            let mut nomes = Vec::new();
+            if let Some(arvore) = area.layout(DockPlacement::Center) {
+                arvore.root().walk(&mut |no| {
+                    if let PaneRef::Tabs { panels, .. } = no.kind() {
+                        nomes.extend(
+                            panels
+                                .iter()
+                                .filter_map(|id| area.panel(*id))
+                                .map(|view| view.panel_name(cx)),
+                        );
+                    }
+                });
             }
+            nomes
         }
 
         let retrato = janela
             .update(cx, |tela, _window, cx| {
                 let dock = tela.dock.as_ref().expect("o dock foi montado");
                 assert_eq!(
-                    vivos(dock.read(cx).items(), cx),
+                    vivos(dock.read(cx), cx),
                     vec![
                         "biblioteca:pastas",
                         "biblioteca:grade",
@@ -2961,7 +2967,7 @@ mod testes {
                 });
 
                 assert_eq!(
-                    vivos(dock.read(cx).items(), cx),
+                    vivos(dock.read(cx), cx),
                     vec![
                         "biblioteca:pastas",
                         "biblioteca:grade",
@@ -2980,11 +2986,11 @@ mod testes {
     /// número fixo e a grade nova só tinha o automático. O que este teste prende
     /// é que a escolha **ganha da janela**: sem isso o botão acende, o número
     /// muda na barra e a grade continua com as colunas que cabem.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_escolha_de_colunas_ganha_da_largura_da_janela(cx: &mut TestAppContext) {
         let (janela, _marcador, _dir) = tela_com(cx, acervo_grande());
-        let visual = gpui::VisualTestContext::from_window(janela.into(), cx);
-        visual.simulate_resize(gpui::size(px(1600.), px(900.)));
+        let visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_resize(gpui_kit::size(px(1600.), px(900.)));
 
         janela
             .update(cx, |tela, window, cx| {
@@ -3005,7 +3011,7 @@ mod testes {
     }
 
     /// ⚠️ Fora da faixa de 1 a 5, a escolha é presa — como no legado.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_escolha_de_colunas_fica_entre_uma_e_cinco(cx: &mut TestAppContext) {
         let (janela, _marcador, _dir) = tela_com(cx, acervo_grande());
 
@@ -3024,7 +3030,7 @@ mod testes {
     ///
     /// É a mesma ação das teclas `0`–`5`, e ter o clique valendo só para uma
     /// faria a mesma nota significar duas coisas conforme de onde veio.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn clicar_na_estrela_da_a_nota_a_selecao_inteira(cx: &mut TestAppContext) {
         let (janela, marcador, _dir) = tela_com(cx, acervo_grande());
 
@@ -3053,7 +3059,7 @@ mod testes {
     /// `sanitize_develop_selection` — ⚠️ com uma diferença: lá a nova escolhida é
     /// sempre a **primeira** da lista filtrada, e numa triagem de 800 fotos isso
     /// devolve quem tria ao começo a cada foto rejeitada.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_selecao_anda_quando_o_filtro_tira_a_foto_da_grade(cx: &mut TestAppContext) {
         let (janela, _marcador, _dir) = tela_com(cx, acervo_grande());
 
@@ -3083,7 +3089,7 @@ mod testes {
 
     /// E quando nada mais passa no filtro, a seleção some — em vez de apontar
     /// para uma grade vazia.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn sem_nenhuma_foto_na_grade_a_selecao_e_limpa(cx: &mut TestAppContext) {
         let (janela, _marcador, _dir) = tela_com(cx, acervo_grande());
 
@@ -3108,7 +3114,7 @@ mod testes {
     /// Com três selecionadas e a principal saindo da grade, a principal passa a
     /// ser a primeira das que ficaram — e não uma foto de fora da seleção. Andar
     /// para fora dela faria a tecla seguinte cair onde ninguém escolheu.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn ao_apertar_o_filtro_a_principal_passa_a_ser_a_primeira_que_sobrou(cx: &mut TestAppContext) {
         let (janela, _marcador, _dir) = tela_com(cx, acervo_grande());
 
@@ -3146,7 +3152,7 @@ mod testes {
     }
 
     /// `Cmd+clique` põe e tira uma foto sem tocar nas outras.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn cmd_clique_alterna_uma_so(cx: &mut TestAppContext) {
         let (janela, _marcador, _dir) = tela_com(cx, acervo_grande());
 
@@ -3175,7 +3181,7 @@ mod testes {
     /// indexa `state.photos`: com filtro ligado, ele seleciona as fotos que
     /// ocupam aquelas posições no acervo — outras fotos, algumas nem visíveis.
     /// Nada falha; a grade marca células que ninguém apontou.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn shift_clique_estende_pelo_que_esta_na_grade(cx: &mut TestAppContext) {
         let (janela, _marcador, _dir) = tela_com(cx, acervo_grande());
 
@@ -3206,7 +3212,7 @@ mod testes {
     /// Com filtro ligado, o `select_all` de lá marca também as que não estão na
     /// tela — e a tecla de nota seguinte cai em todas elas. O próprio legado se
     /// contradiz: o "Select All" do módulo de impressão respeita o filtro.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn selecionar_tudo_pega_so_o_que_esta_na_grade(cx: &mut TestAppContext) {
         let (janela, _marcador, _dir) = tela_com(cx, acervo_grande());
 
@@ -3228,7 +3234,7 @@ mod testes {
     }
 
     /// 🚨 A tecla de nota vale para a seleção inteira — e grava uma vez por foto.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_nota_vale_para_todas_as_selecionadas(cx: &mut TestAppContext) {
         let (janela, marcador, _dir) = tela_com(cx, acervo_grande());
 
@@ -3256,7 +3262,7 @@ mod testes {
     /// Lá, com três selecionadas e uma já escolhida, `P` desmarca aquela e marca
     /// as outras duas: uma tecla, dois desfechos opostos no mesmo gesto. Aqui só
     /// desmarca quando **todas** já estão escolhidas.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_sinalizador_decide_pelo_grupo_inteiro(cx: &mut TestAppContext) {
         let mut fotos = acervo_grande();
         fotos[1].flag = Some(1);
@@ -3287,7 +3293,7 @@ mod testes {
 
     /// `B` decide pelo grupo, como `P`: marca as três se alguma falta, e só
     /// desmarca quando todas já estão levadas.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn levada_no_balcao_decide_pelo_grupo_inteiro(cx: &mut TestAppContext) {
         let mut fotos = acervo_grande();
         fotos[1].comprada = true;
@@ -3327,7 +3333,7 @@ mod testes {
     /// sai de `/dashboard/sessoes-fotograficas` e abre este app não pode ter de
     /// reaprender o clique. A regra que sobrou é a do site, porque o site é a
     /// referência; para desmarcar sem clicar em outra foto existe `Cmd+D`.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn clicar_numa_das_selecionadas_encolhe_para_ela(cx: &mut TestAppContext) {
         let (janela, _marcador, _dir) = tela_com(cx, acervo_grande());
 
@@ -3364,7 +3370,7 @@ mod testes {
     /// já estava marcado, e o site troca pela faixa entre a âncora e o destino.
     /// Com quatro fotos espalhadas já marcadas, o mesmo gesto dava 4+n de um
     /// lado e n do outro.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn shift_clique_substitui_pela_faixa_como_no_site(cx: &mut TestAppContext) {
         let (janela, _marcador, _dir) = tela_com(cx, acervo_grande());
 
@@ -3400,12 +3406,12 @@ mod testes {
     ///
     /// São ~50 controles com essa mesma forma de solda na Revelação. Este teste
     /// é o molde deles.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn digitar_na_busca_filtra_a_grade(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         // O `InputState` lê estado global que só o `init` cria — sem esta linha
         // o teste morre antes da primeira asserção.
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
 
         let janela = cx.add_window(|window, cx| {
             Biblioteca::nova(
@@ -3431,7 +3437,7 @@ mod testes {
         janela
             .update(cx, |tela, window, cx| {
                 tela.busca
-                    .update(cx, |campo, cx| campo.set_value("RETRATO", window, cx));
+                    .update(cx, |campo, cx| campo.trocar_valor("RETRATO", window, cx));
             })
             .expect("a janela deve estar aberta");
         // O `cx.emit` do componente enfileira um efeito; ele só chega ao
@@ -3459,10 +3465,10 @@ mod testes {
     /// fim, que é exatamente o que ele cobra. Foi o que apareceu ao quebrar o
     /// código de propósito para conferir se o teste falhava — o primeiro falhou,
     /// este não. Teste de volta precisa provar que houve ida.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn limpar_a_busca_devolve_o_acervo(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
 
         let janela = cx.add_window(|window, cx| {
             Biblioteca::nova(
@@ -3478,7 +3484,7 @@ mod testes {
         janela
             .update(cx, |tela, window, cx| {
                 tela.busca
-                    .update(cx, |campo, cx| campo.set_value("retrato", window, cx));
+                    .update(cx, |campo, cx| campo.trocar_valor("retrato", window, cx));
             })
             .expect("a janela deve estar aberta");
         cx.run_until_parked();
@@ -3496,7 +3502,7 @@ mod testes {
         janela
             .update(cx, |tela, window, cx| {
                 tela.busca
-                    .update(cx, |campo, cx| campo.set_value("", window, cx));
+                    .update(cx, |campo, cx| campo.trocar_valor("", window, cx));
             })
             .expect("a janela deve estar aberta");
         cx.run_until_parked();

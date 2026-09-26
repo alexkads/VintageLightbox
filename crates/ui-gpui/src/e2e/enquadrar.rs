@@ -1,6 +1,6 @@
 //! ✂️ O Enquadrar: o `R` do site, com as teclas dele.
 
-use gpui::TestAppContext;
+use gpui_kit::TestAppContext;
 
 use super::{abrir_o_ensaio, Cenario};
 use crate::app::Tela;
@@ -15,7 +15,7 @@ fn perto(a: f32, b: f32) -> bool {
 /// espelham, o endireitar encolhe e cresce de volta, a proporção 1:1 segura
 /// o arrasto, `Enter` confirma, `Esc` só sai da ferramenta, "Voltar à foto
 /// inteira" recomeça e o `⌘Z` devolve o enquadramento.
-#[gpui::test]
+#[gpui_kit::test]
 fn enquadrar_girar_espelhar_endireitar_e_proporcao(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     e.revelar_a_do_site(cx, "a");

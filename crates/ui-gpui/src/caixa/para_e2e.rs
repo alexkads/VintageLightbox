@@ -6,7 +6,7 @@
 //! estado do caixa por fora.
 
 use biblioteca_core::caixa::{FormaDePagamento, Pessoas};
-use gpui::{Context, Window};
+use gpui_kit::{Context, Window};
 
 use super::tela::Caixa;
 

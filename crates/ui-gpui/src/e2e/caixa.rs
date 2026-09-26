@@ -1,6 +1,6 @@
 //! 🧾 O caixa flutuante da galeria — por cima da grade e da revelação.
 
-use gpui::TestAppContext;
+use gpui_kit::TestAppContext;
 use serde_json::json;
 
 use super::{abrir_o_ensaio, Cenario, GALERIA};
@@ -19,7 +19,7 @@ fn gravacoes(e: &super::Estudio) -> Vec<PedidoJson> {
 /// aberta, F9 recolhe e abre, o ajuste rápido dá cortesia a um item, F4 sem
 /// os nomes pede as pessoas, e com eles abre o pagamento — que registra a
 /// venda na API de mentira.
-#[gpui::test]
+#[gpui_kit::test]
 fn o_caixa_da_galeria_do_cupom_a_venda(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     e.esperar(cx);
@@ -118,7 +118,7 @@ fn o_caixa_da_galeria_do_cupom_a_venda(cx: &mut TestAppContext) {
 /// 🎬 **O caixa acompanha a revelação e some fora da sessão**: na revelação
 /// as teclas F continuam valendo; na lista de sessões, o painel some e o F9
 /// não faz nada.
-#[gpui::test]
+#[gpui_kit::test]
 fn o_caixa_na_revelacao_e_fora_da_sessao(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     e.revelar_a_do_site(cx, "a");

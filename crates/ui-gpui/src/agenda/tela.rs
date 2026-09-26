@@ -5,6 +5,7 @@
 //! tela**. Com a tela escondida o evento só avisa e marca "desatualizado";
 //! a releitura é ao voltar.
 
+use crate::campo::TrocarValor as _;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
@@ -13,8 +14,8 @@ use std::time::{Duration, Instant};
 use crate::modal::Modal;
 use chrono::{DateTime, NaiveDate, Utc};
 use domain::services::pos_venda::Sessao;
-use gpui::{prelude::*, Context, Entity, EventEmitter, FocusHandle, Task, Window};
-use gpui_component::input::InputState;
+use gpui_kit::component::input::{InputModeKind, InputState, TextareaState};
+use gpui_kit::{prelude::*, Context, Entity, EventEmitter, FocusHandle, Task, Window};
 use serde_json::Value;
 
 use super::modelo::{self, Ensaio, Estudio, EventoDaAgenda, Indicadores, Visao};
@@ -108,7 +109,9 @@ pub struct Agenda {
     pub(crate) valor: Entity<InputState>,
     pub(crate) entrada: Entity<InputState>,
     pub(crate) saida: Entity<InputState>,
-    pub(crate) observacoes: Entity<InputState>,
+    /// Várias linhas: no gpui-kit 0.6 o campo que cresce é um `TextareaState`,
+    /// e não mais um `InputState` com `auto_grow`.
+    pub(crate) observacoes: Entity<TextareaState>,
     pub(crate) erro_do_formulario: Option<String>,
     pub(crate) em_acao: bool,
     /// Os campos pedem a janela para serem preenchidos: o `abrir` marca e o
@@ -170,7 +173,7 @@ impl Agenda {
             entrada: campo("dd/mm/aaaa hh:mm", window, cx),
             saida: campo("dd/mm/aaaa hh:mm", window, cx),
             observacoes: cx.new(|cx| {
-                InputState::new(window, cx)
+                TextareaState::new(window, cx)
                     .auto_grow(3, 6)
                     .placeholder("Ex: cliente chegou atrasado, pagou em dinheiro…")
             }),
@@ -580,7 +583,7 @@ impl Agenda {
         if self.em_acao {
             return;
         }
-        self.aberto.fechar(window);
+        self.aberto.fechar(window, cx);
         self.modo = Modo::Detalhes;
         cx.notify();
     }
@@ -599,7 +602,7 @@ impl Agenda {
             let foco = self.foco.clone();
             self.aberto.focar(&foco, window, cx);
         } else {
-            self.aberto.fechar(window);
+            self.aberto.fechar(window, cx);
         }
         cx.notify();
     }
@@ -622,7 +625,7 @@ impl Agenda {
         let Some(e) = self.aberto.aberto().cloned() else {
             return;
         };
-        let pares: [(&Entity<InputState>, String); 6] = [
+        let pares: [(&Entity<InputState>, String); 5] = [
             (&self.inicio, modelo::para_o_campo(e.inicio)),
             (&self.fim, modelo::para_o_campo(e.fim)),
             (
@@ -639,24 +642,27 @@ impl Agenda {
                 &self.saida,
                 e.hora_saida.map(modelo::para_o_campo).unwrap_or_default(),
             ),
-            (
-                &self.observacoes,
-                e.observacoes_atendimento.clone().unwrap_or_default(),
-            ),
         ];
         for (campo, valor) in pares {
-            campo.update(cx, |c, cx| c.set_value(valor, window, cx));
+            campo.update(cx, |c, cx| c.trocar_valor(valor, window, cx));
         }
+        let observacoes = e.observacoes_atendimento.clone().unwrap_or_default();
+        self.observacoes
+            .update(cx, |c, cx| c.trocar_valor(observacoes, window, cx));
     }
 
-    fn valor_do(&self, campo: &Entity<InputState>, cx: &gpui::App) -> String {
+    fn valor_do<M: InputModeKind>(
+        &self,
+        campo: &Entity<gpui_kit::base::input::InputBaseState<M>>,
+        cx: &gpui_kit::App,
+    ) -> String {
         campo.read(cx).value().trim().to_string()
     }
 
     /// As duas datas do reagendamento, ou a frase do que está errado.
     pub fn datas_do_reagendamento(
         &self,
-        cx: &gpui::App,
+        cx: &gpui_kit::App,
     ) -> Result<(DateTime<Utc>, DateTime<Utc>), &'static str> {
         let inicio = modelo::do_campo(&self.valor_do(&self.inicio, cx));
         let fim = modelo::do_campo(&self.valor_do(&self.fim, cx));
@@ -688,7 +694,7 @@ impl Agenda {
     }
 
     /// O que o "Registrar atendimento" vai mandar, ou a frase do erro.
-    pub fn dados_do_atendimento(&self, cx: &gpui::App) -> Result<Atendimento, String> {
+    pub fn dados_do_atendimento(&self, cx: &gpui_kit::App) -> Result<Atendimento, String> {
         let valor_pago = modelo::ler_valor(&self.valor_do(&self.valor, cx))?;
         let texto_entrada = self.valor_do(&self.entrada, cx);
         let texto_saida = self.valor_do(&self.saida, cx);

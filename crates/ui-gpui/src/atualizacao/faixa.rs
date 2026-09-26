@@ -22,9 +22,9 @@
 
 use std::sync::Arc;
 
-use gpui::{div, prelude::*, px, AnyElement, FontWeight, MouseButton, SharedString, Window};
-use gpui_component::button::{Button, ButtonVariants};
-use gpui_component::{h_flex, v_flex, ActiveTheme, Sizable};
+use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Sizable};
+use gpui_kit::{div, prelude::*, px, AnyElement, FontWeight, MouseButton, SharedString, Window};
 
 use super::novidades;
 use super::porta::{Aviso, JeitoDeAtualizar, VersaoNova};
@@ -185,7 +185,7 @@ pub enum Pedido {
 /// 🔑 Um `Arc`, e não um genérico `Clone`: o que a raiz passa aqui é o
 /// `cx.listener` do GPUI, que **não é `Clone`** — e cada botão precisa da sua
 /// cópia. O `Arc` resolve os dois de uma vez.
-pub type Agir = Arc<dyn Fn(Pedido, &mut Window, &mut gpui::App)>;
+pub type Agir = Arc<dyn Fn(Pedido, &mut Window, &mut gpui_kit::App)>;
 
 fn botao(
     id: &'static str,
@@ -273,7 +273,7 @@ pub fn botoes(estado: &Estado) -> Vec<(&'static str, &'static str, bool, Pedido)
 }
 
 /// Desenha a faixa. `agir` recebe o [`Pedido`] de cada botão.
-pub fn desenhar(estado: &Estado, cx: &gpui::App, agir: Agir) -> Option<AnyElement> {
+pub fn desenhar(estado: &Estado, cx: &gpui_kit::App, agir: Agir) -> Option<AnyElement> {
     let texto: SharedString = estado.texto()?.into();
     let tema = cx.theme();
     let destaque =
@@ -313,7 +313,7 @@ pub fn desenhar(estado: &Estado, cx: &gpui::App, agir: Agir) -> Option<AnyElemen
 }
 
 /// O diálogo "Novidades da versão X": o que mudou, por que atualizar e como.
-pub fn desenhar_novidades(estado: &Estado, cx: &gpui::App, agir: Agir) -> Option<AnyElement> {
+pub fn desenhar_novidades(estado: &Estado, cx: &gpui_kit::App, agir: Agir) -> Option<AnyElement> {
     if !estado.novidades_abertas {
         return None;
     }
@@ -446,7 +446,7 @@ pub fn desenhar_novidades(estado: &Estado, cx: &gpui::App, agir: Agir) -> Option
             .flex()
             .items_center()
             .justify_center()
-            .bg(gpui::black().opacity(0.5))
+            .bg(gpui_kit::black().opacity(0.5))
             .occlude()
             .on_mouse_down(MouseButton::Left, move |_, w, cx| {
                 fechar(Pedido::FecharNovidades, w, cx)

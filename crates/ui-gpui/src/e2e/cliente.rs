@@ -1,6 +1,6 @@
 //! 🖥️ A segunda tela, virada para o cliente.
 
-use gpui::TestAppContext;
+use gpui_kit::TestAppContext;
 
 use super::{abrir_o_ensaio, Cenario};
 use crate::app::Tela;
@@ -17,7 +17,7 @@ fn no_cliente(e: &super::Estudio, cx: &mut TestAppContext) -> Option<(String, f3
 /// 🎬 **A tela do cliente acompanha o operador**: abre pelo botão da galeria
 /// na foto em foco, segue o foco, entra na revelação com ele, vê cada gesto,
 /// a prévia da predefinição e o "Antes" segurado — e fecha pelo mesmo botão.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_tela_do_cliente_acompanha_a_galeria_e_a_revelacao(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
 

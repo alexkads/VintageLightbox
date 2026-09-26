@@ -10,6 +10,7 @@
 //! Quem grava é a tela (`gravar`); o diálogo só lê o teclado, confere o formato
 //! com as regras do core e fecha quando a resposta diz que foi.
 
+use crate::campo::TrocarValor as _;
 use std::collections::HashSet;
 
 use biblioteca_core::caixa::{
@@ -18,13 +19,13 @@ use biblioteca_core::caixa::{
 };
 use biblioteca_core::dinheiro;
 use biblioteca_core::negociacao::{self, Negociacao, Tipo, PARCEIROS};
-use gpui::{
+use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon, Sizable};
+use gpui_kit::{
     div, prelude::*, px, relative, AnyElement, ClickEvent, Context, Div, Entity, FocusHandle,
     Focusable, FontWeight, KeyContext, MouseButton, SharedString, Stateful, Subscription, Window,
 };
-use gpui_component::input::{Input, InputState};
-use gpui_component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
-use gpui_component::{h_flex, v_flex, ActiveTheme, Icon, Sizable};
 use serde_json::json;
 
 use super::dados::{self, CaixaDoBalcao, Conferencia};
@@ -235,7 +236,7 @@ fn escrever(
     window: &mut Window,
     cx: &mut Context<Caixa>,
 ) {
-    campo.update(cx, |c, cx| c.set_value(texto, window, cx));
+    campo.update(cx, |c, cx| c.trocar_valor(texto, window, cx));
 }
 
 impl Caixa {
@@ -341,7 +342,7 @@ impl Caixa {
         };
         self.lembrar_foco(window, cx);
         self.dialogo = Some(dialogo);
-        window.focus(&foco.unwrap_or_else(|| self.foco_do_dialogo.clone()));
+        window.focus(&foco.unwrap_or_else(|| self.foco_do_dialogo.clone()), cx);
         cx.notify();
     }
 
@@ -397,7 +398,7 @@ impl Caixa {
             erro: None,
             enviando: false,
         })));
-        window.focus(&foco);
+        window.focus(&foco, cx);
         cx.notify();
     }
 
@@ -504,7 +505,7 @@ impl Caixa {
         if let Some(Dialogo::Pessoas(form)) = self.dialogo.as_mut() {
             if form.cadastro.take().is_some() {
                 let foco = form.escolhas[0].read(cx).focus_handle(cx);
-                window.focus(&foco);
+                window.focus(&foco, cx);
                 cx.notify();
                 return;
             }
@@ -512,9 +513,9 @@ impl Caixa {
         self.dialogo = None;
         self.depois_das_pessoas = false;
         if self.foco_antes.guardado() {
-            self.foco_antes.devolver(window);
+            self.foco_antes.devolver(window, cx);
         } else {
-            window.focus(&self.foco);
+            window.focus(&self.foco, cx);
         }
         cx.notify();
     }
@@ -560,7 +561,7 @@ impl Caixa {
         }
         form.valores[papel] = Some(id);
         let foco = form.escolhas[papel].read(cx).focus_handle(cx);
-        window.focus(&foco);
+        window.focus(&foco, cx);
     }
 
     /// Escreve num campo do diálogo aberto, pelo nome — só os testes.
@@ -774,7 +775,7 @@ impl Caixa {
                 erro: None,
                 enviando: false,
             });
-            window.focus(&foco);
+            window.focus(&foco, cx);
             cx.notify();
         }
     }
@@ -838,7 +839,7 @@ impl Caixa {
         };
         escrever(&valor, falta, window, cx);
         let foco = valor.read(cx).focus_handle(cx);
-        window.focus(&foco);
+        window.focus(&foco, cx);
         cx.notify();
     }
 
@@ -868,7 +869,7 @@ impl Caixa {
                 // Pronto: o `Enter` seguinte conclui. Faltando: `1`–`8`
                 // escolhem a próxima forma. Os dois pedem o foco fora do campo.
                 let _ = total;
-                window.focus(&foco_do_dialogo);
+                window.focus(&foco_do_dialogo, cx);
             }
             Err(erro) => form.erro = Some(erro),
         }
@@ -995,7 +996,7 @@ impl Caixa {
             erro: None,
             enviando: false,
         })));
-        window.focus(&self.foco_do_dialogo);
+        window.focus(&self.foco_do_dialogo, cx);
         cx.notify();
     }
 
@@ -1175,7 +1176,7 @@ impl Caixa {
             }
             form.conferencia = None;
             let foco = form.campos[0].1.read(cx).focus_handle(cx);
-            window.focus(&foco);
+            window.focus(&foco, cx);
             cx.notify();
         }
     }
@@ -1485,7 +1486,7 @@ impl Caixa {
         cx.notify();
     }
 
-    fn fechar_se(&mut self, qual: impl Fn(&Dialogo) -> bool, cx: &mut gpui::App) {
+    fn fechar_se(&mut self, qual: impl Fn(&Dialogo) -> bool, cx: &mut gpui_kit::App) {
         if self.dialogo.as_ref().is_some_and(qual) {
             self.fechar_dialogo_depois(cx);
         }
@@ -1497,7 +1498,7 @@ impl Caixa {
     /// `fechar_dialogo`. Até 2026-09-26 o sucesso só pedia o foco do caixa, e a
     /// negociação do caixa flutuante nem isso: o foco ficava no campo que
     /// sumiu, e as teclas da galeria morriam.
-    pub(super) fn fechar_dialogo_depois(&mut self, cx: &mut gpui::App) {
+    pub(super) fn fechar_dialogo_depois(&mut self, cx: &mut gpui_kit::App) {
         self.dialogo = None;
         if self.foco_antes.guardado() {
             self.foco_antes.devolver_depois(cx);
@@ -1515,7 +1516,7 @@ impl Caixa {
     ) -> Option<AnyElement> {
         if let Some(foco) = self.foco_pendente.take() {
             let foco = foco.read(cx).focus_handle(cx);
-            window.focus(&foco);
+            window.focus(&foco, cx);
         }
         let dialogo = self.dialogo.as_ref()?;
         let contexto = dialogo.contexto();
@@ -1935,12 +1936,12 @@ impl Caixa {
                                     .placeholder(*dica)
                                     .search_placeholder(*dica)
                                     .cleanable(true)
-                                    .empty(
+                                    .empty(|_, _| {
                                         div()
                                             .p(px(8.))
                                             .text_sm()
-                                            .child("Ninguém com esse nome. Use “Cadastrar”."),
-                                    ),
+                                            .child("Ninguém com esse nome. Use “Cadastrar”.")
+                                    }),
                             ),
                         )
                         .child(
@@ -3079,7 +3080,11 @@ fn alternavel(id: SharedString, ativo: bool, cx: &Context<Caixa>) -> Stateful<Di
 }
 
 /// `Button variant="secondary"` — o "Concluir venda" sobre o painel escuro.
-fn botao_secundario(id: &'static str, fundo: gpui::Hsla, texto: gpui::Hsla) -> Stateful<Div> {
+fn botao_secundario(
+    id: &'static str,
+    fundo: gpui_kit::Hsla,
+    texto: gpui_kit::Hsla,
+) -> Stateful<Div> {
     h_flex()
         .id(id)
         .flex_none()

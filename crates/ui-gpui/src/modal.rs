@@ -17,7 +17,7 @@
 //! como defeito (`e2e::Estudio` recusa seguir), porque a rede salva o operador
 //! mas devolve o foco ao lugar genérico, e não para onde ele estava.
 
-use gpui::{AnyWindowHandle, App, FocusHandle, Window};
+use gpui_kit::{AnyWindowHandle, App, FocusHandle, Window};
 
 /// Quem tinha o foco antes de uma sobreposição tomá-lo — a peça do [`Modal`]
 /// que devolve. Existe solta para quem já guarda o próprio estado aberto de
@@ -42,9 +42,9 @@ impl DevolverFoco {
     }
 
     /// Devolve o foco na hora.
-    pub fn devolver(&mut self, window: &mut Window) {
+    pub fn devolver(&mut self, window: &mut Window, cx: &mut App) {
         if let Some((foco, _)) = self.0.take() {
-            window.focus(&foco);
+            window.focus(&foco, cx);
         }
     }
 
@@ -54,7 +54,7 @@ impl DevolverFoco {
     pub fn devolver_depois(&mut self, cx: &mut App) {
         if let Some((foco, janela)) = self.0.take() {
             cx.defer(move |cx| {
-                let _ = janela.update(cx, |_, window, _| window.focus(&foco));
+                let _ = janela.update(cx, |_, window, cx| window.focus(&foco, cx));
             });
         }
     }
@@ -70,9 +70,9 @@ impl DevolverFoco {
     }
 
     /// Toma o foco para `campo`, guardando antes quem o tinha.
-    pub fn focar(&mut self, campo: &FocusHandle, window: &mut Window, cx: &App) {
+    pub fn focar(&mut self, campo: &FocusHandle, window: &mut Window, cx: &mut App) {
         self.lembrar(window, cx);
-        window.focus(campo);
+        window.focus(campo, cx);
     }
 }
 
@@ -125,13 +125,13 @@ impl<T> Modal<T> {
 
     /// O diálogo aberto toma o foco para um campo dele — guardando antes quem
     /// o tinha, se a abertura não pôde.
-    pub fn focar(&mut self, campo: &FocusHandle, window: &mut Window, cx: &App) {
+    pub fn focar(&mut self, campo: &FocusHandle, window: &mut Window, cx: &mut App) {
         self.foco.focar(campo, window, cx);
     }
 
     /// Fecha e devolve o foco a quem o tinha, na hora.
-    pub fn fechar(&mut self, window: &mut Window) -> Option<T> {
-        self.foco.devolver(window);
+    pub fn fechar(&mut self, window: &mut Window, cx: &mut App) -> Option<T> {
+        self.foco.devolver(window, cx);
         self.estado.take()
     }
 
@@ -167,8 +167,8 @@ impl<T> Modal<T> {
 #[cfg(test)]
 mod testes {
     use super::*;
-    use gpui::{div, Context, Focusable, IntoElement, ParentElement, Render, TestAppContext};
-    use gpui::{InteractiveElement, Styled};
+    use gpui_kit::{div, Context, Focusable, IntoElement, ParentElement, Render, TestAppContext};
+    use gpui_kit::{InteractiveElement, Styled};
 
     /// Uma tela com um foco próprio e um diálogo com campo focável.
     struct Tela {
@@ -193,10 +193,10 @@ mod testes {
         }
     }
 
-    fn tela(cx: &mut TestAppContext) -> (gpui::Entity<Tela>, &mut gpui::VisualTestContext) {
+    fn tela(cx: &mut TestAppContext) -> (gpui_kit::Entity<Tela>, &mut gpui_kit::VisualTestContext) {
         cx.add_window_view(|window, cx| {
             let foco = cx.focus_handle();
-            window.focus(&foco);
+            window.focus(&foco, cx);
             Tela {
                 foco,
                 campo: cx.focus_handle(),
@@ -205,13 +205,13 @@ mod testes {
         })
     }
 
-    #[gpui::test]
+    #[gpui_kit::test]
     fn fechar_devolve_o_foco_a_quem_o_tinha(cx: &mut TestAppContext) {
         let (tela, cx) = tela(cx);
         cx.update(|window, cx| {
             tela.update(cx, |t, cx| {
                 t.dialogo.abrir((), window, cx);
-                window.focus(&t.campo);
+                window.focus(&t.campo, cx);
                 cx.notify();
             })
         });
@@ -219,7 +219,7 @@ mod testes {
         cx.update(|window, cx| {
             tela.update(cx, |t, cx| {
                 assert!(t.campo.is_focused(window));
-                t.dialogo.fechar(window);
+                t.dialogo.fechar(window, cx);
                 cx.notify();
             })
         });
@@ -231,13 +231,13 @@ mod testes {
         });
     }
 
-    #[gpui::test]
+    #[gpui_kit::test]
     fn fechar_depois_devolve_quando_a_janela_fica_livre(cx: &mut TestAppContext) {
         let (tela, cx) = tela(cx);
         cx.update(|window, cx| {
             tela.update(cx, |t, cx| {
                 t.dialogo.abrir((), window, cx);
-                window.focus(&t.campo);
+                window.focus(&t.campo, cx);
                 cx.notify();
             })
         });
@@ -255,16 +255,16 @@ mod testes {
         });
     }
 
-    #[gpui::test]
+    #[gpui_kit::test]
     fn reabrir_por_cima_nao_guarda_o_campo_do_dialogo(cx: &mut TestAppContext) {
         let (tela, cx) = tela(cx);
         cx.update(|window, cx| {
             tela.update(cx, |t, cx| {
                 t.dialogo.abrir((), window, cx);
-                window.focus(&t.campo);
+                window.focus(&t.campo, cx);
                 // O segundo passo do mesmo diálogo, com o campo focado.
                 t.dialogo.abrir((), window, cx);
-                t.dialogo.fechar(window);
+                t.dialogo.fechar(window, cx);
                 assert!(t.foco.is_focused(window));
             })
         });

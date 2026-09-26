@@ -15,8 +15,8 @@
 //! envio). Caiu: ele é o componente `origem_das_fotos::OrigemDasFotos`, um só
 //! para as duas portas, e cada uma põe o botão dele ao lado do "Escolher fotos".
 
-use gpui::{div, prelude::*, px, App, Div, FontWeight, SharedString};
-use gpui_component::{v_flex, ActiveTheme, Icon};
+use gpui_kit::component::{v_flex, ActiveTheme, Icon};
+use gpui_kit::{div, prelude::*, px, App, Div, FontWeight, SharedString};
 
 use crate::recursos::Icone;
 

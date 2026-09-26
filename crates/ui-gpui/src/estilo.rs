@@ -18,8 +18,10 @@
 //! | `Alert` | [`aviso`] |
 //! | `Dialog` (véu, caixa, cabeçalho, opção, rodapé) | [`veu_do_dialogo`], [`caixa_do_dialogo`], [`cabecalho_do_dialogo`], [`opcao_do_dialogo`], [`rodape_do_dialogo`] |
 
-use gpui::{div, prelude::*, px, AnyElement, App, Div, FontWeight, Hsla, SharedString, Stateful};
-use gpui_component::{h_flex, v_flex, ActiveTheme, Icon};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
+use gpui_kit::{
+    div, prelude::*, px, AnyElement, App, Div, FontWeight, Hsla, SharedString, Stateful,
+};
 
 use crate::recursos::Icone;
 
@@ -140,7 +142,7 @@ pub fn tecla(texto: impl Into<SharedString>) -> Div {
         .px(px(4.))
         .rounded(px(4.))
         .border_1()
-        .border_color(gpui::rgba(0x80808066))
+        .border_color(gpui_kit::rgba(0x80808066))
         .text_size(px(10.))
         .opacity(0.7)
         .child(texto.into())
@@ -234,7 +236,7 @@ pub fn veu_do_dialogo() -> Div {
         .flex()
         .items_center()
         .justify_center()
-        .bg(gpui::black().opacity(0.5))
+        .bg(gpui_kit::black().opacity(0.5))
         // 🚨 **O véu para o mouse aqui, e é o que faz dele um véu** (dono,
         // 18/set/2026: *"tem que selecionar o estúdio e ficar na listagem de
         // sessões, e não abrir uma sessão"*). No GPUI, desenhar por cima não

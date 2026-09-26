@@ -24,7 +24,7 @@
 use std::sync::Arc;
 
 use adapters::view_models::PhotoViewModel;
-use gpui::TestAppContext;
+use gpui_kit::TestAppContext;
 use image::{DynamicImage, Rgba, RgbaImage};
 use infrastructure::cache::preview_manager::PreviewManager;
 use tempfile::TempDir;
@@ -87,7 +87,7 @@ fn previews_com(nomes: &[&str]) -> (Arc<PreviewManager>, TempDir) {
 
 /// O estúdio montado: as portas de mentira e a conta do site já entrada.
 struct Estudio {
-    janela: gpui::WindowHandle<Aplicativo>,
+    janela: gpui_kit::WindowHandle<Aplicativo>,
     publicador: Arc<PublicadorDeMentira>,
     seletor_de_fotos: Arc<SeletorDeFotosDeMentira>,
     /// Quem grava a foto no catálogo local — o destino do passo 1.
@@ -98,7 +98,7 @@ struct Estudio {
 }
 
 fn abrir_o_estudio(cx: &mut TestAppContext, fotos: Vec<PhotoViewModel>) -> Estudio {
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
     let nomes: Vec<String> = fotos.iter().map(|f| f.name.clone()).collect();
     let (previews, dir) = previews_com(&nomes.iter().map(String::as_str).collect::<Vec<_>>());
 
@@ -217,7 +217,7 @@ fn abrir_o_estudio(cx: &mut TestAppContext, fotos: Vec<PhotoViewModel>) -> Estud
 /// revela o que já foi classificado. É o contrário: a revelação acontece na foto
 /// crua, e a classificação é o que decide o que sobe. Uma tela que exigisse nota
 /// para revelar passaria em todos os testes dela e quebraria o fluxo.
-#[gpui::test]
+#[gpui_kit::test]
 fn revelar_vem_antes_de_classificar(cx: &mut TestAppContext) {
     let estudio = abrir_o_estudio(cx, vec![foto("DSC_001.NEF"), foto("DSC_002.NEF")]);
 
@@ -256,7 +256,7 @@ fn revelar_vem_antes_de_classificar(cx: &mut TestAppContext) {
 /// verdade até 2026-09-20: só a classificada ia para a nuvem. O dono trocou a
 /// regra — a não classificada sobe junto, em segundo plano, e a nota passou a
 /// ser curadoria.
-#[gpui::test]
+#[gpui_kit::test]
 fn classificar_filtrar_e_sinalizar(cx: &mut TestAppContext) {
     let estudio = abrir_o_estudio(cx, vec![foto("DSC_001.NEF"), foto("DSC_002.NEF")]);
 
@@ -326,7 +326,7 @@ fn classificar_filtrar_e_sinalizar(cx: &mut TestAppContext) {
 /// 🔑 A junta que este teste pega é a do **id remoto**: sem ele chegar à foto, o
 /// balcão não tem em que linha gravar — e o sintoma seria um botão que não faz
 /// nada, sem erro nenhum.
-#[gpui::test]
+#[gpui_kit::test]
 fn pagar_no_balcao_e_gerar_o_link(cx: &mut TestAppContext) {
     let mut ja_no_site = foto("DSC_001.NEF");
     ja_no_site.rating = 4;
@@ -378,7 +378,7 @@ fn pagar_no_balcao_e_gerar_o_link(cx: &mut TestAppContext) {
 /// ⚠️ O único `remove_file` do repositório inteiro é o do modo `Move` da
 /// importação, que apaga a **origem** depois de copiar — e a tela avisa antes,
 /// porque é o único gesto irreversível do app.
-#[gpui::test]
+#[gpui_kit::test]
 fn apagar_tira_do_catalogo_e_nao_do_disco(cx: &mut TestAppContext) {
     let estudio = abrir_o_estudio(cx, vec![foto("DSC_001.NEF"), foto("DSC_002.NEF")]);
 
@@ -417,7 +417,7 @@ fn apagar_tira_do_catalogo_e_nao_do_disco(cx: &mut TestAppContext) {
 /// revela as duas — as temporárias e as do acervo"*), e o desktop precisa fazer
 /// o mesmo: quando não há preview local e a foto tem id no site, buscar a
 /// **cópia de trabalho** por `GET /pos-venda/fotos/{id}/copia-de-trabalho`.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_revelacao_abre_a_foto_que_so_existe_na_nuvem(cx: &mut TestAppContext) {
     // Sem preview local: `abrir_o_estudio` grava preview de todas, então esta
     // entra depois, com um nome que não foi gravado.
@@ -476,7 +476,7 @@ fn a_revelacao_abre_a_foto_que_so_existe_na_nuvem(cx: &mut TestAppContext) {
 /// A cópia de trabalho do site custa uma ida à rede por foto. Pedir sempre
 /// transformaria a revelação em série — que é como se revela um casamento — em
 /// duzentos downloads que o cache local já tinha respondido.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_foto_que_esta_no_disco_nao_vai_a_rede(cx: &mut TestAppContext) {
     let mut tem_as_duas = foto("DSC_001.NEF");
     tem_as_duas.pos_venda_foto_id = Some("remota-1".into());
@@ -507,7 +507,7 @@ fn a_foto_que_esta_no_disco_nao_vai_a_rede(cx: &mut TestAppContext) {
 /// não existia era **entrar** numa sessão: "abrir" só a marcava como destino
 /// das próximas classificadas, e quem vinha da web achava o app *"muito aberto
 /// e estranho"*. Lá a sessão é onde se trabalha; aqui era um rótulo.
-#[gpui::test]
+#[gpui_kit::test]
 fn da_lista_ao_revelar_dentro_da_sessao(cx: &mut TestAppContext) {
     let estudio = abrir_o_estudio(cx, vec![foto("DSC_001.NEF"), foto("DSC_002.NEF")]);
 
@@ -701,10 +701,10 @@ fn da_lista_ao_revelar_dentro_da_sessao(cx: &mut TestAppContext) {
 /// ⚠️ E a guarda está no **método**, não só no botão: atalho de teclado chega
 /// antes de botão, e foi assim que uma nota já caiu numa grade que ninguém
 /// estava vendo.
-#[gpui::test]
+#[gpui_kit::test]
 fn nada_acontece_fora_de_uma_sessao(cx: &mut TestAppContext) {
     let (previews, _dir) = previews_com(&["DSC_001.NEF"]);
-    cx.update(gpui_component::init);
+    cx.update(gpui_kit::init);
 
     let janela = cx.add_window({
         let previews = previews.clone();
@@ -788,7 +788,7 @@ fn nada_acontece_fora_de_uma_sessao(cx: &mut TestAppContext) {
 /// 🔑 **E as do site entram na mesma lista das locais**, como na web: a foto que
 /// já subiu e a que ainda não subiu aparecem juntas, e é sobre essa lista que a
 /// revelação e a escolha com o cliente acontecem.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_grade_e_a_do_ensaio_e_e_uma_so(cx: &mut TestAppContext) {
     let mut de_outro_cliente = foto("DSC_900.NEF");
     de_outro_cliente.sessao_id = Some("g9".into());
@@ -860,7 +860,7 @@ fn a_grade_e_a_do_ensaio_e_e_uma_so(cx: &mut TestAppContext) {
 ///
 /// Sem o carimbo a foto chega ao catálogo sem dono e **não aparece** na grade da
 /// sessão que a importou — e o sintoma é "a importação não funcionou".
-#[gpui::test]
+#[gpui_kit::test]
 fn importar_dentro_da_sessao_poe_a_foto_nela(cx: &mut TestAppContext) {
     let estudio = abrir_o_estudio(cx, vec![foto("DSC_001.NEF")]);
 
@@ -883,7 +883,7 @@ fn importar_dentro_da_sessao_poe_a_foto_nela(cx: &mut TestAppContext) {
 /// O defeito que o dono viu: a sessão abria com *"25 no site"* escrito e **nada**
 /// embaixo. Não era grade vazia — era grade sem altura: o cabeçalho usava
 /// `size_full` e comia os 100% da coluna.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_sessao_aberta_mostra_as_fotos_do_site(cx: &mut TestAppContext) {
     let estudio = abrir_o_estudio(cx, vec![foto("DSC_001.NEF")]);
 

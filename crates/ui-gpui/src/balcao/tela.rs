@@ -22,6 +22,7 @@
 //! classificar (passo 3). A tela diz isso em vez de deixar o botão ligado para
 //! dar erro depois.
 
+use crate::campo::TrocarValor as _;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
@@ -30,13 +31,13 @@ use adapters::view_models::PhotoViewModel;
 use biblioteca_core::dinheiro;
 use biblioteca_core::negociacao::{self, Gravavel, Negociacao, Tipo, PARCEIROS};
 use domain::services::pos_venda::{MudancaDaFoto, Sessao};
-use gpui::{
+use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::select::{Select, SelectEvent, SelectState};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
+use gpui_kit::{
     div, prelude::*, px, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable,
     FontWeight, MouseButton, SharedString, Subscription, Task, Window,
 };
-use gpui_component::input::{Input, InputState};
-use gpui_component::select::{Select, SelectEvent, SelectState};
-use gpui_component::{h_flex, v_flex, ActiveTheme, Icon};
 
 use crate::estilo;
 use crate::pos_venda::porta::{Publicador, Recado};
@@ -44,7 +45,7 @@ use crate::recursos::Icone;
 
 const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(100);
 
-gpui::actions!(balcao, [SalvarNegociacao, FecharNegociacao]);
+gpui_kit::actions!(balcao, [SalvarNegociacao, FecharNegociacao]);
 
 /// O contexto de teclado do diálogo.
 const CONTEXTO: &str = "Negociacao";
@@ -57,10 +58,10 @@ const CONTEXTO: &str = "Negociacao";
 /// O `\n` dentro de um campo de uma linha derrubava o app no desenho seguinte
 /// (`shape_line`, achado pelo roteiro em 26/set/2026). É o mesmo arranjo do
 /// `ConfirmarDialogo` do caixa. Ligação repetida é inofensiva.
-pub fn init(cx: &mut gpui::App) {
+pub fn init(cx: &mut gpui_kit::App) {
     cx.bind_keys([
-        gpui::KeyBinding::new("enter", SalvarNegociacao, Some(CONTEXTO)),
-        gpui::KeyBinding::new("escape", FecharNegociacao, Some(CONTEXTO)),
+        gpui_kit::KeyBinding::new("enter", SalvarNegociacao, Some(CONTEXTO)),
+        gpui_kit::KeyBinding::new("escape", FecharNegociacao, Some(CONTEXTO)),
     ]);
 }
 
@@ -257,11 +258,13 @@ impl Balcao {
             (Some(p), _) => dinheiro::formatar_campo(p),
         };
         self.preco
-            .update(cx, |c, cx| c.set_value(preco, window, cx));
-        self.cupom
-            .update(cx, |c, cx| c.set_value(inicial.cupom.clone(), window, cx));
-        self.motivo
-            .update(cx, |c, cx| c.set_value(inicial.motivo.clone(), window, cx));
+            .update(cx, |c, cx| c.trocar_valor(preco, window, cx));
+        self.cupom.update(cx, |c, cx| {
+            c.trocar_valor(inicial.cupom.clone(), window, cx)
+        });
+        self.motivo.update(cx, |c, cx| {
+            c.trocar_valor(inicial.motivo.clone(), window, cx)
+        });
         let parceiro = PARCEIROS
             .into_iter()
             .find(|p| *p == inicial.parceiro)
@@ -329,7 +332,7 @@ impl Balcao {
     pub fn escrever_cupom(&mut self, cupom: &str, window: &mut Window, cx: &mut Context<Self>) {
         let cupom = cupom.to_string();
         self.cupom
-            .update(cx, |c, cx| c.set_value(cupom, window, cx));
+            .update(cx, |c, cx| c.trocar_valor(cupom, window, cx));
     }
 
     pub fn tipo(&self) -> Tipo {
@@ -530,7 +533,7 @@ fn centavos_em_decimal(centavos: i64) -> String {
 }
 
 /// `Label` em cima, campo embaixo (`grid gap-1.5`).
-fn rotulado(rotulo: &str, campo: impl IntoElement) -> gpui::Div {
+fn rotulado(rotulo: &str, campo: impl IntoElement) -> gpui_kit::Div {
     v_flex()
         .gap(px(6.))
         .child(
@@ -548,8 +551,12 @@ impl Render for Balcao {
         // app sempre tem (`main.rs`) e as janelas de teste do balcão e do
         // `fluxo.rs` não. Sem ele o cursor só não vai sozinho ao campo.
         if let Some(foco) = self.foco_pendente.take() {
-            if window.root::<gpui_component::Root>().flatten().is_some() {
-                window.focus(&foco);
+            if window
+                .root::<gpui_kit::component::Root>()
+                .flatten()
+                .is_some()
+            {
+                window.focus(&foco, cx);
             }
         }
         let tema = cx.theme();
@@ -727,7 +734,7 @@ impl Render for Balcao {
                     .relative()
                     .w(px(512.))
                     .max_w_full()
-                    .max_h(gpui::relative(0.9))
+                    .max_h(gpui_kit::relative(0.9))
                     .overflow_y_scroll()
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .key_context(CONTEXTO)
@@ -777,7 +784,7 @@ impl Render for Balcao {
 mod testes {
     use super::*;
     use crate::pos_venda::porta::mentira::PublicadorDeMentira;
-    use gpui::TestAppContext;
+    use gpui_kit::TestAppContext;
 
     fn foto(id: &str, no_site: Option<&str>) -> PhotoViewModel {
         PhotoViewModel {
@@ -791,8 +798,8 @@ mod testes {
     fn janela(
         cx: &mut TestAppContext,
         publicador: Arc<PublicadorDeMentira>,
-    ) -> gpui::WindowHandle<Balcao> {
-        cx.update(gpui_component::init);
+    ) -> gpui_kit::WindowHandle<Balcao> {
+        cx.update(gpui_kit::init);
         cx.add_window(move |window, cx| {
             let mut tela = Balcao::nova(publicador, window, cx);
             tela.sessao = Some(Sessao {
@@ -807,7 +814,7 @@ mod testes {
         })
     }
 
-    fn colher(cx: &mut TestAppContext, janela: &gpui::WindowHandle<Balcao>) {
+    fn colher(cx: &mut TestAppContext, janela: &gpui_kit::WindowHandle<Balcao>) {
         for _ in 0..10 {
             let _ = janela.update(cx, |tela, _window, cx| tela.colher(cx));
             cx.run_until_parked();
@@ -820,7 +827,7 @@ mod testes {
     /// foto que nunca subiu não tem essa linha. Mandar assim mesmo traria um
     /// `404` por foto e nenhuma explicação para quem está no balcão com o
     /// cliente na frente.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn so_negocia_o_que_ja_esta_no_site(cx: &mut TestAppContext) {
         let publicador = Arc::new(PublicadorDeMentira::default());
         let janela = janela(cx, publicador.clone());
@@ -866,7 +873,7 @@ mod testes {
     /// É a mesma `montar` que a tela do site usa: o que é recusado aqui é
     /// recusado lá, e o operador não espera uma ida à rede para descobrir que
     /// faltou o valor do desconto.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn o_que_falta_e_dito_antes_de_sair_daqui(cx: &mut TestAppContext) {
         let publicador = Arc::new(PublicadorDeMentira::default());
         let janela = janela(cx, publicador.clone());
@@ -888,7 +895,7 @@ mod testes {
     }
 
     /// Sem nenhuma foto no site não há o que registrar, e a tela diz isso.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn selecao_toda_fora_do_site_nao_registra_nada(cx: &mut TestAppContext) {
         let publicador = Arc::new(PublicadorDeMentira::default());
         let janela = janela(cx, publicador.clone());
@@ -908,7 +915,7 @@ mod testes {
     /// 🖼️ **Uma foto abre como a web abre**: "Negociação desta foto", já no
     /// tipo gravado, com o site, o cupom e o preço da faixa — o print do dono
     /// (26/set/2026), "Já paga em outro site", LançadorDeOfertas, AHEB82.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn uma_foto_abre_com_o_que_esta_gravado(cx: &mut TestAppContext) {
         let publicador = Arc::new(PublicadorDeMentira::default());
         let janela = janela(cx, publicador.clone());
@@ -938,7 +945,7 @@ mod testes {
 
     /// 🗑️ "Remover negociação" pergunta antes, e a remoção grava os **dois
     /// campos vazios** — o `salvar(null)` do site, que não é "não mexer".
-    #[gpui::test]
+    #[gpui_kit::test]
     fn remover_pergunta_e_grava_vazio(cx: &mut TestAppContext) {
         let publicador = Arc::new(PublicadorDeMentira::default());
         let janela = janela(cx, publicador.clone());
@@ -964,7 +971,7 @@ mod testes {
     /// ✅ Quando o site confirma tudo, o diálogo pede para fechar — como o do
     /// site, que fecha quando `salvar` dá certo — e avisa que gravou, para a
     /// grade reler.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn fecha_quando_o_site_confirma(cx: &mut TestAppContext) {
         let publicador = Arc::new(PublicadorDeMentira::default());
         let janela = janela(cx, publicador.clone());

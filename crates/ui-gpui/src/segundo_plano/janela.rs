@@ -23,7 +23,7 @@
 //! envio na fila (G9); minimizar deixa a janela na barra do sistema, como
 //! qualquer programa.
 
-use gpui::Window;
+use gpui_kit::Window;
 
 /// Um gesto na janela para rodar fora do `update` em que foi preparado.
 pub type Adiado = Box<dyn FnOnce()>;
@@ -65,7 +65,7 @@ fn nada() -> Adiado {
 
 #[cfg(all(target_os = "macos", not(test)))]
 mod plataforma {
-    use gpui::Window;
+    use gpui_kit::Window;
     use objc2::msg_send;
     use objc2::runtime::{AnyClass, AnyObject};
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -151,7 +151,7 @@ mod plataforma {
 
 #[cfg(all(target_os = "windows", not(test)))]
 mod plataforma {
-    use gpui::Window;
+    use gpui_kit::Window;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows_sys::Win32::Foundation::HWND;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -214,7 +214,7 @@ mod plataforma {
 
 #[cfg(all(not(any(target_os = "macos", target_os = "windows")), not(test)))]
 mod plataforma {
-    use gpui::Window;
+    use gpui_kit::Window;
 
     use super::{nada, Adiado};
 
@@ -248,7 +248,7 @@ mod plataforma {
 pub(crate) mod plataforma {
     use std::cell::{Cell, RefCell};
 
-    use gpui::Window;
+    use gpui_kit::Window;
 
     use super::Adiado;
 

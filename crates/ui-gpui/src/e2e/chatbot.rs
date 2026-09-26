@@ -8,9 +8,10 @@
 //! frente. A junta com a API de verdade é conferida contra a pilha local
 //! (skill `conferir-o-app-desktop`); aqui é a janela.
 
+use crate::campo::TrocarValor as _;
 use std::time::Duration;
 
-use gpui::{Context, Modifiers, TestAppContext, VisualTestContext, Window};
+use gpui_kit::{Context, Modifiers, TestAppContext, VisualTestContext, Window};
 use serde_json::{json, Value};
 
 use super::{abrir_o_app, Cenario, Estudio};
@@ -268,7 +269,8 @@ pub(super) fn passo(cx: &mut TestAppContext) {
 fn escrever(e: &Estudio, cx: &mut TestAppContext, texto: &str) {
     chatbot(e, cx, |t, w, cx| {
         let texto = texto.to_string();
-        t.compositor.update(cx, |c, cx| c.set_value(texto, w, cx));
+        t.compositor
+            .update(cx, |c, cx| c.trocar_valor(texto, w, cx));
     });
 }
 
@@ -277,7 +279,7 @@ fn escrever(e: &Estudio, cx: &mut TestAppContext, texto: &str) {
 /// 🔑 **Escutar começa na entrada, ler só na tela.** O aviso tem de chegar
 /// com o operador em qualquer tela — mas abrir o app não pode custar oito
 /// leituras ao site para uma tela que ninguém abriu.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_conta_entra_e_o_chatbot_escuta_os_cinco_canais_sem_ler_nada(cx: &mut TestAppContext) {
     let e = entrar(cx);
     assert_eq!(e.escuta.abertas(), 2, "a do chatbot e a da agenda");
@@ -299,7 +301,7 @@ fn a_conta_entra_e_o_chatbot_escuta_os_cinco_canais_sem_ler_nada(cx: &mut TestAp
 /// Pelo menu: os cinco canais, as respostas e as urgências numa leva, o
 /// voucher e o cadastro na leva seguinte (dependem da página), e a lista
 /// fundida do mais recente para o mais antigo.
-#[gpui::test]
+#[gpui_kit::test]
 fn pelo_menu_le_os_cinco_canais_e_monta_a_lista_do_site(cx: &mut TestAppContext) {
     let e = abrir_o_chatbot(cx);
     e.app(cx, |app, _w, _cx| assert_eq!(app.tela(), Tela::Chatbot));
@@ -358,11 +360,12 @@ fn pelo_menu_le_os_cinco_canais_e_monta_a_lista_do_site(cx: &mut TestAppContext)
 
 /// A busca vale no Enter (o `submit` do site), volta à página 1 e vai
 /// codificada; o X limpa e relê sem ela.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_busca_vale_no_enter_e_o_x_limpa(cx: &mut TestAppContext) {
     let e = abrir_o_chatbot(cx);
     chatbot(&e, cx, |t, w, cx| {
-        t.busca.update(cx, |c, cx| c.set_value("maria josé", w, cx));
+        t.busca
+            .update(cx, |c, cx| c.trocar_valor("maria josé", w, cx));
         t.busca.update(cx, |c, cx| c.focus(w, cx));
     });
     assert_eq!(leituras_da_lista(&e), 1, "digitar não busca");
@@ -396,7 +399,7 @@ fn a_busca_vale_no_enter_e_o_x_limpa(cx: &mut TestAppContext) {
 }
 
 /// "Anterior" e "Próxima" andam só o WhatsApp, e param nas pontas.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_paginacao_anda_o_whatsapp_e_para_nas_pontas(cx: &mut TestAppContext) {
     let e = entrar(cx);
     e.site.responder_json(
@@ -442,7 +445,7 @@ fn a_paginacao_anda_o_whatsapp_e_para_nas_pontas(cx: &mut TestAppContext) {
 /// 🔔 **Mensagem nova com o operador em outra tela e a janela na frente**:
 /// toast dentro do app, o selo acende no menu, e nada é relido — a tela do
 /// chatbot está escondida.
-#[gpui::test]
+#[gpui_kit::test]
 fn mensagem_nova_em_outra_tela_vira_toast_e_acende_o_selo(cx: &mut TestAppContext) {
     let e = entrar(cx);
     assert!(!desenhado(&e, cx, "menu-selo-do-chatbot"));
@@ -480,7 +483,7 @@ fn mensagem_nova_em_outra_tela_vira_toast_e_acende_o_selo(cx: &mut TestAppContex
 
 /// 🔔 **Com a janela atrás**, o aviso é do sistema, com os textos do site; o
 /// clique nele traz o app, abre o chatbot e a conversa, e apaga a novidade.
-#[gpui::test]
+#[gpui_kit::test]
 fn com_a_janela_atras_vira_aviso_do_sistema_e_o_clique_abre_a_conversa(cx: &mut TestAppContext) {
     let e = entrar(cx);
     VisualTestContext::from_window(e.raiz.into(), cx).deactivate_window();
@@ -528,7 +531,7 @@ fn com_a_janela_atras_vira_aviso_do_sistema_e_o_clique_abre_a_conversa(cx: &mut 
 }
 
 /// O sino desliga o aviso do sistema — e só ele: a novidade continua acesa.
-#[gpui::test]
+#[gpui_kit::test]
 fn o_sino_desligado_cala_o_aviso_do_sistema_mas_nao_a_novidade(cx: &mut TestAppContext) {
     let e = abrir_o_chatbot(cx);
     chatbot(&e, cx, |t, _w, _cx| {
@@ -551,7 +554,7 @@ fn o_sino_desligado_cala_o_aviso_do_sistema_mas_nao_a_novidade(cx: &mut TestAppC
 
 /// A conversa aberta e na frente não avisa nada: o operador está lendo. E
 /// uma rajada de eventos vira **uma** releitura.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_conversa_aberta_nao_avisa_e_a_rajada_vira_uma_releitura(cx: &mut TestAppContext) {
     let e = abrir_o_chatbot(cx);
     clicar(&e, cx, "chatbot-conversa-0");
@@ -574,7 +577,7 @@ fn a_conversa_aberta_nao_avisa_e_a_rajada_vira_uma_releitura(cx: &mut TestAppCon
 /// O relógio da releitura, do `canal.tsx` do site: o primeiro `pronto` é a
 /// abertura (não relê), o segundo é reconexão (relê); `sincronizar` relê; e a
 /// releitura de segurança é de 15 s sem conexão e de 300 s com ela.
-#[gpui::test]
+#[gpui_kit::test]
 fn o_relogio_da_releitura_segue_o_site(cx: &mut TestAppContext) {
     let e = abrir_o_chatbot(cx);
     let mut n = leituras_da_lista(&e);
@@ -621,7 +624,7 @@ fn o_relogio_da_releitura_segue_o_site(cx: &mut TestAppContext) {
 }
 
 /// O indicador é o da pior fonte: "Tempo real" só com as cinco.
-#[gpui::test]
+#[gpui_kit::test]
 fn o_indicador_segue_as_cinco_fontes(cx: &mut TestAppContext) {
     let e = abrir_o_chatbot(cx);
     chatbot(&e, cx, |t, _w, _cx| {
@@ -671,7 +674,7 @@ fn o_indicador_segue_as_cinco_fontes(cx: &mut TestAppContext) {
 /// ⌨️ **Enter envia, Shift+Enter quebra linha** — teclas de verdade no
 /// campo. O balão "enviando" aparece na hora, o campo esvazia, e o balão some
 /// quando o servidor confirma (e a conversa relê).
-#[gpui::test]
+#[gpui_kit::test]
 fn enter_envia_shift_enter_quebra_linha_e_o_balao_some_quando_volta(cx: &mut TestAppContext) {
     let e = abrir_o_chatbot(cx);
     clicar(&e, cx, "chatbot-conversa-0");
@@ -737,7 +740,7 @@ fn enter_envia_shift_enter_quebra_linha_e_o_balao_some_quando_volta(cx: &mut Tes
 
 /// Envio recusado fica no balão, com a frase do servidor, "Tentar de novo" e
 /// "Descartar" — nada do que o operador escreveu se perde.
-#[gpui::test]
+#[gpui_kit::test]
 fn envio_recusado_fica_no_balao_com_tentar_de_novo(cx: &mut TestAppContext) {
     let e = abrir_o_chatbot(cx);
     clicar(&e, cx, "chatbot-conversa-0");
@@ -780,7 +783,7 @@ fn envio_recusado_fica_no_balao_com_tentar_de_novo(cx: &mut TestAppContext) {
 }
 
 /// ⚡ A resposta rápida sai com um clique, pela rota do canal, e conta um uso.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_resposta_rapida_sai_e_conta_um_uso(cx: &mut TestAppContext) {
     let e = abrir_o_chatbot(cx);
     clicar(&e, cx, "chatbot-conversa-1"); // a Bia, no Instagram
@@ -816,7 +819,7 @@ fn a_resposta_rapida_sai_e_conta_um_uso(cx: &mut TestAppContext) {
 
 /// "Carregar mensagens anteriores (N)": 60 mensagens mostram 50, e o botão
 /// traz as 10.
-#[gpui::test]
+#[gpui_kit::test]
 fn carregar_anteriores_mostra_o_historico_inteiro(cx: &mut TestAppContext) {
     let e = entrar(cx);
     e.site.responder_json(
@@ -838,7 +841,7 @@ fn carregar_anteriores_mostra_o_historico_inteiro(cx: &mut TestAppContext) {
     // vista: o operador rola até ele, como no site.
     chatbot(&e, cx, |t, _w, _cx| {
         t.rolagem
-            .set_offset(gpui::point(gpui::px(0.), gpui::px(0.)))
+            .set_offset(gpui_kit::point(gpui_kit::px(0.), gpui_kit::px(0.)))
     });
     clicar(&e, cx, "chatbot-anteriores");
     chatbot(&e, cx, |t, _w, _cx| {
@@ -854,7 +857,7 @@ fn carregar_anteriores_mostra_o_historico_inteiro(cx: &mut TestAppContext) {
 
 /// 🕐 **A janela de 24 h fechada tira o compositor** e põe o motivo no lugar —
 /// e o gesto de enviar também não passa por baixo.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_janela_fechada_troca_o_compositor_pelo_motivo(cx: &mut TestAppContext) {
     let e = abrir_o_chatbot(cx);
     e.site.responder_json(
@@ -895,7 +898,7 @@ fn a_janela_fechada_troca_o_compositor_pelo_motivo(cx: &mut TestAppContext) {
 
 /// ✋ Assumir e devolver no WhatsApp: pausa e retoma o bot, com o toast do
 /// site; se o servidor recusar, o botão volta ao que era.
-#[gpui::test]
+#[gpui_kit::test]
 fn assumir_e_devolver_no_whatsapp_e_a_volta_quando_o_servidor_recusa(cx: &mut TestAppContext) {
     let e = abrir_o_chatbot(cx);
     clicar(&e, cx, "chatbot-conversa-0");
@@ -944,7 +947,7 @@ fn assumir_e_devolver_no_whatsapp_e_a_volta_quando_o_servidor_recusa(cx: &mut Te
 
 /// 🙋 Assumir no site pergunta quem é, manda o nome, e lembra dele na
 /// próxima. Cancelar não manda nada.
-#[gpui::test]
+#[gpui_kit::test]
 fn assumir_no_site_pergunta_quem_e_e_lembra_o_nome(cx: &mut TestAppContext) {
     let e = abrir_o_chatbot(cx);
     clicar(&e, cx, "chatbot-conversa-2");
@@ -965,7 +968,7 @@ fn assumir_no_site_pergunta_quem_e_e_lembra_o_nome(cx: &mut TestAppContext) {
     clicar(&e, cx, "chatbot-alternar");
     chatbot(&e, cx, |t, w, cx| {
         t.nome_do_atendente
-            .update(cx, |c, cx| c.set_value("  Ana Paula ", w, cx))
+            .update(cx, |c, cx| c.trocar_valor("  Ana Paula ", w, cx))
     });
     clicar(&e, cx, "quem-assumir");
     e.esperar(cx);
@@ -991,7 +994,7 @@ fn assumir_no_site_pergunta_quem_e_e_lembra_o_nome(cx: &mut TestAppContext) {
 
 /// 📋 "Copiar IGSID" copia o id do canal, com a frase do site; e o Instagram
 /// não oferece "Excluir histórico", que só existe no WhatsApp.
-#[gpui::test]
+#[gpui_kit::test]
 fn mais_acoes_copia_o_id_e_so_o_whatsapp_exclui(cx: &mut TestAppContext) {
     let e = abrir_o_chatbot(cx);
     clicar(&e, cx, "chatbot-conversa-1");
@@ -1009,7 +1012,7 @@ fn mais_acoes_copia_o_id_e_so_o_whatsapp_exclui(cx: &mut TestAppContext) {
 
 /// 🗑️ **Excluir histórico só com `QUERO EXCLUIR!` letra por letra** — o
 /// botão apagado não passa, a frase quase certa não passa.
-#[gpui::test]
+#[gpui_kit::test]
 fn excluir_historico_so_com_a_frase_letra_por_letra(cx: &mut TestAppContext) {
     let e = abrir_o_chatbot(cx);
     clicar(&e, cx, "chatbot-conversa-0");
@@ -1027,14 +1030,15 @@ fn excluir_historico_so_com_a_frase_letra_por_letra(cx: &mut TestAppContext) {
     assert!(!apagou(&e), "vazio não apaga");
     for quase in ["quero excluir!", "QUERO EXCLUIR", " QUERO EXCLUIR!"] {
         chatbot(&e, cx, |t, w, cx| {
-            t.confirmacao.update(cx, |c, cx| c.set_value(quase, w, cx))
+            t.confirmacao
+                .update(cx, |c, cx| c.trocar_valor(quase, w, cx))
         });
         clicar(&e, cx, "excluir-confirmar");
         assert!(!apagou(&e), "{quase:?} não apaga");
     }
     chatbot(&e, cx, |t, w, cx| {
         t.confirmacao
-            .update(cx, |c, cx| c.set_value("QUERO EXCLUIR!", w, cx))
+            .update(cx, |c, cx| c.trocar_valor("QUERO EXCLUIR!", w, cx))
     });
     clicar(&e, cx, "excluir-confirmar");
     e.esperar(cx);
@@ -1053,7 +1057,7 @@ fn excluir_historico_so_com_a_frase_letra_por_letra(cx: &mut TestAppContext) {
 /// 🚨 A lista de urgências inteira: assumir, resolver (as notas são
 /// obrigatórias), descartar (com a pergunta, que cancela de volta à lista) e
 /// "Ver conversa", que abre quem está fora da página.
-#[gpui::test]
+#[gpui_kit::test]
 fn urgencias_assumir_resolver_descartar_e_ver_a_conversa(cx: &mut TestAppContext) {
     let e = abrir_o_chatbot(cx);
     clicar(&e, cx, "chatbot-urgentes");
@@ -1084,7 +1088,7 @@ fn urgencias_assumir_resolver_descartar_e_ver_a_conversa(cx: &mut TestAppContext
     assert_eq!(patches(&e), 1);
     chatbot(&e, cx, |t, w, cx| {
         t.notas
-            .update(cx, |c, cx| c.set_value("cliente atendido", w, cx))
+            .update(cx, |c, cx| c.trocar_valor("cliente atendido", w, cx))
     });
     clicar(&e, cx, "resolver-confirmar");
     e.esperar(cx);
@@ -1146,7 +1150,7 @@ fn urgencias_assumir_resolver_descartar_e_ver_a_conversa(cx: &mut TestAppContext
 }
 
 /// O véu fecha o diálogo; o clique dentro da caixa, não.
-#[gpui::test]
+#[gpui_kit::test]
 fn o_veu_fecha_o_dialogo_e_a_caixa_nao(cx: &mut TestAppContext) {
     let e = abrir_o_chatbot(cx);
     clicar(&e, cx, "chatbot-urgentes");
@@ -1156,7 +1160,7 @@ fn o_veu_fecha_o_dialogo_e_a_caixa_nao(cx: &mut TestAppContext) {
         .expect("a caixa está na tela");
     // Um pouco acima do botão "Fechar": ainda dentro da caixa.
     visual.simulate_click(
-        gpui::point(caixa.center().x, caixa.origin.y - gpui::px(20.)),
+        gpui_kit::point(caixa.center().x, caixa.origin.y - gpui_kit::px(20.)),
         Modifiers::none(),
     );
     visual.run_until_parked();
@@ -1168,9 +1172,9 @@ fn o_veu_fecha_o_dialogo_e_a_caixa_nao(cx: &mut TestAppContext) {
     let mut visual = quadro_novo(&e, cx);
     let fechar = visual.debug_bounds("urgencias-fechar").unwrap();
     visual.simulate_click(
-        gpui::point(
+        gpui_kit::point(
             fechar.center().x,
-            fechar.origin.y + fechar.size.height + gpui::px(60.),
+            fechar.origin.y + fechar.size.height + gpui_kit::px(60.),
         ),
         Modifiers::none(),
     );
@@ -1182,7 +1186,7 @@ fn o_veu_fecha_o_dialogo_e_a_caixa_nao(cx: &mut TestAppContext) {
 
 /// 🚪 Sair da conta fecha os fluxos e esquece as conversas; entrar de novo
 /// escuta de novo.
-#[gpui::test]
+#[gpui_kit::test]
 fn sair_da_conta_fecha_os_fluxos_e_esquece_as_conversas(cx: &mut TestAppContext) {
     let e = abrir_o_chatbot(cx);
     e.escuta.mandar(evento(

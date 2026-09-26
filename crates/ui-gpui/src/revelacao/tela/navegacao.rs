@@ -17,12 +17,12 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use gpui::{
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon, Sizable};
+use gpui_kit::{
     canvas, div, img, prelude::*, px, AnyElement, Bounds, Context, Div, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, Pixels, Point, RenderImage,
     ScrollWheelEvent, SharedString, Stateful,
 };
-use gpui_component::{h_flex, v_flex, ActiveTheme, Icon, Sizable};
 
 use super::Revelacao;
 use crate::recursos::Icone;
@@ -436,10 +436,10 @@ impl Revelacao {
             .is_some_and(|(c, v)| zoom::passa_da_area(&v, &c));
         let mao = self.navegacao.espaco.is_some();
         caixa
-            .when(mao, |c| c.cursor(gpui::CursorStyle::ClosedHand))
+            .when(mao, |c| c.cursor(gpui_kit::CursorStyle::ClosedHand))
             .when(!mao && ampliada, |c| c.cursor_grab())
             .when(!mao && !ampliada, |c| {
-                c.cursor(gpui::CursorStyle::PointingHand)
+                c.cursor(gpui_kit::CursorStyle::PointingHand)
             })
             .on_scroll_wheel(cx.listener(|tela, e: &ScrollWheelEvent, _w, cx| tela.ao_rolar(e, cx)))
             .on_mouse_down(
@@ -608,7 +608,7 @@ impl Revelacao {
                 .items_center()
                 .justify_center()
                 .p(px(24.))
-                .bg(gpui::rgba(0x000000b3))
+                .bg(gpui_kit::rgba(0x000000b3))
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|tela, _, _, cx| {
@@ -661,7 +661,7 @@ impl Revelacao {
     }
 
     /// A foto do palco na vista do zoom (ou encaixada, fora dele).
-    pub(super) fn foto_na_vista(&self, imagem: Arc<RenderImage>) -> gpui::Img {
+    pub(super) fn foto_na_vista(&self, imagem: Arc<RenderImage>) -> gpui_kit::Img {
         match self.vista() {
             Some((cena, vista)) => img(imagem)
                 .absolute()
@@ -701,8 +701,8 @@ impl Revelacao {
                 .w(px((b.x - a.x).abs()))
                 .h(px((b.y - a.y).abs()))
                 .border_1()
-                .border_color(gpui::white())
-                .bg(gpui::rgba(0xffffff1a))
+                .border_color(gpui_kit::white())
+                .bg(gpui_kit::rgba(0xffffff1a))
                 .into_any_element(),
         )
     }
@@ -718,9 +718,10 @@ impl Revelacao {
                 .items_center()
                 .justify_center()
                 .rounded(px(4.))
-                .text_color(gpui::rgb(0xd4d4d4))
+                .text_color(gpui_kit::rgb(0xd4d4d4))
                 .when(!desligado, |b| {
-                    b.cursor_pointer().hover(|s| s.bg(gpui::rgba(0xffffff26)))
+                    b.cursor_pointer()
+                        .hover(|s| s.bg(gpui_kit::rgba(0xffffff26)))
                 })
                 .child(Icon::new(icone).size(px(14.)))
         };
@@ -731,9 +732,9 @@ impl Revelacao {
             .gap(px(4.))
             .p(px(2.))
             .rounded(px(8.))
-            .bg(gpui::rgba(0x000000a6))
+            .bg(gpui_kit::rgba(0x000000a6))
             .text_xs()
-            .text_color(gpui::white())
+            .text_color(gpui_kit::white())
             .when(desligado, |d| d.opacity(0.5))
             .child(
                 botao("zoom-afastar", Icone::Minus)
@@ -758,8 +759,8 @@ impl Revelacao {
                     h_flex()
                         .gap(px(6.))
                         .px(px(6.))
-                        .text_color(gpui::rgba(0xffffffcc))
-                        .child(gpui_component::spinner::Spinner::new().xsmall())
+                        .text_color(gpui_kit::rgba(0xffffffcc))
+                        .child(gpui_kit::component::spinner::Spinner::new().xsmall())
                         .child("resolução cheia…"),
                 )
             })
@@ -795,7 +796,7 @@ impl Revelacao {
                 .py(px(2.))
                 .rounded(px(4.))
                 .text_size(px(11.))
-                .when(aceso, |b| b.bg(ambar).text_color(gpui::black()))
+                .when(aceso, |b| b.bg(ambar).text_color(gpui_kit::black()))
                 .when(!aceso, |b| b.text_color(apagado))
                 .when(desligado, |b| b.opacity(0.4))
                 .when(!desligado, |b| {
@@ -944,7 +945,7 @@ impl Revelacao {
                                     .w(px(r.w * w))
                                     .h(px(r.h * h))
                                     .border_1()
-                                    .border_color(gpui::white())
+                                    .border_color(gpui_kit::white())
                             }))
                             .child(
                                 canvas(

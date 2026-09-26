@@ -1,14 +1,14 @@
 //! 📋 A lista de sessões, a sessão nova, a retenção e o caixa da rota.
 
 use biblioteca_core::sessoes::Situacao;
-use gpui::TestAppContext;
+use gpui_kit::TestAppContext;
 
 use super::{abrir_o_app, abrir_o_ensaio, Cenario, GALERIA};
 use crate::app::Tela;
 
 /// 🎬 **A lista**: chega do site, a busca acha sem acento, o recorte por
 /// situação filtra, "Limpar" devolve tudo, e recarregar pede de novo.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_lista_busca_recorta_e_recarrega(cx: &mut TestAppContext) {
     let e = abrir_o_app(cx, Cenario::default());
     e.entrar_na_conta(cx);
@@ -68,7 +68,7 @@ fn a_lista_busca_recorta_e_recarrega(cx: &mut TestAppContext) {
 
 /// 🎬 **Sessão nova**: só o título é obrigatório, o e-mail pela metade é
 /// recusado na tela, e criar **entra** na sessão criada.
-#[gpui::test]
+#[gpui_kit::test]
 fn abrir_sessao_nova_e_entrar_nela(cx: &mut TestAppContext) {
     let e = abrir_o_app(cx, Cenario::default());
     e.entrar_na_conta(cx);
@@ -113,7 +113,7 @@ fn abrir_sessao_nova_e_entrar_nela(cx: &mut TestAppContext) {
 
 /// 🎬 **Retenção**: abre com a política do servidor, recusa o que não passa
 /// na conferência do site, grava o que passa (`PUT`) e volta às sessões.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_retencao_le_recusa_e_grava(cx: &mut TestAppContext) {
     let e = abrir_o_app(cx, Cenario::default());
     e.entrar_na_conta(cx);
@@ -192,7 +192,7 @@ fn a_retencao_le_recusa_e_grava(cx: &mut TestAppContext) {
 /// 🔑 É a junta que nenhum teste de unidade pega: a decisão da célula está no
 /// `biblioteca-core` e a navegação, na raiz. Entre as duas há um evento, e
 /// evento sem assinante falha calado.
-#[gpui::test]
+#[gpui_kit::test]
 fn fechar_venda_na_lista_abre_o_caixa_na_sessao(cx: &mut TestAppContext) {
     let e = abrir_o_app(cx, Cenario::default());
     e.entrar_na_conta(cx);
@@ -217,7 +217,7 @@ fn fechar_venda_na_lista_abre_o_caixa_na_sessao(cx: &mut TestAppContext) {
 /// 🎬 **O caixa da rota**: o menu leva a ele, ele carrega o estúdio, os
 /// funcionários e o catálogo, e escolher uma sessão lá abre a galeria dela —
 /// cuja volta é para o caixa.
-#[gpui::test]
+#[gpui_kit::test]
 fn o_caixa_da_rota_abre_a_galeria_e_a_volta_e_para_ele(cx: &mut TestAppContext) {
     let e = abrir_o_app(cx, Cenario::default());
     e.entrar_na_conta(cx);
@@ -266,7 +266,7 @@ fn o_caixa_da_rota_abre_a_galeria_e_a_volta_e_para_ele(cx: &mut TestAppContext) 
 /// abre outra guia com o nome dela; `Ctrl+Tab` e `⌘1` andam entre elas pela
 /// tecla de verdade, e `⌘W` fecha a da frente e leva à vizinha — até a lista,
 /// quando não sobra nenhuma.
-#[gpui::test]
+#[gpui_kit::test]
 fn cada_sessao_abre_numa_guia_e_as_teclas_do_navegador_andam_entre_elas(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     e.app(cx, |app, _w, cx| app.entrar_na_sessao("g2".into(), cx));
@@ -323,7 +323,7 @@ fn cada_sessao_abre_numa_guia_e_as_teclas_do_navegador_andam_entre_elas(cx: &mut
 /// mostra a outra sessão como ela estava; voltar reabre a Revelação na mesma
 /// foto — inclusive depois de a outra sessão ter revelado no meio, e
 /// inclusive quando a saída foi pelo menu lateral, que fica na Revelação.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_revelacao_mostra_as_guias_e_cada_guia_volta_no_modo_em_que_ficou(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     e.app(cx, |app, _w, cx| app.entrar_na_sessao("g2".into(), cx));
@@ -332,7 +332,7 @@ fn a_revelacao_mostra_as_guias_e_cada_guia_volta_no_modo_em_que_ficou(cx: &mut T
     e.esperar(cx);
     e.revelar_a_do_site(cx, "b");
 
-    let mut visual = gpui::VisualTestContext::from_window(e.raiz.into(), cx);
+    let mut visual = gpui_kit::VisualTestContext::from_window(e.raiz.into(), cx);
     let da_frente = visual
         .debug_bounds("guia-g1")
         .expect("a guia da sessão aberta está sobre a Revelação");
@@ -341,7 +341,7 @@ fn a_revelacao_mostra_as_guias_e_cada_guia_volta_no_modo_em_que_ficou(cx: &mut T
         .debug_bounds("menu-Sessões fotográficas")
         .expect("o menu lateral fica na Revelação");
 
-    visual.simulate_click(da_frente.center(), gpui::Modifiers::none());
+    visual.simulate_click(da_frente.center(), gpui_kit::Modifiers::none());
     cx.run_until_parked();
     e.teclar(cx, "cmd-w");
     e.esperar(cx);
@@ -360,8 +360,8 @@ fn a_revelacao_mostra_as_guias_e_cada_guia_volta_no_modo_em_que_ficou(cx: &mut T
 
     // Para a outra guia: ela estava na grade, e é na grade que aparece.
     e.revelacao(cx, |tela, _w, cx| tela.arrastar_slider(0, 1.5, cx));
-    let mut visual = gpui::VisualTestContext::from_window(e.raiz.into(), cx);
-    visual.simulate_click(outra.center(), gpui::Modifiers::none());
+    let mut visual = gpui_kit::VisualTestContext::from_window(e.raiz.into(), cx);
+    visual.simulate_click(outra.center(), gpui_kit::Modifiers::none());
     cx.run_until_parked();
     e.app(cx, |app, _w, cx| {
         assert_eq!(app.tela(), Tela::Sessao);
@@ -398,8 +398,8 @@ fn a_revelacao_mostra_as_guias_e_cada_guia_volta_no_modo_em_que_ficou(cx: &mut T
     voltou_na_revelacao(&e, cx);
 
     // Pelo menu lateral: a lista abre, e a guia continua na Revelação.
-    let mut visual = gpui::VisualTestContext::from_window(e.raiz.into(), cx);
-    visual.simulate_click(menu.center(), gpui::Modifiers::none());
+    let mut visual = gpui_kit::VisualTestContext::from_window(e.raiz.into(), cx);
+    visual.simulate_click(menu.center(), gpui_kit::Modifiers::none());
     cx.run_until_parked();
     e.app(cx, |app, _w, _cx| {
         assert_eq!(app.tela(), Tela::Sessoes);
@@ -418,7 +418,7 @@ fn a_revelacao_mostra_as_guias_e_cada_guia_volta_no_modo_em_que_ficou(cx: &mut T
 /// verdade, passa por cima da vizinha e troca de lugar; pelo menu, ganha um
 /// nome só dela (o nome inteiro já vem selecionado, e digitar troca), uma cor,
 /// e "Fechar as outras" traz à frente a do menu antes de fechar as demais.
-#[gpui::test]
+#[gpui_kit::test]
 fn a_guia_se_arrasta_se_renomeia_ganha_cor_e_fecha_as_outras(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     e.app(cx, |app, _w, cx| app.entrar_na_sessao("g2".into(), cx));
@@ -428,7 +428,7 @@ fn a_guia_se_arrasta_se_renomeia_ganha_cor_e_fecha_as_outras(cx: &mut TestAppCon
     });
 
     // O arrasto: aperta na primeira, passa pela segunda, solta.
-    let mut visual = gpui::VisualTestContext::from_window(e.raiz.into(), cx);
+    let mut visual = gpui_kit::VisualTestContext::from_window(e.raiz.into(), cx);
     let de = visual
         .debug_bounds("guia-g1")
         .expect("a primeira guia está na faixa");
@@ -437,22 +437,22 @@ fn a_guia_se_arrasta_se_renomeia_ganha_cor_e_fecha_as_outras(cx: &mut TestAppCon
         .expect("a segunda guia está na faixa");
     visual.simulate_mouse_down(
         de.center(),
-        gpui::MouseButton::Left,
-        gpui::Modifiers::none(),
+        gpui_kit::MouseButton::Left,
+        gpui_kit::Modifiers::none(),
     );
     for passo in 1..=8 {
         let t = passo as f32 / 8.;
         let x = de.center().x + (para.center().x - de.center().x) * t;
         visual.simulate_mouse_move(
-            gpui::point(x, de.center().y),
-            Some(gpui::MouseButton::Left),
-            gpui::Modifiers::none(),
+            gpui_kit::point(x, de.center().y),
+            Some(gpui_kit::MouseButton::Left),
+            gpui_kit::Modifiers::none(),
         );
     }
     visual.simulate_mouse_up(
         para.center(),
-        gpui::MouseButton::Left,
-        gpui::Modifiers::none(),
+        gpui_kit::MouseButton::Left,
+        gpui_kit::Modifiers::none(),
     );
     cx.run_until_parked();
     e.app(cx, |app, _w, _cx| {
