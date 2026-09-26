@@ -435,10 +435,34 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path $binario)) {
 #    2026-09-25: "nao pode corromper a aplicacao que ja esta funcionando").
 #    `--versao` responde e sai antes de janela, catalogo e rede.
 Diga "conferindo o app novo"
+# 🐛 **Nao pelo `&`** (balcao, 2026-09-26: "o app novo nao abriu (--versao)"
+#    com a compilacao inteira ok). O binario do `instalador` e de janela
+#    (`windows_subsystem`), e o PowerShell trata executavel de janela diferente
+#    do de console: a resposta pelo pipe podia chegar vazia. O `Start-Process`
+#    com a saida em arquivo espera o fim e entrega o que ele escreveu, sempre.
 $env:PATH = "$mingw;$env:PATH"
-$global:LASTEXITCODE = 0
-$resposta = (& $binario --versao 2>$null | Select-Object -First 1)
-if ($LASTEXITCODE -ne 0 -or -not "$resposta".Trim()) {
+$saidaVersao = Join-Path $env:TEMP "vlb-versao-$PID.txt"
+$errosVersao = Join-Path $env:TEMP "vlb-versao-$PID-erros.txt"
+$codigoVersao = $null
+try {
+    $processo = Start-Process -FilePath $binario -ArgumentList "--versao" -NoNewWindow -Wait -PassThru `
+        -RedirectStandardOutput $saidaVersao -RedirectStandardError $errosVersao
+    $codigoVersao = $processo.ExitCode
+} catch {
+    $codigoVersao = "nao iniciou: $_"
+}
+$resposta = if (Test-Path $saidaVersao) { Get-Content $saidaVersao -ErrorAction SilentlyContinue | Select-Object -First 1 } else { $null }
+$errosTexto = if (Test-Path $errosVersao) { (Get-Content $errosVersao -ErrorAction SilentlyContinue | Select-Object -Last 15) -join "`n" } else { "" }
+Remove-Item $saidaVersao, $errosVersao -Force -ErrorAction SilentlyContinue
+if ($codigoVersao -ne 0 -or -not "$resposta".Trim()) {
+    # 🔎 O codigo diz o motivo quando nao ha texto: 0xC0000135 e DLL que falta,
+    #    0xC0000005 e o processo que caiu antes de responder.
+    $codigoTexto = if ($codigoVersao -is [int]) { "{0} (0x{0:X8})" -f $codigoVersao } else { "$codigoVersao" }
+    Erro "o app novo nao respondeu a versao. Codigo de saida: $codigoTexto"
+    if ($codigoVersao -is [int] -and ($codigoVersao -band 0xFFFFFFFF) -eq 0xC0000135) {
+        Write-Host "   Falta uma DLL. Confira se $mingw existe e tem libstdc++-6.dll."
+    }
+    if ($errosTexto.Trim()) { Write-Host "   O app disse:"; Write-Host $errosTexto }
     throw "o app novo nao abriu (--versao); o instalado continua como estava"
 }
 Ok "o app novo responde a versao $("$resposta".Trim())"
