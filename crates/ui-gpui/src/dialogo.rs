@@ -28,6 +28,12 @@
 //! respiro de 16 (`p-4 gap-4`), o canto de 12, o fundo do `popover` (o kit usa
 //! o da página, que no escuro é outro) e a largura.
 //!
+//! 🎯 **No meio da janela, como o site** (`top-1/2 -translate-y-1/2`). O kit
+//! põe a caixa a um décimo do topo, e a única alavanca dele é o `margin_top`:
+//! a altura da caixa é medida no quadro em que ela é desenhada e o respiro de
+//! cima sai dela ([`Altura`]). No primeiro quadro, ainda sem medida, a caixa
+//! nasce transparente, para não aparecer no alto e pular para o meio.
+//!
 //! O `Dialog` já se desenha `deferred`. No GPUI do gpui-kit 0.6 isso pode ir
 //! dentro de outro `deferred` (ele desenha em rodadas, até 10 níveis) — o
 //! pânico do gpui 0.2.2 com um dentro do outro virou teste de regressão —, mas
@@ -35,7 +41,7 @@
 
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::{ActiveTheme, Root};
-use gpui_kit::{prelude::*, px, AnyElement, Context, Window};
+use gpui_kit::{prelude::*, px, AnyElement, Context, Pixels, SharedString, Window};
 
 /// Como o diálogo se comporta — o do site, caso a caso.
 #[derive(Clone, Copy)]
@@ -82,6 +88,17 @@ impl Jeito {
         }
     }
 }
+
+/// A altura medida da caixa, guardada de um quadro para o outro: o miolo e o
+/// rodapé, cada um no seu `on_children_prepainted`.
+#[derive(Default, Clone, Copy, PartialEq)]
+struct Altura {
+    miolo: Option<Pixels>,
+    rodape: Pixels,
+}
+
+/// O respiro que o kit guarda nas bordas da janela (`spacing_tokens().lg`).
+const MARGEM: f32 = 16.;
 
 /// O conteúdo do diálogo, lido da tela.
 pub type Montar<T> = fn(&mut T, &mut Window, &mut Context<T>) -> Option<AnyElement>;
@@ -142,6 +159,40 @@ pub fn desenhar_conteudo<T: 'static>(
         });
     };
     let ao_cancelar = pedir_cancelar.clone();
+    // Um estado por diálogo da tela: a caixa do PDV e a pergunta por cima dela
+    // são dois, com larguras e rodapés diferentes.
+    let chave = SharedString::from(format!(
+        "dialogo-altura-{}-{}-{}",
+        cx.entity_id(),
+        jeito.largura,
+        rodape.is_some()
+    ));
+    let altura = window.use_keyed_state(chave, cx, |_, _| Altura::default());
+    let medida = *altura.read(cx);
+    let medir = |altura: &gpui_kit::Entity<Altura>, qual: fn(&mut Altura, Pixels)| {
+        let altura = altura.clone();
+        move |filhos: Vec<gpui_kit::Bounds<Pixels>>, _: &mut Window, cx: &mut gpui_kit::App| {
+            let alto = filhos.iter().map(|b| b.size.height).sum::<Pixels>();
+            altura.update(cx, |altura, cx| {
+                let antes = *altura;
+                qual(altura, alto);
+                if *altura != antes {
+                    cx.notify();
+                }
+            });
+        }
+    };
+    // A caixa: o miolo, o `gap` de 8 do kit antes do rodapé, e a borda de 1.
+    let topo = medida.miolo.map(|miolo| {
+        let caixa = miolo
+            + if rodape.is_some() {
+                medida.rodape + px(8.)
+            } else {
+                px(0.)
+            }
+            + px(2.);
+        ((window.viewport_size().height - caixa) / 2.).max(px(MARGEM))
+    });
     // 🚨 **O clique fora é nosso, e não do kit.** O véu do kit só fecha o
     // diálogo "de cima", e ele descobre qual é contando os diálogos guardados
     // na `Root` (`layer_ix + 1 == active_dialogs.len()`): desenhado pela tela,
@@ -151,7 +202,11 @@ pub fn desenhar_conteudo<T: 'static>(
     // ter o tamanho exato da caixa — e o clique fora dele pede o cancelar.
     let miolo = gpui_kit::div()
         .p(px(16.))
-        .child(conteudo)
+        .child(
+            gpui_kit::div()
+                .on_children_prepainted(medir(&altura, |a, alto| a.miolo = Some(alto + px(32.))))
+                .child(conteudo),
+        )
         .when(jeito.veu, |miolo| {
             miolo.on_mouse_down_out(move |_, window, cx| pedir_cancelar(window, cx))
         });
@@ -173,7 +228,16 @@ pub fn desenhar_conteudo<T: 'static>(
                 false
             })
             .child(miolo)
-            .when_some(rodape, |dialogo, rodape| dialogo.footer(rodape))
+            .when_some(topo, |dialogo, topo| dialogo.margin_top(topo))
+            .when(topo.is_none(), |dialogo| dialogo.opacity(0.))
+            .when_some(rodape, |dialogo, rodape| {
+                dialogo.footer(
+                    gpui_kit::div()
+                        .w_full()
+                        .on_children_prepainted(medir(&altura, |a, alto| a.rodape = alto))
+                        .child(rodape),
+                )
+            })
             .into_any_element(),
     )
 }

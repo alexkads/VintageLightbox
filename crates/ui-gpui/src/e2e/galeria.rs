@@ -853,6 +853,37 @@ fn o_acerto_da_foto_volta_preenchido(cx: &mut TestAppContext) {
     });
 }
 
+/// 🎯 **O diálogo fica no meio da janela, como no site** (`top-1/2
+/// -translate-y-1/2`). O `Dialog` do gpui-kit o punha a um décimo do topo;
+/// `crate::dialogo` mede a caixa e acerta o `margin_top`.
+#[gpui_kit::test]
+fn o_dialogo_fica_no_meio_da_janela(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    let aditivo = Modifiers {
+        #[cfg(target_os = "macos")]
+        platform: true,
+        #[cfg(not(target_os = "macos"))]
+        control: true,
+        ..Modifiers::none()
+    };
+    clicar(&e, cx, "sessao-tile-a");
+    clicar_com(&e, cx, "tira-d", aditivo);
+    clicar(&e, cx, "lote-negociar");
+    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    visual.run_until_parked();
+    let caixa = visual
+        .debug_bounds("balcao-dialogo")
+        .expect("o diálogo está na tela");
+    let altura = visual.update(|window, _| window.viewport_size().height);
+    let meio = caixa.origin.y + caixa.size.height / 2.;
+    let desvio = (meio - altura / 2.).abs();
+    assert!(
+        desvio < gpui_kit::px(2.),
+        "o miolo do diálogo está em {meio:?}, e o meio da janela em {:?}",
+        altura / 2.
+    );
+}
+
 /// ⌨️ **Todo jeito de fechar a negociação devolve as teclas.** O diálogo toma
 /// o foco para o campo "Motivo"; fechá-lo sem devolver deixava o foco no campo
 /// que sumiu, e a nota, o `B` e as setas morriam até o próximo clique (dono,
