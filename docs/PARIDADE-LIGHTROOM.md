@@ -102,6 +102,7 @@ de ser **exata no inteiro**, senão o neutro passa a mover pixel.
 | ✅ **Tom automático ("Auto")** | **desde 30/ago** — botão no topo do Básico: lê o histograma da foto crua e escolhe exposição e altas luzes. Mexe em dois ajustes, e não nos seis do Lightroom, porque "sombras" no shader multiplica **todo** pixel abaixo de 128 e enterraria o meio-tom |
 | ⬜ **Cópias virtuais e instantâneos** | |
 | ✅ Antes/depois, desfazer/refazer, presets, corte/giro/espelho/endireitar, histograma | |
+| ✅ **Comparar (o `C` do Lightroom, aqui `⇧C`)** | **desde 26/set** — na Revelação, a aberta e a candidata lado a lado, aqui e na tela do cliente. O clique escolhe a avaliada (borda âmbar), as setas trocam a outra, `0`–`5`, `P` e `X` classificam a escolhida, e `Esc` sai abrindo ela. `⇧C` porque o `C` solto é a Cortesia do caixa. Regra em `biblioteca_core::comparar`, repetida no editor do site |
 | ✅ **Importar predefinição do Lightroom** (`.lrtemplate` e `.xmp`) | **desde 7/set** — `revelacao/lightroom.rs`, o porte de `lightroom.ts` do site: converte as escalas e **conta o que ignorou** por arquivo |
 | ✅ **Prévia da predefinição ao passar o ponteiro** | **desde 7/set** — muda a foto, não os ajustes; não entra no histórico nem no banco |
 

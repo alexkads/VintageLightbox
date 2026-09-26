@@ -33,7 +33,7 @@ const LARGURA_DO_NAVEGADOR: f32 = 208.;
 const ALTURA_DO_NAVEGADOR: f32 = 156.;
 
 /// A folha de atalhos — o `ATALHOS` de `atalhos.ts`, na mesma ordem.
-pub(super) const ATALHOS: [(&str, &[(&str, &str)]); 4] = [
+pub(super) const ATALHOS: [(&str, &[(&str, &str)]); 5] = [
     (
         "Enquadrar",
         &[
@@ -76,10 +76,26 @@ pub(super) const ATALHOS: [(&str, &[(&str, &str)]); 4] = [
         ],
     ),
     (
+        "Comparar",
+        &[
+            (
+                "⇧C",
+                "Põe as marcadas lado a lado, aqui e na tela do cliente; de novo, volta a uma",
+            ),
+            (
+                "Esc no Comparar",
+                "Sai abrindo a foto escolhida (a da borda âmbar)",
+            ),
+            ("0–5", "No Comparar, dá a nota à escolhida (0 tira)"),
+            ("P", "No Comparar, marca a escolhida como levada no balcão"),
+            ("X", "No Comparar, rejeita a escolhida (de novo, desfaz)"),
+        ],
+    ),
+    (
         "Andar e marcar",
         &[
-            ("←", "Foto anterior"),
-            ("→", "Próxima foto"),
+            ("←", "Foto anterior (no Comparar, troca a outra foto)"),
+            ("→", "Próxima foto (no Comparar, troca a outra foto)"),
             ("⌘A", "Marca todas as fotos da tira"),
             ("⌘D", "Marca só esta foto"),
             ("?", "Mostra e esconde esta lista"),

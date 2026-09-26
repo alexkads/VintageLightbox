@@ -50,6 +50,7 @@ use super::sincronizacao::{self, Escolha, Grupo};
 use infrastructure::transformacao;
 
 /// O Enquadrar: retângulo, alças, transferidor e o painel dele.
+mod comparar;
 mod enquadrar;
 /// O zoom no palco e o Navegador.
 mod navegacao;
@@ -71,6 +72,7 @@ pub(crate) use tira::faixa_desenhada;
 #[cfg(test)]
 mod estresse;
 
+use comparar::EmComparacao;
 use enquadrar::Edicao;
 
 /// Largura da coluna de ajustes — os `w-80` do site.
@@ -333,6 +335,10 @@ pub struct Revelacao {
     /// foto **seguinte**, e `colher` desenhava qualquer resultado que passasse
     /// do `descartar_ate`. Aqui cada id diz de quem é e para quê.
     pedidos: HashMap<u64, Pendente>,
+    /// O Comparar (`⇧C`) em curso — ver `tela/comparar.rs`.
+    comparacao: Option<EmComparacao>,
+    /// O pedido da outra metade do Comparar que ainda não voltou do motor.
+    pedido_do_comparar: Option<u64>,
     /// O pedido especulativo da próxima foto, enquanto ele está no ar.
     ///
     /// Um por vez: dois adiantariam a segunda foto à frente, que o operador
@@ -418,9 +424,18 @@ struct Controle {
 /// Um pedido no motor, e o que fazer com o que voltar dele.
 struct Pendente {
     chave: cache::Chave,
-    /// `false` é a revelação antecipada da próxima foto: ela só alimenta o
-    /// cache, e **nunca** entra no palco — quem está na tela é outra foto.
-    para_a_tela: bool,
+    destino: Destino,
+}
+
+/// Para onde vai o que o motor devolver.
+enum Destino {
+    /// A foto aberta, no palco.
+    Palco,
+    /// A revelação antecipada da próxima foto: ela só alimenta o cache, e
+    /// **nunca** entra no palco — quem está na tela é outra foto.
+    Cache,
+    /// A outra metade do Comparar (`⇧C`). Também nunca vai ao palco da aberta.
+    Comparar { posicao: usize, crop: CropSettings },
 }
 
 struct Aberta {
@@ -593,6 +608,8 @@ impl Revelacao {
             aguardando: None,
             reveladas: CacheDeReveladas::default(),
             pedidos: HashMap::new(),
+            comparacao: None,
+            pedido_do_comparar: None,
             antecipando: None,
             rumo: 1,
             descartar_ate: 0,
@@ -642,6 +659,9 @@ impl Revelacao {
         }
         self.posicao = posicao.min(acervo.len() - 1);
         self.acervo = Arc::new(acervo);
+        // Posições novas: o par do Comparar não aponta mais para as mesmas fotos.
+        self.comparacao = None;
+        self.pedido_do_comparar = None;
         self.gravadas.clear();
         self.bases.clear();
         // Acervo novo, posições novas: o lote antigo não aponta para nada.
@@ -657,6 +677,11 @@ impl Revelacao {
     /// depois de mexer num slider deixaria a gravação atrasada sair com os
     /// ajustes já substituídos.
     pub fn andar(&mut self, passo: i32, window: &mut Window, cx: &mut Context<Self>) {
+        // No Comparar, as setas trocam a outra foto, pulando a escolhida.
+        if self.comparacao.is_some() {
+            self.andar_no_comparar(passo, cx);
+            return;
+        }
         // 🔑 **A seta anda sobre a tira**, e não sobre o acervo: com um recorte
         // aceso, "a próxima" é a próxima que se vê (`naTira` do site).
         if let Some(nova) = tira::vizinha(&self.na_tira(), self.posicao, passo) {
@@ -1942,7 +1967,7 @@ impl Revelacao {
             id,
             Pendente {
                 chave,
-                para_a_tela: true,
+                destino: Destino::Palco,
             },
         );
         // 🚨 **O especulativo ficou para trás deste.** `proximo_id` acima já moveu
@@ -1975,6 +2000,10 @@ impl Revelacao {
     ///   e não há ida à GPU para poupar.
     fn antecipar_a_proxima(&mut self, cx: &mut Context<Self>) {
         if self.aguardando.is_some() || self.antecipando.is_some() {
+            return;
+        }
+        // No Comparar a GPU é da outra metade: ver `tela/comparar.rs`.
+        if self.comparacao.is_some() {
             return;
         }
         if self.edicao.is_some() || self.repondo {
@@ -2046,7 +2075,11 @@ impl Revelacao {
         corte: transformacao::Corte,
         cx: &mut Context<Self>,
     ) {
-        if self.aguardando.is_some() || self.antecipando.is_some() || self.edicao.is_some() {
+        if self.aguardando.is_some()
+            || self.antecipando.is_some()
+            || self.edicao.is_some()
+            || self.comparacao.is_some()
+        {
             return;
         }
         let chave = cache::Chave::nova(foto_id, (largura, altura), &ajustes, &corte);
@@ -2067,7 +2100,7 @@ impl Revelacao {
             id,
             Pendente {
                 chave,
-                para_a_tela: false,
+                destino: Destino::Cache,
             },
         );
         self.antecipando = Some(id);
@@ -2164,12 +2197,32 @@ impl Revelacao {
             // guardar cada um encheria o cache com receitas que ninguém vai
             // pedir de volta e despejaria as fotos que valem.
             let ultimo_do_gesto = self.aguardando == Some(resultado.id);
-            let antecipado = pendente.as_ref().is_some_and(|p| !p.para_a_tela);
+            let antecipado = pendente
+                .as_ref()
+                .is_some_and(|p| !matches!(p.destino, Destino::Palco));
             if let Some(pendente) = &pendente {
                 if antecipado || ultimo_do_gesto {
                     self.reveladas
                         .guardar(pendente.chave.clone(), &resultado.imagem);
                 }
+            }
+            // 🚨 **O pedido do Comparar que a thread largou volta para a fila.**
+            // Ela só atende o mais novo: se a aberta pediu depois (uma receita
+            // que mudou por fora), a outra metade ficaria esperando para sempre.
+            if self.pedido_do_comparar.is_some_and(|id| id < resultado.id) {
+                self.pedido_do_comparar = None;
+                self.devolver_a_fila_do_comparar();
+            }
+            if let Some(Pendente {
+                destino: Destino::Comparar { posicao, crop },
+                ..
+            }) = &pendente
+            {
+                if self.pedido_do_comparar == Some(resultado.id) {
+                    self.pedido_do_comparar = None;
+                }
+                let (posicao, crop) = (*posicao, crop.clone());
+                self.entregar_ao_comparar(posicao, &resultado.imagem, &crop, cx);
             }
 
             // 🚨 **A revelação antecipada nunca vai ao palco.** Ela é da foto
@@ -2196,12 +2249,15 @@ impl Revelacao {
                     self.atualizar_a_tira_com_o_revelado();
                     // E, com a GPU livre, a próxima foto já pode ir sendo feita.
                     self.antecipar_a_proxima(cx);
+                    self.soltar_a_proxima_do_comparar(cx);
                 }
             }
             cx.notify();
         }
 
-        let continua = self.aguardando.is_some() || self.antecipando.is_some();
+        let continua = self.aguardando.is_some()
+            || self.antecipando.is_some()
+            || self.pedido_do_comparar.is_some();
         if !continua {
             self.colhendo = false;
         }
@@ -2209,6 +2265,9 @@ impl Revelacao {
     }
 
     fn palco(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        if self.comparacao.is_some() {
+            return self.palco_do_comparar(cx);
+        }
         // 🚨 **`size_full`, e não `flex_1`.** Esta moldura era filha de uma
         // linha flex antes do dock; hoje ela é a **raiz de um painel**, e
         // `flex_1` sem pai flex não cresce: a altura cai no conteúdo, o filho
@@ -2481,11 +2540,36 @@ impl Render for Revelacao {
         }
         self.acompanhar_a_resolucao(cx);
         let cabecalho = self.cabecalho(window, cx);
+        // 🔑 **No Comparar não se revela**: as duas fotos estão em julgamento, e
+        // um slider mexido ali mudaria só a aberta, sem o operador ver. As duas
+        // colunas ficam esmaecidas e sem clique, como no site (`inert`).
+        let comparando = self.comparacao.is_some();
+        let fundo = cx.theme().background;
+        let calar = move |coluna: gpui::AnyElement| {
+            // Sem tamanho próprio: a coluna das predefinições tem largura fixa e
+            // `flex_none` numa linha flex, e o invólucro não pode esticá-la.
+            div()
+                .relative()
+                .flex_none()
+                .h_full()
+                .child(coluna)
+                .when(comparando, |d| {
+                    d.child(
+                        div()
+                            .id("coluna-calada-no-comparar")
+                            .absolute()
+                            .inset_0()
+                            .occlude()
+                            .bg(fundo.opacity(0.6)),
+                    )
+                })
+                .into_any_element()
+        };
         let presets = self
             .presets_a_mostra
-            .then(|| self.coluna_dos_presets(cx).into_any_element());
+            .then(|| calar(self.coluna_dos_presets(cx).into_any_element()));
         let palco = self.palco(cx);
-        let ajustes = self.painel(cx).into_any_element();
+        let ajustes = calar(self.painel(cx).into_any_element());
         let tira = self.filmstrip(window, cx);
 
         div()

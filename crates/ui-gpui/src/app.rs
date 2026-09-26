@@ -391,6 +391,13 @@ const AMARELO: &str = "Yellow";
 const VERDE: &str = "Green";
 const AZUL: &str = "Blue";
 
+/// O que a segunda tela mostra no Comparar: por metade, o id, a nota e a
+/// receita — e qual das duas é a escolhida.
+type ChaveDoPar = (
+    Vec<(String, i32, Ajustes, CropSettings)>,
+    biblioteca_core::comparar::Lado,
+);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tela {
     Biblioteca,
@@ -717,9 +724,15 @@ pub struct Aplicativo {
     /// refazer a imagem a cada notificação da mesma foto (a revelação notifica
     /// a cada milímetro de slider).
     no_cliente: Option<(String, Ajustes, CropSettings)>,
-    /// Os pixels sem marca da foto que a segunda tela mostra, guardados para a
-    /// edição ao vivo não decodificar a foto a cada gesto.
-    bruto_do_cliente: Option<(String, Arc<Vec<u8>>, u32, u32)>,
+    /// O par que a segunda tela mostra no Comparar (`⇧C`): as duas receitas e
+    /// a escolhida. É o `no_cliente` das duas metades.
+    par_no_cliente: Option<ChaveDoPar>,
+    /// Os pixels sem marca das fotos que a segunda tela mostra, guardados para
+    /// a edição ao vivo não decodificar a foto a cada gesto.
+    ///
+    /// 🔑 **Três, e não uma**: no Comparar são duas no ar, e trocar a outra
+    /// foto pela seta não pode jogar fora a escolhida.
+    bruto_do_cliente: Vec<(String, Arc<Vec<u8>>, u32, u32)>,
     /// A foto cuja cópia de trabalho foi pedida para a segunda tela.
     cliente_pedindo: Option<String>,
     /// O adiamento da releitura do acervo — ver `pedir_releitura_do_acervo`.
@@ -1223,7 +1236,8 @@ impl Aplicativo {
             _cliente_na_galeria: cliente_na_galeria,
             _cliente_na_revelacao: cliente_na_revelacao,
             no_cliente: None,
-            bruto_do_cliente: None,
+            par_no_cliente: None,
+            bruto_do_cliente: Vec::new(),
             cliente_pedindo: None,
             lote_no_ar: None,
             esteira: crate::envios::Esteira::default(),
@@ -2816,6 +2830,17 @@ impl Aplicativo {
         match self.tela {
             Tela::Sessao => self.detalhe.update(cx, na_sessao),
             Tela::Biblioteca => self.biblioteca.update(cx, na_biblioteca),
+            // 🔑 **No Comparar (`⇧C`), a nota, o `P` e o `X` valem para a foto
+            // escolhida** — com as regras e os avisos da sessão, e sem mexer na
+            // seleção dela (`Detalhe::nas_fotos`). Fora dele, a Revelação não
+            // classifica, como o editor do site.
+            Tela::Revelacao if self.sessao_aberta.is_some() => {
+                let Some(id) = self.revelacao.read(cx).escolhida_no_comparar() else {
+                    return;
+                };
+                self.detalhe
+                    .update(cx, |tela, cx| tela.nas_fotos(&[id], cx, na_sessao));
+            }
             _ => {}
         }
     }
@@ -3962,6 +3987,15 @@ impl Aplicativo {
         let Some(janela) = self.cliente else {
             return;
         };
+        // No Comparar (`⇧C`), a segunda tela mostra as duas.
+        if self.tela == Tela::Revelacao {
+            if let Some(par) = self.revelacao.read(cx).fotos_do_comparar() {
+                self.comparar_no_cliente(janela, par, forcar, cx);
+                return;
+            }
+        }
+        // Saiu do Comparar: a foto única vai de novo, mesmo que seja a mesma.
+        let forcar = forcar || self.par_no_cliente.take().is_some();
         let _inicio = std::time::Instant::now();
         let _cronometro = CronometroAoSair("atualizar_o_cliente", _inicio);
         let Some((foto, posicao)) = self.foto_para_o_cliente(cx) else {
@@ -4026,6 +4060,90 @@ impl Aplicativo {
         }
     }
 
+    /// Leva o par do Comparar à segunda tela — se ele mudou (ou se `forcar`).
+    ///
+    /// 🔑 **A aberta vai com a receita da tela**, como na foto única; a outra,
+    /// com a do catálogo — a mesma com que a Revelação a mostra ao lado.
+    fn comparar_no_cliente(
+        &mut self,
+        janela: gpui::WindowHandle<Cliente>,
+        (esquerda, direita, ativa): (usize, usize, biblioteca_core::comparar::Lado),
+        forcar: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let (fotos, total) = {
+            let revelacao = self.revelacao.read(cx);
+            let total = revelacao.acervo().len();
+            let fotos: Option<Vec<(usize, PhotoViewModel, Ajustes, CropSettings)>> =
+                [esquerda, direita]
+                    .into_iter()
+                    .map(|posicao| {
+                        let foto = revelacao.acervo().get(posicao)?.clone();
+                        let (ajustes, corte) = if posicao == revelacao.posicao() {
+                            revelacao.receita_para_o_cliente()
+                        } else {
+                            (
+                                persistencia::da_foto(&foto),
+                                persistencia::para_crop_settings(&persistencia::corte_da_foto(
+                                    &foto,
+                                )),
+                            )
+                        };
+                        Some((posicao, foto, ajustes, corte))
+                    })
+                    .collect();
+            (fotos, total)
+        };
+        let Some(fotos) = fotos else {
+            return;
+        };
+        let chave: ChaveDoPar = (
+            fotos
+                .iter()
+                .map(|(_, foto, ajustes, corte)| {
+                    (foto.id.clone(), foto.rating, *ajustes, corte.clone())
+                })
+                .collect(),
+            ativa,
+        );
+        if !forcar && self.par_no_cliente.as_ref() == Some(&chave) {
+            return;
+        }
+        let mut pedidos = Vec::new();
+        for (posicao, foto, ajustes, corte) in fotos {
+            // A cópia de trabalho ainda não veio: foi pedida, e a raiz volta
+            // aqui quando ela chegar.
+            let Some((pixels, largura, altura)) = self.bruto_para_o_cliente(&foto, cx) else {
+                return;
+            };
+            pedidos.push(ParaRevelar {
+                foto,
+                posicao: Some((posicao + 1, total)),
+                pixels,
+                largura,
+                altura,
+                ajustes,
+                corte,
+            });
+        }
+        self.par_no_cliente = Some(chave);
+        self.no_cliente = None;
+        let direita = pedidos.pop();
+        let esquerda = pedidos.pop();
+        let (Some(esquerda), Some(direita)) = (esquerda, direita) else {
+            return;
+        };
+        let resposta = janela.update(cx, |cliente, _window, cx| {
+            cliente.comparar(esquerda, direita, ativa, cx)
+        });
+        if resposta.is_err() {
+            self.cliente = None;
+            self.detalhe
+                .update(cx, |tela, cx| tela.definir_cliente_aberta(false, cx));
+            cx.notify();
+        }
+    }
+
     /// Os pixels **sem marca** desta foto, para a segunda tela.
     ///
     /// 🚨 **A foto do site não usa a prévia do cache**: aquela é a da galeria,
@@ -4038,10 +4156,10 @@ impl Aplicativo {
         foto: &PhotoViewModel,
         cx: &mut Context<Self>,
     ) -> Option<(Arc<Vec<u8>>, u32, u32)> {
-        if let Some((id, pixels, largura, altura)) = &self.bruto_do_cliente {
-            if *id == foto.id {
-                return Some((pixels.clone(), *largura, *altura));
-            }
+        if let Some((_, pixels, largura, altura)) =
+            self.bruto_do_cliente.iter().find(|(id, ..)| *id == foto.id)
+        {
+            return Some((pixels.clone(), *largura, *altura));
         }
         let inicio = std::time::Instant::now();
         let do_site = persistencia::id_no_site(&foto.id).is_some();
@@ -4072,7 +4190,9 @@ impl Aplicativo {
         let (largura, altura) = (rgba.width(), rgba.height());
         let pixels = Arc::new(rgba.into_raw());
         crate::depuracao::vigia::cronometrar("bruto_para_o_cliente (ler + decodificar)", inicio);
-        self.bruto_do_cliente = Some((foto.id.clone(), pixels.clone(), largura, altura));
+        self.bruto_do_cliente
+            .insert(0, (foto.id.clone(), pixels.clone(), largura, altura));
+        self.bruto_do_cliente.truncate(3);
         Some((pixels, largura, altura))
     }
 
@@ -4860,15 +4980,21 @@ impl Aplicativo {
         self.colar_revelacao(cx);
     }
 
+    /// A Revelação está no ar **e** não está no Comparar — onde desfazer,
+    /// enquadrar e ver o antes mexeriam na aberta sem ela estar sozinha no palco.
+    fn revelando_sozinha(&self, cx: &gpui::App) -> bool {
+        self.tela == Tela::Revelacao && !self.revelacao.read(cx).comparando()
+    }
+
     fn ao_desfazer(&mut self, _acao: &Desfazer, window: &mut Window, cx: &mut Context<Self>) {
-        if self.tela == Tela::Revelacao {
+        if self.revelando_sozinha(cx) {
             self.revelacao
                 .update(cx, |tela, cx| tela.desfazer(window, cx));
         }
     }
 
     fn ao_refazer(&mut self, _acao: &Refazer, window: &mut Window, cx: &mut Context<Self>) {
-        if self.tela == Tela::Revelacao {
+        if self.revelando_sozinha(cx) {
             self.revelacao
                 .update(cx, |tela, cx| tela.refazer(window, cx));
         }
@@ -4881,7 +5007,7 @@ impl Aplicativo {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.tela == Tela::Revelacao {
+        if self.revelando_sozinha(cx) {
             self.revelacao
                 .update(cx, |tela, cx| tela.alternar_corte(window, cx));
         }
@@ -4894,7 +5020,7 @@ impl Aplicativo {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.tela == Tela::Revelacao {
+        if self.revelando_sozinha(cx) {
             self.revelacao
                 .update(cx, |tela, cx| tela.alternar_original(cx));
         }
@@ -5011,6 +5137,14 @@ impl Aplicativo {
         if self.tela == Tela::Revelacao && self.revelacao.read(cx).cortando() {
             self.revelacao
                 .update(cx, |tela, cx| tela.cancelar_corte(cx));
+            return;
+        }
+        // 🚨 **No Comparar, o `Esc` sai dele — e não da Revelação.** O cliente
+        // está olhando as duas; fechar tudo com a tecla de desistir seria o
+        // mesmo tombo do `Esc` no Enquadrar.
+        if self.tela == Tela::Revelacao && self.revelacao.read(cx).comparando() {
+            self.revelacao
+                .update(cx, |tela, cx| tela.sair_do_comparar(window, cx));
             return;
         }
         // 🚨 **Só a Revelação e a impressão têm de onde voltar.** Até
@@ -7473,6 +7607,271 @@ mod testes {
                 );
             })
             .expect("a janela deve estar aberta");
+    }
+
+    /// A Revelação de uma sessão com três fotos do site, aberta na primeira —
+    /// o palco do Comparar (`⇧C`).
+    fn revelacao_de_tres_do_site(
+        cx: &mut TestAppContext,
+    ) -> (
+        gpui::WindowHandle<Aplicativo>,
+        Arc<PublicadorDeMentira>,
+        TempDir,
+    ) {
+        use crate::sessoes::detalhe::FotoARevelar;
+
+        let (previews, dir) = previews_descartaveis();
+        cx.update(gpui_component::init);
+        cx.update(init);
+        let ids = ["remota-1", "remota-2", "remota-3"];
+        // A galeria "g1" com as três, para a grade da sessão tê-las: é ela que
+        // classifica no site.
+        let publicador = Arc::new(PublicadorDeMentira {
+            galerias: std::sync::Mutex::new(vec![domain::services::pos_venda::GaleriaDoPainel {
+                id: "g1".into(),
+                titulo: "Ensaio".into(),
+                produto_id: "p1".into(),
+                criada_em_iso: "2026-09-26".into(),
+                ..Default::default()
+            }]),
+            fotos_da_sessao: std::sync::Mutex::new(
+                ids.iter().map(|id| foto_do_site(id, None)).collect(),
+            ),
+            ..Default::default()
+        });
+        let janela = cx.add_window({
+            let publicador = publicador.clone();
+            move |window, cx| {
+                Aplicativo::ja_dentro(
+                    Vec::new(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        publicador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+        // O que o `entrar_na_conta` e o `entrar_na_sessao` fazem: a sessão da
+        // conta e a galeria chegam à grade, que é quem classifica no site.
+        janela
+            .update(cx, |app, _window, cx| {
+                app.detalhe.update(cx, |tela, cx| {
+                    tela.definir_sessao(sessao_de_teste());
+                    tela.entrar("g1".into(), cx);
+                });
+            })
+            .expect("a janela deve estar aberta");
+        for _ in 0..10 {
+            let _ = janela.update(cx, |app, _window, cx| {
+                app.detalhe.update(cx, |tela, cx| tela.colher(cx))
+            });
+            cx.run_until_parked();
+        }
+        janela
+            .update(cx, |app, window, cx| {
+                app.atender_a_sessao(
+                    &DetalhePedido::FotosDoSite(
+                        ids.iter().map(|id| foto_do_site(id, None)).collect(),
+                    ),
+                    window,
+                    cx,
+                );
+                app.atender_a_sessao(
+                    &DetalhePedido::Revelar {
+                        fotos: ids
+                            .iter()
+                            .map(|id| FotoARevelar {
+                                id: (*id).into(),
+                                arquivo: format!("{id}.jpg"),
+                                no_disco: false,
+                            })
+                            .collect(),
+                        inicial: 0,
+                    },
+                    window,
+                    cx,
+                );
+                assert_eq!(app.tela(), Tela::Revelacao);
+            })
+            .expect("a janela deve estar aberta");
+        (janela, publicador, dir)
+    }
+
+    /// 🔑 **O `⇧C` põe duas lado a lado, e as setas trocam a outra.**
+    ///
+    /// O Comparar do Lightroom (dono, 2026-09-26), no `⇧C` porque o `C` solto
+    /// é a Cortesia do caixa. A aberta fica, as setas trocam a candidata
+    /// pulando a escolhida, o `R` não abre o Enquadrar no meio da comparação, e
+    /// o `Esc` sai abrindo a escolhida — sem fechar a Revelação.
+    #[gpui::test]
+    fn o_comparar_poe_duas_lado_a_lado_e_as_setas_trocam_a_outra(cx: &mut TestAppContext) {
+        use biblioteca_core::comparar::Lado;
+
+        let (janela, _publicador, _dir) = revelacao_de_tres_do_site(cx);
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        let par = |cx: &mut gpui::VisualTestContext| {
+            janela
+                .update(cx, |app, _window, cx| {
+                    app.revelacao.read(cx).fotos_do_comparar()
+                })
+                .expect("a janela deve estar aberta")
+        };
+
+        visual.simulate_keystrokes("c");
+        assert_eq!(par(&mut visual), None, "o C solto fica para a Cortesia");
+
+        visual.simulate_keystrokes("shift-c");
+        assert_eq!(
+            par(&mut visual),
+            Some((0, 1, Lado::Esquerda)),
+            "a aberta e a seguinte, com a aberta escolhida"
+        );
+
+        visual.simulate_keystrokes("right");
+        assert_eq!(
+            par(&mut visual),
+            Some((0, 2, Lado::Esquerda)),
+            "→ troca a outra"
+        );
+
+        visual.simulate_keystrokes("r");
+        janela
+            .update(&mut visual, |app, _window, cx| {
+                let revelacao = app.revelacao.read(cx);
+                assert!(revelacao.comparando(), "o R não sai do Comparar");
+                assert!(!revelacao.cortando(), "nem abre o Enquadrar");
+                assert_eq!(revelacao.posicao(), 0, "e a aberta não mudou");
+            })
+            .expect("a janela deve estar aberta");
+
+        janela
+            .update(&mut visual, |app, _window, cx| {
+                app.revelacao
+                    .update(cx, |tela, cx| tela.ativar_no_comparar(Lado::Direita, cx))
+            })
+            .expect("a janela deve estar aberta");
+        // Com a direita escolhida, as setas trocam a esquerda — e ← na ponta
+        // não dá a volta.
+        visual.simulate_keystrokes("left");
+        assert_eq!(
+            par(&mut visual),
+            Some((0, 2, Lado::Direita)),
+            "← na ponta fica"
+        );
+        visual.simulate_keystrokes("right");
+        assert_eq!(
+            par(&mut visual),
+            Some((1, 2, Lado::Direita)),
+            "→ troca a esquerda"
+        );
+
+        visual.simulate_keystrokes("escape");
+        janela
+            .update(&mut visual, |app, _window, cx| {
+                assert_eq!(
+                    app.tela(),
+                    Tela::Revelacao,
+                    "o Esc sai do Comparar, não da Revelação"
+                );
+                let revelacao = app.revelacao.read(cx);
+                assert!(!revelacao.comparando());
+                assert_eq!(revelacao.posicao(), 2, "abrindo a escolhida");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🔑 **No Comparar, a nota vai para a escolhida — e só no Comparar.**
+    ///
+    /// Fora dele a Revelação não classifica (como o editor do site); dentro, o
+    /// `2` chega ao site na foto de borda âmbar, pela regra da sessão.
+    #[gpui::test]
+    fn no_comparar_a_nota_vai_para_a_escolhida(cx: &mut TestAppContext) {
+        use biblioteca_core::comparar::Lado;
+
+        let (janela, publicador, _dir) = revelacao_de_tres_do_site(cx);
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+
+        // As três vêm com ★★★★ do site; o `2` é a nota nova.
+        visual.simulate_keystrokes("2");
+        visual.run_until_parked();
+        assert!(
+            publicador.negociadas().is_empty(),
+            "fora do Comparar, a Revelação não classifica"
+        );
+
+        visual.simulate_keystrokes("shift-c");
+        janela
+            .update(&mut visual, |app, _window, cx| {
+                app.revelacao
+                    .update(cx, |tela, cx| tela.ativar_no_comparar(Lado::Direita, cx))
+            })
+            .expect("a janela deve estar aberta");
+        visual.simulate_keystrokes("2");
+        visual.run_until_parked();
+
+        let negociadas = publicador.negociadas();
+        assert_eq!(negociadas.len(), 1, "{negociadas:?}");
+        assert_eq!(negociadas[0].0, "remota-2", "a escolhida, e não a aberta");
+        assert_eq!(negociadas[0].1.nota, Some(Some(2)));
+    }
+
+    /// 🔑 **No Comparar, a segunda tela mostra as duas** — e volta a uma ao sair.
+    ///
+    /// É o ponto do pedido (dono, 2026-09-26): o cliente decide qual levar
+    /// olhando as duas juntas no monitor dele.
+    #[gpui::test]
+    fn a_segunda_tela_compara_as_duas(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        for id in ["id-DSC_001.NEF", "id-retrato.jpg"] {
+            previews
+                .save_preview(id, &foto_vermelha())
+                .expect("gravar preview");
+        }
+        cx.update(gpui_component::init);
+        cx.update(init);
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
+        });
+        janela
+            .update(cx, |app, window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(0), cx));
+                app.revelar(window, cx);
+                app.alternar_cliente(cx);
+                assert!(app.cliente_aberto());
+            })
+            .expect("a janela deve estar aberta");
+
+        let no_cliente = |cx: &mut gpui::VisualTestContext| {
+            janela
+                .update(cx, |app, _window, cx| {
+                    let cliente = app.cliente.as_ref()?.read(cx).ok()?;
+                    Some((cliente.fotos_comparadas(), cliente.foto_mostrada()))
+                })
+                .expect("a janela deve estar aberta")
+                .expect("a tela do cliente está aberta")
+        };
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+
+        visual.simulate_keystrokes("shift-c");
+        visual.run_until_parked();
+        let (par, _) = no_cliente(&mut visual);
+        let (esquerda, direita, _) = par.expect("o cliente está comparando");
+        assert_eq!(
+            (esquerda.as_str(), direita.as_str()),
+            ("DSC_001.NEF", "retrato.jpg")
+        );
+
+        visual.simulate_keystrokes("escape");
+        visual.run_until_parked();
+        let (par, uma) = no_cliente(&mut visual);
+        assert_eq!(par, None, "saiu do Comparar: o cliente volta a uma");
+        assert_eq!(uma.as_deref(), Some("DSC_001.NEF"));
     }
 
     /// 🚨 Andar na Revelação **grava o ajuste pendente da foto que sai**.

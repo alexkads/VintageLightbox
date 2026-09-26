@@ -15,6 +15,11 @@
 //! | `\` | segurado, mostra a foto sem ajuste |
 //! | `⌘=` · `⌘−` · `⌘0` · `⌘⌥0` | aproxima · afasta · encaixa · 1:1 |
 //! | Home · End · PgDn · PgUp | percorrem a foto ampliada |
+//! | `⇧C` | o Comparar: duas fotos lado a lado, aqui e na tela do cliente |
+//!
+//! 🔑 **No Comparar, as outras ficam mudas** (`na_revelacao`): elas editam a
+//! foto aberta, que ali divide o palco com outra. Só o `?` e o próprio `⇧C`
+//! passam — é a lista do `decidirAtalho` do site com `comparando`.
 
 use gpui::{actions, prelude::*, Context, Div, KeyBinding, KeyUpEvent, Window};
 
@@ -41,7 +46,8 @@ actions!(
         ZoomAoInicio,
         ZoomAoFim,
         ZoomTelaSeguinte,
-        ZoomTelaAnterior
+        ZoomTelaAnterior,
+        Comparar
     ]
 );
 
@@ -76,6 +82,10 @@ pub(super) fn ligar(cx: &mut gpui::App) {
         KeyBinding::new("end", ZoomAoFim, solta),
         KeyBinding::new("pagedown", ZoomTelaSeguinte, solta),
         KeyBinding::new("pageup", ZoomTelaAnterior, solta),
+        // 🔑 **`⇧C`, e não o `C` do Lightroom** (dono, 2026-09-26): o `C` solto
+        // já é a Cortesia no caixa. O `cmd-shift-c` (Copiar revelação) é outra
+        // tecla e não disputa com este.
+        KeyBinding::new("shift-c", Comparar, solta),
     ]);
 }
 
@@ -83,6 +93,23 @@ impl Aplicativo {
     /// Faz na Revelação, e só nela. Fora dela a tecla segue adiante — Home e
     /// PgDn continuam rolando o que rolariam.
     fn na_revelacao(
+        &mut self,
+        cx: &mut Context<Self>,
+        fazer: impl FnOnce(&mut Revelacao, &mut Context<Revelacao>),
+    ) {
+        if self.tela != Tela::Revelacao {
+            cx.propagate();
+            return;
+        }
+        // No Comparar, a tecla é engolida sem efeito — ver o topo do módulo.
+        if self.revelacao.read(cx).comparando() {
+            return;
+        }
+        self.revelacao.update(cx, fazer);
+    }
+
+    /// Faz na Revelação mesmo no Comparar — o `?` e o próprio `⇧C`.
+    fn na_revelacao_sempre(
         &mut self,
         cx: &mut Context<Self>,
         fazer: impl FnOnce(&mut Revelacao, &mut Context<Revelacao>),
@@ -100,7 +127,9 @@ impl Aplicativo {
         cx: &mut Context<Self>,
         fazer: impl FnOnce(&mut Revelacao, &mut Context<Revelacao>),
     ) {
-        let ampliada = self.tela == Tela::Revelacao && self.revelacao.read(cx).foto_ampliada();
+        let ampliada = self.tela == Tela::Revelacao
+            && self.revelacao.read(cx).foto_ampliada()
+            && !self.revelacao.read(cx).comparando();
         if !ampliada {
             cx.propagate();
             return;
@@ -159,7 +188,10 @@ impl Aplicativo {
             este.na_revelacao(cx, |tela, cx| tela.espelhar_vertical(cx))
         }))
         .on_action(cx.listener(|este, _: &AlternarAjuda, _w, cx| {
-            este.na_revelacao(cx, |tela, cx| tela.alternar_ajuda(cx))
+            este.na_revelacao_sempre(cx, |tela, cx| tela.alternar_ajuda(cx))
+        }))
+        .on_action(cx.listener(|este, _: &Comparar, window, cx| {
+            este.na_revelacao_sempre(cx, |tela, cx| tela.alternar_comparacao(window, cx))
         }))
         .on_action(cx.listener(|este, _: &AlternarZoom, _w, cx| {
             este.na_revelacao(cx, |tela, cx| tela.z_apertado(cx))

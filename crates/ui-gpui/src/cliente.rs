@@ -19,10 +19,12 @@
 //! faz `ctx.request_repaint()` incondicional nos dois lados enquanto ela estiver
 //! aberta.
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
 
 use adapters::view_models::PhotoViewModel;
+use biblioteca_core::comparar::Lado;
 use domain::value_objects::CropSettings;
 use gpui::{
     actions, div, ease_in_out, img, point, prelude::*, px, size, Animation, AnimationExt, Bounds,
@@ -56,6 +58,24 @@ pub struct ParaRevelar {
 /// O pedido no motor: o id dele, a foto, onde ela está na sequência e o
 /// enquadramento a aplicar no resultado.
 type EmRevelacao = (u64, PhotoViewModel, Option<(usize, usize)>, CropSettings);
+
+/// Uma metade do Comparar (`⇧C`) na segunda tela.
+struct MetadeNoCliente {
+    foto: PhotoViewModel,
+    posicao: Option<(usize, usize)>,
+    /// `None` enquanto o motor revela: a metade mostra o aviso, e não a crua.
+    imagem: Option<Arc<RenderImage>>,
+    /// A receita com que a imagem acima foi revelada — o que decide se vale
+    /// revelar de novo quando a raiz reenvia o par (uma nota, a escolhida).
+    receita: (Ajustes, CropSettings),
+}
+
+/// As duas fotos do Comparar, e qual o operador está avaliando.
+struct ParNoCliente {
+    esquerda: MetadeNoCliente,
+    direita: MetadeNoCliente,
+    ativa: Lado,
+}
 
 /// Quanto dura o cruzamento entre uma foto e a seguinte.
 ///
@@ -404,6 +424,15 @@ pub struct Cliente {
     processador: Option<Processador>,
     /// O pedido que está no motor, e o que fazer com o resultado.
     revelando: Option<EmRevelacao>,
+    /// O Comparar (`⇧C`): duas fotos lado a lado, enquanto o operador compara.
+    par: Option<ParNoCliente>,
+    /// Para qual metade é o pedido em `revelando` — `None` é a foto única.
+    revelando_lado: Option<Lado>,
+    /// As metades que esperam a vez do motor.
+    ///
+    /// 🚨 **Uma no motor por vez**: ele só atende o pedido mais novo, e dois
+    /// seguidos perderiam o primeiro — a metade esquerda nunca chegaria.
+    fila_do_par: VecDeque<(Lado, ParaRevelar)>,
     _colheita: Option<Task<()>>,
     /// A janela precisa de foco próprio para `Esc` e `I` chegarem — a mesma
     /// lição que custou dois commits na Revelação: `track_focus` rastreia o
@@ -443,6 +472,9 @@ impl Cliente {
             mostrar_info: true,
             processador: None,
             revelando: None,
+            par: None,
+            revelando_lado: None,
+            fila_do_par: VecDeque::new(),
             _colheita: None,
             foco,
             arquivo,
@@ -488,6 +520,88 @@ impl Cliente {
     /// 🔑 **A foto anterior fica na tela até a nova estar pronta**, e só então
     /// cruza: nunca aparece um quadro preto nem a foto crua no meio.
     pub fn revelar(&mut self, pedido: ParaRevelar, cx: &mut Context<Self>) {
+        // Uma foto de novo: o Comparar acabou.
+        self.par = None;
+        self.fila_do_par.clear();
+        self.revelar_para(pedido, None, cx);
+    }
+
+    /// Duas fotos lado a lado — o Comparar (`⇧C`) do operador.
+    ///
+    /// 🔑 **Só revela a metade que mudou.** A raiz reenvia o par a cada mudança
+    /// (a outra foto trocou, a escolhida mudou, uma nota): a metade com a mesma
+    /// foto e a mesma receita fica como está, e a que já estava na tela como
+    /// foto única vira a esquerda sem piscar — o motor a refaz por baixo.
+    pub fn comparar(
+        &mut self,
+        esquerda: ParaRevelar,
+        direita: ParaRevelar,
+        ativa: Lado,
+        cx: &mut Context<Self>,
+    ) {
+        let anterior = self.par.take();
+        let unica = self
+            .foto
+            .as_ref()
+            .map(|f| f.id.clone())
+            .zip(self.imagem.clone());
+        let em_voo = self
+            .revelando
+            .as_ref()
+            .map(|(_, foto, _, _)| foto.id.clone())
+            .zip(self.revelando_lado);
+        self.fila_do_par.clear();
+        let metade = |lado: Lado, pedido: ParaRevelar, fila: &mut VecDeque<(Lado, ParaRevelar)>| {
+            let receita = (pedido.ajustes, pedido.corte.clone());
+            let ja = anterior.as_ref().and_then(|p| {
+                [&p.esquerda, &p.direita]
+                    .into_iter()
+                    .find(|m| m.foto.id == pedido.foto.id)
+                    .map(|m| (m.imagem.clone(), Some(m.receita.clone())))
+            });
+            let ja = ja.or_else(|| {
+                unica
+                    .as_ref()
+                    .filter(|(id, _)| *id == pedido.foto.id)
+                    .map(|(_, imagem)| (Some(imagem.clone()), None))
+            });
+            let (imagem, receita_da_imagem) = ja.unwrap_or((None, None));
+            let revelada_assim = imagem.is_some() && receita_da_imagem.as_ref() == Some(&receita);
+            let no_motor = em_voo.as_ref() == Some(&(pedido.foto.id.clone(), lado));
+            let m = MetadeNoCliente {
+                foto: pedido.foto.clone(),
+                posicao: pedido.posicao,
+                imagem,
+                receita,
+            };
+            if !revelada_assim && !no_motor {
+                fila.push_back((lado, pedido));
+            }
+            m
+        };
+        let esquerda = metade(Lado::Esquerda, esquerda, &mut self.fila_do_par);
+        let direita = metade(Lado::Direita, direita, &mut self.fila_do_par);
+        self.par = Some(ParNoCliente {
+            esquerda,
+            direita,
+            ativa,
+        });
+        self.soltar_a_proxima_do_par(cx);
+        cx.notify();
+    }
+
+    /// Manda ao motor a próxima metade da fila, se ele estiver livre.
+    fn soltar_a_proxima_do_par(&mut self, cx: &mut Context<Self>) {
+        if self.revelando.is_some() {
+            return;
+        }
+        if let Some((lado, pedido)) = self.fila_do_par.pop_front() {
+            self.revelar_para(pedido, Some(lado), cx);
+        }
+    }
+
+    fn revelar_para(&mut self, pedido: ParaRevelar, lado: Option<Lado>, cx: &mut Context<Self>) {
+        self.revelando_lado = lado;
         let processador = self.processador.get_or_insert_with(Processador::novo);
         let id = processador.proximo_id();
         processador.pedir(Pedido {
@@ -533,7 +647,24 @@ impl Cliente {
                     if crate::depuracao::vigia::ligado() {
                         eprintln!("[cliente] mostrou {}", foto.id);
                     }
-                    self.mostrar(Some(foto), Some(imagem), posicao, cx);
+                    match self.revelando_lado.take() {
+                        // Uma metade do Comparar: vai para ela, se ela ainda
+                        // for desta foto, e a próxima da fila entra no motor.
+                        Some(lado) => {
+                            if let Some(par) = self.par.as_mut() {
+                                let metade = match lado {
+                                    Lado::Esquerda => &mut par.esquerda,
+                                    Lado::Direita => &mut par.direita,
+                                };
+                                if metade.foto.id == foto.id {
+                                    metade.imagem = Some(imagem);
+                                }
+                            }
+                            self.soltar_a_proxima_do_par(cx);
+                            cx.notify();
+                        }
+                        None => self.mostrar(Some(foto), Some(imagem), posicao, cx),
+                    }
                 } else {
                     if crate::depuracao::vigia::ligado() {
                         eprintln!("[cliente] resultado velho {} (espera {id})", resultado.id);
@@ -605,6 +736,16 @@ impl Cliente {
             .map(|(_, foto, _, _)| foto)
             .or(self.foto.as_ref())
             .map(|foto| foto.name.clone())
+    }
+
+    /// Os nomes das duas fotos do Comparar, e se as duas já têm imagem.
+    pub fn fotos_comparadas(&self) -> Option<(String, String, bool)> {
+        let par = self.par.as_ref()?;
+        Some((
+            par.esquerda.foto.name.clone(),
+            par.direita.foto.name.clone(),
+            par.esquerda.imagem.is_some() && par.direita.imagem.is_some(),
+        ))
     }
 
     pub fn mostrando_info(&self) -> bool {
@@ -795,6 +936,11 @@ impl Render for Cliente {
             janela.height = (janela.height - px(ALTURA_DA_BARRA)).max(px(0.));
         }
 
+        if let Some(par) = self.par.as_ref() {
+            let comparacao = Self::palco_do_comparar(par, self.mostrar_info, janela);
+            return self.moldura(comparacao.into_any_element(), barra, window, cx);
+        }
+
         let palco =
             div()
                 .id("palco-do-cliente")
@@ -914,6 +1060,19 @@ impl Render for Cliente {
                         })),
                 );
 
+        self.moldura(palco.into_any_element(), barra, window, cx)
+    }
+}
+
+impl Cliente {
+    /// A janela em volta do palco: o foco, as teclas e a barra própria.
+    fn moldura(
+        &self,
+        palco: gpui::AnyElement,
+        barra: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
         div()
             .key_context(CONTEXTO)
             .track_focus(&self.foco)
@@ -948,6 +1107,97 @@ impl Render for Cliente {
                 )
             })
             .child(palco)
+            .into_any_element()
+    }
+
+    /// As duas fotos do Comparar, uma de cada lado, sobre preto.
+    ///
+    /// 🔑 **A borda âmbar é a mesma da tela do operador**: o cliente sabe de
+    /// qual das duas se está falando. As fotos não trocam de lado.
+    fn palco_do_comparar(par: &ParNoCliente, info: bool, janela: Size<Pixels>) -> impl IntoElement {
+        const VAO: f32 = 8.;
+        let meia = size(
+            ((janela.width - px(VAO * 3.)) / 2.).max(px(1.)),
+            (janela.height - px(VAO * 2.)).max(px(1.)),
+        );
+        let metade = |metade: &MetadeNoCliente, ativa: bool| {
+            let nota = metade.foto.rating.clamp(0, 5) as usize;
+            div()
+                .relative()
+                .flex_1()
+                .h_full()
+                .min_w(px(0.))
+                .overflow_hidden()
+                .flex()
+                .items_center()
+                .justify_center()
+                .border_4()
+                .rounded(px(4.))
+                .border_color(if ativa {
+                    gpui::rgb(0xfbbf24).into()
+                } else {
+                    gpui::transparent_black()
+                })
+                .children(metade.imagem.clone().map(|imagem| {
+                    let base = crate::imagem::cabe_em(meia, imagem.size(0));
+                    div()
+                        .w(base.width)
+                        .h(base.height)
+                        .child(img(imagem).size_full())
+                }))
+                .when(info, |d| {
+                    d.child(
+                        div()
+                            .absolute()
+                            .left(px(12.))
+                            .bottom(px(12.))
+                            .px(px(10.))
+                            .py(px(6.))
+                            .rounded(px(4.))
+                            .bg(gpui::rgba(0x000000b4))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.))
+                            .text_sm()
+                            .children(metade.posicao.map(|(i, total)| {
+                                div()
+                                    .text_color(gpui::rgb(0x9a9a9a))
+                                    .child(SharedString::from(format!("{i} / {total}")))
+                            }))
+                            .child(
+                                div()
+                                    .text_color(gpui::white())
+                                    .child(SharedString::from(metade.foto.name.clone())),
+                            )
+                            .child(
+                                div()
+                                    .text_color(gpui::rgb(0xfbbf24))
+                                    .child(SharedString::from("★".repeat(nota))),
+                            )
+                            .when(metade.foto.comprada, |linha| {
+                                linha.child(
+                                    div()
+                                        .px(px(6.))
+                                        .rounded(px(999.))
+                                        .bg(gpui::rgb(0xfbbf24))
+                                        .text_xs()
+                                        .text_color(gpui::black())
+                                        .child("Escolhida"),
+                                )
+                            }),
+                    )
+                })
+        };
+        div()
+            .id("palco-do-cliente")
+            .flex_1()
+            .w_full()
+            .bg(gpui::black())
+            .flex()
+            .gap(px(VAO))
+            .p(px(VAO))
+            .child(metade(&par.esquerda, par.ativa == Lado::Esquerda))
+            .child(metade(&par.direita, par.ativa == Lado::Direita))
     }
 }
 

@@ -445,6 +445,10 @@ impl Revelacao {
                 self.marcadas = faixa;
                 cx.notify();
             }
+        } else if self.comparando() {
+            // No Comparar, o clique simples troca a **outra** foto — a
+            // escolhida fica, e o cliente segue comparando com ela.
+            self.escolher_no_comparar(posicao, cx);
         } else {
             self.ir_para(posicao, window, cx);
         }
@@ -914,7 +918,20 @@ impl Revelacao {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let foto = &self.acervo[posicao];
-        let escolhida = posicao == self.posicao;
+        // No Comparar, a âmbar é a escolhida — a mesma borda do palco — e a
+        // outra ganha o destaque de candidata.
+        let escolhida = match self.fotos_do_comparar() {
+            Some((esquerda, direita, lado)) => {
+                posicao
+                    == if lado == biblioteca_core::comparar::Lado::Esquerda {
+                        esquerda
+                    } else {
+                        direita
+                    }
+            }
+            None => posicao == self.posicao,
+        };
+        let candidata = self.candidata_no_comparar() == Some(posicao);
         let marcada = self.marcadas.contains(&posicao);
         let nao_salva = self.nao_salva(posicao, foto);
         let c = classificacao(foto);
@@ -952,10 +969,11 @@ impl Revelacao {
             .border_2()
             .cursor_pointer()
             .when(escolhida, |t| t.border_color(ambar))
-            .when(!escolhida && marcada, |t| {
+            .when(candidata, |t| t.border_color(gpui::rgb(0x38bdf8)))
+            .when(!escolhida && !candidata && marcada, |t| {
                 t.border_color(ambar.opacity(0.4))
             })
-            .when(!escolhida && !marcada, |t| {
+            .when(!escolhida && !candidata && !marcada, |t| {
                 t.border_color(gpui::transparent_black())
                     .hover(move |s| s.border_color(borda))
             })
