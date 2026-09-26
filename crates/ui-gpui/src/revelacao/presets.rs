@@ -68,7 +68,7 @@ impl GuardaDePresets for GuardaDoBanco {
 
         self.tokio.spawn(async move {
             if let Err(erro) = presets.save_preset(&preset).await {
-                eprintln!("⚠️ [Presets] \"{rotulo}\" não foi salvo: {erro}");
+                crate::telemetria::avisar!("⚠️ [Presets] \"{rotulo}\" não foi salvo: {erro}");
             }
         });
     }
@@ -79,7 +79,9 @@ impl GuardaDePresets for GuardaDoBanco {
 
         self.tokio.spawn(async move {
             if let Err(erro) = presets.rename_preset(&id, nome).await {
-                eprintln!("⚠️ [Presets] o nome \"{rotulo}\" não foi gravado: {erro}");
+                crate::telemetria::avisar!(
+                    "⚠️ [Presets] o nome \"{rotulo}\" não foi gravado: {erro}"
+                );
             }
         });
     }
@@ -89,7 +91,9 @@ impl GuardaDePresets for GuardaDoBanco {
 
         self.tokio.spawn(async move {
             if let Err(erro) = presets.delete_preset(&id).await {
-                eprintln!("⚠️ [Presets] a predefinição {id} não foi apagada: {erro}");
+                crate::telemetria::avisar!(
+                    "⚠️ [Presets] a predefinição {id} não foi apagada: {erro}"
+                );
             }
         });
     }

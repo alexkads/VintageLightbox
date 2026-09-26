@@ -122,7 +122,9 @@ impl CantoDosEnvios {
         // sempre na próxima abertura.
         if let Ok(texto) = serde_json::to_string(&guardado) {
             if let Err(erro) = std::fs::write(&self.lembranca, texto) {
-                eprintln!("⚠️ [Canto dos envios] não deu para lembrar o lugar: {erro}");
+                crate::telemetria::avisar!(
+                    "⚠️ [Canto dos envios] não deu para lembrar o lugar: {erro}"
+                );
             }
         }
         true

@@ -317,6 +317,6 @@ pub fn abrir_pasta(pasta: &std::path::Path) {
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let programa = "xdg-open";
     if let Err(erro) = std::process::Command::new(programa).arg(pasta).spawn() {
-        eprintln!("⚠️ [Bandeja] não abri {}: {erro}", pasta.display());
+        crate::telemetria::avisar!("⚠️ [Bandeja] não abri {}: {erro}", pasta.display());
     }
 }

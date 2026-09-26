@@ -432,7 +432,7 @@ impl Biblioteca {
             // versão — os três casos em que `ler_de` devolve `None`.
             if let Some(salvo) = arranjo::ler_de(&arquivo_para_ler) {
                 if let Err(erro) = area.load(salvo, window, cx) {
-                    eprintln!("⚠️  Arranjo salvo não pôde ser restaurado: {erro}");
+                    crate::telemetria::avisar!("⚠️  Arranjo salvo não pôde ser restaurado: {erro}");
                 }
             }
         });

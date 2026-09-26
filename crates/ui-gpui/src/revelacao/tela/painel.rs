@@ -126,7 +126,9 @@ impl EstadoDoPainel {
             let _ = std::fs::create_dir_all(pasta);
         }
         if let Err(erro) = std::fs::write(caminho, texto) {
-            eprintln!("⚠️ [Revelação] a arrumação dos painéis não foi gravada: {erro}");
+            crate::telemetria::avisar!(
+                "⚠️ [Revelação] a arrumação dos painéis não foi gravada: {erro}"
+            );
         }
     }
 

@@ -47,6 +47,9 @@ pub struct Estado {
     pub novidades_abertas: bool,
     /// O operador pediu "Verificar atualizações" e a resposta não chegou.
     pub verificando: bool,
+    /// A versão cuja faixa já foi contada ao servidor como `exibida` — a
+    /// mesma faixa volta a cada procura, e contar de novo inflaria o painel.
+    pub relatada: Option<String>,
 }
 
 impl Estado {

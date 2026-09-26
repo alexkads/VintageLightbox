@@ -223,14 +223,14 @@ async fn manter_aberto(
                 return;
             }
             Err(erro) if erro.to_string().contains("respondeu 403") => {
-                eprintln!("⚠️ [Tempo real] {fonte}: {erro}");
+                crate::telemetria::avisar!("⚠️ [Tempo real] {fonte}: {erro}");
                 let _ = canal.send(Sinal::Conexao {
                     fonte,
                     estado: EstadoDaConexao::Recusado,
                 });
                 return;
             }
-            Err(erro) => eprintln!("⚠️ [Tempo real] {fonte}: {erro}"),
+            Err(erro) => crate::telemetria::avisar!("⚠️ [Tempo real] {fonte}: {erro}"),
             Ok(()) => {}
         }
         estado = EstadoDaConexao::Reconectando;

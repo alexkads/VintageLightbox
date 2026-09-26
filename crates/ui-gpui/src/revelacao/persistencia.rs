@@ -168,7 +168,9 @@ impl Gravador for GravadorDoBanco {
             }
             self.tokio.spawn(async move {
                 if let Err(erro) = editor.guardar_revelacao_do_site(&no_site, &json).await {
-                    eprintln!("⚠️ [Revelação] a revelação de {nome} não foi guardada: {erro}");
+                    crate::telemetria::avisar!(
+                        "⚠️ [Revelação] a revelação de {nome} não foi guardada: {erro}"
+                    );
                 }
             });
             return;
@@ -254,7 +256,9 @@ impl Gravador for GravadorDoBanco {
                 .await;
 
             if let Err(erro) = resultado {
-                eprintln!("⚠️ [Revelação] a revelação de {nome} não foi gravada: {erro}");
+                crate::telemetria::avisar!(
+                    "⚠️ [Revelação] a revelação de {nome} não foi gravada: {erro}"
+                );
             }
         });
     }
@@ -281,7 +285,9 @@ impl Gravador for GravadorDoBanco {
                 // perda: na próxima abertura ela volta como "receita local" e
                 // diz o mesmo que o servidor — o que ela deixa de fazer é sair
                 // do caminho.
-                eprintln!("⚠️ [Revelação] {foto_no_site} subiu, mas ficou no depósito: {erro}");
+                crate::telemetria::avisar!(
+                    "⚠️ [Revelação] {foto_no_site} subiu, mas ficou no depósito: {erro}"
+                );
             }
         });
     }

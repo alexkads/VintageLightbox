@@ -495,7 +495,9 @@ impl Chatbot {
                     };
                     match EventoDoChatbot::ler(canal, &dados) {
                         Some(evento) => self.receber(evento, cx),
-                        None => eprintln!("⚠️ [Chatbot] evento ilegível de {fonte}: {dados}"),
+                        None => crate::telemetria::avisar!(
+                            "⚠️ [Chatbot] evento ilegível de {fonte}: {dados}"
+                        ),
                     }
                     self.marcar_desatualizado(agora, false);
                 }
@@ -640,7 +642,7 @@ impl Chatbot {
                         self.fora_da_pagina = modelo::pagina_do_whatsapp(&valor)
                     }
                     (_, Err(erro)) => {
-                        eprintln!("⚠️ [Chatbot] histórico: {erro}");
+                        crate::telemetria::avisar!("⚠️ [Chatbot] histórico: {erro}");
                         cx.emit(PedidoDoChatbot::Toast {
                             texto: modelo::explicar(&erro, "Não foi possível carregar a conversa."),
                             erro: true,
@@ -676,7 +678,7 @@ impl Chatbot {
         let valor = match resultado {
             Ok(valor) => valor,
             Err(erro) => {
-                eprintln!("⚠️ [Chatbot] {rotulo}: {erro}");
+                crate::telemetria::avisar!("⚠️ [Chatbot] {rotulo}: {erro}");
                 if rotulo == "wa-conversas" {
                     self.falhou_a_carga = true;
                 }

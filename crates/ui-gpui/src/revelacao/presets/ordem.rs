@@ -179,7 +179,7 @@ pub fn gravar_em(caminho: &Path, ordem: &Ordem) {
         let _ = std::fs::create_dir_all(pasta);
     }
     if let Err(erro) = std::fs::write(caminho, texto) {
-        eprintln!("⚠️ [Presets] a ordem não foi guardada: {erro}");
+        crate::telemetria::avisar!("⚠️ [Presets] a ordem não foi guardada: {erro}");
     }
 }
 

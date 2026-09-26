@@ -177,7 +177,7 @@ impl Retencao {
                     self.estado = Estado::Pronta;
                 }
                 ("retencao", Err(erro)) => {
-                    eprintln!("⚠️ [Retenção] {erro}");
+                    crate::telemetria::avisar!("⚠️ [Retenção] {erro}");
                     self.estado = Estado::NaoCarregou;
                 }
                 ("retencao-salva", resultado) => {

@@ -354,7 +354,7 @@ impl Agenda {
                         }
                     }
                     None => {
-                        eprintln!("⚠️ [Agenda] evento ilegível: {dados}");
+                        crate::telemetria::avisar!("⚠️ [Agenda] evento ilegível: {dados}");
                         self.marcar_desatualizado(agora, false);
                     }
                 },
@@ -462,14 +462,14 @@ impl Agenda {
                 self.falhou_os_indicadores = self.indicadores.is_none();
             }
             ("agenda", Err(erro)) => {
-                eprintln!("⚠️ [Agenda] {erro}");
+                crate::telemetria::avisar!("⚠️ [Agenda] {erro}");
                 self.falhou_a_agenda = true;
             }
             ("indicadores", Err(erro)) => {
-                eprintln!("⚠️ [Agenda] indicadores: {erro}");
+                crate::telemetria::avisar!("⚠️ [Agenda] indicadores: {erro}");
                 self.falhou_os_indicadores = true;
             }
-            (rotulo, Err(erro)) => eprintln!("⚠️ [Agenda] {rotulo}: {erro}"),
+            (rotulo, Err(erro)) => crate::telemetria::avisar!("⚠️ [Agenda] {rotulo}: {erro}"),
             _ => {}
         }
     }

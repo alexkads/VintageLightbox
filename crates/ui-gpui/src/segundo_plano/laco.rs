@@ -55,7 +55,7 @@ impl SegundoPlano {
         }
         let icone = self.icone.get_or_insert_with(|| {
             Icone::criar().inspect_err(|erro| {
-                eprintln!("⚠️ [Bandeja] o sistema não deu o ícone: {erro}");
+                crate::telemetria::avisar!("⚠️ [Bandeja] o sistema não deu o ícone: {erro}");
             })
         });
         let icone = icone.as_ref().ok()?;

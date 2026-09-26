@@ -2940,6 +2940,7 @@ impl Detalhe {
                 // barra: o operador mandou 500, e "uma não entrou" é um recado —
                 // as outras 499 continuam.
                 Andamento::Falhou { caminho, erro } => {
+                    crate::telemetria::erro("importacao/sessao", &format!("{caminho}: {erro}"));
                     if let Some(lote) = self.importacao.as_mut() {
                         lote.falhas += 1;
                     }

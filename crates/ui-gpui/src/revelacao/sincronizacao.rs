@@ -397,7 +397,9 @@ pub fn gravar_em(caminho: &Path, escolha: &Escolha) {
         let _ = std::fs::create_dir_all(pasta);
     }
     if let Err(erro) = std::fs::write(caminho, texto) {
-        eprintln!("⚠️ [Revelação] a escolha de sincronizar não foi gravada: {erro}");
+        crate::telemetria::avisar!(
+            "⚠️ [Revelação] a escolha de sincronizar não foi gravada: {erro}"
+        );
     }
 }
 

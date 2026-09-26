@@ -71,6 +71,10 @@ async fn main() {
         println!("{}", env!("CARGO_PKG_VERSION"));
         return;
     }
+    // 🧯 O panic vai para o depósito **antes** de qualquer coisa — janela,
+    // catálogo, rede. Um panic na abertura também fica registrado, e sobe
+    // quando a conta entrar (`telemetria`).
+    ui_gpui::telemetria::instalar_o_gancho_de_panico();
     // Onde está rodando — no Linux, a área de trabalho muda quem desenha a
     // barra das janelas (`janela::app_desenha_a_barra`).
     if cfg!(target_os = "linux") {
@@ -265,6 +269,9 @@ async fn main() {
                 .com_cofre(cofre_da_sessao(local)),
         )
     };
+    // 📡 O app falando de si com o servidor: o aviso de versão por SSE e os
+    // relatos de panic e erro. Mesmo cliente, mesmo token.
+    ui_gpui::telemetria::ligar(api_do_site.clone(), tokio::runtime::Handle::current());
     let publicador: Arc<dyn Publicador> = Arc::new(PublicadorDaApi::novo(
         Arc::new({
             let api = api_do_site.clone();

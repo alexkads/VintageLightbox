@@ -508,6 +508,7 @@ impl Importacao {
             Andamento::Pulado { .. } => progresso.pulados += 1,
             Andamento::Falhou { caminho, erro } => {
                 progresso.falhas += 1;
+                crate::telemetria::erro("importacao", &format!("{caminho}: {erro}"));
                 // A falha de um arquivo não interrompe o lote, mas não pode
                 // sumir: o aviso é o que diz que 39 de 40 entraram.
                 self.estado.aviso = Some(format!("{caminho}: {erro}"));

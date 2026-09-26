@@ -79,7 +79,7 @@ pub fn gravar_em(caminho: &Path, estado: &DockAreaState) {
         let _ = std::fs::create_dir_all(pasta);
     }
     if let Err(erro) = std::fs::write(caminho, texto) {
-        eprintln!("⚠️  Não foi possível gravar o arranjo dos painéis: {erro}");
+        crate::telemetria::avisar!("⚠️  Não foi possível gravar o arranjo dos painéis: {erro}");
     }
 }
 

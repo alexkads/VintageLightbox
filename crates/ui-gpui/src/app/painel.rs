@@ -311,6 +311,7 @@ impl Aplicativo {
         self.guardar_guias();
         let (canal, _) = std::sync::mpsc::channel();
         self.publicador.sair(canal);
+        crate::telemetria::conta_saiu();
         // Os fluxos do chatbot eram da conta que saiu.
         self.chatbot.update(cx, |t, cx| {
             t.mostrar(false, cx);
@@ -405,7 +406,7 @@ impl Aplicativo {
                         // desta conta — só agora se sabe quem entrou.
                         self.repor_guias();
                     }
-                    Err(erro) => eprintln!("⚠️ [Conta] /auth/me: {erro}"),
+                    Err(erro) => crate::telemetria::avisar!("⚠️ [Conta] /auth/me: {erro}"),
                 }
                 cx.notify();
             }

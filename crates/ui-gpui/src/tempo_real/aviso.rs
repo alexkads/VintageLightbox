@@ -60,7 +60,9 @@ impl Avisador for AvisoDoSistema {
             let handle = match notificacao.show() {
                 Ok(handle) => handle,
                 Err(erro) => {
-                    eprintln!("⚠️ [Aviso] o sistema recusou a notificação: {erro}");
+                    crate::telemetria::avisar!(
+                        "⚠️ [Aviso] o sistema recusou a notificação: {erro}"
+                    );
                     return;
                 }
             };
@@ -87,7 +89,9 @@ impl Avisador for AvisoDoSistema {
             // interface.
             std::thread::spawn(move || {
                 if let Err(erro) = notificacao.show() {
-                    eprintln!("⚠️ [Aviso] o sistema recusou a notificação: {erro}");
+                    crate::telemetria::avisar!(
+                        "⚠️ [Aviso] o sistema recusou a notificação: {erro}"
+                    );
                 }
             });
         }

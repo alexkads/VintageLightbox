@@ -1772,7 +1772,9 @@ impl NovaSessao {
                 // Nada se perde: as fotos continuam no catálogo com o id do
                 // rascunho, e a próxima troca as leva junto.
                 levando.de_novo = true;
-                eprintln!("⚠️ [Nova sessão] a cópia não passou para a sessão: {erro}");
+                crate::telemetria::avisar!(
+                    "⚠️ [Nova sessão] a cópia não passou para a sessão: {erro}"
+                );
             }
         }
         let falta = levando.de_novo;
@@ -1936,7 +1938,7 @@ impl NovaSessao {
                     }
                 },
                 Recado::Falhou(erro) => {
-                    eprintln!("⚠️ [Nova sessão] {erro}");
+                    crate::telemetria::avisar!("⚠️ [Nova sessão] {erro}");
                     self.carregando = false;
                 }
                 _ => {}
@@ -1958,7 +1960,11 @@ impl NovaSessao {
             match andamento {
                 Andamento::Comecou { total } => lote.total = total,
                 Andamento::Feito { .. } | Andamento::Pulado { .. } => lote.feitas += 1,
-                Andamento::Falhou { erro, .. } => {
+                Andamento::Falhou { caminho, erro } => {
+                    crate::telemetria::erro(
+                        "importacao/nova-sessao",
+                        &format!("{caminho}: {erro}"),
+                    );
                     lote.falhas += 1;
                     self.falhas_da_copia = Some((lote.falhas, erro));
                 }

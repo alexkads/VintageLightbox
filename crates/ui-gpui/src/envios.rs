@@ -312,6 +312,12 @@ impl Esteira {
         self.progresso.respondidos += 1;
         self.progresso.houve_falha = true;
         self.talvez_zerar();
+        // A foto que não subiu depois de todas as tentativas é o problema
+        // operacional por excelência: o cliente não vai vê-la na galeria.
+        crate::telemetria::erro(
+            "envio",
+            &format!("{alvo}: não subiu depois de {} tentativas", item.tentativas),
+        );
         Desfecho::Desistiu {
             tentativas: item.tentativas,
         }

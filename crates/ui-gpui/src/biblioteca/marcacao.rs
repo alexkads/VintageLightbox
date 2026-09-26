@@ -102,7 +102,7 @@ impl Marcador for MarcadorDoBanco {
             };
 
             if let Err(erro) = resultado {
-                eprintln!("⚠️  Falhou ao marcar {nome}: {erro}");
+                crate::telemetria::avisar!("⚠️  Falhou ao marcar {nome}: {erro}");
             }
         });
     }
@@ -112,7 +112,7 @@ impl Marcador for MarcadorDoBanco {
         let nome = id.clone();
         self.tokio.spawn(async move {
             if let Err(erro) = fotos.delete_photo(&id).await {
-                eprintln!("⚠️  Falhou ao apagar {nome} do catálogo: {erro}");
+                crate::telemetria::avisar!("⚠️  Falhou ao apagar {nome} do catálogo: {erro}");
             }
         });
     }

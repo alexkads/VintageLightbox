@@ -835,6 +835,9 @@ pub struct Aplicativo {
     /// sintoma seria a faixa nunca aparecer — versão nova publicada, ninguém
     /// sabendo.
     _atualizacao: Option<gpui_kit::Task<()>>,
+    /// Recolhe o anúncio de versão que o servidor mandou pelo SSE
+    /// (`telemetria`). `None` nos testes, onde a telemetria não é ligada.
+    _anuncios_do_servidor: Option<gpui_kit::Task<()>>,
 }
 
 impl Aplicativo {
@@ -856,6 +859,7 @@ impl Aplicativo {
             .atualizador
             .procurar(avisos_de_versao.0.clone(), false);
         let atualizacao = Self::esperar_aviso(cx);
+        let anuncios_do_servidor = Self::ouvir_os_anuncios(cx);
 
         // O mesmo cache de previews da Biblioteca: a importação grava miniatura
         // com a chave `import::` na mesma tabela, e dois `PreviewManager` para o
@@ -1306,6 +1310,7 @@ impl Aplicativo {
             atualizacao: faixa::Estado::default(),
             avisos_de_versao,
             _atualizacao: Some(atualizacao),
+            _anuncios_do_servidor: anuncios_do_servidor,
         }
     }
 
@@ -1326,9 +1331,17 @@ impl Aplicativo {
                     let mut chegou = false;
                     while let Ok(aviso) = raiz.avisos_de_versao.1.try_recv() {
                         chegou = true;
+                        raiz.contar_ao_servidor(&aviso);
                         // 🔑 **Tudo automático**: a versão que compila começa
                         // sozinha, sem clique.
                         if raiz.atualizacao.receber(aviso) {
+                            if let Some(v) = &raiz.atualizacao.versao {
+                                crate::telemetria::reagir(
+                                    &v.versao,
+                                    "atualizar",
+                                    Some("a compilação começou sozinha".into()),
+                                );
+                            }
                             raiz.comecar_a_compilar();
                         }
                     }
@@ -1368,6 +1381,69 @@ impl Aplicativo {
                 }
             }
         })
+    }
+
+    /// O anúncio do servidor (`versao_nova`, pelo SSE) vira a procura de sempre.
+    ///
+    /// 🔑 **O servidor diz que há versão; quem decide como atualizar é o app**
+    /// (`atualizacao::compilar::decidir`), com todas as regras dele — pacote ou
+    /// compilação, a espera depois de uma falha, a trava de dois instaladores.
+    /// O anúncio só faz a procura acontecer agora, e não na próxima abertura:
+    /// é o que faz o balcão que nunca fecha o app receber a versão nova.
+    ///
+    /// Um olhar por segundo num `Mutex`: nada de rede, e só com a telemetria
+    /// ligada (os testes não a ligam, e um laço eterno lá nunca pararia).
+    fn ouvir_os_anuncios(cx: &mut Context<Self>) -> Option<gpui_kit::Task<()>> {
+        if !crate::telemetria::ligada() {
+            return None;
+        }
+        Some(cx.spawn(async move |raiz, cx| loop {
+            cx.background_executor()
+                .timer(std::time::Duration::from_secs(1))
+                .await;
+            let Some(versao) = crate::telemetria::tomar_anuncio() else {
+                continue;
+            };
+            let vivo = raiz.update(cx, |raiz, cx| {
+                let ocupada = raiz.atualizacao.instalando
+                    || raiz.atualizacao.verificando
+                    || matches!(raiz.atualizacao.aviso, Some(Aviso::Instalada(_)));
+                if !ocupada {
+                    eprintln!("📡 [Atualização] o servidor anunciou a {versao}: procurando");
+                    raiz.atualizador
+                        .procurar(raiz.avisos_de_versao.0.clone(), false);
+                    raiz._atualizacao = Some(Self::esperar_aviso(cx));
+                }
+            });
+            if vivo.is_err() {
+                return;
+            }
+        }))
+    }
+
+    /// O que a faixa mostrou, contado ao servidor — é o que responde "ele viu
+    /// o aviso?" no painel dos computadores.
+    fn contar_ao_servidor(&mut self, aviso: &Aviso) {
+        match aviso {
+            Aviso::Disponivel { versao, .. }
+                if self.atualizacao.relatada.as_deref() != Some(versao.versao.as_str()) =>
+            {
+                self.atualizacao.relatada = Some(versao.versao.clone());
+                crate::telemetria::reagir(&versao.versao, "exibida", None);
+            }
+            Aviso::Instalada(versao) => crate::telemetria::reagir(versao, "instalada", None),
+            Aviso::Falhou(motivo) => {
+                let versao = self
+                    .atualizacao
+                    .versao
+                    .as_ref()
+                    .map(|v| v.versao.clone())
+                    .unwrap_or_default();
+                crate::telemetria::reagir(&versao, "falhou", Some(motivo.clone()));
+                crate::telemetria::erro("atualizacao", motivo);
+            }
+            _ => {}
+        }
     }
 
     /// "Verificar atualizações", do menu da conta: pergunta agora, e responde
@@ -1415,11 +1491,17 @@ impl Aplicativo {
             PedidoDeAtualizacao::Instalar | PedidoDeAtualizacao::TentarDeNovo
                 if jeito == Some(JeitoDeAtualizar::Compilar) =>
             {
+                if let Some(v) = &self.atualizacao.versao {
+                    crate::telemetria::reagir(&v.versao, "atualizar", Some("clicou".into()));
+                }
                 self.atualizacao.novidades_abertas = false;
                 self.comecar_a_compilar();
                 self._atualizacao = Some(Self::esperar_aviso(cx));
             }
             PedidoDeAtualizacao::Instalar | PedidoDeAtualizacao::TentarDeNovo => {
+                if let Some(v) = &self.atualizacao.versao {
+                    crate::telemetria::reagir(&v.versao, "atualizar", Some("clicou".into()));
+                }
                 // A faixa troca para "Baixando…" **antes** de o download
                 // começar: sem isto, um clique num pacote de 60 MB não muda
                 // nada na tela por meio minuto, e o gesto seguinte é clicar de
@@ -1439,6 +1521,7 @@ impl Aplicativo {
                 // que ele precisa. E some só nesta abertura — na próxima o
                 // aviso volta.
                 if let Some(Aviso::Disponivel { versao, .. }) = &self.atualizacao.aviso {
+                    crate::telemetria::reagir(&versao.versao, "depois", None);
                     self.atualizacao.dispensada = Some(versao.versao.clone());
                 } else {
                     self.atualizacao.aviso = None;
@@ -3167,7 +3250,7 @@ impl Aplicativo {
                         "{}: {frase}",
                         self.nome_no_site(&alvo, cx).unwrap_or_else(|| alvo.clone())
                     );
-                    eprintln!("⚠️ [Envio] recusado — {recusa}");
+                    crate::telemetria::avisar!("⚠️ [Envio] recusado — {recusa}");
                     self.recusas.push(recusa.clone());
                     self.avisar_falha(recusa, cx);
                 }
@@ -3982,7 +4065,9 @@ impl Aplicativo {
             // Abrir janela é pedido ao sistema, e ele pode recusar. Sem monitor
             // não há segunda tela — e derrubar o app por causa disso seria trocar
             // "o botão não fez nada" por "perdi a triagem inteira".
-            Err(erro) => eprintln!("⚠️  Não foi possível abrir a segunda tela: {erro}"),
+            Err(erro) => {
+                crate::telemetria::avisar!("⚠️  Não foi possível abrir a segunda tela: {erro}")
+            }
         }
         cx.notify();
     }
@@ -4992,6 +5077,9 @@ impl Aplicativo {
         // onde tudo parte, e abrir no catálogo global foi o que fez o app
         // parecer "aberto e estranho" para quem vinha de lá.
         self.tela = Tela::Sessoes;
+        // 📡 O fluxo do aviso de versão e o envio dos relatos guardados — a
+        // conta é o que autoriza falar com o servidor (`telemetria`).
+        crate::telemetria::conta_entrou(sessao.clone());
         self.sessao = Some(sessao);
         self.carregar_conta(cx);
         cx.notify();

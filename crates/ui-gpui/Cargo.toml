@@ -95,6 +95,8 @@ serde_json.workspace = true
 sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "sqlite", "migrate"] }
 chrono.workspace = true
 uuid.workspace = true
+# O nome e o sistema do computador, para o painel dos balcões (`telemetria`).
+sysinfo = "0.36.1"
 
 # A atualização automática (`atualizacao/porta.rs`). É o updater do mesmo autor
 # do `cargo-packager` que monta os instaladores — então o `.sig` que o
