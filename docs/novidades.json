@@ -1,13 +1,15 @@
 {
-  "versao": "0.1.18",
-  "titulo": "Importar muitas fotos grandes com o cliente olhando: todas chegam à sessão.",
+  "versao": "0.1.19",
+  "titulo": "O app passa a avisar o estúdio: versão nova chega na hora, e os erros vão para o dono.",
   "importante": true,
   "novidades": [
-    "Criar a sessão com as fotos ainda copiando não deixa mais as últimas para trás: todas passam para a sessão, mesmo as que terminam no exato momento de criar.",
-    "Dar nota e sinalizar enquanto a cópia anda não tira mais a foto da sessão, e a cópia não apaga mais a nota nem o corte do preset que a foto acabou de receber.",
-    "Fotos soltas numa sessão enquanto outra cópia está andando entram na fila e são importadas em seguida, em vez de sumirem.",
-    "O aviso de \"fotos de um rascunho antigo\" não aparece mais para as fotos que ainda estão a caminho da sessão criada — o botão Apagar dele podia apagar essas fotos.",
-    "Várias importações ao mesmo tempo usam bem menos memória: o computador não fica sem fôlego com o cliente na segunda tela."
+    "Versão nova aparece sem precisar fechar e abrir o app: o site avisa o computador assim que ela sai.",
+    "Quando o app encontra um erro ou fecha sozinho, ele guarda o que aconteceu e manda ao estúdio assim que houver internet, para o problema ser corrigido sem depender de alguém lembrar de contar.",
+    "O estúdio passa a ver quais computadores já atualizaram e quais ainda estão na versão anterior.",
+    "Importar de novo as mesmas fotos na mesma sessão não duplica mais as fotos; em outra sessão, elas entram normalmente.",
+    "Na lista de sessões, o cartão do caixa mostra o líquido, as vendas, os estornos e as sessões por fechar; um clique abre as formas de pagamento, com os mesmos nomes do site.",
+    "Gráficos do caixa e do pós-venda dos últimos 30 dias, e a divisão por forma de pagamento.",
+    "A busca de sessões responde enquanto se digita e, com texto, procura em todas as datas; telefone com +55 acha o número salvo sem DDI."
   ],
-  "por_que_atualizar": "Com fotos grandes e o balcão trabalhando durante a cópia, parte das fotos podia não aparecer na sessão. Esta versão corrige isso."
+  "por_que_atualizar": "É esta versão que deixa o estúdio acompanhar os computadores e corrigir problemas sem esperar alguém relatar."
 }
