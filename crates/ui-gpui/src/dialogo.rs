@@ -101,13 +101,18 @@ pub fn desenhar<T: 'static>(
         return None;
     }
     let conteudo = montar(tela, window, cx);
-    desenhar_conteudo(conteudo, jeito, cancelar, window, cx)
+    desenhar_conteudo(conteudo, None, jeito, cancelar, window, cx)
 }
 
 /// Como [`desenhar`], com o conteúdo já montado — para as telas em que ele sai
 /// de um estado com dados (o ensaio aberto, a urgência escolhida).
+///
+/// `rodape` é a faixa de baixo do `AlertDialogFooter` do site (`bg-muted/50`,
+/// borda em cima, de ponta a ponta): no espaço de rodapé do `Dialog`, porque
+/// dentro do corpo o kit a cortaria nos 16 px de respiro.
 pub fn desenhar_conteudo<T: 'static>(
     conteudo: Option<AnyElement>,
+    rodape: Option<AnyElement>,
     jeito: Jeito,
     cancelar: Cancelar<T>,
     window: &mut Window,
@@ -152,7 +157,9 @@ pub fn desenhar_conteudo<T: 'static>(
         Dialog::new(cx)
             .w(px(jeito.largura))
             .p(px(0.))
-            .rounded(px(12.))
+            // O `rounded-xl` do `DialogContent` do site: 14 px com o
+            // `--radius` de 10.
+            .rounded(px(14.))
             .bg(cx.theme().popover)
             .text_color(cx.theme().popover_foreground)
             .close_button(jeito.x)
@@ -164,6 +171,7 @@ pub fn desenhar_conteudo<T: 'static>(
                 false
             })
             .child(miolo)
+            .when_some(rodape, |dialogo, rodape| dialogo.footer(rodape))
             .into_any_element(),
     )
 }

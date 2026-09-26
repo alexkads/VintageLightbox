@@ -877,12 +877,14 @@ fn todo_jeito_de_fechar_a_negociacao_devolve_as_teclas(cx: &mut TestAppContext) 
         ("Cancelar", |e, cx| clicar(e, cx, "balcao-cancelar")),
         ("Esc", |e, cx| e.teclar(cx, "escape")),
         ("o véu", |e, cx| {
+            // O véu é o do `Dialog` do gpui-kit: um clique longe da caixa, no
+            // canto da janela, é um clique fora.
             let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
-            let veu = visual
-                .debug_bounds("balcao-veu")
-                .expect("o véu está na tela");
-            let canto = veu.origin + gpui_kit::point(gpui_kit::px(8.), gpui_kit::px(8.));
-            visual.simulate_click(canto, Modifiers::none());
+            let caixa = visual
+                .debug_bounds("balcao-dialogo")
+                .expect("o diálogo está na tela");
+            let fora = gpui_kit::point(gpui_kit::px(8.), caixa.origin.y + gpui_kit::px(8.));
+            visual.simulate_click(fora, Modifiers::none());
             visual.run_until_parked();
         }),
         ("Salvar", |e, cx| {

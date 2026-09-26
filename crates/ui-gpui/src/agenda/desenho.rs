@@ -55,6 +55,7 @@ impl Render for Agenda {
         let conteudo = self.aberto.aberto().cloned().map(|e| self.dialogo(e, cx));
         let dialogo = crate::dialogo::desenhar_conteudo(
             conteudo,
+            None,
             crate::dialogo::Jeito {
                 largura,
                 esc: false,
@@ -68,6 +69,7 @@ impl Render for Agenda {
         let do_dia = self.dia_aberto.map(|d| self.popup_do_dia(d, cx));
         let dia_aberto = crate::dialogo::desenhar_conteudo(
             do_dia,
+            None,
             crate::dialogo::Jeito {
                 largura: 360.,
                 esc: true,

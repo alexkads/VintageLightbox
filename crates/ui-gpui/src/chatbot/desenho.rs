@@ -115,6 +115,7 @@ impl Render for Chatbot {
         let conteudo = aberto.map(|d| self.dialogo_aberto(d, cx));
         let dialogo = crate::dialogo::desenhar_conteudo(
             conteudo,
+            None,
             crate::dialogo::Jeito {
                 largura,
                 esc: true,
