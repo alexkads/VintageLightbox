@@ -3704,6 +3704,60 @@ impl Render for Detalhe {
         self.preparar_formulario_do_cliente(window, cx);
         self.preparar_painel(window, cx);
         self.preparar_lote(window, cx);
+        // 🔑 Depois das preparações: os campos dos dados do cliente nascem em
+        // `preparar_formulario_do_cliente`, e o diálogo montado antes delas
+        // saía vazio no primeiro quadro — o foco pedido pelo contrato caía
+        // num campo que não existia.
+        // 🪟 Os diálogos da sessão, no `Dialog` do gpui-kit (`crate::dialogo`),
+        // que se desenha `deferred` por cima de tudo (o caixa flutuante incluído).
+        let modal_de_importacao = {
+            let quer = self.importacao_aberta;
+            crate::dialogo::desenhar(
+                self,
+                quer,
+                crate::dialogo::Jeito::dialogo(560.),
+                Self::modal_de_importacao,
+                |tela, _, cx| tela.fechar_a_importacao(cx),
+                window,
+                cx,
+            )
+        };
+        // "Apagar" é o `useConfirmacao` do site: `AlertDialog`.
+        let dialogo_de_apagar = {
+            let quer = self.apagar_lote_confirmando.is_some() || self.apagar_confirmando.is_some();
+            crate::dialogo::desenhar(
+                self,
+                quer,
+                crate::dialogo::Jeito::alerta(460.),
+                Self::dialogo_de_apagar,
+                |tela, _, cx| tela.cancelar_apagar(cx),
+                window,
+                cx,
+            )
+        };
+        // Os dados do cliente têm o X deles (o do kit fica desligado), e o
+        // clique fora não fecha no meio da gravação.
+        let formulario_do_cliente = {
+            let quer = self.dados_do_cliente.aberto().is_some();
+            crate::dialogo::desenhar(
+                self,
+                quer,
+                crate::dialogo::Jeito {
+                    largura: 480.,
+                    esc: true,
+                    veu: true,
+                    x: false,
+                },
+                Self::formulario_do_cliente,
+                |tela, window, cx| {
+                    if tela.gravando_dados.is_none() {
+                        tela.fechar_formulario_do_cliente(window, cx)
+                    }
+                },
+                window,
+                cx,
+            )
+        };
         self.preparar_seletores(window, cx);
         // 🔬 **Só nos testes: desligar partes da tela para medir o quadro**
         // (`estresse::medir_as_partes_do_quadro`). Foi assim que se achou que
@@ -3780,10 +3834,7 @@ impl Render for Detalhe {
             // da raiz, desenhado depois desta tela, e ficava por cima do modal.
             // Diferido, o modal é pintado depois de tudo. Não há `deferred`
             // dentro dele (ver o comentário acima).
-            .children(
-                self.modal_de_importacao(cx)
-                    .map(|modal| gpui_kit::deferred(modal).with_priority(2)),
-            )
+            .children(modal_de_importacao)
             // 🔑 **A janela de escolher as fotos do cartão também é
             // diferida**, pelo mesmo motivo do modal: o caixa flutuante é
             // desenhado depois desta tela. Ela não abre junto com o modal — o
@@ -3798,14 +3849,8 @@ impl Render for Detalhe {
             // modal dos dados do cliente). Eles vinham antes da grade na
             // árvore: a grade era pintada por cima do véu, que não escurecia
             // nada, e o caixa flutuante cobria o "Gravar".
-            .children(
-                self.dialogo_de_apagar(cx)
-                    .map(|dialogo| gpui_kit::deferred(dialogo).with_priority(2)),
-            )
-            .children(
-                self.formulario_do_cliente(cx)
-                    .map(|dialogo| gpui_kit::deferred(dialogo).with_priority(2)),
-            )
+            .children(dialogo_de_apagar)
+            .children(formulario_do_cliente)
     }
 }
 
@@ -4091,7 +4136,11 @@ impl Detalhe {
     /// outro com o rótulo em cima, a frase da recusa embaixo do campo que ela
     /// aponta, e Cancelar / Gravar no rodapé. Fora do "editar" o título não
     /// aparece e o e-mail ganha o `*`, como lá.
-    fn formulario_do_cliente(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    fn formulario_do_cliente(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui_kit::AnyElement> {
         use crate::estilo;
         use crate::recursos::Icone;
         use dados_do_cliente::Campo;
@@ -4152,86 +4201,78 @@ impl Detalhe {
         };
 
         Some(
-            estilo::veu_do_dialogo()
-                .id("cliente-veu")
-                .on_click(cx.listener(|tela, _ev, window, cx| {
-                    if tela.gravando_dados.is_none() {
-                        tela.fechar_formulario_do_cliente(window, cx)
-                    }
-                }))
+            gpui_kit::component::v_flex()
+                .gap(px(16.))
+                .relative()
+                .debug_selector(|| "dados-do-cliente".into())
+                .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
+                    cx.stop_propagation()
+                })
                 .child(
-                    estilo::caixa_do_dialogo(cx)
-                        .relative()
-                        .w(px(480.))
-                        .debug_selector(|| "dados-do-cliente".into())
-                        .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
-                            cx.stop_propagation()
-                        })
-                        .child(
-                            div().absolute().top(px(10.)).right(px(10.)).child(
-                                Button::new("sessao-cliente-fechar")
-                                    .debug_selector(|| "sessao-cliente-fechar".into())
-                                    .icon(Icon::new(Icone::X))
-                                    .xsmall()
-                                    .ghost()
-                                    .disabled(gravando)
-                                    .on_click(cx.listener(|tela, _ev, window, cx| {
+                    div().absolute().top(px(10.)).right(px(10.)).child(
+                        Button::new("sessao-cliente-fechar")
+                            .debug_selector(|| "sessao-cliente-fechar".into())
+                            .icon(Icon::new(Icone::X))
+                            .xsmall()
+                            .ghost()
+                            .disabled(gravando)
+                            .on_click(cx.listener(|tela, _ev, window, cx| {
+                                tela.fechar_formulario_do_cliente(window, cx)
+                            })),
+                    ),
+                )
+                .child(estilo::cabecalho_do_dialogo(titulo, dica, None, cx))
+                .when(editar, |caixa| {
+                    caixa.child(campo(
+                        "Título",
+                        true,
+                        &campos.titulo,
+                        erro_de(Campo::Titulo),
+                    ))
+                })
+                .child(campo(
+                    "E-mail do cliente",
+                    !editar,
+                    &campos.email,
+                    erro_de(Campo::Email),
+                ))
+                .child(campo(
+                    "WhatsApp",
+                    false,
+                    &campos.whatsapp,
+                    erro_de(Campo::Whatsapp),
+                ))
+                .children(erro_geral.map(|e| div().text_sm().text_color(perigo).child(e)))
+                .child(
+                    estilo::rodape_do_dialogo()
+                        .child(estilo::desligado(
+                            estilo::botao_fantasma("sessao-cliente-cancelar", cx)
+                                .debug_selector(|| "sessao-cliente-cancelar".into())
+                                .child(if editar { "Cancelar" } else { "Agora não" })
+                                .when(!gravando, |b| {
+                                    b.on_click(cx.listener(|tela, _ev, window, cx| {
                                         tela.fechar_formulario_do_cliente(window, cx)
-                                    })),
-                            ),
-                        )
-                        .child(estilo::cabecalho_do_dialogo(titulo, dica, None, cx))
-                        .when(editar, |caixa| {
-                            caixa.child(campo(
-                                "Título",
-                                true,
-                                &campos.titulo,
-                                erro_de(Campo::Titulo),
-                            ))
-                        })
-                        .child(campo(
-                            "E-mail do cliente",
-                            !editar,
-                            &campos.email,
-                            erro_de(Campo::Email),
+                                    }))
+                                }),
+                            gravando,
                         ))
-                        .child(campo(
-                            "WhatsApp",
-                            false,
-                            &campos.whatsapp,
-                            erro_de(Campo::Whatsapp),
-                        ))
-                        .children(erro_geral.map(|e| div().text_sm().text_color(perigo).child(e)))
-                        .child(
-                            estilo::rodape_do_dialogo()
-                                .child(estilo::desligado(
-                                    estilo::botao_fantasma("sessao-cliente-cancelar", cx)
-                                        .debug_selector(|| "sessao-cliente-cancelar".into())
-                                        .child(if editar { "Cancelar" } else { "Agora não" })
-                                        .when(!gravando, |b| {
-                                            b.on_click(cx.listener(|tela, _ev, window, cx| {
-                                                tela.fechar_formulario_do_cliente(window, cx)
-                                            }))
-                                        }),
-                                    gravando,
-                                ))
-                                .child(estilo::desligado(
-                                    estilo::botao_primario("sessao-cliente-gravar", cx)
-                                        .debug_selector(|| "sessao-cliente-gravar".into())
-                                        .child(if gravando {
-                                            "Gravando…"
-                                        } else {
-                                            rotulo_de_gravar
-                                        })
-                                        .when(!gravando, |b| {
-                                            b.on_click(cx.listener(|tela, _ev, _w, cx| {
-                                                tela.gravar_dados_do_cliente(cx)
-                                            }))
-                                        }),
-                                    gravando,
-                                )),
-                        ),
-                ),
+                        .child(estilo::desligado(
+                            estilo::botao_primario("sessao-cliente-gravar", cx)
+                                .debug_selector(|| "sessao-cliente-gravar".into())
+                                .child(if gravando {
+                                    "Gravando…"
+                                } else {
+                                    rotulo_de_gravar
+                                })
+                                .when(!gravando, |b| {
+                                    b.on_click(cx.listener(|tela, _ev, _w, cx| {
+                                        tela.gravar_dados_do_cliente(cx)
+                                    }))
+                                }),
+                            gravando,
+                        )),
+                )
+                .into_any_element(),
         )
     }
 
@@ -5486,7 +5527,11 @@ impl Detalhe {
     /// 🔑 **Soltar arquivos no véu importa**, como soltar na faixa de envio: o
     /// véu para o mouse, e sem isto o arrasto que o modal convida a fazer
     /// morreria nele.
-    fn modal_de_importacao(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    fn modal_de_importacao(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui_kit::AnyElement> {
         if !self.importacao_aberta {
             return None;
         }
@@ -5519,9 +5564,8 @@ impl Detalhe {
         )
         .min_h(px(280.));
         Some(
-            crate::estilo::veu_do_dialogo()
-                .id("importar-veu")
-                .on_click(cx.listener(|tela, _ev, _w, cx| tela.fechar_a_importacao(cx)))
+            gpui_kit::component::v_flex()
+                .gap(px(16.))
                 .on_drop(
                     cx.listener(|tela, arrastados: &gpui_kit::ExternalPaths, _window, cx| {
                         tela.fechar_a_importacao(cx);
@@ -5529,40 +5573,41 @@ impl Detalhe {
                         tela.enviar_arquivos(fotos, cx);
                     }),
                 )
+                .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
+                    cx.stop_propagation()
+                })
                 .child(
-                    crate::estilo::caixa_do_dialogo(cx)
-                        .w(px(560.))
-                        .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
-                            cx.stop_propagation()
-                        })
+                    gpui_kit::component::h_flex()
+                        .gap(px(8.))
+                        .items_center()
+                        .text_lg()
+                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                         .child(
-                            gpui_kit::component::h_flex()
-                                .gap(px(8.))
-                                .items_center()
-                                .text_lg()
-                                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                                .child(
-                                    gpui_kit::component::Icon::new(crate::recursos::Icone::Upload)
-                                        .size(px(18.)),
-                                )
-                                .child("Importar fotos"),
+                            gpui_kit::component::Icon::new(crate::recursos::Icone::Upload)
+                                .size(px(18.)),
                         )
-                        .child(quadro)
-                        .child(
-                            crate::estilo::rodape_do_dialogo().child(
-                                crate::estilo::botao_contorno("importar-cancelar", cx)
-                                    .debug_selector(|| "importar-cancelar".into())
-                                    .child("Cancelar")
-                                    .on_click(cx.listener(|tela, _ev, _w, cx| {
-                                        tela.fechar_a_importacao(cx)
-                                    })),
+                        .child("Importar fotos"),
+                )
+                .child(quadro)
+                .child(
+                    crate::estilo::rodape_do_dialogo().child(
+                        crate::estilo::botao_contorno("importar-cancelar", cx)
+                            .debug_selector(|| "importar-cancelar".into())
+                            .child("Cancelar")
+                            .on_click(
+                                cx.listener(|tela, _ev, _w, cx| tela.fechar_a_importacao(cx)),
                             ),
-                        ),
-                ),
+                    ),
+                )
+                .into_any_element(),
         )
     }
 
-    fn dialogo_de_apagar(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    fn dialogo_de_apagar(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui_kit::AnyElement> {
         let (titulo, descricao, confirmar) = if let Some(fotos) = &self.apagar_lote_confirmando {
             let n = fotos.len();
             (
@@ -5581,41 +5626,37 @@ impl Detalhe {
             )
         };
         Some(
-            crate::estilo::veu_do_dialogo()
-                .id("apagar-veu")
-                .on_click(cx.listener(|tela, _ev, _w, cx| tela.cancelar_apagar(cx)))
+            gpui_kit::component::v_flex()
+                .gap(px(16.))
+                .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
+                    cx.stop_propagation()
+                })
+                .child(crate::estilo::cabecalho_do_dialogo(
+                    titulo,
+                    SharedString::from(descricao),
+                    Some(crate::recursos::Icone::Trash2),
+                    cx,
+                ))
                 .child(
-                    crate::estilo::caixa_do_dialogo(cx)
-                        .w(px(460.))
-                        .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
-                            cx.stop_propagation()
-                        })
-                        .child(crate::estilo::cabecalho_do_dialogo(
-                            titulo,
-                            SharedString::from(descricao),
-                            Some(crate::recursos::Icone::Trash2),
-                            cx,
-                        ))
+                    crate::estilo::rodape_do_dialogo()
                         .child(
-                            crate::estilo::rodape_do_dialogo()
-                                .child(
-                                    crate::estilo::botao_contorno("apagar-cancelar", cx)
-                                        .debug_selector(|| "apagar-cancelar".into())
-                                        .child("Cancelar")
-                                        .on_click(cx.listener(|tela, _ev, _w, cx| {
-                                            tela.cancelar_apagar(cx)
-                                        })),
-                                )
-                                .child(
-                                    crate::estilo::botao_perigo("apagar-confirmar", cx)
-                                        .debug_selector(|| "apagar-confirmar".into())
-                                        .child(confirmar)
-                                        .on_click(cx.listener(|tela, _ev, _w, cx| {
-                                            tela.confirmar_apagar(cx)
-                                        })),
+                            crate::estilo::botao_contorno("apagar-cancelar", cx)
+                                .debug_selector(|| "apagar-cancelar".into())
+                                .child("Cancelar")
+                                .on_click(
+                                    cx.listener(|tela, _ev, _w, cx| tela.cancelar_apagar(cx)),
+                                ),
+                        )
+                        .child(
+                            crate::estilo::botao_perigo("apagar-confirmar", cx)
+                                .debug_selector(|| "apagar-confirmar".into())
+                                .child(confirmar)
+                                .on_click(
+                                    cx.listener(|tela, _ev, _w, cx| tela.confirmar_apagar(cx)),
                                 ),
                         ),
-                ),
+                )
+                .into_any_element(),
         )
     }
 

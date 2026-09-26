@@ -222,10 +222,6 @@ pub struct Sessoes {
     /// 2026-09-18), como no site: sem a resposta, cada tela adiante adivinha —
     /// e adivinhava pela última sessão criada, que é a de qualquer balcão.
     escolhendo_estudio: bool,
-    /// O "Em qual estúdio você está?" no `Dialog` do gpui-kit (`crate::dialogo`).
-    ponte_do_estudio: crate::dialogo::Ponte,
-    ponte_da_exclusao: crate::dialogo::Ponte,
-    ponte_da_restauracao: crate::dialogo::Ponte,
     /// Qual sessão está aberta para receber fotos.
     aberta: Option<String>,
     busca: gpui_kit::Entity<InputState>,
@@ -407,9 +403,6 @@ impl Sessoes {
             estudios: Vec::new(),
             lembranca: caminho_da_lembranca(),
             escolhendo_estudio: false,
-            ponte_do_estudio: crate::dialogo::Ponte::default(),
-            ponte_da_exclusao: crate::dialogo::Ponte::default(),
-            ponte_da_restauracao: crate::dialogo::Ponte::default(),
             capas: std::collections::HashMap::new(),
             capas_pedidas: std::collections::HashSet::new(),
             aberta: None,
@@ -1276,40 +1269,46 @@ fn nao_vazio(texto: &str) -> Option<String> {
 
 impl Render for Sessoes {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // 🪟 Os diálogos vão para o `Dialog` do gpui-kit pela ponte — a escolha
+        // 🪟 Os diálogos são o `Dialog` do gpui-kit (`crate::dialogo`) — a escolha
         // do estúdio é o "sem saída" do site: nem Esc, nem clique fora, nem X.
-        let dialogo_do_estudio = crate::dialogo::sincronizar(
-            self,
-            |tela| tela.escolhendo_estudio,
-            crate::dialogo::Jeito::sem_saida(440.),
-            |tela| &mut tela.ponte_do_estudio,
-            Self::dialogo_do_estudio,
-            |_, _, _| {},
-            window,
-            cx,
-        );
+        let dialogo_do_estudio = {
+            let quer = self.escolhendo_estudio;
+            crate::dialogo::desenhar(
+                self,
+                quer,
+                crate::dialogo::Jeito::sem_saida(440.),
+                Self::dialogo_do_estudio,
+                |_, _, _| {},
+                window,
+                cx,
+            )
+        };
         // O `AlertDialog` do site: `Esc` e os botões fecham; o clique fora não
         // descarta a frase meio digitada.
-        let dialogo_de_exclusao = crate::dialogo::sincronizar(
-            self,
-            |tela| tela.exclusao.is_some(),
-            crate::dialogo::Jeito::alerta(512.),
-            |tela| &mut tela.ponte_da_exclusao,
-            Self::dialogo_de_exclusao,
-            |tela, _, cx| tela.cancelar_exclusao(cx),
-            window,
-            cx,
-        );
-        let dialogo_de_restauracao = crate::dialogo::sincronizar(
-            self,
-            |tela| tela.restaurar.is_some(),
-            crate::dialogo::Jeito::alerta(440.),
-            |tela| &mut tela.ponte_da_restauracao,
-            Self::dialogo_de_restauracao,
-            |tela, _, cx| tela.cancelar_restauracao(cx),
-            window,
-            cx,
-        );
+        let dialogo_de_exclusao = {
+            let quer = self.exclusao.is_some();
+            crate::dialogo::desenhar(
+                self,
+                quer,
+                crate::dialogo::Jeito::alerta(512.),
+                Self::dialogo_de_exclusao,
+                |tela, _, cx| tela.cancelar_exclusao(cx),
+                window,
+                cx,
+            )
+        };
+        let dialogo_de_restauracao = {
+            let quer = self.restaurar.is_some();
+            crate::dialogo::desenhar(
+                self,
+                quer,
+                crate::dialogo::Jeito::alerta(440.),
+                Self::dialogo_de_restauracao,
+                |tela, _, cx| tela.cancelar_restauracao(cx),
+                window,
+                cx,
+            )
+        };
         let agora = agora_em_segundos();
         let todas = self.para_o_core();
         let contagens = sessoes::contar_por_situacao(&todas, agora);

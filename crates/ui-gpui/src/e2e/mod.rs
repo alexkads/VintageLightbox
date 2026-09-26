@@ -388,6 +388,10 @@ pub(super) struct Estudio {
 pub(super) fn abrir_o_app(cx: &mut TestAppContext, cenario: Cenario) -> Estudio {
     cx.update(|cx| {
         gpui_kit::init(cx);
+        // 🎞️ Sem as animações do kit, como nos testes dele: o `Dialog` entra
+        // deslizando por 250 ms, e com o relógio parado do teste a caixa ficava
+        // no meio do caminho — o clique medido num lugar caía em outro.
+        cx.set_reduce_motion(true);
         crate::tema::aplicar(crate::tema::Escolha::Claro, None, cx);
         crate::app::init(cx);
         crate::importacao::tela::init(cx);
