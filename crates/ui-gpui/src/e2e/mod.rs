@@ -495,6 +495,9 @@ pub(super) fn abrir_o_app(cx: &mut TestAppContext, cenario: Cenario) -> Estudio 
         let guardado = &mut guardado;
         move |window, cx| {
             let app = cx.new(|cx| Aplicativo::novo(locais, previews, presets, portas, window, cx));
+            // A máquina já respondeu à pergunta do estúdio — o diálogo dela é
+            // modal como o do site, e sem resposta nada atrás dele responde.
+            app.read(cx).sessoes.read(cx).ja_respondeu_o_estudio();
             if segundo_plano {
                 crate::segundo_plano::ligar(app.downgrade(), window, cx);
             }

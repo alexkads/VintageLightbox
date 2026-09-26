@@ -222,6 +222,8 @@ pub struct Sessoes {
     /// 2026-09-18), como no site: sem a resposta, cada tela adiante adivinha —
     /// e adivinhava pela última sessão criada, que é a de qualquer balcão.
     escolhendo_estudio: bool,
+    /// O "Em qual estúdio você está?" no `Dialog` do gpui-kit (`crate::dialogo`).
+    ponte_do_estudio: crate::dialogo::Ponte,
     /// Qual sessão está aberta para receber fotos.
     aberta: Option<String>,
     busca: gpui_kit::Entity<InputState>,
@@ -322,6 +324,17 @@ fn estudio_lembrado(caminho: &Path) -> Option<String> {
         .filter(|id| !id.trim().is_empty())
 }
 
+impl Sessoes {
+    /// 🧪 Uma máquina que já respondeu "todos os estúdios" — o ponto de
+    /// partida dos e2e que não são sobre a pergunta. Desde que o diálogo é o
+    /// `Dialog` do gpui-kit, ele é modal como o do site (`disablePointerDismissal`,
+    /// sem X): sem resposta, nem o menu lateral responde.
+    #[cfg(test)]
+    pub(crate) fn ja_respondeu_o_estudio(&self) {
+        let _ = std::fs::write(&self.lembranca, r#"{"ver_todos":true}"#);
+    }
+}
+
 /// Esta máquina já respondeu à pergunta do estúdio? ("Todos" é resposta.)
 fn ja_respondeu(caminho: &Path) -> bool {
     let guardada = lembranca(caminho);
@@ -392,6 +405,7 @@ impl Sessoes {
             estudios: Vec::new(),
             lembranca: caminho_da_lembranca(),
             escolhendo_estudio: false,
+            ponte_do_estudio: crate::dialogo::Ponte::default(),
             capas: std::collections::HashMap::new(),
             capas_pedidas: std::collections::HashSet::new(),
             aberta: None,
@@ -1257,7 +1271,22 @@ fn nao_vazio(texto: &str) -> Option<String> {
 }
 
 impl Render for Sessoes {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 🪟 Os diálogos vão para o `Dialog` do gpui-kit pela ponte — a escolha
+        // do estúdio é o "sem saída" do site: nem Esc, nem clique fora, nem X.
+        let dialogo_do_estudio = crate::dialogo::sincronizar(
+            self,
+            |tela| tela.escolhendo_estudio,
+            crate::dialogo::Jeito {
+                largura: 440.,
+                fechavel: false,
+            },
+            |tela| &mut tela.ponte_do_estudio,
+            Self::dialogo_do_estudio,
+            |_, _, _| {},
+            window,
+            cx,
+        );
         let agora = agora_em_segundos();
         let todas = self.para_o_core();
         let contagens = sessoes::contar_por_situacao(&todas, agora);
@@ -1302,7 +1331,7 @@ impl Render for Sessoes {
                 tela.child(self.tabela(&visiveis, agora, cx))
                     .child(div().text_xs().text_color(apagado).child(rodape))
             })
-            .children(self.dialogo_do_estudio(cx))
+            .children(dialogo_do_estudio)
             .children(self.dialogo_de_exclusao(cx))
             .children(self.dialogo_de_restauracao(cx))
             .children(self.popover_do_periodo(cx))
@@ -1576,7 +1605,11 @@ impl Sessoes {
     ///
     /// 🚨 **Sem "cancelar", como no site.** A única saída é escolher — e é isso
     /// que impede a tela seguinte de adivinhar.
-    fn dialogo_do_estudio(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    fn dialogo_do_estudio(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui_kit::AnyElement> {
         if !self.escolhendo_estudio {
             return None;
         }
@@ -1584,115 +1617,110 @@ impl Sessoes {
         let primaria = cx.theme().primary;
         let atual = self.estudio_de_trabalho().map(|e| e.id.clone());
         Some(
-            crate::estilo::veu_do_dialogo().child(
-                crate::estilo::caixa_do_dialogo(cx)
-                    .child(crate::estilo::cabecalho_do_dialogo(
-                        "Em qual estúdio você está?",
-                        "A escolha fica guardada nesta máquina e vale para todas as telas: as \
+            gpui_kit::component::v_flex()
+                .gap(px(16.))
+                .child(crate::estilo::cabecalho_do_dialogo(
+                    "Em qual estúdio você está?",
+                    "A escolha fica guardada nesta máquina e vale para todas as telas: as \
                          sessões que você criar e o caixa saem daqui. Dá para trocar a qualquer \
                          momento na barra.",
-                        Some(crate::recursos::Icone::Building2),
-                        cx,
-                    ))
-                    .child(
-                        gpui_kit::component::v_flex()
-                            .gap(px(8.))
-                            // 🏢 **"Todos os estúdios", no topo** (dono,
-                            // 18/set/2026: *"tem que ter opção de trazer todos
-                            // os estúdios, pois tem sessões que foram criadas
-                            // sem definição de estúdio"*). No topo porque é a
-                            // saída de quem não sabe em qual procurar — e
-                            // porque é ela que mostra as sessões órfãs, que
-                            // atrapalham o fechamento do caixa.
-                            .child(
-                                crate::estilo::opcao_do_dialogo(
-                                    SharedString::from("estudio-de-trabalho-todos"),
-                                    cx,
-                                )
-                                .when(self.vendo_todos_os_estudios(), |o| o.border_color(primaria))
-                                .flex_row()
-                                .items_center()
-                                .gap(px(12.))
-                                .child(
-                                    div()
-                                        .flex_none()
-                                        .size(px(LADO_DA_CAPA as f32))
-                                        .rounded(px(8.))
-                                        .bg(cx.theme().muted)
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .child(
-                                            gpui_kit::component::Icon::new(
-                                                crate::recursos::Icone::Building2,
-                                            )
-                                            .size(px(18.))
-                                            .text_color(apagado),
-                                        ),
-                                )
-                                .child(
-                                    gpui_kit::component::v_flex()
-                                        .gap(px(2.))
-                                        .items_start()
-                                        .child(
-                                            div()
-                                                .font_weight(gpui_kit::FontWeight::MEDIUM)
-                                                .child("Todos os estúdios"),
-                                        )
-                                        .child(
-                                            div()
-                                                .text_xs()
-                                                .text_color(apagado)
-                                                .child("Inclusive as sessões sem estúdio definido"),
-                                        ),
-                                )
-                                .on_click(cx.listener(
-                                    move |tela, _ev, _window, cx| {
-                                        tela.escolher_todos_os_estudios(cx)
-                                    },
-                                )),
+                    Some(crate::recursos::Icone::Building2),
+                    cx,
+                ))
+                .child(
+                    gpui_kit::component::v_flex()
+                        .gap(px(8.))
+                        // 🏢 **"Todos os estúdios", no topo** (dono,
+                        // 18/set/2026: *"tem que ter opção de trazer todos
+                        // os estúdios, pois tem sessões que foram criadas
+                        // sem definição de estúdio"*). No topo porque é a
+                        // saída de quem não sabe em qual procurar — e
+                        // porque é ela que mostra as sessões órfãs, que
+                        // atrapalham o fechamento do caixa.
+                        .child(
+                            crate::estilo::opcao_do_dialogo(
+                                SharedString::from("estudio-de-trabalho-todos"),
+                                cx,
                             )
-                            .children(self.estudios.iter().map(|estudio| {
-                                let id = estudio.id.clone();
-                                let escolhido = atual.as_deref() == Some(estudio.id.as_str());
-                                crate::estilo::opcao_do_dialogo(
-                                    SharedString::from(format!(
-                                        "estudio-de-trabalho-{}",
-                                        estudio.id
-                                    )),
-                                    cx,
-                                )
-                                .when(escolhido, |o| o.border_color(primaria))
-                                // 🖼️ Capa à esquerda, nome e cidade à direita — o
-                                // item de lista com avatar do shadcn.
-                                .flex_row()
-                                .items_center()
-                                .gap(px(12.))
-                                .child(self.capa_do_estudio(estudio, LADO_DA_CAPA as f32, cx))
-                                .child(
-                                    gpui_kit::component::v_flex()
-                                        .gap(px(2.))
-                                        .items_start()
-                                        .child(
-                                            div()
-                                                .font_weight(gpui_kit::FontWeight::MEDIUM)
-                                                .child(SharedString::from(estudio.nome.clone())),
+                            .when(self.vendo_todos_os_estudios(), |o| o.border_color(primaria))
+                            .flex_row()
+                            .items_center()
+                            .gap(px(12.))
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .size(px(LADO_DA_CAPA as f32))
+                                    .rounded(px(8.))
+                                    .bg(cx.theme().muted)
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(
+                                        gpui_kit::component::Icon::new(
+                                            crate::recursos::Icone::Building2,
                                         )
-                                        .child(
-                                            div()
-                                                .text_xs()
-                                                .text_color(apagado)
-                                                .child(SharedString::from(estudio.cidade.clone())),
-                                        ),
-                                )
-                                .on_click(cx.listener(
-                                    move |tela, _ev, _window, cx| {
-                                        tela.escolher_estudio_de_trabalho(&id, cx)
-                                    },
-                                ))
-                            })),
-                    ),
-            ),
+                                        .size(px(18.))
+                                        .text_color(apagado),
+                                    ),
+                            )
+                            .child(
+                                gpui_kit::component::v_flex()
+                                    .gap(px(2.))
+                                    .items_start()
+                                    .child(
+                                        div()
+                                            .font_weight(gpui_kit::FontWeight::MEDIUM)
+                                            .child("Todos os estúdios"),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(apagado)
+                                            .child("Inclusive as sessões sem estúdio definido"),
+                                    ),
+                            )
+                            .on_click(cx.listener(
+                                move |tela, _ev, _window, cx| tela.escolher_todos_os_estudios(cx),
+                            )),
+                        )
+                        .children(self.estudios.iter().map(|estudio| {
+                            let id = estudio.id.clone();
+                            let escolhido = atual.as_deref() == Some(estudio.id.as_str());
+                            crate::estilo::opcao_do_dialogo(
+                                SharedString::from(format!("estudio-de-trabalho-{}", estudio.id)),
+                                cx,
+                            )
+                            .when(escolhido, |o| o.border_color(primaria))
+                            // 🖼️ Capa à esquerda, nome e cidade à direita — o
+                            // item de lista com avatar do shadcn.
+                            .flex_row()
+                            .items_center()
+                            .gap(px(12.))
+                            .child(self.capa_do_estudio(estudio, LADO_DA_CAPA as f32, cx))
+                            .child(
+                                gpui_kit::component::v_flex()
+                                    .gap(px(2.))
+                                    .items_start()
+                                    .child(
+                                        div()
+                                            .font_weight(gpui_kit::FontWeight::MEDIUM)
+                                            .child(SharedString::from(estudio.nome.clone())),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(apagado)
+                                            .child(SharedString::from(estudio.cidade.clone())),
+                                    ),
+                            )
+                            .on_click(cx.listener(
+                                move |tela, _ev, _window, cx| {
+                                    tela.escolher_estudio_de_trabalho(&id, cx)
+                                },
+                            ))
+                        })),
+                )
+                .into_any_element(),
         )
     }
 

@@ -22,6 +22,7 @@ pub mod cliente;
 pub mod configuracoes;
 /// Fotografar a janela e seguir um roteiro, só em build de depuração.
 pub mod depuracao;
+pub mod dialogo;
 /// O app inteiro de ponta a ponta, com as portas de mentira. Só testes.
 #[cfg(test)]
 mod e2e;
