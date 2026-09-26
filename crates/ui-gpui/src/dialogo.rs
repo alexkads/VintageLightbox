@@ -281,3 +281,42 @@ pub fn rodape_da_pergunta(cx: &gpui_kit::App) -> gpui_kit::Div {
         .bg(tema.muted.opacity(0.5))
         .rounded_b(px(14.))
 }
+
+/// O `DialogHeader` do site com o X do `DialogContent` (`opacity-70`, 16 px),
+/// para os diálogos em que o X tem nome próprio — os testes o acham pelo
+/// `debug_selector`, e o do kit não tem um.
+pub fn cabecalho_com_x(
+    id: &'static str,
+    titulo: impl Into<SharedString>,
+    fechar: impl Fn(&gpui_kit::ClickEvent, &mut Window, &mut gpui_kit::App) + 'static,
+    cx: &gpui_kit::App,
+) -> gpui_kit::Div {
+    let acento = cx.theme().accent;
+    gpui_kit::component::h_flex()
+        .items_start()
+        .gap(px(8.))
+        .child(
+            gpui_kit::div()
+                .flex_1()
+                .min_w(px(0.))
+                .text_size(px(16.))
+                .font_weight(gpui_kit::FontWeight::MEDIUM)
+                .child(titulo.into()),
+        )
+        .child(
+            gpui_kit::div()
+                .id(id)
+                .debug_selector(move || id.into())
+                .flex_none()
+                .size(px(20.))
+                .rounded(px(4.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .opacity(0.7)
+                .cursor_pointer()
+                .hover(move |s| s.opacity(1.).bg(acento))
+                .child(gpui_kit::component::Icon::new(crate::recursos::Icone::X).size(px(16.)))
+                .on_click(fechar),
+        )
+}

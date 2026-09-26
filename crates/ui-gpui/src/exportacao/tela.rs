@@ -412,8 +412,6 @@ impl gpui_kit::Render for Exportacao {
             .flex()
             .flex_col()
             .gap(px(12.))
-            .p(px(16.))
-            .min_w(px(420.))
             .child(
                 div()
                     .flex()

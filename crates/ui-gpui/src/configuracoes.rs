@@ -132,7 +132,6 @@ impl Render for Configuracoes {
             .flex()
             .flex_col()
             .gap(px(10.))
-            .p(px(14.))
             .size_full()
             .child(div().text_xs().child("Cache de previews"))
             .child(match &estatisticas {

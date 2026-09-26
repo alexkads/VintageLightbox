@@ -33,10 +33,10 @@ use std::sync::Arc;
 use adapters::view_models::PhotoViewModel;
 use domain::entities::Preset;
 use domain::value_objects::CropSettings;
-use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::{ActiveTheme, Sizable};
+use gpui_kit::component::{v_flex, ActiveTheme};
 use gpui_kit::{
-    actions, div, prelude::*, px, App, Context, Entity, FocusHandle, SharedString, Task, Window,
+    actions, div, prelude::*, px, AnyElement, App, Context, Entity, FocusHandle, SharedString,
+    Task, Window,
 };
 use infrastructure::cache::preview_manager::PreviewManager;
 
@@ -5289,46 +5289,30 @@ impl Aplicativo {
         self.sessao_aberta.is_some()
     }
 
-    /// As Configurações, no mesmo véu do modal de importação.
-    fn modal_de_configuracoes(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .absolute()
-            .inset_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(tema::cores::veu())
-            .child(
-                div()
-                    .w(px(520.))
-                    .max_w_full()
-                    .flex()
-                    .flex_col()
-                    .bg(cx.theme().background)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .rounded(px(6.))
-                    .overflow_hidden()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .px(px(12.))
-                            .py(px(6.))
-                            .bg(cx.theme().title_bar)
-                            .child(div().text_xs().child("Configurações"))
-                            .child(
-                                Button::new("fechar-configuracoes")
-                                    .label("Fechar")
-                                    .xsmall()
-                                    .on_click(cx.listener(|este, _ev, window, cx| {
-                                        este.fechar_configuracoes(window, cx);
-                                    })),
-                            ),
-                    )
-                    .child(self.configuracoes.clone()),
-            )
+    /// As Configurações, no `Dialog` do gpui-kit.
+    fn modal_de_configuracoes(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let miolo = v_flex()
+            .gap(px(16.))
+            .child(crate::dialogo::cabecalho_com_x(
+                "fechar-configuracoes",
+                "Configurações",
+                cx.listener(|este, _, window, cx| este.fechar_configuracoes(window, cx)),
+                cx,
+            ))
+            .child(self.configuracoes.clone())
+            .into_any_element();
+        crate::dialogo::desenhar_conteudo(
+            Some(miolo),
+            None,
+            crate::dialogo::Jeito::alerta(520.),
+            |este, window, cx| este.fechar_configuracoes(window, cx),
+            window,
+            cx,
+        )
     }
 
     /// O modal por cima de tudo, com um véu que escurece o que ficou atrás.
@@ -5346,111 +5330,80 @@ impl Aplicativo {
     /// frase, quem lê "apagar" imagina perda de arquivo e não clica; sem a
     /// terceira, clica achando que reimportar desfaz — e reimportar devolve o
     /// arquivo, não os 46 ajustes.
-    fn aviso_de_apagar(&self, quantas: usize, cx: &mut Context<Self>) -> impl IntoElement {
+    fn aviso_de_apagar(
+        &self,
+        quantas: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let titulo = if quantas == 1 {
             "Tirar 1 foto do catálogo?".to_string()
         } else {
             format!("Tirar {quantas} fotos do catálogo?")
         };
-
-        div()
-            .absolute()
-            .inset_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(tema::cores::veu())
+        let miolo = crate::dialogo::miolo_da_pergunta(
+            "apagar-pergunta",
+            titulo,
+            "O arquivo continua no disco — sai só do catálogo. ⚠️ A revelação vai junto: \
+             reimportar devolve a foto, não os ajustes.",
+            cx,
+        );
+        let rodape = crate::dialogo::rodape_da_pergunta(cx)
             .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(10.))
-                    .p(px(16.))
-                    .max_w(px(420.))
-                    .bg(cx.theme().background)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .rounded(px(6.))
-                    .child(div().text_sm().child(titulo))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(
-                                "O arquivo continua no disco — sai só do catálogo. \
-                                 ⚠️ A revelação vai junto: reimportar devolve a foto, \
-                                 não os ajustes.",
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .justify_end()
-                            .gap(px(8.))
-                            .child(
-                                Button::new("apagar-cancelar")
-                                    .label("Cancelar")
-                                    .xsmall()
-                                    .on_click(cx.listener(|este, _ev, _window, cx| {
-                                        este.biblioteca
-                                            .update(cx, |tela, cx| tela.cancelar_apagar(cx));
-                                    })),
-                            )
-                            .child(
-                                Button::new("apagar-confirmar")
-                                    .label("Tirar do catálogo")
-                                    .xsmall()
-                                    .danger()
-                                    .on_click(cx.listener(|este, _ev, _window, cx| {
-                                        este.biblioteca
-                                            .update(cx, |tela, cx| tela.apagar_confirmado(cx));
-                                    })),
-                            ),
-                    ),
+                crate::estilo::botao_contorno("apagar-cancelar", cx)
+                    .child("Cancelar")
+                    .on_click(cx.listener(|este, _, _, cx| {
+                        este.biblioteca
+                            .update(cx, |tela, cx| tela.cancelar_apagar(cx));
+                    })),
             )
+            .child(
+                crate::estilo::botao_perigo("apagar-confirmar", cx)
+                    .child("Tirar do catálogo")
+                    .on_click(cx.listener(|este, _, _, cx| {
+                        este.biblioteca
+                            .update(cx, |tela, cx| tela.apagar_confirmado(cx));
+                    })),
+            )
+            .into_any_element();
+        crate::dialogo::desenhar_conteudo(
+            Some(miolo),
+            Some(rodape),
+            crate::dialogo::Jeito::alerta(448.),
+            |este, _, cx| {
+                este.biblioteca
+                    .update(cx, |tela, cx| tela.cancelar_apagar(cx));
+            },
+            window,
+            cx,
+        )
     }
 
-    fn modal_de_exportacao(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .absolute()
-            .inset_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(tema::cores::veu())
-            .child(
-                div()
-                    .max_w_full()
-                    .max_h_full()
-                    .flex()
-                    .flex_col()
-                    .bg(cx.theme().background)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .rounded(px(6.))
-                    .overflow_hidden()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .gap(px(24.))
-                            .px(px(12.))
-                            .py(px(6.))
-                            .bg(cx.theme().title_bar)
-                            .child(div().text_xs().child("Exportar fotos"))
-                            .child(
-                                Button::new("fechar-exportacao")
-                                    .debug_selector(|| "fechar-exportacao".into())
-                                    .label("Fechar")
-                                    .xsmall()
-                                    .on_click(cx.listener(|este, _ev, window, cx| {
-                                        este.fechar_exportacao(window, cx);
-                                    })),
-                            ),
-                    )
-                    .child(self.exportacao.clone()),
-            )
+    /// A exportação, no `Dialog` do gpui-kit — da largura do
+    /// `exportar-dialogo.tsx` do site (`sm:max-w-md`).
+    fn modal_de_exportacao(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let miolo = v_flex()
+            .gap(px(16.))
+            .child(crate::dialogo::cabecalho_com_x(
+                "fechar-exportacao",
+                "Exportar fotos",
+                cx.listener(|este, _, window, cx| este.fechar_exportacao(window, cx)),
+                cx,
+            ))
+            .child(self.exportacao.clone())
+            .into_any_element();
+        crate::dialogo::desenhar_conteudo(
+            Some(miolo),
+            None,
+            crate::dialogo::Jeito::alerta(448.),
+            |este, window, cx| este.fechar_exportacao(window, cx),
+            window,
+            cx,
+        )
     }
 
     /// O diálogo da negociação — véu, caixa e botões são dele
@@ -5459,52 +5412,38 @@ impl Aplicativo {
         div().absolute().inset_0().child(self.balcao.clone())
     }
 
-    fn modal_de_importacao(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .absolute()
-            .inset_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(tema::cores::veu())
+    /// A importação, no `Dialog` do gpui-kit: 760 × 560, como a janela de
+    /// antes.
+    fn modal_de_importacao(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let miolo = v_flex()
+            .h(px(528.))
+            .gap(px(16.))
+            .child(crate::dialogo::cabecalho_com_x(
+                "fechar-importacao",
+                "Importar fotos",
+                cx.listener(|este, _, window, cx| este.fechar_importacao(window, cx)),
+                cx,
+            ))
             .child(
                 div()
-                    .w(px(760.))
-                    .h(px(560.))
-                    .max_w_full()
-                    .max_h_full()
                     .flex()
-                    .flex_col()
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .rounded(px(6.))
-                    .overflow_hidden()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .px(px(12.))
-                            .py(px(6.))
-                            .bg(cx.theme().title_bar)
-                            .child(div().text_xs().child("Importar fotos"))
-                            .child(
-                                Button::new("fechar-importacao")
-                                    .label("Fechar")
-                                    .xsmall()
-                                    .on_click(cx.listener(|este, _ev, window, cx| {
-                                        este.fechar_importacao(window, cx);
-                                    })),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_1()
-                            .min_h(px(0.))
-                            .child(self.importacao.clone()),
-                    ),
+                    .flex_1()
+                    .min_h(px(0.))
+                    .child(self.importacao.clone()),
             )
+            .into_any_element();
+        crate::dialogo::desenhar_conteudo(
+            Some(miolo),
+            None,
+            crate::dialogo::Jeito::alerta(760.),
+            |este, window, cx| este.fechar_importacao(window, cx),
+            window,
+            cx,
+        )
     }
 }
 
@@ -5528,6 +5467,24 @@ impl Render for Aplicativo {
         // ela na tela, os botões de janela moram nela, e as barras de baixo
         // não desenham os seus (`janela::controles_da_tela`).
         let faixa_das_guias = self.faixa_das_guias(window, cx);
+        // Os modais da raiz são o `Dialog` do gpui-kit (`crate::dialogo`).
+        let modal_de_importacao = self
+            .importando
+            .then(|| self.modal_de_importacao(window, cx))
+            .flatten();
+        let modal_de_exportacao = self
+            .exportando
+            .then(|| self.modal_de_exportacao(window, cx))
+            .flatten();
+        let aviso_de_apagar = self
+            .biblioteca
+            .read(cx)
+            .confirmando_apagar()
+            .and_then(|quantas| self.aviso_de_apagar(quantas, window, cx));
+        let modal_de_configuracoes = self
+            .configurando
+            .then(|| self.modal_de_configuracoes(window, cx))
+            .flatten();
         crate::janela::marcar_faixa_com_controles(faixa_das_guias.is_some(), window, cx);
 
         let com_caixa = matches!(self.tela, Tela::Sessao | Tela::Revelacao);
@@ -5755,26 +5712,17 @@ impl Render for Aplicativo {
             )
             .when(com_caixa, |raiz| raiz.child(self.caixa_flutuante.clone()))
             .children(self.canto_dos_envios(window, cx))
-            .when(self.importando, |raiz| {
-                raiz.child(self.modal_de_importacao(cx))
-            })
-            .when(self.exportando, |raiz| {
-                raiz.child(self.modal_de_exportacao(cx))
-            })
+            .children(modal_de_importacao)
+            .children(modal_de_exportacao)
             .when(self.no_balcao.esta_aberto(), |raiz| {
                 raiz.child(self.modal_do_balcao(cx))
             })
-            .when_some(
-                self.biblioteca.read(cx).confirmando_apagar(),
-                |raiz, quantas| raiz.child(self.aviso_de_apagar(quantas, cx)),
-            )
+            .children(aviso_de_apagar)
             .when_some(self.saida, |raiz, saida| {
                 raiz.child(self.aviso_de_saida(saida, cx))
             })
             .when(false, |raiz| raiz)
-            .when(self.configurando, |raiz| {
-                raiz.child(self.modal_de_configuracoes(cx))
-            })
+            .children(modal_de_configuracoes)
             .when(self.menu_da_conta, |raiz| {
                 raiz.child(self.menu_da_conta(cx))
             })
