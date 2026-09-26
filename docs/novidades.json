@@ -1,14 +1,11 @@
 {
-  "versao": "0.1.15",
-  "titulo": "Vários itens do cupom de uma vez no caixa, a lixeira com volta na lista de sessões, e os detalhes e o atendimento da sessão iguais aos do site.",
+  "versao": "0.1.16",
+  "titulo": "Dois temas novos, Matrix e Cyberpunk, e o diálogo de negociação igual ao do site, na galeria e no caixa.",
   "importante": false,
   "novidades": [
-    "Caixa: marque vários itens do cupom com a caixinha, com Ctrl/⌘ ou com Shift, e dê cortesia ou desconto a todos de uma vez. O N negocia os marcados, Shift+seta estende a marcação e o Esc desmarca.",
-    "Lista de sessões: a aba \"Excluídas\" com o \"Restaurar\", e a lixeira para quem é administrador, com as mesmas travas do site.",
-    "Sessão: os detalhes da galeria e a gaveta do atendimento no mesmo desenho do site, com o último aviso ao cliente, a retenção e as três buscas (agendamento, voucher e compra antecipada).",
-    "O menu da conta mostra a sua foto do perfil.",
-    "Depois de fechar qualquer diálogo, o teclado volta para onde estava: as teclas não param mais de responder.",
-    "A base de desenho do app foi atualizada. Se algum botão, campo ou menu se comportar diferente do costume, avise."
+    "Temas Matrix e Cyberpunk no menu da conta, ao lado de Claro, Escuro e Sistema. O Matrix é verde sobre preto, com letra de terminal; o Cyberpunk é neon amarelo, rosa e ciano sobre azul-noite. A escolha fica guardada na máquina.",
+    "Negociação: o cartão escolhido ganha a borda do site, e \"Remover negociação\" pergunta numa janela por cima do formulário; o Esc fecha só a pergunta. Vale na galeria e no caixa.",
+    "No caixa, o site parceiro da negociação virou uma lista, como no site."
   ],
-  "por_que_atualizar": "Acertar a negociação de várias fotos do mesmo cliente vira um gesto só, e uma sessão excluída por engano volta com um clique."
+  "por_que_atualizar": "A negociação no atendimento fica igual à do site e para de atrapalhar, e cada balcão pode escolher o visual que prefere."
 }
