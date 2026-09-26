@@ -93,7 +93,7 @@ fn marcado(
     botao.debug_selector(move || nome.clone())
 }
 
-fn selo(texto: impl Into<SharedString>, cx: &gpui_kit::App) -> gpui_kit::Div {
+fn selo(texto: impl Into<SharedString>, cx: &gpui_kit::App) -> gpui_kit::component::tag::Tag {
     estilo::selo_contorno(cx).child(texto.into())
 }
 

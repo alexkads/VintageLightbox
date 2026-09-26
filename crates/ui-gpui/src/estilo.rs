@@ -18,7 +18,9 @@
 //! | `Alert` | [`aviso`] |
 //! | `Dialog` (véu, caixa, cabeçalho, opção, rodapé) | [`veu_do_dialogo`], [`caixa_do_dialogo`], [`cabecalho_do_dialogo`], [`opcao_do_dialogo`], [`rodape_do_dialogo`] |
 
+use gpui_kit::component::alert::Alert;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Disableable as _, Icon, Sizable as _};
 use gpui_kit::{
     div, prelude::*, px, AnyElement, App, Div, FontWeight, Hsla, SharedString, Stateful,
@@ -81,37 +83,39 @@ pub fn botao_do_menu(id: impl Into<SharedString>, _cx: &App) -> Button {
         .child(Icon::new(Icone::PanelLeft).size(px(16.)))
 }
 
-/// `Badge variant="outline"`: pílula de 20 px com borda.
-pub fn selo_contorno(cx: &App) -> Div {
-    let tema = cx.theme();
-    h_flex()
+/// `Badge variant="outline"`: a `Tag` do gpui-kit, em pílula de 22 px com a
+/// borda da página — as medidas do site por cima das do kit.
+pub fn selo_contorno(_cx: &App) -> Tag {
+    Tag::secondary()
+        .outline()
+        .rounded_full()
         .flex_none()
         .h(px(22.))
         .px(px(8.))
+        .py(px(0.))
         .gap(px(6.))
-        .rounded_full()
-        .border_1()
-        .border_color(tema.border)
-        .text_xs()
         .font_weight(FontWeight::MEDIUM)
 }
 
-/// Um selo colorido: fundo, borda e texto (ver `tema::cores::selo_*`).
-pub fn selo_colorido(cores: (Hsla, Hsla, Hsla)) -> Div {
+/// Um selo colorido: a `Tag` do gpui-kit com fundo, borda e texto próprios
+/// (ver `tema::cores::selo_*`).
+pub fn selo_colorido(cores: (Hsla, Hsla, Hsla)) -> Tag {
     let (fundo, borda, texto) = cores;
-    h_flex()
+    Tag::custom(fundo, texto, borda)
+        .rounded(px(6.))
         .flex_none()
         .h(px(20.))
         .px(px(6.))
-        .rounded(px(6.))
-        .border_1()
-        .border_color(borda)
-        .bg(fundo)
-        .text_color(texto)
-        .text_xs()
+        .py(px(0.))
         .font_weight(FontWeight::MEDIUM)
 }
 
+/// 🔑 **A tecla continua desenhada aqui, e não é o `Kbd` do gpui-kit.** O
+/// `Kbd` impõe a cor dele (`muted_foreground` sobre o fundo) — e a tecla do
+/// site herda a do botão em que está: no "Abrir caixa F8" escuro, o "F8" é
+/// claro sobre o próprio botão. Com o `Kbd` viraria uma caixinha cinza dentro
+/// do botão da marca, diferente da web (diretriz do dono: padronizar no kit
+/// *"sem ficar diferente da versão Web"*).
 /// A tecla ao lado do rótulo (`F2`, `F4`…).
 pub fn tecla(texto: impl Into<SharedString>) -> Div {
     div()
@@ -161,34 +165,22 @@ pub fn cabecalho_da_pagina(
         })
 }
 
-/// `Alert`: uma faixa com borda; `perigo` pinta de vermelho.
-pub fn aviso(texto: impl Into<SharedString>, perigo: bool, cx: &App) -> Div {
+/// `Alert`: o do gpui-kit — o padrão já é o do site (texto, fundo da página,
+/// borda); com `perigo`, o vermelho do texto e da borda, **sem** o fundo
+/// tingido que o `error` do kit põe, porque o do site não tem. Respiro e canto
+/// do site por cima dos do kit.
+pub fn aviso(texto: impl Into<SharedString>, perigo: bool, cx: &App) -> Alert {
     let tema = cx.theme();
-    let cor = if perigo { tema.danger } else { tema.foreground };
-    h_flex()
-        .w_full()
-        .gap(px(8.))
-        .px(px(16.))
-        .py(px(12.))
-        .rounded(px(10.))
-        .border_1()
-        .border_color(if perigo {
-            cor.opacity(0.5)
-        } else {
-            tema.border
-        })
-        .bg(tema.background)
-        .text_sm()
-        .text_color(cor)
-        .child(
-            Icon::new(if perigo {
-                Icone::CircleAlert
-            } else {
-                Icone::Info
-            })
-            .size(px(16.)),
-        )
-        .child(div().flex_1().child(texto.into()))
+    let texto: SharedString = texto.into();
+    let alerta = if perigo {
+        Alert::error(texto.clone(), texto)
+            .icon(Icon::new(Icone::CircleAlert).size(px(16.)))
+            .bg(tema.background)
+            .border_color(tema.danger.opacity(0.5))
+    } else {
+        Alert::new(texto.clone(), texto).icon(Icon::new(Icone::Info).size(px(16.)))
+    };
+    alerta.small().px(px(16.)).py(px(12.)).rounded(px(10.))
 }
 
 /// O véu do `Dialog` do site, e a caixa dele — as duas peças de um diálogo.
