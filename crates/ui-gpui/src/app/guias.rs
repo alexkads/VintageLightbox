@@ -1131,6 +1131,12 @@ impl Aplicativo {
             // seriam vários com o mesmo. Fora de uma guia (no `+`, no vão),
             // não há alvo e o menu não abre.
             .context_menu(move |menu, window, cx| {
+                // 🚨 Devolver o foco ao fechar — ver o menu da tira da Revelação:
+                // sem o `action_context`, as teclas da raiz morriam depois dele.
+                let menu = match window.focused(cx) {
+                    Some(antes) => menu.action_context(antes),
+                    None => menu,
+                };
                 let Some(dados) = esta
                     .update(cx, |raiz, _cx| {
                         raiz.edicao_das_guias

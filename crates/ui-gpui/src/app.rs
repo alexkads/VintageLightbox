@@ -7409,6 +7409,72 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
+    /// 🚨 **As setas voltam a andar depois do menu da tira.**
+    ///
+    /// Aberto, o menu do botão direito toma o foco; fechado, o `PopupMenu` só o
+    /// devolve a quem estiver no `action_context`. Sem isso, o foco ficava num
+    /// menu que já não estava na tela, a raiz saía do caminho das teclas e as
+    /// setas paravam de trocar de foto (dono, 2026-09-25).
+    #[gpui::test]
+    fn as_setas_andam_depois_do_menu_da_tira(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        for id in ["id-DSC_001.NEF", "id-retrato.jpg"] {
+            previews
+                .save_preview(id, &foto_vermelha())
+                .expect("gravar preview");
+        }
+        cx.update(gpui_component::init);
+        cx.update(init);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
+        });
+        janela
+            .update(cx, |app, window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(0), cx));
+                app.revelar(window, cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        visual.run_until_parked();
+        let ponto = janela
+            .update(cx, |app, _window, cx| {
+                app.revelacao.read(cx).centro_da_miniatura(1)
+            })
+            .expect("a janela deve estar aberta")
+            .expect("a tira tem de estar desenhada");
+
+        visual.simulate_mouse_down(ponto, gpui::MouseButton::Right, gpui::Modifiers::none());
+        visual.simulate_mouse_up(ponto, gpui::MouseButton::Right, gpui::Modifiers::none());
+        visual.run_until_parked();
+        visual.simulate_keystrokes("escape");
+        visual.run_until_parked();
+
+        visual.simulate_keystrokes("right");
+        janela
+            .update(cx, |app, _window, cx| {
+                assert_eq!(
+                    app.revelacao.read(cx).foto().map(|f| f.name.as_str()),
+                    Some("retrato.jpg"),
+                    "depois de fechar o menu da tira, a seta tem de trocar a foto"
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        visual.simulate_keystrokes("left");
+        janela
+            .update(cx, |app, _window, cx| {
+                assert_eq!(
+                    app.revelacao.read(cx).foto().map(|f| f.name.as_str()),
+                    Some("DSC_001.NEF")
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
     /// 🚨 Andar na Revelação **grava o ajuste pendente da foto que sai**.
     ///
     /// A espera de 500 ms é uma janela de perda, e a seta cai bem no meio dela:

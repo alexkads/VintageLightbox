@@ -1283,7 +1283,20 @@ impl Revelacao {
             // 🔑 **Um menu para a faixa inteira.** A miniatura do botão direito
             // anota quem foi clicada; o menu é montado depois do evento, e lê.
             // No vão entre duas, não há alvo e o menu não abre.
-            .context_menu(move |menu, _window, cx| {
+            .context_menu(move |menu, window, cx| {
+                // 🚨 **O menu tem que saber a quem devolver o foco.** Aberto, ele
+                // toma o foco para si; fechado (Esc, clique fora ou um item), o
+                // `PopupMenu` só o devolve a quem estiver no `action_context` — e
+                // sem ele o foco ficava preso num menu que nem existe mais na
+                // tela. A raiz saía do caminho do foco, e as setas deixavam de
+                // chegar ao `Adiante`/`Atras`: andavam de foto só às vezes, ou
+                // nunca, até um clique qualquer devolver o foco (dono,
+                // 2026-09-25). Isto roda antes de o menu se focar, então
+                // `focused` ainda é quem tinha o foco — em geral, a raiz.
+                let menu = match window.focused(cx) {
+                    Some(antes) => menu.action_context(antes),
+                    None => menu,
+                };
                 let Some(dados) = esta
                     .update(cx, |tela, _cx| {
                         tela.tira.menu.take().and_then(|p| tela.menu_da_tira(p))
@@ -1314,6 +1327,15 @@ impl Revelacao {
 }
 
 impl Revelacao {
+    /// O centro da `k`-ésima miniatura desenhada, na janela — onde um teste dá o
+    /// botão direito. `None` antes do primeiro desenho.
+    #[cfg(test)]
+    pub(crate) fn centro_da_miniatura(&self, k: usize) -> Option<gpui::Point<gpui::Pixels>> {
+        let primeira = self.tira.primeira_desenhada;
+        let elemento = k.checked_sub(primeira)? + usize::from(primeira > 0);
+        Some(self.rolagem_da_tira.bounds_for_item(elemento)?.center())
+    }
+
     /// Um gesto do roteiro de depuração (`tira …`). Devolve onde dar o botão
     /// direito, quando o gesto é `menu`.
     pub fn seguir_o_roteiro_da_tira(
