@@ -282,7 +282,8 @@ impl Aplicativo {
         self.escolha_de_tema
     }
 
-    /// Claro, Escuro ou Sistema — e a escolha fica para a próxima abertura.
+    /// Claro, Escuro, Sistema, Matrix ou Cyberpunk — e a escolha fica para a
+    /// próxima abertura.
     pub fn escolher_tema(&mut self, escolha: Escolha, window: &mut Window, cx: &mut Context<Self>) {
         self.escolha_de_tema = escolha;
         tema::guardar_escolha(&self.arquivo_do_tema, escolha);
@@ -938,6 +939,20 @@ impl Aplicativo {
                         Icone::Monitor,
                         "Sistema",
                         Escolha::Sistema,
+                        cx,
+                    ))
+                    .child(opcao(
+                        "tema-matrix",
+                        Icone::SquareTerminal,
+                        "Matrix",
+                        Escolha::Matrix,
+                        cx,
+                    ))
+                    .child(opcao(
+                        "tema-cyberpunk",
+                        Icone::Zap,
+                        "Cyberpunk",
+                        Escolha::Cyberpunk,
                         cx,
                     ))
                     .child(separador())

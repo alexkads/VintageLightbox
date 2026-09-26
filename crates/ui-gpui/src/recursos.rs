@@ -141,6 +141,8 @@ pub enum Icone {
     Phone,
     // Os quatro da barra de janela, desenhados como os do Zed no Linux —
     // traço fino de 16 px, e não o lucide do resto do app (`crate::janela`).
+    // 🟩 O tema Matrix no menu da conta.
+    SquareTerminal,
     JanelaMinimizar,
     JanelaMaximizar,
     JanelaRestaurar,
@@ -236,6 +238,7 @@ impl Icone {
         Icone::Clock,
         Icone::MapPin,
         Icone::Phone,
+        Icone::SquareTerminal,
         Icone::JanelaMinimizar,
         Icone::JanelaMaximizar,
         Icone::JanelaRestaurar,
@@ -331,6 +334,7 @@ impl Icone {
             Icone::Clock => "clock",
             Icone::MapPin => "map-pin",
             Icone::Phone => "phone",
+            Icone::SquareTerminal => "square-terminal",
             Icone::JanelaMinimizar => "janela-minimizar",
             Icone::JanelaMaximizar => "janela-maximizar",
             Icone::JanelaRestaurar => "janela-restaurar",

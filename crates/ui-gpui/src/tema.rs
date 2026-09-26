@@ -10,6 +10,20 @@
 //! operador escolhe **Claro, Escuro ou Sistema** no menu da conta, como no
 //! site.
 //!
+//! ## 🟩 Matrix e 🌆 Cyberpunk — os dois temas que não vêm do site
+//!
+//! Pedido do dono em 2026-09-26 (*"Eu preciso de dois temas, um Matrix e outro
+//! Cyberpunk"*). São escuros e ficam no mesmo menu, lembrados na máquina como
+//! os outros:
+//!
+//! | Tema | Fundo | Marca | Letra |
+//! |---|---|---|---|
+//! | Matrix | preto esverdeado `#030d06` | o verde fósforo `#00ff41` | a mono do sistema |
+//! | Cyberpunk | azul-noite `#0a0a1f` | amarelo neon `#fcee0a`, rosa `#ff2a6d` no menu lateral, ciano `#05d9e8` no foco | a do sistema |
+//!
+//! O âmbar da nota, o verde de "deu certo" e as etiquetas continuam os de
+//! sempre: são o significado da foto, e não decoração do tema.
+//!
 //! | Token do site | Claro | Escuro |
 //! |---|---|---|
 //! | `--background` | `#ffffff` | `#0a0a0a` |
@@ -48,7 +62,8 @@
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::OnceLock;
 
 use gpui_kit::component::button::ButtonCustomVariant;
 use gpui_kit::component::{Theme, ThemeConfig, ThemeMode};
@@ -59,6 +74,7 @@ use serde_json::Value;
 /// As duas paletas, em `0xrrggbb`.
 mod paleta {
     /// Os tokens do shadcn do site, num modo.
+    #[derive(Debug, PartialEq)]
     pub struct Paleta {
         pub fundo: u32,
         pub texto: u32,
@@ -137,6 +153,60 @@ mod paleta {
         rolagem: 0x404040,
     };
 
+    /// 🟩 Matrix: o verde fósforo sobre preto.
+    pub const MATRIX: Paleta = Paleta {
+        fundo: 0x030d06,
+        texto: 0x5cff8f,
+        cartao: 0x071a0d,
+        primaria: 0x00ff41,
+        // `bg-primary/80` sobre o fundo.
+        primaria_pairando: 0x01cf35,
+        sobre_primaria: 0x021a08,
+        apagado: 0x0b2413,
+        texto_apagado: 0x34b865,
+        acento: 0x0d2e18,
+        sobre_acento: 0x8dffb0,
+        destrutiva: 0xff4d4d,
+        borda: 0x114225,
+        campo: 0x17592f,
+        anel: 0x00ff41,
+        lateral: 0x020805,
+        texto_lateral: 0x5cff8f,
+        marca: 0x00ff41,
+        sobre_marca: 0x021a08,
+        acento_lateral: 0x0d2e18,
+        borda_lateral: 0x114225,
+        poco: 0x000000,
+        rolagem: 0x17592f,
+    };
+
+    /// 🌆 Cyberpunk: neon amarelo, rosa e ciano sobre azul-noite.
+    pub const CYBERPUNK: Paleta = Paleta {
+        fundo: 0x0a0a1f,
+        texto: 0xeae8ff,
+        cartao: 0x141438,
+        primaria: 0xfcee0a,
+        // `bg-primary/80` sobre o fundo.
+        primaria_pairando: 0xccc00e,
+        sobre_primaria: 0x0a0a1f,
+        apagado: 0x1c1c47,
+        texto_apagado: 0xa3a1dc,
+        acento: 0x24245a,
+        sobre_acento: 0x05d9e8,
+        destrutiva: 0xff2a6d,
+        borda: 0x2c2c66,
+        campo: 0x3a3a80,
+        anel: 0x05d9e8,
+        lateral: 0x07071a,
+        texto_lateral: 0xeae8ff,
+        marca: 0xff2a6d,
+        sobre_marca: 0x0a0a1f,
+        acento_lateral: 0x24245a,
+        borda_lateral: 0x2c2c66,
+        poco: 0x05050f,
+        rolagem: 0x3a3a80,
+    };
+
     // ── Tailwind 4, as famílias que o site usa por nome ────────────────────
     pub const AMBAR_50: u32 = 0xfffbeb;
     pub const AMBAR_300: u32 = 0xffd230;
@@ -185,14 +255,20 @@ const RAIO_GRANDE: usize = 10;
 const LETRA: f32 = 14.;
 
 /// Se a tela está no escuro agora. As cores sem `cx` ([`cores`]) leem daqui.
-static ESCURO_AGORA: AtomicBool = AtomicBool::new(true);
+/// Qual paleta está na tela: a de [`Escolha::paleta_escura`] no escuro, a
+/// clara no claro. Guardada como o índice de [`PALETAS`].
+static PALETA_AGORA: AtomicU8 = AtomicU8::new(1);
+
+/// As paletas, na ordem do índice de [`PALETA_AGORA`].
+const PALETAS: [&paleta::Paleta; 4] = [
+    &paleta::CLARO,
+    &paleta::ESCURO,
+    &paleta::MATRIX,
+    &paleta::CYBERPUNK,
+];
 
 fn paleta_atual() -> &'static paleta::Paleta {
-    if ESCURO_AGORA.load(Ordering::Relaxed) {
-        &paleta::ESCURO
-    } else {
-        &paleta::CLARO
-    }
+    PALETAS[PALETA_AGORA.load(Ordering::Relaxed) as usize % PALETAS.len()]
 }
 
 /// O que o operador escolheu no menu da conta.
@@ -204,6 +280,10 @@ pub enum Escolha {
     /// O padrão, como no site: segue o sistema.
     #[default]
     Sistema,
+    /// 🟩 Verde fósforo sobre preto, com a letra mono.
+    Matrix,
+    /// 🌆 Neon sobre azul-noite.
+    Cyberpunk,
 }
 
 impl Escolha {
@@ -212,6 +292,8 @@ impl Escolha {
             "claro" => Some(Self::Claro),
             "escuro" => Some(Self::Escuro),
             "sistema" => Some(Self::Sistema),
+            "matrix" => Some(Self::Matrix),
+            "cyberpunk" => Some(Self::Cyberpunk),
             _ => None,
         }
     }
@@ -220,11 +302,28 @@ impl Escolha {
     pub fn modo(self, aparencia: WindowAppearance) -> ThemeMode {
         match self {
             Self::Claro => ThemeMode::Light,
-            Self::Escuro => ThemeMode::Dark,
+            Self::Escuro | Self::Matrix | Self::Cyberpunk => ThemeMode::Dark,
             Self::Sistema => match aparencia {
                 WindowAppearance::Dark | WindowAppearance::VibrantDark => ThemeMode::Dark,
                 WindowAppearance::Light | WindowAppearance::VibrantLight => ThemeMode::Light,
             },
+        }
+    }
+
+    /// O índice em [`PALETAS`] da paleta que esta escolha pinta no escuro.
+    fn paleta_escura(self) -> u8 {
+        match self {
+            Self::Matrix => 2,
+            Self::Cyberpunk => 3,
+            Self::Claro | Self::Escuro | Self::Sistema => 1,
+        }
+    }
+
+    fn nome_do_escuro(self) -> &'static str {
+        match self {
+            Self::Matrix => "Matrix",
+            Self::Cyberpunk => "Cyberpunk",
+            Self::Claro | Self::Escuro | Self::Sistema => "RecordarFotos Escuro",
         }
     }
 }
@@ -277,17 +376,45 @@ pub fn aplicar(escolha: Escolha, window: Option<&mut Window>, cx: &mut App) {
         .map(|w| w.appearance())
         .unwrap_or_else(|| cx.window_appearance());
     let modo = escolha.modo(aparencia);
+    let escura = escolha.paleta_escura();
+    // 🟩 O Matrix escreve com a mono que o próprio gpui-kit escolheu para este
+    // sistema (Menlo, Consolas…) — nome de fonte escrito à mão faltaria em
+    // algum balcão.
+    //
+    // 🚨 **E os outros devolvem a letra do sistema, dita por extenso.** O
+    // `apply_config` só troca o que vem nele: sem `font.family`, quem saía do
+    // Matrix para o Cyberpunk ficava com a mono (as fotos do roteiro pegaram).
+    // A letra do sistema é a que o tema tinha antes da primeira aplicação.
+    static LETRA_DO_SISTEMA: OnceLock<gpui_kit::SharedString> = OnceLock::new();
+    let do_sistema = LETRA_DO_SISTEMA
+        .get_or_init(|| Theme::global(cx).font_family.clone())
+        .clone();
+    let letra = if escolha == Escolha::Matrix {
+        Theme::global(cx).mono_font_family.clone()
+    } else {
+        do_sistema.clone()
+    };
     let tema = Theme::global_mut(cx);
-    tema.apply_config(&Rc::new(tema_do_site(ThemeMode::Light)));
-    tema.apply_config(&Rc::new(tema_do_site(ThemeMode::Dark)));
-    ESCURO_AGORA.store(modo.is_dark(), Ordering::Relaxed);
+    tema.apply_config(&Rc::new(tema_da_paleta(
+        "RecordarFotos Claro",
+        ThemeMode::Light,
+        PALETAS[0],
+        Some(do_sistema),
+    )));
+    tema.apply_config(&Rc::new(tema_da_paleta(
+        escolha.nome_do_escuro(),
+        ThemeMode::Dark,
+        PALETAS[escura as usize],
+        Some(letra),
+    )));
+    PALETA_AGORA.store(if modo.is_dark() { escura } else { 0 }, Ordering::Relaxed);
     Theme::change(modo, window, cx);
 }
 
 /// As cores que a tela pede pelo nome, e o tema do `gpui-component` não tem
 /// nome para. Seguem o modo da tela.
 pub mod cores {
-    use super::{paleta, paleta_atual, ESCURO_AGORA};
+    use super::{paleta, paleta_atual, PALETA_AGORA};
     use domain::value_objects::ColorLabel;
     use gpui_kit::Hsla;
     use std::sync::atomic::Ordering;
@@ -297,7 +424,7 @@ pub mod cores {
     }
 
     fn escuro() -> bool {
-        ESCURO_AGORA.load(Ordering::Relaxed)
+        PALETA_AGORA.load(Ordering::Relaxed) != 0
     }
 
     /// O fundo de tudo que encosta numa imagem.
@@ -488,11 +615,21 @@ pub fn botao_quente(cx: &App) -> ButtonCustomVariant {
         .active(gpui_kit::rgb(AMBAR_500).into())
 }
 
+/// O tema do site num modo — o que o app sempre instalou.
+#[cfg(test)]
 fn tema_do_site(modo: ThemeMode) -> ThemeConfig {
-    let (nome, p) = match modo {
-        ThemeMode::Light => ("RecordarFotos Claro", &paleta::CLARO),
-        ThemeMode::Dark => ("RecordarFotos Escuro", &paleta::ESCURO),
-    };
+    match modo {
+        ThemeMode::Light => tema_da_paleta("RecordarFotos Claro", modo, &paleta::CLARO, None),
+        ThemeMode::Dark => tema_da_paleta("RecordarFotos Escuro", modo, &paleta::ESCURO, None),
+    }
+}
+
+fn tema_da_paleta(
+    nome: &str,
+    modo: ThemeMode,
+    p: &paleta::Paleta,
+    letra: Option<gpui_kit::SharedString>,
+) -> ThemeConfig {
     let mut config = serde_json::Map::new();
     config.insert("is_default".into(), Value::Bool(true));
     config.insert("name".into(), Value::String(nome.into()));
@@ -505,6 +642,9 @@ fn tema_do_site(modo: ThemeMode) -> ThemeConfig {
     config.insert("font.size".into(), Value::from(LETRA));
     // O `shadow-xs` dos botões e campos do shadcn.
     config.insert("shadow".into(), Value::Bool(true));
+    if let Some(letra) = letra {
+        config.insert("font.family".into(), Value::String(letra.to_string()));
+    }
     config.insert("colors".into(), cores_do_esquema(p));
     serde_json::from_value(Value::Object(config))
         .expect("o tema do site tem de ser legível — `tema_e_legivel` confere isso")
@@ -705,6 +845,77 @@ mod testes {
             "oklch(0.72 0.045 248.63)"
         );
         assert_eq!(paleta::ESCURO.marca, 0x1447e6, "oklch(0.488 0.243 264.376)");
+    }
+
+    /// 🟩🌆 Matrix e Cyberpunk: toda cor é `#rrggbb`, toda chave existe no
+    /// esquema, o texto é legível (WCAG, 4,5:1) e o `bg-primary/80` é a conta.
+    #[test]
+    fn matrix_e_cyberpunk_sao_legiveis() {
+        for (nome, p) in [
+            ("Matrix", &paleta::MATRIX),
+            ("Cyberpunk", &paleta::CYBERPUNK),
+        ] {
+            let config = tema_da_paleta(nome, ThemeMode::Dark, p, Some("Menlo".into()));
+            assert_eq!(config.font_family.as_deref(), Some("Menlo"), "{nome}");
+            let de_volta = serde_json::to_value(&config.colors).expect("as cores devem serializar");
+            for (chave, cor) in cores(p) {
+                assert_eq!(
+                    de_volta.get(chave).and_then(|v| v.as_str()),
+                    Some(hex(cor).as_str()),
+                    "{nome}: `{chave}` fora do esquema"
+                );
+            }
+            for (par, fundo, frente) in [
+                ("texto", p.fundo, p.texto),
+                ("apagado", p.fundo, p.texto_apagado),
+                ("texto no cartão", p.cartao, p.texto),
+                ("primária", p.primaria, p.sobre_primaria),
+                ("acento", p.acento, p.sobre_acento),
+                ("menu lateral", p.lateral, p.texto_lateral),
+                ("marca", p.marca, p.sobre_marca),
+            ] {
+                let razao = contraste(fundo, frente);
+                assert!(
+                    razao >= 4.5,
+                    "{nome}, `{par}`: {razao:.2}:1 — abaixo de 4,5:1"
+                );
+            }
+            let canal = |c: u32, d: u32| ((c >> d) & 0xff) as f32;
+            for d in [16, 8, 0] {
+                let conta = canal(p.primaria, d) * 0.8 + canal(p.fundo, d) * 0.2;
+                assert!(
+                    (canal(p.primaria_pairando, d) - conta).abs() <= 1.,
+                    "{nome}: `primaria_pairando` não é o primary/80"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn matrix_e_cyberpunk_sao_escuros_e_ficam_lembrados() {
+        for (nome, escolha) in [
+            ("matrix", Escolha::Matrix),
+            ("cyberpunk", Escolha::Cyberpunk),
+        ] {
+            assert_eq!(Escolha::do_nome(nome), Some(escolha));
+            assert_eq!(escolha.modo(WindowAppearance::Light), ThemeMode::Dark);
+            let pasta = tempfile::tempdir().unwrap();
+            let arquivo = pasta.path().join("tema.json");
+            guardar_escolha(&arquivo, escolha);
+            assert_eq!(escolha_guardada(&arquivo), escolha);
+        }
+        assert_eq!(
+            PALETAS[Escolha::Matrix.paleta_escura() as usize],
+            &paleta::MATRIX
+        );
+        assert_eq!(
+            PALETAS[Escolha::Cyberpunk.paleta_escura() as usize],
+            &paleta::CYBERPUNK
+        );
+        assert_eq!(
+            PALETAS[Escolha::Escuro.paleta_escura() as usize],
+            &paleta::ESCURO
+        );
     }
 
     #[test]
