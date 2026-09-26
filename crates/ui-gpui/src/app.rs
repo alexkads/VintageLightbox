@@ -489,6 +489,9 @@ pub struct Aplicativo {
     menu_da_conta: bool,
     /// Quem está logado, de `/auth/me`.
     conta: Option<Conta>,
+    /// A foto do perfil, baixada ao entrar. Sem ela, o retrato é a inicial.
+    retrato: Option<std::sync::Arc<gpui_kit::RenderImage>>,
+    _retrato: Option<gpui_kit::Task<()>>,
     recados_da_conta: (Sender<PosVendaRecado>, Receiver<PosVendaRecado>),
     _conta: Option<gpui_kit::Task<()>>,
     /// Claro, Escuro ou Sistema, e onde a escolha fica lembrada.
@@ -1216,6 +1219,8 @@ impl Aplicativo {
             menu_aberto: false,
             menu_da_conta: false,
             conta: None,
+            retrato: None,
+            _retrato: None,
             recados_da_conta: channel(),
             _conta: None,
             escolha_de_tema,

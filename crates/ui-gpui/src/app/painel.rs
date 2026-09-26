@@ -45,6 +45,9 @@ pub struct Conta {
     /// O `role` do cadastro (`ADMIN`, `USER`…). Só serve para esconder o que
     /// o backend recusaria — quem autoriza é ele.
     pub papel: Option<String>,
+    /// A foto do perfil (a do Google, para quem entra por ele) — a coluna
+    /// `avatar` de `users`, a mesma que o menu do site mostra.
+    pub avatar: Option<String>,
 }
 
 impl Conta {
@@ -66,7 +69,18 @@ impl Conta {
             .get("role")
             .and_then(|v| v.as_str())
             .map(str::to_string);
-        Some(Conta { nome, email, papel })
+        let avatar = usuario
+            .get("avatar")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|a| a.starts_with("https://") || a.starts_with("http://"))
+            .map(str::to_string);
+        Some(Conta {
+            nome,
+            email,
+            papel,
+            avatar,
+        })
     }
 
     /// 🗑️ É o SuperAdmin — o único que exclui e restaura sessão?
@@ -307,6 +321,8 @@ impl Aplicativo {
         });
         self.sessao = None;
         self.conta = None;
+        self.retrato = None;
+        self._retrato = None;
         self.sessoes
             .update(cx, |t, cx| t.definir_super_admin(false, cx));
         self.tela = Tela::Sessoes;
@@ -342,6 +358,30 @@ impl Aplicativo {
         }));
     }
 
+    /// 🖼️ **A foto do perfil**, como no menu do site. Baixada uma vez por
+    /// entrada, numa thread: o cliente é bloqueante e a interface não espera.
+    /// Falhou (a URL do Google expira quando a pessoa troca a foto, ou a rede
+    /// caiu), fica a inicial — o `AvatarFallback` do site.
+    fn baixar_o_retrato(&mut self, cx: &mut Context<Self>) {
+        self.retrato = None;
+        let Some(endereco) = self.conta.as_ref().and_then(|c| c.avatar.clone()) else {
+            self._retrato = None;
+            return;
+        };
+        let baixando = cx
+            .background_executor()
+            .spawn(async move { retrato_de(&endereco) });
+        self._retrato = Some(cx.spawn(async move |raiz, cx| {
+            let Some(retrato) = baixando.await else {
+                return;
+            };
+            let _ = raiz.update(cx, |raiz, cx| {
+                raiz.retrato = Some(retrato);
+                cx.notify();
+            });
+        }));
+    }
+
     pub(crate) fn colher_conta(&mut self, cx: &mut Context<Self>) -> bool {
         let mut chegou = false;
         while let Ok(recado) = self.recados_da_conta.1.try_recv() {
@@ -354,6 +394,7 @@ impl Aplicativo {
                 match resultado {
                     Ok(valor) => {
                         self.conta = Conta::da_resposta(&valor);
+                        self.baixar_o_retrato(cx);
                         // 🗑️ A lixeira da lista só aparece para o SuperAdmin,
                         // e só agora se sabe quem entrou.
                         let pode = self.conta.as_ref().is_some_and(Conta::e_super_admin);
@@ -523,7 +564,15 @@ impl Aplicativo {
         }
     }
 
-    fn retrato(&self, cx: &Context<Self>) -> impl IntoElement {
+    fn retrato(&self, cx: &Context<Self>) -> AnyElement {
+        if let Some(retrato) = self.retrato.clone() {
+            return gpui_kit::img(retrato)
+                .flex_none()
+                .size(px(32.))
+                .rounded(px(8.))
+                .object_fit(gpui_kit::ObjectFit::Cover)
+                .into_any_element();
+        }
         let tema = cx.theme();
         div()
             .flex_none()
@@ -541,6 +590,7 @@ impl Aplicativo {
                     .map(Conta::inicial)
                     .unwrap_or_else(|| "·".into()),
             )
+            .into_any_element()
     }
 
     fn nome_e_email(&self, apagado: gpui_kit::Hsla) -> impl IntoElement {
@@ -763,7 +813,15 @@ impl Aplicativo {
                 .rounded(px(6.))
                 .cursor_pointer()
                 .hover(move |s| s.bg(acento))
-                .child(Icon::new(icone).size(px(16.)).text_color(apagado))
+                // 🔑 `flex_none`: com algo à direita (a versão, o ✓) o
+                // flex encolhia a caixa do ícone, o desenho de 16 px invadia
+                // o espaço e o texto encostava nele (dono, 2026-09-26).
+                .child(
+                    Icon::new(icone)
+                        .size(px(16.))
+                        .flex_none()
+                        .text_color(apagado),
+                )
         };
         let opcao = |id: &'static str,
                      icone: Icone,
@@ -893,7 +951,7 @@ impl Aplicativo {
                             .cursor_pointer()
                             .text_color(perigo)
                             .hover(move |s| s.bg(perigo.opacity(0.1)))
-                            .child(Icon::new(Icone::LogOut).size(px(16.)))
+                            .child(Icon::new(Icone::LogOut).size(px(16.)).flex_none())
                             .child("Sair")
                             .on_click(cx.listener(|raiz, _, _window, cx| raiz.sair_da_conta(cx))),
                     ),
@@ -1059,6 +1117,28 @@ impl Aplicativo {
     }
 }
 
+/// Baixa e decodifica a foto do perfil. **Bloqueia**: chamar fora da thread da
+/// interface.
+fn retrato_de(endereco: &str) -> Option<std::sync::Arc<gpui_kit::RenderImage>> {
+    let cliente = cargo_packager_updater::reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .ok()?;
+    let resposta = cliente.get(endereco).send().ok()?;
+    if !resposta.status().is_success() {
+        eprintln!(
+            "⚠️ [Conta] a foto do perfil respondeu {}",
+            resposta.status()
+        );
+        return None;
+    }
+    let bytes = resposta.bytes().ok()?;
+    let imagem = image::load_from_memory(&bytes).ok()?;
+    // 64 px bastam para um retrato de 32 em tela Retina.
+    let imagem = imagem.thumbnail(64, 64);
+    Some(crate::imagem::para_gpui(imagem))
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -1080,6 +1160,26 @@ mod testes {
         assert_eq!(conta.inicial(), "X");
 
         assert!(Conta::da_resposta(&serde_json::json!({"ok": true})).is_none());
+    }
+
+    #[test]
+    fn a_foto_do_perfil_vem_do_avatar_e_so_se_for_endereco() {
+        let com_foto = serde_json::json!({"user": {
+            "email": "alexkads@gmail.com",
+            "avatar": "https://lh3.googleusercontent.com/a/abc=s96-c"
+        }});
+        assert_eq!(
+            Conta::da_resposta(&com_foto).unwrap().avatar.as_deref(),
+            Some("https://lh3.googleusercontent.com/a/abc=s96-c")
+        );
+        for sem in [
+            serde_json::json!({"email": "a@b.c"}),
+            serde_json::json!({"email": "a@b.c", "avatar": null}),
+            serde_json::json!({"email": "a@b.c", "avatar": "  "}),
+            serde_json::json!({"email": "a@b.c", "avatar": "data:image/png;base64,AAAA"}),
+        ] {
+            assert_eq!(Conta::da_resposta(&sem).unwrap().avatar, None, "{sem}");
+        }
     }
 
     #[test]
