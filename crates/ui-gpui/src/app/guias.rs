@@ -386,8 +386,9 @@ pub(super) fn arquivo() -> Option<PathBuf> {
 pub(super) struct Edicao {
     /// A guia do último botão direito. O menu é montado depois do evento, e lê.
     alvo_do_menu: Option<String>,
-    /// A guia com o nome em edição.
-    renome: Option<Renome>,
+    /// A guia com o nome em edição — um campo que some com o foco dentro, e
+    /// por isso no contrato de [`crate::modal::Modal`].
+    renome: crate::modal::Modal<Renome>,
     /// Onde cada guia foi desenhada no último quadro — o roteiro de depuração
     /// abre o menu sobre ela.
     desenhadas: std::rc::Rc<std::cell::RefCell<Vec<gpui::Bounds<gpui::Pixels>>>>,
@@ -712,10 +713,10 @@ impl Aplicativo {
         let assinatura = cx.subscribe_in(
             &campo,
             window,
-            |raiz: &mut Self, _campo, evento: &InputEvent, _window, cx| match evento {
-                InputEvent::PressEnter { .. } | InputEvent::Blur => {
-                    raiz.confirmar_renome_da_guia(cx)
-                }
+            |raiz: &mut Self, _campo, evento: &InputEvent, window, cx| match evento {
+                InputEvent::PressEnter { .. } => raiz.confirmar_renome_da_guia(Some(window), cx),
+                // Clicou fora: o foco já foi para onde o operador quis.
+                InputEvent::Blur => raiz.confirmar_renome_da_guia(None, cx),
                 _ => {}
             },
         );
@@ -735,17 +736,34 @@ impl Aplicativo {
             });
         })
         .detach();
-        self.edicao_das_guias.renome = Some(Renome {
-            id,
-            campo,
-            _assinatura: assinatura,
-        });
+        // 🔑 **O foco volta para a raiz**, e não para "quem o tinha": pelo menu
+        // de contexto, quem o tinha é o próprio menu, que já sumiu.
+        self.edicao_das_guias.renome.abrir_devolvendo_a(
+            Renome {
+                id,
+                campo,
+                _assinatura: assinatura,
+            },
+            self.foco.clone(),
+            window,
+        );
         cx.notify();
     }
 
     /// Enter, ou clicar fora: o nome digitado vale. Vazio volta ao da sessão.
-    pub fn confirmar_renome_da_guia(&mut self, cx: &mut Context<Self>) {
-        let Some(renome) = self.edicao_das_guias.renome.take() else {
+    ///
+    /// Com `window` (o Enter) o foco volta à raiz; sem ela (o `Blur`), ele
+    /// fica onde o operador clicou.
+    pub fn confirmar_renome_da_guia(
+        &mut self,
+        window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) {
+        let renome = match window {
+            Some(window) => self.edicao_das_guias.renome.fechar(window),
+            None => self.edicao_das_guias.renome.largar(),
+        };
+        let Some(renome) = renome else {
             return;
         };
         let nome = renome.campo.read(cx).value().to_string();
@@ -753,8 +771,8 @@ impl Aplicativo {
     }
 
     /// Esc: a guia fica com o nome que tinha.
-    pub fn cancelar_renome_da_guia(&mut self, cx: &mut Context<Self>) {
-        if self.edicao_das_guias.renome.take().is_some() {
+    pub fn cancelar_renome_da_guia(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.edicao_das_guias.renome.fechar(window).is_some() {
             cx.notify();
         }
     }
@@ -876,7 +894,7 @@ impl Aplicativo {
     }
 
     pub fn renomeando_guia_para_teste(&self) -> Option<&str> {
-        self.edicao_das_guias.renome.as_ref().map(|r| r.id.as_str())
+        self.edicao_das_guias.renome.aberto().map(|r| r.id.as_str())
     }
 
     // ── O desenho ────────────────────────────────────────────────────────
@@ -909,7 +927,7 @@ impl Aplicativo {
         let renome = self
             .edicao_das_guias
             .renome
-            .as_ref()
+            .aberto()
             .map(|r| (r.id.clone(), r.campo.clone()));
 
         let guias = self.guias.lista().iter().enumerate().map(|(i, guia)| {
@@ -1057,8 +1075,8 @@ impl Aplicativo {
                         div()
                             .flex_1()
                             .min_w(px(0.))
-                            .on_action(cx.listener(|raiz, _: &Escape, _window, cx| {
-                                raiz.cancelar_renome_da_guia(cx)
+                            .on_action(cx.listener(|raiz, _: &Escape, window, cx| {
+                                raiz.cancelar_renome_da_guia(window, cx)
                             }))
                             .child(Input::new(&campo).xsmall()),
                     ),

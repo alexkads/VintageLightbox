@@ -136,7 +136,7 @@ fn faixa_e_preco_em_lote_pela_grade_e_filmstrip(cx: &mut TestAppContext) {
     clicar(&e, cx, "lote-negociar");
     e.app(cx, |app, _, _| assert!(app.no_balcao()));
 
-    e.app(cx, |app, _, cx| app.fechar_balcao(cx));
+    e.app(cx, |app, window, cx| app.fechar_balcao(window, cx));
     let visual = VisualTestContext::from_window(e.raiz.into(), cx);
     visual.simulate_resize(gpui::size(gpui::px(1600.), gpui::px(1100.)));
     clicar(&e, cx, "lote-apagar");
@@ -848,6 +848,126 @@ fn o_acerto_da_foto_volta_preenchido(cx: &mut TestAppContext) {
         assert_eq!(balcao.parceiro(), "LançadorDeOfertas");
         assert!(balcao.existente());
     });
+}
+
+/// ⌨️ **Todo jeito de fechar a negociação devolve as teclas.** O diálogo toma
+/// o foco para o campo "Motivo"; fechá-lo sem devolver deixava o foco no campo
+/// que sumiu, e a nota, o `B` e as setas morriam até o próximo clique (dono,
+/// 2026-09-26). Cada caminho de saída é conferido pela tecla, e não pelo foco:
+/// é a tecla que o operador sente.
+#[gpui::test]
+fn todo_jeito_de_fechar_a_negociacao_devolve_as_teclas(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    let aditivo = Modifiers {
+        #[cfg(target_os = "macos")]
+        platform: true,
+        #[cfg(not(target_os = "macos"))]
+        control: true,
+        ..Modifiers::none()
+    };
+    clicar(&e, cx, "sessao-tile-a");
+    clicar_com(&e, cx, "tira-d", aditivo);
+
+    type Saida = (&'static str, fn(&Estudio, &mut TestAppContext));
+    let saidas: [Saida; 5] = [
+        ("o X", |e, cx| clicar(e, cx, "balcao-fechar")),
+        ("Cancelar", |e, cx| clicar(e, cx, "balcao-cancelar")),
+        ("Esc", |e, cx| e.teclar(cx, "escape")),
+        ("o véu", |e, cx| {
+            let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+            let veu = visual
+                .debug_bounds("balcao-veu")
+                .expect("o véu está na tela");
+            let canto = veu.origin + gpui::point(gpui::px(8.), gpui::px(8.));
+            visual.simulate_click(canto, Modifiers::none());
+            visual.run_until_parked();
+        }),
+        ("Salvar", |e, cx| {
+            clicar(e, cx, "balcao-registrar");
+            e.esperar(cx);
+        }),
+    ];
+    for (nota, (saida, fechar)) in (1..).zip(saidas) {
+        clicar(&e, cx, "lote-negociar");
+        e.app(cx, |app, _, _| {
+            assert!(app.no_balcao(), "{saida}: o balcão abriu")
+        });
+        fechar(&e, cx);
+        e.app(cx, |app, _, _| {
+            assert!(!app.no_balcao(), "{saida}: o balcão fechou")
+        });
+
+        // `teclar` já recusa foco caído; a nota chegar ao site é a prova.
+        let antes = e.site.negociadas().len();
+        e.teclar(cx, &nota.to_string());
+        e.esperar(cx);
+        let negociadas = e.site.negociadas();
+        assert!(
+            negociadas[antes..]
+                .iter()
+                .any(|(_, m)| m.nota == Some(Some(nota))),
+            "{saida}: a tecla {nota} não chegou à foto depois de fechar: {:?}",
+            &negociadas[antes..]
+        );
+    }
+}
+
+/// ⌨️ **Todo diálogo da galeria devolve as teclas ao fechar.** O defeito do
+/// balcão se repetia de diálogo em diálogo (dono, 2026-09-26: *"isso não pode
+/// ser assim"*): cada um que toma o foco para um campo e fecha sem devolver
+/// mata a nota, o `B` e as setas. Aqui cada um é aberto e fechado pelo clique,
+/// e a prova é a tecla — `teclar` recusa seguir se o foco caiu
+/// ([`Estudio::teclas_vivas`]), e a nota tem de chegar à foto.
+///
+/// Diálogo novo na galeria entra nesta lista.
+#[gpui::test]
+fn todo_dialogo_da_galeria_devolve_as_teclas(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    // O "Apagar do site" fica no fim da coluna do lote.
+    VisualTestContext::from_window(e.raiz.into(), cx)
+        .simulate_resize(gpui::size(gpui::px(1600.), gpui::px(1100.)));
+    let aditivo = Modifiers {
+        #[cfg(target_os = "macos")]
+        platform: true,
+        #[cfg(not(target_os = "macos"))]
+        control: true,
+        ..Modifiers::none()
+    };
+    clicar(&e, cx, "sessao-tile-a");
+    clicar_com(&e, cx, "tira-d", aditivo);
+
+    let dialogos: [(&str, &'static str, &'static str); 6] = [
+        ("negociação", "lote-negociar", "balcao-fechar"),
+        (
+            "dados do cliente",
+            "sessao-editar-cliente",
+            "sessao-cliente-cancelar",
+        ),
+        (
+            "dados do cliente pelo X",
+            "sessao-editar-cliente",
+            "sessao-cliente-fechar",
+        ),
+        ("importar", "detalhe-importar", "importar-cancelar"),
+        ("apagar do site", "lote-apagar", "apagar-cancelar"),
+        ("exportar", "detalhe-exportar", "fechar-exportacao"),
+    ];
+    for (i, (nome, abre, fecha)) in dialogos.into_iter().enumerate() {
+        let nota = i % 5 + 1;
+        clicar(&e, cx, abre);
+        clicar(&e, cx, fecha);
+        let antes = e.site.negociadas().len();
+        e.teclar(cx, &nota.to_string());
+        e.esperar(cx);
+        let negociadas = e.site.negociadas();
+        assert!(
+            negociadas[antes..]
+                .iter()
+                .any(|(_, m)| m.nota == Some(Some(nota as i16))),
+            "{nome}: a tecla {nota} não chegou à foto depois de fechar: {:?}",
+            &negociadas[antes..]
+        );
+    }
 }
 
 /// 🎬 **Negociar e imprimir as marcadas**: os botões da barra levam a seleção

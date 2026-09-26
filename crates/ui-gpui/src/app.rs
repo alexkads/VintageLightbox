@@ -34,7 +34,7 @@ use adapters::view_models::PhotoViewModel;
 use domain::entities::Preset;
 use domain::value_objects::CropSettings;
 use gpui::{
-    actions, div, prelude::*, px, Context, Entity, FocusHandle, SharedString, Task, Window,
+    actions, div, prelude::*, px, App, Context, Entity, FocusHandle, SharedString, Task, Window,
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::{ActiveTheme, Sizable};
@@ -62,6 +62,7 @@ use crate::exportacao::tela::Exportacao;
 use crate::importacao::explorador::{Explorador, GeradorDeMiniaturas, Importador, SeletorDePasta};
 use crate::importacao::tela::{Importacao, Importou};
 use crate::impressao::tela::Impressao;
+use crate::modal::Modal;
 use crate::pos_venda::porta::Recado as PosVendaRecado;
 use crate::pos_venda::porta::{Natureza, PedidoDeFoto, Publicador};
 use crate::revelacao::persistencia::{self, Gravador};
@@ -450,7 +451,9 @@ pub struct Aplicativo {
     /// O modal do pós-venda — o único caminho do app até o site.
     /// O balcão: o que o cliente acertou ao levar a foto na hora.
     pub(crate) balcao: Entity<Balcao>,
-    no_balcao: bool,
+    /// Aberto ou não — e quem tinha o foco, para devolver ao fechar
+    /// ([`crate::modal`]).
+    no_balcao: Modal<()>,
     _pedido_do_balcao: gpui::Subscription,
     /// A lista de sessões fotográficas.
     pub(crate) sessoes: Entity<Sessoes>,
@@ -775,6 +778,11 @@ pub struct Aplicativo {
     /// Sem isto, `Esc` só funcionaria enquanto algum filho focável estivesse
     /// ativo — e a tela de Revelação não tem nenhum ainda.
     foco: FocusHandle,
+    /// 🛟 A rede do foco ([`Aplicativo::foco_perdido`]).
+    _rede_do_foco: gpui::Subscription,
+    /// Quantas vezes a rede apanhou um foco caído. Em teste é defeito: alguma
+    /// sobreposição fechou sem passar pelo [`crate::modal::Modal`].
+    pub(crate) focos_perdidos: usize,
     /// Quem relê o catálogo quando a importação termina.
     acervo: Arc<dyn Acervo>,
     /// Quem grava — aqui usado pelo colar, que escreve em N fotos de uma vez.
@@ -958,6 +966,11 @@ impl Aplicativo {
         // idêntico ao que acabou de custar dois commits para aparecer.
         let foco = cx.focus_handle();
         window.focus(&foco);
+        // 🛟 **A rede**: o elemento focado sumiu e nada mais tem foco — um
+        // diálogo fechou sem devolver. Sem ela, nenhuma tecla chega a ninguém
+        // até o próximo clique.
+        let rede_do_foco =
+            cx.on_focus_lost(window, |raiz, window, cx| raiz.foco_perdido(window, cx));
 
         // A segunda tela acompanha a seleção da Biblioteca. `observe` dispara a
         // cada `notify` dela — que é exatamente quando a seleção pode ter mudado.
@@ -989,15 +1002,19 @@ impl Aplicativo {
         });
 
         let balcao = cx.new(|cx| Balcao::nova(publicador_do_balcao, window, cx));
-        let pedido_do_balcao = cx.subscribe(&balcao, |raiz, _tela, evento: &EventoDoBalcao, cx| {
-            let EventoDoBalcao::Fechar { gravou } = evento;
-            if *gravou {
-                // A grade da sessão mostra a etiqueta do acerto: relê sem
-                // sair dela.
-                raiz.detalhe.update(cx, |tela, cx| tela.reler(cx));
-            }
-            raiz.fechar_balcao(cx);
-        });
+        let pedido_do_balcao = cx.subscribe_in(
+            &balcao,
+            window,
+            |raiz, _tela, evento: &EventoDoBalcao, window, cx| {
+                let EventoDoBalcao::Fechar { gravou } = evento;
+                if *gravou {
+                    // A grade da sessão mostra a etiqueta do acerto: relê sem
+                    // sair dela.
+                    raiz.detalhe.update(cx, |tela, cx| tela.reler(cx));
+                }
+                raiz.fechar_balcao(window, cx);
+            },
+        );
         let sessoes = cx.new(|cx| Sessoes::nova(publicador_das_sessoes, window, cx));
         let sessao_escolhida = cx.subscribe(&sessoes, |raiz, _tela, evento: &Escolhida, cx| {
             raiz.entrar_na_sessao(evento.0.clone(), cx);
@@ -1178,7 +1195,7 @@ impl Aplicativo {
             sessao: None,
             _escolha: escolha,
             balcao,
-            no_balcao: false,
+            no_balcao: Modal::default(),
             _pedido_do_balcao: pedido_do_balcao,
             sessoes,
             detalhe,
@@ -1269,6 +1286,8 @@ impl Aplicativo {
             baixas: resolucao_cheia::Baixas::nova(),
             tela: Tela::Biblioteca,
             foco,
+            _rede_do_foco: rede_do_foco,
+            focos_perdidos: 0,
             acervo: portas.acervo,
             gravador: gravador_para_colar,
             area_de_transferencia: None,
@@ -2253,9 +2272,9 @@ impl Aplicativo {
                     return;
                 }
                 let (alvos, fora, abertura) = (alvos.clone(), *fora, abertura.clone());
+                self.no_balcao.abrir((), window, cx);
                 self.balcao
                     .update(cx, |tela, cx| tela.abrir(alvos, fora, abertura, window, cx));
-                self.no_balcao = true;
                 cx.notify();
             }
             // 🗑️ "Apagar" no painel da foto: o mesmo `DELETE` de zerar a
@@ -2891,22 +2910,58 @@ impl Aplicativo {
         if fotos.is_empty() {
             return;
         }
+        self.no_balcao.abrir((), window, cx);
         self.balcao
             .update(cx, |tela, cx| tela.abrir_para(fotos, window, cx));
-        self.no_balcao = true;
         cx.notify();
     }
 
-    pub fn fechar_balcao(&mut self, cx: &mut Context<Self>) {
-        self.no_balcao = false;
+    pub fn fechar_balcao(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // 🔑 O foco volta para quem o tinha — a grade da sessão, a tira.
+        self.no_balcao.fechar(window);
         // O que foi registrado mudou a foto no site, e a grade mostra o selo do
         // que está lá: reler é o que faz a mudança aparecer.
         self.reler_o_acervo(cx);
         cx.notify();
     }
 
+    /// 🛟 **A rede do foco.** O GPUI chama isto quando o elemento focado some
+    /// da árvore e nada mais tem foco. O foco vai para a tela da frente, onde
+    /// moram os atalhos dela.
+    ///
+    /// ⚠️ É rede, não caminho: a sobreposição que fecha pelo
+    /// [`crate::modal::Modal`] devolve o foco **para onde ele estava** (a foto
+    /// da tira, o campo da busca), e a rede só sabe a tela. Por isso cada
+    /// queda é contada, e os testes de ponta a ponta recusam seguir com ela.
+    fn foco_perdido(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.focos_perdidos += 1;
+        eprintln!(
+            "⚠️ [Foco] caiu num elemento que sumiu — devolvido à tela {:?}",
+            self.tela
+        );
+        let foco = self.foco_da_tela(cx);
+        window.focus(&foco);
+    }
+
+    /// O foco da raiz — tudo o que a janela principal desenha está dentro dele.
+    #[cfg(test)]
+    pub(crate) fn foco_da_raiz(&self) -> &FocusHandle {
+        &self.foco
+    }
+
+    /// Quem recebe as teclas da tela da frente.
+    fn foco_da_tela(&self, cx: &App) -> FocusHandle {
+        match self.tela {
+            Tela::Caixa if !self.caixa.read(cx).flutuante() => self.caixa.read(cx).foco(),
+            Tela::NovaSessao => gpui::Focusable::focus_handle(self.nova_sessao.read(cx), cx),
+            Tela::Backup => self.backup.read(cx).foco(),
+            Tela::Agenda => self.agenda.read(cx).foco.clone(),
+            _ => self.foco.clone(),
+        }
+    }
+
     pub fn no_balcao(&self) -> bool {
-        self.no_balcao
+        self.no_balcao.esta_aberto()
     }
 
     /// Espera a resposta de `quantas` pedidos do mesmo tipo, na conta certa.
@@ -5376,6 +5431,7 @@ impl Aplicativo {
                             .child(div().text_xs().child("Exportar fotos"))
                             .child(
                                 Button::new("fechar-exportacao")
+                                    .debug_selector(|| "fechar-exportacao".into())
                                     .label("Fechar")
                                     .xsmall()
                                     .on_click(cx.listener(|este, _ev, window, cx| {
@@ -5695,7 +5751,9 @@ impl Render for Aplicativo {
             .when(self.exportando, |raiz| {
                 raiz.child(self.modal_de_exportacao(cx))
             })
-            .when(self.no_balcao, |raiz| raiz.child(self.modal_do_balcao(cx)))
+            .when(self.no_balcao.esta_aberto(), |raiz| {
+                raiz.child(self.modal_do_balcao(cx))
+            })
             .when_some(
                 self.biblioteca.read(cx).confirmando_apagar(),
                 |raiz, quantas| raiz.child(self.aviso_de_apagar(quantas, cx)),

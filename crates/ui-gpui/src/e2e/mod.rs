@@ -599,10 +599,38 @@ impl Estudio {
     }
 
     /// Teclas de verdade, na janela principal.
+    ///
+    /// 🚨 **Antes de apertar, confere que a tecla tem para onde ir**
+    /// ([`Estudio::teclas_vivas`]). Tecla que não chega a ninguém não falha:
+    /// ela não faz nada — e o teste que só conferia o efeito dela dizia "a
+    /// foto não mudou" sem apontar o diálogo que roubou o foco.
     pub fn teclar(&self, cx: &mut TestAppContext, teclas: &str) {
+        self.teclas_vivas(cx);
         let mut visual = VisualTestContext::from_window(self.raiz.into(), cx);
         visual.simulate_keystrokes(teclas);
         cx.run_until_parked();
+    }
+
+    /// 🪟 **O foco está vivo**: há um elemento focado, ele está desenhado, e a
+    /// rede da raiz nunca precisou apanhar um foco caído. A rede salva o
+    /// operador, mas devolve o foco à tela e não para onde ele estava — então
+    /// aqui cada queda é defeito de uma sobreposição que fechou sem o
+    /// [`crate::modal::Modal`].
+    pub fn teclas_vivas(&self, cx: &mut TestAppContext) {
+        let visual = VisualTestContext::from_window(self.raiz.into(), cx);
+        visual.run_until_parked();
+        self.app(cx, |app, window, cx| {
+            assert_eq!(
+                app.focos_perdidos, 0,
+                "uma sobreposição fechou sem devolver o foco: ele caiu num \
+                 elemento que sumiu, e só a rede da raiz o salvou — use \
+                 crate::modal::Modal"
+            );
+            assert!(
+                app.foco_da_raiz().contains_focused(window, cx),
+                "nada desenhado tem o foco: as teclas não chegam a ninguém"
+            );
+        });
     }
 
     /// Solta uma tecla — o `simulate_keystrokes` só aperta, e o `Z`, o

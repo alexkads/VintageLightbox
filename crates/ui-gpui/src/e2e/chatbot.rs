@@ -952,12 +952,14 @@ fn assumir_no_site_pergunta_quem_e_e_lembra_o_nome(cx: &mut TestAppContext) {
     clicar(&e, cx, "chatbot-alternar");
     chatbot(&e, cx, |t, _w, _cx| {
         assert_eq!(
-            t.dialogo,
+            t.dialogo.aberto().cloned(),
             Some(Dialogo::QuemAssume(Chave::nova(Canal::Web, "sess-1")))
         )
     });
     clicar(&e, cx, "quem-cancelar");
-    chatbot(&e, cx, |t, _w, _cx| assert_eq!(t.dialogo, None));
+    chatbot(&e, cx, |t, _w, _cx| {
+        assert_eq!(t.dialogo.aberto().cloned(), None)
+    });
     assert!(!caminhos(&e).iter().any(|c| c.contains("/assumir")));
 
     clicar(&e, cx, "chatbot-alternar");
@@ -973,7 +975,7 @@ fn assumir_no_site_pergunta_quem_e_e_lembra_o_nome(cx: &mut TestAppContext) {
         .expect("assumiu");
     assert_eq!(assumida.corpo.unwrap(), json!({"atendente": "Ana Paula"}));
     chatbot(&e, cx, |t, _w, cx| {
-        assert_eq!(t.dialogo, None);
+        assert_eq!(t.dialogo.aberto().cloned(), None);
         assert_eq!(t.preferencias.atendente, "Ana Paula");
         // A leitura voltou com o site dizendo "não assumida": o botão é Assumir.
         assert!(!t.conversa_aberta().unwrap().atendimento_humano);
@@ -1014,7 +1016,10 @@ fn excluir_historico_so_com_a_frase_letra_por_letra(cx: &mut TestAppContext) {
     clicar(&e, cx, "chatbot-mais-acoes");
     clicar(&e, cx, "chatbot-excluir-historico");
     chatbot(&e, cx, |t, _w, _cx| {
-        assert!(matches!(t.dialogo, Some(Dialogo::ExcluirHistorico(_))))
+        assert!(matches!(
+            t.dialogo.aberto(),
+            Some(Dialogo::ExcluirHistorico(_))
+        ))
     });
     let apagou = |e: &Estudio| caminhos(e).iter().any(|c| c.starts_with("DELETE"));
 
@@ -1038,7 +1043,9 @@ fn excluir_historico_so_com_a_frase_letra_por_letra(cx: &mut TestAppContext) {
         "Histórico de mensagens excluído com sucesso (7 mensagens)".into(),
         false
     )));
-    chatbot(&e, cx, |t, _w, _cx| assert_eq!(t.dialogo, None));
+    chatbot(&e, cx, |t, _w, _cx| {
+        assert_eq!(t.dialogo.aberto().cloned(), None)
+    });
 }
 
 // ── Urgências ──────────────────────────────────────────────────────────────
@@ -1051,7 +1058,7 @@ fn urgencias_assumir_resolver_descartar_e_ver_a_conversa(cx: &mut TestAppContext
     let e = abrir_o_chatbot(cx);
     clicar(&e, cx, "chatbot-urgentes");
     chatbot(&e, cx, |t, _w, _cx| {
-        assert_eq!(t.dialogo, Some(Dialogo::Urgencias))
+        assert_eq!(t.dialogo.aberto().cloned(), Some(Dialogo::Urgencias))
     });
 
     clicar(&e, cx, "urgencia-assumir-0");
@@ -1092,14 +1099,18 @@ fn urgencias_assumir_resolver_descartar_e_ver_a_conversa(cx: &mut TestAppContext
     );
     assert!(toasts(&e, cx).contains(&("Urgência resolvida com sucesso!".into(), false)));
     chatbot(&e, cx, |t, _w, _cx| {
-        assert_eq!(t.dialogo, Some(Dialogo::Urgencias), "volta à lista")
+        assert_eq!(
+            t.dialogo.aberto().cloned(),
+            Some(Dialogo::Urgencias),
+            "volta à lista"
+        )
     });
 
     // Descartar pergunta; Cancelar volta à lista sem mandar nada.
     clicar(&e, cx, "urgencia-descartar-0");
     clicar(&e, cx, "descartar-cancelar");
     chatbot(&e, cx, |t, _w, _cx| {
-        assert_eq!(t.dialogo, Some(Dialogo::Urgencias))
+        assert_eq!(t.dialogo.aberto().cloned(), Some(Dialogo::Urgencias))
     });
     assert_eq!(patches(&e), 2);
     clicar(&e, cx, "urgencia-descartar-0");
@@ -1122,7 +1133,7 @@ fn urgencias_assumir_resolver_descartar_e_ver_a_conversa(cx: &mut TestAppContext
         "GET /whatsapp/conversations?contact_filter={CAIO}&show_automated=true&page=1&limit=1"
     )));
     chatbot(&e, cx, |t, _w, _cx| {
-        assert_eq!(t.dialogo, None);
+        assert_eq!(t.dialogo.aberto().cloned(), None);
         assert_eq!(t.aberta, Some(Chave::nova(Canal::WhatsApp, CAIO)));
         let aberta = t.conversa_aberta().unwrap();
         assert_eq!(aberta.nome, "Caio");
@@ -1150,7 +1161,7 @@ fn o_veu_fecha_o_dialogo_e_a_caixa_nao(cx: &mut TestAppContext) {
     );
     visual.run_until_parked();
     chatbot(&e, cx, |t, _w, _cx| {
-        assert_eq!(t.dialogo, Some(Dialogo::Urgencias))
+        assert_eq!(t.dialogo.aberto().cloned(), Some(Dialogo::Urgencias))
     });
     // Abaixo da caixa ainda é o véu (ele cobre a área do chatbot; o menu
     // lateral fica fora, como nas outras telas do app).
@@ -1164,7 +1175,9 @@ fn o_veu_fecha_o_dialogo_e_a_caixa_nao(cx: &mut TestAppContext) {
         Modifiers::none(),
     );
     visual.run_until_parked();
-    chatbot(&e, cx, |t, _w, _cx| assert_eq!(t.dialogo, None));
+    chatbot(&e, cx, |t, _w, _cx| {
+        assert_eq!(t.dialogo.aberto().cloned(), None)
+    });
 }
 
 /// 🚪 Sair da conta fecha os fluxos e esquece as conversas; entrar de novo

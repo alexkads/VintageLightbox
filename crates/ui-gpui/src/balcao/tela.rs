@@ -690,6 +690,7 @@ impl Render for Balcao {
             .pt(px(4.))
             .child(
                 estilo::desligado(estilo::botao_primario("balcao-registrar", cx), enviando)
+                    .debug_selector(|| "balcao-registrar".into())
                     .child(if enviando { "Salvando…" } else { "Salvar" })
                     .on_click(cx.listener(|tela, _: &ClickEvent, _, cx| {
                         tela.confirmando = false;
@@ -698,6 +699,7 @@ impl Render for Balcao {
             )
             .child(
                 estilo::desligado(estilo::botao_fantasma("balcao-cancelar", cx), enviando)
+                    .debug_selector(|| "balcao-cancelar".into())
                     .child("Cancelar")
                     .on_click(cx.listener(|tela, _: &ClickEvent, _, cx| tela.fechar(cx))),
             )
@@ -714,6 +716,7 @@ impl Render for Balcao {
 
         estilo::veu_do_dialogo()
             .id("balcao-veu")
+            .debug_selector(|| "balcao-veu".into())
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|tela, _, _, cx| tela.fechar(cx)),
@@ -751,6 +754,7 @@ impl Render for Balcao {
                     .child(
                         div()
                             .id("balcao-fechar")
+                            .debug_selector(|| "balcao-fechar".into())
                             .absolute()
                             .top(px(16.))
                             .right(px(16.))

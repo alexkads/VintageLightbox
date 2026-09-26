@@ -108,6 +108,11 @@ pub struct Backup {
 }
 
 impl Backup {
+    /// Quem recebe as teclas da tela do acervo.
+    pub fn foco(&self) -> FocusHandle {
+        self.foco.clone()
+    }
+
     pub fn novo(
         acervo: Arc<dyn Acervo>,
         escolha: Arc<dyn EscolhaDoBackup>,

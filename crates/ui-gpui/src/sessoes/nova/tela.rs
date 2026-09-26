@@ -25,6 +25,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::modal::Modal;
 use adapters::view_models::PhotoViewModel;
 use domain::entities::Preset;
 use domain::services::pos_venda::{Estudio, GaleriaDoPainel, Produto, Sessao};
@@ -261,7 +262,7 @@ pub struct NovaSessao {
     pub(super) fase: Option<Fase>,
     pub(super) erro: Option<(String, Option<usize>)>,
     pub(super) confirmacao: Option<Confirmacao>,
-    pub(super) busca: Option<Busca>,
+    pub(super) busca: Modal<Busca>,
     pub(super) cadastro: Option<Cadastro>,
     /// "Do cartão ou pasta…": o menu e a janela de escolher as fotos — o
     /// mesmo componente do modal "Importar fotos" da sessão.
@@ -502,7 +503,7 @@ impl NovaSessao {
             fase: None,
             erro: None,
             confirmacao: None,
-            busca: None,
+            busca: Modal::default(),
             cadastro: None,
             origem,
             fotos: Vec::new(),
@@ -548,7 +549,8 @@ impl NovaSessao {
     pub fn abrir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.erro = None;
         self.confirmacao = None;
-        self.busca = None;
+        // Largada: a tela está aparecendo, e quem a abre foca a tela.
+        self.busca.largar();
         self.fechar_menu_da_origem(cx);
         self.tentou = false;
         if self.fase.is_none() {
@@ -746,7 +748,8 @@ impl NovaSessao {
         }
         self.rascunho.etapa = etapa;
         self.fechar_menu_da_origem(cx);
-        self.busca = None;
+        // Largada: a troca de etapa foca a tela logo abaixo.
+        self.busca.largar();
         self.guardar();
         self.rolagem
             .set_offset(gpui::point(gpui::px(0.), gpui::px(0.)));
@@ -785,7 +788,7 @@ impl NovaSessao {
     /// Enter: Avançar, ou Criar na etapa 7.
     pub fn acao_principal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.confirmacao.is_some()
-            || self.busca.is_some()
+            || self.busca.esta_aberto()
             || self.guardado.is_some()
             || self.cadastro.is_some()
         {
@@ -1174,13 +1177,13 @@ impl NovaSessao {
             window,
             |tela, _, evento: &InputEvent, window, cx| match evento {
                 InputEvent::Change => {
-                    if let Some(busca) = tela.busca.as_mut() {
+                    if let Some(busca) = tela.busca.aberto_mut() {
                         busca.agendada = Some(Instant::now() + ESPERA_DA_BUSCA);
                     }
                     tela.acompanhar(window, cx);
                 }
                 InputEvent::PressEnter { .. } => {
-                    let primeiro = tela.busca.as_ref().and_then(|b| b.itens.first().cloned());
+                    let primeiro = tela.busca.aberto().and_then(|b| b.itens.first().cloned());
                     if let Some(item) = primeiro {
                         tela.escolher_da_busca(item, window, cx);
                     }
@@ -1188,26 +1191,34 @@ impl NovaSessao {
                 _ => {}
             },
         );
-        campo.update(cx, |c, cx| c.focus(window, cx));
-        self.busca = Some(Busca {
-            tipo,
-            campo,
-            carregando: false,
-            erro: None,
-            itens: Vec::new(),
-            com_texto: false,
-            enviados: 0,
-            recebidos: 0,
-            agendada: None,
-            _assinatura: assinatura,
-        });
+        // 🔑 Abre **antes** de focar o campo: é aí que o contrato guarda quem
+        // tinha o foco, para devolver ao fechar.
+        self.busca.abrir(
+            Busca {
+                tipo,
+                campo,
+                carregando: false,
+                erro: None,
+                itens: Vec::new(),
+                com_texto: false,
+                enviados: 0,
+                recebidos: 0,
+                agendada: None,
+                _assinatura: assinatura,
+            },
+            window,
+            cx,
+        );
+        if let Some(busca) = self.busca.aberto() {
+            busca.campo.update(cx, |c, cx| c.focus(window, cx));
+        }
         self.buscar(cx);
         self.acompanhar(window, cx);
         cx.notify();
     }
 
-    pub fn fechar_busca(&mut self, cx: &mut Context<Self>) {
-        self.busca = None;
+    pub fn fechar_busca(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.busca.fechar(window);
         cx.notify();
     }
 
@@ -1215,7 +1226,7 @@ impl NovaSessao {
         let Some(sessao) = self.sessao.clone() else {
             return;
         };
-        let Some(busca) = self.busca.as_mut() else {
+        let Some(busca) = self.busca.aberto_mut() else {
             return;
         };
         let texto = busca.campo.read(cx).value().trim().to_string();
@@ -1271,7 +1282,7 @@ impl NovaSessao {
     }
 
     fn receber_busca(&mut self, tipo: TipoDeBusca, resultado: Result<serde_json::Value, String>) {
-        let Some(busca) = self.busca.as_mut().filter(|b| b.tipo == tipo) else {
+        let Some(busca) = self.busca.aberto_mut().filter(|b| b.tipo == tipo) else {
             return;
         };
         busca.recebidos += 1;
@@ -1318,7 +1329,7 @@ impl NovaSessao {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.busca = None;
+        self.busca.fechar(window);
         self.associar(item, window, cx);
     }
 
@@ -1492,7 +1503,7 @@ impl NovaSessao {
                 Some(parceiro) => {
                     self.rascunho.formulario.parceiro = Some(parceiro);
                     self.cadastro = None;
-                    self.busca = None;
+                    self.busca.fechar_depois(cx);
                     self.guardar();
                 }
                 None => {
@@ -1535,7 +1546,7 @@ impl NovaSessao {
         let Some(parceiro) = self.cadastro.as_ref().and_then(|c| c.existente.clone()) else {
             return;
         };
-        self.busca = None;
+        self.busca.fechar(window);
         self.associar(ItemDaBusca::Parceiro(parceiro), window, cx);
     }
 
@@ -2044,7 +2055,7 @@ impl NovaSessao {
             mudou = true;
         }
 
-        if let Some(busca) = self.busca.as_ref() {
+        if let Some(busca) = self.busca.aberto() {
             if busca
                 .agendada
                 .is_some_and(|quando| Instant::now() >= quando)
@@ -2092,7 +2103,7 @@ impl NovaSessao {
                 .is_some_and(|c| c.enviando || c.erro.is_some())
             || self
                 .busca
-                .as_ref()
+                .aberto()
                 .is_some_and(|b| b.carregando || b.agendada.is_some());
         if !continua {
             self.colhendo = false;
@@ -2197,7 +2208,7 @@ impl NovaSessao {
     #[cfg(test)]
     pub(crate) fn itens_da_busca(&self) -> Vec<ItemDaBusca> {
         self.busca
-            .as_ref()
+            .aberto()
             .map(|b| b.itens.clone())
             .unwrap_or_default()
     }

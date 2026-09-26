@@ -221,7 +221,9 @@ impl Render for NovaSessao {
                     .update(cx, |origem, cx| origem.dialogo(window, cx)),
             )
             .when_some(self.confirmacao, |t, qual| t.child(self.dialogo(qual, cx)))
-            .when(self.busca.is_some(), |t| t.child(self.modal_de_busca(cx)))
+            .when(self.busca.esta_aberto(), |t| {
+                t.child(self.modal_de_busca(cx))
+            })
             .when_some(self.aviso.as_ref(), |t, aviso| {
                 t.child(
                     div()
@@ -260,8 +262,8 @@ impl NovaSessao {
             return;
         }
         if tecla == "escape" {
-            if self.busca.is_some() {
-                self.fechar_busca(cx);
+            if self.busca.esta_aberto() {
+                self.fechar_busca(window, cx);
             } else if self.confirmacao.is_some() {
                 self.cancelar_confirmacao(cx);
             } else {
@@ -1521,7 +1523,7 @@ impl NovaSessao {
         let Some(cadastro) = self.cadastro.as_ref() else {
             let texto_da_busca = self
                 .busca
-                .as_ref()
+                .aberto()
                 .map(|b| b.campo.read(cx).value().trim().to_string())
                 .filter(|t| !t.is_empty());
             let rotulo = match (&texto_da_busca, no_modal) {
@@ -1934,7 +1936,7 @@ impl NovaSessao {
             .occlude()
             .on_mouse_down(
                 gpui::MouseButton::Left,
-                cx.listener(|tela, _, _, cx| tela.fechar_busca(cx)),
+                cx.listener(|tela, _, window, cx| tela.fechar_busca(window, cx)),
             )
     }
 
@@ -2039,7 +2041,7 @@ impl NovaSessao {
     }
 
     fn modal_de_busca(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let Some(busca) = self.busca.as_ref() else {
+        let Some(busca) = self.busca.aberto() else {
             return div().id("nova-sem-busca");
         };
         let tema = cx.theme().clone();
@@ -2136,7 +2138,11 @@ impl NovaSessao {
                         .child(
                             estilo::botao_fantasma("nova-fechar-busca", cx)
                                 .child(Icon::new(Icone::X).size(px(16.)))
-                                .on_click(cx.listener(|tela, _, _, cx| tela.fechar_busca(cx))),
+                                .on_click(
+                                    cx.listener(|tela, _, window, cx| {
+                                        tela.fechar_busca(window, cx)
+                                    }),
+                                ),
                         ),
                 )
                 .child(

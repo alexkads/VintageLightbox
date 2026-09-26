@@ -10,6 +10,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::modal::Modal;
 use chrono::{DateTime, NaiveDate, Utc};
 use domain::services::pos_venda::Sessao;
 use gpui::{prelude::*, Context, Entity, EventEmitter, FocusHandle, Task, Window};
@@ -96,7 +97,9 @@ pub struct Agenda {
     pub(crate) dia_aberto: Option<NaiveDate>,
 
     // ── O diálogo do agendamento ──
-    pub(crate) aberto: Option<Ensaio>,
+    /// No contrato de [`Modal`]: o formulário de reagendar tem campos, e
+    /// fechar com o foco num deles matava o `Esc` da agenda.
+    pub(crate) aberto: Modal<Ensaio>,
     pub(crate) modo: Modo,
     /// Veio de um aviso: abre quando a leitura trouxer o ensaio.
     abrir_quando_chegar: Option<String>,
@@ -158,7 +161,7 @@ impl Agenda {
             estudio: None,
             escolhendo_estudio: false,
             dia_aberto: None,
-            aberto: None,
+            aberto: Modal::default(),
             modo: Modo::Detalhes,
             abrir_quando_chegar: None,
             inicio: campo("dd/mm/aaaa hh:mm", window, cx),
@@ -214,7 +217,7 @@ impl Agenda {
         self.ensaios.clear();
         self.de_hoje.clear();
         self.indicadores = None;
-        self.aberto = None;
+        self.aberto.largar();
         self.carregou = false;
         self.carga = None;
         self.acoes.clear();
@@ -436,9 +439,9 @@ impl Agenda {
                     }
                 }
                 // O que está aberto acompanha a leitura.
-                if let Some(aberto) = &self.aberto {
+                if let Some(aberto) = self.aberto.aberto_mut() {
                     if let Some(novo) = self.ensaios.iter().find(|e| e.id == aberto.id) {
-                        self.aberto = Some(novo.clone());
+                        *aberto = novo.clone();
                     }
                 }
             }
@@ -539,14 +542,18 @@ impl Agenda {
     // ── O diálogo ──────────────────────────────────────────────────────────
 
     /// Clicar num evento ou no "Abrir" da lista de hoje.
-    pub fn abrir_ensaio(&mut self, ensaio: Ensaio, cx: &mut Context<Self>) {
+    /// O clique no evento: o diálogo abre e o foco vai para a agenda, onde
+    /// mora o `Esc` dele — e é para lá que volta ao fechar.
+    pub fn abrir_ensaio(&mut self, ensaio: Ensaio, window: &mut Window, cx: &mut Context<Self>) {
         self.dia_aberto = None;
         self.abrir(ensaio);
+        self.aberto.focar(&self.foco.clone(), window, cx);
         cx.notify();
     }
 
+    /// Sem janela: o aviso que abre o ensaio quando a leitura chegar.
     fn abrir(&mut self, ensaio: Ensaio) {
-        self.aberto = Some(ensaio);
+        self.aberto.abrir_sem_janela(ensaio);
         self.modo = Modo::Detalhes;
         self.erro_do_formulario = None;
         self.em_acao = false;
@@ -569,33 +576,36 @@ impl Agenda {
         self.recarregar(cx);
     }
 
-    pub fn fechar(&mut self, cx: &mut Context<Self>) {
+    pub fn fechar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.em_acao {
             return;
         }
-        self.aberto = None;
+        self.aberto.fechar(window);
         self.modo = Modo::Detalhes;
         cx.notify();
     }
 
     /// O Esc do site: formulário → detalhes → fechar.
-    pub fn voltar(&mut self, cx: &mut Context<Self>) {
+    pub fn voltar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.em_acao {
             return;
         }
         if self.dia_aberto.is_some() {
             self.dia_aberto = None;
-        } else if self.aberto.is_some() && self.modo != Modo::Detalhes {
+        } else if self.aberto.esta_aberto() && self.modo != Modo::Detalhes {
             self.modo = Modo::Detalhes;
             self.erro_do_formulario = None;
+            // O formulário sumiu com o campo focado: o foco volta à agenda.
+            let foco = self.foco.clone();
+            self.aberto.focar(&foco, window, cx);
         } else {
-            self.aberto = None;
+            self.aberto.fechar(window);
         }
         cx.notify();
     }
 
     pub fn entrar_no_modo(&mut self, modo: Modo, cx: &mut Context<Self>) {
-        if self.aberto.is_none() {
+        if !self.aberto.esta_aberto() {
             return;
         }
         self.modo = modo;
@@ -609,7 +619,7 @@ impl Agenda {
         if !std::mem::take(&mut self.preencher) {
             return;
         }
-        let Some(e) = self.aberto.clone() else {
+        let Some(e) = self.aberto.aberto().cloned() else {
             return;
         };
         let pares: [(&Entity<InputState>, String); 6] = [
@@ -661,7 +671,7 @@ impl Agenda {
 
     /// "Confirmar reagendamento".
     pub fn confirmar_reagendamento(&mut self, cx: &mut Context<Self>) {
-        let Some(ensaio) = self.aberto.clone() else {
+        let Some(ensaio) = self.aberto.aberto().cloned() else {
             return;
         };
         if self.em_acao {
@@ -705,7 +715,7 @@ impl Agenda {
 
     /// "Confirmar atendimento".
     pub fn confirmar_atendimento(&mut self, cx: &mut Context<Self>) {
-        let Some(ensaio) = self.aberto.clone() else {
+        let Some(ensaio) = self.aberto.aberto().cloned() else {
             return;
         };
         if self.em_acao {
@@ -723,7 +733,7 @@ impl Agenda {
 
     /// "Excluir" na pergunta.
     pub fn confirmar_exclusao(&mut self, cx: &mut Context<Self>) {
-        let Some(ensaio) = self.aberto.clone() else {
+        let Some(ensaio) = self.aberto.aberto().cloned() else {
             return;
         };
         if self.em_acao || self.modo != Modo::Excluir {
@@ -792,7 +802,7 @@ impl Agenda {
                     texto: certo.into(),
                     erro: false,
                 });
-                self.aberto = None;
+                self.aberto.fechar_depois(cx);
                 self.modo = Modo::Detalhes;
                 self.recarregar(cx);
             }

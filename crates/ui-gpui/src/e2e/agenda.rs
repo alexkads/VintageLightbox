@@ -201,7 +201,7 @@ fn pelo_menu_le_os_quatro_e_mostra_o_mes(cx: &mut TestAppContext) {
     clicar(&e, cx, "agenda-dia-evento-e5");
     agenda(&e, cx, |t, _w, _cx| {
         assert_eq!(t.dia_aberto, None);
-        assert_eq!(t.aberto.as_ref().map(|a| a.id.as_str()), Some("e5"));
+        assert_eq!(t.aberto.aberto().map(|a| a.id.as_str()), Some("e5"));
         assert_eq!(t.modo, Modo::Detalhes);
     });
 }
@@ -356,7 +356,9 @@ fn reagendar_valida_as_datas_e_manda_em_utc(cx: &mut TestAppContext) {
         })
     );
     assert!(toasts(&e, cx).contains(&("Agendamento reagendado.".into(), false)));
-    agenda(&e, cx, |t, _w, _cx| assert!(t.aberto.is_none(), "fecha"));
+    agenda(&e, cx, |t, _w, _cx| {
+        assert!(!t.aberto.esta_aberto(), "fecha")
+    });
 }
 
 /// Registrar atendimento: o valor chega em reais, "dez" não passa, saída
@@ -428,7 +430,7 @@ fn excluir_pergunta_antes_e_usa_a_rota_do_painel(cx: &mut TestAppContext) {
     e.esperar(cx);
     assert!(caminhos(&e).contains(&"DELETE /bookings/agenda/e1".to_string()));
     assert!(toasts(&e, cx).contains(&("Agendamento excluído.".into(), false)));
-    agenda(&e, cx, |t, _w, _cx| assert!(t.aberto.is_none()));
+    agenda(&e, cx, |t, _w, _cx| assert!(!t.aberto.esta_aberto()));
 }
 
 /// 🔧 **Descancelar pela lista de hoje** — e a resposta `{id, status}` é
@@ -469,10 +471,10 @@ fn o_esc_volta_um_passo(cx: &mut TestAppContext) {
     e.teclar(cx, "escape");
     agenda(&e, cx, |t, _w, _cx| {
         assert_eq!(t.modo, Modo::Detalhes);
-        assert!(t.aberto.is_some());
+        assert!(t.aberto.esta_aberto());
     });
     e.teclar(cx, "escape");
-    agenda(&e, cx, |t, _w, _cx| assert!(t.aberto.is_none()));
+    agenda(&e, cx, |t, _w, _cx| assert!(!t.aberto.esta_aberto()));
 }
 
 // ── O tempo real ───────────────────────────────────────────────────────────
@@ -544,7 +546,7 @@ fn agendamento_novo_avisa_e_o_clique_abre_o_ensaio(cx: &mut TestAppContext) {
     e.app(cx, |app, _w, _cx| assert_eq!(app.tela(), Tela::Agenda));
     agenda(&e, cx, |t, _w, _cx| {
         assert_eq!(
-            t.aberto.as_ref().map(|a| a.id.as_str()),
+            t.aberto.aberto().map(|a| a.id.as_str()),
             Some("e9"),
             "o ensaio do aviso abre quando a leitura chega"
         );

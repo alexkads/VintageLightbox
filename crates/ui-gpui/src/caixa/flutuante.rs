@@ -1016,7 +1016,7 @@ impl Caixa {
                         cx,
                     );
                 }
-                self.negociacao_terminou(lote.feitas > 0);
+                self.negociacao_terminou(lote.feitas > 0, cx);
             }
         }
         if lote.feitas > 0 {
@@ -2401,11 +2401,11 @@ impl Caixa {
     }
 
     /// O diálogo de negociação acabou de gravar.
-    fn negociacao_terminou(&mut self, fechar: bool) {
+    fn negociacao_terminou(&mut self, fechar: bool, cx: &mut gpui::App) {
         if let Some(Dialogo::Negociacao(form)) = self.dialogo.as_mut() {
             form.enviando = false;
             if fechar {
-                self.dialogo = None;
+                self.fechar_dialogo_depois(cx);
             }
         }
     }

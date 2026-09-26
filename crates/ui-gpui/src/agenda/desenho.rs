@@ -42,18 +42,20 @@ impl Render for Agenda {
         self.preencher_se_preciso(window, cx);
         let tema = cx.theme();
         let (fundo, texto) = (tema.background, tema.foreground);
-        let dialogo = self.aberto.clone().map(|e| self.dialogo(e, cx));
+        let dialogo = self.aberto.aberto().cloned().map(|e| self.dialogo(e, cx));
         let dia_aberto = self.dia_aberto.map(|d| self.popup_do_dia(d, cx));
 
         v_flex()
             .id("agenda")
             .key_context(DIALOGO)
             .track_focus(&self.foco)
-            .on_action(cx.listener(|tela, _: &VoltarNaAgenda, _, cx| tela.voltar(cx)))
+            .on_action(cx.listener(|tela, _: &VoltarNaAgenda, window, cx| tela.voltar(window, cx)))
             // O Esc de dentro de um campo é do campo; ele o repassa, e aqui
             // vira o mesmo "voltar um passo".
             .on_action(
-                cx.listener(|tela, _: &gpui_component::input::Escape, _, cx| tela.voltar(cx)),
+                cx.listener(|tela, _: &gpui_component::input::Escape, window, cx| {
+                    tela.voltar(window, cx)
+                }),
             )
             .relative()
             .size_full()
@@ -364,8 +366,7 @@ impl Agenda {
                 ensaio.titulo()
             ))
             .on_click(cx.listener(move |tela, _, window, cx| {
-                tela.abrir_ensaio(e.clone(), cx);
-                window.focus(&tela.foco);
+                tela.abrir_ensaio(e.clone(), window, cx);
             }))
     }
 
@@ -696,8 +697,7 @@ impl Agenda {
                                 .child("Abrir")
                                 .on_click(cx.listener(
                                     move |tela, _, window, cx| {
-                                        tela.abrir_ensaio(abrir.clone(), cx);
-                                        window.focus(&tela.foco);
+                                        tela.abrir_ensaio(abrir.clone(), window, cx);
                                     },
                                 )),
                             )
@@ -869,7 +869,7 @@ impl Agenda {
         estilo::veu_do_dialogo()
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|tela, _, _, cx| tela.fechar(cx)),
+                cx.listener(|tela, _, window, cx| tela.fechar(window, cx)),
             )
             .child(
                 div()
@@ -1001,7 +1001,9 @@ impl Agenda {
                                     "detalhe-fechar",
                                 )
                                 .child(Icon::new(Icone::X).size(px(16.)))
-                                .on_click(cx.listener(|tela, _, _, cx| tela.fechar(cx))),
+                                .on_click(
+                                    cx.listener(|tela, _, window, cx| tela.fechar(window, cx)),
+                                ),
                             ),
                     ),
             )
@@ -1078,7 +1080,9 @@ impl Agenda {
                                     "detalhe-fechar-rodape",
                                 )
                                 .child("Fechar")
-                                .on_click(cx.listener(|tela, _, _, cx| tela.fechar(cx))),
+                                .on_click(
+                                    cx.listener(|tela, _, window, cx| tela.fechar(window, cx)),
+                                ),
                             ),
                     ),
             )

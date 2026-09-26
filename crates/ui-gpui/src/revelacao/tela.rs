@@ -5302,13 +5302,16 @@ mod testes {
             .update(cx, |tela, window, cx| {
                 tela.abrir(foto("retrato.jpg"), window, cx);
                 tela.alternar_formulario_de_preset(window, cx);
-                assert!(tela.predefinicoes.criando);
+                assert!(tela.predefinicoes.criando.esta_aberto());
                 tela.nome_do_preset
                     .update(cx, |estado, cx| estado.set_value("Nada", window, cx));
 
                 tela.salvar_preset(window, cx);
                 assert!(tela.presets.is_empty(), "nada fora do neutro");
-                assert!(tela.predefinicoes.criando, "o formulário continua aberto");
+                assert!(
+                    tela.predefinicoes.criando.esta_aberto(),
+                    "o formulário continua aberto"
+                );
 
                 // Com a caixa marcada, guarda todos — e aplicar devolve ao original.
                 tela.alternar_preset_inteiro(cx);
@@ -5318,13 +5321,16 @@ mod testes {
                     tela.presets[0].adjustments.len(),
                     crate::revelacao::processador::Ajustes::NOMES.len()
                 );
-                assert!(!tela.predefinicoes.criando, "salvar fecha");
+                assert!(!tela.predefinicoes.criando.esta_aberto(), "salvar fecha");
                 assert!(!tela.preset_inteiro, "a caixa volta desmarcada");
                 assert_eq!(tela.nome_do_preset.read(cx).value().as_ref(), "");
 
                 tela.alternar_formulario_de_preset(window, cx);
                 tela.alternar_formulario_de_preset(window, cx);
-                assert!(!tela.predefinicoes.criando, "o + fecha o que abriu");
+                assert!(
+                    !tela.predefinicoes.criando.esta_aberto(),
+                    "o + fecha o que abriu"
+                );
             })
             .expect("a janela deve estar aberta");
         assert_eq!(guarda.salvos().len(), 1);
@@ -5354,15 +5360,15 @@ mod testes {
             .update(cx, |tela, window, cx| {
                 tela.pedir_para_apagar(id, window, cx);
                 assert_eq!(
-                    tela.predefinicoes.pergunta,
-                    Some((id, "Retrato".to_string()))
+                    tela.predefinicoes.pergunta.aberto(),
+                    Some(&(id, "Retrato".to_string()))
                 );
-                tela.responder_pergunta(false, cx);
-                assert!(tela.predefinicoes.pergunta.is_none());
+                tela.responder_pergunta(false, window, cx);
+                assert!(!tela.predefinicoes.pergunta.esta_aberto());
                 assert_eq!(tela.presets.len(), 1, "cancelar não apaga");
 
                 tela.pedir_para_apagar(id, window, cx);
-                tela.responder_pergunta(true, cx);
+                tela.responder_pergunta(true, window, cx);
                 assert!(tela.presets.is_empty());
             })
             .expect("a janela deve estar aberta");
@@ -5426,20 +5432,20 @@ mod testes {
         janela
             .update(cx, |tela, window, cx| {
                 tela.comecar_a_renomear(id, window, cx);
-                assert_eq!(tela.predefinicoes.renomeando, Some(id));
+                assert_eq!(tela.predefinicoes.renomeando.aberto(), Some(&id));
                 assert_eq!(tela.renome_do_preset.read(cx).value().as_ref(), "Retrato");
 
                 // Em branco não vale, e o campo fica.
                 tela.renomear_preset(id, "  ".into(), cx);
-                assert_eq!(tela.predefinicoes.renomeando, Some(id));
+                assert_eq!(tela.predefinicoes.renomeando.aberto(), Some(&id));
 
                 tela.renomear_preset(id, "Retrato claro".into(), cx);
-                assert_eq!(tela.predefinicoes.renomeando, None);
+                assert_eq!(tela.predefinicoes.renomeando.aberto(), None);
                 assert_eq!(tela.presets[0].name, "Retrato claro");
 
                 tela.comecar_a_renomear(id, window, cx);
-                tela.cancelar_renome(cx);
-                assert_eq!(tela.predefinicoes.renomeando, None);
+                tela.cancelar_renome(window, cx);
+                assert_eq!(tela.predefinicoes.renomeando.aberto(), None);
                 assert_eq!(tela.presets[0].name, "Retrato claro", "cancelar não muda");
             })
             .expect("a janela deve estar aberta");

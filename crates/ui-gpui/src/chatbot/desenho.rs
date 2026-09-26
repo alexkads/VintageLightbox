@@ -101,7 +101,11 @@ impl Render for Chatbot {
         }
         let tema = cx.theme();
         let (fundo, texto) = (tema.background, tema.foreground);
-        let dialogo = self.dialogo.clone().map(|d| self.dialogo_aberto(d, cx));
+        let dialogo = self
+            .dialogo
+            .aberto()
+            .cloned()
+            .map(|d| self.dialogo_aberto(d, cx));
 
         v_flex()
             .id("chatbot")
@@ -199,7 +203,7 @@ impl Chatbot {
                         .text_xs()
                         .child(total.to_string()),
                 )
-                .on_click(cx.listener(|tela, _, _, cx| tela.abrir_urgencias(cx))),
+                .on_click(cx.listener(|tela, _, window, cx| tela.abrir_urgencias(window, cx))),
             )
             .child(
                 marcado(estilo::botao_fantasma("chatbot-sino", cx), "chatbot-sino")
@@ -1168,7 +1172,7 @@ impl Chatbot {
                         .child(
                             marcado(estilo::botao_contorno("descartar-cancelar", cx), "descartar-cancelar")
                                 .child("Cancelar")
-                                .on_click(cx.listener(|tela, _, _, cx| tela.fechar_dialogo(cx))),
+                                .on_click(cx.listener(|tela, _, window, cx| tela.fechar_dialogo(window, cx))),
                         )
                         .child(estilo::desligado(
                             marcado(estilo::botao_perigo("descartar-confirmar", cx), "descartar-confirmar")
@@ -1203,7 +1207,7 @@ impl Chatbot {
                         .child(
                             marcado(estilo::botao_fantasma("quem-cancelar", cx), "quem-cancelar")
                                 .child("Cancelar")
-                                .on_click(cx.listener(|tela, _, _, cx| tela.fechar_dialogo(cx))),
+                                .on_click(cx.listener(|tela, _, window, cx| tela.fechar_dialogo(window, cx))),
                         )
                         .child(
                             marcado(estilo::botao_primario("quem-assumir", cx), "quem-assumir")
@@ -1238,7 +1242,7 @@ impl Chatbot {
                         .child(estilo::desligado(
                             marcado(estilo::botao_contorno("excluir-cancelar", cx), "excluir-cancelar")
                                 .child("Cancelar")
-                                .on_click(cx.listener(|tela, _, _, cx| tela.fechar_dialogo(cx))),
+                                .on_click(cx.listener(|tela, _, window, cx| tela.fechar_dialogo(window, cx))),
                             self.em_acao,
                         ))
                         .child(estilo::desligado(
@@ -1253,7 +1257,7 @@ impl Chatbot {
         estilo::veu_do_dialogo()
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|tela, _, _, cx| tela.fechar_dialogo(cx)),
+                cx.listener(|tela, _, window, cx| tela.fechar_dialogo(window, cx)),
             )
             .child(
                 div()
@@ -1313,7 +1317,7 @@ impl Chatbot {
                         "urgencias-fechar",
                     )
                     .child("Fechar")
-                    .on_click(cx.listener(|tela, _, _, cx| tela.fechar_dialogo(cx))),
+                    .on_click(cx.listener(|tela, _, window, cx| tela.fechar_dialogo(window, cx))),
                 ),
             )
     }
@@ -1418,9 +1422,9 @@ impl Chatbot {
                             format!("urgencia-descartar-{}", i),
                         )
                         .child("Descartar")
-                        .on_click(
-                            cx.listener(move |tela, _, _, cx| tela.pedir_descarte(d.clone(), cx)),
-                        ),
+                        .on_click(cx.listener(
+                            move |tela, _, window, cx| tela.pedir_descarte(d.clone(), window, cx),
+                        )),
                         self.em_acao,
                     ))
                     .child(
@@ -1466,7 +1470,7 @@ impl Chatbot {
                     .child(
                         marcado(estilo::botao_contorno("resolver-cancelar", cx), "resolver-cancelar")
                             .child("Cancelar")
-                            .on_click(cx.listener(|tela, _, _, cx| tela.fechar_dialogo(cx))),
+                            .on_click(cx.listener(|tela, _, window, cx| tela.fechar_dialogo(window, cx))),
                     )
                     .child(estilo::desligado(
                         marcado(estilo::botao_primario("resolver-confirmar", cx), "resolver-confirmar")

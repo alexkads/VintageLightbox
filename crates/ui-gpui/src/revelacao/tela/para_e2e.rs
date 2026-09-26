@@ -110,7 +110,7 @@ impl Revelacao {
     pub(crate) fn nome_na_pergunta_de_apagar(&self) -> Option<String> {
         self.predefinicoes
             .pergunta
-            .as_ref()
+            .aberto()
             .map(|(_, nome)| nome.clone())
     }
 
@@ -163,7 +163,7 @@ impl Revelacao {
     }
 
     pub(crate) fn formulario_de_predefinicao_aberto(&self) -> bool {
-        self.predefinicoes.criando
+        self.predefinicoes.criando.esta_aberto()
     }
 
     /// O resultado da última importação: `(arquivos lidos, predefinições novas)`.

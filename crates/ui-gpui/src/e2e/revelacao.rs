@@ -314,7 +314,7 @@ fn predefinicoes_prever_aplicar_criar_renomear_reordenar_importar_e_apagar(
             tela.nome_na_pergunta_de_apagar().as_deref(),
             Some("Fim de tarde")
         );
-        tela.responder_pergunta(false, cx);
+        tela.responder_pergunta(false, window, cx);
         assert!(tela.predefinicao("Fim de tarde").is_some());
         tela.clicar_na_lixeira(&minha, window, cx);
     });

@@ -31,6 +31,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::modal::Modal;
 use biblioteca_core::acervo::{self, Acervo, Filtro};
 use biblioteca_core::dados_do_cliente::{self, DadosDoCliente};
 use biblioteca_core::dinheiro;
@@ -668,7 +669,7 @@ pub struct Detalhe {
     link: Option<LinkDeAcesso>,
     /// ✏️ O formulário dos dados do cliente, quando aparece — o "Editar" e o
     /// pedido de contato do fim da sessão. Ver [`FormularioDoCliente`].
-    dados_do_cliente: Option<FormularioDoCliente>,
+    dados_do_cliente: Modal<FormularioDoCliente>,
     /// O que foi mandado ao site e ainda não voltou: o motivo (para seguir o
     /// gesto) e os dados conferidos (para aplicar à sessão aberta). Fora do
     /// formulário de propósito — fechá-lo no meio não perde a resposta.
@@ -867,7 +868,7 @@ impl Detalhe {
             escolhendo: false,
             importacao: None,
             link: None,
-            dados_do_cliente: None,
+            dados_do_cliente: Modal::default(),
             gravando_dados: None,
             carregando: false,
             erro: None,
@@ -917,7 +918,8 @@ impl Detalhe {
         self.baixando = 0;
         self.link = None;
         // O formulário de outro cliente aberto na tela deste seria o mesmo erro.
-        self.dados_do_cliente = None;
+        // Largado, sem devolver: a troca de sessão foca a tela nova.
+        self.dados_do_cliente.largar();
         self.gravando_dados = None;
         self.importacao = None;
         self.erro = None;
@@ -2460,7 +2462,7 @@ impl Detalhe {
 
     /// Por que o formulário dos dados do cliente está aberto — `None` fechado.
     pub fn motivo_do_formulario(&self) -> Option<MotivoDoFormulario> {
-        self.dados_do_cliente.as_ref().map(|f| f.motivo)
+        self.dados_do_cliente.aberto().map(|f| f.motivo)
     }
 
     /// ✏️ "Editar": título, e-mail e WhatsApp da sessão aberta.
@@ -2481,7 +2483,7 @@ impl Detalhe {
         if self.aberta.is_none() {
             return;
         }
-        match self.dados_do_cliente.as_mut() {
+        match self.dados_do_cliente.aberto_mut() {
             // Reabrir pelo mesmo motivo mantém o que já foi digitado.
             Some(formulario) if formulario.motivo == motivo => {
                 if aviso.is_some() {
@@ -2490,7 +2492,9 @@ impl Detalhe {
                 }
             }
             _ => {
-                self.dados_do_cliente = Some(FormularioDoCliente {
+                // Sem janela: a recusa do site chega pela colheita. O foco é
+                // guardado quando o formulário o tomar, na primeira pintura.
+                self.dados_do_cliente.abrir_sem_janela(FormularioDoCliente {
                     motivo,
                     campos: None,
                     erro: aviso,
@@ -2510,12 +2514,12 @@ impl Detalhe {
     /// 🧪 A frase da recusa e o campo a que ela se refere.
     #[cfg(test)]
     pub(crate) fn recusa_do_formulario(&self) -> Option<(Option<dados_do_cliente::Campo>, String)> {
-        let f = self.dados_do_cliente.as_ref()?;
+        let f = self.dados_do_cliente.aberto()?;
         Some((f.campo_do_erro, f.erro.as_ref()?.to_string()))
     }
 
-    pub fn fechar_formulario_do_cliente(&mut self, cx: &mut Context<Self>) {
-        self.dados_do_cliente = None;
+    pub fn fechar_formulario_do_cliente(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.dados_do_cliente.fechar(window);
         cx.notify();
     }
 
@@ -2542,7 +2546,7 @@ impl Detalhe {
         self.preparar_formulario_do_cliente(window, cx);
         let Some(campos) = self
             .dados_do_cliente
-            .as_ref()
+            .aberto()
             .and_then(|f| f.campos.as_ref())
         else {
             return;
@@ -2567,7 +2571,7 @@ impl Detalhe {
     fn preparar_formulario_do_cliente(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(motivo) = self
             .dados_do_cliente
-            .as_ref()
+            .aberto()
             .filter(|f| f.campos.is_none())
             .map(|f| f.motivo)
         else {
@@ -2613,10 +2617,11 @@ impl Detalhe {
         // pintura. No app a primeira camada é sempre o `Root` (`main.rs`). O
         // foco é conforto — gravar e o Enter não dependem dele.
         if window.root::<gpui_component::Root>().flatten().is_some() {
-            window.focus(&foco.read(cx).focus_handle(cx));
+            let foco = foco.read(cx).focus_handle(cx);
+            self.dados_do_cliente.focar(&foco, window, cx);
         }
 
-        if let Some(formulario) = self.dados_do_cliente.as_mut() {
+        if let Some(formulario) = self.dados_do_cliente.aberto_mut() {
             formulario.campos = Some(CamposDoCliente {
                 titulo,
                 email,
@@ -2639,7 +2644,7 @@ impl Detalhe {
         ) else {
             return;
         };
-        let Some(formulario) = self.dados_do_cliente.as_ref() else {
+        let Some(formulario) = self.dados_do_cliente.aberto() else {
             return;
         };
         let Some(campos) = formulario.campos.as_ref() else {
@@ -2658,7 +2663,7 @@ impl Detalhe {
         let novo = match dados_do_cliente::conferir(modo, &titulo, &email, &whatsapp) {
             Ok(novo) => novo,
             Err(recusa) => {
-                if let Some(formulario) = self.dados_do_cliente.as_mut() {
+                if let Some(formulario) = self.dados_do_cliente.aberto_mut() {
                     formulario.erro = Some(recusa.frase.into());
                     formulario.campo_do_erro = Some(recusa.campo);
                 }
@@ -2670,13 +2675,13 @@ impl Detalhe {
         let mudancas = dados_do_cliente::mudancas(&atual, &novo);
         if mudancas.vazia() {
             // Nada mudou: não vai à rede — mas o gesto que abriu segue.
-            self.dados_do_cliente = None;
+            self.dados_do_cliente.fechar_depois(cx);
             self.seguir_o_gesto(motivo, cx);
             cx.notify();
             return;
         }
 
-        if let Some(formulario) = self.dados_do_cliente.as_mut() {
+        if let Some(formulario) = self.dados_do_cliente.aberto_mut() {
             formulario.erro = None;
             formulario.campo_do_erro = None;
         }
@@ -3084,7 +3089,7 @@ impl Detalhe {
                             aberta.galeria.email = novo.email;
                             aberta.galeria.whatsapp = novo.whatsapp;
                         }
-                        self.dados_do_cliente = None;
+                        self.dados_do_cliente.fechar_depois(cx);
                         // 🔑 O recado não é a verdade: relê. O site normaliza
                         // (e-mail em minúsculas, WhatsApp só dígitos), e é o que
                         // ele gravou que o cabeçalho deve mostrar.
@@ -3100,7 +3105,7 @@ impl Detalhe {
                 }
                 Recado::GaleriaNaoAtualizada(frase) => {
                     self.gravando_dados = None;
-                    match self.dados_do_cliente.as_mut() {
+                    match self.dados_do_cliente.aberto_mut() {
                         Some(formulario) => {
                             formulario.erro = Some(frase.into());
                             formulario.campo_do_erro = None;
@@ -4018,7 +4023,7 @@ impl Detalhe {
         use crate::recursos::Icone;
         use dados_do_cliente::Campo;
         use gpui_component::Icon;
-        let formulario = self.dados_do_cliente.as_ref()?;
+        let formulario = self.dados_do_cliente.aberto()?;
         let campos = formulario.campos.as_ref()?;
         let gravando = self.gravando_dados.is_some();
         let editar = formulario.motivo == MotivoDoFormulario::Editar;
@@ -4076,9 +4081,9 @@ impl Detalhe {
         Some(
             estilo::veu_do_dialogo()
                 .id("cliente-veu")
-                .on_click(cx.listener(|tela, _ev, _w, cx| {
+                .on_click(cx.listener(|tela, _ev, window, cx| {
                     if tela.gravando_dados.is_none() {
-                        tela.fechar_formulario_do_cliente(cx)
+                        tela.fechar_formulario_do_cliente(window, cx)
                     }
                 }))
                 .child(
@@ -4090,12 +4095,13 @@ impl Detalhe {
                         .child(
                             div().absolute().top(px(10.)).right(px(10.)).child(
                                 Button::new("sessao-cliente-fechar")
+                                    .debug_selector(|| "sessao-cliente-fechar".into())
                                     .icon(Icon::new(Icone::X))
                                     .xsmall()
                                     .ghost()
                                     .disabled(gravando)
-                                    .on_click(cx.listener(|tela, _ev, _w, cx| {
-                                        tela.fechar_formulario_do_cliente(cx)
+                                    .on_click(cx.listener(|tela, _ev, window, cx| {
+                                        tela.fechar_formulario_do_cliente(window, cx)
                                     })),
                             ),
                         )
@@ -4128,8 +4134,8 @@ impl Detalhe {
                                         .debug_selector(|| "sessao-cliente-cancelar".into())
                                         .child(if editar { "Cancelar" } else { "Agora não" })
                                         .when(!gravando, |b| {
-                                            b.on_click(cx.listener(|tela, _ev, _w, cx| {
-                                                tela.fechar_formulario_do_cliente(cx)
+                                            b.on_click(cx.listener(|tela, _ev, window, cx| {
+                                                tela.fechar_formulario_do_cliente(window, cx)
                                             }))
                                         }),
                                     gravando,
@@ -5741,6 +5747,7 @@ impl Detalhe {
                             crate::estilo::rodape_do_dialogo()
                                 .child(
                                     crate::estilo::botao_contorno("apagar-cancelar", cx)
+                                        .debug_selector(|| "apagar-cancelar".into())
                                         .child("Cancelar")
                                         .on_click(cx.listener(|tela, _ev, _w, cx| {
                                             tela.cancelar_apagar(cx)
@@ -7671,7 +7678,7 @@ mod testes {
         tela.preparar_formulario_do_cliente(window, cx);
         let campos = tela
             .dados_do_cliente
-            .as_ref()
+            .aberto()
             .and_then(|f| f.campos.as_ref())
             .expect("o formulário tem campos");
         (
@@ -7707,7 +7714,7 @@ mod testes {
                 assert!(tela.gravando_dados.is_none());
                 assert!(tela
                     .dados_do_cliente
-                    .as_ref()
+                    .aberto()
                     .is_some_and(|f| f.erro.is_some()));
 
                 email.update(cx, |campo, cx| {
@@ -7772,7 +7779,7 @@ mod testes {
                 );
                 assert!(tela
                     .dados_do_cliente
-                    .as_ref()
+                    .aberto()
                     .and_then(|f| f.erro.clone())
                     .is_some_and(|frase| frase.contains("informe o e-mail")));
                 assert!(!tela.avisando);

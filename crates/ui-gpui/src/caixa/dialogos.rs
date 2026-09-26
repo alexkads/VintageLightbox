@@ -348,7 +348,8 @@ impl Caixa {
     /// Quem tinha o foco antes do primeiro diálogo — é para lá que ele volta.
     fn lembrar_foco(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.dialogo.is_none() {
-            self.foco_antes = window.focused(cx);
+            self.foco_antes.esquecer();
+            self.foco_antes.lembrar(window, cx);
         }
     }
 
@@ -510,8 +511,11 @@ impl Caixa {
         }
         self.dialogo = None;
         self.depois_das_pessoas = false;
-        let foco = self.foco_antes.take().unwrap_or_else(|| self.foco.clone());
-        window.focus(&foco);
+        if self.foco_antes.guardado() {
+            self.foco_antes.devolver(window);
+        } else {
+            window.focus(&self.foco);
+        }
         cx.notify();
     }
 
@@ -1106,8 +1110,7 @@ impl Caixa {
             );
         }
         if matches!(self.dialogo, Some(Dialogo::Estorno(_))) {
-            self.dialogo = None;
-            self.pedir_foco = true;
+            self.fechar_dialogo_depois(cx);
         }
         // As fotos des-sinalizadas mudaram na galeria: ela se relê também.
         if des_sinalizou && d.feitas > 0 {
@@ -1241,7 +1244,7 @@ impl Caixa {
                             TipoDeRecado::Sucesso,
                             cx,
                         );
-                        self.fechar_se(|d| matches!(d, Dialogo::Abrir(_)));
+                        self.fechar_se(|d| matches!(d, Dialogo::Abrir(_)), cx);
                         self.recarregar(cx);
                     }
                     Err(erro) => {
@@ -1271,7 +1274,7 @@ impl Caixa {
                                 cx,
                             );
                         }
-                        self.fechar_se(|d| matches!(d, Dialogo::Movimento(_)));
+                        self.fechar_se(|d| matches!(d, Dialogo::Movimento(_)), cx);
                         self.recarregar(cx);
                     }
                     Err(erro) => {
@@ -1313,7 +1316,7 @@ impl Caixa {
                         }
                     }
                     self.desconto = DescontoNoTotal::default();
-                    self.fechar_se(|d| matches!(d, Dialogo::Pagamento(_)));
+                    self.fechar_se(|d| matches!(d, Dialogo::Pagamento(_)), cx);
                     self.recarregar(cx);
                 }
                 Err(erro) => {
@@ -1431,8 +1434,7 @@ impl Caixa {
                         match dados::ler_caixa(valor) {
                             Ok(caixa) => form.resultado = Some(caixa),
                             Err(_) => {
-                                self.dialogo = None;
-                                self.pedir_foco = true;
+                                self.fechar_dialogo_depois(cx);
                                 self.avisar("Caixa fechado.", TipoDeRecado::Sucesso, cx);
                             }
                         }
@@ -1483,9 +1485,23 @@ impl Caixa {
         cx.notify();
     }
 
-    fn fechar_se(&mut self, qual: impl Fn(&Dialogo) -> bool) {
+    fn fechar_se(&mut self, qual: impl Fn(&Dialogo) -> bool, cx: &mut gpui::App) {
         if self.dialogo.as_ref().is_some_and(qual) {
-            self.dialogo = None;
+            self.fechar_dialogo_depois(cx);
+        }
+    }
+
+    /// Fecha de onde não há janela — a resposta da rede que conclui o diálogo.
+    ///
+    /// 🔑 **O foco volta para quem o tinha** ([`crate::modal`]), como no
+    /// `fechar_dialogo`. Até 2026-09-26 o sucesso só pedia o foco do caixa, e a
+    /// negociação do caixa flutuante nem isso: o foco ficava no campo que
+    /// sumiu, e as teclas da galeria morriam.
+    pub(super) fn fechar_dialogo_depois(&mut self, cx: &mut gpui::App) {
+        self.dialogo = None;
+        if self.foco_antes.guardado() {
+            self.foco_antes.devolver_depois(cx);
+        } else {
             self.pedir_foco = true;
         }
     }

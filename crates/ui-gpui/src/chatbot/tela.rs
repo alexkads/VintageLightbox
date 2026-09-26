@@ -25,6 +25,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::modal::Modal;
 use domain::services::pos_venda::Sessao;
 use gpui::{prelude::*, Context, Entity, EventEmitter, SharedString, Task, Window};
 use gpui_component::input::{InputEvent, InputState};
@@ -193,7 +194,9 @@ pub struct Chatbot {
     pub(crate) rolagem_vista: Option<(Chave, usize, usize)>,
 
     // ── Diálogos ──
-    pub(crate) dialogo: Option<Dialogo>,
+    /// No contrato de [`Modal`]: "Quem assume", "Resolver" e "Excluir"
+    /// têm campo, e fechar com o foco nele matava as teclas da tela.
+    pub(crate) dialogo: Modal<Dialogo>,
     pub(crate) notas: Entity<InputState>,
     pub(crate) nome_do_atendente: Entity<InputState>,
     pub(crate) confirmacao: Entity<InputState>,
@@ -291,7 +294,7 @@ impl Chatbot {
             limpar_compositor: false,
             rolagem: gpui::ScrollHandle::new(),
             rolagem_vista: None,
-            dialogo: None,
+            dialogo: Modal::default(),
             notas,
             nome_do_atendente,
             confirmacao,
@@ -350,7 +353,7 @@ impl Chatbot {
         self.pendentes.clear();
         self.conexoes.clear();
         self.aberta = None;
-        self.dialogo = None;
+        self.dialogo.largar();
         self.carregou = false;
         self.carga = None;
         self.envia_da_carga = None;
@@ -1029,7 +1032,8 @@ impl Chatbot {
             let nome = self.preferencias.atendente.clone();
             self.nome_do_atendente
                 .update(cx, |campo, cx| campo.set_value(nome, window, cx));
-            self.dialogo = Some(Dialogo::QuemAssume(conversa.chave));
+            self.dialogo
+                .abrir(Dialogo::QuemAssume(conversa.chave), window, cx);
             cx.notify();
             return;
         }
@@ -1037,8 +1041,8 @@ impl Chatbot {
     }
 
     /// "Assumir conversa" no "Quem está assumindo?".
-    pub fn confirmar_quem_assume(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let Some(Dialogo::QuemAssume(chave)) = self.dialogo.clone() else {
+    pub fn confirmar_quem_assume(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(Dialogo::QuemAssume(chave)) = self.dialogo.aberto().cloned() else {
             return;
         };
         let nome = self.nome_do_atendente.read(cx).value().trim().to_string();
@@ -1046,7 +1050,7 @@ impl Chatbot {
             self.preferencias.atendente = nome.clone();
             preferencias::guardar(&self.arquivo_de_preferencias, &self.preferencias);
         }
-        self.dialogo = None;
+        self.dialogo.fechar(window);
         self.mandar_alternancia(chave, true, Some(nome), cx);
     }
 
@@ -1116,7 +1120,8 @@ impl Chatbot {
         };
         self.confirmacao
             .update(cx, |campo, cx| campo.set_value("", window, cx));
-        self.dialogo = Some(Dialogo::ExcluirHistorico(chave));
+        self.dialogo
+            .abrir(Dialogo::ExcluirHistorico(chave), window, cx);
         cx.notify();
     }
 
@@ -1126,7 +1131,7 @@ impl Chatbot {
 
     /// "Excluir histórico", só com a frase letra por letra.
     pub fn excluir_historico(&mut self, cx: &mut Context<Self>) {
-        let Some(Dialogo::ExcluirHistorico(chave)) = self.dialogo.clone() else {
+        let Some(Dialogo::ExcluirHistorico(chave)) = self.dialogo.aberto().cloned() else {
             return;
         };
         if !self.exclusao_confirmada(cx) || self.em_acao {
@@ -1141,20 +1146,24 @@ impl Chatbot {
 
     // ── Urgências ──────────────────────────────────────────────────────────
 
-    pub fn abrir_urgencias(&mut self, cx: &mut Context<Self>) {
-        self.dialogo = Some(Dialogo::Urgencias);
+    pub fn abrir_urgencias(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.dialogo.abrir(Dialogo::Urgencias, window, cx);
         cx.notify();
     }
 
-    pub fn fechar_dialogo(&mut self, cx: &mut Context<Self>) {
+    pub fn fechar_dialogo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.em_acao {
             return;
         }
         // Resolver e Descartar abrem de dentro da lista: cancelar volta a ela.
-        self.dialogo = match self.dialogo.take() {
-            Some(Dialogo::Resolver(_)) | Some(Dialogo::Descartar(_)) => Some(Dialogo::Urgencias),
-            _ => None,
-        };
+        match self.dialogo.aberto() {
+            Some(Dialogo::Resolver(_)) | Some(Dialogo::Descartar(_)) => {
+                self.dialogo.abrir(Dialogo::Urgencias, window, cx)
+            }
+            _ => {
+                self.dialogo.fechar(window);
+            }
+        }
         cx.notify();
     }
 
@@ -1170,18 +1179,23 @@ impl Chatbot {
     ) {
         self.notas
             .update(cx, |campo, cx| campo.set_value("", window, cx));
-        self.dialogo = Some(Dialogo::Resolver(urgencia));
+        self.dialogo.abrir(Dialogo::Resolver(urgencia), window, cx);
         cx.notify();
     }
 
-    pub fn pedir_descarte(&mut self, urgencia: Urgencia, cx: &mut Context<Self>) {
-        self.dialogo = Some(Dialogo::Descartar(urgencia));
+    pub fn pedir_descarte(
+        &mut self,
+        urgencia: Urgencia,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.dialogo.abrir(Dialogo::Descartar(urgencia), window, cx);
         cx.notify();
     }
 
     /// "Confirmar resolução" — as notas são obrigatórias.
     pub fn confirmar_resolucao(&mut self, cx: &mut Context<Self>) {
-        let Some(Dialogo::Resolver(urgencia)) = self.dialogo.clone() else {
+        let Some(Dialogo::Resolver(urgencia)) = self.dialogo.aberto().cloned() else {
             return;
         };
         if self.notas.read(cx).value().trim().is_empty() {
@@ -1191,7 +1205,7 @@ impl Chatbot {
     }
 
     pub fn confirmar_descarte(&mut self, cx: &mut Context<Self>) {
-        let Some(Dialogo::Descartar(urgencia)) = self.dialogo.clone() else {
+        let Some(Dialogo::Descartar(urgencia)) = self.dialogo.aberto().cloned() else {
             return;
         };
         self.mudar_urgencia(&urgencia, MudancaDaUrgencia::Descartar, cx);
@@ -1219,7 +1233,7 @@ impl Chatbot {
 
     /// "Ver conversa" de uma urgência: as urgências são do WhatsApp.
     pub fn ver_conversa_da_urgencia(&mut self, urgencia: &Urgencia, cx: &mut Context<Self>) {
-        self.dialogo = None;
+        self.dialogo.fechar_depois(cx);
         self.abrir(
             Chave::nova(Canal::WhatsApp, urgencia.contact_id.clone()),
             cx,
@@ -1304,10 +1318,11 @@ impl Chatbot {
                     Ok(_) => {
                         self.toast(certo, false, cx);
                         if matches!(
-                            self.dialogo,
+                            self.dialogo.aberto(),
                             Some(Dialogo::Resolver(_)) | Some(Dialogo::Descartar(_))
                         ) {
-                            self.dialogo = Some(Dialogo::Urgencias);
+                            // Continua aberto: a volta para a lista não mexe no foco guardado.
+                            self.dialogo.abrir_sem_janela(Dialogo::Urgencias);
                         }
                         self.recarregar(cx);
                     }
@@ -1326,7 +1341,7 @@ impl Chatbot {
                             false,
                             cx,
                         );
-                        self.dialogo = None;
+                        self.dialogo.fechar_depois(cx);
                         self.recarregar(cx);
                     }
                     Err(erro) => self.toast(

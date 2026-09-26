@@ -38,6 +38,7 @@ use gpui_component::tooltip::Tooltip;
 use gpui_component::{h_flex, v_flex, ActiveTheme, Icon, Sizable};
 
 use super::Revelacao;
+use crate::modal::Modal;
 use crate::recursos::Icone;
 use crate::revelacao::lightroom::{self, Arquivo};
 use crate::revelacao::presets::{self, ordem, ordem::Grupo};
@@ -88,10 +89,11 @@ pub(super) fn ligar_atalhos(cx: &mut App) {
 
 /// O que a coluna guarda além do que já estava na tela.
 pub(super) struct Predefinicoes {
-    /// O formulário de "salvar como predefinição" está aberto.
-    pub criando: bool,
+    /// O formulário de "salvar como predefinição". Os três que tomam o foco
+    /// para um campo moram no [`Modal`]: fechar é devolver.
+    pub criando: Modal<()>,
     /// A linha que virou campo de nome.
-    pub renomeando: Option<PresetId>,
+    pub renomeando: Modal<PresetId>,
     /// A ordem escolhida neste computador.
     pub ordem: ordem::Ordem,
     /// O arrasto em curso: de onde saiu, e sobre qual linha (antes ou depois).
@@ -100,7 +102,7 @@ pub(super) struct Predefinicoes {
     /// alças nascem no desenho, que só tem `&self`.
     focos: RefCell<HashMap<String, FocusHandle>>,
     /// A predefinição que espera o "Apagar" ou o "Cancelar".
-    pub pergunta: Option<(PresetId, String)>,
+    pub pergunta: Modal<(PresetId, String)>,
     foco_da_pergunta: Option<FocusHandle>,
     /// Os avisos no canto — o `toast` do site.
     pub avisos: Vec<Aviso>,
@@ -124,12 +126,12 @@ pub(super) struct Aviso {
 impl Default for Predefinicoes {
     fn default() -> Self {
         Self {
-            criando: false,
-            renomeando: None,
+            criando: Modal::default(),
+            renomeando: Modal::default(),
             ordem: ordem::ler(),
             arrasto: None,
             focos: RefCell::new(HashMap::new()),
-            pergunta: None,
+            pergunta: Modal::default(),
             foco_da_pergunta: None,
             avisos: Vec::new(),
             proximo_aviso: 0,
@@ -195,8 +197,8 @@ pub(super) fn assinar(
             renome,
             window,
             |tela: &mut Revelacao, campo, evento: &InputEvent, _window, cx| {
-                if let (InputEvent::PressEnter { .. }, Some(id)) =
-                    (evento, tela.predefinicoes.renomeando)
+                if let (InputEvent::PressEnter { .. }, Some(&id)) =
+                    (evento, tela.predefinicoes.renomeando.aberto())
                 {
                     let nome = campo.read(cx).value().to_string();
                     tela.renomear_preset(id, nome, cx);
@@ -282,18 +284,20 @@ impl Revelacao {
     /// O campo começa vazio a cada abertura: o nome anterior sugerido convida a
     /// salvar dois com o mesmo nome.
     pub fn alternar_formulario_de_preset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.predefinicoes.criando = !self.predefinicoes.criando;
         self.nome_do_preset
             .update(cx, |campo, cx| campo.set_value("", window, cx));
-        if self.predefinicoes.criando {
+        if self.predefinicoes.criando.esta_aberto() {
+            self.predefinicoes.criando.fechar(window);
+        } else {
+            self.predefinicoes.criando.abrir((), window, cx);
             self.nome_do_preset
                 .update(cx, |campo, cx| campo.focus(window, cx));
         }
         cx.notify();
     }
 
-    pub fn cancelar_formulario_de_preset(&mut self, cx: &mut Context<Self>) {
-        self.predefinicoes.criando = false;
+    pub fn cancelar_formulario_de_preset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.predefinicoes.criando.fechar(window);
         cx.notify();
     }
 
@@ -340,7 +344,7 @@ impl Revelacao {
         );
         self.presets.push(novo);
 
-        self.predefinicoes.criando = false;
+        self.predefinicoes.criando.fechar(window);
         self.preset_inteiro = false;
         self.nome_do_preset
             .update(cx, |campo, cx| campo.set_value("", window, cx));
@@ -435,7 +439,7 @@ impl Revelacao {
             return;
         };
         let nome = preset.name.clone();
-        self.predefinicoes.renomeando = Some(id);
+        self.predefinicoes.renomeando.abrir(id, window, cx);
         self.renome_do_preset.update(cx, |campo, cx| {
             campo.set_value(nome, window, cx);
             campo.focus(window, cx);
@@ -443,8 +447,8 @@ impl Revelacao {
         cx.notify();
     }
 
-    pub fn cancelar_renome(&mut self, cx: &mut Context<Self>) {
-        self.predefinicoes.renomeando = None;
+    pub fn cancelar_renome(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.predefinicoes.renomeando.fechar(window);
         cx.notify();
     }
 
@@ -466,8 +470,9 @@ impl Revelacao {
             return;
         };
         preset.name = nome.clone();
-        if self.predefinicoes.renomeando == Some(id) {
-            self.predefinicoes.renomeando = None;
+        if self.predefinicoes.renomeando.aberto() == Some(&id) {
+            // Sem janela à mão: quem renomeia é o Enter do campo e os testes.
+            self.predefinicoes.renomeando.fechar_depois(cx);
         }
 
         self.guarda_de_presets.renomear(id, nome);
@@ -492,7 +497,7 @@ impl Revelacao {
         else {
             return;
         };
-        self.predefinicoes.pergunta = Some((id, nome));
+        self.predefinicoes.pergunta.abrir((id, nome), window, cx);
         let foco = self
             .predefinicoes
             .foco_da_pergunta
@@ -503,8 +508,13 @@ impl Revelacao {
     }
 
     /// "Apagar" (`true`) ou "Cancelar" (`false`).
-    pub fn responder_pergunta(&mut self, apagar: bool, cx: &mut Context<Self>) {
-        let Some((id, _)) = self.predefinicoes.pergunta.take() else {
+    pub fn responder_pergunta(
+        &mut self,
+        apagar: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((id, _)) = self.predefinicoes.pergunta.fechar(window) else {
             return;
         };
         if apagar {
@@ -714,7 +724,7 @@ impl Revelacao {
                     self.aplicar_preset(&preset, window, cx);
                 }
             }
-            "responder" => self.responder_pergunta(argumento == "sim", cx),
+            "responder" => self.responder_pergunta(argumento == "sim", window, cx),
             "ordem" => self.definir_ordem_dos_presets(Grupo::Sistema, None, cx),
             "importar" => {
                 let caminho = std::path::Path::new(argumento);
@@ -829,7 +839,7 @@ impl Revelacao {
 
     /// "Apagar "X"?" — o `useConfirmacao` do site, sobre a tela inteira.
     fn pergunta_de_apagar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let (_, nome) = self.predefinicoes.pergunta.as_ref()?;
+        let (_, nome) = self.predefinicoes.pergunta.aberto()?;
         let foco = self.predefinicoes.foco_da_pergunta.clone()?;
         let tamanho = self.predefinicoes.janela.get();
         let tema = cx.theme();
@@ -860,8 +870,8 @@ impl Revelacao {
                             .items_center()
                             .justify_center()
                             // Clicar fora cancela, como o `onOpenChange` do site.
-                            .on_click(cx.listener(|tela, _ev, _window, cx| {
-                                tela.responder_pergunta(false, cx);
+                            .on_click(cx.listener(|tela, _ev, window, cx| {
+                                tela.responder_pergunta(false, window, cx);
                             }))
                             .child(
                                 v_flex()
@@ -869,13 +879,15 @@ impl Revelacao {
                                     .track_focus(&foco)
                                     .key_context(CONTEXTO_DA_PERGUNTA)
                                     .on_action(cx.listener(
-                                        |tela, _: &ConfirmarPergunta, _w, cx| {
-                                            tela.responder_pergunta(true, cx);
+                                        |tela, _: &ConfirmarPergunta, window, cx| {
+                                            tela.responder_pergunta(true, window, cx);
                                         },
                                     ))
-                                    .on_action(cx.listener(|tela, _: &CancelarPergunta, _w, cx| {
-                                        tela.responder_pergunta(false, cx);
-                                    }))
+                                    .on_action(cx.listener(
+                                        |tela, _: &CancelarPergunta, window, cx| {
+                                            tela.responder_pergunta(false, window, cx);
+                                        },
+                                    ))
                                     // O clique no cartão não é "fora".
                                     .on_click(|_, _, cx| cx.stop_propagation())
                                     .w(largura)
@@ -921,8 +933,8 @@ impl Revelacao {
                                                 .border_color(borda)
                                                 .bg(fundo)
                                                 .hover(move |s| s.bg(realce))
-                                                .on_click(cx.listener(|tela, _ev, _w, cx| {
-                                                    tela.responder_pergunta(false, cx);
+                                                .on_click(cx.listener(|tela, _ev, window, cx| {
+                                                    tela.responder_pergunta(false, window, cx);
                                                 })),
                                             )
                                             .child(
@@ -930,9 +942,13 @@ impl Revelacao {
                                                     .bg(perigo)
                                                     .text_color(gpui::white())
                                                     .hover(move |s| s.bg(perigo.opacity(0.9)))
-                                                    .on_click(cx.listener(|tela, _ev, _w, cx| {
-                                                        tela.responder_pergunta(true, cx);
-                                                    })),
+                                                    .on_click(cx.listener(
+                                                        |tela, _ev, window, cx| {
+                                                            tela.responder_pergunta(
+                                                                true, window, cx,
+                                                            );
+                                                        },
+                                                    )),
                                             ),
                                     ),
                             ),
@@ -1045,7 +1061,7 @@ impl Revelacao {
     /// 🔑 **Embutido, e não diálogo**, como no site: o operador vê o resumo do
     /// que vai guardar enquanto a foto continua à vista.
     fn formulario_de_preset(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.predefinicoes.criando {
+        if !self.predefinicoes.criando.esta_aberto() {
             return None;
         }
         let tema = cx.theme();
@@ -1069,8 +1085,8 @@ impl Revelacao {
                 .border_color(borda)
                 .bg(cartao)
                 .p(px(8.))
-                .on_action(cx.listener(|tela, _: &Escape, _window, cx| {
-                    tela.cancelar_formulario_de_preset(cx);
+                .on_action(cx.listener(|tela, _: &Escape, window, cx| {
+                    tela.cancelar_formulario_de_preset(window, cx);
                 }))
                 .child(
                     Styled::h(Input::new(&self.nome_do_preset).xsmall(), px(28.))
@@ -1133,8 +1149,8 @@ impl Revelacao {
                         .gap(px(4.))
                         .child(
                             botao_pequeno("cancelar-preset", "Cancelar", false, false, cx).on_click(
-                                cx.listener(|tela, _ev, _window, cx| {
-                                    tela.cancelar_formulario_de_preset(cx);
+                                cx.listener(|tela, _ev, window, cx| {
+                                    tela.cancelar_formulario_de_preset(window, cx);
                                 }),
                             ),
                         )
@@ -1297,7 +1313,7 @@ impl Revelacao {
             _ => v_flex()
                 .gap(px(2.))
                 .children(lista.iter().map(|preset| {
-                    if self.predefinicoes.renomeando == Some(preset.id) {
+                    if self.predefinicoes.renomeando.aberto() == Some(&preset.id) {
                         self.nome_em_edicao(preset.id, cx)
                     } else {
                         self.linha_de_preset(preset, cx)
@@ -1565,7 +1581,7 @@ impl Revelacao {
             .gap(px(4.))
             .px(px(4.))
             .py(px(2.))
-            .on_action(cx.listener(|tela, _: &Escape, _window, cx| tela.cancelar_renome(cx)))
+            .on_action(cx.listener(|tela, _: &Escape, window, cx| tela.cancelar_renome(window, cx)))
             .child(
                 div().flex_1().min_w(px(0.)).child(
                     Styled::h(Input::new(&self.renome_do_preset).xsmall(), px(28.))
@@ -1590,8 +1606,9 @@ impl Revelacao {
                 })),
             )
             .child(
-                icone_de_botao("cancelar-nome", Icone::X, 14., "Cancelar", false, cx)
-                    .on_click(cx.listener(|tela, _ev, _window, cx| tela.cancelar_renome(cx))),
+                icone_de_botao("cancelar-nome", Icone::X, 14., "Cancelar", false, cx).on_click(
+                    cx.listener(|tela, _ev, window, cx| tela.cancelar_renome(window, cx)),
+                ),
             )
             .into_any_element()
     }

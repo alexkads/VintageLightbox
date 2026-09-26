@@ -343,7 +343,7 @@ pub struct Caixa {
     /// continua enquanto houver.
     pub(super) leituras_soltas: usize,
     /// Quem tinha o foco antes de o diálogo abrir — volta a ele ao fechar.
-    pub(super) foco_antes: Option<FocusHandle>,
+    pub(super) foco_antes: crate::modal::DevolverFoco,
 }
 
 /// O último trio escolhido — o balcão costuma repeti-lo o dia inteiro. No site
@@ -437,8 +437,13 @@ impl Caixa {
             modo,
             lote: None,
             leituras_soltas: 0,
-            foco_antes: None,
+            foco_antes: crate::modal::DevolverFoco::default(),
         }
+    }
+
+    /// Quem recebe as teclas F do caixa em tela cheia.
+    pub fn foco(&self) -> FocusHandle {
+        self.foco.clone()
     }
 
     /// É o painel flutuante da galeria?
