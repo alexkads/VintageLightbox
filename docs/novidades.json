@@ -1,11 +1,12 @@
 {
-  "versao": "0.1.16",
-  "titulo": "Dois temas novos, Matrix e Cyberpunk, e o diálogo de negociação igual ao do site, na galeria e no caixa.",
+  "versao": "0.1.17",
+  "titulo": "Janelas, botões e gaveta com o visual do site: tudo no mesmo padrão, no meio da tela.",
   "importante": false,
   "novidades": [
-    "Temas Matrix e Cyberpunk no menu da conta, ao lado de Claro, Escuro e Sistema. O Matrix é verde sobre preto, com letra de terminal; o Cyberpunk é neon amarelo, rosa e ciano sobre azul-noite. A escolha fica guardada na máquina.",
-    "Negociação: o cartão escolhido ganha a borda do site, e \"Remover negociação\" pergunta numa janela por cima do formulário; o Esc fecha só a pergunta. Vale na galeria e no caixa.",
-    "No caixa, o site parceiro da negociação virou uma lista, como no site."
+    "Todas as janelas de pergunta e de formulário (negociação, caixa, dados do cliente, apagar, importar, exportar, nova sessão, agenda, chatbot) ficam no meio da tela e têm o mesmo desenho do site. O Esc fecha, e as perguntas de apagar ou descartar trazem os botões numa faixa embaixo.",
+    "O atendimento abre como gaveta pela direita, e os detalhes da galeria abrem num balão preso ao botão, como no site.",
+    "Botões, selos e avisos passam a ter o tamanho e as cores do site.",
+    "As buscas de agendamento, voucher, compra e parceiro ficam mais largas, e a lista rola sem esconder o campo de busca."
   ],
-  "por_que_atualizar": "A negociação no atendimento fica igual à do site e para de atrapalhar, e cada balcão pode escolher o visual que prefere."
+  "por_que_atualizar": "O app fica igual ao site em todas as janelas: quem aprendeu num sabe usar o outro."
 }
