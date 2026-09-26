@@ -604,6 +604,13 @@ impl PhotoRepository for PhotoRepositoryImpl {
         Ok(fotos)
     }
 
+    /// Regrava a foto — **menos a sessão**.
+    ///
+    /// 🚨 O `sessao_id` fica de fora de propósito: quem muda de sessão é
+    /// [`PhotoRepository::trocar_sessao`], numa tacada. Nota, bandeira e receita
+    /// leem a foto antes e regravam depois; com a sessão na lista, uma leitura
+    /// de antes da troca devolvia a foto ao rascunho, e ela sumia da sessão
+    /// (40 fotos de 24 MB, 12 para trás — 26/set/2026).
     async fn update(&self, photo: &Photo) -> DomainResult<()> {
         let id = photo.id().to_string();
         let file_path = photo.file_path().to_string_lossy().to_string();
@@ -612,7 +619,6 @@ impl PhotoRepository for PhotoRepositoryImpl {
         let flag = photo.flag().map(|f| f.as_code());
         let comprada_em = photo.comprada_em().map(|d| d.to_rfc3339());
         let pos_venda_foto_id = photo.id_no_site().map(str::to_string);
-        let sessao_id = photo.sessao().map(str::to_string);
         let nome_original = photo.nome_original().map(str::to_string);
         let receita = photo.receita().map(str::to_string);
         let is_edited = photo.is_edited();
@@ -699,7 +705,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
 
         let result = sqlx::query(
             "UPDATE photos
-             SET file_path = ?, rating = ?, color_label = ?, flag = ?, comprada_em = ?, pos_venda_foto_id = ?, sessao_id = ?, nome_original = ?, edit_receita = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, preview_path = ?, edit_exposure = ?, edit_contrast = ?, edit_temperature = ?, edit_tint = ?, edit_highlights = ?, edit_shadows = ?, edit_whites = ?, edit_blacks = ?, edit_clarity = ?, edit_vibrance = ?, edit_saturation = ?, edit_tone_curve_shadows = ?, edit_tone_curve_darks = ?, edit_tone_curve_lights = ?, edit_tone_curve_highlights = ?, content_hash = ?, edit_hsl_red_sat = ?, edit_hsl_orange_sat = ?, edit_hsl_yellow_sat = ?, edit_hsl_green_sat = ?, edit_hsl_aqua_sat = ?, edit_hsl_blue_sat = ?, edit_hsl_purple_sat = ?, edit_hsl_magenta_sat = ?, edit_hsl_red_hue = ?, edit_hsl_orange_hue = ?, edit_hsl_yellow_hue = ?, edit_hsl_green_hue = ?, edit_hsl_aqua_hue = ?, edit_hsl_blue_hue = ?, edit_hsl_purple_hue = ?, edit_hsl_magenta_hue = ?, edit_hsl_red_lum = ?, edit_hsl_orange_lum = ?, edit_hsl_yellow_lum = ?, edit_hsl_green_lum = ?, edit_hsl_aqua_lum = ?, edit_hsl_blue_lum = ?, edit_hsl_purple_lum = ?, edit_hsl_magenta_lum = ?, edit_lens_distortion = ?, edit_lens_vignette_amount = ?, edit_lens_vignette_midpoint = ?, edit_nr_luminance = ?, edit_nr_color = ?, edit_sharpen_amount = ?, edit_sharpen_radius = ?, edit_split_shadow_hue = ?, edit_split_shadow_sat = ?, edit_split_highlight_hue = ?, edit_split_highlight_sat = ?, edit_split_balance = ?, edit_grain_amount = ?, edit_grain_size = ?, edit_crop_x = ?, edit_crop_y = ?, edit_crop_width = ?, edit_crop_height = ?, edit_crop_rotation = ?, edit_crop_angle = ?, edit_crop_flip_h = ?, edit_crop_flip_v = ?
+             SET file_path = ?, rating = ?, color_label = ?, flag = ?, comprada_em = ?, pos_venda_foto_id = ?, nome_original = ?, edit_receita = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, preview_path = ?, edit_exposure = ?, edit_contrast = ?, edit_temperature = ?, edit_tint = ?, edit_highlights = ?, edit_shadows = ?, edit_whites = ?, edit_blacks = ?, edit_clarity = ?, edit_vibrance = ?, edit_saturation = ?, edit_tone_curve_shadows = ?, edit_tone_curve_darks = ?, edit_tone_curve_lights = ?, edit_tone_curve_highlights = ?, content_hash = ?, edit_hsl_red_sat = ?, edit_hsl_orange_sat = ?, edit_hsl_yellow_sat = ?, edit_hsl_green_sat = ?, edit_hsl_aqua_sat = ?, edit_hsl_blue_sat = ?, edit_hsl_purple_sat = ?, edit_hsl_magenta_sat = ?, edit_hsl_red_hue = ?, edit_hsl_orange_hue = ?, edit_hsl_yellow_hue = ?, edit_hsl_green_hue = ?, edit_hsl_aqua_hue = ?, edit_hsl_blue_hue = ?, edit_hsl_purple_hue = ?, edit_hsl_magenta_hue = ?, edit_hsl_red_lum = ?, edit_hsl_orange_lum = ?, edit_hsl_yellow_lum = ?, edit_hsl_green_lum = ?, edit_hsl_aqua_lum = ?, edit_hsl_blue_lum = ?, edit_hsl_purple_lum = ?, edit_hsl_magenta_lum = ?, edit_lens_distortion = ?, edit_lens_vignette_amount = ?, edit_lens_vignette_midpoint = ?, edit_nr_luminance = ?, edit_nr_color = ?, edit_sharpen_amount = ?, edit_sharpen_radius = ?, edit_split_shadow_hue = ?, edit_split_shadow_sat = ?, edit_split_highlight_hue = ?, edit_split_highlight_sat = ?, edit_split_balance = ?, edit_grain_amount = ?, edit_grain_size = ?, edit_crop_x = ?, edit_crop_y = ?, edit_crop_width = ?, edit_crop_height = ?, edit_crop_rotation = ?, edit_crop_angle = ?, edit_crop_flip_h = ?, edit_crop_flip_v = ?
              WHERE id = ?"
         )
         .bind(&file_path)
@@ -708,7 +714,6 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(flag)
         .bind(&comprada_em)
         .bind(&pos_venda_foto_id)
-        .bind(&sessao_id)
         .bind(&nome_original)
         .bind(&receita)
         .bind(is_edited)
@@ -833,5 +838,23 @@ impl PhotoRepository for PhotoRepositoryImpl {
             Some(r) => Ok(Some(Self::row_to_photo(&r)?)),
             None => Ok(None),
         }
+    }
+
+    async fn trocar_sessao(&self, de: &str, para: &str) -> DomainResult<usize> {
+        // `modified_at` anda como andava em `Photo::definir_sessao`.
+        let resultado =
+            sqlx::query("UPDATE photos SET sessao_id = ?, modified_at = ? WHERE sessao_id = ?")
+                .bind(para)
+                .bind(chrono::Utc::now().to_rfc3339())
+                .bind(de)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| {
+                    DomainError::InvalidOperation(format!(
+                        "Failed to move photos to session: {}",
+                        e
+                    ))
+                })?;
+        Ok(resultado.rows_affected() as usize)
     }
 }

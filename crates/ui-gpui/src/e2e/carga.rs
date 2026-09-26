@@ -313,3 +313,41 @@ fn importacao_longa_com_o_r2_lento_nao_trava_a_triagem(cx: &mut TestAppContext) 
         );
     }
 }
+
+/// 🚨 **A leva solta com outra cópia andando espera a vez, e não some.**
+///
+/// Até 26/set/2026 `enviar_arquivos` voltava calado quando já havia cópia: o
+/// operador soltava o resto do cartão, nada acontecia e nada dizia por quê.
+/// É um dos caminhos para "40 fotos, 12 ficaram para trás".
+#[gpui_kit::test]
+fn a_segunda_leva_solta_durante_a_copia_entra_depois(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(
+        cx,
+        Cenario {
+            importador_demorado: true,
+            ..Cenario::default()
+        },
+    );
+    let primeira: Vec<String> = (0..28).map(|i| format!("/cartao/A_{i:02}.jpg")).collect();
+    let segunda: Vec<String> = (0..12).map(|i| format!("/cartao/B_{i:02}.jpg")).collect();
+    e.detalhe(cx, |tela, _w, cx| {
+        tela.enviar_arquivos(primeira.clone(), cx)
+    });
+    e.esperar(cx);
+    e.detalhe(cx, |tela, _w, cx| tela.enviar_arquivos(segunda.clone(), cx));
+    e.esperar(cx);
+    assert_eq!(e.importador.importados().len(), 1, "uma cópia de cada vez");
+    assert_eq!(
+        e.detalhe(cx, |tela, _w, _cx| tela.na_fila()),
+        12,
+        "a segunda espera"
+    );
+
+    // A primeira termina: a segunda sai sozinha.
+    e.importador.responder();
+    e.esperar(cx);
+    let lotes = e.importador.importados();
+    assert_eq!(lotes.len(), 2, "a segunda saiu");
+    assert_eq!(lotes[1].0, segunda);
+    assert_eq!(e.detalhe(cx, |tela, _w, _cx| tela.na_fila()), 0);
+}

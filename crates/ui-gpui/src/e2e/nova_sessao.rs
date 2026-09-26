@@ -328,6 +328,176 @@ fn criar_com_a_copia_correndo_entra_na_sessao_e_o_resto_chega(cx: &mut TestAppCo
     }
 }
 
+/// 🚨 **A cópia que termina durante a troca da criação também chega**
+/// (26/set/2026: 40 fotos de 24 MB, 12 ficaram para trás).
+///
+/// "Criar" passa as fotos do rascunho para a sessão com um `UPDATE`, e a
+/// resposta dele volta um respiro depois. Se as últimas fotos são gravadas
+/// nesse meio — depois do `UPDATE`, antes da resposta — e o `Terminou` chega
+/// junto, a tela via a cópia terminada e não armava a varredura seguinte: as
+/// fotos ficavam com o id do rascunho, que é trocado logo em seguida, e
+/// nenhuma troca mais as levava.
+#[gpui_kit::test]
+fn a_copia_que_termina_durante_a_troca_nao_fica_no_rascunho(cx: &mut TestAppContext) {
+    let e = abrir_o_app(
+        cx,
+        Cenario {
+            importador_demorado: true,
+            ..Cenario::default()
+        },
+    );
+    e.entrar_na_conta(cx);
+    abrir_o_assistente(&e, cx);
+    let rascunho = id_do_rascunho(&e, cx);
+
+    e.app(cx, |app, window, cx| {
+        app.nova_sessao.update(cx, |tela, cx| {
+            tela.importar_arquivos(
+                vec![
+                    "/cartao/DSC_1.jpg".into(),
+                    "/cartao/DSC_2.jpg".into(),
+                    "/cartao/DSC_3.jpg".into(),
+                ],
+                window,
+                cx,
+            )
+        });
+    });
+    e.importador.responder_uma(); // Começou
+    foto_no_rascunho(&e, "nova-1", &rascunho);
+    e.importador.responder_uma(); // a primeira ficou pronta
+    e.esperar(cx);
+
+    // 🚀 Criar: o `UPDATE` roda, e a resposta dele ainda não voltou.
+    e.acervo
+        .segurar_trocas
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    e.site.responder_json(
+        "nova-criada",
+        Ok(json!({"id": "g9", "titulo": "Ensaio da Ana"})),
+    );
+    e.app(cx, |app, window, cx| {
+        app.nova_sessao.update(cx, |tela, cx| {
+            tela.escolher_produto("p1", window, cx);
+            tela.escolher_estudio("e1", window, cx);
+            tela.digitar("Ensaio da Ana", "", "", window, cx);
+            tela.criar(window, cx);
+        });
+    });
+    e.esperar(cx);
+
+    // 📥 As duas últimas gravadas depois do `UPDATE`, e a cópia termina.
+    foto_no_rascunho(&e, "nova-2", &rascunho);
+    foto_no_rascunho(&e, "nova-3", &rascunho);
+    e.importador.responder();
+    e.esperar(cx);
+
+    // A resposta da troca enfim volta.
+    e.acervo
+        .segurar_trocas
+        .store(false, std::sync::atomic::Ordering::Relaxed);
+    e.acervo.responder_as_trocas();
+    e.esperar(cx);
+    e.esperar(cx);
+
+    let dono = |id: &str| {
+        e.acervo
+            .fotos
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|f| f.id == id)
+            .and_then(|f| f.sessao_id.clone())
+    };
+    for id in ["id-nova-1", "id-nova-2", "id-nova-3"] {
+        assert_eq!(dono(id).as_deref(), Some("g9"), "{id} chegou à sessão");
+    }
+    e.app(cx, |app, _w, cx| {
+        assert!(
+            app.nova_sessao.read(cx).levando_para_teste().is_none(),
+            "e nada ficou esperando para ser levado"
+        );
+    });
+}
+
+/// 🚨 **A foto a caminho da sessão criada não é "de um rascunho antigo".**
+///
+/// Com a cópia seguindo em segundo plano, o rascunho da tela já é outro, e a
+/// foto gravada entre duas trocas carrega o id velho por um respiro. A
+/// releitura a via como órfã e oferecia "Apagar" — que tira do catálogo **e do
+/// disco** as fotos da sessão anterior no meio da cópia.
+#[gpui_kit::test]
+fn a_foto_em_transito_nao_e_oferecida_para_apagar(cx: &mut TestAppContext) {
+    let e = abrir_o_app(
+        cx,
+        Cenario {
+            importador_demorado: true,
+            ..Cenario::default()
+        },
+    );
+    e.entrar_na_conta(cx);
+    abrir_o_assistente(&e, cx);
+    let rascunho = id_do_rascunho(&e, cx);
+
+    e.app(cx, |app, window, cx| {
+        app.nova_sessao.update(cx, |tela, cx| {
+            tela.importar_arquivos(
+                vec!["/cartao/DSC_1.jpg".into(), "/cartao/DSC_2.jpg".into()],
+                window,
+                cx,
+            )
+        });
+    });
+    e.importador.responder_uma(); // Começou
+    foto_no_rascunho(&e, "nova-1", &rascunho);
+    e.importador.responder_uma();
+    e.esperar(cx);
+    e.site.responder_json(
+        "nova-criada",
+        Ok(json!({"id": "g9", "titulo": "Ensaio da Ana"})),
+    );
+    e.app(cx, |app, window, cx| {
+        app.nova_sessao.update(cx, |tela, cx| {
+            tela.escolher_produto("p1", window, cx);
+            tela.escolher_estudio("e1", window, cx);
+            tela.digitar("Ensaio da Ana", "", "", window, cx);
+            tela.criar(window, cx);
+        });
+    });
+    e.esperar(cx);
+
+    // A segunda gravada com o id velho, e a tela relê antes da próxima troca.
+    foto_no_rascunho(&e, "nova-2", &rascunho);
+    e.app(cx, |app, window, cx| {
+        app.nova_sessao
+            .update(cx, |tela, cx| tela.reler_fotos_para_teste(window, cx));
+    });
+    e.esperar(cx);
+    e.app(cx, |app, _w, cx| {
+        let nova = app.nova_sessao.read(cx);
+        assert!(nova.levando_para_teste().is_some(), "a cópia ainda anda");
+        assert!(
+            nova.orfas_para_teste().is_empty(),
+            "a foto a caminho não é órfã: {:?}",
+            nova.orfas_para_teste()
+        );
+    });
+
+    // E termina na sessão.
+    e.importador.responder();
+    e.esperar(cx);
+    e.esperar(cx);
+    let dono = e
+        .acervo
+        .fotos
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|f| f.id == "id-nova-2")
+        .and_then(|f| f.sessao_id.clone());
+    assert_eq!(dono.as_deref(), Some("g9"));
+}
+
 /// 🧯 O site recusa: a frase dele aparece, com o caminho para a etapa, e
 /// nenhuma galeria fica registrada no rascunho.
 #[gpui_kit::test]

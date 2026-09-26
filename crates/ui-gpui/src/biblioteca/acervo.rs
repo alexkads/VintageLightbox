@@ -109,6 +109,9 @@ pub mod mentira {
     use super::*;
     use std::sync::Mutex;
 
+    /// Quem espera a resposta da troca, e quantas ela mudou.
+    pub type TrocaSegurada = (Sender<Result<usize, String>>, usize);
+
     #[derive(Default)]
     pub struct AcervoDeMentira {
         pub fotos: Mutex<Vec<PhotoViewModel>>,
@@ -116,6 +119,11 @@ pub mod mentira {
         /// Uma leitura que começou antes da última gravação e terminou
         /// depois dela: a próxima releitura devolve este retrato, uma vez.
         pub leitura_atrasada: Mutex<Option<Vec<PhotoViewModel>>>,
+        /// A troca acontece na hora, mas a resposta espera
+        /// [`AcervoDeMentira::responder_as_trocas`] — o `UPDATE` que já rodou no
+        /// banco enquanto a tela ainda não soube, e a cópia segue gravando.
+        pub segurar_trocas: std::sync::atomic::AtomicBool,
+        pub trocas_seguradas: Mutex<Vec<TrocaSegurada>>,
     }
 
     impl AcervoDeMentira {
@@ -132,6 +140,12 @@ pub mod mentira {
                 ..Default::default()
             };
             self.fotos.lock().expect("as fotos").push(foto);
+        }
+
+        pub fn responder_as_trocas(&self) {
+            for (canal, trocadas) in self.trocas_seguradas.lock().expect("as trocas").drain(..) {
+                let _ = canal.send(Ok(trocadas));
+            }
         }
 
         fn mudar_sessao(&self, de: &str, para: Option<&str>) -> usize {
@@ -169,7 +183,18 @@ pub mod mentira {
         }
 
         fn trocar_sessao(&self, de: String, para: String, canal: Sender<Result<usize, String>>) {
-            let _ = canal.send(Ok(self.mudar_sessao(&de, Some(&para))));
+            let trocadas = self.mudar_sessao(&de, Some(&para));
+            if self
+                .segurar_trocas
+                .load(std::sync::atomic::Ordering::Relaxed)
+            {
+                self.trocas_seguradas
+                    .lock()
+                    .expect("as trocas")
+                    .push((canal, trocadas));
+                return;
+            }
+            let _ = canal.send(Ok(trocadas));
         }
 
         fn apagar_da_sessao(&self, sessao: String, canal: Sender<Result<usize, String>>) {

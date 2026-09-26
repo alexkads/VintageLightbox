@@ -73,6 +73,25 @@ pub struct ImportWithOptionsUseCase {
     preview_storage: Arc<dyn PreviewStorage>,
     file_organizer: Arc<dyn FileOrganizer>,
     check_duplicates: Arc<CheckDuplicatesUseCase>,
+    /// As vagas de decodificação, **do app inteiro** — ver [`vagas_de_decodificacao`].
+    vagas: Arc<Semaphore>,
+}
+
+/// Quantas fotos o app decodifica ao mesmo tempo, somando todas as levas.
+///
+/// Decodificar prévias grandes consome CPU e memória. Reservar ao menos um
+/// núcleo para a interface evita que o progresso fique sem repintar.
+///
+/// 🚨 **Uma conta para o app, e não uma por leva.** Até 26/set/2026 cada
+/// `execute` abria o próprio semáforo: duas sessões copiando ao mesmo tempo (a
+/// cópia em segundo plano de uma, a importação de outra) decodificavam o dobro.
+/// Medido com 5 levas de 50 fotos de 24 MB: 2,4 GB de pico, contra ~0,8 GB de
+/// uma leva — num balcão de 8 GB, com a GPU revelando ao lado, é onde o
+/// sistema começa a matar processo.
+fn vagas_de_decodificacao() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get().saturating_sub(1).clamp(1, 4))
+        .unwrap_or(2)
 }
 
 impl ImportWithOptionsUseCase {
@@ -93,6 +112,7 @@ impl ImportWithOptionsUseCase {
             preview_storage,
             file_organizer,
             check_duplicates,
+            vagas: Arc::new(Semaphore::new(vagas_de_decodificacao())),
         }
     }
 
@@ -125,12 +145,7 @@ impl ImportWithOptionsUseCase {
             Vec::new()
         };
 
-        // Decodificar prévias grandes consome CPU e memória. Reservar ao menos
-        // um núcleo para a interface evita que o progresso fique sem repintar.
-        let paralelismo = std::thread::available_parallelism()
-            .map(|n| n.get().saturating_sub(1).clamp(1, 4))
-            .unwrap_or(2);
-        let semaphore = Arc::new(Semaphore::new(paralelismo));
+        let semaphore = self.vagas.clone();
 
         // Contadores compartilhados
         let successful = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -145,6 +160,13 @@ impl ImportWithOptionsUseCase {
             // 🔑 Cancelar para de **abrir** trabalho, e não só de fazê-lo. Sem
             // esta saída, cancelar um lote de 2.000 arquivos ainda criaria as
             // 2.000 tarefas — cada uma para desistir na primeira linha.
+            if cancel_flag.load(Ordering::Relaxed) {
+                break;
+            }
+            // Pausada, nem pede vaga: as que ela soltou são das outras levas.
+            while pause_flag.load(Ordering::Relaxed) && !cancel_flag.load(Ordering::Relaxed) {
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            }
             if cancel_flag.load(Ordering::Relaxed) {
                 break;
             }
@@ -183,9 +205,17 @@ impl ImportWithOptionsUseCase {
                 .find(|d| d.file_path == file_path)
                 .and_then(|d| d.existing_photo.clone());
 
+            let vagas = semaphore.clone();
             let task = tokio::spawn(async move {
                 // Liberar permit ao final
-                let _permit = permit;
+                let mut vaga = Some(permit);
+
+                // 🔑 **Pausada, a leva devolve a vaga.** As vagas são do app
+                // inteiro: segurá-las dormindo pararia a cópia das outras
+                // sessões junto com esta.
+                if pause_flag.load(Ordering::Relaxed) && !cancel_flag.load(Ordering::Relaxed) {
+                    vaga = None;
+                }
 
                 // 🚨 A espera da pausa também olha o cancelamento.
                 //
@@ -201,6 +231,10 @@ impl ImportWithOptionsUseCase {
                 if cancel_flag.load(Ordering::Relaxed) {
                     return;
                 }
+                if vaga.is_none() {
+                    vaga = vagas.acquire_owned().await.ok();
+                }
+                let _vaga = vaga;
 
                 // Enviar progresso
                 let _ = progress_sender.send(ImportProgress::Processing {
@@ -877,6 +911,81 @@ mod tests {
         assert_eq!(
             importacao.successful, 0,
             "nada entra depois do cancelamento"
+        );
+    }
+
+    /// Um gerador que conta quantas decodificações correm ao mesmo tempo.
+    #[derive(Default)]
+    struct GeradorQueConta {
+        agora: std::sync::atomic::AtomicUsize,
+        pico: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl ThumbnailGenerator for GeradorQueConta {
+        async fn generate(&self, _path: &FilePath, _max_size: u32) -> DomainResult<Vec<u8>> {
+            let agora = self.agora.fetch_add(1, Ordering::SeqCst) + 1;
+            self.pico.fetch_max(agora, Ordering::SeqCst);
+            tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+            self.agora.fetch_sub(1, Ordering::SeqCst);
+            Ok(vec![0u8; 8])
+        }
+    }
+
+    /// 🚨 **Duas levas ao mesmo tempo dividem as mesmas vagas.** Cada `execute`
+    /// abria o próprio semáforo, e duas sessões copiando decodificavam o dobro
+    /// de fotos de 24 MB ao mesmo tempo (5 levas: 2,4 GB de pico).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    async fn duas_levas_juntas_nao_passam_das_vagas_do_app() {
+        let mut repo = MockPhotoRepo::new();
+        repo.expect_save().returning(|_| Ok(()));
+        let mut metadados = MockMetadataExt::new();
+        metadados
+            .expect_extract()
+            .returning(|_| Ok(PhotoMetadata::default()));
+        let mut previas = MockPreviewStore::new();
+        previas.expect_save().returning(|_, _, _| Ok(()));
+        let gerador = Arc::new(GeradorQueConta::default());
+        let use_case = Arc::new(ImportWithOptionsUseCase::new(
+            Arc::new(repo),
+            Arc::new(metadados),
+            gerador.clone(),
+            Arc::new(previas),
+            Arc::new(MockFileOrg),
+        ));
+
+        let arquivos: Vec<NamedTempFile> = (0..24).map(|i| create_temp_file(&[i])).collect();
+        let leva = |de: usize| {
+            let files = arquivos[de..de + 12]
+                .iter()
+                .map(|a| FilePath::new(a.path().to_str().unwrap()).unwrap())
+                .collect();
+            let use_case = use_case.clone();
+            async move {
+                let (tx, _rx) = mpsc::unbounded_channel();
+                use_case
+                    .execute(ImportRequest {
+                        files,
+                        options: ImportOptions {
+                            mode: ImportMode::Add,
+                            skip_duplicates: false,
+                            ..ImportOptions::default()
+                        },
+                        progress_sender: tx,
+                        pause_flag: Arc::default(),
+                        cancel_flag: Arc::default(),
+                    })
+                    .await
+                    .unwrap()
+            }
+        };
+        let (a, b) = tokio::join!(leva(0), leva(12));
+        assert_eq!(a.successful + b.successful, 24);
+        let pico = gerador.pico.load(Ordering::SeqCst);
+        assert!(
+            pico <= vagas_de_decodificacao(),
+            "{pico} decodificações juntas, com {} vagas no app",
+            vagas_de_decodificacao()
         );
     }
 }

@@ -568,3 +568,73 @@ async fn a_foto_antiga_sem_a_coluna_continua_com_nome() {
     assert_eq!(lida.nome_original(), None, "nada foi guardado");
     assert_eq!(lida.file_name(), Some("DSC_0001.NEF"), "e ela tem nome");
 }
+
+/// 🚨 **A nota dada com a leitura de antes da troca não devolve a foto ao
+/// rascunho** (VintageLightbox, 26/set/2026: 40 fotos de 24 MB, 12 ficaram
+/// para trás).
+///
+/// Nota, bandeira e a receita padrão leem a foto e regravam a linha. A cópia em
+/// segundo plano passa a foto do rascunho para a sessão **entre** as duas
+/// pontas — e a regravação, com o `sessao_id` lido antes, a levava de volta. Se
+/// isso acontecia depois da última troca, a foto ficava presa no rascunho e não
+/// aparecia na sessão. Medido no teste de carga: 151 trocas para 150 fotos.
+#[tokio::test]
+async fn a_regravacao_com_leitura_velha_nao_tira_a_foto_da_sessao() {
+    let repo = create_test_repository().await;
+    let mut foto = Photo::new(FilePath::new("/ensaio/DSC_0001.jpg").unwrap());
+    foto.definir_sessao(Some("rascunho:1".into()));
+    repo.save(&foto).await.unwrap();
+
+    // A nota lê a foto…
+    let mut lida = repo.find_by_id(&foto.id()).await.unwrap().unwrap();
+    // …a cópia em segundo plano a passa para a sessão criada…
+    assert_eq!(repo.trocar_sessao("rascunho:1", "g1").await.unwrap(), 1);
+    // …e a nota regrava com o que leu.
+    lida.rate(Rating::new(4).unwrap()).unwrap();
+    repo.update(&lida).await.unwrap();
+
+    let agora = repo.find_by_id(&foto.id()).await.unwrap().unwrap();
+    assert_eq!(agora.sessao(), Some("g1"), "a foto continua na sessão");
+    assert_eq!(
+        agora.rating().map(|r| r.value()),
+        Some(4),
+        "e a nota entrou"
+    );
+}
+
+/// 🚨 **A troca mexe só na sessão**: o que foi gravado na foto depois de a
+/// troca começar (a receita padrão com o corte, a nota) não é apagado. Antes
+/// ela lia o catálogo inteiro e regravava cada foto com a leitura velha — no
+/// teste de carga, uma sessão terminou com 49 de 50 cortes.
+#[tokio::test]
+async fn a_troca_so_mexe_na_sessao_e_so_nas_do_rascunho() {
+    let repo = create_test_repository().await;
+    let mut minha = Photo::new(FilePath::new("/ensaio/a.jpg").unwrap());
+    minha.definir_sessao(Some("rascunho:1".into()));
+    let mut outra = Photo::new(FilePath::new("/ensaio/b.jpg").unwrap());
+    outra.definir_sessao(Some("rascunho:2".into()));
+    repo.save(&minha).await.unwrap();
+    repo.save(&outra).await.unwrap();
+
+    minha.rate(Rating::new(5).unwrap()).unwrap();
+    minha.definir_receita(Some("{\"exposure\":0.4}".into()));
+    repo.update(&minha).await.unwrap();
+
+    assert_eq!(repo.trocar_sessao("rascunho:1", "g1").await.unwrap(), 1);
+    assert_eq!(
+        repo.trocar_sessao("rascunho:1", "g1").await.unwrap(),
+        0,
+        "refazer é de graça"
+    );
+
+    let minha = repo.find_by_id(&minha.id()).await.unwrap().unwrap();
+    assert_eq!(minha.sessao(), Some("g1"));
+    assert_eq!(minha.rating().map(|r| r.value()), Some(5));
+    assert_eq!(minha.receita(), Some("{\"exposure\":0.4}"));
+    let outra = repo.find_by_id(&outra.id()).await.unwrap().unwrap();
+    assert_eq!(
+        outra.sessao(),
+        Some("rascunho:2"),
+        "a do outro rascunho fica"
+    );
+}

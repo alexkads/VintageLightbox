@@ -677,6 +677,14 @@ pub struct Detalhe {
     /// Pior: quando a negociação passava, ela zerava o contador do lote e a
     /// importação se dava por terminada no meio.
     importacao: Option<Importacao>,
+    /// As levas soltas enquanto outra cópia andava, com a sessão de cada uma.
+    ///
+    /// 🚨 **Antes eram jogadas fora, em silêncio**: `enviar_arquivos` voltava
+    /// sem dizer nada quando já havia cópia — a da própria sessão, ou a que o
+    /// assistente continua depois de criar. O operador soltava o resto do
+    /// cartão e as fotos simplesmente não vinham (26/set/2026). O assistente e
+    /// o site põem na fila; aqui também.
+    fila_de_levas: std::collections::VecDeque<(String, Vec<String>)>,
     link: Option<LinkDeAcesso>,
     /// ✏️ O formulário dos dados do cliente, quando aparece — o "Editar" e o
     /// pedido de contato do fim da sessão. Ver [`FormularioDoCliente`].
@@ -886,6 +894,7 @@ impl Detalhe {
             na_mao: std::collections::HashMap::new(),
             escolhendo: false,
             importacao: None,
+            fila_de_levas: std::collections::VecDeque::new(),
             link: None,
             dados_do_cliente: Modal::default(),
             gravando_dados: None,
@@ -945,6 +954,8 @@ impl Detalhe {
         self.atendimento_gravando.clear();
         self.atendimento.update(cx, |gaveta, cx| gaveta.largar(cx));
         self.importacao = None;
+        // A fila era da sessão que ficou para trás: não entra nesta.
+        self.fila_de_levas.clear();
         self.erro = None;
         self.carregando = true;
 
@@ -2328,7 +2339,27 @@ impl Detalhe {
     /// o botão "Importar" espera, pela mesma razão de uma importação de cada vez.
     pub fn mostrar_a_copia(&mut self, andamento: Importacao, cx: &mut Context<Self>) {
         self.importacao = Some(andamento);
+        self.despachar_a_fila(cx);
         cx.notify();
+    }
+
+    /// A cópia em curso acabou: a próxima leva da fila, se é desta sessão.
+    fn despachar_a_fila(&mut self, cx: &mut Context<Self>) {
+        if self.importando() {
+            return;
+        }
+        while let Some((galeria, caminhos)) = self.fila_de_levas.pop_front() {
+            if self.galeria_id.as_deref() == Some(galeria.as_str()) {
+                self.enviar_arquivos(caminhos, cx);
+                return;
+            }
+        }
+    }
+
+    /// 🧪 Quantas fotos esperam na fila.
+    #[cfg(test)]
+    pub(crate) fn na_fila(&self) -> usize {
+        self.fila_de_levas.iter().map(|(_, c)| c.len()).sum()
     }
 
     /// O andamento da última importação, terminada ou não.
@@ -2385,7 +2416,13 @@ impl Detalhe {
         let Some(galeria_id) = self.galeria_id.clone() else {
             return;
         };
-        if caminhos.is_empty() || self.importando() {
+        if caminhos.is_empty() {
+            return;
+        }
+        if self.importando() {
+            self.fila_de_levas.push_back((galeria_id, caminhos));
+            self.acompanhar(cx);
+            cx.notify();
             return;
         }
 
@@ -2924,6 +2961,7 @@ impl Detalhe {
                 entrou_foto = true;
             }
         }
+        self.despachar_a_fila(cx);
         // 🔑 **Quem relê o catálogo é a raiz** — ela é que tem a porta do
         // acervo. Sem esta linha as fotos ficariam gravadas e invisíveis, que é
         // o mesmo desfecho de não ter importado.
@@ -3189,6 +3227,7 @@ impl Detalhe {
             || self.escolhendo
             || self.mudando() > 0
             || self.importando()
+            || !self.fila_de_levas.is_empty()
             || self.baixando > 0
             || self.avisando
             || self.pedindo_link

@@ -34,6 +34,23 @@ pub trait PhotoRepository: Send + Sync {
     /// Busca uma foto pelo content hash (SHA-256)
     /// Retorna None se não encontrar nenhuma foto com esse hash
     async fn find_by_content_hash(&self, hash: &str) -> DomainResult<Option<Photo>>;
+
+    /// Passa para `para` as fotos da sessão `de`, **mexendo só na sessão**.
+    /// Devolve quantas mudaram.
+    ///
+    /// 🚨 **Não é `find_all` + `update`**, e é o motivo de existir: a troca
+    /// corre com o balcão classificando em cima (a cópia em segundo plano da
+    /// nova sessão), e regravar a foto inteira com uma leitura de antes apagava
+    /// a nota e o corte gravados no meio.
+    ///
+    /// O padrão recusa: só o repositório de verdade sabe fazer isso numa
+    /// tacada, e um dublê de teste que não o declare não deve fingir que sabe.
+    async fn trocar_sessao(&self, de: &str, para: &str) -> DomainResult<usize> {
+        let _ = (de, para);
+        Err(crate::DomainError::InvalidOperation(
+            "este repositório não troca sessão".into(),
+        ))
+    }
 }
 
 /// Repository para persistência de Collections

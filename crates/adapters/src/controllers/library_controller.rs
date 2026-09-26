@@ -144,21 +144,13 @@ impl LibraryController {
     /// Devolve quantas mudaram. Refazer depois de uma falha no meio só mexe
     /// nas que ficaram para trás: as que já mudaram não são mais "de".
     pub async fn trocar_sessao(&self, de: &str, para: &str) -> Result<usize, String> {
-        let fotos = self
-            .photo_repository
-            .find_all()
+        // 🚨 **Numa tacada, e só a sessão** — ver `PhotoRepository::trocar_sessao`.
+        // Ler o catálogo inteiro e regravar foto por foto, como era, atropelava
+        // a nota e o corte gravados no meio pelo balcão.
+        self.photo_repository
+            .trocar_sessao(de, para)
             .await
-            .map_err(|e| e.to_string())?;
-        let mut trocadas = 0;
-        for mut foto in fotos.into_iter().filter(|f| f.sessao() == Some(de)) {
-            foto.definir_sessao(Some(para.to_string()));
-            self.photo_repository
-                .update(&foto)
-                .await
-                .map_err(|e| e.to_string())?;
-            trocadas += 1;
-        }
-        Ok(trocadas)
+            .map_err(|e| e.to_string())
     }
 
     /// Tira do catálogo as fotos de uma sessão e devolve os caminhos que elas

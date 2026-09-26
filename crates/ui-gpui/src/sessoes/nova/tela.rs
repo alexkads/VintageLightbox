@@ -1675,14 +1675,20 @@ impl NovaSessao {
         match resultado {
             Ok(_) => {
                 let id = self.rascunho.criada_id.clone().unwrap_or_default();
-                if self.importando() {
-                    self.levando = Some(Levando {
-                        de: self.rascunho.id_provisorio.clone(),
-                        para: id.clone(),
-                        trocando: false,
-                        de_novo: false,
-                    });
-                }
+                // 🚨 **Sempre uma última varredura, com cópia andando ou não.**
+                // As fotos gravadas entre o `UPDATE` e esta resposta ficaram com
+                // o id do rascunho, e se a cópia terminou nesse meio o
+                // `Terminou` delas já passou — e a releitura dele já apagou o
+                // andamento, então nem "havia cópia" sobra para dizer. Sem esta
+                // varredura ninguém mais as levaria, e o rascunho é trocado logo
+                // abaixo: ficavam fora da sessão para sempre (26/set/2026, 12 de
+                // 40). Quando nada chegou, custa um `UPDATE` que não acha ninguém.
+                self.levando = Some(Levando {
+                    de: self.rascunho.id_provisorio.clone(),
+                    para: id.clone(),
+                    trocando: false,
+                    de_novo: true,
+                });
                 let fotos = self.fotos.len();
                 estado::apagar_rascunho(&self.caminho);
                 lembranca::gravar(&lembranca::Lembranca {
@@ -1997,6 +2003,11 @@ impl NovaSessao {
                 .filter_map(|f| f.sessao_id.clone())
                 .filter(|s| estado::eh_rascunho(s) && *s != id)
                 .filter(|s| self.guardado.as_ref().is_none_or(|g| &g.id_provisorio != s))
+                // 🚨 **A da sessão que ainda está copiando não é órfã.** Ela
+                // está a caminho: o rascunho já foi trocado, e a foto só passa
+                // na próxima troca. Oferecer "Apagar" aqui apagava do catálogo e
+                // do disco as fotos da sessão anterior no meio da cópia.
+                .filter(|s| self.levando.as_ref().is_none_or(|l| &l.de != s))
                 .collect();
             orfas.sort();
             orfas.dedup();
@@ -2197,6 +2208,12 @@ impl NovaSessao {
     #[cfg(test)]
     pub(crate) fn erro_para_teste(&self) -> Option<(String, Option<usize>)> {
         self.erro.clone()
+    }
+
+    /// 🧪 Os rascunhos que a tela oferece apagar.
+    #[cfg(test)]
+    pub(crate) fn orfas_para_teste(&self) -> Vec<String> {
+        self.orfas.clone()
     }
 
     /// 🧪 O rascunho como está.
