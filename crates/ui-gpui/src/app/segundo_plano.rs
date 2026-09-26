@@ -1,13 +1,11 @@
 //! O que a raiz conta à bandeja (`crate::segundo_plano`), e o que a bandeja
 //! pede a ela.
 
-use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::{ActiveTheme, Sizable};
-use gpui_kit::{div, prelude::*, px, App, Context};
+use gpui_kit::{prelude::*, AnyElement, App, Context, Window};
 
 use super::Aplicativo;
+use crate::estilo;
 use crate::segundo_plano::frases::Retrato;
-use crate::tema;
 
 /// O aviso de sair com envio no ar, onde o sistema não tem bandeja.
 ///
@@ -85,8 +83,15 @@ impl Aplicativo {
         cx.notify();
     }
 
-    /// O cartão por cima de tudo, no formato do "Tirar fotos do catálogo?".
-    pub(super) fn aviso_de_saida(&self, saida: Saida, cx: &mut Context<Self>) -> impl IntoElement {
+    /// O aviso por cima de tudo, no formato do "Tirar fotos do catálogo?": o
+    /// `AlertDialog` do `useConfirmacao`, no `Dialog` do gpui-kit. O `Esc` é o
+    /// "Cancelar" (ou "Não sair"); o clique fora não fecha.
+    pub(super) fn aviso_de_saida(
+        &self,
+        saida: Saida,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let n = self.sincronias_pendentes;
         let fotos = if n == 1 {
             "1 envio".to_string()
@@ -106,87 +111,57 @@ impl Aplicativo {
                 "O app fecha sozinho assim que o último envio chegar ao site.".to_string(),
             ),
         };
-        let botoes = match saida {
-            Saida::Perguntando => div()
-                .flex()
-                .flex_wrap()
-                .justify_end()
-                .gap(px(8.))
+        let rodape = crate::dialogo::rodape_da_pergunta(cx).flex_wrap();
+        let rodape = match saida {
+            Saida::Perguntando => rodape
                 .child(
-                    Button::new("saida-cancelar")
-                        .label("Cancelar")
-                        .xsmall()
-                        .on_click(cx.listener(|app, _ev, _w, cx| app.desistir_de_sair(cx))),
+                    estilo::botao_contorno("saida-cancelar", cx)
+                        .child("Cancelar")
+                        .on_click(cx.listener(|app, _, _, cx| app.desistir_de_sair(cx))),
                 )
                 .child(
-                    Button::new("saida-sair-agora")
-                        .label("Sair mesmo assim")
-                        .xsmall()
-                        .on_click(|_ev, _w, cx| crate::segundo_plano::sair_agora(cx)),
+                    estilo::botao_contorno("saida-sair-agora", cx)
+                        .child("Sair mesmo assim")
+                        .on_click(|_, _, cx| crate::segundo_plano::sair_agora(cx)),
                 )
                 .child(
-                    Button::new("saida-minimizar")
-                        .label("Minimizar e continuar")
-                        .xsmall()
-                        .on_click(cx.listener(|app, _ev, window, cx| {
+                    estilo::botao_contorno("saida-minimizar", cx)
+                        .child("Minimizar e continuar")
+                        .on_click(cx.listener(|app, _, window, cx| {
                             app.desistir_de_sair(cx);
                             window.minimize_window();
                         })),
                 )
                 .child(
-                    Button::new("saida-esperar")
-                        .label("Esperar terminar e sair")
-                        .xsmall()
-                        .primary()
-                        .on_click(cx.listener(|app, _ev, _w, cx| app.esperar_a_fila_e_sair(cx))),
+                    estilo::botao_primario("saida-esperar", cx)
+                        .child("Esperar terminar e sair")
+                        .on_click(cx.listener(|app, _, _, cx| app.esperar_a_fila_e_sair(cx))),
                 ),
-            Saida::Esperando => div()
-                .flex()
-                .justify_end()
-                .gap(px(8.))
+            Saida::Esperando => rodape
                 .child(
-                    Button::new("saida-cancelar")
-                        .label("Não sair")
-                        .xsmall()
-                        .on_click(cx.listener(|app, _ev, _w, cx| app.desistir_de_sair(cx))),
+                    estilo::botao_contorno("saida-cancelar", cx)
+                        .child("Não sair")
+                        .on_click(cx.listener(|app, _, _, cx| app.desistir_de_sair(cx))),
                 )
                 .child(
-                    Button::new("saida-sair-agora")
-                        .label("Sair agora")
-                        .xsmall()
-                        .on_click(|_ev, _w, cx| crate::segundo_plano::sair_agora(cx)),
+                    estilo::botao_contorno("saida-sair-agora", cx)
+                        .child("Sair agora")
+                        .on_click(|_, _, cx| crate::segundo_plano::sair_agora(cx)),
                 ),
         };
-
-        div()
-            .absolute()
-            .inset_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(tema::cores::veu())
-            .child(
-                div()
-                    .id("aviso-de-saida")
-                    .debug_selector(|| "aviso-de-saida".to_string())
-                    .flex()
-                    .flex_col()
-                    .gap(px(10.))
-                    .p(px(16.))
-                    .max_w(px(520.))
-                    .bg(cx.theme().background)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .rounded(px(6.))
-                    .child(div().text_sm().child(titulo))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(texto),
-                    )
-                    .child(botoes),
-            )
+        crate::dialogo::desenhar_conteudo(
+            Some(crate::dialogo::miolo_da_pergunta(
+                "aviso-de-saida",
+                titulo,
+                texto,
+                cx,
+            )),
+            Some(rodape.into_any_element()),
+            crate::dialogo::Jeito::alerta(520.),
+            |app, _, cx| app.desistir_de_sair(cx),
+            window,
+            cx,
+        )
     }
 
     /// Fecha a segunda tela, se aberta. A janela principal foi para a bandeja,

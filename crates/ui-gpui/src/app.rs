@@ -5481,6 +5481,9 @@ impl Render for Aplicativo {
             .read(cx)
             .confirmando_apagar()
             .and_then(|quantas| self.aviso_de_apagar(quantas, window, cx));
+        let aviso_de_saida = self
+            .saida
+            .and_then(|saida| self.aviso_de_saida(saida, window, cx));
         let modal_de_configuracoes = self
             .configurando
             .then(|| self.modal_de_configuracoes(window, cx))
@@ -5718,9 +5721,7 @@ impl Render for Aplicativo {
                 raiz.child(self.modal_do_balcao(cx))
             })
             .children(aviso_de_apagar)
-            .when_some(self.saida, |raiz, saida| {
-                raiz.child(self.aviso_de_saida(saida, cx))
-            })
+            .children(aviso_de_saida)
             .when(false, |raiz| raiz)
             .children(modal_de_configuracoes)
             .when(self.menu_da_conta, |raiz| {

@@ -252,6 +252,7 @@ pub fn miolo_da_pergunta(
 ) -> AnyElement {
     gpui_kit::component::v_flex()
         .id(id)
+        .debug_selector(move || id.into())
         .gap(px(6.))
         .child(
             gpui_kit::div()
