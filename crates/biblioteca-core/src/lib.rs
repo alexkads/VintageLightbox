@@ -14,6 +14,7 @@
 //! |---|---|
 //! | [`grade`] | onde cada foto fica, o que está visível, para onde o foco vai |
 //! | [`selecao`] | clique, Shift, Ctrl, arrasto e teclado |
+//! | [`comparar`] | o `⇧C`: duas fotos lado a lado, a ativa e a candidata |
 //! | [`acervo`] | o recorte da barra, as contagens e o que ainda pode mudar |
 //! | [`miniaturas`] | quantas carregar por vez, em que ordem e qual descartar |
 //! | [`sessoes`] | a lista de sessões fotográficas: situação, busca, contagens, gráfico |
@@ -39,6 +40,7 @@
 
 pub mod acervo;
 pub mod caixa;
+pub mod comparar;
 pub mod dados_do_cliente;
 pub mod dinheiro;
 pub mod filtro_de_coluna;
