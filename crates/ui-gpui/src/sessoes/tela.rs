@@ -111,6 +111,72 @@ struct Exclusao {
     _campo: gpui::Subscription,
 }
 
+/// "Restaurar “X”?" aberta, e se o pedido já saiu.
+struct Restauracao {
+    galeria_id: String,
+    titulo: String,
+    enviando: bool,
+}
+
+/// Uma sessão excluída, pronta para a aba "Excluídas" — a
+/// `GaleriaExcluidaDaLista` do site.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Excluida {
+    id: String,
+    titulo: String,
+    /// O e-mail, ou o WhatsApp, ou nada.
+    contato: Option<String>,
+    /// "13/09/2026 14:02", no fuso do estúdio.
+    excluida_em: String,
+    excluida_por: String,
+    no_acervo: u32,
+    bytes: u64,
+    /// `None` = a API não mandou o relato: a tela diz "?", e não "ninguém".
+    maquinas: Option<Vec<exclusao::Maquina>>,
+}
+
+/// A lista das excluídas. `None` na tela = ainda não chegou ou falhou.
+fn excluidas_da_resposta(valor: &serde_json::Value, agora: i64) -> Option<Vec<Excluida>> {
+    let texto = |g: &serde_json::Value, campo: &str| {
+        g.get(campo)
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    let numero = |g: &serde_json::Value, campo: &str| {
+        g.pointer(&format!("/fotos/{campo}"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0)
+    };
+    valor
+        .as_array()?
+        .iter()
+        .map(|g| {
+            let excluida_em = chrono::DateTime::parse_from_rfc3339(g.get("excluida_em")?.as_str()?)
+                .ok()?
+                .with_timezone(&chrono::FixedOffset::west_opt(3 * 3600)?)
+                .format("%d/%m/%Y %H:%M")
+                .to_string();
+            Some(Excluida {
+                id: texto(g, "id")?,
+                titulo: texto(g, "titulo").unwrap_or_default(),
+                contato: texto(g, "email").or_else(|| texto(g, "whatsapp")),
+                excluida_em,
+                excluida_por: texto(g, "excluida_por").unwrap_or_default(),
+                no_acervo: (numero(g, "disponiveis")
+                    + numero(g, "levadas_no_balcao")
+                    + numero(g, "compradas")) as u32,
+                bytes: numero(g, "bytes"),
+                maquinas: g
+                    .get("sobras")
+                    .and_then(sobras_da_resposta)
+                    .map(|s| exclusao::maquinas(&s, agora)),
+            })
+        })
+        .collect()
+}
+
 /// Quem ainda tem fotos da sessão fora do servidor, pelo relato das máquinas.
 ///
 /// ⚠️ **"Não foi possível saber" é dito**, e não omitido: um diálogo que só
@@ -174,6 +240,12 @@ pub struct Sessoes {
     /// espera ([`Sessoes::reler_sobras`]).
     sobras_em_voo: u32,
     reler_sobras: bool,
+    /// 🗑️ As sessões excluídas — a aba "Excluídas". `None` = não chegou.
+    excluidas: Option<Vec<Excluida>>,
+    /// A aba "Excluídas" está na tela, no lugar da lista?
+    na_aba_de_excluidas: bool,
+    /// "Restaurar “X”?" — a pergunta antes de devolver a sessão.
+    restaurar: Option<Restauracao>,
     /// O formulário de abrir sessão, quando aparece.
     nova: Option<Nova>,
     recados: (Sender<Recado>, Receiver<Recado>),
@@ -331,6 +403,9 @@ impl Sessoes {
             exclusao: None,
             sobras_em_voo: 0,
             reler_sobras: false,
+            excluidas: None,
+            na_aba_de_excluidas: false,
+            restaurar: None,
             nova: None,
             recados: channel(),
             colhendo: false,
@@ -538,9 +613,95 @@ impl Sessoes {
             .galerias(sessao.clone(), self.recados.0.clone());
         self.publicador
             .estudios(sessao.clone(), self.recados.0.clone());
+        // 🗑️ As excluídas, para o botão da aba dizer quantas são.
+        self.publicador.pedir_json(
+            sessao.clone(),
+            PedidoJson::ler("excluidas", "/pos-venda/galerias/excluidas"),
+            self.recados.0.clone(),
+        );
         self.publicador.produtos(sessao, self.recados.0.clone());
         self.acompanhar(cx);
         cx.notify();
+    }
+
+    /// Entra na aba "Excluídas", ou volta às sessões.
+    pub fn alternar_aba_de_excluidas(&mut self, cx: &mut Context<Self>) {
+        self.na_aba_de_excluidas = !self.na_aba_de_excluidas;
+        cx.notify();
+    }
+
+    /// "Restaurar" na linha da excluída: pergunta antes.
+    pub fn pedir_restauracao(&mut self, id: &str, cx: &mut Context<Self>) {
+        if !self.super_admin || self.restaurar.is_some() {
+            return;
+        }
+        let Some(excluida) = self.excluidas.iter().flatten().find(|e| e.id == id) else {
+            return;
+        };
+        self.restaurar = Some(Restauracao {
+            galeria_id: excluida.id.clone(),
+            titulo: excluida.titulo.clone(),
+            enviando: false,
+        });
+        cx.notify();
+    }
+
+    pub fn cancelar_restauracao(&mut self, cx: &mut Context<Self>) {
+        if self.restaurar.as_ref().is_some_and(|r| r.enviando) {
+            return;
+        }
+        self.restaurar = None;
+        cx.notify();
+    }
+
+    /// Devolve a sessão, com o mesmo id: a fila das máquinas que a tinham
+    /// parada volta a subir no próximo relato delas.
+    pub fn confirmar_restauracao(&mut self, cx: &mut Context<Self>) {
+        let (Some(sessao), Some(r)) = (self.sessao.clone(), self.restaurar.as_mut()) else {
+            return;
+        };
+        if r.enviando {
+            return;
+        }
+        r.enviando = true;
+        self.publicador.pedir_json(
+            sessao,
+            PedidoJson::gravar(
+                "restauracao",
+                "POST",
+                format!("/pos-venda/galerias/{}/restaurar", r.galeria_id),
+                serde_json::json!({}),
+            ),
+            self.recados.0.clone(),
+        );
+        self.acompanhar(cx);
+        cx.notify();
+    }
+
+    fn receber_restauracao(
+        &mut self,
+        resultado: Result<serde_json::Value, String>,
+        cx: &mut Context<Self>,
+    ) {
+        match resultado {
+            Ok(_) => {
+                self.restaurar = None;
+                cx.emit(AvisoDaLista {
+                    texto: "Sessão restaurada.".into(),
+                    erro: false,
+                });
+                self.recarregar(cx);
+            }
+            Err(erro) => {
+                if let Some(r) = self.restaurar.as_mut() {
+                    r.enviando = false;
+                }
+                cx.emit(AvisoDaLista {
+                    texto: frase_da_recusa(&erro, Gesto::Restaurar),
+                    erro: true,
+                });
+            }
+        }
     }
 
     /// As sessões como o core as entende — a tradução acontece num lugar só.
@@ -999,6 +1160,18 @@ impl Sessoes {
                     rotulo: "exclusao",
                     resultado,
                 } => self.receber_exclusao(resultado, cx),
+                Recado::Json {
+                    rotulo: "excluidas",
+                    resultado,
+                } => {
+                    self.excluidas = resultado
+                        .ok()
+                        .and_then(|v| excluidas_da_resposta(&v, agora_em_segundos()));
+                }
+                Recado::Json {
+                    rotulo: "restauracao",
+                    resultado,
+                } => self.receber_restauracao(resultado, cx),
                 Recado::Falhou(erro) => {
                     self.carregando = false;
                     if let Some(nova) = self.nova.as_mut() {
@@ -1016,6 +1189,7 @@ impl Sessoes {
         let continua = self.carregando
             || self.nova.as_ref().is_some_and(|n| n.enviando)
             || self.exclusao.as_ref().is_some_and(|e| e.enviando)
+            || self.restaurar.as_ref().is_some_and(|r| r.enviando)
             || self.sobras_em_voo > 0;
         if !continua {
             self.colhendo = false;
@@ -1047,6 +1221,7 @@ fn sobras_da_resposta(valor: &serde_json::Value) -> Option<Vec<exclusao::Sobra>>
 #[derive(Clone, Copy)]
 enum Gesto {
     Excluir,
+    Restaurar,
 }
 
 /// A frase do toast quando o site recusa — as mesmas do `actions.ts` do site.
@@ -1061,6 +1236,7 @@ fn frase_da_recusa(erro: &str, gesto: Gesto) -> String {
         .and_then(|s| s.parse::<u16>().ok());
     match (status, gesto) {
         (Some(403), Gesto::Excluir) => "Somente o SuperAdmin pode excluir uma sessão.".into(),
+        (Some(403), Gesto::Restaurar) => "Somente o SuperAdmin pode restaurar uma sessão.".into(),
         (Some(410), Gesto::Excluir) => "Esta sessão já estava excluída.".into(),
         // O site já escreve a frase (`409` com as fotos pagas, `400` da frase):
         // ela vai sem o "o site respondeu NNN:" na frente.
@@ -1070,6 +1246,7 @@ fn frase_da_recusa(erro: &str, gesto: Gesto) -> String {
             .map(|(_, frase)| frase.to_string())
             .unwrap_or_else(|| erro.to_string()),
         (None, Gesto::Excluir) => format!("Não foi possível excluir a sessão: {erro}"),
+        (None, Gesto::Restaurar) => format!("Não foi possível restaurar a sessão: {erro}"),
     }
 }
 
@@ -1100,8 +1277,12 @@ impl Render for Sessoes {
             .p(px(24.))
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .child(self.barra(&contagens, cx))
-            .child(self.indicadores(&soma, visiveis.len(), filtrando, cx))
+            // 🗑️ Na aba das excluídas a barra é só o caminho de volta e a nota,
+            // como no site: busca, período e totais são da lista viva.
+            .when(!self.na_aba_de_excluidas, |tela| {
+                tela.child(self.barra(&contagens, cx))
+                    .child(self.indicadores(&soma, visiveis.len(), filtrando, cx))
+            })
             .when_some(self.erro.clone(), |tela, erro| {
                 tela.child(crate::estilo::aviso(erro, true, cx))
             })
@@ -1113,10 +1294,16 @@ impl Render for Sessoes {
                 ))
             })
             .children(self.formulario(cx))
-            .child(self.tabela(&visiveis, agora, cx))
-            .child(div().text_xs().text_color(apagado).child(rodape))
+            .when(self.na_aba_de_excluidas, |tela| {
+                tela.child(self.tabela_de_excluidas(cx))
+            })
+            .when(!self.na_aba_de_excluidas, |tela| {
+                tela.child(self.tabela(&visiveis, agora, cx))
+                    .child(div().text_xs().text_color(apagado).child(rodape))
+            })
             .children(self.dialogo_do_estudio(cx))
             .children(self.dialogo_de_exclusao(cx))
+            .children(self.dialogo_de_restauracao(cx))
             .children(self.popover_do_periodo(cx))
     }
 }
@@ -1501,6 +1688,262 @@ impl Sessoes {
         )
     }
 
+    /// 🗑️ A aba "Excluídas" — a `ListaDeExcluidas` do site: o que foi excluído,
+    /// por quem, e **quem ainda tem fotos de cada uma**. Sessão excluída com
+    /// fotos paradas numa máquina é sessão que alguém ainda está trabalhando.
+    ///
+    /// Todo administrador vê; **só o SuperAdmin restaura**.
+    fn tabela_de_excluidas(&self, cx: &mut Context<Self>) -> AnyElement {
+        use crate::recursos::Icone;
+        use gpui_component::Icon;
+
+        let tema = cx.theme();
+        let (borda, apagado) = (tema.border, tema.muted_foreground);
+        let aviso = div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(8.))
+            .child(
+                crate::estilo::botao_contorno("sessoes-voltar-das-excluidas", cx)
+                    .child("Voltar às sessões")
+                    .on_click(
+                        cx.listener(|tela, _ev, _window, cx| tela.alternar_aba_de_excluidas(cx)),
+                    ),
+            )
+            .child(div().text_sm().text_color(apagado).child(
+                "Sessões excluídas saem da lista e do link do cliente, mas nada é apagado.",
+            ));
+        let Some(excluidas) = self.excluidas.as_ref() else {
+            return gpui_component::v_flex()
+                .gap(px(12.))
+                .child(aviso)
+                .child(crate::estilo::aviso(
+                    "Não foi possível carregar as sessões excluídas. Use o Recarregar.",
+                    true,
+                    cx,
+                ))
+                .into_any_element();
+        };
+        if excluidas.is_empty() {
+            return gpui_component::v_flex()
+                .gap(px(12.))
+                .child(aviso)
+                .child(
+                    crate::estilo::cartao(cx)
+                        .p(px(24.))
+                        .flex()
+                        .justify_center()
+                        .text_sm()
+                        .text_color(apagado)
+                        .child("Nenhuma sessão excluída."),
+                )
+                .into_any_element();
+        }
+
+        const EXCLUIDA: f32 = 180.;
+        const ACERVO: f32 = 96.;
+        const RESTAURAR: f32 = 120.;
+        let com_restaurar = self.super_admin;
+        let linha = || {
+            div()
+                .flex()
+                .items_center()
+                .flex_none()
+                .gap(px(16.))
+                .px(px(8.))
+                .border_b_1()
+                .border_color(borda)
+                .text_sm()
+        };
+        let cabecalho = linha()
+            .h(px(40.))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .child(div().flex_1().min_w(px(200.)).child("Sessão"))
+            .child(div().w(px(EXCLUIDA)).flex_none().child("Excluída"))
+            .child(
+                div()
+                    .w(px(ACERVO))
+                    .flex_none()
+                    .flex()
+                    .justify_end()
+                    .child("No acervo"),
+            )
+            .child(div().flex_1().min_w(px(180.)).child("Máquinas com fotos"))
+            .when(com_restaurar, |c| {
+                c.child(div().w(px(RESTAURAR)).flex_none())
+            });
+
+        let restaurando = self.restaurar.as_ref().map(|r| r.galeria_id.clone());
+        let linhas = excluidas.iter().map(|g| {
+            let id = g.id.clone();
+            let maquinas: AnyElement = match &g.maquinas {
+                None => div().text_color(apagado).child("?").into_any_element(),
+                Some(lista) if lista.is_empty() => {
+                    div().text_color(apagado).child("—").into_any_element()
+                }
+                Some(lista) => gpui_component::v_flex()
+                    .gap(px(2.))
+                    .text_xs()
+                    .children(lista.iter().map(|m| {
+                        div()
+                            .when(m.velho, |d| d.text_color(apagado))
+                            .child(format!(
+                                "{}: {} · {}{}",
+                                m.origem,
+                                m.quantas,
+                                m.ha_quanto,
+                                if m.velho { " (desatualizado?)" } else { "" }
+                            ))
+                    }))
+                    .into_any_element(),
+            };
+            linha()
+                .id(SharedString::from(format!("excluida-{}", g.id)))
+                .min_h(px(52.))
+                .py(px(6.))
+                .child(
+                    gpui_component::v_flex()
+                        .flex_1()
+                        .min_w(px(200.))
+                        .child(
+                            div()
+                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .truncate()
+                                .child(g.titulo.clone()),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(apagado)
+                                .truncate()
+                                .child(g.contato.clone().unwrap_or_else(|| "—".into())),
+                        ),
+                )
+                .child(
+                    gpui_component::v_flex()
+                        .w(px(EXCLUIDA))
+                        .flex_none()
+                        .text_xs()
+                        .text_color(apagado)
+                        .child(g.excluida_em.clone())
+                        .child(div().truncate().child(format!("por {}", g.excluida_por))),
+                )
+                .child(
+                    gpui_component::v_flex()
+                        .w(px(ACERVO))
+                        .flex_none()
+                        .items_end()
+                        .child(g.no_acervo.to_string())
+                        .when(g.bytes > 0, |d| {
+                            d.child(
+                                div()
+                                    .text_xs()
+                                    .text_color(apagado)
+                                    .child(crate::configuracoes::formatar_bytes(g.bytes)),
+                            )
+                        }),
+                )
+                .child(div().flex_1().min_w(px(180.)).child(maquinas))
+                .when(com_restaurar, |l| {
+                    let esta = restaurando.as_deref() == Some(g.id.as_str())
+                        && self.restaurar.as_ref().is_some_and(|r| r.enviando);
+                    l.child(
+                        div()
+                            .w(px(RESTAURAR))
+                            .flex_none()
+                            .flex()
+                            .justify_end()
+                            .child(
+                                crate::estilo::desligado(
+                                    crate::estilo::botao_contorno(
+                                        SharedString::from(format!("restaurar-{id}")),
+                                        cx,
+                                    ),
+                                    self.restaurar.as_ref().is_some_and(|r| r.enviando),
+                                )
+                                .child(Icon::new(Icone::RotateCcw).size(px(14.)))
+                                .child(if esta { "Restaurando…" } else { "Restaurar" })
+                                .on_click(cx.listener(
+                                    move |tela, _ev, _window, cx| tela.pedir_restauracao(&id, cx),
+                                )),
+                            ),
+                    )
+                })
+        });
+
+        gpui_component::v_flex()
+            .gap(px(12.))
+            .flex_1()
+            .min_h(px(0.))
+            .child(aviso)
+            .child(
+                crate::estilo::cartao(cx)
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .child(cabecalho)
+                    .child(
+                        div()
+                            .id("excluidas-linhas")
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_h(px(0.))
+                            .overflow_y_scroll()
+                            .children(linhas),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    /// "Restaurar “X”?" — a pergunta do `useConfirmacao` do site.
+    fn dialogo_de_restauracao(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        use crate::estilo;
+
+        let r = self.restaurar.as_ref()?;
+        Some(
+            estilo::veu_do_dialogo().child(
+                estilo::caixa_do_dialogo(cx)
+                    .child(estilo::cabecalho_do_dialogo(
+                        format!("Restaurar \u{201c}{}\u{201d}?", r.titulo),
+                        "A sessão volta para a lista e para o link do cliente, com o mesmo \
+                         endereço. As máquinas com fotos paradas voltam a subi-las sozinhas.",
+                        None,
+                        cx,
+                    ))
+                    .child(
+                        estilo::rodape_do_dialogo()
+                            .child(
+                                estilo::desligado(
+                                    estilo::botao_contorno("restaurar-cancelar", cx),
+                                    r.enviando,
+                                )
+                                .child("Cancelar")
+                                .on_click(cx.listener(
+                                    |tela, _ev, _window, cx| tela.cancelar_restauracao(cx),
+                                )),
+                            )
+                            .child(
+                                estilo::desligado(
+                                    estilo::botao_primario("restaurar-confirmar", cx),
+                                    r.enviando,
+                                )
+                                .child(if r.enviando {
+                                    "Restaurando…"
+                                } else {
+                                    "Restaurar"
+                                })
+                                .on_click(cx.listener(
+                                    |tela, _ev, _window, cx| tela.confirmar_restauracao(cx),
+                                )),
+                            ),
+                    ),
+            ),
+        )
+    }
+
     /// 🗑️ "Excluir a sessão" — o `AlertDialog` do site: a frase, e quem ainda
     /// tem fotos dela antes de digitá-la.
     ///
@@ -1718,6 +2161,26 @@ impl Sessoes {
                     }),
                 sem_conta,
             ))
+            // 🗑️ **A aba das excluídas só aparece quando há o que mostrar**, ou
+            // quando se está nela — para haver como voltar. Como no site.
+            .when_some(
+                match (
+                    self.na_aba_de_excluidas,
+                    self.excluidas.as_ref().map(Vec::len),
+                ) {
+                    (false, Some(n)) if n > 0 => Some(format!("Excluídas ({n})")),
+                    _ => None,
+                },
+                |barra, rotulo| {
+                    barra.child(
+                        estilo::botao_contorno("sessoes-aba-excluidas", cx)
+                            .child(SharedString::from(rotulo))
+                            .on_click(cx.listener(|tela, _ev, _window, cx| {
+                                tela.alternar_aba_de_excluidas(cx)
+                            })),
+                    )
+                },
+            )
             .child(
                 div().w(px(320.)).child(
                     Input::new(&self.busca)
@@ -3270,6 +3733,105 @@ mod testes {
         });
     }
 
+    /// 🗑️ A resposta de `/galerias/excluidas` vira a linha da aba: data no
+    /// fuso do estúdio, o acervo somado, e o relato ausente como "não sei".
+    #[test]
+    fn a_excluida_da_api_vira_a_linha_da_aba() {
+        let agora = chrono::DateTime::parse_from_rfc3339("2026-09-26T12:00:00Z")
+            .unwrap()
+            .timestamp();
+        let lista = excluidas_da_resposta(
+            &serde_json::json!([
+                {
+                    "id": "g1", "titulo": "Ensaio da Ana", "email": null, "whatsapp": "5554999",
+                    "excluida_em": "2026-09-13T17:02:00Z", "excluida_por": "alexkads@gmail.com",
+                    "fotos": { "disponiveis": 10, "levadas_no_balcao": 0, "compradas": 0, "bytes": 2048 },
+                    "sobras": [{ "origem": "Balcão 1", "quantas": 4, "bytes": null, "visto_em": "2026-09-26T11:00:00Z" }]
+                },
+                {
+                    "id": "g2", "titulo": "Sem relato",
+                    "excluida_em": "2026-09-14T03:00:00Z", "excluida_por": "alexkads@gmail.com",
+                    "fotos": { "disponiveis": 1, "levadas_no_balcao": 0, "compradas": 0 }
+                }
+            ]),
+            agora,
+        )
+        .expect("a lista é lida");
+        assert_eq!(
+            lista[0].excluida_em, "13/09/2026 14:02",
+            "no fuso do estúdio"
+        );
+        assert_eq!(
+            lista[0].contato.as_deref(),
+            Some("5554999"),
+            "sem e-mail, o WhatsApp"
+        );
+        assert_eq!(lista[0].no_acervo, 10);
+        assert_eq!(lista[0].bytes, 2048);
+        let maquinas = lista[0].maquinas.as_ref().expect("o relato veio");
+        assert_eq!(maquinas[0].ha_quanto, "há 1 h");
+        assert_eq!(
+            lista[1].maquinas, None,
+            "sem relato é \"?\", e não \"ninguém\""
+        );
+        assert_eq!(lista[1].excluida_em, "14/09/2026 00:00");
+    }
+
+    /// 🗑️ Restaurar: só o SuperAdmin, pergunta antes, manda o `POST` e relê.
+    #[gpui::test]
+    fn restaurar_pergunta_antes_e_manda_o_post(cx: &mut TestAppContext) {
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        publicador.responder_json(
+            "excluidas",
+            Ok(serde_json::json!([{
+                "id": "g9", "titulo": "Excluída", "excluida_em": "2026-09-13T17:02:00Z",
+                "excluida_por": "alexkads@gmail.com", "fotos": { "disponiveis": 2 }
+            }])),
+        );
+        publicador.responder_json("restauracao", Ok(serde_json::json!({ "id": "g9" })));
+        let (raiz, tela) = janela_com_raiz(cx, publicador.clone());
+        colher_na_raiz(cx, &raiz, &tela);
+
+        na_tela(cx, &raiz, &tela, |tela, _, cx| {
+            assert_eq!(tela.excluidas.as_ref().map(Vec::len), Some(1));
+            tela.alternar_aba_de_excluidas(cx);
+            tela.pedir_restauracao("g9", cx);
+            assert!(tela.restaurar.is_none(), "sem ser SuperAdmin, nada abre");
+            tela.definir_super_admin(true, cx);
+            tela.pedir_restauracao("g9", cx);
+            assert!(tela.restaurar.is_some(), "a pergunta aparece antes");
+        });
+        assert!(
+            !publicador
+                .pedidos_json()
+                .iter()
+                .any(|p| p.rotulo == "restauracao"),
+            "perguntar não manda nada"
+        );
+
+        na_tela(cx, &raiz, &tela, |tela, _, cx| {
+            tela.confirmar_restauracao(cx)
+        });
+        colher_na_raiz(cx, &raiz, &tela);
+
+        let post = publicador
+            .pedidos_json()
+            .into_iter()
+            .find(|p| p.rotulo == "restauracao")
+            .expect("o POST saiu");
+        assert_eq!(post.metodo, "POST");
+        assert_eq!(post.caminho, "/pos-venda/galerias/g9/restaurar");
+        na_tela(cx, &raiz, &tela, |tela, _, _| {
+            assert!(tela.restaurar.is_none(), "deu certo: a pergunta fecha");
+        });
+        let releituras = publicador
+            .pedidos_json()
+            .iter()
+            .filter(|p| p.rotulo == "excluidas")
+            .count();
+        assert_eq!(releituras, 2, "e a lista das excluídas é relida");
+    }
+
     #[test]
     fn a_recusa_do_site_vira_a_frase_do_site() {
         let r = |e: &str| frase_da_recusa(e, Gesto::Excluir);
@@ -3286,5 +3848,9 @@ mod testes {
             "a galeria tem 2 foto(s) paga(s)"
         );
         assert_eq!(r("sem rede"), "Não foi possível excluir a sessão: sem rede");
+        assert_eq!(
+            frase_da_recusa("o site respondeu 403: x", Gesto::Restaurar),
+            "Somente o SuperAdmin pode restaurar uma sessão."
+        );
     }
 }
