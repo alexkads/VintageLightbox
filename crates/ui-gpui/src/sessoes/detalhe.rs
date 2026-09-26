@@ -56,6 +56,7 @@ use infrastructure::cache::preview_manager::PreviewManager;
 
 use super::altura_da_tira;
 use super::arquivos::SeletorDeFotos;
+use super::atendimento::{Atendimento, EventoDoAtendimento};
 use crate::balcao::tela::Abertura;
 use crate::biblioteca::miniaturas::{CacheDeMiniaturas, Miniatura};
 use crate::importacao::explorador::{Andamento, Freios, Importador};
@@ -599,6 +600,13 @@ pub struct Detalhe {
     campos_do_lote: Option<CamposDoLote>,
     /// A gaveta do atendimento está aberta?
     atendimento_aberto: bool,
+    /// A gaveta — o `atendimento-da-sessao.tsx` do site. Ver
+    /// [`super::atendimento`].
+    atendimento: Entity<Atendimento>,
+    /// As trocas da gaveta que foram ao site e ainda não voltaram, com a
+    /// frase de quando voltarem certas.
+    atendimento_gravando: std::collections::VecDeque<&'static str>,
+    _assinatura_do_atendimento: gpui::Subscription,
     /// A sanfona "Faixa, negociação e preço" do painel — **fechada por
     /// padrão**, como no site (`PainelColapsavel`, `padrao={false}`): o que se
     /// faz a cada foto fica em cima; o que se faz uma vez por atendimento, atrás
@@ -783,6 +791,11 @@ impl Detalhe {
         cx: &mut Context<Self>,
     ) -> Self {
         let zoom_slider = Self::novo_slider_do_zoom(ZOOM_MAXIMO, ZOOM_PADRAO, cx);
+        let atendimento = cx.new(|cx| Atendimento::novo(publicador.clone(), cx));
+        let assinatura_do_atendimento = cx
+            .subscribe(&atendimento, |tela, _, evento: &EventoDoAtendimento, cx| {
+                tela.do_atendimento(evento.clone(), cx)
+            });
 
         Self {
             zoom_slider,
@@ -845,6 +858,9 @@ impl Detalhe {
             imagens_por_arquivo: std::collections::HashMap::new(),
             campos_do_painel: None,
             atendimento_aberto: false,
+            atendimento,
+            atendimento_gravando: Default::default(),
+            _assinatura_do_atendimento: assinatura_do_atendimento,
             faixa_e_precos_aberto: false,
             paineis: super::paineis::PaineisDaGaleria::default(),
             detalhes_abertos: false,
@@ -921,6 +937,10 @@ impl Detalhe {
         // Largado, sem devolver: a troca de sessão foca a tela nova.
         self.dados_do_cliente.largar();
         self.gravando_dados = None;
+        // A gaveta de outra sessão também: largada, como o formulário.
+        self.atendimento_aberto = false;
+        self.atendimento_gravando.clear();
+        self.atendimento.update(cx, |gaveta, cx| gaveta.largar(cx));
         self.importacao = None;
         self.erro = None;
         self.carregando = true;
@@ -2995,6 +3015,9 @@ impl Detalhe {
                     }
 
                     cx.emit(Pedido::FotosDoSite(aberta.fotos.clone()));
+                    let sessao = self.sessao.clone();
+                    self.atendimento
+                        .update(cx, |gaveta, cx| gaveta.definir(sessao, &aberta, cx));
                     self.aberta = Some(*aberta);
                     abriu = true;
                 }
@@ -3101,7 +3124,27 @@ impl Detalhe {
                             self.carregando = true;
                         }
                         self.seguir_o_gesto(motivo, cx);
+                    } else if let Some(ok) = self.atendimento_gravando.pop_front() {
+                        self.atendimento
+                            .update(cx, |gaveta, cx| gaveta.gravou(ok, cx));
+                        // 🔑 **O recado não é a verdade: relê.** Os resumos da
+                        // associação nova e o número do botão vêm da galeria —
+                        // sem reler, o cabeçalho continuava contando as de antes.
+                        if let (Some(sessao), Some(id)) =
+                            (self.sessao.clone(), self.galeria_id.clone())
+                        {
+                            self.publicador
+                                .abrir_galeria(sessao, id, self.recados.0.clone());
+                        }
                     }
+                }
+                Recado::GaleriaNaoAtualizada(frase)
+                    if self.gravando_dados.is_none() && !self.atendimento_gravando.is_empty() =>
+                {
+                    self.atendimento_gravando.pop_front();
+                    // A gaveta volta ao que o site tem, e diz por quê.
+                    self.atendimento
+                        .update(cx, |gaveta, cx| gaveta.recusado(frase, cx));
                 }
                 Recado::GaleriaNaoAtualizada(frase) => {
                     self.gravando_dados = None;
@@ -3723,7 +3766,9 @@ impl Render for Detalhe {
             // desenhadas na própria tela — o `deferred` do GPUI não aceita
             // outro `deferred` dentro (ver `caixa/dialogos.rs`).
             .children(self.detalhes(cx))
-            .children(self.atendimento(cx))
+            .when(self.atendimento_aberto, |tela| {
+                tela.child(self.atendimento.clone())
+            })
             // 🔑 **`deferred`, e não só por último**: o caixa flutuante é filho
             // da raiz, desenhado depois desta tela, e ficava por cima do modal.
             // Diferido, o modal é pintado depois de tudo. Não há `deferred`
@@ -4979,7 +5024,66 @@ impl Detalhe {
     /// Abre ou fecha a gaveta do atendimento.
     pub fn alternar_atendimento(&mut self, cx: &mut Context<Self>) {
         self.atendimento_aberto = !self.atendimento_aberto;
+        if !self.atendimento_aberto {
+            self.atendimento.update(cx, |gaveta, cx| gaveta.largar(cx));
+            cx.notify();
+            return;
+        }
+        // 🖼️ A foto das amostras dos presets: a primeira **local** desta
+        // sessão, como no site; sem nenhuma (a sessão foi importada em outra
+        // máquina), a de exemplo.
+        let primeira = self
+            .acervo
+            .todas()
+            .iter()
+            .map(|f| f.id.clone())
+            .find(|id| self.ids_locais.contains(id));
+        let previews = self.previews.clone();
+        let presets = self.presets_da_receita.clone();
+        self.atendimento.update(cx, |gaveta, cx| {
+            gaveta.definir_presets(presets);
+            gaveta.definir_base(primeira.clone(), || {
+                let id = primeira?;
+                previews
+                    .get_preview(&id)
+                    .or_else(|| previews.get_thumbnail(&id))
+            });
+            gaveta.abrir(cx);
+        });
         cx.notify();
+    }
+
+    /// O que a gaveta do atendimento pede.
+    fn do_atendimento(&mut self, evento: EventoDoAtendimento, cx: &mut Context<Self>) {
+        match evento {
+            EventoDoAtendimento::Gravar { mudanca, ok } => {
+                if mudanca.vazia() {
+                    return;
+                }
+                if self.sessao.is_none() || self.galeria_id.is_none() {
+                    self.atendimento.update(cx, |gaveta, cx| {
+                        gaveta.recusado("Sem a conta do site, nada se grava.".into(), cx)
+                    });
+                    return;
+                }
+                self.atendimento_gravando.push_back(ok);
+                self.gravar_a_galeria(*mudanca, cx);
+            }
+            EventoDoAtendimento::Fechou => {
+                self.atendimento_aberto = false;
+                cx.notify();
+            }
+        }
+    }
+
+    /// 🧪 A gaveta do atendimento.
+    #[cfg(test)]
+    pub(crate) fn gaveta_do_atendimento(&self) -> Entity<Atendimento> {
+        self.atendimento.clone()
+    }
+
+    pub fn atendimento_aberto(&self) -> bool {
+        self.atendimento_aberto
     }
 
     /// Quantas associações a sessão tem — o número do botão do cabeçalho.
@@ -4999,54 +5103,6 @@ impl Detalhe {
         .into_iter()
         .filter(|tem| *tem)
         .count()
-    }
-
-    /// Troca a resposta de "como conheceu" da sessão aberta.
-    ///
-    /// 🚨 **Os três campos vão juntos.** Trocar a resposta sem limpar o parceiro
-    /// manda `parceiro_id` com outra origem, e o site recusa (`400`); clicar na
-    /// que já está marcada desmarca — "não perguntei" é diferente de qualquer
-    /// resposta, como no `ToggleGroup` do site.
-    fn escolher_como_conheceu(&mut self, valor: &str, cx: &mut Context<Self>) {
-        let atual = self
-            .aberta
-            .as_ref()
-            .and_then(|a| a.galeria.como_conheceu.clone());
-        let novo = (atual.as_deref() != Some(valor)).then(|| valor.to_string());
-        let vira_parceiro = novo.as_deref() == Some("parceiro");
-        let vira_outro = novo.as_deref() == Some("outro");
-        self.gravar_a_galeria(
-            MudancaDaGaleria {
-                como_conheceu: Some(novo),
-                // O parceiro só sobrevive à resposta "parceiro"; o texto, à
-                // "outro". A gaveta ainda não escolhe parceiro — quem o associa
-                // é o assistente —, então trocar para "parceiro" mantém o que
-                // houver.
-                parceiro_id: (!vira_parceiro).then_some(None),
-                como_conheceu_detalhe: (!vira_outro).then_some(None),
-                ..Default::default()
-            },
-            cx,
-        );
-    }
-
-    /// Troca o corte padrão da sessão. `""` é "sem corte".
-    fn escolher_corte_padrao(&mut self, valor: &str, cx: &mut Context<Self>) {
-        let novo = (!valor.trim().is_empty()).then(|| valor.to_string());
-        let atual = self
-            .aberta
-            .as_ref()
-            .and_then(|a| a.galeria.proporcao_padrao.clone());
-        if atual == novo {
-            return;
-        }
-        self.gravar_a_galeria(
-            MudancaDaGaleria {
-                proporcao_padrao: Some(novo),
-                ..Default::default()
-            },
-            cx,
-        );
     }
 
     /// Os números e os prazos da galeria — o `DetalhesDaGaleria` do site.
@@ -5260,247 +5316,6 @@ impl Detalhe {
                     tela.detalhes_abertos = false;
                     cx.notify();
                 })),
-        )
-    }
-
-    /// A gaveta do atendimento: o que veio junto com o cliente.
-    ///
-    /// 🔑 **Ids valem como "associado".** A API devolve o id sempre e o resumo
-    /// quando o tem; um `voucher_id` sem resumo aparece como "associado", porque
-    /// esconder diria que **não há** voucher — e o gesto seguinte do operador
-    /// seria associar outro por cima (a mesma regra do `atendimento.ts`).
-    fn atendimento(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-        if !self.atendimento_aberto {
-            return None;
-        }
-        let aberta = self.aberta.as_ref()?;
-        let g = aberta.galeria.clone();
-        let tema = cx.theme();
-        let apagado = tema.muted_foreground;
-
-        let linha = |rotulo: &'static str, valor: String| {
-            div()
-                .flex()
-                .items_center()
-                .gap(px(8.))
-                .text_sm()
-                .child(div().w(px(150.)).text_color(apagado).child(rotulo))
-                .child(div().flex_1().truncate().child(SharedString::from(valor)))
-        };
-        // 🔑 O resumo quando ele veio; "associado" quando só há o id; "—" quando
-        // não há associação nenhuma. Nunca o contrário: esconder um id sem
-        // resumo diria que não há associação, e o gesto seguinte seria associar
-        // outra por cima (a mesma regra do `atendimento.ts`).
-        let resumos = aberta.resumos.clone();
-        let com_resumo = |id: Option<String>,
-                          resumo: Option<domain::services::pos_venda::ResumoSimples>,
-                          associado: &str| match (id, resumo) {
-            (None, _) => "—".to_string(),
-            (Some(_), Some(r)) if !r.detalhe.trim().is_empty() => {
-                format!("{} — {}", r.titulo, r.detalhe)
-            }
-            (Some(_), Some(r)) => r.titulo,
-            (Some(_), None) => associado.to_string(),
-        };
-        let preset = g
-            .preset_padrao_id
-            .as_deref()
-            .map(|id| {
-                crate::sessoes::nova::receita::presets_da_sessao(
-                    &self.presets_da_receita,
-                    Vec::new(),
-                )
-                .into_iter()
-                .find(|p| p.id == id)
-                .map(|p| p.nome)
-                .unwrap_or_else(|| id.to_string())
-            })
-            .unwrap_or_else(|| "—".to_string());
-        let proporcao = g
-            .proporcao_padrao
-            .as_deref()
-            .map(|p| crate::sessoes::nova::estado::rotulo_da_proporcao(p).to_string())
-            .unwrap_or_else(|| "Sem corte".to_string());
-
-        Some(
-            // 🪟 **Gaveta pela direita, como o `Drawer` do site** — e não um
-            // bloco que empurra a tela: a galeria continua atrás, e é dela que
-            // o operador voltou a olhar assim que fecha. O véu fecha ao clique,
-            // como o `onOpenChange` de lá.
-            div()
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                .bg(gpui::black().opacity(0.4))
-                .id("atendimento-veu")
-                .on_click(cx.listener(|tela, _ev, _w, cx| {
-                    tela.atendimento_aberto = false;
-                    cx.notify();
-                }))
-                .child(
-            div()
-                .absolute()
-                .top_0()
-                .right_0()
-                .h_full()
-                .w(px(576.))
-                .flex()
-                .flex_col()
-                .gap(px(8.))
-                .p(px(16.))
-                .id("atendimento-gaveta")
-                .border_l_1()
-                .border_color(tema.border)
-                .bg(tema.background)
-                .shadow_lg()
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .child(
-                            div()
-                                .flex_1()
-                                .font_weight(gpui::FontWeight::SEMIBOLD)
-                                .child("Atendimento"),
-                        )
-                        .child(
-                            Button::new("atendimento-fechar")
-                                .label("Fechar")
-                                .xsmall()
-                                .ghost()
-                                .on_click(cx.listener(|tela, _ev, _w, cx| {
-                                    tela.atendimento_aberto = false;
-                                    cx.notify();
-                                })),
-                        ),
-                )
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(apagado)
-                        .child("O que veio junto com o cliente, gravado no assistente."),
-                )
-                .child(linha(
-                    "Agendamento",
-                    com_resumo(
-                        g.ensaio_id.clone(),
-                        resumos.agendamento.clone(),
-                        "Agendamento associado",
-                    ),
-                ))
-                .child(linha(
-                    "Voucher",
-                    com_resumo(
-                        g.voucher_id.clone(),
-                        resumos.voucher.clone(),
-                        "Voucher associado",
-                    ),
-                ))
-                .child(linha(
-                    "Compra antecipada",
-                    com_resumo(
-                        g.pedido_id.clone(),
-                        resumos.pedido.clone(),
-                        "Compra antecipada associada",
-                    ),
-                ))
-                // ✏️ **Editável aqui**, como no site: entrar na sessão com tudo e
-                // não poder corrigir a resposta sem recriar a sessão seria meio
-                // pedido (`atendimento-da-sessao.tsx`). Trocar limpa o parceiro
-                // e o texto de "Outro" — é o que o site recusaria com `400`.
-                .child(
-                    div()
-                        .flex()
-                        .gap(px(8.))
-                        .items_start()
-                        .text_sm()
-                        .child(div().w(px(150.)).text_color(apagado).child("Como conheceu"))
-                        .child(
-                            div().flex().flex_wrap().gap(px(6.)).children(
-                                crate::sessoes::nova::associacoes::COMO_CONHECEU.iter().map(
-                                    |(valor, rotulo)| {
-                                        let escolhido = g.como_conheceu.as_deref() == Some(*valor);
-                                        let valor = *valor;
-                                        pilula(
-                                            SharedString::from(format!("atend-origem-{valor}")),
-                                            rotulo,
-                                            None,
-                                            escolhido,
-                                            cx,
-                                        )
-                                        .on_click(cx.listener(move |tela, _ev, _w, cx| {
-                                            tela.escolher_como_conheceu(valor, cx)
-                                        }))
-                                    },
-                                ),
-                            ),
-                        ),
-                )
-                .children(
-                    g.como_conheceu_detalhe
-                        .as_deref()
-                        .filter(|d| !d.trim().is_empty())
-                        .map(|detalhe| linha("Detalhe", detalhe.to_string())),
-                )
-                .child(linha(
-                    "Parceiro",
-                    com_resumo(
-                        g.parceiro_id.clone(),
-                        resumos.parceiro.clone(),
-                        "Parceiro associado",
-                    ),
-                ))
-                .child(linha("Preset padrão", preset))
-                // ✂️ **O corte padrão se troca aqui**, e vale para as próximas
-                // fotos da sessão: o serviço da receita repassa a proporção
-                // nova a quem ainda não subiu (ver `aplicar_a_receita_da_sessao`
-                // na raiz). O preset continua sendo escolhido no assistente,
-                // onde as amostras existem.
-                .child(
-                    div()
-                        .flex()
-                        .gap(px(8.))
-                        .items_start()
-                        .text_sm()
-                        .child(div().w(px(150.)).text_color(apagado).child("Corte padrão"))
-                        .child(
-                            div().flex().flex_wrap().gap(px(6.)).children(
-                                std::iter::once(("", "Sem corte"))
-                                    .chain(
-                                        crate::sessoes::nova::estado::PROPORCOES_PADRAO
-                                            .iter()
-                                            .map(|p| {
-                                                (
-                                                    *p,
-                                                    crate::sessoes::nova::estado::rotulo_da_proporcao(p),
-                                                )
-                                            }),
-                                    )
-                                    .map(|(valor, rotulo)| {
-                                        let escolhido = match valor {
-                                            "" => g.proporcao_padrao.is_none(),
-                                            v => g.proporcao_padrao.as_deref() == Some(v),
-                                        };
-                                        let valor = valor.to_string();
-                                        pilula(
-                                            SharedString::from(format!("atend-corte-{valor}")),
-                                            rotulo,
-                                            None,
-                                            escolhido,
-                                            cx,
-                                        )
-                                        .on_click(cx.listener(move |tela, _ev, _w, cx| {
-                                            tela.escolher_corte_padrao(&valor, cx)
-                                        }))
-                                    }),
-                            ),
-                        ),
-                )
-                .child(div().text_xs().text_color(apagado).child(
-                    SharedString::from(format!("Agora: {proporcao}. Vale para as próximas fotos desta sessão.")),
-                )),
-                ),
         )
     }
 
@@ -9024,7 +8839,14 @@ mod testes {
 
         janela
             .update(cx, |tela, _window, cx| {
-                tela.escolher_como_conheceu("instagram", cx);
+                tela.alternar_atendimento(cx);
+                tela.gaveta_do_atendimento().update(cx, |gaveta, cx| {
+                    // A resposta se edita na gaveta e vai no "Gravar", com o
+                    // parceiro e o texto — num gesto só.
+                    gaveta.escolher_como_conheceu("instagram", cx);
+                    assert!(gaveta.origem().parceiro.is_none());
+                    gaveta.gravar_origem(cx);
+                });
             })
             .expect("a janela deve estar aberta");
         cx.run_until_parked();
@@ -9041,15 +8863,33 @@ mod testes {
 
         janela
             .update(cx, |tela, _window, cx| {
-                tela.escolher_corte_padrao("1:1", cx);
+                tela.gaveta_do_atendimento().update(cx, |gaveta, cx| {
+                    gaveta.escolher_proporcao(Some("1:1".into()), cx);
+                    gaveta.escolher_preset(Some("sistema:sepia".into()), cx);
+                    assert_eq!(
+                        gaveta.valores().proporcao.as_deref(),
+                        Some("1:1"),
+                        "a escolha aparece na hora, antes de o site responder"
+                    );
+                });
             })
             .expect("a janela deve estar aberta");
         cx.run_until_parked();
 
         let mudancas = publicador.atualizacoes();
-        assert_eq!(
-            mudancas.last().map(|(_, m)| m.proporcao_padrao.clone()),
-            Some(Some(Some("1:1".into())))
+        assert!(
+            mudancas
+                .iter()
+                .any(|(_, m)| m.proporcao_padrao == Some(Some("1:1".into()))),
+            "o corte vai num PATCH"
+        );
+        let preset = mudancas
+            .iter()
+            .find(|(_, m)| m.preset_padrao_id.is_some())
+            .expect("o preset também se troca na gaveta");
+        assert!(
+            preset.1.proporcao_padrao.is_none() && preset.1.como_conheceu.is_none(),
+            "ausente não é nulo: cada troca leva só o que mudou"
         );
     }
 

@@ -9,6 +9,11 @@
 
 pub mod altura_da_tira;
 pub mod arquivos;
+/// Os campos de associação (agendamento, voucher, compra, parceiro) — o
+/// `associacoes/` do site.
+pub mod associacao;
+/// A gaveta do atendimento da sessão aberta.
+pub mod atendimento;
 pub mod detalhe;
 /// O texto dos detalhes da galeria (o `DetalhesDaGaleria` do site).
 pub mod detalhes_da_galeria;
