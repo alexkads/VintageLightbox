@@ -4474,21 +4474,16 @@ impl Detalhe {
                     .when(self.cliente_aberta, |b| {
                         b.child(crate::cliente::tecla_da_tela_cheia())
                     })
-                    .tooltip({
-                        let texto = if self.cliente_aberta {
-                            format!(
-                                "Fechar a tela do cliente · {} põe e tira a tela cheia",
-                                crate::cliente::texto_da_tela_cheia()
-                            )
-                        } else {
-                            format!(
-                                "Abrir a tela do cliente · depois, {} põe e tira a tela cheia",
-                                crate::cliente::texto_da_tela_cheia()
-                            )
-                        };
-                        move |w, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new(texto.clone()).build(w, cx)
-                        }
+                    .tooltip(if self.cliente_aberta {
+                        format!(
+                            "Fechar a tela do cliente · {} põe e tira a tela cheia",
+                            crate::cliente::texto_da_tela_cheia()
+                        )
+                    } else {
+                        format!(
+                            "Abrir a tela do cliente · depois, {} põe e tira a tela cheia",
+                            crate::cliente::texto_da_tela_cheia()
+                        )
                     })
                     .on_click(
                         cx.listener(|_tela, _ev, _window, cx| cx.emit(Pedido::TelaDoCliente)),

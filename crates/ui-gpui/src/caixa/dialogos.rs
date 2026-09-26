@@ -24,7 +24,7 @@ use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectItem
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon, Sizable};
 use gpui_kit::{
     div, prelude::*, px, relative, AnyElement, ClickEvent, Context, Div, Entity, FocusHandle,
-    Focusable, FontWeight, KeyContext, MouseButton, SharedString, Stateful, Subscription, Window,
+    Focusable, FontWeight, KeyContext, MouseButton, SharedString, Subscription, Window,
 };
 use serde_json::json;
 
@@ -2358,7 +2358,7 @@ impl Caixa {
             .child(
                 com_tecla(
                     estilo::desligado(
-                        botao_secundario("caixa-concluir", secundario, sobre_secundario),
+                        botao_secundario("caixa-concluir", secundario, sobre_secundario, cx),
                         !conta.pronto || enviando,
                     ),
                     if enviando {
@@ -3192,7 +3192,11 @@ fn erro_do_form(erro: String, cx: &Context<Caixa>) -> Div {
 }
 
 /// Os pares de botão do site: `default` quando escolhido, `outline` quando não.
-fn alternavel(id: SharedString, ativo: bool, cx: &Context<Caixa>) -> Stateful<Div> {
+fn alternavel(
+    id: SharedString,
+    ativo: bool,
+    cx: &Context<Caixa>,
+) -> gpui_kit::component::button::Button {
     if ativo {
         estilo::botao_primario(id, cx)
     } else {
@@ -3200,27 +3204,22 @@ fn alternavel(id: SharedString, ativo: bool, cx: &Context<Caixa>) -> Stateful<Di
     }
 }
 
-/// `Button variant="secondary"` — o "Concluir venda" sobre o painel escuro.
+/// `Button variant="secondary"` — o "Concluir venda" sobre o painel escuro:
+/// o `Button` do gpui-kit com as cores do painel.
 fn botao_secundario(
     id: &'static str,
     fundo: gpui_kit::Hsla,
     texto: gpui_kit::Hsla,
-) -> Stateful<Div> {
-    h_flex()
-        .id(id)
-        .flex_none()
-        .h(px(32.))
-        .px(px(10.))
-        .gap(px(6.))
-        .rounded(px(8.))
-        .justify_center()
-        .text_sm()
-        .whitespace_nowrap()
-        .cursor_pointer()
-        .bg(fundo)
-        .text_color(texto)
-        .font_weight(FontWeight::MEDIUM)
-        .hover(move |s| s.bg(fundo.opacity(0.8)))
+    cx: &gpui_kit::App,
+) -> gpui_kit::component::button::Button {
+    use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
+    Button::new(id).custom(
+        ButtonCustomVariant::new(cx)
+            .color(fundo)
+            .foreground(texto)
+            .hover(fundo.opacity(0.8))
+            .active(fundo),
+    )
 }
 
 /// O quadradinho de marcar (`role="checkbox"` do site).

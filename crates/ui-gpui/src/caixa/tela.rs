@@ -1088,10 +1088,10 @@ pub(super) fn codificar(texto: &str) -> String {
 
 /// Um rótulo com a tecla ao lado (`Desconto F2`).
 pub(super) fn com_tecla(
-    botao: gpui_kit::Stateful<Div>,
+    botao: gpui_kit::component::button::Button,
     texto: &str,
     tecla: &str,
-) -> gpui_kit::Stateful<Div> {
+) -> gpui_kit::component::button::Button {
     botao
         .child(texto.to_string())
         .child(estilo::tecla(tecla.to_string()))
@@ -1232,9 +1232,7 @@ impl Caixa {
                     .w(px(32.))
                     .px(px(0.))
                     .child(Icon::new(Icone::Keyboard).size(px(16.)))
-                    .tooltip(|window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new("Atalhos (F1)").build(window, cx)
-                    })
+                    .tooltip("Atalhos (F1)")
                     .on_click(cx.listener(|t, _: &ClickEvent, w, cx| {
                         t.abrir_dialogo(TipoDeDialogo::Atalhos, w, cx)
                     })),
@@ -1274,7 +1272,10 @@ impl Caixa {
             .w(px(224.))
             .justify_between()
             .child(
+                // `flex_1`: o conteúdo do `Button` centraliza, e o seletor do
+                // site tem o nome à esquerda e a seta à direita.
                 div()
+                    .flex_1()
                     .truncate()
                     .when(nome.is_none(), |d| d.text_color(apagado))
                     .child(nome.unwrap_or_else(|| "Estúdio…".into())),

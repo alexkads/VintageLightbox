@@ -18,90 +18,66 @@
 //! | `Alert` | [`aviso`] |
 //! | `Dialog` (véu, caixa, cabeçalho, opção, rodapé) | [`veu_do_dialogo`], [`caixa_do_dialogo`], [`cabecalho_do_dialogo`], [`opcao_do_dialogo`], [`rodape_do_dialogo`] |
 
-use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Disableable as _, Icon, Sizable as _};
 use gpui_kit::{
     div, prelude::*, px, AnyElement, App, Div, FontWeight, Hsla, SharedString, Stateful,
 };
 
 use crate::recursos::Icone;
 
-/// `Button variant="outline"`: 32 px, borda do campo, fundo da página.
-pub fn botao_contorno(id: impl Into<SharedString>, cx: &App) -> Stateful<Div> {
-    let tema = cx.theme();
-    let (borda, fundo, acento) = (tema.input, tema.background, tema.accent);
-    base(id)
-        .border_1()
-        .border_color(borda)
-        .bg(fundo)
-        .shadow_xs()
-        .hover(move |s| s.bg(acento))
+// 🔘 **Os botões são o `Button` do gpui-kit** desde 2026-09-26 (dono: trocar
+// o que é desenhado à mão por componentes do kit, *"para reduzir a
+// preocupação com UX"*). O de antes era um `div` com as medidas do shadcn; o
+// `Button` traz o que o `div` não tinha: o desligado que **não clica** (o
+// antigo só apagava), o foco pelo teclado, o carregando e a dica.
+//
+// As assinaturas ficaram: as telas continuam montando o conteúdo (ícone,
+// rótulo, tecla) com `.child()` e chamando `.on_click()` no que voltar.
+
+/// 🎯 **As medidas do site, e não as do gpui-kit.** O `Button` médio do kit
+/// escreve em `text-base` (16 px); o do site é `text-sm` (14 px), com 32 px de
+/// altura e 10 de respiro. O pequeno do kit já escreve em 14 — e a altura e o
+/// respiro do site vão por cima, porque o estilo do botão vale depois do
+/// tamanho. (Comparado lado a lado com as fotos de antes: o médio deixava
+/// todo rótulo maior que o do site.)
+fn botao(id: impl Into<SharedString>) -> Button {
+    Button::new(id.into()).small().h(px(32.)).px(px(10.))
+}
+
+/// `Button variant="outline"`.
+pub fn botao_contorno(id: impl Into<SharedString>, _cx: &App) -> Button {
+    botao(id).outline()
 }
 
 /// `Button` padrão: a cor da marca.
-pub fn botao_primario(id: impl Into<SharedString>, cx: &App) -> Stateful<Div> {
-    let tema = cx.theme();
-    let (fundo, texto, pairando) = (tema.primary, tema.primary_foreground, tema.primary_hover);
-    base(id)
-        .bg(fundo)
-        .text_color(texto)
-        .font_weight(FontWeight::MEDIUM)
-        .hover(move |s| s.bg(pairando))
+pub fn botao_primario(id: impl Into<SharedString>, _cx: &App) -> Button {
+    botao(id).primary()
 }
 
-/// `Button variant="destructive"`: vermelho claro, texto vermelho.
-pub fn botao_perigo(id: impl Into<SharedString>, cx: &App) -> Stateful<Div> {
-    let perigo = cx.theme().danger;
-    base(id)
-        .bg(perigo.opacity(0.2))
-        .text_color(perigo)
-        .font_weight(FontWeight::MEDIUM)
-        .hover(move |s| s.bg(perigo.opacity(0.3)))
+/// `Button variant="destructive"`.
+pub fn botao_perigo(id: impl Into<SharedString>, _cx: &App) -> Button {
+    botao(id).danger()
 }
 
 /// `Button variant="ghost"`.
-pub fn botao_fantasma(id: impl Into<SharedString>, cx: &App) -> Stateful<Div> {
-    let acento = cx.theme().accent;
-    base(id).hover(move |s| s.bg(acento))
+pub fn botao_fantasma(id: impl Into<SharedString>, _cx: &App) -> Button {
+    botao(id).ghost()
 }
 
-/// Um botão desligado: sem ponteiro e meio apagado. Encadear depois do botão.
-pub fn desligado(botao: Stateful<Div>, desligar: bool) -> Stateful<Div> {
-    if desligar {
-        botao.opacity(0.5).cursor_default()
-    } else {
-        botao
-    }
+/// Um botão desligado: o `disabled` do `Button`, que apaga **e não clica**.
+/// Encadear depois do botão.
+pub fn desligado(botao: Button, desligar: bool) -> Button {
+    botao.disabled(desligar)
 }
 
-fn base(id: impl Into<SharedString>) -> Stateful<Div> {
-    h_flex()
-        .id(id.into())
-        .flex_none()
-        .h(px(32.))
-        .px(px(10.))
-        .gap(px(6.))
-        .rounded(px(8.))
-        .justify_center()
-        .text_sm()
-        .whitespace_nowrap()
-        .cursor_pointer()
-}
-
-/// O `SidebarTrigger`: 28 px, fantasma, com o ícone do painel.
-pub fn botao_do_menu(id: impl Into<SharedString>, cx: &App) -> Stateful<Div> {
-    let tema = cx.theme();
-    let (apagado, acento, texto) = (tema.muted_foreground, tema.accent, tema.foreground);
-    div()
-        .id(id.into())
-        .flex_none()
+/// O `SidebarTrigger`: 28 px, fantasma, com o ícone do painel em 16.
+pub fn botao_do_menu(id: impl Into<SharedString>, _cx: &App) -> Button {
+    Button::new(id.into())
+        .ghost()
+        .small()
         .size(px(28.))
-        .rounded(px(6.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .cursor_pointer()
-        .text_color(apagado)
-        .hover(move |s| s.bg(acento).text_color(texto))
+        .px(px(0.))
         .child(Icon::new(Icone::PanelLeft).size(px(16.)))
 }
 

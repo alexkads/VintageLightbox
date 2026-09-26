@@ -26,9 +26,9 @@ use crate::tempo_real::EstadoDaConexao;
 pub const DIALOGO: &str = "DialogoDaAgenda";
 
 fn marcado(
-    botao: gpui_kit::Stateful<gpui_kit::Div>,
+    botao: gpui_kit::component::button::Button,
     nome: impl Into<String>,
-) -> gpui_kit::Stateful<gpui_kit::Div> {
+) -> gpui_kit::component::button::Button {
     let nome = nome.into();
     botao.debug_selector(move || nome.clone())
 }

@@ -86,9 +86,9 @@ fn avatar(conversa: &Conversa, lado: f32, redondo: bool) -> impl IntoElement {
 
 /// Marca o botão para o teste clicar onde o dedo clica (`debug_selector`).
 fn marcado(
-    botao: gpui_kit::Stateful<gpui_kit::Div>,
+    botao: gpui_kit::component::button::Button,
     nome: impl Into<String>,
-) -> gpui_kit::Stateful<gpui_kit::Div> {
+) -> gpui_kit::component::button::Button {
     let nome = nome.into();
     botao.debug_selector(move || nome.clone())
 }
@@ -214,13 +214,10 @@ impl Chatbot {
                     .child(
                         Icon::new(if ligados { Icone::Bell } else { Icone::BellOff }).size(px(16.)),
                     )
-                    .tooltip(move |window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new(if ligados {
-                            "Desligar notificações"
-                        } else {
-                            "Ligar notificações do sistema"
-                        })
-                        .build(window, cx)
+                    .tooltip(if ligados {
+                        "Desligar notificações"
+                    } else {
+                        "Ligar notificações do sistema"
                     })
                     .on_click(cx.listener(|tela, _, _, cx| tela.alternar_avisos(cx))),
             )
@@ -377,10 +374,7 @@ impl Chatbot {
                                         "chatbot-limpar-busca",
                                     )
                                     .child(Icon::new(Icone::X).size(px(14.)))
-                                    .tooltip(|window, cx| {
-                                        gpui_kit::component::tooltip::Tooltip::new("Limpar busca")
-                                            .build(window, cx)
-                                    })
+                                    .tooltip("Limpar busca")
                                     .on_click(cx.listener(
                                         |tela, _, window, cx| tela.limpar_busca(window, cx),
                                     )),
@@ -723,15 +717,12 @@ impl Chatbot {
                     .child(Icon::new(Icone::Hand).size(px(16.)))
                     .child("Assumir")
                 }
-                .tooltip(move |window, cx| {
-                    gpui_kit::component::tooltip::Tooltip::new(if atendendo {
-                        "Devolver a conversa ao bot"
-                    } else if canal == Canal::WhatsApp {
-                        "Pausar o bot neste contato e responder à mão"
-                    } else {
-                        "Assumir a conversa e calar o bot"
-                    })
-                    .build(window, cx)
+                .tooltip(if atendendo {
+                    "Devolver a conversa ao bot"
+                } else if canal == Canal::WhatsApp {
+                    "Pausar o bot neste contato e responder à mão"
+                } else {
+                    "Assumir a conversa e calar o bot"
                 })
                 .on_click(cx.listener(|tela, _, window, cx| tela.alternar_atendimento(window, cx))),
             )
@@ -741,9 +732,7 @@ impl Chatbot {
                     "chatbot-mais-acoes",
                 )
                 .child(Icon::new(Icone::EllipsisVertical).size(px(16.)))
-                .tooltip(|window, cx| {
-                    gpui_kit::component::tooltip::Tooltip::new("Mais ações").build(window, cx)
-                })
+                .tooltip("Mais ações")
                 .on_click(cx.listener(|tela, _, _, cx| tela.alternar_mais_acoes(cx))),
             )
             .children(menu)
@@ -1133,10 +1122,7 @@ impl Chatbot {
                         };
                         botao
                             .child(Icon::new(Icone::Zap).size(px(16.)))
-                            .tooltip(|window, cx| {
-                                gpui_kit::component::tooltip::Tooltip::new("Respostas rápidas")
-                                    .build(window, cx)
-                            })
+                            .tooltip("Respostas rápidas")
                             .on_click(cx.listener(|tela, _, _, cx| tela.alternar_respostas(cx)))
                     })
                     .child(div().flex_1().child(Textarea::new(&self.compositor)))
@@ -1146,9 +1132,7 @@ impl Chatbot {
                             "chatbot-enviar",
                         )
                         .child(Icon::new(Icone::Send).size(px(16.)))
-                        .tooltip(|window, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new("Enviar").build(window, cx)
-                        })
+                        .tooltip("Enviar")
                         .on_click(
                             cx.listener(|tela, _, window, cx| tela.enviar_o_escrito(window, cx)),
                         ),
