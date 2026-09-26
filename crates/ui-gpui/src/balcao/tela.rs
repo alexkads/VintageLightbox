@@ -1,4 +1,11 @@
-//! O passo 6 do fluxo: **o cliente paga no balcão**.
+//! O passo 6 do fluxo: **o cliente paga no balcão** — o `negociacao-dialog.tsx`
+//! do site, no mesmo desenho.
+//!
+//! Primeiro o **tipo**, em cartões grandes: cortesia, desconto, já paga em
+//! outro site, outro. O tipo decide o que falta perguntar, e só isso aparece —
+//! cortesia não pede preço, parceiro pede o site (numa lista) e o cupom. Até
+//! 26/set/2026 isto era uma faixa de botões miúdos com um "Registrar", e o dono
+//! mandou o print da web: *"eu preciso que no vintagelightbox seja assim"*.
 //!
 //! # O que se registra aqui, e o que não
 //!
@@ -21,34 +28,129 @@ use std::time::Duration;
 
 use adapters::view_models::PhotoViewModel;
 use biblioteca_core::dinheiro;
-use biblioteca_core::negociacao::{self, Negociacao, Tipo, PARCEIROS};
+use biblioteca_core::negociacao::{self, Gravavel, Negociacao, Tipo, PARCEIROS};
 use domain::services::pos_venda::{MudancaDaFoto, Sessao};
-use gpui::{div, prelude::*, px, Context, SharedString, Task, Window};
-use gpui_component::button::{Button, ButtonVariants};
+use gpui::{
+    div, prelude::*, px, ClickEvent, Context, Entity, EventEmitter, FocusHandle, Focusable,
+    FontWeight, MouseButton, SharedString, Subscription, Task, Window,
+};
 use gpui_component::input::{Input, InputState};
-use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
+use gpui_component::select::{Select, SelectEvent, SelectState};
+use gpui_component::{h_flex, v_flex, ActiveTheme, Icon};
 
+use crate::estilo;
 use crate::pos_venda::porta::{Publicador, Recado};
+use crate::recursos::Icone;
 
 const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(100);
+
+gpui::actions!(balcao, [SalvarNegociacao, FecharNegociacao]);
+
+/// O contexto de teclado do diálogo.
+const CONTEXTO: &str = "Negociacao";
+
+/// ⏎ é o "Salvar" (o `<form onSubmit>` do site) e Esc fecha.
+///
+/// 🚨 **O Enter tem de ser consumido por uma ação**, e não só ouvido pelo
+/// `PressEnter` do campo: o `InputState` de uma linha emite o evento e
+/// **propaga** a tecla, e sem ninguém que a pare ela volta ao campo como texto.
+/// O `\n` dentro de um campo de uma linha derrubava o app no desenho seguinte
+/// (`shape_line`, achado pelo roteiro em 26/set/2026). É o mesmo arranjo do
+/// `ConfirmarDialogo` do caixa. Ligação repetida é inofensiva.
+pub fn init(cx: &mut gpui::App) {
+    cx.bind_keys([
+        gpui::KeyBinding::new("enter", SalvarNegociacao, Some(CONTEXTO)),
+        gpui::KeyBinding::new("escape", FecharNegociacao, Some(CONTEXTO)),
+    ]);
+}
+
+/// Com o que o diálogo abre — as quatro coisas que o `NegociacaoDialog` do site
+/// recebe além das fotos.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Abertura {
+    /// "Negociação desta foto", ou "Negociação de 3 fotos".
+    pub titulo: String,
+    /// O que já está gravado, lido de volta; o vazio quando não há nada.
+    pub inicial: Negociacao,
+    /// O preço da faixa, ao lado do valor. `None` em lote de faixas misturadas.
+    pub preco_da_faixa: Option<i64>,
+    /// Já há negociação gravada — mostra "Remover negociação".
+    pub existente: bool,
+}
+
+impl Abertura {
+    /// A de várias fotos: começa vazia, como o lote do site (`grade.tsx`).
+    pub fn do_lote(quantas: usize) -> Self {
+        Self {
+            titulo: format!(
+                "Negociação de {quantas} foto{}",
+                if quantas > 1 { "s" } else { "" }
+            ),
+            inicial: Negociacao::default(),
+            preco_da_faixa: None,
+            existente: false,
+        }
+    }
+
+    /// A de uma foto: já preenchida com o que está gravado (`foto-acoes.tsx`).
+    pub fn da_foto(
+        preco_negociado: Option<i64>,
+        observacao: Option<&str>,
+        preco_da_faixa: Option<i64>,
+    ) -> Self {
+        let existente =
+            preco_negociado.is_some() || observacao.is_some_and(|o| !o.trim().is_empty());
+        Self {
+            titulo: "Negociação desta foto".into(),
+            inicial: if existente {
+                negociacao::interpretar(preco_negociado, observacao)
+            } else {
+                Negociacao::default()
+            },
+            preco_da_faixa,
+            existente,
+        }
+    }
+}
+
+/// O que o diálogo pede a quem o mostra.
+pub enum Evento {
+    /// Fechar. `gravou` = o site confirmou tudo, e a grade precisa reler.
+    Fechar { gravou: bool },
+}
+
+impl EventEmitter<Evento> for Balcao {}
 
 pub struct Balcao {
     publicador: Arc<dyn Publicador>,
     sessao: Option<Sessao>,
-    /// A seleção que veio da grade.
-    fotos: Vec<PhotoViewModel>,
+    /// Os ids **do site** das fotos que recebem a negociação.
+    alvos: Vec<String>,
+    /// As da seleção que não estão no site, e por isso ficam de fora.
+    fora: usize,
+    titulo: String,
+    preco_da_faixa: Option<i64>,
+    existente: bool,
     tipo: Tipo,
-    preco: gpui::Entity<InputState>,
-    cupom: gpui::Entity<InputState>,
-    motivo: gpui::Entity<InputState>,
     parceiro: String,
+    lista_de_parceiros: Entity<SelectState<Vec<&'static str>>>,
+    preco: Entity<InputState>,
+    cupom: Entity<InputState>,
+    motivo: Entity<InputState>,
+    /// "Remover a negociação?" à vista, dentro do diálogo.
+    confirmando: bool,
+    /// O campo que ganha o cursor no próximo desenho.
+    foco_pendente: Option<FocusHandle>,
     enviando: usize,
     /// Quantas o site já confirmou nesta rodada.
     gravadas: usize,
+    /// Quantas o site recusou nesta rodada.
+    recusadas: usize,
     erro: Option<SharedString>,
     recados: (Sender<Recado>, Receiver<Recado>),
     colhendo: bool,
     _colheita: Option<Task<()>>,
+    _assinaturas: Vec<Subscription>,
 }
 
 impl Balcao {
@@ -57,21 +159,50 @@ impl Balcao {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let preco = cx.new(|cx| InputState::new(window, cx).placeholder("0,00"));
+        let cupom =
+            cx.new(|cx| InputState::new(window, cx).placeholder("o código que o cliente trouxe"));
+        let motivo =
+            cx.new(|cx| InputState::new(window, cx).placeholder("aniversário, indicação, brinde…"));
+        let lista_de_parceiros =
+            cx.new(|cx| SelectState::new(PARCEIROS.to_vec(), None, window, cx));
+
+        init(cx);
+        let assinaturas = vec![cx.subscribe_in(
+            &lista_de_parceiros,
+            window,
+            |tela, _, evento: &SelectEvent<Vec<&'static str>>, _, cx| {
+                let SelectEvent::Confirm(Some(parceiro)) = evento else {
+                    return;
+                };
+                tela.escolher_parceiro(parceiro, cx);
+            },
+        )];
+
         Self {
             publicador,
             sessao: None,
-            fotos: Vec::new(),
+            alvos: Vec::new(),
+            fora: 0,
+            titulo: String::new(),
+            preco_da_faixa: None,
+            existente: false,
             tipo: Tipo::Cortesia,
-            preco: cx.new(|cx| InputState::new(window, cx).placeholder("19,90")),
-            cupom: cx.new(|cx| InputState::new(window, cx).placeholder("cupom")),
-            motivo: cx.new(|cx| InputState::new(window, cx).placeholder("aniversário")),
             parceiro: PARCEIROS[0].to_string(),
+            lista_de_parceiros,
+            preco,
+            cupom,
+            motivo,
+            confirmando: false,
+            foco_pendente: None,
             enviando: 0,
             gravadas: 0,
+            recusadas: 0,
             erro: None,
             recados: channel(),
             colhendo: false,
             _colheita: None,
+            _assinaturas: assinaturas,
         }
     }
 
@@ -80,25 +211,83 @@ impl Balcao {
         cx.notify();
     }
 
-    /// Abre o balcão para uma seleção.
-    pub fn abrir_para(&mut self, fotos: Vec<PhotoViewModel>, cx: &mut Context<Self>) {
-        self.fotos = fotos;
-        self.erro = None;
-        self.gravadas = 0;
-        cx.notify();
+    /// Abre para uma seleção da Biblioteca: entra só a que está no site.
+    pub fn abrir_para(
+        &mut self,
+        fotos: Vec<PhotoViewModel>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let alvos: Vec<String> = fotos
+            .iter()
+            .filter_map(|f| f.pos_venda_foto_id.clone())
+            .collect();
+        let fora = fotos.len() - alvos.len();
+        let abertura = Abertura::do_lote(alvos.len());
+        self.abrir(alvos, fora, abertura, window, cx);
     }
 
-    /// As que podem receber a negociação — as que já estão no site.
-    pub fn negociaveis(&self) -> Vec<&PhotoViewModel> {
-        self.fotos
-            .iter()
-            .filter(|f| f.pos_venda_foto_id.is_some())
-            .collect()
+    /// Abre para fotos do site, pelo id de lá — o gesto da sessão.
+    pub fn abrir(
+        &mut self,
+        alvos: Vec<String>,
+        fora: usize,
+        abertura: Abertura,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Abertura {
+            titulo,
+            inicial,
+            preco_da_faixa,
+            existente,
+        } = abertura;
+        self.alvos = alvos;
+        self.fora = fora;
+        self.titulo = titulo;
+        self.preco_da_faixa = preco_da_faixa;
+        self.existente = existente;
+        self.confirmando = false;
+        self.erro = None;
+        self.gravadas = 0;
+        self.recusadas = 0;
+
+        let preco = match (inicial.preco, inicial.tipo) {
+            (_, Tipo::Cortesia) | (None, _) => String::new(),
+            (Some(p), _) => dinheiro::formatar_campo(p),
+        };
+        self.preco
+            .update(cx, |c, cx| c.set_value(preco, window, cx));
+        self.cupom
+            .update(cx, |c, cx| c.set_value(inicial.cupom.clone(), window, cx));
+        self.motivo
+            .update(cx, |c, cx| c.set_value(inicial.motivo.clone(), window, cx));
+        let parceiro = PARCEIROS
+            .into_iter()
+            .find(|p| *p == inicial.parceiro)
+            .unwrap_or(PARCEIROS[0]);
+        self.parceiro = parceiro.to_string();
+        self.lista_de_parceiros
+            .update(cx, |l, cx| l.set_selected_value(&parceiro, window, cx));
+        self.mudar_tipo(inicial.tipo, window, cx);
+    }
+
+    /// Os ids do site que recebem a negociação.
+    pub fn negociaveis(&self) -> &[String] {
+        &self.alvos
     }
 
     /// As que não têm linha no site, e por isso ficam de fora.
     pub fn fora(&self) -> usize {
-        self.fotos.len() - self.negociaveis().len()
+        self.fora
+    }
+
+    pub fn titulo(&self) -> &str {
+        &self.titulo
+    }
+
+    pub fn existente(&self) -> bool {
+        self.existente
     }
 
     pub fn escolher_tipo(&mut self, tipo: Tipo, cx: &mut Context<Self>) {
@@ -107,9 +296,40 @@ impl Balcao {
         cx.notify();
     }
 
+    /// Troca o tipo e leva o cursor ao campo que ele pede — o `autoFocus` do
+    /// site, e o marcador do motivo que muda com o tipo.
+    pub fn mudar_tipo(&mut self, tipo: Tipo, window: &mut Window, cx: &mut Context<Self>) {
+        self.escolher_tipo(tipo, cx);
+        let dica = match tipo {
+            Tipo::Cortesia => "aniversário, indicação, brinde…",
+            Tipo::Outro => "ex.: troca por indicação de cliente",
+            _ => "opcional",
+        };
+        self.motivo
+            .update(cx, |c, cx| c.set_placeholder(dica, window, cx));
+        let campo = match tipo {
+            Tipo::Desconto => &self.preco,
+            Tipo::Parceiro => &self.cupom,
+            _ => &self.motivo,
+        };
+        // 🔑 O foco vai no próximo desenho, e não agora: o campo de texto do
+        // `gpui-component` procura o `Root` da janela ao ganhar o foco — como
+        // o `foco_pendente` do caixa.
+        self.foco_pendente = Some(campo.read(cx).focus_handle(cx));
+        cx.notify();
+    }
+
     pub fn escolher_parceiro(&mut self, parceiro: &str, cx: &mut Context<Self>) {
         self.parceiro = parceiro.to_string();
         cx.notify();
+    }
+
+    /// 🧪 O cupom, como se digitado — para os e2e.
+    #[cfg(test)]
+    pub fn escrever_cupom(&mut self, cupom: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let cupom = cupom.to_string();
+        self.cupom
+            .update(cx, |c, cx| c.set_value(cupom, window, cx));
     }
 
     pub fn tipo(&self) -> Tipo {
@@ -120,23 +340,73 @@ impl Balcao {
         &self.parceiro
     }
 
-    /// O que a tela está pedindo, no formato do core.
-    fn negociacao(&self, cx: &Context<Self>) -> Negociacao {
-        Negociacao {
-            tipo: self.tipo,
-            preco: dinheiro::ler_campo(&self.preco.read(cx).value()),
-            parceiro: self.parceiro.clone(),
-            cupom: self.cupom.read(cx).value().to_string(),
-            motivo: self.motivo.read(cx).value().to_string(),
+    /// "Salvar": grava a negociação montada, ou a remoção se ela estiver
+    /// sendo confirmada.
+    pub fn salvar(&mut self, cx: &mut Context<Self>) {
+        if self.confirmando {
+            self.remover(cx);
+        } else {
+            self.registrar(cx);
         }
     }
 
-    /// Grava a negociação na seleção.
+    /// Grava a negociação nas fotos.
     ///
     /// 🔑 **O core decide se falta alguma coisa**, e a recusa aparece aqui sem
     /// ida ao servidor: é a mesma `montar` que a tela do site usa, então o que é
     /// recusado aqui é recusado lá.
     pub fn registrar(&mut self, cx: &mut Context<Self>) {
+        if self.enviando > 0 {
+            return;
+        }
+        let texto = self.preco.read(cx).value().to_string();
+        let mut preco = None;
+        if self.tipo != Tipo::Cortesia && !texto.trim().is_empty() {
+            match dinheiro::ler_campo(&texto) {
+                Some(p) => preco = Some(p),
+                None => {
+                    self.erro = Some("Valor inválido. Use o formato 15,00.".into());
+                    cx.notify();
+                    return;
+                }
+            }
+        }
+        let n = Negociacao {
+            tipo: self.tipo,
+            preco: if self.tipo == Tipo::Cortesia {
+                Some(0)
+            } else {
+                preco
+            },
+            parceiro: self.parceiro.clone(),
+            cupom: self.cupom.read(cx).value().to_string(),
+            motivo: self.motivo.read(cx).value().to_string(),
+        };
+        match negociacao::montar(&n) {
+            Ok(g) => self.gravar(Some(g), cx),
+            Err(falta) => {
+                self.erro = Some(falta.into());
+                cx.notify();
+            }
+        }
+    }
+
+    /// "Remover negociação" pede a confirmação, dentro do diálogo.
+    pub fn pedir_remocao(&mut self, cx: &mut Context<Self>) {
+        if self.enviando == 0 {
+            self.confirmando = true;
+            cx.notify();
+        }
+    }
+
+    /// Apaga o registro: os dois campos voltam a vazio.
+    pub fn remover(&mut self, cx: &mut Context<Self>) {
+        self.confirmando = false;
+        self.gravar(None, cx);
+    }
+
+    /// `None` remove — o `salvar(null)` do site.
+    fn gravar(&mut self, valor: Option<Gravavel>, cx: &mut Context<Self>) {
         let Some(sessao) = self.sessao.clone() else {
             self.erro = Some("esta ação precisa da conta do site".into());
             cx.notify();
@@ -145,22 +415,7 @@ impl Balcao {
         if self.enviando > 0 {
             return;
         }
-
-        let gravavel = match negociacao::montar(&self.negociacao(cx)) {
-            Ok(g) => g,
-            Err(falta) => {
-                self.erro = Some(falta.into());
-                cx.notify();
-                return;
-            }
-        };
-
-        let alvos: Vec<String> = self
-            .negociaveis()
-            .iter()
-            .filter_map(|f| f.pos_venda_foto_id.clone())
-            .collect();
-        if alvos.is_empty() {
+        if self.alvos.is_empty() {
             self.erro =
                 Some("nenhuma das fotos escolhidas está no site — classifique-as primeiro".into());
             cx.notify();
@@ -170,25 +425,36 @@ impl Balcao {
         // 🔑 O decimal em texto é o que a API fala, e a conversão é a mesma que
         // o campo de preço usa ao ler. `None` continua `None`: "voltar ao preço
         // da faixa" é diferente de "não mexer".
+        let (preco_negociado, observacao) = match valor {
+            Some(g) => (g.preco_negociado.map(centavos_em_decimal), g.observacao),
+            None => (None, None),
+        };
         let mudanca = MudancaDaFoto {
-            preco_negociado: Some(gravavel.preco_negociado.map(centavos_em_decimal)),
-            observacao_da_negociacao: Some(gravavel.observacao.clone()),
+            preco_negociado: Some(preco_negociado),
+            observacao_da_negociacao: Some(observacao),
             ..MudancaDaFoto::default()
         };
 
         self.erro = None;
         self.gravadas = 0;
-        self.enviando = alvos.len();
-        for foto_id in alvos {
+        self.recusadas = 0;
+        self.enviando = self.alvos.len();
+        for foto_id in &self.alvos {
             self.publicador.negociar(
                 sessao.clone(),
-                foto_id,
+                foto_id.clone(),
                 mudanca.clone(),
                 self.recados.0.clone(),
             );
         }
         self.acompanhar(cx);
         cx.notify();
+    }
+
+    fn fechar(&mut self, cx: &mut Context<Self>) {
+        if self.enviando == 0 {
+            cx.emit(Evento::Fechar { gravou: false });
+        }
     }
 
     fn acompanhar(&mut self, cx: &mut Context<Self>) {
@@ -207,6 +473,8 @@ impl Balcao {
         }));
     }
 
+    /// Recolhe as respostas do site. Quando a última chega sem recusa, o
+    /// diálogo fecha — como o do site, que fecha quando `salvar` dá certo.
     pub fn colher(&mut self, cx: &mut Context<Self>) -> bool {
         let mut mudou = false;
         while let Ok(recado) = self.recados.1.try_recv() {
@@ -217,16 +485,26 @@ impl Balcao {
                     self.enviando = self.enviando.saturating_sub(1);
                 }
                 Recado::Falhou(erro) => {
+                    self.recusadas += 1;
                     self.enviando = self.enviando.saturating_sub(1);
                     self.erro = Some(erro.into());
                 }
                 _ => {}
             }
         }
+        let continua = self.enviando > 0;
+        if mudou && !continua {
+            if self.recusadas == 0 {
+                cx.emit(Evento::Fechar { gravou: true });
+            } else if self.gravadas > 0 {
+                // Parte foi: a grade relê, e o diálogo fica para dizer o resto.
+                let erro = self.erro.clone().unwrap_or_default();
+                self.erro = Some(format!("{} não mudaram: {erro}", self.recusadas).into());
+            }
+        }
         if mudou {
             cx.notify();
         }
-        let continua = self.enviando > 0;
         if !continua {
             self.colhendo = false;
         }
@@ -240,20 +518,6 @@ impl Balcao {
     pub fn erro(&self) -> Option<&SharedString> {
         self.erro.as_ref()
     }
-
-    pub fn resumo(&self) -> String {
-        let quantas = self.negociaveis().len();
-        let fora = self.fora();
-        match (self.enviando, self.gravadas) {
-            (0, 0) if quantas == 0 => "nenhuma foto no site para registrar".to_string(),
-            (0, gravadas) if gravadas > 0 => format!("{gravadas} registrada(s)"),
-            (0, _) if fora > 0 => {
-                format!("{quantas} no site · {fora} ainda não classificada(s)")
-            }
-            (0, _) => format!("{quantas} foto(s)"),
-            (faltam, _) => format!("gravando… faltam {faltam}"),
-        }
-    }
 }
 
 /// Centavos no formato que a API recebe: decimal em texto, com dois dígitos.
@@ -265,132 +529,241 @@ fn centavos_em_decimal(centavos: i64) -> String {
     format!("{}.{:02}", centavos / 100, (centavos % 100).abs())
 }
 
-impl Render for Balcao {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let tipo = self.tipo;
-        let campo = |rotulo: &str, estado: &gpui::Entity<InputState>| {
+/// `Label` em cima, campo embaixo (`grid gap-1.5`).
+fn rotulado(rotulo: &str, campo: impl IntoElement) -> gpui::Div {
+    v_flex()
+        .gap(px(6.))
+        .child(
             div()
-                .flex()
-                .flex_col()
-                .gap(px(2.))
-                .flex_1()
+                .text_sm()
+                .font_weight(FontWeight::MEDIUM)
+                .child(rotulo.to_string()),
+        )
+        .child(campo)
+}
+
+impl Render for Balcao {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // ⚠️ Campo com foco, ao se desenhar, pede o `Root` da janela — que o
+        // app sempre tem (`main.rs`) e as janelas de teste do balcão e do
+        // `fluxo.rs` não. Sem ele o cursor só não vai sozinho ao campo.
+        if let Some(foco) = self.foco_pendente.take() {
+            if window.root::<gpui_component::Root>().flatten().is_some() {
+                window.focus(&foco);
+            }
+        }
+        let tema = cx.theme();
+        let (primaria, borda, acento, apagado, perigo, aviso) = (
+            tema.primary,
+            tema.border,
+            tema.accent,
+            tema.muted_foreground,
+            tema.danger,
+            tema.warning,
+        );
+        let tipo = self.tipo;
+        let enviando = self.enviando > 0;
+
+        let tipos = div()
+            .grid()
+            .grid_cols(2)
+            .gap(px(8.))
+            .children(Tipo::TODOS.into_iter().map(|t| {
+                let ativo = tipo == t;
+                v_flex()
+                    .id(SharedString::from(format!("balcao-tipo-{}", t.rotulo())))
+                    .gap(px(2.))
+                    .p(px(12.))
+                    .rounded(px(8.))
+                    .border_1()
+                    .cursor_pointer()
+                    .map(|d| {
+                        if ativo {
+                            d.border_color(primaria).bg(primaria.opacity(0.05))
+                        } else {
+                            d.border_color(borda).hover(move |s| s.bg(acento))
+                        }
+                    })
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(t.rotulo()),
+                    )
+                    .child(div().text_xs().text_color(apagado).child(t.dica()))
+                    .on_click(cx.listener(move |tela, _: &ClickEvent, window, cx| {
+                        tela.mudar_tipo(t, window, cx)
+                    }))
+            }));
+
+        let parceiro = (tipo == Tipo::Parceiro).then(|| {
+            div()
+                .grid()
+                .grid_cols(2)
+                .gap(px(12.))
+                .child(rotulado(
+                    "Site",
+                    div()
+                        .debug_selector(|| "balcao-site".into())
+                        .child(Select::new(&self.lista_de_parceiros)),
+                ))
+                .child(rotulado("Cupom", Input::new(&self.cupom)))
+        });
+
+        let preco = (tipo != Tipo::Cortesia).then(|| {
+            let rotulo = match tipo {
+                Tipo::Desconto => "Quanto foi cobrado",
+                Tipo::Parceiro => "Quanto pagou lá (se souber)",
+                _ => "Valor cobrado (se houver)",
+            };
+            rotulado(
+                rotulo,
+                h_flex()
+                    .gap(px(8.))
+                    .child(div().text_sm().text_color(apagado).child("R$"))
+                    .child(div().w(px(128.)).child(Input::new(&self.preco)))
+                    .children(self.preco_da_faixa.map(|p| {
+                        div()
+                            .text_xs()
+                            .text_color(apagado)
+                            .child(format!("preço da faixa: {}", dinheiro::formatar(p)))
+                    })),
+            )
+        });
+
+        let motivo = rotulado(
+            if tipo == Tipo::Outro {
+                "O que foi combinado"
+            } else {
+                "Motivo (opcional)"
+            },
+            Input::new(&self.motivo),
+        );
+
+        let fora = (self.fora > 0).then(|| {
+            div().text_xs().text_color(aviso).child(format!(
+                "{} foto(s) da seleção ainda não estão no site e ficam de fora — \
+                 classifique-as para elas subirem.",
+                self.fora
+            ))
+        });
+
+        let confirmacao = self.confirmando.then(|| {
+            v_flex()
+                .gap(px(8.))
+                .p(px(12.))
+                .rounded(px(8.))
+                .border_1()
+                .border_color(perigo.opacity(0.5))
                 .child(
                     div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(rotulo.to_string()),
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child("Remover a negociação?"),
                 )
-                .child(Input::new(estado).xsmall())
-        };
+                .child(div().text_sm().text_color(apagado).child(
+                    "O registro do que foi combinado no balcão — tipo, valor e motivo — é apagado.",
+                ))
+                .child(
+                    estilo::rodape_do_dialogo()
+                        .child(
+                            estilo::botao_contorno("balcao-nao-remover", cx)
+                                .child("Cancelar")
+                                .on_click(cx.listener(|tela, _: &ClickEvent, _, cx| {
+                                    tela.confirmando = false;
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            estilo::botao_perigo("balcao-remover-sim", cx)
+                                .child("Remover")
+                                .on_click(
+                                    cx.listener(|tela, _: &ClickEvent, _, cx| tela.remover(cx)),
+                                ),
+                        ),
+                )
+        });
 
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(10.))
-            .p(px(16.))
-            .min_w(px(460.))
-            .bg(cx.theme().background)
-            .text_color(cx.theme().foreground)
+        let botoes = h_flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(8.))
+            .pt(px(4.))
             .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(
-                        "O que o cliente acertou ao levar estas fotos. \
-                         🔒 Não muda o preço da galeria online — é registro do que já aconteceu.",
-                    ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap(px(4.))
-                    .children(Tipo::TODOS.into_iter().map(|t| {
-                        Button::new(SharedString::from(format!("balcao-tipo-{}", t.rotulo())))
-                            .label(t.rotulo())
-                            .xsmall()
-                            .selected(tipo == t)
-                            .on_click(
-                                cx.listener(move |tela, _ev, _window, cx| {
-                                    tela.escolher_tipo(t, cx)
-                                }),
-                            )
+                estilo::desligado(estilo::botao_primario("balcao-registrar", cx), enviando)
+                    .child(if enviando { "Salvando…" } else { "Salvar" })
+                    .on_click(cx.listener(|tela, _: &ClickEvent, _, cx| {
+                        tela.confirmando = false;
+                        tela.registrar(cx)
                     })),
             )
             .child(
-                div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(tipo.dica()),
+                estilo::desligado(estilo::botao_fantasma("balcao-cancelar", cx), enviando)
+                    .child("Cancelar")
+                    .on_click(cx.listener(|tela, _: &ClickEvent, _, cx| tela.fechar(cx))),
             )
-            // Cada tipo pede o que precisa, e só isso: um formulário com os
-            // cinco campos sempre visíveis faria procurar qual deles vale.
-            .when(matches!(tipo, Tipo::Desconto | Tipo::Outro), |tela| {
-                tela.child(
-                    div()
-                        .flex()
-                        .gap(px(8.))
-                        .child(campo("quanto entrou", &self.preco))
-                        .child(campo("motivo", &self.motivo)),
+            .when(self.existente, |d| {
+                d.child(div().flex_1()).child(
+                    estilo::desligado(estilo::botao_fantasma("balcao-remover", cx), enviando)
+                        .text_color(perigo)
+                        .child("Remover negociação")
+                        .on_click(
+                            cx.listener(|tela, _: &ClickEvent, _, cx| tela.pedir_remocao(cx)),
+                        ),
                 )
-            })
-            .when(matches!(tipo, Tipo::Cortesia), |tela| {
-                tela.child(campo("motivo", &self.motivo))
-            })
-            .when(matches!(tipo, Tipo::Parceiro), |tela| {
-                tela.child(div().flex().flex_wrap().gap(px(4.)).children(
-                    PARCEIROS.into_iter().map(|p| {
-                        Button::new(SharedString::from(format!("balcao-parceiro-{p}")))
-                            .label(p)
-                            .xsmall()
-                            .selected(self.parceiro == p)
-                            .on_click(cx.listener(move |tela, _ev, _window, cx| {
-                                tela.escolher_parceiro(p, cx)
-                            }))
-                    }),
-                ))
-                .child(
-                    div()
-                        .flex()
-                        .gap(px(8.))
-                        .child(campo("cupom", &self.cupom))
-                        .child(campo("quanto entrou", &self.preco)),
-                )
-            })
-            .when_some(self.erro.clone(), |tela, erro| {
-                tela.child(div().text_xs().text_color(cx.theme().danger).child(erro))
-            })
-            .when(self.fora() > 0, |tela| {
-                let fora = self.fora();
-                tela.child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().warning)
-                        .child(format!(
-                            "{fora} foto(s) da seleção ainda não estão no site e ficam de fora — \
-                             classifique-as para elas subirem."
-                        )),
-                )
-            })
+            });
+
+        estilo::veu_do_dialogo()
+            .id("balcao-veu")
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|tela, _, _, cx| tela.fechar(cx)),
+            )
             .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.))
+                estilo::caixa_do_dialogo(cx)
+                    .id("balcao-dialogo")
+                    .relative()
+                    .w(px(512.))
+                    .max_w_full()
+                    .max_h(gpui::relative(0.9))
+                    .overflow_y_scroll()
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .key_context(CONTEXTO)
+                    .on_action(cx.listener(|tela, _: &SalvarNegociacao, _, cx| tela.salvar(cx)))
+                    .on_action(cx.listener(|tela, _: &FecharNegociacao, _, cx| tela.fechar(cx)))
+                    .child(div().pr(px(24.)).child(estilo::cabecalho_do_dialogo(
+                        self.titulo.clone(),
+                        "O que foi combinado no balcão. Não muda o preço da compra online.",
+                        None,
+                        cx,
+                    )))
+                    .child(tipos)
+                    .children(parceiro)
+                    .children(preco)
+                    .child(motivo)
+                    .children(fora)
+                    .children(
+                        self.erro
+                            .clone()
+                            .map(|e| div().text_sm().text_color(perigo).child(e)),
+                    )
+                    .children(confirmacao)
+                    .child(botoes)
                     .child(
                         div()
-                            .flex_1()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(self.resumo()),
-                    )
-                    .child(
-                        Button::new("balcao-registrar")
-                            .label("Registrar")
-                            .xsmall()
-                            .primary()
-                            .disabled(self.enviando > 0 || self.negociaveis().is_empty())
-                            .on_click(cx.listener(|tela, _ev, _window, cx| tela.registrar(cx))),
+                            .id("balcao-fechar")
+                            .absolute()
+                            .top(px(16.))
+                            .right(px(16.))
+                            .size(px(20.))
+                            .rounded(px(4.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .opacity(0.7)
+                            .cursor_pointer()
+                            .hover(move |s| s.opacity(1.).bg(acento))
+                            .child(Icon::new(Icone::X).size(px(16.)))
+                            .on_click(cx.listener(|tela, _: &ClickEvent, _, cx| tela.fechar(cx))),
                     ),
             )
     }
@@ -449,13 +822,14 @@ mod testes {
         let janela = janela(cx, publicador.clone());
 
         janela
-            .update(cx, |tela, _window, cx| {
+            .update(cx, |tela, window, cx| {
                 tela.abrir_para(
                     vec![
                         foto("a", Some("remota-a")),
                         foto("b", None),
                         foto("c", Some("remota-c")),
                     ],
+                    window,
                     cx,
                 );
                 assert_eq!(tela.negociaveis().len(), 2);
@@ -494,8 +868,8 @@ mod testes {
         let janela = janela(cx, publicador.clone());
 
         janela
-            .update(cx, |tela, _window, cx| {
-                tela.abrir_para(vec![foto("a", Some("remota-a"))], cx);
+            .update(cx, |tela, window, cx| {
+                tela.abrir_para(vec![foto("a", Some("remota-a"))], window, cx);
                 // Desconto sem quanto entrou: o core recusa.
                 tela.escolher_tipo(Tipo::Desconto, cx);
                 tela.registrar(cx);
@@ -509,21 +883,104 @@ mod testes {
         );
     }
 
-    /// Sem nenhuma foto no site não há o que registrar, e o botão diz isso.
+    /// Sem nenhuma foto no site não há o que registrar, e a tela diz isso.
     #[gpui::test]
     fn selecao_toda_fora_do_site_nao_registra_nada(cx: &mut TestAppContext) {
         let publicador = Arc::new(PublicadorDeMentira::default());
         let janela = janela(cx, publicador.clone());
 
         janela
-            .update(cx, |tela, _window, cx| {
-                tela.abrir_para(vec![foto("a", None), foto("b", None)], cx);
-                assert_eq!(tela.resumo(), "nenhuma foto no site para registrar");
+            .update(cx, |tela, window, cx| {
+                tela.abrir_para(vec![foto("a", None), foto("b", None)], window, cx);
+                assert!(tela.negociaveis().is_empty());
+                assert_eq!(tela.fora(), 2);
                 tela.registrar(cx);
                 assert!(tela.erro().is_some());
             })
             .expect("a janela deve estar aberta");
         assert!(publicador.negociadas().is_empty());
+    }
+
+    /// 🖼️ **Uma foto abre como a web abre**: "Negociação desta foto", já no
+    /// tipo gravado, com o site, o cupom e o preço da faixa — o print do dono
+    /// (26/set/2026), "Já paga em outro site", LançadorDeOfertas, AHEB82.
+    #[gpui::test]
+    fn uma_foto_abre_com_o_que_esta_gravado(cx: &mut TestAppContext) {
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        let janela = janela(cx, publicador.clone());
+
+        janela
+            .update(cx, |tela, window, cx| {
+                let abertura =
+                    Abertura::da_foto(None, Some("LançadorDeOfertas — cupom AHEB82"), Some(4000));
+                assert!(abertura.existente);
+                tela.abrir(vec!["remota-a".into()], 0, abertura, window, cx);
+
+                assert_eq!(tela.titulo(), "Negociação desta foto");
+                assert_eq!(tela.tipo(), Tipo::Parceiro);
+                assert_eq!(tela.parceiro(), "LançadorDeOfertas");
+                assert_eq!(tela.cupom.read(cx).value(), "AHEB82");
+                assert!(tela.existente(), "com negociação, o \"Remover\" aparece");
+            })
+            .expect("a janela deve estar aberta");
+
+        // E o lote começa vazio, com o título que conta.
+        let lote = Abertura::do_lote(3);
+        assert_eq!(lote.titulo, "Negociação de 3 fotos");
+        assert_eq!(lote.inicial, Negociacao::default());
+        assert_eq!(Abertura::do_lote(1).titulo, "Negociação de 1 foto");
+        assert!(!Abertura::da_foto(None, Some("  "), None).existente);
+    }
+
+    /// 🗑️ "Remover negociação" pergunta antes, e a remoção grava os **dois
+    /// campos vazios** — o `salvar(null)` do site, que não é "não mexer".
+    #[gpui::test]
+    fn remover_pergunta_e_grava_vazio(cx: &mut TestAppContext) {
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        let janela = janela(cx, publicador.clone());
+
+        janela
+            .update(cx, |tela, window, cx| {
+                let abertura = Abertura::da_foto(Some(0), Some("Cortesia"), None);
+                tela.abrir(vec!["remota-a".into()], 0, abertura, window, cx);
+                tela.pedir_remocao(cx);
+                assert!(publicador.negociadas().is_empty(), "só perguntou");
+                // ⏎ com a pergunta à vista confirma a remoção.
+                tela.salvar(cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher(cx, &janela);
+
+        let negociadas = publicador.negociadas();
+        assert_eq!(negociadas.len(), 1);
+        assert_eq!(negociadas[0].1.preco_negociado, Some(None));
+        assert_eq!(negociadas[0].1.observacao_da_negociacao, Some(None));
+    }
+
+    /// ✅ Quando o site confirma tudo, o diálogo pede para fechar — como o do
+    /// site, que fecha quando `salvar` dá certo — e avisa que gravou, para a
+    /// grade reler.
+    #[gpui::test]
+    fn fecha_quando_o_site_confirma(cx: &mut TestAppContext) {
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        let janela = janela(cx, publicador.clone());
+        let fechou = Arc::new(std::sync::Mutex::new(None));
+
+        janela
+            .update(cx, |tela, window, cx| {
+                let fechou = fechou.clone();
+                cx.subscribe_in(&cx.entity(), window, move |_, _, ev: &Evento, _, _| {
+                    let Evento::Fechar { gravou } = ev;
+                    *fechou.lock().unwrap() = Some(*gravou);
+                })
+                .detach();
+                tela.abrir(vec!["remota-a".into()], 0, Abertura::do_lote(1), window, cx);
+                tela.registrar(cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher(cx, &janela);
+
+        assert_eq!(*fechou.lock().unwrap(), Some(true));
     }
 
     /// 🚨 O decimal que vai para a API é `"19.90"`, e não `"R$ 19,90"`.

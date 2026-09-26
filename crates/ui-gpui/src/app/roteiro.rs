@@ -198,6 +198,34 @@ impl Aplicativo {
             Passo::DadosDoCliente => self
                 .detalhe
                 .update(cx, |tela, cx| tela.editar_dados_do_cliente(cx)),
+            // 🔑 Dois passos, e não um: o pedido da sessão chega à raiz como
+            // evento, depois que este passo termina — conferir aqui mesmo dava
+            // "não abriu" com o diálogo a caminho.
+            Passo::Negociar(tipo) if tipo.is_empty() => {
+                let foco = self.detalhe.read(cx).em_foco().map(|f| f.id.clone());
+                let Some(foco) = foco else {
+                    panic!("[roteiro] negociar pede uma foto em foco (`foco 1`)");
+                };
+                eprintln!("[roteiro] negociar a foto {foco}");
+                self.detalhe
+                    .update(cx, |tela, cx| tela.pedir_negociacao(vec![foco], true, cx));
+            }
+            Passo::Negociar(tipo) => {
+                assert!(
+                    self.no_balcao(),
+                    "[roteiro] o diálogo da negociação deveria estar aberto (`negociar` antes)"
+                );
+                let tipo = match tipo.as_str() {
+                    "cortesia" => biblioteca_core::negociacao::Tipo::Cortesia,
+                    "desconto" => biblioteca_core::negociacao::Tipo::Desconto,
+                    "parceiro" => biblioteca_core::negociacao::Tipo::Parceiro,
+                    "outro" => biblioteca_core::negociacao::Tipo::Outro,
+                    outro => panic!("[roteiro] tipo de negociação desconhecido: '{outro}'"),
+                };
+                self.balcao
+                    .update(cx, |tela, cx| tela.mudar_tipo(tipo, window, cx));
+                eprintln!("[roteiro] negociação: {}", self.balcao.read(cx).titulo());
+            }
             Passo::Filtros => self
                 .sessoes
                 .update(cx, |tela, cx| tela.alternar_filtros(cx)),

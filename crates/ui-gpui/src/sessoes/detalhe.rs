@@ -55,6 +55,7 @@ use infrastructure::cache::preview_manager::PreviewManager;
 
 use super::altura_da_tira;
 use super::arquivos::SeletorDeFotos;
+use crate::balcao::tela::Abertura;
 use crate::biblioteca::miniaturas::{CacheDeMiniaturas, Miniatura};
 use crate::importacao::explorador::{Andamento, Freios, Importador};
 use crate::pos_venda::porta::{GestoDoFim, Publicador, Recado};
@@ -202,8 +203,14 @@ pub enum Pedido {
     /// Abrir ou recolher o menu lateral: nesta tela o botão dele mora na
     /// barra de cima, porque a galeria não tem o cabeçalho do painel.
     AlternarMenu,
-    /// "Negociação…": o balcão com as fotos marcadas.
-    Negociar(Vec<String>),
+    /// "Negociação…": o diálogo do balcão, com os ids **do site** das fotos
+    /// que recebem o acerto e o que ele mostra ao abrir.
+    Negociar {
+        alvos: Vec<String>,
+        /// As pedidas que ainda não estão no site (só no disco).
+        fora: usize,
+        abertura: Abertura,
+    },
     /// "Apagar": a foto sai do site, com os dois arquivos.
     ApagarDoSite(String),
     /// "Apagar" em lote, depois da confirmação de todas as fotos editáveis.
@@ -4409,7 +4416,7 @@ impl Detalhe {
                             .child(Icon::new(Icone::ShoppingCart).size(px(16.)))
                             .child(format!("Negociação… ({marcadas})"))
                             .on_click(cx.listener(|tela, _ev, _window, cx| {
-                                cx.emit(Pedido::Negociar(tela.marcadas()))
+                                tela.pedir_negociacao(tela.marcadas(), false, cx)
                             })),
                     )
                     .child(
@@ -5650,6 +5657,71 @@ impl Detalhe {
         self.aberta.as_ref()?.fotos.iter().find(|f| f.id == foto_id)
     }
 
+    /// O preço da faixa que vale para a foto, em centavos.
+    fn preco_da_faixa(&self, foto: &FotoDaGaleria) -> Option<i64> {
+        self.produtos
+            .iter()
+            .find(|p| p.id == foto.produto_efetivo)
+            .and_then(|p| dinheiro::ler_campo(&p.preco.replace('.', ",")))
+    }
+
+    /// 🤝 "Negociação…": pede o diálogo do balcão para estas fotos (ids da
+    /// grade) — o `NegociacaoDialog` do site, com o que ele recebe.
+    ///
+    /// `uma` é o botão do painel ("Negociação desta foto", já preenchida com o
+    /// que está gravado); sem ele é o lote ("Negociação de N fotos", vazio).
+    /// Entra só a que está no site e ainda se pode mudar — nem só no disco, nem
+    /// comprada, nem apagada —, como o `editaveis` da grade do site.
+    pub fn pedir_negociacao(&self, ids: Vec<String>, uma: bool, cx: &mut Context<Self>) {
+        let fotos: Vec<&FotoDaGaleria> = ids
+            .iter()
+            .filter(|id| !self.ids_locais.contains(*id))
+            .filter_map(|id| self.do_site(id))
+            .filter(|f| para_o_core(f).editavel())
+            .collect();
+        if fotos.is_empty() {
+            return;
+        }
+        let abertura = match fotos.as_slice() {
+            [foto] if uma => Abertura::da_foto(
+                foto.preco_negociado
+                    .as_deref()
+                    .and_then(dinheiro::ler_campo),
+                foto.observacao_da_negociacao.as_deref(),
+                self.preco_da_faixa(foto),
+            ),
+            _ => {
+                let precos: std::collections::HashSet<Option<i64>> =
+                    fotos.iter().map(|f| self.preco_da_faixa(f)).collect();
+                Abertura {
+                    preco_da_faixa: if precos.len() == 1 {
+                        precos.into_iter().next().flatten()
+                    } else {
+                        None
+                    },
+                    existente: fotos.iter().any(|f| {
+                        f.preco_negociado.is_some()
+                            || f.observacao_da_negociacao
+                                .as_deref()
+                                .is_some_and(|o| !o.trim().is_empty())
+                    }),
+                    ..Abertura::do_lote(fotos.len())
+                }
+            }
+        };
+        let alvos: Vec<String> = fotos.iter().map(|f| f.id.clone()).collect();
+        cx.emit(Pedido::Negociar {
+            // O aviso de "fora" é o de quem ainda não subiu; a comprada e a
+            // apagada saem caladas, como na grade do site.
+            fora: ids
+                .iter()
+                .filter(|id| self.ids_locais.contains(*id))
+                .count(),
+            alvos,
+            abertura,
+        });
+    }
+
     /// A faixa padrão desta galeria — a que vale para a foto sem faixa própria.
     fn produto_padrao_da_galeria(&self) -> String {
         self.aberta
@@ -6245,14 +6317,7 @@ impl Detalhe {
                                 .xsmall()
                                 .disabled(editaveis == 0)
                                 .on_click(cx.listener(|tela, _, _, cx| {
-                                    let ids = tela
-                                        .selecao
-                                        .marcadas()
-                                        .filter_map(|p| tela.acervo.visivel(p))
-                                        .filter(|f| f.editavel() && !tela.ids_locais.contains(&f.id))
-                                        .map(|f| f.id.clone())
-                                        .collect();
-                                    cx.emit(Pedido::Negociar(ids));
+                                    tela.pedir_negociacao(tela.marcadas(), false, cx);
                                 })),
                         )
                         .child(
@@ -6509,7 +6574,7 @@ impl Detalhe {
                                                 let Some(foto) = tela.em_foco().cloned() else {
                                                     return;
                                                 };
-                                                cx.emit(Pedido::Negociar(vec![foto.id]));
+                                                tela.pedir_negociacao(vec![foto.id], true, cx);
                                             })),
                                     )
                                     .child(

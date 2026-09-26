@@ -55,6 +55,10 @@ pub enum Passo {
     Filtros,
     /// Abre o modal "Dados do cliente" da sessão aberta.
     DadosDoCliente,
+    /// `negociar` — o "Negociação…" do painel na foto em foco. Depois,
+    /// `negociar parceiro` troca o tipo (`cortesia`, `desconto`, `parceiro`,
+    /// `outro`) e falha se o diálogo não tiver aberto. Não salva nada.
+    Negociar(String),
     /// `menu_usuario` — abre ou fecha o menu da conta.
     MenuDoUsuario,
     /// `tema claro` · `tema escuro` · `tema sistema`
@@ -175,6 +179,7 @@ pub fn ler_roteiro(texto: &str) -> Result<Vec<Passo>, String> {
             "menu" => Passo::Menu,
             "filtros" => Passo::Filtros,
             "dados_do_cliente" => Passo::DadosDoCliente,
+            "negociar" => Passo::Negociar(argumentos.join(" ")),
             "menu_usuario" => Passo::MenuDoUsuario,
             "tema" => Passo::Tema(argumentos.first().copied().unwrap_or_default().to_string()),
             "tamanho" => Passo::Tamanho(numero(0)?, numero(1)?),

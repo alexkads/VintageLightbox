@@ -43,7 +43,7 @@ use infrastructure::cache::preview_manager::PreviewManager;
 use crate::agenda::{Agenda, PedidoDaAgenda};
 use crate::atualizacao::faixa::{self, Pedido as PedidoDeAtualizacao};
 use crate::atualizacao::porta::{Atualizador, AtualizadorDaWeb, Aviso};
-use crate::balcao::tela::Balcao;
+use crate::balcao::tela::{Balcao, Evento as EventoDoBalcao};
 use crate::biblioteca::acervo::Acervo;
 use crate::biblioteca::colecoes::Colecoes;
 use crate::biblioteca::marcacao::Marcador;
@@ -451,6 +451,7 @@ pub struct Aplicativo {
     /// O balcão: o que o cliente acertou ao levar a foto na hora.
     pub(crate) balcao: Entity<Balcao>,
     no_balcao: bool,
+    _pedido_do_balcao: gpui::Subscription,
     /// A lista de sessões fotográficas.
     pub(crate) sessoes: Entity<Sessoes>,
     /// Dentro de uma sessão: cabeçalho, envio e a grade do site.
@@ -988,6 +989,15 @@ impl Aplicativo {
         });
 
         let balcao = cx.new(|cx| Balcao::nova(publicador_do_balcao, window, cx));
+        let pedido_do_balcao = cx.subscribe(&balcao, |raiz, _tela, evento: &EventoDoBalcao, cx| {
+            let EventoDoBalcao::Fechar { gravou } = evento;
+            if *gravou {
+                // A grade da sessão mostra a etiqueta do acerto: relê sem
+                // sair dela.
+                raiz.detalhe.update(cx, |tela, cx| tela.reler(cx));
+            }
+            raiz.fechar_balcao(cx);
+        });
         let sessoes = cx.new(|cx| Sessoes::nova(publicador_das_sessoes, window, cx));
         let sessao_escolhida = cx.subscribe(&sessoes, |raiz, _tela, evento: &Escolhida, cx| {
             raiz.entrar_na_sessao(evento.0.clone(), cx);
@@ -1160,6 +1170,7 @@ impl Aplicativo {
             _escolha: escolha,
             balcao,
             no_balcao: false,
+            _pedido_do_balcao: pedido_do_balcao,
             sessoes,
             detalhe,
             caixa,
@@ -2221,13 +2232,22 @@ impl Aplicativo {
                 }
             }
             DetalhePedido::AlternarMenu => self.alternar_menu_lateral(cx),
-            // 🔑 **A seleção da grade da sessão vira a da Biblioteca**, que é
-            // quem o balcão e a impressão leem.
-            DetalhePedido::Negociar(ids) => {
-                let ids = ids.clone();
-                self.biblioteca
-                    .update(cx, |tela, cx| tela.selecionar_ids(&ids, cx));
-                self.abrir_balcao(cx);
+            // 🤝 **O diálogo recebe os ids do site**, e não uma seleção da
+            // Biblioteca: a foto que subiu pela web não está no catálogo local,
+            // e passar pela Biblioteca a deixava de fora sem aviso.
+            DetalhePedido::Negociar {
+                alvos,
+                fora,
+                abertura,
+            } => {
+                if !self.pode_trabalhar() {
+                    return;
+                }
+                let (alvos, fora, abertura) = (alvos.clone(), *fora, abertura.clone());
+                self.balcao
+                    .update(cx, |tela, cx| tela.abrir(alvos, fora, abertura, window, cx));
+                self.no_balcao = true;
+                cx.notify();
             }
             // 🗑️ "Apagar" no painel da foto: o mesmo `DELETE` de zerar a
             // classificação, e a grade relê depois que o site confirma.
@@ -2850,7 +2870,7 @@ impl Aplicativo {
     /// ⚠️ **Leva a seleção, e não a grade inteira** — ao contrário de publicar.
     /// Negociação é acerto sobre fotos específicas; aplicá-la ao que estivesse
     /// visível daria cortesia a duzentas fotos por um filtro mal escolhido.
-    pub fn abrir_balcao(&mut self, cx: &mut Context<Self>) {
+    pub fn abrir_balcao(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // 🚨 **Logado, nada acontece fora de uma sessão.** A guarda fica aqui, e
         // não só no botão: atalho de teclado chega antes de botão, e foi assim
         // que a nota caiu numa grade que ninguém estava vendo.
@@ -2862,7 +2882,7 @@ impl Aplicativo {
             return;
         }
         self.balcao
-            .update(cx, |tela, cx| tela.abrir_para(fotos, cx));
+            .update(cx, |tela, cx| tela.abrir_para(fotos, window, cx));
         self.no_balcao = true;
         cx.notify();
     }
@@ -5357,46 +5377,10 @@ impl Aplicativo {
             )
     }
 
-    fn modal_do_balcao(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .absolute()
-            .inset_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(tema::cores::veu())
-            .child(
-                div()
-                    .max_w_full()
-                    .max_h_full()
-                    .flex()
-                    .flex_col()
-                    .bg(cx.theme().background)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .rounded(px(6.))
-                    .overflow_hidden()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .gap(px(24.))
-                            .px(px(12.))
-                            .py(px(6.))
-                            .bg(cx.theme().title_bar)
-                            .child(div().text_xs().child("Pago no balcão"))
-                            .child(
-                                Button::new("fechar-balcao")
-                                    .label("Fechar")
-                                    .xsmall()
-                                    .on_click(cx.listener(|este, _ev, _window, cx| {
-                                        este.fechar_balcao(cx);
-                                    })),
-                            ),
-                    )
-                    .child(self.balcao.clone()),
-            )
+    /// O diálogo da negociação — véu, caixa e botões são dele
+    /// (`balcao/tela.rs`), como o `NegociacaoDialog` do site.
+    fn modal_do_balcao(&self, _cx: &mut Context<Self>) -> impl IntoElement {
+        div().absolute().inset_0().child(self.balcao.clone())
     }
 
     fn modal_de_importacao(&self, cx: &mut Context<Self>) -> impl IntoElement {

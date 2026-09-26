@@ -335,9 +335,9 @@ fn pagar_no_balcao_e_gerar_o_link(cx: &mut TestAppContext) {
 
     estudio
         .janela
-        .update(cx, |app, _window, cx| {
+        .update(cx, |app, window, cx| {
             app.na_biblioteca(cx, |tela, cx| tela.selecionar(Some(0), cx));
-            app.abrir_balcao(cx);
+            app.abrir_balcao(window, cx);
             assert!(app.no_balcao());
 
             app.balcao.update(cx, |tela, cx| {
@@ -758,7 +758,7 @@ fn nada_acontece_fora_de_uma_sessao(cx: &mut TestAppContext) {
             app.imprimir(window, cx);
             app.exportar(cx);
             app.importar(window, cx);
-            app.abrir_balcao(cx);
+            app.abrir_balcao(window, cx);
             app.alternar_cliente(cx);
 
             assert_eq!(app.tela(), Tela::Sessoes, "continua na lista");

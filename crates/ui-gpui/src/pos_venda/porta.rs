@@ -1604,6 +1604,12 @@ pub mod mentira {
                 if let Some(rejeitada) = mudanca.rejeitada {
                     foto.rejeitada = rejeitada;
                 }
+                if let Some(preco) = mudanca.preco_negociado.clone() {
+                    foto.preco_negociado = preco;
+                }
+                if let Some(observacao) = mudanca.observacao_da_negociacao.clone() {
+                    foto.observacao_da_negociacao = observacao;
+                }
                 if let Some(estado) = mudanca.estado {
                     foto.estado = match estado {
                         EstadoNoBalcao::LevadaNoBalcao => {

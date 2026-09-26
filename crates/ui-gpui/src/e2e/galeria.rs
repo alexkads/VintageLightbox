@@ -1,6 +1,7 @@
 //! 🖼️ Dentro da sessão: a galeria do ensaio, como a rota `[id]` do site.
 
 use biblioteca_core::acervo::{Estado, Filtro};
+use biblioteca_core::negociacao::Tipo;
 use domain::services::pos_venda::{EstadoNoBalcao, MudancaDaGaleria, Produto};
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
 
@@ -812,9 +813,45 @@ fn recortes_zoom_e_marcacao_da_grade(cx: &mut TestAppContext) {
     });
 }
 
+/// 🤝 **O acerto de uma foto volta preenchido** — "Negociação desta foto" do
+/// painel, como o `NegociacaoDaFoto` do site: salvar fecha o diálogo, a sessão
+/// relê, e reabrir mostra o tipo, o site e o cupom gravados, com "Remover".
+#[gpui::test]
+fn o_acerto_da_foto_volta_preenchido(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+
+    e.detalhe(cx, |tela, _w, cx| {
+        tela.pedir_negociacao(vec!["a".into()], true, cx)
+    });
+    e.app(cx, |app, w, cx| {
+        assert!(app.no_balcao(), "o diálogo abriu");
+        app.balcao.update(cx, |tela, cx| {
+            assert_eq!(tela.titulo(), "Negociação desta foto");
+            assert!(!tela.existente(), "sem acerto, sem \"Remover\"");
+            tela.mudar_tipo(Tipo::Parceiro, w, cx);
+            tela.escolher_parceiro("LançadorDeOfertas", cx);
+            tela.escrever_cupom("AHEB82", w, cx);
+            tela.salvar(cx);
+        });
+    });
+    e.esperar(cx);
+    e.app(cx, |app, _w, _cx| {
+        assert!(!app.no_balcao(), "o site confirmou, e o diálogo fechou");
+    });
+
+    e.detalhe(cx, |tela, _w, cx| {
+        tela.pedir_negociacao(vec!["a".into()], true, cx)
+    });
+    e.app(cx, |app, _w, cx| {
+        let balcao = app.balcao.read(cx);
+        assert_eq!(balcao.tipo(), Tipo::Parceiro, "reabriu no tipo gravado");
+        assert_eq!(balcao.parceiro(), "LançadorDeOfertas");
+        assert!(balcao.existente());
+    });
+}
+
 /// 🎬 **Negociar e imprimir as marcadas**: os botões da barra levam a seleção
-/// da grade ao balcão e à folha — com o id do site atravessando para a
-/// Biblioteca, que é quem o balcão lê.
+/// da grade ao diálogo do balcão — pelo id do site, direto — e à folha.
 #[gpui::test]
 fn negociar_e_imprimir_as_marcadas(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
@@ -822,18 +859,13 @@ fn negociar_e_imprimir_as_marcadas(cx: &mut TestAppContext) {
     e.detalhe(cx, |tela, _w, cx| {
         tela.marcar_ids(&["a".into(), "d".into()], cx);
         let marcadas = tela.marcadas();
-        cx.emit(crate::sessoes::detalhe::Pedido::Negociar(marcadas));
+        tela.pedir_negociacao(marcadas, false, cx);
     });
     e.app(cx, |app, _w, cx| {
         assert!(app.no_balcao(), "o balcão abriu");
-        let negociaveis: Vec<String> = app
-            .balcao
-            .read(cx)
-            .negociaveis()
-            .iter()
-            .filter_map(|f| f.pos_venda_foto_id.clone())
-            .collect();
-        assert_eq!(negociaveis, vec!["a".to_string(), "d".to_string()]);
+        let balcao = app.balcao.read(cx);
+        assert_eq!(balcao.negociaveis(), ["a".to_string(), "d".to_string()]);
+        assert_eq!(balcao.titulo(), "Negociação de 2 fotos");
         app.balcao.update(cx, |tela, cx| tela.registrar(cx));
     });
     e.esperar(cx);
@@ -851,8 +883,10 @@ fn negociar_e_imprimir_as_marcadas(cx: &mut TestAppContext) {
         .all(|(_, m)| m.observacao_da_negociacao.is_some()));
     e.app(cx, |app, _w, cx| {
         assert_eq!(app.balcao.read(cx).gravadas(), 2);
-        app.fechar_balcao(cx);
-        assert!(!app.no_balcao());
+        assert!(
+            !app.no_balcao(),
+            "o site confirmou, e o diálogo fechou sozinho"
+        );
     });
 
     // 🖨️ Imprimir as mesmas.
