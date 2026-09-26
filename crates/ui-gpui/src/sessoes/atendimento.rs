@@ -46,17 +46,16 @@ use super::nova::estado::{rotulo_da_proporcao, PROPORCOES_PADRAO};
 use super::nova::receita::{self, Grupo, PresetDaSessao};
 use super::nova::tela::{ItemDaBusca, TipoDeBusca};
 use crate::estilo;
-use crate::modal::DevolverFoco;
 use crate::pos_venda::porta::{PedidoJson, Publicador, Recado};
 use crate::recursos::Icone;
-use crate::tema;
 
 const VERMELHO: u32 = 0xdc2626;
 const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(50);
 /// Quantos cartões de preset cabem numa linha da gaveta — a conta das setas.
 const COLUNAS_DOS_PRESETS: usize = 4;
 /// `sm:[--drawer-content-width:36rem]` do site.
-const LARGURA: f32 = 576.;
+/// A largura da gaveta (`sm:max-w-xl` do `Drawer` do site).
+pub const LARGURA: f32 = 576.;
 
 fn cor(hex: u32) -> Hsla {
     gpui_kit::rgb(hex).into()
@@ -283,7 +282,6 @@ pub struct Atendimento {
     foco_dos_presets: FocusHandle,
     foco_do_preset: usize,
     foco: FocusHandle,
-    devolver: DevolverFoco,
     tomar_foco: bool,
     /// Quantas trocas ainda não voltaram.
     gravando: usize,
@@ -331,7 +329,6 @@ impl Atendimento {
             foco_dos_presets: cx.focus_handle(),
             foco_do_preset: 0,
             foco: cx.focus_handle(),
-            devolver: DevolverFoco::default(),
             tomar_foco: false,
             gravando: 0,
             ultimo: None,
@@ -395,13 +392,13 @@ impl Atendimento {
     /// Fecha sem devolver o foco — quem chama já cuida dele.
     pub fn largar(&mut self, cx: &mut Context<Self>) {
         self.tomar_foco = false;
-        self.devolver.esquecer();
         self.associador.update(cx, |a, _| a.largar());
     }
 
-    fn fechar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// O `Sheet` fechou (véu, Esc ou o X). O foco quem devolve é ele, na hora,
+    /// a quem o tinha antes de a gaveta abrir.
+    pub fn fechou(&mut self, cx: &mut Context<Self>) {
         self.associador.update(cx, |a, _| a.largar());
-        self.devolver.devolver(window, cx);
         cx.emit(EventoDoAtendimento::Fechou);
     }
 
@@ -799,8 +796,10 @@ impl Atendimento {
                 escolha.update(cx, |e, cx| e.set_selected_value(&atual, window, cx));
             }
         }
+        // Quem guarda para onde o foco volta é o `Sheet`: ele anotou quem o
+        // tinha antes de abrir. Guardar aqui anotaria o próprio `Sheet`, que
+        // some ao fechar.
         if std::mem::take(&mut self.tomar_foco) {
-            self.devolver.lembrar(window, cx);
             window.focus(&self.foco, cx);
         }
     }
@@ -1087,131 +1086,99 @@ impl Render for Atendimento {
         let como_conheceu = self.como_conheceu(cx);
         let presets = self.seletor_de_preset(window, cx);
 
-        // 🪟 **Gaveta pela direita, como o `Drawer` do site** — a galeria
-        // continua atrás, e é dela que o operador volta a olhar quando fecha.
-        // O véu fecha ao clique, como o `onOpenChange` de lá.
-        div()
-            .id("atendimento-veu")
-            .absolute()
-            .top_0()
-            .left_0()
+        // 🪟 **O conteúdo da gaveta.** A gaveta em si — entrar pela direita,
+        // o véu que fecha no clique, o Esc, o X e o foco preso nela — é o
+        // `Sheet` do gpui-kit, aberto pela sessão (`Detalhe::alternar_atendimento`).
+        // Até 2026-09-26 tudo isso era desenhado aqui, à mão.
+        v_flex()
+            .id("atendimento-gaveta")
+            .track_focus(&self.foco)
             .size_full()
-            .bg(tema::cores::veu().opacity(0.5))
-            .on_mouse_down(
-                gpui_kit::MouseButton::Left,
-                cx.listener(|tela, _, window, cx| tela.fechar(window, cx)),
-            )
             .child(
                 v_flex()
-                    .id("atendimento-gaveta")
-                    .track_focus(&self.foco)
-                    .on_key_down(cx.listener(|tela, evento: &KeyDownEvent, window, cx| {
-                        if evento.keystroke.key == "escape" {
-                            cx.stop_propagation();
-                            tela.fechar(window, cx);
-                        }
-                    }))
-                    .occlude()
-                    .absolute()
-                    .top_0()
-                    .right_0()
-                    .h_full()
-                    .w(px(LARGURA))
-                    .border_l_1()
+                    .gap(px(4.))
+                    .p(px(16.))
+                    .pb(px(12.))
+                    .border_b_1()
                     .border_color(tema.border)
-                    .bg(tema.background)
-                    .shadow_lg()
+                    // O título "Atendimento" é o da barra do `Sheet`.
                     .child(
-                        v_flex()
-                            .gap(px(4.))
-                            .p(px(16.))
-                            .pb(px(12.))
-                            .border_b_1()
-                            .border_color(tema.border)
-                            .child(
-                                h_flex()
-                                    .gap(px(8.))
-                                    .child(
-                                        div()
-                                            .text_base()
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .child("Atendimento"),
-                                    )
-                                    .when(self.gravando > 0, |c| {
-                                        c.child(
-                                            Icon::new(Icone::LoaderCircle)
-                                                .size(px(16.))
-                                                .text_color(tema.muted_foreground),
-                                        )
-                                    }),
-                            )
+                        h_flex()
+                            .gap(px(8.))
                             .child(div().text_sm().text_color(tema.muted_foreground).child(
                                 "O que veio junto com o cliente. Cada troca é gravada na hora.",
                             ))
-                            .when_some(self.ultimo.clone(), |c, (frase, erro)| {
+                            .when(self.gravando > 0, |c| {
                                 c.child(
-                                    div()
-                                        .id("atendimento-ultimo")
-                                        .text_xs()
-                                        .text_color(if erro {
-                                            cor(VERMELHO)
-                                        } else {
-                                            tema.muted_foreground
-                                        })
-                                        .child(frase),
+                                    Icon::new(Icone::LoaderCircle)
+                                        .size(px(16.))
+                                        .text_color(tema.muted_foreground),
                                 )
                             }),
                     )
-                    .child(
+                    .when_some(self.ultimo.clone(), |c, (frase, erro)| {
+                        c.child(
+                            div()
+                                .id("atendimento-ultimo")
+                                .text_xs()
+                                .text_color(if erro {
+                                    cor(VERMELHO)
+                                } else {
+                                    tema.muted_foreground
+                                })
+                                .child(frase),
+                        )
+                    }),
+            )
+            .child(
+                v_flex()
+                    .id("atendimento-corpo")
+                    .flex_1()
+                    .min_h(px(0.))
+                    .overflow_y_scroll()
+                    .p(px(16.))
+                    .gap(px(24.))
+                    .child(secao("Agendamento", agendamento))
+                    .child(secao("Voucher", voucher))
+                    .child(secao("Compra antecipada", compra))
+                    .child(secao("Como conheceu o estúdio", como_conheceu))
+                    .child(secao(
+                        "Preset padrão",
                         v_flex()
-                            .id("atendimento-corpo")
-                            .flex_1()
-                            .min_h(px(0.))
-                            .overflow_y_scroll()
-                            .p(px(16.))
-                            .gap(px(24.))
-                            .child(secao("Agendamento", agendamento))
-                            .child(secao("Voucher", voucher))
-                            .child(secao("Compra antecipada", compra))
-                            .child(secao("Como conheceu o estúdio", como_conheceu))
-                            .child(secao(
-                                "Preset padrão",
-                                v_flex()
-                                    .gap(px(12.))
-                                    .child(div().text_xs().text_color(tema.muted_foreground).child(
-                                        "Preset e corte com que as fotos desta sessão chegam. \
+                            .gap(px(12.))
+                            .child(div().text_xs().text_color(tema.muted_foreground).child(
+                                "Preset e corte com que as fotos desta sessão chegam. \
                                          Mudar aqui vale para o que for importado daqui em \
                                          diante. Setas para percorrer, Espaço para escolher.",
-                                    ))
+                            ))
+                            .child(
+                                v_flex()
+                                    .gap(px(6.))
                                     .child(
-                                        v_flex()
-                                            .gap(px(6.))
-                                            .child(
-                                                div()
-                                                    .text_sm()
-                                                    .font_weight(FontWeight::MEDIUM)
-                                                    .child("Preset"),
-                                            )
-                                            .child(presets),
+                                        div()
+                                            .text_sm()
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .child("Preset"),
                                     )
+                                    .child(presets),
+                            )
+                            .child(
+                                v_flex()
+                                    .gap(px(6.))
+                                    .max_w(px(256.))
                                     .child(
-                                        v_flex()
-                                            .gap(px(6.))
-                                            .max_w(px(256.))
-                                            .child(
-                                                div()
-                                                    .text_sm()
-                                                    .font_weight(FontWeight::MEDIUM)
-                                                    .child("Proporção do corte"),
-                                            )
-                                            .children(
-                                                self.corte
-                                                    .as_ref()
-                                                    .map(|escolha| Select::new(escolha).w_full()),
-                                            ),
+                                        div()
+                                            .text_sm()
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .child("Proporção do corte"),
+                                    )
+                                    .children(
+                                        self.corte
+                                            .as_ref()
+                                            .map(|escolha| Select::new(escolha).w_full()),
                                     ),
-                            )),
-                    ),
+                            ),
+                    )),
             )
             // O modal da busca, por cima de tudo — inclusive da gaveta.
             .child(self.associador.clone())

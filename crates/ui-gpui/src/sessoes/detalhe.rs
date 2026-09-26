@@ -48,7 +48,7 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
-use gpui_kit::component::{ActiveTheme, Disableable, Sizable};
+use gpui_kit::component::{ActiveTheme, Disableable, Sizable, WindowExt as _};
 use gpui_kit::{
     canvas, div, img, prelude::*, px, App, Context, Entity, EventEmitter, Focusable, SharedString,
     Task, Window,
@@ -3776,9 +3776,6 @@ impl Render for Detalhe {
             // desenhadas na própria tela — o `deferred` do GPUI não aceita
             // outro `deferred` dentro (ver `caixa/dialogos.rs`).
             .children(self.detalhes(cx))
-            .when(self.atendimento_aberto, |tela| {
-                tela.child(self.atendimento.clone())
-            })
             // 🔑 **`deferred`, e não só por último**: o caixa flutuante é filho
             // da raiz, desenhado depois desta tela, e ficava por cima do modal.
             // Diferido, o modal é pintado depois de tudo. Não há `deferred`
@@ -3993,9 +3990,9 @@ impl Detalhe {
                         n => format!("Atendimento · {n}"),
                     }))
                     .when(!sem_galeria, |b| {
-                        b.on_click(
-                            cx.listener(|tela, _ev, _window, cx| tela.alternar_atendimento(cx)),
-                        )
+                        b.on_click(cx.listener(|tela, _ev, window, cx| {
+                            tela.alternar_atendimento(window, cx)
+                        }))
                     }),
                 sem_galeria,
             ))
@@ -5038,11 +5035,24 @@ impl Detalhe {
         cx.notify();
     }
 
-    /// Abre ou fecha a gaveta do atendimento.
-    pub fn alternar_atendimento(&mut self, cx: &mut Context<Self>) {
+    /// Abre ou fecha a gaveta do atendimento — o `Sheet` do gpui-kit, pela
+    /// direita, como o `Drawer` do site.
+    ///
+    /// ⚠️ **Sem a `Root` do gpui-kit na janela, só o estado muda.** É o caso
+    /// dos testes que montam a sessão sozinha: o `Sheet` mora na camada da
+    /// raiz, e abri-lo sem ela é `panic`. A gaveta de verdade fica com os e2e,
+    /// que montam o app inteiro.
+    pub fn alternar_atendimento(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let com_raiz = window
+            .root::<gpui_kit::component::Root>()
+            .flatten()
+            .is_some();
         self.atendimento_aberto = !self.atendimento_aberto;
         if !self.atendimento_aberto {
             self.atendimento.update(cx, |gaveta, cx| gaveta.largar(cx));
+            if com_raiz && window.has_active_sheet(cx) {
+                window.close_sheet(cx);
+            }
             cx.notify();
             return;
         }
@@ -5067,6 +5077,25 @@ impl Detalhe {
             });
             gaveta.abrir(cx);
         });
+        if com_raiz {
+            let gaveta = self.atendimento.clone();
+            window.open_sheet_at(
+                gpui_kit::component::Placement::Right,
+                cx,
+                move |sheet, _, _| {
+                    let ao_fechar = gaveta.clone();
+                    sheet
+                        .size(px(super::atendimento::LARGURA))
+                        // O respiro é o da gaveta, e não o do `Sheet`.
+                        .px_0()
+                        .title("Atendimento")
+                        .child(gaveta.clone())
+                        .on_close(move |_, _window, cx| {
+                            ao_fechar.update(cx, |gaveta, cx| gaveta.fechou(cx));
+                        })
+                },
+            );
+        }
         cx.notify();
     }
 
@@ -8861,8 +8890,8 @@ mod testes {
         entrar(cx, &janela);
 
         janela
-            .update(cx, |tela, _window, cx| {
-                tela.alternar_atendimento(cx);
+            .update(cx, |tela, window, cx| {
+                tela.alternar_atendimento(window, cx);
                 tela.gaveta_do_atendimento().update(cx, |gaveta, cx| {
                     // A resposta se edita na gaveta e vai no "Gravar", com o
                     // parceiro e o texto — num gesto só.

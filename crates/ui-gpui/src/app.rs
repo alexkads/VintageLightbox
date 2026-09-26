@@ -5796,6 +5796,9 @@ impl Render for Aplicativo {
             // 🚨 **Os toasts vêm antes das camadas do `gpui-component`** e
             // depois de todo o resto: eles ficam sobre a tela, e sob o diálogo.
             .children(self.camada_dos_toasts(cx))
+            // 🪟 A camada das gavetas (`Sheet`), **abaixo** da dos diálogos:
+            // um diálogo aberto de dentro de uma gaveta nasce por cima dela.
+            .children(gpui_kit::component::Root::render_sheet_layer(window, cx))
             .children(gpui_kit::component::Root::render_dialog_layer(window, cx))
             .children(gpui_kit::component::Root::render_notification_layer(
                 window, cx,

@@ -1234,9 +1234,28 @@ impl Associador {
 impl Render for Associador {
     /// Só o modal da busca — o cartão e o cadastro são desenhados por quem usa
     /// o componente, no lugar dele ([`Associador::campo`]).
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    ///
+    /// 🪟 **Por cima da janela inteira**, e não só de quem o contém: o
+    /// associador vive dentro da gaveta do atendimento, que desde 2026-09-26 é
+    /// o `Sheet` do gpui-kit — e ali o `inset_0` cobriria só a gaveta, com a
+    /// busca de 760 px espremida nos 576 dela. `deferred` + `anchored` no canto
+    /// da janela devolvem o modal ao tamanho dela. (Nada acima dele é
+    /// `deferred`: o `Sheet` é desenhado na camada da raiz.)
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         match self.busca.aberto() {
-            Some(busca) => self.modal_de_busca(busca, cx).into_any_element(),
+            Some(busca) => {
+                let tamanho = window.viewport_size();
+                gpui_kit::deferred(
+                    gpui_kit::anchored()
+                        .position(gpui_kit::point(px(0.), px(0.)))
+                        .child(
+                            self.modal_de_busca(busca, cx)
+                                .w(tamanho.width)
+                                .h(tamanho.height),
+                        ),
+                )
+                .into_any_element()
+            }
             None => div().into_any_element(),
         }
     }

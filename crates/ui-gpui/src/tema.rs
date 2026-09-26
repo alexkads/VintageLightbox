@@ -645,7 +645,16 @@ fn tema_da_paleta(
     if let Some(letra) = letra {
         config.insert("font.family".into(), Value::String(letra.to_string()));
     }
-    config.insert("colors".into(), cores_do_esquema(p));
+    let mut cores = cores_do_esquema(p);
+    // 🪟 O véu atrás do `Sheet` e do `Dialog` do gpui-kit — o mesmo
+    // `bg-black/50` do véu que o app desenha ([`cores::veu`]). Fora da lista
+    // de [`cores`] porque tem transparência, e aquela é só `#rrggbb`. Sem ele,
+    // valia o do gpui-kit, quase transparente: a gaveta do atendimento abria
+    // sem escurecer a grade atrás.
+    if let Value::Object(mapa) = &mut cores {
+        mapa.insert("overlay".into(), Value::String(VEU.into()));
+    }
+    config.insert("colors".into(), cores);
     serde_json::from_value(Value::Object(config))
         .expect("o tema do site tem de ser legível — `tema_e_legivel` confere isso")
 }
@@ -747,6 +756,9 @@ fn cores(p: &paleta::Paleta) -> Vec<(&'static str, u32)> {
     ]
 }
 
+/// O véu dos modais, em `#rrggbbaa`: preto a 50%.
+const VEU: &str = "#00000080";
+
 /// `0x1a2b3c` → `"#1a2b3c"`. Sempre seis dígitos.
 fn hex(cor: u32) -> String {
     format!("#{cor:06x}")
@@ -820,6 +832,16 @@ mod testes {
                 );
             }
         }
+    }
+
+    /// O véu do `Sheet` e do `Dialog` é o do app, e o gpui-kit o lê.
+    #[test]
+    fn o_veu_dos_modais_e_o_do_app() {
+        let config = tema_do_site(ThemeMode::Light);
+        let de_volta = serde_json::to_value(&config.colors).expect("as cores devem serializar");
+        assert_eq!(de_volta.get("overlay").and_then(|v| v.as_str()), Some(VEU));
+        let veu = gpui_kit::Rgba::from(cores::veu());
+        assert!((veu.a - 0.5).abs() < 0.01, "o véu do app mudou: {veu:?}");
     }
 
     #[test]

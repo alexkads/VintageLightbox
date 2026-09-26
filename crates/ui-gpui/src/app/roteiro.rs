@@ -193,7 +193,7 @@ impl Aplicativo {
             }
             Passo::Atendimento => self
                 .detalhe
-                .update(cx, |tela, cx| tela.alternar_atendimento(cx)),
+                .update(cx, |tela, cx| tela.alternar_atendimento(window, cx)),
             Passo::Menu => self.alternar_menu_lateral(cx),
             Passo::DadosDoCliente => self
                 .detalhe
