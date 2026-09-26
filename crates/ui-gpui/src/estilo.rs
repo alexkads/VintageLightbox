@@ -214,6 +214,13 @@ pub fn veu_do_dialogo() -> Div {
         .occlude()
 }
 
+/// O miolo de um diálogo, **sem moldura**: o arranjo da caixa (16 px entre as
+/// partes). A moldura — véu, caixa, X — é o `Dialog` do gpui-kit
+/// (`crate::dialogo`).
+pub fn conteudo_do_dialogo() -> Div {
+    v_flex().gap(px(16.))
+}
+
 /// A caixa do `DialogContent`: canto de 12 px, fundo do `popover`, 16 px de
 /// respiro e 16 px entre as partes.
 pub fn caixa_do_dialogo(cx: &App) -> Div {

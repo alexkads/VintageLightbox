@@ -11,8 +11,7 @@ use chrono::{Datelike, NaiveDate, Utc};
 use gpui_kit::component::input::{Input, Textarea};
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
 use gpui_kit::{
-    div, prelude::*, px, rgb, AnyElement, Context, FontWeight, Hsla, MouseButton, SharedString,
-    Window,
+    div, prelude::*, px, rgb, AnyElement, Context, FontWeight, Hsla, SharedString, Window,
 };
 
 use super::modelo::{self, Ensaio, Visao};
@@ -45,8 +44,40 @@ impl Render for Agenda {
         self.preencher_se_preciso(window, cx);
         let tema = cx.theme();
         let (fundo, texto) = (tema.background, tema.foreground);
-        let dialogo = self.aberto.aberto().cloned().map(|e| self.dialogo(e, cx));
-        let dia_aberto = self.dia_aberto.map(|d| self.popup_do_dia(d, cx));
+        // 🪟 Os diálogos são o `Dialog` do gpui-kit (`crate::dialogo`). O `Esc`
+        // do kit fica desligado no do agendamento: aqui ele volta um passo
+        // (formulário → detalhes → fechar, o `VoltarNaAgenda`), e o clique
+        // fora fecha tudo, como o véu de antes.
+        let largura = match self.modo {
+            Modo::Detalhes => 520.,
+            Modo::Reagendar | Modo::Atendimento | Modo::Excluir => 440.,
+        };
+        let conteudo = self.aberto.aberto().cloned().map(|e| self.dialogo(e, cx));
+        let dialogo = crate::dialogo::desenhar_conteudo(
+            conteudo,
+            crate::dialogo::Jeito {
+                largura,
+                esc: false,
+                veu: true,
+                x: false,
+            },
+            |tela, window, cx| tela.fechar(window, cx),
+            window,
+            cx,
+        );
+        let do_dia = self.dia_aberto.map(|d| self.popup_do_dia(d, cx));
+        let dia_aberto = crate::dialogo::desenhar_conteudo(
+            do_dia,
+            crate::dialogo::Jeito {
+                largura: 360.,
+                esc: true,
+                veu: true,
+                x: false,
+            },
+            |tela, _, cx| tela.mostrar_o_dia(None, cx),
+            window,
+            cx,
+        );
 
         v_flex()
             .id("agenda")
@@ -811,25 +842,13 @@ impl Agenda {
                     .into_any_element()
             })
             .collect();
-        estilo::veu_do_dialogo()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|tela, _, _, cx| tela.mostrar_o_dia(None, cx)),
-            )
+        estilo::conteudo_do_dialogo()
             .child(
                 div()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(
-                        estilo::caixa_do_dialogo(cx)
-                            .w(px(360.))
-                            .child(
-                                div()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child(modelo::data_longa(dia)),
-                            )
-                            .child(v_flex().gap(px(4.)).children(chips)),
-                    ),
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(modelo::data_longa(dia)),
             )
+            .child(v_flex().gap(px(4.)).children(chips))
             .into_any_element()
     }
 
@@ -840,7 +859,7 @@ impl Agenda {
             Modo::Detalhes => self.detalhes(&e, cx).into_any_element(),
             Modo::Reagendar => self.formulario_de_reagendamento(&e, cx).into_any_element(),
             Modo::Atendimento => self.formulario_de_atendimento(&e, cx).into_any_element(),
-            Modo::Excluir => estilo::caixa_do_dialogo(cx)
+            Modo::Excluir => estilo::conteudo_do_dialogo()
                 .child(estilo::cabecalho_do_dialogo(
                     "Excluir o agendamento?",
                     format!(
@@ -869,17 +888,7 @@ impl Agenda {
                 )
                 .into_any_element(),
         };
-        estilo::veu_do_dialogo()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|tela, _, window, cx| tela.fechar(window, cx)),
-            )
-            .child(
-                div()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(caixa),
-            )
-            .into_any_element()
+        caixa
     }
 
     fn linha_do_detalhe(
@@ -969,8 +978,7 @@ impl Agenda {
         }
         let descancelar = e.clone();
         let link = e.link_do_whatsapp();
-        estilo::caixa_do_dialogo(cx)
-            .w(px(520.))
+        estilo::conteudo_do_dialogo()
             .child(div().h(px(4.)).rounded_full().bg(c))
             .child(
                 h_flex()
@@ -1140,7 +1148,7 @@ impl Agenda {
             }
             _ => None,
         });
-        estilo::caixa_do_dialogo(cx)
+        estilo::conteudo_do_dialogo()
             .child(estilo::cabecalho_do_dialogo(
                 "Reagendar",
                 e.titulo(),
@@ -1168,7 +1176,7 @@ impl Agenda {
             .erro_do_formulario
             .clone()
             .or_else(|| validacao.as_ref().err().cloned());
-        estilo::caixa_do_dialogo(cx)
+        estilo::conteudo_do_dialogo()
             .child(estilo::cabecalho_do_dialogo(
                 "Registrar atendimento",
                 format!("{} — marca como Concluído", e.titulo()),

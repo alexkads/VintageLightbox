@@ -9,8 +9,7 @@ use crate::campo::TrocarValor as _;
 use gpui_kit::component::input::{Input, Textarea};
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
 use gpui_kit::{
-    div, prelude::*, px, rgb, AnyElement, Context, FontWeight, Hsla, MouseButton, SharedString,
-    Window,
+    div, prelude::*, px, rgb, AnyElement, Context, FontWeight, Hsla, SharedString, Window,
 };
 
 use super::modelo::{self, Canal, Conversa, FiltroDeCanal, Mensagem, Status, Urgencia};
@@ -105,11 +104,27 @@ impl Render for Chatbot {
         }
         let tema = cx.theme();
         let (fundo, texto) = (tema.background, tema.foreground);
-        let dialogo = self
-            .dialogo
-            .aberto()
-            .cloned()
-            .map(|d| self.dialogo_aberto(d, cx));
+        // 🪟 Os diálogos são o `Dialog` do gpui-kit (`crate::dialogo`), com a
+        // largura de cada um.
+        let aberto = self.dialogo.aberto().cloned();
+        let largura = match &aberto {
+            Some(Dialogo::Urgencias) => 720.,
+            Some(Dialogo::QuemAssume(_)) => 384.,
+            _ => 440.,
+        };
+        let conteudo = aberto.map(|d| self.dialogo_aberto(d, cx));
+        let dialogo = crate::dialogo::desenhar_conteudo(
+            conteudo,
+            crate::dialogo::Jeito {
+                largura,
+                esc: true,
+                veu: true,
+                x: false,
+            },
+            |tela, window, cx| tela.fechar_dialogo(window, cx),
+            window,
+            cx,
+        );
 
         v_flex()
             .id("chatbot")
@@ -1148,7 +1163,7 @@ impl Chatbot {
         let caixa = match dialogo {
             Dialogo::Urgencias => self.dialogo_de_urgencias(cx).into_any_element(),
             Dialogo::Resolver(urgencia) => self.dialogo_de_resolucao(&urgencia, cx).into_any_element(),
-            Dialogo::Descartar(_) => estilo::caixa_do_dialogo(cx)
+            Dialogo::Descartar(_) => estilo::conteudo_do_dialogo()
                 .child(estilo::cabecalho_do_dialogo(
                     "Descartar este alerta?",
                     "Ele é marcado como falso positivo e sai da lista.",
@@ -1172,8 +1187,7 @@ impl Chatbot {
                         )),
                 )
                 .into_any_element(),
-            Dialogo::QuemAssume(_) => estilo::caixa_do_dialogo(cx)
-                .w(px(384.))
+            Dialogo::QuemAssume(_) => estilo::conteudo_do_dialogo()
                 .child(estilo::cabecalho_do_dialogo(
                     "Quem está assumindo?",
                     "O visitante lê “fulano entrou na conversa” — no site ele não tem outro jeito de saber com quem está falando.",
@@ -1206,7 +1220,7 @@ impl Chatbot {
                         ),
                 )
                 .into_any_element(),
-            Dialogo::ExcluirHistorico(chave) => estilo::caixa_do_dialogo(cx)
+            Dialogo::ExcluirHistorico(chave) => estilo::conteudo_do_dialogo()
                 .child(estilo::cabecalho_do_dialogo(
                     "Excluir todo o histórico",
                     format!(
@@ -1242,17 +1256,7 @@ impl Chatbot {
                 )
                 .into_any_element(),
         };
-        estilo::veu_do_dialogo()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|tela, _, window, cx| tela.fechar_dialogo(window, cx)),
-            )
-            .child(
-                div()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(caixa),
-            )
-            .into_any_element()
+        caixa
     }
 
     fn dialogo_de_urgencias(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1264,8 +1268,7 @@ impl Chatbot {
             .enumerate()
             .map(|(i, u)| self.linha_de_urgencia(i, u, cx).into_any_element())
             .collect();
-        estilo::caixa_do_dialogo(cx)
-            .w(px(720.))
+        estilo::conteudo_do_dialogo()
             .max_h(px(640.))
             .child(estilo::cabecalho_do_dialogo(
                 "🚨 Interações urgentes",
@@ -1437,7 +1440,7 @@ impl Chatbot {
     ) -> impl IntoElement {
         let apagado = cx.theme().muted_foreground;
         let sem_notas = self.notas.read(cx).value().trim().is_empty();
-        estilo::caixa_do_dialogo(cx)
+        estilo::conteudo_do_dialogo()
             .child(estilo::cabecalho_do_dialogo(
                 "Resolver urgência",
                 format!("{} · {}", urgencia.profile_name, urgencia.contact_id),
