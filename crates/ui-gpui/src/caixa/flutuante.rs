@@ -41,6 +41,7 @@ use std::sync::Arc;
 use biblioteca_core::caixa::{self as regras, ItemDoCupom, TipoDeMovimento};
 use biblioteca_core::dinheiro;
 use biblioteca_core::negociacao::{self, Negociacao, Tipo, PARCEIROS};
+use biblioteca_core::Modificadores;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
 use gpui_kit::{
@@ -110,6 +111,9 @@ pub(super) struct Painel {
     foco_do_cupom: FocusHandle,
     rolagem: ScrollHandle,
     editando: Option<EdicaoRapida>,
+    /// ☑️ Os itens marcados — Ctrl/⌘, Shift e a caixinha de cada linha (dono,
+    /// 2026-09-26). Com dois ou mais, o ajuste rápido e o `N` agem neles.
+    selecao: regras::SelecaoDoCupom,
     /// A foto em foco na grade — o visor mostra o item dela.
     em_foco: Option<String>,
     ultimo_foco: Option<String>,
@@ -231,6 +235,7 @@ impl Caixa {
             foco_do_cupom: cx.focus_handle(),
             rolagem: ScrollHandle::new(),
             editando: None,
+            selecao: regras::SelecaoDoCupom::default(),
             em_foco: None,
             ultimo_foco: None,
             galeria_id: None,
@@ -393,10 +398,23 @@ impl Caixa {
             return;
         }
         let m = evento.keystroke.modifiers;
+        let contexto = |nome: &str| evento.context_stack.iter().any(|c| c.contains(nome));
+        // Ctrl/⌘+A no cupom marca todos os itens — e não a grade de trás.
+        if (m.control || m.platform)
+            && !m.alt
+            && !m.shift
+            && evento.keystroke.key == "a"
+            && contexto(CUPOM)
+            && !contexto("Input")
+            && self.dialogo.is_none()
+        {
+            self.marcar_todos_no_cupom(cx);
+            cx.stop_propagation();
+            return;
+        }
         if m.control || m.platform || m.alt {
             return;
         }
-        let contexto = |nome: &str| evento.context_stack.iter().any(|c| c.contains(nome));
         let no_dialogo = contexto("CaixaDialogo") && contexto("Flutuante");
         let no_cupom = contexto(CUPOM);
         let no_campo = contexto("Input");
@@ -510,12 +528,26 @@ impl Caixa {
                 self.fechar_edicao(window, cx);
                 return true;
             }
+            // Esc sem a barra aberta desmarca, e o cursor fica onde está.
+            "escape" if self.marcados_no_cupom() > 0 => {
+                if let Some(p) = self.painel_mut() {
+                    p.selecao.desmarcar();
+                }
+                cx.notify();
+                return true;
+            }
             "up" | "down" => {
-                self.mover(if tecla == "down" { 1 } else { -1 }, window, cx);
+                self.mover(if tecla == "down" { 1 } else { -1 }, shift, window, cx);
                 return true;
             }
             "e" => {
-                if let Some(foco) = self.foco_no_cupom() {
+                let foco = self.foco_no_cupom();
+                let marcado = foco
+                    .as_deref()
+                    .is_some_and(|f| self.painel_ref().is_some_and(|p| p.selecao.tem(f)));
+                if self.lote_do_ajuste().len() >= 2 && !marcado {
+                    self.ajustar_marcados(window, cx);
+                } else if let Some(foco) = foco {
                     self.alternar_edicao(foco, window, cx);
                 }
                 return true;
@@ -556,10 +588,33 @@ impl Caixa {
             .then_some(foco)
     }
 
-    /// Clique num item: a grade vai até a foto, e o teclado fica no cupom.
-    pub(super) fn selecionar_item(
+    /// O clique num item ou na caixinha dele (`na_caixa`), com Ctrl/⌘ e Shift
+    /// — as regras da grade, em [`regras::SelecaoDoCupom`].
+    pub(super) fn clicar_item(
         &mut self,
         foto: &str,
+        na_caixa: bool,
+        modificadores: Modificadores,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let ids = self.editaveis();
+        let Some(p) = self.painel_mut() else {
+            return;
+        };
+        p.selecao.clicar(&ids, foto, na_caixa, modificadores);
+        let manter = p.selecao.tem(foto) && p.selecao.alvos(&ids, Some(foto)).len() >= 2;
+        self.focar_item(foto, manter, window, cx);
+    }
+
+    /// A grade vai até a foto, e o teclado fica no cupom.
+    ///
+    /// `manter_edicao`: a barra aberta acompanha o item — marcando mais um, o
+    /// ajuste continua sendo do lote.
+    fn focar_item(
+        &mut self,
+        foto: &str,
+        manter_edicao: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -567,8 +622,12 @@ impl Caixa {
             return;
         };
         // Trocar de item fecha a barra: ela é do item em que foi aberta.
-        if p.editando.as_ref().is_some_and(|e| e.foto_id != foto) {
-            p.editando = None;
+        if let Some(e) = p.editando.as_mut().filter(|e| e.foto_id != foto) {
+            if manter_edicao {
+                e.foto_id = foto.to_string();
+            } else {
+                p.editando = None;
+            }
         }
         p.em_foco = Some(foto.to_string());
         let (detalhe, foco) = (p.detalhe.clone(), p.foco_do_cupom.clone());
@@ -577,7 +636,7 @@ impl Caixa {
         cx.notify();
     }
 
-    fn mover(&mut self, passo: i32, window: &mut Window, cx: &mut Context<Self>) {
+    fn mover(&mut self, passo: i32, faixa: bool, window: &mut Window, cx: &mut Context<Self>) {
         let itens = self.cupom().itens;
         if itens.is_empty() {
             return;
@@ -591,7 +650,88 @@ impl Caixa {
             Some(i) => (i as i32 + passo).clamp(0, itens.len() as i32 - 1) as usize,
         };
         let id = itens[proximo].foto_id.clone();
-        self.selecionar_item(&id, window, cx);
+        let de = atual.map(|i| itens[i].foto_id.clone());
+        let ids = self.editaveis();
+        let Some(p) = self.painel_mut() else {
+            return;
+        };
+        p.selecao.mover(&ids, de.as_deref(), &id, faixa);
+        let manter = p.selecao.tem(&id) && p.selecao.alvos(&ids, Some(&id)).len() >= 2;
+        self.focar_item(&id, manter, window, cx);
+    }
+
+    /// Quantos itens do cupom de agora estão marcados.
+    pub(super) fn marcados_no_cupom(&self) -> usize {
+        let ids = self.editaveis();
+        self.painel_ref()
+            .map(|p| {
+                p.selecao
+                    .marcados()
+                    .iter()
+                    .filter(|m| ids.contains(m))
+                    .count()
+            })
+            .unwrap_or(0)
+    }
+
+    fn marcar_todos_no_cupom(&mut self, cx: &mut Context<Self>) {
+        let ids = self.editaveis();
+        if let Some(p) = self.painel_mut() {
+            p.selecao.marcar_todos(&ids);
+        }
+        cx.notify();
+    }
+
+    fn alternar_todos_no_cupom(&mut self, cx: &mut Context<Self>) {
+        let ids = self.editaveis();
+        if let Some(p) = self.painel_mut() {
+            p.selecao.alternar_todos(&ids);
+        }
+        cx.notify();
+    }
+
+    /// Em quem o ajuste rápido e o `N` agem sem `Shift`: os marcados (dois ou
+    /// mais), ou o item da barra — o em foco, sem barra aberta.
+    pub(super) fn lote_do_ajuste(&self) -> Vec<ItemDoCupom> {
+        let itens = self.cupom().itens;
+        let Some(p) = self.painel_ref() else {
+            return Vec::new();
+        };
+        let ids: Vec<String> = itens.iter().map(|i| i.foto_id.clone()).collect();
+        let foco = p
+            .editando
+            .as_ref()
+            .map(|e| e.foto_id.clone())
+            .or_else(|| p.em_foco.clone());
+        let alvos = p.selecao.alvos(&ids, foco.as_deref());
+        alvos
+            .iter()
+            .filter_map(|a| itens.iter().find(|i| &i.foto_id == a).cloned())
+            .collect()
+    }
+
+    /// A negociação do lote, quando todos têm a mesma; misturado é `None`.
+    fn tipo_do_lote(&self) -> Option<Option<Tipo>> {
+        let lote = self.lote_do_ajuste();
+        let primeiro = lote.first()?.tipo;
+        lote.iter().all(|i| i.tipo == primeiro).then_some(primeiro)
+    }
+
+    /// O "Ajustar N" do cabeçalho: a barra no item em foco, se marcado, ou no
+    /// primeiro marcado.
+    fn ajustar_marcados(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(p) = self.painel_ref() else {
+            return;
+        };
+        let marcados = p.selecao.marcados();
+        let onde = p
+            .em_foco
+            .clone()
+            .filter(|f| marcados.contains(f))
+            .or_else(|| marcados.first().cloned());
+        if let Some(onde) = onde {
+            self.alternar_edicao(onde, window, cx);
+        }
     }
 
     fn alternar_edicao(&mut self, foto: String, window: &mut Window, cx: &mut Context<Self>) {
@@ -603,7 +743,7 @@ impl Caixa {
             self.fechar_edicao(window, cx);
             return;
         }
-        self.selecionar_item(&foto, window, cx);
+        self.focar_item(&foto, false, window, cx);
         let item = self.cupom().itens.into_iter().find(|i| i.foto_id == foto);
         let valor_inicial = item
             .filter(|i| i.tipo == Some(Tipo::Desconto))
@@ -677,9 +817,11 @@ impl Caixa {
     /// 🔁 Os chips ligam e desligam: clicar no aceso tira a negociação; com um
     /// campo aberto, clicar no chip dele fecha o campo.
     fn escolher_chip(&mut self, chave: Option<Tipo>, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(item) = self.item_editado() else {
+        if self.item_editado().is_none() {
             return;
-        };
+        }
+        let tipo_do_lote = self.tipo_do_lote();
+        let algum_negociado = self.lote_do_ajuste().iter().any(|i| i.tipo.is_some());
         let modo = self
             .painel_ref()
             .and_then(|p| p.editando.as_ref())
@@ -687,7 +829,7 @@ impl Caixa {
         match chave {
             None => {
                 self.abrir_modo_rapido(None, false, window, cx);
-                if item.tipo.is_some() {
+                if algum_negociado {
                     self.negociar_rapido(None, false, cx);
                 }
             }
@@ -700,7 +842,7 @@ impl Caixa {
                 };
                 if modo == Some(m) {
                     self.abrir_modo_rapido(None, false, window, cx);
-                } else if modo.is_none() && item.tipo == Some(t) {
+                } else if modo.is_none() && tipo_do_lote == Some(Some(t)) {
                     self.negociar_rapido(None, false, cx);
                 } else {
                     self.abrir_modo_rapido(Some(m), false, window, cx);
@@ -710,13 +852,13 @@ impl Caixa {
     }
 
     fn alternar_cortesia(&mut self, todos: bool, cx: &mut Context<Self>) {
-        let Some(item) = self.item_editado() else {
+        if self.item_editado().is_none() {
             return;
-        };
+        }
         if let Some(e) = self.painel_mut().and_then(|p| p.editando.as_mut()) {
             e.modo = None;
         }
-        if item.tipo == Some(Tipo::Cortesia) && !todos {
+        if self.tipo_do_lote() == Some(Some(Tipo::Cortesia)) && !todos {
             self.negociar_rapido(None, false, cx);
         } else {
             let cortesia = Negociacao {
@@ -771,11 +913,14 @@ impl Caixa {
             let frase = format!("{} foto(s)", ids.len());
             (ids, frase)
         } else {
-            let ids = self
-                .item_editado()
-                .map(|i| vec![i.foto_id])
-                .unwrap_or_default();
-            (ids, "esta foto".into())
+            // Os marcados (dois ou mais), ou o item da barra.
+            let lote = self.lote_do_ajuste();
+            let frase = if lote.len() >= 2 {
+                format!("{} fotos marcadas", lote.len())
+            } else {
+                "esta foto".into()
+            };
+            (lote.into_iter().map(|i| i.foto_id).collect(), frase)
         }
     }
 
@@ -816,9 +961,9 @@ impl Caixa {
         );
     }
 
-    /// 🤝 O botão de negociação do PDV (`N`): o diálogo completo. Com um item
-    /// em foco, só ele, já preenchido; sem item (ou com `Shift`), todas as
-    /// fotos do cupom.
+    /// 🤝 O botão de negociação do PDV (`N`): o diálogo completo. Com itens
+    /// marcados, eles; com um item em foco, só ele, já preenchido; sem item
+    /// (ou com `Shift`), todas as fotos do cupom.
     pub(super) fn abrir_negociacao(
         &mut self,
         todos: bool,
@@ -826,16 +971,14 @@ impl Caixa {
         cx: &mut Context<Self>,
     ) {
         let itens = self.cupom().itens;
-        let escolhido = if todos {
-            None
+        let lote = if todos {
+            Vec::new()
         } else {
-            self.foco_no_cupom()
-                .and_then(|f| itens.iter().find(|i| i.foto_id == f).cloned())
+            self.lote_do_ajuste()
         };
-        let alvos: Vec<ItemDoCupom> = match &escolhido {
-            Some(i) => vec![i.clone()],
-            None => itens.clone(),
-        };
+        let escolhido = (lote.len() == 1).then(|| lote[0].clone());
+        let marcados = lote.len() >= 2;
+        let alvos: Vec<ItemDoCupom> = if lote.is_empty() { itens.clone() } else { lote };
         if alvos.is_empty() {
             self.avisar(
                 "Nenhuma foto do cupom para negociar.",
@@ -847,6 +990,7 @@ impl Caixa {
         let faixas: HashSet<i64> = alvos.iter().map(|i| i.cheio).collect();
         let titulo = match &escolhido {
             Some(i) => format!("Negociação de {}", i.arquivo),
+            None if marcados => format!("Negociação de {} fotos marcadas", alvos.len()),
             None => format!("Negociação de {} foto(s) do cupom", alvos.len()),
         };
         let inicial = match &escolhido {
@@ -1473,6 +1617,7 @@ impl Caixa {
                     .into_any_element(),
             });
 
+        let cabecalho_da_selecao = (n > 0).then(|| self.cabecalho_da_selecao(&cupom, cx));
         let lista = self.itens_do_cupom(&cupom, em_foco.as_deref(), cx);
 
         let linha = |rotulo: String, valor: String| {
@@ -1692,6 +1837,7 @@ impl Caixa {
             .max_h(px(altura))
             .child(barra)
             .child(visor)
+            .children(cabecalho_da_selecao)
             .child(lista)
             .child(
                 v_flex()
@@ -1727,6 +1873,16 @@ impl Caixa {
             .painel_ref()
             .map(|p| p.rolagem.clone())
             .unwrap_or_default();
+        let (lote, marcados) = self
+            .painel_ref()
+            .map(|p| {
+                let ids: Vec<String> = cupom.itens.iter().map(|i| i.foto_id.clone()).collect();
+                (
+                    p.selecao.alvos(&ids, em_foco).len() >= 2,
+                    p.selecao.marcados(),
+                )
+            })
+            .unwrap_or_default();
 
         let vazio = cupom.itens.is_empty().then(|| {
             h_flex()
@@ -1751,6 +1907,7 @@ impl Caixa {
             .children(vazio)
             .children(cupom.itens.iter().enumerate().map(|(indice, i)| {
                 let e_o_foco = em_foco == Some(i.foto_id.as_str());
+                let marcado = marcados.contains(&i.foto_id);
                 let aberto = editando.as_deref() == Some(i.foto_id.as_str());
                 let (fundo_ambar, _, texto_ambar) = cores::selo_ambar();
                 let mut conta: Vec<AnyElement> = vec![
@@ -1793,21 +1950,52 @@ impl Caixa {
                 }
                 let grupo = SharedString::from(format!("caixa-item-{}", i.foto_id));
                 let id = i.foto_id.clone();
+                let id_da_caixinha = i.foto_id.clone();
                 let id_do_ajuste = i.foto_id.clone();
+                // Os modificadores vêm do `ClickEvent`: `Cmd`/`Ctrl` alterna,
+                // `Shift` estende da âncora — como na grade.
+                let gesto = |evento: &ClickEvent| {
+                    let m = evento.modifiers();
+                    Modificadores {
+                        aditivo: m.secondary(),
+                        faixa: m.shift,
+                    }
+                };
                 let linha = v_flex()
                     .id(SharedString::from(format!("caixa-linha-{}", i.foto_id)))
                     .group(grupo.clone())
                     .relative()
-                    .px(px(12.))
+                    .pl(px(36.))
+                    .pr(px(12.))
                     .py(px(6.))
                     .border_b_1()
                     .border_color(borda)
                     .font_family(mono.clone())
                     .cursor_pointer()
                     .hover(move |s| s.bg(realce.opacity(0.6)))
+                    .when(marcado, |d| d.bg(cores::quente().opacity(0.10)))
                     .when(e_o_foco, |d| d.bg(cores::quente().opacity(0.15)))
-                    .on_click(
-                        cx.listener(move |t, _: &ClickEvent, w, cx| t.selecionar_item(&id, w, cx)),
+                    .on_click(cx.listener(move |t, evento: &ClickEvent, w, cx| {
+                        t.clicar_item(&id, false, gesto(evento), w, cx)
+                    }))
+                    // ☑️ A caixinha de marcar: alterna sem desfazer o resto.
+                    .child(
+                        caixinha(
+                            SharedString::from(format!("caixa-marcar-{}", i.foto_id)),
+                            marcado,
+                            false,
+                            cartao,
+                            frente,
+                        )
+                        .absolute()
+                        .left(px(12.))
+                        .top(px(7.))
+                        .on_click(cx.listener(
+                            move |t, evento: &ClickEvent, w, cx| {
+                                cx.stop_propagation();
+                                t.clicar_item(&id_da_caixinha, true, gesto(evento), w, cx)
+                            },
+                        )),
                     )
                     .child(
                         h_flex()
@@ -1880,7 +2068,13 @@ impl Caixa {
                                 d.opacity(0.).group_hover(grupo.clone(), |s| s.opacity(1.))
                             })
                             .child(Icon::new(Icone::SlidersHorizontal).size(px(12.)))
-                            .child(if aberto { "Fechar" } else { "Ajustar" })
+                            .child(if aberto {
+                                "Fechar"
+                            } else if lote && marcado {
+                                "Ajustar marcados"
+                            } else {
+                                "Ajustar"
+                            })
                             .child(
                                 div()
                                     .font_family(mono.clone())
@@ -1916,6 +2110,9 @@ impl Caixa {
         };
         let pendente = self.lote_no_ar();
         let n_editaveis = self.editaveis().len();
+        let do_lote = self.lote_do_ajuste();
+        let lote = do_lote.len() >= 2;
+        let tipo_do_lote = self.tipo_do_lote();
         let (modo, em_todos) = (e.modo, e.em_todos);
         let vista = self.vista.as_ref();
         let padrao = vista.map(|v| v.padrao.clone());
@@ -2045,7 +2242,7 @@ impl Caixa {
         let aceso = |t: Option<Tipo>| match modo {
             Some(ModoRapido::Desconto) => t == Some(Tipo::Desconto),
             Some(ModoRapido::Parceiro) => t == Some(Tipo::Parceiro),
-            None => item.tipo == t,
+            None => tipo_do_lote == Some(t),
         };
         let chips: [(Option<Tipo>, &str, &str); 4] = [
             (None, "Sem", "⌫"),
@@ -2163,6 +2360,11 @@ impl Caixa {
                             .child(campo_de(
                                 &if em_todos {
                                     format!("Valor cobrado · em todos os {n_editaveis} itens")
+                                } else if lote {
+                                    format!(
+                                        "Valor cobrado · em cada um dos {} marcados",
+                                        do_lote.len()
+                                    )
                                 } else {
                                     "Valor cobrado".into()
                                 },
@@ -2197,6 +2399,8 @@ impl Caixa {
                                     .child(div().text_size(px(11.)).text_color(apagado).child(
                                         if em_todos {
                                             format!("Site · em todos os {n_editaveis} itens")
+                                        } else if lote {
+                                            format!("Site · nos {} marcados", do_lote.len())
                                         } else {
                                             "Site".into()
                                         },
@@ -2236,7 +2440,20 @@ impl Caixa {
             None => None,
         };
 
-        let arquivo = item.arquivo.clone();
+        let arquivo = if lote {
+            do_lote
+                .iter()
+                .map(|i| i.arquivo.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        } else {
+            item.arquivo.clone()
+        };
+        let titulo = if lote {
+            format!("Ajustar {} itens marcados", do_lote.len())
+        } else {
+            "Ajustar item".into()
+        };
         v_flex()
             .mx(px(8.))
             .my(px(8.))
@@ -2264,7 +2481,7 @@ impl Caixa {
                         div()
                             .text_xs()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child("Ajustar item"),
+                            .child(titulo),
                     )
                     .child(
                         div()
@@ -2310,7 +2527,7 @@ impl Caixa {
                                     .child(
                                         link(
                                             "caixa-rapido-mais",
-                                            if item.tipo == Some(Tipo::Outro) {
+                                            if !lote && item.tipo == Some(Tipo::Outro) {
                                                 "Editar acerto · N".into()
                                             } else {
                                                 "Mais opções · N".into()
@@ -2330,11 +2547,14 @@ impl Caixa {
                                     ),
                             )
                             .child(negociacao_chips)
-                            .when(item.tipo == Some(Tipo::Outro) && modo.is_none(), |d| {
-                                d.child(div().text_size(px(11.)).text_color(apagado).child(
+                            .when(
+                                !lote && item.tipo == Some(Tipo::Outro) && modo.is_none(),
+                                |d| {
+                                    d.child(div().text_size(px(11.)).text_color(apagado).child(
                                     "Esta foto tem um acerto em texto livre — use “Editar acerto”.",
                                 ))
-                            }),
+                                },
+                            ),
                     )
                     .children(quadro),
             )
@@ -2348,12 +2568,166 @@ impl Caixa {
                     .border_color(borda)
                     .text_size(px(10.))
                     .text_color(apagado)
+                    .when(lote, |d| d.child("C, D, S e ⌫ valem para os marcados ·"))
                     .child(crate::estilo::tecla("Shift"))
                     .child("+ tecla aplica a todos os itens ·")
                     .child(crate::estilo::tecla("Esc"))
                     .child("fecha"),
             )
     }
+}
+
+impl Caixa {
+    /// A linha de cima do cupom: marcar todos, quantos estão marcados e quanto
+    /// eles somam, e — com dois ou mais — o ajuste do lote e o "desmarcar".
+    fn cabecalho_da_selecao(&self, cupom: &regras::Cupom, cx: &mut Context<Self>) -> Div {
+        let tema = cx.theme();
+        let (borda, apagado, realce, cartao, frente) = (
+            tema.border,
+            tema.muted_foreground,
+            tema.muted,
+            tema.popover,
+            tema.foreground,
+        );
+        let marcados = self
+            .painel_ref()
+            .map(|p| p.selecao.marcados())
+            .unwrap_or_default();
+        let dentro: Vec<&ItemDoCupom> = cupom
+            .itens
+            .iter()
+            .filter(|i| marcados.contains(&i.foto_id))
+            .collect();
+        let (n, total) = (dentro.len(), cupom.itens.len());
+        let valor: i64 = dentro.iter().map(|i| i.cobrado).sum();
+        let todos = n == total;
+        let editando_lote = n >= 2 && self.painel_ref().is_some_and(|p| p.editando.is_some());
+        let texto = if n == 0 {
+            div()
+                .child("Marque itens para ajustar juntos · Ctrl/⇧ + clique")
+                .into_any_element()
+        } else {
+            h_flex()
+                .gap(px(4.))
+                .child(
+                    div()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(frente)
+                        .child(if n == 1 {
+                            "1 marcado".to_string()
+                        } else {
+                            format!("{n} marcados")
+                        }),
+                )
+                .child("·")
+                .child(dinheiro::formatar(valor))
+                .into_any_element()
+        };
+        h_flex()
+            .flex_none()
+            .gap(px(8.))
+            .min_h(px(32.))
+            .px(px(12.))
+            .py(px(4.))
+            .border_b_1()
+            .border_color(borda)
+            .text_size(px(11.))
+            .text_color(apagado)
+            .child(
+                caixinha(
+                    "caixa-marcar-todos".into(),
+                    todos,
+                    n > 0 && !todos,
+                    cartao,
+                    frente,
+                )
+                .on_click(cx.listener(|t, _: &ClickEvent, _, cx| t.alternar_todos_no_cupom(cx))),
+            )
+            .child(div().flex_1().min_w(px(0.)).truncate().child(texto))
+            .when(n >= 2, |d| {
+                d.child(
+                    h_flex()
+                        .id("caixa-ajustar-marcados")
+                        .gap(px(4.))
+                        .px(px(6.))
+                        .py(px(2.))
+                        .rounded(px(6.))
+                        .border_1()
+                        .cursor_pointer()
+                        .map(|d| {
+                            if editando_lote {
+                                d.border_color(cores::quente())
+                                    .bg(cores::quente())
+                                    .text_color(cores::sobre_quente())
+                            } else {
+                                d.border_color(borda)
+                                    .bg(cartao)
+                                    .text_color(frente)
+                                    .hover(move |s| s.bg(realce))
+                            }
+                        })
+                        .child(Icon::new(Icone::SlidersHorizontal).size(px(12.)))
+                        .child(format!("Ajustar {n}"))
+                        .child(div().text_size(px(10.)).opacity(0.7).child("E"))
+                        .on_click(
+                            cx.listener(|t, _: &ClickEvent, w, cx| t.ajustar_marcados(w, cx)),
+                        ),
+                )
+                .child(
+                    div()
+                        .id("caixa-desmarcar")
+                        .px(px(6.))
+                        .py(px(2.))
+                        .rounded(px(6.))
+                        .cursor_pointer()
+                        .hover(move |s| s.bg(realce).text_color(frente))
+                        .child("Desmarcar")
+                        .on_click(cx.listener(|t, _: &ClickEvent, _, cx| {
+                            if let Some(p) = t.painel_mut() {
+                                p.selecao.desmarcar();
+                            }
+                            cx.notify();
+                        })),
+                )
+            })
+    }
+}
+
+/// ☑️ A caixinha de marcar (o "flag" de seleção que o dono pediu em
+/// 2026-09-26) — a mesma do site. `mista` é o cabeçalho com parte marcada.
+fn caixinha(
+    id: SharedString,
+    marcada: bool,
+    mista: bool,
+    cartao: Hsla,
+    frente: Hsla,
+) -> Stateful<Div> {
+    let acesa = marcada || mista;
+    div()
+        .id(id)
+        .flex_none()
+        .size(px(16.))
+        .rounded(px(4.))
+        .border_1()
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .map(|d| {
+            if acesa {
+                d.border_color(cores::quente())
+                    .bg(cores::quente())
+                    .text_color(cores::sobre_quente())
+            } else {
+                d.border_color(frente.opacity(0.4))
+                    .bg(cartao)
+                    .hover(move |s| s.border_color(frente))
+            }
+        })
+        .when(mista, |d| d.child(Icon::new(Icone::Minus).size(px(12.))))
+        .when(marcada && !mista, |d| {
+            d.child(Icon::new(Icone::Check).size(px(12.)))
+        })
 }
 
 fn corpo_da_negociacao(preco: Option<i64>, observacao: Option<String>) -> Value {

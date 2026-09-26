@@ -48,6 +48,7 @@ fn galeria_json() -> Value {
             foto_json("a", 0, "levada_no_balcao"),
             foto_json("b", 1, "levada_no_balcao"),
             foto_json("d", 2, "disponivel"),
+            foto_json("c", 3, "levada_no_balcao"),
         ],
         "produto": { "id": "p1", "nome": "Digital", "preco": "30.00", "preco_cheio": "40.00" },
         "produtos": [{ "id": "p1", "nome": "Digital", "preco": "30.00", "preco_cheio": "40.00" }],
@@ -74,6 +75,7 @@ fn publicador() -> Arc<PublicadorDeMentira> {
             foto_do_site("a", 0, EstadoDaFotoNoSite::LevadaNoBalcao),
             foto_do_site("b", 1, EstadoDaFotoNoSite::LevadaNoBalcao),
             foto_do_site("d", 2, EstadoDaFotoNoSite::Disponivel),
+            foto_do_site("c", 3, EstadoDaFotoNoSite::LevadaNoBalcao),
         ]),
         ..Default::default()
     });
@@ -220,8 +222,8 @@ fn o_painel_segue_a_galeria_aberta_e_monta_o_cupom(cx: &mut TestAppContext) {
         assert_eq!(v.estudio_id.as_deref(), Some("e1"));
         assert!(v.caixa.is_some());
         let ids: Vec<&str> = v.cupom.itens.iter().map(|i| i.foto_id.as_str()).collect();
-        assert_eq!(ids, vec!["a", "b"]);
-        assert_eq!(v.cupom.total, 8000);
+        assert_eq!(ids, vec!["a", "b", "c"]);
+        assert_eq!(v.cupom.total, 12000);
     });
     // O painel não pediu lista de sessões nem estúdios: não são dele.
     let rotulos: Vec<&str> = m
@@ -274,7 +276,7 @@ fn no_pagamento_os_numeros_escolhem_a_forma_e_nao_dao_nota(cx: &mut TestAppConte
         assert!(t.teclar_no_painel("2", false, true, Some("Pagamento"), false, false, w, cx));
         t.lancar(w, cx);
         assert_eq!(t.lancados()[0].forma, regras::FormaDePagamento::Pix);
-        assert_eq!(t.lancados()[0].valor, 8000);
+        assert_eq!(t.lancados()[0].valor, 12000);
         assert!(t.teclar_no_painel(
             "backspace",
             false,
@@ -336,11 +338,18 @@ fn shift_apaga_a_negociacao_de_todos_os_itens(cx: &mut TestAppContext) {
     });
     colher(cx, &m);
     let caminhos: Vec<String> = gravacoes(&m).into_iter().map(|p| p.caminho).collect();
-    assert_eq!(caminhos, vec!["/pos-venda/fotos/a", "/pos-venda/fotos/b"]);
+    assert_eq!(
+        caminhos,
+        vec![
+            "/pos-venda/fotos/a",
+            "/pos-venda/fotos/b",
+            "/pos-venda/fotos/c"
+        ]
+    );
     na_janela(cx, &m, |t, _, _| {
         assert_eq!(
             t.avisos_passageiros(),
-            vec!["Negociação removida de 2 foto(s)."]
+            vec!["Negociação removida de 3 foto(s)."]
         );
     });
 }
@@ -374,13 +383,76 @@ fn n_sem_item_negocia_o_cupom_inteiro_pelo_dialogo(cx: &mut TestAppContext) {
         t.confirmar(w, cx);
     });
     colher(cx, &m);
-    assert_eq!(gravacoes(&m).len(), 2);
+    assert_eq!(gravacoes(&m).len(), 3);
     na_janela(cx, &m, |t, _, _| {
         assert_eq!(t.dialogo_aberto(), None);
         assert_eq!(
             t.avisos_passageiros(),
-            vec!["2 foto(s) com a negociação registrada."]
+            vec!["3 foto(s) com a negociação registrada."]
         );
+    });
+}
+
+const CTRL: Modificadores = Modificadores {
+    aditivo: true,
+    faixa: false,
+};
+
+/// ☑️ Dono, 2026-09-26: marcar vários itens com Ctrl/Shift ou a caixinha, e o
+/// ajuste rápido age só neles — nem no item sozinho, nem no cupom inteiro.
+#[gpui_kit::test]
+fn ctrl_marca_dois_itens_e_a_cortesia_vai_so_para_eles(cx: &mut TestAppContext) {
+    let m = aberto(cx);
+    na_janela(cx, &m, |t, w, cx| {
+        t.clicar_item("a", false, Modificadores::default(), w, cx);
+        t.clicar_item("c", false, CTRL, w, cx);
+        assert_eq!(t.marcados_no_cupom(), 2);
+        assert!(no_cupom(t, "e", false, w, cx));
+        assert!(no_cupom(t, "c", false, w, cx));
+    });
+    colher(cx, &m);
+    let caminhos: Vec<String> = gravacoes(&m).into_iter().map(|p| p.caminho).collect();
+    assert_eq!(caminhos, vec!["/pos-venda/fotos/a", "/pos-venda/fotos/c"]);
+    na_janela(cx, &m, |t, _, _| {
+        assert_eq!(
+            t.avisos_passageiros(),
+            vec!["Negociação registrada em 2 fotos marcadas."]
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn a_caixinha_alterna_sem_desfazer_o_resto_e_n_negocia_os_marcados(cx: &mut TestAppContext) {
+    let m = aberto(cx);
+    na_janela(cx, &m, |t, w, cx| {
+        t.clicar_item("b", true, Modificadores::default(), w, cx);
+        t.clicar_item("c", true, Modificadores::default(), w, cx);
+        t.clicar_item("a", true, Modificadores::default(), w, cx);
+        t.clicar_item("a", true, Modificadores::default(), w, cx);
+        assert_eq!(t.marcados_no_cupom(), 2);
+        assert!(no_cupom(t, "n", false, w, cx));
+        assert_eq!(t.dialogo_aberto(), Some("Negociacao"));
+        t.confirmar(w, cx);
+    });
+    colher(cx, &m);
+    let caminhos: Vec<String> = gravacoes(&m).into_iter().map(|p| p.caminho).collect();
+    assert_eq!(caminhos, vec!["/pos-venda/fotos/b", "/pos-venda/fotos/c"]);
+}
+
+#[gpui_kit::test]
+fn shift_seta_estende_e_esc_desmarca(cx: &mut TestAppContext) {
+    let m = aberto(cx);
+    na_janela(cx, &m, |t, w, cx| {
+        no_cupom(t, "down", false, w, cx);
+        assert_eq!(t.marcados_no_cupom(), 1);
+        no_cupom(t, "down", true, w, cx);
+        no_cupom(t, "down", true, w, cx);
+        assert_eq!(t.marcados_no_cupom(), 3);
+        assert_eq!(t.lote_do_ajuste().len(), 3);
+        assert!(no_cupom(t, "escape", false, w, cx));
+        assert_eq!(t.marcados_no_cupom(), 0);
+        // Sem marcados, o ajuste volta a ser do item em foco.
+        assert_eq!(t.lote_do_ajuste().len(), 1);
     });
 }
 

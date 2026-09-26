@@ -1891,3 +1891,260 @@ mod testes {
         assert_eq!(itens(0), "0 itens");
     }
 }
+
+// ── Os itens marcados no cupom ──────────────────────────────────────────────
+
+/// Os itens marcados no cupom — Ctrl/⌘, Shift e a caixinha de cada linha
+/// (`selecao-do-cupom.ts` do site).
+///
+/// Pedido do dono em 2026-09-26: *"selecionar vários itens com control/shift e
+/// um componente flag de seleção clicável, para possibilitar os ajustes de
+/// negociações"*. Antes o ajuste rápido e o `N` agiam num item só, ou — com
+/// `Shift` — no cupom inteiro.
+///
+/// 🔑 **As regras são as da grade**: por baixo está a mesma
+/// [`crate::Selecao`]. O que este tipo acrescenta é a tradução para **ids** —
+/// o cupom se refaz a cada venda e a cada foto sinalizada, e a posição
+/// passaria a apontar para outro item. [`SelecaoDoCupom::alinhar`] refaz as
+/// posições pelo cupom de agora, e o que saiu dele (vendido) sai da seleção.
+#[derive(Debug, Default, Clone)]
+pub struct SelecaoDoCupom {
+    selecao: crate::Selecao,
+    ids: Vec<String>,
+}
+
+impl SelecaoDoCupom {
+    /// Refaz as posições pelo cupom em vigor. Chamar antes de cada gesto.
+    pub fn alinhar(&mut self, ids: &[String]) {
+        if self.ids == ids {
+            return;
+        }
+        let marcados = self.marcados();
+        let mut nova = crate::Selecao::nova();
+        for id in &marcados {
+            if let Some(i) = ids.iter().position(|x| x == id) {
+                nova.marcar(i);
+            }
+        }
+        self.selecao = nova;
+        self.ids = ids.to_vec();
+    }
+
+    /// Os marcados, na ordem em que foram marcados.
+    pub fn marcados(&self) -> Vec<String> {
+        self.selecao
+            .marcadas()
+            .filter_map(|i| self.ids.get(i).cloned())
+            .collect()
+    }
+
+    pub fn quantos(&self) -> usize {
+        self.selecao.quantas()
+    }
+
+    pub fn tem(&self, id: &str) -> bool {
+        self.ids
+            .iter()
+            .position(|x| x == id)
+            .is_some_and(|i| self.selecao.tem(i))
+    }
+
+    /// O clique no item (`na_caixa` = na caixinha de marcar).
+    pub fn clicar(
+        &mut self,
+        ids: &[String],
+        id: &str,
+        na_caixa: bool,
+        modificadores: crate::Modificadores,
+    ) {
+        self.alinhar(ids);
+        if let Some(i) = ids.iter().position(|x| x == id) {
+            self.selecao.clicar(i, na_caixa, modificadores);
+        }
+    }
+
+    /// As setas do cupom: sozinhas marcam só o destino; com Shift estendem da
+    /// âncora — que, sem nenhuma, passa a ser o item de onde se saiu.
+    pub fn mover(&mut self, ids: &[String], de: Option<&str>, destino: &str, faixa: bool) {
+        self.alinhar(ids);
+        if faixa {
+            // `focar` só põe a âncora quando não há nenhuma.
+            let de = de.and_then(|d| ids.iter().position(|x| x == d));
+            if de.is_some() {
+                self.selecao.focar(de);
+            }
+        }
+        if let Some(i) = ids.iter().position(|x| x == destino) {
+            self.selecao.clicar(
+                i,
+                false,
+                crate::Modificadores {
+                    aditivo: false,
+                    faixa,
+                },
+            );
+        }
+    }
+
+    /// A caixinha do cabeçalho: marca todos, ou desmarca quando todos já estão.
+    pub fn alternar_todos(&mut self, ids: &[String]) {
+        self.alinhar(ids);
+        self.selecao.alternar_todas(ids.len());
+    }
+
+    /// Ctrl/⌘+A no cupom.
+    pub fn marcar_todos(&mut self, ids: &[String]) {
+        self.alinhar(ids);
+        self.selecao.marcar_todas(ids.len());
+    }
+
+    /// Esc: desmarca, e o cursor fica onde está.
+    pub fn desmarcar(&mut self) {
+        self.selecao.desmarcar();
+    }
+
+    /// Em quem o ajuste rápido e o `N` agem.
+    ///
+    /// Com dois ou mais marcados, neles — é para isso que se marca. Com um ou
+    /// nenhum, no item em foco: a grade move o foco por fora do cupom, e um
+    /// item marcado lá atrás não pode receber a cortesia que o operador deu à
+    /// foto que está olhando.
+    ///
+    /// `ids` é o cupom de agora: o que foi vendido depois do último gesto não
+    /// é alvo.
+    pub fn alvos(&self, ids: &[String], foco: Option<&str>) -> Vec<String> {
+        let marcados: Vec<String> = self
+            .marcados()
+            .into_iter()
+            .filter(|m| ids.contains(m))
+            .collect();
+        if marcados.len() >= 2 {
+            return marcados;
+        }
+        match foco.filter(|f| ids.iter().any(|x| x == f)) {
+            Some(f) => vec![f.to_string()],
+            None => marcados,
+        }
+    }
+}
+
+/// Os mesmos casos do `selecao-do-cupom.test.ts`.
+#[cfg(test)]
+mod testes_da_selecao_do_cupom {
+    use super::*;
+    use crate::Modificadores;
+
+    fn ids() -> Vec<String> {
+        ["a", "b", "c", "d", "e"].map(String::from).to_vec()
+    }
+    const SIMPLES: Modificadores = Modificadores {
+        aditivo: false,
+        faixa: false,
+    };
+    const CTRL: Modificadores = Modificadores {
+        aditivo: true,
+        faixa: false,
+    };
+    const SHIFT: Modificadores = Modificadores {
+        aditivo: false,
+        faixa: true,
+    };
+
+    #[test]
+    fn o_clique_simples_troca_a_selecao_pelo_item() {
+        let mut s = SelecaoDoCupom::default();
+        s.clicar(&ids(), "b", false, SIMPLES);
+        s.clicar(&ids(), "d", false, SIMPLES);
+        assert_eq!(s.marcados(), ["d"]);
+    }
+
+    #[test]
+    fn ctrl_e_a_caixinha_alternam_sem_desfazer_o_resto() {
+        let mut s = SelecaoDoCupom::default();
+        s.clicar(&ids(), "a", false, SIMPLES);
+        s.clicar(&ids(), "c", false, CTRL);
+        s.clicar(&ids(), "e", true, SIMPLES);
+        assert_eq!(s.marcados(), ["a", "c", "e"]);
+        s.clicar(&ids(), "c", true, SIMPLES);
+        assert_eq!(s.marcados(), ["a", "e"]);
+        assert!(s.tem("e") && !s.tem("c"));
+    }
+
+    #[test]
+    fn shift_estende_da_ancora_para_qualquer_lado() {
+        let mut s = SelecaoDoCupom::default();
+        s.clicar(&ids(), "b", false, SIMPLES);
+        s.clicar(&ids(), "d", false, SHIFT);
+        assert_eq!(s.marcados(), ["b", "c", "d"]);
+        s.clicar(&ids(), "a", false, SHIFT);
+        assert_eq!(s.marcados(), ["b", "a"]);
+    }
+
+    #[test]
+    fn shift_sem_ancora_e_um_clique_simples() {
+        let mut s = SelecaoDoCupom::default();
+        s.clicar(&ids(), "c", false, SHIFT);
+        assert_eq!(s.marcados(), ["c"]);
+    }
+
+    #[test]
+    fn a_seta_sozinha_marca_o_destino_e_com_shift_estende() {
+        let mut s = SelecaoDoCupom::default();
+        s.mover(&ids(), Some("b"), "c", false);
+        assert_eq!(s.marcados(), ["c"]);
+        s.mover(&ids(), Some("c"), "d", true);
+        s.mover(&ids(), Some("d"), "e", true);
+        assert_eq!(s.marcados(), ["c", "d", "e"]);
+    }
+
+    #[test]
+    fn sem_ancora_o_shift_comeca_no_item_em_foco() {
+        let mut s = SelecaoDoCupom::default();
+        s.mover(&ids(), Some("b"), "c", true);
+        assert_eq!(s.marcados(), ["b", "c"]);
+    }
+
+    #[test]
+    fn a_caixinha_do_cabecalho_marca_todos_e_desmarca_quando_todos_estao() {
+        let mut s = SelecaoDoCupom::default();
+        s.clicar(&ids(), "c", false, SIMPLES);
+        s.alternar_todos(&ids());
+        assert_eq!(s.marcados(), ["c", "a", "b", "d", "e"]);
+        s.alternar_todos(&ids());
+        assert_eq!(s.quantos(), 0);
+    }
+
+    #[test]
+    fn com_dois_ou_mais_marcados_o_ajuste_age_neles() {
+        let mut s = SelecaoDoCupom::default();
+        s.clicar(&ids(), "a", true, SIMPLES);
+        s.clicar(&ids(), "c", true, SIMPLES);
+        assert_eq!(s.alvos(&ids(), Some("e")), ["a", "c"]);
+    }
+
+    #[test]
+    fn com_um_marcado_o_ajuste_age_no_item_em_foco() {
+        let mut s = SelecaoDoCupom::default();
+        s.clicar(&ids(), "a", false, SIMPLES);
+        assert_eq!(s.alvos(&ids(), Some("d")), ["d"]);
+        assert_eq!(s.alvos(&ids(), None), ["a"]);
+    }
+
+    #[test]
+    fn o_que_saiu_do_cupom_sai_da_selecao() {
+        let mut s = SelecaoDoCupom::default();
+        s.clicar(&ids(), "a", true, SIMPLES);
+        s.clicar(&ids(), "c", true, SIMPLES);
+        s.clicar(&ids(), "d", true, SIMPLES);
+        // `c` foi vendida: o cupom se refez sem ela.
+        s.alinhar(&["a", "b", "d", "e"].map(String::from));
+        assert_eq!(s.marcados(), ["a", "d"]);
+        assert!(!s.tem("c"));
+        // Sem alinhar, o alvo também não inclui a vendida.
+        let mut t = SelecaoDoCupom::default();
+        t.clicar(&ids(), "a", true, SIMPLES);
+        t.clicar(&ids(), "c", true, SIMPLES);
+        let sem_c = ["a", "b", "d", "e"].map(String::from);
+        assert_eq!(t.alvos(&sem_c, Some("b")), ["b"]);
+    }
+}
