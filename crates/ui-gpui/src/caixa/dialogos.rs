@@ -1,11 +1,12 @@
 //! Os diálogos do PDV — um por operação do caixa, cada um inteiro no teclado.
 //! É o `pdv-dialogos.tsx` do site, e as gravações do `usar-pdv.tsx`.
 //!
-//! 🪟 **Uma camada absoluta sobre a tela, e não um `deferred`.** O GPUI recusa
-//! `deferred` dentro de `deferred` (entra em pânico), e o campo de texto do
-//! `gpui-component` abre o menu do botão direito com um. Um diálogo adiado com
-//! campo dentro derrubaria o app no primeiro clique direito — então ele é
-//! desenhado por último dentro da própria tela, como os modais da raiz.
+//! 🪟 **O `Dialog` do gpui-kit** (`crate::dialogo`), desde 2026-09-26: véu,
+//! caixa e canto são dele; o miolo, o X e as teclas do PDV são daqui. Até o
+//! gpui 0.2.2 o diálogo era uma camada absoluta própria, porque `deferred`
+//! dentro de `deferred` entrava em pânico (e o campo de texto abre o menu do
+//! botão direito com um); o GPUI do gpui-kit 0.6 desenha `deferred` aninhado
+//! em rodadas, e o pânico virou teste de regressão dele.
 //!
 //! Quem grava é a tela (`gravar`); o diálogo só lê o teclado, confere o formato
 //! com as regras do core e fecha quando a resposta diz que foi.
@@ -23,8 +24,8 @@ use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon, Sizable};
 use gpui_kit::{
-    div, prelude::*, px, relative, AnyElement, ClickEvent, Context, Div, Entity, FocusHandle,
-    Focusable, FontWeight, KeyContext, MouseButton, SharedString, Subscription, Window,
+    div, prelude::*, px, AnyElement, ClickEvent, Context, Div, Entity, FocusHandle, Focusable,
+    FontWeight, KeyContext, SharedString, Subscription, Window,
 };
 use serde_json::json;
 
@@ -1738,7 +1739,36 @@ impl Caixa {
                     )
                 }
             };
-        Some(self.casca(contexto, titulo, descricao, largura, corpo, cx))
+        let miolo = self.casca(contexto, titulo, descricao, corpo, cx);
+        let perguntando = matches!(
+            self.dialogo.as_ref(),
+            Some(Dialogo::Negociacao(form)) if form.confirmando
+        );
+        let principal = crate::dialogo::desenhar_conteudo(
+            Some(miolo),
+            None,
+            // O X é o do cabeçalho daqui (`caixa-dialogo-fechar`); com a
+            // pergunta à vista, o clique fora não fecha o de baixo.
+            crate::dialogo::Jeito {
+                largura,
+                esc: true,
+                veu: !perguntando,
+                x: false,
+            },
+            |tela, window, cx| tela.fechar_dialogo(window, cx),
+            window,
+            cx,
+        )?;
+        let (pergunta, rodape) = self.pergunta_de_remover_negociacao(cx).unzip();
+        let pergunta = crate::dialogo::desenhar_conteudo(
+            pergunta,
+            rodape,
+            crate::dialogo::Jeito::alerta(448.),
+            |tela, window, cx| tela.fechar_dialogo(window, cx),
+            window,
+            cx,
+        );
+        Some(div().child(principal).children(pergunta).into_any_element())
     }
 
     fn casca(
@@ -1746,127 +1776,88 @@ impl Caixa {
         contexto: &str,
         titulo: String,
         descricao: Option<AnyElement>,
-        largura: f32,
         corpo: AnyElement,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let tema = cx.theme();
-        let (fundo, frente, apagado, acento) = (
-            tema.popover,
-            tema.foreground,
-            tema.muted_foreground,
-            tema.accent,
-        );
-        let pergunta = self.pergunta_de_remover_negociacao(cx);
+        let (apagado, acento) = (tema.muted_foreground, tema.accent);
         // O painel da galeria marca os dele: o interceptador de teclas dele só
         // cuida do que é seu.
         let flutuante = if self.flutuante() { " Flutuante" } else { "" };
         let chave =
             KeyContext::parse(&format!("{DIALOGO} {contexto}{flutuante}")).unwrap_or_default();
 
-        div()
-            .id("caixa-veu")
-            .absolute()
-            .inset_0()
-            .occlude()
-            .bg(cores::veu())
-            .flex()
-            .items_center()
-            .justify_center()
-            .p(px(16.))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|t, _, w, cx| t.fechar_dialogo(w, cx)),
+        // 🪟 O miolo: véu, caixa e canto são do `Dialog` do gpui-kit
+        // (`crate::dialogo`, em `render_dialogo`). O cabeçalho do site — título
+        // `text-base font-medium` — e o X são daqui.
+        v_flex()
+            .id("caixa-dialogo")
+            .key_context(chave)
+            .track_focus(&self.foco_do_dialogo)
+            .on_action(cx.listener(|t, _: &FecharDialogo, w, cx| t.fechar_dialogo(w, cx)))
+            .on_action(cx.listener(|t, _: &ConfirmarDialogo, w, cx| t.confirmar(w, cx)))
+            .on_action(cx.listener(|t, _: &ConcluirVenda, w, cx| {
+                if matches!(t.dialogo, Some(Dialogo::Pagamento(_))) {
+                    t.concluir_venda(w, cx)
+                } else {
+                    t.confirmar(w, cx)
+                }
+            }))
+            .on_action(cx.listener(|t, _: &Forma1, w, cx| t.escolher_forma(1, w, cx)))
+            .on_action(cx.listener(|t, _: &Forma2, w, cx| t.escolher_forma(2, w, cx)))
+            .on_action(cx.listener(|t, _: &Forma3, w, cx| t.escolher_forma(3, w, cx)))
+            .on_action(cx.listener(|t, _: &Forma4, w, cx| t.escolher_forma(4, w, cx)))
+            .on_action(cx.listener(|t, _: &Forma5, w, cx| t.escolher_forma(5, w, cx)))
+            .on_action(cx.listener(|t, _: &Forma6, w, cx| t.escolher_forma(6, w, cx)))
+            .on_action(cx.listener(|t, _: &Forma7, w, cx| t.escolher_forma(7, w, cx)))
+            .on_action(cx.listener(|t, _: &Forma8, w, cx| t.escolher_forma(8, w, cx)))
+            .on_action(cx.listener(|t, _: &TirarUltimo, _, cx| t.tirar_ultimo(cx)))
+            .on_action(cx.listener(|t, _: &EmReais, _, cx| t.mudar_modo(ModoDoDesconto::Valor, cx)))
+            .on_action(cx.listener(|t, _: &EmPercentual, _, cx| {
+                t.mudar_modo(ModoDoDesconto::Percentual, cx)
+            }))
+            .on_action(
+                cx.listener(|t, _: &Sangria, _, cx| t.mudar_tipo(TipoDeMovimento::Sangria, cx)),
             )
+            .on_action(
+                cx.listener(|t, _: &Suprimento, _, cx| {
+                    t.mudar_tipo(TipoDeMovimento::Suprimento, cx)
+                }),
+            )
+            .relative()
+            .gap(px(16.))
             .child(
                 v_flex()
-                    .id("caixa-dialogo")
-                    .key_context(chave)
-                    .track_focus(&self.foco_do_dialogo)
-                    .on_action(cx.listener(|t, _: &FecharDialogo, w, cx| t.fechar_dialogo(w, cx)))
-                    .on_action(cx.listener(|t, _: &ConfirmarDialogo, w, cx| t.confirmar(w, cx)))
-                    .on_action(cx.listener(|t, _: &ConcluirVenda, w, cx| {
-                        if matches!(t.dialogo, Some(Dialogo::Pagamento(_))) {
-                            t.concluir_venda(w, cx)
-                        } else {
-                            t.confirmar(w, cx)
-                        }
-                    }))
-                    .on_action(cx.listener(|t, _: &Forma1, w, cx| t.escolher_forma(1, w, cx)))
-                    .on_action(cx.listener(|t, _: &Forma2, w, cx| t.escolher_forma(2, w, cx)))
-                    .on_action(cx.listener(|t, _: &Forma3, w, cx| t.escolher_forma(3, w, cx)))
-                    .on_action(cx.listener(|t, _: &Forma4, w, cx| t.escolher_forma(4, w, cx)))
-                    .on_action(cx.listener(|t, _: &Forma5, w, cx| t.escolher_forma(5, w, cx)))
-                    .on_action(cx.listener(|t, _: &Forma6, w, cx| t.escolher_forma(6, w, cx)))
-                    .on_action(cx.listener(|t, _: &Forma7, w, cx| t.escolher_forma(7, w, cx)))
-                    .on_action(cx.listener(|t, _: &Forma8, w, cx| t.escolher_forma(8, w, cx)))
-                    .on_action(cx.listener(|t, _: &TirarUltimo, _, cx| t.tirar_ultimo(cx)))
-                    .on_action(
-                        cx.listener(|t, _: &EmReais, _, cx| {
-                            t.mudar_modo(ModoDoDesconto::Valor, cx)
-                        }),
-                    )
-                    .on_action(cx.listener(|t, _: &EmPercentual, _, cx| {
-                        t.mudar_modo(ModoDoDesconto::Percentual, cx)
-                    }))
-                    .on_action(cx.listener(|t, _: &Sangria, _, cx| {
-                        t.mudar_tipo(TipoDeMovimento::Sangria, cx)
-                    }))
-                    .on_action(cx.listener(|t, _: &Suprimento, _, cx| {
-                        t.mudar_tipo(TipoDeMovimento::Suprimento, cx)
-                    }))
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .relative()
-                    .w(px(largura))
-                    .max_w_full()
-                    .max_h(relative(0.9))
-                    .overflow_y_scroll()
-                    // O `DialogContent` do site: `gap-4 rounded-xl bg-popover p-4
-                    // ring-1 ring-foreground/10`, título `text-base font-medium`.
-                    // O `rounded-xl` é 1,4 × o `--radius` de 10 px.
-                    .gap(px(16.))
-                    .p(px(16.))
-                    .rounded(px(14.))
-                    .border_1()
-                    .border_color(frente.opacity(0.1))
-                    .bg(fundo)
-                    .shadow_lg()
-                    .child(
-                        v_flex()
-                            .gap(px(6.))
-                            .pr(px(24.))
-                            .child(
-                                div()
-                                    .text_size(px(16.))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .child(titulo),
-                            )
-                            .when_some(descricao, |d, descricao| {
-                                d.child(div().text_sm().text_color(apagado).child(descricao))
-                            }),
-                    )
-                    .child(corpo)
+                    .gap(px(6.))
+                    .pr(px(24.))
                     .child(
                         div()
-                            .id("caixa-dialogo-fechar")
-                            .absolute()
-                            .top(px(16.))
-                            .right(px(16.))
-                            .size(px(20.))
-                            .rounded(px(4.))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .opacity(0.7)
-                            .cursor_pointer()
-                            .hover(move |s| s.opacity(1.).bg(acento))
-                            .child(Icon::new(Icone::X).size(px(16.)))
-                            .on_click(
-                                cx.listener(|t, _: &ClickEvent, w, cx| t.fechar_dialogo(w, cx)),
-                            ),
-                    ),
+                            .text_size(px(16.))
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(titulo),
+                    )
+                    .when_some(descricao, |d, descricao| {
+                        d.child(div().text_sm().text_color(apagado).child(descricao))
+                    }),
             )
-            .children(pergunta)
+            .child(corpo)
+            .child(
+                div()
+                    .id("caixa-dialogo-fechar")
+                    .absolute()
+                    .top(px(16.))
+                    .right(px(16.))
+                    .size(px(20.))
+                    .rounded(px(4.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .opacity(0.7)
+                    .cursor_pointer()
+                    .hover(move |s| s.opacity(1.).bg(acento))
+                    .child(Icon::new(Icone::X).size(px(16.)))
+                    .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.fechar_dialogo(w, cx))),
+            )
             .into_any_element()
     }
 
@@ -3059,7 +3050,14 @@ impl Caixa {
     /// "Remover a negociação?" — o `AlertDialog` do `useConfirmacao`, por cima
     /// do diálogo: véu próprio, cartão de 448 px, rodapé cinza com "Cancelar"
     /// e "Remover". O clique fora não fecha nada, como no site.
-    fn pergunta_de_remover_negociacao(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// "Remover a negociação?" — o `AlertDialog` do `useConfirmacao`, por
+    /// cima do diálogo: o miolo e o rodapé cinza de ponta a ponta (no espaço
+    /// de rodapé do `Dialog` do kit). O clique fora não fecha nada, como no
+    /// site.
+    fn pergunta_de_remover_negociacao(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<(AnyElement, AnyElement)> {
         let Some(Dialogo::Negociacao(form)) = self.dialogo.as_ref() else {
             return None;
         };
@@ -3067,74 +3065,43 @@ impl Caixa {
             return None;
         }
         let tema = cx.theme();
-        let (cartao, frente, apagado, borda, realce) = (
-            tema.popover,
-            tema.foreground,
-            tema.muted_foreground,
-            tema.border,
-            tema.muted,
-        );
-        Some(
-            div()
-                .id("caixa-negociacao-pergunta")
-                .absolute()
-                .inset_0()
-                .occlude()
-                .bg(gpui_kit::black().opacity(0.1))
-                .flex()
-                .items_center()
-                .justify_center()
-                .p(px(16.))
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .child(
-                    v_flex()
-                        .w(px(448.))
-                        .max_w_full()
-                        .rounded(px(14.))
-                        .border_1()
-                        .border_color(frente.opacity(0.1))
-                        .bg(cartao)
-                        .text_color(frente)
-                        .shadow_lg()
-                        .overflow_hidden()
-                        .child(
-                            v_flex()
-                                .p(px(16.))
-                                .gap(px(6.))
-                                .child(
-                                    div()
-                                        .text_size(px(16.))
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .child("Remover a negociação?"),
-                                )
-                                .child(div().text_sm().text_color(apagado).child(
-                                    "O registro do que foi combinado no balcão — tipo, valor e motivo — é apagado.",
-                                )),
-                        )
-                        .child(
-                            rodape()
-                                .p(px(16.))
-                                .border_t_1()
-                                .border_color(borda)
-                                .bg(realce.opacity(0.5))
-                                .child(
-                                    estilo::botao_contorno("caixa-negociacao-nao-remover", cx)
-                                        .child("Cancelar")
-                                        .on_click(cx.listener(|tela, _: &ClickEvent, w, cx| {
-                                            tela.fechar_dialogo(w, cx)
-                                        })),
-                                )
-                                .child(
-                                    estilo::botao_perigo("caixa-negociacao-remover-sim", cx)
-                                        .child("Remover")
-                                        .on_click(cx.listener(|tela, _: &ClickEvent, _, cx| {
-                                            tela.salvar_negociacao(cx)
-                                        })),
-                                ),
-                        ),
-                )
-                .into_any_element(),
-        )
+        let (apagado, borda, realce) = (tema.muted_foreground, tema.border, tema.muted);
+        let miolo = v_flex()
+            .id("caixa-negociacao-pergunta")
+            .gap(px(6.))
+            .child(
+                div()
+                    .text_size(px(16.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .child("Remover a negociação?"),
+            )
+            .child(div().text_sm().text_color(apagado).child(
+                "O registro do que foi combinado no balcão — tipo, valor e motivo — é apagado.",
+            ))
+            .into_any_element();
+        let rodape = rodape()
+            .w_full()
+            .p(px(16.))
+            .border_t_1()
+            .border_color(borda)
+            .bg(realce.opacity(0.5))
+            .rounded_b(px(14.))
+            .child(
+                estilo::botao_contorno("caixa-negociacao-nao-remover", cx)
+                    .child("Cancelar")
+                    .on_click(
+                        cx.listener(|tela, _: &ClickEvent, w, cx| tela.fechar_dialogo(w, cx)),
+                    ),
+            )
+            .child(
+                estilo::botao_perigo("caixa-negociacao-remover-sim", cx)
+                    .child("Remover")
+                    .on_click(
+                        cx.listener(|tela, _: &ClickEvent, _, cx| tela.salvar_negociacao(cx)),
+                    ),
+            )
+            .into_any_element();
+        Some((miolo, rodape))
     }
 }
 

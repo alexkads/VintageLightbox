@@ -28,8 +28,10 @@
 //! respiro de 16 (`p-4 gap-4`), o canto de 12, o fundo do `popover` (o kit usa
 //! o da página, que no escuro é outro) e a largura.
 //!
-//! ⚠️ **O `Dialog` já é `deferred`**: ele não pode ir dentro de outro `deferred`
-//! (o GPUI recusa um dentro do outro).
+//! O `Dialog` já se desenha `deferred`. No GPUI do gpui-kit 0.6 isso pode ir
+//! dentro de outro `deferred` (ele desenha em rodadas, até 10 níveis) — o
+//! pânico do gpui 0.2.2 com um dentro do outro virou teste de regressão —, mas
+//! envolvê-lo em outro não serve para nada.
 
 use gpui_kit::component::dialog::Dialog;
 use gpui_kit::component::{ActiveTheme, Root};
@@ -87,7 +89,7 @@ pub type Montar<T> = fn(&mut T, &mut Window, &mut Context<T>) -> Option<AnyEleme
 pub type Cancelar<T> = fn(&mut T, &mut Window, &mut Context<T>);
 
 /// O diálogo da tela, se ela o quer aberto. Chamar no `render` e pôr o
-/// resultado na árvore dela — **fora** de qualquer `deferred`.
+/// resultado na árvore dela.
 pub fn desenhar<T: 'static>(
     tela: &mut T,
     quer: bool,
