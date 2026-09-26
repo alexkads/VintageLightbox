@@ -8,6 +8,7 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
+use domain::repositories::PhotoRepository;
 use domain::value_objects::{
     FilePath, ImportMode, ImportOptions, OrganizationStrategy, RenamePattern,
 };
@@ -18,6 +19,7 @@ use infrastructure::{
 };
 use tempfile::TempDir;
 use tokio::sync::mpsc;
+use use_cases::import_with_options::ImportResult;
 use use_cases::{ImportRequest, ImportWithOptionsUseCase};
 
 /// Monta a pilha real de importação sobre um catálogo temporário
@@ -26,6 +28,7 @@ struct Bancada {
     origem: std::path::PathBuf,
     catalogo: std::path::PathBuf,
     use_case: ImportWithOptionsUseCase,
+    repositorio: Arc<PhotoRepositoryImpl>,
 }
 
 async fn bancada() -> Bancada {
@@ -45,8 +48,9 @@ async fn bancada() -> Bancada {
     let cache = temp.path().join("cache");
     std::fs::create_dir_all(&cache).unwrap();
 
+    let repositorio = Arc::new(PhotoRepositoryImpl::new(pool));
     let use_case = ImportWithOptionsUseCase::new(
-        Arc::new(PhotoRepositoryImpl::new(pool)),
+        repositorio.clone(),
         Arc::new(ExifReader),
         Arc::new(ThumbnailGeneratorImpl::new()),
         Arc::new(PreviewManager::new_with_path(cache)),
@@ -58,6 +62,7 @@ async fn bancada() -> Bancada {
         origem,
         catalogo,
         use_case,
+        repositorio,
     }
 }
 
@@ -84,6 +89,14 @@ fn jpeg(dir: &std::path::Path, nome: &str, semente: u8) -> FilePath {
 }
 
 async fn importar(bancada: &Bancada, files: Vec<FilePath>, options: ImportOptions) -> usize {
+    importar_lote(bancada, files, options).await.successful
+}
+
+async fn importar_lote(
+    bancada: &Bancada,
+    files: Vec<FilePath>,
+    options: ImportOptions,
+) -> ImportResult {
     let (progress_sender, mut rx) = mpsc::unbounded_channel();
 
     let request = ImportRequest {
@@ -99,7 +112,7 @@ async fn importar(bancada: &Bancada, files: Vec<FilePath>, options: ImportOption
     // Drenar o canal para não deixar a task de progresso pendurada
     while rx.try_recv().is_ok() {}
 
-    resultado.successful
+    resultado
 }
 
 #[tokio::test]
@@ -272,6 +285,91 @@ async fn numa_pasta_so_ignora_a_data_e_a_hierarquia() {
 }
 
 /// Lista recursivamente os arquivos de um diretório (vazio se ele nem existe)
+/// Um lote de fotos diferentes no cartão.
+fn cartao(bancada: &Bancada, quantas: u8) -> Vec<FilePath> {
+    (0..quantas)
+        .map(|i| jpeg(&bancada.origem, &format!("DSC_{i:04}.jpg"), i * 20))
+        .collect()
+}
+
+fn para_a_sessao(sessao: &str) -> ImportOptions {
+    ImportOptions {
+        sessao_id: Some(sessao.into()),
+        ..ImportOptions::default()
+    }
+}
+
+/// 🚨 **Reimportar o mesmo cartão na mesma sessão não duplica.** Até 26/set/2026
+/// a importação nunca gravava o `content_hash`: a conferência calculava o SHA-256
+/// de cada arquivo e procurava num catálogo onde nenhuma foto tinha hash — 40
+/// fotos reimportadas viravam 80 linhas.
+#[tokio::test]
+async fn reimportar_na_mesma_sessao_pula_o_que_ja_esta_la() {
+    let bancada = bancada().await;
+    let fotos = cartao(&bancada, 3);
+
+    let primeira = importar_lote(&bancada, fotos.clone(), para_a_sessao("ensaio-a")).await;
+    assert_eq!(primeira.successful, 3);
+    assert!(
+        primeira
+            .imported_photos
+            .iter()
+            .all(|f| f.content_hash().is_some_and(|h| h.len() == 64)),
+        "a importação grava o hash que a conferência calculou"
+    );
+
+    let segunda = importar_lote(&bancada, fotos, para_a_sessao("ensaio-a")).await;
+    assert_eq!(
+        (segunda.successful, segunda.skipped),
+        (0, 3),
+        "as três já estão nesta sessão"
+    );
+    assert_eq!(bancada.repositorio.find_all().await.unwrap().len(), 3);
+}
+
+/// 🚨 **A duplicata é da sessão, não do catálogo.** A mesma foto numa outra
+/// sessão (ou num rascunho abandonado) não pode sumir desta: o operador a veria
+/// contada como feita e ela não estaria na grade. O site também não pula foto
+/// por existir em outra galeria.
+#[tokio::test]
+async fn a_mesma_foto_em_outra_sessao_entra() {
+    let bancada = bancada().await;
+    let fotos = cartao(&bancada, 3);
+
+    assert_eq!(
+        importar(&bancada, fotos.clone(), para_a_sessao("ensaio-a")).await,
+        3
+    );
+    let outra = importar_lote(&bancada, fotos.clone(), para_a_sessao("ensaio-b")).await;
+    assert_eq!((outra.successful, outra.skipped), (3, 0));
+
+    // Sem sessão também é um lugar: não herda as fotos das sessões.
+    let sem_sessao = importar_lote(&bancada, fotos, ImportOptions::default()).await;
+    assert_eq!((sem_sessao.successful, sem_sessao.skipped), (3, 0));
+
+    let todas = bancada.repositorio.find_all().await.unwrap();
+    for sessao in [Some("ensaio-a"), Some("ensaio-b"), None] {
+        assert_eq!(
+            todas.iter().filter(|f| f.sessao() == sessao).count(),
+            3,
+            "{sessao:?} tem as três"
+        );
+    }
+}
+
+/// Uma foto nova no meio de um cartão já importado entra, e só ela.
+#[tokio::test]
+async fn cartao_com_uma_foto_nova_importa_so_a_nova() {
+    let bancada = bancada().await;
+    let mut fotos = cartao(&bancada, 2);
+    importar(&bancada, fotos.clone(), para_a_sessao("ensaio-a")).await;
+
+    fotos.push(jpeg(&bancada.origem, "DSC_0099.jpg", 250));
+    let segunda = importar_lote(&bancada, fotos, para_a_sessao("ensaio-a")).await;
+    assert_eq!((segunda.successful, segunda.skipped), (1, 2));
+    assert_eq!(bancada.repositorio.find_all().await.unwrap().len(), 3);
+}
+
 fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut encontrados = Vec::new();
     let Ok(entradas) = std::fs::read_dir(dir) else {

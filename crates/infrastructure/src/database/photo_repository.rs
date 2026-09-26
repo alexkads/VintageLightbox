@@ -840,6 +840,29 @@ impl PhotoRepository for PhotoRepositoryImpl {
         }
     }
 
+    async fn find_by_content_hash_na_sessao(
+        &self,
+        hash: &str,
+        sessao_id: Option<String>,
+    ) -> DomainResult<Option<Photo>> {
+        // `IS`, e não `=`: com `sessao_id` nulo, `= NULL` nunca casa, e o lote
+        // sem sessão reimportaria tudo.
+        let row =
+            sqlx::query("SELECT * FROM photos WHERE content_hash = ? AND sessao_id IS ? LIMIT 1")
+                .bind(hash)
+                .bind(sessao_id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| {
+                    DomainError::InvalidOperation(format!(
+                        "Failed to find photo by hash in session: {}",
+                        e
+                    ))
+                })?;
+
+        row.map(|r| Self::row_to_photo(&r)).transpose()
+    }
+
     async fn trocar_sessao(&self, de: &str, para: &str) -> DomainResult<usize> {
         // `modified_at` anda como andava em `Photo::definir_sessao`.
         let resultado =

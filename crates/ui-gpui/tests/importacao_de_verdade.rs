@@ -168,7 +168,7 @@ async fn detalhar_traz_o_que_a_grade_mostra() {
     let foto = gravar_jpeg(&origem, "DSC_0001.jpg");
 
     let (envio, recepcao) = canal_de_recados();
-    explorador.detalhar(vec![foto.clone()], envio);
+    explorador.detalhar(vec![foto.clone()], None, envio);
 
     match esperar(&recepcao) {
         Recado::Descritos(itens) => {

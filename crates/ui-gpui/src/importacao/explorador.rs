@@ -36,7 +36,11 @@ pub trait Explorador: Send + Sync + 'static {
     /// Lê metadados e confere duplicatas. Responde `Descritos` **e**
     /// `Duplicados` — dois recados, porque as duas leituras terminam em tempos
     /// diferentes e a grade se completa aos poucos.
-    fn detalhar(&self, arquivos: Vec<String>, canal: Sender<Recado>);
+    ///
+    /// 🚨 `sessao` é a sessão de destino: duplicata é o que **já está nela**, e
+    /// não em qualquer lugar do catálogo. A mesma foto em outra sessão não é
+    /// desmarcada.
+    fn detalhar(&self, arquivos: Vec<String>, sessao: Option<String>, canal: Sender<Recado>);
 }
 
 /// O explorador de verdade, falando com o `ImportController`.
@@ -88,7 +92,7 @@ impl Explorador for ExploradorDoDisco {
         });
     }
 
-    fn detalhar(&self, arquivos: Vec<String>, canal: Sender<Recado>) {
+    fn detalhar(&self, arquivos: Vec<String>, sessao: Option<String>, canal: Sender<Recado>) {
         let importacao = self.importacao.clone();
 
         self.tokio.spawn(async move {
@@ -118,7 +122,7 @@ impl Explorador for ExploradorDoDisco {
                 return;
             }
 
-            let recado = match importacao.check_duplicates(arquivos).await {
+            let recado = match importacao.check_duplicates(arquivos, sessao).await {
                 Ok(resultados) => Recado::Duplicados(
                     resultados
                         .into_iter()
@@ -478,6 +482,8 @@ pub mod mentira {
         pub varreduras: Mutex<Vec<(String, Vec<String>)>>,
         pub pedidos: Mutex<Vec<String>>,
         pub cartoes: Mutex<Vec<Origem>>,
+        /// A sessão de cada `detalhar`, na ordem: é onde a duplicata é conferida.
+        pub sessoes_conferidas: Mutex<Vec<Option<String>>>,
     }
 
     impl ExploradorDeMentira {
@@ -529,7 +535,11 @@ pub mod mentira {
             });
         }
 
-        fn detalhar(&self, arquivos: Vec<String>, canal: Sender<Recado>) {
+        fn detalhar(&self, arquivos: Vec<String>, sessao: Option<String>, canal: Sender<Recado>) {
+            self.sessoes_conferidas
+                .lock()
+                .expect("as sessões")
+                .push(sessao);
             self.pedidos
                 .lock()
                 .expect("os pedidos")

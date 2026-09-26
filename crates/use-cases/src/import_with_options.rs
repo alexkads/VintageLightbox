@@ -140,7 +140,9 @@ impl ImportWithOptionsUseCase {
 
         // Fase 1: Detectar duplicatas (se habilitado)
         let duplicates = if options.skip_duplicates {
-            self.check_duplicates.execute(files.clone()).await?
+            self.check_duplicates
+                .execute(files.clone(), options.sessao_id.as_deref())
+                .await?
         } else {
             Vec::new()
         };
@@ -194,16 +196,14 @@ impl ImportWithOptionsUseCase {
             let imported_photos = imported_photos.clone();
 
             // Verificar se é duplicata
-            let is_duplicate = duplicates
-                .iter()
-                .find(|d| d.file_path == file_path)
-                .map(|d| d.is_duplicate)
-                .unwrap_or(false);
-
-            let existing_photo = duplicates
-                .iter()
-                .find(|d| d.file_path == file_path)
-                .and_then(|d| d.existing_photo.clone());
+            let conferida = duplicates.iter().find(|d| d.file_path == file_path);
+            let is_duplicate = conferida.is_some_and(|d| d.is_duplicate);
+            let existing_photo = conferida.and_then(|d| d.existing_photo.clone());
+            // 🔑 O hash da fase 1 vai junto para a foto: é o que a próxima
+            // conferência procura, e recalculá-lo seria ler o arquivo de novo.
+            let content_hash = conferida
+                .map(|d| d.content_hash.clone())
+                .filter(|h| !h.is_empty());
 
             let vagas = semaphore.clone();
             let task = tokio::spawn(async move {
@@ -257,6 +257,7 @@ impl ImportWithOptionsUseCase {
                 // Processar importação
                 match Self::import_single_file(
                     &file_path,
+                    content_hash,
                     &options,
                     &*metadata_extractor,
                     &*thumbnail_generator,
@@ -312,8 +313,14 @@ impl ImportWithOptionsUseCase {
     }
 
     /// Importa um único arquivo
+    ///
+    /// `content_hash` é o SHA-256 que a conferência de duplicatas já calculou —
+    /// `None` quando ela não rodou (`skip_duplicates` desligado) ou não
+    /// conseguiu ler o arquivo.
+    #[allow(clippy::too_many_arguments)]
     async fn import_single_file(
         source: &FilePath,
+        content_hash: Option<String>,
         options: &ImportOptions,
         metadata_extractor: &dyn MetadataExtractor,
         thumbnail_generator: &dyn ThumbnailGenerator,
@@ -358,6 +365,13 @@ impl ImportWithOptionsUseCase {
         // catálogo sem ensaio não aparece na grade da sessão que a importou, e o
         // sintoma é a importação "não ter funcionado".
         photo.definir_sessao(options.sessao_id.clone());
+        // 🚨 **Sem o hash gravado, a conferência de duplicatas não acha nada.**
+        // Até 26/set/2026 esta linha não existia: a fase 1 calculava o SHA-256
+        // de cada arquivo e procurava num catálogo onde nenhuma foto importada
+        // tinha hash — reimportar 40 fotos na mesma sessão dava 80 linhas.
+        if let Some(hash) = content_hash {
+            photo.set_content_hash(hash);
+        }
 
         // 4. Gerar thumbnails
         let thumbnail_300 = thumbnail_generator.generate(&dest_path, 300).await?;
@@ -411,6 +425,7 @@ mod tests {
             async fn delete(&self, id: &PhotoId) -> DomainResult<()>;
             async fn exists(&self, id: &PhotoId) -> DomainResult<bool>;
             async fn find_by_content_hash(&self, hash: &str) -> DomainResult<Option<Photo>>;
+            async fn find_by_content_hash_na_sessao(&self, hash: &str, sessao_id: Option<String>) -> DomainResult<Option<Photo>>;
         }
     }
 
@@ -569,9 +584,9 @@ mod tests {
         // Primeira é duplicata, segunda não (baseado na ordem das chamadas)
         let mut call_count = 0;
         mock_repo
-            .expect_find_by_content_hash()
+            .expect_find_by_content_hash_na_sessao()
             .times(2)
-            .returning(move |_hash: &str| {
+            .returning(move |_hash: &str, _| {
                 call_count += 1;
                 if call_count == 1 {
                     Ok(Some(fake_photo_clone.clone()))

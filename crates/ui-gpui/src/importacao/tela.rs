@@ -322,8 +322,18 @@ impl Importacao {
     /// 🔑 Vem da raiz a cada abertura do modal, e não de um campo desta tela: o
     /// ensaio é o contexto do app, e perguntá-lo aqui seria pedir de novo o que
     /// já foi escolhido.
-    pub fn importar_para_a_sessao(&mut self, sessao_id: Option<String>) {
-        self.estado.opcoes.sessao_id = sessao_id;
+    ///
+    /// 🚨 Trocar de sessão com uma listagem aberta **reconfere as duplicatas**
+    /// — ver [`Estado::trocar_sessao`].
+    pub fn importar_para_a_sessao(&mut self, sessao_id: Option<String>, cx: &mut Context<Self>) {
+        if let Some(Seguimento::Detalhar(arquivos)) = self.estado.trocar_sessao(sessao_id) {
+            self.explorador.detalhar(
+                arquivos,
+                self.estado.opcoes.sessao_id.clone(),
+                self.recados.0.clone(),
+            );
+            self.acompanhar(cx);
+        }
     }
 
     /// Manda importar o que está marcado.
@@ -439,7 +449,11 @@ impl Importacao {
 
             match aplicar(&mut self.estado, recado) {
                 Some(Seguimento::Detalhar(arquivos)) => {
-                    self.explorador.detalhar(arquivos, self.recados.0.clone());
+                    self.explorador.detalhar(
+                        arquivos,
+                        self.estado.opcoes.sessao_id.clone(),
+                        self.recados.0.clone(),
+                    );
                 }
                 Some(Seguimento::Varrer(raiz)) => self.comecar_varredura(raiz),
                 None => {}
@@ -1401,6 +1415,40 @@ mod testes {
         assert_eq!(tamanho_legivel(512), "512 B");
         assert_eq!(tamanho_legivel(2048), "2.0 KB");
         assert_eq!(tamanho_legivel(5 * 1024 * 1024), "5.0 MB");
+    }
+
+    /// 🚨 A conferência de duplicatas é **na sessão de destino**. Sem ela, a
+    /// tela desmarcaria sozinha a foto que só existe em outra sessão, e o
+    /// operador a veria sumir do lote.
+    #[gpui_kit::test]
+    fn detalhar_confere_duplicata_na_sessao_do_lote(cx: &mut TestAppContext) {
+        let explorador = Arc::new(ExploradorDeMentira::responde("/cartao", &["/cartao/a.NEF"]));
+        let janela = janela(
+            cx,
+            explorador.clone(),
+            Arc::new(ImportadorDeMentira::default()),
+        );
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.importar_para_a_sessao(Some("ensaio-a".into()), cx);
+                tela.abrir_origem("/cartao".into(), cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher(cx, &janela);
+
+        // Fechar e reabrir em outra sessão, com a listagem ainda na tela.
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.importar_para_a_sessao(Some("ensaio-b".into()), cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher(cx, &janela);
+
+        assert_eq!(
+            *explorador.sessoes_conferidas.lock().expect("as sessões"),
+            [Some("ensaio-a".to_string()), Some("ensaio-b".to_string())]
+        );
     }
 
     /// 🚨 A ordem das leituras: varrer, depois detalhar.

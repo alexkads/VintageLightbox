@@ -81,7 +81,7 @@ async fn test_advanced_import_e2e_workflow() {
     let check_duplicates_use_case = CheckDuplicatesUseCase::new(photo_repository.clone());
 
     let duplicates = check_duplicates_use_case
-        .execute(test_images.clone())
+        .execute(test_images.clone(), None)
         .await
         .unwrap();
     assert_eq!(duplicates.len(), 3);

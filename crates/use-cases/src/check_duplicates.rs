@@ -53,11 +53,21 @@ impl CheckDuplicatesUseCase {
         Ok(format!("{:x}", result))
     }
 
-    /// Verifica uma lista de arquivos para detectar duplicatas
+    /// Verifica uma lista de arquivos para detectar duplicatas **na sessão**
+    /// `sessao_id` (`None` é o lote sem sessão).
+    ///
+    /// 🚨 Duplicata é a foto que **já está nesta sessão**, e não em qualquer
+    /// lugar do catálogo: a mesma foto em outra sessão, ou num rascunho
+    /// abandonado, entra de novo — ver
+    /// [`PhotoRepository::find_by_content_hash_na_sessao`].
     ///
     /// Processa arquivos em paralelo usando Rayon para melhor performance.
     /// Hash é calculado de forma síncrona (bloqueante) em threads separadas.
-    pub async fn execute(&self, files: Vec<FilePath>) -> DomainResult<Vec<DuplicateCheckResult>> {
+    pub async fn execute(
+        &self,
+        files: Vec<FilePath>,
+        sessao_id: Option<&str>,
+    ) -> DomainResult<Vec<DuplicateCheckResult>> {
         use rayon::prelude::*;
 
         if files.is_empty() {
@@ -84,7 +94,10 @@ impl CheckDuplicatesUseCase {
         for (file_path, hash_opt) in hashes {
             if let Some(hash) = hash_opt {
                 // Buscar no banco de dados
-                let existing_photo = self.photo_repository.find_by_content_hash(&hash).await?;
+                let existing_photo = self
+                    .photo_repository
+                    .find_by_content_hash_na_sessao(&hash, sessao_id.map(str::to_owned))
+                    .await?;
 
                 results.push(DuplicateCheckResult {
                     file_path,
@@ -128,6 +141,7 @@ mod tests {
             async fn delete(&self, id: &domain::value_objects::PhotoId) -> DomainResult<()>;
             async fn exists(&self, id: &domain::value_objects::PhotoId) -> DomainResult<bool>;
             async fn find_by_content_hash(&self, hash: &str) -> DomainResult<Option<Photo>>;
+            async fn find_by_content_hash_na_sessao(&self, hash: &str, sessao_id: Option<String>) -> DomainResult<Option<Photo>>;
         }
     }
 
@@ -146,9 +160,9 @@ mod tests {
 
         // Nenhuma foto encontrada no banco
         mock_repo
-            .expect_find_by_content_hash()
+            .expect_find_by_content_hash_na_sessao()
             .times(2)
-            .returning(|_| Ok(None));
+            .returning(|_, _| Ok(None));
 
         let use_case = CheckDuplicatesUseCase::new(Arc::new(mock_repo));
 
@@ -160,7 +174,7 @@ mod tests {
         ];
 
         // Act
-        let result = use_case.execute(files).await;
+        let result = use_case.execute(files, Some("ensaio")).await;
 
         // Assert
         assert!(result.is_ok());
@@ -184,9 +198,9 @@ mod tests {
 
         // Todas as fotos são duplicatas
         mock_repo
-            .expect_find_by_content_hash()
+            .expect_find_by_content_hash_na_sessao()
             .times(2)
-            .returning(move |_| Ok(Some(fake_photo_clone.clone())));
+            .returning(move |_, _| Ok(Some(fake_photo_clone.clone())));
 
         let use_case = CheckDuplicatesUseCase::new(Arc::new(mock_repo));
 
@@ -198,7 +212,7 @@ mod tests {
         ];
 
         // Act
-        let result = use_case.execute(files).await;
+        let result = use_case.execute(files, Some("ensaio")).await;
 
         // Assert
         assert!(result.is_ok());
@@ -220,9 +234,9 @@ mod tests {
 
         // Primeira chamada retorna duplicata, segunda não
         mock_repo
-            .expect_find_by_content_hash()
+            .expect_find_by_content_hash_na_sessao()
             .times(2)
-            .returning(move |hash: &str| {
+            .returning(move |hash: &str, _| {
                 // Simular que o primeiro arquivo é duplicata
                 if hash.starts_with('a') || hash.starts_with('b') || hash.starts_with('c') {
                     Ok(Some(fake_photo_clone.clone()))
@@ -241,7 +255,7 @@ mod tests {
         ];
 
         // Act
-        let result = use_case.execute(files).await;
+        let result = use_case.execute(files, Some("ensaio")).await;
 
         // Assert
         assert!(result.is_ok());
@@ -255,9 +269,9 @@ mod tests {
         let mut mock_repo = MockPhotoRepo::new();
 
         mock_repo
-            .expect_find_by_content_hash()
+            .expect_find_by_content_hash_na_sessao()
             .times(1)
-            .returning(|_| Ok(None));
+            .returning(|_, _| Ok(None));
 
         let use_case = CheckDuplicatesUseCase::new(Arc::new(mock_repo));
 
@@ -265,7 +279,10 @@ mod tests {
         let files = vec![FilePath::new(temp.path().to_str().unwrap()).unwrap()];
 
         // Act
-        let result1 = use_case.execute(files.clone()).await.unwrap();
+        let result1 = use_case
+            .execute(files.clone(), Some("ensaio"))
+            .await
+            .unwrap();
 
         // O hash deveria ser o mesmo se recalcularmos
         let hash1 = &result1[0].content_hash;
@@ -275,6 +292,26 @@ mod tests {
         assert!(hash1.chars().all(|c| c.is_ascii_hexdigit()));
     }
 
+    /// 🚨 A conferência pergunta **pela sessão de destino**, e nunca pelo
+    /// catálogo inteiro: a mesma foto em outra sessão não é duplicata desta.
+    #[tokio::test]
+    async fn confere_so_na_sessao_de_destino() {
+        let mut mock_repo = MockPhotoRepo::new();
+        mock_repo.expect_find_by_content_hash().never();
+        mock_repo
+            .expect_find_by_content_hash_na_sessao()
+            .withf(|_, sessao| sessao.as_deref() == Some("ensaio-b"))
+            .times(1)
+            .returning(|_, _| Ok(None));
+
+        let use_case = CheckDuplicatesUseCase::new(Arc::new(mock_repo));
+        let temp = create_temp_file_with_content(b"foto");
+        let files = vec![FilePath::new(temp.path().to_str().unwrap()).unwrap()];
+
+        let resultado = use_case.execute(files, Some("ensaio-b")).await.unwrap();
+        assert!(!resultado[0].is_duplicate);
+    }
+
     #[tokio::test]
     async fn test_empty_input() {
         // Arrange
@@ -282,7 +319,7 @@ mod tests {
         let use_case = CheckDuplicatesUseCase::new(Arc::new(mock_repo));
 
         // Act
-        let result = use_case.execute(vec![]).await;
+        let result = use_case.execute(vec![], Some("ensaio")).await;
 
         // Assert
         assert!(result.is_ok());

@@ -35,6 +35,28 @@ pub trait PhotoRepository: Send + Sync {
     /// Retorna None se não encontrar nenhuma foto com esse hash
     async fn find_by_content_hash(&self, hash: &str) -> DomainResult<Option<Photo>>;
 
+    /// Busca pelo content hash uma foto **desta sessão** — `None` é o lote sem
+    /// sessão, que também é um lugar e não enxerga as fotos das sessões.
+    ///
+    /// 🚨 **É esta a conferência de duplicata da importação, e não
+    /// [`find_by_content_hash`](Self::find_by_content_hash).** Procurar no
+    /// catálogo inteiro pularia a foto que está em **outra** sessão ou num
+    /// rascunho abandonado: ela sumiria da sessão nova contada como feita. O
+    /// site também não pula foto por existir em outra galeria.
+    ///
+    /// O padrão recusa, como [`trocar_sessao`](Self::trocar_sessao): um dublê
+    /// que não o declare não deve fingir que confere.
+    async fn find_by_content_hash_na_sessao(
+        &self,
+        hash: &str,
+        sessao_id: Option<String>,
+    ) -> DomainResult<Option<Photo>> {
+        let _ = (hash, sessao_id);
+        Err(crate::DomainError::InvalidOperation(
+            "este repositório não confere duplicata por sessão".into(),
+        ))
+    }
+
     /// Passa para `para` as fotos da sessão `de`, **mexendo só na sessão**.
     /// Devolve quantas mudaram.
     ///

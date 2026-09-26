@@ -98,11 +98,15 @@
 ```
 
 ### 1.3 Detecção de Duplicatas
-**Descrição**: Identifica fotos já existentes no catálogo.
+**Descrição**: Identifica fotos que já estão **na sessão de destino**.
+
+🚨 A mesma foto em outra sessão (ou num rascunho abandonado) **não** é duplicata: ela entra de novo,
+como no site. Procurar no catálogo inteiro faria a foto sumir da sessão nova, contada como feita
+(26/set/2026).
 
 **Algoritmo**:
-1. Hash SHA-256 do conteúdo do arquivo
-2. Comparação de hash com banco de dados
+1. Hash SHA-256 do conteúdo do arquivo — calculado uma vez e gravado na foto importada
+2. Comparação de hash com as fotos da sessão de destino
 3. Se duplicata: verificar metadados EXIF
 4. Marcar visualmente na preview
 

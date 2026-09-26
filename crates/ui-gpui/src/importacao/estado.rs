@@ -199,6 +199,36 @@ pub struct Estado {
 }
 
 impl Estado {
+    /// Aponta o lote para outra sessão e devolve a reconferência que isso pede.
+    ///
+    /// 🚨 **Duplicata é de uma sessão.** A listagem sobrevive a fechar e reabrir
+    /// o modal; sem isto, o cartão marcado na sessão A e reaberto na B
+    /// continuaria com as duplicatas **de A** desmarcadas — e as fotos que B
+    /// não tem ficariam fora do lote sem ninguém ter pedido.
+    pub fn trocar_sessao(&mut self, sessao_id: Option<String>) -> Option<Seguimento> {
+        if self.opcoes.sessao_id == sessao_id {
+            return None;
+        }
+        self.opcoes.sessao_id = sessao_id;
+        if self.candidatos.is_empty() {
+            return None;
+        }
+        let pular = self.opcoes.skip_duplicates;
+        for candidato in self.candidatos.iter_mut() {
+            if candidato.duplicado {
+                candidato.duplicado = false;
+                // Quem a desmarcou foi a conferência da outra sessão.
+                if pular {
+                    candidato.marcado = true;
+                }
+            }
+        }
+        self.conferindo_duplicatas = true;
+        Some(Seguimento::Detalhar(
+            self.candidatos.iter().map(|c| c.caminho.clone()).collect(),
+        ))
+    }
+
     pub fn marcados(&self) -> usize {
         self.candidatos.iter().filter(|c| c.marcado).count()
     }
@@ -769,6 +799,37 @@ mod testes {
 
         assert_eq!(sem_pular.duplicados(), 1, "continua sendo duplicata");
         assert_eq!(sem_pular.marcados(), 2, "mas continua marcada");
+    }
+
+    /// 🚨 Trocar de sessão refaz a conferência: as duplicatas da sessão
+    /// anterior voltam para o lote até a nova dizer o contrário.
+    #[test]
+    fn trocar_de_sessao_reconfere_as_duplicatas() {
+        let mut estado = com_arquivos("/cartao", &["a.NEF", "b.NEF"]);
+        estado.opcoes.skip_duplicates = true;
+        estado.opcoes.sessao_id = Some("ensaio-a".into());
+        aplicar(
+            &mut estado,
+            Recado::Duplicados(vec!["/cartao/a.NEF".into()]),
+        );
+        assert_eq!(estado.marcados(), 1);
+
+        assert!(
+            estado.trocar_sessao(Some("ensaio-a".into())).is_none(),
+            "a mesma sessão não reconfere"
+        );
+
+        let seguimento = estado.trocar_sessao(Some("ensaio-b".into()));
+        assert_eq!(
+            seguimento,
+            Some(Seguimento::Detalhar(vec![
+                "/cartao/a.NEF".into(),
+                "/cartao/b.NEF".into()
+            ]))
+        );
+        assert_eq!(estado.duplicados(), 0);
+        assert_eq!(estado.marcados(), 2, "a duplicata de A voltou para o lote");
+        assert!(estado.conferindo_duplicatas);
     }
 
     /// O filtro "só novos" tira as duplicatas da grade sem desmarcá-las.

@@ -416,7 +416,10 @@ impl OrigemDasFotos {
                             .gerar(fotos.clone(), self.origens.0.clone());
                         self.portas
                             .explorador
-                            .detalhar(fotos.clone(), self.origens.0.clone());
+                            // Sem sessão: esta janela não desmarca duplicata
+                            // (ignora `Duplicados`); quem pula é a importação,
+                            // que confere na sessão de destino.
+                            .detalhar(fotos.clone(), None, self.origens.0.clone());
                         self.selecao = Some(SelecaoDaPasta {
                             raiz,
                             fotos: fotos.into_iter().map(|caminho| (caminho, true)).collect(),

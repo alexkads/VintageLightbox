@@ -4327,7 +4327,7 @@ impl Aplicativo {
         // o sintoma é "a importação não funcionou".
         let sessao = self.sessao_aberta.clone();
         self.importacao
-            .update(cx, |tela, _cx| tela.importar_para_a_sessao(sessao));
+            .update(cx, |tela, cx| tela.importar_para_a_sessao(sessao, cx));
         // Cartões e recentes são pedidos a cada abertura: um cartão plugado
         // depois de o app subir não apareceria numa lista buscada uma vez só.
         self.importacao

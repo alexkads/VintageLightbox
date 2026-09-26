@@ -108,10 +108,13 @@ impl ImportController {
         Ok(())
     }
 
-    /// Check for duplicate files
+    /// Check for duplicate files — duplicata é a foto que já está na sessão
+    /// `sessao_id` (`None` é o lote sem sessão), e não em qualquer lugar do
+    /// catálogo.
     pub async fn check_duplicates(
         &self,
         files: Vec<String>,
+        sessao_id: Option<String>,
     ) -> Result<Vec<DuplicateCheckViewModel>, String> {
         // Convert strings to FilePaths
         let file_paths: Result<Vec<FilePath>, _> = files.iter().map(FilePath::new).collect();
@@ -121,7 +124,7 @@ impl ImportController {
         // Execute duplicate check
         let results = self
             .check_duplicates_use_case
-            .execute(file_paths)
+            .execute(file_paths, sessao_id.as_deref())
             .await
             .map_err(|e| format!("Duplicate check failed: {}", e))?;
 
