@@ -231,8 +231,8 @@ pub struct Sessoes {
     _busca_ativa: gpui_kit::Subscription,
     /// 💳 O cartão do caixa aberto nas formas de pagamento — as "moedas".
     formas_abertas: bool,
-    /// 📈 Os gráficos acima da tabela; o operador pode recolhê-los.
-    graficos_visiveis: bool,
+    /// 📈 O diálogo dos gráficos aberto.
+    graficos_abertos: bool,
     situacao: Option<Situacao>,
     /// O "Filtros" do site: um campo por coluna, sob o cabeçalho.
     filtros: super::filtros_da_lista::FiltrosDaLista,
@@ -426,7 +426,7 @@ impl Sessoes {
             busca,
             _busca_ativa: busca_ativa,
             formas_abertas: false,
-            graficos_visiveis: true,
+            graficos_abertos: false,
             situacao: None,
             filtros: super::filtros_da_lista::FiltrosDaLista::novos(window, cx),
             carregando: false,
@@ -866,8 +866,7 @@ impl Sessoes {
     }
 
     /// 🧪 Troca o período sem passar pelo calendário — `None` é "todo o
-    /// período", o "Tudo" do seletor.
-    #[cfg(test)]
+    /// período", o "Tudo" do seletor. Também o verbo `periodo` do roteiro.
     pub(crate) fn escolher_periodo_para_teste(
         &mut self,
         faixa: Option<FaixaDeDatas>,
@@ -1085,8 +1084,8 @@ impl Sessoes {
             .update(cx, |estado, cx| estado.trocar_valor(email, window, cx));
     }
 
-    /// 🧪 Digita na busca, como quem escreve no campo.
-    #[cfg(test)]
+    /// 🧪 Digita na busca, como quem escreve no campo. Também o verbo `buscar`
+    /// do roteiro.
     pub(crate) fn buscar(&mut self, texto: &str, window: &mut Window, cx: &mut Context<Self>) {
         let texto = texto.to_string();
         self.busca
@@ -1330,6 +1329,15 @@ impl Render for Sessoes {
                 cx,
             )
         };
+        let dialogo_dos_graficos = crate::dialogo::desenhar(
+            self,
+            self.graficos_abertos,
+            crate::dialogo::Jeito::dialogo(1000.),
+            Self::dialogo_dos_graficos,
+            |tela, _, cx| tela.fechar_graficos(cx),
+            window,
+            cx,
+        );
         let agora = agora_em_segundos();
         let todas = self.para_o_core();
         let contagens = sessoes::contar_por_situacao(&todas, agora);
@@ -1355,7 +1363,6 @@ impl Render for Sessoes {
             .when(!self.na_aba_de_excluidas, |tela| {
                 tela.child(self.barra(&contagens, cx))
                     .child(self.indicadores(&soma, visiveis.len(), filtrando, cx))
-                    .child(self.graficos(&todas, &soma, agora, cx))
             })
             .when_some(self.erro.clone(), |tela, erro| {
                 tela.child(crate::estilo::aviso(erro, true, cx))
@@ -1378,6 +1385,7 @@ impl Render for Sessoes {
             .children(dialogo_do_estudio)
             .children(dialogo_de_exclusao)
             .children(dialogo_de_restauracao)
+            .children(dialogo_dos_graficos)
             .children(self.popover_do_periodo(cx))
     }
 }
@@ -2384,6 +2392,15 @@ impl Sessoes {
                     )
                 },
             )
+            // 📈 Os gráficos moram num diálogo, e não na página: a tabela é o
+            // que o balcão olha, e três gráficos acima dela a espremiam.
+            .child(
+                estilo::botao_contorno("sessoes-graficos", cx)
+                    .debug_selector(|| "sessoes-graficos".into())
+                    .child(Icon::new(Icone::ChartColumn).size(px(14.)))
+                    .child("Gráficos")
+                    .on_click(cx.listener(|tela, _ev, _window, cx| tela.abrir_graficos(cx))),
+            )
             .child(estilo::desligado(
                 estilo::botao_contorno("sessoes-recarregar", cx)
                     .child(if self.carregando {
@@ -2396,65 +2413,83 @@ impl Sessoes {
             ))
     }
 
-    /// 📈 Mostra ou recolhe os gráficos.
-    pub fn alternar_graficos(&mut self, cx: &mut Context<Self>) {
-        self.graficos_visiveis = !self.graficos_visiveis;
+    /// 📈 Abre o diálogo dos gráficos.
+    pub fn abrir_graficos(&mut self, cx: &mut Context<Self>) {
+        self.graficos_abertos = true;
         cx.notify();
     }
 
-    /// 📈 **Os gráficos da lista** (dono, 2026-09-26: *"nessa tela de sessões
-    /// coloque gráficos usando https://gpui-kit.com/component/chart/"*): a área
-    /// dos últimos 30 dias — caixa e pós-venda — e a rosca das formas de
-    /// pagamento do recorte. O site desenha os mesmos dois com os charts do
-    /// shadcn (`sessoes-fotograficas/graficos-da-lista.tsx`).
+    pub fn fechar_graficos(&mut self, cx: &mut Context<Self>) {
+        self.graficos_abertos = false;
+        cx.notify();
+    }
+
+    /// 📈 **Os gráficos da lista, num diálogo** (dono, 2026-09-26: *"coloque
+    /// gráficos usando https://gpui-kit.com/component/chart/"* e, em seguida,
+    /// *"tinha que ter um modal separado para esses gráficos, pois a tela vai
+    /// ficar pequena"*). O botão "Gráficos" fica na barra; a página continua
+    /// sendo cartões e tabela.
+    ///
+    /// Três gráficos, os mesmos do modal do site
+    /// (`sessoes-fotograficas/graficos-da-lista.tsx`): a área dos últimos 30
+    /// dias — caixa e pós-venda —, a rosca das formas de pagamento do recorte e
+    /// as barras de entrada por período, balcão e pós-venda empilhados.
     ///
     /// 🔑 **A área não segue o período**, e diz isso no título: a lista abre em
     /// hoje, e área de um dia é um ponto. Ela segue a busca, a situação e os
     /// filtros de coluna, e termina no fim do período escolhido
     /// ([`sessoes::ultimos_dias`]). A rosca é do recorte, como o cartão.
-    fn graficos(
-        &self,
-        todas: &[SessaoFotografica],
-        soma: &sessoes::Soma,
-        agora: i64,
+    ///
+    /// ⚠️ **Linha reta entre os dias, e não a curva `natural`**: a spline
+    /// passava abaixo de zero entre um dia de venda e um dia vazio, desenhando
+    /// venda negativa que não houve. O site usa `monotone`, que não ultrapassa.
+    fn dialogo_dos_graficos(
+        &mut self,
+        _window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        use gpui_kit::component::chart::{AreaChart, PieChart};
+    ) -> Option<gpui_kit::AnyElement> {
+        use gpui_kit::component::chart::{AreaChart, BarChart, PieChart};
+
+        let agora = agora_em_segundos();
+        let todas_as_sessoes = self.para_o_core();
+        let todas = todas_as_sessoes.as_slice();
+        let visiveis = self.visiveis(todas, agora, cx);
+        let soma = sessoes::somar_totais(&visiveis);
+        let entradas = sessoes::agrupar_por_periodo(&visiveis);
+        let filtrando = self.filtrando(cx);
 
         let tema = cx.theme();
         let (borda, apagado) = (tema.border, tema.muted_foreground);
-        let cor_do_caixa = tema.chart_2;
+        // 🎨 Cores fixas do tema, e não o `chart_1..5`: no tema claro o
+        // `chart_1` sai quase branco, e a fatia do dinheiro e as barras do
+        // balcão sumiam no fundo (visto na conferência de 2026-09-26).
+        let cor_do_caixa = tema.blue;
         let (_, _, cor_do_pos_venda) = crate::tema::cores::destaque_esmeralda();
+        // Na ordem de `FORMAS_DE_PAGAMENTO`: dinheiro, PIX, débito, crédito,
+        // voucher, parceiro, transferência, outro.
         let paleta = [
-            tema.chart_1,
-            tema.chart_2,
-            tema.chart_3,
-            tema.chart_4,
-            tema.chart_5,
+            tema.green,
             tema.cyan,
+            tema.blue,
             tema.magenta,
+            tema.yellow,
+            tema.cyan_light,
+            tema.magenta_light,
             tema.muted_foreground,
         ];
 
-        let cabecalho = div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .child(div().text_xs().text_color(apagado).child("GRÁFICOS"))
-            .child(
-                crate::estilo::botao_fantasma("sessoes-graficos-alternar", cx)
-                    .text_xs()
-                    .text_color(apagado)
-                    .child(if self.graficos_visiveis {
-                        "Recolher"
-                    } else {
-                        "Mostrar"
-                    })
-                    .on_click(cx.listener(|tela, _ev, _window, cx| tela.alternar_graficos(cx))),
-            );
-        if !self.graficos_visiveis {
-            return div().flex().flex_col().child(cabecalho);
-        }
+        let fechar = cx.listener(|tela, _ev, _window, cx| tela.fechar_graficos(cx));
+        let cabecalho =
+            crate::dialogo::cabecalho_com_x("sessoes-graficos-fechar", "Gráficos", fechar, cx);
+        let descricao = format!(
+            "O caixa, o pós-venda e as formas de pagamento{}. A área olha os últimos {} dias.",
+            if filtrando {
+                " — das sessões deste recorte"
+            } else {
+                ""
+            },
+            sessoes::DIAS_DO_GRAFICO
+        );
 
         // A janela: a busca, a situação e os filtros de coluna, sem o período.
         let criterio = Criterio {
@@ -2511,12 +2546,12 @@ impl Sessoes {
                     .y(|d: &sessoes::DiaDoGrafico| d.caixa as f64 / 100.)
                     .stroke(cor_do_caixa)
                     .fill(cor_do_caixa.opacity(0.25))
-                    .natural()
+                    .linear()
                     .name("Caixa (PDV)")
                     .y(|d: &sessoes::DiaDoGrafico| d.pos_venda as f64 / 100.)
                     .stroke(cor_do_pos_venda)
                     .fill(cor_do_pos_venda.opacity(0.25))
-                    .natural()
+                    .linear()
                     .name("Pós-venda")
                     .tick_margin(7),
             ),
@@ -2529,8 +2564,15 @@ impl Sessoes {
                 .child(legenda(cor_do_pos_venda, "Pós-venda".into())),
         );
 
+        // 🍩 **Fatia só para forma com saldo positivo.** O líquido por forma
+        // pode ser negativo — o estorno devolvido por PIX de uma venda paga no
+        // crédito tira do PIX o que nunca entrou por ele. A legenda mostra esse
+        // valor, em vermelho; fatia negativa não existe (a rosca dizia "108%" e
+        // "−8%"). As porcentagens são sobre as fatias. O site faz o mesmo.
         let formas = soma.caixa.por_forma.clone();
-        let total: i64 = formas.iter().map(|(_, v)| *v).sum();
+        let fatias: Vec<(String, i64)> = formas.iter().filter(|(_, v)| *v > 0).cloned().collect();
+        let total: i64 = fatias.iter().map(|(_, v)| *v).sum();
+        let perigo = tema.danger;
         let cor_da_forma = move |chave: &str| {
             let i = sessoes::FORMAS_DE_PAGAMENTO
                 .iter()
@@ -2541,7 +2583,7 @@ impl Sessoes {
         let rosca = quadro("FORMAS DE PAGAMENTO — NO RECORTE".into())
             .w(px(360.))
             .flex_none()
-            .child(if formas.is_empty() || total <= 0 {
+            .child(if fatias.is_empty() || total <= 0 {
                 div()
                     .h(px(150.))
                     .flex()
@@ -2558,7 +2600,7 @@ impl Sessoes {
                     .gap(px(12.))
                     .child(
                         div().size(px(150.)).flex_none().child(
-                            PieChart::new(formas.clone())
+                            PieChart::new(fatias)
                                 .id("sessoes-grafico-formas")
                                 .name("Recebido")
                                 .value(|(_, v): &(String, i64)| *v as f32 / 100.)
@@ -2570,7 +2612,18 @@ impl Sessoes {
                     )
                     .child(div().flex().flex_col().gap(px(4.)).flex_1().children(
                         formas.iter().map(|(chave, valor)| {
-                            let parte = (*valor as f64 / total as f64 * 100.).round();
+                            let lado = if *valor > 0 {
+                                let parte = (*valor as f64 / total as f64 * 100.).round();
+                                div()
+                                    .text_xs()
+                                    .text_color(apagado)
+                                    .child(format!("{parte:.0}%"))
+                            } else {
+                                div()
+                                    .text_xs()
+                                    .text_color(perigo)
+                                    .child(dinheiro::formatar(*valor))
+                            };
                             div()
                                 .flex()
                                 .justify_between()
@@ -2579,23 +2632,98 @@ impl Sessoes {
                                     cor_da_forma(chave),
                                     sessoes::rotulo_da_forma(chave).to_string(),
                                 ))
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(apagado)
-                                        .child(format!("{parte:.0}%")),
-                                )
+                                .child(lado)
                         }),
                     ))
                     .into_any_element()
             });
 
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(6.))
-            .child(cabecalho)
-            .child(div().flex().gap(px(12.)).child(area).child(rosca))
+        // 📊 Balcão e pós-venda por período, empilhados como no site. O
+        // `BarChart` do gpui-kit tem uma série só: a barra é o total, pintada
+        // de balcão até a fração dele e de pós-venda daí para cima — um corte
+        // seco no preenchimento, com as duas cores no mesmo ponto.
+        let cor_do_balcao = cor_do_caixa;
+        let total_entrado: i64 = entradas
+            .periodos
+            .iter()
+            .map(|p| p.balcao + p.pos_venda)
+            .sum();
+        let do_pos_venda: i64 = entradas.periodos.iter().map(|p| p.pos_venda).sum();
+        let fatia = if total_entrado > 0 {
+            (do_pos_venda as f64 / total_entrado as f64 * 100.).round()
+        } else {
+            0.
+        };
+        let por_mes = entradas.passo == sessoes::Passo::Mes;
+        let barras = quadro(format!(
+            "ENTRADA POR {} — BALCÃO E PÓS-VENDA",
+            if por_mes { "MÊS" } else { "DIA" }
+        ))
+        .child(
+            div()
+                .text_xs()
+                .text_color(apagado)
+                .child(format!(
+                    "{fatia:.0}% veio do pós-venda. Pelo dia em que a sessão foi criada: uma foto comprada hoje entra no dia da sessão dela."
+                )),
+        )
+        .child(if entradas.periodos.is_empty() {
+            div()
+                .h(px(200.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_xs()
+                .text_color(apagado)
+                .child("Nenhuma sessão no recorte — sem período para desenhar.")
+                .into_any_element()
+        } else {
+            div()
+                .h(px(200.))
+                .child(
+                    BarChart::new(entradas.periodos)
+                        .id("sessoes-grafico-entradas")
+                        .name("Entrada")
+                        .band(move |p: &sessoes::Periodo| {
+                            if p.chave.len() == 7 {
+                                mes_curto(&p.chave)
+                            } else {
+                                sessoes::dia_curto(&p.chave)
+                            }
+                        })
+                        .value(|p: &sessoes::Periodo| (p.balcao + p.pos_venda) as f64 / 100.)
+                        .fill(move |p: &sessoes::Periodo, _, _, _| {
+                            let total = (p.balcao + p.pos_venda).max(1) as f32;
+                            let corte = p.balcao.max(0) as f32 / total;
+                            gpui_kit::linear_gradient(
+                                0.,
+                                gpui_kit::linear_color_stop(cor_do_balcao, corte),
+                                gpui_kit::linear_color_stop(cor_do_pos_venda, corte),
+                            )
+                        })
+                        .tick_margin(if por_mes { 1 } else { 3 }),
+                )
+                .into_any_element()
+        })
+        .child(
+            div()
+                .flex()
+                .gap(px(16.))
+                .child(legenda(cor_do_balcao, "Balcão".into()))
+                .child(legenda(cor_do_pos_venda, "Pós-venda".into())),
+        );
+
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(12.))
+                .child(cabecalho)
+                .child(div().text_sm().text_color(apagado).child(descricao))
+                .child(div().flex().gap(px(12.)).child(area).child(rosca))
+                .child(barras)
+                .into_any_element(),
+        )
     }
 
     /// 💳 Abre ou fecha as formas de pagamento no cartão do caixa.
@@ -2615,6 +2743,8 @@ impl Sessoes {
         use gpui_kit::component::Icon;
         let tema = cx.theme();
         let (borda, apagado, acento) = (tema.border, tema.muted_foreground, tema.accent);
+        // Forma com saldo negativo: saiu por ela mais do que entrou (estorno).
+        let perigo = tema.danger;
         let (fundo_bom, borda_boa, texto_bom) = crate::tema::cores::destaque_esmeralda();
         let rotulo_do_cartao = move |rotulo: String| {
             div()
@@ -2678,7 +2808,11 @@ impl Sessoes {
                     .child(div().text_color(apagado).child(SharedString::from(
                         sessoes::rotulo_da_forma(forma).to_string(),
                     )))
-                    .child(div().child(dinheiro::formatar(*valor)))
+                    .child(
+                        div()
+                            .when(*valor < 0, |d| d.text_color(perigo))
+                            .child(dinheiro::formatar(*valor)),
+                    )
             }));
         let cartao_do_caixa = div()
             .id("sessoes-cartao-do-caixa")
@@ -3343,6 +3477,21 @@ fn celula_do_caixa(
     }
 }
 
+/// `"2026-09"` → `"set/26"`, o rótulo do mês no eixo (o mesmo do site).
+fn mes_curto(chave: &str) -> String {
+    const NOMES: [&str; 12] = [
+        "jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez",
+    ];
+    let (ano, mes) = chave.split_once('-').unwrap_or((chave, ""));
+    let nome = mes
+        .parse::<usize>()
+        .ok()
+        .and_then(|m| NOMES.get(m.wrapping_sub(1)))
+        .copied()
+        .unwrap_or(mes);
+    format!("{nome}/{}", ano.get(2..).unwrap_or(ano))
+}
+
 /// Agora, em segundos desde a época — o que a conta da situação compara.
 fn agora_em_segundos() -> i64 {
     std::time::SystemTime::now()
@@ -3468,6 +3617,50 @@ mod testes {
     /// "Filtros", clicado de verdade, liga a linha; texto acha sem acento,
     /// número pergunta "quanto" com o operador escolhido, e o "Limpar" da barra
     /// apaga os campos junto com o resto.
+    /// 📈 Os gráficos moram num diálogo: o botão da barra abre, o X fecha, e
+    /// a página não os carrega. 💳 O cartão do caixa abre as formas no clique.
+    #[gpui_kit::test]
+    fn os_graficos_abrem_num_dialogo_e_o_caixa_abre_as_formas(cx: &mut TestAppContext) {
+        let publicador = Arc::new(PublicadorDeMentira {
+            galerias: Mutex::new(vec![galeria("g1", "Ensaio do João", None)]),
+            ..Default::default()
+        });
+        let janela = janela(cx, publicador);
+        com_sessao(cx, &janela);
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        visual.run_until_parked();
+        assert!(
+            visual.debug_bounds("sessoes-graficos-fechar").is_none(),
+            "a página nasce sem os gráficos"
+        );
+
+        let botao = visual
+            .debug_bounds("sessoes-graficos")
+            .expect("o botão Gráficos está na barra");
+        visual.simulate_click(botao.center(), gpui_kit::Modifiers::none());
+        visual.run_until_parked();
+        let fechar = visual
+            .debug_bounds("sessoes-graficos-fechar")
+            .expect("o diálogo dos gráficos abriu");
+        visual.simulate_click(fechar.center(), gpui_kit::Modifiers::none());
+        visual.run_until_parked();
+        assert!(
+            visual.debug_bounds("sessoes-graficos-fechar").is_none(),
+            "o X fecha o diálogo"
+        );
+
+        let cartao = visual
+            .debug_bounds("sessoes-cartao-do-caixa")
+            .expect("o cartão do caixa está na página");
+        visual.simulate_click(cartao.center(), gpui_kit::Modifiers::none());
+        visual.run_until_parked();
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert!(tela.formas_abertas, "o clique abre as formas de pagamento");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
     #[gpui_kit::test]
     fn os_filtros_de_coluna_recortam_a_lista_como_no_site(cx: &mut TestAppContext) {
         use biblioteca_core::filtro_de_coluna::{Coluna, Operador};

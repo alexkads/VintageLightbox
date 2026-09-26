@@ -229,6 +229,22 @@ impl Aplicativo {
             Passo::Filtros => self
                 .sessoes
                 .update(cx, |tela, cx| tela.alternar_filtros(cx)),
+            Passo::Graficos => self.sessoes.update(cx, |tela, cx| tela.abrir_graficos(cx)),
+            Passo::FormasDoCaixa => self.sessoes.update(cx, |tela, cx| tela.alternar_formas(cx)),
+            Passo::Buscar(texto) => self
+                .sessoes
+                .update(cx, |tela, cx| tela.buscar(texto, window, cx)),
+            Passo::Periodo(faixa) => {
+                let faixa =
+                    faixa
+                        .as_ref()
+                        .map(|(de, ate)| biblioteca_core::sessoes::FaixaDeDatas {
+                            de: de.clone(),
+                            ate: ate.clone(),
+                        });
+                self.sessoes
+                    .update(cx, |tela, cx| tela.escolher_periodo_para_teste(faixa, cx));
+            }
             Passo::MenuDoUsuario => self.alternar_menu_da_conta(cx),
             Passo::Tema(nome) => match crate::tema::Escolha::do_nome(nome) {
                 Some(escolha) => self.escolher_tema(escolha, window, cx),

@@ -53,6 +53,14 @@ pub enum Passo {
     Menu,
     /// Liga ou desliga a linha de filtros por coluna da lista de sessões.
     Filtros,
+    /// `graficos` — abre o diálogo dos gráficos da lista de sessões.
+    Graficos,
+    /// `formas_do_caixa` — abre ou fecha as formas no cartão do caixa.
+    FormasDoCaixa,
+    /// `buscar <texto>` — escreve na busca da lista de sessões.
+    Buscar(String),
+    /// `periodo <de> <ate>` (ou `periodo tudo`) — o período da lista.
+    Periodo(Option<(String, String)>),
     /// Abre o modal "Dados do cliente" da sessão aberta.
     DadosDoCliente,
     /// `negociar` — o "Negociação…" do painel na foto em foco. Depois,
@@ -178,6 +186,13 @@ pub fn ler_roteiro(texto: &str) -> Result<Vec<Passo>, String> {
             "conferir_agenda" => Passo::ConferirAgenda(numero(0)? as usize),
             "menu" => Passo::Menu,
             "filtros" => Passo::Filtros,
+            "graficos" => Passo::Graficos,
+            "formas_do_caixa" => Passo::FormasDoCaixa,
+            "buscar" => Passo::Buscar(argumentos.join(" ")),
+            "periodo" => match argumentos.as_slice() {
+                [de, ate] => Passo::Periodo(Some((de.to_string(), ate.to_string()))),
+                _ => Passo::Periodo(None),
+            },
             "dados_do_cliente" => Passo::DadosDoCliente,
             "negociar" => Passo::Negociar(argumentos.join(" ")),
             "menu_usuario" => Passo::MenuDoUsuario,
