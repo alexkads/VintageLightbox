@@ -241,3 +241,43 @@ pub fn desenhar_conteudo<T: 'static>(
             .into_any_element(),
     )
 }
+
+/// O miolo do `useConfirmacao` do site: `AlertDialogTitle` (`text-base
+/// font-medium`) e `AlertDialogDescription` (`text-sm`, apagado).
+pub fn miolo_da_pergunta(
+    id: &'static str,
+    titulo: impl Into<SharedString>,
+    descricao: impl Into<SharedString>,
+    cx: &gpui_kit::App,
+) -> AnyElement {
+    gpui_kit::component::v_flex()
+        .id(id)
+        .gap(px(6.))
+        .child(
+            gpui_kit::div()
+                .text_size(px(16.))
+                .font_weight(gpui_kit::FontWeight::MEDIUM)
+                .child(titulo.into()),
+        )
+        .child(
+            gpui_kit::div()
+                .text_sm()
+                .text_color(cx.theme().muted_foreground)
+                .child(descricao.into()),
+        )
+        .into_any_element()
+}
+
+/// A faixa do `AlertDialogFooter` (`bg-muted/50 border-t`, de ponta a ponta,
+/// com o canto de baixo da caixa): os botões vão dentro, à direita. Vai no
+/// `rodape` de [`desenhar_conteudo`].
+pub fn rodape_da_pergunta(cx: &gpui_kit::App) -> gpui_kit::Div {
+    let tema = cx.theme();
+    crate::estilo::rodape_do_dialogo()
+        .w_full()
+        .p(px(16.))
+        .border_t_1()
+        .border_color(tema.border)
+        .bg(tema.muted.opacity(0.5))
+        .rounded_b(px(14.))
+}

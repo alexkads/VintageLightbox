@@ -10,7 +10,7 @@ use gpui_kit::component::select::Select;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
 use gpui_kit::{
     div, img, prelude::*, px, relative, AnyElement, App, Context, Div, Entity, FontWeight, Hsla,
-    KeyDownEvent, RenderImage, SharedString, Stateful, Window,
+    KeyDownEvent, Pixels, RenderImage, SharedString, Stateful, Window,
 };
 
 use super::associacoes::{self as assoc};
@@ -19,7 +19,6 @@ use super::receita::Grupo;
 use super::tela::{Confirmacao, Fase, ItemDaBusca, NovaSessao, PedidoDaNova, TipoDeBusca};
 use crate::estilo;
 use crate::recursos::Icone;
-use crate::tema;
 
 const ESMERALDA: u32 = 0x059669;
 const VERMELHO: u32 = 0xdc2626;
@@ -162,6 +161,32 @@ impl Render for NovaSessao {
         {
             self.acompanhar(window, cx);
         }
+        // Os diálogos são o `Dialog` do gpui-kit (`crate::dialogo`): véu,
+        // caixa e `Esc` são dele.
+        let confirmacao = self.confirmacao.and_then(|qual| {
+            let (miolo, rodape) = self.dialogo(qual, cx);
+            crate::dialogo::desenhar_conteudo(
+                Some(miolo),
+                Some(rodape),
+                crate::dialogo::Jeito::alerta(448.),
+                |tela, _, cx| tela.cancelar_confirmacao(cx),
+                window,
+                cx,
+            )
+        });
+        let altura = window.viewport_size().height;
+        let miolo_da_busca = self
+            .busca
+            .esta_aberto()
+            .then(|| self.modal_de_busca(altura, cx).into_any_element());
+        let busca = crate::dialogo::desenhar_conteudo(
+            miolo_da_busca,
+            None,
+            crate::dialogo::Jeito::dialogo(768.),
+            |tela, window, cx| tela.fechar_busca(window, cx),
+            window,
+            cx,
+        );
         let tema = cx.theme();
         let (fundo, borda) = (tema.background, tema.border);
 
@@ -220,10 +245,8 @@ impl Render for NovaSessao {
                 self.origem
                     .update(cx, |origem, cx| origem.dialogo(window, cx)),
             )
-            .when_some(self.confirmacao, |t, qual| t.child(self.dialogo(qual, cx)))
-            .when(self.busca.esta_aberto(), |t| {
-                t.child(self.modal_de_busca(cx))
-            })
+            .children(confirmacao)
+            .children(busca)
             .when_some(self.aviso.as_ref(), |t, aviso| {
                 t.child(
                     div()
@@ -1932,24 +1955,9 @@ impl NovaSessao {
             .on_mouse_down_out(cx.listener(|tela, _, _, cx| tela.destacar(false, cx)))
     }
 
-    fn veu(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        div()
-            .id("nova-veu")
-            .absolute()
-            .inset_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(tema::cores::veu())
-            .occlude()
-            .on_mouse_down(
-                gpui_kit::MouseButton::Left,
-                cx.listener(|tela, _, window, cx| tela.fechar_busca(window, cx)),
-            )
-    }
-
-    fn dialogo(&self, qual: Confirmacao, cx: &mut Context<Self>) -> impl IntoElement {
-        let tema = cx.theme().clone();
+    /// A pergunta do `useConfirmacao` do site (`assistente.tsx`): o miolo e o
+    /// rodapé cinza do `AlertDialogFooter`.
+    fn dialogo(&self, qual: Confirmacao, cx: &mut Context<Self>) -> (AnyElement, AnyElement) {
         let fotos = self.quantas_fotos();
         let (titulo, descricao) = match qual {
             Confirmacao::Descartar => {
@@ -2002,57 +2010,27 @@ impl NovaSessao {
             Confirmacao::ApagarOrfas => "Apagar",
             _ => "Descartar",
         };
-        self.veu(cx).child(
-            v_flex()
-                .w(px(460.))
-                .p(px(24.))
-                .gap(px(12.))
-                .rounded(px(12.))
-                .border_1()
-                .border_color(tema.border)
-                .bg(tema.background)
-                .shadow_lg()
-                .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
-                    cx.stop_propagation()
-                })
-                .child(
-                    div()
-                        .text_lg()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(titulo),
-                )
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(tema.muted_foreground)
-                        .child(descricao),
-                )
-                .child(
-                    h_flex()
-                        .mt(px(8.))
-                        .justify_end()
-                        .gap(px(8.))
-                        .child(
-                            estilo::botao_contorno("nova-confirmacao-cancelar", cx)
-                                .child("Cancelar")
-                                .on_click(
-                                    cx.listener(|tela, _, _, cx| tela.cancelar_confirmacao(cx)),
-                                ),
-                        )
-                        .child(
-                            estilo::botao_perigo("nova-confirmacao-ok", cx)
-                                .child(rotulo)
-                                .on_click(
-                                    cx.listener(|tela, _, window, cx| tela.confirmar(window, cx)),
-                                ),
-                        ),
-                ),
-        )
+        let miolo = crate::dialogo::miolo_da_pergunta("nova-confirmacao", titulo, descricao, cx);
+        let rodape = crate::dialogo::rodape_da_pergunta(cx)
+            .child(
+                estilo::botao_contorno("nova-confirmacao-cancelar", cx)
+                    .child("Cancelar")
+                    .on_click(cx.listener(|tela, _, _, cx| tela.cancelar_confirmacao(cx))),
+            )
+            .child(
+                estilo::botao_perigo("nova-confirmacao-ok", cx)
+                    .child(rotulo)
+                    .on_click(cx.listener(|tela, _, window, cx| tela.confirmar(window, cx))),
+            )
+            .into_any_element();
+        (miolo, rodape)
     }
 
-    fn modal_de_busca(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// O miolo do `modal-de-busca.tsx`: véu, caixa, X e `Esc` são do `Dialog`
+    /// do gpui-kit (no `render`).
+    fn modal_de_busca(&self, altura: Pixels, cx: &mut Context<Self>) -> Div {
         let Some(busca) = self.busca.aberto() else {
-            return div().id("nova-sem-busca");
+            return div();
         };
         let tema = cx.theme().clone();
         let (titulo, descricao, colunas): (&str, &str, [&str; 4]) = match busca.tipo {
@@ -2124,100 +2102,78 @@ impl NovaSessao {
             })
             .collect();
 
-        self.veu(cx).child(
-            v_flex()
-                .w(px(760.))
-                .max_h(relative(0.85))
-                .p(px(24.))
-                .gap(px(12.))
-                .rounded(px(12.))
-                .border_1()
-                .border_color(tema.border)
-                .bg(tema.background)
-                .shadow_lg()
-                .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
-                    cx.stop_propagation()
-                })
-                .child(
-                    h_flex()
-                        .child(
-                            div()
-                                .flex_1()
-                                .text_lg()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .child(titulo),
-                        )
-                        .child(
-                            estilo::botao_fantasma("nova-fechar-busca", cx)
-                                .child(Icon::new(Icone::X).size(px(16.)))
-                                .on_click(
-                                    cx.listener(|tela, _, window, cx| {
-                                        tela.fechar_busca(window, cx)
-                                    }),
-                                ),
-                        ),
-                )
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(tema.muted_foreground)
-                        .child(descricao),
-                )
-                .child(entrada(&busca.campo).prefix(Icon::new(Icone::Search).size(px(16.))))
-                .child(
-                    v_flex()
-                        .id("nova-resultados")
-                        .flex_1()
-                        .min_h(px(160.))
-                        .overflow_y_scroll()
-                        .rounded(px(8.))
-                        .border_1()
-                        .border_color(tema.border)
-                        .child(
-                            h_flex()
-                                .gap(px(12.))
-                                .px(px(12.))
-                                .py(px(8.))
-                                .border_b_1()
-                                .border_color(tema.border)
-                                .bg(tema.muted)
-                                .children(colunas.iter().map(|c| {
-                                    div()
-                                        .flex_1()
-                                        .text_xs()
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(tema.muted_foreground)
-                                        .child(*c)
-                                })),
-                        )
-                        .map(|lista| {
-                            if busca.carregando && busca.itens.is_empty() {
-                                lista.child(div().p(px(16.)).text_sm().child("Carregando…"))
-                            } else if let Some(erro) = &busca.erro {
-                                lista.child(
-                                    div()
-                                        .p(px(16.))
-                                        .text_sm()
-                                        .text_color(cor(VERMELHO))
-                                        .child(erro.clone()),
-                                )
-                            } else if busca.itens.is_empty() {
-                                lista.child(
-                                    div()
-                                        .p(px(16.))
-                                        .text_sm()
-                                        .text_color(tema.muted_foreground)
-                                        .child(vazio),
-                                )
-                            } else {
-                                lista.children(linhas)
-                            }
-                        }),
-                )
-                .when(busca.tipo == TipoDeBusca::Parceiro, |c| {
-                    c.child(self.cadastro_de_parceiro(true, cx))
-                }),
-        )
+        // `max-h-[calc(100dvh-2rem)]`, menos o respiro de 16 da caixa: a lista
+        // é quem encolhe, e o campo de busca não sai da vista.
+        v_flex()
+            .max_h(altura - px(64.))
+            .gap(px(12.))
+            .child(
+                div()
+                    .pr(px(24.))
+                    .text_size(px(16.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(titulo),
+            )
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(tema.muted_foreground)
+                    .child(descricao),
+            )
+            .child(entrada(&busca.campo).prefix(Icon::new(Icone::Search).size(px(16.))))
+            .child(
+                v_flex()
+                    .id("nova-resultados")
+                    .flex_1()
+                    .min_h(px(160.))
+                    .overflow_y_scroll()
+                    .rounded(px(8.))
+                    .border_1()
+                    .border_color(tema.border)
+                    .child(
+                        h_flex()
+                            .gap(px(12.))
+                            .px(px(12.))
+                            .py(px(8.))
+                            .border_b_1()
+                            .border_color(tema.border)
+                            .bg(tema.muted)
+                            .children(colunas.iter().map(|c| {
+                                div()
+                                    .flex_1()
+                                    .text_xs()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(tema.muted_foreground)
+                                    .child(*c)
+                            })),
+                    )
+                    .map(|lista| {
+                        if busca.carregando && busca.itens.is_empty() {
+                            lista.child(div().p(px(16.)).text_sm().child("Carregando…"))
+                        } else if let Some(erro) = &busca.erro {
+                            lista.child(
+                                div()
+                                    .p(px(16.))
+                                    .text_sm()
+                                    .text_color(cor(VERMELHO))
+                                    .child(erro.clone()),
+                            )
+                        } else if busca.itens.is_empty() {
+                            lista.child(
+                                div()
+                                    .p(px(16.))
+                                    .text_sm()
+                                    .text_color(tema.muted_foreground)
+                                    .child(vazio),
+                            )
+                        } else {
+                            lista.children(linhas)
+                        }
+                    }),
+            )
+            .when(busca.tipo == TipoDeBusca::Parceiro, |c| {
+                c.child(self.cadastro_de_parceiro(true, cx))
+            })
     }
 }
 

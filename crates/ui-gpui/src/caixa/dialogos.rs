@@ -3064,28 +3064,13 @@ impl Caixa {
         if !form.confirmando {
             return None;
         }
-        let tema = cx.theme();
-        let (apagado, borda, realce) = (tema.muted_foreground, tema.border, tema.muted);
-        let miolo = v_flex()
-            .id("caixa-negociacao-pergunta")
-            .gap(px(6.))
-            .child(
-                div()
-                    .text_size(px(16.))
-                    .font_weight(FontWeight::MEDIUM)
-                    .child("Remover a negociação?"),
-            )
-            .child(div().text_sm().text_color(apagado).child(
-                "O registro do que foi combinado no balcão — tipo, valor e motivo — é apagado.",
-            ))
-            .into_any_element();
-        let rodape = rodape()
-            .w_full()
-            .p(px(16.))
-            .border_t_1()
-            .border_color(borda)
-            .bg(realce.opacity(0.5))
-            .rounded_b(px(14.))
+        let miolo = crate::dialogo::miolo_da_pergunta(
+            "caixa-negociacao-pergunta",
+            "Remover a negociação?",
+            "O registro do que foi combinado no balcão — tipo, valor e motivo — é apagado.",
+            cx,
+        );
+        let rodape = crate::dialogo::rodape_da_pergunta(cx)
             .child(
                 estilo::botao_contorno("caixa-negociacao-nao-remover", cx)
                     .child("Cancelar")

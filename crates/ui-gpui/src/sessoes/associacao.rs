@@ -26,8 +26,8 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
 use gpui_kit::{
-    div, prelude::*, px, relative, AnyElement, Context, Div, Entity, EventEmitter, FontWeight,
-    Hsla, SharedString, Subscription, Task, Window,
+    div, prelude::*, px, AnyElement, Context, Div, Entity, EventEmitter, FontWeight, Hsla, Pixels,
+    SharedString, Subscription, Task, Window,
 };
 
 use super::nova::associacoes::{
@@ -39,7 +39,6 @@ use crate::estilo;
 use crate::modal::Modal;
 use crate::pos_venda::porta::{PedidoJson, Publicador, Recado};
 use crate::recursos::Icone;
-use crate::tema;
 
 const VERMELHO: u32 = 0xdc2626;
 const ESMERALDA: u32 = 0x059669;
@@ -1040,7 +1039,9 @@ impl Associador {
             .into_any_element()
     }
 
-    fn modal_de_busca(&self, busca: &Busca, cx: &mut Context<Self>) -> Div {
+    /// O miolo do `modal-de-busca.tsx`: véu, caixa, X e `Esc` são do `Dialog`
+    /// do gpui-kit (`crate::dialogo`, no `render`).
+    fn modal_de_busca(&self, busca: &Busca, altura: Pixels, cx: &mut Context<Self>) -> Div {
         let tema = cx.theme().clone();
         let (titulo, descricao, colunas): (&str, &str, [&str; 4]) = match busca.tipo {
             TipoDeBusca::Agendamento => (
@@ -1111,123 +1112,82 @@ impl Associador {
             })
             .collect();
 
-        div()
-            .absolute()
-            .inset_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(tema::cores::veu())
-            .occlude()
-            .on_mouse_down(
-                gpui_kit::MouseButton::Left,
-                cx.listener(|tela, _, window, cx| tela.fechar_busca(window, cx)),
+        // `max-h-[calc(100dvh-2rem)]`, menos o respiro de 16 da caixa: a lista
+        // é quem encolhe, e o campo de busca não sai da vista.
+        v_flex()
+            .max_h(altura - px(64.))
+            .gap(px(12.))
+            .child(
+                div()
+                    .pr(px(24.))
+                    .text_size(px(16.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(titulo),
             )
-            .on_key_down(
-                cx.listener(|tela, evento: &gpui_kit::KeyDownEvent, window, cx| {
-                    if evento.keystroke.key == "escape" {
-                        cx.stop_propagation();
-                        tela.fechar_busca(window, cx);
-                    }
-                }),
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(tema.muted_foreground)
+                    .child(descricao),
+            )
+            .child(
+                Input::new(&busca.campo)
+                    .w_full()
+                    .prefix(Icon::new(Icone::Search).size(px(16.))),
             )
             .child(
                 v_flex()
-                    .w(px(760.))
-                    .max_w(relative(0.95))
-                    .max_h(relative(0.85))
-                    .p(px(24.))
-                    .gap(px(12.))
-                    .rounded(px(12.))
+                    .id(self.id("resultados"))
+                    .flex_1()
+                    .min_h(px(160.))
+                    .overflow_y_scroll()
+                    .rounded(px(8.))
                     .border_1()
                     .border_color(tema.border)
-                    .bg(tema.background)
-                    .shadow_lg()
-                    .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
-                        cx.stop_propagation()
-                    })
                     .child(
                         h_flex()
-                            .child(
+                            .gap(px(12.))
+                            .px(px(12.))
+                            .py(px(8.))
+                            .border_b_1()
+                            .border_color(tema.border)
+                            .bg(tema.muted)
+                            .children(colunas.iter().map(|c| {
                                 div()
                                     .flex_1()
-                                    .text_lg()
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child(titulo),
+                                    .text_xs()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(tema.muted_foreground)
+                                    .child(*c)
+                            })),
+                    )
+                    .map(|lista| {
+                        if busca.carregando && busca.itens.is_empty() {
+                            lista.child(div().p(px(16.)).text_sm().child("Carregando…"))
+                        } else if let Some(erro) = &busca.erro {
+                            lista.child(
+                                div()
+                                    .p(px(16.))
+                                    .text_sm()
+                                    .text_color(cor(VERMELHO))
+                                    .child(erro.clone()),
                             )
-                            .child(
-                                estilo::botao_fantasma(self.id("fechar-busca"), cx)
-                                    .child(Icon::new(Icone::X).size(px(16.)))
-                                    .on_click(cx.listener(|tela, _, window, cx| {
-                                        tela.fechar_busca(window, cx)
-                                    })),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(tema.muted_foreground)
-                            .child(descricao),
-                    )
-                    .child(
-                        Input::new(&busca.campo)
-                            .w_full()
-                            .prefix(Icon::new(Icone::Search).size(px(16.))),
-                    )
-                    .child(
-                        v_flex()
-                            .id(self.id("resultados"))
-                            .flex_1()
-                            .min_h(px(160.))
-                            .overflow_y_scroll()
-                            .rounded(px(8.))
-                            .border_1()
-                            .border_color(tema.border)
-                            .child(
-                                h_flex()
-                                    .gap(px(12.))
-                                    .px(px(12.))
-                                    .py(px(8.))
-                                    .border_b_1()
-                                    .border_color(tema.border)
-                                    .bg(tema.muted)
-                                    .children(colunas.iter().map(|c| {
-                                        div()
-                                            .flex_1()
-                                            .text_xs()
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .text_color(tema.muted_foreground)
-                                            .child(*c)
-                                    })),
+                        } else if busca.itens.is_empty() {
+                            lista.child(
+                                div()
+                                    .p(px(16.))
+                                    .text_sm()
+                                    .text_color(tema.muted_foreground)
+                                    .child(vazio),
                             )
-                            .map(|lista| {
-                                if busca.carregando && busca.itens.is_empty() {
-                                    lista.child(div().p(px(16.)).text_sm().child("Carregando…"))
-                                } else if let Some(erro) = &busca.erro {
-                                    lista.child(
-                                        div()
-                                            .p(px(16.))
-                                            .text_sm()
-                                            .text_color(cor(VERMELHO))
-                                            .child(erro.clone()),
-                                    )
-                                } else if busca.itens.is_empty() {
-                                    lista.child(
-                                        div()
-                                            .p(px(16.))
-                                            .text_sm()
-                                            .text_color(tema.muted_foreground)
-                                            .child(vazio),
-                                    )
-                                } else {
-                                    lista.children(linhas)
-                                }
-                            }),
-                    )
-                    .when(busca.tipo == TipoDeBusca::Parceiro, |c| {
-                        c.child(self.cadastro_de_parceiro(true, cx))
+                        } else {
+                            lista.children(linhas)
+                        }
                     }),
             )
+            .when(busca.tipo == TipoDeBusca::Parceiro, |c| {
+                c.child(self.cadastro_de_parceiro(true, cx))
+            })
     }
 }
 
@@ -1236,28 +1196,24 @@ impl Render for Associador {
     /// o componente, no lugar dele ([`Associador::campo`]).
     ///
     /// 🪟 **Por cima da janela inteira**, e não só de quem o contém: o
-    /// associador vive dentro da gaveta do atendimento, que desde 2026-09-26 é
-    /// o `Sheet` do gpui-kit — e ali o `inset_0` cobriria só a gaveta, com a
-    /// busca de 760 px espremida nos 576 dela. `deferred` + `anchored` no canto
-    /// da janela devolvem o modal ao tamanho dela. (Nada acima dele é
-    /// `deferred`: o `Sheet` é desenhado na camada da raiz.)
+    /// associador vive dentro da gaveta do atendimento (o `Sheet` do
+    /// gpui-kit), e a busca de 768 px não cabe nos 576 dela. O `Dialog` do kit
+    /// se ancora no canto da janela, esteja onde estiver na árvore.
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        match self.busca.aberto() {
-            Some(busca) => {
-                let tamanho = window.viewport_size();
-                gpui_kit::deferred(
-                    gpui_kit::anchored()
-                        .position(gpui_kit::point(px(0.), px(0.)))
-                        .child(
-                            self.modal_de_busca(busca, cx)
-                                .w(tamanho.width)
-                                .h(tamanho.height),
-                        ),
-                )
-                .into_any_element()
-            }
-            None => div().into_any_element(),
-        }
+        let altura = window.viewport_size().height;
+        let miolo = self
+            .busca
+            .aberto()
+            .map(|busca| self.modal_de_busca(busca, altura, cx).into_any_element());
+        crate::dialogo::desenhar_conteudo(
+            miolo,
+            None,
+            crate::dialogo::Jeito::dialogo(768.),
+            |tela, window, cx| tela.fechar_busca(window, cx),
+            window,
+            cx,
+        )
+        .unwrap_or_else(|| div().into_any_element())
     }
 }
 

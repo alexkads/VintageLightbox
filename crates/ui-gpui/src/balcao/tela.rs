@@ -677,28 +677,15 @@ impl Render for Balcao {
         // no site; o `Esc` e o ⏎ são os do formulário de baixo (`fechar` e
         // `salvar` conferem `confirmando`).
         let pergunta = self.confirmando.then(|| {
-            v_flex()
-                .id("balcao-pergunta")
-                .gap(px(6.))
-                .child(
-                    div()
-                        .text_size(px(16.))
-                        .font_weight(FontWeight::MEDIUM)
-                        .child("Remover a negociação?"),
-                )
-                .child(div().text_sm().text_color(apagado).child(
-                    "O registro do que foi combinado no balcão — tipo, valor e motivo — é apagado.",
-                ))
-                .into_any_element()
+            crate::dialogo::miolo_da_pergunta(
+                "balcao-pergunta",
+                "Remover a negociação?",
+                "O registro do que foi combinado no balcão — tipo, valor e motivo — é apagado.",
+                cx,
+            )
         });
         let rodape_da_pergunta = self.confirmando.then(|| {
-            estilo::rodape_do_dialogo()
-                .w_full()
-                .p(px(16.))
-                .border_t_1()
-                .border_color(borda)
-                .bg(realce.opacity(0.5))
-                .rounded_b(px(14.))
+            crate::dialogo::rodape_da_pergunta(cx)
                 .child(
                     estilo::botao_contorno("balcao-nao-remover", cx)
                         .child("Cancelar")
