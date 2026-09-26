@@ -1,5 +1,5 @@
 {
-  "versao": "0.1.19",
+  "versao": "0.1.20",
   "titulo": "O app passa a avisar o estúdio: versão nova chega na hora, e os erros vão para o dono.",
   "importante": true,
   "novidades": [
@@ -7,8 +7,8 @@
     "Quando o app encontra um erro ou fecha sozinho, ele guarda o que aconteceu e manda ao estúdio assim que houver internet, para o problema ser corrigido sem depender de alguém lembrar de contar.",
     "O estúdio passa a ver quais computadores já atualizaram e quais ainda estão na versão anterior.",
     "Importar de novo as mesmas fotos na mesma sessão não duplica mais as fotos; em outra sessão, elas entram normalmente.",
-    "Na lista de sessões, o cartão do caixa mostra o líquido, as vendas, os estornos e as sessões por fechar; um clique abre as formas de pagamento, com os mesmos nomes do site.",
-    "Gráficos do caixa e do pós-venda dos últimos 30 dias, e a divisão por forma de pagamento.",
+    "Na lista de sessões, o cartão do caixa mostra o líquido, as vendas, os estornos e as sessões por fechar; um clique abre as formas de pagamento, com os mesmos nomes do site. Forma em que saiu mais do que entrou (estorno) aparece em vermelho.",
+    "Botão \"Gráficos\" na lista de sessões: abre, numa janela à parte, o caixa e o pós-venda dos últimos 30 dias, a divisão por forma de pagamento e a entrada por dia — a lista continua com espaço para a tabela.",
     "A busca de sessões responde enquanto se digita e, com texto, procura em todas as datas; telefone com +55 acha o número salvo sem DDI."
   ],
   "por_que_atualizar": "É esta versão que deixa o estúdio acompanhar os computadores e corrigir problemas sem esperar alguém relatar."
