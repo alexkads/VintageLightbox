@@ -74,7 +74,7 @@ use crate::sessoes::arquivos::SeletorDeFotos;
 use crate::sessoes::detalhe::{Detalhe, FotoARevelar, Pedido as DetalhePedido};
 use crate::sessoes::nova::tela::{NovaSessao, PedidoDaNova, PortasDaNova};
 use crate::sessoes::retencao::{PedidoDaRetencao, Retencao};
-use crate::sessoes::tela::{Escolhida, FecharVendaPedida, NovaPedida, Sessoes};
+use crate::sessoes::tela::{AvisoDaLista, Escolhida, FecharVendaPedida, NovaPedida, Sessoes};
 use crate::tema;
 
 /// As portas para o mundo de fora, num pacote só.
@@ -1077,6 +1077,15 @@ impl Aplicativo {
                     raiz.caixa
                         .update(cx, |tela, cx| tela.escolher_sessao(Some(id), cx));
                     raiz.ir_para(Tela::Caixa, window, cx);
+                },
+            ),
+            // 🗑️ "Sessão excluída" e as recusas do site: o toast, como o
+            // `sonner` do site.
+            cx.subscribe_in(
+                &sessoes,
+                window,
+                |raiz, _tela, aviso: &AvisoDaLista, _window, cx| {
+                    raiz.avisar_em_toast(aviso.texto.clone(), aviso.erro, cx);
                 },
             ),
         ];

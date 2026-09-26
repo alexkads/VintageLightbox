@@ -23,6 +23,7 @@
 //! | [`negociacao`] | cortesia, desconto, site parceiro — o registro do balcão |
 //! | [`preco_de_venda`] | o preço fixado para a compra online, e o que ele recusa |
 //! | [`dados_do_cliente`] | título, e-mail e WhatsApp da sessão: o que se confere e o que mudou |
+//! | [`exclusao`] | quem pode excluir uma sessão, o que a tranca e quem ainda tem fotos dela |
 //! | [`retencao`] | a política de retenção do pós-venda: as faixas de cada prazo |
 //!
 //! # O que ele **não** faz, e por quê
@@ -43,6 +44,7 @@ pub mod caixa;
 pub mod comparar;
 pub mod dados_do_cliente;
 pub mod dinheiro;
+pub mod exclusao;
 pub mod filtro_de_coluna;
 pub mod grade;
 pub mod miniaturas;

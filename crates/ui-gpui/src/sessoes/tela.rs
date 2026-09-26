@@ -21,6 +21,7 @@ use std::time::Duration;
 
 use biblioteca_core::dados_do_cliente;
 use biblioteca_core::dinheiro;
+use biblioteca_core::exclusao;
 use biblioteca_core::filtro_de_coluna::{self, Coluna};
 use biblioteca_core::sessoes::{
     self, estado_no_caixa, ContagemDeFotos, Criterio, EstadoNoCaixa, FaixaDeDatas, PagoNoCaixa,
@@ -34,13 +35,13 @@ use gpui::{
     Task, Window,
 };
 use gpui_component::button::{Button, ButtonVariants};
-use gpui_component::input::{Input, InputState};
+use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::{ActiveTheme, Disableable, Selectable, Sizable};
 use infrastructure::paths::AppPaths;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-use crate::pos_venda::porta::{Publicador, Recado};
+use crate::pos_venda::porta::{PedidoJson, Publicador, Recado};
 
 /// De quanto em quanto a tela pergunta se o site respondeu.
 const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(100);
@@ -81,6 +82,45 @@ impl EventEmitter<NovaPedida> for Sessoes {}
 pub struct FecharVendaPedida(pub String);
 
 impl EventEmitter<FecharVendaPedida> for Sessoes {}
+
+/// Um aviso para o toast da raiz — o `toast` do `sonner` no site.
+pub struct AvisoDaLista {
+    pub texto: String,
+    pub erro: bool,
+}
+
+impl EventEmitter<AvisoDaLista> for Sessoes {}
+
+/// 🗑️ O diálogo "Excluir a sessão" aberto — o `ExcluirGaleria` do site.
+///
+/// # Por que digitar a frase, e não um "tem certeza?"
+///
+/// Mesmo reversível, excluir tira a sessão do cliente que está com o link na
+/// mão e para a fila das outras máquinas. Digitar obriga a ler o que está
+/// escrito — e o que está escrito é o título da sessão e quem tem fotos dela.
+struct Exclusao {
+    galeria_id: String,
+    titulo: String,
+    disponiveis: u32,
+    frase: gpui::Entity<InputState>,
+    enviando: bool,
+    quem_tem: QuemTemFotos,
+    /// Quem tinha o foco ao abrir: o campo da frase some com o diálogo, e o
+    /// foco num elemento que ninguém desenha mata todos os atalhos.
+    devolver: Option<(gpui::FocusHandle, gpui::AnyWindowHandle)>,
+    _campo: gpui::Subscription,
+}
+
+/// Quem ainda tem fotos da sessão fora do servidor, pelo relato das máquinas.
+///
+/// ⚠️ **"Não foi possível saber" é dito**, e não omitido: um diálogo que só
+/// mostrasse o que sabe pareceria dizer "ninguém tem" justamente quando o
+/// relato não chegou.
+enum QuemTemFotos {
+    Lendo,
+    NaoSei,
+    Sabe(Vec<exclusao::Maquina>),
+}
 
 pub struct Sessoes {
     publicador: Arc<dyn Publicador>,
@@ -123,6 +163,17 @@ pub struct Sessoes {
     filtros: super::filtros_da_lista::FiltrosDaLista,
     carregando: bool,
     erro: Option<SharedString>,
+    /// 🗑️ Quem entrou é o SuperAdmin? Só ele vê a lixeira — o backend confere
+    /// de novo, e é ele quem vale.
+    super_admin: bool,
+    /// 🗑️ O diálogo de excluir, quando aparece.
+    exclusao: Option<Exclusao>,
+    /// Quantos pedidos do relato das máquinas estão no ar. A resposta não diz
+    /// de que sessão é: com dois no ar, a que chega por último pode ser a
+    /// velha — então só um sai por vez, e o de uma sessão reaberta no meio
+    /// espera ([`Sessoes::reler_sobras`]).
+    sobras_em_voo: u32,
+    reler_sobras: bool,
     /// O formulário de abrir sessão, quando aparece.
     nova: Option<Nova>,
     recados: (Sender<Recado>, Receiver<Recado>),
@@ -276,6 +327,10 @@ impl Sessoes {
             filtros: super::filtros_da_lista::FiltrosDaLista::novos(window, cx),
             carregando: false,
             erro: None,
+            super_admin: false,
+            exclusao: None,
+            sobras_em_voo: 0,
+            reler_sobras: false,
             nova: None,
             recados: channel(),
             colhendo: false,
@@ -287,6 +342,190 @@ impl Sessoes {
     pub fn definir_sessao(&mut self, sessao: Sessao, cx: &mut Context<Self>) {
         self.sessao = Some(sessao);
         self.recarregar(cx);
+    }
+
+    /// 🗑️ A raiz diz quem entrou, depois do `/auth/me`.
+    pub fn definir_super_admin(&mut self, sim: bool, cx: &mut Context<Self>) {
+        if self.super_admin != sim {
+            self.super_admin = sim;
+            cx.notify();
+        }
+    }
+
+    /// 🗑️ A lixeira da linha: abre o diálogo de excluir.
+    ///
+    /// Sessão com foto paga não abre — a lixeira dela nem é clicável. O backend
+    /// recusa de novo (`409`), e é ele quem vale.
+    pub fn pedir_exclusao(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.super_admin || self.exclusao.is_some() {
+            return;
+        }
+        let Some(galeria) = self.galerias.iter().find(|g| g.id == id) else {
+            return;
+        };
+        if exclusao::bloqueio(galeria.fotos.levadas_no_balcao, galeria.fotos.compradas).is_some() {
+            return;
+        }
+        let frase =
+            cx.new(|cx| InputState::new(window, cx).placeholder(exclusao::FRASE_DE_CONFIRMACAO));
+        let campo = cx.subscribe_in(
+            &frase,
+            window,
+            |tela, _, evento: &InputEvent, window, cx| {
+                match evento {
+                    InputEvent::PressEnter { .. } => tela.confirmar_exclusao(cx),
+                    // O botão acende conforme a frase: a tela redesenha a cada letra.
+                    InputEvent::Change => cx.notify(),
+                    _ => {}
+                }
+                let _ = window;
+            },
+        );
+        let devolver = window
+            .focused(cx)
+            .map(|foco| (foco, window.window_handle()));
+        // O foco vai direto ao campo: é a única coisa a fazer além de cancelar.
+        window.focus(&gpui::Focusable::focus_handle(frase.read(cx), cx));
+        self.exclusao = Some(Exclusao {
+            galeria_id: galeria.id.clone(),
+            titulo: galeria.titulo.clone(),
+            disponiveis: galeria.fotos.disponiveis,
+            frase,
+            enviando: false,
+            quem_tem: QuemTemFotos::Lendo,
+            devolver,
+            _campo: campo,
+        });
+        self.pedir_sobras(cx);
+        cx.notify();
+    }
+
+    /// Pede o relato das máquinas da sessão do diálogo — um pedido por vez.
+    fn pedir_sobras(&mut self, cx: &mut Context<Self>) {
+        let (Some(sessao), Some(aberta)) = (self.sessao.clone(), self.exclusao.as_ref()) else {
+            return;
+        };
+        if self.sobras_em_voo > 0 {
+            self.reler_sobras = true;
+            return;
+        }
+        self.sobras_em_voo += 1;
+        self.publicador.pedir_json(
+            sessao,
+            PedidoJson::ler(
+                "exclusao-sobras",
+                format!("/pos-venda/galerias/{}/sobras-locais", aberta.galeria_id),
+            ),
+            self.recados.0.clone(),
+        );
+        self.acompanhar(cx);
+    }
+
+    /// "Cancelar", `Esc` ou o fim da exclusão: fecha e devolve o foco.
+    ///
+    /// Fechar esquece a frase: reabrir com ela já digitada deixaria o botão
+    /// armado antes de alguém ler de qual sessão se trata.
+    pub fn cancelar_exclusao(&mut self, cx: &mut Context<Self>) {
+        if self.exclusao.as_ref().is_some_and(|e| e.enviando) {
+            return;
+        }
+        self.fechar_exclusao(cx);
+    }
+
+    fn fechar_exclusao(&mut self, cx: &mut Context<Self>) {
+        let Some(aberta) = self.exclusao.take() else {
+            return;
+        };
+        // Depois, e não agora: pedir a janela de dentro da atualização dela
+        // falharia.
+        if let Some((foco, janela)) = aberta.devolver {
+            cx.defer(move |cx| {
+                let _ = janela.update(cx, |_, window, _| window.focus(&foco));
+            });
+        }
+        cx.notify();
+    }
+
+    /// "Excluir sessão": manda o `DELETE` com a frase, se ela confere.
+    pub fn confirmar_exclusao(&mut self, cx: &mut Context<Self>) {
+        let Some(sessao) = self.sessao.clone() else {
+            return;
+        };
+        let Some(aberta) = self.exclusao.as_mut() else {
+            return;
+        };
+        let digitado = aberta.frase.read(cx).value().trim().to_string();
+        if aberta.enviando || !exclusao::confere(&digitado) {
+            return;
+        }
+        aberta.enviando = true;
+        self.publicador.pedir_json(
+            sessao,
+            PedidoJson::gravar(
+                "exclusao",
+                "DELETE",
+                format!("/pos-venda/galerias/{}", aberta.galeria_id),
+                serde_json::json!({ "confirmacao": digitado }),
+            ),
+            self.recados.0.clone(),
+        );
+        self.acompanhar(cx);
+        cx.notify();
+    }
+
+    /// O relato das máquinas chegou.
+    fn receber_sobras(
+        &mut self,
+        resultado: Result<serde_json::Value, String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.sobras_em_voo = self.sobras_em_voo.saturating_sub(1);
+        if std::mem::take(&mut self.reler_sobras) {
+            self.pedir_sobras(cx);
+            return;
+        }
+        let Some(aberta) = self.exclusao.as_mut() else {
+            return;
+        };
+        aberta.quem_tem = match resultado.ok().and_then(|v| sobras_da_resposta(&v)) {
+            Some(sobras) => QuemTemFotos::Sabe(exclusao::maquinas(&sobras, agora_em_segundos())),
+            None => QuemTemFotos::NaoSei,
+        };
+    }
+
+    /// O `DELETE` voltou.
+    fn receber_exclusao(
+        &mut self,
+        resultado: Result<serde_json::Value, String>,
+        cx: &mut Context<Self>,
+    ) {
+        match resultado {
+            Ok(_) => {
+                let excluida = self.exclusao.as_ref().map(|e| e.galeria_id.clone());
+                if let Some(aberta) = self.exclusao.as_mut() {
+                    aberta.enviando = false;
+                }
+                self.fechar_exclusao(cx);
+                if excluida.is_some() && self.aberta == excluida {
+                    self.aberta = None;
+                }
+                cx.emit(AvisoDaLista {
+                    texto: "Sessão excluída. Ela pode ser restaurada na aba Excluídas.".into(),
+                    erro: false,
+                });
+                self.recarregar(cx);
+            }
+            // O diálogo fica aberto: a frase continua lá, e o operador decide.
+            Err(erro) => {
+                if let Some(aberta) = self.exclusao.as_mut() {
+                    aberta.enviando = false;
+                }
+                cx.emit(AvisoDaLista {
+                    texto: frase_da_recusa(&erro, Gesto::Excluir),
+                    erro: true,
+                });
+            }
+        }
     }
 
     pub fn recarregar(&mut self, cx: &mut Context<Self>) {
@@ -752,6 +991,14 @@ impl Sessoes {
                     cx.emit(Escolhida(galeria.id));
                     self.recarregar(cx);
                 }
+                Recado::Json {
+                    rotulo: "exclusao-sobras",
+                    resultado,
+                } => self.receber_sobras(resultado, cx),
+                Recado::Json {
+                    rotulo: "exclusao",
+                    resultado,
+                } => self.receber_exclusao(resultado, cx),
                 Recado::Falhou(erro) => {
                     self.carregando = false;
                     if let Some(nova) = self.nova.as_mut() {
@@ -766,11 +1013,63 @@ impl Sessoes {
         if mudou {
             cx.notify();
         }
-        let continua = self.carregando || self.nova.as_ref().is_some_and(|n| n.enviando);
+        let continua = self.carregando
+            || self.nova.as_ref().is_some_and(|n| n.enviando)
+            || self.exclusao.as_ref().is_some_and(|e| e.enviando)
+            || self.sobras_em_voo > 0;
         if !continua {
             self.colhendo = false;
         }
         continua
+    }
+}
+
+/// Os relatos de `GET /galerias/{id}/sobras-locais`. `None` = a resposta não
+/// é a lista que se esperava, e a tela diz que não sabe.
+fn sobras_da_resposta(valor: &serde_json::Value) -> Option<Vec<exclusao::Sobra>> {
+    valor
+        .as_array()?
+        .iter()
+        .map(|s| {
+            let visto_em = chrono::DateTime::parse_from_rfc3339(s.get("visto_em")?.as_str()?)
+                .ok()?
+                .timestamp();
+            Some(exclusao::Sobra {
+                origem: s.get("origem")?.as_str()?.to_string(),
+                quantas: u32::try_from(s.get("quantas")?.as_i64()?).unwrap_or(0),
+                visto_em,
+            })
+        })
+        .collect()
+}
+
+/// O gesto que o site recusou — muda a frase do `403`.
+#[derive(Clone, Copy)]
+enum Gesto {
+    Excluir,
+}
+
+/// A frase do toast quando o site recusa — as mesmas do `actions.ts` do site.
+///
+/// 🔑 O `403` aqui não é "sua conta não administra galerias": quem chegou à
+/// lixeira administra. O que falta é a flag de SuperAdmin, e a frase diz isso.
+fn frase_da_recusa(erro: &str, gesto: Gesto) -> String {
+    let status = erro
+        .split("respondeu ")
+        .nth(1)
+        .and_then(|resto| resto.get(..3))
+        .and_then(|s| s.parse::<u16>().ok());
+    match (status, gesto) {
+        (Some(403), Gesto::Excluir) => "Somente o SuperAdmin pode excluir uma sessão.".into(),
+        (Some(410), Gesto::Excluir) => "Esta sessão já estava excluída.".into(),
+        // O site já escreve a frase (`409` com as fotos pagas, `400` da frase):
+        // ela vai sem o "o site respondeu NNN:" na frente.
+        (Some(_), _) => erro
+            .split_once("respondeu ")
+            .and_then(|(_, resto)| resto.split_once(": "))
+            .map(|(_, frase)| frase.to_string())
+            .unwrap_or_else(|| erro.to_string()),
+        (None, Gesto::Excluir) => format!("Não foi possível excluir a sessão: {erro}"),
     }
 }
 
@@ -817,6 +1116,7 @@ impl Render for Sessoes {
             .child(self.tabela(&visiveis, agora, cx))
             .child(div().text_xs().text_color(apagado).child(rodape))
             .children(self.dialogo_do_estudio(cx))
+            .children(self.dialogo_de_exclusao(cx))
             .children(self.popover_do_periodo(cx))
     }
 }
@@ -1196,6 +1496,166 @@ impl Sessoes {
                                     },
                                 ))
                             })),
+                    ),
+            ),
+        )
+    }
+
+    /// 🗑️ "Excluir a sessão" — o `AlertDialog` do site: a frase, e quem ainda
+    /// tem fotos dela antes de digitá-la.
+    ///
+    /// Como o `AlertDialog`, **não fecha com clique no véu**: um clique perdido
+    /// fora da caixa não descarta a frase meio digitada. Fecha no "Cancelar" e
+    /// no `Esc`.
+    fn dialogo_de_exclusao(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        use crate::estilo;
+        use crate::recursos::Icone;
+        use gpui_component::Icon;
+
+        let aberta = self.exclusao.as_ref()?;
+        let tema = cx.theme();
+        let apagado = tema.muted_foreground;
+        let confere = exclusao::confere(&aberta.frase.read(cx).value());
+        let pode = confere && !aberta.enviando;
+        let descricao = format!(
+            "\u{201c}{}\u{201d} sai da lista e do link do cliente, e as máquinas param de subir \
+             fotos para ela. Nada é apagado: as {} foto(s) no acervo, os arquivos e o histórico \
+             ficam, e a sessão volta pela aba Excluídas.",
+            aberta.titulo, aberta.disponiveis
+        );
+
+        let quem_tem = match &aberta.quem_tem {
+            QuemTemFotos::Sabe(lista) if lista.is_empty() => div()
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .text_sm()
+                .text_color(apagado)
+                .child(Icon::new(Icone::HardDrive).size(px(16.)))
+                .child("Nenhuma máquina relata fotos desta sessão fora do servidor.")
+                .into_any_element(),
+            quem_tem => {
+                let (fundo, borda, texto) = crate::tema::cores::selo_ambar();
+                let linhas: Vec<AnyElement> = match quem_tem {
+                    QuemTemFotos::Lendo => vec![div()
+                        .child("Lendo o relato das máquinas…")
+                        .into_any_element()],
+                    QuemTemFotos::NaoSei => vec![div()
+                        .child("Não foi possível saber agora quais máquinas têm fotos dela.")
+                        .into_any_element()],
+                    QuemTemFotos::Sabe(lista) => lista
+                        .iter()
+                        .map(|m| {
+                            div()
+                                .child(format!(
+                                    "{}: {} foto(s) · visto {}{}",
+                                    m.origem,
+                                    m.quantas,
+                                    m.ha_quanto,
+                                    if m.velho {
+                                        " (possivelmente desatualizado)"
+                                    } else {
+                                        ""
+                                    }
+                                ))
+                                .into_any_element()
+                        })
+                        .collect(),
+                };
+                gpui_component::v_flex()
+                    .gap(px(6.))
+                    .p(px(12.))
+                    .rounded(px(8.))
+                    .border_1()
+                    .border_color(borda)
+                    .bg(fundo)
+                    .text_color(texto)
+                    .text_sm()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .child(Icon::new(Icone::HardDrive).size(px(16.)))
+                            .child("Fotos desta sessão fora do servidor"),
+                    )
+                    .children(linhas)
+                    .child(div().text_xs().opacity(0.8).child(
+                        "Excluir não apaga essas fotos: elas param de subir e esperam nas \
+                         máquinas até a sessão ser restaurada.",
+                    ))
+                    .into_any_element()
+            }
+        };
+
+        let botao_excluir =
+            estilo::desligado(estilo::botao_perigo("excluir-sessao-confirmar", cx), !pode)
+                .child(if aberta.enviando {
+                    "Excluindo…"
+                } else {
+                    "Excluir sessão"
+                })
+                .when(pode, |b| {
+                    b.on_click(cx.listener(|tela, _ev, _window, cx| tela.confirmar_exclusao(cx)))
+                });
+
+        Some(
+            estilo::veu_do_dialogo().child(
+                estilo::caixa_do_dialogo(cx)
+                    .id("dialogo-de-exclusao")
+                    .w(px(512.))
+                    .on_key_down(cx.listener(|tela, ev: &gpui::KeyDownEvent, _window, cx| {
+                        if ev.keystroke.key == "escape" {
+                            cx.stop_propagation();
+                            tela.cancelar_exclusao(cx);
+                        }
+                    }))
+                    .child(estilo::cabecalho_do_dialogo(
+                        "Excluir a sessão",
+                        descricao,
+                        Some(Icone::TriangleAlert),
+                        cx,
+                    ))
+                    .child(quem_tem)
+                    .child(
+                        gpui_component::v_flex()
+                            .gap(px(6.))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_wrap()
+                                    .items_center()
+                                    .gap(px(4.))
+                                    .text_sm()
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .child("Para confirmar, digite")
+                                    .child(
+                                        div()
+                                            .px(px(4.))
+                                            .rounded(px(4.))
+                                            .bg(tema.muted)
+                                            .font_family("monospace")
+                                            .child(exclusao::FRASE_DE_CONFIRMACAO),
+                                    ),
+                            )
+                            .child(Input::new(&aberta.frase).disabled(aberta.enviando)),
+                    )
+                    .child(
+                        estilo::rodape_do_dialogo()
+                            .child(
+                                estilo::desligado(
+                                    estilo::botao_contorno("excluir-sessao-cancelar", cx),
+                                    aberta.enviando,
+                                )
+                                .child("Cancelar")
+                                .on_click(
+                                    cx.listener(|tela, _ev, _window, cx| {
+                                        tela.cancelar_exclusao(cx)
+                                    }),
+                                ),
+                            )
+                            .child(botao_excluir),
                     ),
             ),
         )
@@ -1668,10 +2128,14 @@ impl Sessoes {
         const SITUACAO: f32 = 160.;
         const VAO: f32 = 16.;
         const RECUO: f32 = 8.;
+        // 🗑️ A lixeira: só para o SuperAdmin, como o `podeExcluir` do site.
+        const LIXEIRA: f32 = 28.;
+        let com_lixeira = self.super_admin;
         let largura_minima = {
             let fixas: f32 = LARGURAS.iter().sum();
-            let colunas = 3 + LARGURAS.len();
-            GALERIA + CONTATO + SITUACAO + fixas + VAO * (colunas - 1) as f32 + RECUO * 2.
+            let colunas = 3 + LARGURAS.len() + usize::from(com_lixeira);
+            let lixeira = if com_lixeira { LIXEIRA } else { 0. };
+            GALERIA + CONTATO + SITUACAO + fixas + lixeira + VAO * (colunas - 1) as f32 + RECUO * 2.
         };
         let numero = |largura: f32| div().w(px(largura)).flex_none().flex().justify_end();
         let titulo_da_coluna = |texto: &'static str, largura: f32| numero(largura).child(texto);
@@ -1701,7 +2165,8 @@ impl Sessoes {
             .child(titulo_da_coluna("Balcão", LARGURAS[3]))
             .child(titulo_da_coluna("Caixa (PDV)", LARGURAS[4]))
             .child(titulo_da_coluna("Pós-venda", LARGURAS[5]))
-            .child(titulo_da_coluna("Criada", LARGURAS[6]));
+            .child(titulo_da_coluna("Criada", LARGURAS[6]))
+            .when(com_lixeira, |c| c.child(div().w(px(LIXEIRA)).flex_none()));
 
         // 🔎 A linha de filtros, com as larguras do cabeçalho: cada campo fica
         // sob a sua coluna, como no site.
@@ -1731,6 +2196,7 @@ impl Sessoes {
                 .child(celula(LARGURAS[4], Coluna::Caixa))
                 .child(celula(LARGURAS[5], Coluna::PosVenda))
                 .child(celula(LARGURAS[6], Coluna::Criada))
+                .when(com_lixeira, |c| c.child(div().w(px(LIXEIRA)).flex_none()))
         });
         let nenhuma = visiveis.is_empty().then(|| {
             div()
@@ -1825,6 +2291,14 @@ impl Sessoes {
                         .text_color(apagado)
                         .child(data_br(&sessao.criada_em_iso)),
                 )
+                .when(com_lixeira, |linha| {
+                    linha.child(
+                        div()
+                            .w(px(LIXEIRA))
+                            .flex_none()
+                            .child(lixeira(sessao, apagado, cx)),
+                    )
+                })
         });
 
         // ↔️ Duas rolagens encaixadas: a de fora é só horizontal e leva o
@@ -1873,6 +2347,57 @@ impl Sessoes {
             )
             .into_any_element()
     }
+}
+
+/// 🗑️ A lixeira da linha — ou a lixeira apagada, quando há foto paga.
+///
+/// 🔑 **Apagada, e não ausente**: o operador vê que a sessão não sai, e o
+/// porquê vem no balão — um botão que sempre falha faria concluir que o
+/// sistema quebrou.
+///
+/// ⚠️ `stop_propagation`: a linha inteira abre a sessão, e excluir não pode ser
+/// efeito colateral de abrir a galeria.
+fn lixeira(sessao: &SessaoFotografica, apagado: Hsla, cx: &Context<Sessoes>) -> AnyElement {
+    use crate::recursos::Icone;
+    use gpui_component::Icon;
+
+    let id = sessao.id.clone();
+    let caixa = div()
+        .id(SharedString::from(format!("excluir-{id}")))
+        .size(px(28.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(6.))
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
+    if let Some(b) = exclusao::bloqueio(sessao.fotos.levadas_no_balcao, sessao.fotos.compradas) {
+        let dica = format!(
+            "Não dá para excluir: {}. O cliente perderia o acesso ao que já pagou.",
+            exclusao::descrever(b)
+        );
+        return caixa
+            .text_color(apagado.opacity(0.4))
+            .on_click(|_, _, cx| cx.stop_propagation())
+            .tooltip(move |window, cx| {
+                gpui_component::tooltip::Tooltip::new(dica.clone()).build(window, cx)
+            })
+            .child(Icon::new(Icone::Trash2).size(px(16.)))
+            .into_any_element();
+    }
+    let perigo = cx.theme().danger;
+    caixa
+        .text_color(apagado)
+        .cursor_pointer()
+        .hover(move |s| s.bg(perigo.opacity(0.1)).text_color(perigo))
+        .tooltip(|window, cx| {
+            gpui_component::tooltip::Tooltip::new("Excluir esta sessão").build(window, cx)
+        })
+        .on_click(cx.listener(move |tela, _ev, window, cx| {
+            cx.stop_propagation();
+            tela.pedir_exclusao(&id, window, cx);
+        }))
+        .child(Icon::new(Icone::Trash2).size(px(16.)))
+        .into_any_element()
 }
 
 /// 💵 A célula da coluna "Caixa (PDV)" — o que o PDV cobrou, ou o caminho
@@ -2584,5 +3109,182 @@ mod testes {
                 assert_eq!(tela.quantas(), 1, "e a lista já a inclui");
             })
             .expect("a janela deve estar aberta");
+    }
+
+    /// A janela com o `Root` por baixo, como no app: o campo da frase o
+    /// procura ao ser desenhado (o mesmo arranjo de `caixa::testes`).
+    fn janela_com_raiz(
+        cx: &mut TestAppContext,
+        publicador: Arc<PublicadorDeMentira>,
+    ) -> (
+        gpui::WindowHandle<gpui_component::Root>,
+        gpui::Entity<Sessoes>,
+    ) {
+        cx.update(gpui_component::init);
+        let mut tela = None;
+        let raiz = cx.add_window(|window, cx| {
+            let sessoes = cx.new(|cx| Sessoes::nova(publicador, window, cx));
+            tela = Some(sessoes.clone());
+            gpui_component::Root::new(sessoes, window, cx)
+        });
+        let tela = tela.expect("a tela criada");
+        na_tela(cx, &raiz, &tela, |t, _, cx| {
+            t.definir_sessao(
+                Sessao {
+                    access_token: "tok".into(),
+                    refresh_token: "ref".into(),
+                    access_vence_em: i64::MAX,
+                    refresh_vence_em: i64::MAX,
+                },
+                cx,
+            );
+            t.galerias = vec![];
+        });
+        (raiz, tela)
+    }
+
+    fn na_tela<R>(
+        cx: &mut TestAppContext,
+        raiz: &gpui::WindowHandle<gpui_component::Root>,
+        tela: &gpui::Entity<Sessoes>,
+        f: impl FnOnce(&mut Sessoes, &mut Window, &mut Context<Sessoes>) -> R,
+    ) -> R {
+        let r = raiz
+            .update(cx, |_, window, cx| {
+                tela.update(cx, |t, cx| f(t, window, cx))
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        r
+    }
+
+    fn colher_na_raiz(
+        cx: &mut TestAppContext,
+        raiz: &gpui::WindowHandle<gpui_component::Root>,
+        tela: &gpui::Entity<Sessoes>,
+    ) {
+        for _ in 0..10 {
+            na_tela(cx, raiz, tela, |t, _, cx| {
+                t.colher(cx);
+            });
+        }
+    }
+
+    /// 🗑️ A sessão com foto paga não abre o diálogo, e quem não é SuperAdmin
+    /// nem chega a ele — as duas travas do `ExcluirGaleria` do site.
+    #[gpui::test]
+    fn so_o_super_admin_exclui_e_so_sessao_sem_venda(cx: &mut TestAppContext) {
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        let (raiz, tela) = janela_com_raiz(cx, publicador);
+
+        na_tela(cx, &raiz, &tela, |tela, window, cx| {
+            let mut paga = galeria("g2", "Com venda", None);
+            paga.fotos.levadas_no_balcao = 2;
+            tela.galerias = vec![galeria("g1", "Sem venda", None), paga];
+
+            tela.pedir_exclusao("g1", window, cx);
+            assert!(tela.exclusao.is_none(), "sem ser SuperAdmin, nada abre");
+
+            tela.definir_super_admin(true, cx);
+            tela.pedir_exclusao("g2", window, cx);
+            assert!(tela.exclusao.is_none(), "foto levada no balcão tranca");
+
+            tela.pedir_exclusao("g1", window, cx);
+            assert!(tela.exclusao.is_some());
+        });
+    }
+
+    /// 🗑️ O caminho inteiro: o relato das máquinas chega, a frase errada não
+    /// manda nada, a certa manda o `DELETE` com ela, e o diálogo fecha
+    /// devolvendo o foco a quem o tinha.
+    #[gpui::test]
+    fn excluir_exige_a_frase_e_manda_o_delete_com_ela(cx: &mut TestAppContext) {
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        publicador.responder_json(
+            "exclusao-sobras",
+            Ok(serde_json::json!([
+                { "origem": "Balcão 2", "quantas": 7, "bytes": null, "visto_em": "2026-09-26T12:00:00Z" },
+                { "origem": "Vazio", "quantas": 0, "bytes": null, "visto_em": "2026-09-26T12:00:00Z" }
+            ])),
+        );
+        publicador.responder_json("exclusao", Ok(serde_json::Value::Null));
+        let (raiz, tela) = janela_com_raiz(cx, publicador.clone());
+        let foco_de_antes = na_tela(cx, &raiz, &tela, |_, window, cx| {
+            let foco = cx.focus_handle();
+            window.focus(&foco);
+            foco
+        });
+
+        na_tela(cx, &raiz, &tela, |tela, window, cx| {
+            tela.galerias = vec![galeria("g1", "Ensaio da Ana", None)];
+            tela.definir_super_admin(true, cx);
+            tela.pedir_exclusao("g1", window, cx);
+        });
+        colher_na_raiz(cx, &raiz, &tela);
+
+        na_tela(cx, &raiz, &tela, |tela, window, cx| {
+            let aberta = tela.exclusao.as_ref().expect("o diálogo está aberto");
+            match &aberta.quem_tem {
+                QuemTemFotos::Sabe(lista) => {
+                    assert_eq!(lista.len(), 1, "a máquina sem fotos não aparece");
+                    assert_eq!(lista[0].origem, "Balcão 2");
+                }
+                _ => panic!("o relato chegou e a tela precisa dizê-lo"),
+            }
+            let frase = aberta.frase.clone();
+            frase.update(cx, |c, cx| c.set_value("confirmar exclusão!", window, cx));
+            tela.confirmar_exclusao(cx);
+        });
+        assert!(
+            !publicador
+                .pedidos_json()
+                .iter()
+                .any(|p| p.rotulo == "exclusao"),
+            "a frase errada não manda nada"
+        );
+
+        na_tela(cx, &raiz, &tela, |tela, window, cx| {
+            let frase = tela.exclusao.as_ref().expect("segue aberto").frase.clone();
+            frase.update(cx, |c, cx| c.set_value(" CONFIRMAR EXCLUSÃO! ", window, cx));
+            tela.confirmar_exclusao(cx);
+        });
+        colher_na_raiz(cx, &raiz, &tela);
+
+        let delete = publicador
+            .pedidos_json()
+            .into_iter()
+            .find(|p| p.rotulo == "exclusao")
+            .expect("o DELETE saiu");
+        assert_eq!(delete.metodo, "DELETE");
+        assert_eq!(delete.caminho, "/pos-venda/galerias/g1");
+        assert_eq!(
+            delete.corpo,
+            Some(serde_json::json!({ "confirmacao": "CONFIRMAR EXCLUSÃO!" }))
+        );
+        na_tela(cx, &raiz, &tela, |tela, window, _cx| {
+            assert!(tela.exclusao.is_none(), "deu certo: o diálogo fecha");
+            assert!(
+                foco_de_antes.is_focused(window),
+                "e o foco volta para onde estava"
+            );
+        });
+    }
+
+    #[test]
+    fn a_recusa_do_site_vira_a_frase_do_site() {
+        let r = |e: &str| frase_da_recusa(e, Gesto::Excluir);
+        assert_eq!(
+            r("o site respondeu 403: somente o SuperAdmin pode apagar uma galeria"),
+            "Somente o SuperAdmin pode excluir uma sessão."
+        );
+        assert_eq!(
+            r("o site respondeu 410: x"),
+            "Esta sessão já estava excluída."
+        );
+        assert_eq!(
+            r("o site respondeu 409: a galeria tem 2 foto(s) paga(s)"),
+            "a galeria tem 2 foto(s) paga(s)"
+        );
+        assert_eq!(r("sem rede"), "Não foi possível excluir a sessão: sem rede");
     }
 }

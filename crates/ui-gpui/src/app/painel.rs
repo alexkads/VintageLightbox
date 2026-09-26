@@ -42,6 +42,9 @@ pub(super) const ALTURA_DO_CABECALHO: f32 = 56.;
 pub struct Conta {
     pub nome: Option<String>,
     pub email: String,
+    /// O `role` do cadastro (`ADMIN`, `USER`…). Só serve para esconder o que
+    /// o backend recusaria — quem autoriza é ele.
+    pub papel: Option<String>,
 }
 
 impl Conta {
@@ -59,7 +62,16 @@ impl Conta {
             .map(str::trim)
             .filter(|n| !n.is_empty())
             .map(str::to_string);
-        Some(Conta { nome, email })
+        let papel = usuario
+            .get("role")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        Some(Conta { nome, email, papel })
+    }
+
+    /// 🗑️ É o SuperAdmin — o único que exclui e restaura sessão?
+    pub fn e_super_admin(&self) -> bool {
+        biblioteca_core::exclusao::e_super_admin(&self.email, self.papel.as_deref())
     }
 
     /// O nome, ou o e-mail quando não há nome (como o site).
@@ -295,6 +307,8 @@ impl Aplicativo {
         });
         self.sessao = None;
         self.conta = None;
+        self.sessoes
+            .update(cx, |t, cx| t.definir_super_admin(false, cx));
         self.tela = Tela::Sessoes;
         cx.notify();
     }
@@ -340,6 +354,11 @@ impl Aplicativo {
                 match resultado {
                     Ok(valor) => {
                         self.conta = Conta::da_resposta(&valor);
+                        // 🗑️ A lixeira da lista só aparece para o SuperAdmin,
+                        // e só agora se sabe quem entrou.
+                        let pode = self.conta.as_ref().is_some_and(Conta::e_super_admin);
+                        self.sessoes
+                            .update(cx, |t, cx| t.definir_super_admin(pode, cx));
                         // 🗂️ As guias da última abertura voltam, se forem
                         // desta conta — só agora se sabe quem entrou.
                         self.repor_guias();
@@ -1061,6 +1080,16 @@ mod testes {
         assert_eq!(conta.inicial(), "X");
 
         assert!(Conta::da_resposta(&serde_json::json!({"ok": true})).is_none());
+    }
+
+    #[test]
+    fn o_papel_do_auth_me_decide_quem_e_super_admin() {
+        let dono = serde_json::json!({"email": "alexkads@gmail.com", "role": "ADMIN"});
+        assert!(Conta::da_resposta(&dono).unwrap().e_super_admin());
+        let funcionario = serde_json::json!({"email": "caixa@loja.com", "role": "ADMIN"});
+        assert!(!Conta::da_resposta(&funcionario).unwrap().e_super_admin());
+        let sem_papel = serde_json::json!({"email": "alexkads@gmail.com"});
+        assert!(!Conta::da_resposta(&sem_papel).unwrap().e_super_admin());
     }
 
     #[test]
