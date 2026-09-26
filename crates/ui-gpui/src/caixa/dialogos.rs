@@ -153,15 +153,30 @@ pub(super) struct FormNegociacao {
     titulo: String,
     tipo: Tipo,
     parceiro: String,
+    /// A `ListaDeOpcoes` do site (o `Select`), e não uma fileira de botões.
+    site: Entity<Site>,
     cupom: Entity<InputState>,
     preco: Entity<InputState>,
     motivo: Entity<InputState>,
     preco_da_faixa: Option<i64>,
     existente: bool,
-    /// "Remover a negociação?" à vista, dentro do diálogo.
+    /// "Remover a negociação?" — o `useConfirmacao` do site, por cima do
+    /// diálogo.
     confirmando: bool,
     erro: Option<String>,
     pub(super) enviando: bool,
+    _assinatura: Subscription,
+}
+
+type Site = SelectState<Vec<&'static str>>;
+
+/// O `placeholder` do motivo, que muda com o tipo — como no site.
+fn dica_do_motivo(tipo: Tipo) -> &'static str {
+    match tipo {
+        Tipo::Cortesia => "aniversário, indicação, brinde…",
+        Tipo::Outro => "ex.: troca por indicação de cliente",
+        _ => "opcional",
+    }
 }
 
 pub enum Dialogo {
@@ -371,7 +386,7 @@ impl Caixa {
         if let (Some(p), true) = (inicial.preco, inicial.tipo != Tipo::Cortesia) {
             escrever(&preco, dinheiro::formatar_campo(p), window, cx);
         }
-        let motivo = campo(window, cx, "");
+        let motivo = campo(window, cx, dica_do_motivo(inicial.tipo));
         escrever(&motivo, inicial.motivo.clone(), window, cx);
         let foco = match inicial.tipo {
             Tipo::Desconto => preco.read(cx).focus_handle(cx),
@@ -383,12 +398,33 @@ impl Caixa {
         } else {
             inicial.parceiro.clone()
         };
+        let site = cx.new(|cx| {
+            let mut estado = SelectState::new(PARCEIROS.to_vec(), None, window, cx);
+            if let Some(p) = PARCEIROS.iter().find(|p| **p == parceiro) {
+                estado.set_selected_value(p, window, cx);
+            }
+            estado
+        });
+        let assinatura = cx.subscribe_in(
+            &site,
+            window,
+            |tela, _, evento: &SelectEvent<Vec<&'static str>>, _, cx| {
+                let SelectEvent::Confirm(Some(p)) = evento else {
+                    return;
+                };
+                if let Some(Dialogo::Negociacao(form)) = tela.dialogo.as_mut() {
+                    form.parceiro = p.to_string();
+                    cx.notify();
+                }
+            },
+        );
         self.lembrar_foco(window, cx);
         self.dialogo = Some(Dialogo::Negociacao(Box::new(FormNegociacao {
             ids,
             titulo,
             tipo: inicial.tipo,
             parceiro,
+            site,
             cupom,
             preco,
             motivo,
@@ -397,9 +433,66 @@ impl Caixa {
             confirmando: false,
             erro: None,
             enviando: false,
+            _assinatura: assinatura,
         })));
         window.focus(&foco, cx);
         cx.notify();
+    }
+
+    /// O tipo decide o que falta perguntar. O `autoFocus` do site vale para o
+    /// campo que acabou de aparecer: o cupom do parceiro, o valor do desconto
+    /// quando vem da cortesia (que não tinha valor).
+    pub(super) fn trocar_tipo_da_negociacao(
+        &mut self,
+        tipo: Tipo,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(Dialogo::Negociacao(form)) = self.dialogo.as_mut() else {
+            return;
+        };
+        let antes = form.tipo;
+        form.tipo = tipo;
+        form.erro = None;
+        form.motivo.update(cx, |c, cx| {
+            c.set_placeholder(dica_do_motivo(tipo), window, cx)
+        });
+        let foco = if tipo == Tipo::Parceiro && antes != Tipo::Parceiro {
+            Some(form.cupom.read(cx).focus_handle(cx))
+        } else if tipo == Tipo::Desconto && antes == Tipo::Cortesia {
+            Some(form.preco.read(cx).focus_handle(cx))
+        } else {
+            None
+        };
+        if let Some(foco) = foco {
+            window.focus(&foco, cx);
+        }
+        cx.notify();
+    }
+
+    /// "Remover negociação" pergunta antes, como o `useConfirmacao` do site. O
+    /// foco sai do campo para a moldura do diálogo: o teclado não escreve
+    /// atrás da pergunta, e `Esc`/`Enter` continuam chegando.
+    pub(super) fn perguntar_se_remove_a_negociacao(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(Dialogo::Negociacao(form)) = self.dialogo.as_mut() else {
+            return;
+        };
+        if form.enviando {
+            return;
+        }
+        form.confirmando = true;
+        window.focus(&self.foco_do_dialogo, cx);
+        cx.notify();
+    }
+
+    /// A pergunta "Remover a negociação?" está por cima do diálogo.
+    #[cfg(test)]
+    pub(super) fn perguntando_se_remove(&self) -> bool {
+        matches!(&self.dialogo, Some(Dialogo::Negociacao(form)) if form.confirmando)
     }
 
     fn salvar_negociacao(&mut self, cx: &mut Context<Self>) {
@@ -501,6 +594,15 @@ impl Caixa {
     }
 
     pub(super) fn fechar_dialogo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // A pergunta de remover é filha do diálogo, como no site: `Esc` e
+        // "Cancelar" fecham só ela e devolvem ao formulário aberto.
+        if let Some(Dialogo::Negociacao(form)) = self.dialogo.as_mut() {
+            if form.confirmando {
+                form.confirmando = false;
+                cx.notify();
+                return;
+            }
+        }
         // Fechar o cadastro volta às pessoas, como o diálogo de cima do site.
         if let Some(Dialogo::Pessoas(form)) = self.dialogo.as_mut() {
             if form.cadastro.take().is_some() {
@@ -1607,7 +1709,8 @@ impl Caixa {
                     Some(texto(
                         "O que foi combinado no balcão. Não muda o preço da compra online.",
                     )),
-                    448.,
+                    // O `max-w-lg` do `DialogContent`, sem classe de largura.
+                    512.,
                     self.corpo_negociacao(cx),
                 ),
                 Dialogo::Fechar(form) => {
@@ -1648,12 +1751,13 @@ impl Caixa {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let tema = cx.theme();
-        let (fundo, borda, apagado, acento) = (
-            tema.background,
-            tema.border,
+        let (fundo, frente, apagado, acento) = (
+            tema.popover,
+            tema.foreground,
             tema.muted_foreground,
             tema.accent,
         );
+        let pergunta = self.pergunta_de_remover_negociacao(cx);
         // O painel da galeria marca os dele: o interceptador de teclas dele só
         // cuida do que é seu.
         let flutuante = if self.flutuante() { " Flutuante" } else { "" };
@@ -1717,22 +1821,24 @@ impl Caixa {
                     .max_w_full()
                     .max_h(relative(0.9))
                     .overflow_y_scroll()
+                    // O `DialogContent` do site: `gap-4 rounded-xl bg-popover p-4
+                    // ring-1 ring-foreground/10`, título `text-base font-medium`.
+                    // O `rounded-xl` é 1,4 × o `--radius` de 10 px.
                     .gap(px(16.))
-                    .p(px(24.))
-                    .rounded(px(10.))
+                    .p(px(16.))
+                    .rounded(px(14.))
                     .border_1()
-                    .border_color(borda)
+                    .border_color(frente.opacity(0.1))
                     .bg(fundo)
                     .shadow_lg()
                     .child(
                         v_flex()
-                            .gap(px(8.))
+                            .gap(px(6.))
                             .pr(px(24.))
                             .child(
                                 div()
-                                    .text_lg()
-                                    .line_height(px(18.))
-                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_size(px(16.))
+                                    .font_weight(FontWeight::MEDIUM)
                                     .child(titulo),
                             )
                             .when_some(descricao, |d, descricao| {
@@ -1760,6 +1866,7 @@ impl Caixa {
                             ),
                     ),
             )
+            .children(pergunta)
             .into_any_element()
     }
 
@@ -2815,13 +2922,16 @@ impl Caixa {
             return div().into_any_element();
         };
         let tema = cx.theme();
-        let (primaria, borda, acento, apagado, perigo) = (
+        let (primaria, borda, realce, apagado, perigo) = (
             tema.primary,
             tema.border,
-            tema.accent,
+            tema.muted,
             tema.muted_foreground,
             tema.danger,
         );
+        // `rounded-lg border p-3`; o escolhido ganha `border-primary
+        // bg-primary/5 ring-1 ring-primary` — a borda de 2 px, com 1 px a menos
+        // de respiro para o texto não pular.
         let tipos = div()
             .grid()
             .grid_cols(2)
@@ -2831,63 +2941,39 @@ impl Caixa {
                 v_flex()
                     .id(SharedString::from(format!("caixa-negociacao-{t:?}")))
                     .gap(px(2.))
-                    .p(px(12.))
                     .rounded(px(10.))
-                    .border_1()
                     .cursor_pointer()
                     .map(|d| {
                         if ativo {
-                            d.border_color(primaria).bg(primaria.opacity(0.05))
+                            d.p(px(11.))
+                                .border_2()
+                                .border_color(primaria)
+                                .bg(primaria.opacity(0.05))
                         } else {
-                            d.border_color(borda).hover(move |s| s.bg(acento))
+                            d.p(px(12.))
+                                .border_1()
+                                .border_color(borda)
+                                .hover(move |s| s.bg(realce))
                         }
                     })
-                    .child(div().font_weight(FontWeight::MEDIUM).child(t.rotulo()))
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(t.rotulo()),
+                    )
                     .child(div().text_xs().text_color(apagado).child(t.dica()))
-                    .on_click(cx.listener(move |tela, _: &ClickEvent, _, cx| {
-                        if let Some(Dialogo::Negociacao(form)) = tela.dialogo.as_mut() {
-                            form.tipo = t;
-                            form.erro = None;
-                            cx.notify();
-                        }
+                    .on_click(cx.listener(move |tela, _: &ClickEvent, w, cx| {
+                        tela.trocar_tipo_da_negociacao(t, w, cx)
                     }))
             }));
         let parceiro = (form.tipo == Tipo::Parceiro).then(|| {
-            h_flex()
-                .items_start()
+            div()
+                .grid()
+                .grid_cols(2)
                 .gap(px(12.))
-                .child(
-                    div().flex_1().child(rotulado(
-                        "Site",
-                        h_flex()
-                            .flex_wrap()
-                            .gap(px(6.))
-                            .children(PARCEIROS.iter().map(|p| {
-                                let p: &'static str = p;
-                                alternavel(
-                                    SharedString::from(format!("caixa-negociacao-site-{p}")),
-                                    form.parceiro == p,
-                                    cx,
-                                )
-                                .child(p)
-                                .on_click(cx.listener(
-                                    move |tela, _: &ClickEvent, _, cx| {
-                                        if let Some(Dialogo::Negociacao(form)) =
-                                            tela.dialogo.as_mut()
-                                        {
-                                            form.parceiro = p.to_string();
-                                            cx.notify();
-                                        }
-                                    },
-                                ))
-                            })),
-                    )),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .child(rotulado("Cupom", Input::new(&form.cupom))),
-                )
+                .child(rotulado("Site", Select::new(&form.site)))
+                .child(rotulado("Cupom", Input::new(&form.cupom)))
         });
         let preco = (form.tipo != Tipo::Cortesia).then(|| {
             let rotulo = match form.tipo {
@@ -2899,7 +2985,7 @@ impl Caixa {
                 rotulo,
                 h_flex()
                     .gap(px(8.))
-                    .child(div().text_color(apagado).child("R$"))
+                    .child(div().text_sm().text_color(apagado).child("R$"))
                     .child(div().w(px(128.)).child(Input::new(&form.preco)))
                     .children(form.preco_da_faixa.map(|p| {
                         div()
@@ -2917,42 +3003,6 @@ impl Caixa {
             },
             Input::new(&form.motivo),
         );
-        let confirmacao = form.confirmando.then(|| {
-            v_flex()
-                .gap(px(8.))
-                .p(px(12.))
-                .rounded(px(10.))
-                .border_1()
-                .border_color(perigo.opacity(0.5))
-                .child(
-                    div()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child("Remover a negociação?"),
-                )
-                .child(div().text_sm().text_color(apagado).child(
-                    "O registro do que foi combinado no balcão — tipo, valor e motivo — é apagado.",
-                ))
-                .child(
-                    rodape()
-                        .child(
-                            estilo::botao_contorno("caixa-negociacao-nao-remover", cx)
-                                .child("Cancelar")
-                                .on_click(cx.listener(|tela, _: &ClickEvent, _, cx| {
-                                    if let Some(Dialogo::Negociacao(form)) = tela.dialogo.as_mut() {
-                                        form.confirmando = false;
-                                        cx.notify();
-                                    }
-                                })),
-                        )
-                        .child(
-                            estilo::botao_perigo("caixa-negociacao-remover-sim", cx)
-                                .child("Remover")
-                                .on_click(cx.listener(|tela, _: &ClickEvent, _, cx| {
-                                    tela.salvar_negociacao(cx)
-                                })),
-                        ),
-                )
-        });
         let enviando = form.enviando;
         let existente = form.existente;
         v_flex()
@@ -2962,25 +3012,20 @@ impl Caixa {
             .children(preco)
             .child(motivo)
             .children(form.erro.clone().map(|e| erro_do_form(e, cx)))
-            .children(confirmacao)
             .child(
                 h_flex()
                     .flex_wrap()
                     .gap(px(8.))
+                    .pt(px(4.))
                     .child(
                         estilo::desligado(
                             estilo::botao_primario("caixa-negociacao-salvar", cx),
                             enviando,
                         )
                         .child(if enviando { "Salvando…" } else { "Salvar" })
-                        .on_click(cx.listener(
-                            |tela, _: &ClickEvent, _, cx| {
-                                if let Some(Dialogo::Negociacao(form)) = tela.dialogo.as_mut() {
-                                    form.confirmando = false;
-                                }
-                                tela.salvar_negociacao(cx)
-                            },
-                        )),
+                        .on_click(
+                            cx.listener(|tela, _: &ClickEvent, _, cx| tela.salvar_negociacao(cx)),
+                        ),
                     )
                     .child(
                         estilo::desligado(
@@ -3001,19 +3046,95 @@ impl Caixa {
                             .text_color(perigo)
                             .child("Remover negociação")
                             .on_click(cx.listener(
-                                |tela, _: &ClickEvent, _, cx| {
-                                    if let Some(Dialogo::Negociacao(form)) = tela.dialogo.as_mut() {
-                                        if !form.enviando {
-                                            form.confirmando = true;
-                                            cx.notify();
-                                        }
-                                    }
+                                |tela, _: &ClickEvent, w, cx| {
+                                    tela.perguntar_se_remove_a_negociacao(w, cx)
                                 },
                             )),
                         )
                     }),
             )
             .into_any_element()
+    }
+
+    /// "Remover a negociação?" — o `AlertDialog` do `useConfirmacao`, por cima
+    /// do diálogo: véu próprio, cartão de 448 px, rodapé cinza com "Cancelar"
+    /// e "Remover". O clique fora não fecha nada, como no site.
+    fn pergunta_de_remover_negociacao(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let Some(Dialogo::Negociacao(form)) = self.dialogo.as_ref() else {
+            return None;
+        };
+        if !form.confirmando {
+            return None;
+        }
+        let tema = cx.theme();
+        let (cartao, frente, apagado, borda, realce) = (
+            tema.popover,
+            tema.foreground,
+            tema.muted_foreground,
+            tema.border,
+            tema.muted,
+        );
+        Some(
+            div()
+                .id("caixa-negociacao-pergunta")
+                .absolute()
+                .inset_0()
+                .occlude()
+                .bg(gpui_kit::black().opacity(0.1))
+                .flex()
+                .items_center()
+                .justify_center()
+                .p(px(16.))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(
+                    v_flex()
+                        .w(px(448.))
+                        .max_w_full()
+                        .rounded(px(14.))
+                        .border_1()
+                        .border_color(frente.opacity(0.1))
+                        .bg(cartao)
+                        .text_color(frente)
+                        .shadow_lg()
+                        .overflow_hidden()
+                        .child(
+                            v_flex()
+                                .p(px(16.))
+                                .gap(px(6.))
+                                .child(
+                                    div()
+                                        .text_size(px(16.))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .child("Remover a negociação?"),
+                                )
+                                .child(div().text_sm().text_color(apagado).child(
+                                    "O registro do que foi combinado no balcão — tipo, valor e motivo — é apagado.",
+                                )),
+                        )
+                        .child(
+                            rodape()
+                                .p(px(16.))
+                                .border_t_1()
+                                .border_color(borda)
+                                .bg(realce.opacity(0.5))
+                                .child(
+                                    estilo::botao_contorno("caixa-negociacao-nao-remover", cx)
+                                        .child("Cancelar")
+                                        .on_click(cx.listener(|tela, _: &ClickEvent, w, cx| {
+                                            tela.fechar_dialogo(w, cx)
+                                        })),
+                                )
+                                .child(
+                                    estilo::botao_perigo("caixa-negociacao-remover-sim", cx)
+                                        .child("Remover")
+                                        .on_click(cx.listener(|tela, _: &ClickEvent, _, cx| {
+                                            tela.salvar_negociacao(cx)
+                                        })),
+                                ),
+                        ),
+                )
+                .into_any_element(),
+        )
     }
 }
 

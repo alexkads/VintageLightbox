@@ -12,6 +12,7 @@ use super::*;
 use crate::importacao::explorador::mentira::ImportadorDeMentira;
 use crate::pos_venda::porta::mentira::PublicadorDeMentira;
 use crate::sessoes::arquivos::mentira::SeletorDeMentira;
+use biblioteca_core::negociacao::{Negociacao, Tipo};
 
 fn foto_do_site(id: &str, ordem: i32, estado: EstadoDaFotoNoSite) -> FotoDaGaleria {
     FotoDaGaleria {
@@ -471,4 +472,67 @@ fn sem_estudio_o_painel_diz_onde_escolher(cx: &mut TestAppContext) {
         assert_eq!(t.dialogo_aberto(), None);
         assert_eq!(t.avisos_passageiros(), vec![regras::SESSAO_SEM_ESTUDIO]);
     });
+}
+
+fn abrir_negociacao_existente(t: &mut Caixa, w: &mut Window, cx: &mut Context<Caixa>) {
+    t.abrir_dialogo_de_negociacao(
+        vec!["a".into()],
+        "Negociação desta foto".into(),
+        Negociacao {
+            preco: Some(0),
+            ..Negociacao::default()
+        },
+        Some(4000),
+        true,
+        w,
+        cx,
+    );
+}
+
+/// 🗑️ "Remover negociação" pergunta antes, por cima do diálogo — o
+/// `useConfirmacao` do site. `Esc` fecha só a pergunta e devolve ao
+/// formulário; "Remover" apaga.
+#[gpui_kit::test]
+fn remover_a_negociacao_pergunta_e_esc_fecha_so_a_pergunta(cx: &mut TestAppContext) {
+    let m = aberto(cx);
+    na_janela(cx, &m, |t, w, cx| {
+        abrir_negociacao_existente(t, w, cx);
+        t.perguntar_se_remove_a_negociacao(w, cx);
+        assert!(t.perguntando_se_remove());
+        t.fechar_dialogo(w, cx);
+        assert!(!t.perguntando_se_remove());
+        assert_eq!(t.dialogo_aberto(), Some("Negociacao"));
+    });
+    assert!(gravacoes(&m).is_empty());
+    na_janela(cx, &m, |t, w, cx| {
+        t.perguntar_se_remove_a_negociacao(w, cx);
+        t.confirmar(w, cx);
+    });
+    colher(cx, &m);
+    let g = gravacoes(&m);
+    assert_eq!(g.len(), 1, "{g:?}");
+    assert_eq!(g[0].caminho, "/pos-venda/fotos/a");
+    assert_eq!(
+        g[0].corpo,
+        Some(json!({ "preco_negociado": null, "observacao_da_negociacao": null }))
+    );
+}
+
+/// 🏷️ "Já paga em outro site" grava o site escolhido na lista — o primeiro,
+/// quando ninguém mexe nela, como o `Select` do site.
+#[gpui_kit::test]
+fn ja_paga_em_outro_site_grava_o_site_da_lista(cx: &mut TestAppContext) {
+    let m = aberto(cx);
+    na_janela(cx, &m, |t, w, cx| {
+        abrir_negociacao_existente(t, w, cx);
+        t.trocar_tipo_da_negociacao(Tipo::Parceiro, w, cx);
+        t.confirmar(w, cx);
+    });
+    colher(cx, &m);
+    let g = gravacoes(&m);
+    assert_eq!(g.len(), 1, "{g:?}");
+    assert_eq!(
+        g[0].corpo,
+        Some(json!({ "preco_negociado": null, "observacao_da_negociacao": "TchêOfertas" }))
+    );
 }

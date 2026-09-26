@@ -138,7 +138,8 @@ pub struct Balcao {
     preco: Entity<InputState>,
     cupom: Entity<InputState>,
     motivo: Entity<InputState>,
-    /// "Remover a negociação?" à vista, dentro do diálogo.
+    /// "Remover a negociação?" — o `useConfirmacao` do site, por cima do
+    /// diálogo.
     confirmando: bool,
     /// O campo que ganha o cursor no próximo desenho.
     foco_pendente: Option<FocusHandle>,
@@ -454,7 +455,14 @@ impl Balcao {
         cx.notify();
     }
 
+    /// A pergunta de remover é filha do diálogo, como no site: `Esc` fecha só
+    /// ela e devolve ao formulário aberto.
     fn fechar(&mut self, cx: &mut Context<Self>) {
+        if self.confirmando {
+            self.confirmando = false;
+            cx.notify();
+            return;
+        }
         if self.enviando == 0 {
             cx.emit(Evento::Fechar { gravou: false });
         }
@@ -560,13 +568,15 @@ impl Render for Balcao {
             }
         }
         let tema = cx.theme();
-        let (primaria, borda, acento, apagado, perigo, aviso) = (
+        let (primaria, borda, acento, realce, apagado, perigo, aviso, frente) = (
             tema.primary,
             tema.border,
             tema.accent,
+            tema.muted,
             tema.muted_foreground,
             tema.danger,
             tema.warning,
+            tema.foreground,
         );
         let tipo = self.tipo;
         let enviando = self.enviando > 0;
@@ -577,18 +587,25 @@ impl Render for Balcao {
             .gap(px(8.))
             .children(Tipo::TODOS.into_iter().map(|t| {
                 let ativo = tipo == t;
+                // `rounded-lg border p-3 hover:bg-muted`; o escolhido ganha
+                // `border-primary bg-primary/5 ring-1 ring-primary` — a borda de
+                // 2 px, com 1 px a menos de respiro para o texto não pular.
                 v_flex()
                     .id(SharedString::from(format!("balcao-tipo-{}", t.rotulo())))
                     .gap(px(2.))
-                    .p(px(12.))
-                    .rounded(px(8.))
-                    .border_1()
+                    .rounded(px(10.))
                     .cursor_pointer()
                     .map(|d| {
                         if ativo {
-                            d.border_color(primaria).bg(primaria.opacity(0.05))
+                            d.p(px(11.))
+                                .border_2()
+                                .border_color(primaria)
+                                .bg(primaria.opacity(0.05))
                         } else {
-                            d.border_color(borda).hover(move |s| s.bg(acento))
+                            d.p(px(12.))
+                                .border_1()
+                                .border_color(borda)
+                                .hover(move |s| s.bg(realce))
                         }
                     })
                     .child(
@@ -655,36 +672,66 @@ impl Render for Balcao {
             ))
         });
 
+        // "Remover a negociação?" — o `AlertDialog` do `useConfirmacao`, por
+        // cima do diálogo: véu próprio, cartão de 448 px, rodapé cinza com
+        // "Cancelar" e "Remover". O clique fora não fecha nada, como no site.
         let confirmacao = self.confirmando.then(|| {
-            v_flex()
-                .gap(px(8.))
-                .p(px(12.))
-                .rounded(px(8.))
-                .border_1()
-                .border_color(perigo.opacity(0.5))
+            div()
+                .id("balcao-pergunta")
+                .absolute()
+                .inset_0()
+                .occlude()
+                .bg(gpui_kit::black().opacity(0.1))
+                .flex()
+                .items_center()
+                .justify_center()
+                .p(px(16.))
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(
-                    div()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child("Remover a negociação?"),
-                )
-                .child(div().text_sm().text_color(apagado).child(
-                    "O registro do que foi combinado no balcão — tipo, valor e motivo — é apagado.",
-                ))
-                .child(
-                    estilo::rodape_do_dialogo()
+                    v_flex()
+                        .w(px(448.))
+                        .max_w_full()
+                        .rounded(px(14.))
+                        .border_1()
+                        .border_color(frente.opacity(0.1))
+                        .bg(cx.theme().popover)
+                        .text_color(frente)
+                        .shadow_lg()
+                        .overflow_hidden()
                         .child(
-                            estilo::botao_contorno("balcao-nao-remover", cx)
-                                .child("Cancelar")
-                                .on_click(cx.listener(|tela, _: &ClickEvent, _, cx| {
-                                    tela.confirmando = false;
-                                    cx.notify();
-                                })),
+                            v_flex()
+                                .p(px(16.))
+                                .gap(px(6.))
+                                .child(
+                                    div()
+                                        .text_size(px(16.))
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .child("Remover a negociação?"),
+                                )
+                                .child(div().text_sm().text_color(apagado).child(
+                                    "O registro do que foi combinado no balcão — tipo, valor e motivo — é apagado.",
+                                )),
                         )
                         .child(
-                            estilo::botao_perigo("balcao-remover-sim", cx)
-                                .child("Remover")
-                                .on_click(
-                                    cx.listener(|tela, _: &ClickEvent, _, cx| tela.remover(cx)),
+                            estilo::rodape_do_dialogo()
+                                .p(px(16.))
+                                .border_t_1()
+                                .border_color(borda)
+                                .bg(realce.opacity(0.5))
+                                .child(
+                                    estilo::botao_contorno("balcao-nao-remover", cx)
+                                        .child("Cancelar")
+                                        .on_click(cx.listener(|tela, _: &ClickEvent, _, cx| {
+                                            tela.confirmando = false;
+                                            cx.notify();
+                                        })),
+                                )
+                                .child(
+                                    estilo::botao_perigo("balcao-remover-sim", cx)
+                                        .child("Remover")
+                                        .on_click(cx.listener(|tela, _: &ClickEvent, _, cx| {
+                                            tela.remover(cx)
+                                        })),
                                 ),
                         ),
                 )
@@ -740,12 +787,25 @@ impl Render for Balcao {
                     .key_context(CONTEXTO)
                     .on_action(cx.listener(|tela, _: &SalvarNegociacao, _, cx| tela.salvar(cx)))
                     .on_action(cx.listener(|tela, _: &FecharNegociacao, _, cx| tela.fechar(cx)))
-                    .child(div().pr(px(24.)).child(estilo::cabecalho_do_dialogo(
-                        self.titulo.clone(),
-                        "O que foi combinado no balcão. Não muda o preço da compra online.",
-                        None,
-                        cx,
-                    )))
+                    // O `DialogContent` do site: `rounded-xl` (14 px),
+                    // `ring-1 ring-foreground/10`, e o `DialogHeader` com o
+                    // título em `text-base font-medium` e 6 px até a descrição.
+                    .rounded(px(14.))
+                    .border_color(frente.opacity(0.1))
+                    .child(
+                        v_flex()
+                            .pr(px(24.))
+                            .gap(px(6.))
+                            .child(
+                                div()
+                                    .text_size(px(16.))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .child(self.titulo.clone()),
+                            )
+                            .child(div().text_sm().text_color(apagado).child(
+                                "O que foi combinado no balcão. Não muda o preço da compra online.",
+                            )),
+                    )
                     .child(tipos)
                     .children(parceiro)
                     .children(preco)
@@ -756,7 +816,6 @@ impl Render for Balcao {
                             .clone()
                             .map(|e| div().text_sm().text_color(perigo).child(e)),
                     )
-                    .children(confirmacao)
                     .child(botoes)
                     .child(
                         div()
@@ -777,6 +836,7 @@ impl Render for Balcao {
                             .on_click(cx.listener(|tela, _: &ClickEvent, _, cx| tela.fechar(cx))),
                     ),
             )
+            .children(confirmacao)
     }
 }
 
@@ -956,6 +1016,10 @@ mod testes {
                 tela.abrir(vec!["remota-a".into()], 0, abertura, window, cx);
                 tela.pedir_remocao(cx);
                 assert!(publicador.negociadas().is_empty(), "só perguntou");
+                // Esc fecha só a pergunta: o diálogo segue aberto, sem gravar.
+                tela.fechar(cx);
+                assert!(!tela.confirmando);
+                tela.pedir_remocao(cx);
                 // ⏎ com a pergunta à vista confirma a remoção.
                 tela.salvar(cx);
             })
