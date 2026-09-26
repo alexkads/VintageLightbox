@@ -45,6 +45,7 @@ use domain::services::pos_venda::{
 use domain::services::PreviewType;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::popover::Popover;
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
@@ -3775,7 +3776,6 @@ impl Render for Detalhe {
             // Elas ficam **por último** para nascerem acima da grade, e são
             // desenhadas na própria tela — o `deferred` do GPUI não aceita
             // outro `deferred` dentro (ver `caixa/dialogos.rs`).
-            .children(self.detalhes(cx))
             // 🔑 **`deferred`, e não só por último**: o caixa flutuante é filho
             // da raiz, desenhado depois desta tela, e ficava por cima do modal.
             // Diferido, o modal é pintado depois de tudo. Não há `deferred`
@@ -3945,37 +3945,57 @@ impl Detalhe {
             })
             .child(div().flex_1())
             .child(
-                // O painel mora junto do botão para nascer embaixo dele, e é
-                // diferido para ser pintado por cima da grade e do véu.
-                div()
-                    .relative()
-                    .child(
-                        // Os números da galeria, como o "detalhes" do site.
-                        estilo::botao_contorno("sessao-contagem", cx)
-                            .debug_selector(|| "sessao-contagem".into())
-                            .text_xs()
-                            .text_color(apagado)
-                            .child(Icon::new(Icone::Info).size(px(14.)))
-                            .child(format!(
-                                "{levadas} levadas · {a_venda} à venda · {compradas} compradas"
-                            ))
-                            // A seta do `ChevronDown` do site, que vira quando abre.
-                            .child(Icon::new(Icone::ChevronDown).size(px(14.)).rotate(
-                                gpui_kit::radians(if self.detalhes_abertos {
-                                    std::f32::consts::PI
-                                } else {
-                                    0.
-                                }),
-                            ))
-                            .on_click(cx.listener(|tela, _ev, _window, cx| {
-                                tela.detalhes_abertos = !tela.detalhes_abertos;
+                // 🪟 **O `Popover` do gpui-kit**, como o do site: embaixo do
+                // botão e alinhado à direita dele (`align="end"`), fechando no
+                // clique fora e no Esc. Controlado por `detalhes_abertos`,
+                // porque o roteiro e os links do painel também o fecham. O
+                // desenho do painel é o nosso (`appearance(false)`), que já é o
+                // do site.
+                {
+                    let eu = cx.entity().downgrade();
+                    let do_painel = eu.clone();
+                    Popover::new("sessao-detalhes")
+                        .anchor(gpui_kit::Anchor::TopRight)
+                        .appearance(false)
+                        .open(self.detalhes_abertos)
+                        .on_open_change(move |aberto, _window, cx| {
+                            let aberto = *aberto;
+                            let _ = eu.update(cx, |tela, cx| {
+                                tela.detalhes_abertos = aberto;
                                 cx.notify();
-                            })),
-                    )
-                    .children(
-                        self.painel_dos_detalhes(cx)
-                            .map(|painel| gpui_kit::deferred(painel).with_priority(1)),
-                    ),
+                            });
+                        })
+                        .content(move |_, _window, cx| {
+                            do_painel
+                                .upgrade()
+                                .and_then(|tela| {
+                                    tela.update(cx, |tela, cx| {
+                                        tela.painel_dos_detalhes(cx)
+                                            .map(|painel| painel.into_any_element())
+                                    })
+                                })
+                                .unwrap_or_else(|| div().into_any_element())
+                        })
+                        .trigger(
+                            // Os números da galeria, como o "detalhes" do site.
+                            estilo::botao_contorno("sessao-contagem", cx)
+                                .debug_selector(|| "sessao-contagem".into())
+                                .text_xs()
+                                .text_color(apagado)
+                                .child(Icon::new(Icone::Info).size(px(14.)))
+                                .child(format!(
+                                    "{levadas} levadas · {a_venda} à venda · {compradas} compradas"
+                                ))
+                                // A seta do `ChevronDown` do site, que vira quando abre.
+                                .child(Icon::new(Icone::ChevronDown).size(px(14.)).rotate(
+                                    gpui_kit::radians(if self.detalhes_abertos {
+                                        std::f32::consts::PI
+                                    } else {
+                                        0.
+                                    }),
+                                )),
+                        )
+                },
             )
             // 📋 **Atendimento** — o que o assistente coletou nas sete etapas.
             // No site é uma gaveta ao lado do "Dados do cliente", e é onde se
@@ -5247,116 +5267,89 @@ impl Detalhe {
         let eu = cx.entity().downgrade();
 
         Some(
-            // Abaixo do botão que o abriu e alinhado à direita dele — o
-            // `align="end"` do `PopoverContent` do site.
-            div()
-                .absolute()
-                .top(gpui_kit::relative(1.))
-                .right_0()
-                .pt(px(4.))
-                .child(
-                    div()
-                        .id("detalhes-painel")
-                        .debug_selector(|| "detalhes-painel".into())
-                        .w(px(384.))
-                        .p(px(12.))
-                        .rounded(tema.radius)
-                        .border_1()
-                        .border_color(tema.border)
-                        .bg(tema.popover)
-                        .text_color(tema.popover_foreground)
-                        .shadow_lg()
-                        // Clique dentro do painel não é clique fora.
-                        .on_click(|_ev, _w, cx| cx.stop_propagation())
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap(px(6.))
-                                .child(linha(
-                                    "Fotos",
-                                    &texto::fotos(levadas, a_venda, compradas, apagadas),
-                                ))
-                                .child(linha(
-                                    "Preço padrão",
-                                    &texto::preco_padrao(&preco, &nome, aberta.faixas.len()),
-                                ))
-                                .children(
-                                    aberta
-                                        .vence_venda
-                                        .and_then(texto::dia_br)
-                                        .map(|d| linha("À venda até", &simples(d))),
-                                )
-                                .children(
-                                    aberta
-                                        .vence_download
-                                        .and_then(texto::dia_br)
-                                        .map(|d| linha("Download até", &simples(d))),
-                                )
-                                .children(
-                                    g.expira_em
-                                        .and_then(texto::dia_br)
-                                        .map(|d| linha("Galeria até", &simples(d))),
-                                )
-                                .child(linha(
-                                    "Criada",
-                                    &texto::criada(&criada, g.criada_por.as_deref()),
-                                )),
-                        )
-                        .child(
-                            div()
-                                .mt(px(12.))
-                                .pt(px(8.))
-                                .border_t_1()
-                                .border_color(tema.border)
-                                .text_xs()
-                                .text_color(apagado)
-                                .children(rodape.iter().enumerate().map(|(i, t)| {
-                                    let eu = eu.clone();
-                                    let links = t.de(Tom::Link);
-                                    div()
-                                        .debug_selector(move || format!("detalhes-rodape-{i}"))
-                                        .when(i == 1, |d| d.mt(px(4.)))
-                                        .child(
-                                            gpui_kit::InteractiveText::new(
-                                                ("detalhes-rodape", i),
-                                                pintar(t),
-                                            )
-                                            .on_click(
-                                                links,
-                                                move |_, _w, cx| {
-                                                    let _ = eu.update(cx, |tela, cx| {
-                                                        tela.detalhes_abertos = false;
-                                                        cx.emit(Pedido::PoliticaDeRetencao);
-                                                        cx.notify();
-                                                    });
-                                                },
-                                            ),
+            // Onde nasce (embaixo do botão, à direita) é o `Popover` que diz.
+            div().pt(px(4.)).child(
+                div()
+                    .id("detalhes-painel")
+                    .debug_selector(|| "detalhes-painel".into())
+                    .w(px(384.))
+                    .p(px(12.))
+                    .rounded(tema.radius)
+                    .border_1()
+                    .border_color(tema.border)
+                    .bg(tema.popover)
+                    .text_color(tema.popover_foreground)
+                    .shadow_lg()
+                    // Clique dentro do painel não é clique fora.
+                    .on_click(|_ev, _w, cx| cx.stop_propagation())
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(6.))
+                            .child(linha(
+                                "Fotos",
+                                &texto::fotos(levadas, a_venda, compradas, apagadas),
+                            ))
+                            .child(linha(
+                                "Preço padrão",
+                                &texto::preco_padrao(&preco, &nome, aberta.faixas.len()),
+                            ))
+                            .children(
+                                aberta
+                                    .vence_venda
+                                    .and_then(texto::dia_br)
+                                    .map(|d| linha("À venda até", &simples(d))),
+                            )
+                            .children(
+                                aberta
+                                    .vence_download
+                                    .and_then(texto::dia_br)
+                                    .map(|d| linha("Download até", &simples(d))),
+                            )
+                            .children(
+                                g.expira_em
+                                    .and_then(texto::dia_br)
+                                    .map(|d| linha("Galeria até", &simples(d))),
+                            )
+                            .child(linha(
+                                "Criada",
+                                &texto::criada(&criada, g.criada_por.as_deref()),
+                            )),
+                    )
+                    .child(
+                        div()
+                            .mt(px(12.))
+                            .pt(px(8.))
+                            .border_t_1()
+                            .border_color(tema.border)
+                            .text_xs()
+                            .text_color(apagado)
+                            .children(rodape.iter().enumerate().map(|(i, t)| {
+                                let eu = eu.clone();
+                                let links = t.de(Tom::Link);
+                                div()
+                                    .debug_selector(move || format!("detalhes-rodape-{i}"))
+                                    .when(i == 1, |d| d.mt(px(4.)))
+                                    .child(
+                                        gpui_kit::InteractiveText::new(
+                                            ("detalhes-rodape", i),
+                                            pintar(t),
                                         )
-                                })),
-                        ),
-                ),
-        )
-    }
-
-    /// O véu dos detalhes: ocupa a tela e fecha ao clique, como o `Popover` do
-    /// site fecha ao clicar fora. O painel vem depois dele (diferido, no botão),
-    /// e por isso fica por cima.
-    fn detalhes(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-        if !self.detalhes_abertos {
-            return None;
-        }
-        Some(
-            div()
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                .id("detalhes-veu")
-                .on_click(cx.listener(|tela, _ev, _w, cx| {
-                    tela.detalhes_abertos = false;
-                    cx.notify();
-                })),
+                                        .on_click(
+                                            links,
+                                            move |_, _w, cx| {
+                                                let _ = eu.update(cx, |tela, cx| {
+                                                    tela.detalhes_abertos = false;
+                                                    cx.emit(Pedido::PoliticaDeRetencao);
+                                                    cx.notify();
+                                                });
+                                            },
+                                        ),
+                                    )
+                            })),
+                    ),
+            ),
         )
     }
 
