@@ -1,12 +1,13 @@
 {
-  "versao": "0.1.17",
-  "titulo": "Janelas, botões e gaveta com o visual do site: tudo no mesmo padrão, no meio da tela.",
-  "importante": false,
+  "versao": "0.1.18",
+  "titulo": "Importar muitas fotos grandes com o cliente olhando: todas chegam à sessão.",
+  "importante": true,
   "novidades": [
-    "Todas as janelas de pergunta e de formulário (negociação, caixa, dados do cliente, apagar, importar, exportar, nova sessão, agenda, chatbot) ficam no meio da tela e têm o mesmo desenho do site. O Esc fecha, e as perguntas de apagar ou descartar trazem os botões numa faixa embaixo.",
-    "O atendimento abre como gaveta pela direita, e os detalhes da galeria abrem num balão preso ao botão, como no site.",
-    "Botões, selos e avisos passam a ter o tamanho e as cores do site.",
-    "As buscas de agendamento, voucher, compra e parceiro ficam mais largas, e a lista rola sem esconder o campo de busca."
+    "Criar a sessão com as fotos ainda copiando não deixa mais as últimas para trás: todas passam para a sessão, mesmo as que terminam no exato momento de criar.",
+    "Dar nota e sinalizar enquanto a cópia anda não tira mais a foto da sessão, e a cópia não apaga mais a nota nem o corte do preset que a foto acabou de receber.",
+    "Fotos soltas numa sessão enquanto outra cópia está andando entram na fila e são importadas em seguida, em vez de sumirem.",
+    "O aviso de \"fotos de um rascunho antigo\" não aparece mais para as fotos que ainda estão a caminho da sessão criada — o botão Apagar dele podia apagar essas fotos.",
+    "Várias importações ao mesmo tempo usam bem menos memória: o computador não fica sem fôlego com o cliente na segunda tela."
   ],
-  "por_que_atualizar": "O app fica igual ao site em todas as janelas: quem aprendeu num sabe usar o outro."
+  "por_que_atualizar": "Com fotos grandes e o balcão trabalhando durante a cópia, parte das fotos podia não aparecer na sessão. Esta versão corrige isso."
 }
