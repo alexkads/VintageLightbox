@@ -224,6 +224,8 @@ pub struct Sessoes {
     escolhendo_estudio: bool,
     /// O "Em qual estúdio você está?" no `Dialog` do gpui-kit (`crate::dialogo`).
     ponte_do_estudio: crate::dialogo::Ponte,
+    ponte_da_exclusao: crate::dialogo::Ponte,
+    ponte_da_restauracao: crate::dialogo::Ponte,
     /// Qual sessão está aberta para receber fotos.
     aberta: Option<String>,
     busca: gpui_kit::Entity<InputState>,
@@ -406,6 +408,8 @@ impl Sessoes {
             lembranca: caminho_da_lembranca(),
             escolhendo_estudio: false,
             ponte_do_estudio: crate::dialogo::Ponte::default(),
+            ponte_da_exclusao: crate::dialogo::Ponte::default(),
+            ponte_da_restauracao: crate::dialogo::Ponte::default(),
             capas: std::collections::HashMap::new(),
             capas_pedidas: std::collections::HashSet::new(),
             aberta: None,
@@ -1277,13 +1281,32 @@ impl Render for Sessoes {
         let dialogo_do_estudio = crate::dialogo::sincronizar(
             self,
             |tela| tela.escolhendo_estudio,
-            crate::dialogo::Jeito {
-                largura: 440.,
-                fechavel: false,
-            },
+            crate::dialogo::Jeito::sem_saida(440.),
             |tela| &mut tela.ponte_do_estudio,
             Self::dialogo_do_estudio,
             |_, _, _| {},
+            window,
+            cx,
+        );
+        // O `AlertDialog` do site: `Esc` e os botões fecham; o clique fora não
+        // descarta a frase meio digitada.
+        let dialogo_de_exclusao = crate::dialogo::sincronizar(
+            self,
+            |tela| tela.exclusao.is_some(),
+            crate::dialogo::Jeito::alerta(512.),
+            |tela| &mut tela.ponte_da_exclusao,
+            Self::dialogo_de_exclusao,
+            |tela, _, cx| tela.cancelar_exclusao(cx),
+            window,
+            cx,
+        );
+        let dialogo_de_restauracao = crate::dialogo::sincronizar(
+            self,
+            |tela| tela.restaurar.is_some(),
+            crate::dialogo::Jeito::alerta(440.),
+            |tela| &mut tela.ponte_da_restauracao,
+            Self::dialogo_de_restauracao,
+            |tela, _, cx| tela.cancelar_restauracao(cx),
             window,
             cx,
         );
@@ -1332,8 +1355,8 @@ impl Render for Sessoes {
                     .child(div().text_xs().text_color(apagado).child(rodape))
             })
             .children(dialogo_do_estudio)
-            .children(self.dialogo_de_exclusao(cx))
-            .children(self.dialogo_de_restauracao(cx))
+            .children(dialogo_de_exclusao)
+            .children(dialogo_de_restauracao)
             .children(self.popover_do_periodo(cx))
     }
 }
@@ -1935,48 +1958,54 @@ impl Sessoes {
     }
 
     /// "Restaurar “X”?" — a pergunta do `useConfirmacao` do site.
-    fn dialogo_de_restauracao(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    fn dialogo_de_restauracao(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui_kit::AnyElement> {
         use crate::estilo;
 
         let r = self.restaurar.as_ref()?;
         Some(
-            estilo::veu_do_dialogo().child(
-                estilo::caixa_do_dialogo(cx)
-                    .child(estilo::cabecalho_do_dialogo(
-                        format!("Restaurar \u{201c}{}\u{201d}?", r.titulo),
-                        "A sessão volta para a lista e para o link do cliente, com o mesmo \
+            gpui_kit::component::v_flex()
+                .gap(px(16.))
+                .child(estilo::cabecalho_do_dialogo(
+                    format!("Restaurar \u{201c}{}\u{201d}?", r.titulo),
+                    "A sessão volta para a lista e para o link do cliente, com o mesmo \
                          endereço. As máquinas com fotos paradas voltam a subi-las sozinhas.",
-                        None,
-                        cx,
-                    ))
-                    .child(
-                        estilo::rodape_do_dialogo()
-                            .child(
-                                estilo::desligado(
-                                    estilo::botao_contorno("restaurar-cancelar", cx),
-                                    r.enviando,
-                                )
-                                .child("Cancelar")
-                                .on_click(cx.listener(
-                                    |tela, _ev, _window, cx| tela.cancelar_restauracao(cx),
-                                )),
+                    None,
+                    cx,
+                ))
+                .child(
+                    estilo::rodape_do_dialogo()
+                        .child(
+                            estilo::desligado(
+                                estilo::botao_contorno("restaurar-cancelar", cx),
+                                r.enviando,
                             )
-                            .child(
-                                estilo::desligado(
-                                    estilo::botao_primario("restaurar-confirmar", cx),
-                                    r.enviando,
-                                )
-                                .child(if r.enviando {
-                                    "Restaurando…"
-                                } else {
-                                    "Restaurar"
-                                })
-                                .on_click(cx.listener(
-                                    |tela, _ev, _window, cx| tela.confirmar_restauracao(cx),
-                                )),
+                            .child("Cancelar")
+                            .on_click(
+                                cx.listener(|tela, _ev, _window, cx| tela.cancelar_restauracao(cx)),
                             ),
-                    ),
-            ),
+                        )
+                        .child(
+                            estilo::desligado(
+                                estilo::botao_primario("restaurar-confirmar", cx),
+                                r.enviando,
+                            )
+                            .child(if r.enviando {
+                                "Restaurando…"
+                            } else {
+                                "Restaurar"
+                            })
+                            .on_click(
+                                cx.listener(|tela, _ev, _window, cx| {
+                                    tela.confirmar_restauracao(cx)
+                                }),
+                            ),
+                        ),
+                )
+                .into_any_element(),
         )
     }
 
@@ -1986,7 +2015,11 @@ impl Sessoes {
     /// Como o `AlertDialog`, **não fecha com clique no véu**: um clique perdido
     /// fora da caixa não descarta a frase meio digitada. Fecha no "Cancelar" e
     /// no `Esc`.
-    fn dialogo_de_exclusao(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    fn dialogo_de_exclusao(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui_kit::AnyElement> {
         use crate::estilo;
         use crate::recursos::Icone;
         use gpui_kit::component::Icon;
@@ -2080,65 +2113,62 @@ impl Sessoes {
                 });
 
         Some(
-            estilo::veu_do_dialogo().child(
-                estilo::caixa_do_dialogo(cx)
-                    .id("dialogo-de-exclusao")
-                    .w(px(512.))
-                    .on_key_down(
-                        cx.listener(|tela, ev: &gpui_kit::KeyDownEvent, _window, cx| {
-                            if ev.keystroke.key == "escape" {
-                                cx.stop_propagation();
-                                tela.cancelar_exclusao(cx);
-                            }
-                        }),
-                    )
-                    .child(estilo::cabecalho_do_dialogo(
-                        "Excluir a sessão",
-                        descricao,
-                        Some(Icone::TriangleAlert),
-                        cx,
-                    ))
-                    .child(quem_tem)
-                    .child(
-                        gpui_kit::component::v_flex()
-                            .gap(px(6.))
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_wrap()
-                                    .items_center()
-                                    .gap(px(4.))
-                                    .text_sm()
-                                    .font_weight(gpui_kit::FontWeight::MEDIUM)
-                                    .child("Para confirmar, digite")
-                                    .child(
-                                        div()
-                                            .px(px(4.))
-                                            .rounded(px(4.))
-                                            .bg(tema.muted)
-                                            .font_family("monospace")
-                                            .child(exclusao::FRASE_DE_CONFIRMACAO),
-                                    ),
-                            )
-                            .child(Input::new(&aberta.frase).disabled(aberta.enviando)),
-                    )
-                    .child(
-                        estilo::rodape_do_dialogo()
-                            .child(
-                                estilo::desligado(
-                                    estilo::botao_contorno("excluir-sessao-cancelar", cx),
-                                    aberta.enviando,
-                                )
-                                .child("Cancelar")
-                                .on_click(
-                                    cx.listener(|tela, _ev, _window, cx| {
-                                        tela.cancelar_exclusao(cx)
-                                    }),
+            gpui_kit::component::v_flex()
+                .gap(px(16.))
+                .id("dialogo-de-exclusao")
+                .on_key_down(
+                    cx.listener(|tela, ev: &gpui_kit::KeyDownEvent, _window, cx| {
+                        if ev.keystroke.key == "escape" {
+                            cx.stop_propagation();
+                            tela.cancelar_exclusao(cx);
+                        }
+                    }),
+                )
+                .child(estilo::cabecalho_do_dialogo(
+                    "Excluir a sessão",
+                    descricao,
+                    Some(Icone::TriangleAlert),
+                    cx,
+                ))
+                .child(quem_tem)
+                .child(
+                    gpui_kit::component::v_flex()
+                        .gap(px(6.))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_wrap()
+                                .items_center()
+                                .gap(px(4.))
+                                .text_sm()
+                                .font_weight(gpui_kit::FontWeight::MEDIUM)
+                                .child("Para confirmar, digite")
+                                .child(
+                                    div()
+                                        .px(px(4.))
+                                        .rounded(px(4.))
+                                        .bg(tema.muted)
+                                        .font_family("monospace")
+                                        .child(exclusao::FRASE_DE_CONFIRMACAO),
                                 ),
+                        )
+                        .child(Input::new(&aberta.frase).disabled(aberta.enviando)),
+                )
+                .child(
+                    estilo::rodape_do_dialogo()
+                        .child(
+                            estilo::desligado(
+                                estilo::botao_contorno("excluir-sessao-cancelar", cx),
+                                aberta.enviando,
                             )
-                            .child(botao_excluir),
-                    ),
-            ),
+                            .child("Cancelar")
+                            .on_click(
+                                cx.listener(|tela, _ev, _window, cx| tela.cancelar_exclusao(cx)),
+                            ),
+                        )
+                        .child(botao_excluir),
+                )
+                .into_any_element(),
         )
     }
 

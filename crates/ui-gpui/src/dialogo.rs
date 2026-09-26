@@ -35,21 +35,48 @@ use gpui_kit::{prelude::*, px, AnyElement, Context, Window};
 
 use crate::estilo;
 
-/// Como o diálogo se comporta.
+/// Como o diálogo se comporta — o do site, caso a caso.
 #[derive(Clone, Copy)]
 pub struct Jeito {
     /// A largura da caixa (a de hoje é 440; a exclusão usa 512).
     pub largura: f32,
-    /// Esc, clique fora e o X fecham. `false` é o diálogo "sem saída" do site
-    /// (a escolha do estúdio), que só fecha escolhendo.
-    pub fechavel: bool,
+    /// O `Esc` fecha.
+    pub esc: bool,
+    /// O clique fora fecha.
+    pub veu: bool,
+    /// O X no canto.
+    pub x: bool,
 }
 
-impl Default for Jeito {
-    fn default() -> Self {
+impl Jeito {
+    /// O `Dialog` do site: X, `Esc` e clique fora fecham.
+    pub const fn dialogo(largura: f32) -> Self {
         Self {
-            largura: 440.,
-            fechavel: true,
+            largura,
+            esc: true,
+            veu: true,
+            x: true,
+        }
+    }
+
+    /// O `AlertDialog` do site (e o `useConfirmacao`): só o `Esc` e os botões
+    /// fecham — um clique perdido fora não descarta o que foi digitado.
+    pub const fn alerta(largura: f32) -> Self {
+        Self {
+            largura,
+            esc: true,
+            veu: false,
+            x: false,
+        }
+    }
+
+    /// O "sem saída" do site (a escolha do estúdio): só fecha escolhendo.
+    pub const fn sem_saida(largura: f32) -> Self {
+        Self {
+            largura,
+            esc: false,
+            veu: false,
+            x: false,
         }
     }
 }
@@ -189,9 +216,9 @@ fn abrir<T: 'static>(
             .rounded(px(12.))
             .bg(cx.theme().popover)
             .text_color(cx.theme().popover_foreground)
-            .close_button(jeito.fechavel)
-            .overlay_closable(jeito.fechavel)
-            .keyboard(jeito.fechavel)
+            .close_button(jeito.x)
+            .overlay_closable(jeito.veu)
+            .keyboard(jeito.esc)
             .on_cancel(move |_, window, cx| {
                 ao_cancelar(window, cx);
                 false
