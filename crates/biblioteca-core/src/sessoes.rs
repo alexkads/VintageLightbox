@@ -94,7 +94,7 @@ pub struct Totais {
 /// caixa, e é isso que faz a lista oferecer o caminho para fechar a venda.
 /// Quem não sabe é o `Option` de fora — a API que não respondeu, ou que é
 /// anterior ao campo.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PagoNoCaixa {
     pub vendas: u32,
     /// Em centavos, como o resto do caixa — e ao contrário de [`Totais`], que
@@ -103,6 +103,9 @@ pub struct PagoNoCaixa {
     pub estornado_centavos: i64,
     /// `bruto − estornado`, calculado no servidor: a tela mostra, não recompõe.
     pub liquido_centavos: i64,
+    /// 💳 O líquido por forma de pagamento, com a chave do site (`"pix"`).
+    /// Soma o `liquido_centavos`. Ver [`rotulo_da_forma`].
+    pub por_forma: BTreeMap<String, i64>,
 }
 
 /// O que a coluna "Caixa (PDV)" da lista tem a dizer sobre uma sessão.
@@ -134,7 +137,7 @@ pub enum EstadoNoCaixa {
 }
 
 /// A decisão da coluna do caixa. Ver [`EstadoNoCaixa`].
-pub fn estado_no_caixa(caixa: Option<PagoNoCaixa>, levadas_no_balcao: u32) -> EstadoNoCaixa {
+pub fn estado_no_caixa(caixa: Option<&PagoNoCaixa>, levadas_no_balcao: u32) -> EstadoNoCaixa {
     let Some(pago) = caixa else {
         return EstadoNoCaixa::NaoSei;
     };
@@ -305,26 +308,52 @@ fn so_digitos(texto: &str) -> String {
 /// digita "12" procurando um título veria as galerias erradas aparecerem.
 const DIGITOS_PARA_VALER_TELEFONE: usize = 3;
 
-/// Busca por título, e-mail ou WhatsApp, e filtro por situação.
+/// Os dígitos do telefone buscado, sem o `55` do Brasil na frente.
 ///
-/// O WhatsApp compara **só dígitos**: quem digita `99999` acha
+/// Quem cola `+55 (47) 99999-8888` procura o mesmo cliente que foi salvo como
+/// `(47) 99999-8888`; com o DDI, os dígitos não caberiam dentro do número salvo.
+/// Só corta com 12 dígitos ou mais — DDI + DDD + número —, para `5599…` (DDD 55)
+/// continuar sendo DDD.
+fn digitos_do_telefone(busca: &str) -> String {
+    let digitos = so_digitos(busca);
+    match digitos.strip_prefix("55") {
+        Some(resto) if digitos.len() >= 12 => resto.to_string(),
+        _ => digitos,
+    }
+}
+
+/// Busca por título, e-mail ou telefone, e filtro por situação.
+///
+/// O telefone compara **só dígitos**: quem digita `99999` acha
 /// `(47) 99999-8888` — a máscara é apresentação, não dado.
+///
+/// 🔎 **Com texto na busca, o período não recorta** (dono, 2026-09-26: *"tinha
+/// que ter uma busca ativa por título, email e telefone"*). A lista abre em
+/// hoje, e o cliente que volta ao balcão quase nunca é de hoje: buscar só dentro
+/// do dia respondia "nada" para quem existe. A busca procura no arquivo inteiro,
+/// e apagar o texto devolve o período escolhido. A situação continua valendo —
+/// é um chip que o operador acendeu de propósito.
+///
+/// ⚠️ **O site tem a mesma regra** (`sessoes-fotograficas/lista.tsx`,
+/// `apresentacao.ts`): ao mudar uma, mudar a outra.
 pub fn filtrar<'a>(
     sessoes: &'a [SessaoFotografica],
     criterio: &Criterio,
     agora: i64,
 ) -> Vec<&'a SessaoFotografica> {
     let termo = normalizar(&criterio.busca);
-    let digitos = so_digitos(&criterio.busca);
+    let digitos = digitos_do_telefone(&criterio.busca);
 
     sessoes
         .iter()
         .filter(|sessao| {
-            // 📅 O período é o recorte mais grosso, e vem primeiro.
-            if criterio
-                .periodo
-                .as_ref()
-                .is_some_and(|p| !p.contem(dia_da_criacao(&sessao.criada_em_iso)))
+            // 📅 O período é o recorte mais grosso, e vem primeiro — menos
+            // quando há busca, que procura em todas as datas.
+            if termo.is_empty()
+                && criterio
+                    .periodo
+                    .as_ref()
+                    .is_some_and(|p| !p.contem(dia_da_criacao(&sessao.criada_em_iso)))
             {
                 return false;
             }
@@ -394,7 +423,7 @@ pub fn contar_por_situacao(sessoes: &[SessaoFotografica], agora: i64) -> Contage
 }
 
 /// A soma do **recorte visível**, e o que ela não pôde somar.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Soma {
     pub balcao: i64,
     pub pos_venda: i64,
@@ -403,6 +432,59 @@ pub struct Soma {
     /// 🔑 **Contadas, e não silenciadas.** Sem isto o rodapé anunciaria um total
     /// menor que o real sem nada dizendo por quê.
     pub sem_totais: usize,
+    /// 💵 O que o **caixa (PDV)** registrou no recorte — o cartão "Vendido no
+    /// caixa".
+    pub caixa: SomaDoCaixa,
+}
+
+/// O caixa do recorte: o que o PDV cobrou, o que voltou, e por qual forma.
+///
+/// 🔑 **É o número do caixa, e não o do preço das fotos** (dono, 2026-09-26:
+/// *"tinha que ser o total vendido com as informações do caixa"*). O `balcao`
+/// de [`Soma`] conta a foto levada pelo preço dela, tenha ou não passado pela
+/// gaveta; este é o dinheiro que o caixa registrou.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SomaDoCaixa {
+    pub vendas: u32,
+    pub bruto_centavos: i64,
+    pub estornado_centavos: i64,
+    pub liquido_centavos: i64,
+    /// As "moedas": o líquido por forma de pagamento, na ordem das teclas do
+    /// PDV. Só as que ficaram com valor.
+    pub por_forma: Vec<(String, i64)>,
+    /// Sessões com foto levada no balcão e nenhuma venda no PDV — dinheiro
+    /// que saiu do balcão sem passar pela gaveta.
+    pub a_fechar: usize,
+    /// Sessões de que a API não soube dizer o caixa. Como o `sem_totais`:
+    /// contadas, para o número não se apresentar como inteiro.
+    pub sem_caixa: usize,
+}
+
+/// As formas de pagamento do caixa do site, na ordem das teclas do PDV (1 a
+/// 8), com o nome que o operador lê — os mesmos de `ROTULO_DA_FORMA`, no
+/// `lib/schemas/caixa.ts` do site.
+///
+/// ⚠️ **A lista é do site** (`domain::pos_venda::caixa::FormaDePagamento`, no
+/// e-commerce). Uma forma que chegue fora dela vai para o fim, com a chave
+/// como veio — some da tela é que ela não pode.
+pub const FORMAS_DE_PAGAMENTO: [(&str, &str); 8] = [
+    ("dinheiro", "Dinheiro"),
+    ("pix", "PIX"),
+    ("debito", "Cartão de débito"),
+    ("credito", "Cartão de crédito"),
+    ("voucher", "Voucher"),
+    ("parceiro", "Site parceiro"),
+    ("transferencia", "Transferência"),
+    ("outro", "Outro"),
+];
+
+/// O nome de uma forma de pagamento para a tela.
+pub fn rotulo_da_forma(chave: &str) -> &str {
+    FORMAS_DE_PAGAMENTO
+        .iter()
+        .find(|(k, _)| *k == chave)
+        .map(|(_, rotulo)| *rotulo)
+        .unwrap_or(chave)
 }
 
 /// ⚠️ **É a soma do que está na tela.** Com busca ou filtro ativo o número é do
@@ -410,6 +492,7 @@ pub struct Soma {
 /// total é a mesma armadilha que o contador da grade evita do outro lado.
 pub fn somar_totais(sessoes: &[&SessaoFotografica]) -> Soma {
     let mut soma = Soma::default();
+    let mut formas: BTreeMap<String, i64> = BTreeMap::new();
     for sessao in sessoes {
         match sessao.totais {
             Some(totais) => {
@@ -418,7 +501,32 @@ pub fn somar_totais(sessoes: &[&SessaoFotografica]) -> Soma {
             }
             None => soma.sem_totais += 1,
         }
+        match estado_no_caixa(sessao.caixa.as_ref(), sessao.fotos.levadas_no_balcao) {
+            EstadoNoCaixa::NaoSei => soma.caixa.sem_caixa += 1,
+            EstadoNoCaixa::FecharVenda => soma.caixa.a_fechar += 1,
+            EstadoNoCaixa::NadaACobrar | EstadoNoCaixa::Cobrado { .. } => {}
+        }
+        if let Some(pago) = &sessao.caixa {
+            soma.caixa.vendas += pago.vendas;
+            soma.caixa.bruto_centavos += pago.bruto_centavos;
+            soma.caixa.estornado_centavos += pago.estornado_centavos;
+            soma.caixa.liquido_centavos += pago.liquido_centavos;
+            for (forma, valor) in &pago.por_forma {
+                *formas.entry(forma.clone()).or_insert(0) += valor;
+            }
+        }
     }
+    formas.retain(|_, valor| *valor != 0);
+    // Na ordem das teclas do PDV; a forma desconhecida vai para o fim.
+    let posicao = |chave: &str| {
+        FORMAS_DE_PAGAMENTO
+            .iter()
+            .position(|(k, _)| *k == chave)
+            .unwrap_or(FORMAS_DE_PAGAMENTO.len())
+    };
+    let mut por_forma: Vec<(String, i64)> = formas.into_iter().collect();
+    por_forma.sort_by_key(|(chave, _)| posicao(chave));
+    soma.caixa.por_forma = por_forma;
     soma
 }
 
@@ -527,9 +635,146 @@ fn dia_civil(iso: &str) -> Option<i64> {
     Some(era * 146_097 + dia_da_era - 719_468)
 }
 
+/// O inverso de [`dia_civil`]: dias desde 1970-01-01 → `"YYYY-MM-DD"`.
+fn data_do_dia(dias: i64) -> String {
+    let z = dias + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let dia_da_era = z - era * 146_097;
+    let ano_da_era =
+        (dia_da_era - dia_da_era / 1460 + dia_da_era / 36_524 - dia_da_era / 146_096) / 365;
+    let dia_do_ano = dia_da_era - (365 * ano_da_era + ano_da_era / 4 - ano_da_era / 100);
+    let mp = (5 * dia_do_ano + 2) / 153;
+    let dia = dia_do_ano - (153 * mp + 2) / 5 + 1;
+    let mes = if mp < 10 { mp + 3 } else { mp - 9 };
+    let ano = ano_da_era + era * 400 + i64::from(mes <= 2);
+    format!("{ano:04}-{mes:02}-{dia:02}")
+}
+
+/// Quantos dias o gráfico de área mostra.
+pub const DIAS_DO_GRAFICO: i64 = 30;
+
+/// Um dia do gráfico de área: o que o caixa registrou e o que o pós-venda
+/// vendeu nas sessões criadas nele.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiaDoGrafico {
+    /// `"2026-09-03"`.
+    pub chave: String,
+    /// O líquido do caixa (PDV), em centavos.
+    pub caixa: i64,
+    /// O pós-venda, em centavos.
+    pub pos_venda: i64,
+}
+
+/// 📈 **Os últimos dias até `fim`, um a um** — o gráfico de área da lista
+/// (dono, 2026-09-26: *"nessa tela de sessões coloque gráficos"*).
+///
+/// # Por que uma janela, e não o recorte
+///
+/// A lista abre em hoje: um gráfico do recorte seria um ponto só, e área de um
+/// ponto não desenha nada. A janela termina no fim do período escolhido (ou
+/// hoje) e olha para trás; **a busca, a situação e os filtros de coluna
+/// valem**, só o período não — quem chama passa as sessões já filtradas sem
+/// ele.
+///
+/// # Aqui o dia vazio é zero
+///
+/// Ao contrário de [`agrupar_por_periodo`], o eixo é o **calendário**: a
+/// janela tem sempre os mesmos dias, e um dia sem sessão é um dia em que não
+/// entrou nada — zero é o fato, e não uma queda inventada.
+///
+/// ⚠️ **Pelo dia em que a sessão foi criada**, como o resto da lista. O site
+/// faz a mesma conta (`serie-dos-graficos.ts`, `ultimosDias`).
+pub fn ultimos_dias(sessoes: &[&SessaoFotografica], fim: &str, dias: i64) -> Vec<DiaDoGrafico> {
+    let Some(ultimo) = dia_civil(fim) else {
+        return Vec::new();
+    };
+    let primeiro = ultimo - (dias.max(1) - 1);
+    let mut serie: Vec<DiaDoGrafico> = (primeiro..=ultimo)
+        .map(|d| DiaDoGrafico {
+            chave: data_do_dia(d),
+            caixa: 0,
+            pos_venda: 0,
+        })
+        .collect();
+    for sessao in sessoes {
+        let Some(d) = dia_civil(dia_da_criacao(&sessao.criada_em_iso)) else {
+            continue;
+        };
+        if d < primeiro || d > ultimo {
+            continue;
+        }
+        let dia = &mut serie[(d - primeiro) as usize];
+        if let Some(pago) = &sessao.caixa {
+            dia.caixa += pago.liquido_centavos;
+        }
+        if let Some(totais) = sessao.totais {
+            dia.pos_venda += totais.pos_venda;
+        }
+    }
+    serie
+}
+
+/// `"2026-09-03"` → `"03/09"`, o rótulo do eixo.
+pub fn dia_curto(chave: &str) -> String {
+    let mut partes = chave.split('-').skip(1);
+    match (partes.next(), partes.next()) {
+        (Some(mes), Some(dia)) => format!("{dia}/{mes}"),
+        _ => chave.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    /// 📈 Trinta dias até o fim, o dia vazio em zero, e a sessão fora da
+    /// janela não entra.
+    #[test]
+    fn os_ultimos_dias_cobrem_a_janela_inteira() {
+        let pago = |liquido: i64| PagoNoCaixa {
+            vendas: 1,
+            bruto_centavos: liquido,
+            liquido_centavos: liquido,
+            ..PagoNoCaixa::default()
+        };
+        let em = |dia: &str, caixa: i64, pos_venda: i64| SessaoFotografica {
+            criada_em_iso: dia.into(),
+            caixa: Some(pago(caixa)),
+            totais: Some(Totais {
+                balcao: 0,
+                pos_venda,
+            }),
+            ..sessao(dia)
+        };
+        let sessoes = [
+            em("2026-09-01T10:00:00Z", 4_000, 500),
+            em("2026-09-01", 1_000, 0),
+            em("2026-08-02", 9_999, 0),
+            em("2026-09-03", 0, 700),
+        ];
+        let refs: Vec<&SessaoFotografica> = sessoes.iter().collect();
+
+        let serie = ultimos_dias(&refs, "2026-09-03", DIAS_DO_GRAFICO);
+
+        assert_eq!(serie.len(), 30);
+        assert_eq!(serie[0].chave, "2026-08-05", "atravessa o mês");
+        assert_eq!(serie[29].chave, "2026-09-03");
+        assert_eq!(serie[27].caixa, 5_000, "duas sessões do mesmo dia somam");
+        assert_eq!(serie[27].pos_venda, 500);
+        assert_eq!(
+            serie[28],
+            DiaDoGrafico {
+                chave: "2026-09-02".into(),
+                caixa: 0,
+                pos_venda: 0,
+            }
+        );
+        assert_eq!(serie[29].pos_venda, 700);
+        let total: i64 = serie.iter().map(|d| d.caixa).sum();
+        assert_eq!(total, 5_000, "a de agosto ficou fora da janela");
+        assert_eq!(data_do_dia(dia_civil("2024-02-29").unwrap()), "2024-02-29");
+        assert_eq!(dia_curto("2026-09-03"), "03/09");
+    }
 
     /// 12h de 3/set/2026, em segundos — o "agora" de todos os testes.
     const AGORA: i64 = 1_788_609_600;
@@ -563,12 +808,12 @@ mod testes {
         // Não passou pelo caixa, com foto levada: é a venda esquecida.
         let sem_venda = PagoNoCaixa::default();
         assert_eq!(
-            estado_no_caixa(Some(sem_venda), 3),
+            estado_no_caixa(Some(&sem_venda), 3),
             EstadoNoCaixa::FecharVenda
         );
         // Sem foto levada não há o que cobrar — e o convite não aparece.
         assert_eq!(
-            estado_no_caixa(Some(sem_venda), 0),
+            estado_no_caixa(Some(&sem_venda), 0),
             EstadoNoCaixa::NadaACobrar
         );
 
@@ -579,13 +824,76 @@ mod testes {
             bruto_centavos: 9_000,
             estornado_centavos: 9_000,
             liquido_centavos: 0,
+            ..PagoNoCaixa::default()
         };
         assert_eq!(
-            estado_no_caixa(Some(estornada), 2),
+            estado_no_caixa(Some(&estornada), 2),
             EstadoNoCaixa::Cobrado {
                 liquido_centavos: 0,
                 estornado_centavos: 9_000
             }
+        );
+    }
+
+    /// 💳 O cartão do caixa soma o PDV do recorte: o líquido, as formas na
+    /// ordem das teclas, a venda por fechar e a sessão de que não se sabe.
+    #[test]
+    fn a_soma_do_caixa_junta_as_formas_na_ordem_do_pdv() {
+        let pago = |liquido: i64, formas: &[(&str, i64)]| PagoNoCaixa {
+            vendas: 1,
+            bruto_centavos: liquido,
+            estornado_centavos: 0,
+            liquido_centavos: liquido,
+            por_forma: formas.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
+        };
+        let com = |titulo: &str, caixa: Option<PagoNoCaixa>, levadas: u32| SessaoFotografica {
+            caixa,
+            fotos: ContagemDeFotos {
+                levadas_no_balcao: levadas,
+                ..ContagemDeFotos::default()
+            },
+            ..sessao(titulo)
+        };
+        let sessoes = [
+            com(
+                "a",
+                Some(pago(5_000, &[("pix", 3_000), ("dinheiro", 2_000)])),
+                2,
+            ),
+            com(
+                "b",
+                Some(pago(4_000, &[("credito", 1_000), ("dinheiro", 3_000)])),
+                2,
+            ),
+            com("c", Some(PagoNoCaixa::default()), 3),
+            com("d", None, 1),
+        ];
+        let refs: Vec<&SessaoFotografica> = sessoes.iter().collect();
+
+        let caixa = somar_totais(&refs).caixa;
+
+        assert_eq!(caixa.liquido_centavos, 9_000);
+        assert_eq!(caixa.vendas, 2);
+        assert_eq!(
+            caixa.por_forma,
+            vec![
+                ("dinheiro".to_string(), 5_000),
+                ("pix".to_string(), 3_000),
+                ("credito".to_string(), 1_000),
+            ]
+        );
+        assert_eq!(
+            caixa.por_forma.iter().map(|(_, v)| v).sum::<i64>(),
+            caixa.liquido_centavos,
+            "as formas fecham com o líquido"
+        );
+        assert_eq!(caixa.a_fechar, 1, "a sessão com foto levada e sem venda");
+        assert_eq!(caixa.sem_caixa, 1);
+        assert_eq!(rotulo_da_forma("credito"), "Cartão de crédito");
+        assert_eq!(
+            rotulo_da_forma("cripto"),
+            "cripto",
+            "a desconhecida aparece como veio"
         );
     }
 
@@ -932,6 +1240,39 @@ mod testes_do_periodo {
         assert!(faixa.contem("2026-09-18"));
         assert_eq!(faixa.em_ordem(), ("2026-09-17", "2026-09-20"));
         assert!(!faixa.contem("2026-09-21"));
+    }
+
+    /// 🔎 **A busca procura em todas as datas**: com a lista em hoje, o
+    /// cliente de ontem aparece por título, e-mail ou telefone — e apagar a
+    /// busca devolve o dia.
+    #[test]
+    fn a_busca_procura_fora_do_periodo() {
+        let mut ontem = sessao("a", "2026-09-17T14:00:00Z");
+        ontem.titulo = "Leslye e Ricardo".into();
+        ontem.email = Some("leslye@yahoo.com".into());
+        ontem.whatsapp = Some("(51) 99876-5432".into());
+        let sessoes = vec![ontem, sessao("b", "2026-09-18T09:30:00Z")];
+        let buscando = |busca: &str| Criterio {
+            busca: busca.into(),
+            periodo: Some(FaixaDeDatas::no_dia("2026-09-18")),
+            ..Default::default()
+        };
+        let achadas = |busca: &str| -> Vec<String> {
+            filtrar(&sessoes, &buscando(busca), 0)
+                .iter()
+                .map(|s| s.id.clone())
+                .collect()
+        };
+
+        assert_eq!(achadas("ricardo"), vec!["a"], "pelo título");
+        assert_eq!(achadas("LESLYE@"), vec!["a"], "pelo e-mail");
+        assert_eq!(achadas("98765"), vec!["a"], "pelo telefone");
+        assert_eq!(
+            achadas("+55 51 99876-5432"),
+            vec!["a"],
+            "com o DDI na frente"
+        );
+        assert_eq!(achadas(""), vec!["b"], "sem busca, o dia volta");
     }
 
     /// 🚨 A hora não entra na conta: o que se compara é o dia.

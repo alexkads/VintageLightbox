@@ -268,12 +268,20 @@ pub struct TotaisDaGaleria {
 ///
 /// 🔑 **`vendas: 0` é um fato**: a sessão não passou pelo caixa, e é dele que
 /// sai o "Fechar venda" da lista. Quem não sabe é o `Option` de fora.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PagoNoCaixa {
     pub vendas: u32,
     pub bruto_centavos: i64,
     pub estornado_centavos: i64,
     pub liquido_centavos: i64,
+    /// 💳 O líquido por forma de pagamento (`"dinheiro"`, `"pix"`, …), em
+    /// centavos — a soma dá o `liquido_centavos`. Só as formas com valor; a
+    /// API anterior ao campo (2026-09-26) manda vazio.
+    ///
+    /// 🔑 **A chave fica em texto**: a lista de formas é do caixa do site, e
+    /// uma forma nova lá não pode derrubar a lista aqui. Quem desenha traduz as
+    /// conhecidas e mostra a desconhecida como veio.
+    pub por_forma: std::collections::BTreeMap<String, i64>,
 }
 
 /// O link que abre a galeria **sem senha**.

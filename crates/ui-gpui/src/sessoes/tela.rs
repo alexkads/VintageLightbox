@@ -225,6 +225,14 @@ pub struct Sessoes {
     /// Qual sessão está aberta para receber fotos.
     aberta: Option<String>,
     busca: gpui_kit::Entity<InputState>,
+    /// 🔎 **A busca é ativa**: a lista se refaz a cada letra (dono,
+    /// 2026-09-26). O campo é uma entidade própria, e sem esta assinatura a
+    /// tela só redesenhava quando outra coisa a notificava.
+    _busca_ativa: gpui_kit::Subscription,
+    /// 💳 O cartão do caixa aberto nas formas de pagamento — as "moedas".
+    formas_abertas: bool,
+    /// 📈 Os gráficos acima da tabela; o operador pode recolhê-los.
+    graficos_visiveis: bool,
     situacao: Option<Situacao>,
     /// O "Filtros" do site: um campo por coluna, sob o cabeçalho.
     filtros: super::filtros_da_lista::FiltrosDaLista,
@@ -389,7 +397,16 @@ impl Sessoes {
         cx: &mut Context<Self>,
     ) -> Self {
         let busca =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Nome, e-mail ou WhatsApp…"));
+            cx.new(|cx| InputState::new(window, cx).placeholder("Título, e-mail ou telefone…"));
+        let busca_ativa = cx.subscribe_in(
+            &busca,
+            window,
+            |_tela, _, evento: &InputEvent, _window, cx| {
+                if matches!(evento, InputEvent::Change) {
+                    cx.notify();
+                }
+            },
+        );
         // 📅 **A lista abre em hoje** (dono, 2026-09-18), como no site: o balcão
         // trabalha o dia, e a lista inteira é o arquivo.
         let hoje = hoje_no_estudio();
@@ -407,6 +424,9 @@ impl Sessoes {
             capas_pedidas: std::collections::HashSet::new(),
             aberta: None,
             busca,
+            _busca_ativa: busca_ativa,
+            formas_abertas: false,
+            graficos_visiveis: true,
             situacao: None,
             filtros: super::filtros_da_lista::FiltrosDaLista::novos(window, cx),
             carregando: false,
@@ -762,11 +782,12 @@ impl Sessoes {
                 }),
                 // 💵 O caixa já vem em centavos — não passa pelo leitor de
                 // decimal acima, e é essa a diferença entre as duas colunas.
-                caixa: g.caixa.map(|c| PagoNoCaixa {
+                caixa: g.caixa.as_ref().map(|c| PagoNoCaixa {
                     vendas: c.vendas,
                     bruto_centavos: c.bruto_centavos,
                     estornado_centavos: c.estornado_centavos,
                     liquido_centavos: c.liquido_centavos,
+                    por_forma: c.por_forma.clone(),
                 }),
             })
             .collect()
@@ -1334,6 +1355,7 @@ impl Render for Sessoes {
             .when(!self.na_aba_de_excluidas, |tela| {
                 tela.child(self.barra(&contagens, cx))
                     .child(self.indicadores(&soma, visiveis.len(), filtrando, cx))
+                    .child(self.graficos(&todas, &soma, agora, cx))
             })
             .when_some(self.erro.clone(), |tela, erro| {
                 tela.child(crate::estilo::aviso(erro, true, cx))
@@ -2374,6 +2396,214 @@ impl Sessoes {
             ))
     }
 
+    /// 📈 Mostra ou recolhe os gráficos.
+    pub fn alternar_graficos(&mut self, cx: &mut Context<Self>) {
+        self.graficos_visiveis = !self.graficos_visiveis;
+        cx.notify();
+    }
+
+    /// 📈 **Os gráficos da lista** (dono, 2026-09-26: *"nessa tela de sessões
+    /// coloque gráficos usando https://gpui-kit.com/component/chart/"*): a área
+    /// dos últimos 30 dias — caixa e pós-venda — e a rosca das formas de
+    /// pagamento do recorte. O site desenha os mesmos dois com os charts do
+    /// shadcn (`sessoes-fotograficas/graficos-da-lista.tsx`).
+    ///
+    /// 🔑 **A área não segue o período**, e diz isso no título: a lista abre em
+    /// hoje, e área de um dia é um ponto. Ela segue a busca, a situação e os
+    /// filtros de coluna, e termina no fim do período escolhido
+    /// ([`sessoes::ultimos_dias`]). A rosca é do recorte, como o cartão.
+    fn graficos(
+        &self,
+        todas: &[SessaoFotografica],
+        soma: &sessoes::Soma,
+        agora: i64,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        use gpui_kit::component::chart::{AreaChart, PieChart};
+
+        let tema = cx.theme();
+        let (borda, apagado) = (tema.border, tema.muted_foreground);
+        let cor_do_caixa = tema.chart_2;
+        let (_, _, cor_do_pos_venda) = crate::tema::cores::destaque_esmeralda();
+        let paleta = [
+            tema.chart_1,
+            tema.chart_2,
+            tema.chart_3,
+            tema.chart_4,
+            tema.chart_5,
+            tema.cyan,
+            tema.magenta,
+            tema.muted_foreground,
+        ];
+
+        let cabecalho = div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .child(div().text_xs().text_color(apagado).child("GRÁFICOS"))
+            .child(
+                crate::estilo::botao_fantasma("sessoes-graficos-alternar", cx)
+                    .text_xs()
+                    .text_color(apagado)
+                    .child(if self.graficos_visiveis {
+                        "Recolher"
+                    } else {
+                        "Mostrar"
+                    })
+                    .on_click(cx.listener(|tela, _ev, _window, cx| tela.alternar_graficos(cx))),
+            );
+        if !self.graficos_visiveis {
+            return div().flex().flex_col().child(cabecalho);
+        }
+
+        // A janela: a busca, a situação e os filtros de coluna, sem o período.
+        let criterio = Criterio {
+            periodo: None,
+            ..self.criterio(cx)
+        };
+        let sem_periodo = filtro_de_coluna::filtrar_por_coluna(
+            sessoes::filtrar(todas, &criterio, agora),
+            &self.filtros.ativos(cx),
+            agora,
+        );
+        let fim = self
+            .faixa
+            .as_ref()
+            .map(|f| f.em_ordem().1.to_string())
+            .unwrap_or_else(|| hoje_no_estudio().format("%Y-%m-%d").to_string());
+        let serie = sessoes::ultimos_dias(&sem_periodo, &fim, sessoes::DIAS_DO_GRAFICO);
+        let de = serie.first().map(|d| sessoes::dia_curto(&d.chave));
+        let ate = sessoes::dia_curto(&fim);
+
+        let quadro = |titulo: String| {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(8.))
+                .p(px(12.))
+                .rounded(px(10.))
+                .border_1()
+                .border_color(borda)
+                .child(div().text_xs().text_color(apagado).child(titulo))
+        };
+        let legenda = |cor: Hsla, rotulo: String| {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .text_xs()
+                .child(div().size(px(8.)).rounded(px(2.)).bg(cor))
+                .child(rotulo)
+        };
+
+        let area = quadro(format!(
+            "CAIXA E PÓS-VENDA — ÚLTIMOS {} DIAS ({} A {ate})",
+            sessoes::DIAS_DO_GRAFICO,
+            de.unwrap_or_default()
+        ))
+        .flex_1()
+        .min_w(px(0.))
+        .child(
+            div().h(px(150.)).child(
+                AreaChart::new(serie)
+                    .id("sessoes-grafico-area")
+                    .x(|d: &sessoes::DiaDoGrafico| sessoes::dia_curto(&d.chave))
+                    .y(|d: &sessoes::DiaDoGrafico| d.caixa as f64 / 100.)
+                    .stroke(cor_do_caixa)
+                    .fill(cor_do_caixa.opacity(0.25))
+                    .natural()
+                    .name("Caixa (PDV)")
+                    .y(|d: &sessoes::DiaDoGrafico| d.pos_venda as f64 / 100.)
+                    .stroke(cor_do_pos_venda)
+                    .fill(cor_do_pos_venda.opacity(0.25))
+                    .natural()
+                    .name("Pós-venda")
+                    .tick_margin(7),
+            ),
+        )
+        .child(
+            div()
+                .flex()
+                .gap(px(16.))
+                .child(legenda(cor_do_caixa, "Caixa (PDV)".into()))
+                .child(legenda(cor_do_pos_venda, "Pós-venda".into())),
+        );
+
+        let formas = soma.caixa.por_forma.clone();
+        let total: i64 = formas.iter().map(|(_, v)| *v).sum();
+        let cor_da_forma = move |chave: &str| {
+            let i = sessoes::FORMAS_DE_PAGAMENTO
+                .iter()
+                .position(|(k, _)| *k == chave)
+                .unwrap_or(paleta.len() - 1);
+            paleta[i]
+        };
+        let rosca = quadro("FORMAS DE PAGAMENTO — NO RECORTE".into())
+            .w(px(360.))
+            .flex_none()
+            .child(if formas.is_empty() || total <= 0 {
+                div()
+                    .h(px(150.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_xs()
+                    .text_color(apagado)
+                    .child("Nenhum valor recebido no caixa neste recorte.")
+                    .into_any_element()
+            } else {
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(12.))
+                    .child(
+                        div().size(px(150.)).flex_none().child(
+                            PieChart::new(formas.clone())
+                                .id("sessoes-grafico-formas")
+                                .name("Recebido")
+                                .value(|(_, v): &(String, i64)| *v as f32 / 100.)
+                                .color(move |(k, _): &(String, i64)| cor_da_forma(k))
+                                .inner_radius(38.)
+                                .outer_radius(64.)
+                                .pad_angle(0.02),
+                        ),
+                    )
+                    .child(div().flex().flex_col().gap(px(4.)).flex_1().children(
+                        formas.iter().map(|(chave, valor)| {
+                            let parte = (*valor as f64 / total as f64 * 100.).round();
+                            div()
+                                .flex()
+                                .justify_between()
+                                .gap(px(8.))
+                                .child(legenda(
+                                    cor_da_forma(chave),
+                                    sessoes::rotulo_da_forma(chave).to_string(),
+                                ))
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(apagado)
+                                        .child(format!("{parte:.0}%")),
+                                )
+                        }),
+                    ))
+                    .into_any_element()
+            });
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .child(cabecalho)
+            .child(div().flex().gap(px(12.)).child(area).child(rosca))
+    }
+
+    /// 💳 Abre ou fecha as formas de pagamento no cartão do caixa.
+    pub fn alternar_formas(&mut self, cx: &mut Context<Self>) {
+        self.formas_abertas = !self.formas_abertas;
+        cx.notify();
+    }
+
     fn indicadores(
         &self,
         soma: &sessoes::Soma,
@@ -2381,36 +2611,149 @@ impl Sessoes {
         filtrando: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        use crate::recursos::Icone;
+        use gpui_kit::component::Icon;
         let tema = cx.theme();
-        let (borda, apagado) = (tema.border, tema.muted_foreground);
+        let (borda, apagado, acento) = (tema.border, tema.muted_foreground, tema.accent);
         let (fundo_bom, borda_boa, texto_bom) = crate::tema::cores::destaque_esmeralda();
-        let cartao = move |rotulo: String, valor: String, nota: &'static str, destaque: bool| {
+        let rotulo_do_cartao = move |rotulo: String| {
             div()
-                .flex_1()
-                .flex()
-                .flex_col()
-                .gap(px(2.))
-                .p(px(12.))
-                .rounded(px(10.))
-                .border_1()
-                .border_color(if destaque { borda_boa } else { borda })
-                .when(destaque, |c| c.bg(fundo_bom))
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(apagado)
-                        .child(rotulo.to_uppercase()),
-                )
-                .child(
-                    div()
-                        .text_2xl()
-                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                        .when(destaque, |d| d.text_color(texto_bom))
-                        .child(valor),
-                )
-                .child(div().text_xs().text_color(apagado).child(nota))
+                .text_xs()
+                .text_color(apagado)
+                .child(rotulo.to_uppercase())
+        };
+        let valor_do_cartao = |valor: String| {
+            div()
+                .text_2xl()
+                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                .child(valor)
         };
 
+        // 💵 **O caixa, e não o preço das fotos** (dono, 2026-09-26: *"tinha
+        // que ser o total vendido com as informações do caixa. E quando clicar
+        // mostrar as moedas que foram vendidas"*). O número é o líquido que o
+        // PDV registrou; o clique abre as formas de pagamento.
+        let caixa = &soma.caixa;
+        let mut nota = vec![match caixa.vendas {
+            0 => "nenhuma venda no PDV".to_string(),
+            1 => "1 venda no PDV".to_string(),
+            n => format!("{n} vendas no PDV"),
+        }];
+        if caixa.estornado_centavos > 0 {
+            nota.push(format!(
+                "−{} estornado",
+                dinheiro::formatar(caixa.estornado_centavos)
+            ));
+        }
+        if caixa.a_fechar > 0 {
+            nota.push(if caixa.a_fechar == 1 {
+                "1 sessão por fechar".to_string()
+            } else {
+                format!("{} sessões por fechar", caixa.a_fechar)
+            });
+        }
+        let abertas = self.formas_abertas;
+        let formas = div()
+            .flex()
+            .flex_col()
+            .mt(px(8.))
+            .pt(px(6.))
+            .border_t_1()
+            .border_color(borda)
+            .when(caixa.por_forma.is_empty(), |lista| {
+                lista.child(
+                    div()
+                        .py(px(4.))
+                        .text_xs()
+                        .text_color(apagado)
+                        .child("Nenhum valor recebido no caixa neste recorte."),
+                )
+            })
+            .children(caixa.por_forma.iter().map(|(forma, valor)| {
+                div()
+                    .flex()
+                    .justify_between()
+                    .py(px(4.))
+                    .text_sm()
+                    .child(div().text_color(apagado).child(SharedString::from(
+                        sessoes::rotulo_da_forma(forma).to_string(),
+                    )))
+                    .child(div().child(dinheiro::formatar(*valor)))
+            }));
+        let cartao_do_caixa = div()
+            .id("sessoes-cartao-do-caixa")
+            .debug_selector(|| "sessoes-cartao-do-caixa".into())
+            .flex_1()
+            .flex()
+            .flex_col()
+            .gap(px(2.))
+            .p(px(12.))
+            .rounded(px(10.))
+            .border_1()
+            .border_color(borda)
+            .cursor_pointer()
+            .hover(move |c| c.bg(acento.opacity(0.4)))
+            .on_click(cx.listener(|tela, _ev, _window, cx| tela.alternar_formas(cx)))
+            .child(
+                div()
+                    .flex()
+                    .justify_between()
+                    .items_center()
+                    .child(rotulo_do_cartao(if filtrando {
+                        "Caixa, no recorte".into()
+                    } else {
+                        "Vendido no caixa".into()
+                    }))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(4.))
+                            .text_xs()
+                            .text_color(apagado)
+                            .child(if abertas {
+                                "formas de pagamento"
+                            } else {
+                                "ver formas de pagamento"
+                            })
+                            .child(
+                                Icon::new(if abertas {
+                                    Icone::ChevronDown
+                                } else {
+                                    Icone::ChevronRight
+                                })
+                                .size(px(14.)),
+                            ),
+                    ),
+            )
+            .child(valor_do_cartao(dinheiro::formatar(caixa.liquido_centavos)))
+            .child(div().text_xs().text_color(apagado).child(nota.join(" · ")))
+            .when(abertas, |c| c.child(formas));
+
+        let cartao_do_pos_venda = div()
+            .flex_1()
+            .flex()
+            .flex_col()
+            .gap(px(2.))
+            .p(px(12.))
+            .rounded(px(10.))
+            .border_1()
+            .border_color(borda_boa)
+            .bg(fundo_bom)
+            .child(rotulo_do_cartao(if filtrando {
+                "Pós-venda, no recorte".into()
+            } else {
+                "Pago no pós-venda".to_string()
+            }))
+            .child(valor_do_cartao(dinheiro::formatar(soma.pos_venda)).text_color(texto_bom))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(apagado)
+                    .child("fotos que o cliente voltou e comprou pela galeria"),
+            );
+
+        let buscando = !self.busca.read(cx).value().trim().is_empty();
         div()
             .flex()
             .flex_col()
@@ -2418,44 +2761,43 @@ impl Sessoes {
             .child(
                 div()
                     .flex()
+                    .items_start()
                     .gap(px(12.))
-                    .child(cartao(
-                        if filtrando {
-                            "Balcão, no recorte".into()
-                        } else {
-                            "Pago no balcão".to_string()
-                        },
-                        dinheiro::formatar(soma.balcao),
-                        "fotos levadas na hora, pelo preço cheio ou pelo que foi negociado",
-                        false,
-                    ))
-                    .child(cartao(
-                        if filtrando {
-                            "Pós-venda, no recorte".into()
-                        } else {
-                            "Pago no pós-venda".to_string()
-                        },
-                        dinheiro::formatar(soma.pos_venda),
-                        "fotos que o cliente voltou e comprou pela galeria",
-                        true,
-                    )),
+                    .child(cartao_do_caixa)
+                    .child(cartao_do_pos_venda),
             )
             // 💰 A tela dizendo de qual conjunto o número é.
-            .when(filtrando || soma.sem_totais > 0, |bloco| {
-                let mut frase = String::new();
-                if filtrando {
-                    frase.push_str(&format!(
-                        "Somando as {quantas} sessões deste recorte, não o total. "
-                    ));
-                }
-                if soma.sem_totais > 0 {
-                    frase.push_str(&format!(
-                        "{} sessão(ões) ainda sem os totais na API — o número está menor que o real.",
-                        soma.sem_totais
-                    ));
-                }
-                bloco.child(div().text_xs().text_color(apagado).child(frase))
-            })
+            .when(
+                filtrando || soma.sem_totais > 0 || caixa.sem_caixa > 0,
+                |bloco| {
+                    let mut frase = String::new();
+                    if filtrando {
+                        frase.push_str(&format!(
+                            "Somando as {quantas} sessões deste recorte, não o total. "
+                        ));
+                    }
+                    // 🔎 A busca procura em todas as datas: o período fica no
+                    // botão, mas não está valendo — e a tela tem de dizer.
+                    if buscando && self.faixa.is_some() {
+                        frase.push_str(
+                            "A busca procura em todas as datas; apague-a para voltar ao período. ",
+                        );
+                    }
+                    if soma.sem_totais > 0 {
+                        frase.push_str(&format!(
+                            "{} sessão(ões) ainda sem os totais na API — o número está menor que o real. ",
+                            soma.sem_totais
+                        ));
+                    }
+                    if caixa.sem_caixa > 0 {
+                        frase.push_str(&format!(
+                            "{} sessão(ões) sem resposta do caixa — o caixa está menor que o real.",
+                            caixa.sem_caixa
+                        ));
+                    }
+                    bloco.child(div().text_xs().text_color(apagado).child(frase))
+                },
+            )
     }
 
     /// 🎯 Preço por foto e estúdio, em fichas — os dois obrigatórios (dono,
@@ -2808,7 +3150,7 @@ impl Sessoes {
                 .child(numero(LARGURAS[2]).child(sessao.fotos.compradas.to_string()))
                 .child(numero(LARGURAS[3]).child(valor_ou_traco(balcao)))
                 .child(numero(LARGURAS[4]).child(celula_do_caixa(
-                    sessao.caixa,
+                    sessao.caixa.as_ref(),
                     sessao.fotos.levadas_no_balcao,
                     sessao.id.clone(),
                     apagado,
@@ -2947,7 +3289,7 @@ fn lixeira(sessao: &SessaoFotografica, apagado: Hsla, cx: &Context<Sessoes>) -> 
 /// ⚠️ **`stop_propagation` não é detalhe**: a linha inteira abre a sessão, e
 /// sem ele o clique em "Fechar venda" abriria a sessão em vez do caixa.
 fn celula_do_caixa(
-    caixa: Option<PagoNoCaixa>,
+    caixa: Option<&PagoNoCaixa>,
     levadas: u32,
     sessao_id: String,
     apagado: Hsla,

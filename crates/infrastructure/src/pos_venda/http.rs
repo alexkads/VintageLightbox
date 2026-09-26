@@ -1298,6 +1298,8 @@ struct PagoNoCaixaDaApi {
     estornado_centavos: i64,
     #[serde(default)]
     liquido_centavos: i64,
+    #[serde(default)]
+    por_forma: std::collections::BTreeMap<String, i64>,
 }
 
 impl From<GaleriaDoPainelDaApi> for GaleriaDoPainel {
@@ -1330,6 +1332,7 @@ impl From<GaleriaDoPainelDaApi> for GaleriaDoPainel {
                 bruto_centavos: c.bruto_centavos,
                 estornado_centavos: c.estornado_centavos,
                 liquido_centavos: c.liquido_centavos,
+                por_forma: c.por_forma,
             }),
             preset_padrao_id: g.preset_padrao_id,
             proporcao_padrao: g.proporcao_padrao,
@@ -1818,7 +1821,8 @@ mod tests {
                         "vendas": 2,
                         "bruto_centavos": 15000,
                         "estornado_centavos": 2500,
-                        "liquido_centavos": 12500
+                        "liquido_centavos": 12500,
+                        "por_forma": { "dinheiro": 7500, "pix": 5000 }
                     },
                     // O painel manda mais que isto; o serde ignora o que sobra.
                     "criada_por": "operador",
@@ -1863,10 +1867,13 @@ mod tests {
 
         // 💵 O caixa vem em centavos inteiros, ao contrário dos totais ao lado
         // — e o líquido é o que a coluna mostra.
-        let pago = galerias[0].caixa.expect("g1 passou pelo caixa");
+        let pago = galerias[0].caixa.as_ref().expect("g1 passou pelo caixa");
         assert_eq!(pago.vendas, 2);
         assert_eq!(pago.bruto_centavos, 15_000);
         assert_eq!(pago.liquido_centavos, 12_500);
+        // 💳 As formas chegam com a chave do site, e somam o líquido.
+        assert_eq!(pago.por_forma.get("pix"), Some(&5_000));
+        assert_eq!(pago.por_forma.values().sum::<i64>(), pago.liquido_centavos);
         // 🚨 E a galeria sem o campo não vira "cobrada, e deu zero": ela chega
         // como "não sei", que é o `?` da coluna.
         assert_eq!(galerias[1].caixa, None);

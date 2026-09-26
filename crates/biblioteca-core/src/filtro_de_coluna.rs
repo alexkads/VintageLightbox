@@ -181,7 +181,7 @@ fn valor(coluna: Coluna, sessao: &SessaoFotografica, agora: i64) -> Option<Valor
         Coluna::Compradas => Valor::Numero(sessao.fotos.compradas.into()),
         Coluna::Balcao => centavos(sessao.totais?.balcao),
         Coluna::PosVenda => centavos(sessao.totais?.pos_venda),
-        Coluna::Caixa => centavos(sessao.caixa?.liquido_centavos),
+        Coluna::Caixa => centavos(sessao.caixa.as_ref()?.liquido_centavos),
         Coluna::Criada => Valor::Dia(dia_da_criacao(&sessao.criada_em_iso)),
     })
 }
@@ -340,6 +340,7 @@ mod testes {
             bruto_centavos: 0,
             estornado_centavos: 0,
             liquido_centavos: 0,
+            ..PagoNoCaixa::default()
         });
         let lista = [sem_totais, com_caixa];
         let zero_ou_mais = |coluna| {
