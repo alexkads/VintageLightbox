@@ -405,6 +405,12 @@ pub struct GaleriaAberta {
     pub vence_venda: Option<i64>,
     /// Até quando as adquiridas ficam para download.
     pub vence_download: Option<i64>,
+    /// As faixas em uso na galeria, a padrão incluída, **a preço de balcão**
+    /// (o cheio). É daqui que o "Preço padrão" dos detalhes sai, como no site:
+    /// o catálogo pode não ter uma faixa que a galeria ainda usa.
+    pub faixas: Vec<FaixaDaGaleria>,
+    /// Os e-mails que saíram para o cliente, mais recente primeiro.
+    pub avisos: Vec<AvisoDaGaleria>,
     /// Os resumos do que o assistente associou — o que a gaveta do atendimento
     /// mostra além do id.
     ///
@@ -412,6 +418,28 @@ pub struct GaleriaAberta {
     /// isso. O resumo pode faltar (a API no meio de um deploy, o voucher
     /// apagado), e aí a gaveta diz "associado" — a mesma regra do site.
     pub resumos: ResumosDoAtendimento,
+}
+
+/// Uma faixa de preço em uso na galeria.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FaixaDaGaleria {
+    pub id: String,
+    pub nome: String,
+    /// O preço **cheio**, decimal em texto (`"25.00"`): no balcão a negociação
+    /// parte dele, e o desconto do cadastro é da compra antecipada pelo site.
+    pub preco: String,
+}
+
+/// Um e-mail que saiu para o cliente, e o que o provedor contou dele depois.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AvisoDaGaleria {
+    /// `fotos_prontas`, `vencimento_venda` ou `vencimento_download`.
+    pub tipo: String,
+    pub destino: String,
+    pub enviado_em: i64,
+    pub entregue_em: Option<i64>,
+    /// Abertura ou clique — o que a retenção lê para decidir prorrogar.
+    pub lido_em: Option<i64>,
 }
 
 /// O que a API devolve sobre cada associação, para a gaveta não mostrar só ids.

@@ -2324,6 +2324,7 @@ impl Aplicativo {
                 self.revelar_da_sessao(fotos, *inicial, window, cx);
             }
             DetalhePedido::TelaDoCliente => self.alternar_cliente(cx),
+            DetalhePedido::PoliticaDeRetencao => self.ir_para(Tela::Retencao, window, cx),
             DetalhePedido::Exportar => self.exportar(cx),
             // 🔑 **A importação da sessão grava no catálogo local**, e as fotos
             // só aparecem depois desta releitura — a porta do acervo é daqui.

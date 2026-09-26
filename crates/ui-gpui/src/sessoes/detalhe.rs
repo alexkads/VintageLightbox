@@ -233,6 +233,9 @@ pub enum Pedido {
     MiniaturaPronta(String),
     /// Abrir (ou fechar) a segunda tela, a do cliente.
     TelaDoCliente,
+    /// O "política de retenção" dos detalhes da galeria — o link do site para
+    /// `/dashboard/sessoes-fotograficas/configuracoes`.
+    PoliticaDeRetencao,
     /// A sessão abriu (ou foi relida): estas são as fotos que já estão no site.
     ///
     /// 🔑 Quem as põe na grade é a raiz — a grade é uma só, e nela as do site
@@ -3884,18 +3887,37 @@ impl Detalhe {
             })
             .child(div().flex_1())
             .child(
-                // Os números da galeria, como o "detalhes" do site.
-                estilo::botao_contorno("sessao-contagem", cx)
-                    .text_xs()
-                    .text_color(apagado)
-                    .child(Icon::new(Icone::Info).size(px(14.)))
-                    .child(format!(
-                        "{levadas} levadas · {a_venda} à venda · {compradas} compradas"
-                    ))
-                    .on_click(cx.listener(|tela, _ev, _window, cx| {
-                        tela.detalhes_abertos = !tela.detalhes_abertos;
-                        cx.notify();
-                    })),
+                // O painel mora junto do botão para nascer embaixo dele, e é
+                // diferido para ser pintado por cima da grade e do véu.
+                div()
+                    .relative()
+                    .child(
+                        // Os números da galeria, como o "detalhes" do site.
+                        estilo::botao_contorno("sessao-contagem", cx)
+                            .debug_selector(|| "sessao-contagem".into())
+                            .text_xs()
+                            .text_color(apagado)
+                            .child(Icon::new(Icone::Info).size(px(14.)))
+                            .child(format!(
+                                "{levadas} levadas · {a_venda} à venda · {compradas} compradas"
+                            ))
+                            // A seta do `ChevronDown` do site, que vira quando abre.
+                            .child(Icon::new(Icone::ChevronDown).size(px(14.)).rotate(
+                                gpui::radians(if self.detalhes_abertos {
+                                    std::f32::consts::PI
+                                } else {
+                                    0.
+                                }),
+                            ))
+                            .on_click(cx.listener(|tela, _ev, _window, cx| {
+                                tela.detalhes_abertos = !tela.detalhes_abertos;
+                                cx.notify();
+                            })),
+                    )
+                    .children(
+                        self.painel_dos_detalhes(cx)
+                            .map(|painel| gpui::deferred(painel).with_priority(1)),
+                    ),
             )
             // 📋 **Atendimento** — o que o assistente coletou nas sete etapas.
             // No site é uma gaveta ao lado do "Dados do cliente", e é onde se
@@ -5021,13 +5043,20 @@ impl Detalhe {
         );
     }
 
-    /// Os números e os prazos da galeria — o "detalhes" do cabeçalho do site.
+    /// Os números e os prazos da galeria — o `DetalhesDaGaleria` do site.
     ///
     /// 🔑 **Nada aqui muda foto nenhuma**: é conferência, e por isso fica atrás
     /// de um clique. Prazo ausente some da lista em vez de virar "—": a galeria
     /// sem vencimento de venda não tem essa data, e inventar um traço sugeriria
     /// que alguém esqueceu de preencher.
-    fn detalhes(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    ///
+    /// 🚨 **Era outro painel** (dono, 2026-09-26: "tá muito diferente"): tinha
+    /// título e "Fechar", rótulo numa coluna de 150 px, número sem negrito, o
+    /// preço do catálogo, e nada do último e-mail nem da política de retenção.
+    /// O texto agora sai de [`detalhes_da_galeria`], e aqui só se pinta.
+    fn painel_dos_detalhes(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        use super::detalhes_da_galeria::{self as texto, Texto, Tom};
+
         if !self.detalhes_abertos {
             return None;
         }
@@ -5038,29 +5067,183 @@ impl Detalhe {
         let (levadas, a_venda, compradas) = self.contagem();
         let apagadas = self.acervo.contagens().de(Filtro::Apagadas);
 
-        let linha = |rotulo: &'static str, valor: String| {
+        // O `<strong>`, o `text-muted-foreground` e o `<Link>` do site.
+        let pintar = move |t: &Texto| {
+            gpui::StyledText::new(t.texto.clone()).with_highlights(t.trechos.iter().map(
+                |(faixa, tom)| {
+                    let estilo = match tom {
+                        Tom::Forte => gpui::HighlightStyle {
+                            font_weight: Some(gpui::FontWeight::BOLD),
+                            ..Default::default()
+                        },
+                        Tom::Apagado => gpui::HighlightStyle {
+                            color: Some(apagado),
+                            ..Default::default()
+                        },
+                        Tom::Link => gpui::HighlightStyle {
+                            underline: Some(gpui::UnderlineStyle {
+                                thickness: px(1.),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        },
+                    };
+                    (faixa.clone(), estilo)
+                },
+            ))
+        };
+        // `Dado` do site: rótulo em caixa-alta miúda, colado ao valor.
+        let linha = |rotulo: &'static str, valor: &Texto| {
             div()
                 .flex()
-                .gap(px(8.))
-                .text_sm()
-                .child(div().w(px(150.)).text_color(apagado).child(rotulo))
-                .child(div().flex_1().truncate().child(SharedString::from(valor)))
+                .items_baseline()
+                .gap(px(6.))
+                .child(
+                    div()
+                        .flex_none()
+                        .text_xs()
+                        .text_color(apagado)
+                        .child(rotulo.to_uppercase()),
+                )
+                .child(div().min_w(px(0.)).text_sm().child(pintar(valor)))
         };
-        let dia = |quando: Option<i64>| {
-            quando
-                .and_then(|s| chrono::DateTime::from_timestamp(s, 0))
-                .map(|d| {
-                    d.with_timezone(&chrono::FixedOffset::west_opt(3 * 3600).expect("fuso"))
-                        .format("%d/%m/%Y")
-                        .to_string()
-                })
+        let simples = |valor: String| Texto {
+            texto: valor,
+            trechos: Vec::new(),
         };
+
+        // 🧮 A faixa padrão **a preço de balcão**, das faixas da galeria; o
+        // catálogo só cobre a resposta de um backend que ainda não as manda.
         let padrao = self.produto_padrao_da_galeria();
+        let (preco, nome) = aberta
+            .faixas
+            .iter()
+            .find(|f| f.id == padrao)
+            .map(|f| (f.preco.clone(), f.nome.clone()))
+            .or_else(|| {
+                self.produtos
+                    .iter()
+                    .find(|p| p.id == padrao)
+                    .map(|p| (p.preco.clone(), p.nome.clone()))
+            })
+            .unwrap_or_else(|| ("0".into(), "Padrão da galeria".into()));
+        let preco = dinheiro::formatar(dinheiro::ler_campo(&preco).unwrap_or(0));
+
+        // `2026-09-18` → `18/09/2026`: a data se lê como no resto da tela, e
+        // não como o banco a guarda.
+        let criada = g
+            .criada_em_iso
+            .split('-')
+            .collect::<Vec<_>>()
+            .as_slice()
+            .try_into()
+            .map(|[a, m, d]: [&str; 3]| format!("{d}/{m}/{a}"))
+            .unwrap_or_else(|_| g.criada_em_iso.clone());
+        let tem_email = g.email.as_deref().is_some_and(|e| !e.trim().is_empty());
+        let rodape = texto::rodape(&aberta.avisos, tem_email);
+        let eu = cx.entity().downgrade();
 
         Some(
-            // O véu ocupa a tela e fecha ao clique, como o `Popover` do site
-            // fecha ao clicar fora; o painel nasce abaixo do botão que o abriu,
-            // alinhado à direita dele.
+            // Abaixo do botão que o abriu e alinhado à direita dele — o
+            // `align="end"` do `PopoverContent` do site.
+            div()
+                .absolute()
+                .top(gpui::relative(1.))
+                .right_0()
+                .pt(px(4.))
+                .child(
+                    div()
+                        .id("detalhes-painel")
+                        .debug_selector(|| "detalhes-painel".into())
+                        .w(px(384.))
+                        .p(px(12.))
+                        .rounded(tema.radius)
+                        .border_1()
+                        .border_color(tema.border)
+                        .bg(tema.popover)
+                        .text_color(tema.popover_foreground)
+                        .shadow_lg()
+                        // Clique dentro do painel não é clique fora.
+                        .on_click(|_ev, _w, cx| cx.stop_propagation())
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(6.))
+                                .child(linha(
+                                    "Fotos",
+                                    &texto::fotos(levadas, a_venda, compradas, apagadas),
+                                ))
+                                .child(linha(
+                                    "Preço padrão",
+                                    &texto::preco_padrao(&preco, &nome, aberta.faixas.len()),
+                                ))
+                                .children(
+                                    aberta
+                                        .vence_venda
+                                        .and_then(texto::dia_br)
+                                        .map(|d| linha("À venda até", &simples(d))),
+                                )
+                                .children(
+                                    aberta
+                                        .vence_download
+                                        .and_then(texto::dia_br)
+                                        .map(|d| linha("Download até", &simples(d))),
+                                )
+                                .children(
+                                    g.expira_em
+                                        .and_then(texto::dia_br)
+                                        .map(|d| linha("Galeria até", &simples(d))),
+                                )
+                                .child(linha(
+                                    "Criada",
+                                    &texto::criada(&criada, g.criada_por.as_deref()),
+                                )),
+                        )
+                        .child(
+                            div()
+                                .mt(px(12.))
+                                .pt(px(8.))
+                                .border_t_1()
+                                .border_color(tema.border)
+                                .text_xs()
+                                .text_color(apagado)
+                                .children(rodape.iter().enumerate().map(|(i, t)| {
+                                    let eu = eu.clone();
+                                    let links = t.de(Tom::Link);
+                                    div()
+                                        .debug_selector(move || format!("detalhes-rodape-{i}"))
+                                        .when(i == 1, |d| d.mt(px(4.)))
+                                        .child(
+                                            gpui::InteractiveText::new(
+                                                ("detalhes-rodape", i),
+                                                pintar(t),
+                                            )
+                                            .on_click(
+                                                links,
+                                                move |_, _w, cx| {
+                                                    let _ = eu.update(cx, |tela, cx| {
+                                                        tela.detalhes_abertos = false;
+                                                        cx.emit(Pedido::PoliticaDeRetencao);
+                                                        cx.notify();
+                                                    });
+                                                },
+                                            ),
+                                        )
+                                })),
+                        ),
+                ),
+        )
+    }
+
+    /// O véu dos detalhes: ocupa a tela e fecha ao clique, como o `Popover` do
+    /// site fecha ao clicar fora. O painel vem depois dele (diferido, no botão),
+    /// e por isso fica por cima.
+    fn detalhes(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        if !self.detalhes_abertos {
+            return None;
+        }
+        Some(
             div()
                 .absolute()
                 .top_0()
@@ -5070,80 +5253,7 @@ impl Detalhe {
                 .on_click(cx.listener(|tela, _ev, _w, cx| {
                     tela.detalhes_abertos = false;
                     cx.notify();
-                }))
-                .child(
-            div()
-                .absolute()
-                .top(px(52.))
-                .right(px(12.))
-                .w(px(384.))
-                .flex()
-                .flex_col()
-                .gap(px(8.))
-                .p(px(12.))
-                .rounded(tema.radius)
-                .border_1()
-                .border_color(tema.border)
-                .bg(tema.background)
-                .shadow_lg()
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .child(
-                            div()
-                                .flex_1()
-                                .font_weight(gpui::FontWeight::SEMIBOLD)
-                                .child("Detalhes da sessão"),
-                        )
-                        .child(
-                            Button::new("detalhes-fechar")
-                                .label("Fechar")
-                                .xsmall()
-                                .ghost()
-                                .on_click(cx.listener(|tela, _ev, _w, cx| {
-                                    tela.detalhes_abertos = false;
-                                    cx.notify();
-                                })),
-                        ),
-                )
-                .child(linha(
-                    "Fotos",
-                    match apagadas {
-                        0 => format!("{levadas} levadas · {a_venda} à venda · {compradas} compradas"),
-                        n => format!(
-                            "{levadas} levadas · {a_venda} à venda · {compradas} compradas · {n} apagadas"
-                        ),
-                    },
-                ))
-                .child(linha("Preço padrão", self.nome_da_faixa(&padrao)))
-                .children(
-                    dia(aberta.vence_venda).map(|quando| linha("À venda até", quando)),
-                )
-                .children(
-                    dia(aberta.vence_download).map(|quando| linha("Download até", quando)),
-                )
-                .children(dia(g.expira_em).map(|quando| linha("Galeria até", quando)))
-                .child(linha(
-                    "Criada",
-                    {
-                        // `2026-09-18` → `18/09/2026`: a data se lê como no
-                        // resto da tela, e não como o banco a guarda.
-                        let criada = g
-                            .criada_em_iso
-                            .split('-')
-                            .collect::<Vec<_>>()
-                            .as_slice()
-                            .try_into()
-                            .map(|[a, m, d]: [&str; 3]| format!("{d}/{m}/{a}"))
-                            .unwrap_or_else(|_| g.criada_em_iso.clone());
-                        match g.criada_por.as_deref().filter(|q| !q.trim().is_empty()) {
-                            Some(quem) => format!("{criada} por {quem}"),
-                            None => criada,
-                        }
-                    },
-                )),
-                ),
+                })),
         )
     }
 
@@ -8208,6 +8318,80 @@ mod testes {
             ImportMode::Copy,
             "o cartão sai da máquina: copiar, nunca catalogar onde está"
         );
+    }
+
+    /// ℹ️ **Os detalhes da sessão são os do site** (dono, 2026-09-26: "tá
+    /// muito diferente"): clicar dentro do painel não o fecha, o rodapé conta
+    /// o último e-mail e os anteriores, e o "política de retenção" pede a tela
+    /// da retenção à raiz — o `<Link>` do site para `configuracoes`.
+    #[gpui::test]
+    fn os_detalhes_contam_os_avisos_e_levam_a_politica_de_retencao(cx: &mut TestAppContext) {
+        let publicador = publicador_com(
+            vec![foto("a", EstadoDaFotoNoSite::Disponivel, Some(4))],
+            false,
+        );
+        let aviso = |lido: Option<i64>| domain::services::pos_venda::AvisoDaGaleria {
+            tipo: "fotos_prontas".into(),
+            destino: "ana@x.com".into(),
+            enviado_em: 1_789_851_060,
+            entregue_em: None,
+            lido_em: lido,
+        };
+        *publicador.avisos_da_sessao.lock().expect("os avisos") =
+            vec![aviso(Some(1_789_851_120)), aviso(None)];
+        let janela = janela_com(cx, publicador, Arc::new(SeletorDeMentira::default()));
+        entrar(cx, &janela);
+
+        let tela = janela.root(cx).expect("a raiz da janela");
+        let pedidos = Arc::new(std::sync::Mutex::new(0usize));
+        let _inscricao = cx.update({
+            let pedidos = pedidos.clone();
+            move |cx| {
+                cx.subscribe(&tela, move |_tela, pedido: &Pedido, _cx| {
+                    if matches!(pedido, Pedido::PoliticaDeRetencao) {
+                        *pedidos.lock().expect("os pedidos") += 1;
+                    }
+                })
+            }
+        });
+
+        clicar(cx, &janela, "sessao-contagem");
+        clicar(cx, &janela, "detalhes-painel");
+        janela
+            .update(cx, |tela, _w, _cx| {
+                assert!(tela.detalhes_abertos, "clicar dentro do painel não o fecha");
+            })
+            .unwrap();
+
+        // Com um aviso anterior, o link desce sozinho para a última linha, e
+        // começa logo depois do "· ".
+        let mut visual = gpui::VisualTestContext::from_window(janela.into(), cx);
+        visual.run_until_parked();
+        for linha in ["detalhes-rodape-0", "detalhes-rodape-1"] {
+            assert!(
+                visual.debug_bounds(linha).is_some(),
+                "{linha} não foi desenhada"
+            );
+        }
+        let link = visual
+            .debug_bounds("detalhes-rodape-2")
+            .expect("a linha da política não foi desenhada");
+        visual.simulate_click(
+            gpui::point(link.origin.x + px(40.), link.center().y),
+            gpui::Modifiers::none(),
+        );
+        visual.run_until_parked();
+
+        assert_eq!(
+            *pedidos.lock().expect("os pedidos"),
+            1,
+            "o clique na política de retenção não virou pedido à raiz"
+        );
+        janela
+            .update(cx, |tela, _w, _cx| {
+                assert!(!tela.detalhes_abertos, "ir para a retenção fecha o painel");
+            })
+            .unwrap();
     }
 
     /// 🚨 **O clique no "Exportar" pede a exportação à raiz.**

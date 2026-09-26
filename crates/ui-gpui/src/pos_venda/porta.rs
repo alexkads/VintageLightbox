@@ -960,6 +960,9 @@ pub mod mentira {
         pub notas_pedidas: Mutex<Vec<Option<u8>>>,
         /// O que a sessão aberta vai mostrar.
         pub fotos_da_sessao: Mutex<Vec<domain::services::pos_venda::FotoDaGaleria>>,
+        /// Os e-mails que "saíram" para a galeria aberta, mais recente primeiro —
+        /// o que os detalhes da sessão mostram no rodapé.
+        pub avisos_da_sessao: Mutex<Vec<domain::services::pos_venda::AvisoDaGaleria>>,
         /// `(galeria, caminho, ordem, estado)` de cada arquivo do disco enviado.
         pub arquivos_enviados: Mutex<Vec<(String, String, u32, EstadoNoBalcao)>>,
         /// `(foto no site, ajustes, corte)` de cada revelação salva.
@@ -1481,6 +1484,8 @@ pub mod mentira {
                 fotos: self.fotos_da_sessao.lock().expect("as fotos").clone(),
                 vence_venda: None,
                 vence_download: None,
+                faixas: Vec::new(),
+                avisos: self.avisos_da_sessao.lock().expect("os avisos").clone(),
                 resumos: Default::default(),
             })));
         }

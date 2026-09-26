@@ -27,10 +27,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use domain::services::pos_venda::{
-    CofreDeSessao, ContagemDeFotos, EstadoDaFotoNoSite, Estudio, FotoDaGaleria, FotoEnviada,
-    FotoParaEnviar, Galeria, GaleriaAberta, GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto,
-    MudancaDaGaleria, NovaGaleria, PagoNoCaixa, PosVendaApi, Produto, ResumoSimples,
-    ResumosDoAtendimento, Sessao, TotaisDaGaleria,
+    AvisoDaGaleria, CofreDeSessao, ContagemDeFotos, EstadoDaFotoNoSite, Estudio, FaixaDaGaleria,
+    FotoDaGaleria, FotoEnviada, FotoParaEnviar, Galeria, GaleriaAberta, GaleriaDoPainel,
+    LinkDeAcesso, MudancaDaFoto, MudancaDaGaleria, NovaGaleria, PagoNoCaixa, PosVendaApi, Produto,
+    ResumoSimples, ResumosDoAtendimento, Sessao, TotaisDaGaleria,
 };
 use domain::{DomainError, DomainResult};
 use serde::Deserialize;
@@ -737,6 +737,31 @@ impl PosVendaApi for PosVendaApiHttp {
                 .collect(),
             vence_venda: aberta.vence_venda.map(|q| q.timestamp()),
             vence_download: aberta.vence_download.map(|q| q.timestamp()),
+            faixas: aberta
+                .produtos
+                .into_iter()
+                .map(|p| FaixaDaGaleria {
+                    id: p.id,
+                    nome: p.nome,
+                    // `?? preco`, como o site: um backend anterior ao
+                    // `preco_cheio` ainda devolve só o da vitrine.
+                    preco: match p.preco_cheio.unwrap_or(p.preco) {
+                        serde_json::Value::String(s) => s,
+                        outro => outro.to_string(),
+                    },
+                })
+                .collect(),
+            avisos: aberta
+                .avisos
+                .into_iter()
+                .map(|a| AvisoDaGaleria {
+                    tipo: a.tipo,
+                    destino: a.destino,
+                    enviado_em: a.enviado_em.timestamp(),
+                    entregue_em: a.entregue_em.map(|q| q.timestamp()),
+                    lido_em: a.lido_em.map(|q| q.timestamp()),
+                })
+                .collect(),
             resumos: ResumosDoAtendimento {
                 agendamento: aberta.agendamento.map(|a| ResumoSimples {
                     titulo: a.nome.unwrap_or_else(|| "Agendamento".into()),
@@ -1327,6 +1352,12 @@ struct GaleriaAbertaDaApi {
     vence_venda: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(default)]
     vence_download: Option<chrono::DateTime<chrono::Utc>>,
+    /// As faixas em uso, a padrão incluída.
+    #[serde(default)]
+    produtos: Vec<FaixaDaApi>,
+    /// Os e-mails que saíram, mais recente primeiro.
+    #[serde(default)]
+    avisos: Vec<AvisoDaApi>,
     #[serde(default)]
     agendamento: Option<AgendamentoDaApi>,
     #[serde(default)]
@@ -1335,6 +1366,28 @@ struct GaleriaAbertaDaApi {
     pedido: Option<PedidoDaApi>,
     #[serde(default)]
     parceiro: Option<ParceiroDaApi>,
+}
+
+/// Uma faixa em uso, como `GET /pos-venda/galerias/{id}` a devolve.
+#[derive(Deserialize)]
+struct FaixaDaApi {
+    id: String,
+    nome: String,
+    preco: serde_json::Value,
+    #[serde(default)]
+    preco_cheio: Option<serde_json::Value>,
+}
+
+/// Um e-mail que saiu, com entrega e leitura como o provedor contou.
+#[derive(Deserialize)]
+struct AvisoDaApi {
+    tipo: String,
+    destino: String,
+    enviado_em: chrono::DateTime<chrono::Utc>,
+    #[serde(default)]
+    entregue_em: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    lido_em: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// Os quatro resumos do atendimento, como a API os devolve. Cada um vira um
@@ -2147,6 +2200,56 @@ mod tests {
             !aberta.fotos[1].rejeitada,
             "e a sem o campo é só uma foto sem curadoria — não uma rejeitada"
         );
+        assert!(
+            aberta.faixas.is_empty() && aberta.avisos.is_empty(),
+            "sem `produtos` nem `avisos` a galeria abre do mesmo jeito"
+        );
+    }
+
+    /// ℹ️ **Os detalhes da sessão leem o que a web lê**: a faixa a preço cheio
+    /// (o do balcão) e os e-mails com entrega e leitura. Sem isso o desktop
+    /// mostrava o preço do catálogo e nada do último aviso.
+    #[tokio::test]
+    async fn a_galeria_aberta_traz_as_faixas_a_preco_cheio_e_os_avisos() {
+        let servidor = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/pos-venda/galerias/g1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "galeria": {
+                    "id": "g1",
+                    "titulo": "Ensaio",
+                    "produto_id": "p1",
+                    "criada_em": "2026-09-19T10:00:00Z"
+                },
+                "fotos": [],
+                "produtos": [
+                    { "id": "p1", "nome": "Até 2 Pessoas", "preco": "19.90", "preco_cheio": "25.00" },
+                    { "id": "p2", "nome": "Avulsa", "preco": "10.00" }
+                ],
+                "avisos": [{
+                    "id": "a1",
+                    "galeria_id": "g1",
+                    "tipo": "fotos_prontas",
+                    "message_id": null,
+                    "destino": "ana@exemplo.com",
+                    "enviado_em": "2026-09-19T20:51:00Z",
+                    "entregue_em": null,
+                    "lido_em": "2026-09-19T20:52:00Z"
+                }]
+            })))
+            .mount(&servidor)
+            .await;
+
+        let api = PosVendaApiHttp::nova(servidor.uri());
+        let aberta = api.abrir_galeria(&sessao_valida(), "g1").await.unwrap();
+
+        assert_eq!(aberta.faixas[0].preco, "25.00", "o cheio vale no balcão");
+        assert_eq!(aberta.faixas[1].preco, "10.00", "sem o cheio, o da vitrine");
+        assert_eq!(aberta.avisos.len(), 1);
+        assert_eq!(aberta.avisos[0].tipo, "fotos_prontas");
+        assert_eq!(aberta.avisos[0].destino, "ana@exemplo.com");
+        assert!(aberta.avisos[0].lido_em.is_some());
+        assert!(aberta.avisos[0].entregue_em.is_none());
     }
 
     /// ❌ **O `X` vai no `PATCH` como booleano, e sozinho basta.**

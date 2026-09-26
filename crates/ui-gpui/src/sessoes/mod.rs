@@ -10,6 +10,8 @@
 pub mod altura_da_tira;
 pub mod arquivos;
 pub mod detalhe;
+/// O texto dos detalhes da galeria (o `DetalhesDaGaleria` do site).
+pub mod detalhes_da_galeria;
 /// O "Filtros" da lista: um campo por coluna, sob o cabeçalho.
 pub mod filtros_da_lista;
 /// O assistente de sete etapas da nova sessão (a rota `nova` do site).
