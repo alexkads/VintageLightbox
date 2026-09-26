@@ -12,10 +12,9 @@
 //! `enviar_arquivos` na sessão.
 //!
 //! 🪟 **Dois pedaços, desenhados por quem usa**: o [`OrigemDasFotos::botao`]
-//! vai onde a tela quer o botão, e o [`OrigemDasFotos::dialogo`] por cima de
-//! tudo — no assistente, filho da raiz; na sessão, num `deferred`, porque o
-//! caixa flutuante é desenhado depois dela. O diálogo não tem `deferred`
-//! dentro: o GPUI não aceita um dentro do outro.
+//! vai onde a tela quer o botão, e o [`OrigemDasFotos::dialogo`] em qualquer
+//! lugar da árvore: é o `Dialog` do gpui-kit, que se desenha adiado e
+//! ancorado no canto da janela — por cima do caixa flutuante também.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -27,8 +26,8 @@ use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
 use gpui_kit::{
-    div, img, prelude::*, px, relative, AnyElement, ClickEvent, Context, Div, Entity, EventEmitter,
-    FocusHandle, FontWeight, RenderImage, SharedString, Stateful, Subscription, Task, Window,
+    div, img, prelude::*, px, AnyElement, ClickEvent, Context, Div, Entity, EventEmitter,
+    FocusHandle, FontWeight, RenderImage, SharedString, Subscription, Task, Window,
 };
 use infrastructure::cache::preview_manager::PreviewManager;
 
@@ -36,7 +35,6 @@ use crate::estilo;
 use crate::importacao::estado::{Descricao, Recado};
 use crate::importacao::explorador::{Explorador, GeradorDeMiniaturas, SeletorDePasta};
 use crate::recursos::Icone;
-use crate::tema;
 
 const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(100);
 
@@ -457,13 +455,33 @@ impl OrigemDasFotos {
 
     // ── Desenho ──────────────────────────────────────────────────────────
 
-    /// A janela de escolher as fotos, sobre o véu — `None` quando fechada.
+    /// A janela de escolher as fotos, no `Dialog` do gpui-kit — `None` quando
+    /// fechada. Só o "Cancelar" e o "Importar" a fecham, como antes: o véu e o
+    /// `Esc` não descartam uma seleção feita foto a foto.
     pub fn dialogo(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let selecao = self.selecao.as_ref()?;
-        Some(
-            self.desenhar_dialogo(selecao, window, cx)
-                .into_any_element(),
+        let largura = self.largura_do_dialogo(window);
+        let miolo = self
+            .desenhar_dialogo(selecao, window, cx)
+            .into_any_element();
+        crate::dialogo::desenhar_conteudo(
+            Some(miolo),
+            None,
+            crate::dialogo::Jeito::sem_saida(largura),
+            |origem, window, cx| origem.cancelar(window, cx),
+            window,
+            cx,
         )
+    }
+
+    /// 88% da janela até 820 px; maximizada, 94% até 1440.
+    fn largura_do_dialogo(&self, window: &Window) -> f32 {
+        let largura_janela = f32::from(window.viewport_size().width);
+        if self.maximizada {
+            (largura_janela * 0.94).min(1440.)
+        } else {
+            (largura_janela * 0.88).min(820.)
+        }
     }
 
     /// "Do cartão ou pasta…", com o menu dos cartões e o "Escolher pasta…".
@@ -563,19 +581,15 @@ impl OrigemDasFotos {
         selecao: &SelecaoDaPasta,
         window: &Window,
         cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
+    ) -> Div {
         let tema = cx.theme().clone();
         let selecionadas = selecao.fotos.iter().filter(|(_, marcado)| *marcado).count();
         let todas = selecionadas == selecao.fotos.len();
         let minimizada = self.minimizada;
         let maximizada = self.maximizada;
         let zoom = self.zoom_valor;
-        let largura_janela = f32::from(window.viewport_size().width);
-        let largura_modal = if maximizada {
-            (largura_janela * 0.94).min(1440.)
-        } else {
-            (largura_janela * 0.88).min(820.)
-        };
+        let largura_modal = self.largura_do_dialogo(window);
+        let altura_janela = window.viewport_size().height;
         let colunas = ((largura_modal - 64.) / (178. * zoom))
             .floor()
             .clamp(2., 8.) as u16;
@@ -584,19 +598,12 @@ impl OrigemDasFotos {
             .map(|nome| nome.to_string_lossy().to_string())
             .unwrap_or_else(|| selecao.raiz.clone());
 
-        veu().child(
-            v_flex()
-                .w(relative(if maximizada { 0.94 } else { 0.88 }))
-                .max_w(px(if maximizada { 1440. } else { 820. }))
-                .max_h(if maximizada { relative(0.94) } else { relative(0.82) })
-                .p(px(24.))
+        // 🪟 Véu, caixa e canto são do `Dialog` do gpui-kit ([`Self::dialogo`]);
+        // a altura é a de antes (82% da janela, 94% maximizada), menos o
+        // respiro de 16 da caixa.
+        v_flex()
+                .max_h(altura_janela * if maximizada { 0.94 } else { 0.82 } - px(32.))
                 .gap(px(14.))
-                .rounded(px(16.))
-                .border_1()
-                .border_color(tema.border)
-                .bg(tema.background)
-                .shadow_lg()
-                .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 // 🔑 **O foco é do diálogo**, e os atalhos de marcar também —
                 // nas duas telas. `Cmd/Ctrl+A` e `Cmd/Ctrl+D` chegam como ação
                 // (a raiz as liga a `SelecionarTudo` e `LimparSelecao`), e o
@@ -925,22 +932,8 @@ impl OrigemDasFotos {
                                     origem.importar_selecao(window, cx)
                                 })),
                         ),
-                ),
-        )
+                )
     }
-}
-
-/// O véu atrás da janela: tapa a tela e para o mouse.
-fn veu() -> Stateful<Div> {
-    div()
-        .id("origem-veu")
-        .absolute()
-        .inset_0()
-        .flex()
-        .items_center()
-        .justify_center()
-        .bg(tema::cores::veu())
-        .occlude()
 }
 
 fn data_hora_da_foto(valor: &str) -> String {

@@ -3824,26 +3824,19 @@ impl Render for Detalhe {
                     ),
             )
             .children(tira_el)
-            // 🪟 **As duas camadas do site, por cima da tela**: os "detalhes"
-            // ancorados no botão que os abriu (o `Popover` de lá) e o
-            // atendimento como gaveta que entra pela direita (o `Drawer`).
-            // Elas ficam **por último** para nascerem acima da grade, e são
-            // desenhadas na própria tela — o `deferred` do GPUI não aceita
-            // outro `deferred` dentro (ver `caixa/dialogos.rs`).
-            // 🔑 **`deferred`, e não só por último**: o caixa flutuante é filho
-            // da raiz, desenhado depois desta tela, e ficava por cima do modal.
-            // Diferido, o modal é pintado depois de tudo. Não há `deferred`
-            // dentro dele (ver o comentário acima).
+            // 🪟 **Os diálogos são o `Dialog` do gpui-kit** (`crate::dialogo`),
+            // que se desenha adiado e ancorado no canto da janela: fica acima
+            // da grade e do caixa flutuante — filho da raiz, desenhado depois
+            // desta tela — esteja onde estiver aqui.
             .children(modal_de_importacao)
-            // 🔑 **A janela de escolher as fotos do cartão também é
-            // diferida**, pelo mesmo motivo do modal: o caixa flutuante é
-            // desenhado depois desta tela. Ela não abre junto com o modal — o
-            // modal fecha quando ela abre ([`EventoDaOrigem::Lendo`]).
+            // A janela de escolher as fotos do cartão é o `Dialog` do kit, que
+            // já se desenha adiado — acima do caixa flutuante. Ela não abre
+            // junto com o modal — o modal fecha quando ela abre
+            // ([`EventoDaOrigem::Lendo`]).
             .children(
                 self.origem
                     .clone()
-                    .and_then(|origem| origem.update(cx, |origem, cx| origem.dialogo(window, cx)))
-                    .map(|dialogo| gpui_kit::deferred(dialogo).with_priority(2)),
+                    .and_then(|origem| origem.update(cx, |origem, cx| origem.dialogo(window, cx))),
             )
             // 🔑 **Os diálogos também são diferidos** (dono, 24/set/2026, no
             // modal dos dados do cliente). Eles vinham antes da grade na
