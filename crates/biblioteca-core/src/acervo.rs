@@ -69,7 +69,9 @@ pub struct Foto {
     /// A faixa que vale para esta foto (a dela, ou a da galeria).
     pub produto_efetivo: String,
     pub preco_negociado: Option<i64>,
-    pub tem_observacao: bool,
+    /// O texto do acerto de balcão, como o site o guarda
+    /// (`"TchêOfertas — cupom 123"`). `None` = nada anotado.
+    pub observacao: Option<String>,
     /// Preço fixado para a compra online, em centavos. `None` = vale a faixa.
     pub preco_de_venda: Option<i64>,
     pub pedido_id: Option<String>,
@@ -107,7 +109,20 @@ impl Foto {
 
     /// Houve conversa de balcão sobre esta foto (cortesia, desconto, já paga).
     pub fn tem_negociacao(&self) -> bool {
-        self.preco_negociado.is_some() || self.tem_observacao
+        self.preco_negociado.is_some()
+            || self
+                .observacao
+                .as_deref()
+                .is_some_and(|o| !o.trim().is_empty())
+    }
+
+    /// 🤝 A etiqueta do acerto sobre a foto na grade — `"Cortesia"`,
+    /// `"LançadorDeOfertas · cupom AHEB82"` —, o `negociacao` do `grade.tsx`
+    /// do site. `None` sem acerto.
+    pub fn etiqueta_da_negociacao(&self) -> Option<String> {
+        self.tem_negociacao().then(|| {
+            crate::negociacao::descrever(self.preco_negociado, self.observacao.as_deref()).titulo
+        })
     }
 }
 
@@ -365,7 +380,7 @@ mod testes {
             apagada,
             produto_efetivo: "avulsa".to_string(),
             preco_negociado: None,
-            tem_observacao: false,
+            observacao: None,
             preco_de_venda: None,
             pedido_id: None,
             downloads: 0,
@@ -380,6 +395,40 @@ mod testes {
             nota: None,
             ..foto(id, Estado::Disponivel, false)
         }
+    }
+
+    /// 🤝 A etiqueta da grade é a do site (`descreverNegociacao`): o print
+    /// do dono de 26/set/2026 — "LançadorDeOfertas · cupom AHEB82".
+    #[test]
+    fn a_etiqueta_do_acerto_e_a_do_site() {
+        let sem = foto("a", Estado::Disponivel, false);
+        assert_eq!(sem.etiqueta_da_negociacao(), None);
+
+        let parceiro = Foto {
+            observacao: Some("LançadorDeOfertas — cupom AHEB82".into()),
+            ..sem.clone()
+        };
+        assert_eq!(
+            parceiro.etiqueta_da_negociacao().as_deref(),
+            Some("LançadorDeOfertas · cupom AHEB82")
+        );
+
+        let cortesia = Foto {
+            preco_negociado: Some(0),
+            observacao: Some("Cortesia — aniversário".into()),
+            ..sem.clone()
+        };
+        assert_eq!(
+            cortesia.etiqueta_da_negociacao().as_deref(),
+            Some("Cortesia")
+        );
+
+        // Texto em branco não é acerto.
+        let branco = Foto {
+            observacao: Some("  ".into()),
+            ..sem
+        };
+        assert!(!branco.tem_negociacao());
     }
 
     #[test]

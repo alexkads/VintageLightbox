@@ -4759,12 +4759,48 @@ impl Detalhe {
                         .left(px(4.)),
                     )
                     // 📍 **Onde ela está**, no canto de baixo — como no site.
-                    .child(
-                        selo_do_lugar(self.lugar_de(&foto.id))
-                            .absolute()
-                            .bottom(px(4.))
-                            .left(px(4.)),
-                    )
+                    // 🤝 E, ao lado, **o acerto do balcão** numa pílula âmbar
+                    // (`rodapes-da-grade.tsx`: *"🤝 LançadorDeOfertas · cupom
+                    // AHEB82"*), só em cartão com mais de 120 px, como lá.
+                    // Escura por cima da foto nos dois temas: o contraste é
+                    // com a imagem.
+                    .child({
+                        let onde = self.lugar_de(&foto.id);
+                        // ⚠️ A pílula tem teto explícito: sem ele o texto
+                        // passava da borda do cartão e era cortado ali, sem
+                        // as reticências do `truncate` do site.
+                        let redondos = [onde.transito, onde.nuvem, onde.disco]
+                            .into_iter()
+                            .filter(|r| *r)
+                            .count() as f32;
+                        let teto = lado - 4. - 8. - redondos * 26.;
+                        let lugar = selo_do_lugar(onde);
+                        match foto.etiqueta_da_negociacao().filter(|_| lado > 120.) {
+                            None => lugar.absolute().bottom(px(4.)).left(px(4.)),
+                            Some(etiqueta) => div()
+                                .absolute()
+                                .bottom(px(4.))
+                                .left(px(4.))
+                                .right(px(4.))
+                                .flex()
+                                .items_center()
+                                .gap(px(4.))
+                                .child(lugar.flex_none())
+                                .child(
+                                    div()
+                                        .min_w(px(0.))
+                                        .max_w(px(teto.max(0.)))
+                                        .truncate()
+                                        .px(px(6.))
+                                        .rounded_full()
+                                        .bg(gpui::rgb(0xffb900))
+                                        .text_color(gpui::black())
+                                        .text_size(px(10.))
+                                        .line_height(px(20.))
+                                        .child(SharedString::from(format!("🤝 {etiqueta}"))),
+                                ),
+                        }
+                    })
                     .when(marcada, |quadro| {
                         quadro.child(
                             div()
@@ -7251,10 +7287,7 @@ fn para_o_core(foto: &FotoDaGaleria) -> acervo::Foto {
             .preco_negociado
             .as_deref()
             .and_then(dinheiro::ler_campo),
-        tem_observacao: foto
-            .observacao_da_negociacao
-            .as_deref()
-            .is_some_and(|o| !o.trim().is_empty()),
+        observacao: foto.observacao_da_negociacao.clone(),
         preco_de_venda: foto.preco_de_venda.as_deref().and_then(dinheiro::ler_campo),
         pedido_id: foto.pedido_id.clone(),
         downloads: foto.downloads,
@@ -7464,7 +7497,7 @@ mod testes {
                         apagada: false,
                         produto_efetivo: String::new(),
                         preco_negociado: None,
-                        tem_observacao: false,
+                        observacao: None,
                         preco_de_venda: None,
                         pedido_id: None,
                         downloads: 0,
@@ -8765,7 +8798,7 @@ mod testes {
             apagada: false,
             produto_efetivo: String::new(),
             preco_negociado: None,
-            tem_observacao: false,
+            observacao: None,
             preco_de_venda: None,
             pedido_id: None,
             downloads: 0,

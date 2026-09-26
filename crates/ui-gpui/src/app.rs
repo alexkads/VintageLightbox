@@ -5758,7 +5758,7 @@ fn local_para_a_grade(foto: &PhotoViewModel, ordem: i64) -> biblioteca_core::ace
         apagada: false,
         produto_efetivo: String::new(),
         preco_negociado: None,
-        tem_observacao: false,
+        observacao: None,
         preco_de_venda: None,
         pedido_id: None,
         downloads: 0,

@@ -149,7 +149,7 @@ pub fn classificacao(foto: &PhotoViewModel) -> acervo::Foto {
         apagada,
         produto_efetivo: String::new(),
         preco_negociado: None,
-        tem_observacao: false,
+        observacao: None,
         preco_de_venda: None,
         pedido_id: None,
         downloads: 0,
