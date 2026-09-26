@@ -1,12 +1,13 @@
 {
-  "versao": "0.1.13",
-  "titulo": "O Chatbot e os Agendamentos agora estão no app, com aviso de mensagem nova e de agendamento novo em qualquer tela.",
-  "importante": true,
+  "versao": "0.1.14",
+  "titulo": "Negociação do balcão igual à do site, e o Comparar na revelação: duas fotos lado a lado, também na tela do cliente.",
+  "importante": false,
   "novidades": [
-    "Chatbot: as conversas do WhatsApp, Instagram, Messenger, Telegram e do chat do site numa lista só, como no painel do site. Dá para assumir a conversa, responder, usar as respostas rápidas e cuidar das urgências sem sair do app.",
-    "Agendamentos: a agenda do estúdio com mês, semana, dia, agenda, ano e estação, os agendamentos de hoje, e em cada um Reagendar, Registrar atendimento, Excluir e Descancelar.",
-    "Aviso na hora: mensagem nova de cliente e agendamento novo ou cancelado aparecem mesmo com você na triagem ou no caixa. Com o app atrás de outra janela ou na bandeja, vem um aviso do sistema.",
-    "Atualização automática: daqui em diante o app avisa sozinho quando há versão nova, mostra o que mudou e se atualiza em segundo plano, sem precisar rodar o instalador à mão."
+    "Negociação: o \"Negociação…\" da sessão abre o mesmo diálogo do site — Cortesia, Desconto, Já paga em outro site e Outro, com o site parceiro numa lista, o cupom e o preço da faixa ao lado. A foto que já tem acerto abre preenchida, com \"Remover negociação\".",
+    "Na grade da sessão, a foto com acerto mostra uma etiqueta amarela no pé, como no site: \"🤝 LançadorDeOfertas · cupom AHEB82\".",
+    "Comparar (Shift+C) na revelação: duas fotos lado a lado, na tela e na tela do cliente. As teclas 0 a 5, P e X classificam a foto escolhida.",
+    "A triagem não trava mais enquanto a importação e o envio para a nuvem estão andando.",
+    "As setas da revelação voltam a andar depois de abrir o menu da tira, e o Backup de arquivos foi para o menu da conta."
   ],
-  "por_que_atualizar": "Cliente que escreve no WhatsApp ou pede atendente no site e não recebe resposta desiste. Com esta versão o balcão fica sabendo na hora, sem abrir o navegador. E ela traz a atualização automática: as próximas versões chegam sozinhas, e se alguma não der certo, a versão que você usa continua funcionando."
+  "por_que_atualizar": "Quem chega com cupom de site parceiro é registrado em dois cliques, do mesmo jeito que no site, e a grade mostra na hora quais fotos já foram acertadas. E o Comparar ajuda o cliente a escolher entre duas fotos parecidas sem trocar de tela."
 }
