@@ -152,7 +152,8 @@ codegen-units = 1
 #
 # 🔑 **Thin LTO e 16 unidades** dividem o trabalho entre os núcleos e gastam
 # bem menos memória na ligação. O `opt-level` continua 3: os laços de pixel
-# rodam praticamente iguais.
+# rodam praticamente iguais. Os pacotes distribuídos (`empacotar.sh`) seguem no
+# `release` completo.
 [profile.instalador]
 inherits = "release"
 lto = "thin"

@@ -1200,7 +1200,7 @@ if [ "$SISTEMA" = "Darwin" ]; then
   mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
   cp "$BINARIO" "$APP/Contents/MacOS/ui-gpui"
   cp "$FONTE/empacotamento/icones/icone.icns" "$APP/Contents/Resources/icone.icns"
-  # 🔑 O identificador é o mesmo do antigo `.dmg` (`br.com.recordarfotos.vintagelightbox`): é
+  # 🔑 O identificador é o mesmo do `.dmg` (`empacotamento/packager.toml`): é
   #    por ele que o macOS lembra as permissões já concedidas ao app GPUI.
   cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

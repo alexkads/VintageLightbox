@@ -50,7 +50,7 @@ fn main() {
 /// | Perfil | Quem compila | Como atualiza |
 /// |---|---|---|
 /// | `instalador` | `scripts/instalar-vintagelightbox-gpui.cmd`, no balcão | repetindo o instalador (compila o `main`) |
-/// | `release` | o antigo pacote assinado (`.dmg`, fora desde 27/set/2026) | a faixa baixa o pacote, ou compila se não houver |
+/// | `release` | `scripts/empacotar.sh`, o pacote assinado | a faixa baixa e instala sozinha |
 /// | `debug` | quem desenvolve | `git pull` |
 ///
 /// 🔑 **Pelo diretório de saída, e não por variável do instalador.** O
@@ -83,7 +83,8 @@ fn jeito_de_instalar() {
 /// macOS o ícone vem do `.app` e no Linux do `.desktop`, e por isso lá não
 /// faltava.
 ///
-/// 🔑 **O mesmo `.ico` do instalador** (`empacotamento/icones/icone.ico`): dois arquivos para a mesma logo é a receita de um
+/// 🔑 **O mesmo `.ico` do instalador** (`empacotamento/icones/icone.ico`, que o
+/// `packager.toml` já lista): dois arquivos para a mesma logo é a receita de um
 /// deles envelhecer sem ninguém notar.
 fn icone_do_executavel(raiz: &Path) {
     // ⚠️ **O alvo, e não o host**: `cfg!(windows)` aqui falaria da máquina que
