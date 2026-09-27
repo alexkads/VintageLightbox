@@ -1010,12 +1010,19 @@ impl Detalhe {
     /// Relê a galeria aberta **sem sair dela** — seleção e foco ficam, pela
     /// mesma tradução por id da releitura depois de uma nota. É o que o caixa
     /// pede depois de gravar faixa ou negociação por fora desta tela.
+    ///
+    /// 🚨 **`carregando` liga junto**, senão a colheita não espera a resposta
+    /// (dono, 27/set/2026: *"somente no segundo salvar a informação é
+    /// persistida"*). Sem ele o primeiro tique não via nada no ar, o laço
+    /// parava, e a galeria relida ficava presa no canal até o gesto seguinte
+    /// religá-lo — a cortesia só aparecia no segundo "Salvar".
     pub fn reler(&mut self, cx: &mut Context<Self>) {
         let (Some(sessao), Some(id)) = (self.sessao.clone(), self.galeria_id.clone()) else {
             return;
         };
         self.publicador
             .abrir_galeria(sessao, id, self.recados.0.clone());
+        self.carregando = true;
         self.acompanhar(cx);
     }
 
@@ -3226,11 +3233,14 @@ impl Detalhe {
                         // 🔑 **O recado não é a verdade: relê.** Os resumos da
                         // associação nova e o número do botão vêm da galeria —
                         // sem reler, o cabeçalho continuava contando as de antes.
+                        // E com `carregando`, como o `reler`: sem ele o laço
+                        // podia parar antes de a resposta chegar.
                         if let (Some(sessao), Some(id)) =
                             (self.sessao.clone(), self.galeria_id.clone())
                         {
                             self.publicador
                                 .abrir_galeria(sessao, id, self.recados.0.clone());
+                            self.carregando = true;
                         }
                     }
                 }
@@ -8701,6 +8711,60 @@ mod testes {
             .update(cx, |tela, _window, _cx| {
                 assert_eq!(nota_na_grade(tela, "f1"), Some(3));
                 assert!(tela.na_mao.is_empty());
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **A cortesia aparece no primeiro "Salvar"** (dono, 27/set/2026:
+    /// *"somente no segundo salvar a informação é persistida"*).
+    ///
+    /// O balcão grava e pede `reler`; a resposta do site chega depois do
+    /// primeiro tique da colheita. O `reler` não marcava nada como no ar, o
+    /// laço parava nesse tique, e a galeria relida ficava presa no canal até o
+    /// segundo "Salvar" religá-lo. Aqui quem colhe é o laço de verdade — o
+    /// relógio anda, ninguém chama `colher` à mão.
+    #[gpui_kit::test]
+    fn a_releitura_que_chega_atrasada_ainda_entra_na_grade(cx: &mut TestAppContext) {
+        let (janela, publicador) = janela(
+            cx,
+            vec![foto("f1", EstadoDaFotoNoSite::Disponivel, Some(5))],
+        );
+        entrar(cx, &janela);
+        cx.executor().advance_clock(INTERVALO_DE_COLHEITA * 3);
+        cx.run_until_parked();
+
+        // O site gravou a cortesia; a releitura vai demorar a voltar.
+        {
+            let mut fotos = publicador.fotos_da_sessao.lock().unwrap();
+            fotos[0].preco_negociado = Some("0.00".into());
+            fotos[0].observacao_da_negociacao = Some("Cortesia".into());
+        }
+        publicador
+            .galeria_demorada
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        janela
+            .update(cx, |tela, _window, cx| tela.reler(cx))
+            .expect("a janela deve estar aberta");
+        for _ in 0..3 {
+            cx.executor().advance_clock(INTERVALO_DE_COLHEITA);
+            cx.run_until_parked();
+        }
+
+        // A rede responde, enfim — e o laço ainda tem de estar esperando.
+        publicador.responder();
+        for _ in 0..3 {
+            cx.executor().advance_clock(INTERVALO_DE_COLHEITA);
+            cx.run_until_parked();
+        }
+        janela
+            .update(cx, |tela, _window, _cx| {
+                let p = tela.acervo.posicao_de("f1").expect("a foto está na grade");
+                let f = tela.acervo.visivel(p).expect("e visível");
+                assert_eq!(
+                    (f.preco_negociado, f.observacao.as_deref()),
+                    (Some(0), Some("Cortesia")),
+                    "a releitura chegou e a grade não a colheu"
+                );
             })
             .expect("a janela deve estar aberta");
     }

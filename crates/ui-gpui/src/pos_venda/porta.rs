@@ -1045,6 +1045,10 @@ pub mod mentira {
         /// Segura a resposta do `PATCH` até `responder()` — a rede cheia com o
         /// ensaio subindo ao R2, que é quando a tecla seguinte chega antes.
         pub negociacao_demorada: bool,
+        /// Segura a **releitura da galeria** até `responder()`. Atômico, e não
+        /// `bool`, porque liga depois de entrar: a primeira abertura responde
+        /// na hora, e só a releitura do gesto chega atrasada — como na rede.
+        pub galeria_demorada: std::sync::atomic::AtomicBool,
         /// Com isto, a cópia de trabalho falha em vez de chegar.
         pub copia_falha: Option<String>,
     }
@@ -1520,7 +1524,7 @@ pub mod mentira {
                 let _ = canal.send(Recado::Falhou("essa sessão não existe".into()));
                 return;
             };
-            let _ = canal.send(Recado::Aberta(Box::new(GaleriaAberta {
+            let recado = Recado::Aberta(Box::new(GaleriaAberta {
                 galeria,
                 fotos: self.fotos_da_sessao.lock().expect("as fotos").clone(),
                 vence_venda: None,
@@ -1528,7 +1532,18 @@ pub mod mentira {
                 faixas: Vec::new(),
                 avisos: self.avisos_da_sessao.lock().expect("os avisos").clone(),
                 resumos: Default::default(),
-            })));
+            }));
+            if self
+                .galeria_demorada
+                .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                self.guardados
+                    .lock()
+                    .expect("os guardados")
+                    .push((canal, recado));
+            } else {
+                let _ = canal.send(recado);
+            }
         }
 
         fn avisar(&self, _sessao: Sessao, galeria_id: String, canal: Sender<Recado>) {
