@@ -1930,10 +1930,14 @@ impl Revelacao {
         // O Enquadrar continua aberto, como no site: o retângulo é lido do
         // corte da foto, e o pedido do operador recomeça do que voltou.
         if let Some(edicao) = self.edicao.as_mut() {
+            // O traçado de guias continua ligado: desfazer uma guia e traçar
+            // outra é o gesto seguido mais comum da perspectiva guiada.
+            let armadas = edicao.guias.armadas;
             *edicao = Edicao {
                 proporcao: edicao.proporcao,
                 ..Edicao::default()
             };
+            edicao.guias.armadas = armadas;
         }
         let graus = self.corte_atual().angle();
         self.angulo
@@ -7825,6 +7829,7 @@ mod testes {
                 let p = *tela.corte_atual().perspectiva();
                 assert_eq!(p.quantas_guias(), 1);
                 assert!(!p.corrige());
+                assert!(tela.tracando_guias(), "desfazer não desliga o traçado");
 
                 tela.refazer(window, cx);
                 assert_eq!(*tela.corte_atual().perspectiva(), corrigida);
