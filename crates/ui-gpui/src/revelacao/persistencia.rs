@@ -103,6 +103,22 @@ pub trait Gravador: Send + Sync + 'static {
     fn receita_de(&self, _id: &str) -> Option<Receita> {
         None
     }
+
+    /// Grava a **receita local** (a Revelação local: máscaras e retoques) —
+    /// `None` apaga. À parte de [`Self::gravar`], de propósito: os outros
+    /// escritores da receita (sincronização, receita padrão, zerar) gravam
+    /// ajustes e corte e **não podem** apagar máscara nenhuma. Ver
+    /// `PhotoRepository::update`.
+    ///
+    /// O padrão não guarda nada.
+    fn gravar_locais(&self, _id: String, _locais: Option<String>) {}
+
+    /// A receita local de uma foto **do site**, por id de lá — o que a tela lê
+    /// ao abrir e o que a subida manda junto. Em memória, como
+    /// [`Self::guardadas_do_site`].
+    fn locais_do_site(&self, _foto_no_site: &str) -> Option<String> {
+        None
+    }
 }
 
 /// O gravador de verdade: entrega ao `EditorController`, numa tarefa do tokio.
@@ -124,6 +140,9 @@ pub struct GravadorDoBanco {
     /// A última receita de cada foto local, gravada nesta abertura — ver
     /// [`Gravador::receita_de`].
     locais: std::sync::Mutex<std::collections::HashMap<String, Receita>>,
+    /// A receita local das fotos do site, em memória — espelho de
+    /// `locais_do_site` (migration 024). Ver [`Gravador::locais_do_site`].
+    locais_do_site: std::sync::Mutex<std::collections::HashMap<String, String>>,
 }
 
 impl GravadorDoBanco {
@@ -139,7 +158,17 @@ impl GravadorDoBanco {
             tokio,
             do_site: Arc::new(std::sync::Mutex::new(guardadas.into_iter().collect())),
             locais: std::sync::Mutex::default(),
+            locais_do_site: std::sync::Mutex::default(),
         }
+    }
+
+    /// Semeia a receita local das fotos do site — o que a tabela tinha na
+    /// abertura do app (`EditorController::locais_do_site`).
+    pub fn com_locais_do_site(self, locais: Vec<(String, String)>) -> Self {
+        if let Ok(mut guardado) = self.locais_do_site.lock() {
+            guardado.extend(locais);
+        }
+        self
     }
 }
 
@@ -294,6 +323,43 @@ impl Gravador for GravadorDoBanco {
 
     fn receita_de(&self, id: &str) -> Option<Receita> {
         self.locais.lock().ok()?.get(id).copied()
+    }
+
+    fn gravar_locais(&self, id: String, locais: Option<String>) {
+        let editor = self.editor.clone();
+        let nome = id.clone();
+        if let Some(no_site) = id_no_site(&id) {
+            let no_site = no_site.to_string();
+            // O espelho anda na hora; o disco, atrás — o mesmo da receita.
+            if let Ok(mut guardado) = self.locais_do_site.lock() {
+                match &locais {
+                    Some(json) => guardado.insert(no_site.clone(), json.clone()),
+                    None => guardado.remove(&no_site),
+                };
+            }
+            self.tokio.spawn(async move {
+                if let Err(erro) = editor
+                    .guardar_locais_do_site(&no_site, locais.as_deref())
+                    .await
+                {
+                    crate::telemetria::avisar!(
+                        "⚠️ [Revelação local] a de {nome} não foi guardada: {erro}"
+                    );
+                }
+            });
+            return;
+        }
+        self.tokio.spawn(async move {
+            if let Err(erro) = editor.save_locais(&id, locais).await {
+                crate::telemetria::avisar!(
+                    "⚠️ [Revelação local] a de {nome} não foi gravada: {erro}"
+                );
+            }
+        });
+    }
+
+    fn locais_do_site(&self, foto_no_site: &str) -> Option<String> {
+        self.locais_do_site.lock().ok()?.get(foto_no_site).cloned()
     }
 }
 
@@ -636,7 +702,39 @@ pub fn chave_da_revelada(foto_id: &str) -> String {
 /// ⚠️ **Contra o neutro, e não contra zero.** Contraste e raio da nitidez têm
 /// neutro 1,0: comparar com zero acenderia o ponto em toda foto do acervo.
 pub fn ja_revelada(foto: &PhotoViewModel) -> bool {
-    da_foto(foto) != Ajustes::default() || corte_da_foto(foto) != Corte::default()
+    da_foto(foto) != Ajustes::default()
+        || corte_da_foto(foto) != Corte::default()
+        || foto.locais.is_some()
+}
+
+/// A receita local de uma foto, do jeito que a tela a abre.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LocaisDaFoto {
+    /// Lida (ou a foto não tem máscara nem retoque: a receita vazia).
+    Lida(infrastructure::gpu_adjustments::ReceitaLocal),
+    /// 🚨 Gravada por uma versão mais nova do app, ou corrompida. A tela
+    /// mostra a foto **sem** mexer nela e **não grava por cima**: o texto
+    /// volta intacto para quem souber lê-lo.
+    Ilegivel { texto: String, erro: String },
+}
+
+/// A receita local da foto: a do catálogo (`photos.edit_locais`) ou, para a
+/// foto do site, a do depósito (`locais_do_site`).
+pub fn locais_da_foto(foto: &PhotoViewModel, gravador: &dyn Gravador) -> LocaisDaFoto {
+    let texto = match id_no_site(&foto.id) {
+        Some(no_site) => gravador.locais_do_site(no_site),
+        None => foto.locais.clone(),
+    };
+    match texto {
+        None => LocaisDaFoto::Lida(infrastructure::gpu_adjustments::ReceitaLocal::default()),
+        Some(texto) => match infrastructure::gpu_adjustments::ReceitaLocal::de_json(&texto) {
+            Ok(receita) => LocaisDaFoto::Lida(receita),
+            Err(erro) => LocaisDaFoto::Ilegivel {
+                texto,
+                erro: erro.to_string(),
+            },
+        },
+    }
 }
 
 /// Um gravador que só anota o que recebeu.
@@ -660,6 +758,8 @@ pub mod mentira {
         /// o gravador de verdade escreve e o que a subida do ensaio lê.
         #[allow(clippy::type_complexity)]
         pub no_catalogo: Mutex<Option<Box<dyn Fn(&str, Ajustes, Corte) + Send>>>,
+        /// Cada gravação da receita local, na ordem.
+        locais: Mutex<Vec<(String, Option<String>)>>,
     }
 
     impl GravadorDeMentira {
@@ -676,6 +776,11 @@ pub mod mentira {
                 do_site: Mutex::new(guardadas),
                 ..Self::default()
             }
+        }
+
+        /// As gravações da receita local, na ordem.
+        pub fn locais_gravados(&self) -> Vec<(String, Option<String>)> {
+            self.locais.lock().expect("as gravações locais").clone()
         }
 
         /// O que sobrou no depósito. Vazio depois de a revelação subir.
@@ -717,6 +822,24 @@ pub mod mentira {
                 .lock()
                 .expect("o depósito")
                 .retain(|(id, _)| id != &foto_no_site);
+        }
+
+        fn gravar_locais(&self, id: String, locais: Option<String>) {
+            self.locais
+                .lock()
+                .expect("as gravações locais")
+                .push((id, locais));
+        }
+
+        fn locais_do_site(&self, foto_no_site: &str) -> Option<String> {
+            let id = format!("{}{foto_no_site}", super::PREFIXO_DO_SITE);
+            self.locais
+                .lock()
+                .expect("as gravações locais")
+                .iter()
+                .rev()
+                .find(|(outra, _)| *outra == id)
+                .and_then(|(_, l)| l.clone())
         }
 
         fn receita_de(&self, id: &str) -> Option<super::Receita> {

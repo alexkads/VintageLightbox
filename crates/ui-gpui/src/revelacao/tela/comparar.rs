@@ -255,9 +255,15 @@ impl Revelacao {
             return;
         }
         let corte = transformacao::corte(&crop);
-        let chave = cache::Chave::nova(&foto_id, (largura, altura), &ajustes, &corte);
+        let locais = self
+            .acervo
+            .iter()
+            .find(|f| f.id == foto_id)
+            .map(|f| self.locais_de(f))
+            .unwrap_or_default();
+        let chave = cache::Chave::nova(&foto_id, (largura, altura), &ajustes, &corte, &locais);
         let sem_gpu = self.processador.disponivel() == Some(false);
-        let pronta = if ajustes == Ajustes::default() || sem_gpu {
+        let pronta = if (ajustes == Ajustes::default() && locais.vazia()) || sem_gpu {
             // Sem receita não há o que revelar; sem GPU, a crua é o que há.
             image::RgbaImage::from_raw(largura, altura, pixels.to_vec())
                 .map(image::DynamicImage::ImageRgba8)
@@ -277,6 +283,7 @@ impl Revelacao {
             altura,
             ajustes,
             corte,
+            locais,
         });
         self.pedidos.insert(
             id,

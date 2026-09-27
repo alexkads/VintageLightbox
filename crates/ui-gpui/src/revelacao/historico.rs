@@ -41,14 +41,23 @@
 //! ou máscaras, eles entram no [`Estado`] e o desfazer os alcança sem que ninguém
 //! precise lembrar de mexer aqui.
 
+use std::sync::Arc;
+
+use infrastructure::gpu_adjustments::ReceitaLocal;
+
 use super::persistencia::Corte;
 use super::processador::Ajustes;
 
 /// Como a foto está revelada, inteira — é o que um passo do histórico guarda.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+///
+/// 🔑 **A Revelação local entrou aqui como o cabeçalho previa**: máscaras e
+/// retoques são parte do estado, e o `Cmd+Z` os alcança sem ninguém lembrar.
+/// Por `Arc`: um passo custa um ponteiro, e a comparação continua por valor.
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Estado {
     pub ajustes: Ajustes,
     pub corte: Corte,
+    pub locais: Arc<ReceitaLocal>,
 }
 
 /// Quantos passos cabem.
@@ -115,7 +124,7 @@ impl Historico {
             return None;
         }
         self.atual -= 1;
-        Some(self.passos[self.atual])
+        Some(self.passos[self.atual].clone())
     }
 
     /// Avança um passo. `None` quando já está no fim.
@@ -124,7 +133,7 @@ impl Historico {
             return None;
         }
         self.atual += 1;
-        Some(self.passos[self.atual])
+        Some(self.passos[self.atual].clone())
     }
 
     /// Refaz cada passo sobre uma receita que mudou por fora.
@@ -134,7 +143,7 @@ impl Historico {
     /// gravaria isso (ver `Revelacao::receita_mudou_por_fora`).
     pub fn rebasear(&mut self, refazer: impl Fn(Estado) -> Estado) {
         for passo in &mut self.passos {
-            *passo = refazer(*passo);
+            *passo = refazer(passo.clone());
         }
     }
 }
@@ -150,6 +159,7 @@ mod testes {
                 ..Default::default()
             },
             corte: Corte::default(),
+            ..Default::default()
         }
     }
 
@@ -278,10 +288,11 @@ mod testes {
                 ..Default::default()
             },
             corte: Corte::default(),
+            ..Default::default()
         };
 
         let mut historico = Historico::novo(Estado::default());
-        historico.registrar(cheio);
+        historico.registrar(cheio.clone());
         historico.registrar(Estado::default());
 
         assert_eq!(historico.desfazer(), Some(cheio));

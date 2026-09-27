@@ -23,7 +23,22 @@ pub trait PhotoRepository: Send + Sync {
     async fn find_all(&self) -> DomainResult<Vec<Photo>>;
 
     /// Atualiza uma foto existente
+    ///
+    /// ⚠️ **Não toca na receita local** (`edit_locais`): ela tem gravação
+    /// própria, [`Self::atualizar_locais`]. Cada `update` reescreve a linha a
+    /// partir de uma leitura, e os escritores da receita (sincronização,
+    /// receita padrão, a Revelação) rodam em tarefas que terminam na ordem que
+    /// quiserem: se as máscaras andassem aqui, qualquer um deles poderia
+    /// devolver ao banco a versão velha delas.
     async fn update(&self, photo: &Photo) -> DomainResult<()>;
+
+    /// Grava **só** a receita local (máscaras e retoques) de uma foto — `None`
+    /// apaga. `PhotoNotFound` se a foto não existe.
+    async fn atualizar_locais(&self, _id: &PhotoId, _locais: Option<&str>) -> DomainResult<()> {
+        Err(crate::DomainError::InfrastructureError(
+            "este repositório não guarda a receita local".into(),
+        ))
+    }
 
     /// Remove uma foto
     async fn delete(&self, id: &PhotoId) -> DomainResult<()>;

@@ -53,6 +53,8 @@ pub struct ParaRevelar {
     pub altura: u32,
     pub ajustes: Ajustes,
     pub corte: CropSettings,
+    /// A Revelação local: sem ela o cliente veria outra foto.
+    pub locais: Arc<infrastructure::gpu_adjustments::ReceitaLocal>,
 }
 
 /// O pedido no motor: o id dele, a foto, onde ela está na sequência e o
@@ -611,6 +613,7 @@ impl Cliente {
             altura: pedido.altura,
             ajustes: pedido.ajustes,
             corte: transformacao::corte(&pedido.corte),
+            locais: pedido.locais,
         });
         self.revelando = Some((id, pedido.foto, pedido.posicao, pedido.corte));
         if self._colheita.is_none() {

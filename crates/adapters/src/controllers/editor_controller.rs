@@ -58,6 +58,16 @@ impl EditorController {
             .map_err(|e| e.to_string())
     }
 
+    /// Grava a receita local (máscaras e retoques) de uma foto do catálogo —
+    /// só ela, à parte de [`Self::save_edits`]. `None` apaga.
+    pub async fn save_locais(&self, id: &str, locais: Option<String>) -> Result<(), String> {
+        let photo_id = PhotoId::from_string(id).map_err(|e| e.to_string())?;
+        self.save_photo_edits_use_case
+            .salvar_locais(photo_id, locais)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
     /// Guarda a receita local (máscaras e retoques) de uma foto do site —
     /// `None` apaga. Fica nesta máquina mesmo depois de a revelação subir.
     pub async fn guardar_locais_do_site(
@@ -155,7 +165,6 @@ impl EditorController {
         crop_flip_h: Option<bool>,
         crop_flip_v: Option<bool>,
         receita: Option<String>,
-        locais: Option<String>,
     ) -> Result<(), String> {
         let photo_id = PhotoId::from_string(&id).map_err(|e| e.to_string())?;
 
@@ -224,7 +233,6 @@ impl EditorController {
                 crop_flip_h,
                 crop_flip_v,
                 receita,
-                locais,
             )
             .await
             .map_err(|e| e.to_string())

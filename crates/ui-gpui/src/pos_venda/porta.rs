@@ -2,6 +2,7 @@
 //! portas: o controller é `async` do tokio, o GPUI não roda futuros dele, e o
 //! `Handle` é capturado no `main` antes de `Application::run` tomar a thread.
 
+use infrastructure::gpu_adjustments::ReceitaLocal;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
@@ -425,7 +426,13 @@ pub struct PublicadorDaApi {
     /// dispositivos dariam três respostas possíveis para a mesma foto.
     exportador: Arc<ImageExporterImpl>,
     tokio: tokio::runtime::Handle,
+    /// A Revelação local de uma foto do site, pelo id de lá — o mesmo depósito
+    /// que a tela grava (`Gravador::locais_do_site`).
+    locais_de: LocaisDoSite,
 }
+
+/// De onde a porta tira a receita local de uma foto do site.
+pub type LocaisDoSite = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 impl PublicadorDaApi {
     pub fn novo(
@@ -437,7 +444,23 @@ impl PublicadorDaApi {
             controlador,
             exportador,
             tokio,
+            locais_de: Arc::new(|_| None),
         }
+    }
+
+    /// Liga a porta ao depósito da receita local (ver o campo).
+    pub fn com_locais(mut self, locais_de: LocaisDoSite) -> Self {
+        self.locais_de = locais_de;
+        self
+    }
+}
+
+/// A receita local de uma foto do site, lida — ilegível é erro, e não "sem
+/// máscara": subir sem o que o operador pintou entregaria outra foto.
+fn locais_lidos(locais_de: &LocaisDoSite, foto_no_site: &str) -> Result<ReceitaLocal, String> {
+    match locais_de(foto_no_site) {
+        None => Ok(ReceitaLocal::default()),
+        Some(json) => ReceitaLocal::de_json(&json).map_err(|e| e.to_string()),
     }
 }
 
@@ -460,6 +483,7 @@ async fn revelar_e_salvar(
     foto_no_site: &str,
     ajustes: Ajustes,
     corte: CropSettings,
+    locais: ReceitaLocal,
 ) -> Result<(), String> {
     // 🔑 **Zerou tudo: o bruto volta ao lugar dele, e nada sobe.** Pelo caminho
     // de baixo isto seria baixar o original, revelá-lo com os ajustes neutros e
@@ -467,7 +491,7 @@ async fn revelar_e_salvar(
     // lugar do arquivo que ele deveria receber. É o mesmo atalho que o editor
     // do site faz (`semRevelacao` em `editor.tsx`); o gesto é o mesmo nos dois,
     // e o resultado tem de ser também.
-    if ajustes == Ajustes::default() && corte == CropSettings::default() {
+    if ajustes == Ajustes::default() && corte == CropSettings::default() && locais.vazia() {
         return controlador.restaurar_original(sessao, foto_no_site).await;
     }
 
@@ -476,7 +500,7 @@ async fn revelar_e_salvar(
     let exportador = exportador.clone();
     let para_revelar = corte.clone();
     let jpeg = tokio::task::spawn_blocking(move || {
-        exportador.renderizar_bytes(&original, &ajustes, &para_revelar, QUALIDADE)
+        exportador.renderizar_bytes(&original, &ajustes, &para_revelar, &locais, QUALIDADE)
     })
     .await
     .map_err(|e| format!("a revelação não terminou: {e}"))?
@@ -575,17 +599,26 @@ impl Publicador for PublicadorDaApi {
     ) {
         let controlador = self.controlador.clone();
         let exportador = self.exportador.clone();
+        let locais = locais_lidos(&self.locais_de, &foto_no_site);
         self.tokio.spawn(async move {
-            let recado = match revelar_e_salvar(
-                &controlador,
-                &exportador,
-                &sessao,
-                &foto_no_site,
-                ajustes,
-                corte,
-            )
-            .await
-            {
+            let feito = match locais {
+                Ok(locais) => {
+                    revelar_e_salvar(
+                        &controlador,
+                        &exportador,
+                        &sessao,
+                        &foto_no_site,
+                        ajustes,
+                        corte,
+                        locais,
+                    )
+                    .await
+                }
+                Err(erro) => Err(format!(
+                    "a Revelação local desta foto não pôde ser lida: {erro}"
+                )),
+            };
+            let recado = match feito {
                 Ok(()) => Recado::RevelacaoSalva {
                     foto_no_site: foto_no_site.clone(),
                 },
@@ -622,11 +655,14 @@ impl Publicador for PublicadorDaApi {
     ) {
         let controlador = self.controlador.clone();
         let exportador = self.exportador.clone();
+        let locais = locais_lidos(&self.locais_de, &foto_no_site);
         self.tokio.spawn(async move {
             let revelado = async {
+                let locais = locais
+                    .map_err(|e| format!("a Revelação local desta foto não pôde ser lida: {e}"))?;
                 let original = controlador.original(&sessao, &foto_no_site).await?;
                 tokio::task::spawn_blocking(move || {
-                    exportador.renderizar_bytes(&original, &ajustes, &corte, QUALIDADE)
+                    exportador.renderizar_bytes(&original, &ajustes, &corte, &locais, QUALIDADE)
                 })
                 .await
                 .map_err(|e| format!("a revelação não terminou: {e}"))?

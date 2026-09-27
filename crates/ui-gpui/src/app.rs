@@ -395,9 +395,18 @@ const AZUL: &str = "Blue";
 /// O que a segunda tela mostra no Comparar: por metade, o id, a nota e a
 /// receita — e qual das duas é a escolhida.
 type ChaveDoPar = (
-    Vec<(String, i32, Ajustes, CropSettings)>,
+    Vec<(
+        String,
+        i32,
+        Ajustes,
+        CropSettings,
+        Arc<ReceitaLocalDoCliente>,
+    )>,
     biblioteca_core::comparar::Lado,
 );
+
+/// A Revelação local que vai à segunda tela com cada foto.
+type ReceitaLocalDoCliente = infrastructure::gpu_adjustments::ReceitaLocal;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tela {
@@ -730,7 +739,7 @@ pub struct Aplicativo {
     /// O que a segunda tela mostra agora: o id e se já foi com imagem. Evita
     /// refazer a imagem a cada notificação da mesma foto (a revelação notifica
     /// a cada milímetro de slider).
-    no_cliente: Option<(String, Ajustes, CropSettings)>,
+    no_cliente: Option<(String, Ajustes, CropSettings, Arc<ReceitaLocalDoCliente>)>,
     /// O par que a segunda tela mostra no Comparar (`⇧C`): as duas receitas e
     /// a escolhida. É o `no_cliente` das duas metades.
     par_no_cliente: Option<ChaveDoPar>,
@@ -4193,7 +4202,12 @@ impl Aplicativo {
                 persistencia::para_crop_settings(&persistencia::corte_da_foto(&foto)),
             )
         };
-        let chave = (foto.id.clone(), ajustes, corte.clone());
+        let locais = if na_revelacao {
+            self.revelacao.read(cx).locais()
+        } else {
+            self.revelacao.read(cx).locais_da(&foto)
+        };
+        let chave = (foto.id.clone(), ajustes, corte.clone(), locais.clone());
         if crate::depuracao::vigia::ligado() {
             eprintln!(
                 "[cliente] entrada: {} exp={} igual={} tela={:?} na_revelacao={na_revelacao}",
@@ -4221,6 +4235,7 @@ impl Aplicativo {
             altura,
             ajustes,
             corte,
+            locais,
         };
         // 🚨 O `update` falha quando a janela **já foi fechada** — pelo `Esc` de
         // dentro dela, que a raiz não tem como saber que aconteceu.
@@ -4253,24 +4268,32 @@ impl Aplicativo {
         let (fotos, total) = {
             let revelacao = self.revelacao.read(cx);
             let total = revelacao.acervo().len();
-            let fotos: Option<Vec<(usize, PhotoViewModel, Ajustes, CropSettings)>> =
-                [esquerda, direita]
-                    .into_iter()
-                    .map(|posicao| {
-                        let foto = revelacao.acervo().get(posicao)?.clone();
-                        let (ajustes, corte) = if posicao == revelacao.posicao() {
-                            revelacao.receita_para_o_cliente()
-                        } else {
-                            (
-                                persistencia::da_foto(&foto),
-                                persistencia::para_crop_settings(&persistencia::corte_da_foto(
-                                    &foto,
-                                )),
-                            )
-                        };
-                        Some((posicao, foto, ajustes, corte))
-                    })
-                    .collect();
+            #[allow(clippy::type_complexity)]
+            let fotos: Option<
+                Vec<(
+                    usize,
+                    PhotoViewModel,
+                    Ajustes,
+                    CropSettings,
+                    Arc<ReceitaLocalDoCliente>,
+                )>,
+            > = [esquerda, direita]
+                .into_iter()
+                .map(|posicao| {
+                    let foto = revelacao.acervo().get(posicao)?.clone();
+                    let (ajustes, corte, locais) = if posicao == revelacao.posicao() {
+                        let (a, c) = revelacao.receita_para_o_cliente();
+                        (a, c, revelacao.locais())
+                    } else {
+                        (
+                            persistencia::da_foto(&foto),
+                            persistencia::para_crop_settings(&persistencia::corte_da_foto(&foto)),
+                            revelacao.locais_da(&foto),
+                        )
+                    };
+                    Some((posicao, foto, ajustes, corte, locais))
+                })
+                .collect();
             (fotos, total)
         };
         let Some(fotos) = fotos else {
@@ -4279,8 +4302,14 @@ impl Aplicativo {
         let chave: ChaveDoPar = (
             fotos
                 .iter()
-                .map(|(_, foto, ajustes, corte)| {
-                    (foto.id.clone(), foto.rating, *ajustes, corte.clone())
+                .map(|(_, foto, ajustes, corte, locais)| {
+                    (
+                        foto.id.clone(),
+                        foto.rating,
+                        *ajustes,
+                        corte.clone(),
+                        locais.clone(),
+                    )
                 })
                 .collect(),
             ativa,
@@ -4289,7 +4318,7 @@ impl Aplicativo {
             return;
         }
         let mut pedidos = Vec::new();
-        for (posicao, foto, ajustes, corte) in fotos {
+        for (posicao, foto, ajustes, corte, locais) in fotos {
             // A cópia de trabalho ainda não veio: foi pedida, e a raiz volta
             // aqui quando ela chegar.
             let Some((pixels, largura, altura)) = self.bruto_para_o_cliente(&foto, cx) else {
@@ -4303,6 +4332,7 @@ impl Aplicativo {
                 altura,
                 ajustes,
                 corte,
+                locais,
             });
         }
         self.par_no_cliente = Some(chave);
@@ -5995,7 +6025,7 @@ impl Aplicativo {
     pub(crate) fn receita_no_cliente(&self) -> Option<(String, Ajustes)> {
         self.no_cliente
             .as_ref()
-            .map(|(id, ajustes, _)| (id.clone(), *ajustes))
+            .map(|(id, ajustes, _, _)| (id.clone(), *ajustes))
     }
 
     /// O serviço das prévias ainda tem pedido na fila? Para o teste esperar a

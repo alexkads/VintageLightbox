@@ -625,7 +625,6 @@ impl PhotoRepository for PhotoRepositoryImpl {
         let pos_venda_foto_id = photo.id_no_site().map(str::to_string);
         let nome_original = photo.nome_original().map(str::to_string);
         let receita = photo.receita().map(str::to_string);
-        let locais = photo.locais().map(str::to_string);
         let is_edited = photo.is_edited();
         let modified_at = photo.modified_at().to_rfc3339();
         let thumbnail_path = photo
@@ -710,7 +709,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
 
         let result = sqlx::query(
             "UPDATE photos
-             SET file_path = ?, rating = ?, color_label = ?, flag = ?, comprada_em = ?, pos_venda_foto_id = ?, nome_original = ?, edit_receita = ?, edit_locais = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, preview_path = ?, edit_exposure = ?, edit_contrast = ?, edit_temperature = ?, edit_tint = ?, edit_highlights = ?, edit_shadows = ?, edit_whites = ?, edit_blacks = ?, edit_clarity = ?, edit_vibrance = ?, edit_saturation = ?, edit_tone_curve_shadows = ?, edit_tone_curve_darks = ?, edit_tone_curve_lights = ?, edit_tone_curve_highlights = ?, content_hash = ?, edit_hsl_red_sat = ?, edit_hsl_orange_sat = ?, edit_hsl_yellow_sat = ?, edit_hsl_green_sat = ?, edit_hsl_aqua_sat = ?, edit_hsl_blue_sat = ?, edit_hsl_purple_sat = ?, edit_hsl_magenta_sat = ?, edit_hsl_red_hue = ?, edit_hsl_orange_hue = ?, edit_hsl_yellow_hue = ?, edit_hsl_green_hue = ?, edit_hsl_aqua_hue = ?, edit_hsl_blue_hue = ?, edit_hsl_purple_hue = ?, edit_hsl_magenta_hue = ?, edit_hsl_red_lum = ?, edit_hsl_orange_lum = ?, edit_hsl_yellow_lum = ?, edit_hsl_green_lum = ?, edit_hsl_aqua_lum = ?, edit_hsl_blue_lum = ?, edit_hsl_purple_lum = ?, edit_hsl_magenta_lum = ?, edit_lens_distortion = ?, edit_lens_vignette_amount = ?, edit_lens_vignette_midpoint = ?, edit_nr_luminance = ?, edit_nr_color = ?, edit_sharpen_amount = ?, edit_sharpen_radius = ?, edit_split_shadow_hue = ?, edit_split_shadow_sat = ?, edit_split_highlight_hue = ?, edit_split_highlight_sat = ?, edit_split_balance = ?, edit_grain_amount = ?, edit_grain_size = ?, edit_crop_x = ?, edit_crop_y = ?, edit_crop_width = ?, edit_crop_height = ?, edit_crop_rotation = ?, edit_crop_angle = ?, edit_crop_flip_h = ?, edit_crop_flip_v = ?
+             SET file_path = ?, rating = ?, color_label = ?, flag = ?, comprada_em = ?, pos_venda_foto_id = ?, nome_original = ?, edit_receita = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, preview_path = ?, edit_exposure = ?, edit_contrast = ?, edit_temperature = ?, edit_tint = ?, edit_highlights = ?, edit_shadows = ?, edit_whites = ?, edit_blacks = ?, edit_clarity = ?, edit_vibrance = ?, edit_saturation = ?, edit_tone_curve_shadows = ?, edit_tone_curve_darks = ?, edit_tone_curve_lights = ?, edit_tone_curve_highlights = ?, content_hash = ?, edit_hsl_red_sat = ?, edit_hsl_orange_sat = ?, edit_hsl_yellow_sat = ?, edit_hsl_green_sat = ?, edit_hsl_aqua_sat = ?, edit_hsl_blue_sat = ?, edit_hsl_purple_sat = ?, edit_hsl_magenta_sat = ?, edit_hsl_red_hue = ?, edit_hsl_orange_hue = ?, edit_hsl_yellow_hue = ?, edit_hsl_green_hue = ?, edit_hsl_aqua_hue = ?, edit_hsl_blue_hue = ?, edit_hsl_purple_hue = ?, edit_hsl_magenta_hue = ?, edit_hsl_red_lum = ?, edit_hsl_orange_lum = ?, edit_hsl_yellow_lum = ?, edit_hsl_green_lum = ?, edit_hsl_aqua_lum = ?, edit_hsl_blue_lum = ?, edit_hsl_purple_lum = ?, edit_hsl_magenta_lum = ?, edit_lens_distortion = ?, edit_lens_vignette_amount = ?, edit_lens_vignette_midpoint = ?, edit_nr_luminance = ?, edit_nr_color = ?, edit_sharpen_amount = ?, edit_sharpen_radius = ?, edit_split_shadow_hue = ?, edit_split_shadow_sat = ?, edit_split_highlight_hue = ?, edit_split_highlight_sat = ?, edit_split_balance = ?, edit_grain_amount = ?, edit_grain_size = ?, edit_crop_x = ?, edit_crop_y = ?, edit_crop_width = ?, edit_crop_height = ?, edit_crop_rotation = ?, edit_crop_angle = ?, edit_crop_flip_h = ?, edit_crop_flip_v = ?
              WHERE id = ?"
         )
         .bind(&file_path)
@@ -721,7 +720,6 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(&pos_venda_foto_id)
         .bind(&nome_original)
         .bind(&receita)
-        .bind(&locais)
         .bind(is_edited)
         .bind(&modified_at)
         .bind(metadata)
@@ -798,6 +796,20 @@ impl PhotoRepository for PhotoRepositoryImpl {
             return Err(DomainError::PhotoNotFound);
         }
 
+        Ok(())
+    }
+
+    async fn atualizar_locais(&self, id: &PhotoId, locais: Option<&str>) -> DomainResult<()> {
+        // Só a coluna da receita local — ver o `update` do trait.
+        let resultado = sqlx::query("UPDATE photos SET edit_locais = ? WHERE id = ?")
+            .bind(locais)
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await
+            .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
+        if resultado.rows_affected() == 0 {
+            return Err(DomainError::PhotoNotFound);
+        }
         Ok(())
     }
 

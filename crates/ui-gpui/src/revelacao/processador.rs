@@ -50,6 +50,9 @@ pub struct Pedido {
     /// depois), mas as duas vinhetas são medidas no recorte: sem o corte, a foto
     /// recortada mostrava a vinheta da foto inteira.
     pub corte: Corte,
+    /// A Revelação local: máscaras e retoques, refeitos pelo motor na
+    /// resolução desta revelação.
+    pub locais: Arc<infrastructure::gpu_adjustments::ReceitaLocal>,
 }
 
 /// O que volta.
@@ -175,6 +178,9 @@ fn laco(
 
         let comeco = std::time::Instant::now();
         motor.definir_corte(&pedido.corte);
+        // Sem suporte a máscara na GPU a revelação sai sem elas — a tela
+        // avisa (`Processador::mascaras_suportadas`), e a exportação falha.
+        let _ = motor.definir_locais(&pedido.locais);
         if let Some(imagem) = motor.revelar(
             &pedido.pixels,
             pedido.largura,

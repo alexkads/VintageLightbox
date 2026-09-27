@@ -77,7 +77,13 @@ pub struct Chave {
 }
 
 impl Chave {
-    pub fn nova(foto_id: &str, origem: (u32, u32), ajustes: &Ajustes, corte: &Corte) -> Self {
+    pub fn nova(
+        foto_id: &str,
+        origem: (u32, u32),
+        ajustes: &Ajustes,
+        corte: &Corte,
+        locais: &infrastructure::gpu_adjustments::ReceitaLocal,
+    ) -> Self {
         let mut receita: Vec<u32> = ajustes.como_vetor().iter().map(|v| v.to_bits()).collect();
         receita.extend(
             [
@@ -93,6 +99,16 @@ impl Chave {
         receita.push(corte.giro_90() as u32);
         receita.push(u32::from(corte.espelho_h()));
         receita.push(u32::from(corte.espelho_v()));
+        // 🔑 A Revelação local entra pela impressão do JSON dela: a mesma foto
+        // com outra máscara é outra revelação, e o cache não pode devolvê-la.
+        if !locais.vazia() {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            locais.em_json().hash(&mut h);
+            let impressao = h.finish();
+            receita.push(impressao as u32);
+            receita.push((impressao >> 32) as u32);
+        }
         Self {
             foto: foto_id.to_string(),
             origem,
@@ -209,14 +225,20 @@ mod testes {
     #[test]
     fn a_mesma_foto_com_receitas_diferentes_tem_chaves_diferentes() {
         let mut ajustes = Ajustes::default();
-        let neutra = Chave::nova("id-1", ORIGEM, &ajustes, &corte());
+        let neutra = Chave::nova("id-1", ORIGEM, &ajustes, &corte(), &Default::default());
         ajustes.exposure = 1.5;
-        let mexida = Chave::nova("id-1", ORIGEM, &ajustes, &corte());
+        let mexida = Chave::nova("id-1", ORIGEM, &ajustes, &corte(), &Default::default());
 
         assert_ne!(neutra, mexida);
         assert_eq!(
             neutra,
-            Chave::nova("id-1", ORIGEM, &Ajustes::default(), &corte())
+            Chave::nova(
+                "id-1",
+                ORIGEM,
+                &Ajustes::default(),
+                &corte(),
+                &Default::default()
+            )
         );
     }
 
@@ -225,24 +247,27 @@ mod testes {
     #[test]
     fn o_corte_entra_na_chave() {
         let ajustes = Ajustes::default();
-        let inteira = Chave::nova("id-1", ORIGEM, &ajustes, &corte());
+        let inteira = Chave::nova("id-1", ORIGEM, &ajustes, &corte(), &Default::default());
         let recortada = Chave::nova(
             "id-1",
             ORIGEM,
             &ajustes,
             &Corte::novo(0.1, 0.1, 0.5, 0.5, 0, 0.0, false, false),
+            &Default::default(),
         );
         let girada = Chave::nova(
             "id-1",
             ORIGEM,
             &ajustes,
             &Corte::novo(0.0, 0.0, 1.0, 1.0, 1, 0.0, false, false),
+            &Default::default(),
         );
         let espelhada = Chave::nova(
             "id-1",
             ORIGEM,
             &ajustes,
             &Corte::novo(0.0, 0.0, 1.0, 1.0, 0, 0.0, true, false),
+            &Default::default(),
         );
 
         assert_ne!(inteira, recortada);
@@ -256,8 +281,20 @@ mod testes {
     fn o_tamanho_da_origem_entra_na_chave() {
         let ajustes = Ajustes::default();
         assert_ne!(
-            Chave::nova("id-1", (2048, 1365), &ajustes, &corte()),
-            Chave::nova("id-1", (6000, 4000), &ajustes, &corte())
+            Chave::nova(
+                "id-1",
+                (2048, 1365),
+                &ajustes,
+                &corte(),
+                &Default::default()
+            ),
+            Chave::nova(
+                "id-1",
+                (6000, 4000),
+                &ajustes,
+                &corte(),
+                &Default::default()
+            )
         );
     }
 
@@ -266,15 +303,21 @@ mod testes {
     fn a_foto_faz_parte_da_chave() {
         let ajustes = Ajustes::default();
         assert_ne!(
-            Chave::nova("id-1", ORIGEM, &ajustes, &corte()),
-            Chave::nova("id-2", ORIGEM, &ajustes, &corte())
+            Chave::nova("id-1", ORIGEM, &ajustes, &corte(), &Default::default()),
+            Chave::nova("id-2", ORIGEM, &ajustes, &corte(), &Default::default())
         );
     }
 
     #[test]
     fn guarda_e_devolve_a_mesma_revelacao() {
         let mut cache = CacheDeReveladas::default();
-        let chave = Chave::nova("id-1", ORIGEM, &Ajustes::default(), &corte());
+        let chave = Chave::nova(
+            "id-1",
+            ORIGEM,
+            &Ajustes::default(),
+            &corte(),
+            &Default::default(),
+        );
 
         assert!(cache.buscar(&chave).is_none(), "nasce vazio");
         assert!(cache.guardar(chave.clone(), &imagem(64, 48)));
@@ -292,7 +335,13 @@ mod testes {
     #[test]
     fn a_revelacao_grande_demais_nao_e_guardada() {
         let mut cache = CacheDeReveladas::default();
-        let chave = Chave::nova("id-1", (6000, 4000), &Ajustes::default(), &corte());
+        let chave = Chave::nova(
+            "id-1",
+            (6000, 4000),
+            &Ajustes::default(),
+            &corte(),
+            &Default::default(),
+        );
 
         assert!(
             !cache.guardar(chave.clone(), &imagem(6000, 4000)),
@@ -307,7 +356,13 @@ mod testes {
     #[test]
     fn a_previa_de_2560_cabe() {
         let mut cache = CacheDeReveladas::default();
-        let chave = Chave::nova("id-1", (2560, 1707), &Ajustes::default(), &corte());
+        let chave = Chave::nova(
+            "id-1",
+            (2560, 1707),
+            &Ajustes::default(),
+            &corte(),
+            &Default::default(),
+        );
 
         assert!(cache.guardar(chave.clone(), &imagem(2560, 1707)));
         assert!(cache.buscar(&chave).is_some());
@@ -318,10 +373,10 @@ mod testes {
     fn esquecer_tira_tudo_o_que_e_daquela_foto() {
         let mut cache = CacheDeReveladas::default();
         let mut ajustes = Ajustes::default();
-        let uma = Chave::nova("id-1", ORIGEM, &ajustes, &corte());
+        let uma = Chave::nova("id-1", ORIGEM, &ajustes, &corte(), &Default::default());
         ajustes.exposure = 1.0;
-        let outra_receita = Chave::nova("id-1", ORIGEM, &ajustes, &corte());
-        let outra_foto = Chave::nova("id-2", ORIGEM, &ajustes, &corte());
+        let outra_receita = Chave::nova("id-1", ORIGEM, &ajustes, &corte(), &Default::default());
+        let outra_foto = Chave::nova("id-2", ORIGEM, &ajustes, &corte(), &Default::default());
 
         cache.guardar(uma.clone(), &imagem(8, 8));
         cache.guardar(outra_receita.clone(), &imagem(8, 8));
@@ -343,9 +398,27 @@ mod testes {
     fn o_mais_velho_sai_primeiro() {
         // Teto de duas imagens de 8x8.
         let mut cache = CacheDeReveladas::nova(8 * 8 * 2);
-        let a = Chave::nova("id-a", ORIGEM, &Ajustes::default(), &corte());
-        let b = Chave::nova("id-b", ORIGEM, &Ajustes::default(), &corte());
-        let c = Chave::nova("id-c", ORIGEM, &Ajustes::default(), &corte());
+        let a = Chave::nova(
+            "id-a",
+            ORIGEM,
+            &Ajustes::default(),
+            &corte(),
+            &Default::default(),
+        );
+        let b = Chave::nova(
+            "id-b",
+            ORIGEM,
+            &Ajustes::default(),
+            &corte(),
+            &Default::default(),
+        );
+        let c = Chave::nova(
+            "id-c",
+            ORIGEM,
+            &Ajustes::default(),
+            &corte(),
+            &Default::default(),
+        );
 
         cache.guardar(a.clone(), &imagem(8, 8));
         cache.guardar(b.clone(), &imagem(8, 8));

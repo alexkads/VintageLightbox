@@ -214,11 +214,15 @@ async fn main() {
         eprintln!("⚠️ [Revelação] o depósito das fotos do site não abriu: {erro}");
         Vec::new()
     });
-    let gravador: Arc<dyn Gravador> = Arc::new(GravadorDoBanco::novo(
-        editor,
-        tokio::runtime::Handle::current(),
-        guardadas,
-    ));
+    // A Revelação local das fotos do site, lida uma vez como as guardadas.
+    let locais_do_site = editor.locais_do_site().await.unwrap_or_else(|erro| {
+        eprintln!("⚠️ [Revelação local] o depósito das fotos do site não abriu: {erro}");
+        Vec::new()
+    });
+    let gravador: Arc<dyn Gravador> = Arc::new(
+        GravadorDoBanco::novo(editor, tokio::runtime::Handle::current(), guardadas)
+            .com_locais_do_site(locais_do_site),
+    );
     // 🚨 A releitura do catálogo, pelo mesmo `LibraryController` que leu a lista
     // acima. Sem ela a importação grava no banco e a grade continua com a lista
     // lida antes de a janela existir — as fotos só apareciam ao reabrir o app.
@@ -272,27 +276,35 @@ async fn main() {
     // 📡 O app falando de si com o servidor: o aviso de versão por SSE e os
     // relatos de panic e erro. Mesmo cliente, mesmo token.
     ui_gpui::telemetria::ligar(api_do_site.clone(), tokio::runtime::Handle::current());
-    let publicador: Arc<dyn Publicador> = Arc::new(PublicadorDaApi::novo(
-        Arc::new({
-            let api = api_do_site.clone();
-            adapters::controllers::PosVendaController::new(
-                api.clone(),
-                Arc::new(use_cases::pos_venda::PublicarNoPosVendaUseCase::new(
-                    repositorio_de_fotos.clone(),
-                    Arc::new(infrastructure::ImageExporterImpl::new()),
-                    // O mesmo gerador das miniaturas prepara o que sobe: ele já
-                    // abre RAW, TIFF e HEIC, e já reduz para um lado máximo.
-                    Arc::new(infrastructure::ThumbnailGeneratorImpl::new()),
-                    api,
-                )),
-            )
+    let publicador: Arc<dyn Publicador> = Arc::new(
+        PublicadorDaApi::novo(
+            Arc::new({
+                let api = api_do_site.clone();
+                adapters::controllers::PosVendaController::new(
+                    api.clone(),
+                    Arc::new(use_cases::pos_venda::PublicarNoPosVendaUseCase::new(
+                        repositorio_de_fotos.clone(),
+                        Arc::new(infrastructure::ImageExporterImpl::new()),
+                        // O mesmo gerador das miniaturas prepara o que sobe: ele já
+                        // abre RAW, TIFF e HEIC, e já reduz para um lado máximo.
+                        Arc::new(infrastructure::ThumbnailGeneratorImpl::new()),
+                        api,
+                    )),
+                )
+            }),
+            // 🔑 O mesmo exportador da exportação e da impressão: é ele que revela
+            // o original quando o editor salva na galeria, e a foto do cliente não
+            // pode depender de qual dos caminhos a produziu.
+            Arc::new(infrastructure::ImageExporterImpl::new()),
+            tokio::runtime::Handle::current(),
+        )
+        // A receita local das fotos do site sobe e revela junto: a porta a lê do
+        // mesmo depósito que a tela grava.
+        .com_locais({
+            let gravador = gravador.clone();
+            Arc::new(move |foto_no_site: &str| gravador.locais_do_site(foto_no_site))
         }),
-        // 🔑 O mesmo exportador da exportação e da impressão: é ele que revela
-        // o original quando o editor salva na galeria, e a foto do cliente não
-        // pode depender de qual dos caminhos a produziu.
-        Arc::new(infrastructure::ImageExporterImpl::new()),
-        tokio::runtime::Handle::current(),
-    ));
+    );
 
     // 📦 O acervo de arquivos de `/dashboard/backup`: lista pastas, pede a URL
     // assinada e sobe o arquivo direto no R2. Mesmo cliente, mesmo token.

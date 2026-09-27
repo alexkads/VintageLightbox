@@ -47,6 +47,7 @@ use super::presets::GuardaDePresets;
 use super::processador::{Ajustes, Pedido, Processador};
 use super::reposicao::APor;
 use super::sincronizacao::{self, Escolha, Grupo};
+use infrastructure::gpu_adjustments::ReceitaLocal;
 use infrastructure::transformacao;
 
 /// O Enquadrar: retângulo, alças, transferidor e o painel dele.
@@ -218,6 +219,13 @@ pub struct Revelacao {
     /// A Revelação nova ainda não sabe cortar; se ela gravasse `None` aqui,
     /// mexer num slider apagaria o enquadramento feito no app de egui.
     corte: Corte,
+    /// A Revelação local da foto aberta: máscaras e retoques. É parte do
+    /// [`Estado`] — o histórico e a gravação a carregam como o corte.
+    locais: Arc<ReceitaLocal>,
+    /// A receita local da foto aberta não pôde ser lida (versão mais nova do
+    /// app, ou corrompida): a tela mostra a foto sem ela e **não grava por
+    /// cima** — o texto fica intacto para quem souber lê-lo.
+    locais_ilegiveis: Option<String>,
     /// Os passos de desfazer, **por foto**: trocar de foto começa um histórico
     /// novo. Um `Cmd+Z` que atravessasse fotos aplicaria a revelação de uma na
     /// outra — que é o mesmo defeito que a cópia da seleção já impede.
@@ -583,6 +591,8 @@ impl Revelacao {
             aberta: None,
             ajustes: Ajustes::default(),
             corte: Corte::default(),
+            locais: Arc::default(),
+            locais_ilegiveis: None,
             historico: Historico::novo(Estado::default()),
             pendente: false,
             gravadas: std::collections::HashSet::new(),
@@ -755,7 +765,7 @@ impl Revelacao {
             .copied()
             .or_else(|| {
                 aberta
-                    .then_some(self.receita_ao_abrir)
+                    .then(|| self.receita_ao_abrir.clone())
                     .flatten()
                     .map(|e| (e.ajustes, e.corte))
             })
@@ -773,10 +783,15 @@ impl Revelacao {
             // Daqui em diante, o que o operador mudar é sobre a receita nova.
             self.bases.insert(id.to_string(), fora);
             if aberta {
+                // A receita local não vem de fora: cada passo guarda a sua.
                 self.historico.rebasear(|passo| {
                     let (ajustes, corte) =
                         persistencia::mesclar(base, (passo.ajustes, passo.corte), fora);
-                    Estado { ajustes, corte }
+                    Estado {
+                        ajustes,
+                        corte,
+                        locais: passo.locais,
+                    }
                 });
             }
         } else if aberta {
@@ -784,8 +799,9 @@ impl Revelacao {
             let estado = Estado {
                 ajustes: deles.0,
                 corte: deles.1,
+                locais: self.locais.clone(),
             };
-            self.receita_ao_abrir = Some(estado);
+            self.receita_ao_abrir = Some(estado.clone());
             self.historico = Historico::novo(estado);
         }
         if persistencia::mesma_receita(final_, meu) {
@@ -922,7 +938,8 @@ impl Revelacao {
             && (self.aberta_no_deposito
                 || self
                     .receita_ao_abrir
-                    .is_some_and(|receita| receita != self.estado()))
+                    .as_ref()
+                    .is_some_and(|receita| *receita != self.estado()))
     }
 
     /// Há o que salvar na galeria? Sem isso o botão se apaga.
@@ -1286,6 +1303,17 @@ impl Revelacao {
         // mostraria o arquivo cru de uma foto que já foi revelada.
         self.ajustes = persistencia::da_foto(&foto);
         self.corte = persistencia::corte_da_foto(&foto);
+        match persistencia::locais_da_foto(&foto, &*self.gravador) {
+            persistencia::LocaisDaFoto::Lida(receita) => {
+                self.locais = Arc::new(receita);
+                self.locais_ilegiveis = None;
+            }
+            persistencia::LocaisDaFoto::Ilegivel { erro, .. } => {
+                crate::telemetria::avisar!("⚠️ [Revelação local] {}: {erro}", foto.name);
+                self.locais = Arc::default();
+                self.locais_ilegiveis = Some(erro);
+            }
+        }
         // 🚨 O modo de corte fecha aqui. O retângulo que está na tela é da foto
         // que sai; mantê-lo aberto aplicaria, no clique seguinte, o enquadramento
         // de uma foto na outra — o mesmo defeito que a cópia da seleção e o
@@ -1606,6 +1634,7 @@ impl Revelacao {
         Estado {
             ajustes: self.ajustes,
             corte: self.corte,
+            locais: self.locais.clone(),
         }
     }
 
@@ -1646,6 +1675,7 @@ impl Revelacao {
         }
         self.gravador.gravar(id.clone(), self.ajustes, self.corte);
         self.gravadas.insert(id.clone());
+        self.gravar_locais_se_mudou(&id);
 
         let (ajustes, corte) = (self.ajustes, self.corte);
         if let Some(aberta) = self.aberta.as_mut() {
@@ -1655,6 +1685,65 @@ impl Revelacao {
         if let Some(foto) = acervo.iter_mut().find(|f| f.id == id) {
             persistencia::na_foto(foto, ajustes, corte);
         }
+    }
+
+    /// A receita local vai ao banco **à parte** dos ajustes, e só quando mudou
+    /// — ver `Gravador::gravar_locais`. Ilegível, nunca: não se grava por cima
+    /// do que não se leu.
+    fn gravar_locais_se_mudou(&mut self, id: &str) {
+        if self.locais_ilegiveis.is_some() {
+            return;
+        }
+        let novo = self.locais.em_json();
+        let gravado = match persistencia::id_no_site(id) {
+            Some(no_site) => self.gravador.locais_do_site(no_site),
+            None => self.aberta.as_ref().and_then(|a| a.foto.locais.clone()),
+        };
+        if novo == gravado {
+            return;
+        }
+        self.gravador.gravar_locais(id.to_string(), novo.clone());
+        if persistencia::id_no_site(id).is_none() {
+            if let Some(aberta) = self.aberta.as_mut() {
+                aberta.foto.locais = novo.clone();
+            }
+            let acervo = Arc::make_mut(&mut self.acervo);
+            if let Some(foto) = acervo.iter_mut().find(|f| f.id == id) {
+                foto.locais = novo;
+            }
+        }
+    }
+
+    /// A receita local de uma foto do acervo: a da tela, se ela está aberta;
+    /// senão, a gravada.
+    pub(super) fn locais_de(&self, foto: &PhotoViewModel) -> Arc<ReceitaLocal> {
+        if self.aberta.as_ref().is_some_and(|a| a.foto.id == foto.id) {
+            return self.locais.clone();
+        }
+        match persistencia::locais_da_foto(foto, &*self.gravador) {
+            persistencia::LocaisDaFoto::Lida(receita) => Arc::new(receita),
+            persistencia::LocaisDaFoto::Ilegivel { .. } => Arc::default(),
+        }
+    }
+
+    /// A receita local que a GPU revela agora — a da foto, mais o gesto que
+    /// estiver em curso na Revelação local.
+    pub(super) fn locais_na_tela(&self) -> Arc<ReceitaLocal> {
+        self.locais.clone()
+    }
+
+    /// A receita local gravada de uma foto do acervo — a da tela, se ela está
+    /// aberta. Para a segunda tela.
+    pub fn locais_da(&self, foto: &PhotoViewModel) -> Arc<ReceitaLocal> {
+        self.locais_de(foto)
+    }
+
+    /// A receita local da foto aberta — a segunda tela revela com ela.
+    pub fn locais(&self) -> Arc<ReceitaLocal> {
+        if self.mostrando_original() {
+            return Arc::default();
+        }
+        self.locais.clone()
     }
 
     /// Volta um passo. `Cmd+Z`.
@@ -1697,6 +1786,7 @@ impl Revelacao {
     ) {
         self.ajustes = estado.ajustes;
         self.corte = estado.corte;
+        self.locais = estado.locais;
         // O Enquadrar continua aberto, como no site: o retângulo é lido do
         // corte da foto, e o pedido do operador recomeça do que voltou.
         if let Some(edicao) = self.edicao.as_mut() {
@@ -1953,7 +2043,8 @@ impl Revelacao {
 
         let ajustes = self.ajustes_na_tela();
         let corte = transformacao::corte(&self.corte_na_tela());
-        let chave = cache::Chave::nova(&foto_id, (largura, altura), &ajustes, &corte);
+        let locais = self.locais_na_tela();
+        let chave = cache::Chave::nova(&foto_id, (largura, altura), &ajustes, &corte, &locais);
 
         // 🔑 **O que já foi revelado não é revelado de novo.** Voltar uma seta,
         // desfazer, tirar o ponteiro de cima de uma predefinição: nos três a
@@ -1982,6 +2073,7 @@ impl Revelacao {
             altura,
             ajustes,
             corte,
+            locais,
         });
         self.pedidos.insert(
             id,
@@ -2037,7 +2129,8 @@ impl Revelacao {
         };
 
         let ajustes = persistencia::da_foto(&foto);
-        if ajustes == Ajustes::default() {
+        let locais = self.locais_de(&foto);
+        if ajustes == Ajustes::default() && locais.vazia() {
             return;
         }
         let corte = transformacao::corte(&persistencia::para_crop_settings(
@@ -2071,7 +2164,7 @@ impl Revelacao {
             };
             let _ = esta.update(cx, |tela, cx| {
                 tela.enfileirar_a_antecipacao(
-                    &foto.id, largura, altura, pixels, ajustes, corte, cx,
+                    &foto.id, largura, altura, pixels, ajustes, corte, locais, cx,
                 );
             });
         })
@@ -2093,6 +2186,7 @@ impl Revelacao {
         pixels: Arc<Vec<u8>>,
         ajustes: Ajustes,
         corte: transformacao::Corte,
+        locais: Arc<ReceitaLocal>,
         cx: &mut Context<Self>,
     ) {
         if self.aguardando.is_some()
@@ -2102,7 +2196,7 @@ impl Revelacao {
         {
             return;
         }
-        let chave = cache::Chave::nova(foto_id, (largura, altura), &ajustes, &corte);
+        let chave = cache::Chave::nova(foto_id, (largura, altura), &ajustes, &corte, &locais);
         if self.reveladas.buscar(&chave).is_some() {
             return;
         }
@@ -2115,6 +2209,7 @@ impl Revelacao {
             altura,
             ajustes,
             corte,
+            locais,
         });
         self.pedidos.insert(
             id,
@@ -3901,6 +3996,7 @@ mod testes {
                     &transformacao::corte(&persistencia::para_crop_settings(
                         &persistencia::corte_da_foto(&com_receita),
                     )),
+                    &Default::default(),
                 );
                 assert!(tela.reveladas.guardar(chave, &foto_uniforme(200)));
             })
@@ -3950,6 +4046,7 @@ mod testes {
                     &transformacao::corte(&persistencia::para_crop_settings(
                         &persistencia::corte_da_foto(&com_receita),
                     )),
+                    &Default::default(),
                 );
                 tela.reveladas.guardar(chave, &foto_uniforme(200));
 
