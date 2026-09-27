@@ -121,6 +121,11 @@ impl PainelDeDesempenho {
         self.janela.is_some()
     }
 
+    /// A janela do painel, quando aberta (o roteiro a fotografa).
+    pub fn janela(&self) -> Option<AnyWindowHandle> {
+        self.janela
+    }
+
     /// O botão do rodapé: abre a janela, ou a fecha.
     pub fn alternar(&mut self, cx: &mut Context<Self>) {
         if let Some(janela) = self.janela.take() {
@@ -1312,6 +1317,12 @@ fn abrir_a_janela(entidade: Entity<PainelDeDesempenho>, cx: &mut App) {
         is_minimizable: true,
         window_background: gpui_kit::WindowBackgroundAppearance::Opaque,
         window_decorations: crate::janela::decoracoes_ao_abrir(),
+        // 🚨 **Sem roubar o foco.** Com a janela principal inativa, o macOS não
+        // considera nada dela "sob o mouse", e os sliders ignoram o arrasto
+        // até um clique a reativar — o operador abriria o painel e o gesto que
+        // queria medir não responderia (achado medindo, 27/09).
+        focus: false,
+        show: true,
         ..Default::default()
     };
     let raiz = entidade.clone();

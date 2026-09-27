@@ -84,8 +84,12 @@ impl Aplicativo {
                         _ => Duration::ZERO,
                     };
                     for evento in eventos {
+                        // 🚨 Adiado, como a pinça: o despacho chega à raiz, que
+                        // está emprestada a este `update`.
                         let seguiu = raiz.update_in(cx, |_, window, cx| {
-                            window.dispatch_event(evento, cx);
+                            window.defer(cx, move |window, cx| {
+                                window.dispatch_event(evento, cx);
+                            });
                         });
                         if seguiu.is_err() {
                             return;
@@ -488,6 +492,25 @@ impl Aplicativo {
                     "iniciar" => painel.update(cx, |p, cx| p.iniciar(cx)),
                     "parar" => painel.update(cx, |p, cx| p.parar(cx)),
                     "salvar" => painel.update(cx, |p, cx| p.salvar_pelo_roteiro(cx)),
+                    // `desempenho foto 03-painel` — fotografa a janela do painel.
+                    foto if foto.starts_with("foto ") => {
+                        let nome = foto.trim_start_matches("foto ").trim().to_string();
+                        let janela = painel.read(cx).janela();
+                        if let (Some(janela), Some(pasta)) = (janela, pasta) {
+                            let destino = pasta.join(format!("{nome}.png"));
+                            cx.defer(move |cx| {
+                                let _ =
+                                    janela.update(cx, |_, window, _| {
+                                        match depuracao::fotografar(window, &destino) {
+                                            Ok(()) => eprintln!("[foto] {}", destino.display()),
+                                            Err(e) => {
+                                                eprintln!("[foto] {}: {e}", destino.display())
+                                            }
+                                        }
+                                    });
+                            });
+                        }
+                    }
                     "relatorio" => match painel.read(cx).relatorio_em_texto() {
                         Some(texto) => eprintln!("[desempenho]\n{texto}"),
                         None => eprintln!("[desempenho] sem sessão montada ainda"),

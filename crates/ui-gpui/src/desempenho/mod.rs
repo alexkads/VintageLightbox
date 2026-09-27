@@ -223,11 +223,12 @@ pub enum Etapa {
     GpuMotorTotal,
     LatenciaDaFoto,
     EntradaAoQuadro,
+    DecodificacaoNaInterface,
 }
 
 /// As etapas que podem rodar na thread da interface e entram no quadro.
 pub const ETAPAS_DA_INTERFACE: [Etapa; 5] = [
-    Etapa::Decodificacao,
+    Etapa::DecodificacaoNaInterface,
     Etapa::PreparacaoDosAjustes,
     Etapa::RecorteNaCpu,
     Etapa::Histograma,
@@ -235,7 +236,7 @@ pub const ETAPAS_DA_INTERFACE: [Etapa; 5] = [
 ];
 
 impl Etapa {
-    pub const TODAS: [Etapa; 21] = [
+    pub const TODAS: [Etapa; 22] = [
         Etapa::IntervaloDoQuadro,
         Etapa::TempoDoQuadro,
         Etapa::MontagemDaInterface,
@@ -257,6 +258,7 @@ impl Etapa {
         Etapa::GpuMotorTotal,
         Etapa::LatenciaDaFoto,
         Etapa::EntradaAoQuadro,
+        Etapa::DecodificacaoNaInterface,
     ];
 
     pub fn nome(self) -> &'static str {
@@ -282,6 +284,7 @@ impl Etapa {
             Etapa::GpuMotorTotal => "gpu_motor_total",
             Etapa::LatenciaDaFoto => "latencia_da_foto",
             Etapa::EntradaAoQuadro => "entrada_ao_quadro",
+            Etapa::DecodificacaoNaInterface => "decodificacao_na_interface",
         }
     }
 
@@ -308,6 +311,9 @@ impl Etapa {
             Etapa::GpuMotorTotal => "GPU do motor (1ª à última passada)",
             Etapa::LatenciaDaFoto => "do pedido à foto na tela",
             Etapa::EntradaAoQuadro => "do gesto processado ao quadro seguinte",
+            Etapa::DecodificacaoNaInterface => {
+                "leitura/decodificação da foto na thread da interface"
+            }
         }
     }
 
@@ -318,6 +324,7 @@ impl Etapa {
             | Etapa::MontagemDaInterface
             | Etapa::Apresentacao => Onde::Quadro,
             Etapa::PreparacaoDosAjustes
+            | Etapa::DecodificacaoNaInterface
             | Etapa::RecorteNaCpu
             | Etapa::Histograma
             | Etapa::ConversaoParaExibicao => Onde::CpuInterface,

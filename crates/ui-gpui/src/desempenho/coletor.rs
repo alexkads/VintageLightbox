@@ -418,6 +418,7 @@ impl Coletor {
             .take()
             .filter(|&i| i <= t && self.ultima_pintura_us.is_none_or(|u| i >= u))
             .map_or(0, |i| t - i);
+        let anterior = self.ultima_pintura_us;
         self.ultima_pintura_us = Some(t);
         self.seq += 1;
         self.quadros_total += 1;
@@ -444,6 +445,32 @@ impl Coletor {
             lento: false,
             etapas,
         };
+        // 🔑 **Engasgo é quadro atrasado em relação ao gesto**, e não quadro
+        // abaixo da taxa do monitor: com a entrada chegando a 60 Hz (um mouse
+        // comum, ou o roteiro), a janela desenha a 60 Hz num monitor de 120,
+        // e isso é o ritmo do gesto. O intervalo longo é engasgo quando o
+        // quadro demorou a responder ao gesto, ou quando a thread estava presa
+        // antes de conseguir processá-lo (nenhuma batida desde o quadro
+        // anterior, e mais que o limite de espera).
+        let atrasado = match (sinal, anterior) {
+            (Some((s, batida)), Some(u)) => {
+                let resposta_ms = t.saturating_sub(s) as f32 / 1000.0;
+                let espera_ms = s.saturating_sub(u) as f32 / 1000.0;
+                // ⚠️ A batida é de 16 ms (e o timer do Windows tem ~15,6 ms de
+                // grão): só a ausência de **três** batidas prova a thread
+                // presa. Travas menores que 48 ms antes do gesto escapam desta
+                // regra — e aparecem no tempo do quadro e nas etapas.
+                let limiar_ms = self
+                    .limite_de_lento_ms()
+                    .max(3.0 * BATIDA_US as f32 / 1000.0);
+                let presa = espera_ms > limiar_ms && !batida.is_some_and(|b| b > u);
+                // Um quadro saudável espera até uma batida do monitor para
+                // começar, e mais a montagem: passar de duas é ter perdido
+                // a batida seguinte.
+                resposta_ms > 2.0 * self.periodo_ms || presa
+            }
+            _ => false,
+        };
         if conta {
             let ms = q.intervalo_ms();
             self.intervalos.anotar(ms);
@@ -451,7 +478,7 @@ impl Coletor {
             let r = self.ritmo.entry(operacao).or_default();
             r.0 += 1;
             r.1 += u64::from(intervalo_us);
-            if ms > self.limite_de_lento_ms() {
+            if ms > self.limite_de_lento_ms() && atrasado {
                 q.lento = true;
                 self.acima_do_orcamento += 1;
                 *self.acima_por_operacao.entry(operacao).or_default() += 1;
@@ -535,6 +562,13 @@ impl Coletor {
     /// Uma etapa medida. `na_interface`: rodou na thread da interface, e entra
     /// no quadro seguinte como "o que a thread fez entre dois quadros".
     pub fn etapa(&mut self, etapa: Etapa, ms: f32, na_interface: bool, t: u64) {
+        // A decodificação roda em segundo plano na antecipação e **na thread
+        // da interface** ao mostrar a foto: são duas etapas, porque só uma
+        // prende o quadro.
+        let etapa = match etapa {
+            Etapa::Decodificacao if na_interface => Etapa::DecodificacaoNaInterface,
+            outra => outra,
+        };
         let operacao = self.operacao_em(t);
         self.anotar(operacao, etapa, ms);
         if etapa.onde() == super::Onde::Gpu {
@@ -854,17 +888,17 @@ mod testes {
         c.etapa(Etapa::Histograma, 3.0, true, 5 * MS);
         c.etapa(Etapa::ConversaoParaExibicao, 22.0, true, 6 * MS);
         c.etapa(Etapa::EsperaPelaGpu, 9.0, false, 6 * MS);
-        c.quadro_pintado(30 * MS);
+        c.quadro_pintado(45 * MS);
         let q = c.quadros().back().copied().unwrap();
         let i = Etapa::ConversaoParaExibicao.indice_na_interface().unwrap();
         assert_eq!(q.etapa_ms(i), 22.0);
         assert!(q.lento);
-        let r = c.resumo(30 * MS);
+        let r = c.resumo(45 * MS);
         let (etapa, s) = r.por_operacao[0].gargalo.unwrap();
         assert_eq!(etapa, Etapa::ConversaoParaExibicao);
         assert!((s.p95_ms - 22.0).abs() < 0.1);
         // O quadro seguinte começa zerado.
-        c.quadro_pintado(40 * MS);
+        c.quadro_pintado(55 * MS);
         assert_eq!(
             c.quadros().back().unwrap().etapas,
             [0; ETAPAS_DA_INTERFACE.len()]
@@ -890,7 +924,7 @@ mod testes {
         let mut t = 0;
         let operacoes = Operacao::TODAS;
         for i in 0..400_000u64 {
-            t += if i % 97 == 0 { 40 * MS } else { 16_667 };
+            t += if i % 97 == 0 { 60 * MS } else { 16_667 };
             let op = operacoes[(i / 5_000) as usize % operacoes.len()];
             c.operacao(op, t - 1);
             c.etapa(Etapa::Histograma, 1.0, true, t - 1);
@@ -966,6 +1000,22 @@ mod testes {
         let r = c.resumo(400 * MS);
         assert_eq!(r.quadros_interacao, 0);
         assert_eq!(r.lentos_recentes.len(), 1, "31 ms de quadro");
+    }
+
+    /// Mouse a 60 Hz num monitor de 120 Hz: a janela desenha a 60 Hz, e isso
+    /// é o ritmo da entrada — cada quadro responde ao gesto em 2 ms.
+    #[test]
+    fn a_entrada_a_60_hz_num_monitor_de_120_nao_e_engasgo() {
+        let mut c = Coletor::novo(120.0);
+        let mut t = 0;
+        for _ in 0..60 {
+            t += 16_667;
+            c.operacao(Operacao::Rolagem, t - 2 * MS);
+            c.quadro_pintado(t);
+        }
+        let r = c.resumo(t);
+        assert_eq!(r.acima_do_orcamento, 0);
+        assert!((r.fps_interacao - 60.0).abs() < 1.0, "{}", r.fps_interacao);
     }
 
     #[test]

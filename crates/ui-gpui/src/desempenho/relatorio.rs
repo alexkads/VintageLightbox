@@ -364,11 +364,15 @@ pub fn montar_sessao(
             cpu: maquina.map(Maquina::cpu_em_uma_linha).unwrap_or_default(),
             gpu_nome: motor.nome.clone(),
             gpu_backend: motor.backend.into(),
-            gpu_driver: [motor.driver.as_str(), motor.driver_info.as_str()]
+            gpu_driver: match [motor.driver.as_str(), motor.driver_info.as_str()]
                 .into_iter()
                 .filter(|s| !s.is_empty())
                 .collect::<Vec<_>>()
-                .join(" "),
+                .join(" ")
+            {
+                vazio if vazio.is_empty() && motor.backend == "Metal" => "embutido no macOS".into(),
+                driver => driver,
+            },
             gpu_carimbos: motor.carimbos,
             janela_largura_px: contexto.janela_px.0,
             janela_altura_px: contexto.janela_px.1,
@@ -627,7 +631,7 @@ mod testes {
         c.operacao(Operacao::ArrastoDeSlider, 0);
         let mut t = 0;
         for i in 0..100 {
-            t += if i % 10 == 0 { 45 * MS } else { 16_667 };
+            t += if i % 10 == 0 { 60 * MS } else { 16_667 };
             c.operacao(Operacao::ArrastoDeSlider, t - 1);
             c.etapa(Etapa::ConversaoParaExibicao, 22.0, true, t - 2);
             c.etapa(Etapa::Histograma, 2.0, true, t - 2);
