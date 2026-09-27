@@ -5703,13 +5703,17 @@ impl Aplicativo {
     fn ao_apagar_fotos(
         &mut self,
         _acao: &ApagarFotos,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         // Na Revelação, o `Delete` é do retoque selecionado — nunca da foto.
         if self.tela == Tela::Revelacao {
-            self.revelacao
-                .update(cx, |tela, cx| tela.apagar_retoque_selecionado(cx));
+            // No Enquadrar, com uma guia de perspectiva selecionada, é dela.
+            self.revelacao.update(cx, |tela, cx| {
+                if !tela.apagar_guia_selecionada(window, cx) {
+                    tela.apagar_retoque_selecionado(cx);
+                }
+            });
             return;
         }
         // ⚠️ Só na Biblioteca. Na Revelação a tecla apagaria a foto que está

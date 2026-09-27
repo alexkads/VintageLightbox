@@ -394,3 +394,80 @@ async fn reduzir_nunca_amplia() {
 
     assert_eq!(pedida_maior.dimensions(), (64, 64));
 }
+
+/// 🚨 **A perspectiva guiada sai no arquivo** — a mesma que a tela mostra.
+///
+/// Ela não tem coluna: mora na receita em JSON. Sem ler a receita, a
+/// exportação (e a impressão, que passa pelo mesmo `renderizar`) entregaria a
+/// foto torta que o operador acabou de endireitar na tela.
+#[tokio::test]
+async fn a_perspectiva_guiada_sai_no_arquivo() {
+    use domain::value_objects::{perspectiva, PerspectivaGuiada};
+    let dir = tempfile::tempdir().unwrap();
+    let (foto, original) = foto_no_disco(&dir, "predio.png");
+    let campos = Campos {
+        saturation: None,
+        hsl_red_sat: None,
+        crop_x: Some(0.1),
+        crop_y: Some(0.1),
+        crop_width: Some(0.8),
+        crop_height: Some(0.8),
+    };
+    let mut foto = com_campos(foto, campos);
+    let sem_perspectiva = exportar(&foto, &dir.path().join("reta.jpg")).await;
+
+    let p = PerspectivaGuiada {
+        rotacao: [8.0, -3.0, 1.0],
+        foco: 1.5,
+        vertical: 1.0,
+        ..Default::default()
+    };
+    let mut objeto = serde_json::Map::new();
+    p.em_json(&mut objeto);
+    perspectiva::restringir_em_json(true, &mut objeto);
+    foto.definir_receita(Some(serde_json::Value::Object(objeto).to_string()));
+
+    let exportada = exportar(&foto, &dir.path().join("corrigida.jpg")).await;
+
+    let mut motor = Motor::abrir().expect("nenhum adaptador de GPU");
+    let rgba = original.to_rgba8();
+    let (largura, altura) = (rgba.width(), rgba.height());
+    let corte = transformacao::corte_da_entidade(&foto);
+    assert_eq!(corte.perspectiva(), &p, "a receita chega ao corte");
+    motor.definir_corte(&transformacao::corte(&corte));
+    let revelada = motor
+        .revelar(
+            &Arc::new(rgba.into_raw()),
+            largura,
+            altura,
+            &campos.ajustes(),
+        )
+        .expect("o motor não devolveu imagem");
+    let na_tela = transformacao::aplicar(&revelada, &corte, true);
+
+    assert_eq!(exportada.dimensions(), na_tela.dimensions());
+    let pior = exportada
+        .to_rgb8()
+        .as_raw()
+        .iter()
+        .zip(na_tela.to_rgb8().as_raw())
+        .map(|(a, b)| a.abs_diff(*b) as u32)
+        .max()
+        .unwrap();
+    assert!(pior <= 12, "o arquivo diverge da tela em {pior} níveis");
+
+    let mudou = exportada
+        .to_rgb8()
+        .as_raw()
+        .iter()
+        .zip(sem_perspectiva.to_rgb8().as_raw())
+        .filter(|(a, b)| a.abs_diff(**b) > 20)
+        .count();
+    // A foto de teste tem listras horizontais de 8 linhas e uma rampa suave:
+    // mudar mais de 20 níveis só acontece onde a correção empurra uma borda de
+    // listra — ~6% dos canais. Sem a perspectiva, zero.
+    assert!(
+        mudou > 200,
+        "a correção não mudou o arquivo ({mudou} canais)"
+    );
+}

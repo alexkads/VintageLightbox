@@ -330,15 +330,84 @@ fn dentro_da_foto_girada(px: f32, py: f32, espaco: (f32, f32), angulo: f32) -> b
     x >= -folga && y >= -folga && x <= espaco.0 + folga && y <= espaco.1 + folga
 }
 
+/// Onde há foto dentro do espaço — o que "restringir ao conteúdo" respeita.
+///
+/// 🔑 **Sem perspectiva é a conta de sempre** (a foto girada pelo ângulo), e o
+/// retângulo encolhe exatamente como antes. Com perspectiva, a foto corrigida é
+/// um quadrilátero convexo ([`revelacao_core::Corte::contorno_no_espaco`]), e
+/// um retângulo cabe nele quando os quatro cantos cabem.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Conteudo {
+    /// "Restringir" desligado: só os limites do espaço.
+    Livre,
+    Angulo(f32),
+    /// O contorno da foto em pixels do espaço, na ordem dos cantos da foto.
+    Contorno([[f32; 2]; 4]),
+}
+
+impl Conteudo {
+    pub fn de(corte: &CropSettings, espaco: (f32, f32)) -> Self {
+        if !corte.restringir() {
+            return Conteudo::Livre;
+        }
+        if !corte.perspectiva().corrige() {
+            return Conteudo::Angulo(corte.angle());
+        }
+        // As dimensões da foto de pé: o espaço desgirado. Só o aspecto conta.
+        let (l, a) = if corte.rotation_90().rem_euclid(4) % 2 == 1 {
+            (espaco.1, espaco.0)
+        } else {
+            espaco
+        };
+        let motor = infrastructure::transformacao::corte(corte);
+        let contorno = motor.contorno_no_espaco(l.round().max(1.) as u32, a.round().max(1.) as u32);
+        Conteudo::Contorno(
+            contorno.map(|[x, y]| [(x * espaco.0 as f64) as f32, (y * espaco.1 as f64) as f32]),
+        )
+    }
+
+    /// O ponto (em pixels do espaço) tem foto embaixo? Meio pixel de folga.
+    pub fn tem_foto(&self, px: f32, py: f32, espaco: (f32, f32)) -> bool {
+        match self {
+            Conteudo::Livre => true,
+            Conteudo::Angulo(angulo) => dentro_da_foto_girada(px, py, espaco, *angulo),
+            Conteudo::Contorno(q) => {
+                // O sentido do contorno muda com o espelho: o sinal da área diz
+                // qual lado é dentro.
+                let area: f32 = (0..4)
+                    .map(|i| {
+                        let (a, b) = (q[i], q[(i + 1) % 4]);
+                        a[0] * b[1] - b[0] * a[1]
+                    })
+                    .sum();
+                let sinal = area.signum();
+                (0..4).all(|i| {
+                    let (a, b) = (q[i], q[(i + 1) % 4]);
+                    let (ex, ey) = (b[0] - a[0], b[1] - a[1]);
+                    let n = ex.hypot(ey).max(1e-6);
+                    // Distância com sinal até a aresta, positiva do lado de dentro.
+                    let d = sinal * (ex * (py - a[1]) - ey * (px - a[0])) / n;
+                    d >= -0.5
+                })
+            }
+        }
+    }
+}
+
 /// O retângulo cabe inteiro na foto girada — sem canto vazio?
 pub fn cabe_na_foto_girada(r: Retangulo, espaco: (f32, f32), angulo: f32) -> bool {
+    cabe_no_conteudo(r, espaco, &Conteudo::Angulo(angulo))
+}
+
+/// O retângulo cabe no espaço e só cobre foto?
+pub fn cabe_no_conteudo(r: Retangulo, espaco: (f32, f32), conteudo: &Conteudo) -> bool {
     if r.x < -0.5 || r.y < -0.5 {
         return false;
     }
     if r.x + r.w > espaco.0 + 0.5 || r.y + r.h > espaco.1 + 0.5 {
         return false;
     }
-    if angulo == 0. {
+    if matches!(conteudo, Conteudo::Livre | Conteudo::Angulo(0.)) {
         return true;
     }
     [
@@ -348,7 +417,7 @@ pub fn cabe_na_foto_girada(r: Retangulo, espaco: (f32, f32), angulo: f32) -> boo
         (r.x + r.w, r.y + r.h),
     ]
     .iter()
-    .all(|(x, y)| dentro_da_foto_girada(*x, *y, espaco, angulo))
+    .all(|(x, y)| conteudo.tem_foto(*x, *y, espaco))
 }
 
 fn escalar_no_centro(r: Retangulo, s: f32, cx: f32, cy: f32) -> Retangulo {
@@ -365,6 +434,12 @@ fn escalar_no_centro(r: Retangulo, s: f32, cx: f32, cy: f32) -> Retangulo {
 /// girada — o "zoom do endireitar" (dono, 2026-09-05: *"o endireitar precisa
 /// dar zoom para preencher os espaços não preenchidos"*).
 pub fn encolher_para_caber(r: Retangulo, espaco: (f32, f32), angulo: f32) -> Retangulo {
+    encolher_para_caber_no(r, espaco, &Conteudo::Angulo(angulo))
+}
+
+/// O mesmo, para qualquer [`Conteudo`] — a perspectiva guiada também deixa
+/// cantos vazios, e o retângulo encolhe para fora deles do mesmo jeito.
+pub fn encolher_para_caber_no(r: Retangulo, espaco: (f32, f32), conteudo: &Conteudo) -> Retangulo {
     // Arredondar para dentro, nunca para fora: um pixel a mais é o canto vazio
     // de volta.
     let arredondar = |v: Retangulo| {
@@ -377,18 +452,18 @@ pub fn encolher_para_caber(r: Retangulo, espaco: (f32, f32), angulo: f32) -> Ret
             h: ((v.y + v.h + 1e-3).floor() - y).max(1.),
         }
     };
-    if cabe_na_foto_girada(r, espaco, angulo) {
+    if cabe_no_conteudo(r, espaco, conteudo) {
         return arredondar(r);
     }
     let (mut cx, mut cy) = (r.x + r.w / 2., r.y + r.h / 2.);
-    if !dentro_da_foto_girada(cx, cy, espaco, angulo) {
+    if !conteudo.tem_foto(cx, cy, espaco) {
         cx = espaco.0 / 2.;
         cy = espaco.1 / 2.;
     }
     let (mut cabe, mut nao_cabe) = (0f32, 1f32);
     for _ in 0..40 {
         let meio = (cabe + nao_cabe) / 2.;
-        if cabe_na_foto_girada(escalar_no_centro(r, meio, cx, cy), espaco, angulo) {
+        if cabe_no_conteudo(escalar_no_centro(r, meio, cx, cy), espaco, conteudo) {
             cabe = meio;
         } else {
             nao_cabe = meio;
@@ -410,7 +485,6 @@ pub fn endireitar(
 ) -> CropSettings {
     let limitado = angulo.clamp(-ANGULO_MAXIMO, ANGULO_MAXIMO);
     let alvo = desejado.unwrap_or_else(|| retangulo_de(corte, espaco));
-    let cabendo = encolher_para_caber(alvo, espaco, limitado);
     let com_angulo = CropSettings::new(
         corte.crop_x(),
         corte.crop_y(),
@@ -422,7 +496,37 @@ pub fn endireitar(
         corte.flip_vertical(),
     )
     .herdar(corte);
+    let cabendo = encolher_para_caber_no(alvo, espaco, &Conteudo::de(&com_angulo, espaco));
     com_retangulo(&com_angulo, cabendo, espaco)
+}
+
+/// Troca a perspectiva guiada, e traz o retângulo para dentro da foto
+/// corrigida — o mesmo "zoom" do endireitar, e o mesmo `desejado` que o faz
+/// crescer de volta quando a correção diminui.
+pub fn com_perspectiva(
+    corte: &CropSettings,
+    perspectiva: domain::value_objects::PerspectivaGuiada,
+    espaco: (f32, f32),
+    desejado: Option<Retangulo>,
+) -> CropSettings {
+    let alvo = desejado.unwrap_or_else(|| retangulo_de(corte, espaco));
+    let novo = corte.clone().with_perspectiva(perspectiva);
+    let cabendo = encolher_para_caber_no(alvo, espaco, &Conteudo::de(&novo, espaco));
+    com_retangulo(&novo, cabendo, espaco)
+}
+
+/// Liga ou desliga "restringir ao conteúdo". Ligar encolhe o retângulo para
+/// dentro da foto; desligar devolve o que o operador tinha pedido.
+pub fn com_restringir(
+    corte: &CropSettings,
+    restringir: bool,
+    espaco: (f32, f32),
+    desejado: Option<Retangulo>,
+) -> CropSettings {
+    let alvo = desejado.unwrap_or_else(|| retangulo_de(corte, espaco));
+    let novo = corte.clone().with_restringir(restringir);
+    let cabendo = encolher_para_caber_no(alvo, espaco, &Conteudo::de(&novo, espaco));
+    com_retangulo(&novo, cabendo, espaco)
 }
 
 /// O retângulo remodelado para uma proporção, **na hora**
@@ -437,6 +541,15 @@ pub fn com_proporcao_no_centro(
     espaco: (f32, f32),
     angulo: f32,
 ) -> Retangulo {
+    com_proporcao_no_centro_em(r, proporcao, espaco, &Conteudo::Angulo(angulo))
+}
+
+pub fn com_proporcao_no_centro_em(
+    r: Retangulo,
+    proporcao: f32,
+    espaco: (f32, f32),
+    conteudo: &Conteudo,
+) -> Retangulo {
     let area = (r.w * r.h).max(1.);
     let mut w = (area * proporcao).sqrt();
     let mut h = w / proporcao;
@@ -446,7 +559,37 @@ pub fn com_proporcao_no_centro(
     let (cx, cy) = (r.x + r.w / 2., r.y + r.h / 2.);
     let x = (cx - w / 2.).min(espaco.0 - w).max(0.);
     let y = (cy - h / 2.).min(espaco.1 - h).max(0.);
-    encolher_para_caber(Retangulo { x, y, w, h }, espaco, angulo)
+    encolher_para_caber_no(Retangulo { x, y, w, h }, espaco, conteudo)
+}
+
+/// O arrasto com "restringir ao conteúdo": o retângulo anda **até** a borda da
+/// foto, e para ali — o maior pedaço do movimento que ainda cabe, achado por
+/// bissecção. Se o retângulo já saía da foto antes do arrasto (restringir
+/// recém-ligado, por exemplo), o arrasto é livre: prender o operador num
+/// retângulo que ele não consegue consertar seria pior.
+pub fn arrastar_no_conteudo(
+    inicial: Retangulo,
+    alca: Option<Alca>,
+    (dx, dy): (f32, f32),
+    espaco: (f32, f32),
+    proporcao: Option<f32>,
+    conteudo: &Conteudo,
+) -> Retangulo {
+    let livre = arrastar_em_pixels(inicial, alca, dx, dy, espaco, proporcao);
+    if cabe_no_conteudo(livre, espaco, conteudo) || !cabe_no_conteudo(inicial, espaco, conteudo) {
+        return livre;
+    }
+    let (mut cabe, mut nao_cabe) = (0f32, 1f32);
+    for _ in 0..24 {
+        let meio = (cabe + nao_cabe) / 2.;
+        let r = arrastar_em_pixels(inicial, alca, dx * meio, dy * meio, espaco, proporcao);
+        if cabe_no_conteudo(r, espaco, conteudo) {
+            cabe = meio;
+        } else {
+            nao_cabe = meio;
+        }
+    }
+    arrastar_em_pixels(inicial, alca, dx * cabe, dy * cabe, espaco, proporcao)
 }
 
 /// As proporções que o painel oferece, na ordem do site. `None` é livre.

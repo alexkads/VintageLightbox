@@ -71,6 +71,8 @@ pub(super) struct Edicao {
     pub procurando: bool,
     /// O que o Auto ou a régua têm a dizer — "não achei retas", por exemplo.
     pub aviso: Option<SharedString>,
+    /// A perspectiva guiada ([`super::perspectiva`]).
+    pub guias: super::perspectiva::EdicaoDasGuias,
 }
 
 /// O traço mais curto que a régua aceita, em pontos: menos que isso é um
@@ -86,7 +88,7 @@ pub(super) struct ArrastoDoCorte {
 }
 
 /// O enquadramento na forma em que a foto o guarda.
-fn corte_de(c: &CropSettings) -> Corte {
+pub(super) fn corte_de(c: &CropSettings) -> Corte {
     Corte {
         x: Some(c.crop_x()),
         y: Some(c.crop_y()),
@@ -135,6 +137,7 @@ impl Revelacao {
         let graus = self.corte_atual().angle();
         self.angulo
             .update(cx, |estado, cx| estado.set_value(graus, window, cx));
+        self.sincronizar_sliders_da_perspectiva(window, cx);
         self.edicao = Some(Edicao::default());
         self.atualizar_exibicao();
         self.revelar_de_novo_se_a_vinheta_segue_o_corte(cx);
@@ -160,6 +163,9 @@ impl Revelacao {
     /// `Esc`: sai da ferramenta — como no site, **sem desfazer** nada. Com a
     /// régua armada ou no meio do traço, larga só a régua.
     pub fn cancelar_corte(&mut self, cx: &mut Context<Self>) {
+        if self.esc_das_guias(cx) {
+            return;
+        }
         if let Some(edicao) = self.edicao.as_mut() {
             if edicao.regua_armada || edicao.regua.is_some() {
                 edicao.regua_armada = false;
@@ -176,7 +182,7 @@ impl Revelacao {
     }
 
     /// O espaço girado da foto aberta, em pixels da cópia de trabalho.
-    fn espaco(&self) -> Option<(f32, f32)> {
+    pub(super) fn espaco(&self) -> Option<(f32, f32)> {
         self.tamanho_da_foto()
             .map(|foto| corte::espaco_de(&self.corte_atual(), foto))
     }
@@ -268,11 +274,11 @@ impl Revelacao {
             return;
         };
         let atual = self.corte_atual();
-        let remodelado = corte::com_proporcao_no_centro(
+        let remodelado = corte::com_proporcao_no_centro_em(
             corte::retangulo_de(&atual, espaco),
             p,
             espaco,
-            atual.angle(),
+            &corte::Conteudo::de(&atual, espaco),
         );
         self.gravar_o_que_estiver_pendente();
         self.trocar_corte(corte::com_retangulo(&atual, remodelado, espaco), false, cx);
@@ -426,6 +432,7 @@ impl Revelacao {
     /// Arma ou desarma a régua (o botão).
     pub fn alternar_regua(&mut self, cx: &mut Context<Self>) {
         if let Some(edicao) = self.edicao.as_mut() {
+            edicao.guias.armadas = false;
             edicao.regua_armada = !edicao.regua_armada;
             edicao.regua = None;
             edicao.aviso = None;
@@ -498,9 +505,12 @@ impl Revelacao {
 
     /// Há um gesto do Enquadrar em curso (retângulo, transferidor ou régua)?
     pub(super) fn arrastando_no_corte(&self) -> bool {
-        self.edicao
-            .as_ref()
-            .is_some_and(|e| e.arrasto.is_some() || e.transferidor.is_some() || e.regua.is_some())
+        self.edicao.as_ref().is_some_and(|e| {
+            e.arrasto.is_some()
+                || e.transferidor.is_some()
+                || e.regua.is_some()
+                || e.guias.em_gesto()
+        })
     }
 
     /// O ponteiro andou durante um gesto do Enquadrar.
@@ -510,6 +520,9 @@ impl Revelacao {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.mover_guia(ponteiro, cx) {
+            return;
+        }
         if let Some((_, ate)) = self.edicao.as_mut().and_then(|e| e.regua.as_mut()) {
             *ate = ponteiro;
             cx.notify();
@@ -540,20 +553,25 @@ impl Revelacao {
         let escala = area.2 / espaco.0;
         let dx = f32::from(ponteiro.x - arrasto.inicio.x) / escala;
         let dy = f32::from(ponteiro.y - arrasto.inicio.y) / escala;
-        let novo = corte::arrastar_em_pixels(
+        let atual = self.corte_atual();
+        // 🔑 Com "restringir ao conteúdo", o retângulo para na borda da foto —
+        // girada pelo ângulo ou corrigida pela perspectiva.
+        let novo = corte::arrastar_no_conteudo(
             arrasto.inicial,
             arrasto.alca,
-            dx,
-            dy,
+            (dx, dy),
             espaco,
             arrasto.alca.and(proporcao),
+            &corte::Conteudo::de(&atual, espaco),
         );
-        let atual = self.corte_atual();
         self.trocar_corte(corte::com_retangulo(&atual, novo, espaco), false, cx);
     }
 
     /// O botão subiu: o gesto vira um passo e vai para o banco.
     pub(super) fn soltar_no_corte(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.soltar_guia(window, cx) {
+            return;
+        }
         let Some(edicao) = self.edicao.as_mut() else {
             return;
         };
@@ -716,6 +734,9 @@ impl Revelacao {
                         .children(grade)
                         .children(alcas),
                 )
+                // As guias da perspectiva, por cima do retângulo e por baixo
+                // do transferidor (que continua respondendo).
+                .children(self.overlay_das_guias(cx))
                 .child(self.transferidor(cx))
                 // 🔑 **Com a régua armada, a foto inteira é da régua**: a
                 // camada vai por cima do retângulo, e arrastar o meio traça em
@@ -1078,6 +1099,7 @@ impl Revelacao {
                             ),
                     ),
             )
+            .child(self.secao_da_perspectiva(cx))
             .child({
                 let inteiro = corte::e_inteiro(&atual);
                 estilo::desligado(
@@ -1136,6 +1158,30 @@ impl Revelacao {
                 self.edicao.as_ref().and_then(|e| e.aviso.clone()),
             ),
             "proporcao" => self.travar_proporcao(numero, cx),
+            "guias" => self.alternar_guias(cx),
+            "guia" => {
+                let v: Vec<f32> = gesto
+                    .split_whitespace()
+                    .skip(1)
+                    .filter_map(|n| n.parse().ok())
+                    .collect();
+                if let [x1, y1, x2, y2] = v[..] {
+                    self.guia_pelo_roteiro((x1, y1), (x2, y2), window, cx);
+                }
+            }
+            "persp_vertical" => {
+                self.ajuste_do_slider(true, numero.unwrap_or(0.), cx);
+                self.gravar_o_que_estiver_pendente();
+                self.sincronizar_sliders_da_perspectiva(window, cx);
+            }
+            "persp_horizontal" => {
+                self.ajuste_do_slider(false, numero.unwrap_or(0.), cx);
+                self.gravar_o_que_estiver_pendente();
+                self.sincronizar_sliders_da_perspectiva(window, cx);
+            }
+            "restringir" => self.alternar_restringir(window, cx),
+            "redefinir_perspectiva" => self.redefinir_perspectiva(window, cx),
+            "estado_perspectiva" => eprintln!("[perspectiva] {}", self.descrever_perspectiva()),
             "girar" => self.girar(cx),
             "zoom" => self.z_apertado(cx),
             "ajuda" => self.alternar_ajuda(cx),

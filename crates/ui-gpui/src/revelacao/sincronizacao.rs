@@ -152,7 +152,7 @@ impl Grupo {
             Grupo::Calibracao | Grupo::Painel(Painel::Calibracao) => Some("os primários da câmera"),
             Grupo::Painel(Painel::Tonalizacao) => Some("a cor das sombras e a das altas luzes"),
             Grupo::Painel(Painel::Efeitos) => Some("grão"),
-            Grupo::Enquadramento => Some("giro, espelho, endireitar e recorte"),
+            Grupo::Enquadramento => Some("giro, espelho, endireitar, perspectiva e recorte"),
             Grupo::Painel(Painel::Basico) | Grupo::Painel(Painel::CurvaDeTons) => None,
         }
     }
