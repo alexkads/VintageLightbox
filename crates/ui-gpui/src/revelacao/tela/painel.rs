@@ -132,6 +132,13 @@ impl EstadoDoPainel {
         }
     }
 
+    /// Abre, se estiver fechado — sem regravar o que já está aberto.
+    pub(super) fn abrir(&mut self, chave: &str) {
+        if !self.aberto(chave, false) {
+            self.definir(chave, true);
+        }
+    }
+
     fn alternar(&mut self, chave: &str, padrao: bool) {
         let valor = !self.aberto(chave, padrao);
         self.definir(chave, valor);
@@ -350,7 +357,6 @@ impl Revelacao {
         let aviso = self.aviso_de_comprada(cx);
         let mut corpo: Vec<AnyElement> = Vec::new();
         if !enquadrando {
-            corpo.push(self.painel_local(cx));
             corpo.push(self.cabecalho_dos_ajustes(cx));
             corpo.push(self.abas_de_espaco(cx));
             let paineis: &[Painel] = if self.estado_do_painel.no_rgb() {
@@ -358,8 +364,13 @@ impl Revelacao {
             } else {
                 &Painel::SRGB
             };
-            for painel in paineis {
+            // A Revelação local vem logo abaixo do primeiro painel (o Básico;
+            // no RGB, a Exposição), como no Lightroom — recolhida por padrão.
+            for (i, painel) in paineis.iter().enumerate() {
                 corpo.push(self.painel_sanfonado(*painel, cx));
+                if i == 0 {
+                    corpo.push(self.painel_local(cx));
+                }
             }
         }
         let rodape = self.rodape(cx);

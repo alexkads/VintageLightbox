@@ -190,6 +190,8 @@ const FEATHER_INICIAL: f32 = 0.5;
 const FEATHER_DO_LACO: f32 = 0.04;
 /// Até onde o clique ainda pega uma alça, em pontos.
 const ALCANCE_DA_ALCA: f32 = 8.0;
+/// A chave de lembrança da sanfona da Revelação local (`revelacao:<título>`).
+const CHAVE_DO_PAINEL_LOCAL: &str = "revelacao:Revelação local";
 
 impl Local {
     /// Cria os sliders e liga cada um à tela.
@@ -460,6 +462,9 @@ impl Revelacao {
             self.local.ferramenta = None;
         } else {
             self.local.ferramenta = Some(ferramenta);
+            // Pelo atalho, com a sanfona recolhida, os controles da
+            // ferramenta ficariam escondidos: escolher abre o painel.
+            self.estado_do_painel.abrir(CHAVE_DO_PAINEL_LOCAL);
         }
         self.local.poligono.clear();
         self.local.gesto = None;
@@ -1538,14 +1543,14 @@ impl Revelacao {
         // 🔑 **Sanfona, como os outros painéis da coluna**: a mesma chave de
         // lembrança (`revelacao:<título>`) e o ponto âmbar quando a foto tem
         // máscara ou retoque — fechado, o painel não pode esconder que há.
-        let chave = "revelacao:Revelação local".to_string();
-        let aberto = self.estado_do_painel.aberto(&chave, true);
+        let chave = CHAVE_DO_PAINEL_LOCAL.to_string();
+        let aberto = self.estado_do_painel.aberto(&chave, false);
         let cabecalho = self.cabecalho_da_sanfona(
             "Revelação local",
             aberto,
             !self.locais.vazia(),
             chave,
-            true,
+            false,
             cx,
         );
         let caixa = div()
