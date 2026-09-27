@@ -137,7 +137,7 @@ pub enum Passo {
     /// `keyCode` do macOS), num `NSEvent` entregue à fila do próprio app. Passa
     /// pela tradução do layout (ABNT2, Brazilian Pro…) e pelo foco reais, que
     /// o `tecla` pula. Não precisa da permissão de acessibilidade.
-    TeclaReal { codigo: u16, shift: bool },
+    TeclaReal { codigo: u16, modificadores: usize },
     /// `mouse_real apertar 0.5 0.5` · `arrastar` · `soltar` · `mover` ·
     /// `duplo` — o botão esquerdo de verdade (`NSEvent`), numa fração do palco
     /// da foto aberta na Revelação.
@@ -146,7 +146,17 @@ pub enum Passo {
     /// no macOS o GPUI só considera sob o mouse a janela **ativa**
     /// (`is_window_hovered` = `is_window_active`), e o sistema não deixa um
     /// processo em segundo plano se ativar. Apertar, arrastar e soltar chegam.
-    MouseReal { tipo: String, x: f32, y: f32 },
+    ///
+    /// `mouse_janela clicar 120 340` — o mesmo, em pontos da janela (o painel,
+    /// a barra). Os dois aceitam modificadores no fim: `alt`, `shift`, `cmd`,
+    /// `ctrl` (e `tecla_real` também: `tecla_real 6 cmd shift`).
+    MouseReal {
+        tipo: String,
+        x: f32,
+        y: f32,
+        modificadores: usize,
+        na_janela: bool,
+    },
     /// `rajada 200 25 tecla right` — o passo do fim da linha, N vezes, com o
     /// intervalo em milissegundos, **sem** o respiro de 120 ms entre passos: é
     /// a carga do teste de estresse (dono, 2026-09-22: *"a aplicação parou de
@@ -236,12 +246,14 @@ pub fn ler_roteiro(texto: &str) -> Result<Vec<Passo>, String> {
             "importar" => Passo::Importar(argumentos.join(" ")),
             "tecla_real" => Passo::TeclaReal {
                 codigo: numero(0)? as u16,
-                shift: argumentos.get(1) == Some(&"shift"),
+                modificadores: modificadores(argumentos.get(1..).unwrap_or_default()),
             },
-            "mouse_real" => Passo::MouseReal {
+            "mouse_real" | "mouse_janela" => Passo::MouseReal {
                 tipo: argumentos.first().copied().unwrap_or_default().to_string(),
                 x: numero(1)?,
                 y: numero(2)?,
+                modificadores: modificadores(argumentos.get(3..).unwrap_or_default()),
+                na_janela: comando == "mouse_janela",
             },
             "tecla" => Passo::Tecla(argumentos.first().copied().unwrap_or_default().to_string()),
             "rajada" => {
@@ -265,6 +277,20 @@ pub fn ler_roteiro(texto: &str) -> Result<Vec<Passo>, String> {
         passos.push(passo);
     }
     Ok(passos)
+}
+
+/// Os `NSEventModifierFlags` pelos nomes do roteiro.
+fn modificadores(nomes: &[&str]) -> usize {
+    nomes
+        .iter()
+        .map(|n| match *n {
+            "shift" => 1 << 17,
+            "ctrl" => 1 << 18,
+            "alt" => 1 << 19,
+            "cmd" => 1 << 20,
+            _ => 0,
+        })
+        .fold(0, |a, b| a | b)
 }
 
 fn nome_valido(nome: &str) -> bool {
@@ -307,26 +333,38 @@ fn vista_da(window: &gpui_kit::Window) -> Result<*mut std::ffi::c_void, String> 
 
 /// Põe na fila do app uma tecla física (desce e sobe) — ver [`Passo::TeclaReal`].
 #[cfg(target_os = "macos")]
-pub fn tecla_nativa(window: &gpui_kit::Window, codigo: u16, shift: bool) -> Result<(), String> {
+pub fn tecla_nativa(window: &gpui_kit::Window, codigo: u16, mods: usize) -> Result<(), String> {
     let vista = vista_da(window)?;
-    unsafe { mac::tecla(vista, codigo, shift) }
+    unsafe { mac::tecla(vista, codigo, mods) }
 }
 
 /// Põe na fila do app um evento do botão esquerdo em `(x, y)`, em pontos da
 /// janela com a origem no alto — ver [`Passo::MouseReal`].
 #[cfg(target_os = "macos")]
-pub fn mouse_nativo(window: &gpui_kit::Window, tipo: &str, x: f32, y: f32) -> Result<(), String> {
+pub fn mouse_nativo(
+    window: &gpui_kit::Window,
+    tipo: &str,
+    x: f32,
+    y: f32,
+    mods: usize,
+) -> Result<(), String> {
     let vista = vista_da(window)?;
-    unsafe { mac::mouse(vista, tipo, x as f64, y as f64) }
+    unsafe { mac::mouse(vista, tipo, x as f64, y as f64, mods) }
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn tecla_nativa(_w: &gpui_kit::Window, _c: u16, _s: bool) -> Result<(), String> {
+pub fn tecla_nativa(_w: &gpui_kit::Window, _c: u16, _m: usize) -> Result<(), String> {
     Err("só no macOS".into())
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn mouse_nativo(_w: &gpui_kit::Window, _t: &str, _x: f32, _y: f32) -> Result<(), String> {
+pub fn mouse_nativo(
+    _w: &gpui_kit::Window,
+    _t: &str,
+    _x: f32,
+    _y: f32,
+    _m: usize,
+) -> Result<(), String> {
     Err("só no macOS".into())
 }
 
@@ -401,7 +439,6 @@ mod mac {
 
     const TECLA_DESCE: usize = 10;
     const TECLA_SOBE: usize = 11;
-    const SHIFT: usize = 1 << 17;
 
     unsafe fn classe(nome: &std::ffi::CStr) -> Result<&'static AnyClass, String> {
         AnyClass::get(nome).ok_or_else(|| format!("classe {nome:?} ausente"))
@@ -422,11 +459,10 @@ mod mac {
         Ok(())
     }
 
-    pub unsafe fn tecla(vista: *mut c_void, codigo: u16, shift: bool) -> Result<(), String> {
+    pub unsafe fn tecla(vista: *mut c_void, codigo: u16, flags: usize) -> Result<(), String> {
         let vista = vista as *mut AnyObject;
         let janela: *mut AnyObject = msg_send![vista, window];
         let numero: isize = msg_send![janela, windowNumber];
-        let flags = if shift { SHIFT } else { 0 };
         // Os caracteres do evento não importam ao GPUI: ele traduz o keyCode
         // pelo layout ativo (`chars_for_modified_key`). Vão vazios de propósito.
         let vazio = texto("")?;
@@ -449,7 +485,13 @@ mod mac {
         Ok(())
     }
 
-    pub unsafe fn mouse(vista: *mut c_void, tipo: &str, x: f64, y: f64) -> Result<(), String> {
+    pub unsafe fn mouse(
+        vista: *mut c_void,
+        tipo: &str,
+        x: f64,
+        y: f64,
+        flags: usize,
+    ) -> Result<(), String> {
         let vista = vista as *mut AnyObject;
         let janela: *mut AnyObject = msg_send![vista, window];
         let numero: isize = msg_send![janela, windowNumber];
@@ -491,7 +533,7 @@ mod mac {
                 classe(c"NSEvent")?,
                 mouseEventWithType: *t,
                 location: ponto,
-                modifierFlags: 0usize,
+                modifierFlags: flags,
                 timestamp: 0.0f64,
                 windowNumber: numero,
                 context: std::ptr::null_mut::<AnyObject>(),

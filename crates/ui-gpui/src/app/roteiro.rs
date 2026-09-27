@@ -387,17 +387,32 @@ impl Aplicativo {
                 }),
                 Err(erro) => eprintln!("[roteiro] tecla inválida '{tecla}': {erro}"),
             },
-            Passo::TeclaReal { codigo, shift } => {
-                match depuracao::tecla_nativa(window, *codigo, *shift) {
-                    Ok(()) => eprintln!("[roteiro] tecla real {codigo} shift={shift} na fila"),
-                    Err(erro) => eprintln!("[roteiro] tecla real {codigo}: {erro}"),
+            Passo::TeclaReal {
+                codigo,
+                modificadores,
+            } => match depuracao::tecla_nativa(window, *codigo, *modificadores) {
+                Ok(()) => {
+                    eprintln!("[roteiro] tecla real {codigo} mods={modificadores:#x} na fila")
                 }
-            }
-            Passo::MouseReal { tipo, x, y } => {
-                let palco = self.revelacao.read(cx).palco_da_foto();
-                let px_ = f32::from(palco.origin.x) + f32::from(palco.size.width) * x;
-                let py_ = f32::from(palco.origin.y) + f32::from(palco.size.height) * y;
-                match depuracao::mouse_nativo(window, tipo, px_, py_) {
+                Err(erro) => eprintln!("[roteiro] tecla real {codigo}: {erro}"),
+            },
+            Passo::MouseReal {
+                tipo,
+                x,
+                y,
+                modificadores,
+                na_janela,
+            } => {
+                let (px_, py_) = if *na_janela {
+                    (*x, *y)
+                } else {
+                    let palco = self.revelacao.read(cx).palco_da_foto();
+                    (
+                        f32::from(palco.origin.x) + f32::from(palco.size.width) * x,
+                        f32::from(palco.origin.y) + f32::from(palco.size.height) * y,
+                    )
+                };
+                match depuracao::mouse_nativo(window, tipo, px_, py_, *modificadores) {
                     Ok(()) => eprintln!("[roteiro] mouse {tipo} em ({px_:.0}, {py_:.0})"),
                     Err(erro) => eprintln!("[roteiro] mouse {tipo}: {erro}"),
                 }

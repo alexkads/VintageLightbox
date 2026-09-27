@@ -152,6 +152,9 @@ pub(super) struct Navegacao {
     pub ultimo_ponteiro: Option<Ponto>,
     /// A folha de atalhos (`?`).
     pub ajuda: bool,
+    /// O zoom de antes do último clique — o duplo clique que entra na edição
+    /// devolve o que o primeiro clique do par mudou.
+    pub zoom_antes_do_clique: Option<EstadoDoZoom>,
 }
 
 impl Default for Navegacao {
@@ -168,6 +171,7 @@ impl Default for Navegacao {
             espaco: None,
             ultimo_ponteiro: None,
             ajuda: false,
+            zoom_antes_do_clique: None,
         }
     }
 }
@@ -333,10 +337,29 @@ impl Revelacao {
         cx.notify();
     }
 
-    fn ao_apertar(&mut self, evento: &MouseDownEvent, _cx: &mut Context<Self>) {
+    pub(super) fn ao_apertar(
+        &mut self,
+        evento: &MouseDownEvent,
+        window: &mut gpui_kit::Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some((_, vista)) = self.vista() else {
             return;
         };
+        // 🔑 **Duplo clique num retoque ou numa máscara entra na edição**, e o
+        // zoom volta a ser o de antes do primeiro clique do par.
+        if evento.click_count >= 2 && self.navegacao.espaco.is_none() {
+            let p = self.ponto_na_area(evento.position);
+            let antes = self.navegacao.zoom_antes_do_clique;
+            if self.editar_o_que_esta_em(p, window, cx) {
+                if let Some(antes) = antes {
+                    self.navegacao.zoom = antes;
+                }
+                self.navegacao.gesto = None;
+                cx.notify();
+                return;
+            }
+        }
         let m = evento.modifiers;
         self.navegacao.gesto = Some(Gesto {
             tipo: if m.platform || m.control {
@@ -418,6 +441,7 @@ impl Revelacao {
             return;
         }
         if gesto.tipo == TipoDeGesto::Clique && !gesto.moveu {
+            self.navegacao.zoom_antes_do_clique = Some(self.navegacao.zoom);
             self.alternar_zoom(Some(p), cx);
         }
     }
@@ -478,7 +502,7 @@ impl Revelacao {
             .on_scroll_wheel(cx.listener(|tela, e: &ScrollWheelEvent, _w, cx| tela.ao_rolar(e, cx)))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|tela, e: &MouseDownEvent, _w, cx| tela.ao_apertar(e, cx)),
+                cx.listener(|tela, e: &MouseDownEvent, window, cx| tela.ao_apertar(e, window, cx)),
             )
             .on_mouse_move(cx.listener(|tela, e: &MouseMoveEvent, _w, cx| tela.ao_mover(e, cx)))
             .on_mouse_up(

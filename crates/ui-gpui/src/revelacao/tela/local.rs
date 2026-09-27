@@ -116,6 +116,19 @@ impl Ferramenta {
     }
 }
 
+/// O que se arrasta num componente de máscara que já existe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AlcaDeMascara {
+    /// As pontas do gradiente linear: onde começa (100%) e onde acaba (0%).
+    Inicio,
+    Fim,
+    /// O centro do radial, ou o meio do linear e do laço: move o todo.
+    Mover,
+    /// A borda do radial nos dois eixos.
+    RaioX,
+    RaioY,
+}
+
 /// O que se arrasta num retoque que já existe.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Parte {
@@ -136,6 +149,16 @@ enum Gesto {
     Componente { nova: bool, componente: Componente },
     /// Um retoque sendo desenhado.
     Retoque(Retoque),
+    /// Um componente de máscara que já existe, pela alça (linear, radial,
+    /// laço) — ao vivo na GPU, um passo ao soltar.
+    Mascara {
+        camada: usize,
+        componente: usize,
+        alca: AlcaDeMascara,
+        de: [f32; 2],
+        original: Componente,
+        valor: Componente,
+    },
     /// Um retoque existente sendo mudado.
     Editando {
         indice: usize,
@@ -168,8 +191,6 @@ pub(in crate::revelacao) struct Local {
     pub selecionado: Option<usize>,
     /// Onde o ponteiro está, em pontos da área.
     cursor: Option<Ponto>,
-    /// O próximo número de "Máscara N".
-    proximo_nome: usize,
     /// Os valores da ferramenta (os sliders escrevem aqui).
     pub raio: f32,
     pub feather: f32,
@@ -256,7 +277,6 @@ impl Local {
             origem: None,
             selecionado: None,
             cursor: None,
-            proximo_nome: 1,
             raio: RAIO_INICIAL,
             feather: FEATHER_INICIAL,
             opacidade: 1.0,
@@ -312,6 +332,99 @@ fn ambar() -> Hsla {
     gpui_kit::rgb(0xe0a24a).into()
 }
 
+/// O pedaço do segmento `a`–`b` (0–1 da foto) que fica dentro da foto
+/// (Liang–Barsky). `None` se passa todo por fora.
+fn cortar_na_foto(a: [f32; 2], b: [f32; 2]) -> Option<([f32; 2], [f32; 2])> {
+    let d = [b[0] - a[0], b[1] - a[1]];
+    let (mut t0, mut t1) = (0.0f32, 1.0f32);
+    for (p, q) in [
+        (-d[0], a[0]),
+        (d[0], 1.0 - a[0]),
+        (-d[1], a[1]),
+        (d[1], 1.0 - a[1]),
+    ] {
+        if p.abs() < 1e-9 {
+            if q < 0.0 {
+                return None;
+            }
+            continue;
+        }
+        let t = q / p;
+        if p < 0.0 {
+            t0 = t0.max(t);
+        } else {
+            t1 = t1.min(t);
+        }
+    }
+    (t0 <= t1).then(|| {
+        (
+            [a[0] + d[0] * t0, a[1] + d[1] * t0],
+            [a[0] + d[0] * t1, a[1] + d[1] * t1],
+        )
+    })
+}
+
+/// "Máscara N" com o menor N livre na foto — o contador corrido dava
+/// "Máscara 2" à primeira máscara depois de um ⌘Z, e seguia contando de uma
+/// foto para a outra.
+fn nome_livre(receita: &ReceitaLocal) -> String {
+    (1..)
+        .map(|n| format!("Máscara {n}"))
+        .find(|nome| receita.camadas.iter().all(|c| &c.nome != nome))
+        .unwrap_or_default()
+}
+
+/// 🧪 A receita numa linha, para o roteiro: camadas e retoques com o que
+/// importa conferir.
+fn resumo_da_receita(r: &ReceitaLocal) -> String {
+    let camadas = r.camadas.iter().map(|c| {
+        let formas: Vec<String> = c
+            .componentes
+            .iter()
+            .map(|k| match (&k.forma, k.modo) {
+                (Forma::Pincel(_), Modo::Somar) => "pincel+".to_string(),
+                (Forma::Pincel(_), Modo::Subtrair) => "pincel-".to_string(),
+                (Forma::Linear(g), _) => format!(
+                    "linear ({:.3},{:.3})→({:.3},{:.3})",
+                    g.inicio[0], g.inicio[1], g.fim[0], g.fim[1]
+                ),
+                (Forma::Radial(g), _) => format!(
+                    "radial c=({:.3},{:.3}) r=({:.3},{:.3})",
+                    g.centro[0], g.centro[1], g.raio_x, g.raio_y
+                ),
+                (Forma::Laco(l), _) => format!("laco {}", l.pontos.len()),
+            })
+            .collect();
+        format!(
+            "[{} ev={:+.2} vis={} inv={} {:?}]",
+            c.nome, c.ajustes.exposicao_ev, c.visivel, c.invertida, formas
+        )
+    });
+    let retoques = r.retoques.iter().map(|t| match t {
+        Retoque::Clone(c) | Retoque::Heal(c) => format!(
+            "[{} r={:.4} origem=({:.3},{:.3}) destino=({:.3},{:.3}) op={:.2}]",
+            if matches!(t, Retoque::Clone(_)) {
+                "clone"
+            } else {
+                "heal"
+            },
+            c.raio,
+            c.origem[0],
+            c.origem[1],
+            c.destino_inicial[0],
+            c.destino_inicial[1],
+            c.opacidade
+        ),
+        Retoque::Preencher(p) => format!(
+            "[preencher r={:.4} pontos={} laco={}]",
+            p.raio,
+            p.caminho.len(),
+            p.laco.len()
+        ),
+    });
+    camadas.chain(retoques).collect::<Vec<_>>().join(" ")
+}
+
 fn sombra() -> Hsla {
     gpui_kit::rgba(0x0000008c).into()
 }
@@ -353,6 +466,20 @@ impl Revelacao {
             Gesto::Editando { indice, valor, .. } => {
                 if let Some(r) = receita.retoques.get_mut(*indice) {
                     *r = valor.clone();
+                }
+            }
+            Gesto::Mascara {
+                camada,
+                componente,
+                valor,
+                ..
+            } => {
+                if let Some(k) = receita
+                    .camadas
+                    .get_mut(*camada)
+                    .and_then(|c| c.componentes.get_mut(*componente))
+                {
+                    *k = valor.clone();
                 }
             }
         }
@@ -512,7 +639,7 @@ impl Revelacao {
             "ferramenta={:?} raio={:.4} feather={:.2} selecionado={:?} mascara_sel={:?} \
              camadas={} componentes={} retoques={} foco_no_palco={} marcacoes={} gesto={} \
              origem={:?} bruta={} revelada={} aguardando={:?} gpu={:?} cursor={:?} \
-             pontos_do_ultimo={}",
+             pontos_do_ultimo={} desfaz={} refaz={}\n        receita: {}",
             self.local.ferramenta,
             self.local.raio,
             self.local.feather,
@@ -546,6 +673,9 @@ impl Revelacao {
                     Forma::Laco(l) => l.pontos.len(),
                     _ => 0,
                 }),
+            self.historico.pode_desfazer(),
+            self.historico.pode_refazer(),
+            resumo_da_receita(&self.locais),
         )
     }
 
@@ -842,6 +972,176 @@ impl Revelacao {
         }
     }
 
+    /// Um componente da máscara como está na tela — o do gesto, se é ele que
+    /// se arrasta.
+    fn componente_na_tela(&self, camada: usize, k: usize) -> Option<Componente> {
+        if let Some(Gesto::Mascara {
+            camada: c,
+            componente,
+            valor,
+            ..
+        }) = &self.local.gesto
+        {
+            if (*c, *componente) == (camada, k) {
+                return Some(valor.clone());
+            }
+        }
+        self.locais.camadas.get(camada)?.componentes.get(k).cloned()
+    }
+
+    /// Os pontos (0–1) das alças de um componente, com o que cada uma faz.
+    /// O pincel não tem alça: ele se refaz pintando.
+    fn alcas_do_componente(&self, k: &Componente) -> Vec<([f32; 2], AlcaDeMascara)> {
+        let (w, h) = self.tamanho_da_copia().unwrap_or((1.0, 1.0));
+        let lado = self.lado_da_foto();
+        match &k.forma {
+            Forma::Linear(g) => vec![
+                (g.inicio, AlcaDeMascara::Inicio),
+                (g.fim, AlcaDeMascara::Fim),
+                (
+                    [
+                        (g.inicio[0] + g.fim[0]) / 2.0,
+                        (g.inicio[1] + g.fim[1]) / 2.0,
+                    ],
+                    AlcaDeMascara::Mover,
+                ),
+            ],
+            Forma::Radial(g) => {
+                let (s, c) = g.angulo.to_radians().sin_cos();
+                let rx = g.raio_x * lado;
+                let ry = g.raio_y * lado;
+                vec![
+                    (g.centro, AlcaDeMascara::Mover),
+                    (
+                        [g.centro[0] + rx * c / w, g.centro[1] + rx * s / h],
+                        AlcaDeMascara::RaioX,
+                    ),
+                    (
+                        [g.centro[0] - ry * s / w, g.centro[1] + ry * c / h],
+                        AlcaDeMascara::RaioY,
+                    ),
+                ]
+            }
+            Forma::Laco(l) if !l.pontos.is_empty() => {
+                let n = l.pontos.len() as f32;
+                let (sx, sy) = l
+                    .pontos
+                    .iter()
+                    .fold((0.0, 0.0), |(x, y), p| (x + p[0], y + p[1]));
+                vec![([sx / n, sy / n], AlcaDeMascara::Mover)]
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// A alça da máscara selecionada sob o ponteiro.
+    fn acertar_alca_da_mascara(&self, p: Ponto) -> Option<(usize, usize, AlcaDeMascara)> {
+        let camada = self.local.mascara_sel?;
+        let n = self.locais.camadas.get(camada)?.componentes.len();
+        (0..n).rev().find_map(|k| {
+            let comp = self.componente_na_tela(camada, k)?;
+            self.alcas_do_componente(&comp)
+                .into_iter()
+                .find(|(q, _)| {
+                    self.ponto_da_foto(*q)
+                        .is_some_and(|a| (a.x - p.x).hypot(a.y - p.y) <= ALCANCE_DA_ALCA)
+                })
+                .map(|(_, alca)| (camada, k, alca))
+        })
+    }
+
+    /// A máscara (visível) que tem um componente sob o ponteiro.
+    fn mascara_em(&self, p: Ponto, q: [f32; 2]) -> Option<(usize, Ferramenta)> {
+        let (w, h) = self.tamanho_da_copia()?;
+        let lado = self.lado_da_foto();
+        // Pixels da cópia → pontos da tela.
+        let por_pixel = self.raio_na_tela(1.0 / lado);
+        for (i, camada) in self.locais.camadas.iter().enumerate().rev() {
+            if !camada.visivel {
+                continue;
+            }
+            for k in camada.componentes.iter().rev() {
+                let acerta = match &k.forma {
+                    Forma::Pincel(t) => {
+                        let c: Vec<[f32; 2]> = t.pontos.iter().map(|a| [a[0], a[1]]).collect();
+                        self.distancia_ao_caminho(q, &c) <= t.raio * lado
+                    }
+                    Forma::Linear(g) => {
+                        self.distancia_ao_caminho(q, &[g.inicio, g.fim]) * por_pixel
+                            <= ALCANCE_DA_ALCA * 1.5
+                    }
+                    Forma::Radial(g) => {
+                        let (s, c) = g.angulo.to_radians().sin_cos();
+                        let dx = (q[0] - g.centro[0]) * w;
+                        let dy = (q[1] - g.centro[1]) * h;
+                        let u = (dx * c + dy * s) / (g.raio_x * lado).max(1e-6);
+                        let v = (-dx * s + dy * c) / (g.raio_y * lado).max(1e-6);
+                        u * u + v * v <= 1.0
+                    }
+                    Forma::Laco(l) => {
+                        let poligono: Vec<[f32; 2]> =
+                            l.pontos.iter().map(|a| [a[0] * w, a[1] * h]).collect();
+                        locais::distancia_ao_laco(&poligono, [q[0] * w, q[1] * h]) > 0.0
+                    }
+                };
+                if acerta {
+                    let f = match &k.forma {
+                        Forma::Pincel(_) => Ferramenta::Pincel,
+                        Forma::Linear(_) => Ferramenta::Linear,
+                        Forma::Radial(_) => Ferramenta::Radial,
+                        Forma::Laco(_) => Ferramenta::Laco,
+                    };
+                    let _ = p;
+                    return Some((i, f));
+                }
+            }
+        }
+        None
+    }
+
+    /// 🔑 **Duplo clique na foto, sem ferramenta: entra na edição do que está
+    /// ali** — o retoque, com a ferramenta dele e as alças; ou a máscara, com
+    /// a ferramenta do componente e as alças dela (pedido do dono). Devolve se
+    /// achou alguma coisa.
+    pub(super) fn editar_o_que_esta_em(
+        &mut self,
+        p: Ponto,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.revelacao_travada() {
+            return false;
+        }
+        let Some(q) = self.foto_do_ponto(p) else {
+            return false;
+        };
+        self.local.selecionado = None;
+        if let Some((k, _)) = self.acertar(p, q) {
+            let f = match &self.locais.retoques[k] {
+                Retoque::Clone(_) => Ferramenta::Carimbo,
+                Retoque::Heal(_) => Ferramenta::BandAid,
+                Retoque::Preencher(_) => Ferramenta::Preencher,
+            };
+            self.local.ferramenta = Some(f);
+            self.local.selecionado = Some(k);
+            self.local.mascara_sel = None;
+            self.local.criando = false;
+            self.estado_do_painel.abrir(CHAVE_DO_PAINEL_LOCAL);
+            self.sincronizar_sliders_com_o_selecionado(window, cx);
+            cx.notify();
+            return true;
+        }
+        if let Some((i, f)) = self.mascara_em(p, q) {
+            self.local.ferramenta = Some(f);
+            self.local.mascara_sel = Some(i);
+            self.local.criando = false;
+            self.estado_do_painel.abrir(CHAVE_DO_PAINEL_LOCAL);
+            cx.notify();
+            return true;
+        }
+        false
+    }
+
     /// A origem automática do band-aid: do lado com mais espaço, a 3 raios.
     fn origem_automatica(&self, q: [f32; 2]) -> [f32; 2] {
         let (w, h) = self.tamanho_da_copia().unwrap_or((1.0, 1.0));
@@ -895,6 +1195,24 @@ impl Revelacao {
             }
             cx.notify();
             return;
+        }
+
+        // As alças da máscara selecionada vêm antes de um componente novo.
+        if ferramenta.de_mascara() && !alt {
+            if let Some((camada, k, alca)) = self.acertar_alca_da_mascara(p) {
+                if let Some(original) = self.componente_na_tela(camada, k) {
+                    self.local.gesto = Some(Gesto::Mascara {
+                        camada,
+                        componente: k,
+                        alca,
+                        de: q,
+                        valor: original.clone(),
+                        original,
+                    });
+                    cx.notify();
+                    return;
+                }
+            }
         }
 
         if matches!(ferramenta, Ferramenta::Carimbo | Ferramenta::BandAid) && alt {
@@ -1138,6 +1456,43 @@ impl Revelacao {
                     (_, r) => r,
                 };
             }
+            Gesto::Mascara {
+                alca,
+                de,
+                original,
+                valor,
+                ..
+            } => {
+                let (dx, dy) = (q[0] - de[0], q[1] - de[1]);
+                let mut novo = original.clone();
+                match (&mut novo.forma, *alca) {
+                    (Forma::Linear(g), AlcaDeMascara::Inicio) => g.inicio = q,
+                    (Forma::Linear(g), AlcaDeMascara::Fim) => g.fim = q,
+                    (Forma::Linear(g), _) => {
+                        g.inicio = [g.inicio[0] + dx, g.inicio[1] + dy];
+                        g.fim = [g.fim[0] + dx, g.fim[1] + dy];
+                    }
+                    (Forma::Radial(g), AlcaDeMascara::RaioX | AlcaDeMascara::RaioY) => {
+                        // A distância ao centro, em fração do maior lado.
+                        let r = ((q[0] - g.centro[0]) * w).hypot((q[1] - g.centro[1]) * h) / lado;
+                        if *alca == AlcaDeMascara::RaioX {
+                            g.raio_x = r.max(0.003);
+                        } else {
+                            g.raio_y = r.max(0.003);
+                        }
+                    }
+                    (Forma::Radial(g), _) => {
+                        g.centro = [g.centro[0] + dx, g.centro[1] + dy];
+                    }
+                    (Forma::Laco(l), _) => {
+                        for p in &mut l.pontos {
+                            *p = [p[0] + dx, p[1] + dy];
+                        }
+                    }
+                    (Forma::Pincel(_), _) => {}
+                }
+                *valor = novo;
+            }
         }
         if revelar {
             self.pedir_revelacao(cx);
@@ -1146,12 +1501,61 @@ impl Revelacao {
     }
 
     /// Fim do gesto: vira **um** passo do histórico.
+    /// Larga a seleção que aponta para fora da receita — depois de um ⌘Z ou
+    /// ⌘⇧Z, a camada ou o retoque escolhido pode não existir mais (achado no
+    /// app real, 2026-09-27: o traço seguinte se perdia).
+    pub(super) fn conferir_a_selecao_local(&mut self) {
+        if self
+            .local
+            .mascara_sel
+            .is_some_and(|i| i >= self.locais.camadas.len())
+        {
+            self.local.mascara_sel = None;
+        }
+        if self
+            .local
+            .selecionado
+            .is_some_and(|i| i >= self.locais.retoques.len())
+        {
+            self.local.selecionado = None;
+        }
+        if matches!(&self.local.gesto, Some(Gesto::Editando { indice, .. }) if *indice >= self.locais.retoques.len())
+        {
+            self.local.gesto = None;
+        }
+        if matches!(&self.local.gesto, Some(Gesto::Mascara { camada, .. }) if *camada >= self.locais.camadas.len())
+        {
+            self.local.gesto = None;
+        }
+    }
+
     pub(super) fn local_soltar(&mut self, cx: &mut Context<Self>) {
         let Some(gesto) = self.local.gesto.take() else {
             return;
         };
         let mut receita = (*self.locais).clone();
         match gesto {
+            Gesto::Mascara {
+                camada,
+                componente,
+                original,
+                valor,
+                ..
+            } => {
+                // Clique na alça sem arrastar não vira passo.
+                if valor == original {
+                    self.pedir_revelacao(cx);
+                    cx.notify();
+                    return;
+                }
+                if let Some(k) = receita
+                    .camadas
+                    .get_mut(camada)
+                    .and_then(|c| c.componentes.get_mut(componente))
+                {
+                    *k = valor;
+                }
+            }
             Gesto::Componente { nova, componente } => {
                 if let Forma::Laco(l) = &componente.forma {
                     if l.pontos.len() < 3 {
@@ -1159,9 +1563,14 @@ impl Revelacao {
                         return;
                     }
                 }
-                if nova {
-                    let nome = format!("Máscara {}", self.local.proximo_nome);
-                    self.local.proximo_nome += 1;
+                // 🚨 **A camada escolhida pode ter sumido** (um ⌘Z que a
+                // desfez): o traço vira máscara nova em vez de se perder.
+                let existe = self
+                    .local
+                    .mascara_sel
+                    .is_some_and(|i| i < receita.camadas.len());
+                if nova || !existe {
+                    let nome = nome_livre(&receita);
                     receita.camadas.push(Camada {
                         nome,
                         componentes: vec![componente],
@@ -1243,8 +1652,7 @@ impl Revelacao {
                     receita.camadas[i].componentes.push(componente)
                 }
                 _ => {
-                    let nome = format!("Máscara {}", self.local.proximo_nome);
-                    self.local.proximo_nome += 1;
+                    let nome = nome_livre(&receita);
                     receita.camadas.push(Camada {
                         nome,
                         componentes: vec![componente],
@@ -1489,6 +1897,109 @@ impl Revelacao {
                         cor: ambar(),
                         tracejado: true,
                     });
+                }
+            }
+        }
+
+        // A máscara selecionada: o contorno de cada componente e as alças,
+        // com uma ferramenta de máscara na mão (o `H` esconde; arrastando,
+        // o que se arrasta continua).
+        let arrastando_mascara = matches!(self.local.gesto, Some(Gesto::Mascara { .. }));
+        if let (Some(camada), true) = (
+            self.local.mascara_sel,
+            (self.local.marcacoes || arrastando_mascara)
+                && self.local.ferramenta.is_some_and(Ferramenta::de_mascara),
+        ) {
+            let n = self
+                .locais
+                .camadas
+                .get(camada)
+                .map_or(0, |c| c.componentes.len());
+            for k in 0..n {
+                let Some(comp) = self.componente_na_tela(camada, k) else {
+                    continue;
+                };
+                // O linear são três retas perpendiculares à direção, como no
+                // Lightroom: onde vale 100%, o meio e onde chega a 0%. A reta
+                // na direção não dizia onde a transição acontece.
+                if let Forma::Linear(g) = &comp.forma {
+                    let (w, h) = self.tamanho_da_copia().unwrap_or((1.0, 1.0));
+                    let d = [(g.fim[0] - g.inicio[0]) * w, (g.fim[1] - g.inicio[1]) * h];
+                    let n = d[0].hypot(d[1]).max(1e-6);
+                    // A perpendicular, do tamanho de duas diagonais da foto.
+                    let alcance = 2.0 * w.hypot(h);
+                    let perp = [-d[1] / n * alcance / w, d[0] / n * alcance / h];
+                    let meio = [
+                        (g.inicio[0] + g.fim[0]) / 2.0,
+                        (g.inicio[1] + g.fim[1]) / 2.0,
+                    ];
+                    for (c, tracejada) in [(g.inicio, false), (meio, true), (g.fim, false)] {
+                        let Some((a, b)) = cortar_na_foto(
+                            [c[0] - perp[0], c[1] - perp[1]],
+                            [c[0] + perp[0], c[1] + perp[1]],
+                        ) else {
+                            continue;
+                        };
+                        let pontos: Vec<Ponto> = [a, b]
+                            .iter()
+                            .filter_map(|q| self.ponto_da_foto(*q))
+                            .collect();
+                        if pontos.len() == 2 {
+                            marcas.push(Marca::Caminho {
+                                pontos,
+                                fechado: false,
+                                cor: branco(),
+                                tracejado: tracejada,
+                                largura: 1.0,
+                            });
+                        }
+                    }
+                }
+                let contorno: Vec<[f32; 2]> = match &comp.forma {
+                    Forma::Linear(_) => Vec::new(),
+                    Forma::Radial(g) => {
+                        let (w, h) = self.tamanho_da_copia().unwrap_or((1.0, 1.0));
+                        let lado = self.lado_da_foto();
+                        let (s, c) = g.angulo.to_radians().sin_cos();
+                        (0..=48)
+                            .map(|i| {
+                                let t = i as f32 / 48.0 * std::f32::consts::TAU;
+                                let (u, v) = (g.raio_x * lado * t.cos(), g.raio_y * lado * t.sin());
+                                [
+                                    g.centro[0] + (u * c - v * s) / w,
+                                    g.centro[1] + (u * s + v * c) / h,
+                                ]
+                            })
+                            .collect()
+                    }
+                    Forma::Laco(l) => l.pontos.clone(),
+                    Forma::Pincel(_) => Vec::new(),
+                };
+                let pontos: Vec<Ponto> = contorno
+                    .iter()
+                    .filter_map(|q| self.ponto_da_foto(*q))
+                    .collect();
+                if pontos.len() >= 2 {
+                    marcas.push(Marca::Caminho {
+                        pontos,
+                        fechado: matches!(comp.forma, Forma::Laco(_)),
+                        cor: branco(),
+                        tracejado: true,
+                        largura: 1.0,
+                    });
+                }
+                let ativa = |alca: AlcaDeMascara| {
+                    matches!(&self.local.gesto,
+                        Some(Gesto::Mascara { camada: c, componente, alca: a, .. })
+                            if (*c, *componente, *a) == (camada, k, alca))
+                };
+                for (q, alca) in self.alcas_do_componente(&comp) {
+                    if let Some(centro) = self.ponto_da_foto(q) {
+                        marcas.push(Marca::Alca {
+                            centro,
+                            ativa: ativa(alca),
+                        });
+                    }
                 }
             }
         }
@@ -2391,5 +2902,38 @@ fn pintar(marca: &Marca, em: &dyn Fn(Ponto) -> Point<Pixels>, window: &mut Windo
                 gpui_kit::BorderStyle::Solid,
             ));
         }
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    #[test]
+    fn a_reta_do_linear_e_cortada_na_borda_da_foto() {
+        let (a, b) = super::cortar_na_foto([-1.0, 0.5], [2.0, 0.5]).expect("atravessa");
+        assert!(a[0].abs() < 1e-6 && (b[0] - 1.0).abs() < 1e-6);
+        assert!(
+            super::cortar_na_foto([-1.0, 2.0], [2.0, 2.0]).is_none(),
+            "passa por fora"
+        );
+    }
+
+    #[test]
+    fn o_nome_da_mascara_nova_e_o_menor_livre() {
+        use super::{Camada, ReceitaLocal};
+        let com = |nomes: &[&str]| ReceitaLocal {
+            camadas: nomes
+                .iter()
+                .map(|n| Camada {
+                    nome: n.to_string(),
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        };
+        assert_eq!(super::nome_livre(&com(&[])), "Máscara 1");
+        assert_eq!(
+            super::nome_livre(&com(&["Máscara 1", "Máscara 3"])),
+            "Máscara 2"
+        );
     }
 }

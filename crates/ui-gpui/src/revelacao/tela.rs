@@ -1807,6 +1807,7 @@ impl Revelacao {
         self.ajustes = estado.ajustes;
         self.corte = estado.corte;
         self.locais = estado.locais;
+        self.conferir_a_selecao_local();
         // O Enquadrar continua aberto, como no site: o retângulo é lido do
         // corte da foto, e o pedido do operador recomeça do que voltou.
         if let Some(edicao) = self.edicao.as_mut() {
@@ -6852,6 +6853,94 @@ mod testes {
             })
             .expect("a janela deve estar aberta");
         (janela, dir)
+    }
+
+    /// 🔑 **A máscara que já existe se edita pela alça, e se volta a ela com
+    /// duplo clique** (pedido do dono; conferido no app real em 2026-09-27):
+    /// a ponta do linear arrastada é um passo só, e o duplo clique sem
+    /// ferramenta põe a do componente na mão, com a máscara escolhida.
+    #[gpui_kit::test]
+    fn a_alca_edita_o_linear_e_o_duplo_clique_volta_a_ele(cx: &mut TestAppContext) {
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let (janela, _dir) = aberta_no_palco(cx, gravador, foto("retrato.jpg"));
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.usar_ferramenta(Ferramenta::Linear, cx);
+                let em = |tela: &Revelacao, q: [f32; 2]| {
+                    na_janela(tela, tela.ponto_da_foto(q).expect("a foto na tela"))
+                };
+                let (a, b) = (em(tela, [0.5, 0.2]), em(tela, [0.5, 0.5]));
+                tela.local_apertar(&ponteiro_desce(a.x, a.y, false), window, cx);
+                tela.local_mover(&ponteiro_anda(b.x, b.y), cx);
+                tela.local_soltar(cx);
+                assert_eq!(tela.locais.camadas[0].componentes.len(), 1);
+
+                // A ponta de baixo, arrastada até 0,8: mesmo componente.
+                let c = em(tela, [0.5, 0.8]);
+                tela.local_apertar(&ponteiro_desce(b.x, b.y, false), window, cx);
+                tela.local_mover(&ponteiro_anda(c.x, c.y), cx);
+                tela.local_soltar(cx);
+                let camada = &tela.locais.camadas[0];
+                assert_eq!(camada.componentes.len(), 1, "a alça não cria componente");
+                let Forma::Linear(g) = &camada.componentes[0].forma else {
+                    panic!("um linear");
+                };
+                assert!(
+                    (g.fim[1] - 0.8).abs() < 0.01,
+                    "a ponta foi para 0,8: {:?}",
+                    g.fim
+                );
+                tela.desfazer(window, cx);
+                let Forma::Linear(g) = &tela.locais.camadas[0].componentes[0].forma else {
+                    panic!("um linear");
+                };
+                assert!((g.fim[1] - 0.5).abs() < 0.01, "um ⌘Z devolve a ponta");
+
+                // Sem ferramenta, duplo clique sobre a reta.
+                tela.usar_ferramenta(Ferramenta::Linear, cx);
+                assert!(!tela.com_ferramenta_local());
+                tela.local.mascara_sel = None;
+                let m = em(tela, [0.5, 0.35]);
+                let mut duplo = ponteiro_desce(m.x, m.y, false);
+                duplo.click_count = 2;
+                tela.ao_apertar(&duplo, window, cx);
+                assert_eq!(tela.local.ferramenta, Some(Ferramenta::Linear));
+                assert_eq!(tela.local.mascara_sel, Some(0), "a máscara escolhida");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **O traço depois de um ⌘Z não se perde** (achado no app real,
+    /// 2026-09-27): a máscara escolhida era a que o ⌘Z desfez, e o traço
+    /// seguinte ia para uma camada que não existia mais.
+    #[gpui_kit::test]
+    fn o_traco_depois_do_desfazer_vira_mascara_nova(cx: &mut TestAppContext) {
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let (janela, _dir) = aberta_no_palco(cx, gravador, foto("retrato.jpg"));
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.usar_ferramenta(Ferramenta::Pincel, cx);
+                let c = na_janela(
+                    tela,
+                    tela.ponto_da_foto([0.5, 0.5]).expect("a foto na tela"),
+                );
+                let pincelar =
+                    |tela: &mut Revelacao, window: &mut Window, cx: &mut Context<Revelacao>| {
+                        tela.local_apertar(&ponteiro_desce(c.x, c.y, false), window, cx);
+                        tela.local_mover(&ponteiro_anda(c.x + 40., c.y), cx);
+                        tela.local_soltar(cx);
+                    };
+                pincelar(tela, window, cx);
+                tela.desfazer(window, cx);
+                assert!(tela.locais.camadas.is_empty());
+                pincelar(tela, window, cx);
+                assert_eq!(tela.locais.camadas.len(), 1, "o traço virou máscara");
+                assert_eq!(
+                    tela.locais.camadas[0].nome, "Máscara 1",
+                    "com o primeiro nome livre"
+                );
+            })
+            .expect("a janela deve estar aberta");
     }
 
     /// 🚨 **Uma pincelada é um passo só**, e o gesto em curso é provisório:
