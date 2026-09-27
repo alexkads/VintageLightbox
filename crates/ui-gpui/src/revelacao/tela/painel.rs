@@ -109,7 +109,7 @@ fn arquivo_da_lembranca() -> Option<PathBuf> {
 
 impl EstadoDoPainel {
     /// Aberto ou fechado — o gravado, ou o padrão.
-    fn aberto(&self, chave: &str, padrao: bool) -> bool {
+    pub(super) fn aberto(&self, chave: &str, padrao: bool) -> bool {
         self.abertos.get(chave).copied().unwrap_or(padrao)
     }
 
@@ -584,7 +584,7 @@ impl Revelacao {
     }
 
     /// Um cabeçalho de sanfona — o `PainelColapsavel` do site.
-    fn cabecalho_da_sanfona(
+    pub(super) fn cabecalho_da_sanfona(
         &self,
         titulo: &'static str,
         aberto: bool,

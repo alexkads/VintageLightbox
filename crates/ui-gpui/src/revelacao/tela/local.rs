@@ -1535,19 +1535,38 @@ impl Revelacao {
                 .on_click(cx.listener(|tela, _e, _w, cx| tela.alternar_marcacoes(cx))),
         );
 
-        let titulo = div().flex().items_center().justify_between().child(
-            div()
-                .text_xs()
-                .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                .text_color(tema.muted_foreground)
-                .child("REVELAÇÃO LOCAL"),
+        // 🔑 **Sanfona, como os outros painéis da coluna**: a mesma chave de
+        // lembrança (`revelacao:<título>`) e o ponto âmbar quando a foto tem
+        // máscara ou retoque — fechado, o painel não pode esconder que há.
+        let chave = "revelacao:Revelação local".to_string();
+        let aberto = self.estado_do_painel.aberto(&chave, true);
+        let cabecalho = self.cabecalho_da_sanfona(
+            "Revelação local",
+            aberto,
+            !self.locais.vazia(),
+            chave,
+            true,
+            cx,
         );
+        let caixa = div()
+            .flex()
+            .flex_col()
+            .flex_none()
+            .rounded(px(6.))
+            .border_1()
+            .border_color(tema.border)
+            .child(cabecalho);
+        if !aberto {
+            return caixa.into_any_element();
+        }
 
         let mut secao = div()
             .flex()
             .flex_col()
             .gap(px(10.))
-            .child(titulo)
+            .p(px(12.))
+            .border_t_1()
+            .border_color(tema.border)
             .child(barra);
         if let Some(erro) = &self.locais_ilegiveis {
             secao = secao.child(
@@ -1564,7 +1583,7 @@ impl Revelacao {
         }
         secao = secao.child(self.lista_de_mascaras(cx));
         secao = secao.child(self.lista_de_retoques(cx));
-        secao.into_any_element()
+        caixa.child(secao).into_any_element()
     }
 
     fn dica_da_ferramenta(&self, f: Ferramenta) -> String {
