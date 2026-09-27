@@ -75,6 +75,16 @@ pub fn ler(texto: &str) -> Option<Novidades> {
     valido.then_some(novidades)
 }
 
+/// As novidades **desta** versão, gravadas no binário na compilação.
+///
+/// 🔑 **É o arquivo do próprio commit**, e não o do `main`: o rodapé mostra o
+/// que o operador tem nas mãos agora, e o teste
+/// `o_novidades_json_anda_com_a_versao_do_cargo` garante que ele fala da
+/// `CARGO_PKG_VERSION`.
+pub fn desta_versao() -> Option<Novidades> {
+    ler(include_str!("../../../../docs/novidades.json"))
+}
+
 fn versao_em_numeros(versao: &str) -> Option<Vec<u64>> {
     let limpa = versao.trim().trim_start_matches('v');
     let numeros: Option<Vec<u64>> = limpa
@@ -314,8 +324,7 @@ mod testes {
     /// ou não serem avisados, ou serem avisados do que não existe.
     #[test]
     fn o_novidades_json_anda_com_a_versao_do_cargo() {
-        let arquivo = include_str!("../../../../docs/novidades.json");
-        let n = ler(arquivo).expect("docs/novidades.json legível, com versão e título");
+        let n = desta_versao().expect("docs/novidades.json legível, com versão e título");
         assert_eq!(
             n.versao,
             env!("CARGO_PKG_VERSION"),

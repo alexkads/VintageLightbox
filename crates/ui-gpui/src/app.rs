@@ -20,6 +20,7 @@ mod guias;
 mod painel;
 pub mod resgate;
 mod resolucao_cheia;
+pub mod rodape;
 mod roteiro;
 /// O que a raiz conta à bandeja (`crate::segundo_plano`).
 mod segundo_plano;
@@ -1564,7 +1565,11 @@ impl Aplicativo {
                 }
             }
             PedidoDeAtualizacao::VerNovidades => self.atualizacao.novidades_abertas = true,
-            PedidoDeAtualizacao::FecharNovidades => self.atualizacao.novidades_abertas = false,
+            PedidoDeAtualizacao::VerEstaVersao => self.atualizacao.desta_versao_aberta = true,
+            PedidoDeAtualizacao::FecharNovidades => {
+                self.atualizacao.novidades_abertas = false;
+                self.atualizacao.desta_versao_aberta = false;
+            }
             PedidoDeAtualizacao::CopiarComando => {
                 cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(
                     crate::atualizacao::novidades::COMANDO_DO_INSTALADOR.into(),
@@ -1655,21 +1660,6 @@ impl Aplicativo {
             este.atender(*pedido, cx);
         });
         faixa::desenhar_novidades(
-            &self.atualizacao,
-            cx,
-            Arc::new(move |pedido, window, app| agir(&pedido, window, app)),
-        )
-    }
-
-    /// A faixa do rodapé, quando há o que dizer.
-    fn faixa_de_atualizacao(&self, cx: &mut Context<Self>) -> Option<gpui_kit::AnyElement> {
-        // O `cx.listener` é o que dá à faixa acesso a `&mut Aplicativo` de
-        // dentro de um clique; ela própria não conhece a raiz — só diz qual
-        // [`PedidoDeAtualizacao`] o operador fez.
-        let agir = cx.listener(|este, pedido: &PedidoDeAtualizacao, _window, cx| {
-            este.atender(*pedido, cx);
-        });
-        faixa::desenhar(
             &self.atualizacao,
             cx,
             Arc::new(move |pedido, window, app| agir(&pedido, window, app)),
@@ -6056,6 +6046,7 @@ impl Render for Aplicativo {
             }))
             .map(|raiz| self.ouvir_atalhos_das_guias(raiz, cx))
             .flex()
+            .flex_col()
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
@@ -6068,40 +6059,49 @@ impl Render for Aplicativo {
             // uma sensação de falta de acabamento"*). Até aqui ela cobria a
             // janela inteira, como o `fixed inset-0` do site, e a moldura do
             // app sumia e voltava a cada entrada e saída.
-            .child(self.menu_lateral(cx))
             .child(
                 div()
                     .flex()
-                    .flex_col()
                     .flex_1()
-                    .min_w(px(0.))
-                    .h_full()
-                    .children(faixa_das_guias)
-                    .when(self.tela.tem_cabecalho(), |coluna| {
-                        coluna.child(self.cabecalho(window, cx))
-                    })
+                    .min_h(px(0.))
+                    .child(self.menu_lateral(cx))
                     .child(
-                        // `min_h(0)` no contêiner da tela: sem ele, o conteúdo
-                        // rolável de dentro empurra o pai e a rolagem nunca
-                        // acontece.
-                        div().flex().flex_1().min_h(px(0.)).child(match self.tela {
-                            Tela::Biblioteca => self.biblioteca.clone().into_any_element(),
-                            Tela::Revelacao => self.revelacao.clone().into_any_element(),
-                            Tela::Impressao => self.impressao.clone().into_any_element(),
-                            Tela::Sessoes => self.sessoes.clone().into_any_element(),
-                            // 🚨 **A sessão é uma tela só**, com tudo dentro:
-                            // cabeçalho, envio, barra, grade, painel e a tira. É
-                            // a rota `[id]` do site.
-                            Tela::Sessao => self.detalhe.clone().into_any_element(),
-                            Tela::Caixa => self.caixa.clone().into_any_element(),
-                            Tela::Retencao => self.retencao.clone().into_any_element(),
-                            Tela::Backup => self.backup.clone().into_any_element(),
-                            Tela::NovaSessao => self.nova_sessao.clone().into_any_element(),
-                            Tela::Chatbot => self.chatbot.clone().into_any_element(),
-                            Tela::Agenda => self.agenda.clone().into_any_element(),
-                        }),
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .h_full()
+                            .children(faixa_das_guias)
+                            .when(self.tela.tem_cabecalho(), |coluna| {
+                                coluna.child(self.cabecalho(window, cx))
+                            })
+                            .child(
+                                // `min_h(0)` no contêiner da tela: sem ele, o conteúdo
+                                // rolável de dentro empurra o pai e a rolagem nunca
+                                // acontece.
+                                div().flex().flex_1().min_h(px(0.)).child(match self.tela {
+                                    Tela::Biblioteca => self.biblioteca.clone().into_any_element(),
+                                    Tela::Revelacao => self.revelacao.clone().into_any_element(),
+                                    Tela::Impressao => self.impressao.clone().into_any_element(),
+                                    Tela::Sessoes => self.sessoes.clone().into_any_element(),
+                                    // 🚨 **A sessão é uma tela só**, com tudo dentro:
+                                    // cabeçalho, envio, barra, grade, painel e a tira. É
+                                    // a rota `[id]` do site.
+                                    Tela::Sessao => self.detalhe.clone().into_any_element(),
+                                    Tela::Caixa => self.caixa.clone().into_any_element(),
+                                    Tela::Retencao => self.retencao.clone().into_any_element(),
+                                    Tela::Backup => self.backup.clone().into_any_element(),
+                                    Tela::NovaSessao => self.nova_sessao.clone().into_any_element(),
+                                    Tela::Chatbot => self.chatbot.clone().into_any_element(),
+                                    Tela::Agenda => self.agenda.clone().into_any_element(),
+                                }),
+                            ),
                     ),
             )
+            // 📣 O rodapé: a versão, a faixa de atualização e o servidor, em
+            // toda tela (`rodape.rs`).
+            .child(self.rodape(cx))
             .when(com_caixa, |raiz| raiz.child(self.caixa_flutuante.clone()))
             .children(self.canto_dos_envios(window, cx))
             .children(modal_de_importacao)
@@ -6115,13 +6115,6 @@ impl Render for Aplicativo {
             .children(modal_de_configuracoes)
             .when(self.menu_da_conta, |raiz| {
                 raiz.child(self.menu_da_conta(cx))
-            })
-            // 🔑 **Depois dos modais, e por cima deles.** A faixa é a última
-            // coisa desenhada de propósito: ela ocupa uma linha do rodapé e
-            // precisa continuar legível com o modal de importação aberto — que
-            // é justamente quando um download longo termina.
-            .when_some(self.faixa_de_atualizacao(cx), |raiz, faixa| {
-                raiz.child(faixa)
             })
             // As novidades da versão: por cima de tudo, só quando pedidas.
             .children(self.novidades_da_versao(cx))

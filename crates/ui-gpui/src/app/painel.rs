@@ -859,7 +859,8 @@ impl Aplicativo {
                     .id("menu-conta-caixa")
                     .absolute()
                     .left(px(self.largura_do_menu() - 4.))
-                    .bottom(px(8.))
+                    // O botão da conta fica no pé do menu, logo acima do rodapé.
+                    .bottom(px(8. + super::rodape::ALTURA_DO_RODAPE))
                     .min_w(px(240.))
                     .p(px(4.))
                     .rounded(px(10.))
@@ -993,7 +994,12 @@ impl Aplicativo {
         }
         let menu = self.largura_do_menu();
         let janela = window.viewport_size();
-        let area = (f32::from(janela.width) - menu, f32::from(janela.height));
+        // A área do canto é a da tela: sem o menu à esquerda e sem o rodapé.
+        let rodape = super::rodape::ALTURA_DO_RODAPE;
+        let area = (
+            f32::from(janela.width) - menu,
+            f32::from(janela.height) - rodape,
+        );
         // Com a janela menor, o canto volta para dentro.
         let (x, y) = dentro_dos_limites(self.canto.posicao, self.canto.tamanho.get(), area);
         let tamanho = self.canto.tamanho.clone();
@@ -1078,7 +1084,7 @@ impl Aplicativo {
             .debug_selector(|| "canto-dos-envios".into())
             .absolute()
             .left(px(menu + MARGEM + x))
-            .bottom(px(MARGEM - y))
+            .bottom(px(rodape + MARGEM - y))
             .gap(px(8.))
             .child(
                 h_flex()

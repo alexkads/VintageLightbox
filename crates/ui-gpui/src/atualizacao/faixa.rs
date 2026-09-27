@@ -6,6 +6,12 @@
 //! importar de verdade some junto. A faixa fica no rodapé, ocupa uma linha e
 //! espera. As novidades abrem num diálogo **só quando pedidas**.
 //!
+//! 🔑 **A faixa mora dentro do rodapé** (`app/rodape.rs`) desde 27/set/2026 —
+//! antes ela se sobrepunha ao pé da tela e sumia quando não havia o que
+//! dizer. O rodapé fica sempre, com a versão à esquerda; a faixa ocupa o meio
+//! dele quando há aviso, e o mesmo diálogo mostra as novidades **desta**
+//! versão quando o operador clica na versão.
+//!
 //! | Estado | A faixa diz | Botões |
 //! |---|---|---|
 //! | há versão (pacote) | "Versão X disponível — …" | Atualizar · Ver novidades · Depois |
@@ -45,6 +51,9 @@ pub struct Estado {
     pub etapa: Option<String>,
     /// O diálogo das novidades está aberto.
     pub novidades_abertas: bool,
+    /// O diálogo das novidades **desta** versão (clique na versão do rodapé)
+    /// está aberto.
+    pub desta_versao_aberta: bool,
     /// O operador pediu "Verificar atualizações" e a resposta não chegou.
     pub verificando: bool,
     /// A versão cuja faixa já foi contada ao servidor como `exibida` — a
@@ -174,6 +183,9 @@ pub enum Pedido {
     Reabrir,
     Dispensar,
     VerNovidades,
+    /// A versão no rodapé: o que esta versão trouxe.
+    VerEstaVersao,
+    /// Fecha o diálogo das novidades, seja de qual versão for.
     FecharNovidades,
     /// "Tentar de novo", depois de a compilação falhar.
     TentarDeNovo,
@@ -275,99 +287,66 @@ pub fn botoes(estado: &Estado) -> Vec<(&'static str, &'static str, bool, Pedido)
     lista
 }
 
-/// Desenha a faixa. `agir` recebe o [`Pedido`] de cada botão.
+/// Se a faixa pede destaque: versão nova importante, ainda por instalar.
+pub fn em_destaque(estado: &Estado) -> bool {
+    estado.importante() && matches!(estado.visivel(), Some(Aviso::Disponivel { .. }))
+}
+
+/// Desenha a faixa **dentro do rodapé**: a frase e os botões, numa linha que
+/// encolhe. `agir` recebe o [`Pedido`] de cada botão.
 pub fn desenhar(estado: &Estado, cx: &gpui_kit::App, agir: Agir) -> Option<AnyElement> {
     let texto: SharedString = estado.texto()?.into();
     let tema = cx.theme();
-    let destaque =
-        estado.importante() && matches!(estado.visivel(), Some(Aviso::Disponivel { .. }));
-    let mut linha = h_flex().items_center().gap(px(6.));
+    let destaque = em_destaque(estado);
+    let mut linha = h_flex().flex_none().items_center().gap(px(4.));
     for (id, rotulo, primario, pedido) in botoes(estado) {
         linha = linha.child(botao(id, rotulo, primario, pedido, &agir));
     }
     Some(
-        div()
-            .absolute()
-            .bottom_0()
-            .left_0()
-            .right_0()
-            .flex()
+        h_flex()
+            .id("faixa-de-atualizacao")
+            .debug_selector(|| "faixa-de-atualizacao".into())
+            .min_w(px(0.))
             .items_center()
-            .justify_between()
-            .gap(px(12.))
-            .px(px(12.))
-            .py(px(6.))
-            .bg(if destaque {
-                tema.warning.opacity(0.15)
-            } else {
-                tema.background
-            })
-            .border_t_1()
-            .border_color(if destaque { tema.warning } else { tema.border })
+            .gap(px(8.))
             .child(
                 div()
+                    .min_w(px(0.))
+                    .truncate()
                     .text_xs()
+                    .text_color(if destaque {
+                        tema.foreground
+                    } else {
+                        tema.muted_foreground
+                    })
                     .when(destaque, |d| d.font_weight(FontWeight::MEDIUM))
-                    .child(texto),
+                    .child(texto.clone()),
             )
             .child(linha)
+            // A frase inteira, quando o rodapé estreito a cortou.
+            .tooltip(move |window, cx| {
+                gpui_kit::component::tooltip::Tooltip::new(texto.clone()).build(window, cx)
+            })
             .into_any_element(),
     )
 }
 
 /// O diálogo "Novidades da versão X": o que mudou, por que atualizar e como.
 pub fn desenhar_novidades(estado: &Estado, cx: &gpui_kit::App, agir: Agir) -> Option<AnyElement> {
+    if estado.desta_versao_aberta {
+        return desenhar_desta_versao(cx, agir);
+    }
     if !estado.novidades_abertas {
         return None;
     }
     let versao = estado.versao.as_ref()?;
     let tema = cx.theme();
-    let (apagado, borda, fundo, aviso) = (
-        tema.muted_foreground,
-        tema.border,
-        tema.popover,
-        tema.warning,
-    );
+    let (apagado, borda, aviso) = (tema.muted_foreground, tema.border, tema.warning);
     let como = novidades::como_atualizar(versao.jeito);
-    let secao = |titulo: &'static str| {
-        div()
-            .text_sm()
-            .font_weight(FontWeight::SEMIBOLD)
-            .child(titulo)
-    };
 
     let mut corpo = v_flex().gap(px(12.));
     if let Some(n) = &versao.novidades {
-        if n.importante {
-            corpo = corpo.child(
-                div()
-                    .px(px(8.))
-                    .py(px(4.))
-                    .rounded(px(6.))
-                    .bg(aviso.opacity(0.15))
-                    .text_color(aviso)
-                    .text_xs()
-                    .font_weight(FontWeight::MEDIUM)
-                    .child("Atualização importante"),
-            );
-        }
-        corpo = corpo
-            .child(div().text_sm().child(n.titulo.clone()))
-            .child(secao("O que mudou"))
-            .child(
-                v_flex()
-                    .gap(px(4.))
-                    .children(n.novidades.iter().map(|item| {
-                        h_flex()
-                            .items_start()
-                            .gap(px(6.))
-                            .text_sm()
-                            .child("•")
-                            .child(div().flex_1().child(item.clone()))
-                    })),
-            )
-            .child(secao("Por que atualizar"))
-            .child(div().text_sm().child(n.por_que_atualizar.clone()));
+        corpo = corpo.child(o_que_mudou(n, "Por que atualizar", aviso));
     }
     corpo = corpo.child(secao("Como atualizar")).child(
         v_flex().gap(px(4.)).children(
@@ -439,46 +418,133 @@ pub fn desenhar_novidades(estado: &Estado, cx: &gpui_kit::App, agir: Agir) -> Op
         &agir,
     ));
 
-    let fechar = agir.clone();
-    Some(
-        div()
-            .absolute()
-            .top_0()
-            .left_0()
-            .size_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(gpui_kit::black().opacity(0.5))
-            .occlude()
-            .on_mouse_down(MouseButton::Left, move |_, w, cx| {
-                fechar(Pedido::FecharNovidades, w, cx)
-            })
-            .child(
-                v_flex()
-                    .id("novidades-da-versao")
-                    .w(px(520.))
-                    .max_h(px(620.))
-                    .overflow_y_scroll()
-                    .p(px(16.))
-                    .gap(px(16.))
-                    .rounded(px(12.))
-                    .border_1()
-                    .border_color(borda)
-                    .bg(fundo)
-                    .shadow_lg()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(
-                        div()
-                            .text_lg()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(format!("Novidades da versão {}", versao.versao)),
-                    )
-                    .child(corpo)
-                    .child(rodape),
+    Some(moldura(
+        format!("Novidades da versão {}", versao.versao),
+        corpo.into_any_element(),
+        rodape,
+        cx,
+        agir,
+    ))
+}
+
+/// O diálogo da versão **aberta** — o que ela trouxe, sem "como atualizar":
+/// não há nada a instalar.
+fn desenhar_desta_versao(cx: &gpui_kit::App, agir: Agir) -> Option<AnyElement> {
+    let n = novidades::desta_versao()?;
+    let corpo = o_que_mudou(&n, "Por que ela importa", cx.theme().warning);
+    let rodape = h_flex().justify_end().child(botao(
+        "novidades-fechar",
+        "Fechar",
+        false,
+        Pedido::FecharNovidades,
+        &agir,
+    ));
+    Some(moldura(
+        format!("Novidades da versão {}", n.versao),
+        corpo,
+        rodape,
+        cx,
+        agir,
+    ))
+}
+
+fn secao(titulo: &'static str) -> gpui_kit::Div {
+    div()
+        .text_sm()
+        .font_weight(FontWeight::SEMIBOLD)
+        .child(titulo)
+}
+
+/// O título, o que mudou e o porquê — igual para a versão nova e a aberta.
+fn o_que_mudou(
+    n: &novidades::Novidades,
+    por_que: &'static str,
+    aviso: gpui_kit::Hsla,
+) -> AnyElement {
+    v_flex()
+        .gap(px(12.))
+        .when(n.importante, |corpo| {
+            corpo.child(
+                div()
+                    .px(px(8.))
+                    .py(px(4.))
+                    .rounded(px(6.))
+                    .bg(aviso.opacity(0.15))
+                    .text_color(aviso)
+                    .text_xs()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child("Atualização importante"),
             )
-            .into_any_element(),
-    )
+        })
+        .child(div().text_sm().child(n.titulo.clone()))
+        .child(secao("O que mudou"))
+        .child(
+            v_flex()
+                .gap(px(4.))
+                .children(n.novidades.iter().map(|item| {
+                    h_flex()
+                        .items_start()
+                        .gap(px(6.))
+                        .text_sm()
+                        .child("•")
+                        // `min_w(0)`: sem ele o item não quebra a linha e
+                        // passa da borda do diálogo.
+                        .child(div().flex_1().min_w(px(0.)).child(item.clone()))
+                })),
+        )
+        .child(secao(por_que))
+        .child(div().text_sm().child(n.por_que_atualizar.clone()))
+        .into_any_element()
+}
+
+/// O véu escuro e o cartão do diálogo. Clicar fora fecha.
+fn moldura(
+    titulo: String,
+    corpo: AnyElement,
+    rodape: gpui_kit::Div,
+    cx: &gpui_kit::App,
+    agir: Agir,
+) -> AnyElement {
+    let tema = cx.theme();
+    let (borda, fundo) = (tema.border, tema.popover);
+    div()
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(gpui_kit::black().opacity(0.5))
+        .occlude()
+        .on_mouse_down(MouseButton::Left, move |_, w, cx| {
+            agir(Pedido::FecharNovidades, w, cx)
+        })
+        .child(
+            v_flex()
+                .id("novidades-da-versao")
+                .debug_selector(|| "novidades-da-versao".into())
+                .w(px(520.))
+                .max_h(px(620.))
+                .overflow_y_scroll()
+                .p(px(16.))
+                .gap(px(16.))
+                .rounded(px(12.))
+                .border_1()
+                .border_color(borda)
+                .bg(fundo)
+                .shadow_lg()
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(
+                    div()
+                        .text_lg()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(titulo),
+                )
+                .child(corpo)
+                .child(rodape),
+        )
+        .into_any_element()
 }
 
 #[cfg(test)]

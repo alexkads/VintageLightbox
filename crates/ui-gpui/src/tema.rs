@@ -407,6 +407,9 @@ pub fn aplicar(escolha: Escolha, window: Option<&mut Window>, cx: &mut App) {
         PALETAS[escura as usize],
         Some(letra),
     )));
+    // 📣 Os toasts do canto de baixo (chatbot e agenda) sobem acima do
+    // rodapé da janela, em vez de cair em cima da versão.
+    tema.notification.margins.bottom = gpui_kit::px(16. + crate::app::rodape::ALTURA_DO_RODAPE);
     PALETA_AGORA.store(if modo.is_dark() { escura } else { 0 }, Ordering::Relaxed);
     Theme::change(modo, window, cx);
 }

@@ -1243,8 +1243,11 @@ impl Caixa {
     ) -> AnyElement {
         self.pedir_foco = false;
         self.aplicar_pendencias_do_dialogo(window, cx);
+        // A área do painel é a janela sem o rodapé: ele flutua sobre as telas,
+        // e nunca sobre a versão e o servidor.
+        let rodape = crate::app::rodape::ALTURA_DO_RODAPE;
         let janela = window.viewport_size();
-        let janela = (f32::from(janela.width), f32::from(janela.height));
+        let janela = (f32::from(janela.width), f32::from(janela.height) - rodape);
         let Some(p) = self.painel_ref() else {
             return div().into_any_element();
         };
@@ -1289,7 +1292,7 @@ impl Caixa {
             .occlude()
             .absolute()
             .right(px(MARGEM - posicao.0))
-            .bottom(px(MARGEM - posicao.1))
+            .bottom(px(rodape + MARGEM - posicao.1))
             .overflow_hidden()
             .border_1()
             .border_color(frente.opacity(0.25))
