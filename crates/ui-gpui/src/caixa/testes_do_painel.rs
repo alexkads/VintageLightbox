@@ -43,13 +43,25 @@ fn foto_json(id: &str, ordem: i64, estado: &str) -> Value {
 }
 
 fn galeria_json() -> Value {
+    galeria_com(&["a", "b", "c"])
+}
+
+/// A galeria como o site a devolve, com estas fotos levadas e as outras à venda.
+fn galeria_com(levadas: &[&str]) -> Value {
+    let estado = |id: &str| {
+        if levadas.contains(&id) {
+            "levada_no_balcao"
+        } else {
+            "disponivel"
+        }
+    };
     json!({
         "galeria": { "id": "g1", "titulo": "Ensaio", "estudio_id": "e1" },
         "fotos": [
-            foto_json("a", 0, "levada_no_balcao"),
-            foto_json("b", 1, "levada_no_balcao"),
-            foto_json("d", 2, "disponivel"),
-            foto_json("c", 3, "levada_no_balcao"),
+            foto_json("a", 0, estado("a")),
+            foto_json("b", 1, estado("b")),
+            foto_json("d", 2, estado("d")),
+            foto_json("c", 3, estado("c")),
         ],
         "produto": { "id": "p1", "nome": "Digital", "preco": "30.00", "preco_cheio": "40.00" },
         "produtos": [{ "id": "p1", "nome": "Digital", "preco": "30.00", "preco_cheio": "40.00" }],
@@ -58,7 +70,13 @@ fn galeria_json() -> Value {
 }
 
 fn publicador() -> Arc<PublicadorDeMentira> {
+    publicador_com(false)
+}
+
+/// Com `negociacao_demorada`, o `PATCH` da grade só volta em `responder()`.
+fn publicador_com(negociacao_demorada: bool) -> Arc<PublicadorDeMentira> {
     let p = Arc::new(PublicadorDeMentira {
+        negociacao_demorada,
         galerias: std::sync::Mutex::new(vec![GaleriaDoPainel {
             id: "g1".into(),
             titulo: "Ensaio".into(),
@@ -114,8 +132,11 @@ struct Montagem {
 }
 
 fn montar(cx: &mut TestAppContext) -> Montagem {
+    montar_com(cx, publicador())
+}
+
+fn montar_com(cx: &mut TestAppContext, publicador: Arc<PublicadorDeMentira>) -> Montagem {
     cx.update(gpui_kit::init);
-    let publicador = publicador();
     let dir = tempfile::TempDir::new().expect("diretório temporário");
     let previews = Arc::new(PreviewManager::new_with_path(dir.path().to_path_buf()));
     std::mem::forget(dir);
@@ -185,7 +206,11 @@ fn colher(cx: &mut TestAppContext, m: &Montagem) {
 
 /// A galeria aberta e o painel carregado.
 fn aberto(cx: &mut TestAppContext) -> Montagem {
-    let m = montar(cx);
+    aberto_com(cx, publicador())
+}
+
+fn aberto_com(cx: &mut TestAppContext, publicador: Arc<PublicadorDeMentira>) -> Montagem {
+    let m = montar_com(cx, publicador);
     let detalhe = m.detalhe.clone();
     cx.update(|cx| detalhe.update(cx, |d, cx| d.entrar("g1".into(), cx)));
     colher(cx, &m);
@@ -535,4 +560,53 @@ fn ja_paga_em_outro_site_grava_o_site_da_lista(cx: &mut TestAppContext) {
         g[0].corpo,
         Some(json!({ "preco_negociado": null, "observacao_da_negociacao": "TchêOfertas" }))
     );
+}
+
+fn ids_no_cupom(cx: &mut TestAppContext, m: &Montagem) -> Vec<String> {
+    na_janela(cx, m, |t, _, _| {
+        let v = t.vista.as_ref().expect("o painel carregou");
+        v.cupom.itens.iter().map(|i| i.foto_id.clone()).collect()
+    })
+}
+
+/// `P` na grade, na foto `id`.
+fn p_na_grade(cx: &mut TestAppContext, m: &Montagem, id: &str) {
+    let detalhe = m.detalhe.clone();
+    cx.update(|cx| {
+        detalhe.update(cx, |d, cx| {
+            d.focar_foto(id, cx);
+            d.alternar_levada(cx);
+        })
+    });
+    colher(cx, m);
+}
+
+/// 🛒 **O cupom acompanha o `P` da grade — o de marcar e o de desistir.**
+///
+/// A grade pinta a levada antes de o site responder, e o caixa relia a galeria
+/// nesse instante: o `GET` chegava ao site antes do `PATCH` e trazia o estado
+/// velho. Quando o `PATCH` voltava, a grade já estava pintada e não mudava de
+/// novo, e o caixa não relia mais — o cupom ficava um gesto atrás (dono,
+/// 27/set/2026: *"uma levada e caixa não foi atualizado"*, e o cliente desistiu
+/// de uma foto e o caixa *"ainda constam duas fotos"*).
+#[gpui_kit::test]
+fn o_cupom_acompanha_o_p_da_grade_mesmo_com_o_patch_demorado(cx: &mut TestAppContext) {
+    let m = aberto_com(cx, publicador_com(true));
+    assert_eq!(ids_no_cupom(cx, &m), vec!["a", "b", "c"]);
+
+    // Marca `d`: até o `PATCH` voltar, o site ainda não a tem como levada.
+    p_na_grade(cx, &m, "d");
+    m.publicador.responder();
+    m.publicador
+        .responder_json("galeria-viva", Ok(galeria_com(&["a", "b", "d", "c"])));
+    colher(cx, &m);
+    assert_eq!(ids_no_cupom(cx, &m), vec!["a", "b", "d", "c"]);
+
+    // O cliente desiste de `a`: o mesmo gesto, o mesmo atraso.
+    p_na_grade(cx, &m, "a");
+    m.publicador.responder();
+    m.publicador
+        .responder_json("galeria-viva", Ok(galeria_com(&["b", "d", "c"])));
+    colher(cx, &m);
+    assert_eq!(ids_no_cupom(cx, &m), vec!["b", "d", "c"]);
 }

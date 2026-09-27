@@ -149,8 +149,8 @@ const ORCAMENTO_DA_MARGEM: Duration = Duration::from_millis(4);
 struct MedidaDaGrade {
     largura: f32,
     janela: f32,
-    /// A coluna da direita estava recolhida naquele quadro?
-    recolhida: bool,
+    /// O que a coluna da direita (com a seta) tirava da linha naquele quadro.
+    coluna: f32,
 }
 
 /// Os recortes da barra, na ordem da web.
@@ -286,6 +286,14 @@ pub enum Pedido {
     /// para fora dela: quem sabe o que a grade tem marcado, e o que sobra
     /// quando nada está, é a raiz.
     Exportar,
+    /// ⚠️ Um aviso de gesto recusado em parte — a `Notification` do gpui-kit,
+    /// que a raiz empurra (só ela tem a `Window`).
+    ///
+    /// 🔑 **Não é a linha de erro do cabeçalho** (dono, 27/set/2026): o `0`
+    /// numa levada não falhou nada, só deixou uma foto de fora, e a faixa
+    /// vermelha fixa sobre a grade dizia "quebrou" e ficava lá até outro
+    /// gesto. Na Revelação ela nem aparecia — a tecla vale lá também.
+    Avisar(SharedString),
 }
 
 /// Uma foto da grade da sessão, no que a Revelação precisa para abri-la.
@@ -471,7 +479,7 @@ pub struct Detalhe {
     linha_medida: Option<f32>,
     /// As colunas que o quadro de fato desenhou, para a janela, o painel e o
     /// zoom daquele quadro — vence a conta quando as duas discordam.
-    colunas_vistas: Option<((f32, bool, f32), usize)>,
+    colunas_vistas: Option<((f32, f32, f32), usize)>,
     /// As colunas e as linhas com que este quadro montou a grade.
     colunas_da_grade: usize,
     linhas_da_grade: usize,
@@ -483,7 +491,13 @@ pub struct Detalhe {
     grade_no_quadro: bool,
     /// A janela e o painel no quadro em curso — o que a medida guarda.
     janela_no_quadro: (f32, f32),
-    painel_no_quadro: bool,
+    painel_no_quadro: f32,
+    /// A coluna da foto e a tira no dock: a coluna se puxa pela borda e as
+    /// duas se recolhem pelas setas (`crate::docas`). Nasce no primeiro quadro.
+    docas: Option<crate::docas::Docas>,
+    /// O que a coluna da direita tira da linha agora — a largura da doca (zero
+    /// recolhida) mais a faixa da seta.
+    largura_da_coluna: f32,
     /// O pedaço da tira que vira elemento neste quadro: `[de, ate)`.
     tira_desenhada: (usize, usize),
     /// A foto que a tira ainda tem de trazer à vista — espera a tira ter
@@ -840,7 +854,9 @@ impl Detalhe {
             grade_a_seguir: None,
             grade_no_quadro: false,
             janela_no_quadro: (0.0, 1000.0),
-            painel_no_quadro: false,
+            painel_no_quadro: 0.0,
+            docas: None,
+            largura_da_coluna: super::paineis::LARGURA_ABERTA + crate::docas::LARGURA_DA_SETA,
             campos_do_lote: None,
             tira_desenhada: (0, 0),
             tira_a_seguir: None,
@@ -1566,17 +1582,9 @@ impl Detalhe {
     /// o quadro deu à grade. Sem ela (antes do primeiro quadro), a conta é pela
     /// janela, como era.
     fn largura_da_grade(&self, janela: f32) -> f32 {
-        use super::paineis::{LARGURA_ABERTA, LARGURA_RECOLHIDA};
-        let coluna = |recolhida: bool| {
-            if recolhida {
-                LARGURA_RECOLHIDA
-            } else {
-                LARGURA_ABERTA
-            }
-        };
-        let agora = coluna(self.paineis.coluna_recolhida());
+        let agora = self.largura_da_coluna;
         match self.medida_da_grade {
-            Some(m) => m.largura + (janela - m.janela) + coluna(m.recolhida) - agora,
+            Some(m) => m.largura + (janela - m.janela) + m.coluna - agora,
             None => janela - MARGEM_DA_GRADE - agora,
         }
     }
@@ -1587,7 +1595,7 @@ impl Detalhe {
     /// uma linha da tela.
     pub fn colunas_visiveis(&self, window: &Window) -> usize {
         let janela = f32::from(window.viewport_size().width);
-        let chave = (janela, self.paineis.coluna_recolhida(), self.zoom);
+        let chave = (janela, self.largura_da_coluna, self.zoom);
         if let Some((vista, colunas)) = self.colunas_vistas {
             if vista == chave {
                 return colunas;
@@ -1701,12 +1709,12 @@ impl Detalhe {
             cx,
         );
         if levadas > 0 {
-            self.recado(
+            cx.emit(Pedido::Avisar(
                 format!(
                     "{levadas} levada(s) no balcão ficaram com a nota: tire a marcação (P) antes."
-                ),
-                cx,
-            );
+                )
+                .into(),
+            ));
         }
     }
 
@@ -2044,8 +2052,9 @@ impl Detalhe {
             .negociar(sessao, foto_id, mudanca, self.recados.0.clone());
     }
 
-    /// Quantas fotos têm mudança no ar ou esperando a vez.
-    fn mudando(&self) -> usize {
+    /// Quantas fotos têm mudança no ar ou esperando a vez — o caixa espera
+    /// zerar para reler o site.
+    pub(crate) fn mudando(&self) -> usize {
         self.no_ar.len() + self.na_vez.len()
     }
 
@@ -3758,7 +3767,7 @@ impl Detalhe {
             self.medida_da_grade = Some(MedidaDaGrade {
                 largura,
                 janela: self.janela_no_quadro.0,
-                recolhida: self.painel_no_quadro,
+                coluna: self.painel_no_quadro,
             });
         }
         let mut texto = window.text_style();
@@ -3767,7 +3776,7 @@ impl Detalhe {
 
         let janela = window.viewport_size();
         self.janela_no_quadro = (f32::from(janela.width), f32::from(janela.height));
-        self.painel_no_quadro = self.paineis.coluna_recolhida();
+        self.painel_no_quadro = self.largura_da_coluna;
         self.colunas_da_grade = self.colunas_visiveis(window);
         let total = self.acervo.total_visivel();
         self.grade_no_quadro = total > 0;
@@ -3792,6 +3801,10 @@ fn reduzir(imagem: &image::DynamicImage, lado: u32) -> image::DynamicImage {
 impl Render for Detalhe {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _t = crate::regua::trecho("sessão: render");
+        if self.docas.is_none() {
+            self.montar_as_docas(window, cx);
+        }
+        self.largura_da_coluna = self.medir_a_coluna(cx);
         // 🚨 **Antes de montar qualquer célula.** É o que tira o decode de dentro
         // do quadro; `celula` e `tira` daqui para baixo só leem da memória.
         self.medir_o_quadro(window);
@@ -3879,9 +3892,33 @@ impl Render for Detalhe {
             (!pular("cabecalho")).then(|| self.cabecalho(window, cx).into_any_element());
         let envio = (!pular("envio")).then(|| self.envio(cx).into_any_element());
         let barra = (!pular("barra")).then(|| self.barra_da_grade(cx).into_any_element());
-        let grade = (!pular("grade")).then(|| self.grade(cx).into_any_element());
-        let painel = (!pular("painel")).then(|| self.painel(cx).into_any_element());
-        let tira_el = (!pular("tira")).then(|| self.tira(cx).into_any_element());
+        let tira_aberta = self.docas.as_ref().is_none_or(|d| d.tira_aberta());
+        let tira_el = (!pular("tira") && tira_aberta).then(|| self.tira(cx).into_any_element());
+        let area = self.docas.as_ref().map(|d| d.area.clone());
+        let coluna_aberta = !self.paineis.coluna_recolhida();
+        let seta = |id, lado, aberta, dica, cx: &mut Context<Self>| {
+            let tela = cx.entity().downgrade();
+            crate::docas::seta(id, lado, aberta, dica, cx, move |_, window, cx| {
+                let _ = tela.update(cx, |tela, cx| match lado {
+                    crate::docas::Lado::Baixo => tela.alternar_a_tira(window, cx),
+                    _ => tela.alternar_coluna(window, cx),
+                });
+            })
+        };
+        let seta_direita = seta(
+            "galeria-seta-direita",
+            crate::docas::Lado::Direita,
+            coluna_aberta,
+            "Mostrar ou esconder o painel da foto (Tab)",
+            cx,
+        );
+        let seta_de_baixo = seta(
+            "galeria-seta-da-tira",
+            crate::docas::Lado::Baixo,
+            tira_aberta,
+            "Mostrar ou esconder a tira (⇧Tab esconde tudo)",
+            cx,
+        );
 
         // 🎨 **As faixas do site**: o cabeçalho de 48 px, a barra da importação
         // e a dos recortes, cada uma com o traço de baixo, e a grade encostada
@@ -3917,19 +3954,20 @@ impl Render for Detalhe {
                     .flex_col()
                     .flex_1()
                     .min_h(px(0.))
-                    .p(px(12.))
+                    .pl(px(12.))
+                    .py(px(12.))
                     // A grade e o painel da foto, lado a lado — como na tela
-                    // do site.
+                    // do site —, no dock, com a seta na beirada.
                     .child(
                         div()
                             .flex()
                             .flex_1()
                             .min_h(px(0.))
-                            .gap(px(8.))
-                            .children(grade)
-                            .children(painel),
+                            .child(div().flex_1().min_w(px(0.)).h_full().children(area))
+                            .child(seta_direita),
                     ),
             )
+            .child(seta_de_baixo)
             .children(tira_el)
             // 🪟 **Os diálogos são o `Dialog` do gpui-kit** (`crate::dialogo`),
             // que se desenha adiado e ancorado no canto da janela: fica acima
@@ -6172,39 +6210,12 @@ impl Detalhe {
         use crate::recursos::Icone;
         use gpui_kit::component::Icon;
         let (borda, raio) = (cx.theme().border, cx.theme().radius);
-        if self.paineis.coluna_recolhida() {
-            return div()
-                .id("painel-recolhido")
-                .debug_selector(|| "painel-recolhido".into())
-                .w(px(super::paineis::LARGURA_RECOLHIDA - VAO_DA_GRADE))
-                .flex_shrink_0()
-                .flex()
-                .flex_col()
-                .items_center()
-                .py(px(6.))
-                .rounded(raio)
-                .border_1()
-                .border_color(borda)
-                .child(
-                    Button::new("painel-abrir")
-                        .debug_selector(|| "painel-abrir".into())
-                        .icon(Icon::new(Icone::PanelRightOpen))
-                        .xsmall()
-                        .ghost()
-                        .tooltip("Mostrar o painel da foto")
-                        .on_click(
-                            cx.listener(|tela, _, window, cx| tela.alternar_coluna(window, cx)),
-                        ),
-                )
-                .into_any_element();
-        }
         let conteudo = match self.painel_da_foto(cx) {
             Some(painel) => painel.into_any_element(),
             None => self.atalhos(cx).into_any_element(),
         };
         div()
-            .w(px(super::paineis::LARGURA_ABERTA - VAO_DA_GRADE))
-            .flex_shrink_0()
+            .size_full()
             .flex()
             .flex_col()
             .min_h(px(0.))
@@ -6241,6 +6252,11 @@ impl Detalhe {
     /// refeita já neste quadro.
     pub fn alternar_coluna(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.paineis.alternar_coluna();
+        if let Some(docas) = self.docas.as_ref() {
+            let aberta = !self.paineis.coluna_recolhida();
+            docas.definir(crate::docas::Lado::Direita, aberta, window, cx);
+        }
+        self.largura_da_coluna = self.medir_a_coluna(cx);
         self.colunas_vistas = None;
         self.medida_da_grade = None;
         self.colunas_da_grade = self.colunas_visiveis(window);
@@ -6249,6 +6265,91 @@ impl Detalhe {
 
     pub fn coluna_recolhida(&self) -> bool {
         self.paineis.coluna_recolhida()
+    }
+
+    /// A tira some ou volta — a seta de baixo.
+    pub fn alternar_a_tira(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(docas) = self.docas.as_ref() {
+            docas.alternar(crate::docas::Lado::Baixo, window, cx);
+        }
+        cx.notify();
+    }
+
+    /// `Tab` (a coluna) e `⇧Tab` (a coluna e a tira), como no Lightroom.
+    pub fn alternar_paineis(&mut self, tudo: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let coluna = !self.paineis.coluna_recolhida();
+        if !tudo {
+            self.alternar_coluna(window, cx);
+            return;
+        }
+        let tira = self.docas.as_ref().is_none_or(|d| d.tira_aberta());
+        let mostrar = !(coluna || tira);
+        if coluna != mostrar {
+            self.alternar_coluna(window, cx);
+        }
+        if tira != mostrar {
+            self.alternar_a_tira(window, cx);
+        }
+        cx.notify();
+    }
+
+    /// O dock da galeria: a grade no centro e o painel da foto à direita.
+    ///
+    /// 🔑 Aberta ou recolhida continua sendo a lembrança de sempre
+    /// ([`super::paineis`]); do dock vem a largura, que agora se puxa.
+    fn montar_as_docas(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::docas::{Docas, Lado, Lateral, Limites};
+        use std::rc::Rc;
+        let eu = cx.entity();
+        let docas = Docas::montar(
+            "galeria",
+            &eu,
+            (
+                "galeria:grade",
+                Rc::new(|tela: &mut Self, _window, cx| {
+                    div()
+                        .flex()
+                        .size_full()
+                        .child(tela.grade(cx))
+                        .into_any_element()
+                }),
+            ),
+            vec![(
+                Lado::Direita,
+                Lateral {
+                    nome: "galeria:painel",
+                    // O vão entre a grade e o painel fica dentro da doca: a
+                    // borda que se puxa é a da grade.
+                    desenho: Rc::new(|tela: &mut Self, _window, cx| {
+                        div()
+                            .size_full()
+                            .pl(px(VAO_DA_GRADE))
+                            .child(tela.painel(cx))
+                            .into_any_element()
+                    }),
+                    limites: Limites {
+                        minimo: 260.,
+                        maximo: 560.,
+                        padrao: super::paineis::LARGURA_ABERTA,
+                    },
+                },
+            )],
+            window,
+            cx,
+        );
+        docas.definir(Lado::Direita, !self.paineis.coluna_recolhida(), window, cx);
+        self.docas = Some(docas);
+    }
+
+    /// A doca da direita (zero recolhida) mais a faixa da seta.
+    fn medir_a_coluna(&self, cx: &gpui_kit::App) -> f32 {
+        let doca = self
+            .docas
+            .as_ref()
+            .map_or(super::paineis::LARGURA_ABERTA, |d| {
+                d.largura(crate::docas::Lado::Direita, cx)
+            });
+        doca + crate::docas::LARGURA_DA_SETA
     }
 
     /// Sem foto em foco, a coluna ensina os gestos — os **Atalhos** do site
@@ -9543,6 +9644,40 @@ mod testes {
         cx.run_until_parked();
         assert_eq!(*pedidos.borrow(), 0, "não vai ao resgate");
         assert!(publicador.negociadas().is_empty(), "nem ao site");
+    }
+
+    /// ⚠️ **O `0` numa levada avisa por `Notification`, e não pela linha de
+    /// erro** (dono, 27/set/2026): a faixa vermelha fixa sobre a grade dizia
+    /// "quebrou" para um gesto que só deixou uma foto de fora.
+    #[gpui_kit::test]
+    fn o_zero_na_levada_avisa_sem_a_linha_de_erro(cx: &mut TestAppContext) {
+        let (janela, _) = janela(
+            cx,
+            vec![foto("l1", EstadoDaFotoNoSite::LevadaNoBalcao, Some(5))],
+        );
+        entrar(cx, &janela);
+        let raiz = cx.update(|cx| janela.root(cx).expect("a tela"));
+        let avisos = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+        let recebidos = avisos.clone();
+        let _assinatura = cx.update(|cx| {
+            cx.subscribe(&raiz, move |_, evento: &Pedido, _| {
+                if let Pedido::Avisar(texto) = evento {
+                    recebidos.borrow_mut().push(texto.to_string());
+                }
+            })
+        });
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.clicar(0, Modificadores::default(), cx);
+                tela.dar_nota(0, cx);
+                assert!(tela.erro.is_none(), "{:?}", tela.erro);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        assert_eq!(
+            *avisos.borrow(),
+            vec!["1 levada(s) no balcão ficaram com a nota: tire a marcação (P) antes."]
+        );
     }
 
     /// 🔁 **`X` de novo desfaz a rejeição, e a decisão é do grupo.**

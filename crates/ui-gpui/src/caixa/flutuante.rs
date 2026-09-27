@@ -122,6 +122,9 @@ pub(super) struct Painel {
     galeria_id: Option<String>,
     /// O retrato das fotos da galeria no último quadro, para saber se mudou.
     retrato: u64,
+    /// A galeria mudou e o cupom ainda não releu o site — ver
+    /// [`Caixa::reler_se_preciso`].
+    desatualizado: bool,
     lembranca: PathBuf,
     _assinaturas: Vec<Subscription>,
 }
@@ -243,6 +246,7 @@ impl Caixa {
             ultimo_foco: None,
             galeria_id: None,
             retrato: 0,
+            desatualizado: false,
             lembranca,
             _assinaturas: vec![observacao, intercepto],
         };
@@ -369,6 +373,7 @@ impl Caixa {
         if p.galeria_id != galeria {
             p.galeria_id = galeria.clone();
             p.retrato = retrato;
+            p.desatualizado = false;
             p.editando = None;
             self.dialogo = None;
             self.desconto = Default::default();
@@ -385,11 +390,44 @@ impl Caixa {
         }
         if p.retrato != retrato {
             p.retrato = retrato;
-            self.reler_galeria(cx);
+            p.desatualizado = true;
         }
+        self.reler_se_preciso(cx);
         if mudou_o_foco {
             cx.notify();
         }
+    }
+
+    /// Relê a galeria que mudou, **quando o site já tem o que a grade mostra**.
+    ///
+    /// 🚨 **A grade pinta o `P` antes de o site responder** — e o caixa relia
+    /// nesse instante: o `GET` chegava antes do `PATCH` e trazia o estado
+    /// velho. Quando o `PATCH` voltava, a grade já estava pintada, o retrato
+    /// não mudava de novo e o caixa não relia mais: o cupom ficava um gesto
+    /// atrás, na levada e na desistência (dono, 27/set/2026: *"uma levada e
+    /// caixa não foi atualizado"*). Por isso espera três coisas:
+    ///
+    /// - **nenhuma mudança da grade no ar** — senão o site responde o de antes;
+    /// - **nenhuma carga em curso** — ela pode ter saído antes do gesto;
+    /// - **nenhuma releitura no ar** — duas no ar podem chegar trocadas, e a
+    ///   velha, por último, desfaria a nova.
+    ///
+    /// Quem espera não perde a vez: a marca fica, e a resposta seguinte (da
+    /// grade, da carga ou da releitura) chama de novo.
+    pub(super) fn reler_se_preciso(&mut self, cx: &mut Context<Self>) {
+        let Some(p) = self.painel_ref() else {
+            return;
+        };
+        if !p.desatualizado || p.detalhe.read(cx).mudando() > 0 {
+            return;
+        }
+        if self.carregando() || self.leituras_soltas > 0 {
+            return;
+        }
+        if let Some(p) = self.painel_mut() {
+            p.desatualizado = false;
+        }
+        self.reler_galeria(cx);
     }
 
     /// Relê só a galeria — as fotos e as faixas — para o cupom acompanhar.
@@ -397,10 +435,6 @@ impl Caixa {
         let (Some(conta), Some(id)) = (self.sessao.clone(), self.escolhida.clone()) else {
             return;
         };
-        if self.carregando() {
-            // A carga em curso já traz a galeria de agora.
-            return;
-        }
         self.leituras_soltas += 1;
         self.publicador.pedir_json(
             conta,

@@ -512,8 +512,10 @@ impl Caixa {
             cx.notify();
             return;
         };
-        // Um canal novo: o que a navegação anterior ainda devia cai no vazio.
+        // Um canal novo: o que a navegação anterior ainda devia cai no vazio —
+        // e a releitura que estava no ar também, então deixa de contar.
         self.leituras = channel();
+        self.leituras_soltas = 0;
         self.carga = Some(Carga {
             estudio_pedido: estudio,
             sessao_pedida: sessao.clone(),
@@ -597,6 +599,8 @@ impl Caixa {
             mudou = true;
         }
         if mudou {
+            // A carga ou a releitura que segurava a vez chegou.
+            self.reler_se_preciso(cx);
             cx.notify();
         }
         let continua = self.carga.is_some() || self.gravando > 0 || self.leituras_soltas > 0;

@@ -16,6 +16,11 @@
 //! | `⌘=` · `⌘−` · `⌘0` · `⌘⌥0` | aproxima · afasta · encaixa · 1:1 |
 //! | Home · End · PgDn · PgUp | percorrem a foto ampliada |
 //! | `⇧C` | o Comparar: duas fotos lado a lado, aqui e na tela do cliente |
+//! | `Tab` · `⇧Tab` | esconde e mostra as colunas · as colunas e a tira (também na galeria da sessão) |
+//!
+//! ⚠️ **Sem o F6/F7/F8 do Lightroom** para cada coluna: no app eles são do
+//! caixa flutuante (sangria, vendas), que vale em qualquer tela. As setas das
+//! bordas fazem cada coluna uma a uma.
 //!
 //! 🔑 **No Comparar, as outras ficam mudas** (`na_revelacao`): elas editam a
 //! foto aberta, que ali divide o palco com outra. Só o `?` e o próprio `⇧C`
@@ -57,7 +62,9 @@ actions!(
         FerramentaPreencher,
         AlternarMarcacoes,
         MenosSuavizacao,
-        MaisSuavizacao
+        MaisSuavizacao,
+        AlternarColunas,
+        AlternarPaineis
     ]
 );
 
@@ -111,6 +118,9 @@ pub(super) fn ligar(cx: &mut gpui_kit::App) {
         KeyBinding::new("}", MaisSuavizacao, solta),
         KeyBinding::new("shift-[", MenosSuavizacao, solta),
         KeyBinding::new("shift-]", MaisSuavizacao, solta),
+        // Os painéis, com as teclas do Lightroom.
+        KeyBinding::new("tab", AlternarColunas, solta),
+        KeyBinding::new("shift-tab", AlternarPaineis, solta),
     ]);
 }
 
@@ -131,6 +141,19 @@ impl Aplicativo {
             return;
         }
         self.revelacao.update(cx, fazer);
+    }
+
+    /// `Tab` e `⇧Tab`: os painéis da Revelação, ou os da galeria da sessão.
+    fn alternar_paineis(&mut self, tudo: bool, window: &mut Window, cx: &mut Context<Self>) {
+        match self.tela {
+            Tela::Revelacao => self
+                .revelacao
+                .update(cx, |tela, cx| tela.alternar_paineis(tudo, window, cx)),
+            Tela::Sessao => self
+                .detalhe
+                .update(cx, |tela, cx| tela.alternar_paineis(tudo, window, cx)),
+            _ => cx.propagate(),
+        }
     }
 
     /// Faz na Revelação mesmo no Comparar — o `?` e o próprio `⇧C`.
@@ -296,6 +319,12 @@ impl Aplicativo {
                     tela.ir_para_nivel(Nivel::Razao(1.), None, cx)
                 }
             })
+        }))
+        .on_action(cx.listener(|este, _: &AlternarColunas, window, cx| {
+            este.alternar_paineis(false, window, cx)
+        }))
+        .on_action(cx.listener(|este, _: &AlternarPaineis, window, cx| {
+            este.alternar_paineis(true, window, cx)
         }))
         .on_action(cx.listener(|este, _: &ZoomAoInicio, _w, cx| {
             este.na_foto_ampliada(cx, |tela, cx| tela.zoom_ao_inicio(cx))
