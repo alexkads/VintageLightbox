@@ -137,3 +137,59 @@ fn o_zoom_afina_a_ferramenta_e_o_retoque_feito_fica(cx: &mut TestAppContext) {
         "o carimbo já dado não muda com o zoom"
     );
 }
+
+/// 🚪 **O botão de sair larga tudo de uma vez** (dono, 27/set/2026): a
+/// ferramenta, a máscara escolhida e o retoque selecionado — o que o `Esc`
+/// faz em vários toques. Fora da Revelação local ele fica apagado.
+#[gpui_kit::test]
+fn o_botao_de_sair_larga_a_revelacao_local(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    e.revelar_a_do_site(cx, "a");
+
+    // Um carimbo feito e selecionado, com o carimbo ainda na mão.
+    e.teclar(cx, "s");
+    let meio = e.revelacao(cx, |tela, _w, _cx| tela.meio_do_palco());
+    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    visual.simulate_click(meio, Modifiers::default());
+    visual.run_until_parked();
+    visual.simulate_click(meio, Modifiers::default());
+    visual.run_until_parked();
+    assert!(e.revelacao(cx, |tela, _w, _cx| tela.com_ferramenta_local()));
+
+    // A coluna rola: o painel da Revelação local fica abaixo do Básico.
+    let mut visual = super::chatbot::quadro_novo(&e, cx);
+    let coluna = visual
+        .debug_bounds("local-marcacoes")
+        .expect("o botão das marcações está na barra");
+    visual.simulate_event(gpui_kit::ScrollWheelEvent {
+        position: gpui_kit::point(coluna.left(), gpui_kit::px(400.)),
+        delta: gpui_kit::ScrollDelta::Pixels(gpui_kit::point(
+            gpui_kit::px(0.),
+            gpui_kit::px(-600.),
+        )),
+        ..Default::default()
+    });
+    let mut visual = super::chatbot::quadro_novo(&e, cx);
+    let sair = visual
+        .debug_bounds("local-sair")
+        .expect("o botão de sair está na barra");
+    let marcacoes = visual
+        .debug_bounds("local-marcacoes")
+        .expect("o botão das marcações está na barra");
+    assert!(
+        sair.left() >= marcacoes.right() && sair.top() < marcacoes.bottom(),
+        "o sair fica no fim da barra, na mesma linha: {sair:?} × {marcacoes:?}"
+    );
+    super::chatbot::clicar(&e, cx, "local-sair");
+
+    let (dentro, com_ferramenta, retoques) = e.revelacao(cx, |tela, _w, _cx| {
+        (
+            tela.dentro_da_revelacao_local(),
+            tela.com_ferramenta_local(),
+            tela.retoques_locais(),
+        )
+    });
+    assert!(!com_ferramenta, "a ferramenta sai da mão");
+    assert!(!dentro, "nada fica escolhido");
+    assert_eq!(retoques, 1, "sair não apaga o que foi feito");
+}
