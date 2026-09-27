@@ -119,7 +119,9 @@ pub enum Passo {
     /// fingir_envio 2` — a bandeja (`crate::segundo_plano`). `fechar` é o botão
     /// vermelho de verdade; `abrir` é o "Abrir o VintageLightbox"; `fingir_envio`
     /// só mexe na conta de pedidos pendentes, sem mandar nada ao site;
-    /// `janela frente` traz o app para o foco.
+    /// `janela frente` traz o app para o foco; `janela fingir_recusa <motivo>`
+    /// põe uma recusa de mentira na lista local, e `janela recusas` abre a
+    /// lista (o clique nos recusados do rodapé).
     Janela(String),
     /// `nova etapa 3` · `nova buscar agendamento|voucher|compra|parceiro` ·
     /// `nova descartar` · `nova importar <pasta>` · `nova conheceu parceiro` ·

@@ -72,6 +72,9 @@ mod para_e2e;
 mod tira;
 /// A conta do pedaço à vista — a tira da sessão usa a mesma.
 pub(crate) use tira::faixa_desenhada;
+/// Os chips da tira — o rodapé confere que chama os recortes do mesmo jeito.
+#[cfg(test)]
+pub(crate) use tira::FILTROS_DA_TIRA;
 /// O estresse de dentro da tela: tira grande, sliders, Enquadrar e zoom.
 #[cfg(test)]
 mod estresse;

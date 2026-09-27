@@ -366,6 +366,16 @@ impl Aplicativo {
                     window.activate_window();
                 }
                 ["fingir_envio", n] => self.sincronias_pendentes = n.parse().unwrap_or(0),
+                // Uma recusa de mentira na lista local — nada vai ao site.
+                ["fingir_recusa", ..] => self.recusas.push(
+                    gesto
+                        .trim_start()
+                        .trim_start_matches("fingir_recusa")
+                        .trim()
+                        .to_string(),
+                ),
+                // O clique nos recusados do rodapé.
+                ["recusas"] => self.vendo_recusas = !self.vendo_recusas,
                 // 🚨 Fora deste `update`: fechar pergunta à própria janela se
                 // pode, e a janela está emprestada ao passo agora.
                 [gesto @ ("fechar" | "abrir")] => {

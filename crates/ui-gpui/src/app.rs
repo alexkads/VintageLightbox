@@ -6156,6 +6156,8 @@ impl Render for Aplicativo {
             // 📏 A barra do pé: por cima da tela e dos modais, sem pegar clique
             // (não tem `on_mouse_*`, e três pixels não tapam nada).
             .children(self.barra_do_pe(cx))
+            // A lista das recusas, sobre o rodapé que a abre.
+            .children(self.lista_das_recusas(cx))
             // 🚨 **As camadas do `gpui-component`.** Sem elas, `open_dialog` e
             // `push_notification` não aparecem em lugar nenhum — a caixa do
             // "Sincronizar N" abria no vazio e o botão parecia morto.

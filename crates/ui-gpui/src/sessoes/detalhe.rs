@@ -174,7 +174,7 @@ const MODIFICADOR_D: &str = "⌘+D";
 #[cfg(not(target_os = "macos"))]
 const MODIFICADOR_D: &str = "Ctrl+D";
 
-const FILTROS: [(&str, Filtro); 8] = [
+pub(crate) const FILTROS: [(&str, Filtro); 8] = [
     ("Todas", Filtro::Todas),
     // 🔑 **Os dois passos do balcão, na ordem em que acontecem**: classificar
     // (a nota, que é o que sobe a foto) e sinalizar (a tecla P). "Sinalizada"
