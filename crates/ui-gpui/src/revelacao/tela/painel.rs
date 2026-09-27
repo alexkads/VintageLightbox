@@ -237,6 +237,14 @@ impl Revelacao {
 
         self.ajustes = Ajustes::default();
         self.corte = corte_inteiro();
+        // 🔑 **A Revelação local vai junto**, como o "Redefinir" do Lightroom
+        // — um passo só no histórico. A ilegível fica: ela nunca é
+        // sobrescrita (ver `locais_ilegiveis`).
+        if self.locais_ilegiveis.is_none() {
+            self.locais = Default::default();
+            self.local.selecionado = None;
+            self.local.mascara_sel = None;
+        }
         self.espalhar_nos_sliders(window, cx);
         self.pedir_revelacao_cruzando(cx);
         // O corte não passa pela GPU: quem o mostra é a exibição.
@@ -258,7 +266,9 @@ impl Revelacao {
     /// O botão "Zerar tudo" (ou "Zerar N fotos"): esta foto pelo histórico, e
     /// as outras marcadas pela raiz.
     pub(crate) fn zerar_tudo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.controles_ligados() && (self.quantos_alterados() > 0 || self.enquadrada()) {
+        if self.controles_ligados()
+            && (self.quantos_alterados() > 0 || self.enquadrada() || self.tem_revelacao_local())
+        {
             self.redefinir_ajustes(window, cx);
         }
         if !self.outras_a_zerar().is_empty() {
@@ -473,6 +483,13 @@ impl Revelacao {
         )
     }
 
+    /// A foto aberta tem máscara ou retoque (a ilegível conta: ela existe).
+    pub(super) fn tem_revelacao_local(&self) -> bool {
+        !self.locais.camadas.is_empty()
+            || !self.locais.retoques.is_empty()
+            || self.locais_ilegiveis.is_some()
+    }
+
     /// Quantos ajustes estão fora do neutro, e o botão que devolve todos.
     ///
     /// 🔑 **Fora dos painéis sanfonados, e no topo** — é o desenho do site.
@@ -480,20 +497,13 @@ impl Revelacao {
     fn cabecalho_dos_ajustes(&self, cx: &mut Context<Self>) -> AnyElement {
         let alterados = self.quantos_alterados();
         let enquadrada = self.aberta.is_some() && self.enquadrada();
-        let texto = match (alterados, enquadrada) {
-            (0, true) => "Só o enquadramento fora do neutro".to_string(),
-            (0, false) => "Nenhum ajuste fora do neutro".to_string(),
-            (n, _) => format!(
-                "{n} {} fora do neutro{}",
-                if n == 1 { "ajuste" } else { "ajustes" },
-                if enquadrada { " + enquadramento" } else { "" }
-            ),
-        };
+        let locais = self.aberta.is_some() && self.tem_revelacao_local();
+        let texto = texto_do_cabecalho(alterados, enquadrada, locais);
         // 🚨 **O botão não pode decidir sozinho se há o que zerar.** Olhando só
         // a foto no palco, ele se apagava com ela no neutro — mesmo com quatro
         // marcadas atrás cheias de ajuste (dono, 2026-09-11).
         let outras = self.outras_a_zerar().len();
-        let tem_o_que_zerar = alterados > 0 || enquadrada;
+        let tem_o_que_zerar = alterados > 0 || enquadrada || locais;
         let quantas_fotos = usize::from(tem_o_que_zerar && self.controles_ligados()) + outras;
         let dica = if outras > 0 {
             format!(
@@ -501,7 +511,9 @@ impl Revelacao {
                  inclusive o enquadramento de cada uma."
             )
         } else {
-            "Devolve os 53 ajustes ao neutro, e o enquadramento à foto inteira.".to_string()
+            "Devolve os 53 ajustes ao neutro, o enquadramento à foto inteira e tira as \
+             máscaras e os retoques."
+                .to_string()
         };
 
         div()
@@ -1312,8 +1324,54 @@ fn altura_do_ponteiro(limites: Bounds<Pixels>, ponteiro: gpui_kit::Point<Pixels>
         .round()
 }
 
+/// O que está fora do neutro, em uma linha: os ajustes, o enquadramento e a
+/// Revelação local.
+fn texto_do_cabecalho(alterados: usize, enquadrada: bool, locais: bool) -> String {
+    let mut partes = Vec::new();
+    if alterados > 0 {
+        partes.push(format!(
+            "{alterados} {}",
+            if alterados == 1 { "ajuste" } else { "ajustes" }
+        ));
+    }
+    if enquadrada {
+        partes.push("enquadramento".to_string());
+    }
+    if locais {
+        partes.push("Revelação local".to_string());
+    }
+    match partes.as_slice() {
+        [] => "Nenhum ajuste fora do neutro".to_string(),
+        [so] if alterados == 0 => format!("Só {} fora do neutro", com_artigo(so)),
+        _ => format!("{} fora do neutro", partes.join(" + ")),
+    }
+}
+
+fn com_artigo(parte: &str) -> String {
+    match parte {
+        "enquadramento" => "o enquadramento".to_string(),
+        outra => format!("a {outra}"),
+    }
+}
+
 #[cfg(test)]
 mod testes {
+    #[test]
+    fn o_cabecalho_conta_a_revelacao_local() {
+        use super::texto_do_cabecalho as t;
+        assert_eq!(t(0, false, false), "Nenhum ajuste fora do neutro");
+        assert_eq!(t(0, true, false), "Só o enquadramento fora do neutro");
+        assert_eq!(t(0, false, true), "Só a Revelação local fora do neutro");
+        assert_eq!(
+            t(2, true, false),
+            "2 ajustes + enquadramento fora do neutro"
+        );
+        assert_eq!(
+            t(1, false, true),
+            "1 ajuste + Revelação local fora do neutro"
+        );
+    }
+
     use super::*;
 
     fn quadro() -> Bounds<Pixels> {

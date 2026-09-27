@@ -4026,6 +4026,38 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
+    /// 🔑 **"Zerar tudo" tira as máscaras também**, num passo só (achado no
+    /// app real, 2026-09-26: com máscara e ajustes no neutro, o botão ficava
+    /// apagado e o cabeçalho dizia "Nenhum ajuste fora do neutro").
+    #[gpui_kit::test]
+    fn zerar_tudo_leva_a_revelacao_local_num_passo(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let janela = janela(cx, previews);
+        let receita = r#"{"versao":1,"camadas":[{"nome":"M","ajustes":{"exposicao_ev":1.0},
+            "componentes":[{"modo":"somar","tipo":"radial","centro":[0.5,0.5],"raio_x":0.2,
+            "raio_y":0.2,"angulo":0.0,"feather":0.5,"fora":false}],"invertida":false}],"retoques":[]}"#;
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(
+                    PhotoViewModel {
+                        locais: Some(receita.to_string()),
+                        ..foto("retrato.jpg")
+                    },
+                    window,
+                    cx,
+                );
+                assert!(tela.tem_revelacao_local());
+                tela.zerar_tudo(window, cx);
+                assert!(tela.locais.camadas.is_empty(), "as máscaras saem");
+                tela.desfazer(window, cx);
+                assert_eq!(tela.locais.camadas.len(), 1, "e um ⌘Z as devolve");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
     /// 🚨 **A revelação já feita não é feita de novo.**
     ///
     /// Voltar uma seta, desfazer, tirar o ponteiro de cima de uma predefinição:
