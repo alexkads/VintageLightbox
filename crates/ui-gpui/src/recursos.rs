@@ -166,6 +166,8 @@ pub enum Icone {
     Spline,
     Pentagon,
     Scan,
+    // O Enquadrar.
+    Ruler,
 }
 
 impl Icone {
@@ -280,6 +282,7 @@ impl Icone {
         Icone::Spline,
         Icone::Pentagon,
         Icone::Scan,
+        Icone::Ruler,
     ];
 
     fn arquivo(self) -> &'static str {
@@ -394,6 +397,7 @@ impl Icone {
             Icone::Spline => "spline",
             Icone::Pentagon => "pentagon",
             Icone::Scan => "scan",
+            Icone::Ruler => "ruler",
         }
     }
 }

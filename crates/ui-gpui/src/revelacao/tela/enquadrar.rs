@@ -14,6 +14,8 @@
 //! | espelhar ⇆ ⇅ | liga e desliga |
 //! | slider ou transferidor | endireita, e o retângulo encolhe para caber |
 //! | duplo clique no rótulo ou no transferidor | endireitar volta a zero |
+//! | Auto | endireita pelas retas da própria foto ([`revelacao_core::nivel`]) |
+//! | régua, ou ⌘ + arrastar na foto | a reta traçada fica horizontal ou vertical |
 //! | proporção | remodela o retângulo na hora, mantendo a área |
 
 use domain::value_objects::CropSettings;
@@ -22,6 +24,7 @@ use gpui_kit::{
     canvas, div, point, prelude::*, px, AnyElement, Bounds, Context, CursorStyle, MouseButton,
     MouseDownEvent, PathBuilder, Pixels, Point, SharedString, Window,
 };
+use revelacao_core::nivel;
 
 use super::Revelacao;
 use crate::estilo;
@@ -59,7 +62,20 @@ pub(super) struct Edicao {
     pub desejado: Option<Retangulo>,
     /// O arrasto do transferidor: `(x inicial, ângulo inicial)`.
     pub transferidor: Option<(f32, f32)>,
+    /// A régua está armada: o próximo arrasto na foto traça a reta. É o botão
+    /// da régua; o ⌘ + arrastar traça sem armar.
+    pub regua_armada: bool,
+    /// A reta em curso, em pontos da janela: `(de, até)`.
+    pub regua: Option<(Point<Pixels>, Point<Pixels>)>,
+    /// O Auto está procurando as retas (na thread de fundo).
+    pub procurando: bool,
+    /// O que o Auto ou a régua têm a dizer — "não achei retas", por exemplo.
+    pub aviso: Option<SharedString>,
 }
+
+/// O traço mais curto que a régua aceita, em pontos: menos que isso é um
+/// clique, e um clique não diz direção nenhuma.
+const MENOR_TRACO: f32 = 12.;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ArrastoDoCorte {
@@ -139,8 +155,17 @@ impl Revelacao {
         self.sair_do_corte(cx);
     }
 
-    /// `Esc`: sai da ferramenta — como no site, **sem desfazer** nada.
+    /// `Esc`: sai da ferramenta — como no site, **sem desfazer** nada. Com a
+    /// régua armada ou no meio do traço, larga só a régua.
     pub fn cancelar_corte(&mut self, cx: &mut Context<Self>) {
+        if let Some(edicao) = self.edicao.as_mut() {
+            if edicao.regua_armada || edicao.regua.is_some() {
+                edicao.regua_armada = false;
+                edicao.regua = None;
+                cx.notify();
+                return;
+            }
+        }
         self.sair_do_corte(cx);
     }
 
@@ -293,11 +318,141 @@ impl Revelacao {
 
     /// Endireitar volta ao neutro — o duplo clique do site.
     fn zerar_angulo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.angulo_como_gesto(0., window, cx);
+    }
+
+    /// Um ângulo inteiro de uma vez — Auto, régua, duplo clique: fecha o gesto
+    /// anterior, endireita, vira um passo do histórico e leva o slider junto.
+    pub(super) fn angulo_como_gesto(
+        &mut self,
+        graus: f32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let graus = ((graus.clamp(-ANGULO_MAXIMO, ANGULO_MAXIMO) / PASSO_DO_ANGULO).round()
+            * PASSO_DO_ANGULO
+            * 10.)
+            .round()
+            / 10.;
+        // `-0.0` escreveria "-0.0°".
+        let graus = if graus == 0. { 0. } else { graus };
         self.gravar_o_que_estiver_pendente();
-        self.definir_angulo(0., cx);
+        self.definir_angulo(graus, cx);
         self.gravar_o_que_estiver_pendente();
         self.angulo
-            .update(cx, |estado, cx| estado.set_value(0., window, cx));
+            .update(cx, |estado, cx| estado.set_value(graus, window, cx));
+    }
+
+    /// O "Auto" do Lightroom: acha as retas da foto e endireita por elas.
+    ///
+    /// A análise (~40 ms em `release`, bem mais em `debug`) vai para a thread
+    /// de fundo. Ela olha a foto **inteira e ainda sem ângulo** — a revelada,
+    /// que é o que o motor devolveu antes do enquadramento —, e a resposta é o
+    /// ângulo absoluto: apertar Auto de novo não gira mais nada.
+    pub fn endireitar_automatico(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(edicao) = self.edicao.as_mut() else {
+            return;
+        };
+        if edicao.procurando {
+            return;
+        }
+        let Some((foto, imagem)) = self.aberta.as_ref().and_then(|a| {
+            let imagem = a.revelada.clone().or_else(|| a.bruta.clone())?;
+            Some((a.foto.id.clone(), imagem))
+        }) else {
+            return;
+        };
+        edicao.procurando = true;
+        edicao.aviso = None;
+        let atual = self.corte_atual();
+        let corte = revelacao_core::Corte::novo(
+            0.,
+            0.,
+            1.,
+            1.,
+            atual.rotation_90(),
+            0.,
+            atual.flip_horizontal(),
+            atual.flip_vertical(),
+        );
+        cx.notify();
+        cx.spawn_in(window, async move |esta, cx| {
+            let achado = cx
+                .background_executor()
+                .spawn(async move { nivel::angulo_automatico_do_corte(&imagem, &corte) })
+                .await;
+            let _ = esta.update_in(cx, |tela, window, cx| {
+                tela.receber_o_nivel(&foto, achado, window, cx)
+            });
+        })
+        .detach();
+    }
+
+    /// A resposta do Auto chegou. Se o operador trocou de foto ou saiu do
+    /// Enquadrar enquanto ela vinha, ela não vale mais.
+    fn receber_o_nivel(
+        &mut self,
+        foto: &str,
+        achado: Option<nivel::Nivel>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mesma_foto = self.aberta.as_ref().is_some_and(|a| a.foto.id == foto);
+        let Some(edicao) = self.edicao.as_mut() else {
+            return;
+        };
+        edicao.procurando = false;
+        if !mesma_foto {
+            cx.notify();
+            return;
+        }
+        match achado {
+            Some(n) => {
+                edicao.aviso = None;
+                self.angulo_como_gesto(n.angulo, window, cx);
+            }
+            None => {
+                edicao.aviso = Some(
+                    "Não achei retas confiáveis nesta foto. Trace uma com a régua sobre algo que devia ser reto."
+                        .into(),
+                );
+            }
+        }
+        cx.notify();
+    }
+
+    /// Arma ou desarma a régua (o botão).
+    pub fn alternar_regua(&mut self, cx: &mut Context<Self>) {
+        if let Some(edicao) = self.edicao.as_mut() {
+            edicao.regua_armada = !edicao.regua_armada;
+            edicao.regua = None;
+            edicao.aviso = None;
+            cx.notify();
+        }
+    }
+
+    pub(super) fn comecar_regua(&mut self, ponto: Point<Pixels>, cx: &mut Context<Self>) {
+        self.gravar_o_que_estiver_pendente();
+        if let Some(edicao) = self.edicao.as_mut() {
+            edicao.regua = Some((ponto, ponto));
+            edicao.aviso = None;
+            cx.notify();
+        }
+    }
+
+    /// O ângulo que a reta traçada daria, se o botão subisse agora.
+    ///
+    /// 🔑 **A reta é traçada sobre a foto já inclinada.** Ela é desgirada pelo
+    /// ângulo de agora antes da conta, e a resposta é o ângulo absoluto: traçar
+    /// de novo sobre a mesma reta, já endireitada, não gira mais nada.
+    fn angulo_da_regua(&self, de: Point<Pixels>, ate: Point<Pixels>) -> Option<f32> {
+        let (dx, dy) = (f32::from(ate.x - de.x), f32::from(ate.y - de.y));
+        if dx.hypot(dy) < MENOR_TRACO {
+            return None;
+        }
+        let (sen, cos) = self.corte_atual().angle().to_radians().sin_cos();
+        let (bx, by) = (dx * cos + dy * sen, -dx * sen + dy * cos);
+        Some(nivel::angulo_da_reta(bx, by).clamp(-ANGULO_MAXIMO, ANGULO_MAXIMO))
     }
 
     pub(super) fn comecar_arrasto(
@@ -339,11 +494,11 @@ impl Revelacao {
         }
     }
 
-    /// Há um gesto do Enquadrar em curso (retângulo ou transferidor)?
+    /// Há um gesto do Enquadrar em curso (retângulo, transferidor ou régua)?
     pub(super) fn arrastando_no_corte(&self) -> bool {
         self.edicao
             .as_ref()
-            .is_some_and(|e| e.arrasto.is_some() || e.transferidor.is_some())
+            .is_some_and(|e| e.arrasto.is_some() || e.transferidor.is_some() || e.regua.is_some())
     }
 
     /// O ponteiro andou durante um gesto do Enquadrar.
@@ -353,6 +508,11 @@ impl Revelacao {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some((_, ate)) = self.edicao.as_mut().and_then(|e| e.regua.as_mut()) {
+            *ate = ponteiro;
+            cx.notify();
+            return;
+        }
         let Some(edicao) = self.edicao.as_ref() else {
             return;
         };
@@ -391,10 +551,19 @@ impl Revelacao {
     }
 
     /// O botão subiu: o gesto vira um passo e vai para o banco.
-    pub(super) fn soltar_no_corte(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn soltar_no_corte(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(edicao) = self.edicao.as_mut() else {
             return;
         };
+        if let Some((de, ate)) = edicao.regua.take() {
+            // Como no Lightroom, a régua serve uma reta e volta ao retângulo.
+            edicao.regua_armada = false;
+            match self.angulo_da_regua(de, ate) {
+                Some(graus) => self.angulo_como_gesto(graus, window, cx),
+                None => cx.notify(),
+            }
+            return;
+        }
         if edicao.arrasto.take().is_none() && edicao.transferidor.take().is_none() {
             return;
         }
@@ -494,15 +663,31 @@ impl Revelacao {
                     MouseButton::Left,
                     cx.listener(move |tela, evento: &MouseDownEvent, _window, cx| {
                         cx.stop_propagation();
-                        tela.comecar_arrasto(Some(alca), evento.position, cx);
+                        if evento.modifiers.platform {
+                            tela.comecar_regua(evento.position, cx);
+                        } else {
+                            tela.comecar_arrasto(Some(alca), evento.position, cx);
+                        }
                     }),
                 )
         });
 
+        let armada = self.edicao.as_ref().is_some_and(|e| e.regua_armada);
         Some(
             div()
+                .id("overlay-de-corte")
                 .absolute()
                 .inset_0()
+                // ⌘ + arrastar no véu, fora do retângulo, também traça a régua.
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|tela, evento: &MouseDownEvent, _window, cx| {
+                        if evento.modifiers.platform {
+                            cx.stop_propagation();
+                            tela.comecar_regua(evento.position, cx);
+                        }
+                    }),
+                )
                 .children(faixas)
                 .child(
                     div()
@@ -519,13 +704,87 @@ impl Revelacao {
                             MouseButton::Left,
                             cx.listener(|tela, evento: &MouseDownEvent, _window, cx| {
                                 cx.stop_propagation();
-                                tela.comecar_arrasto(None, evento.position, cx);
+                                if evento.modifiers.platform {
+                                    tela.comecar_regua(evento.position, cx);
+                                } else {
+                                    tela.comecar_arrasto(None, evento.position, cx);
+                                }
                             }),
                         )
                         .children(grade)
                         .children(alcas),
                 )
                 .child(self.transferidor(cx))
+                // 🔑 **Com a régua armada, a foto inteira é da régua**: a
+                // camada vai por cima do retângulo, e arrastar o meio traça em
+                // vez de mover.
+                .when(armada, |overlay| {
+                    overlay.child(
+                        div()
+                            .id("camada-da-regua")
+                            .absolute()
+                            .inset_0()
+                            .cursor(CursorStyle::Crosshair)
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|tela, evento: &MouseDownEvent, _window, cx| {
+                                    cx.stop_propagation();
+                                    tela.comecar_regua(evento.position, cx);
+                                }),
+                            ),
+                    )
+                })
+                .children(self.traco_da_regua())
+                .into_any_element(),
+        )
+    }
+
+    /// A reta que a régua está traçando, com o ângulo que ela vai dar.
+    fn traco_da_regua(&self) -> Option<AnyElement> {
+        let (de, ate) = self.edicao.as_ref()?.regua?;
+        let angulo = self.angulo_da_regua(de, ate);
+        let ambar = gpui_kit::rgb(0xfbbf24);
+        let origem = self.palco.origin;
+        Some(
+            div()
+                .absolute()
+                .inset_0()
+                .child(
+                    canvas(
+                        |_, _, _| {},
+                        move |_, _, window, _| {
+                            // O contorno escuro por baixo: a reta âmbar se lê
+                            // sobre a parede clara e sobre o vestido branco.
+                            for (largura, cor) in [
+                                (4., gpui_kit::Hsla::from(gpui_kit::rgba(0x000000a6))),
+                                (2., gpui_kit::Hsla::from(ambar)),
+                            ] {
+                                let mut traco = PathBuilder::stroke(px(largura));
+                                traco.move_to(de);
+                                traco.line_to(ate);
+                                if let Ok(caminho) = traco.build() {
+                                    window.paint_path(caminho, cor);
+                                }
+                            }
+                        },
+                    )
+                    .absolute()
+                    .inset_0(),
+                )
+                .children(angulo.map(|graus| {
+                    div()
+                        .absolute()
+                        .left(ate.x - origem.x + px(12.))
+                        .top(ate.y - origem.y - px(10.))
+                        .px(px(6.))
+                        .py(px(2.))
+                        .rounded(px(4.))
+                        .bg(gpui_kit::rgba(0x000000b3))
+                        .font_family("Menlo")
+                        .text_size(px(11.))
+                        .text_color(ambar)
+                        .child(rotulo_do_angulo(graus))
+                }))
                 .into_any_element(),
         )
     }
@@ -739,7 +998,47 @@ impl Revelacao {
                                     .child(rotulo_do_angulo(angulo)),
                             ),
                     )
-                    .child(div().mt(px(2.)).child(Slider::new(&self.angulo).horizontal())),
+                    .child(div().mt(px(2.)).child(Slider::new(&self.angulo).horizontal()))
+                    .child(
+                        h_flex()
+                            .mt(px(8.))
+                            .gap(px(4.))
+                            .child({
+                                let procurando = self.edicao.as_ref().is_some_and(|e| e.procurando);
+                                estilo::desligado(
+                                    estilo::botao_contorno("corte-auto", cx)
+                                        .flex_1()
+                                        .h(px(28.))
+                                        .text_xs()
+                                        .gap(px(6.))
+                                        .child(Icon::new(Icone::Sparkles).size(px(14.)))
+                                        .child(if procurando { "Procurando retas…" } else { "Auto" })
+                                        .tooltip("Endireita pelas retas da foto: batentes, janelas, quinas"),
+                                    procurando,
+                                )
+                                .when(!procurando, |b| {
+                                    b.on_click(cx.listener(|tela, _, window, cx| {
+                                        tela.endireitar_automatico(window, cx)
+                                    }))
+                                })
+                            })
+                            .child({
+                                let armada = self.edicao.as_ref().is_some_and(|e| e.regua_armada);
+                                botao("corte-regua", Icone::Ruler, armada)
+                                    .w(px(36.))
+                                    .h(px(28.))
+                                    .tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new("Régua: trace sobre algo que devia ser reto (ou ⌘ + arrastar na foto)").build(w, cx))
+                                    .on_click(cx.listener(|tela, _, _, cx| tela.alternar_regua(cx)))
+                            }),
+                    )
+                    .children(self.edicao.as_ref().and_then(|e| {
+                        let texto = if e.regua_armada {
+                            Some(SharedString::from("Arraste sobre a foto ao longo de algo que devia ser reto — um batente, o rodapé, o horizonte."))
+                        } else {
+                            e.aviso.clone()
+                        };
+                        texto.map(|t| div().mt(px(6.)).text_size(px(11.)).text_color(mudo).child(t))
+                    })),
             )
             .child(
                 v_flex()
@@ -823,14 +1122,17 @@ impl Revelacao {
         let partes_extra: Vec<u32> = partes.filter_map(|n| n.parse().ok()).collect();
         match nome {
             "enquadrar" => self.alternar_corte(window, cx),
-            "angulo" => {
-                let graus = numero.unwrap_or(0.);
-                self.gravar_o_que_estiver_pendente();
-                self.definir_angulo(graus, cx);
-                self.gravar_o_que_estiver_pendente();
-                self.angulo
-                    .update(cx, |estado, cx| estado.set_value(graus, window, cx));
-            }
+            "angulo" => self.angulo_como_gesto(numero.unwrap_or(0.), window, cx),
+            // 🧪 O botão Auto, e a régua armada pelo botão.
+            "auto" => self.endireitar_automatico(window, cx),
+            "regua" => self.alternar_regua(cx),
+            "estado_corte" => eprintln!(
+                "[corte] angulo={} regua_armada={} procurando={} aviso={:?}",
+                self.corte_atual().angle(),
+                self.edicao.as_ref().is_some_and(|e| e.regua_armada),
+                self.edicao.as_ref().is_some_and(|e| e.procurando),
+                self.edicao.as_ref().and_then(|e| e.aviso.clone()),
+            ),
             "proporcao" => self.travar_proporcao(numero, cx),
             "girar" => self.girar(cx),
             "zoom" => self.z_apertado(cx),

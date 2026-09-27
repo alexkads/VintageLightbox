@@ -2684,11 +2684,11 @@ impl Revelacao {
 
                 window.on_mouse_event({
                     let esta = ouvinte.clone();
-                    move |_evento: &MouseUpEvent, fase, _window, cx| {
+                    move |_evento: &MouseUpEvent, fase, window, cx| {
                         if !fase.bubble() {
                             return;
                         }
-                        esta.update(cx, |tela, cx| tela.soltar_no_corte(cx));
+                        esta.update(cx, |tela, cx| tela.soltar_no_corte(window, cx));
                     }
                 });
             },
@@ -6115,7 +6115,7 @@ mod testes {
                     gravador.gravado().is_empty(),
                     "no meio do arrasto não grava"
                 );
-                tela.soltar_no_corte(cx);
+                tela.soltar_no_corte(window, cx);
 
                 assert!(tela.cortando(), "soltar não fecha a ferramenta");
                 assert_eq!(tela.corte.x, Some(0.25));
@@ -6126,6 +6126,163 @@ mod testes {
         assert_eq!(gravado.len(), 1);
         assert_eq!(gravado[0].2.x, Some(0.25), "o corte novo foi para o banco");
         assert_eq!(gravado[0].2.largura, Some(0.75));
+    }
+
+    /// Uma parede com batentes, girada `graus` — para o Auto e a régua.
+    fn parede_torta(graus: f32) -> DynamicImage {
+        let reta = RgbaImage::from_fn(900, 600, |x, y| {
+            let batente = [150u32, 330, 570, 750].iter().any(|b| x.abs_diff(*b) < 3);
+            let rodape = y.abs_diff(480) < 3;
+            if batente || rodape {
+                Rgba([240, 240, 235, 255])
+            } else {
+                Rgba([130, 115, 100, 255])
+            }
+        });
+        let girada =
+            revelacao_core::transformacao::inclinar_inteira(&DynamicImage::ImageRgba8(reta), graus);
+        // Sem os cantos transparentes do giro: eles seriam retas também.
+        girada.crop_imm(90, 60, 720, 480)
+    }
+
+    /// 🚨 A régua: a reta traçada fica reta, num passo só, e a régua desarma.
+    #[gpui_kit::test]
+    fn a_regua_endireita_num_passo(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-regua.jpg", &parede_torta(0.))
+            .expect("gravar preview");
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let janela = com_gravador(cx, previews, gravador.clone());
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("regua.jpg"), window, cx);
+                tela.palco = Bounds::new(
+                    gpui_kit::point(px(0.), px(0.)),
+                    gpui_kit::size(px(400.), px(300.)),
+                );
+                tela.alternar_corte(window, cx);
+                tela.alternar_regua(cx);
+
+                // Desce 5 a cada 100: girada 2,86° no horário.
+                tela.comecar_regua(gpui_kit::point(px(50.), px(100.)), cx);
+                tela.mover_no_corte(gpui_kit::point(px(150.), px(105.)), window, cx);
+                assert!(gravador.gravado().is_empty(), "no meio do traço não grava");
+                tela.soltar_no_corte(window, cx);
+
+                assert_eq!(tela.corte_atual().angle(), -2.9);
+                assert!(tela.cortando(), "a régua não fecha o Enquadrar");
+                assert!(
+                    !tela.edicao.as_ref().unwrap().regua_armada,
+                    "a régua serve uma reta e desarma"
+                );
+
+                // A mesma reta, traçada de novo sobre a foto já endireitada
+                // (agora horizontal na tela), não gira mais nada.
+                tela.comecar_regua(gpui_kit::point(px(50.), px(100.)), cx);
+                tela.mover_no_corte(gpui_kit::point(px(150.), px(100.)), window, cx);
+                tela.soltar_no_corte(window, cx);
+                assert_eq!(tela.corte_atual().angle(), -2.9);
+
+                // Um clique não é traço.
+                tela.comecar_regua(gpui_kit::point(px(50.), px(100.)), cx);
+                tela.mover_no_corte(gpui_kit::point(px(53.), px(98.)), window, cx);
+                tela.soltar_no_corte(window, cx);
+                assert_eq!(tela.corte_atual().angle(), -2.9);
+            })
+            .expect("a janela deve estar aberta");
+
+        let gravado = gravador.gravado();
+        assert_eq!(
+            gravado.len(),
+            1,
+            "um passo: o traço repetido e o clique não gravam"
+        );
+        assert_eq!(gravado[0].2.angulo, Some(-2.9));
+    }
+
+    /// `Esc` com a régua armada larga só a régua.
+    #[gpui_kit::test]
+    fn esc_larga_a_regua_antes_do_enquadrar(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-esc.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("esc.jpg"), window, cx);
+                tela.alternar_corte(window, cx);
+                tela.alternar_regua(cx);
+                tela.cancelar_corte(cx);
+                assert!(tela.cortando());
+                assert!(!tela.edicao.as_ref().unwrap().regua_armada);
+                tela.cancelar_corte(cx);
+                assert!(!tela.cortando());
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 O Auto endireita pelas retas da foto, e a resposta é um passo.
+    #[gpui_kit::test]
+    fn o_auto_endireita_pelas_retas(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-auto.jpg", &parede_torta(3.))
+            .expect("gravar preview");
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let janela = com_gravador(cx, previews, gravador.clone());
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("auto.jpg"), window, cx);
+                tela.alternar_corte(window, cx);
+                tela.endireitar_automatico(window, cx);
+                assert!(tela.edicao.as_ref().unwrap().procurando);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        janela
+            .update(cx, |tela, _window, _cx| {
+                let edicao = tela.edicao.as_ref().unwrap();
+                assert!(!edicao.procurando);
+                assert_eq!(edicao.aviso, None);
+                assert!(
+                    (tela.corte_atual().angle() + 3.).abs() <= 0.15,
+                    "girada 3°, o Auto pôs {}°",
+                    tela.corte_atual().angle()
+                );
+            })
+            .expect("a janela deve estar aberta");
+        assert_eq!(gravador.gravado().len(), 1);
+    }
+
+    /// Foto sem reta: o Auto avisa e não mexe em nada.
+    #[gpui_kit::test]
+    fn o_auto_sem_retas_avisa_e_nao_mexe(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-lisa.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let janela = com_gravador(cx, previews, gravador.clone());
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("lisa.jpg"), window, cx);
+                tela.alternar_corte(window, cx);
+                tela.endireitar_automatico(window, cx);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert!(tela.edicao.as_ref().unwrap().aviso.is_some());
+                assert_eq!(tela.corte_atual().angle(), 0.);
+            })
+            .expect("a janela deve estar aberta");
+        assert!(gravador.gravado().is_empty());
     }
 
     /// 🚨 O endireitar encolhe o retângulo para caber, e cresce de volta.
@@ -6525,7 +6682,7 @@ mod testes {
                     cx,
                 );
                 tela.mover_no_corte(gpui_kit::point(px(60.), px(40.)), window, cx);
-                tela.soltar_no_corte(cx);
+                tela.soltar_no_corte(window, cx);
                 let (w, h) = quadrado(tela);
                 assert!((w - h).abs() <= 1., "1:1 depois do arrasto: {w} × {h}");
                 assert!(w < 80.);

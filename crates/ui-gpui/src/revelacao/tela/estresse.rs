@@ -831,7 +831,7 @@ fn estresse_o_enquadrar_arrastado_sem_parar(cx: &mut TestAppContext) {
                 }
                 valido(tela);
                 let antes = gravador.gravado().len();
-                tela.soltar_no_corte(cx);
+                tela.soltar_no_corte(window, cx);
                 assert_eq!(
                     gravador.gravado().len(),
                     antes + 1,
@@ -898,7 +898,7 @@ fn estresse_o_enquadrar_arrastado_sem_parar(cx: &mut TestAppContext) {
                 tela.mover_no_corte(gpui_kit::point(px(final_), px(0.)), window, cx);
                 valido(tela);
                 let angulo_antes = tela.corte_atual().angle();
-                tela.soltar_no_corte(cx);
+                tela.soltar_no_corte(window, cx);
                 assert!(
                     gravador.gravado().len() <= antes + 1,
                     "volta {volta}: mais de uma gravação ao soltar"

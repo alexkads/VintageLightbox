@@ -89,7 +89,7 @@ impl Revelacao {
             window,
             cx,
         );
-        self.soltar_no_corte(cx);
+        self.soltar_no_corte(window, cx);
     }
 
     /// A proporção travada no Enquadrar.

@@ -52,6 +52,10 @@ pub(super) const ATALHOS: [(&str, &[(&str, &str)]); 5] = [
             ("]", "Gira 90° à direita"),
             ("⇧H", "Espelha na horizontal"),
             ("⇧V", "Espelha na vertical"),
+            (
+                "⌘ + arrastar",
+                "Traça a régua: a reta fica na horizontal ou na vertical",
+            ),
         ],
     ),
     (
