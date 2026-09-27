@@ -818,6 +818,27 @@ impl Revelacao {
         true
     }
 
+    /// Está na Revelação local: com ferramenta, máscara ou retoque escolhido,
+    /// ou com um laço pela metade.
+    pub fn dentro_da_revelacao_local(&self) -> bool {
+        self.local.ferramenta.is_some()
+            || self.local.mascara_sel.is_some()
+            || self.local.selecionado.is_some()
+            || !self.local.poligono.is_empty()
+    }
+
+    /// O botão de sair: tudo o que o `Esc` larga em vários toques, de uma vez
+    /// — a foto volta ao que a Revelação global mostra.
+    pub fn sair_da_revelacao_local(&mut self, cx: &mut Context<Self>) {
+        self.local.poligono.clear();
+        self.local.origem = None;
+        self.local.selecionado = None;
+        self.local.mascara_sel = None;
+        self.local.ferramenta = None;
+        self.local.criando = false;
+        cx.notify();
+    }
+
     pub fn alternar_marcacoes(&mut self, cx: &mut Context<Self>) {
         self.local.marcacoes = !self.local.marcacoes;
         cx.notify();
@@ -2266,12 +2287,23 @@ impl Revelacao {
                     .small()
                     .ghost()
                     .selected(self.local.marcacoes)
+                    .debug_selector(|| "local-marcacoes".into())
                     .tooltip(if self.local.marcacoes {
                         "Esconder marcações (H)"
                     } else {
                         "Mostrar marcações (H)"
                     })
                     .on_click(cx.listener(|tela, _e, _w, cx| tela.alternar_marcacoes(cx))),
+            )
+            .child(
+                Button::new("local-sair")
+                    .icon(Icon::new(Icone::LogOut).size(px(15.)))
+                    .small()
+                    .ghost()
+                    .disabled(!self.dentro_da_revelacao_local())
+                    .debug_selector(|| "local-sair".into())
+                    .tooltip("Sair da Revelação local (Esc)")
+                    .on_click(cx.listener(|tela, _e, _w, cx| tela.sair_da_revelacao_local(cx))),
             );
 
         // 🔑 **Sanfona, como os outros painéis da coluna**: a mesma chave de
