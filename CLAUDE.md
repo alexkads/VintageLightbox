@@ -304,6 +304,14 @@ A partir da primeira instalação ele se atualiza sozinho. O caminho inteiro e a
 quem já tem o app" antes de tocar em versão, empacotamento, `atualizacao/`, `lancar-local.sh`,
 `montar-manifesto.py` ou `enderecos-de-atualizacao.txt`.**
 
+🔄 **Desde 27/set/2026, todo balcão atualiza compilando — o Mac também** (dono: *"a atualização
+somente por script de build tá sendo a melhor opção"*; sem conta de desenvolvedor Apple, o `.dmg`
+sai sem notarização). Lançar é subir a versão (três arquivos) e o `make producao` do e-commerce levar
+o `docs/novidades.json` ao `main`: os apps leem esse arquivo e o "Atualizar" recompila o `main`. O
+pacote do macOS e o R2 abaixo saíram do caminho padrão (`producao.sh --pacote-mac` ainda os faz);
+o `latest.json` do R2 ficou na 0.1.24, e um Mac instalado pelo `.dmg` que não acha pacote novo roda
+o instalador, que compila (`atualizacao/compilar.rs`). O que segue descreve o caminho do pacote.
+
 **Como funciona.** Ao abrir, o app lê `latest.json` nos endereços de
 [`empacotamento/enderecos-de-atualizacao.txt`](empacotamento/enderecos-de-atualizacao.txt), em
 ordem. Primeiro o bucket R2 `vintagelightbox`
