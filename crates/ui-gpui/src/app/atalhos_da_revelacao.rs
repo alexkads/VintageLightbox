@@ -24,7 +24,7 @@
 use gpui_kit::{actions, prelude::*, Context, Div, KeyBinding, KeyUpEvent, Window};
 
 use super::{Aplicativo, Tela, CONTEXTO, SEM_CAMPO_DE_TEXTO};
-use crate::revelacao::tela::Revelacao;
+use crate::revelacao::tela::{Ferramenta, Revelacao};
 use crate::revelacao::zoom::Nivel;
 
 actions!(
@@ -47,7 +47,17 @@ actions!(
         ZoomAoFim,
         ZoomTelaSeguinte,
         ZoomTelaAnterior,
-        Comparar
+        Comparar,
+        FerramentaPincel,
+        FerramentaLinear,
+        FerramentaRadial,
+        FerramentaLaco,
+        FerramentaCarimbo,
+        FerramentaBandAid,
+        FerramentaPreencher,
+        AlternarMarcacoes,
+        MenosSuavizacao,
+        MaisSuavizacao
     ]
 );
 
@@ -86,6 +96,21 @@ pub(super) fn ligar(cx: &mut gpui_kit::App) {
         // já é a Cortesia no caixa. O `cmd-shift-c` (Copiar revelação) é outra
         // tecla e não disputa com este.
         KeyBinding::new("shift-c", Comparar, solta),
+        // A Revelação local — as teclas do Lightroom e do Photoshop.
+        KeyBinding::new("k", FerramentaPincel, solta),
+        KeyBinding::new("m", FerramentaLinear, solta),
+        KeyBinding::new("shift-m", FerramentaRadial, solta),
+        KeyBinding::new("l", FerramentaLaco, solta),
+        KeyBinding::new("s", FerramentaCarimbo, solta),
+        KeyBinding::new("j", FerramentaBandAid, solta),
+        KeyBinding::new("shift-j", FerramentaPreencher, solta),
+        KeyBinding::new("h", AlternarMarcacoes, solta),
+        // `{` e `}`: a suavização. Pelo caractere e pela tecla com Shift, para
+        // valer no teclado americano e no ABNT2.
+        KeyBinding::new("{", MenosSuavizacao, solta),
+        KeyBinding::new("}", MaisSuavizacao, solta),
+        KeyBinding::new("shift-[", MenosSuavizacao, solta),
+        KeyBinding::new("shift-]", MaisSuavizacao, solta),
     ]);
 }
 
@@ -175,11 +200,61 @@ impl Aplicativo {
             }
             este.revelacao.update(cx, |tela, cx| tela.aplicar_corte(cx));
         }))
-        .on_action(cx.listener(|este, _: &GirarAEsquerda, _w, cx| {
-            este.na_revelacao(cx, |tela, cx| tela.girar_a_esquerda(cx))
+        // `[` e `]`: com uma ferramenta da Revelação local na mão, o tamanho
+        // (como no Lightroom); sem, o giro de 90° (como no site).
+        .on_action(cx.listener(|este, _: &GirarAEsquerda, window, cx| {
+            este.na_revelacao(cx, |tela, cx| {
+                if tela.com_ferramenta_local() {
+                    tela.mudar_tamanho_local(false, false, window, cx)
+                } else {
+                    tela.girar_a_esquerda(cx)
+                }
+            })
         }))
-        .on_action(cx.listener(|este, _: &GirarADireita, _w, cx| {
-            este.na_revelacao(cx, |tela, cx| tela.girar(cx))
+        .on_action(cx.listener(|este, _: &GirarADireita, window, cx| {
+            este.na_revelacao(cx, |tela, cx| {
+                if tela.com_ferramenta_local() {
+                    tela.mudar_tamanho_local(true, false, window, cx)
+                } else {
+                    tela.girar(cx)
+                }
+            })
+        }))
+        .on_action(cx.listener(|este, _: &MenosSuavizacao, window, cx| {
+            este.na_revelacao(cx, |tela, cx| {
+                tela.mudar_tamanho_local(false, true, window, cx)
+            })
+        }))
+        .on_action(cx.listener(|este, _: &MaisSuavizacao, window, cx| {
+            este.na_revelacao(cx, |tela, cx| {
+                tela.mudar_tamanho_local(true, true, window, cx)
+            })
+        }))
+        .on_action(cx.listener(|este, _: &FerramentaPincel, _w, cx| {
+            este.na_revelacao(cx, |tela, cx| tela.usar_ferramenta(Ferramenta::Pincel, cx))
+        }))
+        .on_action(cx.listener(|este, _: &FerramentaLinear, _w, cx| {
+            este.na_revelacao(cx, |tela, cx| tela.usar_ferramenta(Ferramenta::Linear, cx))
+        }))
+        .on_action(cx.listener(|este, _: &FerramentaRadial, _w, cx| {
+            este.na_revelacao(cx, |tela, cx| tela.usar_ferramenta(Ferramenta::Radial, cx))
+        }))
+        .on_action(cx.listener(|este, _: &FerramentaLaco, _w, cx| {
+            este.na_revelacao(cx, |tela, cx| tela.usar_ferramenta(Ferramenta::Laco, cx))
+        }))
+        .on_action(cx.listener(|este, _: &FerramentaCarimbo, _w, cx| {
+            este.na_revelacao(cx, |tela, cx| tela.usar_ferramenta(Ferramenta::Carimbo, cx))
+        }))
+        .on_action(cx.listener(|este, _: &FerramentaBandAid, _w, cx| {
+            este.na_revelacao(cx, |tela, cx| tela.usar_ferramenta(Ferramenta::BandAid, cx))
+        }))
+        .on_action(cx.listener(|este, _: &FerramentaPreencher, _w, cx| {
+            este.na_revelacao(cx, |tela, cx| {
+                tela.usar_ferramenta(Ferramenta::Preencher, cx)
+            })
+        }))
+        .on_action(cx.listener(|este, _: &AlternarMarcacoes, _w, cx| {
+            este.na_revelacao(cx, |tela, cx| tela.alternar_marcacoes(cx))
         }))
         .on_action(cx.listener(|este, _: &EspelharNaHorizontal, _w, cx| {
             este.na_revelacao(cx, |tela, cx| tela.espelhar_horizontal(cx))

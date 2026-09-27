@@ -350,6 +350,7 @@ impl Revelacao {
         let aviso = self.aviso_de_comprada(cx);
         let mut corpo: Vec<AnyElement> = Vec::new();
         if !enquadrando {
+            corpo.push(self.painel_local(cx));
             corpo.push(self.cabecalho_dos_ajustes(cx));
             corpo.push(self.abas_de_espaco(cx));
             let paineis: &[Painel] = if self.estado_do_painel.no_rgb() {

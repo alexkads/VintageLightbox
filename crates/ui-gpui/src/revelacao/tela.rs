@@ -53,12 +53,15 @@ use infrastructure::transformacao;
 /// O Enquadrar: retângulo, alças, transferidor e o painel dele.
 mod comparar;
 mod enquadrar;
+/// A Revelação local: máscaras e retoques — ferramentas, gestos e painel.
+mod local;
 /// O zoom no palco e o Navegador.
 mod navegacao;
 /// A coluna das predefinições.
 mod predefinicoes;
 /// O bruto em resolução cheia quando o zoom passa da cópia.
 mod resolucao;
+pub use local::Ferramenta;
 
 /// A coluna da direita: cabeçalho, abas sRGB/RGB, painéis e gráficos.
 mod painel;
@@ -226,6 +229,8 @@ pub struct Revelacao {
     /// app, ou corrompida): a tela mostra a foto sem ela e **não grava por
     /// cima** — o texto fica intacto para quem souber lê-lo.
     locais_ilegiveis: Option<String>,
+    /// A ferramenta, o gesto em curso e os sliders da Revelação local.
+    local: local::Local,
     /// Os passos de desfazer, **por foto**: trocar de foto começa um histórico
     /// novo. Um `Cmd+Z` que atravessasse fotos aplicaria a revelação de uma na
     /// outra — que é o mesmo defeito que a cópia da seleção já impede.
@@ -554,6 +559,9 @@ impl Revelacao {
         // O slider de endireitamento nasce junto com os outros, mas fora da
         // tabela: ele não escreve em `Ajustes` — escreve no corte, que é outro
         // caminho e outro dono.
+        // Os sliders da Revelação local (tamanho, suavização, fluxo, exposição).
+        let local = local::Local::novo(window, cx, &mut assinaturas);
+
         let angulo = cx.new(|_| {
             SliderState::new()
                 .min(-ANGULO_MAXIMO)
@@ -593,6 +601,7 @@ impl Revelacao {
             corte: Corte::default(),
             locais: Arc::default(),
             locais_ilegiveis: None,
+            local,
             historico: Historico::novo(Estado::default()),
             pendente: false,
             gravadas: std::collections::HashSet::new(),
@@ -1303,6 +1312,7 @@ impl Revelacao {
         // mostraria o arquivo cru de uma foto que já foi revelada.
         self.ajustes = persistencia::da_foto(&foto);
         self.corte = persistencia::corte_da_foto(&foto);
+        self.local.esquecer_a_foto();
         match persistencia::locais_da_foto(&foto, &*self.gravador) {
             persistencia::LocaisDaFoto::Lida(receita) => {
                 self.locais = Arc::new(receita);
@@ -1729,7 +1739,7 @@ impl Revelacao {
     /// A receita local que a GPU revela agora — a da foto, mais o gesto que
     /// estiver em curso na Revelação local.
     pub(super) fn locais_na_tela(&self) -> Arc<ReceitaLocal> {
-        self.locais.clone()
+        self.locais_com_o_gesto()
     }
 
     /// A receita local gravada de uma foto do acervo — a da tela, se ela está
@@ -2465,6 +2475,7 @@ impl Revelacao {
                     })
                     .children(self.caixa_de_zoom())
                     .children(self.overlay_de_corte(cx))
+                    .children(self.marcacoes_locais(cx))
                     // O `canvas` mede o palco e é onde o arrasto se liga:
                     // registrar ouvinte de mouse exige estar na fase de
                     // pintura, e um `div` comum não chega lá.
@@ -3082,6 +3093,7 @@ mod testes {
     use super::super::presets::mentira::GuardaDeMentira;
     use super::super::presets::ordem::Grupo;
     use gpui_kit::App;
+    use revelacao_core::locais::Forma;
 
     fn previews_descartaveis() -> (Arc<PreviewManager>, TempDir) {
         let dir = TempDir::new().expect("criar diretório temporário");
@@ -6697,6 +6709,222 @@ mod testes {
                     tela.ajustes().saturation,
                     0.0,
                     "a saturação era da foto a — na b ela não existe, e tem de voltar ao neutro"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    // ------------------------------------------------ a Revelação local
+
+    fn ponteiro_desce(x: f32, y: f32, alt: bool) -> gpui_kit::MouseDownEvent {
+        gpui_kit::MouseDownEvent {
+            button: MouseButton::Left,
+            position: gpui_kit::point(px(x), px(y)),
+            modifiers: gpui_kit::Modifiers {
+                alt,
+                ..Default::default()
+            },
+            click_count: 1,
+            first_mouse: false,
+        }
+    }
+
+    fn ponteiro_anda(x: f32, y: f32) -> MouseMoveEvent {
+        MouseMoveEvent {
+            position: gpui_kit::point(px(x), px(y)),
+            pressed_button: Some(MouseButton::Left),
+            modifiers: Default::default(),
+        }
+    }
+
+    /// Um ponto da área do palco em coordenadas da janela — o que o ponteiro
+    /// entrega.
+    fn na_janela(
+        tela: &Revelacao,
+        p: crate::revelacao::zoom::Ponto,
+    ) -> crate::revelacao::zoom::Ponto {
+        crate::revelacao::zoom::Ponto {
+            x: p.x + f32::from(tela.palco.origin.x),
+            y: p.y + f32::from(tela.palco.origin.y),
+        }
+    }
+
+    /// Abre a foto cinza num palco de 800×600 — a foto de 8×8 encaixa num
+    /// quadrado de 600 no meio, e o centro dela é (400, 300).
+    fn aberta_no_palco(
+        cx: &mut TestAppContext,
+        gravador: Arc<GravadorDeMentira>,
+        foto_aberta: PhotoViewModel,
+    ) -> (gpui_kit::WindowHandle<Revelacao>, TempDir) {
+        let (previews, dir) = previews_descartaveis();
+        previews
+            .save_preview(&foto_aberta.id, &foto_cinza())
+            .expect("gravar preview");
+        let janela = com_gravador(cx, previews, gravador);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto_aberta, window, cx);
+                tela.medir_o_palco(800., 600.);
+            })
+            .expect("a janela deve estar aberta");
+        (janela, dir)
+    }
+
+    /// 🚨 **Uma pincelada é um passo só**, e o gesto em curso é provisório:
+    /// revelado pela GPU, mas fora do histórico e do banco até soltar.
+    #[gpui_kit::test]
+    fn uma_pincelada_e_um_passo_so_e_so_grava_ao_soltar(cx: &mut TestAppContext) {
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let (janela, _dir) = aberta_no_palco(cx, gravador.clone(), foto("retrato.jpg"));
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.usar_ferramenta(Ferramenta::Pincel, cx);
+                let c = na_janela(
+                    tela,
+                    tela.ponto_da_foto([0.5, 0.5]).expect("a foto na tela"),
+                );
+                tela.local_apertar(&ponteiro_desce(c.x, c.y, false), window, cx);
+                for dx in [20., 50., 80., 100.] {
+                    tela.local_mover(&ponteiro_anda(c.x + dx, c.y), cx);
+                }
+                // No meio do gesto: a GPU vê, o histórico e o banco não.
+                assert_eq!(tela.locais_na_tela().camadas.len(), 1);
+                assert!(tela.locais.camadas.is_empty(), "provisório não é receita");
+                assert!(!tela.historico.pode_desfazer());
+                assert!(gravador.locais_gravados().is_empty());
+
+                tela.local_soltar(cx);
+                let camada = &tela.locais.camadas[0];
+                assert_eq!(camada.nome, "Máscara 1");
+                let Forma::Pincel(traco) = &camada.componentes[0].forma else {
+                    panic!("um pincel");
+                };
+                assert_eq!(traco.pontos.len(), 5);
+                // O centro do palco é o centro da foto.
+                assert!(
+                    (traco.pontos[0][0] - 0.5).abs() < 0.01
+                        && (traco.pontos[0][1] - 0.5).abs() < 0.01
+                );
+                assert_eq!(
+                    gravador.locais_gravados().len(),
+                    1,
+                    "uma gravação da receita local"
+                );
+
+                tela.desfazer(window, cx);
+                assert!(
+                    tela.locais.camadas.is_empty(),
+                    "um ⌘Z desfaz a pincelada inteira"
+                );
+                tela.refazer(window, cx);
+                assert_eq!(tela.locais.camadas.len(), 1);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// A receita local gravada volta ao reabrir a foto — e salvar a máscara não
+    /// mexe nos ajustes nem no corte que a foto tinha.
+    #[gpui_kit::test]
+    fn a_mascara_volta_ao_reabrir_e_nao_mexe_no_corte(cx: &mut TestAppContext) {
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let mut cortada = foto("cortada.jpg");
+        cortada.edit_crop_width = Some(0.8);
+        let (janela, _dir) = aberta_no_palco(cx, gravador.clone(), cortada.clone());
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.usar_ferramenta(Ferramenta::Radial, cx);
+                let c = na_janela(
+                    tela,
+                    tela.ponto_da_foto([0.5, 0.5]).expect("a foto na tela"),
+                );
+                tela.local_apertar(&ponteiro_desce(c.x, c.y, false), window, cx);
+                tela.local_mover(&ponteiro_anda(c.x + 80., c.y + 60.), cx);
+                tela.local_soltar(cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        let (_, gravado) = gravador
+            .locais_gravados()
+            .pop()
+            .expect("gravou a receita local");
+        let (_, ajustes, corte) = gravador.gravado().pop().expect("gravou a revelação");
+        assert_eq!(ajustes, Ajustes::default(), "os ajustes ficam");
+        assert_eq!(corte.largura, Some(0.8), "o corte fica");
+
+        let mut reaberta = cortada;
+        reaberta.locais = gravado;
+        let (outra, _dir2) = aberta_no_palco(cx, Arc::new(GravadorDeMentira::default()), reaberta);
+        outra
+            .update(cx, |tela, _window, _cx| {
+                assert_eq!(tela.locais.camadas.len(), 1);
+                assert!(matches!(
+                    tela.locais.camadas[0].componentes[0].forma,
+                    Forma::Radial(_)
+                ));
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// O band-aid nasce selecionado; arrastar a origem muda só a origem, num
+    /// passo; e o `Delete` apaga o retoque — nunca a foto.
+    #[gpui_kit::test]
+    fn o_band_aid_muda_a_origem_arrastando_e_o_delete_o_apaga(cx: &mut TestAppContext) {
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let (janela, _dir) = aberta_no_palco(cx, gravador, foto("retrato.jpg"));
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.usar_ferramenta(Ferramenta::BandAid, cx);
+                let c = na_janela(
+                    tela,
+                    tela.ponto_da_foto([0.5, 0.5]).expect("a foto na tela"),
+                );
+                tela.local_apertar(&ponteiro_desce(c.x, c.y, false), window, cx);
+                tela.local_soltar(cx);
+                assert_eq!(tela.locais.retoques.len(), 1);
+                assert_eq!(tela.local.selecionado, Some(0), "nasce selecionado");
+                let antes = tela.locais.retoques[0]
+                    .carimbo()
+                    .expect("com origem")
+                    .clone();
+
+                // Pega a origem (o círculo tracejado) e arrasta 30 pontos.
+                let origem = na_janela(tela, tela.ponto_da_foto(antes.origem).expect("na tela"));
+                tela.local_apertar(&ponteiro_desce(origem.x, origem.y, false), window, cx);
+                tela.local_mover(&ponteiro_anda(origem.x, origem.y + 30.), cx);
+                tela.local_soltar(cx);
+                let depois = tela.locais.retoques[0]
+                    .carimbo()
+                    .expect("com origem")
+                    .clone();
+                assert_eq!(depois.caminho, antes.caminho, "o destino fica");
+                assert!(depois.origem[1] > antes.origem[1] + 0.03, "a origem desceu");
+
+                tela.desfazer(window, cx);
+                assert_eq!(
+                    tela.locais.retoques[0].carimbo().unwrap().origem,
+                    antes.origem
+                );
+
+                tela.local.selecionado = Some(0);
+                assert!(tela.apagar_retoque_selecionado(cx));
+                assert!(tela.locais.retoques.is_empty());
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// Com uma ferramenta local na mão, `Esc` larga ela antes de sair.
+    #[gpui_kit::test]
+    fn o_esc_larga_a_ferramenta_antes(cx: &mut TestAppContext) {
+        let (janela, _dir) =
+            aberta_no_palco(cx, Arc::new(GravadorDeMentira::default()), foto("a.jpg"));
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.usar_ferramenta(Ferramenta::Laco, cx);
+                assert!(tela.esc_local(cx));
+                assert!(!tela.com_ferramenta_local());
+                assert!(
+                    !tela.esc_local(cx),
+                    "sem ferramenta, o Esc segue para a raiz"
                 );
             })
             .expect("a janela deve estar aberta");

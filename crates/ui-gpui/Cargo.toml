@@ -37,6 +37,9 @@ gpui_platform = { package = "gpui-pre-platform", version = "=0.3.6", optional = 
 # As quatro camadas internas, intactas. Nenhuma delas sabe que a interface
 # mudou — é o que torna trocar de interface barato (§2.1).
 infrastructure = { path = "../infrastructure" }
+# A Revelação local mexe na receita (`locais`) e na conta do quadro à foto
+# (`transformacao::do_quadro_para_a_foto`) direto do motor.
+revelacao-core = { path = "../revelacao-core" }
 # A grade da Biblioteca: a mesma aritmética que o site usa (2026-09-05). Sem
 # GPU e sem janela dentro — ver `biblioteca/grade.rs`.
 biblioteca-core = { path = "../biblioteca-core" }

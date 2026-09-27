@@ -5158,6 +5158,12 @@ impl Aplicativo {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Na Revelação, o `Delete` é do retoque selecionado — nunca da foto.
+        if self.tela == Tela::Revelacao {
+            self.revelacao
+                .update(cx, |tela, cx| tela.apagar_retoque_selecionado(cx));
+            return;
+        }
         // ⚠️ Só na Biblioteca. Na Revelação a tecla apagaria a foto que está
         // sendo revelada, deixando a tela com uma foto que já não existe.
         if self.tela != Tela::Biblioteca {
@@ -5350,6 +5356,12 @@ impl Aplicativo {
         if self.tela == Tela::Revelacao && self.revelacao.read(cx).cortando() {
             self.revelacao
                 .update(cx, |tela, cx| tela.cancelar_corte(cx));
+            return;
+        }
+        // Na Revelação local, o `Esc` larga primeiro o laço em curso, depois a
+        // seleção, depois a ferramenta — e só então sai da Revelação.
+        if self.tela == Tela::Revelacao && self.revelacao.update(cx, |tela, cx| tela.esc_local(cx))
+        {
             return;
         }
         // 🚨 **No Comparar, o `Esc` sai dele — e não da Revelação.** O cliente

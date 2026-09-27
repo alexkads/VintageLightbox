@@ -227,7 +227,7 @@ impl Revelacao {
         self.navegacao.zoom.nivel
     }
 
-    fn ponto_na_area(&self, posicao: Point<Pixels>) -> Ponto {
+    pub(super) fn ponto_na_area(&self, posicao: Point<Pixels>) -> Ponto {
         Ponto {
             x: f(posicao.x - self.palco.origin.x),
             y: f(posicao.y - self.palco.origin.y),
@@ -430,6 +430,27 @@ impl Revelacao {
     ) -> Stateful<Div> {
         if self.edicao.is_some() {
             return caixa;
+        }
+        // 🔑 **Com uma ferramenta da Revelação local, o clique é dela.** A roda
+        // continua sendo do zoom, e o Espaço segurado continua sendo a mão.
+        if self.local.ferramenta.is_some() && self.navegacao.espaco.is_none() {
+            return caixa
+                .cursor(gpui_kit::CursorStyle::Crosshair)
+                .on_scroll_wheel(
+                    cx.listener(|tela, e: &ScrollWheelEvent, _w, cx| tela.ao_rolar(e, cx)),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|tela, e: &MouseDownEvent, window, cx| {
+                        tela.local_apertar(e, window, cx)
+                    }),
+                )
+                .on_mouse_move(cx.listener(|tela, e: &MouseMoveEvent, _w, cx| {
+                    // Arrastando, quem ouve é a janela (ver `marcacoes_locais`).
+                    if !tela.local.arrastando() {
+                        tela.local_mover(e, cx);
+                    }
+                }));
         }
         let ampliada = self
             .vista()
