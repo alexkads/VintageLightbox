@@ -1,16 +1,15 @@
 {
-  "versao": "0.1.23",
-  "titulo": "Os atalhos da tira não se perdem mais, e a tira da Revelação dá nota, P e X como a galeria. O Enquadrar ganhou o Auto, que endireita a foto sozinho.",
+  "versao": "0.1.24",
+  "titulo": "Dá para descartar a edição que não foi salva: a foto volta a ficar como está na galeria. E a galeria mostra quais fotos têm edição por salvar.",
   "importante": true,
   "novidades": [
-    "Depois de clicar no caixa, as setas, a nota e o P voltam a funcionar assim que se clica na tira ou na galeria — não é mais preciso fechar e reabrir a guia.",
-    "Na Revelação, as teclas 1 a 5, 0, P e X valem na tira como na galeria: na foto aberta ou em todas as marcadas, e a estrela da miniatura muda na hora.",
-    "Enquadrar: o botão Auto endireita a foto pelas linhas retas dela, e a régua (⌘ + arrastar) deixa reta a linha que você traçar.",
-    "A cortesia ou o desconto aparecem na grade já no primeiro Salvar, sem precisar salvar de novo.",
-    "O rodapé da janela mostra os envios (\"Subindo N fotos\", \"Tudo no site\"), quantas fotos o recorte tem, quantas estão selecionadas e a versão — clique nela para ver as novidades.",
-    "Clicar em \"N envios recusados\" abre a lista com o motivo de cada um.",
-    "A pílula do acerto mostra o ícone do aperto de mão também no Linux.",
-    "No Windows, a Revelação e a tela do cliente ficaram bem mais rápidas."
+    "Na Revelação, o botão Descartar (ao lado de Baixar JPEG) desfaz a edição não salva: \"Descartar esta foto\" (o ⌘Z traz de volta) ou \"Descartar todas\", que pergunta antes.",
+    "O botão direito na tira tem \"Descartar a edição\" para a foto clicada ou as marcadas.",
+    "Na galeria da sessão, a foto com edição por salvar mostra \"não salva\" no rodapé, e a barra conta \"N edições não salvas\" — o clique marca todas elas.",
+    "No painel da foto, o aviso \"Edição feita aqui — ainda não salva na galeria\" vem com o botão para descartá-la.",
+    "As colunas da Revelação e da galeria se ajustam puxando a borda, recolhem pelas setas das beiradas e com Tab / ⇧Tab, como no Lightroom.",
+    "O carimbo do retoque fica pequeno como uma sarda, para acertar detalhes miúdos.",
+    "O aviso de um gesto que não pode ser feito aparece no canto, como os outros avisos."
   ],
-  "por_que_atualizar": "Quem classifica pela tira não perde mais os atalhos no meio da sessão, e endireitar a foto passa a ser um clique."
+  "por_que_atualizar": "Quem entra numa foto só para testar uma ferramenta sai dela sem deixar o \"Salvar\" aceso — e ninguém fecha a sessão com edição esquecida."
 }
