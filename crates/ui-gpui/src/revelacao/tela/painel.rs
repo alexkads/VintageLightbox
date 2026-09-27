@@ -212,8 +212,20 @@ impl Revelacao {
     /// que o ponto âmbar compara (o marco do site).
     fn salvo(&self) -> Ajustes {
         self.receita_ao_abrir
+            .as_ref()
             .map(|e| e.ajustes)
             .unwrap_or(self.ajustes)
+    }
+
+    /// O ponto da Revelação local, pela mesma regra dos painéis: âmbar se as
+    /// máscaras ou os retoques mudaram desde a abertura; cinza se a receita
+    /// salva já tem algum.
+    pub(super) fn marca_da_revelacao_local(&self) -> Option<controles::Marca> {
+        let salvo = self.receita_ao_abrir.as_ref().map(|e| &*e.locais);
+        if salvo.is_some_and(|l| *l != *self.locais) {
+            return Some(controles::Marca::NaoSalvo);
+        }
+        (!self.locais.vazia()).then_some(controles::Marca::Ajustado)
     }
 
     /// A foto tem enquadramento — recorte, giro, endireitamento ou espelho?

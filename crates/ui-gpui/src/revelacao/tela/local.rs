@@ -2182,14 +2182,15 @@ impl Revelacao {
             );
 
         // 🔑 **Sanfona, como os outros painéis da coluna**: a mesma chave de
-        // lembrança (`revelacao:<título>`) e o ponto âmbar quando a foto tem
-        // máscara ou retoque — fechado, o painel não pode esconder que há.
+        // lembrança (`revelacao:<título>`) e o ponto dos outros: âmbar se a
+        // Revelação local mudou e não foi salva, cinza se a foto já tem máscara
+        // ou retoque salvos — fechado, o painel não pode esconder que há.
         let chave = CHAVE_DO_PAINEL_LOCAL.to_string();
         let aberto = self.estado_do_painel.aberto(&chave, false);
         let cabecalho = self.cabecalho_da_sanfona(
             "Revelação local",
             aberto,
-            !self.locais.vazia(),
+            self.marca_da_revelacao_local(),
             chave,
             false,
             cx,
