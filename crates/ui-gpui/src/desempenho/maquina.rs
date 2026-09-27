@@ -201,13 +201,17 @@ pub fn coletar() -> Maquina {
     m.gpus = revelacao_core::adaptadores_da_maquina()
         .into_iter()
         .map(|a| Gpu {
-            fabricante: nome_do_fabricante(a.fabricante_id).to_string(),
+            fabricante: fabricante_da_placa(a.fabricante_id, &a.nome).to_string(),
             fabricante_id: format!("{:#06x}", a.fabricante_id),
             placa_id: format!("{:#06x}", a.placa_id),
             nome: a.nome,
             tipo: a.tipo.into(),
             backend: a.backend.into(),
-            driver: a.driver,
+            driver: if a.driver.is_empty() && a.backend == "Metal" {
+                "embutido no macOS".into()
+            } else {
+                a.driver
+            },
             driver_info: a.driver_info,
             carimbos: a.carimbos,
         })
@@ -234,6 +238,26 @@ pub fn nome_do_fabricante(id: u32) -> &'static str {
         0x10005 => "Mesa (software)",
         0 => "?",
         _ => "outro",
+    }
+}
+
+/// O fabricante pelo id PCI e, sem ele (o Metal não diz), pelo nome.
+pub fn fabricante_da_placa(id: u32, nome: &str) -> &'static str {
+    let conhecido = nome_do_fabricante(id);
+    if id != 0 {
+        return conhecido;
+    }
+    let n = nome.to_lowercase();
+    if n.contains("apple") {
+        "Apple"
+    } else if n.contains("nvidia") || n.contains("geforce") {
+        "NVIDIA"
+    } else if n.contains("amd") || n.contains("radeon") {
+        "AMD"
+    } else if n.contains("intel") {
+        "Intel"
+    } else {
+        conhecido
     }
 }
 

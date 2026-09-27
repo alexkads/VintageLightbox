@@ -167,7 +167,9 @@ pub fn observacoes(resumo: &Resumo, contexto: &Contexto, maquina: Option<&Maquin
         if m.energia.as_deref().is_some_and(|e| e.contains("bateria")) {
             o.push("O computador está na bateria: CPU e GPU podem estar em economia.".into());
         }
-        if m.memoria_livre_mb > 0 && m.memoria_livre_mb < 1024 {
+        // No macOS a memória "livre" é pouca de propósito (vira cache): o
+        // aviso só vale nos outros.
+        if !cfg!(target_os = "macos") && m.memoria_livre_mb > 0 && m.memoria_livre_mb < 1024 {
             o.push(format!(
                 "Pouca memória livre ao coletar ({} MB): o sistema pode estar trocando com o disco.",
                 m.memoria_livre_mb

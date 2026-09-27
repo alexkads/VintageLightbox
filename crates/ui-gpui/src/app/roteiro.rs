@@ -14,7 +14,7 @@ use crate::depuracao::{self, Passo};
 impl Aplicativo {
     /// Lê `VLB_ROTEIRO` e começa a segui-lo depois de a conta entrar.
     pub(super) fn ligar_o_roteiro(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !cfg!(debug_assertions) {
+        if !depuracao::ferramentas_ligadas() {
             return;
         }
         let Some(caminho) = std::env::var_os("VLB_ROTEIRO") else {
@@ -69,6 +69,28 @@ impl Aplicativo {
                             return;
                         }
                         cx.background_executor().timer(*intervalo).await;
+                    }
+                    continue;
+                }
+                // 🖱️ Arrastar e rolar: um evento por volta, com o tempo entre
+                // eles — pelo `dispatch_event`, o mesmo caminho do evento
+                // nativo depois de traduzido, nos três sistemas.
+                if let Some(eventos) = eventos_do_gesto(&passo) {
+                    eprintln!("[roteiro] {passo:?}");
+                    let intervalo = match &passo {
+                        Passo::Varrer { intervalo, .. } | Passo::Rolar { intervalo, .. } => {
+                            *intervalo
+                        }
+                        _ => Duration::ZERO,
+                    };
+                    for evento in eventos {
+                        let seguiu = raiz.update_in(cx, |_, window, cx| {
+                            window.dispatch_event(evento, cx);
+                        });
+                        if seguiu.is_err() {
+                            return;
+                        }
+                        cx.background_executor().timer(intervalo).await;
                     }
                     continue;
                 }
@@ -452,6 +474,27 @@ impl Aplicativo {
                 });
                 eprintln!("[roteiro] pinça {delta} em ({x}, {y})");
             }
+            // Desenrolados pelo laço do roteiro.
+            Passo::Varrer { .. } | Passo::Rolar { .. } => {}
+            Passo::Desempenho(acao) => {
+                let painel = self.desempenho.clone();
+                match acao.as_str() {
+                    "abrir" | "fechar" => {
+                        let aberto = painel.read(cx).aberto();
+                        if aberto != (acao == "abrir") {
+                            painel.update(cx, |p, cx| p.alternar(cx));
+                        }
+                    }
+                    "iniciar" => painel.update(cx, |p, cx| p.iniciar(cx)),
+                    "parar" => painel.update(cx, |p, cx| p.parar(cx)),
+                    "salvar" => painel.update(cx, |p, cx| p.salvar_pelo_roteiro(cx)),
+                    "relatorio" => match painel.read(cx).relatorio_em_texto() {
+                        Some(texto) => eprintln!("[desempenho]\n{texto}"),
+                        None => eprintln!("[desempenho] sem sessão montada ainda"),
+                    },
+                    outra => eprintln!("[roteiro] desempenho: ação desconhecida '{outra}'"),
+                }
+            }
             Passo::Fim => {
                 depuracao::vigia::relatar();
                 cx.quit();
@@ -460,5 +503,58 @@ impl Aplicativo {
         }
         cx.notify();
         true
+    }
+}
+
+/// Os eventos de um arrasto (`varrer`) ou de uma rolagem (`rolar`).
+fn eventos_do_gesto(passo: &Passo) -> Option<Vec<gpui_kit::PlatformInput>> {
+    use gpui_kit::{
+        point, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PlatformInput,
+        ScrollDelta, ScrollWheelEvent, TouchPhase,
+    };
+    let ponto = |(x, y): (f32, f32)| point(px(x), px(y));
+    match passo {
+        Passo::Varrer { vezes, de, ate, .. } => {
+            let mut eventos = vec![PlatformInput::MouseDown(MouseDownEvent {
+                button: MouseButton::Left,
+                position: ponto(*de),
+                modifiers: Default::default(),
+                click_count: 1,
+                first_mouse: false,
+            })];
+            let n = (*vezes).max(1);
+            for i in 1..=n {
+                let f = i as f32 / n as f32;
+                eventos.push(PlatformInput::MouseMove(MouseMoveEvent {
+                    position: ponto((de.0 + (ate.0 - de.0) * f, de.1 + (ate.1 - de.1) * f)),
+                    pressed_button: Some(MouseButton::Left),
+                    modifiers: Default::default(),
+                }));
+            }
+            eventos.push(PlatformInput::MouseUp(MouseUpEvent {
+                button: MouseButton::Left,
+                position: ponto(*ate),
+                modifiers: Default::default(),
+                click_count: 1,
+            }));
+            Some(eventos)
+        }
+        Passo::Rolar { vezes, em, dy, .. } => Some(
+            (0..*vezes)
+                .map(|i| {
+                    PlatformInput::ScrollWheel(ScrollWheelEvent {
+                        position: ponto(*em),
+                        delta: ScrollDelta::Pixels(point(px(0.), px(*dy))),
+                        modifiers: Default::default(),
+                        touch_phase: if i == 0 {
+                            TouchPhase::Started
+                        } else {
+                            TouchPhase::Moved
+                        },
+                    })
+                })
+                .collect(),
+        ),
+        _ => None,
     }
 }

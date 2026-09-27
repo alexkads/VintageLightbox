@@ -36,6 +36,9 @@ pub const TETO_DE_MEMORIA: usize = 8 * 1024 * 1024;
 /// quadros, e o intervalo que atravessa o repouso não é engasgo.
 const INTERVALO_MAXIMO_US: u64 = 1_000_000;
 
+/// A batida da thread da interface durante a captura (ver [`Coletor::batida`]).
+pub const BATIDA_US: u64 = 16_000;
+
 // ── A distribuição ─────────────────────────────────────────────────────────
 
 /// Baldes de 0,1 ms até 50 ms, de 2 ms até 1 s, de 100 ms até 60 s.
@@ -232,6 +235,10 @@ struct EmCurso {
 pub struct Coletor {
     periodo_ms: f32,
     em_curso: Option<EmCurso>,
+    /// O primeiro sinal de operação depois do último quadro, e a última batida
+    /// da thread antes dele — ver [`Coletor::quadro_pintado`].
+    primeiro_sinal: Option<(u64, Option<u64>)>,
+    ultima_batida_us: Option<u64>,
     inicio_do_quadro_us: Option<u64>,
     ultima_pintura_us: Option<u64>,
     pendentes: [f32; ETAPAS_DA_INTERFACE.len()],
@@ -262,6 +269,8 @@ impl Coletor {
         Self {
             periodo_ms: 1000.0 / hz.clamp(20.0, 500.0),
             em_curso: None,
+            primeiro_sinal: None,
+            ultima_batida_us: None,
             inicio_do_quadro_us: None,
             ultima_pintura_us: None,
             pendentes: [0.0; ETAPAS_DA_INTERFACE.len()],
@@ -321,7 +330,15 @@ impl Coletor {
     }
 
     /// O operador está fazendo `operacao` agora. Repetir estica a janela.
+    /// A thread da interface estava livre em `t` (uma tarefa dela rodou).
+    pub fn batida(&mut self, t: u64) {
+        self.ultima_batida_us = Some(t);
+    }
+
     pub fn operacao(&mut self, operacao: Operacao, t: u64) {
+        if self.primeiro_sinal.is_none() {
+            self.primeiro_sinal = Some((t, self.ultima_batida_us));
+        }
         let fica = operacao.duracao_us();
         match &mut self.em_curso {
             Some(e) if e.operacao == operacao && t <= e.ate_us => e.ate_us = t + fica,
@@ -363,7 +380,37 @@ impl Coletor {
         let operacao = self.operacao_em(t);
         let desde = self.desde_em(t);
         let intervalo = self.ultima_pintura_us.map(|u| t.saturating_sub(u));
-        let conta = operacao != Operacao::Nenhuma
+        // 🔑 **Quando o intervalo é engasgo.** Só nos gestos contínuos (rolar,
+        // arrastar, pintar): a troca de foto e a abertura esperam disco e GPU
+        // com a janela parada, e são julgadas pelo tempo do próprio quadro e
+        // pela latência até a foto. E só se o intervalo teve demanda — um
+        // sinal do gesto desde o quadro anterior.
+        //
+        // ⚠️ O sinal é anotado quando a thread **processa** o evento, não quando
+        // o sistema o gerou. Um gesto que pausa (o mouse parado com o botão
+        // apertado) e volta pareceria um engasgo do tamanho da pausa. O que
+        // separa os dois é a batida: se a thread bateu logo antes de processar
+        // o sinal (e depois do quadro anterior), ela estava livre — era o
+        // operador parado, não a janela presa.
+        let sinal = self.primeiro_sinal.take();
+        let ocioso_antes_do_sinal = match (sinal, self.ultima_pintura_us) {
+            (Some((s, Some(b))), Some(u)) => {
+                b > u && s.saturating_sub(b) <= 2 * BATIDA_US && s.saturating_sub(u) > 2 * BATIDA_US
+            }
+            _ => false,
+        };
+        if let Some((s, _)) = sinal {
+            if operacao != Operacao::Nenhuma {
+                self.anotar(
+                    operacao,
+                    Etapa::EntradaAoQuadro,
+                    t.saturating_sub(s) as f32 / 1000.0,
+                );
+            }
+        }
+        let conta = operacao.continua()
+            && sinal.is_some()
+            && !ocioso_antes_do_sinal
             && matches!((intervalo, self.ultima_pintura_us, desde),
                 (Some(i), Some(u), Some(d)) if i < INTERVALO_MAXIMO_US && u >= d);
         let montagem = self
@@ -803,6 +850,7 @@ mod testes {
         let mut c = Coletor::new_60();
         c.operacao(Operacao::ArrastoDeSlider, 0);
         c.quadro_pintado(MS);
+        c.operacao(Operacao::ArrastoDeSlider, 4 * MS);
         c.etapa(Etapa::Histograma, 3.0, true, 5 * MS);
         c.etapa(Etapa::ConversaoParaExibicao, 22.0, true, 6 * MS);
         c.etapa(Etapa::EsperaPelaGpu, 9.0, false, 6 * MS);
@@ -869,8 +917,55 @@ mod testes {
             c.memoria_estimada()
         );
         let r = c.resumo(t);
-        assert!(r.quadros_interacao > 390_000, "as contas cobrem tudo");
-        assert!(r.acima_do_orcamento > 4_000);
+        // Oito das dez operações são contínuas: ~320 mil intervalos contam.
+        assert!(r.quadros_interacao > 300_000, "as contas cobrem tudo");
+        assert!(r.acima_do_orcamento > 3_000);
+    }
+
+    /// O operador parou o mouse no meio do arrasto: a thread bateu antes de o
+    /// gesto voltar, então o intervalo longo é pausa, não engasgo. Sem batida
+    /// (a thread presa), o mesmo intervalo é engasgo.
+    #[test]
+    fn a_pausa_do_operador_nao_e_engasgo_e_a_thread_presa_e() {
+        let mut c = Coletor::novo(60.0);
+        c.operacao(Operacao::ArrastoDeSlider, 0);
+        c.quadro_pintado(MS);
+        c.operacao(Operacao::ArrastoDeSlider, 2 * MS);
+        c.quadro_pintado(18 * MS);
+        // Pausa de 300 ms com a thread livre, batendo.
+        for b in (20..320).step_by(16) {
+            c.batida(b * MS);
+        }
+        c.operacao(Operacao::ArrastoDeSlider, 322 * MS);
+        c.quadro_pintado(330 * MS);
+        assert_eq!(c.resumo(330 * MS).acima_do_orcamento, 0, "pausa");
+        // Agora a thread presa 80 ms: nenhuma batida entre o quadro e o gesto.
+        c.operacao(Operacao::ArrastoDeSlider, 410 * MS);
+        c.quadro_pintado(415 * MS);
+        let r = c.resumo(415 * MS);
+        assert_eq!(r.acima_do_orcamento, 1, "presa");
+        let entrada = r.por_operacao[0]
+            .etapas
+            .iter()
+            .find(|(e, _)| *e == Etapa::EntradaAoQuadro)
+            .unwrap()
+            .1;
+        assert_eq!(entrada.amostras, 4);
+    }
+
+    /// Na troca de foto a janela espera o disco parada: o intervalo não é
+    /// engasgo, mas o quadro que passa do orçamento sozinho é.
+    #[test]
+    fn a_troca_de_foto_e_julgada_pelo_proprio_quadro() {
+        let mut c = Coletor::novo(60.0);
+        c.operacao(Operacao::TrocaDeFoto, 0);
+        c.quadro_pintado(MS);
+        c.quadro_comecou(300 * MS);
+        let s = c.quadro_pintado(330 * MS);
+        c.quadro_apresentado(s, 331 * MS);
+        let r = c.resumo(400 * MS);
+        assert_eq!(r.quadros_interacao, 0);
+        assert_eq!(r.lentos_recentes.len(), 1, "31 ms de quadro");
     }
 
     #[test]

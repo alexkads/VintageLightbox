@@ -1,12 +1,19 @@
-//! O painel de Desempenho: aberto pelo botão do rodapé, sobre a tela, sem
+//! O painel de Desempenho: aberto pelo botão do rodapé **numa janela própria**,
+//! que vai para qualquer monitor, sem
 //! tirar o operador do que ele está medindo.
 //!
-//! # Por que painel, e não tela
+//! # Por que uma janela à parte
 //!
-//! 🔑 **O que se mede é a tela de baixo.** Uma tela própria de diagnóstico
-//! esconderia a rolagem, o slider e o pincel que o operador precisa fazer
-//! enquanto a captura corre. O painel flutua no canto, fecha sem parar a
-//! captura, e o botão do rodapé fica vermelho enquanto ela grava.
+//! 🔑 **O que se mede é a janela principal.** Uma tela de diagnóstico dentro
+//! dela esconderia a rolagem, o slider e o pincel que o operador precisa fazer
+//! enquanto a captura corre — e a primeira versão, um painel flutuando sobre a
+//! Revelação, tapava metade do palco. O dono perguntou se dava para levá-la a
+//! outro monitor (27/09): agora ela é uma janela como a Tela do cliente. Fecha
+//! sem parar a captura, e o botão do rodapé fica vermelho enquanto ela grava.
+//!
+//! O sentinela continua só na janela principal: os quadros desta janela não
+//! entram na conta (mas o tempo que ela gasta desenhando é da mesma thread da
+//! interface — por isso ela só se redesenha duas vezes por segundo).
 //!
 //! # O painel também desenha
 //!
@@ -30,14 +37,13 @@ use std::time::Duration;
 use domain::desempenho::{CabecalhoDaSessao, LinhaDeComparacao, SessaoDeDesempenho};
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Disableable as _, Icon};
 use gpui_kit::{
-    div, prelude::*, px, AnyElement, App, ClipboardItem, Context, FontWeight, Hsla, MouseButton,
-    SharedString, Task, Window,
+    div, prelude::*, px, AnyElement, AnyWindowHandle, App, ClipboardItem, Context, Entity,
+    EventEmitter, FontWeight, Hsla, SharedString, Subscription, Task, Window,
 };
 
 use super::coletor::{Estatistica, Resumo};
 use super::porta::DepositoDeDesempenho;
 use super::{maquina, relatorio, Contexto, Etapa, Operacao};
-use crate::app::rodape::ALTURA_DO_RODAPE;
 use crate::recursos::Icone;
 
 static DEPOSITO: OnceLock<Arc<dyn DepositoDeDesempenho>> = OnceLock::new();
@@ -58,8 +64,16 @@ pub enum Aba {
     Comparar,
 }
 
+/// A janela abriu ou fechou, ou a captura começou ou parou: o rodapé da
+/// janela principal se redesenha. (Não é um `observe`: o painel se atualiza
+/// duas vezes por segundo, e cada aviso redesenharia a janela medida.)
+pub struct MudouOEstado;
+
+impl EventEmitter<MudouOEstado> for PainelDeDesempenho {}
+
 pub struct PainelDeDesempenho {
-    aberto: bool,
+    janela: Option<AnyWindowHandle>,
+    _fechou: Option<Subscription>,
     aba: Aba,
     resumo: Option<Resumo>,
     contexto: Option<Contexto>,
@@ -85,7 +99,8 @@ impl Default for PainelDeDesempenho {
 impl PainelDeDesempenho {
     pub fn novo() -> Self {
         Self {
-            aberto: false,
+            janela: None,
+            _fechou: None,
             aba: Aba::AoVivo,
             resumo: None,
             contexto: None,
@@ -103,51 +118,61 @@ impl PainelDeDesempenho {
     }
 
     pub fn aberto(&self) -> bool {
-        self.aberto
+        self.janela.is_some()
     }
 
-    /// O botão do rodapé.
+    /// O botão do rodapé: abre a janela, ou a fecha.
     pub fn alternar(&mut self, cx: &mut Context<Self>) {
-        self.aberto = !self.aberto;
-        if self.aberto {
-            maquina::coletar_em_fundo();
-            if !self.ja_importou {
-                self.ja_importou = true;
-                self.importar(super::porta::travamentos_pendentes(), true, cx);
-            }
-            self.recarregar_lista(cx);
-            if super::ativa() {
-                self.resumo = super::resumo();
-                self.contexto = super::contexto();
-            }
+        if let Some(janela) = self.janela.take() {
+            // Adiado: quem chama está no meio do `update` da janela principal.
+            cx.defer(move |cx| {
+                let _ = janela.update(cx, |_, window, _| window.remove_window());
+            });
+            cx.emit(MudouOEstado);
+            cx.notify();
+            return;
         }
-        cx.notify();
+        maquina::coletar_em_fundo();
+        if !self.ja_importou {
+            self.ja_importou = true;
+            self.importar(super::porta::travamentos_pendentes(), true, cx);
+        }
+        self.recarregar_lista(cx);
+        if super::ativa() {
+            self.resumo = super::resumo();
+            self.contexto = super::contexto();
+        }
+        // 🚨 Adiado também: abrir a janela desenha a raiz dela — esta entidade
+        // —, e ela está emprestada a este `update`.
+        let entidade = cx.entity();
+        cx.defer(move |cx| abrir_a_janela(entidade, cx));
     }
 
     fn avisar(&mut self, texto: impl Into<String>, erro: bool, cx: &mut Context<Self>) {
-        self.aviso = Some((texto.into(), erro));
+        let texto = texto.into();
+        if crate::depuracao::ferramentas_ligadas() {
+            eprintln!("[desempenho] {texto}");
+        }
+        self.aviso = Some((texto, erro));
         cx.notify();
     }
 
     // ── Iniciar e parar ──
 
-    pub fn iniciar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Liga a captura. O tamanho e a escala são da **janela principal** —
+    /// quem os preenche é o `render` dela (`desempenho::janela_principal`).
+    pub fn iniciar(&mut self, cx: &mut Context<Self>) {
         if super::ativa() {
             return;
         }
         maquina::coletar_em_fundo();
-        let escala = window.scale_factor();
-        let tamanho = window.viewport_size();
         let (hz, origem) = match maquina::pronta().and_then(|m| m.hz_do_principal()) {
             Some(hz) => (hz, "sistema"),
             None => (60.0, "padrao"),
         };
         super::iniciar(Contexto {
-            janela_px: (
-                (f32::from(tamanho.width) * escala).round() as u32,
-                (f32::from(tamanho.height) * escala).round() as u32,
-            ),
-            escala,
+            janela_px: (0, 0),
+            escala: 0.0,
             hz,
             hz_origem: origem,
             motor: None,
@@ -158,21 +183,23 @@ impl PainelDeDesempenho {
         self.aba = Aba::AoVivo;
         self.resumo = super::resumo();
         self.contexto = super::contexto();
-        // 🔑 A batida do vigia e a atualização do painel: uma tarefa da thread
-        // da interface. Ela acorda a thread a cada 100 ms, mas só pede quadro
-        // (notify) com o painel aberto, a cada 500 ms.
+        cx.emit(MudouOEstado);
+        // 🔑 A batida e a atualização do painel: uma tarefa da thread da
+        // interface. Ela acorda a thread a cada 16 ms (sem pedir quadro — é a
+        // prova de que a thread está livre, para o coletor e para o vigia), e
+        // só redesenha o painel, com ele aberto, a cada ~500 ms.
         self.tique = Some(cx.spawn(async move |painel, cx| {
             let mut volta = 0u32;
             loop {
                 cx.background_executor()
-                    .timer(Duration::from_millis(100))
+                    .timer(Duration::from_micros(super::coletor::BATIDA_US))
                     .await;
                 if !super::ativa() {
                     break;
                 }
-                super::vigia::bater();
+                super::batida();
                 volta += 1;
-                if volta % 5 != 0 {
+                if volta % 31 != 0 {
                     continue;
                 }
                 if let Some(hz) = super::estimar_hz() {
@@ -184,7 +211,7 @@ impl PainelDeDesempenho {
                     });
                 }
                 let seguiu = painel.update(cx, |p, cx| {
-                    if p.aberto {
+                    if p.janela.is_some() {
                         p.resumo = super::resumo();
                         p.contexto = super::contexto();
                         cx.notify();
@@ -203,6 +230,7 @@ impl PainelDeDesempenho {
             return;
         };
         self.tique = None;
+        cx.emit(MudouOEstado);
         self.resumo = Some(
             encerrada
                 .coletor
@@ -422,6 +450,20 @@ impl PainelDeDesempenho {
             });
         })
         .detach();
+    }
+
+    /// O "Salvar no banco" do roteiro: espera a montagem, se ela ainda anda.
+    pub fn salvar_pelo_roteiro(&mut self, cx: &mut Context<Self>) {
+        if self.sessao.is_some() {
+            self.salvar(cx);
+        } else {
+            eprintln!("[desempenho] nada para salvar (a montagem terminou?)");
+        }
+    }
+
+    /// O texto do "Copiar relatório" da última sessão montada.
+    pub fn relatorio_em_texto(&self) -> Option<String> {
+        self.sessao.as_ref().map(|s| relatorio::texto(s))
     }
 
     fn copiar(&mut self, cx: &mut Context<Self>) {
@@ -1073,13 +1115,31 @@ impl PainelDeDesempenho {
 
 impl Render for PainelDeDesempenho {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if !self.aberto {
-            return div().into_any_element();
-        }
         let t = cx.theme().clone();
         let ativa = super::ativa();
-        let altura =
-            (f32::from(window.viewport_size().height) - ALTURA_DO_RODAPE - 60.).clamp(280., 720.);
+        // No Linux (GNOME, KDE…) o app desenha a barra da janela: sem ela não
+        // haveria onde pegar para arrastá-la a outro monitor.
+        let barra = crate::janela::app_desenha_a_barra(window).then(|| {
+            crate::janela::como_barra_de_titulo(div(), "barra-do-desempenho", window, cx)
+                .flex_none()
+                .h(px(34.))
+                .w_full()
+                .flex()
+                .items_center()
+                .justify_between()
+                .pl(px(12.))
+                .pr(px(4.))
+                .bg(t.title_bar)
+                .text_xs()
+                .text_color(t.muted_foreground)
+                .child("Desempenho — VintageLightbox")
+                .child(crate::janela::controles(
+                    "janela-desempenho",
+                    t.muted_foreground,
+                    window,
+                    cx,
+                ))
+        });
 
         let estado = if ativa {
             format!(
@@ -1124,7 +1184,7 @@ impl Render for PainelDeDesempenho {
                     .child(Icon::new(Icone::Zap).size(px(14.)))
                     .label("Iniciar")
                     .disabled(ativa)
-                    .on_click(cx.listener(|p, _, window, cx| p.iniciar(window, cx))),
+                    .on_click(cx.listener(|p, _, _, cx| p.iniciar(cx))),
             )
             .child(
                 crate::estilo::botao_perigo("desempenho-parar", cx)
@@ -1167,25 +1227,13 @@ impl Render for PainelDeDesempenho {
             Aba::Comparar => self.comparacao(cx),
         };
 
-        v_flex()
+        let corpo = v_flex()
             .id("painel-de-desempenho")
             .debug_selector(|| "painel-de-desempenho".into())
-            .absolute()
-            .right(px(8.))
-            .bottom(px(ALTURA_DO_RODAPE + 6.))
-            .w(px(760.))
-            .h(px(altura))
+            .flex_1()
+            .min_h(px(0.))
             .p(px(12.))
             .gap(px(8.))
-            .rounded(px(10.))
-            .border_1()
-            .border_color(t.border)
-            .bg(t.popover)
-            .text_color(t.popover_foreground)
-            .shadow_lg()
-            .occlude()
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
             .child(
                 h_flex()
                     .gap(px(8.))
@@ -1219,10 +1267,8 @@ impl Render for PainelDeDesempenho {
                     .child(
                         crate::estilo::botao_fantasma("desempenho-fechar", cx)
                             .child(Icon::new(Icone::JanelaFechar).size(px(14.)))
-                            .on_click(cx.listener(|p, _, _, cx| {
-                                p.aberto = false;
-                                cx.notify();
-                            })),
+                            .tooltip("Fechar a janela (a captura continua)")
+                            .on_click(cx.listener(|p, _, _, cx| p.alternar(cx))),
                     ),
             )
             .child(acoes)
@@ -1239,8 +1285,60 @@ impl Render for PainelDeDesempenho {
                     .min_h(px(0.))
                     .overflow_y_scroll()
                     .child(conteudo),
-            )
+            );
+        v_flex()
+            .size_full()
+            .bg(t.background)
+            .text_color(t.foreground)
+            .children(barra)
+            .child(corpo)
             .into_any_element()
+    }
+}
+
+/// Abre a janela do painel, do tamanho de um painel e no meio da tela — o
+/// operador a arrasta para o monitor que quiser.
+fn abrir_a_janela(entidade: Entity<PainelDeDesempenho>, cx: &mut App) {
+    let area = gpui_kit::Bounds::centered(None, gpui_kit::size(px(820.), px(780.)), cx);
+    let opcoes = gpui_kit::WindowOptions {
+        app_id: Some(crate::menu::APP_ID.into()),
+        window_bounds: Some(gpui_kit::WindowBounds::Windowed(area)),
+        titlebar: Some(gpui_kit::TitlebarOptions {
+            title: Some("Desempenho — VintageLightbox".into()),
+            ..Default::default()
+        }),
+        is_movable: true,
+        is_resizable: true,
+        is_minimizable: true,
+        window_background: gpui_kit::WindowBackgroundAppearance::Opaque,
+        window_decorations: crate::janela::decoracoes_ao_abrir(),
+        ..Default::default()
+    };
+    let raiz = entidade.clone();
+    match cx.open_window(opcoes, move |_, _| raiz) {
+        Ok(janela) => {
+            let id = janela.window_id();
+            let fraca = entidade.downgrade();
+            entidade.update(cx, |p, cx| {
+                p.janela = Some(janela.into());
+                // 🚨 O `X` da barra fecha a janela sem passar pelo botão: o
+                // rodapé tem de saber, senão o clique seguinte "fecha" de novo.
+                p._fechou = Some(cx.on_window_closed(move |cx, fechada| {
+                    if fechada == id {
+                        let _ = fraca.update(cx, |p, cx| {
+                            p.janela = None;
+                            cx.emit(MudouOEstado);
+                            cx.notify();
+                        });
+                    }
+                }));
+                cx.emit(MudouOEstado);
+                cx.notify();
+            });
+        }
+        Err(erro) => {
+            crate::telemetria::avisar!("⚠️ [Desempenho] não foi possível abrir a janela: {erro}")
+        }
     }
 }
 

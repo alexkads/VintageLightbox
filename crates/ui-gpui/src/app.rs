@@ -509,6 +509,9 @@ pub struct Aplicativo {
     pub(crate) caixa_flutuante: Entity<Caixa>,
     /// ⏱️ O painel de Desempenho, aberto pelo botão do rodapé.
     pub(crate) desempenho: Entity<crate::desempenho::painel::PainelDeDesempenho>,
+    /// O rodapé se redesenha quando a janela de Desempenho abre ou fecha, ou
+    /// a captura começa ou para.
+    _desempenho_mudou: gpui_kit::Subscription,
     _pedido_do_caixa: gpui_kit::Subscription,
     /// A galeria foi aberta pelo caixa: a volta dela é para o caixa.
     veio_do_caixa: bool,
@@ -1128,6 +1131,7 @@ impl Aplicativo {
             },
         );
 
+        let desempenho = cx.new(|_| crate::desempenho::painel::PainelDeDesempenho::novo());
         let caixa = cx.new(|cx| Caixa::nova(publicador_do_caixa.clone(), window, cx));
         let caixa_flutuante = cx.new({
             let detalhe = detalhe.clone();
@@ -1280,7 +1284,11 @@ impl Aplicativo {
             detalhe,
             caixa,
             caixa_flutuante,
-            desempenho: cx.new(|_| crate::desempenho::painel::PainelDeDesempenho::novo()),
+            desempenho: desempenho.clone(),
+            _desempenho_mudou: cx.subscribe(
+                &desempenho,
+                |_, _, _: &crate::desempenho::painel::MudouOEstado, cx| cx.notify(),
+            ),
             _pedido_do_caixa: pedido_do_caixa,
             veio_do_caixa: false,
             retencao,
@@ -6122,7 +6130,16 @@ impl Render for Aplicativo {
         // atômica com ela desligada). O fim é o sentinela, lá embaixo.
         crate::desempenho::quadro_comecou();
         if crate::desempenho::ativa() {
-            crate::desempenho::tela(self.tela.nome_para_desempenho());
+            let escala = window.scale_factor();
+            let tamanho = window.viewport_size();
+            crate::desempenho::janela_principal(
+                self.tela.nome_para_desempenho(),
+                (
+                    (f32::from(tamanho.width) * escala).round() as u32,
+                    (f32::from(tamanho.height) * escala).round() as u32,
+                ),
+                escala,
+            );
         }
         // 🚨 A porta vem antes de tudo, inclusive das teclas: com o app inteiro
         // desenhado por baixo, as quinze teclas de triagem continuariam
@@ -6418,9 +6435,8 @@ impl Render for Aplicativo {
             .children(self.barra_do_pe(cx))
             // A lista das recusas, sobre o rodapé que a abre.
             .children(self.lista_das_recusas(cx))
-            // ⏱️ O painel de Desempenho (vazio quando fechado) e o sentinela,
-            // que marca o fim de cada quadro enquanto a captura grava.
-            .child(self.desempenho.clone())
+            // ⏱️ O sentinela, que marca o fim de cada quadro enquanto a captura
+            // grava. O painel é outra janela (`desempenho::painel`).
             .when(crate::desempenho::ativa(), |raiz| {
                 raiz.child(crate::desempenho::sentinela::sentinela())
             })

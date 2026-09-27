@@ -137,6 +137,15 @@ impl Operacao {
         }
     }
 
+    /// Um gesto contínuo: enquanto ele dura, a janela deveria produzir um
+    /// quadro por batida do monitor.
+    pub fn continua(self) -> bool {
+        !matches!(
+            self,
+            Operacao::Nenhuma | Operacao::TrocaDeFoto | Operacao::AberturaDaRevelacao
+        )
+    }
+
     /// Quanto a operação dura depois do último sinal dela. Os gestos contínuos
     /// sinalizam a cada evento; a troca de foto e a abertura sinalizam uma vez
     /// e o trabalho que provocam (decodificar, revelar) chega depois.
@@ -213,6 +222,7 @@ pub enum Etapa {
     GpuRevelacao,
     GpuMotorTotal,
     LatenciaDaFoto,
+    EntradaAoQuadro,
 }
 
 /// As etapas que podem rodar na thread da interface e entram no quadro.
@@ -225,7 +235,7 @@ pub const ETAPAS_DA_INTERFACE: [Etapa; 5] = [
 ];
 
 impl Etapa {
-    pub const TODAS: [Etapa; 20] = [
+    pub const TODAS: [Etapa; 21] = [
         Etapa::IntervaloDoQuadro,
         Etapa::TempoDoQuadro,
         Etapa::MontagemDaInterface,
@@ -246,6 +256,7 @@ impl Etapa {
         Etapa::GpuRevelacao,
         Etapa::GpuMotorTotal,
         Etapa::LatenciaDaFoto,
+        Etapa::EntradaAoQuadro,
     ];
 
     pub fn nome(self) -> &'static str {
@@ -270,6 +281,7 @@ impl Etapa {
             Etapa::GpuRevelacao => "gpu_revelacao",
             Etapa::GpuMotorTotal => "gpu_motor_total",
             Etapa::LatenciaDaFoto => "latencia_da_foto",
+            Etapa::EntradaAoQuadro => "entrada_ao_quadro",
         }
     }
 
@@ -295,6 +307,7 @@ impl Etapa {
             Etapa::GpuRevelacao => "revelação na GPU",
             Etapa::GpuMotorTotal => "GPU do motor (1ª à última passada)",
             Etapa::LatenciaDaFoto => "do pedido à foto na tela",
+            Etapa::EntradaAoQuadro => "do gesto processado ao quadro seguinte",
         }
     }
 
@@ -319,7 +332,7 @@ impl Etapa {
             | Etapa::GpuRetoques
             | Etapa::GpuRevelacao
             | Etapa::GpuMotorTotal => Onde::Gpu,
-            Etapa::LatenciaDaFoto => Onde::PontaAPonta,
+            Etapa::LatenciaDaFoto | Etapa::EntradaAoQuadro => Onde::PontaAPonta,
         }
     }
 
@@ -337,6 +350,7 @@ impl Etapa {
                 | Etapa::MotorTotal
                 | Etapa::GpuMotorTotal
                 | Etapa::LatenciaDaFoto
+                | Etapa::EntradaAoQuadro
         )
     }
 }
@@ -513,6 +527,13 @@ pub fn quadro_comecou() {
     vigia::bater();
 }
 
+/// A batida da thread da interface (a cada [`coletor::BATIDA_US`], da tarefa
+/// do painel): é o que separa a janela presa do operador parado.
+pub fn batida() {
+    vigia::bater();
+    com(|c, t| c.coletor.batida(t));
+}
+
 /// O sentinela pintou — o fim do quadro. Devolve o número dele.
 pub fn quadro_pintado() -> Option<u64> {
     vigia::bater();
@@ -610,4 +631,14 @@ pub fn sessao_ate_agora() -> Option<domain::desempenho::SessaoDeDesempenho> {
             maquina::pronta().as_deref(),
         )
     })
+}
+
+/// A tela aberta e o tamanho da janela principal — do `render` dela, a cada
+/// quadro com a captura ligada.
+pub fn janela_principal(nome: &'static str, janela_px: (u32, u32), escala: f32) {
+    com(|c, _| {
+        c.coletor.tela(nome);
+        c.contexto.janela_px = janela_px;
+        c.contexto.escala = escala;
+    });
 }

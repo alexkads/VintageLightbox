@@ -44,7 +44,9 @@ use ui_gpui::tema;
 /// (`ui_gpui::depuracao::CofreEmArquivo`), para um roteiro não parar no diálogo
 /// do macOS a cada recompilação. O binário do balcão nem olha a variável.
 fn cofre_da_sessao(pilha_local: bool) -> Arc<dyn domain::services::pos_venda::CofreDeSessao> {
-    if cfg!(debug_assertions) && std::env::var_os("VLB_SESSAO_EM_ARQUIVO").is_some() {
+    if ui_gpui::depuracao::ferramentas_ligadas()
+        && std::env::var_os("VLB_SESSAO_EM_ARQUIVO").is_some()
+    {
         return Arc::new(ui_gpui::depuracao::CofreEmArquivo::padrao());
     }
     // 🚨 **A pilha local nunca usa o item de produção do chaveiro.** Eram o
