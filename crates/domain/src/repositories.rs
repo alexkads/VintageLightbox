@@ -159,4 +159,20 @@ pub trait RevelacoesDoSiteRepository: Send + Sync {
     /// Tira esta foto do depósito — ela subiu, e o servidor passou a ser a
     /// verdade.
     async fn esquecer(&self, foto_no_site: &str) -> DomainResult<()>;
+
+    /// Guarda (ou, com `None`, apaga) a receita **local** desta foto do site —
+    /// máscaras e retoques, em JSON (`locais_do_site`, migration 024).
+    ///
+    /// 🔑 **Não é apagada por [`Self::esquecer`]**: as máscaras ainda não sobem
+    /// ao site, e salvar na galeria não pode levá-las embora desta máquina.
+    ///
+    /// O padrão não guarda nada — é o depósito de quem não conhece máscara.
+    async fn guardar_locais(&self, _foto_no_site: &str, _locais: Option<&str>) -> DomainResult<()> {
+        Ok(())
+    }
+
+    /// Todas as receitas locais de fotos do site, como `(id no site, JSON)`.
+    async fn locais_de_todas(&self) -> DomainResult<Vec<(String, String)>> {
+        Ok(Vec::new())
+    }
 }

@@ -638,3 +638,39 @@ async fn a_troca_so_mexe_na_sessao_e_so_nas_do_rascunho() {
         "a do outro rascunho fica"
     );
 }
+
+/// A receita local (máscaras e retoques) vai ao banco e volta igual, nos dois
+/// caminhos de escrita — `save` e `update` — e `None` apaga.
+#[tokio::test]
+async fn a_receita_local_vai_e_volta_do_sqlite() {
+    let repo = create_test_repository().await;
+    let json = r#"{"versao":1,"camadas":[{"ajustes":{"exposicao_ev":1.0},"componentes":[{"modo":"somar","tipo":"pincel","raio":0.02,"feather":0.5,"opacidade":1.0,"pontos":[[0.1,0.2,1.0]]}],"invertida":false}],"retoques":[]}"#;
+
+    let mut foto = Photo::new(FilePath::new("/ensaio/mascara.jpg").unwrap());
+    foto.definir_locais(Some(json.into()));
+    repo.save(&foto).await.unwrap();
+    let lida = repo.find_by_id(&foto.id()).await.unwrap().unwrap();
+    assert_eq!(lida.locais(), Some(json), "pelo save");
+
+    foto.definir_receita(Some("{\"exposure\":0.4}".into()));
+    foto.definir_locais(Some(json.replace("1.0}", "2.0}")));
+    repo.update(&foto).await.unwrap();
+    let lida = repo.find_by_id(&foto.id()).await.unwrap().unwrap();
+    assert_eq!(
+        lida.locais(),
+        Some(json.replace("1.0}", "2.0}").as_str()),
+        "pelo update"
+    );
+    assert_eq!(
+        lida.receita(),
+        Some("{\"exposure\":0.4}"),
+        "sem mexer na receita"
+    );
+
+    foto.definir_locais(None);
+    repo.update(&foto).await.unwrap();
+    assert_eq!(
+        repo.find_by_id(&foto.id()).await.unwrap().unwrap().locais(),
+        None
+    );
+}

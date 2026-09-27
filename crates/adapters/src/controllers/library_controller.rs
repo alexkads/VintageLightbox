@@ -60,6 +60,7 @@ impl LibraryController {
                     sessao_id: photo.sessao().map(str::to_string),
                     ajustes_completos: None,
                     receita: photo.receita().map(str::to_string),
+                    locais: photo.locais().map(str::to_string),
                     revelacao_travada: false,
                     width: metadata.and_then(|m| m.width),
                     height: metadata.and_then(|m| m.height),

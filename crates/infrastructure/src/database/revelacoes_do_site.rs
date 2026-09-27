@@ -65,6 +65,40 @@ impl RevelacoesDoSiteRepository for SqliteRevelacoesDoSite {
             .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
         Ok(())
     }
+
+    async fn guardar_locais(&self, foto_no_site: &str, locais: Option<&str>) -> DomainResult<()> {
+        let consulta = match locais {
+            Some(locais) => sqlx::query(
+                r#"
+                INSERT INTO locais_do_site (pos_venda_foto_id, locais, atualizada_em)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(pos_venda_foto_id) DO UPDATE SET
+                    locais = excluded.locais,
+                    atualizada_em = CURRENT_TIMESTAMP
+                "#,
+            )
+            .bind(foto_no_site)
+            .bind(locais),
+            None => sqlx::query("DELETE FROM locais_do_site WHERE pos_venda_foto_id = ?")
+                .bind(foto_no_site),
+        };
+        consulta
+            .execute(&self.pool)
+            .await
+            .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn locais_de_todas(&self) -> DomainResult<Vec<(String, String)>> {
+        let linhas = sqlx::query("SELECT pos_venda_foto_id, locais FROM locais_do_site")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
+        Ok(linhas
+            .into_iter()
+            .map(|l| (l.get("pos_venda_foto_id"), l.get("locais")))
+            .collect())
+    }
 }
 
 #[cfg(test)]
@@ -123,5 +157,39 @@ mod testes {
         // Esquecer o que não está lá não é erro: o "Salvar na galeria" de uma
         // foto que nunca teve gesto nenhum passa por aqui.
         deposito.esquecer("nunca-existiu").await.unwrap();
+    }
+
+    /// 🚨 As máscaras da foto do site sobrevivem a salvar na galeria: o
+    /// `esquecer` é dos `ajustes`, que sobem; a receita local não sobe.
+    #[tokio::test]
+    async fn a_receita_local_nao_vai_embora_com_o_esquecer() {
+        let deposito = deposito().await;
+        deposito
+            .guardar("remota-1", r#"{"exposure":1.0}"#)
+            .await
+            .unwrap();
+        deposito
+            .guardar_locais("remota-1", Some(r#"{"versao":1,"camadas":[]}"#))
+            .await
+            .unwrap();
+
+        deposito.esquecer("remota-1").await.unwrap();
+        assert!(deposito.todas().await.unwrap().is_empty());
+        assert_eq!(
+            deposito.locais_de_todas().await.unwrap(),
+            vec![(
+                "remota-1".to_string(),
+                r#"{"versao":1,"camadas":[]}"#.to_string()
+            )]
+        );
+
+        // Substitui, e `None` apaga — a foto voltou a não ter máscara.
+        deposito
+            .guardar_locais("remota-1", Some(r#"{"versao":1}"#))
+            .await
+            .unwrap();
+        assert_eq!(deposito.locais_de_todas().await.unwrap().len(), 1);
+        deposito.guardar_locais("remota-1", None).await.unwrap();
+        assert!(deposito.locais_de_todas().await.unwrap().is_empty());
     }
 }

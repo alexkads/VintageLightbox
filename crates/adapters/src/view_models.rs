@@ -39,6 +39,10 @@ pub struct PhotoViewModel {
     /// valem as colunas `edit_*`.
     #[serde(default)]
     pub receita: Option<String>,
+    /// A receita **local** (máscaras e retoques) em JSON, como o banco a
+    /// guarda (`photos.edit_locais`, migration 024). `None` = sem máscara.
+    #[serde(default)]
+    pub locais: Option<String>,
     /// Comprada no site (ou sem arquivo): **não se revela**, como no editor
     /// do site (`editavel`). O cliente pode já ter baixado o original.
     ///

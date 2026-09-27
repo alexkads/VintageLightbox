@@ -13,7 +13,24 @@
 //! campos, está na documentação de [`revelacao_core::ajustes`] e de
 //! [`revelacao_core::motor`].
 
-pub use revelacao_core::{Ajustes, Entrada, Motor};
+pub use revelacao_core::{Ajustes, Entrada, Motor, ReceitaLocal};
+
+/// A receita local (máscaras e retoques) que a foto tem gravada
+/// (`photos.edit_locais`, migration 024).
+///
+/// 🚨 **Ilegível é erro, e não "sem máscara".** Uma receita gravada por uma
+/// versão mais nova do app, ou corrompida, exportada como vazia daria outra
+/// foto — a que o operador não revelou —, calada. Quem exporta falha alto.
+pub fn locais_da_entidade(foto: &domain::entities::Photo) -> domain::DomainResult<ReceitaLocal> {
+    match foto.locais() {
+        None => Ok(ReceitaLocal::default()),
+        Some(json) => ReceitaLocal::de_json(json).map_err(|e| {
+            domain::DomainError::InfrastructureError(format!(
+                "a receita local da foto não pôde ser lida: {e}"
+            ))
+        }),
+    }
+}
 
 /// A revelação que a foto tem gravada.
 ///

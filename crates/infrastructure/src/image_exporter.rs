@@ -38,7 +38,9 @@ use image::DynamicImage;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use crate::gpu_adjustments::{ajustes_da_entidade, Ajustes, Motor};
+use crate::gpu_adjustments::{
+    ajustes_da_entidade, locais_da_entidade, Ajustes, Motor, ReceitaLocal,
+};
 use crate::transformacao;
 
 /// O motor é aberto na primeira exportação e reaproveitado.
@@ -93,12 +95,13 @@ impl ImageExporterImpl {
         bytes: &[u8],
         ajustes: &Ajustes,
         corte: &CropSettings,
+        locais: &ReceitaLocal,
         qualidade: u8,
     ) -> DomainResult<Vec<u8>> {
         // De pé: o bruto do site pode ser o arquivo da câmera, com a etiqueta.
         let imagem = crate::orientacao::decodificar_de_pe(bytes)
             .map_err(|e| DomainError::InfrastructureError(format!("o original não abriu: {e}")))?;
-        let revelada = self.revelar(&imagem, ajustes, corte)?;
+        let revelada = self.revelar(&imagem, ajustes, corte, locais)?;
         let saida = transformacao::aplicar(&revelada, corte, true);
         revelacao_core::jpeg::codificar(&saida, qualidade)
             .map_err(|e| DomainError::InfrastructureError(format!("o JPEG não saiu: {e}")))
@@ -110,11 +113,17 @@ impl ImageExporterImpl {
     /// recorta continua sendo `transformacao::aplicar`, depois; o motor só o usa
     /// para medir as duas vinhetas no recorte (`Motor::definir_corte`). É
     /// definido a cada chamada porque o motor é compartilhado entre fotos.
+    ///
+    /// 🔑 **A receita local também entra aqui**, e as máscaras são refeitas dos
+    /// parâmetros na resolução do arquivo — não é o bitmap do preview ampliado.
+    /// Uma GPU que não desenha máscara faz a exportação falhar, em vez de
+    /// entregar a foto sem o que foi pintado.
     fn revelar(
         &self,
         imagem: &DynamicImage,
         ajustes: &Ajustes,
         corte: &CropSettings,
+        locais: &ReceitaLocal,
     ) -> DomainResult<DynamicImage> {
         // 🚨 RGBA de 8 bits é o que a textura de entrada espera
         // (`Rgba8Unorm`). Um `to_rgb8` aqui daria três canais para um formato de
@@ -129,6 +138,9 @@ impl ImageExporterImpl {
             .map_err(|_| DomainError::InfrastructureError("motor de GPU envenenado".into()))?;
 
         motor.definir_corte(&transformacao::corte(corte));
+        motor
+            .definir_locais(locais)
+            .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
         motor
             .revelar(&pixels, largura, altura, ajustes)
             .ok_or_else(|| {
@@ -238,7 +250,12 @@ impl ImageExporterImpl {
         // o que o processador devolveu). O corte vai ao motor também, mas só
         // para as vinhetas serem medidas no recorte — os pixels saem inteiros.
         let corte = transformacao::corte_da_entidade(photo);
-        let revelada = self.revelar(&img, &ajustes_da_entidade(photo), &corte)?;
+        let revelada = self.revelar(
+            &img,
+            &ajustes_da_entidade(photo),
+            &corte,
+            &locais_da_entidade(photo)?,
+        )?;
         let mut saida = transformacao::aplicar(&revelada, &corte, true);
 
         // ⚠️ Redimensionar **antes** da marca, e as duas coisas dependem disso:
@@ -290,8 +307,15 @@ impl ImageExporter for ImageExporterImpl {
         options: &ExportOptions,
     ) -> DomainResult<Option<Vec<u8>>> {
         // Nada revelado, nada a guardar: o próprio envio é o bruto.
+        //
+        // 🚨 **A receita local conta como revelação.** Uma foto só com máscara
+        // (sliders no neutro) sobe o arquivo mascarado; sem esta conferência ele
+        // seria tratado como o próprio bruto, e o bruto de verdade não subiria.
         let corte = transformacao::corte_da_entidade(photo);
-        if ajustes_da_entidade(photo) == Ajustes::default() && corte == CropSettings::default() {
+        if ajustes_da_entidade(photo) == Ajustes::default()
+            && corte == CropSettings::default()
+            && locais_da_entidade(photo)?.vazia()
+        {
             return Ok(None);
         }
 
@@ -300,7 +324,12 @@ impl ImageExporter for ImageExporterImpl {
             DomainError::InfrastructureError(format!("Failed to open source image: {}", e))
         })?;
 
-        let revelada = self.revelar(&img, &Ajustes::default(), &CropSettings::default())?;
+        let revelada = self.revelar(
+            &img,
+            &Ajustes::default(),
+            &CropSettings::default(),
+            &ReceitaLocal::default(),
+        )?;
         let mut saida = transformacao::aplicar(&revelada, &CropSettings::default(), true);
         if let Some(lado_maior) = options.longest_edge() {
             saida = redimensionar(saida, lado_maior);

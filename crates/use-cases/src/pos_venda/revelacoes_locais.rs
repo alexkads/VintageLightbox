@@ -46,6 +46,21 @@ impl RevelacoesLocaisUseCase {
     pub async fn esquecer(&self, foto_no_site: &str) -> DomainResult<()> {
         self.repositorio.esquecer(foto_no_site).await
     }
+
+    /// A receita local (máscaras e retoques) desta foto — `None` apaga. Não é
+    /// levada pelo [`Self::esquecer`]: ela ainda não sobe ao site.
+    pub async fn guardar_locais(
+        &self,
+        foto_no_site: &str,
+        locais: Option<&str>,
+    ) -> DomainResult<()> {
+        self.repositorio.guardar_locais(foto_no_site, locais).await
+    }
+
+    /// As receitas locais de todas as fotos do site, para a abertura do app.
+    pub async fn locais_de_todas(&self) -> DomainResult<Vec<(String, String)>> {
+        self.repositorio.locais_de_todas().await
+    }
 }
 
 #[cfg(test)]

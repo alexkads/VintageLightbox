@@ -36,6 +36,11 @@ pub struct Photo {
     /// Sem isto, os módulos novos voltavam zerados ao reabrir a foto
     /// (divergência D7 do contrato da foto). `None` = valem as colunas.
     receita: Option<String>,
+    /// A receita **local** — máscaras e retoques — em JSON (migration 024).
+    ///
+    /// Coluna própria porque não sobe ao site como a `receita`: a API recusa
+    /// objeto aninhado. `None` = sem máscara nem retoque.
+    locais: Option<String>,
     /// Classificação por estrelas (0-5)
     rating: Option<Rating>,
     /// Etiqueta de cor
@@ -303,6 +308,7 @@ impl Photo {
             file_path,
             nome_original: None,
             receita: None,
+            locais: None,
             imported_at,
             modified_at,
             metadata,
@@ -615,6 +621,17 @@ impl Photo {
     /// marcar modificação seria mentira.
     pub fn definir_receita(&mut self, receita: Option<String>) {
         self.receita = receita.filter(|r| !r.trim().is_empty());
+    }
+
+    /// A receita local (máscaras e retoques), em JSON — ver o campo.
+    pub fn locais(&self) -> Option<&str> {
+        self.locais.as_deref()
+    }
+
+    /// Guarda a receita local. Mesmas regras de [`Self::definir_receita`]:
+    /// texto vazio é `None`, e `modified_at` não muda.
+    pub fn definir_locais(&mut self, locais: Option<String>) {
+        self.locais = locais.filter(|r| !r.trim().is_empty());
     }
 
     /// Retorna a extensão do arquivo

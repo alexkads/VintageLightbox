@@ -87,6 +87,7 @@ impl SavePhotoEditsUseCase {
         crop_flip_h: Option<bool>,
         crop_flip_v: Option<bool>,
         receita: Option<String>,
+        locais: Option<String>,
     ) -> DomainResult<()> {
         let mut photo = self
             .photo_repository
@@ -159,6 +160,9 @@ impl SavePhotoEditsUseCase {
         )?;
         // Os 53 acima são as colunas antigas; a receita leva os 171 (D7).
         photo.definir_receita(receita);
+        // A receita local (máscaras e retoques) é autoritativa como a de cima:
+        // `None` é "sem máscara". Quem grava a foto manda a que ela tem.
+        photo.definir_locais(locais);
         self.photo_repository.update(&photo).await?;
 
         Ok(())
@@ -232,6 +236,7 @@ mod tests {
                 None, None, // Rotation
                 None, None, // Flip
                 None, // Receita
+                None, // Locais
             )
             .await;
 
@@ -264,6 +269,7 @@ mod tests {
                 0.0, 0.0, // Grão (quantidade, tamanho)
                 None, None, None, None, None, None, None, None, // Crop
                 None, // Receita
+                None, // Locais
             )
             .await;
 

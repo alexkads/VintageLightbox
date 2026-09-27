@@ -58,6 +58,27 @@ impl EditorController {
             .map_err(|e| e.to_string())
     }
 
+    /// Guarda a receita local (máscaras e retoques) de uma foto do site —
+    /// `None` apaga. Fica nesta máquina mesmo depois de a revelação subir.
+    pub async fn guardar_locais_do_site(
+        &self,
+        foto_no_site: &str,
+        locais: Option<&str>,
+    ) -> Result<(), String> {
+        self.revelacoes_do_site
+            .guardar_locais(foto_no_site, locais)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// As receitas locais de todas as fotos do site — lidas na abertura.
+    pub async fn locais_do_site(&self) -> Result<Vec<(String, String)>, String> {
+        self.revelacoes_do_site
+            .locais_de_todas()
+            .await
+            .map_err(|e| e.to_string())
+    }
+
     // ⚠️ Dívida reconhecida, não descuido — docs/10-MIGRACAO-GPUI.md §2.1.
     //
     // A cadeia de ajustes de revelação (exposição, contraste, HSL nos 8 canais,
@@ -134,6 +155,7 @@ impl EditorController {
         crop_flip_h: Option<bool>,
         crop_flip_v: Option<bool>,
         receita: Option<String>,
+        locais: Option<String>,
     ) -> Result<(), String> {
         let photo_id = PhotoId::from_string(&id).map_err(|e| e.to_string())?;
 
@@ -202,6 +224,7 @@ impl EditorController {
                 crop_flip_h,
                 crop_flip_v,
                 receita,
+                locais,
             )
             .await
             .map_err(|e| e.to_string())
