@@ -1,17 +1,16 @@
 {
-  "versao": "0.1.22",
-  "titulo": "Chegou a Revelação local: máscaras e retoque (carimbo, band-aid e Content-Aware), com zoom de pinça até o pixel. E importar do cartão ficou rápido e nítido.",
+  "versao": "0.1.23",
+  "titulo": "Os atalhos da tira não se perdem mais, e a tira da Revelação dá nota, P e X como a galeria. O Enquadrar ganhou o Auto, que endireita a foto sozinho.",
   "importante": true,
   "novidades": [
-    "Revelação local: pincel, gradiente linear e radial e laço para clarear ou escurecer só uma parte da foto.",
-    "Retoque: carimbo, band-aid e Content-Aware tiram manchas, fios e objetos — a origem é escolhida sozinha e dá para arrastar depois.",
-    "Zoom novo na foto: Encaixar, Preencher, 1:1, lista de níveis, régua contínua e um navegador flutuante. A pinça do trackpad amplia até 6400%, com os pixels nítidos para retocar de perto.",
-    "Ao abrir o cartão da câmera, as miniaturas aparecem em poucos segundos e nítidas — antes demoravam e vinham borradas.",
-    "O ensaio sobe para o site uma vez só: o envio termina bem mais rápido, e o contador \"Subindo\" desce foto a foto.",
-    "Depois de trocar o efeito de todas as fotos (Sincronizar) e salvar, a galeria já mostra o efeito novo, sem voltar ao antigo enquanto o envio termina.",
-    "A foto que acabou de subir abre na Revelação na hora, sem esperar baixar do site.",
-    "Rejeitar (X) uma foto enquanto o salvar ainda envia não mostra mais \"envio recusado\".",
-    "Na Revelação, a bolinha âmbar agora quer dizer \"mudou e ainda não foi salvo\"; o ajuste que já está salvo aparece com uma bolinha cinza."
+    "Depois de clicar no caixa, as setas, a nota e o P voltam a funcionar assim que se clica na tira ou na galeria — não é mais preciso fechar e reabrir a guia.",
+    "Na Revelação, as teclas 1 a 5, 0, P e X valem na tira como na galeria: na foto aberta ou em todas as marcadas, e a estrela da miniatura muda na hora.",
+    "Enquadrar: o botão Auto endireita a foto pelas linhas retas dela, e a régua (⌘ + arrastar) deixa reta a linha que você traçar.",
+    "A cortesia ou o desconto aparecem na grade já no primeiro Salvar, sem precisar salvar de novo.",
+    "O rodapé da janela mostra os envios (\"Subindo N fotos\", \"Tudo no site\"), quantas fotos o recorte tem, quantas estão selecionadas e a versão — clique nela para ver as novidades.",
+    "Clicar em \"N envios recusados\" abre a lista com o motivo de cada um.",
+    "A pílula do acerto mostra o ícone do aperto de mão também no Linux.",
+    "No Windows, a Revelação e a tela do cliente ficaram bem mais rápidas."
   ],
-  "por_que_atualizar": "Dá para tirar a mancha, o fio ou o reflexo com o cliente na frente, sem abrir outro programa — e quem importa do cartão ganha minutos por sessão."
+  "por_que_atualizar": "Quem classifica pela tira não perde mais os atalhos no meio da sessão, e endireitar a foto passa a ser um clique."
 }
