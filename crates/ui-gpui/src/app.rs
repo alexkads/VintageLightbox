@@ -2879,8 +2879,18 @@ impl Aplicativo {
             // não tem o que esquecer, e o `remove` não custa nada.
             self.nova_sessao
                 .update(cx, |tela, _| tela.revelada_chegou(&foto_id));
+            // 🚨 **A grade fala o id do site sem o prefixo do acervo.** Avisada
+            // com `site:<id>`, ela esquecia uma chave que não tem e continuava
+            // mostrando a imagem da galeria: depois do "Sincronizar 48" em P&B,
+            // as fotos que já tinham subido ficavam em Sépia na sessão por um
+            // a dois minutos, até o site terminar — com a tira da Revelação já
+            // em P&B (visto rodando o app com o cartão da D3100, 27/set/2026).
+            // É a conversão que `esquecer_a_previa_local` já fazia.
+            let na_grade = persistencia::id_no_site(&foto_id)
+                .unwrap_or(&foto_id)
+                .to_string();
             self.detalhe
-                .update(cx, |tela, _| tela.revelada_chegou(&foto_id));
+                .update(cx, |tela, _| tela.revelada_chegou(&na_grade));
             // 🔑 **A tira da Revelação também mostra estas fotos.** Ela é a
             // tela onde o "Sincronizar N" acontece, e era justamente onde o
             // efeito não aparecia.
@@ -7132,6 +7142,37 @@ mod testes {
                 assert!(
                     revelacao.tem_pixels(),
                     "abriu com o bruto deste computador, sem esperar a rede"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **A prévia revelada de uma foto do site chega à grade pelo id dela.**
+    ///
+    /// O aviso ia com o id do acervo (`site:<id>`), e a grade — que conhece a
+    /// foto pelo id do site, sem prefixo — continuava na imagem da galeria:
+    /// depois de sincronizar P&B, a sessão mostrava Sépia até o site terminar.
+    #[gpui_kit::test]
+    fn a_previa_revelada_da_foto_do_site_chega_a_grade(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_kit::init);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| {
+                Aplicativo::ja_dentro(Vec::new(), previews, Vec::new(), portas(), window, cx)
+            }
+        });
+
+        janela
+            .update(cx, |app, _window, cx| {
+                let _ = app.reveladas.0.send("site:remota-1".into());
+                let _ = app.reveladas.0.send("id-local".into());
+                app.colher_reveladas(cx);
+                assert_eq!(
+                    app.detalhe.read(cx).reveladas_avisadas(),
+                    vec!["remota-1".to_string(), "id-local".to_string()],
+                    "a grade é avisada pelo id que ela conhece"
                 );
             })
             .expect("a janela deve estar aberta");

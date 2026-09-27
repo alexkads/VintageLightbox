@@ -1099,7 +1099,10 @@ impl Revelacao {
                 .button_props(
                     gpui_kit::component::dialog::DialogButtonProps::default()
                         .ok_text(SharedString::from(format!("Sincronizar {quantas}")))
-                        .cancel_text("Cancelar"),
+                        .cancel_text("Cancelar")
+                        // 🚨 As propriedades entram inteiras, e o padrão delas
+                        // esconde o cancelar que o `confirm()` tinha ligado.
+                        .show_cancel(true),
                 )
                 .title(SharedString::from(format!("Sincronizar {quantas} fotos")))
                 .child(
