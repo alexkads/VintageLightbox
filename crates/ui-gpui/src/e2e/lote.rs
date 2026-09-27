@@ -630,6 +630,55 @@ fn a_previa_local_revelada_nasce_ao_sair_e_morre_quando_a_foto_sobe(cx: &mut Tes
     );
 }
 
+/// 🎬 **A foto não volta ao efeito antigo enquanto a miniatura nova vem.**
+///
+/// 🚨 Visto rodando o app com o cartão da D3100 (27/set/2026): P&B
+/// sincronizado e salvo, e cada foto voltava ao Sépia por segundos quando o
+/// site confirmava a revelação dela. A prévia local saía na resposta do envio,
+/// e a grade desenhava a miniatura **antiga** da galeria até o download da
+/// nova terminar. Ela sai quando a nova chega.
+#[gpui_kit::test]
+fn a_previa_local_so_sai_quando_a_miniatura_nova_chega(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(
+        cx,
+        Cenario {
+            site: Box::new(|site| {
+                site.demorada = true;
+                site.miniatura_demorada = true;
+            }),
+            ..Cenario::default()
+        },
+    );
+    let chave = crate::revelacao::persistencia::chave_da_revelada("site:a");
+
+    e.revelar_a_do_site(cx, "a");
+    e.revelacao(cx, |tela, _w, cx| tela.arrastar_slider(0, 0.6, cx));
+    e.esperar(cx);
+    botao(&e, cx, PedidoDaRevelacao::SalvarNaGaleria);
+    e.esperar(cx);
+    assert!(e.previews.tem(&chave, PreviewType::Thumbnail));
+
+    // O site confirma a revelação; a miniatura nova ainda está vindo.
+    e.site.responder();
+    e.esperar(cx);
+    assert!(
+        e.site.miniaturas_pedidas().contains(&"a".to_string()),
+        "a miniatura nova foi pedida"
+    );
+    assert!(
+        e.previews.tem(&chave, PreviewType::Thumbnail),
+        "até ela chegar, a grade continua com a prévia do efeito novo"
+    );
+
+    // Chegou: agora quem manda é o servidor.
+    e.site.responder();
+    e.esperar(cx);
+    assert!(
+        !e.previews.tem(&chave, PreviewType::Thumbnail),
+        "a miniatura nova está no disco, e a prévia local saiu"
+    );
+}
+
 /// 🎬 **"Sincronizar N" muda a tira na hora** — e não só o banco.
 ///
 /// 🚨 **Dono, 18/set/2026**: *"o botão de sincronizar não está com o mesmo

@@ -2191,6 +2191,7 @@ impl Aplicativo {
                 corte,
             );
             self.enfileirar_para_subir(no_site.clone(), ajustes, enquadramento.clone());
+            self.levar_a_previa_local_ao_site(&foto.id, &no_site, cx);
             lote.push((no_site, ajustes, enquadramento));
         }
         if lote.is_empty() {
@@ -2200,6 +2201,33 @@ impl Aplicativo {
         self.absorver_as_do_site(fotos_do_site, cx);
         self.mandar_as_revelacoes(lote, cx);
         self.recontar_o_que_falta_subir(cx);
+    }
+
+    /// 🚨 **A foto que subiu durante o "Sincronizar" aparecia com o efeito de
+    /// antes.** Sincronizada enquanto ainda era local, a prévia do efeito novo
+    /// nasceu sob o id do catálogo (`revelada:<id>`); ao terminar de subir ela
+    /// passa a ser desenhada como foto do site, que procura `revelada:site:<id>`
+    /// — e caía na imagem da galeria, feita com a receita antiga. Visto rodando
+    /// o app com o cartão da D3100 (27/set/2026): P&B sincronizado em 48, e a
+    /// sessão mostrando Sépia nas que subiram no meio, até o lote terminar.
+    ///
+    /// 🔑 A prévia local é o que o operador fez; ela vale para o id do site até
+    /// a revelação nova chegar lá (`PreviaLocalVencida`).
+    fn levar_a_previa_local_ao_site(&mut self, local: &str, no_site: &str, cx: &mut Context<Self>) {
+        use domain::services::PreviewType;
+        let de = persistencia::chave_da_revelada(local);
+        if !self.previews.tem(&de, PreviewType::Thumbnail) {
+            return;
+        }
+        let para =
+            persistencia::chave_da_revelada(&format!("{}{no_site}", persistencia::PREFIXO_DO_SITE));
+        // A prévia de lá, se houver, é de uma receita anterior a esta.
+        self.previews.apagar(&para);
+        for tipo in [PreviewType::Thumbnail, PreviewType::Large] {
+            self.previews.copiar_se_faltar(&de, &para, tipo);
+        }
+        self.detalhe
+            .update(cx, |tela, _| tela.revelada_chegou(no_site));
     }
 
     /// O ajuste feito na Revelação **depois** de a foto local terminar de
@@ -2536,6 +2564,12 @@ impl Aplicativo {
                 // 🔑 Idem: a estrela só aparece na grade da sessão depois de
                 // uma releitura, e a nota não move arquivo para provocá-la.
                 self.pedir_releitura_do_acervo(cx);
+            }
+            // 🔑 A miniatura nova do site chegou: agora sim a prévia local sai
+            // — sem a janela em que a grade mostrava a imagem antiga.
+            DetalhePedido::PreviaLocalVencida(foto_no_site) => {
+                let no_acervo = format!("{}{foto_no_site}", persistencia::PREFIXO_DO_SITE);
+                self.esquecer_a_previa_local(&no_acervo, cx);
             }
             DetalhePedido::MiniaturaPronta(chave) => {
                 let chave = chave.clone();
@@ -3305,13 +3339,10 @@ impl Aplicativo {
                     // quem manda — uma cópia local que ninguém mais atualiza
                     // faria a grade mostrar para sempre a receita deste
                     // momento. É o `apagarPreviaLocal` da web.
-                    let no_acervo = format!("{}{foto_no_site}", persistencia::PREFIXO_DO_SITE);
-                    // 🔑 **Pela função de sempre, e não por um `apagar` à
-                    // parte**: apagar o arquivo sem avisar quem o desenha é
-                    // deixar a tira da Revelação e a grade da nova sessão
-                    // mostrando o que já não existe. Ver
-                    // `esquecer_a_previa_local`.
-                    self.esquecer_a_previa_local(&no_acervo, cx);
+                    // ⚠️ **Mas só quando a miniatura nova chegar** — quem avisa
+                    // é a grade (`PreviaLocalVencida`), pela função de sempre
+                    // (`esquecer_a_previa_local`). Apagar aqui deixava a grade
+                    // na miniatura antiga da galeria até o download terminar.
                     // 🚨 **A miniatura da grade é a de antes do envio** (dono,
                     // 18/set/2026: *"não travou, mas não fez a atualização das
                     // miniaturas"*). A foto no site é a revelada agora;
@@ -10385,6 +10416,65 @@ mod testes {
                     0,
                     "a receita é a mesma: nada sobe de novo"
                 );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **A foto que subiu durante o "Sincronizar" mostrava o efeito antigo.**
+    ///
+    /// Sincronizada ainda local, a prévia do P&B nasceu sob o id do catálogo;
+    /// ao terminar de subir ela passou a ser desenhada como foto do site, que
+    /// procura a prévia sob `site:<id>` e caía na galeria em Sépia (visto
+    /// rodando o app com o cartão da D3100, 27/set/2026).
+    #[gpui_kit::test]
+    fn a_previa_local_acompanha_a_foto_que_subiu_com_a_receita_velha(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_kit::init);
+        let mut subida = foto("DSC_2677.JPG");
+        subida.pos_venda_foto_id = Some("remota-1".into());
+        subida.sessao_id = Some("g1".into());
+        subida.edit_saturation = Some(-1.0);
+        subida.edit_contrast = Some(1.15);
+        previews
+            .save_thumbnail(
+                &persistencia::chave_da_revelada(&subida.id),
+                &foto_vermelha(),
+            )
+            .expect("a prévia do P&B, feita quando ela ainda era local");
+        // Subiu com a Sépia de antes do "Sincronizar".
+        let mut sepia = subida.clone();
+        sepia.edit_contrast = Some(1.08);
+        let que_subiu = crate::pos_venda::porta::ajustes_em_json(
+            &persistencia::da_foto(&sepia),
+            &persistencia::para_crop_settings(&persistencia::corte_da_foto(&sepia)),
+        );
+        let fotos = vec![subida.clone()];
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            move |window, cx| {
+                Aplicativo::ja_dentro(fotos, previews, Vec::new(), portas(), window, cx)
+            }
+        });
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.receitas_que_subiram
+                    .insert(subida.id.clone(), Some(que_subiu.to_string()));
+                app.conciliar_a_receita_que_subiu(std::slice::from_ref(&subida), cx);
+                assert_eq!(app.sincronias_pendentes(), 1, "a receita nova sobe");
+                assert!(
+                    previews.tem(
+                        &persistencia::chave_da_revelada("site:remota-1"),
+                        domain::services::PreviewType::Thumbnail
+                    ),
+                    "a grade da foto do site mostra o P&B até a revelação chegar"
+                );
+                assert!(app
+                    .detalhe
+                    .read(cx)
+                    .reveladas_avisadas()
+                    .contains(&"remota-1".to_string()));
             })
             .expect("a janela deve estar aberta");
     }

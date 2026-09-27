@@ -1003,6 +1003,9 @@ pub mod mentira {
         /// Segura também a cópia de trabalho (o passo 11) até `responder()` —
         /// para provar que um download no ar não conta como envio.
         pub copia_demorada: bool,
+        /// Segura a **miniatura** até `responder()` — o download da imagem nova
+        /// da galeria, que chega depois da resposta do envio.
+        pub miniatura_demorada: bool,
         /// Segura a resposta do `PATCH` até `responder()` — a rede cheia com o
         /// ensaio subindo ao R2, que é quando a tecla seguinte chega antes.
         pub negociacao_demorada: bool,
@@ -1551,10 +1554,18 @@ pub mod mentira {
                 .lock()
                 .expect("as miniaturas pedidas")
                 .push(foto_id.clone());
-            let _ = canal.send(Recado::Miniatura {
+            let recado = Recado::Miniatura {
                 foto_id,
                 bytes: jpeg_de_um_pixel(),
-            });
+            };
+            if self.miniatura_demorada {
+                self.guardados
+                    .lock()
+                    .expect("os guardados")
+                    .push((canal, recado));
+            } else {
+                let _ = canal.send(recado);
+            }
         }
 
         fn copia_de_trabalho(
