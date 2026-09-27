@@ -2276,14 +2276,33 @@ impl Revelacao {
                 .p(px(2.))
                 .rounded(px(7.))
                 .bg(tema.muted);
+            // 🚨 **O escolhido tem de aparecer** (visto no app real,
+            // 2026-09-27): o `Button` fantasma marcado ganha o mesmo fundo
+            // `muted` da barra, e nenhum dos dois parecia escolhido. Desenho
+            // das abas sRGB/RGB: fundo e texto claros no escolhido.
             for (k, (rotulo, ativo)) in rotulos.into_iter().enumerate() {
                 linha = linha.child(
-                    Button::new(SharedString::from(format!("{id}-{k}")))
-                        .label(rotulo)
-                        .xsmall()
-                        .ghost()
-                        .selected(ativo)
+                    div()
+                        .id(SharedString::from(format!("{id}-{k}")))
+                        .flex()
                         .flex_1()
+                        .justify_center()
+                        .py(px(3.))
+                        .rounded(px(5.))
+                        .text_xs()
+                        .cursor_pointer()
+                        .when(ativo, |d| {
+                            d.bg(tema.background)
+                                .border_1()
+                                .border_color(tema.border)
+                                .text_color(tema.foreground)
+                                .font_weight(gpui_kit::FontWeight::MEDIUM)
+                        })
+                        .when(!ativo, |d| {
+                            d.text_color(tema.muted_foreground)
+                                .hover(|d| d.text_color(tema.foreground))
+                        })
+                        .child(rotulo)
                         .on_click(cx.listener(move |tela, _e, _w, cx| {
                             acao(tela, k == 1);
                             cx.notify();
