@@ -170,13 +170,14 @@ impl Render for SemFantasma {
 #[derive(Clone, Copy)]
 struct ArrastoDoNo;
 
-/// O ponto âmbar de "alterado" — `size-1.5 rounded-full bg-amber-400`.
-fn ponto_ambar() -> gpui_kit::Div {
-    div()
-        .size(px(6.))
-        .flex_none()
-        .rounded_full()
-        .bg(tema::cores::quente())
+/// O ponto de um conjunto de controles — âmbar é "mudou e não salvou", cinza é
+/// "tem ajuste, já salvo" (`Marca` e o `<Marca>` do site).
+fn ponto(marca: controles::Marca, cx: &gpui_kit::App) -> gpui_kit::Div {
+    let cor = match marca {
+        controles::Marca::NaoSalvo => tema::cores::quente(),
+        controles::Marca::Ajustado => cx.theme().muted_foreground.opacity(0.5),
+    };
+    div().size(px(6.)).flex_none().rounded_full().bg(cor)
 }
 
 impl Revelacao {
@@ -195,8 +196,17 @@ impl Revelacao {
     }
 
     /// Se alguma coisa desta família saiu do neutro.
+    #[cfg(test)]
     pub(super) fn secao_alterada(&self, secao: Secao) -> bool {
         controles::secao_alterada(&self.ajustes, secao)
+    }
+
+    /// A receita com que a foto abriu — o que a galeria tem, e é contra ela
+    /// que o ponto âmbar compara (o marco do site).
+    fn salvo(&self) -> Ajustes {
+        self.receita_ao_abrir
+            .map(|e| e.ajustes)
+            .unwrap_or(self.ajustes)
     }
 
     /// A foto tem enquadramento — recorte, giro, endireitamento ou espelho?
@@ -530,7 +540,7 @@ impl Revelacao {
         let no_rgb = self.estado_do_painel.no_rgb();
         let aba = |rgb: bool, rotulo: &'static str, dica: &'static str, cx: &mut Context<Self>| {
             let escolhida = no_rgb == rgb;
-            let marcada = controles::aba_alterada(&self.ajustes, rgb);
+            let marca = controles::marca_da_aba(&self.ajustes, &self.salvo(), rgb);
             div()
                 .id(SharedString::from(format!("aba-espaco-{rotulo}")))
                 .flex()
@@ -552,7 +562,7 @@ impl Revelacao {
                     gpui_kit::component::tooltip::Tooltip::new(dica).build(window, cx)
                 })
                 .child(rotulo)
-                .when(marcada, |a| a.child(ponto_ambar()))
+                .when_some(marca, |a, m| a.child(ponto(m, cx)))
                 .on_click(cx.listener(move |tela, _ev, _window, cx| {
                     tela.estado_do_painel.definir(CHAVE_DA_ABA_RGB, rgb);
                     cx.notify();
@@ -587,7 +597,7 @@ impl Revelacao {
         &self,
         titulo: &'static str,
         aberto: bool,
-        alterado: bool,
+        marca: Option<controles::Marca>,
         chave: String,
         padrao: bool,
         cx: &mut Context<Self>,
@@ -613,7 +623,7 @@ impl Revelacao {
                 .text_color(cx.theme().muted_foreground),
             )
             .child(div().flex_1().min_w(px(0.)).truncate().child(titulo))
-            .when(alterado, |c| c.child(ponto_ambar()))
+            .when_some(marca, |c, m| c.child(ponto(m, cx)))
             .on_click(cx.listener(move |tela, _ev, _window, cx| {
                 tela.estado_do_painel.alternar(&chave, padrao);
                 cx.notify();
@@ -629,10 +639,10 @@ impl Revelacao {
         let chave = painel.chave();
         let padrao = painel.nasce_aberto();
         let aberto = self.estado_do_painel.aberto(&chave, padrao);
-        let alterado = controles::painel_alterado(&self.ajustes, painel);
+        let marca = controles::marca_do_painel(&self.ajustes, &self.salvo(), painel);
 
         let cabecalho =
-            self.cabecalho_da_sanfona(painel.rotulo(), aberto, alterado, chave, padrao, cx);
+            self.cabecalho_da_sanfona(painel.rotulo(), aberto, marca, chave, padrao, cx);
 
         let conteudo = aberto.then(|| {
             let mut dentro: Vec<AnyElement> = Vec::new();
@@ -686,7 +696,7 @@ impl Revelacao {
                     .map(|secao| {
                         let secao = *secao;
                         let escolhida = secao == visivel;
-                        let alterada = self.secao_alterada(secao);
+                        let marca = controles::marca_da_secao(&self.ajustes, &self.salvo(), secao);
 
                         div()
                             .id(SharedString::from(format!("aba-{}", secao.rotulo())))
@@ -701,8 +711,13 @@ impl Revelacao {
                                 aba.text_color(cx.theme().muted_foreground)
                                     .hover(|a| a.text_color(cx.theme().foreground))
                             })
-                            .when(alterada && !escolhida, |aba| {
-                                aba.underline().text_decoration_color(tema::cores::quente())
+                            .when_some(marca.filter(|_| !escolhida), |aba, m| {
+                                aba.underline().text_decoration_color(match m {
+                                    controles::Marca::NaoSalvo => tema::cores::quente(),
+                                    controles::Marca::Ajustado => {
+                                        cx.theme().muted_foreground.opacity(0.5)
+                                    }
+                                })
                             })
                             .child(Painel::aba(secao))
                             .on_click(cx.listener(move |tela, _ev, _window, cx| {
@@ -1043,7 +1058,7 @@ impl Revelacao {
         let cabecalho_hist = self.cabecalho_da_sanfona(
             "Histograma",
             com_histograma,
-            false,
+            None,
             CHAVE_DO_HISTOGRAMA.to_string(),
             true,
             cx,
@@ -1051,7 +1066,7 @@ impl Revelacao {
         let cabecalho_curva = self.cabecalho_da_sanfona(
             "Curva resultante",
             com_curva,
-            false,
+            None,
             CHAVE_DA_CURVA_RESULTANTE.to_string(),
             true,
             cx,
@@ -1217,11 +1232,19 @@ impl Revelacao {
         self.estado_do_painel.no_rgb()
     }
 
-    /// O ponto âmbar de cada aba: `(sRGB, RGB)`.
+    /// O ponto âmbar ("mudou e não salvou") de cada aba: `(sRGB, RGB)`.
     pub(crate) fn abas_alteradas(&self) -> (bool, bool) {
+        let (srgb, rgb) = self.marcas_das_abas();
+        let ambar = |m: Option<controles::Marca>| m == Some(controles::Marca::NaoSalvo);
+        (ambar(srgb), ambar(rgb))
+    }
+
+    /// O ponto de cada aba, com o que ele diz: `(sRGB, RGB)`.
+    pub(crate) fn marcas_das_abas(&self) -> (Option<controles::Marca>, Option<controles::Marca>) {
+        let salvo = self.salvo();
         (
-            controles::aba_alterada(&self.ajustes, false),
-            controles::aba_alterada(&self.ajustes, true),
+            controles::marca_da_aba(&self.ajustes, &salvo, false),
+            controles::marca_da_aba(&self.ajustes, &salvo, true),
         )
     }
 
