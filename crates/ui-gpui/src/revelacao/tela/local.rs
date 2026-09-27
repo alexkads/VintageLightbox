@@ -2520,6 +2520,9 @@ impl Revelacao {
                             .ghost()
                             .tooltip(if camada.visivel { "Ocultar" } else { "Mostrar" })
                             .on_click(cx.listener(move |tela, _e, _w, cx| {
+                                // Dentro da linha: o clique não pode chegar a ela,
+                                // que alternaria a seleção da máscara.
+                                cx.stop_propagation();
                                 tela.mudar_mascara(i, cx, |c| {
                                     c.visivel = !c.visivel;
                                     false
@@ -2534,6 +2537,9 @@ impl Revelacao {
                             .selected(camada.invertida)
                             .tooltip("Inverter")
                             .on_click(cx.listener(move |tela, _e, _w, cx| {
+                                // Dentro da linha: o clique não pode chegar a ela,
+                                // que alternaria a seleção da máscara.
+                                cx.stop_propagation();
                                 tela.mudar_mascara(i, cx, |c| {
                                     c.invertida = !c.invertida;
                                     false
@@ -2547,6 +2553,9 @@ impl Revelacao {
                             .ghost()
                             .tooltip("Excluir máscara")
                             .on_click(cx.listener(move |tela, _e, _w, cx| {
+                                // Dentro da linha: o clique não pode chegar a ela,
+                                // que alternaria a seleção da máscara.
+                                cx.stop_propagation();
                                 tela.mudar_mascara(i, cx, |_| true)
                             })),
                     );
@@ -2597,8 +2606,11 @@ impl Revelacao {
                             ),
                     );
                 }
-                lista =
-                    lista.child(comps).child(
+                // A exposição logo abaixo da linha, antes dos componentes: é o
+                // controle da máscara, e no pé de uma lista longa ele ficava
+                // fora da coluna (visto no app real, 2026-09-27).
+                lista = lista
+                    .child(
                         div()
                             .flex()
                             .items_center()
@@ -2622,7 +2634,8 @@ impl Revelacao {
                                     if ev > 0.0 { "+" } else { "" }
                                 )),
                             )),
-                    );
+                    )
+                    .child(comps);
             }
         }
         lista.into_any_element()
