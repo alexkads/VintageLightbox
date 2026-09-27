@@ -143,6 +143,7 @@ impl Caixa {
             original.flip_horizontal(),
             original.flip_vertical(),
         )
+        .herdar(original)
     }
 }
 
@@ -229,6 +230,7 @@ pub fn girar(corte: &CropSettings) -> CropSettings {
         corte.flip_horizontal(),
         corte.flip_vertical(),
     )
+    .herdar(corte)
 }
 
 /// Três quartos de volta: o "girar à esquerda" do painel.
@@ -247,6 +249,7 @@ pub fn espelhar_horizontal(corte: &CropSettings) -> CropSettings {
         !corte.flip_horizontal(),
         corte.flip_vertical(),
     )
+    .herdar(corte)
 }
 
 pub fn espelhar_vertical(corte: &CropSettings) -> CropSettings {
@@ -260,6 +263,7 @@ pub fn espelhar_vertical(corte: &CropSettings) -> CropSettings {
         corte.flip_horizontal(),
         !corte.flip_vertical(),
     )
+    .herdar(corte)
 }
 
 /// Muda o ângulo livre, em graus. `CropSettings` limita a ±45.
@@ -274,6 +278,7 @@ pub fn inclinar(corte: &CropSettings, graus: f32) -> CropSettings {
         corte.flip_horizontal(),
         corte.flip_vertical(),
     )
+    .herdar(corte)
 }
 
 /// O maior ângulo do endireitamento, como no site (`ANGULO_MAXIMO`).
@@ -310,6 +315,7 @@ pub fn com_retangulo(corte: &CropSettings, r: Retangulo, espaco: (f32, f32)) -> 
         corte.flip_horizontal(),
         corte.flip_vertical(),
     )
+    .herdar(corte)
 }
 
 /// O ponto está dentro da foto depois de o ângulo girá-la? A foto gira em
@@ -414,7 +420,8 @@ pub fn endireitar(
         limitado,
         corte.flip_horizontal(),
         corte.flip_vertical(),
-    );
+    )
+    .herdar(corte);
     com_retangulo(&com_angulo, cabendo, espaco)
 }
 

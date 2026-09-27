@@ -96,6 +96,8 @@ fn corte_de(c: &CropSettings) -> Corte {
         angulo: Some(c.angle()),
         espelho_h: Some(c.flip_horizontal()),
         espelho_v: Some(c.flip_vertical()),
+        perspectiva: Some(*c.perspectiva()).filter(|p| !p.e_neutra()),
+        restringir: (!c.restringir()).then_some(false),
     }
 }
 

@@ -44,7 +44,7 @@ impl LibraryController {
                 };
                 let rating = photo.rating().map(|r| r.value() as i32).unwrap_or(0);
 
-                PhotoViewModel {
+                let mut vm = PhotoViewModel {
                     id: photo.id().to_string(),
                     name: photo.file_name().unwrap_or_default().to_string(),
                     path: photo.file_path().to_string(),
@@ -132,7 +132,16 @@ impl LibraryController {
                     edit_crop_angle: photo.edit_crop_angle(),
                     edit_crop_flip_h: photo.edit_crop_flip_h(),
                     edit_crop_flip_v: photo.edit_crop_flip_v(),
+                    ..Default::default()
+                };
+                // 🔑 A perspectiva guiada não tem coluna: mora na receita.
+                if let Some(receita) = photo
+                    .receita()
+                    .and_then(|r| serde_json::from_str::<serde_json::Value>(r).ok())
+                {
+                    vm.ler_perspectiva_da_receita(&receita);
                 }
+                vm
             })
             .collect();
 

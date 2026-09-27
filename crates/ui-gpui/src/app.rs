@@ -4210,6 +4210,8 @@ impl Aplicativo {
                 angulo: Some(0.),
                 espelho_h: Some(false),
                 espelho_v: Some(false),
+                perspectiva: Some(Default::default()),
+                restringir: Some(true),
             };
             self.gravador
                 .gravar(alvo.id.clone(), Ajustes::default(), corte);

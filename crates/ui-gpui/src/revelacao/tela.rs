@@ -1973,16 +1973,7 @@ impl Revelacao {
     }
 
     fn corte_atual(&self) -> CropSettings {
-        CropSettings::new(
-            self.corte.x.unwrap_or(0.0),
-            self.corte.y.unwrap_or(0.0),
-            self.corte.largura.unwrap_or(1.0),
-            self.corte.altura.unwrap_or(1.0),
-            self.corte.rotacao.unwrap_or(0),
-            self.corte.angulo.unwrap_or(0.0),
-            self.corte.espelho_h.unwrap_or(false),
-            self.corte.espelho_v.unwrap_or(false),
-        )
+        persistencia::para_crop_settings(&self.corte)
     }
 
     /// O tamanho da **cópia de trabalho**, mesmo com o bruto na tela: é nele
