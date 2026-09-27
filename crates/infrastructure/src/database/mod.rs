@@ -3,11 +3,13 @@
 //! Implementações de repositories usando SQLite.
 
 pub mod collection_repository;
+pub mod edicoes;
 pub mod photo_repository;
 pub mod preset_repository;
 pub mod revelacoes_do_site;
 
 pub use collection_repository::CollectionRepositoryImpl;
+pub use edicoes::{CatalogoDeEdicoes, EdicaoRegistrada};
 pub use photo_repository::PhotoRepositoryImpl;
 pub use preset_repository::SqlitePresetRepository;
 pub use revelacoes_do_site::SqliteRevelacoesDoSite;

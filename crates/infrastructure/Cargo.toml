@@ -8,6 +8,9 @@ license.workspace = true
 [dependencies]
 domain = { path = "../domain" }
 use-cases = { path = "../use-cases" }
+# O editor em camadas: o catálogo das edições e a exportação lendo a imagem
+# editada (docs/editor-em-camadas/). Sem GPUI, sem ciclo.
+editor-core = { path = "../editor-core" }
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true

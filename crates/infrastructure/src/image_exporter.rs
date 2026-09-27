@@ -51,11 +51,44 @@ use crate::transformacao;
 #[derive(Default)]
 pub struct ImageExporterImpl {
     motor: Mutex<Option<Arc<Mutex<Motor>>>>,
+    /// De onde sai a imagem editada de uma foto, quando ela tem uma (C32,
+    /// `docs/editor-em-camadas/02-CONTRATO.md`). `None` é o app sem editor —
+    /// os testes e as ferramentas de medida.
+    editadas: Option<ImagemEditadaDe>,
 }
+
+/// A imagem editada vigente de uma foto do catálogo, se houver.
+pub type ImagemEditadaDe = Arc<dyn Fn(&Photo) -> Option<std::path::PathBuf> + Send + Sync>;
 
 impl ImageExporterImpl {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Liga a exportação ao catálogo das edições em camadas.
+    pub fn com_editadas(mut self, editadas: ImagemEditadaDe) -> Self {
+        self.editadas = Some(editadas);
+        self
+    }
+
+    /// A entrada da revelação desta foto: a imagem editada, se houver, ou a
+    /// base neutra do bruto (C28, C32).
+    ///
+    /// 🔑 A imagem editada é PNG sem etiqueta de orientação, já de pé — ela
+    /// nasceu da base neutra. Girar de novo seria girar duas vezes.
+    pub fn entrada_de(&self, photo: &Photo) -> DomainResult<DynamicImage> {
+        if let Some(editada) = self.editadas.as_ref().and_then(|f| f(photo)) {
+            return image::open(&editada).map_err(|e| {
+                DomainError::InfrastructureError(format!(
+                    "a imagem editada ({}) não abriu: {e}",
+                    editada.display()
+                ))
+            });
+        }
+        let input_path = photo.file_path().as_str()?;
+        crate::base_neutra::base_neutra(Path::new(&input_path)).map_err(|e| {
+            DomainError::InfrastructureError(format!("Failed to open source image: {}", e))
+        })
     }
 
     fn motor(&self) -> DomainResult<Arc<Mutex<Motor>>> {
@@ -99,7 +132,9 @@ impl ImageExporterImpl {
         qualidade: u8,
     ) -> DomainResult<Vec<u8>> {
         // De pé: o bruto do site pode ser o arquivo da câmera, com a etiqueta.
-        let imagem = crate::orientacao::decodificar_de_pe(bytes)
+        // A mesma base neutra do editor (C28); os bytes podem ser também os da
+        // imagem editada, que o pós-venda manda no lugar do bruto (C32).
+        let imagem = crate::base_neutra::base_neutra_de_bytes(bytes)
             .map_err(|e| DomainError::InfrastructureError(format!("o original não abriu: {e}")))?;
         let revelada = self.revelar(&imagem, ajustes, corte, locais)?;
         let saida = transformacao::aplicar(&revelada, corte, true);
@@ -236,14 +271,12 @@ impl ImageExporterImpl {
     /// original seria o mesmo defeito que a exportação tinha até hoje de manhã —
     /// a tela mostrando uma coisa e o resultado sendo outra.
     pub fn renderizar(&self, photo: &Photo, options: &ExportOptions) -> DomainResult<DynamicImage> {
-        let input_path = photo.file_path().as_str()?;
-
         // 🚨 **De pé** — é daqui que sai o JPEG que sobe ao site, e ele não
         // leva EXIF: a foto em retrato subia deitada, sem etiqueta para o
         // servidor corrigir. Ver `crate::orientacao`.
-        let img = crate::orientacao::abrir_de_pe(Path::new(&input_path)).map_err(|e| {
-            DomainError::InfrastructureError(format!("Failed to open source image: {}", e))
-        })?;
+        //
+        // 🖌️ E **a imagem editada, quando existe**: a revelação parte dela (C32).
+        let img = self.entrada_de(photo)?;
 
         // 🔑 A ordem é a da tela: o shader devolve a foto inteira, e o
         // enquadramento vem depois (`tela.rs` faz `transformacao::aplicar` sobre
@@ -319,8 +352,10 @@ impl ImageExporter for ImageExporterImpl {
             return Ok(None);
         }
 
+        // 🔑 **O bruto verdadeiro, e nunca a imagem editada** (C2, C34): o que
+        // sobe como bruto é a base neutra do arquivo, mesmo com edição.
         let input_path = photo.file_path().as_str()?;
-        let img = crate::orientacao::abrir_de_pe(Path::new(&input_path)).map_err(|e| {
+        let img = crate::base_neutra::base_neutra(Path::new(&input_path)).map_err(|e| {
             DomainError::InfrastructureError(format!("Failed to open source image: {}", e))
         })?;
 
