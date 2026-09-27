@@ -20,6 +20,7 @@ pub mod image_exporter;
 pub use foto_codec::orientacao;
 pub mod paths;
 pub mod pos_venda;
+pub mod previa_embutida;
 pub mod raw_processing;
 pub mod scan_directory;
 pub mod source_scanner;

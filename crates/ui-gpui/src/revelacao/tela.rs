@@ -1124,6 +1124,17 @@ impl Revelacao {
 
             dialogo
                 .confirm()
+                // 🚨 O kit não tem português e escrevia "OK" e "Cancel" no meio
+                // de uma caixa toda em português (visto rodando o app,
+                // 27/set/2026). O botão diz o que faz, como no site.
+                .button_props(
+                    gpui_kit::component::dialog::DialogButtonProps::default()
+                        .ok_text(SharedString::from(format!("Sincronizar {quantas}")))
+                        .cancel_text("Cancelar")
+                        // 🚨 As propriedades entram inteiras, e o padrão delas
+                        // esconde o cancelar que o `confirm()` tinha ligado.
+                        .show_cancel(true),
+                )
                 .title(SharedString::from(format!("Sincronizar {quantas} fotos")))
                 .child(
                     div().text_xs().child(
@@ -6660,6 +6671,58 @@ mod testes {
                     "a aba fechada também se anuncia"
                 );
                 assert!(!tela.secao_alterada(Secao::HslCor), "e a vizinha não");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **A foto que chega revelada não acende âmbar** (dono, 2026-09-27).
+    ///
+    /// O caso visto: uma foto com o RecordarFotos P&B — que mexe nos módulos
+    /// RGB do darktable — aberta sem ninguém tocar. O ponto âmbar comparava com
+    /// o neutro e acendia na aba RGB e em cada seção do estilo, com o "Salvar na
+    /// galeria e sair" apagado ao lado. Agora âmbar é "mudou desde que abriu"; o
+    /// que já estava salvo leva o ponto cinza (`Marca::Ajustado`).
+    #[gpui_kit::test]
+    fn a_receita_salva_leva_o_ponto_cinza_e_so_o_gesto_acende_ambar(cx: &mut TestAppContext) {
+        use crate::revelacao::controles::Marca;
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-pb.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let janela = com_gravador(cx, previews, Arc::new(GravadorDeMentira::default()));
+        let mut revelada = foto("pb.jpg");
+        persistencia::na_foto(
+            &mut revelada,
+            Ajustes {
+                dt_exposure_ativo: 1.0,
+                dt_exposure_exposure: 0.163,
+                ..Default::default()
+            },
+            Default::default(),
+        );
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(revelada, window, cx);
+                assert_eq!(
+                    tela.marcas_das_abas(),
+                    (None, Some(Marca::Ajustado)),
+                    "o estilo salvo aparece na aba RGB, em cinza"
+                );
+                assert_eq!(tela.abas_alteradas(), (false, false), "nenhum âmbar");
+                assert!(!tela.aberta_a_salvar(), "e o botão de salvar concorda");
+
+                let rgb = tela
+                    .controle_onde(|d| d.secao.painel().no_rgb() && !d.discreto)
+                    .expect("um slider contínuo da aba RGB");
+                tela.arrastar_slider(rgb, 0.5, cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert_eq!(tela.marcas_das_abas().1, Some(Marca::NaoSalvo));
+                assert!(tela.aberta_a_salvar(), "mexeu: âmbar e o botão aceso");
             })
             .expect("a janela deve estar aberta");
     }

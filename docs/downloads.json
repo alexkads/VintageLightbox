@@ -1,14 +1,14 @@
 {
-  "versao": "0.1.18",
-  "publicado_em": "2026-09-26T20:51:31+00:00",
-  "notas": "Importar muitas fotos grandes com o cliente olhando: todas chegam à sessão.",
+  "versao": "0.1.21",
+  "publicado_em": "2026-09-27T04:22:19+00:00",
+  "notas": "",
   "downloads": [
     {
       "sistema": "macOS",
       "arquitetura": "Intel e Apple Silicon",
-      "arquivo": "VintageLightbox_0.1.18_universal.dmg",
-      "url": "https://pub-f97274c3a83f47ff903a64fc1578efb0.r2.dev/v0.1.18/VintageLightbox_0.1.18_universal.dmg",
-      "bytes": 40701139
+      "arquivo": "VintageLightbox_0.1.21_universal.dmg",
+      "url": "https://pub-f97274c3a83f47ff903a64fc1578efb0.r2.dev/v0.1.21/VintageLightbox_0.1.21_universal.dmg",
+      "bytes": 40957008
     }
   ]
 }

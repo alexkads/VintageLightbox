@@ -237,6 +237,35 @@ impl PreviewManager {
         .is_some()
     }
 
+    /// Copia a entrada `de` para a chave `para`, **se `para` ainda não existe** —
+    /// direto no banco, sem decodificar nem recodificar o JPEG. Devolve se
+    /// copiou.
+    ///
+    /// 🔑 **Existe para a foto que subiu deste computador.** Quando ela passa a
+    /// ser do site, quem a abre procura o bruto em `trabalho:site:<id>` — que só
+    /// existia depois de baixar a cópia de trabalho do servidor, embora o
+    /// preview do mesmo arquivo estivesse aqui, sob o id do catálogo. Copiar a
+    /// linha custa um `INSERT … SELECT`; `get_preview` + `save_preview` custariam
+    /// um decode e um encode de 2560 px por foto.
+    ///
+    /// ⚠️ **Nunca sobrescreve.** Se o site já mandou a cópia dele, ela fica.
+    pub fn copiar_se_faltar(&self, de: &str, para: &str, tipo: PreviewType) -> bool {
+        let tipo = match tipo {
+            PreviewType::Thumbnail => 0,
+            PreviewType::Large => 1,
+        };
+        let Ok(conn) = self.conn.lock() else {
+            return false;
+        };
+        let agora = chrono::Utc::now().timestamp();
+        conn.execute(
+            "INSERT OR IGNORE INTO previews (photo_id, type, data, created_at, last_accessed_at)
+             SELECT ?2, type, data, ?3, ?3 FROM previews WHERE photo_id = ?1 AND type = ?4",
+            params![de, para, agora, tipo],
+        )
+        .is_ok_and(|linhas| linhas > 0)
+    }
+
     /// Helper to get a thumbnail as DynamicImage
     ///
     /// ⚠️ **Também passa pela memória.** A grade já tem cache próprio de
@@ -603,6 +632,33 @@ mod tests {
         assert!(
             segunda.is_some(),
             "a segunda leitura foi ao disco — não há cache em memória"
+        );
+    }
+
+    /// 🔑 A foto que subiu deste computador ganha o bruto do site a partir do
+    /// preview local — sem sobrescrever a cópia que o site já tenha mandado.
+    #[test]
+    fn copiar_se_faltar_leva_o_preview_e_nao_sobrescreve() {
+        let dir = tempfile::tempdir().expect("diretório");
+        let previews = PreviewManager::new_with_path(dir.path().to_path_buf());
+        let local = DynamicImage::ImageRgb8(image::RgbImage::new(64, 48));
+        previews.save_preview("id-local", &local).expect("gravar");
+
+        assert!(previews.copiar_se_faltar("id-local", "trabalho:site:r1", PreviewType::Large));
+        let copiada = previews.get_preview("trabalho:site:r1").expect("copiada");
+        assert_eq!((copiada.width(), copiada.height()), (64, 48));
+
+        let do_site = DynamicImage::ImageRgb8(image::RgbImage::new(32, 32));
+        previews
+            .save_preview("trabalho:site:r2", &do_site)
+            .expect("gravar");
+        assert!(!previews.copiar_se_faltar("id-local", "trabalho:site:r2", PreviewType::Large));
+        let ficou = previews.get_preview("trabalho:site:r2").expect("ficou");
+        assert_eq!((ficou.width(), ficou.height()), (32, 32), "a do site vale");
+
+        assert!(
+            !previews.copiar_se_faltar("sem-preview", "trabalho:site:r3", PreviewType::Large),
+            "sem origem, nada a copiar"
         );
     }
 

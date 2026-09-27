@@ -266,11 +266,28 @@ pub struct GeradorDoDisco {
 }
 
 impl GeradorDoDisco {
-    /// O lado da miniatura da grade de importação.
+    /// O lado da miniatura da janela de escolher as fotos.
     ///
-    /// Menor que a da Biblioteca (320): aqui a célula é uma linha de lista, e
-    /// gerar em 320 custaria o dobro do decode para desenhar em 48.
-    const LADO: u32 = 128;
+    /// 🚨 **Era 128, do tempo em que a célula era uma linha de lista** — e a
+    /// janela do cartão passou a desenhar cartões de até 236×198 pt, ~470 px
+    /// numa tela Retina. A miniatura chegava esticada 3,7×, borrada (visto
+    /// rodando o app com o cartão da D3100 em 27/set/2026). 480 cobre a célula
+    /// no zoom de 100%, e a prévia embutida da câmera (570 px na D3100) já
+    /// tem esse tamanho sem custo nenhum.
+    const LADO: u32 = 480;
+
+    /// O RAW fica em 320: é o teto até onde o gerador usa a prévia embutida
+    /// (`ThumbnailGeneratorImpl`). Acima dele o RAW seria revelado inteiro para
+    /// virar célula — segundos por foto.
+    const LADO_DO_RAW: u32 = 320;
+
+    /// Quantas fotos se preparam ao mesmo tempo.
+    ///
+    /// O cartão responde melhor a poucas leituras em paralelo do que a uma só,
+    /// e o decode que sobra (sem prévia embutida) usa os núcleos. Mais do que
+    /// isto disputaria o disco com a importação que o operador dispara logo
+    /// depois.
+    const EM_PARALELO: usize = 4;
 
     pub fn novo(
         miniaturas: Arc<dyn domain::services::ThumbnailGenerator>,
@@ -283,42 +300,81 @@ impl GeradorDoDisco {
             tokio,
         }
     }
+
+    /// A miniatura de um arquivo que ainda está no cartão.
+    ///
+    /// 🔑 **Primeiro a prévia que a câmera gravou**, lendo só o começo do
+    /// arquivo (`previa_embutida`): 6 ms por foto da D3100 contra 172 ms
+    /// abrindo os 14 MP, medido em release com as 48 do cartão. Sem prévia
+    /// do tamanho certo, o caminho de sempre.
+    async fn uma(
+        miniaturas: &Arc<dyn domain::services::ThumbnailGenerator>,
+        caminho: &str,
+    ) -> Option<image::DynamicImage> {
+        let raw = infrastructure::raw_processing::is_raw_file(caminho);
+        if !raw {
+            let arquivo = std::path::PathBuf::from(caminho);
+            // Ler o cartão é esperar disco: fora do executor.
+            let embutida = tokio::task::spawn_blocking(move || {
+                infrastructure::previa_embutida::da_camera(&arquivo, Self::LADO * 4 / 5)
+            })
+            .await
+            .ok()
+            .flatten();
+            if let Some(previa) = embutida {
+                // Só encolhe: `thumbnail` também amplia.
+                return Some(if previa.width().max(previa.height()) > Self::LADO {
+                    previa.thumbnail(Self::LADO, Self::LADO)
+                } else {
+                    previa
+                });
+            }
+        }
+        let arquivo = domain::value_objects::FilePath::new(caminho).ok()?;
+        let lado = if raw { Self::LADO_DO_RAW } else { Self::LADO };
+        // ⚠️ Arquivo ilegível não interrompe o lote nem vira aviso: a célula
+        // fica com o retângulo vazio, que é o que a grade já mostra para quem
+        // ainda não chegou. Um cartão com um arquivo corrompido não pode encher
+        // a tela de erro.
+        let bytes = miniaturas.generate(&arquivo, lado).await.ok()?;
+        image::load_from_memory(&bytes).ok()
+    }
 }
 
 impl GeradorDeMiniaturas for GeradorDoDisco {
+    /// 🚨 **Cada miniatura vai para a tela assim que fica pronta.** Até
+    /// 27/set/2026 o lote inteiro era gerado em série e anunciado num recado
+    /// só, no fim: a janela do cartão ficava com 48 quadros vazios por 7 a
+    /// 17 s e depois acendia tudo de uma vez — com 300 fotos, minutos de tela
+    /// morta. Agora a ordem é a da grade (as de cima primeiro) e a colheita da
+    /// tela, a cada 100 ms, junta o que chegou.
     fn gerar(&self, caminhos: Vec<String>, canal: Sender<Recado>) {
-        let miniaturas = self.miniaturas.clone();
-        let previews = self.previews.clone();
+        let trabalhadores = Self::EM_PARALELO.min(caminhos.len());
+        let fila = Arc::new(std::sync::Mutex::new(caminhos.into_iter()));
 
-        self.tokio.spawn(async move {
-            let mut prontas = Vec::new();
-
-            for caminho in caminhos {
-                let Ok(arquivo) = domain::value_objects::FilePath::new(&caminho) else {
-                    continue;
-                };
-                let Ok(bytes) = miniaturas.generate(&arquivo, GeradorDoDisco::LADO).await else {
-                    // ⚠️ Arquivo ilegível não interrompe o lote nem vira aviso: a
-                    // célula fica com o retângulo vazio, que é o que a grade já
-                    // mostra para quem ainda não chegou. Um cartão com um arquivo
-                    // corrompido não pode encher a tela de erro.
-                    continue;
-                };
-                let Ok(imagem) = image::load_from_memory(&bytes) else {
-                    continue;
-                };
-                if previews
-                    .save_thumbnail(&chave_de_miniatura(&caminho), &imagem)
-                    .is_ok()
-                {
-                    prontas.push(caminho);
+        for _ in 0..trabalhadores {
+            let fila = fila.clone();
+            let miniaturas = self.miniaturas.clone();
+            let previews = self.previews.clone();
+            let canal = canal.clone();
+            self.tokio.spawn(async move {
+                while let Some(caminho) = fila.lock().ok().and_then(|mut f| f.next()) {
+                    let Some(imagem) = GeradorDoDisco::uma(&miniaturas, &caminho).await else {
+                        continue;
+                    };
+                    if previews
+                        .save_thumbnail(&chave_de_miniatura(&caminho), &imagem)
+                        .is_ok()
+                        && canal
+                            .send(Recado::MiniaturasProntas(vec![caminho]))
+                            .is_err()
+                    {
+                        // A tela fechou: ninguém mais vai desenhar o resto.
+                        break;
+                    }
                 }
-            }
-
-            if !prontas.is_empty() {
-                let _ = canal.send(Recado::MiniaturasProntas(prontas));
-            }
-        });
+            });
+        }
     }
 }
 
@@ -711,5 +767,136 @@ pub mod mentira {
                 },
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod testes_do_gerador {
+    use std::io::Cursor;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::mpsc::{channel, Receiver};
+    use std::time::Duration;
+
+    use domain::value_objects::FilePath;
+    use domain::DomainResult;
+    use infrastructure::cache::preview_manager::PreviewManager;
+
+    use super::*;
+
+    /// O gerador de verdade decodifica o arquivo; este devolve um quadrado
+    /// cinza — e prende a foto chamada `lenta` até o teste soltá-la.
+    struct GeradorDeTeste {
+        chamadas: AtomicUsize,
+        soltar_a_lenta: std::sync::Mutex<Receiver<()>>,
+    }
+
+    #[async_trait::async_trait]
+    impl domain::services::ThumbnailGenerator for GeradorDeTeste {
+        async fn generate(&self, path: &FilePath, max_size: u32) -> DomainResult<Vec<u8>> {
+            self.chamadas.fetch_add(1, Ordering::SeqCst);
+            if path.to_string().contains("lenta") {
+                let _ = self
+                    .soltar_a_lenta
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(10));
+            }
+            Ok(jpeg(max_size.min(64), max_size.min(64), 120))
+        }
+    }
+
+    fn jpeg(largura: u32, altura: u32, cinza: u8) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            largura,
+            altura,
+            image::Rgb([cinza, cinza, cinza]),
+        ))
+        .write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Jpeg)
+        .unwrap();
+        bytes
+    }
+
+    fn montar() -> (
+        GeradorDoDisco,
+        Arc<GeradorDeTeste>,
+        std::sync::mpsc::Sender<()>,
+        Arc<PreviewManager>,
+        tempfile::TempDir,
+        tokio::runtime::Runtime,
+    ) {
+        let dir = tempfile::tempdir().unwrap();
+        let previews = Arc::new(PreviewManager::new_with_path(dir.path().join("cache")));
+        let (soltar, preso) = channel();
+        let teste = Arc::new(GeradorDeTeste {
+            chamadas: AtomicUsize::new(0),
+            soltar_a_lenta: std::sync::Mutex::new(preso),
+        });
+        let tokio = tokio::runtime::Runtime::new().unwrap();
+        let gerador = GeradorDoDisco::novo(teste.clone(), previews.clone(), tokio.handle().clone());
+        (gerador, teste, soltar, previews, dir, tokio)
+    }
+
+    fn prontas(recado: Recado) -> Vec<String> {
+        match recado {
+            Recado::MiniaturasProntas(caminhos) => caminhos,
+            outro => panic!("esperava miniaturas, veio {outro:?}"),
+        }
+    }
+
+    /// 🚨 O lote era gerado em série e anunciado num recado só, no fim: uma
+    /// foto lenta (um arquivo grande no cartão) segurava a janela inteira com
+    /// quadros vazios.
+    #[test]
+    fn cada_miniatura_chega_sem_esperar_o_lote() {
+        let (gerador, _teste, soltar, _previews, _dir, _tokio) = montar();
+        let (canal, recebe) = channel();
+
+        gerador.gerar(
+            vec!["/cartao/lenta.png".into(), "/cartao/rapida.png".into()],
+            canal,
+        );
+
+        let primeira = prontas(
+            recebe
+                .recv_timeout(Duration::from_secs(5))
+                .expect("a rápida tem de chegar enquanto a lenta ainda está sendo lida"),
+        );
+        assert_eq!(primeira, vec!["/cartao/rapida.png".to_string()]);
+
+        soltar.send(()).unwrap();
+        let segunda = prontas(recebe.recv_timeout(Duration::from_secs(5)).unwrap());
+        assert_eq!(segunda, vec!["/cartao/lenta.png".to_string()]);
+    }
+
+    /// 🚨 A janela do cartão mostrava 128 px esticados num cartão de ~470 px.
+    /// Com a prévia que a câmera gravou dentro do JPEG, a miniatura sai dela —
+    /// sem decodificar a foto — e no tamanho da célula.
+    #[test]
+    fn o_jpg_da_camera_vira_miniatura_pela_previa_embutida() {
+        let (gerador, teste, _soltar, previews, dir, _tokio) = montar();
+        // SOI, a prévia 600×400 num APP2, e a foto principal 1200×800.
+        let previa = jpeg(600, 400, 60);
+        let mut foto = vec![0xFF, 0xD8, 0xFF, 0xE2];
+        foto.extend_from_slice(&((previa.len() + 2) as u16).to_be_bytes());
+        foto.extend_from_slice(&previa);
+        foto.extend_from_slice(&jpeg(1200, 800, 200)[2..]);
+        let caminho = dir.path().join("DSC_0001.JPG");
+        std::fs::write(&caminho, foto).unwrap();
+        let caminho = caminho.to_string_lossy().to_string();
+        let (canal, recebe) = channel();
+
+        gerador.gerar(vec![caminho.clone()], canal);
+
+        prontas(recebe.recv_timeout(Duration::from_secs(5)).unwrap());
+        let miniatura = previews
+            .get_thumbnail(&chave_de_miniatura(&caminho))
+            .expect("gravada");
+        assert_eq!((miniatura.width(), miniatura.height()), (480, 320));
+        assert_eq!(
+            teste.chamadas.load(Ordering::SeqCst),
+            0,
+            "a foto inteira não foi decodificada"
+        );
     }
 }

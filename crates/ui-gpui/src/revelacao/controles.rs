@@ -1114,6 +1114,67 @@ pub fn aba_alterada(ajustes: &Ajustes, rgb: bool) -> bool {
     paineis.iter().any(|p| painel_alterado(ajustes, *p))
 }
 
+/// O que o ponto de um conjunto de controles diz — o `marcaDosCampos` do site.
+///
+/// 🚨 **O ponto âmbar comparava com o neutro** (dono, 2026-09-27): a foto que
+/// chega revelada do servidor, aberta sem mexer, acendia âmbar em toda seção do
+/// estilo, com o "Salvar na galeria e sair" apagado ao lado — as duas
+/// indicações se desmentiam. Âmbar é "mudou e não salvou", a pergunta do botão;
+/// o ajuste que já estava salvo leva um ponto cinza.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Marca {
+    /// Algum controle mudou desde a receita com que a foto abriu.
+    NaoSalvo,
+    /// Nada mudou, e a receita salva tem ajuste fora do neutro.
+    Ajustado,
+}
+
+fn marca_dos<'a>(
+    defs: impl Iterator<Item = &'a Definicao> + Clone,
+    ajustes: &Ajustes,
+    salvo: &Ajustes,
+) -> Option<Marca> {
+    if defs.clone().any(|d| (d.ler)(ajustes) != (d.ler)(salvo)) {
+        Some(Marca::NaoSalvo)
+    } else if defs.into_iter().any(|d| d.alterado(ajustes)) {
+        Some(Marca::Ajustado)
+    } else {
+        None
+    }
+}
+
+/// O ponto de uma família de controles (uma aba do HSL, por exemplo).
+pub fn marca_da_secao(ajustes: &Ajustes, salvo: &Ajustes, secao: Secao) -> Option<Marca> {
+    marca_dos(
+        CONTROLES.iter().filter(|d| d.secao == secao),
+        ajustes,
+        salvo,
+    )
+}
+
+/// O ponto do cabeçalho de um painel.
+pub fn marca_do_painel(ajustes: &Ajustes, salvo: &Ajustes, painel: Painel) -> Option<Marca> {
+    marca_dos(
+        CONTROLES
+            .iter()
+            .filter(|d| painel.secoes().contains(&d.secao)),
+        ajustes,
+        salvo,
+    )
+}
+
+/// O ponto da aba (RGB ou sRGB).
+pub fn marca_da_aba(ajustes: &Ajustes, salvo: &Ajustes, rgb: bool) -> Option<Marca> {
+    let paineis: &[Painel] = if rgb { &Painel::RGB } else { &Painel::SRGB };
+    marca_dos(
+        CONTROLES
+            .iter()
+            .filter(|d| paineis.iter().any(|p| p.secoes().contains(&d.secao))),
+        ajustes,
+        salvo,
+    )
+}
+
 /// Em que campo do [`Ajustes`] este controle lê — pelo que ele devolve, e não
 /// por um nome escrito à mão.
 #[cfg(test)]

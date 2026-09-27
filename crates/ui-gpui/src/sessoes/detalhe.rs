@@ -235,6 +235,9 @@ pub enum Pedido {
     Imprimir(Vec<String>),
     /// A miniatura de uma foto do site chegou ao cache, sob esta chave.
     MiniaturaPronta(String),
+    /// A miniatura **revelada** que o site passou a ter chegou (id do site): a
+    /// prévia local desta foto pode sair — ver [`Detalhe::revelada_subiu`].
+    PreviaLocalVencida(String),
     /// Abrir (ou fechar) a segunda tela, a do cliente.
     TelaDoCliente,
     /// O "política de retenção" dos detalhes da galeria — o link do site para
@@ -577,6 +580,13 @@ pub struct Detalhe {
     /// e era assim que a grade já travou uma vez (ver `preparar_miniaturas`).
     /// `revelada_chegou` tira a foto daqui, e a próxima consulta a refaz.
     com_revelada: std::collections::HashMap<String, bool>,
+    /// As fotos cuja revelação o site acabou de receber e cuja miniatura nova
+    /// ainda está vindo: a prévia local continua na tela até ela chegar. O
+    /// número é quantas respostas de miniatura dessa foto faltam até a do
+    /// pedido feito **depois** da revelação — as de antes trazem a imagem velha.
+    trocar_ao_chegar: std::collections::HashMap<String, usize>,
+    /// Quantos pedidos de miniatura de cada foto estão no ar.
+    miniaturas_no_ar: std::collections::HashMap<String, usize>,
     /// A última imagem desenhada de cada foto perto da vista.
     ///
     /// 🚨 **É o que impede a célula preta quando a foto sobe** (dono,
@@ -863,6 +873,8 @@ impl Detalhe {
             copia_aqui: std::collections::HashSet::new(),
             subindo_agora: std::collections::HashSet::new(),
             com_revelada: std::collections::HashMap::new(),
+            trocar_ao_chegar: std::collections::HashMap::new(),
+            miniaturas_no_ar: std::collections::HashMap::new(),
             imagens_vistas: std::collections::HashMap::new(),
             trocas: std::collections::HashMap::new(),
             proxima_troca: 0,
@@ -2816,11 +2828,27 @@ impl Detalhe {
     ///
     /// 🔑 **Só esta foto.** O envio muda uma por vez, e re-baixar a galeria
     /// inteira a cada resposta é exatamente o custo do qual se saiu.
+    ///
+    /// 🚨 **A prévia local sai quando a miniatura nova chega, e não antes.** A
+    /// raiz a apagava na resposta do envio, e até o download terminar a grade
+    /// desenhava a miniatura **antiga** da galeria, ainda no disco: a foto que
+    /// estava em P&B voltava ao Sépia por segundos — ou mais, com o lote na
+    /// fila (visto rodando o app, 27/set/2026). Agora a troca é na chegada:
+    /// [`Pedido::PreviaLocalVencida`].
     pub fn revelada_subiu(&mut self, foto_id: &str, cx: &mut Context<Self>) {
         self.revelada_chegou(foto_id);
         let (Some(sessao), true) = (self.sessao.clone(), self.tem_para_baixar(foto_id)) else {
+            // Sem o que baixar, não há o que esperar: a prévia sai já.
+            cx.emit(Pedido::PreviaLocalVencida(foto_id.to_string()));
             return;
         };
+        // A resposta que conta é a deste pedido, e não as que já estavam no ar.
+        let antes = self.miniaturas_no_ar.get(foto_id).copied().unwrap_or(0);
+        self.trocar_ao_chegar.insert(foto_id.to_string(), antes + 1);
+        *self
+            .miniaturas_no_ar
+            .entry(foto_id.to_string())
+            .or_default() += 1;
         // ⚠️ **O pedido é direto, e não por `pedir_miniaturas`**: aquela varre a
         // galeria inteira atrás do que falta, e durante um lote de duzentas
         // seriam duzentas varreduras de trezentas fotos — o mesmo tipo de custo
@@ -2863,6 +2891,7 @@ impl Detalhe {
         for id in faltam {
             self.pedidas.insert(id.clone());
             self.baixando += 1;
+            *self.miniaturas_no_ar.entry(id.clone()).or_default() += 1;
             self.publicador
                 .miniatura(sessao.clone(), id, self.recados.0.clone());
         }
@@ -3096,6 +3125,23 @@ impl Detalhe {
                             // apareceria quando a célula saísse e voltasse.
                             cx.emit(Pedido::MiniaturaPronta(chave));
                         }
+                    }
+                    // A revelada do site está no disco: a prévia local já não
+                    // tem o que cobrir. Mesmo que a miniatura não tenha aberto,
+                    // esperar mais não traria outra.
+                    if let Some(no_ar) = self.miniaturas_no_ar.get_mut(&foto_id) {
+                        *no_ar = no_ar.saturating_sub(1);
+                    }
+                    let vencida = self
+                        .trocar_ao_chegar
+                        .get_mut(&foto_id)
+                        .is_some_and(|faltam| {
+                            *faltam = faltam.saturating_sub(1);
+                            *faltam == 0
+                        });
+                    if vencida {
+                        self.trocar_ao_chegar.remove(&foto_id);
+                        cx.emit(Pedido::PreviaLocalVencida(foto_id));
                     }
                 }
                 Recado::Sincronizou => {

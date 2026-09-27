@@ -600,6 +600,9 @@ pub struct Aplicativo {
     /// com esta, assim que a de antes responder. É o que o Worker do site faz:
     /// a mesma foto vai para o fim da fila com a receita nova.
     reenviar_depois: std::collections::HashMap<String, (Ajustes, CropSettings)>,
+    /// As fotos que este app **tirou do site** ao rejeitá-las (id remoto) —
+    /// ver [`Self::largar_o_que_ia_para`].
+    pub(crate) tiradas_do_site: std::collections::HashSet<String>,
     /// Quem refaz o preview que o cache perdeu, e por onde a resposta volta.
     repositor: Arc<dyn Repositor>,
     reposicoes: (Sender<ReposicaoRecado>, Receiver<ReposicaoRecado>),
@@ -617,6 +620,9 @@ pub struct Aplicativo {
     /// depressa do que anda, e a foto do palco ficaria atrás de dezenas de
     /// duplicatas dela mesma.
     reposicoes_pedidas: std::collections::HashSet<String>,
+    /// As fotos do site (id remoto) cujo bruto já foi semeado a partir da cópia
+    /// deste computador — ver [`Self::semear_os_trabalhos`]. Uma vez por foto.
+    trabalhos_semeados: std::collections::HashSet<String>,
     /// 🚨 A `Task` que espera o disco responder. **Descartá-la a cancela**, e a
     /// foto ficaria em "Preparando…" com o preview já gravado no cache.
     _reposicao: Option<gpui_kit::Task<()>>,
@@ -1270,10 +1276,12 @@ impl Aplicativo {
             a_subir: Vec::new(),
             receitas_no_ar: std::collections::HashMap::new(),
             reenviar_depois: std::collections::HashMap::new(),
+            tiradas_do_site: std::collections::HashSet::new(),
             repositor: portas.repositor,
             reposicoes: channel(),
             reposicoes_pendentes: 0,
             reposicoes_pedidas: std::collections::HashSet::new(),
+            trabalhos_semeados: std::collections::HashSet::new(),
             _reposicao: None,
             _reveladas: None,
             receita_padrao,
@@ -1926,6 +1934,68 @@ impl Aplicativo {
         let subindo = self.subindo_sozinhas.keys().cloned().collect();
         self.detalhe
             .update(cx, |tela, cx| tela.definir_lugares(copia_aqui, subindo, cx));
+        self.semear_os_trabalhos(fotos, &galeria, cx);
+    }
+
+    /// 🚨 **A foto que subiu deste computador continuava dependendo da rede para
+    /// ser vista.** Quando ela passa a ser do site, a Revelação, a prévia do
+    /// "Sincronizar" e a tela do cliente procuram o bruto em
+    /// `trabalho:site:<id>` — e essa chave só existia depois de baixar a cópia de
+    /// trabalho do servidor, com o JPEG e o preview do mesmo arquivo aqui, sob o
+    /// id do catálogo (visto rodando o app com o cartão da D3100, 27/set/2026:
+    /// a foto recém-enviada abria em "não tem preview no cache", e depois do
+    /// "Sincronizar 48" a grade ficou em Sépia até a fila baixar 47 cópias).
+    ///
+    /// 🔑 O preview local é o mesmo bruto, de pé e maior (2560 px contra os
+    /// 2048 da cópia do site). Copiá-lo é um `INSERT … SELECT` por foto, em
+    /// segundo plano, e nunca sobrescreve a cópia que o site já tenha mandado.
+    fn semear_os_trabalhos(
+        &mut self,
+        fotos: &[PhotoViewModel],
+        galeria: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let novos: Vec<(String, String)> = fotos
+            .iter()
+            .filter(|f| f.sessao_id.as_deref() == Some(galeria))
+            .filter(|f| crate::biblioteca::tela::e_copia_local(f))
+            .filter_map(|f| Some((f.id.clone(), f.pos_venda_foto_id.clone()?)))
+            .filter(|(_, no_site)| self.trabalhos_semeados.insert(no_site.clone()))
+            .collect();
+        if novos.is_empty() {
+            return;
+        }
+        let previews = self.previews.clone();
+        cx.background_executor()
+            .spawn(async move {
+                for (local, no_site) in novos {
+                    previews.copiar_se_faltar(
+                        &local,
+                        &persistencia::chave_do_trabalho(&format!(
+                            "{}{no_site}",
+                            persistencia::PREFIXO_DO_SITE
+                        )),
+                        domain::services::PreviewType::Large,
+                    );
+                }
+            })
+            .detach();
+    }
+
+    /// O bruto de **uma** foto do site, semeado agora da cópia deste
+    /// computador — a do palco, que não pode esperar a semeadura de fundo.
+    /// Devolve se a chave passou a existir.
+    fn semear_o_trabalho_de(&mut self, no_site: &str, cx: &mut Context<Self>) -> bool {
+        let chave =
+            persistencia::chave_do_trabalho(&format!("{}{no_site}", persistencia::PREFIXO_DO_SITE));
+        let Some(local) = self.biblioteca.read(cx).id_local_do_site(no_site) else {
+            return false;
+        };
+        self.previews
+            .copiar_se_faltar(&local, &chave, domain::services::PreviewType::Large)
+            || self
+                .previews
+                .tem(&chave, domain::services::PreviewType::Large)
     }
 
     /// **O ensaio inteiro sobe, em segundo plano** — contrato C20.
@@ -2123,7 +2193,14 @@ impl Aplicativo {
             // que o site tem fica lembrada para a saída dela.
             self.receita_no_site_das_que_subiram
                 .insert(foto.id.clone(), (no_site.clone(), agora.clone()));
-            if agora == a_que_subiu {
+            // 🚨 Pela receita, e não pelo texto: o corte em `f32` e em `f64`
+            // difere em 1 ulp — ver `mesma_receita`.
+            let igual = match (&agora, &a_que_subiu) {
+                (Some(agora), Some(subiu)) => crate::pos_venda::porta::mesma_receita(agora, subiu),
+                (None, None) => true,
+                _ => false,
+            };
+            if igual {
                 continue;
             }
             // O depósito primeiro: é ele que a galeria relida respeita, e a
@@ -2135,6 +2212,7 @@ impl Aplicativo {
                 corte,
             );
             self.enfileirar_para_subir(no_site.clone(), ajustes, enquadramento.clone());
+            self.levar_a_previa_local_ao_site(&foto.id, &no_site, cx);
             lote.push((no_site, ajustes, enquadramento));
         }
         if lote.is_empty() {
@@ -2144,6 +2222,33 @@ impl Aplicativo {
         self.absorver_as_do_site(fotos_do_site, cx);
         self.mandar_as_revelacoes(lote, cx);
         self.recontar_o_que_falta_subir(cx);
+    }
+
+    /// 🚨 **A foto que subiu durante o "Sincronizar" aparecia com o efeito de
+    /// antes.** Sincronizada enquanto ainda era local, a prévia do efeito novo
+    /// nasceu sob o id do catálogo (`revelada:<id>`); ao terminar de subir ela
+    /// passa a ser desenhada como foto do site, que procura `revelada:site:<id>`
+    /// — e caía na imagem da galeria, feita com a receita antiga. Visto rodando
+    /// o app com o cartão da D3100 (27/set/2026): P&B sincronizado em 48, e a
+    /// sessão mostrando Sépia nas que subiram no meio, até o lote terminar.
+    ///
+    /// 🔑 A prévia local é o que o operador fez; ela vale para o id do site até
+    /// a revelação nova chegar lá (`PreviaLocalVencida`).
+    fn levar_a_previa_local_ao_site(&mut self, local: &str, no_site: &str, cx: &mut Context<Self>) {
+        use domain::services::PreviewType;
+        let de = persistencia::chave_da_revelada(local);
+        if !self.previews.tem(&de, PreviewType::Thumbnail) {
+            return;
+        }
+        let para =
+            persistencia::chave_da_revelada(&format!("{}{no_site}", persistencia::PREFIXO_DO_SITE));
+        // A prévia de lá, se houver, é de uma receita anterior a esta.
+        self.previews.apagar(&para);
+        for tipo in [PreviewType::Thumbnail, PreviewType::Large] {
+            self.previews.copiar_se_faltar(&de, &para, tipo);
+        }
+        self.detalhe
+            .update(cx, |tela, _| tela.revelada_chegou(no_site));
     }
 
     /// O ajuste feito na Revelação **depois** de a foto local terminar de
@@ -2191,7 +2296,13 @@ impl Aplicativo {
             else {
                 continue;
             };
-            if *no_site_agora == agora {
+            // Pela receita, e não pelo texto — ver `mesma_receita`.
+            let igual = match (&*no_site_agora, &agora) {
+                (Some(la), Some(aqui)) => crate::pos_venda::porta::mesma_receita(la, aqui),
+                (None, None) => true,
+                _ => false,
+            };
+            if igual {
                 continue;
             }
             *no_site_agora = agora;
@@ -2201,7 +2312,10 @@ impl Aplicativo {
                 ajustes,
                 corte,
             );
-            self.enfileirar_para_subir(no_site, ajustes, enquadramento);
+            self.enfileirar_para_subir(no_site.clone(), ajustes, enquadramento);
+            // 🚨 A prévia do efeito novo nasceu sob o id local (a tira ainda
+            // tinha a foto como local); a grade a desenha pelo id do site.
+            self.levar_a_previa_local_ao_site(&local, &no_site, cx);
             mudou = true;
         }
         if mudou {
@@ -2481,6 +2595,12 @@ impl Aplicativo {
                 // uma releitura, e a nota não move arquivo para provocá-la.
                 self.pedir_releitura_do_acervo(cx);
             }
+            // 🔑 A miniatura nova do site chegou: agora sim a prévia local sai
+            // — sem a janela em que a grade mostrava a imagem antiga.
+            DetalhePedido::PreviaLocalVencida(foto_no_site) => {
+                let no_acervo = format!("{}{foto_no_site}", persistencia::PREFIXO_DO_SITE);
+                self.esquecer_a_previa_local(&no_acervo, cx);
+            }
             DetalhePedido::MiniaturaPronta(chave) => {
                 let chave = chave.clone();
                 self.biblioteca
@@ -2571,6 +2691,16 @@ impl Aplicativo {
             .collect();
         if acervo.is_empty() {
             return;
+        }
+        // 🔑 A foto do palco, quando é do site e subiu deste computador, abre
+        // com o bruto daqui — sem passar pelo "não tem preview no cache"
+        // enquanto a semeadura de fundo não chega nela.
+        if let Some(no_site) = acervo
+            .get(inicial)
+            .filter(|f| persistencia::so_existe_no_site(f))
+            .and_then(|f| f.pos_venda_foto_id.clone())
+        {
+            self.semear_o_trabalho_de(&no_site, cx);
         }
         // Os pixels do storage são pedidos por `AbriuOutraFoto`, que o
         // `abrir_no_acervo` emite — o mesmo caminho da seta e da tira.
@@ -2813,8 +2943,18 @@ impl Aplicativo {
             // não tem o que esquecer, e o `remove` não custa nada.
             self.nova_sessao
                 .update(cx, |tela, _| tela.revelada_chegou(&foto_id));
+            // 🚨 **A grade fala o id do site sem o prefixo do acervo.** Avisada
+            // com `site:<id>`, ela esquecia uma chave que não tem e continuava
+            // mostrando a imagem da galeria: depois do "Sincronizar 48" em P&B,
+            // as fotos que já tinham subido ficavam em Sépia na sessão por um
+            // a dois minutos, até o site terminar — com a tira da Revelação já
+            // em P&B (visto rodando o app com o cartão da D3100, 27/set/2026).
+            // É a conversão que `esquecer_a_previa_local` já fazia.
+            let na_grade = persistencia::id_no_site(&foto_id)
+                .unwrap_or(&foto_id)
+                .to_string();
             self.detalhe
-                .update(cx, |tela, _| tela.revelada_chegou(&foto_id));
+                .update(cx, |tela, _| tela.revelada_chegou(&na_grade));
             // 🔑 **A tira da Revelação também mostra estas fotos.** Ela é a
             // tela onde o "Sincronizar N" acontece, e era justamente onde o
             // efeito não aparecia.
@@ -2968,6 +3108,24 @@ impl Aplicativo {
             return false;
         };
 
+        // 🔑 **A cópia deste computador antes da rede.** A foto que subiu daqui
+        // tem o bruto no catálogo; baixá-lo do site era segundos de "não tem
+        // preview no cache" — ver `semear_os_trabalhos`.
+        if self.semear_o_trabalho_de(&no_site, cx) {
+            let previews = self.previews.clone();
+            let chave = persistencia::chave_do_trabalho(&local);
+            let pronta = cx.background_executor().spawn(async move {
+                previews
+                    .get_preview(&chave)
+                    .ok_or_else(|| "a cópia deste computador não abriu".to_string())
+            });
+            cx.spawn(async move |raiz, cx| {
+                let imagem = pronta.await;
+                let _ = raiz.update(cx, |raiz, cx| raiz.entregar_a_copia(local, imagem, cx));
+            })
+            .detach();
+            return true;
+        }
         self.pedir_a_copia_de_trabalho(sessao, local, no_site, cx);
         true
     }
@@ -3143,6 +3301,11 @@ impl Aplicativo {
                 PosVendaRecado::RevelacaoSalva { foto_no_site } => {
                     self.esteira.respondeu(foto_no_site, false)
                 }
+                // A foto foi tirada do site por uma rejeição: não há o que
+                // repetir — ver `largar_o_que_ia_para`.
+                PosVendaRecado::EnvioFalhou { alvo, .. } if self.tiradas_do_site.contains(alvo) => {
+                    self.esteira.respondeu(alvo, false)
+                }
                 PosVendaRecado::EnvioFalhou { alvo, .. } => self.esteira.respondeu(alvo, true),
                 _ => crate::envios::Desfecho::NaoEraMeu,
             };
@@ -3206,13 +3369,10 @@ impl Aplicativo {
                     // quem manda — uma cópia local que ninguém mais atualiza
                     // faria a grade mostrar para sempre a receita deste
                     // momento. É o `apagarPreviaLocal` da web.
-                    let no_acervo = format!("{}{foto_no_site}", persistencia::PREFIXO_DO_SITE);
-                    // 🔑 **Pela função de sempre, e não por um `apagar` à
-                    // parte**: apagar o arquivo sem avisar quem o desenha é
-                    // deixar a tira da Revelação e a grade da nova sessão
-                    // mostrando o que já não existe. Ver
-                    // `esquecer_a_previa_local`.
-                    self.esquecer_a_previa_local(&no_acervo, cx);
+                    // ⚠️ **Mas só quando a miniatura nova chegar** — quem avisa
+                    // é a grade (`PreviaLocalVencida`), pela função de sempre
+                    // (`esquecer_a_previa_local`). Apagar aqui deixava a grade
+                    // na miniatura antiga da galeria até o download terminar.
                     // 🚨 **A miniatura da grade é a de antes do envio** (dono,
                     // 18/set/2026: *"não travou, mas não fez a atualização das
                     // miniaturas"*). A foto no site é a revelada agora;
@@ -3247,6 +3407,18 @@ impl Aplicativo {
                 // está com o cliente na frente, e um toast por tentativa seria
                 // três interrupções por foto de rede ruim. O que o operador
                 // precisa saber é o que **ficou para trás**, e isso vem abaixo.
+                // 🔑 O envio que já estava no ar quando a rejeição tirou a foto
+                // do site: o 404 dele é o desfecho esperado, e não recusa.
+                PosVendaRecado::EnvioFalhou { alvo, .. }
+                    if self.tiradas_do_site.contains(&alvo) =>
+                {
+                    self.receitas_no_ar.remove(&alvo);
+                    self.subindo_sozinhas.remove(&alvo);
+                    self.revelacao
+                        .update(cx, |tela, cx| tela.definir_gerando_jpeg(false, cx));
+                    self.tirar_do_lote_do_salvar(cx);
+                    self.recontar_o_que_falta_subir(cx);
+                }
                 PosVendaRecado::EnvioFalhou { alvo, frase } => {
                     if vai_repetir {
                         continue;
@@ -3562,12 +3734,28 @@ impl Aplicativo {
     /// vinte fotos, vinte toasts seriam vinte interrupções para o operador que
     /// já está com o próximo cliente.
     fn contar_o_salvar(&mut self, falhou: bool, cx: &mut Context<Self>) {
-        let Some((total, feitas, falha)) = self.lote_no_ar.as_mut() else {
+        let Some((_, feitas, falha)) = self.lote_no_ar.as_mut() else {
             return;
         };
         *feitas += 1;
         *falha |= falhou;
-        let (total, feitas, falha) = (*total, *feitas, *falha);
+        self.fechar_o_lote_se_acabou(cx);
+    }
+
+    /// Uma foto saiu do lote do "Salvar" sem resposta a dar — a que o operador
+    /// rejeitou enquanto esperava a vez. O lote fica menor, e não "falhou".
+    fn tirar_do_lote_do_salvar(&mut self, cx: &mut Context<Self>) {
+        let Some((total, _, _)) = self.lote_no_ar.as_mut() else {
+            return;
+        };
+        *total = total.saturating_sub(1);
+        self.fechar_o_lote_se_acabou(cx);
+    }
+
+    fn fechar_o_lote_se_acabou(&mut self, cx: &mut Context<Self>) {
+        let Some((total, feitas, falha)) = self.lote_no_ar else {
+            return;
+        };
         if feitas < total {
             return;
         }
@@ -3575,7 +3763,7 @@ impl Aplicativo {
         // ⚠️ **Falha não vira toast aqui**: cada recusa já foi para o canto dos
         // envios com a frase do site, que é onde o operador a encontra depois.
         // Um toast a mais diria a mesma coisa num lugar que some.
-        if !falha {
+        if !falha && total > 0 {
             self.avisar_onde_esta_olhando(
                 if total == 1 {
                     "revelação salva na galeria".into()
@@ -3585,6 +3773,36 @@ impl Aplicativo {
                 cx,
             );
         }
+    }
+
+    /// 🚨 **A foto rejeitada saiu do site, e o que ia para ela ficava na fila.**
+    ///
+    /// Visto rodando o app (27/set/2026): "Sincronizar 48", "Salvar na galeria",
+    /// e o `X` numa das fotos enquanto o lote esperava a vez. A rejeição a
+    /// tirou do site — certo —, mas a revelação dela continuou na fila, bateu
+    /// três vezes num 404 e virou **"1 envio recusado"** em vermelho, com
+    /// ocorrência na telemetria, para um gesto certo do operador.
+    ///
+    /// 🔑 **Cada resposta que deixa de vir é descontada** — do contador do
+    /// canto (e do G9, que segura a janela) e do lote do "Salvar". Tirar da
+    /// fila sem descontar deixaria o app esperando para sempre.
+    pub(crate) fn largar_o_que_ia_para(&mut self, no_site: &str, cx: &mut Context<Self>) {
+        self.tiradas_do_site.insert(no_site.to_string());
+        self.a_subir.retain(|(ja, _, _)| ja != no_site);
+        self.gravador.esquecer_do_site(no_site.to_string());
+        let mut sem_resposta = 0;
+        if self.esteira.tirar_da_fila(no_site) {
+            sem_resposta += 1;
+        }
+        if self.reenviar_depois.remove(no_site).is_some() {
+            sem_resposta += 1;
+        }
+        for _ in 0..sem_resposta {
+            self.sincronias_pendentes = self.sincronias_pendentes.saturating_sub(1);
+            self.tirar_do_lote_do_salvar(cx);
+        }
+        self.recontar_o_que_falta_subir(cx);
+        cx.notify();
     }
 
     /// Traz de volta, para as fotos do site que a raiz guarda, o que a
@@ -4698,8 +4916,13 @@ impl Aplicativo {
         // O que está pendente vai para o banco **antes** do envio: os mesmos
         // ajustes que sobem ficam gravados aqui. A tela só fecha quando o lote
         // responder (`contar_o_salvar`).
-        self.revelacao
-            .update(cx, |tela, _cx| tela.gravar_o_que_estiver_pendente());
+        self.revelacao.update(cx, |tela, _cx| {
+            tela.gravar_o_que_estiver_pendente();
+            // 🔑 A prévia da foto aberta **antes** de a receita dela ir ao
+            // site: `trazer_da_revelacao_as_que_subiram` a leva para o id do
+            // site, e a de antes deste ajuste levaria o efeito velho.
+            tela.guardar_a_revelada_no_cache();
+        });
         self.guardar_as_receitas_do_site(cx);
         self.trazer_da_revelacao_as_que_subiram(cx);
 
@@ -4749,6 +4972,7 @@ impl Aplicativo {
             return;
         }
 
+        let no_lote = lote.len();
         let quantas = self.mandar_as_revelacoes(lote, cx);
         // 🚨 **O editor fecha agora, e o lote sobe atrás** (dono, 18/set/2026:
         // *"precisa acontecer em segundo plano e não pode travar o fluxo,
@@ -4767,10 +4991,16 @@ impl Aplicativo {
         // "Subindo N", e fechar a janela com envio pendente só a esconde (G9).
         self.sair_da_revelacao(cx);
         self.avisar_onde_esta_olhando(
-            if quantas == 1 {
-                "revelando em segundo plano — pode continuar com o cliente".into()
-            } else {
-                format!("{quantas} fotos na fila — pode continuar com o cliente")
+            match quantas {
+                // 🚨 Todas já subiam com esta receita: dizer "0 fotos na fila"
+                // logo depois de sincronizar 48 parecia que nada foi salvo
+                // (visto rodando o app, 27/set/2026).
+                0 if no_lote == 1 => {
+                    "esta foto já está subindo — pode continuar com o cliente".into()
+                }
+                0 => format!("as {no_lote} fotos já estão subindo — pode continuar com o cliente"),
+                1 => "revelando em segundo plano — pode continuar com o cliente".into(),
+                _ => format!("{quantas} fotos na fila — pode continuar com o cliente"),
             },
             cx,
         );
@@ -4798,7 +5028,9 @@ impl Aplicativo {
             // receita do primeiro (visto rodando o app: zerar e salvar com o
             // lote de P&B subindo terminava com duas fotos em P&B).
             if entrada == crate::envios::Entrada::JaNoAr
-                && self.receitas_no_ar.get(&no_site) != Some(&json)
+                && !self.receitas_no_ar.get(&no_site).is_some_and(|no_ar| {
+                    crate::pos_venda::porta::mesma_receita_em_texto(no_ar, &json)
+                })
             {
                 if self
                     .reenviar_depois
@@ -4883,7 +5115,8 @@ impl Aplicativo {
                     .find(|(id, _)| id == foto_no_site)
                     .map(|(_, json)| json)
             });
-        atual.is_some_and(|atual| atual != enviada)
+        atual
+            .is_some_and(|atual| !crate::pos_venda::porta::mesma_receita_em_texto(&atual, &enviada))
     }
 
     fn enfileirar_para_subir(&mut self, no_site: String, ajustes: Ajustes, corte: CropSettings) {
@@ -6952,6 +7185,144 @@ mod testes {
                 assert_eq!(aberta.id, "site:remota-1");
                 assert!(aberta.path.is_empty(), "ela não está neste disco");
                 assert_eq!(aberta.pos_venda_foto_id.as_deref(), Some("remota-1"));
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **A foto que acabou de subir daqui abria sem imagem.**
+    ///
+    /// Visto rodando o app com o cartão da D3100 (27/set/2026): importadas as
+    /// 48, a primeira subiu, a grade passou a mostrá-la como do site, e a
+    /// Revelação abriu nela em "não tem preview no cache" — indo baixar a cópia
+    /// de trabalho de um JPEG que estava no disco, com o preview no cache sob o
+    /// id do catálogo.
+    #[gpui_kit::test]
+    fn a_foto_que_subiu_daqui_abre_com_o_bruto_deste_computador(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-local", &foto_vermelha())
+            .expect("o preview que a importação gravou");
+        let catalogo = vec![PhotoViewModel {
+            id: "id-local".into(),
+            name: "DSC_001.JPG".into(),
+            path: "/cartao/DSC_001.JPG".into(),
+            pos_venda_foto_id: Some("remota-1".into()),
+            sessao_id: Some("g1".into()),
+            ..Default::default()
+        }];
+        cx.update(gpui_kit::init);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| Aplicativo::ja_dentro(catalogo, previews, Vec::new(), portas(), window, cx)
+        });
+
+        janela
+            .update(cx, |app, window, cx| {
+                app.atender_a_sessao(
+                    &DetalhePedido::Revelar {
+                        fotos: vec![FotoARevelar {
+                            id: "remota-1".into(),
+                            arquivo: "DSC_001.jpg".into(),
+                            no_disco: false,
+                        }],
+                        inicial: 0,
+                    },
+                    window,
+                    cx,
+                );
+
+                let revelacao = app.revelacao.read(cx);
+                assert_eq!(
+                    revelacao.foto_aberta().map(|f| f.id.as_str()),
+                    Some("site:remota-1"),
+                    "continua sendo a foto do site"
+                );
+                assert!(
+                    revelacao.tem_pixels(),
+                    "abriu com o bruto deste computador, sem esperar a rede"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **A prévia revelada de uma foto do site chega à grade pelo id dela.**
+    ///
+    /// O aviso ia com o id do acervo (`site:<id>`), e a grade — que conhece a
+    /// foto pelo id do site, sem prefixo — continuava na imagem da galeria:
+    /// depois de sincronizar P&B, a sessão mostrava Sépia até o site terminar.
+    #[gpui_kit::test]
+    fn a_previa_revelada_da_foto_do_site_chega_a_grade(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_kit::init);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| {
+                Aplicativo::ja_dentro(Vec::new(), previews, Vec::new(), portas(), window, cx)
+            }
+        });
+
+        janela
+            .update(cx, |app, _window, cx| {
+                let _ = app.reveladas.0.send("site:remota-1".into());
+                let _ = app.reveladas.0.send("id-local".into());
+                app.colher_reveladas(cx);
+                assert_eq!(
+                    app.detalhe.read(cx).reveladas_avisadas(),
+                    vec!["remota-1".to_string(), "id-local".to_string()],
+                    "a grade é avisada pelo id que ela conhece"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **A imagem da galeria nunca vira bruto.** O acervo guarda também a
+    /// foto do site (`site:<id>`, sem arquivo), e o preview dela é a galeria —
+    /// revelada e com marca. A semeadura só vale para cópia deste computador;
+    /// sem ela, a foto do site continua indo buscar a cópia de trabalho.
+    #[gpui_kit::test]
+    fn a_galeria_do_site_nao_e_semeada_como_bruto(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("site:remota-1", &foto_vermelha())
+            .expect("a imagem da galeria");
+        let catalogo = vec![PhotoViewModel {
+            id: "site:remota-1".into(),
+            name: "DSC_001.jpg".into(),
+            pos_venda_foto_id: Some("remota-1".into()),
+            sessao_id: Some("g1".into()),
+            ..Default::default()
+        }];
+        cx.update(gpui_kit::init);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| Aplicativo::ja_dentro(catalogo, previews, Vec::new(), portas(), window, cx)
+        });
+
+        janela
+            .update(cx, |app, window, cx| {
+                app.atender_a_sessao(
+                    &DetalhePedido::Revelar {
+                        fotos: vec![FotoARevelar {
+                            id: "remota-1".into(),
+                            arquivo: "DSC_001.jpg".into(),
+                            no_disco: false,
+                        }],
+                        inicial: 0,
+                    },
+                    window,
+                    cx,
+                );
+                assert!(
+                    !previews.tem(
+                        &persistencia::chave_do_trabalho("site:remota-1"),
+                        domain::services::PreviewType::Large
+                    ),
+                    "a galeria não foi copiada para o lugar do bruto"
+                );
+                assert!(!app.revelacao.read(cx).tem_pixels());
             })
             .expect("a janela deve estar aberta");
     }
@@ -10069,6 +10440,213 @@ mod testes {
     /// chegava, e as outras ficavam no canal sem ninguém para lê-las: a grade
     /// mostrava uma revelada, e o erro das demais não aparecia. Era o "não está
     /// sincronizando" de 7/set/2026.
+    /// 🚨 **O ensaio inteiro subia duas vezes.**
+    ///
+    /// Visto rodando o app com o cartão da D3100 (27/set/2026): cada foto que
+    /// terminava de subir com a receita padrão (Sépia + corte 3:2) voltava para
+    /// a fila como revelação, porque o `corte_altura` do catálogo (`f32`) e o
+    /// que subiu (`f64`) diferiam em 1 ulp — e a comparação era por texto. O
+    /// "Subindo" do canto ficou em 48↔47 o envio inteiro.
+    #[gpui_kit::test]
+    fn a_receita_que_subiu_igual_nao_sobe_de_novo(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_kit::init);
+        let mut subida = foto("DSC_2670.JPG");
+        subida.pos_venda_foto_id = Some("remota-1".into());
+        subida.sessao_id = Some("g1".into());
+        subida.edit_saturation = Some(-1.0);
+        subida.edit_crop_x = Some(0.0);
+        subida.edit_crop_y = Some(0.000_585_8);
+        subida.edit_crop_width = Some(1.0);
+        subida.edit_crop_height = Some(0.998_828_35);
+        // O que a subida mandou: a mesma receita, com o corte em `f64`.
+        let mut que_subiu = crate::pos_venda::porta::ajustes_em_json(
+            &persistencia::da_foto(&subida),
+            &persistencia::para_crop_settings(&persistencia::corte_da_foto(&subida)),
+        );
+        que_subiu["corte_altura"] = serde_json::json!(0.99882835149765_f64);
+        let fotos = vec![subida.clone()];
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            move |window, cx| {
+                Aplicativo::ja_dentro(fotos, previews, Vec::new(), portas(), window, cx)
+            }
+        });
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.receitas_que_subiram
+                    .insert(subida.id.clone(), Some(que_subiu.to_string()));
+                app.conciliar_a_receita_que_subiu(std::slice::from_ref(&subida), cx);
+                assert_eq!(
+                    app.sincronias_pendentes(),
+                    0,
+                    "a receita é a mesma: nada sobe de novo"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **A foto que subiu durante o "Sincronizar" mostrava o efeito antigo.**
+    ///
+    /// Sincronizada ainda local, a prévia do P&B nasceu sob o id do catálogo;
+    /// ao terminar de subir ela passou a ser desenhada como foto do site, que
+    /// procura a prévia sob `site:<id>` e caía na galeria em Sépia (visto
+    /// rodando o app com o cartão da D3100, 27/set/2026).
+    #[gpui_kit::test]
+    fn a_previa_local_acompanha_a_foto_que_subiu_com_a_receita_velha(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_kit::init);
+        let mut subida = foto("DSC_2677.JPG");
+        subida.pos_venda_foto_id = Some("remota-1".into());
+        subida.sessao_id = Some("g1".into());
+        subida.edit_saturation = Some(-1.0);
+        subida.edit_contrast = Some(1.15);
+        previews
+            .save_thumbnail(
+                &persistencia::chave_da_revelada(&subida.id),
+                &foto_vermelha(),
+            )
+            .expect("a prévia do P&B, feita quando ela ainda era local");
+        // Subiu com a Sépia de antes do "Sincronizar".
+        let mut sepia = subida.clone();
+        sepia.edit_contrast = Some(1.08);
+        let que_subiu = crate::pos_venda::porta::ajustes_em_json(
+            &persistencia::da_foto(&sepia),
+            &persistencia::para_crop_settings(&persistencia::corte_da_foto(&sepia)),
+        );
+        let fotos = vec![subida.clone()];
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            move |window, cx| {
+                Aplicativo::ja_dentro(fotos, previews, Vec::new(), portas(), window, cx)
+            }
+        });
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.receitas_que_subiram
+                    .insert(subida.id.clone(), Some(que_subiu.to_string()));
+                app.conciliar_a_receita_que_subiu(std::slice::from_ref(&subida), cx);
+                assert_eq!(app.sincronias_pendentes(), 1, "a receita nova sobe");
+                assert!(
+                    previews.tem(
+                        &persistencia::chave_da_revelada("site:remota-1"),
+                        domain::services::PreviewType::Thumbnail
+                    ),
+                    "a grade da foto do site mostra o P&B até a revelação chegar"
+                );
+                assert!(app
+                    .detalhe
+                    .read(cx)
+                    .reveladas_avisadas()
+                    .contains(&"remota-1".to_string()));
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **Rejeitar uma foto do lote do "Salvar" não é envio recusado.**
+    ///
+    /// Visto rodando o app com o cartão da D3100 (27/set/2026): "Sincronizar
+    /// 48", "Salvar na galeria", e o `X` numa foto enquanto o lote esperava a
+    /// vez. A rejeição a tirou do site, a revelação dela bateu três vezes num
+    /// 404 e o canto acusou "1 envio recusado". As duas situações: a foto ainda
+    /// na fila (sai dela) e a foto já no ar (o 404 dela é o desfecho esperado).
+    /// Nos dois casos a conta das respostas fecha — senão o G9 seguraria a
+    /// janela para sempre.
+    #[gpui_kit::test]
+    fn rejeitar_uma_foto_do_lote_nao_vira_recusa_nem_prende_a_conta(cx: &mut TestAppContext) {
+        use crate::revelacao::sincronizacao::Escolha;
+
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_kit::init);
+        let publicador = Arc::new(PublicadorDeMentira {
+            demorada: true,
+            ..Default::default()
+        });
+        let fotos: Vec<PhotoViewModel> = (1..=4)
+            .map(|i| {
+                let mut f = foto(&format!("DSC_00{i}.JPG"));
+                f.pos_venda_foto_id = Some(format!("remota-{i}"));
+                previews
+                    .save_preview(&f.id, &foto_vermelha())
+                    .expect("gravar preview");
+                f
+            })
+            .collect();
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let publicador = publicador.clone();
+            move |window, cx| {
+                Aplicativo::ja_dentro(
+                    fotos,
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        publicador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(0), cx));
+                app.revelar(window, cx);
+                app.revelacao.update(cx, |tela, cx| {
+                    tela.marcar_todas(cx);
+                    tela.definir_escolha_da_sincronizacao(Escolha::default());
+                });
+                app.sincronizar_revelacao(window, cx);
+                app.salvar_na_galeria(window, cx);
+                assert_eq!(app.sincronias_pendentes(), 4);
+                assert_eq!(app.esteira.progresso().no_ar, crate::envios::EM_VOO);
+
+                // A · a 4ª ainda espera a vez, e a rejeição a tira do site.
+                app.tiradas_do_site.insert("remota-4".into());
+                app.largar_o_que_ia_para("remota-4", cx);
+                assert_eq!(
+                    app.sincronias_pendentes(),
+                    3,
+                    "a resposta dela não vem mais"
+                );
+
+                // B · a 3ª já estava no ar: o site responde que ela sumiu.
+                app.tiradas_do_site.insert("remota-3".into());
+                app.largar_o_que_ia_para("remota-3", cx);
+                let _ = app.sincronias.0.send(PosVendaRecado::EnvioFalhou {
+                    alvo: "remota-3".into(),
+                    frase: "o site não encontrou: foto nao encontrada".into(),
+                });
+                app.colher_sincronia(cx);
+                assert_eq!(app.sincronias_pendentes(), 2);
+                assert!(
+                    app.recusas_para_teste().is_empty(),
+                    "rejeitar não é envio recusado: {:?}",
+                    app.recusas_para_teste()
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        publicador.responder_uma_revelacao();
+        publicador.responder_uma_revelacao();
+        janela
+            .update(cx, |app, _window, cx| {
+                app.colher_sincronia(cx);
+                assert_eq!(app.sincronias_pendentes(), 0, "a conta fechou");
+                assert!(app.lote_no_ar.is_none(), "o lote do salvar terminou");
+                assert!(app.recusas_para_teste().is_empty());
+            })
+            .expect("a janela deve estar aberta");
+    }
+
     #[gpui_kit::test]
     fn a_espera_conta_uma_resposta_por_foto_do_lote(cx: &mut TestAppContext) {
         use crate::revelacao::sincronizacao::Escolha;
