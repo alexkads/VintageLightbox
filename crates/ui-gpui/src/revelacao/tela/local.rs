@@ -206,13 +206,45 @@ pub(in crate::revelacao) struct SlidersLocais {
 }
 
 const RAIO_INICIAL: f32 = 0.03;
+/// O Tamanho da ferramenta, em fração do maior lado: o piso (~2 px numa foto de
+/// 6000 px) dá para a sarda com zoom; o teto, para o céu inteiro.
+const RAIO_MINIMO_DA_FERRAMENTA: f32 = 0.0003;
+const RAIO_MAXIMO_DA_FERRAMENTA: f32 = 0.15;
+/// O teto do retoque já feito, que as alças esticam além do slider.
+const RAIO_MAXIMO_DO_RETOQUE: f32 = 0.25;
 const FEATHER_INICIAL: f32 = 0.5;
 /// O feather do laço é fração do maior lado (até 4%); o do pincel, do raio.
 const FEATHER_DO_LACO: f32 = 0.04;
 /// Até onde o clique ainda pega uma alça, em pontos.
 const ALCANCE_DA_ALCA: f32 = 8.0;
+/// Abaixo deste raio na tela, em pontos, o retoque circular fica sem alças.
+const RAIO_MINIMO_COM_ALCAS: f32 = 2.0 * ALCANCE_DA_ALCA;
 /// A chave de lembrança da sanfona da Revelação local (`revelacao:<título>`).
 const CHAVE_DO_PAINEL_LOCAL: &str = "revelacao:Revelação local";
+
+/// O slider do Tamanho anda em escala logarítmica (`0..1`): cada passo
+/// multiplica o raio pela mesma razão, e o começo do trilho vira precisão para
+/// retoque pequeno em vez de sumir num canto.
+fn raio_da_posicao(t: f32) -> f32 {
+    RAIO_MINIMO_DA_FERRAMENTA
+        * (RAIO_MAXIMO_DA_FERRAMENTA / RAIO_MINIMO_DA_FERRAMENTA).powf(t.clamp(0.0, 1.0))
+}
+
+fn posicao_do_raio(raio: f32) -> f32 {
+    let r = raio.clamp(RAIO_MINIMO_DA_FERRAMENTA, RAIO_MAXIMO_DA_FERRAMENTA);
+    (r / RAIO_MINIMO_DA_FERRAMENTA).ln()
+        / (RAIO_MAXIMO_DA_FERRAMENTA / RAIO_MINIMO_DA_FERRAMENTA).ln()
+}
+
+/// O Tamanho no painel: duas casas abaixo de 1%, onde a diferença é de pixel.
+fn rotulo_do_raio(raio: f32) -> String {
+    let pct = raio * 100.0;
+    if pct < 1.0 {
+        format!("{pct:.2}%")
+    } else {
+        format!("{pct:.1}%")
+    }
+}
 
 impl Local {
     /// Cria os sliders e liga cada um à tela.
@@ -231,7 +263,7 @@ impl Local {
             })
         };
         let sliders = SlidersLocais {
-            raio: slider(0.005, 0.15, 0.001, RAIO_INICIAL, cx),
+            raio: slider(0.0, 1.0, 0.001, posicao_do_raio(RAIO_INICIAL), cx),
             feather: slider(0.0, 1.0, 0.01, FEATHER_INICIAL, cx),
             opacidade: slider(0.05, 1.0, 0.01, 1.0, cx),
             exposicao: slider(-3.0, 3.0, 0.05, 0.0, cx),
@@ -762,17 +794,21 @@ impl Revelacao {
         // círculo do cursor é o retorno que o dedo espera ver.
         if let Some(i) = self.local.selecionado {
             if let Some(r) = self.locais.retoques.get(i).cloned() {
-                let novo = com_raio(&r, (raio_do(&r) * fator).clamp(0.002, 0.25));
+                let novo = com_raio(
+                    &r,
+                    (raio_do(&r) * fator).clamp(RAIO_MINIMO_DA_FERRAMENTA, RAIO_MAXIMO_DO_RETOQUE),
+                );
                 let mut receita = (*self.locais).clone();
                 receita.retoques[i] = novo;
                 self.comprometer(receita, cx);
             }
         }
-        let novo = (self.local.raio * fator).clamp(0.005, 0.15);
+        let novo =
+            (self.local.raio * fator).clamp(RAIO_MINIMO_DA_FERRAMENTA, RAIO_MAXIMO_DA_FERRAMENTA);
         self.local
             .sliders
             .raio
-            .update(cx, |s, cx| s.set_value(novo, window, cx));
+            .update(cx, |s, cx| s.set_value(posicao_do_raio(novo), window, cx));
         self.local.raio = novo;
         cx.notify();
     }
@@ -792,6 +828,11 @@ impl Revelacao {
     }
 
     fn slider_local(&mut self, qual: u8, valor: f32, soltou: bool, cx: &mut Context<Self>) {
+        let valor = if qual == 0 {
+            raio_da_posicao(valor)
+        } else {
+            valor
+        };
         match qual {
             0 => self.local.raio = valor,
             1 => self.local.feather = valor,
@@ -963,6 +1004,12 @@ impl Revelacao {
                     return Vec::new();
                 };
                 let raio = self.raio_na_tela(t.raio);
+                // Retoque do tamanho de uma sarda: as quatro alças se
+                // empilhariam sobre ele e esconderiam o que se corrige. O
+                // tamanho segue no slider e no `[` `]`.
+                if raio < RAIO_MINIMO_COM_ALCAS {
+                    return Vec::new();
+                }
                 [(raio, 0.0), (0.0, raio), (-raio, 0.0), (0.0, -raio)]
                     .into_iter()
                     .map(|(dx, dy)| {
@@ -1443,7 +1490,10 @@ impl Revelacao {
                                 (pa[0] - pq[0]).hypot(pa[1] - pq[1])
                             })
                             .fold(f32::MAX, f32::min);
-                        com_raio(&r, (d / lado).clamp(0.002, 0.25))
+                        com_raio(
+                            &r,
+                            (d / lado).clamp(RAIO_MINIMO_DA_FERRAMENTA, RAIO_MAXIMO_DO_RETOQUE),
+                        )
                     }
                     (Parte::Escala, Retoque::Preencher(mut p)) => {
                         let n = p.laco.len() as f32;
@@ -1698,7 +1748,7 @@ impl Revelacao {
         self.local.feather = feather;
         self.local.opacidade = opacidade;
         for (s, v) in [
-            (self.local.sliders.raio.clone(), raio),
+            (self.local.sliders.raio.clone(), posicao_do_raio(raio)),
             (self.local.sliders.feather.clone(), feather),
             (self.local.sliders.opacidade.clone(), opacidade),
         ] {
@@ -2390,7 +2440,7 @@ impl Revelacao {
         if f.circular() && !(f == Ferramenta::Preencher && self.local.preencher_por_laco) {
             caixa = caixa.child(linha(
                 "Tamanho",
-                format!("{:.1}%", self.local.raio * 100.0),
+                rotulo_do_raio(self.local.raio),
                 &self.local.sliders.raio,
             ));
         }
@@ -3260,6 +3310,28 @@ mod testes {
                 assert!(perto, "a borda em ({:.1}, {:.1}) ficou sem risco", q.x, q.y);
             }
         }
+    }
+
+    /// 🚨 A sarda que o carimbo não alcançava (visto no app, 2026-09-27): o
+    /// Tamanho parava em 0,5% — 30 px numa foto de 6000 px, maior que a sarda
+    /// mesmo com 439% de zoom. O piso desce a ~2 px, e o trilho logarítmico
+    /// deixa o começo com passo fino sem perder o teto.
+    #[test]
+    fn o_tamanho_desce_ao_pixel_com_passo_fino_embaixo() {
+        use super::{posicao_do_raio, raio_da_posicao, rotulo_do_raio};
+        let piso = raio_da_posicao(0.0);
+        assert!(piso * 6000.0 <= 2.0, "piso de {:.1} px", piso * 6000.0);
+        assert!((raio_da_posicao(1.0) - 0.15).abs() < 1e-6);
+        for r in [0.0003, 0.001, 0.005, 0.03, 0.15] {
+            assert!((raio_da_posicao(posicao_do_raio(r)) - r).abs() < r * 1e-4);
+        }
+        // Um passo do slider (0,001) no piso muda menos de um décimo de pixel.
+        let passo = (raio_da_posicao(0.001) - piso) * 6000.0;
+        assert!(passo < 0.1, "passo de {passo:.3} px");
+        // O raio antigo de 0,5% fica perto do meio, e não no começo.
+        assert!(posicao_do_raio(0.005) > 0.4);
+        assert_eq!(rotulo_do_raio(0.0003), "0.03%");
+        assert_eq!(rotulo_do_raio(0.03), "3.0%");
     }
 
     #[test]
