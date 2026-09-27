@@ -2275,7 +2275,13 @@ impl Aplicativo {
             else {
                 continue;
             };
-            if *no_site_agora == agora {
+            // Pela receita, e não pelo texto — ver `mesma_receita`.
+            let igual = match (&*no_site_agora, &agora) {
+                (Some(la), Some(aqui)) => crate::pos_venda::porta::mesma_receita(la, aqui),
+                (None, None) => true,
+                _ => false,
+            };
+            if igual {
                 continue;
             }
             *no_site_agora = agora;
@@ -2285,7 +2291,10 @@ impl Aplicativo {
                 ajustes,
                 corte,
             );
-            self.enfileirar_para_subir(no_site, ajustes, enquadramento);
+            self.enfileirar_para_subir(no_site.clone(), ajustes, enquadramento);
+            // 🚨 A prévia do efeito novo nasceu sob o id local (a tira ainda
+            // tinha a foto como local); a grade a desenha pelo id do site.
+            self.levar_a_previa_local_ao_site(&local, &no_site, cx);
             mudou = true;
         }
         if mudou {
@@ -4865,8 +4874,13 @@ impl Aplicativo {
         // O que está pendente vai para o banco **antes** do envio: os mesmos
         // ajustes que sobem ficam gravados aqui. A tela só fecha quando o lote
         // responder (`contar_o_salvar`).
-        self.revelacao
-            .update(cx, |tela, _cx| tela.gravar_o_que_estiver_pendente());
+        self.revelacao.update(cx, |tela, _cx| {
+            tela.gravar_o_que_estiver_pendente();
+            // 🔑 A prévia da foto aberta **antes** de a receita dela ir ao
+            // site: `trazer_da_revelacao_as_que_subiram` a leva para o id do
+            // site, e a de antes deste ajuste levaria o efeito velho.
+            tela.guardar_a_revelada_no_cache();
+        });
         self.guardar_as_receitas_do_site(cx);
         self.trazer_da_revelacao_as_que_subiram(cx);
 

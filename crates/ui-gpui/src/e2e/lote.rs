@@ -1169,6 +1169,14 @@ fn a_foto_termina_de_subir_com_a_revelacao_aberta_e_o_ajuste_vai_ao_site(cx: &mu
     // O ajuste chega depois, na cópia local que continua aberta.
     e.revelacao(cx, |tela, _w, cx| tela.arrastar_slider(0, -0.5, cx));
     e.esperar(cx);
+    // A prévia dele, sob o id local — a que a Revelação grava na janela de
+    // verdade (aqui, sem GPU, não há imagem revelada para ela gravar).
+    e.previews
+        .save_thumbnail(
+            &crate::revelacao::persistencia::chave_da_revelada("id-DSC_102.jpg"),
+            &image::DynamicImage::ImageRgb8(image::RgbImage::new(8, 8)),
+        )
+        .expect("a prévia local");
     botao(&e, cx, PedidoDaRevelacao::SalvarNaGaleria);
     e.esperar(cx);
     e.app(cx, |app, _w, _cx| assert_eq!(app.tela(), Tela::Sessao));
@@ -1176,6 +1184,13 @@ fn a_foto_termina_de_subir_com_a_revelacao_aberta_e_o_ajuste_vai_ao_site(cx: &mu
         so_a_102(&e),
         vec![("site-id-DSC_102.jpg".to_string(), -0.5, 1.25)],
         "o Salvar leva o ajuste à foto do site"
+    );
+    // 🚨 E a grade, que a desenha pelo id do site, mostra o ajuste enquanto
+    // a revelação sobe — a prévia nasceu sob o id local.
+    let previa = crate::revelacao::persistencia::chave_da_revelada("site:site-id-DSC_102.jpg");
+    assert!(
+        e.previews.tem(&previa, PreviewType::Thumbnail),
+        "a prévia do ajuste acompanha a foto que já subiu"
     );
     let da_101: Vec<f32> = e
         .site
