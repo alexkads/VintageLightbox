@@ -1,16 +1,16 @@
 {
-  "version": "0.1.23",
+  "version": "0.1.24",
   "notes": "",
-  "pub_date": "2026-09-27T17:49:37+00:00",
+  "pub_date": "2026-09-27T20:18:03+00:00",
   "platforms": {
     "macos-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIGNhcmdvLXBhY2thZ2VyIHNlY3JldCBrZXkKUlVSSk9VNzBRQkxYTS9POVcwdDlsR0RaN1NBNWc1b1ErSTJEcWhIQmJROWlpZEFSUUhEeWNBNjVuTGk4eVRvSVF1QVlsOC81aUNQUXdNVzhCL3Q4MVBqME9RbkpZdFowbEFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNTMxMzMwCWZpbGU6VmludGFnZUxpZ2h0Ym94LmFwcC50YXIuZ3oKSW5maHZaZFhlZm9hQ3JMdk80eFRva1cyVXRNVmtvejdQenc1Tytjek9OQUZUQmZoOURBREVwQTlTNTRsOStOY0VadmkxZ0hpUTlZcGVIMXJzL2JkQlE9PQo=",
-      "url": "https://pub-f97274c3a83f47ff903a64fc1578efb0.r2.dev/v0.1.23/VintageLightbox.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIGNhcmdvLXBhY2thZ2VyIHNlY3JldCBrZXkKUlVSSk9VNzBRQkxYTTFRaEhhakJJZXBydnlHQnhuWTczRDgzUm5sZ2UwRGhjaTI3YjkxWlBFK0ZxaHY2aDBXVEhMd2FJQUswUXcrZStQRklZWXlJV1BET0FlNlRleS9iYUFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNTM5NzU3CWZpbGU6VmludGFnZUxpZ2h0Ym94LmFwcC50YXIuZ3oKNkl3UnpKT0UwSEFuQnBGT1ZMRlM3cWMyRlhCMWZoSi9OWGRYcjc1MDRMMTJiK1l6ZTNtNzB0TmsybDYxdVlyRmlIQ284d3l3TlB3VmdPZ1lkVmh1Qmc9PQo=",
+      "url": "https://pub-f97274c3a83f47ff903a64fc1578efb0.r2.dev/v0.1.24/VintageLightbox.app.tar.gz",
       "format": "app"
     },
     "macos-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIGNhcmdvLXBhY2thZ2VyIHNlY3JldCBrZXkKUlVSSk9VNzBRQkxYTS9POVcwdDlsR0RaN1NBNWc1b1ErSTJEcWhIQmJROWlpZEFSUUhEeWNBNjVuTGk4eVRvSVF1QVlsOC81aUNQUXdNVzhCL3Q4MVBqME9RbkpZdFowbEFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNTMxMzMwCWZpbGU6VmludGFnZUxpZ2h0Ym94LmFwcC50YXIuZ3oKSW5maHZaZFhlZm9hQ3JMdk80eFRva1cyVXRNVmtvejdQenc1Tytjek9OQUZUQmZoOURBREVwQTlTNTRsOStOY0VadmkxZ0hpUTlZcGVIMXJzL2JkQlE9PQo=",
-      "url": "https://pub-f97274c3a83f47ff903a64fc1578efb0.r2.dev/v0.1.23/VintageLightbox.app.tar.gz",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIGNhcmdvLXBhY2thZ2VyIHNlY3JldCBrZXkKUlVSSk9VNzBRQkxYTTFRaEhhakJJZXBydnlHQnhuWTczRDgzUm5sZ2UwRGhjaTI3YjkxWlBFK0ZxaHY2aDBXVEhMd2FJQUswUXcrZStQRklZWXlJV1BET0FlNlRleS9iYUFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkwNTM5NzU3CWZpbGU6VmludGFnZUxpZ2h0Ym94LmFwcC50YXIuZ3oKNkl3UnpKT0UwSEFuQnBGT1ZMRlM3cWMyRlhCMWZoSi9OWGRYcjc1MDRMMTJiK1l6ZTNtNzB0TmsybDYxdVlyRmlIQ284d3l3TlB3VmdPZ1lkVmh1Qmc9PQo=",
+      "url": "https://pub-f97274c3a83f47ff903a64fc1578efb0.r2.dev/v0.1.24/VintageLightbox.app.tar.gz",
       "format": "app"
     }
   }
