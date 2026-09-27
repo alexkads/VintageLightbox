@@ -75,3 +75,65 @@ fn clique_rapido_de_carimbo_e_band_aid_vira_retoque(cx: &mut TestAppContext) {
         assert!(!preso, "{tecla}: e o gesto não fica preso");
     }
 }
+
+/// 🔎 **O Tamanho é na tela** (dono, 27/set/2026): aproximar afina a
+/// ferramenta sozinho, como no Lightroom — o círculo fica do mesmo tamanho na
+/// tela e cobre menos da foto. E o carimbo já dado **não muda** com o zoom: ele
+/// guarda o raio em fração da foto.
+#[gpui_kit::test]
+fn o_zoom_afina_a_ferramenta_e_o_retoque_feito_fica(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    e.revelar_a_do_site(cx, "a");
+    e.teclar(cx, "s");
+    let encaixada = e.revelacao(cx, |tela, _w, _cx| tela.raio_local());
+
+    // Um carimbo com a foto inteira à vista.
+    let meio = e.revelacao(cx, |tela, _w, _cx| tela.meio_do_palco());
+    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    visual.simulate_click(meio, Modifiers::default());
+    visual.run_until_parked();
+    let raio_do_carimbo = |e: &super::Estudio, cx: &mut TestAppContext| {
+        e.revelacao(cx, |tela, _w, _cx| {
+            tela.locais().retoques.first().map(|r| r.traco().raio)
+        })
+    };
+    let feito = raio_do_carimbo(&e, cx).expect("o clique vira carimbo");
+    assert!(
+        (feito - encaixada).abs() < 1e-6,
+        "o carimbo leva o raio da ferramenta"
+    );
+
+    let escala_encaixada = e
+        .revelacao(cx, |tela, _w, _cx| tela.escala_local())
+        .expect("a foto tem medida");
+    for _ in 0..4 {
+        e.revelacao(cx, |tela, _w, cx| tela.passo_de_zoom(1, cx));
+        let visual = VisualTestContext::from_window(e.raiz.into(), cx);
+        visual.run_until_parked();
+    }
+    let (ampliada, escala) = e.revelacao(cx, |tela, _w, _cx| {
+        (
+            tela.raio_local(),
+            tela.escala_local().expect("a foto tem medida"),
+        )
+    });
+    assert!(
+        escala > escala_encaixada * 1.5,
+        "os passos aproximam: {escala_encaixada} → {escala}"
+    );
+    assert!(
+        ampliada < encaixada,
+        "com zoom, o mesmo círculo cobre menos da foto: {encaixada} → {ampliada}"
+    );
+    assert!(
+        (ampliada * escala - encaixada * escala_encaixada).abs() < 0.01,
+        "o tamanho na tela é o mesmo: {} → {} pontos",
+        encaixada * escala_encaixada,
+        ampliada * escala
+    );
+    assert_eq!(
+        raio_do_carimbo(&e, cx),
+        Some(feito),
+        "o carimbo já dado não muda com o zoom"
+    );
+}
