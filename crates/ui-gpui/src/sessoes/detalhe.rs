@@ -5018,18 +5018,35 @@ impl Detalhe {
                                 .items_center()
                                 .gap(px(4.))
                                 .child(lugar.flex_none())
+                                // 🐧 O aperto de mão é o ícone SVG, e não o
+                                // emoji: no Fedora a fonte do texto não tem
+                                // o glifo e a pílula saía só com o texto.
                                 .child(
                                     div()
                                         .min_w(px(0.))
                                         .max_w(px(teto.max(0.)))
-                                        .truncate()
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(4.))
                                         .px(px(6.))
                                         .rounded_full()
                                         .bg(gpui_kit::rgb(0xffb900))
                                         .text_color(gpui_kit::black())
                                         .text_size(px(10.))
                                         .line_height(px(20.))
-                                        .child(SharedString::from(format!("🤝 {etiqueta}"))),
+                                        .child(
+                                            gpui_kit::component::Icon::new(
+                                                crate::recursos::Icone::Handshake,
+                                            )
+                                            .size(px(12.))
+                                            .flex_none(),
+                                        )
+                                        .child(
+                                            div()
+                                                .min_w(px(0.))
+                                                .truncate()
+                                                .child(SharedString::from(etiqueta)),
+                                        ),
                                 ),
                         }
                     })
