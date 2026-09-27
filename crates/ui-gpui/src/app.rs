@@ -603,6 +603,19 @@ pub struct Aplicativo {
     /// com esta, assim que a de antes responder. É o que o Worker do site faz:
     /// a mesma foto vai para o fim da fila com a receita nova.
     reenviar_depois: std::collections::HashMap<String, (Ajustes, CropSettings)>,
+    /// A receita que **a galeria do site tem** de cada foto, por id no site —
+    /// a da API, antes de o depósito local passar por cima
+    /// (`aplicar_o_deposito_do_site`). É para onde o "Descartar" devolve a
+    /// foto (`descartar_as_edicoes`).
+    receitas_do_site: std::collections::HashMap<String, (Ajustes, persistencia::Corte)>,
+    /// A Revelação local que está no JPEG da galeria, por id no site.
+    ///
+    /// ⚠️ **O site não guarda máscara nem retoque** — eles vão queimados no
+    /// JPEG que sobe. O que se sabe é o que estava aqui quando a foto estava
+    /// em dia com a galeria: a foto fora do depósito ao ler o site. A que já
+    /// chegou pendente (de uma abertura anterior do app) fica sem registro, e
+    /// o "Descartar" deixa a Revelação local dela como está.
+    locais_no_site: std::collections::HashMap<String, Option<String>>,
     /// As fotos que este app **tirou do site** ao rejeitá-las (id remoto) —
     /// ver [`Self::largar_o_que_ia_para`].
     pub(crate) tiradas_do_site: std::collections::HashSet<String>,
@@ -1286,6 +1299,8 @@ impl Aplicativo {
             a_subir: Vec::new(),
             receitas_no_ar: std::collections::HashMap::new(),
             reenviar_depois: std::collections::HashMap::new(),
+            receitas_do_site: std::collections::HashMap::new(),
+            locais_no_site: std::collections::HashMap::new(),
             tiradas_do_site: std::collections::HashSet::new(),
             repositor: portas.repositor,
             reposicoes: channel(),
@@ -2503,6 +2518,9 @@ impl Aplicativo {
             }
             // 🗑️ "Apagar" no painel da foto: o mesmo `DELETE` de zerar a
             // classificação, e a grade relê depois que o site confirma.
+            DetalhePedido::DescartarEdicao(ids) => {
+                self.descartar_as_edicoes(ids.clone(), window, cx);
+            }
             DetalhePedido::ApagarDoSite(id) => {
                 let Some(sessao) = self.sessao.clone() else {
                     return;
@@ -2617,11 +2635,15 @@ impl Aplicativo {
             }
             DetalhePedido::FotosDoSite(fotos) => {
                 let sessao = self.sessao_aberta.clone();
-                let convertidas = fotos
+                let convertidas: Vec<PhotoViewModel> = fotos
                     .iter()
                     .map(|f| do_site_para_a_grade(f, sessao.clone()))
                     .collect();
+                self.lembrar_o_que_o_site_tem(&convertidas);
                 self.absorver_as_do_site(convertidas, cx);
+                // As pendentes são contadas sobre as fotos desta sessão: com
+                // elas na mão, a grade já abre dizendo quais não foram salvas.
+                self.recontar_o_que_falta_subir(cx);
                 // O site respondeu (a nota recusada volta, a levada de outro
                 // balcão chega): a tira acompanha a grade.
                 self.sincronizar_a_tira(None, cx);
@@ -3726,6 +3748,9 @@ impl Aplicativo {
                 .update(cx, |tela, _| tela.revelada_chegou(&na_grade));
         }
         self.guardar_as_receitas_do_site(cx);
+        // A grade da sessão diz quais ficaram "não salvas" — os gestos da
+        // Revelação mudaram o depósito sem ninguém recontar.
+        self.recontar_o_que_falta_subir(cx);
         // E de volta: o recorte e as marcadas da tira ficam na grade da sessão.
         //
         // 🚨 **Só vindo da Revelação.** Da impressão (o "Voltar" do cabeçalho)
@@ -3963,6 +3988,12 @@ impl Aplicativo {
             PedidoDaRevelacao::SalvarNaGaleria => self.salvar_na_galeria(window, cx),
             PedidoDaRevelacao::Sincronizar => self.sincronizar_revelacao(window, cx),
             PedidoDaRevelacao::ZerarAsMarcadas => self.zerar_as_marcadas(cx),
+            PedidoDaRevelacao::Descartar => {
+                let ids = self
+                    .revelacao
+                    .update(cx, |tela, _cx| tela.levar_a_descartar());
+                self.descartar_as_edicoes(ids, window, cx);
+            }
             // "Baixar como… (N)" do menu da tira: a exportação com os alvos dele.
             PedidoDaRevelacao::BaixarComo => {
                 let fotos = self.revelacao.update(cx, |tela, _cx| tela.levar_a_baixar());
@@ -3980,6 +4011,11 @@ impl Aplicativo {
             PedidoDaRevelacao::AbriuOutraFoto => {
                 self.repor_os_pixels(cx);
                 self.medir_o_original(cx);
+                // 🚨 **A que saiu acabou de ir para o depósito** (`mostrar`
+                // grava antes de trocar): sem recontar, ela ficava fora do
+                // "Descartar todas", sem o ponto oco na tira e fora do número
+                // do "Salvar" — visto rodando o app, 27/set/2026.
+                self.recontar_o_que_falta_subir(cx);
             }
             PedidoDaRevelacao::QueroOBruto => self.pedir_o_bruto(cx),
         }
@@ -5158,6 +5194,181 @@ impl Aplicativo {
             .is_some_and(|atual| !crate::pos_venda::porta::mesma_receita_em_texto(&atual, &enviada))
     }
 
+    /// Guarda o que a galeria tem de cada foto, na hora em que o site
+    /// responde — ver [`Self::receitas_do_site`] e [`Self::locais_no_site`].
+    fn lembrar_o_que_o_site_tem(&mut self, fotos: &[PhotoViewModel]) {
+        let no_deposito: std::collections::HashSet<String> = self
+            .gravador
+            .guardadas_do_site()
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        for foto in fotos {
+            let Some(no_site) = foto.pos_venda_foto_id.clone() else {
+                continue;
+            };
+            let receita = (
+                persistencia::da_foto(foto),
+                persistencia::corte_da_foto(foto),
+            );
+            // A que nunca foi revelada no site não tem máscara lá.
+            let nunca_revelada = persistencia::mesma_receita(
+                receita,
+                (Ajustes::default(), persistencia::Corte::default()),
+            );
+            if !no_deposito.contains(&no_site) {
+                let locais = self.gravador.locais_do_site(&no_site);
+                self.locais_no_site.insert(no_site.clone(), locais);
+            } else if nunca_revelada {
+                self.locais_no_site.entry(no_site.clone()).or_insert(None);
+            }
+            self.receitas_do_site.insert(no_site, receita);
+        }
+    }
+
+    /// 🗑️ **Descartar**: estas fotos (ids no site) voltam ao que a galeria
+    /// tem, e saem da fila do "Salvar" e do depósito.
+    ///
+    /// É o "Descartar a edição" da web (`grade.tsx`), pedido pelo dono em
+    /// 27/set/2026: *"deixar como estava no servidor"*. A foto aberta na
+    /// Revelação volta como passo de histórico (o `⌘Z` a traz de volta); as
+    /// outras voltam só na memória e no disco.
+    ///
+    /// 🚨 **A que já está subindo fica.** O JPEG dela já saiu com a edição, e
+    /// o site vai tê-la de qualquer jeito — descartar aqui deixaria o app
+    /// mostrando uma coisa e a galeria outra. A que ainda espera a vez na
+    /// esteira sai dela, com as contas descontadas como na rejeição
+    /// (`largar_o_que_ia_para`).
+    pub(crate) fn descartar_as_edicoes(
+        &mut self,
+        ids: Vec<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if ids.is_empty() {
+            return;
+        }
+        let (aberta, na_revelacao) = {
+            let revelacao = self.revelacao.read(cx);
+            let aberta = revelacao
+                .foto_aberta()
+                .and_then(|f| f.pos_venda_foto_id.clone());
+            let ids_na_revelacao: std::collections::HashMap<String, (String, String)> = revelacao
+                .acervo()
+                .iter()
+                .filter_map(|f| {
+                    f.pos_venda_foto_id
+                        .clone()
+                        .map(|no_site| (no_site, (f.id.clone(), f.name.clone())))
+                })
+                .collect();
+            (aberta, ids_na_revelacao)
+        };
+        let mut descartadas: Vec<String> = Vec::new();
+        let mut subindo = 0;
+        let mut outras: Vec<(String, Ajustes, persistencia::Corte)> = Vec::new();
+        for no_site in ids {
+            // Esperando a vez: sai da esteira. No ar: fica.
+            let na_fila = self.esteira.tirar_da_fila(&no_site);
+            if !na_fila && self.receitas_no_ar.contains_key(&no_site) {
+                subindo += 1;
+                continue;
+            }
+            if na_fila {
+                self.receitas_no_ar.remove(&no_site);
+                self.sincronias_pendentes = self.sincronias_pendentes.saturating_sub(1);
+                self.tirar_do_lote_do_salvar(cx);
+            }
+            let (ajustes, corte) = self
+                .receitas_do_site
+                .get(&no_site)
+                .copied()
+                .unwrap_or_default();
+            let locais = self.locais_no_site.get(&no_site).cloned();
+            let do_site = format!("{}{no_site}", persistencia::PREFIXO_DO_SITE);
+            let (id, nome) = na_revelacao
+                .get(&no_site)
+                .cloned()
+                .or_else(|| {
+                    self.fotos_do_site
+                        .iter()
+                        .find(|f| f.pos_venda_foto_id.as_deref() == Some(no_site.as_str()))
+                        .map(|f| (f.id.clone(), f.name.clone()))
+                })
+                .unwrap_or_else(|| (do_site, "a foto".into()));
+
+            if aberta.as_deref() == Some(no_site.as_str()) {
+                let receita_local = locais.clone().map(|texto| {
+                    Arc::new(
+                        texto
+                            .and_then(|t| {
+                                infrastructure::gpu_adjustments::ReceitaLocal::de_json(&t).ok()
+                            })
+                            .unwrap_or_default(),
+                    )
+                });
+                self.revelacao.update(cx, |tela, cx| {
+                    tela.assumir_a_receita_do_site(ajustes, corte, receita_local, window, cx)
+                });
+            } else {
+                if let Some(locais) = locais {
+                    if persistencia::id_no_site(&id).is_some()
+                        && self.gravador.locais_do_site(&no_site) != locais
+                    {
+                        self.gravador.gravar_locais(id.clone(), locais);
+                    }
+                }
+                outras.push((id.clone(), ajustes, corte));
+            }
+            // 🔑 A foto do catálogo não tem depósito: a receita do site volta
+            // para a linha dela.
+            if persistencia::id_no_site(&id).is_none() {
+                self.gravador.gravar(id.clone(), ajustes, corte);
+            }
+            self.a_subir.retain(|(ja, _, _)| ja != &no_site);
+            self.gravador.esquecer_do_site(no_site.clone());
+            if let Some(foto) = self
+                .fotos_do_site
+                .iter_mut()
+                .find(|f| f.pos_venda_foto_id.as_deref() == Some(no_site.as_str()))
+            {
+                persistencia::na_foto(foto, ajustes, corte);
+            }
+            // A prévia local mostrava a edição: sem ela, a grade e a tira
+            // voltam à imagem da galeria.
+            self.esquecer_a_previa_local(&id, cx);
+            descartadas.push(nome);
+        }
+        self.revelacao
+            .update(cx, |tela, cx| tela.aplicar_descartadas(&outras, cx));
+        // A grade relê as do site com o depósito novo.
+        let fotos_do_site = std::mem::take(&mut self.fotos_do_site);
+        self.absorver_as_do_site(fotos_do_site, cx);
+        self.recontar_o_que_falta_subir(cx);
+        let mut aviso = match descartadas.as_slice() {
+            [] => String::new(),
+            [uma] => format!("A edição de {uma} foi descartada — ela fica como está na galeria"),
+            varias => format!(
+                "{} edições descartadas — as fotos ficam como estão na galeria",
+                varias.len()
+            ),
+        };
+        if subindo > 0 {
+            if !aviso.is_empty() {
+                aviso.push_str(" · ");
+            }
+            aviso.push_str(&if subindo == 1 {
+                "1 já estava subindo e foi para a galeria assim mesmo".to_string()
+            } else {
+                format!("{subindo} já estavam subindo e foram para a galeria assim mesmo")
+            });
+        }
+        if !aviso.is_empty() {
+            self.avisar_onde_esta_olhando(aviso, cx);
+        }
+        cx.notify();
+    }
+
     fn enfileirar_para_subir(&mut self, no_site: String, ajustes: Ajustes, corte: CropSettings) {
         self.a_subir.retain(|(ja, _, _)| ja != &no_site);
         self.a_subir.push((no_site, ajustes, corte));
@@ -5178,7 +5389,12 @@ impl Aplicativo {
             .as_deref()
             .is_some_and(|aberta| ids.iter().any(|id| id == aberta));
         let outras = ids.len() - usize::from(no_deposito);
-        let pendentes = ids.into_iter().collect();
+        let pendentes: std::collections::BTreeSet<String> = ids.into_iter().collect();
+        // 📌 A grade da sessão marca as mesmas: "· não salva" no rodapé e o
+        // "N edições não salvas" na barra, como a web.
+        self.detalhe.update(cx, |tela, cx| {
+            tela.definir_nao_salvas(pendentes.clone(), cx)
+        });
         self.revelacao.update(cx, |tela, cx| {
             tela.definir_nao_salvas(outras, no_deposito, cx);
             // O ponto oco de cada miniatura da tira.
@@ -6852,6 +7068,256 @@ mod testes {
             gravador.deposito().is_empty(),
             "a que subiu tem de sair do deposito: {:?}",
             gravador.deposito()
+        );
+    }
+
+    /// Uma sessão com duas fotos do site revelada aqui e não salvas: a
+    /// `remota-1` (a galeria tem exposição 0,25; o depósito, 1,25) e a
+    /// `remota-2` (a galeria nunca a revelou; o depósito tem 0,8). A Revelação
+    /// abre na primeira.
+    fn sessao_com_duas_nao_salvas(
+        cx: &mut TestAppContext,
+    ) -> (
+        gpui_kit::WindowHandle<Aplicativo>,
+        Arc<GravadorDeMentira>,
+        TempDir,
+    ) {
+        use crate::sessoes::detalhe::FotoARevelar;
+        let (previews, dir) = previews_descartaveis();
+        cx.update(gpui_kit::init);
+        let gravador = Arc::new(GravadorDeMentira::com_o_deposito(vec![
+            ("remota-1".to_string(), r#"{"exposure":1.25}"#.to_string()),
+            ("remota-2".to_string(), r#"{"exposure":0.8}"#.to_string()),
+        ]));
+        let janela = cx.add_window({
+            let gravador = gravador.clone();
+            move |window, cx| {
+                Aplicativo::ja_dentro(
+                    Vec::new(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        publicador: Arc::new(PublicadorDeMentira::default()),
+                        gravador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+        janela
+            .update(cx, |app, window, cx| {
+                app.atender_a_sessao(
+                    &DetalhePedido::FotosDoSite(vec![
+                        foto_do_site("remota-1", Some(serde_json::json!({ "exposure": 0.25 }))),
+                        foto_do_site("remota-2", None),
+                    ]),
+                    window,
+                    cx,
+                );
+                app.atender_a_sessao(
+                    &DetalhePedido::Revelar {
+                        fotos: ["remota-1", "remota-2"]
+                            .into_iter()
+                            .map(|id| FotoARevelar {
+                                id: id.into(),
+                                arquivo: format!("{id}.jpg"),
+                                no_disco: false,
+                            })
+                            .collect(),
+                        inicial: 0,
+                    },
+                    window,
+                    cx,
+                );
+            })
+            .expect("a janela deve estar aberta");
+        (janela, gravador, dir)
+    }
+
+    fn no_deposito(gravador: &GravadorDeMentira) -> Vec<String> {
+        let mut ids: Vec<String> = gravador.deposito().into_iter().map(|(id, _)| id).collect();
+        ids.sort();
+        ids
+    }
+
+    /// 🗑️ **"Descartar esta foto" devolve a aberta ao que a galeria tem** — e o
+    /// `⌘Z` a traz de volta (dono, 27/set/2026: *"deixar como estava no
+    /// servidor"*).
+    ///
+    /// O gesto em curso vai junto: mexer num slider e descartar dentro dos
+    /// 500 ms não pode deixar a gravação atrasada sair depois, por cima.
+    #[gpui_kit::test]
+    fn descartar_esta_foto_volta_ao_que_a_galeria_tem_e_o_desfazer_traz_de_volta(
+        cx: &mut TestAppContext,
+    ) {
+        let (janela, gravador, _dir) = sessao_com_duas_nao_salvas(cx);
+        janela
+            .update(cx, |app, window, cx| {
+                let tela = app.revelacao.read(cx);
+                assert_eq!(tela.ajustes().exposure, 1.25, "abre com o depósito");
+                assert_eq!(tela.quantas_a_descartar(), 2);
+                assert!(tela.ha_o_que_salvar());
+                app.revelacao.update(cx, |tela, cx| {
+                    tela.aplicar_para_teste(0, 1.5, cx);
+                    tela.descartar_esta(window, cx);
+                });
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        janela
+            .update(cx, |app, window, cx| {
+                let tela = app.revelacao.read(cx);
+                assert_eq!(tela.ajustes().exposure, 0.25, "a receita da galeria");
+                assert!(!tela.aberta_a_salvar(), "nada mais a salvar nesta foto");
+                assert_eq!(tela.quantas_a_descartar(), 1, "a outra continua pendente");
+                assert_eq!(no_deposito(&gravador), vec!["remota-2".to_string()]);
+                assert_eq!(
+                    app.detalhe
+                        .read(cx)
+                        .nao_salvas()
+                        .iter()
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                    vec!["remota-2".to_string()],
+                    "a grade da sessão deixa de marcar a descartada"
+                );
+                // ⌘Z: o gesto de antes do descarte volta, e com ele a pendência.
+                app.revelacao
+                    .update(cx, |tela, cx| tela.desfazer(window, cx));
+                assert_eq!(app.revelacao.read(cx).ajustes().exposure, 1.5);
+                assert!(app.revelacao.read(cx).aberta_a_salvar());
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        assert_eq!(
+            no_deposito(&gravador),
+            vec!["remota-1".to_string(), "remota-2".to_string()],
+            "o desfazer grava a edição de novo"
+        );
+    }
+
+    /// 🗑️ **"Descartar todas" leva também as que não estão abertas**: saem do
+    /// depósito, e as cópias da tira e da grade passam a ter a receita da
+    /// galeria — a que nunca foi revelada lá volta ao neutro.
+    #[gpui_kit::test]
+    fn descartar_todas_devolve_as_outras_ao_que_a_galeria_tem(cx: &mut TestAppContext) {
+        let (janela, gravador, _dir) = sessao_com_duas_nao_salvas(cx);
+        janela
+            .update(cx, |app, window, cx| {
+                let ids = app.revelacao.read(cx).a_descartar_todas();
+                assert_eq!(ids, vec!["remota-1".to_string(), "remota-2".to_string()]);
+                app.descartar_as_edicoes(ids, window, cx);
+
+                assert!(gravador.deposito().is_empty(), "{:?}", gravador.deposito());
+                let tela = app.revelacao.read(cx);
+                assert_eq!(tela.ajustes().exposure, 0.25);
+                assert_eq!(tela.quantas_a_descartar(), 0);
+                assert!(!tela.ha_o_que_salvar(), "o Salvar se apaga");
+                let outra = tela
+                    .acervo()
+                    .iter()
+                    .find(|f| f.pos_venda_foto_id.as_deref() == Some("remota-2"))
+                    .expect("a outra está na tira");
+                assert_eq!(persistencia::da_foto(outra), Ajustes::default());
+                let na_grade = app
+                    .fotos_do_site
+                    .iter()
+                    .find(|f| f.pos_venda_foto_id.as_deref() == Some("remota-2"))
+                    .expect("a outra está na grade");
+                assert_eq!(persistencia::da_foto(na_grade), Ajustes::default());
+                assert!(app.detalhe.read(cx).nao_salvas().is_empty());
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 📌 **A grade da sessão mostra as não salvas e descarta pelo painel** —
+    /// o que a web tem e o app não tinha em lugar nenhum (dono, 27/set/2026).
+    #[gpui_kit::test]
+    fn a_grade_marca_as_nao_salvas_e_descarta_pelo_painel(cx: &mut TestAppContext) {
+        let (janela, gravador, _dir) = sessao_com_duas_nao_salvas(cx);
+        janela
+            .update(cx, |app, window, cx| {
+                assert_eq!(
+                    app.detalhe.read(cx).nao_salvas().len(),
+                    2,
+                    "a grade já abre marcando as que o depósito tem"
+                );
+                app.atender_a_revelacao(PedidoDaRevelacao::Sair, window, cx);
+                assert_eq!(
+                    app.detalhe.read(cx).nao_salvas().len(),
+                    2,
+                    "as duas aparecem como não salvas"
+                );
+                app.detalhe.update(cx, |tela, cx| {
+                    tela.pedir_descartar(vec![("remota-2".into(), "remota-2.jpg".into())], cx);
+                    tela.confirmar_descartar(cx);
+                });
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        janela
+            .update(cx, |app, _window, cx| {
+                assert_eq!(no_deposito(&gravador), vec!["remota-1".to_string()]);
+                assert_eq!(
+                    app.detalhe
+                        .read(cx)
+                        .nao_salvas()
+                        .iter()
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                    vec!["remota-1".to_string()]
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **A foto editada e deixada para trás continua na conta.** Mexer numa
+    /// e passar à próxima pela seta: a primeira foi para o depósito na troca,
+    /// e ninguém recontava — o "Descartar todas" dizia 1, e a tira não punha
+    /// o ponto oco nela (visto rodando o app, 27/set/2026).
+    #[gpui_kit::test]
+    fn a_editada_que_ficou_para_tras_entra_no_descartar_todas(cx: &mut TestAppContext) {
+        let (janela, _gravador, _dir) = sessao_com_duas_nao_salvas(cx);
+        janela
+            .update(cx, |app, window, cx| {
+                let ids = app.revelacao.read(cx).a_descartar_todas();
+                app.descartar_as_edicoes(ids, window, cx);
+                assert_eq!(app.revelacao.read(cx).quantas_a_descartar(), 0);
+                app.revelacao.update(cx, |tela, cx| {
+                    tela.aplicar_para_teste(0, 1.5, cx);
+                    tela.andar(1, window, cx);
+                });
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        janela
+            .update(cx, |app, _window, cx| {
+                assert_eq!(
+                    app.revelacao.read(cx).a_descartar_todas(),
+                    vec!["remota-1".to_string()],
+                    "a que ficou para trás está na conta"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **A que já está subindo não se descarta**: o JPEG saiu com a edição,
+    /// e a galeria vai tê-la de qualquer jeito.
+    #[gpui_kit::test]
+    fn a_que_esta_subindo_nao_se_descarta(cx: &mut TestAppContext) {
+        let (janela, gravador, _dir) = sessao_com_duas_nao_salvas(cx);
+        janela
+            .update(cx, |app, window, cx| {
+                app.receitas_no_ar
+                    .insert("remota-2".into(), r#"{"exposure":0.8}"#.into());
+                app.descartar_as_edicoes(vec!["remota-2".into()], window, cx);
+            })
+            .expect("a janela deve estar aberta");
+        assert_eq!(
+            no_deposito(&gravador),
+            vec!["remota-1".to_string(), "remota-2".to_string()]
         );
     }
 

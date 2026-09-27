@@ -79,13 +79,15 @@ pub(super) struct EstadoDaTira {
     zerar_do_menu: Option<Vec<String>>,
     /// O "Baixar como… (N)" do menu, até a raiz abrir a exportação.
     a_baixar: Vec<PhotoViewModel>,
+    /// As fotos (id no site) do "Descartar", até a raiz as atender.
+    pub(super) a_descartar: Vec<String>,
     /// Quantos quadros ainda tentam centralizar a aberta.
     ///
     /// ⚠️ **Dois**, porque a conta usa o leiaute do quadro anterior: no primeiro
     /// depois de trocar o recorte as posições ainda são as velhas.
     centrar: u8,
     /// As fotos (id no site) com receita que a galeria ainda não recebeu.
-    pendentes: BTreeSet<String>,
+    pub(super) pendentes: BTreeSet<String>,
     /// O primeiro item da tira que virou elemento no último quadro — os que
     /// vêm antes são um espaçador (ver [`faixa_desenhada`]).
     primeira_desenhada: usize,
@@ -110,6 +112,7 @@ impl EstadoDaTira {
             menu: None,
             zerar_do_menu: None,
             a_baixar: Vec::new(),
+            a_descartar: Vec::new(),
             centrar: 0,
             pendentes: BTreeSet::new(),
             primeira_desenhada: 0,
@@ -328,6 +331,8 @@ struct Menu {
     na_escolha: bool,
     alvos: Vec<PhotoViewModel>,
     quantas_zeram: usize,
+    /// Dos alvos, os que têm edição não salva — o "Descartar a edição".
+    a_descartar: Vec<PhotoViewModel>,
     marcadas: usize,
     pode_sincronizar: bool,
 }
@@ -695,8 +700,19 @@ impl Revelacao {
             && self.pode_revelar()
             && (self.quantos_alterados() > 0 || self.enquadrada());
         let outras = self.outras_do_menu(&alvos).len();
+        let a_descartar = alvos
+            .iter()
+            .filter(|f| {
+                self.acervo
+                    .iter()
+                    .position(|a| a.id == f.id)
+                    .is_some_and(|p| self.nao_salva(p, f))
+            })
+            .cloned()
+            .collect();
         Some(Menu {
             clicada,
+            a_descartar,
             arquivo: foto.name.clone(),
             e_a_aberta: clicada == self.posicao,
             na_escolha: self.marcadas.contains(&clicada),
@@ -774,7 +790,7 @@ impl Revelacao {
     }
 
     /// A foto tem receita que a galeria ainda não recebeu — o ponto oco.
-    fn nao_salva(&self, posicao: usize, foto: &PhotoViewModel) -> bool {
+    pub(super) fn nao_salva(&self, posicao: usize, foto: &PhotoViewModel) -> bool {
         if foto.revelacao_travada {
             return false;
         }
@@ -1536,6 +1552,9 @@ fn montar_o_menu(
         }
     };
     let alvos_zerar = dados.alvos.clone();
+    let n_descartar = dados.a_descartar.len();
+    let alvos_descartar = dados.a_descartar;
+    let para_descartar = esta.clone();
     let alvos_baixar = dados.alvos;
     let (para_zerar, para_baixar) = (esta.clone(), esta.clone());
     let (para_abrir, para_escolher) = (esta.clone(), esta.clone());
@@ -1606,6 +1625,21 @@ fn montar_o_menu(
             .on_click(move |_ev, window, cx| {
                 let alvos = alvos_zerar.clone();
                 let _ = para_zerar.update(cx, |tela, cx| tela.zerar_pelo_menu(alvos, window, cx));
+            }),
+        )
+        // 🗑️ O caminho de volta: a edição que não foi salva sai, e a foto
+        // fica como está na galeria (ver `descartar.rs`).
+        .item(
+            PopupMenuItem::new(if n_descartar > 1 {
+                format!("Descartar a edição de {n_descartar} fotos")
+            } else {
+                "Descartar a edição".to_string()
+            })
+            .disabled(n_descartar == 0)
+            .on_click(move |_ev, window, cx| {
+                let alvos = alvos_descartar.clone();
+                let _ = para_descartar
+                    .update(cx, |tela, cx| tela.descartar_pelo_menu(alvos, window, cx));
             }),
         )
 }

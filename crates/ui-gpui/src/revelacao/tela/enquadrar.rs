@@ -1229,6 +1229,21 @@ impl Revelacao {
                     });
                 }
             }
+            // O botão de salvar e o "Descartar", sem clicar em nada.
+            "estado_salvar" => {
+                let botao = self.botao_de_salvar();
+                eprintln!(
+                    "[roteiro] estado_salvar: salvar {} · aberta_a_salvar={} · a descartar={} {:?}",
+                    if botao.habilitado {
+                        "habilitado"
+                    } else {
+                        "DESABILITADO"
+                    },
+                    self.aberta_a_salvar(),
+                    self.quantas_a_descartar(),
+                    self.a_descartar_todas(),
+                );
+            }
             "salvar" => {
                 let botao = self.botao_de_salvar();
                 eprintln!(

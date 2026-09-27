@@ -219,6 +219,10 @@ pub enum Pedido {
     ApagarDoSite(String),
     /// "Apagar" em lote, depois da confirmação de todas as fotos editáveis.
     ApagarDoSiteEmLote(Vec<String>),
+    /// 🗑️ "Descartar a edição" (ids no site): a revelação feita aqui e não
+    /// salva sai, e a foto fica como a galeria tem — quem sabe a receita do
+    /// site e a fila é a raiz (`descartar_as_edicoes`).
+    DescartarEdicao(Vec<String>),
     /// A tecla `X` em fotos que **só existem no disco**: a rejeição é gravada
     /// no catálogo local (C21), e é ela que as segura fora da fila de subida.
     ///
@@ -639,6 +643,16 @@ pub struct Detalhe {
     /// balcão é tela de dedo rápido; a pergunta é o freio.
     apagar_confirmando: Option<(String, String)>,
     apagar_lote_confirmando: Option<Vec<(String, String)>>,
+    /// As fotos (id no site) com revelação feita aqui que a galeria ainda não
+    /// recebeu — quem conta é a raiz (`recontar_o_que_falta_subir`).
+    ///
+    /// 📌 **Não havia em lugar nenhum da grade** (dono, 27/set/2026: *"no
+    /// VintageLightbox não tem em lugar algum [que] alguma foto está com
+    /// pendências de edições da revelação a serem salvas, mas no web isso
+    /// existe"*). A web as mostra no rodapé do tile, na barra e no painel.
+    nao_salvas: std::collections::BTreeSet<String>,
+    /// "Descartar a edição?" à espera da resposta: (id no site, arquivo).
+    descartar_confirmando: Option<Vec<(String, String)>>,
     /// O modal "Importar fotos" está aberto — o quadro de arrastar ou escolher,
     /// o mesmo da etapa 2 da nova sessão (`quadro_de_importacao`).
     importacao_aberta: bool,
@@ -888,6 +902,8 @@ impl Detalhe {
             paineis: super::paineis::PaineisDaGaleria::default(),
             detalhes_abertos: false,
             apagar_confirmando: None,
+            nao_salvas: std::collections::BTreeSet::new(),
+            descartar_confirmando: None,
             apagar_lote_confirmando: None,
             importacao_aberta: false,
             origem: None,
@@ -3842,6 +3858,18 @@ impl Render for Detalhe {
                 cx,
             )
         };
+        let dialogo_de_descartar = {
+            let quer = self.descartar_confirmando.is_some();
+            crate::dialogo::desenhar(
+                self,
+                quer,
+                crate::dialogo::Jeito::alerta(460.),
+                Self::dialogo_de_descartar,
+                |tela, _, cx| tela.cancelar_descartar(cx),
+                window,
+                cx,
+            )
+        };
         // Os dados do cliente têm o X deles (o do kit fica desligado), e o
         // clique fora não fecha no meio da gravação.
         let formulario_do_cliente = {
@@ -3950,6 +3978,7 @@ impl Render for Detalhe {
             // árvore: a grade era pintada por cima do véu, que não escurecia
             // nada, e o caixa flutuante cobria o "Gravar".
             .children(dialogo_de_apagar)
+            .children(dialogo_de_descartar)
             .children(formulario_do_cliente)
     }
 }
@@ -4593,6 +4622,48 @@ impl Detalhe {
                     .on_click(cx.listener(move |tela, _ev, _window, cx| tela.filtrar(filtro, cx)))
                 })
             }))
+            // 📌 **O aviso de pendência, e o atalho para ela** — o da web
+            // (`grade.tsx`). Some quando não há nenhuma; o clique marca as
+            // pendentes e foca a primeira.
+            .when(!self.nao_salvas.is_empty(), |barra| {
+                let quantas = self.nao_salvas.len();
+                let ambar = cx.theme().warning;
+                barra.child(
+                    div()
+                        .id("sessao-nao-salvas")
+                        .debug_selector(|| "sessao-nao-salvas".into())
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .h(px(28.))
+                        .px(px(10.))
+                        .rounded_full()
+                        .border_1()
+                        .border_color(ambar.opacity(0.6))
+                        .bg(ambar.opacity(0.1))
+                        .hover(move |s| s.bg(ambar.opacity(0.2)))
+                        .cursor_pointer()
+                        .text_xs()
+                        .text_color(ambar)
+                        .child(div().size(px(6.)).rounded_full().bg(ambar))
+                        .child(if quantas == 1 {
+                            "1 edição não salva".to_string()
+                        } else {
+                            format!("{quantas} edições não salvas")
+                        })
+                        .tooltip(move |w, cx| {
+                            gpui_kit::component::tooltip::Tooltip::new(if quantas == 1 {
+                                "Uma revelação está só neste computador. Clique para ir até ela — ela chega ao cliente quando você salvar na galeria."
+                            } else {
+                                "Estas revelações estão só neste computador. Clique para marcá-las — elas chegam ao cliente quando você salvar na galeria."
+                            })
+                            .build(w, cx)
+                        })
+                        .on_click(cx.listener(|tela, _ev, _window, cx| {
+                            tela.ir_ate_as_nao_salvas(cx)
+                        })),
+                )
+            })
             .child(div().flex_1())
             // O zoom, como no site: duas lupas e a faixa entre elas.
             .child(
@@ -5104,14 +5175,30 @@ impl Detalhe {
             )
             .child(
                 div()
+                    .flex()
                     .text_xs()
-                    .truncate()
                     .text_color(cx.theme().muted_foreground)
-                    .child(SharedString::from(format!(
-                        "{} · {} download(s)",
-                        self.nome_da_faixa(&foto.produto_efetivo),
-                        foto.downloads
-                    ))),
+                    .child(
+                        div()
+                            .min_w(px(0.))
+                            .truncate()
+                            .child(SharedString::from(format!(
+                                "{} · {} download(s)",
+                                self.nome_da_faixa(&foto.produto_efetivo),
+                                foto.downloads
+                            ))),
+                    )
+                    // 📌 O "· editada · não salva" do rodapé da web, em âmbar:
+                    // ele não trunca, e a faixa cede o lugar.
+                    .when(self.nao_salvas.contains(&foto.id), |linha| {
+                        linha.child(
+                            div()
+                                .flex_none()
+                                .pl(px(3.))
+                                .text_color(cx.theme().warning)
+                                .child("· não salva"),
+                        )
+                    }),
             )
     }
 
@@ -5561,6 +5648,151 @@ impl Detalhe {
         };
         cx.emit(Pedido::ApagarDoSite(id));
         cx.notify();
+    }
+
+    /// A raiz conta quais fotos têm revelação não salva.
+    pub fn definir_nao_salvas(
+        &mut self,
+        ids: std::collections::BTreeSet<String>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.nao_salvas != ids {
+            self.nao_salvas = ids;
+            cx.notify();
+        }
+    }
+
+    /// As fotos (id no site) que a grade marca como "não salva".
+    pub fn nao_salvas(&self) -> &std::collections::BTreeSet<String> {
+        &self.nao_salvas
+    }
+
+    /// As fotos com edição não salva, na ordem da grade — (id, arquivo).
+    fn as_nao_salvas(&self) -> Vec<(String, String)> {
+        self.acervo
+            .todas()
+            .iter()
+            .filter(|f| self.nao_salvas.contains(&f.id))
+            .map(|f| (f.id.clone(), f.arquivo.clone()))
+            .collect()
+    }
+
+    /// Das marcadas, as que têm edição não salva.
+    fn nao_salvas_marcadas(&self) -> Vec<(String, String)> {
+        self.selecao
+            .marcadas()
+            .filter_map(|p| self.acervo.visivel(p))
+            .filter(|f| self.nao_salvas.contains(&f.id))
+            .map(|f| (f.id.clone(), f.arquivo.clone()))
+            .collect()
+    }
+
+    /// O clique no "N edições não salvas": marca todas e foca a primeira.
+    ///
+    /// 🚨 **O recorte que esconde alguma volta a "Todas" antes** — a seleção é
+    /// por posição no recorte, e a escondida não seria marcada (o
+    /// `irAtePendentes` da web).
+    pub fn ir_ate_as_nao_salvas(&mut self, cx: &mut Context<Self>) {
+        let ids: Vec<String> = self.as_nao_salvas().into_iter().map(|(id, _)| id).collect();
+        if ids.is_empty() {
+            return;
+        }
+        if ids.iter().any(|id| self.acervo.posicao_de(id).is_none()) {
+            self.filtrar(Filtro::Todas, cx);
+        }
+        self.marcar_ids(&ids, cx);
+        let primeira = ids.iter().find_map(|id| self.acervo.posicao_de(id));
+        self.selecao.focar(primeira);
+        cx.notify();
+    }
+
+    /// "Descartar a edição" — pergunta antes, como a web: é trabalho de
+    /// revelação que se perde, e daqui não há `⌘Z`.
+    pub fn pedir_descartar(&mut self, fotos: Vec<(String, String)>, cx: &mut Context<Self>) {
+        if fotos.is_empty() {
+            return;
+        }
+        self.descartar_confirmando = Some(fotos);
+        cx.notify();
+    }
+
+    /// "Descartar a edição não salva (N)" do painel do lote.
+    pub fn descartar_das_marcadas(&mut self, cx: &mut Context<Self>) {
+        let fotos = self.nao_salvas_marcadas();
+        self.pedir_descartar(fotos, cx);
+    }
+
+    /// O "Descartar" do diálogo.
+    pub fn confirmar_descartar(&mut self, cx: &mut Context<Self>) {
+        let Some(fotos) = self.descartar_confirmando.take() else {
+            return;
+        };
+        cx.emit(Pedido::DescartarEdicao(
+            fotos.into_iter().map(|(id, _)| id).collect(),
+        ));
+        cx.notify();
+    }
+
+    /// O "Cancelar" do diálogo de descartar.
+    pub fn cancelar_descartar(&mut self, cx: &mut Context<Self>) {
+        self.descartar_confirmando = None;
+        cx.notify();
+    }
+
+    /// "Descartar a edição?" — os textos do `descartarEdicao` da web.
+    fn dialogo_de_descartar(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui_kit::AnyElement> {
+        let fotos = self.descartar_confirmando.as_ref()?;
+        let (titulo, descricao, confirmar) = match fotos.as_slice() {
+            [(_, arquivo)] => (
+                "Descartar a edição desta foto?".to_string(),
+                format!(
+                    "A revelação de {arquivo} feita aqui, que ainda não foi salva, é apagada. A foto fica como está na galeria do cliente, sem esta edição."
+                ),
+                "Descartar a edição".to_string(),
+            ),
+            varias => (
+                format!("Descartar a edição de {} fotos?", varias.len()),
+                "As revelações feitas aqui, que ainda não foram salvas, são apagadas. Cada foto fica como está na galeria do cliente.".to_string(),
+                format!("Descartar as {}", varias.len()),
+            ),
+        };
+        Some(
+            gpui_kit::component::v_flex()
+                .gap(px(16.))
+                .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
+                    cx.stop_propagation()
+                })
+                .child(crate::estilo::cabecalho_do_dialogo(
+                    titulo,
+                    SharedString::from(descricao),
+                    Some(crate::recursos::Icone::RotateCcw),
+                    cx,
+                ))
+                .child(
+                    crate::estilo::rodape_do_dialogo()
+                        .child(
+                            crate::estilo::botao_contorno("descartar-cancelar", cx)
+                                .debug_selector(|| "descartar-cancelar".into())
+                                .child("Cancelar")
+                                .on_click(
+                                    cx.listener(|tela, _ev, _w, cx| tela.cancelar_descartar(cx)),
+                                ),
+                        )
+                        .child(
+                            crate::estilo::botao_perigo("descartar-confirmar", cx)
+                                .debug_selector(|| "descartar-confirmar".into())
+                                .child(confirmar)
+                                .on_click(
+                                    cx.listener(|tela, _ev, _w, cx| tela.confirmar_descartar(cx)),
+                                ),
+                        ),
+                )
+                .into_any_element(),
+        )
     }
 
     /// O "Cancelar" do diálogo.
@@ -6337,6 +6569,7 @@ impl Detalhe {
         let foto = self.em_foco()?;
         let posicao = self.selecao.foco()? + 1;
         let negociada = foto.tem_negociacao();
+        let pendentes_marcadas = self.nao_salvas_marcadas().len();
         let (editaveis, aguardando, fixadas, negociadas) = self
             .selecao
             .marcadas()
@@ -6523,6 +6756,21 @@ impl Detalhe {
                                     tela.mudar_preco_do_lote(None, cx)
                                 })),
                         )
+                        .when(pendentes_marcadas > 0, |painel| {
+                            painel.child(
+                                Button::new("lote-descartar-edicao")
+                                    .debug_selector(|| "lote-descartar-edicao".into())
+                                    .label(format!(
+                                        "Descartar a edição não salva ({pendentes_marcadas})"
+                                    ))
+                                    .xsmall()
+                                    .danger()
+                                    .ghost()
+                                    .on_click(cx.listener(|tela, _, _, cx| {
+                                        tela.descartar_das_marcadas(cx)
+                                    })),
+                            )
+                        })
                         .child(
                             Button::new("lote-apagar")
                                 .debug_selector(|| "lote-apagar".into())
@@ -6570,6 +6818,33 @@ impl Detalhe {
                             None => "Sem nota".to_string(),
                         }),
                 )
+                // 📌 O `EdicaoLocal` do painel da web, com o caminho de volta.
+                .when(self.nao_salvas.contains(&foto.id), |painel| {
+                    let (id, arquivo) = (foto.id.clone(), foto.arquivo.clone());
+                    painel.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(4.))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().warning)
+                                    .child("Edição feita aqui — ainda não salva na galeria."),
+                            )
+                            .child(div().flex().child(
+                                Button::new("painel-descartar-edicao")
+                                    .debug_selector(|| "painel-descartar-edicao".into())
+                                    .label("Descartar a edição")
+                                    .xsmall()
+                                    .danger()
+                                    .ghost()
+                                    .on_click(cx.listener(move |tela, _ev, _window, cx| {
+                                        tela.pedir_descartar(vec![(id.clone(), arquivo.clone())], cx)
+                                    })),
+                            )),
+                    )
+                })
                 .child(
                     div()
                         .flex()

@@ -63,6 +63,8 @@ mod predefinicoes;
 mod resolucao;
 pub use local::Ferramenta;
 
+/// "Descartar": a foto volta ao que a galeria do site tem.
+mod descartar;
 /// A coluna da direita: cabeçalho, abas sRGB/RGB, painéis e gráficos.
 mod painel;
 /// Os gestos de ponteiro para os cenários de ponta a ponta. Só testes.
@@ -1874,6 +1876,15 @@ impl Revelacao {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.mostrar_o_estado(estado, window, cx);
+        self.gravar();
+        cx.notify();
+    }
+
+    /// O estado vira tela — sliders, corte, Revelação local e a GPU —, **sem
+    /// gravar**. É o miolo do desfazer, e o do descarte, que não grava porque
+    /// quem manda na receita passa a ser a galeria (`descartar.rs`).
+    fn mostrar_o_estado(&mut self, estado: Estado, window: &mut Window, cx: &mut Context<Self>) {
         self.ajustes = estado.ajustes;
         self.corte = estado.corte;
         self.locais = estado.locais;
@@ -1893,8 +1904,6 @@ impl Revelacao {
         self.pedir_revelacao_cruzando(cx);
         // O corte não passa pela GPU: quem o mostra é a exibição.
         self.atualizar_exibicao();
-        self.gravar();
-        cx.notify();
     }
 
     /// Leva os ajustes de agora para as 42 barras.
@@ -2745,6 +2754,9 @@ pub enum PedidoDaRevelacao {
     /// "Baixar como… (N)" do menu da tira: a exportação com essas fotos
     /// (`Revelacao::levar_a_baixar`).
     BaixarComo,
+    /// "Descartar": as fotos de [`Revelacao::levar_a_descartar`] voltam à
+    /// receita que a galeria do site tem, e saem da fila do "Salvar".
+    Descartar,
     /// Outra foto entrou no palco — pela seta, pela tira ou ao abrir.
     ///
     /// 🔑 **A Revelação não sabe buscar na nuvem, e não vai passar a saber**;
@@ -3095,6 +3107,9 @@ impl Revelacao {
                         })),
                 )
             })
+            // 🗑️ "Descartar": o caminho de volta do "Salvar" (dono,
+            // 27/set/2026) — ver `descartar.rs`.
+            .child(self.botao_de_descartar(ocupado, cx))
             // As duas últimas do site: "Baixar JPEG" e "Salvar na galeria e
             // sair". Aqui elas **pedem à raiz**, que é quem tem o modal da
             // pasta de destino e a conversa com o pós-venda.
