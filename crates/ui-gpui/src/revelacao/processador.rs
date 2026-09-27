@@ -192,38 +192,12 @@ fn laco(
         if let Err(erro) = motor.definir_locais(&pedido.locais) {
             crate::telemetria::avisar!("⚠️ [Revelação] a receita local ficou de fora: {erro:?}");
         }
-        if let Ok(dir) = std::env::var("VLB_DESPEJO_PEDIDO") {
-            if !pedido.locais.retoques.is_empty() {
-                let d = std::path::Path::new(&dir);
-                let _ = std::fs::write(
-                    d.join(format!("pedido-{}x{}.rgba", pedido.largura, pedido.altura)),
-                    &*pedido.pixels,
-                );
-                let _ = std::fs::write(
-                    d.join("ajustes.json"),
-                    serde_json::to_string(&pedido.ajustes).unwrap_or_default(),
-                );
-                let _ = std::fs::write(
-                    d.join("locais.json"),
-                    serde_json::to_string(&*pedido.locais).unwrap_or_default(),
-                );
-                let _ = std::fs::write(d.join("corte.txt"), format!("{:?}", pedido.corte));
-            }
-        }
         if let Some(imagem) = motor.revelar(
             &pedido.pixels,
             pedido.largura,
             pedido.altura,
             &pedido.ajustes,
         ) {
-            if let Ok(dir) = std::env::var("VLB_DESPEJO_PEDIDO") {
-                if !pedido.locais.retoques.is_empty() {
-                    let _ = imagem.save(std::path::Path::new(&dir).join(format!(
-                        "revelada-{}x{}.png",
-                        pedido.largura, pedido.altura
-                    )));
-                }
-            }
             let _ = resultados.send(Resultado {
                 id: pedido.id,
                 imagem,

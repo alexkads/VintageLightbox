@@ -314,6 +314,13 @@ enum Marca {
         tracejado: bool,
         largura: f32,
     },
+    /// A borda de uma área com raio: trechos abertos, riscados como o
+    /// círculo (linha fina, sombra leve que segue o tracejado).
+    Contorno {
+        trechos: Vec<Vec<Ponto>>,
+        cor: Hsla,
+        tracejado: bool,
+    },
     Alca {
         centro: Ponto,
         ativa: bool,
@@ -2045,34 +2052,12 @@ impl Revelacao {
             .iter()
             .filter_map(|a| self.ponto_da_foto([a[0], a[1]]))
             .collect();
-        let Some(primeiro) = tela.first().copied() else {
-            return;
-        };
-        let r = self.raio_na_tela(raio);
-        marcas.push(Marca::Circulo {
-            centro: primeiro,
-            raio: r,
+        marcas.extend(marcas_do_contorno(
+            &tela,
+            self.raio_na_tela(raio),
             cor,
             tracejado,
-        });
-        if tela.len() > 1 {
-            let ultimo = *tela.last().expect("não vazio");
-            marcas.push(Marca::Circulo {
-                centro: ultimo,
-                raio: r,
-                cor,
-                tracejado,
-            });
-            let mut faixa = cor;
-            faixa.a = 0.18;
-            marcas.push(Marca::Caminho {
-                pontos: tela,
-                fechado: false,
-                cor: faixa,
-                tracejado: false,
-                largura: 2.0 * r,
-            });
-        }
+        ));
     }
 
     /// As marcações por cima da foto, e o arrasto que continua fora dela.
@@ -2854,6 +2839,189 @@ fn mover(r: Retoque, dx: f32, dy: f32) -> Retoque {
     }
 }
 
+/// Uma curva candidata do contorno: o ponto em `s` (0 a 1), as amostras, e se
+/// ela fecha.
+type CurvaDoContorno = (Box<dyn Fn(f32) -> Ponto>, usize, bool);
+
+/// O contorno de um caminho com raio, em pontos da tela: **a borda** da área
+/// que o retoque cobre — a união dos discos de raio `r` ao longo do caminho.
+///
+/// 🚨 **Só linha, nunca véu.** Até 2026-09-27 o corpo do caminho era um traço
+/// de 2·`r` com 18% da cor, e só entre a primeira e a última ponta: numa
+/// pincelada curta, com zoom, era um retângulo estreito e mais alto que o
+/// palco — uma faixa clara atravessando a foto, que parecia defeito da
+/// revelação. E os círculos das pontas eram inteiros, riscando por dentro.
+///
+/// Cada ponto do caminho dá um círculo, e cada trecho os dois lados; fica o
+/// que está na borda (a `r` do caminho, e não mais perto), e os cortes são
+/// achados por bissecção — as pontas dos pedaços se encontram sem degrau.
+fn marcas_do_contorno(tela: &[Ponto], r: f32, cor: Hsla, tracejado: bool) -> Vec<Marca> {
+    if r < 1.0 || tela.is_empty() {
+        return Vec::new();
+    }
+    // Um ponto a cada 0,2·r (e sempre a última ponta): a pincelada longa tem
+    // milhares de pontos, e a conta abaixo é por quadro. A borda que muda com
+    // isso fica dentro do traço; o ponto repetido (mouse parado) sai também.
+    let espaco = (r * 0.2).max(0.25);
+    let mut caminho: Vec<Ponto> = Vec::with_capacity(tela.len());
+    for (i, p) in tela.iter().enumerate() {
+        let longe = |minimo: f32| {
+            caminho
+                .last()
+                .is_none_or(|u: &Ponto| (p.x - u.x).hypot(p.y - u.y) > minimo)
+        };
+        if longe(espaco) || (i + 1 == tela.len() && longe(0.25)) {
+            caminho.push(*p);
+        }
+    }
+    let distancia = |q: Ponto| -> f32 {
+        let segmento = |a: Ponto, b: Ponto| {
+            let (abx, aby) = (b.x - a.x, b.y - a.y);
+            let l2 = abx * abx + aby * aby;
+            let t = if l2 > 0.0 {
+                (((q.x - a.x) * abx + (q.y - a.y) * aby) / l2).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            (q.x - a.x - abx * t).hypot(q.y - a.y - aby * t)
+        };
+        if caminho.len() == 1 {
+            return segmento(caminho[0], caminho[0]);
+        }
+        caminho
+            .windows(2)
+            .map(|p| segmento(p[0], p[1]))
+            .fold(f32::MAX, f32::min)
+    };
+    // Na borda: a folga é da conta em f32, não da tela.
+    let na_borda = |q: Ponto| distancia(q) >= r - (r * 1e-4).max(0.01);
+
+    // As curvas candidatas, em parâmetro `s` de 0 a 1: `(ponto em s, amostras,
+    // fechada)`.
+    let mut curvas: Vec<CurvaDoContorno> = Vec::new();
+    let voltas = ((r * 0.8) as usize).clamp(24, 96);
+    for &c in &caminho {
+        curvas.push((
+            Box::new(move |s: f32| {
+                let a = s * std::f32::consts::TAU;
+                Ponto {
+                    x: c.x + r * a.cos(),
+                    y: c.y + r * a.sin(),
+                }
+            }),
+            voltas,
+            true,
+        ));
+    }
+    for par in caminho.windows(2) {
+        let (a, b) = (par[0], par[1]);
+        let l = (b.x - a.x).hypot(b.y - a.y);
+        let (nx, ny) = (-(b.y - a.y) / l * r, (b.x - a.x) / l * r);
+        let amostras = ((l / 4.0) as usize).clamp(1, 256);
+        for lado in [1.0f32, -1.0] {
+            curvas.push((
+                Box::new(move |s: f32| Ponto {
+                    x: a.x + (b.x - a.x) * s + lado * nx,
+                    y: a.y + (b.y - a.y) * s + lado * ny,
+                }),
+                amostras,
+                false,
+            ));
+        }
+    }
+
+    let mut trechos: Vec<Vec<Ponto>> = Vec::new();
+    for (curva, n, fechada) in &curvas {
+        let n = *n;
+        let s_de = |k: usize| k as f32 / n as f32;
+        let dentro: Vec<bool> = (0..=n).map(|k| na_borda(curva(s_de(k)))).collect();
+        // O corte entre uma amostra que fica e uma que sai.
+        let corte = |mut fica: f32, mut sai: f32| {
+            for _ in 0..24 {
+                let meio = (fica + sai) * 0.5;
+                if na_borda(curva(meio)) {
+                    fica = meio;
+                } else {
+                    sai = meio;
+                }
+            }
+            curva(fica)
+        };
+        if *fechada && dentro.iter().all(|&d| d) {
+            trechos.push((0..=n).map(|k| curva(s_de(k))).collect());
+            continue;
+        }
+        // Fechada: começa numa amostra que sai, para nenhum pedaço ser
+        // partido na costura do `s = 0`.
+        let inicio = if *fechada {
+            dentro.iter().position(|&d| !d).unwrap_or(0)
+        } else {
+            0
+        };
+        let passos = if *fechada { n } else { n + 1 };
+        let mut atual: Vec<Ponto> = Vec::new();
+        let mut anterior: Option<(usize, bool)> = None;
+        for passo in 0..passos {
+            let k = if *fechada {
+                (inicio + passo) % n
+            } else {
+                passo
+            };
+            let d = dentro[k];
+            match (anterior, d) {
+                (Some((j, false)), true) => {
+                    let (sj, sk) = (
+                        s_de(j),
+                        if *fechada && k < j {
+                            s_de(k) + 1.0
+                        } else {
+                            s_de(k)
+                        },
+                    );
+                    atual.push(corte(sk, sj));
+                }
+                (Some((j, true)), false) => {
+                    let (sj, sk) = (
+                        s_de(j),
+                        if *fechada && k < j {
+                            s_de(k) + 1.0
+                        } else {
+                            s_de(k)
+                        },
+                    );
+                    atual.push(corte(sj, sk));
+                    if atual.len() >= 2 {
+                        trechos.push(std::mem::take(&mut atual));
+                    }
+                    atual.clear();
+                }
+                _ => {}
+            }
+            if d {
+                atual.push(curva(s_de(k)));
+            }
+            anterior = Some((k, d));
+        }
+        if *fechada {
+            // Volta ao começo, que sai: fecha o último pedaço.
+            if let Some((j, true)) = anterior {
+                atual.push(corte(
+                    s_de(j),
+                    s_de(inicio) + if inicio <= j { 1.0 } else { 0.0 },
+                ));
+            }
+        }
+        if atual.len() >= 2 {
+            trechos.push(atual);
+        }
+    }
+    vec![Marca::Contorno {
+        trechos,
+        cor,
+        tracejado,
+    }]
+}
+
 /// Uma marca na janela: o traço escuro por baixo (para aparecer sobre foto
 /// clara) e o da cor por cima.
 fn pintar(marca: &Marca, em: &dyn Fn(Ponto) -> Point<Pixels>, window: &mut Window) {
@@ -2923,6 +3091,17 @@ fn pintar(marca: &Marca, em: &dyn Fn(Ponto) -> Point<Pixels>, window: &mut Windo
             }
             traco(&na_janela, *fechado, *largura, *cor, *tracejado, window);
         }
+        Marca::Contorno {
+            trechos,
+            cor,
+            tracejado,
+        } => {
+            for trecho in trechos {
+                let pontos: Vec<Point<Pixels>> = trecho.iter().map(|p| em(*p)).collect();
+                traco(&pontos, false, 2.2, sombra_leve(), *tracejado, window);
+                traco(&pontos, false, 1.2, *cor, *tracejado, window);
+            }
+        }
         Marca::Alca { centro, ativa } => {
             let c = em(*centro);
             let l = px(4.5);
@@ -2956,6 +3135,133 @@ fn pintar(marca: &Marca, em: &dyn Fn(Ponto) -> Point<Pixels>, window: &mut Windo
 
 #[cfg(test)]
 mod testes {
+    use crate::revelacao::zoom::Ponto;
+
+    /// O que cada marca risca na tela: `(polilinha, largura do traço)`.
+    fn riscos(marcas: &[super::Marca]) -> Vec<(Vec<Ponto>, f32)> {
+        marcas
+            .iter()
+            .filter_map(|m| match m {
+                super::Marca::Circulo { centro, raio, .. } => Some(vec![(
+                    (0..=720)
+                        .map(|k| {
+                            let a = k as f32 / 720.0 * std::f32::consts::TAU;
+                            Ponto {
+                                x: centro.x + raio * a.cos(),
+                                y: centro.y + raio * a.sin(),
+                            }
+                        })
+                        .collect(),
+                    1.2,
+                )]),
+                super::Marca::Caminho {
+                    pontos, largura, ..
+                } => Some(vec![(pontos.clone(), *largura)]),
+                super::Marca::Contorno { trechos, .. } => {
+                    Some(trechos.iter().map(|t| (t.clone(), 1.2)).collect())
+                }
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    }
+
+    fn distancia_ao_segmento(q: Ponto, a: Ponto, b: Ponto) -> f32 {
+        let (abx, aby) = (b.x - a.x, b.y - a.y);
+        let l2 = abx * abx + aby * aby;
+        let t = if l2 > 0.0 {
+            (((q.x - a.x) * abx + (q.y - a.y) * aby) / l2).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        (q.x - a.x - abx * t).hypot(q.y - a.y - aby * t)
+    }
+
+    fn distancia_ao_caminho(q: Ponto, caminho: &[Ponto]) -> f32 {
+        if caminho.len() == 1 {
+            return distancia_ao_segmento(q, caminho[0], caminho[0]);
+        }
+        caminho
+            .windows(2)
+            .map(|p| distancia_ao_segmento(q, p[0], p[1]))
+            .fold(f32::MAX, f32::min)
+    }
+
+    /// 🚨 A faixa clara do band-aid (visto no app, 2026-09-27): o contorno
+    /// enchia o corpo do caminho com um traço de 2·raio e 18% de branco, só
+    /// entre a primeira e a última ponta. Numa pincelada curta, com zoom, isso
+    /// é um retângulo estreito e alto — uma faixa vertical que atravessa a
+    /// foto e parece defeito da revelação. O contorno é **linha na borda** da
+    /// área retocada: não vela a foto, não risca por dentro, e fecha a volta.
+    #[test]
+    fn o_contorno_do_retoque_e_so_a_borda_da_area() {
+        let p = |x: f32, y: f32| Ponto { x, y };
+        for (caminho, r) in [
+            (vec![p(100.0, 100.0), p(108.0, 100.0)], 320.0),
+            (vec![p(0.0, 0.0), p(200.0, 0.0), p(200.0, 150.0)], 40.0),
+            (vec![p(50.0, 60.0)], 30.0),
+        ] {
+            let riscos = riscos(&super::marcas_do_contorno(
+                &caminho,
+                r,
+                gpui_kit::white(),
+                false,
+            ));
+            assert!(!riscos.is_empty());
+            for (_, largura) in &riscos {
+                assert!(*largura <= 2.0, "traço de {largura} pt vela a foto");
+            }
+            for (linha, _) in &riscos {
+                for par in linha.windows(2) {
+                    for k in 0..=4 {
+                        let t = k as f32 / 4.0;
+                        let q = p(
+                            par[0].x + (par[1].x - par[0].x) * t,
+                            par[0].y + (par[1].y - par[0].y) * t,
+                        );
+                        let d = distancia_ao_caminho(q, &caminho);
+                        assert!(
+                            (d - r).abs() <= 1.0,
+                            "risco em ({:.1}, {:.1}) a {d:.1} do caminho, e não na borda ({r})",
+                            q.x,
+                            q.y
+                        );
+                    }
+                }
+            }
+            // A borda inteira está riscada: os lados de cada trecho e as pontas.
+            let mut sondas = Vec::new();
+            for par in caminho.windows(2) {
+                let (dx, dy) = (par[1].x - par[0].x, par[1].y - par[0].y);
+                let l = dx.hypot(dy);
+                let (nx, ny) = (-dy / l, dx / l);
+                let meio = p((par[0].x + par[1].x) / 2.0, (par[0].y + par[1].y) / 2.0);
+                sondas.push(p(meio.x + nx * r, meio.y + ny * r));
+                sondas.push(p(meio.x - nx * r, meio.y - ny * r));
+            }
+            let n = caminho.len();
+            let fim = |a: Ponto, b: Ponto| {
+                let (dx, dy) = (a.x - b.x, a.y - b.y);
+                let l = dx.hypot(dy).max(1e-6);
+                p(a.x + dx / l * r, a.y + dy / l * r)
+            };
+            if n > 1 {
+                sondas.push(fim(caminho[0], caminho[1]));
+                sondas.push(fim(caminho[n - 1], caminho[n - 2]));
+            } else {
+                sondas.push(p(caminho[0].x + r, caminho[0].y));
+            }
+            for q in sondas {
+                let perto = riscos.iter().any(|(linha, _)| {
+                    linha
+                        .windows(2)
+                        .any(|par| distancia_ao_segmento(q, par[0], par[1]) <= 1.0)
+                });
+                assert!(perto, "a borda em ({:.1}, {:.1}) ficou sem risco", q.x, q.y);
+            }
+        }
+    }
+
     #[test]
     fn a_reta_do_linear_e_cortada_na_borda_da_foto() {
         let (a, b) = super::cortar_na_foto([-1.0, 0.5], [2.0, 0.5]).expect("atravessa");
