@@ -1,27 +1,17 @@
 # Atalhos do dia a dia. `make` sem argumento lista os alvos.
 #
-# 🔑 **O mesmo Makefile serve as três plataformas, e cada máquina gera a sua.**
-#    No macOS sai o macOS; no Linux, o Linux; no Windows, o Windows. Um alvo de
-#    outro sistema **recusa de imediato**, antes de compilar nada.
-#
-# ⚠️ **Não é falta de saída — as duas alternativas foram construídas, e as duas
-#    funcionaram.** Em 7/set/2026 o `cargo-xwin` gerou um `.exe` de 34,9 MB
-#    deste Mac, e um contêiner Docker gerou o `.deb`. As duas foram recusadas
-#    pelo mesmo motivo, e é o que decide: **o que sai delas ninguém abre para
-#    conferir**. Decisão do dono: *"quero deixar tudo nativo mesmo"*. O registro
-#    está em `empacotamento/README.md` — leia antes de reconstruir qualquer uma.
-#
-# ⚠️ Num alvo que não pertence a este sistema, o Makefile **recusa e diz onde
-#    rodar** em vez de tentar e falhar no meio. Uma compilação de meia hora que
-#    morre no empacotamento é o pior desfecho possível.
+# 🔑 **Não há alvo de pacote** (dono, 27/set/2026: *"não precisa de .dmg e
+#    appveyor"*). Todo balcão — macOS, Windows e Linux — instala e se atualiza
+#    compilando o `main` pelo `scripts/instalar-vintagelightbox-gpui.cmd`. Lançar
+#    é subir a versão e levar o `dev` ao `main` (`make producao` no e-commerce).
+#    O `.rpm` do Fedora continua em `scripts/empacotar-rpm.sh`.
 
 # ⚠️ **O Windows 11 não vem com `make`.** Instale um destes antes:
 #
 #     winget install ezwinports.make      # o mais leve; usa o cmd como shell
 #     winget install MSYS2.MSYS2          # traz make, grep, awk e o g++ do MinGW
 #
-#    Sem ele, `.\scripts\empacotar.ps1` faz o mesmo que `make windows` — o
-#    Makefile aqui é atalho, nunca requisito.
+#    O Makefile aqui é atalho, nunca requisito.
 #
 # 🚨 **Cada alvo tem duas implementações onde precisa ter.** No Windows o `make`
 #    executa pelo `cmd.exe`, que não tem `grep`, `awk`, `rm` nem `du`. Um alvo
@@ -57,15 +47,9 @@ else
 endif
 
 .DEFAULT_GOAL := ajuda
-.PHONY: ajuda sistema testar carga perfil e2e cobertura lint fmt rodar rodar-local medir icones mac mac-arm mac-intel \
-        linux linux-arm windows conferir-windows tudo publicar publicar-seco \
+.PHONY: ajuda sistema testar carga perfil e2e cobertura lint fmt rodar rodar-local medir icones \
         web biblioteca faxina
 
-# ⚠️ `windows` e `conferir-windows` **nao** levam `##`: eles sao definidos duas
-#    vezes, um ramo do `ifeq` para cada sistema, e o `grep` abaixo le o arquivo
-#    inteiro — mostraria as duas versoes, uma delas mentindo sobre o que faz
-#    aqui. As duas linhas entram abaixo, uma so, ja com o texto do sistema certo.
-#
 # 🚨 **A ajuda tem duas implementacoes, e nao e frescura.** No Windows o `make`
 #    executa cada linha pelo `cmd.exe`, onde `grep`, `awk` e `printf` nao
 #    existem — `make` sozinho, que e o alvo padrao, morreria com "not
@@ -74,33 +58,14 @@ ifeq ($(SISTEMA),windows)
 
 ajuda: ## Lista os alvos disponiveis
 	@powershell -NoProfile -Command "Select-String -Path Makefile -Pattern '^[a-z-]+:.*?## ' | ForEach-Object { $$_.Line -replace '^([a-z-]+):.*?## ', '  $$1'.PadRight(20) } | Sort-Object -Unique"
-	@echo   windows          Gera .msi + .exe - voce esta no Windows, este alvo roda
-	@echo   conferir-windows Diz o que falta instalar para gerar o Windows
-	@echo.
-	@echo   Este sistema e windows: aqui sai o instalador do Windows.
-	@echo   O macOS sai de um Mac; o Linux, de um Linux. Cada maquina gera a sua.
 
 else
 
 ajuda: ## Lista os alvos disponiveis
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*?## ' '{printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
-ifeq ($(SISTEMA),linux)
-	@printf "  \033[36m%-16s\033[0m %s\n" "linux" "Gera .deb + .AppImage — voce esta no Linux, este alvo roda"
-	@printf "  \033[36m%-16s\033[0m %s\n" "windows" "Explica onde gerar o Windows (nao e aqui)"
-	@echo ""
-	@echo "  Este sistema e \033[1m$(SISTEMA)\033[0m: \033[1maqui sai o instalador do Linux\033[0m."
-	@echo "  O macOS sai de um Mac; o Windows, de um Windows 11. Cada maquina gera a sua."
-else
-	@printf "  \033[36m%-16s\033[0m %s\n" "linux" "Explica onde gerar o Linux (nao e aqui)"
-	@printf "  \033[36m%-16s\033[0m %s\n" "windows" "Explica onde gerar o Windows (nao e aqui)"
-	@echo ""
-	@echo "  Este sistema e \033[1m$(SISTEMA)\033[0m: \033[1maqui saem os instaladores do macOS\033[0m."
-	@echo "  O Linux sai de um Linux; o Windows, de um Windows 11. Cada maquina gera a sua."
 endif
 
-endif
-
-sistema: ## Diz que sistema o Makefile detectou (e o que ele gera aqui)
+sistema: ## Diz que sistema o Makefile detectou
 	@echo "$(SISTEMA)"
 
 # ─────────────────────────────── Desenvolver ─────────────────────────────────
@@ -197,97 +162,6 @@ biblioteca: ## A grade da biblioteca para o site — so o motor; a tela e React 
 	./scripts/construir-biblioteca.sh
 
 endif
-
-# ──────────────────────────── Os instaladores ────────────────────────────────
-
-icones: ## Regera .icns, .ico e os PNGs a partir do icone-mestre.png
-	./scripts/gerar-icones.sh
-
-# Um alvo por plataforma, e cada um recusa fora da sua. A recusa e imediata: ela
-# vem antes de qualquer compilacao.
-# 🔑 Os alvos de outro sistema existem em toda plataforma para **responder**, e
-#    nao para tentar: quem procurar "linux" no Makefile do Mac precisa encontrar
-#    o caminho, e nao silencio nem meia hora de compilacao perdida.
-ifeq ($(SISTEMA),windows)
-
-mac mac-arm mac-intel linux:
-	@echo X '$@' nao sai do Windows - cada maquina gera a sua.
-	@echo    Aqui o alvo e: make windows
-	@exit 1
-
-windows:
-	$(PWSH) scripts\empacotar.ps1
-
-conferir-windows:
-	$(PWSH) scripts\empacotar.ps1 -Conferir
-
-tudo: windows
-
-else ifeq ($(SISTEMA),linux)
-
-mac mac-arm mac-intel:
-	@printf "\033[1;31mX\033[0m '$@' nao sai do Linux — ele sai de um Mac.\n"
-	@printf "   Aqui o alvo e: \033[36mmake linux\033[0m\n"
-	@exit 1
-
-linux:
-	./scripts/empacotar.sh linux
-
-tudo: linux
-
-windows conferir-windows:
-	@./scripts/empacotar.sh windows || true
-
-else
-
-mac: ## .app + .dmg universal (Intel e Apple Silicon num binario so)
-	./scripts/empacotar.sh mac-universal
-
-mac-arm: ## .app + .dmg so para Apple Silicon
-	./scripts/empacotar.sh mac-arm
-
-mac-intel: ## .app + .dmg so para Intel
-	./scripts/empacotar.sh mac-intel
-
-tudo: ## o que esta maquina gera — aqui, o macOS universal
-	./scripts/empacotar.sh tudo
-
-linux windows conferir-windows:
-	@./scripts/empacotar.sh $@ 2>/dev/null || ./scripts/empacotar.sh windows || true
-
-endif
-
-# ───────────────────────────── Lancar ────────────────────────────────────────
-#
-# 🔑 **Lancar e empurrar uma tag.** O GitHub Actions compila as tres plataformas,
-#    cada uma no sistema dela, cria o Release com os instaladores e publica o
-#    `latest.json` no Pages. Nao ha credencial de nuvem no caminho — a unica
-#    chave que o CI toca e a minisign, que assina a atualizacao.
-#
-# ⚠️ **Suba a versao antes**, em `[workspace.package]` do Cargo.toml **e** no
-#    `empacotamento/packager.toml`. O app compara a propria `CARGO_PKG_VERSION`
-#    com a do manifesto: lancar sem subir a versao nao atualiza ninguem.
-#
-# 🚨 **Desde 17/set/2026 nao ha GitHub Actions: a conta esta travada por
-#    cobranca** e todo workflow falha em ~2 segundos ("your account is locked due
-#    to a billing issue"). `lancar` empurraria a tag e nada seria compilado — sem
-#    Release, sem `latest.json`, sem balcao atualizado. Enquanto durar, o alvo e
-#    `publicar`, com cada plataforma gerada na maquina dela e junta em `dist/`.
-#    Conferir se voltou: `gh run list --limit 1`. Ver docs/STATUS.md.
-
-publicar: ## Publica dist/ no R2 e espelha no GitHub (sem CI)
-	@./scripts/lancar-local.sh
-
-lancar: ## Empurra a tag da versao atual — o CI faz o resto
-	@v=$$(sed -n '/^\[workspace\.package\]/,/^\[/p' Cargo.toml | sed -n 's/^version *= *"\(.*\)"/\1/p' | head -1); \
-	 p=$$(sed -n 's/^version *= *"\(.*\)"/\1/p' empacotamento/packager.toml | head -1); \
-	 if [ "$$v" != "$$p" ]; then \
-	   echo "X versao divergente: Cargo.toml diz $$v, packager.toml diz $$p"; exit 1; fi; \
-	 if [ -n "$$(git status --porcelain)" ]; then \
-	   echo "X a arvore tem mudanca nao commitada — a tag marcaria um estado que nao existe"; exit 1; fi; \
-	 echo "marcando v$$v e empurrando..."; \
-	 git tag -a "v$$v" -m "VintageLightbox $$v" && git push origin "v$$v"; \
-	 echo "acompanhe em: https://github.com/alexkads/VintageLightbox/actions"
 
 # ────────────────────────────── Manutencao ───────────────────────────────────
 #

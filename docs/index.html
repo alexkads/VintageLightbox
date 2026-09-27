@@ -102,8 +102,7 @@
     <a href="#primeiro-uso">Primeiro uso</a> · <a href="#gpui-telas">As telas</a> ·
     <a href="#gpui-atalhos">Atalhos</a> · <a href="#atualizar">Atualizar</a> ·
     <a href="#opcoes">Opções</a> · <a href="#gpui-onde">Onde as coisas ficam</a> ·
-    <a href="#gpui-problemas">Quando algo dá errado</a> ·
-    <a href="#pacotes">Pacotes prontos (versão antiga)</a>
+    <a href="#gpui-problemas">Quando algo dá errado</a>
   </nav>
 
   <p class="texto">
@@ -330,13 +329,13 @@ VLB_POS_VENDA_URL=http://localhost:8080 VLB_SITE_URL=http://localhost:8001 cargo
     por que vale atualizar.
   </p>
   <ol class="texto">
-    <li><strong>Instalou pelo arquivo que compila no computador</strong> (o caso da maior parte dos
+    <li><strong>Instalou pelo arquivo que compila no computador</strong> (o jeito de todos os
         balcões)? A atualização <strong>começa sozinha</strong>, em segundo plano: o app roda o mesmo
         instalador de sempre, que baixa o código novo e compila nesta máquina. A faixa diz em que
         etapa está. Pode continuar trabalhando — leva alguns minutos.</li>
-    <li><strong>Instalou pelo pacote?</strong> Clique em <strong>Atualizar</strong>: o app baixa a
-        versão nova e confere se ela foi mesmo publicada pela Recordar Fotos antes de instalar. Se
-        ainda não há pacote dessa versão para o seu sistema, o app compila, como no item acima.</li>
+    <li><strong>Instalou por um pacote pronto antigo</strong> (o <code>.dmg</code>, que não é mais
+        publicado)? Clique em <strong>Atualizar</strong>: sem pacote novo, o app compila, como no
+        item acima, e daí em diante segue esse caminho.</li>
     <li>No fim, a faixa diz <em>“Versão X instalada”</em>. Ela entra na próxima vez que o app abrir, ou
         agora mesmo, em <strong>Reabrir agora</strong>.</li>
   </ol>
@@ -463,45 +462,6 @@ sh instalar.cmd</code></pre>
     arquivo acima.
   </p>
 
-  <h2 id="pacotes">Pacotes prontos do GPUI (versão antiga)</h2>
-
-  <p class="nota" style="margin-top:0">
-    ⚠️ Os pacotes abaixo são da <strong>última versão publicada</strong>, anterior ao desenho novo. Para
-    o GPUI atual, <a href="#gpui">compile pelo instalador</a>, acima.
-  </p>
-
-  <div id="baixar"></div>
-  <div class="versao" id="versao">carregando…</div>
-
-  <h3>Todos os arquivos</h3>
-  <table><thead><tr><th>Sistema</th><th>Arquitetura</th><th>Tamanho</th><th></th></tr></thead>
-    <tbody id="lista"><tr><td colspan="4" style="color:var(--suave)">carregando…</td></tr></tbody>
-  </table>
-
-  <div class="nota">
-    <strong>No macOS, a primeira abertura do pacote pronto pede um passo a mais.</strong> O sistema vai
-    dizer que <em>“não pôde verificar se o item está livre de malware”</em> e oferecer só <em>Mover para
-    o Lixo</em>. Não é o app ter problema — é ele não ser assinado com um certificado pago da Apple.
-    Para abrir:
-    <ol style="margin:.6rem 0 0;padding-left:1.2rem">
-      <li>Clique em <strong>OK</strong> no aviso — <em>não</em> em “Mover para o Lixo”.</li>
-      <li>Abra <strong>Ajustes do Sistema → Privacidade e Segurança</strong>.</li>
-      <li>Role até o fim e clique em <strong>Abrir Assim Mesmo</strong>.</li>
-    </ol>
-    <p style="margin:.6rem 0 0">
-      É uma vez só. Depois o aplicativo se atualiza sozinho, e <strong>cada atualização é conferida
-      por assinatura</strong> antes de ser instalada — essa parte não depende da Apple.
-    </p>
-    <p style="margin:.6rem 0 0;font-size:.95em">
-      ⚠️ O truque antigo de <em>botão direito → Abrir</em> <strong>não funciona mais</strong> a
-      partir do macOS 15.
-    </p>
-    <p style="margin:.6rem 0 0;font-size:.95em">
-      👉 Compilado na sua máquina, pelo <a href="#gpui-macos">instalador do GPUI</a>, o aviso não
-      aparece nenhuma vez: o macOS só interroga o que chegou pela rede.
-    </p>
-  </div>
-
   <p class="texto" id="compilar">
     O script antigo só para macOS, <code>curl -fsSL https://alexkads.github.io/VintageLightbox/instalar.sh | sh</code>,
     continua no ar e instala o mesmo <code>VintageLightbox.app</code>, mas pede que o Xcode e o
@@ -522,40 +482,5 @@ sh instalar.cmd</code></pre>
 
 </div>
 
-<script>
-// 🔑 A detecção é no cliente, e a lista completa fica logo abaixo. Um servidor
-//    que decidisse pelo User-Agent erraria em VPN e em Linux ARM — e o erro é
-//    caro: o visitante baixa 25 MB do arquivo errado e conclui que não funciona.
-//    Quando a detecção falha, o botão some e a tabela continua lá.
-const escolher = (ds, ua) => {
-  const doSistema = s => ds.filter(d => d.sistema === s);
-  const preferir = (s, re) => doSistema(s).find(d => re.test(d.arquitetura)) ?? doSistema(s)[0];
-  if (/Mac|iPhone|iPad/i.test(ua)) return preferir("macOS", /Intel e Apple Silicon/);
-  if (/Windows/i.test(ua))         return preferir("Windows", /\.exe/);
-  if (/Linux|X11/i.test(ua))       return preferir("Linux", /arm|aarch64/i.test(ua) ? /ARM64 \(\.deb\)/ : /x86-64 \(\.deb\)/);
-  return null;
-};
-const mb = b => (b / 1e6).toFixed(0) + " MB";
-
-fetch("downloads.json", {cache: "no-cache"}).then(r => r.json()).then(d => {
-  const escolhido = escolher(d.downloads, navigator.userAgent);
-  if (escolhido) {
-    document.getElementById("baixar").innerHTML =
-      `<a class="principal" href="${escolhido.url}" download>Baixar o pacote pronto para ${escolhido.sistema}
-         <small>${escolhido.arquitetura} · ${mb(escolhido.bytes)}</small></a>`;
-  }
-  const data = d.publicado_em ? new Date(d.publicado_em).toLocaleDateString("pt-BR") : "";
-  document.getElementById("versao").textContent =
-    `Versão ${d.versao}${data ? " · " + data : ""}${d.notas ? " · " + d.notas : ""}`;
-  document.getElementById("lista").innerHTML = d.downloads.map(x =>
-    `<tr><td>${x.sistema}</td><td>${x.arquitetura}</td><td>${mb(x.bytes)}</td>
-     <td><a href="${x.url}" download>Baixar</a></td></tr>`).join("")
-    || `<tr><td colspan="4" style="color:var(--suave)">Ainda não há versão publicada.</td></tr>`;
-}).catch(() => {
-  document.getElementById("versao").textContent = "Não consegui ler a lista de versões.";
-  document.getElementById("lista").innerHTML =
-    `<tr><td colspan="4"><a href="https://github.com/alexkads/VintageLightbox/releases">Ver os arquivos no GitHub Releases</a></td></tr>`;
-});
-</script>
 </body>
 </html>

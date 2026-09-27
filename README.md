@@ -371,81 +371,25 @@ gh release upload instalador-tauri scripts/instalar-vintagelightbox*.cmd --clobb
 Mesmo um `.cmd` antigo do Release roda a versão nova: ao abrir, ele baixa a do branch `main` e só usa a
 própria cópia se estiver sem internet (ou com `VLB_SECO=1`).
 
-## ⬇️ Baixar os pacotes publicados
+## ⬇️ Não há pacote pronto — e isso é desenho
 
-> ⚠️ **O caminho recomendado é o `instalar-vintagelightbox-gpui.cmd`, na seção acima**, que roda nos
-> três sistemas. O que segue são os pacotes publicados e o `instalar.sh`, que é só do macOS.
+Desde 27/set/2026 o VintageLightbox **não publica `.dmg`, `.msi`, `.deb` nem `.AppImage`**. Todo
+computador instala pelo `instalar-vintagelightbox-gpui.cmd` da seção acima, que compila o `main` na
+própria máquina — e se atualiza do mesmo jeito: o app lê o
+[`docs/novidades.json`](docs/novidades.json) do `main`, avisa, e o "Atualizar" recompila.
 
-**https://alexkads.github.io/VintageLightbox/** — a versão publicada hoje só tem o `.dmg` do macOS
-(Intel e Apple Silicon).
+- **No macOS, compilar evita o aviso do Gatekeeper.** Um app que saiu do compilador da própria
+  máquina nunca teve a marca de quarentena, e abre no primeiro duplo-clique. O `.dmg` pedia *Ajustes
+  do Sistema → Privacidade e Segurança → Abrir Assim Mesmo*, porque não é assinado com um Developer
+  ID da Apple — que este projeto decidiu não pagar.
+- **Uma atualização que não compila não quebra nada.** O instalador compila numa pasta à parte, confere
+  que o app novo abre (`--versao`) e só então troca; a versão anterior fica guardada ao lado.
+- Quem instalou por um `.dmg` antigo continua atendido: sem pacote novo, o app dele compila na
+  próxima atualização. O que ficou em [`empacotamento/`](empacotamento/README.md), e por quê, está lá.
 
-O app **não passa por loja nenhuma** e, a partir da primeira instalação, **se atualiza sozinho** —
-cada atualização é conferida por assinatura antes de ser instalada.
-
-> ⚠️ **No macOS**, a primeira abertura pede um passo a mais: o sistema dirá que não pôde verificar o
-> app e oferecerá só *Mover para o Lixo*. Clique em **OK**, abra **Ajustes do Sistema → Privacidade e
-> Segurança**, role até o fim e clique em **Abrir Assim Mesmo**. É uma vez só.
->
-> O truque antigo de *botão direito → Abrir* **não funciona a partir do macOS 15**.
-
-### Ou compile na sua máquina — e o aviso do macOS não aparece
-
-```bash
-curl -fsSL https://alexkads.github.io/VintageLightbox/instalar.sh | sh
-```
-
-🔑 **Por que isso resolve.** O Gatekeeper interroga o que chegou pela rede **com a marca de
-quarentena** (`com.apple.quarantine`), que quem põe é o navegador. Um app que saiu do compilador da
-própria máquina nunca teve essa marca: abre no primeiro duplo-clique, sem passar por Ajustes do
-Sistema. O aviso acima existe porque o `.dmg` não é assinado com um **Developer ID** — que custa
-US$ 99 por ano à Apple, e que este projeto decidiu não pagar (8/set/2026).
-
-O script está em [`docs/instalar.sh`](docs/instalar.sh) — no `docs/`, que é o que o Pages publica, e
-é por isso que ele tem um endereço curto. Ele baixa o código da versão publicada, compila só para a
-arquitetura desta máquina, monta o `.app` com o mesmo `Info.plist` do instalador oficial e o instala
-em `/Applications`.
-
-| | |
-|---|---|
-| **Exige** | Xcode (grátis) com o componente Metal — o GPUI compila os shaders na build |
-| **Instala sozinho** | o Rust, pelo `rustup`, em `~/.cargo`, sem `sudo` |
-| **Custa** | 15 a 40 minutos na primeira vez, ~10 GiB em `~/.vintagelightbox` |
-| **Opções** | `sh -s -- --versao main`, `--destino <pasta>`, `--seco`, `--ajuda` |
-
-⚠️ **Só macOS, e é de propósito.** No Linux o `.deb` e o `.AppImage` instalam sem interrogatório
-nenhum, e no Windows o `.msi` pede *Executar assim mesmo* uma vez — nenhum dos dois tem o problema
-que compilar resolve. O script **recusa** fora do macOS, em vez de gastar meia hora para chegar ao
-mesmo lugar.
-
-Depois da primeira vez não é preciso recompilar: o app se atualiza sozinho, e a atualização continua
-sendo conferida por assinatura minisign — essa parte nunca dependeu da Apple.
-
-### Como os instaladores são gerados
-
-Por **GitHub Actions**, e cada plataforma no sistema dela: `macos-14`, `ubuntu-22.04` e
-`windows-latest`. O princípio nunca foi "não usar CI" — era **não gerar de uma plataforma para
-outra**, porque o que sai assim ninguém abre para conferir.
-
-Lançar é empurrar uma tag:
-
-```bash
-make lancar     # confere a versão, marca vX.Y.Z e empurra
-```
-
-O CI compila as três, cria o Release com os instaladores e publica o `latest.json` no Pages.
-
-Para gerar na sua própria máquina — útil para testar antes de lançar:
-
-| Onde você está | O comando |
-|---|---|
-| macOS | `make mac` → `.app` + `.dmg` universal |
-| Linux | `make linux` → `.deb` + `.AppImage` |
-| Windows 11 | `.\scripts\empacotar.ps1` → `.msi` + `.exe` |
-
-⚠️ **Gerar de uma máquina para outra funciona — e foi recusado.** Em 7/set/2026 o `cargo-xwin` gerou
-um `.exe` válido a partir do Mac, e um contêiner Docker gerou o `.deb`. As duas saíram de cena pelo
-mesmo motivo: **o que sai de uma máquina que não é a de destino, ninguém abre para conferir.** O
-registro está em [`empacotamento/README.md`](empacotamento/README.md).
+O script antigo só para macOS (`curl -fsSL https://alexkads.github.io/VintageLightbox/instalar.sh | sh`,
+em [`docs/instalar.sh`](docs/instalar.sh)) continua no ar, mas exige o Xcode com o componente Metal;
+o instalador acima não.
 
 ## 📖 Para Começar
 

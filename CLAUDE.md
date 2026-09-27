@@ -81,10 +81,6 @@ make            # a lista dos alvos
 make testar     # cargo test --workspace
 make lint       # fmt + clippy -D warnings, como no CI
 make rodar      # abre o app (sempre em release)
-make mac        # .app + .dmg universal
-make linux      # .deb + .AppImage, por Docker
-make windows    # explica por que o Windows sai do .ps1, e nao daqui
-make publicar   # publica dist/ no R2 e espelha no GitHub (o único caminho de lançar)
 make faxina     # apaga o cache de debug do cargo
 ```
 
@@ -129,22 +125,6 @@ cargo clippy -p revelacao-web --target wasm32-unknown-unknown -- -D warnings
 scripts/construir-biblioteca.sh [caminho/do/frontend]
 cargo clippy -p biblioteca-web --target wasm32-unknown-unknown -- -D warnings
 
-# Os instaladores — **cada máquina gera a sua**, e nada atravessa plataforma
-make mac                 # .app + .dmg universal (só no macOS)
-make linux               # .deb + .AppImage    (só num Linux)
-.\scripts\empacotar.ps1  # .msi + .exe         (só num Windows 11)
-make publicar            # junta dist/ das três máquinas e publica (sem GitHub Actions)
-# 🔑 **Uma máquina por plataforma, e isso é decisão de desenho** (dono,
-#    7/set/2026: *"quero deixar tudo nativo mesmo"*). O `empacotar.sh` gera **só
-#    o sistema em que ele roda**; um alvo de outro sistema recusa de imediato.
-#
-# 🚫 **As duas alternativas foram construídas, funcionaram, e foram recusadas**
-#    em 7/set/2026: o Windows por `cargo-xwin` (gerou um `.exe` de 34,9 MB) e o
-#    Linux por contêiner Docker (gerou o `.deb`). O motivo é o mesmo nos dois, e
-#    é o que decide: **o que sai de uma máquina que não é a de destino, ninguém
-#    abre para conferir** — um contêiner não tem X11 nem GPU; um `.exe` cruzado
-#    não roda no Mac. Não refazer: `empacotamento/README.md` tem o registro.
-
 # Check code (faster than build)
 cargo check --workspace
 
@@ -153,38 +133,22 @@ cargo fmt --all
 cargo clippy --workspace
 ```
 
-## CI: o AppVeyor roda o instalador do balcão (desde 24/set/2026)
+## Sem CI: quem confere é a bateria local e o próprio balcão (desde 27/set/2026)
 
-O GitHub Actions está travado por cobrança desde 17/set, e o `.github/workflows/` não roda. Quem
-confere agora é o **AppVeyor** (<https://ci.appveyor.com/project/alexkads/vintagelightbox>),
-configurado em [`appveyor.yml`](appveyor.yml). É gratuito para projeto público e roda um job por
-vez.
+> *"Não precisa de .dmg e appveyor!"* — dono, 27/set/2026.
 
-- **O que ele roda é o instalador**, `scripts/instalar-vintagelightbox-gpui.cmd`. No Windows é o
-  bloco PowerShell, extraído do checkout como o `.cmd` faz; no Linux é o `sh`, com a mesma linha
-  do balcão. Ele não roda `cargo test`. A pergunta que ele responde é "o próximo balcão que repetir
-  a instalação compila?".
-- ⏱️ **O plano gratuito corta todo job em 60 minutos, e isso decide o que cada sistema faz:**
-  - **Linux:** compilação completa e instalação, com duas compilações ao mesmo tempo.
-  - **Windows:** o mesmo instalador com `VLB_SO_CONFERIR=1`. Ele prepara tudo e roda
-    `cargo check`, com os `build.rs` e a checagem de tipos, mas **não liga o binário**. A
-    compilação completa no Windows foi cortada aos 60 minutos em três tentativas (24/set/2026).
-    Um erro de linker no Windows este CI não pega.
-  - **Nos dois:** otimização menor (`CARGO_PROFILE_INSTALADOR_*`), só no CI.
-- **Ele roda no `dev`, antes do `main`.** O balcão compila o `main`, e o `dev` só chega lá pelo
-  `make mains` do e-commerce, que avisa se o AppVeyor do `dev` não estiver verde. É a última chance
-  de pegar um `dev` que não compila antes de ele virar produção.
-- **Ele compila o branch como está no GitHub**, porque o instalador baixa
-  `archive/refs/heads/<branch>`. E o `Cargo.lock` não é versionado: uma build vermelha sem commit
-  novo costuma ser dependência nova quebrada, a mesma que o balcão pegaria.
-- **Quando falha no Linux**, o registro do instalador sobe como artefato da build. É o mesmo
-  arquivo que o balcão mandaria.
-- 🚨 **Nenhum segredo vai para lá.** Ele não assina nem publica. A chave minisign e o wrangler do
-  R2 ficam na máquina de quem lança; um CI de terceiro com a chave privada poderia mandar
-  "atualização" a todo balcão.
+O AppVeyor rodava o instalador do balcão no Windows e no Linux a cada push, e saiu. Naquele dia ele
+chegou por último em todas as perguntas: a fila tinha seis builds parados (um job por vez, cerca de
+uma hora cada), enquanto o Mac e o Fedora do dono já tinham compilado e instalado a 0.1.25 pela
+atualização do próprio app. No Windows ele só fazia `cargo check`, sem ligar o binário.
 
-Status da última build:
-`curl -s https://ci.appveyor.com/api/projects/alexkads/vintagelightbox | python3 -m json.tool | grep -m3 status`.
+- **A rede é a bateria local antes de subir**: `make testar` e `make lint` no `dev`.
+- **Uma versão que não compila num balcão não quebra nada**: o instalador compila numa pasta à parte,
+  confere o app novo (`--versao`) e só então troca, guardando o anterior. O custo é o balcão ficar
+  uma versão atrás até a correção, que sai numa versão nova e maior.
+- ⚠️ O que se perdeu: um erro que só aparece no Windows ou só no Linux (código com `cfg(windows)`,
+  dependência nativa, linker) chega sem aviso prévio. Ao mexer nesse tipo de código, diga ao dono
+  para conferir num balcão daquele sistema.
 
 ## Architecture
 
@@ -296,72 +260,41 @@ e `--bin medir-abertura`.
 exporta nada, e nada acusa isso: os testes das camadas de dentro passam todos. Camada pronta não é
 funcionalidade entregue; a pergunta é sempre **"que clique chega até aqui?"**.
 
-## A distribuição: projeto aberto, fora das lojas, e o app se atualiza sozinho
+## A distribuição: projeto aberto, fora das lojas, e o app se atualiza compilando
 
 O VintageLightbox é **software livre sob licença MIT** (7/set/2026) e **não passa por loja nenhuma**.
-A partir da primeira instalação ele se atualiza sozinho. O caminho inteiro e as regras estão em
-[`empacotamento/README.md`](empacotamento/README.md); **ler a seção "O que não pode acontecer com
-quem já tem o app" antes de tocar em versão, empacotamento, `atualizacao/`, `lancar-local.sh`,
-`montar-manifesto.py` ou `enderecos-de-atualizacao.txt`.**
+Desde 27/set/2026 **também não há pacote**: todo balcão — macOS, Windows e Linux — instala e se
+atualiza **compilando o `main`** pelo `scripts/instalar-vintagelightbox-gpui.cmd` (dono: *"a
+atualização somente por script de build tá sendo a melhor opção"*; *"não precisa de .dmg e
+appveyor"*). Sem conta de desenvolvedor Apple, o `.dmg` saía sem notarização e o macOS barrava a
+primeira abertura; compilado na própria máquina, ele abre direto. O que ficou em `empacotamento/`,
+e por que não sai, está em [`empacotamento/README.md`](empacotamento/README.md) — **ler antes de
+tocar em versão, `atualizacao/`, `chave-publica.txt` ou `enderecos-de-atualizacao.txt`.**
 
-🔄 **Desde 27/set/2026, todo balcão atualiza compilando — o Mac também** (dono: *"a atualização
-somente por script de build tá sendo a melhor opção"*; sem conta de desenvolvedor Apple, o `.dmg`
-sai sem notarização). Lançar é subir a versão (três arquivos) e o `make producao` do e-commerce levar
-o `docs/novidades.json` ao `main`: os apps leem esse arquivo e o "Atualizar" recompila o `main`. O
-pacote do macOS e o R2 abaixo saíram do caminho padrão (`producao.sh --pacote-mac` ainda os faz);
-o `latest.json` do R2 ficou na 0.1.24, e um Mac instalado pelo `.dmg` que não acha pacote novo roda
-o instalador, que compila (`atualizacao/compilar.rs`). O que segue descreve o caminho do pacote.
+**Como funciona.** Ao abrir, o app lê o [`docs/novidades.json`](docs/novidades.json) do `main`
+(`raw` do GitHub, depois o Pages). Se a versão de lá for maior que a `CARGO_PKG_VERSION`, aparece a
+faixa com as novidades, e o "Atualizar" roda o instalador, que baixa o `main` e recompila
+(`atualizacao/compilar.rs`). O binário novo só entra depois de provar que abre.
 
-**Como funciona.** Ao abrir, o app lê `latest.json` nos endereços de
-[`empacotamento/enderecos-de-atualizacao.txt`](empacotamento/enderecos-de-atualizacao.txt), em
-ordem. Primeiro o bucket R2 `vintagelightbox`
-(`https://pub-f97274c3a83f47ff903a64fc1578efb0.r2.dev`); se ele falhar, o GitHub Pages. Se a versão
-do manifesto for maior que a `CARGO_PKG_VERSION`, aparece a faixa "Versão X disponível" com
-**Atualizar**. O pacote é baixado, a assinatura minisign é conferida e só então ele é instalado.
-
-**Lançar é `make publicar`** (`scripts/lancar-local.sh`), sempre. `make lancar` depende do GitHub
-Actions, travado por cobrança desde 17/set/2026: empurra a tag e nada compila. O `publicar`:
-
-- confere o R2 pelo `wrangler` logado;
-- monta o manifesto a partir do `dist/` inteiro, com as três máquinas juntadas nele;
-- **recusa o que prejudicaria quem já tem o app**: versão menor que a do ar, plataforma que some,
-  plataforma que estreia sem decisão do dono e versões divergentes entre `Cargo.toml` e
-  `packager.toml`;
-- envia ao R2 com o `latest.json` por último;
-- espelha no GitHub (Pages + Releases). Se o GitHub recusar, é só aviso.
-
-O roteiro passo a passo é a skill `lancar-o-app-desktop`, no repositório do e-commerce.
+**Lançar** é um commit com **dois arquivos** — `Cargo.toml` (`[workspace.package] version`) e
+`docs/novidades.json`, com o texto para o operador — e o `make producao` do e-commerce levar o
+`dev` ao `main`. Um teste (`novidades::…`) prende os dois. O roteiro é a skill
+`lancar-o-app-desktop`, no repositório do e-commerce.
 
 🚨 **Produção só sai do `main`, e só com o `main` dos três projetos em dia** (dono, 24/set/2026):
-este, o e-commerce e a landing `fotoamodaantiga`. O trabalho fica no `dev`. O balcão é produção:
-o instalador compila o `main`, e o `make publicar` recusa se o checkout não for o `main` ou se algum
-`main` estiver atrás do `dev`. Quem confere e quem leva o `dev` ao `main` nos três é
-`../recordarfotos-e-commerce/scripts/mains.sh` (`make mains` lá). Nunca `git push origin main`
-daqui à mão.
+este, o e-commerce e a landing `fotoamodaantiga`. O trabalho fica no `dev`. Quem confere e quem leva
+o `dev` ao `main` nos três é `../recordarfotos-e-commerce/scripts/mains.sh` (`make mains` lá). Nunca
+`git push origin main` daqui à mão.
 
-🚨 **Commit em `dev` não chega ao balcão empacotado.** Só uma versão nova publicada chega. E **não
-há volta de versão**: o updater só instala versão maior, então um lançamento ruim se corrige com
-outro, maior.
+🚨 **O commit da versão é o último commit de código.** Quem compilou a 0.1.N não recompila outra
+0.1.N: uma correção que entra depois não chega a ninguém. E **não há volta de versão**: um lançamento
+ruim se corrige com outro, maior.
 
-🚨 **A maior parte dos balcões instalou compilando** (`instalar-vintagelightbox-gpui.cmd`, que
-compila o `main`), e não pelo pacote. Esses se atualizam repetindo o instalador. Em 24/set/2026 o
-manifesto só tem macOS; publicar Windows ou Linux pela primeira vez faz o updater desses balcões
-instalar o pacote por cima ou ao lado da instalação compilada. Está no README, em "Plataforma
-nova", e o script recusa sem `--estrear-plataforma`.
-
-🔑 **O que substitui a loja é a assinatura minisign.** Cada pacote é assinado por
-`scripts/empacotar.sh`. A chave **pública** é compilada dentro do app
-(`atualizacao::porta::CHAVE_PUBLICA`); a **privada** mora em `~/.vintagelightbox/atualizacao.key`,
-fora do repositório.
-
-🚨 **Perder a chave privada quebra a atualização de todo app já instalado.** Os que estão na rua só
-aceitam pacote assinado por ela, e isso não se conserta pelo software. Trocar `chave-publica.txt` por
-uma que não corresponda transforma toda atualização em "assinatura inválida", em silêncio.
-
-⚠️ **Endereço de atualização só se acrescenta.** O app já instalado só conhece os endereços com que
-foi compilado. Trocar o bucket, o r2.dev ou pôr um domínio próprio é pôr o novo **ao lado**, e tirar
-o velho só quando todo balcão tiver passado por uma versão que conhece o novo. O GitHub Pages está
-preso na lista por teste pelo mesmo motivo: o app 0.1.9 e anteriores só conhecem ele.
+⚠️ **Os `.dmg` antigos ainda existem nos balcões que os instalaram.** Eles consultam o `latest.json`
+(R2 `vintagelightbox`, depois o Pages), que ficou na 0.1.24; sem pacote novo, compilam na próxima
+atualização. Por isso o bucket, o `docs/latest.json`, a `chave-publica.txt` e os endereços de
+atualização **ficam**, e endereço de atualização **só se acrescenta**: o app já instalado só conhece
+os endereços com que foi compilado.
 
 ## Portas para o mundo assíncrono — o padrão da casa
 

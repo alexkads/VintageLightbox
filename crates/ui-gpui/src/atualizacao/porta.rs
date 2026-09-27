@@ -10,8 +10,9 @@
 //!
 //! ## O que garante que a atualização é nossa
 //!
-//! Cada pacote é assinado com **minisign** (ed25519) por
-//! `scripts/empacotar.sh`, e a chave **pública** está compilada aqui dentro
+//! Cada pacote é assinado com **minisign** (ed25519) pelo antigo
+//! `scripts/empacotar.sh` (o pacote saiu em 27/set/2026: todo balcão atualiza
+//! compilando, e este caminho só vale para um `.dmg` antigo), e a chave **pública** está compilada aqui dentro
 //! ([`CHAVE_PUBLICA`]). O app baixa, confere a assinatura e **só então**
 //! instala. Isso é independente da Apple e da Microsoft: se alguém tomar o
 //! servidor de download, o pacote trocado não tem assinatura válida e o app o
@@ -48,8 +49,9 @@ pub const CHAVE_PUBLICA: &str = include_str!("../../../../empacotamento/chave-pu
 /// porque não depende do GitHub Actions, travado por cobrança desde 17/set; o
 /// GitHub Pages fica por último, como espelho. O updater só passa ao seguinte
 /// quando o anterior falha — fora do ar, 404, JSON ilegível. A lista mora em
-/// `empacotamento/enderecos-de-atualizacao.txt` porque o `lancar-local.sh` lê a
-/// mesma, e os dois nunca podem discordar de onde os pacotes estão.
+/// `empacotamento/enderecos-de-atualizacao.txt`, que o antigo `lancar-local.sh`
+/// também lia. Fica: apps já instalados pelo `.dmg` ainda consultam esses
+/// endereços, e só se acrescenta.
 const LISTA_DE_ENDERECOS: &str =
     include_str!("../../../../empacotamento/enderecos-de-atualizacao.txt");
 

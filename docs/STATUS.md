@@ -5,6 +5,11 @@
 **Branch de trabalho**: `dev`, árvore limpa
 **Estado**: ✅ compila · **1.040 testes, 0 falhando** · `fmt` e `clippy -D warnings` limpos (nativo **e** `wasm32`) · o app sobe · **a 0.1.0 está no ar**
 
+> 🔄 **27/set/2026: não há mais pacote nem CI.** Todo balcão instala e se atualiza compilando o
+> `main`; o `.dmg`, o `make publicar`/`lancar-local.sh`, o workflow de instaladores e o AppVeyor
+> saíram. O que segue sobre pacotes e publicação é histórico — o caminho de hoje está no
+> `CLAUDE.md` ("A distribuição") e em `empacotamento/README.md`.
+
 > ✅ **As duas que falhavam voltaram a passar.** `app::testes::esc_sai_mesmo_da_revelacao` e
 > `app::testes::buscar_antes_de_revelar_nao_desliga_as_teclas` esperavam `Tela::Biblioteca` e
 > recebiam `Tela::Sessao`; conferido passando em 7/set/2026, com a suíte inteira verde.

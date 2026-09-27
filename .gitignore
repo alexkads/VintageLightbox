@@ -1,9 +1,7 @@
 # Rust
 /target/
-# Os instaladores gerados por scripts/empacotar.sh
+# Os instaladores que o antigo scripts/empacotar.sh gerava (fora desde 27/set/2026)
 /dist/
-# Gerados por scripts/montar-manifesto.py no CI — a pagina (index.html, icone.png)
-# e versionada; o manifesto e a lista de downloads sao do lancamento.
 /docs/notas-do-lancamento.md
 **/*.rs.bk
 *.pdb
@@ -60,5 +58,5 @@ vintage_lightbox.db
 # Snyk Security Extension - AI Rules (auto-generated)
 .github/instructions/snyk_rules.instructions.md
 
-# Estado local do wrangler (o `make publicar` envia ao R2 por ele)
+# Estado local do wrangler (o antigo `make publicar` enviava ao R2 por ele)
 /.wrangler/

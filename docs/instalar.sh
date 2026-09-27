@@ -269,8 +269,8 @@ fi
 
 # ── Montar o .app ─────────────────────────────────────────────────────────────
 #
-# 🔑 O `Info.plist` daqui é o mesmo que o `cargo-packager` gera para o `.dmg`
-#    publicado — os campos saem de `empacotamento/packager.toml`, e o
+# 🔑 O `Info.plist` daqui é o mesmo que o `cargo-packager` gerava para o `.dmg`
+#    (que não é mais publicado desde 27/set/2026), e o
 #    identificador precisa bater: é por ele que o macOS lembra as permissões que
 #    o fotógrafo já concedeu. Montar à mão evita instalar o empacotador inteiro
 #    só para copiar sete arquivos.

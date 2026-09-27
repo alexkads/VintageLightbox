@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # O pacote .rpm do VintageLightbox (Zed GPUI), para Fedora — gerado e conferido
-# na própria máquina, como o resto do empacotamento (ver `empacotar.sh`).
+# na própria máquina. É o único pacote que sobrou: o `.dmg` e o `empacotar.sh`
+# saíram em 27/set/2026, quando todo balcão passou a atualizar compilando.
 #
 #   ./scripts/empacotar-rpm.sh                    compila e gera o .rpm
 #   ./scripts/empacotar-rpm.sh --binario CAMINHO  usa um binário já compilado
@@ -78,7 +79,7 @@ conferir() {
     correr sudo dnf install -y "${faltam[@]}"
   fi
 
-  # A versão sai do workspace, a mesma que o `empacotar.sh` confere.
+  # A versão sai do workspace.
   VERSAO=$(awk '/^\[workspace.package\]/ {w=1; next} /^\[/ {w=0}
                 w && /^version *=/ {gsub(/[" ]/, "", $0); sub(/version=/, ""); print; exit}' \
            "$RAIZ/Cargo.toml")
@@ -121,7 +122,7 @@ DESKTOP
 # 🔑 **As `Requires` escritas à mão são as que o GPUI abre com `dlopen`.** O
 #    `rpmbuild` só enxerga o que o binário linka; X11, Wayland, teclado e Vulkan
 #    são abertos em tempo de execução, e sem eles o app instala e não abre. É a
-#    mesma lista do `[deb] depends` de `empacotamento/packager.toml`, por soname
+#    mesma lista do `[deb] depends` do antigo `packager.toml`, por soname
 #    — o nome do pacote muda entre versões do Fedora, o soname não.
 escrever_spec() {
   cat > "$1" <<SPEC
