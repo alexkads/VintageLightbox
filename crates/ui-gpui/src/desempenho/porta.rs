@@ -222,7 +222,7 @@ pub mod mentira {
             let mut n = 0;
             for (_, sessoes) in ler_arquivos(&arquivos) {
                 for s in sessoes {
-                    let _ = self.salvar(Arc::new(s));
+                    drop(self.salvar(Arc::new(s)));
                     n += 1;
                 }
             }

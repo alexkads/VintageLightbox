@@ -649,3 +649,48 @@ pub fn janela_principal(nome: &'static str, janela_px: (u32, u32), escala: f32) 
         c.contexto.escala = escala;
     });
 }
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    /// 🔑 O custo da captura por quadro: ligada, microssegundos (o orçamento de
+    /// um quadro a 120 Hz é 8 333 µs); desligada, uma leitura atômica.
+    #[test]
+    fn medir_custa_microssegundos_por_quadro() {
+        let quadros = 20_000u32;
+        let um_quadro = || {
+            operacao(Operacao::ArrastoDeSlider);
+            quadro_comecou();
+            etapa(Etapa::Histograma, Duration::from_micros(900));
+            {
+                let _m = medir(Etapa::ConversaoParaExibicao);
+            }
+            if let Some(s) = quadro_pintado() {
+                quadro_apresentado(s);
+            }
+        };
+
+        let desligada = Instant::now();
+        for _ in 0..quadros {
+            um_quadro();
+        }
+        let desligada = desligada.elapsed() / quadros;
+
+        iniciar(Contexto {
+            hz: 120.0,
+            hz_origem: "sistema",
+            ..Default::default()
+        });
+        let ligada = Instant::now();
+        for _ in 0..quadros {
+            um_quadro();
+        }
+        let ligada = ligada.elapsed() / quadros;
+        let encerrada = parar().expect("a captura existia");
+        eprintln!("custo por quadro: desligada {desligada:?}, ligada {ligada:?}");
+        assert_eq!(encerrada.coletor.quadros().len(), quadros as usize);
+        assert!(desligada < Duration::from_micros(2), "{desligada:?}");
+        assert!(ligada < Duration::from_micros(80), "{ligada:?}");
+    }
+}

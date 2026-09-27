@@ -246,6 +246,10 @@ custa 56× mais, e a fase 1 quase condenou o framework por medir no perfil
 errado. As réguas estão em `cargo run --release -p ui-gpui --bin medir-miniaturas`
 e `--bin medir-abertura`.
 
+⏱️ **Para achar onde o tempo vai no app aberto**, é o botão **Desempenho** do rodapé: quadros,
+etapas de CPU e GPU (timestamp query), máquina e drivers, sessões no banco e comparação entre
+sistemas. Como medir, o que cada número é e o que não dá para medir: [`docs/DESEMPENHO.md`](docs/DESEMPENHO.md).
+
 ## Como uma funcionalidade nova atravessa as camadas
 
 1. Entidade / value object no `domain`, com teste

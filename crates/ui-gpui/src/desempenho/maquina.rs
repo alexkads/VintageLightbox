@@ -433,7 +433,7 @@ fn ler_cim(json: &serde_json::Value, m: &mut Maquina) {
     let plano = texto(json, "plano");
     let plano = plano
         .split_once('(')
-        .map(|(_, r)| r.trim_end_matches(|c| c == ')' || c == ' ').to_string())
+        .map(|(_, r)| r.trim_end_matches([')', ' ']).to_string())
         .unwrap_or(plano);
     m.energia = Some(match bateria {
         // 2 = na tomada; 1 = descarregando.

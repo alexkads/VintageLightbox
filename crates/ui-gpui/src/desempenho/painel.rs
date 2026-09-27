@@ -204,7 +204,7 @@ impl PainelDeDesempenho {
                 }
                 super::batida();
                 volta += 1;
-                if volta % 31 != 0 {
+                if !volta.is_multiple_of(31) {
                     continue;
                 }
                 if let Some(hz) = super::estimar_hz() {
