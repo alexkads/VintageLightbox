@@ -587,6 +587,7 @@ impl Aplicativo {
             });
         }
         self.tela = Tela::Revelacao;
+        self.sincronizar_a_tira(None, cx);
         self.recontar_o_que_falta_subir(cx);
         self.atualizar_o_cliente(true, cx);
         cx.notify();

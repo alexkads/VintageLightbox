@@ -1078,6 +1078,17 @@ impl Detalhe {
         self.selecao.quantas()
     }
 
+    /// A nota e a situação que a grade tem agora para estas fotos (ids da
+    /// grade): o que a tira da Revelação copia para mostrar o mesmo.
+    pub fn classificacoes(&self, ids: &[String]) -> Vec<(String, acervo::Foto)> {
+        self.acervo
+            .todas()
+            .iter()
+            .filter(|f| ids.contains(&f.id))
+            .map(|f| (f.id.clone(), f.clone()))
+            .collect()
+    }
+
     /// Os ids no site das fotos marcadas, na ordem da grade.
     pub fn marcadas(&self) -> Vec<String> {
         self.selecao

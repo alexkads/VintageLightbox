@@ -394,6 +394,71 @@ impl Revelacao {
         cx.notify();
     }
 
+    /// Em quem caem a nota, o `P` e o `X` teclados na tira: a regra do menu
+    /// ([`alvos_do_menu`]) com a aberta no lugar da clicada — as marcadas, se
+    /// a aberta está entre elas; senão, só a aberta. É a mesma conta da
+    /// galeria (a seleção com a foto em foco), e as duas andam juntas.
+    pub fn alvos_dos_atalhos(&self) -> Vec<String> {
+        if self.acervo.is_empty() {
+            return Vec::new();
+        }
+        alvos_do_menu(&self.marcadas, &self.na_tira(), self.posicao)
+            .into_iter()
+            .filter_map(|p| self.acervo.get(p))
+            .map(id_na_grade)
+            .collect()
+    }
+
+    /// Como a tira classifica a foto de id `id` na grade — o que um teste
+    /// compara com a grade da sessão.
+    #[cfg(test)]
+    pub(crate) fn classificacao_na_tira(&self, id: &str) -> Option<acervo::Foto> {
+        self.acervo
+            .iter()
+            .find(|f| id_na_grade(f) == id)
+            .map(classificacao)
+    }
+
+    /// Os ids da grade de todas as fotos da tira.
+    pub fn ids_na_grade(&self) -> Vec<String> {
+        self.acervo.iter().map(id_na_grade).collect()
+    }
+
+    /// 🔄 **A nota e a situação da grade entram na cópia da tira.** O acervo
+    /// da Revelação é um retrato da abertura: sem isto, a nota dada pela tecla
+    /// chegava ao site e à galeria, e a estrela da miniatura (e o recorte
+    /// "Classificadas") continuava a de antes. A conversão é a de
+    /// `do_site_para_a_grade`, ao contrário da [`classificacao`].
+    pub fn reclassificar(&mut self, da_grade: &[(String, acervo::Foto)], cx: &mut Context<Self>) {
+        let novas: Vec<(usize, i32, bool, bool)> = self
+            .acervo
+            .iter()
+            .enumerate()
+            .filter_map(|(p, foto)| {
+                let id = id_na_grade(foto);
+                let (_, c) = da_grade.iter().find(|(i, _)| *i == id)?;
+                let rating = c.nota.unwrap_or(0) as i32;
+                let comprada = matches!(c.estado, Estado::LevadaNoBalcao | Estado::Comprada);
+                let travada = c.estado == Estado::Comprada || c.apagada;
+                ((foto.rating, foto.comprada, foto.revelacao_travada)
+                    != (rating, comprada, travada))
+                    .then_some((p, rating, comprada, travada))
+            })
+            .collect();
+        if novas.is_empty() {
+            return;
+        }
+        // Só copia o acervo compartilhado quando há o que mudar.
+        let acervo = std::sync::Arc::make_mut(&mut self.acervo);
+        for (p, rating, comprada, travada) in novas {
+            let foto = &mut acervo[p];
+            foto.rating = rating;
+            foto.comprada = comprada;
+            foto.revelacao_travada = travada;
+        }
+        cx.notify();
+    }
+
     /// As marcadas, pelo id da grade da sessão — o caminho de volta.
     pub fn marcadas_na_grade(&self) -> Vec<String> {
         self.marcadas

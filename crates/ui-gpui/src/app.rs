@@ -379,13 +379,15 @@ pub fn init(cx: &mut gpui_kit::App) {
     ]);
     atalhos_da_revelacao::ligar(cx);
     // `VLB_TECLAS=1`: cada tecla no stderr, com a ação que ela resolveu — o
-    // diagnóstico de layout (ABNT2, Brazilian Pro…) sem recompilar.
+    // diagnóstico de layout (ABNT2, Brazilian Pro…) sem recompilar. Os
+    // contextos no fim são o caminho do foco: atalho morto aparece ali.
     if std::env::var_os("VLB_TECLAS").is_some() {
-        cx.observe_keystrokes(|evento, _w, _cx| {
+        cx.observe_keystrokes(|evento, window, _cx| {
             eprintln!(
-                "[tecla] {:?} → {}",
+                "[tecla] {:?} → {} · foco em {:?}",
                 evento.keystroke,
-                evento.action.as_ref().map_or("nenhuma", |a| a.name())
+                evento.action.as_ref().map_or("nenhuma", |a| a.name()),
+                window.context_stack()
             );
         })
         .detach();
@@ -1096,6 +1098,8 @@ impl Aplicativo {
             let detalhe = detalhe.clone();
             |cx| Caixa::painel(publicador_do_caixa, detalhe, window, cx)
         });
+        // O clique fora do cupom devolve as teclas à tela (`clique_fora`).
+        caixa_flutuante.update(cx, |caixa, _| caixa.devolver_o_foco_a(foco.clone()));
         let pedido_do_caixa = cx.subscribe_in(
             &caixa,
             window,
@@ -2618,6 +2622,9 @@ impl Aplicativo {
                     .map(|f| do_site_para_a_grade(f, sessao.clone()))
                     .collect();
                 self.absorver_as_do_site(convertidas, cx);
+                // O site respondeu (a nota recusada volta, a levada de outro
+                // balcão chega): a tira acompanha a grade.
+                self.sincronizar_a_tira(None, cx);
             }
         }
     }
@@ -2711,6 +2718,7 @@ impl Aplicativo {
             tela.abrir_no_acervo(acervo, inicial, window, cx);
             tela.herdar_da_sessao(recorte, &marcadas, cx);
         });
+        self.sincronizar_a_tira(None, cx);
         self.tela = Tela::Revelacao;
         self.recontar_o_que_falta_subir(cx);
         // O foco volta para a raiz a cada troca de tela — ver `revelar`.
@@ -3150,19 +3158,46 @@ impl Aplicativo {
         match self.tela {
             Tela::Sessao => self.detalhe.update(cx, na_sessao),
             Tela::Biblioteca => self.biblioteca.update(cx, na_biblioteca),
-            // 🔑 **No Comparar (`⇧C`), a nota, o `P` e o `X` valem para a foto
-            // escolhida** — com as regras e os avisos da sessão, e sem mexer na
-            // seleção dela (`Detalhe::nas_fotos`). Fora dele, a Revelação não
-            // classifica, como o editor do site.
+            // 🔑 **A tira classifica como a galeria** (dono, 27/set/2026: *"os
+            // dois estão em sintonia"*): a nota, o `P` e o `X` valem para as
+            // marcadas da tira, se a aberta está entre elas, ou só para a
+            // aberta (`Revelacao::alvos_dos_atalhos`). No Comparar (`⇧C`),
+            // para a foto escolhida. Sempre pelas regras e avisos da sessão, e
+            // sem mexer na seleção dela (`Detalhe::nas_fotos`).
             Tela::Revelacao if self.sessao_aberta.is_some() => {
-                let Some(id) = self.revelacao.read(cx).escolhida_no_comparar() else {
-                    return;
+                let revelacao = self.revelacao.read(cx);
+                let alvos = match revelacao.escolhida_no_comparar() {
+                    Some(id) => vec![id],
+                    None => revelacao.alvos_dos_atalhos(),
                 };
+                if alvos.is_empty() {
+                    return;
+                }
                 self.detalhe
-                    .update(cx, |tela, cx| tela.nas_fotos(&[id], cx, na_sessao));
+                    .update(cx, |tela, cx| tela.nas_fotos(&alvos, cx, na_sessao));
+                self.sincronizar_a_tira(Some(&alvos), cx);
             }
             _ => {}
         }
+    }
+
+    /// A tira da Revelação copia da grade da sessão a nota e a situação destas
+    /// fotos (`None`: de todas as da tira) — as duas mostram o mesmo.
+    pub(super) fn sincronizar_a_tira(&mut self, ids: Option<&[String]>, cx: &mut Context<Self>) {
+        if self.sessao_aberta.is_none() {
+            return;
+        }
+        let todas;
+        let ids = match ids {
+            Some(ids) => ids,
+            None => {
+                todas = self.revelacao.read(cx).ids_na_grade();
+                &todas
+            }
+        };
+        let da_grade = self.detalhe.read(cx).classificacoes(ids);
+        self.revelacao
+            .update(cx, |tela, cx| tela.reclassificar(&da_grade, cx));
     }
 
     /// O passo 6 do fluxo: **o cliente paga no balcão**.
@@ -8335,12 +8370,13 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
-    /// 🔑 **No Comparar, a nota vai para a escolhida — e só no Comparar.**
+    /// 🔑 **A nota da tira vai para a aberta; no Comparar, para a escolhida.**
     ///
-    /// Fora dele a Revelação não classifica (como o editor do site); dentro, o
-    /// `2` chega ao site na foto de borda âmbar, pela regra da sessão.
+    /// A tira classifica como a galeria (dono, 2026-09-27: *"os dois estão em
+    /// sintonia"*); dentro do Comparar, o `2` chega ao site na foto de borda
+    /// âmbar, pela regra da sessão.
     #[gpui_kit::test]
-    fn no_comparar_a_nota_vai_para_a_escolhida(cx: &mut TestAppContext) {
+    fn a_nota_da_tira_vai_para_a_aberta_e_no_comparar_para_a_escolhida(cx: &mut TestAppContext) {
         use biblioteca_core::comparar::Lado;
 
         let (janela, publicador, _dir) = revelacao_de_tres_do_site(cx);
@@ -8349,10 +8385,10 @@ mod testes {
         // As três vêm com ★★★★ do site; o `2` é a nota nova.
         visual.simulate_keystrokes("2");
         visual.run_until_parked();
-        assert!(
-            publicador.negociadas().is_empty(),
-            "fora do Comparar, a Revelação não classifica"
-        );
+        let negociadas = publicador.negociadas();
+        assert_eq!(negociadas.len(), 1, "{negociadas:?}");
+        assert_eq!(negociadas[0].0, "remota-1", "fora do Comparar, a aberta");
+        assert_eq!(negociadas[0].1.nota, Some(Some(2)));
 
         visual.simulate_keystrokes("shift-c");
         janela
@@ -8365,9 +8401,9 @@ mod testes {
         visual.run_until_parked();
 
         let negociadas = publicador.negociadas();
-        assert_eq!(negociadas.len(), 1, "{negociadas:?}");
-        assert_eq!(negociadas[0].0, "remota-2", "a escolhida, e não a aberta");
-        assert_eq!(negociadas[0].1.nota, Some(Some(2)));
+        assert_eq!(negociadas.len(), 2, "{negociadas:?}");
+        assert_eq!(negociadas[1].0, "remota-2", "a escolhida, e não a aberta");
+        assert_eq!(negociadas[1].1.nota, Some(Some(2)));
     }
 
     /// 🔑 **No Comparar, a segunda tela mostra as duas** — e volta a uma ao sair.

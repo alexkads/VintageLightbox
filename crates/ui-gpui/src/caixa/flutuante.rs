@@ -109,6 +109,8 @@ pub(super) struct Painel {
     /// O tamanho do painel no último quadro — o limite do arrasto.
     tamanho: Rc<Cell<(f32, f32)>>,
     foco_do_cupom: FocusHandle,
+    /// A quem o cupom devolve o foco quando o clique cai fora dele — a raiz.
+    devolver_a: Option<FocusHandle>,
     rolagem: ScrollHandle,
     editando: Option<EdicaoRapida>,
     /// ☑️ Os itens marcados — Ctrl/⌘, Shift e a caixinha de cada linha (dono,
@@ -233,6 +235,7 @@ impl Caixa {
             arrasto: None,
             tamanho: Rc::new(Cell::new((0., 0.))),
             foco_do_cupom: cx.focus_handle(),
+            devolver_a: None,
             rolagem: ScrollHandle::new(),
             editando: None,
             selecao: regras::SelecaoDoCupom::default(),
@@ -270,6 +273,58 @@ impl Caixa {
 
     pub fn visivel(&self) -> bool {
         self.painel_ref().is_some_and(|p| p.visivel)
+    }
+
+    /// O centro do painel no último quadro, na janela de tamanho `janela` —
+    /// onde um teste clica no cupom.
+    #[cfg(test)]
+    pub(crate) fn centro_do_painel(
+        &self,
+        janela: gpui_kit::Size<gpui_kit::Pixels>,
+    ) -> Option<gpui_kit::Point<gpui_kit::Pixels>> {
+        let p = self.painel_ref()?;
+        let (largura, altura) = p.tamanho.get();
+        if largura == 0. {
+            return None;
+        }
+        let direita = f32::from(janela.width) - (MARGEM - p.posicao.0);
+        let base = f32::from(janela.height) - (MARGEM - p.posicao.1);
+        Some(gpui_kit::point(
+            px(direita - largura / 2.),
+            px(base - altura / 2.),
+        ))
+    }
+
+    /// Quem recebe o foco de volta quando o clique cai fora do painel.
+    pub fn devolver_o_foco_a(&mut self, foco: FocusHandle) {
+        if let Some(p) = self.painel_mut() {
+            p.devolver_a = Some(foco);
+        }
+    }
+
+    /// 🚨 **O clique fora do painel leva o foco embora do cupom.** Com o foco
+    /// nele, o cupom engole as setas e toda tecla de um caractere (a nota não
+    /// pode cair na grade de trás) — e no GPUI clicar em algo que não é
+    /// focável, como a tira da Revelação, não tira o foco de ninguém. Um
+    /// clique no cupom bastava para matar as setas, a nota e o `P` da tira até
+    /// a guia ser fechada e reaberta (dono, 27/set/2026).
+    ///
+    /// 🔑 Roda na captura, antes de tudo: se o clique foi num campo ou no palco
+    /// da foto, eles tomam o foco em seguida, como no navegador. Com um diálogo
+    /// do caixa aberto, nada muda — ele fica fora do painel e é modal.
+    fn clique_fora(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.dialogo.is_some() {
+            return;
+        }
+        let Some(p) = self.painel_ref() else {
+            return;
+        };
+        let Some(raiz) = p.devolver_a.clone() else {
+            return;
+        };
+        if p.foco_do_cupom.contains_focused(window, cx) {
+            window.focus(&raiz, cx);
+        }
     }
 
     pub fn minimizado(&self) -> bool {
@@ -1288,6 +1343,9 @@ impl Caixa {
                     .painel_ref()
                     .map(|p| p.foco_do_cupom.clone())
                     .unwrap_or_else(|| self.foco.clone()),
+            )
+            .on_mouse_down_out(
+                cx.listener(|tela, _: &MouseDownEvent, window, cx| tela.clique_fora(window, cx)),
             )
             .occlude()
             .absolute()

@@ -1,6 +1,6 @@
 //! 🧾 O caixa flutuante da galeria — por cima da grade e da revelação.
 
-use gpui_kit::TestAppContext;
+use gpui_kit::{Modifiers, TestAppContext, VisualTestContext};
 use serde_json::json;
 
 use super::{abrir_o_ensaio, Cenario, GALERIA};
@@ -168,4 +168,62 @@ fn o_caixa_na_revelacao_e_fora_da_sessao(cx: &mut TestAppContext) {
             "F9 não chega"
         );
     });
+}
+
+/// 🎬 **O clique na tira tira o foco do cupom**, e as setas voltam a trocar a
+/// foto.
+///
+/// Com o foco no cupom, ele engole as setas e as teclas de um caractere — é o
+/// que impede a nota de cair na grade de trás. Mas a tira não é focável, e no
+/// GPUI clicar nela não tirava o foco de ninguém: depois de um clique no
+/// caixa, as setas, a nota e o `P` da Revelação morriam até a guia ser fechada
+/// e reaberta (dono, 27/set/2026).
+#[gpui_kit::test]
+fn o_clique_fora_do_cupom_devolve_as_setas_a_revelacao(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    e.revelar_a_do_site(cx, "a");
+    let clicar = |cx: &mut TestAppContext, ponto| {
+        let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+        visual.simulate_click(ponto, Modifiers::none());
+        visual.run_until_parked();
+        e.esperar(cx);
+    };
+    let no_cupom = |cx: &mut TestAppContext| {
+        e.app(cx, |_app, window, _cx| {
+            window
+                .context_stack()
+                .iter()
+                .any(|c| c.contains("CaixaCupom"))
+        })
+    };
+
+    let centro = e
+        .app(cx, |app, window, cx| {
+            app.caixa_flutuante
+                .read(cx)
+                .centro_do_painel(window.viewport_size())
+        })
+        .expect("o painel está desenhado");
+    clicar(cx, centro);
+    assert!(no_cupom(cx), "o clique no cupom leva as teclas para ele");
+
+    let (ponto, alvo) = e.revelacao(cx, |tela, _w, _cx| {
+        (tela.centro_da_miniatura(2), tela.na_tira()[2])
+    });
+    clicar(cx, ponto.expect("a tira está desenhada"));
+    assert!(!no_cupom(cx), "o clique na tira tira o foco do cupom");
+    e.revelacao(cx, |tela, _w, _cx| assert_eq!(tela.posicao(), alvo));
+
+    e.teclar(cx, "right");
+    e.revelacao(cx, |tela, _w, _cx| {
+        assert_eq!(
+            tela.posicao(),
+            tela.na_tira()[3],
+            "depois do clique na tira, a seta troca a foto"
+        );
+    });
+
+    // De volta ao cupom, as setas são dele de novo — e não da tira.
+    clicar(cx, centro);
+    assert!(no_cupom(cx));
 }

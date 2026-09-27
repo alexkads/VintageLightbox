@@ -398,3 +398,89 @@ fn o_canto_dos_envios_se_arrasta_para_fora_da_tira(cx: &mut TestAppContext) {
         assert_eq!(app.canto_dos_envios_para_teste(), (400., -300.), "e fica");
     });
 }
+
+/// 🎬 **A tira classifica como a galeria** (dono, 27/set/2026: *"os dois
+/// estão em sintonia"*): a nota, o `P` e o `X` teclados na Revelação valem
+/// para a aberta — ou para as marcadas da tira, se ela está entre elas — e a
+/// tira mostra o que a grade da sessão mostra.
+#[gpui_kit::test]
+fn a_tira_aceita_a_nota_o_p_e_o_x_da_galeria(cx: &mut TestAppContext) {
+    use biblioteca_core::Modificadores;
+
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    e.revelar_a_do_site(cx, "a");
+    // A tira e a grade dizem o mesmo sobre `a` e `b`.
+    let em_sintonia = |cx: &mut TestAppContext| {
+        let ids = vec!["a".to_string(), "b".to_string()];
+        let da_grade = e.detalhe(cx, |tela, _w, _cx| tela.classificacoes(&ids));
+        e.revelacao(cx, |tela, _w, _cx| {
+            for (id, grade) in &da_grade {
+                let tira = tela.classificacao_na_tira(id).expect("a foto está na tira");
+                assert_eq!(
+                    (tira.nota, tira.estado, tira.apagada),
+                    (grade.nota, grade.estado, grade.apagada),
+                    "a tira mostra o que a grade mostra: {id}"
+                );
+            }
+        });
+    };
+
+    e.teclar(cx, "3");
+    e.esperar(cx);
+    let negociadas = e.site.negociadas();
+    let ultima = negociadas.last().expect("a nota foi ao site");
+    assert_eq!((ultima.0.as_str(), ultima.1.nota), ("a", Some(Some(3))));
+    em_sintonia(cx);
+
+    // Com a aberta e mais uma marcadas na tira, a nota cai nas duas.
+    e.revelacao(cx, |tela, window, cx| {
+        let b = tela
+            .acervo()
+            .iter()
+            .position(|f| f.id == "site:b")
+            .expect("b na tira");
+        tela.clicar_na_tira(
+            b,
+            Modificadores {
+                aditivo: true,
+                faixa: false,
+            },
+            window,
+            cx,
+        );
+    });
+    let antes = e.site.negociadas().len();
+    e.teclar(cx, "5");
+    e.esperar(cx);
+    let novas: Vec<_> = e.site.negociadas()[antes..]
+        .iter()
+        .map(|(id, m)| (id.clone(), m.nota))
+        .collect();
+    assert_eq!(
+        novas,
+        vec![
+            ("a".to_string(), Some(Some(5))),
+            ("b".to_string(), Some(Some(5)))
+        ]
+    );
+    em_sintonia(cx);
+
+    // O `P` nas duas marcadas: as levadas voltam à venda, como na galeria.
+    let antes = e.site.negociadas().len();
+    e.teclar(cx, "p");
+    e.esperar(cx);
+    assert!(e.site.negociadas().len() > antes, "o P da tira foi ao site");
+    em_sintonia(cx);
+
+    // E o `X`: na foto da nuvem ele vai ao resgate, que pede o bruto antes de
+    // tirar qualquer coisa de lá — como na galeria.
+    let antes = e.site.originais().len();
+    e.teclar(cx, "x");
+    e.esperar(cx);
+    assert_eq!(
+        e.site.originais()[antes..],
+        ["a", "b"],
+        "o X da tira chegou às duas"
+    );
+    em_sintonia(cx);
+}
