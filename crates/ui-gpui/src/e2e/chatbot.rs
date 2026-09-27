@@ -249,6 +249,26 @@ pub(super) fn toasts(e: &Estudio, cx: &mut TestAppContext) -> Vec<(String, bool)
     e.app(cx, |app, _w, _cx| app.avisos_dados_para_teste())
 }
 
+/// As mensagens que viraram toast no canto de baixo — `(título, prévia,
+/// destino)`.
+pub(super) fn mensagens(
+    e: &Estudio,
+    cx: &mut TestAppContext,
+) -> Vec<(String, Option<String>, String)> {
+    e.app(cx, |app, _w, _cx| app.mensagens_dadas_para_teste())
+}
+
+/// Quantos toasts do kit (`Notification`) estão na tela agora.
+fn toasts_do_kit(e: &Estudio, cx: &mut TestAppContext) -> usize {
+    e.app(cx, |_app, window, cx| {
+        gpui_kit::component::Root::read(window, cx)
+            .notification
+            .read(cx)
+            .notifications()
+            .len()
+    })
+}
+
 fn evento(fonte: &'static str, dados: Value) -> Sinal {
     Sinal::Evento { fonte, dados }
 }
@@ -452,7 +472,28 @@ fn mensagem_nova_em_outra_tela_vira_toast_e_acende_o_selo(cx: &mut TestAppContex
 
     e.escuta.mandar(mensagem_da_ana("oi, tudo bem?"));
     e.esperar(cx);
-    assert!(toasts(&e, cx).contains(&("Ana no WhatsApp — oi, tudo bem?".into(), false)));
+    assert_eq!(
+        mensagens(&e, cx),
+        vec![(
+            "Ana no WhatsApp".into(),
+            Some("oi, tudo bem?".into()),
+            format!("chatbot:wa:{ANA}")
+        )]
+    );
+    assert_eq!(
+        toasts_do_kit(&e, cx),
+        1,
+        "o toast do kit, no canto de baixo"
+    );
+    assert!(
+        toasts(&e, cx).is_empty(),
+        "mensagem não vai para a pilha verde das ações"
+    );
+    // A mesma conversa troca o toast em vez de empilhar.
+    e.escuta.mandar(mensagem_da_ana("posso passar amanhã?"));
+    e.esperar(cx);
+    assert_eq!(mensagens(&e, cx).len(), 2);
+    assert_eq!(toasts_do_kit(&e, cx), 1, "um toast por conversa");
     assert!(
         e.avisador.avisos().is_empty(),
         "a janela está na frente: sem aviso do sistema"
@@ -465,7 +506,7 @@ fn mensagem_nova_em_outra_tela_vira_toast_e_acende_o_selo(cx: &mut TestAppContex
     assert!(pedidos(&e).is_empty(), "escondido, não relê");
 
     // Só mensagem do cliente avisa: a nossa saída e a pausa não.
-    let quantos = toasts(&e, cx).len();
+    let quantos = mensagens(&e, cx).len();
     e.escuta.mandar(evento(
         "wa",
         json!({"tipo": "mensagem_enviada", "contato": ANA}),
@@ -473,12 +514,42 @@ fn mensagem_nova_em_outra_tela_vira_toast_e_acende_o_selo(cx: &mut TestAppContex
     e.escuta
         .mandar(evento("wa", json!({"tipo": "bot_pausado", "contato": ANA})));
     e.esperar(cx);
-    assert_eq!(toasts(&e, cx).len(), quantos);
+    assert_eq!(mensagens(&e, cx).len(), quantos);
 
     // Voltar à tela relê o que ficou desatualizado.
     clicar(&e, cx, "menu-Chatbot");
     e.esperar(cx);
     assert_eq!(leituras_da_lista(&e), 1);
+}
+
+/// 🍞 **O toast da mensagem mora no canto de baixo, à esquerda, e o clique
+/// nele abre a conversa** — o mesmo que o clique no aviso do sistema faz
+/// (dono, 27/set/2026).
+#[gpui_kit::test]
+fn o_clique_no_toast_do_canto_abre_a_conversa(cx: &mut TestAppContext) {
+    let e = entrar(cx);
+    e.escuta.mandar(mensagem_da_ana("oi, tudo bem?"));
+    e.esperar(cx);
+    assert_eq!(toasts_do_kit(&e, cx), 1);
+
+    // O meio do toast: 16 px da borda esquerda e de baixo, 382 de largura.
+    let mut visual = quadro_novo(&e, cx);
+    let janela = e.app(cx, |_app, window, _cx| window.viewport_size());
+    visual.simulate_click(
+        gpui_kit::point(
+            gpui_kit::px(16. + 191.),
+            janela.height - gpui_kit::px(16. + 30.),
+        ),
+        Modifiers::none(),
+    );
+    visual.run_until_parked();
+    e.esperar(cx);
+
+    e.app(cx, |app, _w, _cx| assert_eq!(app.tela(), Tela::Chatbot));
+    chatbot(&e, cx, |t, _w, _cx| {
+        assert_eq!(t.aberta, Some(Chave::nova(Canal::WhatsApp, ANA)));
+        assert!(!t.novidades.contains(&Chave::nova(Canal::WhatsApp, ANA)));
+    });
 }
 
 /// 🔔 **Com a janela atrás**, o aviso é do sistema, com os textos do site; o
@@ -513,7 +584,7 @@ fn com_a_janela_atras_vira_aviso_do_sistema_e_o_clique_abre_a_conversa(cx: &mut 
         ]
     );
     assert!(
-        toasts(&e, cx).iter().all(|(t, _)| !t.contains("site")),
+        mensagens(&e, cx).is_empty() && toasts_do_kit(&e, cx) == 0,
         "com a janela atrás o aviso é do sistema, não toast"
     );
 
@@ -559,12 +630,12 @@ fn a_conversa_aberta_nao_avisa_e_a_rajada_vira_uma_releitura(cx: &mut TestAppCon
     let e = abrir_o_chatbot(cx);
     clicar(&e, cx, "chatbot-conversa-0");
     let antes = leituras_da_lista(&e);
-    let toasts_antes = toasts(&e, cx).len();
+    let toasts_antes = mensagens(&e, cx).len();
     for i in 0..5 {
         e.escuta.mandar(mensagem_da_ana(&format!("parte {i}")));
     }
     e.esperar(cx);
-    assert_eq!(toasts(&e, cx).len(), toasts_antes, "nenhum toast");
+    assert_eq!(mensagens(&e, cx).len(), toasts_antes, "nenhum toast");
     assert!(e.avisador.avisos().is_empty(), "nenhum aviso");
     chatbot(&e, cx, |t, _w, _cx| assert_eq!(t.quantas_novidades(), 0));
     assert_eq!(

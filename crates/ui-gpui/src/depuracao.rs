@@ -118,7 +118,8 @@ pub enum Passo {
     /// `janela minimizar` · `janela fechar` · `janela abrir` · `janela
     /// fingir_envio 2` — a bandeja (`crate::segundo_plano`). `fechar` é o botão
     /// vermelho de verdade; `abrir` é o "Abrir o VintageLightbox"; `fingir_envio`
-    /// só mexe na conta de pedidos pendentes, sem mandar nada ao site.
+    /// só mexe na conta de pedidos pendentes, sem mandar nada ao site;
+    /// `janela frente` traz o app para o foco.
     Janela(String),
     /// `nova etapa 3` · `nova buscar agendamento|voucher|compra|parceiro` ·
     /// `nova descartar` · `nova importar <pasta>` · `nova conheceu parceiro` ·

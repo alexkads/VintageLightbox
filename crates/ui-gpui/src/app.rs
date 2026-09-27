@@ -656,6 +656,11 @@ pub struct Aplicativo {
     /// `avisos_dados_para_teste`.
     #[cfg(test)]
     avisos_dados: Vec<(String, bool)>,
+    /// 🧪 As mensagens que viraram toast no canto de baixo — `(título,
+    /// prévia, destino)`. Os campos da `Notification` do kit são privados, e
+    /// é daqui que os cenários leem o que foi mostrado.
+    #[cfg(test)]
+    mensagens_dadas: Vec<(String, Option<String>, String)>,
     /// Os relógios que tiram os toasts vencidos — **um por toast**.
     ///
     /// 🚨 **Um campo só, sobrescrito, cancelaria o anterior**: `Task` aborta ao
@@ -1288,6 +1293,8 @@ impl Aplicativo {
             toasts: Vec::new(),
             #[cfg(test)]
             avisos_dados: Vec::new(),
+            #[cfg(test)]
+            mensagens_dadas: Vec::new(),
             proximo_toast: 0,
             _relogios_dos_toasts: Vec::new(),
             presets_conhecidos: presets_para_a_receita,
@@ -2886,6 +2893,13 @@ impl Aplicativo {
     #[cfg(test)]
     pub(crate) fn avisos_dados_para_teste(&self) -> Vec<(String, bool)> {
         self.avisos_dados.clone()
+    }
+
+    /// 🧪 As mensagens do chatbot e da agenda que viraram toast no canto de
+    /// baixo, desde a abertura.
+    #[cfg(test)]
+    pub(crate) fn mensagens_dadas_para_teste(&self) -> Vec<(String, Option<String>, String)> {
+        self.mensagens_dadas.clone()
     }
 
     /// 🧪 Quantas fotos a receita padrão já pegou — o que o e2e afirma.

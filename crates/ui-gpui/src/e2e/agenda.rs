@@ -10,7 +10,7 @@ use chrono::{DateTime, Duration, NaiveDate, TimeZone, Utc};
 use gpui_kit::{Context, TestAppContext, VisualTestContext, Window};
 use serde_json::{json, Value};
 
-use super::chatbot::{clicar, desenhado, passo, toasts};
+use super::chatbot::{clicar, desenhado, mensagens, passo, toasts};
 use super::{abrir_o_app, Cenario, Estudio};
 use crate::agenda::modelo::{self, Visao};
 use crate::agenda::tela::Modo;
@@ -505,10 +505,15 @@ fn agendamento_novo_avisa_e_o_clique_abre_o_ensaio(cx: &mut TestAppContext) {
 
     e.escuta.mandar(criado("e9", quando, Some("s1")));
     e.esperar(cx);
-    assert!(toasts(&e, cx).contains(&(
-        format!("Novo agendamento pelo WhatsApp — Família Nova · {horario}"),
-        false
-    )));
+    assert_eq!(
+        mensagens(&e, cx),
+        vec![(
+            "Novo agendamento pelo WhatsApp".into(),
+            Some(format!("Família Nova · {horario}")),
+            "agenda:e9".into()
+        )],
+        "o toast do canto de baixo, como o do chatbot"
+    );
     assert!(pedidos(&e).is_empty(), "escondida, não relê");
 
     VisualTestContext::from_window(e.raiz.into(), cx).deactivate_window();

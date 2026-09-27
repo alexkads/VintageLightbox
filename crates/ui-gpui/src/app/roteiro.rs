@@ -358,6 +358,13 @@ impl Aplicativo {
             }
             Passo::Janela(gesto) => match gesto.split_whitespace().collect::<Vec<_>>()[..] {
                 ["minimizar"] => window.minimize_window(),
+                // O app aberto pelo roteiro nasce atrás das outras janelas, e o
+                // que depende do foco (o toast da mensagem, e não o aviso do
+                // sistema) só aparece com ele na frente.
+                ["frente"] => {
+                    cx.activate(true);
+                    window.activate_window();
+                }
                 ["fingir_envio", n] => self.sincronias_pendentes = n.parse().unwrap_or(0),
                 // 🚨 Fora deste `update`: fechar pergunta à própria janela se
                 // pode, e a janela está emprestada ao passo agora.
