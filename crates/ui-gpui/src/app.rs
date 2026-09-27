@@ -2626,6 +2626,19 @@ impl Aplicativo {
                 // balcão chega): a tira acompanha a grade.
                 self.sincronizar_a_tira(None, cx);
             }
+            // ⚠️ O `Toast` de alerta do shadcn, no canto de baixo à direita —
+            // longe dos botões do alto e das mensagens de cliente (embaixo, à
+            // esquerda). O mesmo `id` troca o aviso em vez de empilhar: apertar
+            // `0` três vezes é um aviso só.
+            DetalhePedido::Avisar(texto) => {
+                use gpui_kit::component::WindowExt as _;
+                window.push_notification(
+                    gpui_kit::component::notification::Notification::warning(texto.clone())
+                        .id::<AvisoDoGesto>()
+                        .placement(gpui_kit::Anchor::BottomRight),
+                    cx,
+                );
+            }
         }
     }
 
@@ -6390,6 +6403,9 @@ fn arquivo_livre(pasta: &std::path::Path, nome: &str) -> std::path::PathBuf {
         .find(|c| !c.exists())
         .expect("sempre há um número livre")
 }
+
+/// A marca do aviso de gesto no `id` do kit: um de cada vez.
+struct AvisoDoGesto;
 
 /// Cronometra um trecho até o fim do escopo — ver `depuracao::vigia`.
 struct CronometroAoSair(&'static str, std::time::Instant);
