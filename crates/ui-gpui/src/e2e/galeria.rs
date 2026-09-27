@@ -1269,7 +1269,7 @@ fn importar_fotos_abre_o_modal_e_esc_ou_cancelar_fecham_sem_importar(cx: &mut Te
 
 /// 🗂️ **A coluna da foto fica reservada** (dono, 24/set/2026). Sem foto em
 /// foco ela mostra os Atalhos; focar uma foto não muda as colunas da grade; o
-/// botão do canto a recolhe numa faixa e a faixa a abre de volta — tudo pelo
+/// botão do canto a recolhe e a seta da beirada a abre de volta — tudo pelo
 /// clique de verdade.
 #[gpui_kit::test]
 fn a_coluna_da_foto_fica_reservada_mostra_os_atalhos_e_se_recolhe(cx: &mut TestAppContext) {
@@ -1301,11 +1301,15 @@ fn a_coluna_da_foto_fica_reservada_mostra_os_atalhos_e_se_recolhe(cx: &mut TestA
     assert!(recolhida >= sem_foco, "a grade ganha a largura da coluna");
     let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
     assert!(
-        visual.debug_bounds("painel-recolhido").is_some(),
-        "a faixa estreita fica no lugar da coluna"
+        visual.debug_bounds("painel-recolher").is_none(),
+        "recolhida, a coluna sai da tela"
+    );
+    assert!(
+        visual.debug_bounds("galeria-seta-direita").is_some(),
+        "a seta da beirada fica para abrir de volta"
     );
 
-    clicar(&e, cx, "painel-abrir");
+    clicar(&e, cx, "galeria-seta-direita");
     e.detalhe(cx, |tela, w, _cx| {
         assert!(!tela.coluna_recolhida());
         assert_eq!(tela.colunas_visiveis(w), sem_foco);

@@ -186,17 +186,19 @@ fn estresse_a_tira_com_dez_mil_fotos(cx: &mut TestAppContext) {
         pior = pior.max(t.elapsed());
     }
     let por_passo = inicio.elapsed() / passos;
-    relatar(
-        "uma seta na tira de 10.000 (média)",
-        por_passo,
-        Duration::from_millis(20),
-    );
+    // ⚖️ **25 ms, em debug** (27/set/2026). Eram 20, com o código a 19,1 ms; as
+    // colunas no dock (`crate::docas`: a área, o grupo e três painéis a mais
+    // por quadro) levaram a 20,1 ms. Em release é ~57× menos. O que este teto
+    // pega é o salto de ordem de grandeza — a tira que montava o recorte
+    // inteiro a cada quadro —, e não um milissegundo de debug.
+    let teto = Duration::from_millis(25);
+    relatar("uma seta na tira de 10.000 (média)", por_passo, teto);
     relatar(
         "uma seta na tira de 10.000 (pior)",
         pior,
         Duration::from_millis(200),
     );
-    assert!(por_passo <= Duration::from_millis(20));
+    assert!(por_passo <= teto);
 
     janela
         .update(cx, |tela, window, cx| {

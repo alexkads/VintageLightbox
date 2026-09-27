@@ -23,6 +23,8 @@ pub mod configuracoes;
 /// Fotografar a janela e seguir um roteiro, só em build de depuração.
 pub mod depuracao;
 pub mod dialogo;
+/// As colunas que se puxam pela borda e se recolhem pelas setas (o dock).
+pub mod docas;
 /// O app inteiro de ponta a ponta, com as portas de mentira. Só testes.
 #[cfg(test)]
 mod e2e;

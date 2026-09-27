@@ -188,10 +188,10 @@ pub struct BotaoDeSalvar {
 pub struct Revelacao {
     previews: Arc<PreviewManager>,
     gravador: Arc<dyn Gravador>,
-    /// Se a coluna das predefinições está à mostra. É o botão de painel do
-    /// site, e some por inteiro quando fechada — uma coluna vazia de 224px
-    /// roubaria da foto o espaço que ela não usa.
-    presets_a_mostra: bool,
+    /// As colunas no dock: as predefinições à esquerda e os ajustes à direita,
+    /// puxadas pela borda e recolhidas pelas setas (`crate::docas`). Nasce no
+    /// primeiro quadro, quando a tela já existe para os painéis apontarem.
+    docas: Option<crate::docas::Docas>,
     /// A lista que a Biblioteca estava mostrando, para as setas e o filmstrip.
     /// `Arc` porque o closure do filmstrip a leva consigo.
     acervo: Arc<Vec<PhotoViewModel>>,
@@ -613,7 +613,7 @@ impl Revelacao {
         Self {
             previews,
             gravador,
-            presets_a_mostra: true,
+            docas: None,
             acervo: Arc::new(Vec::new()),
             miniaturas_da_tira: CacheDeMiniaturas::nova(
                 NonZeroUsize::new(MINIATURAS_DA_TIRA).expect("não é zero"),
@@ -2809,38 +2809,55 @@ impl Render for Revelacao {
             self.espalhar_nos_sliders(window, cx);
         }
         self.acompanhar_a_resolucao(cx);
+        if self.docas.is_none() {
+            self.montar_as_docas(window, cx);
+        }
         let cabecalho = self.cabecalho(window, cx);
-        // 🔑 **No Comparar não se revela**: as duas fotos estão em julgamento, e
-        // um slider mexido ali mudaria só a aberta, sem o operador ver. As duas
-        // colunas ficam esmaecidas e sem clique, como no site (`inert`).
-        let comparando = self.comparacao.is_some();
-        let fundo = cx.theme().background;
-        let calar = move |coluna: gpui_kit::AnyElement| {
-            // Sem tamanho próprio: a coluna das predefinições tem largura fixa e
-            // `flex_none` numa linha flex, e o invólucro não pode esticá-la.
-            div()
-                .relative()
-                .flex_none()
-                .h_full()
-                .child(coluna)
-                .when(comparando, |d| {
-                    d.child(
-                        div()
-                            .id("coluna-calada-no-comparar")
-                            .absolute()
-                            .inset_0()
-                            .occlude()
-                            .bg(fundo.opacity(0.6)),
-                    )
-                })
-                .into_any_element()
+        let (esquerda, direita, tira_aberta) =
+            self.docas.as_ref().map_or((true, true, true), |d| {
+                use crate::docas::Lado;
+                (
+                    d.aberta(Lado::Esquerda, cx),
+                    d.aberta(Lado::Direita, cx),
+                    d.tira_aberta(),
+                )
+            });
+        let tira = if tira_aberta {
+            self.filmstrip(window, cx)
+        } else {
+            None
         };
-        let presets = self
-            .presets_a_mostra
-            .then(|| calar(self.coluna_dos_presets(cx).into_any_element()));
-        let palco = self.palco(cx);
-        let ajustes = calar(self.painel(cx).into_any_element());
-        let tira = self.filmstrip(window, cx);
+        let area = self.docas.as_ref().map(|d| d.area.clone());
+        let seta = |id, lado, aberta, dica, cx: &mut Context<Self>| {
+            let tela = cx.entity().downgrade();
+            crate::docas::seta(id, lado, aberta, dica, cx, move |_, window, cx| {
+                let _ = tela.update(cx, |tela, cx| tela.alternar_coluna(lado, window, cx));
+            })
+        };
+        use crate::docas::Lado;
+        let seta_esquerda = seta(
+            "revelacao-seta-esquerda",
+            Lado::Esquerda,
+            esquerda,
+            "Mostrar ou esconder as predefinições",
+            cx,
+        );
+        let seta_direita = seta(
+            "revelacao-seta-direita",
+            Lado::Direita,
+            direita,
+            "Mostrar ou esconder os ajustes",
+            cx,
+        );
+        let seta_de_baixo = (!self.acervo.is_empty()).then(|| {
+            seta(
+                "revelacao-seta-da-tira",
+                Lado::Baixo,
+                tira_aberta,
+                "Mostrar ou esconder a tira",
+                cx,
+            )
+        });
 
         div()
             .flex()
@@ -2856,22 +2873,142 @@ impl Render for Revelacao {
                     .flex()
                     .flex_1()
                     .min_h(px(0.))
-                    .children(presets)
-                    // 🚨 **Relativo, com a moldura absoluta dentro.** Com
-                    // `size_full` num item flex sem altura definida, a foto
-                    // crescia até o tamanho natural e passava por baixo da tira
-                    // (dono, 2026-09-17: "a foto precisa caber").
-                    .child(div().relative().flex_1().min_w(px(0.)).child(palco))
-                    .child(
-                        div()
-                            .w(px(LADO_DO_PAINEL))
-                            .flex_none()
-                            .border_l_1()
-                            .border_color(cx.theme().border)
-                            .child(ajustes),
-                    ),
+                    .child(seta_esquerda)
+                    .child(div().flex_1().min_w(px(0.)).h_full().children(area))
+                    .child(seta_direita),
             )
+            .children(seta_de_baixo)
             .children(tira)
+    }
+}
+
+impl Revelacao {
+    /// O dock das três partes: as predefinições, a foto e os ajustes.
+    ///
+    /// 🔑 **Os nomes são o que o dock guarda** — não mudar depois.
+    fn montar_as_docas(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::docas::{Docas, Lado, Lateral, Limites};
+        use std::rc::Rc;
+        let eu = cx.entity();
+        let docas = Docas::montar(
+            "revelacao",
+            &eu,
+            (
+                "revelacao:palco",
+                // 🚨 **Relativo, com a moldura absoluta dentro.** Com
+                // `size_full` num item flex sem altura definida, a foto crescia
+                // até o tamanho natural e passava por baixo da tira (dono,
+                // 2026-09-17: "a foto precisa caber").
+                Rc::new(|tela: &mut Self, _window, cx| {
+                    div()
+                        .relative()
+                        .size_full()
+                        .child(tela.palco(cx))
+                        .into_any_element()
+                }),
+            ),
+            vec![
+                (
+                    Lado::Esquerda,
+                    Lateral {
+                        nome: "revelacao:predefinicoes",
+                        desenho: Rc::new(|tela: &mut Self, _window, cx| {
+                            let coluna = tela.coluna_dos_presets(cx).into_any_element();
+                            tela.calada_no_comparar(coluna, cx)
+                        }),
+                        limites: Limites {
+                            minimo: 180.,
+                            maximo: 420.,
+                            padrao: LADO_DOS_PRESETS,
+                        },
+                    },
+                ),
+                (
+                    Lado::Direita,
+                    Lateral {
+                        nome: "revelacao:ajustes",
+                        desenho: Rc::new(|tela: &mut Self, _window, cx| {
+                            let coluna = div()
+                                .size_full()
+                                .border_l_1()
+                                .border_color(cx.theme().border)
+                                .child(tela.painel(cx))
+                                .into_any_element();
+                            tela.calada_no_comparar(coluna, cx)
+                        }),
+                        limites: Limites {
+                            minimo: 280.,
+                            maximo: 560.,
+                            padrao: LADO_DO_PAINEL,
+                        },
+                    },
+                ),
+            ],
+            window,
+            cx,
+        );
+        self.docas = Some(docas);
+    }
+
+    /// 🔑 **No Comparar não se revela**: as duas fotos estão em julgamento, e
+    /// um slider mexido ali mudaria só a aberta, sem o operador ver. As duas
+    /// colunas ficam esmaecidas e sem clique, como no site (`inert`).
+    fn calada_no_comparar(
+        &self,
+        coluna: gpui_kit::AnyElement,
+        cx: &mut Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        let comparando = self.comparacao.is_some();
+        let fundo = cx.theme().background;
+        div()
+            .relative()
+            .size_full()
+            .child(coluna)
+            .when(comparando, |d| {
+                d.child(
+                    div()
+                        .id("coluna-calada-no-comparar")
+                        .absolute()
+                        .inset_0()
+                        .occlude()
+                        .bg(fundo.opacity(0.6)),
+                )
+            })
+            .into_any_element()
+    }
+
+    /// A seta de uma borda, o botão do cabeçalho ou a tecla do Lightroom.
+    pub fn alternar_coluna(
+        &mut self,
+        lado: crate::docas::Lado,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(docas) = self.docas.as_ref() {
+            docas.alternar(lado, window, cx);
+        }
+        // A prévia de uma predefinição sob o ponteiro não sobrevive à coluna
+        // que some com ela.
+        self.prever(None, cx);
+        cx.notify();
+    }
+
+    /// `Tab` (as duas colunas) e `⇧Tab` (colunas e tira), como no Lightroom.
+    pub fn alternar_paineis(&mut self, tudo: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(docas) = self.docas.as_ref() {
+            if tudo {
+                docas.alternar_tudo(window, cx);
+            } else {
+                docas.alternar_as_colunas(window, cx);
+            }
+        }
+        self.prever(None, cx);
+        cx.notify();
+    }
+
+    /// A coluna deste lado está à vista? (Antes do primeiro quadro, sim.)
+    pub fn coluna_aberta(&self, lado: crate::docas::Lado, cx: &gpui_kit::App) -> bool {
+        self.docas.as_ref().is_none_or(|d| d.aberta(lado, cx))
     }
 }
 
@@ -2942,12 +3079,10 @@ impl Revelacao {
                     .icon(Icon::new(Icone::PanelLeft))
                     .small()
                     .ghost()
-                    .tooltip("Mostrar ou esconder as predefinições")
-                    .selected(self.presets_a_mostra)
-                    .on_click(cx.listener(|tela, _ev, _window, cx| {
-                        tela.presets_a_mostra = !tela.presets_a_mostra;
-                        tela.prever(None, cx);
-                        cx.notify();
+                    .tooltip("Mostrar ou esconder as predefinições (Tab esconde as duas colunas)")
+                    .selected(self.coluna_aberta(crate::docas::Lado::Esquerda, cx))
+                    .on_click(cx.listener(|tela, _ev, window, cx| {
+                        tela.alternar_coluna(crate::docas::Lado::Esquerda, window, cx);
                     })),
             )
             // 🔑 "3/200" antes do nome, e não só o nome: revelar é trabalho de
@@ -3164,9 +3299,7 @@ impl Revelacao {
     fn coluna_dos_presets(&self, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .id("coluna-de-presets")
-            .w(px(LADO_DOS_PRESETS))
-            .flex_none()
-            .h_full()
+            .size_full()
             .p(px(8.))
             .overflow_y_scroll()
             .bg(cx.theme().sidebar)
