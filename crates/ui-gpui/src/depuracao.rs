@@ -133,6 +133,15 @@ pub enum Passo {
     /// pelo mesmo despacho do teclado: passa pelo foco e pelos contextos, que é
     /// onde um atalho morto se esconde.
     Tecla(String),
+    /// `tecla_real 33` · `tecla_real 30 shift` — a tecla **física** (o
+    /// `keyCode` do macOS), num `NSEvent` entregue à fila do próprio app. Passa
+    /// pela tradução do layout (ABNT2, Brazilian Pro…) e pelo foco reais, que
+    /// o `tecla` pula. Não precisa da permissão de acessibilidade.
+    TeclaReal { codigo: u16, shift: bool },
+    /// `mouse_real apertar 0.5 0.5` · `arrastar` · `soltar` · `mover` ·
+    /// `duplo` — o botão esquerdo de verdade (`NSEvent`), numa fração do palco
+    /// da foto aberta na Revelação.
+    MouseReal { tipo: String, x: f32, y: f32 },
     /// `rajada 200 25 tecla right` — o passo do fim da linha, N vezes, com o
     /// intervalo em milissegundos, **sem** o respiro de 120 ms entre passos: é
     /// a carga do teste de estresse (dono, 2026-09-22: *"a aplicação parou de
@@ -220,6 +229,15 @@ pub fn ler_roteiro(texto: &str) -> Result<Vec<Passo>, String> {
             "janela" => Passo::Janela(argumentos.join(" ")),
             "nova" => Passo::Nova(argumentos.join(" ")),
             "importar" => Passo::Importar(argumentos.join(" ")),
+            "tecla_real" => Passo::TeclaReal {
+                codigo: numero(0)? as u16,
+                shift: argumentos.get(1) == Some(&"shift"),
+            },
+            "mouse_real" => Passo::MouseReal {
+                tipo: argumentos.first().copied().unwrap_or_default().to_string(),
+                x: numero(1)?,
+                y: numero(2)?,
+            },
             "tecla" => Passo::Tecla(argumentos.first().copied().unwrap_or_default().to_string()),
             "rajada" => {
                 let vezes = numero(0)? as usize;
@@ -268,6 +286,43 @@ pub fn fotografar(window: &gpui_kit::Window, destino: &Path) -> Result<(), Strin
         let _ = std::fs::create_dir_all(pai);
     }
     imagem.save(destino).map_err(|e| e.to_string())
+}
+
+/// O `NSView` do GPUI desta janela.
+#[cfg(target_os = "macos")]
+fn vista_da(window: &gpui_kit::Window) -> Result<*mut std::ffi::c_void, String> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let alca = HasWindowHandle::window_handle(window).map_err(|e| e.to_string())?;
+    let RawWindowHandle::AppKit(appkit) = alca.as_raw() else {
+        return Err("a janela não é do AppKit".into());
+    };
+    Ok(appkit.ns_view.as_ptr())
+}
+
+/// Põe na fila do app uma tecla física (desce e sobe) — ver [`Passo::TeclaReal`].
+#[cfg(target_os = "macos")]
+pub fn tecla_nativa(window: &gpui_kit::Window, codigo: u16, shift: bool) -> Result<(), String> {
+    let vista = vista_da(window)?;
+    unsafe { mac::tecla(vista, codigo, shift) }
+}
+
+/// Põe na fila do app um evento do botão esquerdo em `(x, y)`, em pontos da
+/// janela com a origem no alto — ver [`Passo::MouseReal`].
+#[cfg(target_os = "macos")]
+pub fn mouse_nativo(window: &gpui_kit::Window, tipo: &str, x: f32, y: f32) -> Result<(), String> {
+    let vista = vista_da(window)?;
+    unsafe { mac::mouse(vista, tipo, x as f64, y as f64) }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn tecla_nativa(_w: &gpui_kit::Window, _c: u16, _s: bool) -> Result<(), String> {
+    Err("só no macOS".into())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn mouse_nativo(_w: &gpui_kit::Window, _t: &str, _x: f32, _y: f32) -> Result<(), String> {
+    Err("só no macOS".into())
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -323,6 +378,142 @@ mod mac {
         fn CFDataGetBytePtr(dados: *mut c_void) -> *const u8;
         fn CFDataGetLength(dados: *mut c_void) -> isize;
         fn CFRelease(objeto: *mut c_void);
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct NSPoint {
+        x: f64,
+        y: f64,
+    }
+
+    unsafe impl objc2::encode::Encode for NSPoint {
+        const ENCODING: objc2::encode::Encoding =
+            objc2::encode::Encoding::Struct("CGPoint", &[f64::ENCODING, f64::ENCODING]);
+    }
+
+    use objc2::runtime::AnyClass;
+
+    const TECLA_DESCE: usize = 10;
+    const TECLA_SOBE: usize = 11;
+    const SHIFT: usize = 1 << 17;
+
+    unsafe fn classe(nome: &std::ffi::CStr) -> Result<&'static AnyClass, String> {
+        AnyClass::get(nome).ok_or_else(|| format!("classe {nome:?} ausente"))
+    }
+
+    unsafe fn texto(s: &str) -> Result<*mut AnyObject, String> {
+        let c = std::ffi::CString::new(s).map_err(|e| e.to_string())?;
+        let t: *mut AnyObject = msg_send![classe(c"NSString")?, stringWithUTF8String: c.as_ptr()];
+        Ok(t)
+    }
+
+    unsafe fn postar(evento: *mut AnyObject) -> Result<(), String> {
+        if evento.is_null() {
+            return Err("o NSEvent não foi criado".into());
+        }
+        let app: *mut AnyObject = msg_send![classe(c"NSApplication")?, sharedApplication];
+        let _: () = msg_send![app, postEvent: evento, atStart: false];
+        Ok(())
+    }
+
+    pub unsafe fn tecla(vista: *mut c_void, codigo: u16, shift: bool) -> Result<(), String> {
+        let vista = vista as *mut AnyObject;
+        let janela: *mut AnyObject = msg_send![vista, window];
+        let numero: isize = msg_send![janela, windowNumber];
+        let flags = if shift { SHIFT } else { 0 };
+        // Os caracteres do evento não importam ao GPUI: ele traduz o keyCode
+        // pelo layout ativo (`chars_for_modified_key`). Vão vazios de propósito.
+        let vazio = texto("")?;
+        for tipo in [TECLA_DESCE, TECLA_SOBE] {
+            let evento: *mut AnyObject = msg_send![
+                classe(c"NSEvent")?,
+                keyEventWithType: tipo,
+                location: NSPoint { x: 0.0, y: 0.0 },
+                modifierFlags: flags,
+                timestamp: 0.0f64,
+                windowNumber: numero,
+                context: std::ptr::null_mut::<AnyObject>(),
+                characters: vazio,
+                charactersIgnoringModifiers: vazio,
+                isARepeat: false,
+                keyCode: codigo
+            ];
+            postar(evento)?;
+        }
+        Ok(())
+    }
+
+    pub unsafe fn mouse(vista: *mut c_void, tipo: &str, x: f64, y: f64) -> Result<(), String> {
+        let vista = vista as *mut AnyObject;
+        let janela: *mut AnyObject = msg_send![vista, window];
+        let numero: isize = msg_send![janela, windowNumber];
+        let conteudo: *mut AnyObject = msg_send![janela, contentView];
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        struct NSRect {
+            origem: NSPoint,
+            tamanho: NSPoint,
+        }
+        unsafe impl objc2::encode::Encode for NSRect {
+            const ENCODING: objc2::encode::Encoding = objc2::encode::Encoding::Struct(
+                "CGRect",
+                &[
+                    NSPoint::ENCODING,
+                    objc2::encode::Encoding::Struct("CGSize", &[f64::ENCODING, f64::ENCODING]),
+                ],
+            );
+        }
+        let quadro: NSRect = msg_send![conteudo, frame];
+
+        // O AppKit conta y de baixo para cima.
+        let ponto = NSPoint {
+            x,
+            y: quadro.tamanho.y - y,
+        };
+        let tipos: &[usize] = match tipo {
+            "apertar" => &[1],
+            "soltar" => &[2],
+            "arrastar" => &[6],
+            "mover" => &[5],
+            "clicar" => &[1, 2],
+            "duplo" => &[1, 2, 1, 2],
+            outro => return Err(format!("mouse_real: tipo desconhecido '{outro}'")),
+        };
+        for (i, t) in tipos.iter().enumerate() {
+            let cliques: isize = if tipo == "duplo" && i >= 2 { 2 } else { 1 };
+            let evento: *mut AnyObject = msg_send![
+                classe(c"NSEvent")?,
+                mouseEventWithType: *t,
+                location: ponto,
+                modifierFlags: 0usize,
+                timestamp: 0.0f64,
+                windowNumber: numero,
+                context: std::ptr::null_mut::<AnyObject>(),
+                eventNumber: 0isize,
+                clickCount: cliques,
+                pressure: if *t == 2 || *t == 5 { 0.0f32 } else { 1.0f32 }
+            ];
+            // 🔑 O hover não passa pela fila: a janela normal do GPUI desliga
+            // `acceptsMouseMovedEvents` e ouve a área de rastreamento, que só
+            // reage ao ponteiro físico. O evento vai direto ao `mouseMoved:` da
+            // view — o mesmo método que a área de rastreamento chama.
+            if *t == 5 {
+                if evento.is_null() {
+                    return Err("o NSEvent não foi criado".into());
+                }
+                // No macOS o GPUI só dá hover à janela ativa
+                // (`is_window_hovered` = `is_window_active`).
+                let app: *mut AnyObject = msg_send![classe(c"NSApplication")?, sharedApplication];
+                let _: () = msg_send![app, activateIgnoringOtherApps: true];
+                let _: () =
+                    msg_send![janela, makeKeyAndOrderFront: std::ptr::null_mut::<AnyObject>()];
+                let _: () = msg_send![vista, mouseMoved: evento];
+                continue;
+            }
+            postar(evento)?;
+        }
+        Ok(())
     }
 
     /// O número da janela no WindowServer, a partir da `NSView` do GPUI.

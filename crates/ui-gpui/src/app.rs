@@ -377,6 +377,18 @@ pub fn init(cx: &mut gpui_kit::App) {
         gpui_kit::KeyBinding::new("ctrl-9", UltimaGuia, Some(CONTEXTO)),
     ]);
     atalhos_da_revelacao::ligar(cx);
+    // `VLB_TECLAS=1`: cada tecla no stderr, com a ação que ela resolveu — o
+    // diagnóstico de layout (ABNT2, Brazilian Pro…) sem recompilar.
+    if std::env::var_os("VLB_TECLAS").is_some() {
+        cx.observe_keystrokes(|evento, _w, _cx| {
+            eprintln!(
+                "[tecla] {:?} → {}",
+                evento.keystroke,
+                evento.action.as_ref().map_or("nenhuma", |a| a.name())
+            );
+        })
+        .detach();
+    }
     crate::chatbot::ligar_teclas(cx);
     crate::agenda::ligar_teclas(cx);
 }

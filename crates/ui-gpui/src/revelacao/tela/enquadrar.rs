@@ -854,6 +854,7 @@ impl Revelacao {
             // 🧪 Os outros dois botões da barra — "Zerar tudo" e "Salvar na
             // galeria e sair" —, pelo mesmo caminho do clique.
             "zerar" => self.zerar_tudo(window, cx),
+            "estado_local" => eprintln!("[local] {}", self.descrever_local(window)),
             // 🧪 O caso do dono (2026-09-22): *"com a tela do cliente aberta,
             // resolvi mexer a exposição no modo revelação"* — arrastar **e**
             // passar de foto no meio do arrasto. A cada `N` chamadas (o segundo

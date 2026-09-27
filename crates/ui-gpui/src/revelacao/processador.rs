@@ -168,6 +168,15 @@ fn laco(
     };
     *backend.lock() = Some(motor.backend());
     *disponivel.lock() = Some(true);
+    eprintln!(
+        "[Revelação] motor aberto: {} · máscaras {}",
+        motor.backend(),
+        if motor.mascaras_suportadas() {
+            "suportadas"
+        } else {
+            "SEM SUPORTE"
+        }
+    );
 
     while let Ok(pedido) = pedidos.recv() {
         // Pedido velho é largado sem processar: durante um arrasto a fila enche,
@@ -180,7 +189,9 @@ fn laco(
         motor.definir_corte(&pedido.corte);
         // Sem suporte a máscara na GPU a revelação sai sem elas — a tela
         // avisa (`Processador::mascaras_suportadas`), e a exportação falha.
-        let _ = motor.definir_locais(&pedido.locais);
+        if let Err(erro) = motor.definir_locais(&pedido.locais) {
+            crate::telemetria::avisar!("⚠️ [Revelação] a receita local ficou de fora: {erro:?}");
+        }
         if let Some(imagem) = motor.revelar(
             &pedido.pixels,
             pedido.largura,

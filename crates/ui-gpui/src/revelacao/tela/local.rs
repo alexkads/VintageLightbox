@@ -316,6 +316,10 @@ fn sombra() -> Hsla {
     gpui_kit::rgba(0x0000008c).into()
 }
 
+fn sombra_leve() -> Hsla {
+    gpui_kit::rgba(0x00000066).into()
+}
+
 impl Revelacao {
     // ------------------------------------------------------------ a receita
 
@@ -497,6 +501,73 @@ impl Revelacao {
         self.local.ferramenta.is_some()
     }
 
+    /// Onde a foto está desenhada, em pixels da janela.
+    pub fn palco_da_foto(&self) -> gpui_kit::Bounds<gpui_kit::Pixels> {
+        self.palco
+    }
+
+    /// 🧪 O estado da Revelação local numa linha, para o roteiro conferir.
+    pub fn descrever_local(&self, window: &Window) -> String {
+        format!(
+            "ferramenta={:?} raio={:.4} feather={:.2} selecionado={:?} mascara_sel={:?} \
+             camadas={} componentes={} retoques={} foco_no_palco={} marcacoes={} gesto={} \
+             origem={:?} bruta={} revelada={} aguardando={:?} gpu={:?} cursor={:?} \
+             pontos_do_ultimo={}",
+            self.local.ferramenta,
+            self.local.raio,
+            self.local.feather,
+            self.local.selecionado,
+            self.local.mascara_sel,
+            self.locais.camadas.len(),
+            self.locais
+                .camadas
+                .iter()
+                .map(|c| c.componentes.len())
+                .sum::<usize>(),
+            self.locais.retoques.len(),
+            self.foco_do_palco.is_focused(window),
+            self.local.marcacoes,
+            self.local.gesto.is_some(),
+            self.aberta
+                .as_ref()
+                .and_then(|a| a.origem.as_ref())
+                .map(|o| (o.largura, o.altura)),
+            self.aberta.as_ref().is_some_and(|a| a.bruta.is_some()),
+            self.aberta.as_ref().is_some_and(|a| a.revelada.is_some()),
+            self.aguardando,
+            self.processador.disponivel(),
+            self.local.cursor.map(|c| (c.x.round(), c.y.round())),
+            self.locais
+                .camadas
+                .last()
+                .and_then(|c| c.componentes.last())
+                .map_or(0, |c| match &c.forma {
+                    Forma::Pincel(t) => t.pontos.len(),
+                    Forma::Laco(l) => l.pontos.len(),
+                    _ => 0,
+                }),
+        )
+    }
+
+    /// O tamanho da ferramenta, em fração do maior lado da foto.
+    #[cfg(test)]
+    pub fn raio_local(&self) -> f32 {
+        self.local.raio
+    }
+
+    /// O meio do palco, em pixels da janela — onde o teste clica na foto.
+    #[cfg(test)]
+    pub fn meio_do_palco(&self) -> gpui_kit::Point<gpui_kit::Pixels> {
+        self.palco.center()
+    }
+
+    /// Põe o cursor na busca de predefinições, como o clique do operador.
+    #[cfg(test)]
+    pub fn focar_a_busca(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.busca_de_presets
+            .update(cx, |campo, cx| campo.focus(window, cx));
+    }
+
     /// `Esc`: larga o laço em curso, depois a seleção, depois a ferramenta.
     /// Devolve se fez alguma coisa (senão o `Esc` segue para a raiz).
     pub fn esc_local(&mut self, cx: &mut Context<Self>) -> bool {
@@ -519,8 +590,8 @@ impl Revelacao {
         cx.notify();
     }
 
-    /// `[` e `]` (com Shift, a suavização): no retoque selecionado, se houver;
-    /// senão, na ferramenta.
+    /// `[` e `]` (com Shift, a suavização): na ferramenta e, se houver, no
+    /// retoque selecionado.
     pub fn mudar_tamanho_local(
         &mut self,
         mais: bool,
@@ -538,13 +609,14 @@ impl Revelacao {
             return;
         }
         let fator = if mais { 1.1 } else { 1.0 / 1.1 };
+        // O retoque selecionado cresce junto — mas a ferramenta também: o
+        // círculo do cursor é o retorno que o dedo espera ver.
         if let Some(i) = self.local.selecionado {
             if let Some(r) = self.locais.retoques.get(i).cloned() {
                 let novo = com_raio(&r, (raio_do(&r) * fator).clamp(0.002, 0.25));
                 let mut receita = (*self.locais).clone();
                 receita.retoques[i] = novo;
                 self.comprometer(receita, cx);
-                return;
             }
         }
         let novo = (self.local.raio * fator).clamp(0.005, 0.15);
@@ -954,24 +1026,56 @@ impl Revelacao {
             cx.notify();
             return;
         };
+        // 🚨 **Ponto repetido não entra** (achado no app real, 2026-09-26): o
+        // arrasto é ouvido pela janela e pelo palco, e a mesma posição chegava
+        // várias vezes — um traço de quatro movimentos saía com trinta pontos,
+        // que a receita grava e a GPU desenha. A tolerância só pega o idêntico
+        // (0,06 px numa foto de 6000 px).
+        let passo = 1e-5;
+        let andou = |ultimo: Option<[f32; 2]>| {
+            ultimo.is_none_or(|u| (u[0] - q[0]).abs() > passo || (u[1] - q[1]).abs() > passo)
+        };
         let mut revelar = true;
         match gesto {
             Gesto::Componente { componente, .. } => match &mut componente.forma {
-                Forma::Pincel(t) => t.pontos.push([q[0], q[1], 1.0]),
+                Forma::Pincel(t) => {
+                    if !andou(t.pontos.last().map(|p| [p[0], p[1]])) {
+                        cx.notify();
+                        return;
+                    }
+                    t.pontos.push([q[0], q[1], 1.0])
+                }
                 Forma::Linear(g) => g.fim = q,
                 Forma::Radial(g) => {
                     g.raio_x = ((q[0] - g.centro[0]).abs() * w / lado).max(0.003);
                     g.raio_y = ((q[1] - g.centro[1]).abs() * h / lado).max(0.003);
                 }
-                Forma::Laco(l) => l.pontos.push(q),
-            },
-            Gesto::Retoque(Retoque::Clone(c) | Retoque::Heal(c)) => c.caminho.push(q),
-            Gesto::Retoque(Retoque::Preencher(p)) => {
-                if p.laco.is_empty() {
-                    p.caminho.push(q);
-                } else {
-                    p.laco.push(q);
+                Forma::Laco(l) => {
+                    if !andou(l.pontos.last().copied()) {
+                        cx.notify();
+                        return;
+                    }
+                    l.pontos.push(q)
                 }
+            },
+            Gesto::Retoque(Retoque::Clone(c) | Retoque::Heal(c)) => {
+                if !andou(c.caminho.last().copied()) {
+                    cx.notify();
+                    return;
+                }
+                c.caminho.push(q)
+            }
+            Gesto::Retoque(Retoque::Preencher(p)) => {
+                let alvo = if p.laco.is_empty() {
+                    &mut p.caminho
+                } else {
+                    &mut p.laco
+                };
+                if !andou(alvo.last().copied()) {
+                    cx.notify();
+                    return;
+                }
+                alvo.push(q);
                 revelar = false;
             }
             Gesto::Editando {
@@ -2228,7 +2332,10 @@ fn pintar(marca: &Marca, em: &dyn Fn(Ponto) -> Point<Pixels>, window: &mut Windo
                 return;
             }
             let pontos = circulo(*centro, *raio);
-            traco(&pontos, false, 3.0, sombra(), false, window);
+            // A sombra só separa o traço da foto clara. Grossa e contínua sob
+            // o tracejado, ela virava uma faixa preta dentro do pincel (visto
+            // no app, 2026-09-26): no tracejado ela segue os traços.
+            traco(&pontos, false, 2.2, sombra_leve(), *tracejado, window);
             traco(&pontos, false, 1.2, *cor, *tracejado, window);
         }
         Marca::Caminho {

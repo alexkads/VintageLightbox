@@ -66,6 +66,7 @@ mod janela;
 mod lote;
 mod nova_sessao;
 mod revelacao;
+mod revelacao_local;
 mod segundo_plano;
 mod sessoes;
 mod zoom;

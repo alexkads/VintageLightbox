@@ -231,6 +231,10 @@ pub struct Revelacao {
     locais_ilegiveis: Option<String>,
     /// A ferramenta, o gesto em curso e os sliders da Revelação local.
     local: local::Local,
+    /// O foco da foto. 🔑 **Clicar na foto tira o foco de qualquer campo de
+    /// texto**, como em todo editor: com o cursor esquecido na busca de
+    /// predefinições, `[`, `]`, `K`… eram texto e não atalho.
+    foco_do_palco: gpui_kit::FocusHandle,
     /// Os passos de desfazer, **por foto**: trocar de foto começa um histórico
     /// novo. Um `Cmd+Z` que atravessasse fotos aplicaria a revelação de uma na
     /// outra — que é o mesmo defeito que a cópia da seleção já impede.
@@ -602,6 +606,7 @@ impl Revelacao {
             locais: Arc::default(),
             locais_ilegiveis: None,
             local,
+            foco_do_palco: cx.focus_handle(),
             historico: Historico::novo(Estado::default()),
             pendente: false,
             gravadas: std::collections::HashSet::new(),
@@ -986,7 +991,7 @@ impl Revelacao {
             return;
         };
         let chave = persistencia::chave_da_revelada(&aberta.foto.id);
-        let neutro = self.ajustes == Ajustes::default() && corte::e_inteiro(&self.enquadramento());
+        let neutro = self.sem_revelacao() && corte::e_inteiro(&self.enquadramento());
         // 🚨 **Só a local apaga no neutro.** Na foto do site, sem prévia a tira
         // e a grade voltam à imagem da galeria — que ainda tem a receita antiga
         // até o "Salvar" (dono, 2026-09-21: zerar não mudava a tira). Ela grava
@@ -1372,7 +1377,7 @@ impl Revelacao {
         // bruta é a espera legítima da foto do site enquanto a cópia de trabalho
         // não chega; no neutro o resultado é a própria origem, e segurá-la seria
         // tela preta por nada.
-        let vai_revelar = origem.is_some() && self.ajustes != Ajustes::default();
+        let vai_revelar = origem.is_some() && !self.sem_revelacao();
         self.aberta = Some(Aberta {
             foto,
             origem,
@@ -1465,7 +1470,12 @@ impl Revelacao {
         // trabalho não aparece crua antes de o motor responder — senão a foto do
         // site pisca duas vezes, uma ao chegar e outra ao ser revelada. No
         // neutro o resultado é igual à origem, e segurá-la só atrasaria.
-        aberta.revelada = (self.ajustes == Ajustes::default()).then_some(imagem);
+        // (A mesma pergunta de `sem_revelacao`, campo a campo: `aberta` segura
+        // o empréstimo de `self`.)
+        let neutra = self.ajustes == Ajustes::default()
+            && self.locais.para_o_motor().camadas.is_empty()
+            && self.locais.retoques.is_empty();
+        aberta.revelada = neutra.then_some(imagem);
         aberta.desenhada = None;
         self.repondo = false;
 
@@ -1902,6 +1912,15 @@ impl Revelacao {
     /// muda com o arrasto é o desenho, não os pixels — recalcular a cada
     /// milímetro reprocessaria a foto dezenas de vezes por segundo para produzir
     /// exatamente a mesma imagem.
+    /// 🔑 **Nada a revelar: ajustes no neutro e nenhuma máscara ou retoque.**
+    /// A pergunta é da receita inteira — olhar só os ajustes deixava a foto
+    /// com Revelação local aparecer crua ao abrir (a GPU nem era chamada).
+    fn sem_revelacao(&self) -> bool {
+        self.ajustes == Ajustes::default()
+            && self.locais.para_o_motor().camadas.is_empty()
+            && self.locais.retoques.is_empty()
+    }
+
     fn atualizar_exibicao(&mut self) {
         self.refazer_exibicao(true);
     }
@@ -2442,6 +2461,8 @@ impl Revelacao {
                     self.com_gestos_de_zoom(
                         div()
                             .id("palco-da-foto")
+                            // O clique foca o elemento que rastreia o foco.
+                            .track_focus(&self.foco_do_palco)
                             .relative()
                             .size_full()
                             // O zoom mostra só o pedaço da foto que cabe.
@@ -3969,6 +3990,37 @@ mod testes {
                 assert!(
                     tela.aberta.as_ref().unwrap().desenhada.is_some(),
                     "e por isso a foto já está na tela"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **Ajustes no neutro com Revelação local não é neutro** (achado no
+    /// app real, 2026-09-26): a abertura olhava só os ajustes, a GPU nem era
+    /// chamada, e a foto com máscara aparecia crua até alguém mexer num slider.
+    #[gpui_kit::test]
+    fn a_foto_so_com_mascara_abre_pedindo_a_gpu(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let janela = janela(cx, previews);
+        let receita = r#"{"versao":1,"camadas":[{"nome":"M","ajustes":{"exposicao_ev":1.0},
+            "componentes":[{"modo":"somar","tipo":"radial","centro":[0.5,0.5],"raio_x":0.2,
+            "raio_y":0.2,"angulo":0.0,"feather":0.5,"fora":false}],"invertida":false}],"retoques":[]}"#;
+        let com_mascara = PhotoViewModel {
+            locais: Some(receita.to_string()),
+            ..foto("retrato.jpg")
+        };
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(com_mascara, window, cx);
+                assert_eq!(tela.locais.camadas.len(), 1, "a receita foi lida");
+                assert!(tela.aguardando.is_some(), "a máscara vai à GPU na abertura");
+                assert!(
+                    tela.aberta.as_ref().unwrap().revelada.is_none(),
+                    "e a crua não passa por revelada"
                 );
             })
             .expect("a janela deve estar aberta");
@@ -6784,7 +6836,9 @@ mod testes {
                     tela.ponto_da_foto([0.5, 0.5]).expect("a foto na tela"),
                 );
                 tela.local_apertar(&ponteiro_desce(c.x, c.y, false), window, cx);
-                for dx in [20., 50., 80., 100.] {
+                // O 100 repetido é a janela e o palco ouvindo o mesmo arrasto:
+                // a posição parada não vira ponto.
+                for dx in [20., 50., 80., 100., 100., 100.] {
                     tela.local_mover(&ponteiro_anda(c.x + dx, c.y), cx);
                 }
                 // No meio do gesto: a GPU vê, o histórico e o banco não.
