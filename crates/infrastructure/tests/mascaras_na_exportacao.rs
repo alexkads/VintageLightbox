@@ -38,6 +38,7 @@ fn receita(pontos: usize) -> ReceitaLocal {
                 }),
             }],
             invertida: false,
+            ..Default::default()
         }],
         ..Default::default()
     }
