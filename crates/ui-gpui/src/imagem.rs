@@ -55,6 +55,7 @@ use smallvec::SmallVec;
 /// ordem que o Metal quer. O caminho de baixo continua existindo para o que
 /// realmente chega em RGBA (PNG com alfa, imagem sintética dos testes).
 pub fn para_gpui(imagem: DynamicImage) -> Arc<RenderImage> {
+    let _m = crate::desempenho::medir(crate::desempenho::Etapa::ConversaoParaExibicao);
     let bytes = match imagem {
         DynamicImage::ImageRgb8(rgb) => bgra_de_rgb8(rgb),
         outra => {

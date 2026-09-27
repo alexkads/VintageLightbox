@@ -458,6 +458,26 @@ pub enum Tela {
     /// 📅 A agenda dos ensaios — `/dashboard/agendamentos` (2026-09-25).
     Agenda,
 }
+
+impl Tela {
+    /// O nome estável da tela na ferramenta de desempenho.
+    pub fn nome_para_desempenho(self) -> &'static str {
+        match self {
+            Tela::Biblioteca => "biblioteca",
+            Tela::Revelacao => "revelacao",
+            Tela::Impressao => "impressao",
+            Tela::Sessoes => "sessoes",
+            Tela::Sessao => "sessao",
+            Tela::Caixa => "caixa",
+            Tela::Retencao => "retencao",
+            Tela::NovaSessao => "nova_sessao",
+            Tela::Backup => "backup",
+            Tela::Chatbot => "chatbot",
+            Tela::Agenda => "agenda",
+        }
+    }
+}
+
 pub struct Aplicativo {
     pub(crate) biblioteca: Entity<Biblioteca>,
     pub(crate) revelacao: Entity<Revelacao>,
@@ -487,6 +507,8 @@ pub struct Aplicativo {
     pub(crate) caixa: Entity<Caixa>,
     /// 🧾 O caixa flutuante da galeria — por cima da grade e da revelação.
     pub(crate) caixa_flutuante: Entity<Caixa>,
+    /// ⏱️ O painel de Desempenho, aberto pelo botão do rodapé.
+    pub(crate) desempenho: Entity<crate::desempenho::painel::PainelDeDesempenho>,
     _pedido_do_caixa: gpui_kit::Subscription,
     /// A galeria foi aberta pelo caixa: a volta dela é para o caixa.
     veio_do_caixa: bool,
@@ -1258,6 +1280,7 @@ impl Aplicativo {
             detalhe,
             caixa,
             caixa_flutuante,
+            desempenho: cx.new(|_| crate::desempenho::painel::PainelDeDesempenho::novo()),
             _pedido_do_caixa: pedido_do_caixa,
             veio_do_caixa: false,
             retencao,
@@ -2749,6 +2772,7 @@ impl Aplicativo {
             let detalhe = self.detalhe.read(cx);
             (detalhe.filtro(), detalhe.marcadas())
         };
+        crate::desempenho::operacao(crate::desempenho::Operacao::AberturaDaRevelacao);
         self.revelacao.update(cx, |tela, cx| {
             tela.abrir_no_acervo(acervo, inicial, window, cx);
             tela.herdar_da_sessao(recorte, &marcadas, cx);
@@ -3677,6 +3701,7 @@ impl Aplicativo {
 
         // 📸 Passo 11 — os pixels do storage, quando o cache não tem o bruto —
         // é pedido por `AbriuOutraFoto`, que `abrir_no_acervo` emite.
+        crate::desempenho::operacao(crate::desempenho::Operacao::AberturaDaRevelacao);
         self.revelacao.update(cx, |tela, cx| {
             tela.abrir_no_acervo(acervo, posicao, window, cx)
         });
@@ -6093,6 +6118,12 @@ impl Aplicativo {
 impl Render for Aplicativo {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _t = crate::regua::trecho("raiz: render");
+        // ⏱️ O começo do quadro, para a ferramenta de desempenho (uma leitura
+        // atômica com ela desligada). O fim é o sentinela, lá embaixo.
+        crate::desempenho::quadro_comecou();
+        if crate::desempenho::ativa() {
+            crate::desempenho::tela(self.tela.nome_para_desempenho());
+        }
         // 🚨 A porta vem antes de tudo, inclusive das teclas: com o app inteiro
         // desenhado por baixo, as quinze teclas de triagem continuariam
         // chegando à Biblioteca por trás da tela de login.
@@ -6387,6 +6418,12 @@ impl Render for Aplicativo {
             .children(self.barra_do_pe(cx))
             // A lista das recusas, sobre o rodapé que a abre.
             .children(self.lista_das_recusas(cx))
+            // ⏱️ O painel de Desempenho (vazio quando fechado) e o sentinela,
+            // que marca o fim de cada quadro enquanto a captura grava.
+            .child(self.desempenho.clone())
+            .when(crate::desempenho::ativa(), |raiz| {
+                raiz.child(crate::desempenho::sentinela::sentinela())
+            })
             // 🚨 **As camadas do `gpui-component`.** Sem elas, `open_dialog` e
             // `push_notification` não aparecem em lugar nenhum — a caixa do
             // "Sincronizar N" abria no vazio e o botão parecia morto.

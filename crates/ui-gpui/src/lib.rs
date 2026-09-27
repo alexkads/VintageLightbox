@@ -22,6 +22,8 @@ pub mod cliente;
 pub mod configuracoes;
 /// Fotografar a janela e seguir um roteiro, só em build de depuração.
 pub mod depuracao;
+// ⏱️ A ferramenta de medição do rodapé: quadros, etapas de CPU e GPU, máquina.
+pub mod desempenho;
 pub mod dialogo;
 /// As colunas que se puxam pela borda e se recolhem pelas setas (o dock).
 pub mod docas;

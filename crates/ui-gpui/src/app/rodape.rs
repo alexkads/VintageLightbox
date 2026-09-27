@@ -279,6 +279,41 @@ impl Aplicativo {
                 .child(resumo)
         });
 
+        // ── Desempenho ────────────────────────────────────────────────────
+        // ⏱️ Abre o painel de medição. Vermelho, com o ponto, enquanto a
+        // captura grava — mesmo com o painel fechado.
+        let medindo = crate::desempenho::ativa();
+        let painel_aberto = self.desempenho.read(cx).aberto();
+        let desempenho = item("rodape-desempenho")
+            .cursor_pointer()
+            .hover(move |s| s.bg(acento))
+            .map(|d| {
+                if medindo {
+                    d.text_color(perigo)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .bg(perigo.opacity(0.12))
+                } else if painel_aberto {
+                    d.text_color(frente).bg(acento)
+                } else {
+                    d.text_color(apagado)
+                }
+            })
+            .child(Icon::new(Icone::ChartColumn).size(px(12.)))
+            .when(medindo, |d| d.child("● Medindo"))
+            .when(!medindo, |d| d.child("Desempenho"))
+            .tooltip(move |window, cx| {
+                gpui_kit::component::tooltip::Tooltip::new(if medindo {
+                    "A captura de desempenho está gravando — clique para ver"
+                } else {
+                    "Medir quadros, etapas de CPU e GPU e a máquina"
+                })
+                .build(window, cx)
+            })
+            .on_click(cx.listener(|raiz, _, _window, cx| {
+                raiz.desempenho.update(cx, |p, cx| p.alternar(cx));
+                cx.notify();
+            }));
+
         // ── O servidor ────────────────────────────────────────────────────
         let (site, producao) = servidor();
         let producao = *producao;
@@ -337,6 +372,8 @@ impl Aplicativo {
                     .children(meio),
             )
             .when_some(tela, |rodape, tela| rodape.child(tela).child(separador()))
+            .child(desempenho)
+            .child(separador())
             .child(servidor)
     }
 

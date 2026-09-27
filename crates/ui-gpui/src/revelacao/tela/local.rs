@@ -52,6 +52,19 @@ pub enum Ferramenta {
 }
 
 impl Ferramenta {
+    /// O gesto desta ferramenta, para a ferramenta de desempenho.
+    pub fn operacao_de_desempenho(self) -> crate::desempenho::Operacao {
+        use crate::desempenho::Operacao;
+        match self {
+            Ferramenta::Pincel => Operacao::Pincel,
+            Ferramenta::Linear | Ferramenta::Radial => Operacao::Gradiente,
+            Ferramenta::Laco => Operacao::Laco,
+            Ferramenta::Carimbo => Operacao::Clone,
+            Ferramenta::BandAid => Operacao::Heal,
+            Ferramenta::Preencher => Operacao::Preencher,
+        }
+    }
+
     pub const MASCARA: [Ferramenta; 4] = [
         Ferramenta::Pincel,
         Ferramenta::Linear,
@@ -1279,6 +1292,7 @@ impl Revelacao {
         if self.revelacao_travada() {
             return;
         }
+        crate::desempenho::operacao(ferramenta.operacao_de_desempenho());
         let p = self.ponto_na_area(e.position);
         let Some(q) = self.foto_do_ponto(p) else {
             return;
@@ -1462,6 +1476,9 @@ impl Revelacao {
             cx.notify();
             return;
         };
+        if let Some(ferramenta) = self.local.ferramenta {
+            crate::desempenho::operacao(ferramenta.operacao_de_desempenho());
+        }
         // 🚨 **Ponto repetido não entra** (achado no app real, 2026-09-26): o
         // arrasto é ouvido pela janela e pelo palco, e a mesma posição chegava
         // várias vezes — um traço de quatro movimentos saía com trinta pontos,

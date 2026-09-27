@@ -276,6 +276,14 @@ async fn main() {
     // 📡 O app falando de si com o servidor: o aviso de versão por SSE e os
     // relatos de panic e erro. Mesmo cliente, mesmo token.
     ui_gpui::telemetria::ligar(api_do_site.clone(), tokio::runtime::Handle::current());
+    // ⏱️ A ferramenta de desempenho grava as sessões no mesmo SQLite do
+    // catálogo, em segundo plano (`desempenho::porta`).
+    ui_gpui::desempenho::painel::instalar(Arc::new(
+        ui_gpui::desempenho::porta::DepositoNoBanco::novo(
+            Arc::new(infrastructure::SqliteDesempenho::new(pool.clone())),
+            tokio::runtime::Handle::current(),
+        ),
+    ));
     let publicador: Arc<dyn Publicador> = Arc::new(
         PublicadorDaApi::novo(
             Arc::new({

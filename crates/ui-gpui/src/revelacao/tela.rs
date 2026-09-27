@@ -543,6 +543,7 @@ impl Revelacao {
                         tela.fim_do_gesto(cx);
                         return;
                     };
+                    crate::desempenho::operacao(crate::desempenho::Operacao::ArrastoDeSlider);
                     (definicao.aplicar)(&mut tela.ajustes, valor.start());
                     tela.gesto_do_slider(cx);
                     tela.pedir_revelacao(cx);
@@ -606,6 +607,7 @@ impl Revelacao {
                 let SliderEvent::Change(valor) = evento else {
                     return;
                 };
+                crate::desempenho::operacao(crate::desempenho::Operacao::ArrastoDeSlider);
                 tela.angulo_do_slider(valor.start(), cx);
             },
         ));
@@ -1245,6 +1247,7 @@ impl Revelacao {
     }
 
     fn mostrar_a_posicao(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        crate::desempenho::operacao(crate::desempenho::Operacao::TrocaDeFoto);
         // Dentro do lote, o lote fica; fora dele, recomeça (`selecaoAoTrocar`).
         self.marcadas = tira::ao_trocar(&self.marcadas, self.posicao);
         let foto = self.acervo[self.posicao].clone();
@@ -1292,6 +1295,7 @@ impl Revelacao {
         cx.background_executor()
             .spawn(async move {
                 for id in vizinhas {
+                    let _m = crate::desempenho::medir(crate::desempenho::Etapa::Decodificacao);
                     let _ = previews.get_preview(&id);
                 }
             })
@@ -1317,6 +1321,7 @@ impl Revelacao {
         // guarda em `trabalho:<id>` (ver `chave_do_trabalho`). Duas imagens,
         // duas chaves: aqui a origem sai da segunda, e a da galeria fica só como
         // **espera** na tela enquanto o download não volta.
+        let decodificacao = crate::desempenho::medir(crate::desempenho::Etapa::Decodificacao);
         let do_site = persistencia::so_existe_no_site(&foto);
         let trabalho = do_site
             .then(|| {
@@ -1346,6 +1351,7 @@ impl Revelacao {
                 pixels: Arc::new(rgba.into_raw()),
             }
         });
+        drop(decodificacao);
 
         // Os ajustes vêm da **foto**, e não do que estava no painel: é o que o
         // legado faz ao selecionar (`app.rs`, "Load saved edits FIRST"), e é o
@@ -2037,12 +2043,16 @@ impl Revelacao {
             aberta.revelada.as_ref()
         };
 
-        let exibida = fonte.map(|imagem| transformacao::aplicar(imagem, &corte, recortar));
+        let exibida = {
+            let _m = crate::desempenho::medir(crate::desempenho::Etapa::RecorteNaCpu);
+            fonte.map(|imagem| transformacao::aplicar(imagem, &corte, recortar))
+        };
 
         // 🔑 O histograma mede **o que está na tela**, e não a foto crua: com os
         // sliders mexidos, o histograma do cru descreveria uma imagem que ninguém
         // está vendo. É o que o legado faz (ele calcula depois do `process_image`).
         if medir {
+            let _m = crate::desempenho::medir(crate::desempenho::Etapa::Histograma);
             self.histograma = exibida.as_ref().map(Histograma::da_imagem);
         }
 
@@ -2138,6 +2148,7 @@ impl Revelacao {
     }
 
     fn pedir_revelacao(&mut self, cx: &mut Context<Self>) {
+        let preparacao = crate::desempenho::medir(crate::desempenho::Etapa::PreparacaoDosAjustes);
         let Some(Aberta {
             foto,
             origem: Some(origem),
@@ -2176,6 +2187,25 @@ impl Revelacao {
 
         let lado_na_tela = self.lado_do_rascunho();
         let id = self.processador.proximo_id();
+        if crate::desempenho::ativa() {
+            crate::desempenho::imagem(crate::desempenho::Imagem {
+                largura,
+                altura,
+                formato: self
+                    .aberta
+                    .as_ref()
+                    .and_then(|a| {
+                        std::path::Path::new(&a.foto.name)
+                            .extension()
+                            .map(|e| e.to_string_lossy().to_lowercase())
+                    })
+                    .unwrap_or_else(|| "?".into()),
+                mascaras: locais.camadas.len() as u32,
+                retoques: locais.retoques.len() as u32,
+            });
+        }
+        drop(preparacao);
+        crate::desempenho::pedido_ao_motor(id);
         self.processador.pedir(Pedido {
             id,
             pixels,
@@ -2265,6 +2295,7 @@ impl Revelacao {
             let origem = cx
                 .background_executor()
                 .spawn(async move {
+                    let _m = crate::desempenho::medir(crate::desempenho::Etapa::Decodificacao);
                     let imagem = previews.get_preview(&no_cache)?;
                     let rgba = imagem.to_rgba8();
                     let (largura, altura) = (rgba.width(), rgba.height());
@@ -2476,6 +2507,7 @@ impl Revelacao {
                     aberta.revelada = Some(resultado.imagem);
                 }
                 self.atualizar_exibicao();
+                crate::desempenho::foto_na_tela(resultado.id);
                 // Só larga a espera se o que voltou é o último pedido. No meio de
                 // um arrasto chegam resultados de valores já ultrapassados, e
                 // parar de colher ali deixaria a foto congelada num ajuste que o
