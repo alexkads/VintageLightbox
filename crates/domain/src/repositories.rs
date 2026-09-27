@@ -191,3 +191,32 @@ pub trait RevelacoesDoSiteRepository: Send + Sync {
         Ok(Vec::new())
     }
 }
+
+/// ⏱️ As sessões da ferramenta de desempenho (`crate::desempenho`), no SQLite
+/// do catálogo (migration 025).
+///
+/// 🔑 **Gravar é um lote só**, numa transação: a sessão, as métricas e a
+/// amostra de quadros entram juntas ou não entram. Quem grava é uma tarefa de
+/// fundo depois do "Salvar" — nunca o caminho do quadro.
+#[async_trait]
+pub trait DesempenhoRepository: Send + Sync {
+    /// Grava (ou substitui, pelo id) uma sessão inteira.
+    async fn salvar(&self, sessao: &crate::desempenho::SessaoDeDesempenho) -> DomainResult<()>;
+
+    /// Os cabeçalhos, da mais nova para a mais antiga.
+    async fn listar(&self, limite: u32) -> DomainResult<Vec<crate::desempenho::CabecalhoDaSessao>>;
+
+    /// Uma sessão com métricas e quadros.
+    async fn carregar(
+        &self,
+        id: &str,
+    ) -> DomainResult<Option<crate::desempenho::SessaoDeDesempenho>>;
+
+    /// A mesma operação em todas as sessões guardadas — de qualquer sistema.
+    async fn comparar(
+        &self,
+        operacao: &str,
+    ) -> DomainResult<Vec<crate::desempenho::LinhaDeComparacao>>;
+
+    async fn apagar(&self, id: &str) -> DomainResult<()>;
+}
