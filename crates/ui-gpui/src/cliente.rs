@@ -424,6 +424,15 @@ pub struct Cliente {
     mostrar_info: bool,
     /// O motor desta janela, aberto na primeira foto.
     processador: Option<Processador>,
+    /// O maior lado do monitor desta janela, em pixels do dispositivo — o
+    /// tamanho em que a foto é revelada aqui. Medido a cada `render`.
+    ///
+    /// 🪟 **O monitor, e não a janela**: ela pode passar a tela cheia sem foto
+    /// nova, e a foto revelada para a prévia pequena ficaria borrada no cliente.
+    /// Revelar os 2560 px da cópia para um monitor de 1920 era pagar a mais, a
+    /// cada passo de slider, na GPU e na subida para a janela — o que no
+    /// Windows, com duas APIs gráficas, pesava (dono, 27/set/2026).
+    lado_do_monitor: Option<u32>,
     /// O pedido que está no motor, e o que fazer com o resultado.
     revelando: Option<EmRevelacao>,
     /// O Comparar (`⇧C`): duas fotos lado a lado, enquanto o operador compara.
@@ -473,6 +482,7 @@ impl Cliente {
             // querer o nome do arquivo à vista, e desligar é uma tecla.
             mostrar_info: true,
             processador: None,
+            lado_do_monitor: None,
             revelando: None,
             par: None,
             revelando_lado: None,
@@ -614,6 +624,7 @@ impl Cliente {
             ajustes: pedido.ajustes,
             corte: transformacao::corte(&pedido.corte),
             locais: pedido.locais,
+            lado_na_tela: self.lado_do_monitor,
         });
         self.revelando = Some((id, pedido.foto, pedido.posicao, pedido.corte));
         if self._colheita.is_none() {
@@ -932,6 +943,11 @@ impl Cliente {
 impl Render for Cliente {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _t = crate::regua::trecho("tela do cliente: render");
+        self.lado_do_monitor = window.display(cx).map(|monitor| {
+            let tamanho = monitor.bounds().size;
+            let lado = f32::from(tamanho.width).max(f32::from(tamanho.height));
+            (lado * window.scale_factor().max(1.0)).ceil() as u32
+        });
         let info = self.mostrar_info.then(|| self.info()).flatten();
         let barra = tem_barra_propria(window);
         let mut janela = window.viewport_size();

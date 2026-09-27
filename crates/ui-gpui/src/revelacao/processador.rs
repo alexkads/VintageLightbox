@@ -53,6 +53,14 @@ pub struct Pedido {
     /// A Revelação local: máscaras e retoques, refeitos pelo motor na
     /// resolução desta revelação.
     pub locais: Arc<infrastructure::gpu_adjustments::ReceitaLocal>,
+    /// O maior lado, em pixels do dispositivo, da área onde a foto vai
+    /// aparecer. `None` revela no tamanho que chegou.
+    ///
+    /// 🔑 **Revelar mais pixels do que a tela mostra é pagar três vezes por
+    /// nada**: na GPU, na volta para a CPU e na subida para a janela. Durante o
+    /// arrasto de um slider a Revelação pede no tamanho do palco, e a tela do
+    /// cliente sempre no tamanho do monitor — ver [`tamanho_reduzido`].
+    pub lado_na_tela: Option<u32>,
 }
 
 /// O que volta.
@@ -178,6 +186,7 @@ fn laco(
         }
     );
 
+    let mut reduzida: Option<Reduzida> = None;
     while let Ok(pedido) = pedidos.recv() {
         // Pedido velho é largado sem processar: durante um arrasto a fila enche,
         // e o que interessa é sempre o último.
@@ -186,23 +195,138 @@ fn laco(
         }
 
         let comeco = std::time::Instant::now();
+        let (pixels, largura, altura) = match pedido
+            .lado_na_tela
+            .and_then(|lado| tamanho_reduzido(pedido.largura, pedido.altura, &pedido.corte, lado))
+        {
+            Some((largura, altura)) => (
+                reduzir(
+                    &mut reduzida,
+                    &pedido.pixels,
+                    (pedido.largura, pedido.altura),
+                    (largura, altura),
+                ),
+                largura,
+                altura,
+            ),
+            None => (pedido.pixels.clone(), pedido.largura, pedido.altura),
+        };
+        // Os módulos locais medem em pixels da foto: na cópia reduzida o raio
+        // encolhe junto, e o rascunho mostra o mesmo efeito que a cópia inteira.
+        motor.definir_escala_do_original(largura as f32 / pedido.largura.max(1) as f32);
         motor.definir_corte(&pedido.corte);
         // Sem suporte a máscara na GPU a revelação sai sem elas — a tela
         // avisa (`Processador::mascaras_suportadas`), e a exportação falha.
         if let Err(erro) = motor.definir_locais(&pedido.locais) {
             crate::telemetria::avisar!("⚠️ [Revelação] a receita local ficou de fora: {erro:?}");
         }
-        if let Some(imagem) = motor.revelar(
-            &pedido.pixels,
-            pedido.largura,
-            pedido.altura,
-            &pedido.ajustes,
-        ) {
+        if let Some(imagem) = motor.revelar(&pixels, largura, altura, &pedido.ajustes) {
             let _ = resultados.send(Resultado {
                 id: pedido.id,
                 imagem,
                 duracao_ms: comeco.elapsed().as_secs_f32() * 1000.0,
             });
         }
+    }
+}
+
+/// A última cópia reduzida, e de quais pixels ela saiu.
+///
+/// 🔑 **Reduz uma vez por foto, e não por quadro.** Durante um arrasto chegam
+/// dezenas de pedidos com o mesmo `Arc`; guardar a cópia também mantém a
+/// identidade dela, que é o que evita o motor subir a textura de novo.
+struct Reduzida {
+    de: Arc<Vec<u8>>,
+    tamanho: (u32, u32),
+    pixels: Arc<Vec<u8>>,
+}
+
+fn reduzir(
+    guardada: &mut Option<Reduzida>,
+    pixels: &Arc<Vec<u8>>,
+    (largura, altura): (u32, u32),
+    tamanho: (u32, u32),
+) -> Arc<Vec<u8>> {
+    if let Some(r) = guardada.as_ref() {
+        if Arc::ptr_eq(&r.de, pixels) && r.tamanho == tamanho {
+            return r.pixels.clone();
+        }
+    }
+    let original =
+        image::ImageBuffer::<image::Rgba<u8>, &[u8]>::from_raw(largura, altura, &pixels[..]);
+    let Some(original) = original else {
+        return pixels.clone();
+    };
+    let copia = Arc::new(image::imageops::thumbnail(&original, tamanho.0, tamanho.1).into_raw());
+    *guardada = Some(Reduzida {
+        de: pixels.clone(),
+        tamanho,
+        pixels: copia.clone(),
+    });
+    copia
+}
+
+/// O tamanho da cópia que basta para a tela, ou `None` quando não vale reduzir.
+///
+/// ⚠️ **O recorte é feito depois da revelação**, então a conta é sobre o
+/// pedaço que sobra: um corte que fica com metade da foto precisa do dobro de
+/// pixels para encher a mesma tela. O endireitamento amplia a foto mais um
+/// pouco, e entra pelo cosseno.
+pub fn tamanho_reduzido(largura: u32, altura: u32, corte: &Corte, lado: u32) -> Option<(u32, u32)> {
+    let maior = largura.max(altura) as f32;
+    if maior < 1.0 || lado == 0 {
+        return None;
+    }
+    let fracao = corte.largura().min(corte.altura()).max(0.01);
+    let giro = corte.angulo().to_radians().cos().abs().max(0.5);
+    let necessario = lado as f32 / (fracao * giro);
+    // Menos de 20% de ganho não paga a redução.
+    if necessario >= maior * 0.8 {
+        return None;
+    }
+    let fator = necessario / maior;
+    let medir = |lado: u32| ((lado as f32 * fator).round() as u32).max(1);
+    Some((medir(largura), medir(altura)))
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    #[test]
+    fn a_copia_cabe_na_tela_e_guarda_a_proporcao() {
+        let (l, a) = tamanho_reduzido(2560, 1707, &Corte::inteiro(), 1280).expect("reduz");
+        assert_eq!(l, 1280);
+        assert!((a as i32 - 854).abs() <= 1, "3:2 continua 3:2: {a}");
+    }
+
+    #[test]
+    fn tela_do_tamanho_da_foto_nao_reduz() {
+        assert_eq!(tamanho_reduzido(2560, 1707, &Corte::inteiro(), 2400), None);
+        assert_eq!(tamanho_reduzido(2560, 1707, &Corte::inteiro(), 0), None);
+    }
+
+    /// Metade da foto recortada precisa do dobro de pixels na mesma tela.
+    #[test]
+    fn o_recorte_pede_mais_pixels() {
+        let metade = Corte::novo(0.25, 0.25, 0.5, 0.5, 0, 0.0, false, false);
+        let (l, _) = tamanho_reduzido(4000, 3000, &metade, 1000).expect("reduz");
+        assert_eq!(l, 2000);
+        let apertado = Corte::novo(0.4, 0.4, 0.2, 0.2, 0, 0.0, false, false);
+        assert_eq!(tamanho_reduzido(4000, 3000, &apertado, 1000), None);
+    }
+
+    /// A cópia sai uma vez por foto: o mesmo `Arc` volta enquanto dura o arrasto.
+    #[test]
+    fn a_reducao_e_feita_uma_vez_por_foto() {
+        let pixels = Arc::new(vec![128u8; 40 * 20 * 4]);
+        let mut guardada = None;
+        let primeira = reduzir(&mut guardada, &pixels, (40, 20), (20, 10));
+        assert_eq!(primeira.len(), 20 * 10 * 4);
+        let segunda = reduzir(&mut guardada, &pixels, (40, 20), (20, 10));
+        assert!(Arc::ptr_eq(&primeira, &segunda));
+        let outra = Arc::new(vec![0u8; 40 * 20 * 4]);
+        let terceira = reduzir(&mut guardada, &outra, (40, 20), (20, 10));
+        assert!(!Arc::ptr_eq(&primeira, &terceira), "foto nova, cópia nova");
     }
 }

@@ -284,12 +284,14 @@ impl Revelacao {
             ajustes,
             corte,
             locais,
+            lado_na_tela: None,
         });
         self.pedidos.insert(
             id,
             Pendente {
                 chave,
                 destino: Destino::Comparar { posicao, crop },
+                rascunho: false,
             },
         );
         // O pedido novo passou à frente da antecipação: a thread a larga.

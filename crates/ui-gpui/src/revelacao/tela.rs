@@ -136,6 +136,10 @@ const A_REPOR_POR_VEZ: usize = 24;
 /// [`Revelacao::gravar_o_que_estiver_pendente`] faz.
 const ESPERA_DA_GRAVACAO: Duration = Duration::from_millis(500);
 
+/// Quanto o slider fica parado para o gesto dar-se por acabado sem `Release`
+/// — a roda do mouse e as setas mudam o valor sem soltar nada.
+const FIM_DO_GESTO: Duration = Duration::from_millis(150);
+
 /// Até onde o slider de endireitamento vai, em graus.
 const ANGULO_MAXIMO: f32 = corte::ANGULO_MAXIMO;
 
@@ -386,6 +390,15 @@ pub struct Revelacao {
     /// abriria um laço novo e a tela acabaria com dezenas deles perguntando a
     /// mesma coisa.
     colhendo: bool,
+    /// Um slider está sendo arrastado: a foto sai no tamanho do palco.
+    ///
+    /// 🪟 **É o que o Lightroom faz no arrasto**, e o que o Windows pedia: lá
+    /// cada quadro revelado atravessa duas APIs gráficas (o motor e a janela),
+    /// e revelar 2560 px para um palco de 1200 era pagar isso em dobro. Acaba no
+    /// `Release` do slider, ou em [`FIM_DO_GESTO`] sem movimento — o que vier
+    /// primeiro —, e aí a cópia inteira é pedida.
+    em_gesto: bool,
+    _fim_do_gesto: Option<Task<()>>,
     /// A foto **de antes**, enquanto a de depois entra por cima.
     ///
     /// 🔑 Guardada só nas trocas que valem cruzamento (predefinição, desfazer,
@@ -442,6 +455,10 @@ struct Controle {
 struct Pendente {
     chave: cache::Chave,
     destino: Destino,
+    /// Revelado no tamanho do palco durante um arrasto (ver
+    /// [`Revelacao::lado_do_rascunho`]): vai à tela, mas **nunca** ao cache
+    /// nem à tira — a chave é a da cópia inteira.
+    rascunho: bool,
 }
 
 /// Para onde vai o que o motor devolver.
@@ -518,9 +535,11 @@ impl Revelacao {
                     // O `Release` (novo no gpui-kit 0.6) chega depois do último `Change`
                     // com o mesmo valor: tratá-lo gravaria duas vezes.
                     let SliderEvent::Change(valor) = evento else {
+                        tela.fim_do_gesto(cx);
                         return;
                     };
                     (definicao.aplicar)(&mut tela.ajustes, valor.start());
+                    tela.gesto_do_slider(cx);
                     tela.pedir_revelacao(cx);
                     tela.adiar_gravacao(cx);
                 },
@@ -647,6 +666,8 @@ impl Revelacao {
             descartar_ate: 0,
             exibicao_atrasada: false,
             colhendo: false,
+            em_gesto: false,
+            _fim_do_gesto: None,
             saindo: None,
             cruzar: false,
             cruzamento: 0,
@@ -1615,6 +1636,41 @@ impl Revelacao {
     /// Cada chamada **substitui** a espera anterior, e substituir a `Task` a
     /// cancela — é o que faz um arrasto inteiro virar uma gravação só, em vez de
     /// uma por milímetro.
+    /// Um passo do slider: o gesto continua, e acaba sozinho se parar.
+    fn gesto_do_slider(&mut self, cx: &mut Context<Self>) {
+        self.em_gesto = true;
+        self._fim_do_gesto = Some(cx.spawn(async move |esta, cx| {
+            cx.background_executor().timer(FIM_DO_GESTO).await;
+            let _ = esta.update(cx, |tela, cx| tela.fim_do_gesto(cx));
+        }));
+    }
+
+    /// O dedo soltou (ou parou): a cópia inteira substitui o rascunho.
+    fn fim_do_gesto(&mut self, cx: &mut Context<Self>) {
+        self._fim_do_gesto = None;
+        if std::mem::take(&mut self.em_gesto) {
+            self.pedir_revelacao(cx);
+        }
+    }
+
+    /// O maior lado do palco em pixels do dispositivo, se a foto pode sair
+    /// nele — só no meio de um arrasto, e só com a foto inteira à vista.
+    ///
+    /// ⚠️ Com zoom, no Enquadrar ou no Comparar, a cópia inteira: lá a tela
+    /// mostra mais pixels do que o palco tem, ou outra coisa que não o palco.
+    fn lado_do_rascunho(&self) -> Option<u32> {
+        if !self.em_gesto
+            || self.edicao.is_some()
+            || self.comparacao.is_some()
+            || self.foto_ampliada()
+        {
+            return None;
+        }
+        let lado = f32::from(self.palco.size.width).max(f32::from(self.palco.size.height))
+            * self.navegacao.dpr.max(1.0);
+        (lado >= 1.0).then(|| lado.ceil() as u32)
+    }
+
     fn adiar_gravacao(&mut self, cx: &mut Context<Self>) {
         self.pendente = true;
         self._gravacao = Some(cx.spawn(async move |esta, cx| {
@@ -2106,6 +2162,7 @@ impl Revelacao {
             return;
         }
 
+        let lado_na_tela = self.lado_do_rascunho();
         let id = self.processador.proximo_id();
         self.processador.pedir(Pedido {
             id,
@@ -2115,12 +2172,14 @@ impl Revelacao {
             ajustes,
             corte,
             locais,
+            lado_na_tela,
         });
         self.pedidos.insert(
             id,
             Pendente {
                 chave,
                 destino: Destino::Palco,
+                rascunho: lado_na_tela.is_some(),
             },
         );
         // 🚨 **O especulativo ficou para trás deste.** `proximo_id` acima já moveu
@@ -2251,12 +2310,14 @@ impl Revelacao {
             ajustes,
             corte,
             locais,
+            lado_na_tela: None,
         });
         self.pedidos.insert(
             id,
             Pendente {
                 chave,
                 destino: Destino::Cache,
+                rascunho: false,
             },
         );
         self.antecipando = Some(id);
@@ -2356,8 +2417,21 @@ impl Revelacao {
             let antecipado = pendente
                 .as_ref()
                 .is_some_and(|p| !matches!(p.destino, Destino::Palco));
+            let rascunho = pendente.as_ref().is_some_and(|p| p.rascunho);
+            // 🔧 Com `VLB_VIGIA=1`, o tamanho e o custo de cada revelação — a
+            // conta que separa a GPU do resto quando um balcão acha lento.
+            if crate::depuracao::vigia::ligado() {
+                eprintln!(
+                    "[revelacao] {}x{} {} em {:.1} ms no motor ({})",
+                    resultado.imagem.width(),
+                    resultado.imagem.height(),
+                    if rascunho { "rascunho" } else { "inteira" },
+                    resultado.duracao_ms,
+                    self.processador.backend().unwrap_or("?"),
+                );
+            }
             if let Some(pendente) = &pendente {
-                if antecipado || ultimo_do_gesto {
+                if (antecipado || ultimo_do_gesto) && !rascunho {
                     self.reveladas
                         .guardar(pendente.chave.clone(), &resultado.imagem);
                 }
@@ -2396,6 +2470,10 @@ impl Revelacao {
                 // dedo já passou.
                 if ultimo_do_gesto {
                     self.aguardando = None;
+                }
+                // O rascunho é só o que o dedo vê: a tira, a próxima foto e o
+                // Comparar esperam a cópia inteira, que vem quando o gesto acaba.
+                if ultimo_do_gesto && !rascunho {
                     // 🔑 **Chegou o último: a tira mostra o que o palco mostra.**
                     // Este é o único instante em que a foto revelada está pronta e
                     // parada — no meio de um arrasto os resultados são de valores
