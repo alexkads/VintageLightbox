@@ -561,6 +561,18 @@ impl Revelacao {
         self.palco.center()
     }
 
+    /// Quantos retoques a receita tem.
+    #[cfg(test)]
+    pub fn retoques_locais(&self) -> usize {
+        self.locais.retoques.len()
+    }
+
+    /// Se há um gesto da Revelação local em curso.
+    #[cfg(test)]
+    pub fn gesto_local_em_curso(&self) -> bool {
+        self.local.gesto.is_some()
+    }
+
     /// Põe o cursor na busca de predefinições, como o clique do operador.
     #[cfg(test)]
     pub fn focar_a_busca(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -968,16 +980,14 @@ impl Revelacao {
                 },
             },
             Ferramenta::Carimbo | Ferramenta::BandAid => {
-                let origem = match (self.local.origem, ferramenta) {
-                    (Some(o), _) => o,
-                    (None, Ferramenta::BandAid) => self.origem_automatica(q),
-                    (None, _) => {
-                        // O carimbo precisa de origem: a dica do painel diz como.
-                        self.local.gesto = None;
-                        cx.notify();
-                        return;
-                    }
-                };
+                // 🔑 **Os dois acham a origem sozinhos, como no Lightroom** — e
+                // ela se arrasta depois. O carimbo esperava um ⌥-clique antes,
+                // à moda do Photoshop, e o clique sem ele não fazia nada
+                // (achado no app real, 2026-09-26). O ⌥-clique continua valendo.
+                let origem = self
+                    .local
+                    .origem
+                    .unwrap_or_else(|| self.origem_automatica(q));
                 let carimbo = Carimbo {
                     origem,
                     destino_inicial: q,
@@ -1730,7 +1740,9 @@ impl Revelacao {
                 "Arraste o tracejado para mudar a amostragem, o branco para mover, as alças para o tamanho. Delete apaga."
             }
             Ferramenta::Carimbo if self.local.origem.is_some() => "Pinte o destino. ⌥ + clique troca a origem.",
-            Ferramenta::Carimbo => "⌥ + clique escolhe a origem; depois pinte o destino.",
+            Ferramenta::Carimbo => {
+                "Pinte o destino; a origem é escolhida ao lado e dá para arrastar depois. ⌥ + clique fixa uma."
+            }
             Ferramenta::BandAid if self.local.selecionado.is_some() => {
                 "Arraste o tracejado para mudar a amostragem, o branco para mover, as alças para o tamanho. Delete apaga."
             }

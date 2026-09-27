@@ -141,6 +141,11 @@ pub enum Passo {
     /// `mouse_real apertar 0.5 0.5` · `arrastar` · `soltar` · `mover` ·
     /// `duplo` — o botão esquerdo de verdade (`NSEvent`), numa fração do palco
     /// da foto aberta na Revelação.
+    ///
+    /// ⚠️ **O `mover` sem botão não dá hover** a um app aberto pelo terminal:
+    /// no macOS o GPUI só considera sob o mouse a janela **ativa**
+    /// (`is_window_hovered` = `is_window_active`), e o sistema não deixa um
+    /// processo em segundo plano se ativar. Apertar, arrastar e soltar chegam.
     MouseReal { tipo: String, x: f32, y: f32 },
     /// `rajada 200 25 tecla right` — o passo do fim da linha, N vezes, com o
     /// intervalo em milissegundos, **sem** o respiro de 120 ms entre passos: é

@@ -450,7 +450,20 @@ impl Revelacao {
                     if !tela.local.arrastando() {
                         tela.local_mover(e, cx);
                     }
-                }));
+                }))
+                // 🚨 **O soltar também é ouvido aqui** (achado no app real,
+                // 2026-09-26): o da janela só é registrado no quadro seguinte
+                // ao apertar, e um clique rápido — o toque do trackpad — soltava
+                // antes dele existir, deixando o gesto preso. Soltar duas vezes
+                // é inofensivo: o segundo não acha gesto.
+                .on_mouse_up(
+                    MouseButton::Left,
+                    cx.listener(|tela, _e: &MouseUpEvent, _w, cx| tela.local_soltar(cx)),
+                )
+                .on_mouse_up_out(
+                    MouseButton::Left,
+                    cx.listener(|tela, _e: &MouseUpEvent, _w, cx| tela.local_soltar(cx)),
+                );
         }
         let ampliada = self
             .vista()
