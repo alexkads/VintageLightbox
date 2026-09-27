@@ -111,10 +111,25 @@ impl Aplicativo {
         self._resgate = Some(cx.spawn(async move |raiz, cx| {
             let mut desfecho = Desfecho::default();
             for foto in fotos {
+                // 🔑 **Marcada antes do `DELETE`**: um envio para ela que já
+                // esteja no ar volta com 404, e esse 404 não é recusa — ver
+                // `largar_o_que_ia_para`.
+                let _ = raiz.update(cx, |raiz, _| {
+                    raiz.tiradas_do_site.insert(foto.no_site.clone())
+                });
                 // ⚠️ Uma de cada vez, e a que falha não derruba as outras.
                 match rejeitar_uma(&raiz, &foto, cx).await {
-                    Ok(()) => desfecho.voltaram.push(foto.arquivo.clone()),
-                    Err(()) => desfecho.ficaram.push(foto.arquivo.clone()),
+                    Ok(()) => {
+                        let _ = raiz
+                            .update(cx, |raiz, cx| raiz.largar_o_que_ia_para(&foto.no_site, cx));
+                        desfecho.voltaram.push(foto.arquivo.clone())
+                    }
+                    Err(()) => {
+                        // Ficou no site: o que for para ela volta a valer.
+                        let _ =
+                            raiz.update(cx, |raiz, _| raiz.tiradas_do_site.remove(&foto.no_site));
+                        desfecho.ficaram.push(foto.arquivo.clone())
+                    }
                 }
             }
             let _ = raiz.update(cx, |raiz, cx| raiz.terminar_o_resgate(desfecho, cx));

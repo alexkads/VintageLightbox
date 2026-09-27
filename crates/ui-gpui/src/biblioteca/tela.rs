@@ -817,6 +817,21 @@ impl Biblioteca {
         self.fotos.as_ref().clone()
     }
 
+    /// O id no catálogo desta máquina da foto que está no site como `no_site`
+    /// — sem clonar o acervo, que é o que [`Self::todas_as_fotos`] faz.
+    ///
+    /// 🚨 **Só a cópia de verdade: arquivo neste disco e id do catálogo.** O
+    /// acervo também guarda a foto do site (`site:<id>`, com o mesmo id remoto),
+    /// e o preview dela é a imagem **da galeria** — revelada e com marca. Achar
+    /// essa linha levaria a galeria para o lugar do bruto (visto no e2e
+    /// `download_no_ar_nao_segura_a_janela`).
+    pub fn id_local_do_site(&self, no_site: &str) -> Option<String> {
+        self.fotos
+            .iter()
+            .find(|f| f.pos_venda_foto_id.as_deref() == Some(no_site) && e_copia_local(f))
+            .map(|f| f.id.clone())
+    }
+
     /// Onde cada uma destas fotos está no acervo — **a ordem em que o ensaio
     /// foi fotografado**.
     ///
@@ -2438,6 +2453,15 @@ impl Biblioteca {
     pub fn barra(&mut self, cx: &mut Context<Self>) -> AnyElement {
         self.cabecalho(cx).into_any_element()
     }
+}
+
+/// A linha é uma cópia **deste computador** — e não a foto do site guardada
+/// no acervo para a grade.
+pub(crate) fn e_copia_local(foto: &PhotoViewModel) -> bool {
+    !foto.path.is_empty()
+        && !foto
+            .id
+            .starts_with(crate::revelacao::persistencia::PREFIXO_DO_SITE)
 }
 
 #[cfg(test)]

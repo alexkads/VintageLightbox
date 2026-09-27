@@ -494,7 +494,9 @@ async fn revelar_e_salvar(
 
 /// A receita como o site a grava — mora no `infrastructure`, junto com a
 /// compressão com que ela sobe. Ver `infrastructure::pos_venda::receita`.
-pub(crate) use infrastructure::pos_venda::receita::ajustes_em_json;
+pub(crate) use infrastructure::pos_venda::receita::{
+    ajustes_em_json, mesma_receita, mesma_receita_em_texto,
+};
 
 impl Publicador for PublicadorDaApi {
     fn autorizar(&self, canal: Sender<Recado>) {

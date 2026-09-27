@@ -1093,6 +1093,14 @@ impl Revelacao {
 
             dialogo
                 .confirm()
+                // 🚨 O kit não tem português e escrevia "OK" e "Cancel" no meio
+                // de uma caixa toda em português (visto rodando o app,
+                // 27/set/2026). O botão diz o que faz, como no site.
+                .button_props(
+                    gpui_kit::component::dialog::DialogButtonProps::default()
+                        .ok_text(SharedString::from(format!("Sincronizar {quantas}")))
+                        .cancel_text("Cancelar"),
+                )
                 .title(SharedString::from(format!("Sincronizar {quantas} fotos")))
                 .child(
                     div().text_xs().child(
