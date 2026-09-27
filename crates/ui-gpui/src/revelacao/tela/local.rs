@@ -2151,19 +2151,35 @@ impl Revelacao {
         for f in Ferramenta::RETOQUE {
             barra = barra.child(botao_da_ferramenta(f, cx));
         }
-        barra = barra.child(div().flex_1()).child(
-            Button::new("local-marcacoes")
-                .icon(Icon::new(Icone::MapPin).size(px(15.)))
-                .small()
-                .ghost()
-                .selected(self.local.marcacoes)
-                .tooltip(if self.local.marcacoes {
-                    "Esconder marcações (H)"
-                } else {
-                    "Mostrar marcações (H)"
-                })
-                .on_click(cx.listener(|tela, _e, _w, cx| tela.alternar_marcacoes(cx))),
-        );
+        let ampliada = self.navegacao.zoom.nivel != crate::revelacao::zoom::Nivel::Encaixar;
+        barra = barra
+            .child(div().flex_1())
+            // O zoom da prévia: laço, carimbo e band-aid pedem a foto de perto.
+            // A barra completa (níveis, slider, navegador) fica no palco.
+            .child(
+                Button::new("local-zoom")
+                    .icon(Icon::new(Icone::ZoomIn).size(px(15.)))
+                    .small()
+                    .ghost()
+                    .selected(ampliada)
+                    .tooltip(
+                        "Alternar zoom: encaixar ↔ último nível (Z · Espaço; pinça no trackpad)",
+                    )
+                    .on_click(cx.listener(|tela, _e, _w, cx| tela.alternar_zoom(None, cx))),
+            )
+            .child(
+                Button::new("local-marcacoes")
+                    .icon(Icon::new(Icone::MapPin).size(px(15.)))
+                    .small()
+                    .ghost()
+                    .selected(self.local.marcacoes)
+                    .tooltip(if self.local.marcacoes {
+                        "Esconder marcações (H)"
+                    } else {
+                        "Mostrar marcações (H)"
+                    })
+                    .on_click(cx.listener(|tela, _e, _w, cx| tela.alternar_marcacoes(cx))),
+            );
 
         // 🔑 **Sanfona, como os outros painéis da coluna**: a mesma chave de
         // lembrança (`revelacao:<título>`) e o ponto âmbar quando a foto tem

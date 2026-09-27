@@ -855,6 +855,36 @@ impl Revelacao {
             // galeria e sair" —, pelo mesmo caminho do clique.
             "zerar" => self.zerar_tudo(window, cx),
             "estado_local" => eprintln!("[local] {}", self.descrever_local(window)),
+            // 🧪 O zoom de agora, com o palco e o trilho do slider em pontos da
+            // janela — para o roteiro clicar na barra sem adivinhar.
+            "estado_zoom" => {
+                let n = &self.navegacao;
+                let razao = self
+                    .vista()
+                    .map(|(c, v)| crate::revelacao::zoom::razao_da_escala(v.escala, &c));
+                eprintln!(
+                    "[zoom] nivel={:?} razao={:?} centro=({:.3},{:.3}) menu={} navegador={} palco={:?} trilho={:?}",
+                    n.zoom.nivel,
+                    razao,
+                    n.zoom.centro.x,
+                    n.zoom.centro.y,
+                    n.menu_de_niveis,
+                    n.navegador_flutuante,
+                    self.palco,
+                    n.trilho,
+                );
+                if let Some(imagem) = self.aberta.as_ref().and_then(|a| a.desenhada.clone()) {
+                    let t = imagem.size(0);
+                    eprintln!(
+                        "[zoom] desenhada={}x{} bytes={:?} saindo={} nitidos={}",
+                        t.width.0,
+                        t.height.0,
+                        imagem.as_bytes(0).map(|b| b.len()),
+                        self.saindo.is_some(),
+                        self.pixels_nitidos(&imagem).is_some(),
+                    );
+                }
+            }
             // 🧪 O caso do dono (2026-09-22): *"com a tela do cliente aberta,
             // resolvi mexer a exposição no modo revelação"* — arrastar **e**
             // passar de foto no meio do arrasto. A cada `N` chamadas (o segundo

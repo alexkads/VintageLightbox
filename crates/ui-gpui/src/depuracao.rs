@@ -157,6 +157,12 @@ pub enum Passo {
         modificadores: usize,
         na_janela: bool,
     },
+    /// `pinca 0.05 0.5 0.5` — a pinça do trackpad (o `magnify` do AppKit), com
+    /// o quanto a escala cresce (0,05 = 5%; negativo afasta), numa fração do
+    /// palco. O AppKit não deixa criar esse `NSEvent`: ela entra pelo
+    /// `dispatch_event` da janela, o mesmo caminho que o evento nativo
+    /// percorre depois de traduzido.
+    Pinca { delta: f32, x: f32, y: f32 },
     /// `rajada 200 25 tecla right` — o passo do fim da linha, N vezes, com o
     /// intervalo em milissegundos, **sem** o respiro de 120 ms entre passos: é
     /// a carga do teste de estresse (dono, 2026-09-22: *"a aplicação parou de
@@ -256,6 +262,11 @@ pub fn ler_roteiro(texto: &str) -> Result<Vec<Passo>, String> {
                 na_janela: comando == "mouse_janela",
             },
             "tecla" => Passo::Tecla(argumentos.first().copied().unwrap_or_default().to_string()),
+            "pinca" => Passo::Pinca {
+                delta: numero(0)?,
+                x: numero(1)?,
+                y: numero(2)?,
+            },
             "rajada" => {
                 let vezes = numero(0)? as usize;
                 let intervalo = Duration::from_millis(numero(1)? as u64);

@@ -75,8 +75,16 @@ pub struct Retangulo {
     pub h: f32,
 }
 
-/// As razões do Lightroom Classic, com 1:8 e 16:1 nas pontas.
-pub const RAZOES: [f32; 11] = [
+/// As razões do Lightroom Classic, com 1:8 embaixo — e, em cima, além do 16:1
+/// dele, 32:1 e 64:1.
+///
+/// 🔑 **O zoom não para no 16:1** (dono, 2026-09-27: *"o zoom de pinça não
+/// pode ser limitado, pois às vezes precisamos ver detalhes próximos do
+/// pixel"*). No 64:1 um pixel da foto é um quadrado de 32 pontos numa tela
+/// Retina: dá para contar os vizinhos de um pixel quente, que é o que o
+/// carimbo e o band-aid pedem. Mais que isso seria um pixel maior que o
+/// pincel.
+pub const RAZOES: [f32; 13] = [
     1. / 8.,
     1. / 4.,
     1. / 3.,
@@ -88,6 +96,8 @@ pub const RAZOES: [f32; 11] = [
     8.,
     11.,
     16.,
+    32.,
+    64.,
 ];
 const RAZAO_MINIMA: f32 = RAZOES[0];
 const RAZAO_MAXIMA: f32 = RAZOES[RAZOES.len() - 1];
@@ -114,11 +124,62 @@ pub fn razao_da_escala(escala: f32, c: &Cena) -> f32 {
 }
 
 /// O de baixo nunca impede o encaixe, e o de cima nunca impede o preencher.
-pub fn limitar_escala(escala: f32, c: &Cena) -> f32 {
-    let minima = escala_de_encaixar(c).min(escala_da_razao(RAZAO_MINIMA, c));
-    let maxima = escala_de_preencher(c).max(escala_da_razao(RAZAO_MAXIMA, c));
-    escala.max(minima).min(maxima)
+pub fn escala_minima(c: &Cena) -> f32 {
+    escala_de_encaixar(c).min(escala_da_razao(RAZAO_MINIMA, c))
 }
+
+pub fn escala_maxima(c: &Cena) -> f32 {
+    escala_de_preencher(c).max(escala_da_razao(RAZAO_MAXIMA, c))
+}
+
+pub fn limitar_escala(escala: f32, c: &Cena) -> f32 {
+    escala.max(escala_minima(c)).min(escala_maxima(c))
+}
+
+/// As paradas do menu da barra do palco: as potências de dois, de 1:8 a 64:1
+/// (as da prévia do motor, com as pontas daqui).
+pub const RAZOES_DO_MENU: [f32; 10] = [1. / 8., 1. / 4., 1. / 2., 1., 2., 4., 8., 16., 32., 64.];
+
+/// O slider contínuo da barra (0–1) anda em escala **logarítmica**: cada
+/// trecho igual do trilho multiplica o zoom pelo mesmo tanto — de 1:1 a 2:1 é
+/// o mesmo trecho que de 32:1 a 64:1. Linear, quase todo o trilho seria acima
+/// de 8:1.
+pub fn escala_do_slider(t: f32, c: &Cena) -> f32 {
+    let (a, b) = (escala_minima(c), escala_maxima(c));
+    a * (b / a).powf(t.clamp(0., 1.))
+}
+
+pub fn slider_da_escala(escala: f32, c: &Cena) -> f32 {
+    let (a, b) = (escala_minima(c), escala_maxima(c));
+    if b <= a {
+        return 0.;
+    }
+    ((escala / a).ln() / (b / a).ln()).clamp(0., 1.)
+}
+
+/// A razão em porcentagem, como na barra da prévia: `100%` é o 1:1. Abaixo
+/// de 20% a casa decimal conta (12,5% é o 1:8).
+pub fn porcentagem(razao: f32) -> String {
+    let p = razao * 100.;
+    if p < 20. && (p - p.round()).abs() > 0.05 {
+        format!("{:.1}%", p).replace('.', ",")
+    } else {
+        format!("{}%", p.round() as i32)
+    }
+}
+
+/// O fator da pinça do trackpad: o `magnification` do AppKit é o quanto a
+/// escala cresce neste evento (0,02 = 2%), a conta que o próprio AppKit
+/// sugere. Sem freio: só não deixa a escala virar zero ou negativa.
+pub fn fator_da_pinca(delta: f32) -> f32 {
+    (1. + delta).max(0.05)
+}
+
+/// A partir de quantos pixels do dispositivo por pixel da foto o palco
+/// desenha os pixels nítidos, um quadrado cada (o `image-rendering: pixelated`
+/// da prévia). O GPU do GPUI amplia a textura com filtro linear: acima disto
+/// o pixel vira um borrão, e o que se queria ver some.
+pub const PIXELS_NITIDOS_A_PARTIR_DE: f32 = 8.;
 
 pub fn escala_do_nivel(nivel: Nivel, c: &Cena) -> f32 {
     match nivel {
@@ -464,6 +525,58 @@ mod testes {
         let z =
             zoom_da_caixa(&v, Ponto { x: 0., y: 150. }, Ponto { x: 500., y: 400. }, &c).unwrap();
         assert_eq!(z.nivel, Nivel::Razao(2.));
+    }
+
+    #[test]
+    fn o_slider_vai_de_ponta_a_ponta_em_escala_logaritmica() {
+        let c = cena();
+        assert!((escala_do_slider(0., &c) - escala_minima(&c)).abs() < 1e-5);
+        assert!((escala_do_slider(1., &c) - escala_maxima(&c)).abs() < 1e-4);
+        // Nesta cena o trilho vai de 1:8 a 64:1 (nove dobras): o 1:1 fica a
+        // 3/9 dele, e o meio do trilho é a média geométrica das pontas.
+        let um = escala_da_razao(1., &c);
+        assert!((slider_da_escala(um, &c) - 3. / 9.).abs() < 1e-4);
+        let meio = escala_do_slider(0.5, &c);
+        let geometrica = (escala_minima(&c) * escala_maxima(&c)).sqrt();
+        assert!((meio - geometrica).abs() < 1e-4);
+        for t in [0., 0.2, 0.61, 1.] {
+            assert!((slider_da_escala(escala_do_slider(t, &c), &c) - t).abs() < 1e-4);
+        }
+        assert_eq!(
+            slider_da_escala(100., &c),
+            1.,
+            "fora do trilho, encosta na ponta"
+        );
+    }
+
+    #[test]
+    fn a_porcentagem_e_a_da_previa() {
+        assert_eq!(porcentagem(1.), "100%");
+        assert_eq!(porcentagem(1.374), "137%");
+        assert_eq!(porcentagem(0.125), "12,5%");
+        assert_eq!(porcentagem(0.25), "25%");
+        assert_eq!(porcentagem(0.064), "6,4%");
+    }
+
+    #[test]
+    fn a_pinca_amplia_sem_freio_e_nunca_vira_do_avesso() {
+        assert!((fator_da_pinca(0.02) - 1.02).abs() < 1e-6);
+        assert!(fator_da_pinca(-0.02) < 1.);
+        assert_eq!(fator_da_pinca(5.), 6.);
+        assert!(fator_da_pinca(-3.) > 0.);
+    }
+
+    #[test]
+    fn a_pinca_chega_ao_pixel() {
+        // Pinçando sem parar, a escala vai além do 16:1 e só encosta no
+        // 64:1 — um pixel da foto em 64 pixels da tela.
+        let c = cena();
+        let mut escala = escala_de_encaixar(&c);
+        for _ in 0..400 {
+            escala = limitar_escala(escala * fator_da_pinca(0.05), &c);
+        }
+        assert_eq!(nivel_da_escala(escala, &c), Nivel::Razao(64.));
+        assert!(razao_da_escala(escala, &c) > 16.);
     }
 
     #[test]

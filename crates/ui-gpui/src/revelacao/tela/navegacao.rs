@@ -7,9 +7,13 @@
 //! | arrastar | move a foto ampliada |
 //! | `⌘`/`Ctrl` + arrastar | a caixa marcada passa a encher a tela |
 //! | `⌥` + arrastar | zoom contínuo em torno de onde começou |
-//! | `⌘`/`Ctrl`/`⌥` + roda, e a pinça | zoom em torno do cursor |
+//! | `⌘`/`Ctrl`/`⌥` + roda | zoom em torno do cursor |
+//! | pinça do trackpad | zoom em torno dos dedos — também com ferramenta da Revelação local |
 //! | roda | move a foto ampliada |
 //! | `Z` · `⌘=` · `⌘−` · `⌘0` · `⌘⌥0` · Home · End · PgDn · PgUp | ver `app.rs` |
+//!
+//! A barra do palco é a da prévia do motor: `Encaixar · Preencher · 1:1`, o
+//! passo, a lista dos níveis, o slider contínuo e o navegador flutuante.
 //!
 //! 🔑 **No Enquadrar não há zoom**, como no site: o retângulo é desenhado
 //! sobre a foto encaixada, e o navegador fica apagado.
@@ -20,8 +24,8 @@ use std::time::{Duration, Instant};
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon, Sizable};
 use gpui_kit::{
     canvas, div, img, prelude::*, px, AnyElement, Bounds, Context, Div, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, Pixels, Point, RenderImage,
-    ScrollWheelEvent, SharedString, Stateful,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, PinchEvent, Pixels, Point,
+    RenderImage, ScrollWheelEvent, SharedString, Stateful,
 };
 
 use super::Revelacao;
@@ -31,6 +35,10 @@ use crate::revelacao::zoom::{self, Cena, EstadoDoZoom, Medidas, Nivel, Ponto, Vi
 /// A caixa da miniatura do navegador: a coluna de 224 px menos o respiro.
 const LARGURA_DO_NAVEGADOR: f32 = 208.;
 const ALTURA_DO_NAVEGADOR: f32 = 156.;
+/// O slider da barra do palco e o navegador flutuante, nas medidas da prévia.
+const LARGURA_DO_TRILHO: f32 = 110.;
+const ALTURA_DO_TRILHO: f32 = 20.;
+const LARGURA_DO_FLUTUANTE: f32 = 190.;
 
 /// A folha de atalhos — o `ATALHOS` de `atalhos.ts`, na mesma ordem.
 pub(super) const ATALHOS: [(&str, &[(&str, &str)]); 5] = [
@@ -109,7 +117,10 @@ const GESTOS_DO_ZOOM: [(&str, &str); 7] = [
     ("Arrastar", "move a foto ampliada"),
     ("⌘ + arrastar", "zoom na área marcada"),
     ("⌥ + arrastar", "zoom contínuo, para a direita aproxima"),
-    ("⌘ + roda, ou pinça", "zoom em torno do cursor"),
+    (
+        "⌘ + roda, ou pinça",
+        "zoom em torno do cursor (com ferramenta também)",
+    ),
     ("Roda", "move a foto ampliada"),
     ("Navegador", "clique ou arraste para levar a tela até lá"),
 ];
@@ -155,6 +166,15 @@ pub(super) struct Navegacao {
     /// O zoom de antes do último clique — o duplo clique que entra na edição
     /// devolve o que o primeiro clique do par mudou.
     pub zoom_antes_do_clique: Option<EstadoDoZoom>,
+    /// A lista de níveis da barra do palco, aberta.
+    pub menu_de_niveis: bool,
+    /// O slider da barra: onde está na janela, e se está sendo arrastado.
+    pub trilho: Bounds<Pixels>,
+    pub arrastando_trilho: bool,
+    /// O navegador flutuante sobre a foto (o botão do mapa na barra).
+    pub navegador_flutuante: bool,
+    pub miniatura_flutuante: Bounds<Pixels>,
+    pub arrastando_flutuante: bool,
 }
 
 impl Default for Navegacao {
@@ -172,6 +192,12 @@ impl Default for Navegacao {
             ultimo_ponteiro: None,
             ajuda: false,
             zoom_antes_do_clique: None,
+            menu_de_niveis: false,
+            trilho: Bounds::default(),
+            arrastando_trilho: false,
+            navegador_flutuante: false,
+            miniatura_flutuante: Bounds::default(),
+            arrastando_flutuante: false,
         }
     }
 }
@@ -316,6 +342,17 @@ impl Revelacao {
             centro: zoom::centro_em_torno_de(&vista, escala, ponto, &cena),
         };
         cx.notify();
+    }
+
+    /// A pinça do trackpad (o `magnify` do AppKit): zoom contínuo em torno de
+    /// onde os dedos estão — com ou sem ferramenta da Revelação local. No meio
+    /// de uma pincelada não: a foto andaria debaixo do traço.
+    pub(super) fn ao_pincar(&mut self, evento: &PinchEvent, cx: &mut Context<Self>) {
+        if self.local.arrastando() || self.navegacao.gesto.is_some_and(|g| g.moveu) {
+            return;
+        }
+        let ponto = self.ponto_na_area(evento.position);
+        self.ampliar_em_torno(zoom::fator_da_pinca(evento.delta), ponto, cx);
     }
 
     fn ao_rolar(&mut self, evento: &ScrollWheelEvent, cx: &mut Context<Self>) {
@@ -748,6 +785,83 @@ impl Revelacao {
         }
     }
 
+    /// Os pixels nítidos: acima de [`zoom::PIXELS_NITIDOS_A_PARTIR_DE`] pixels
+    /// da tela por pixel da foto, cada pixel visível vira um quadrado da cor
+    /// dele por cima da textura (que o GPU amplia borrando). Com a foto
+    /// ampliada assim, os visíveis são poucos: numa área de 1800×1400 pixels
+    /// no limiar, ~40 mil quadrados, e menos a cada dobra.
+    ///
+    /// 🔑 As bordas caem em pixel inteiro da tela, calculadas de cada lado —
+    /// somar largura sobre largura deixaria frestas entre os quadrados.
+    pub(super) fn pixels_nitidos(&self, imagem: &Arc<RenderImage>) -> Option<AnyElement> {
+        let (cena, vista) = self.vista()?;
+        let tamanho = imagem.size(0);
+        let (iw, ih) = (
+            tamanho.width.0.max(0) as usize,
+            tamanho.height.0.max(0) as usize,
+        );
+        if iw == 0 || ih == 0 {
+            return None;
+        }
+        let lado_x = cena.janela.largura * vista.escala / iw as f32;
+        let lado_y = cena.janela.altura * vista.escala / ih as f32;
+        let dpr = cena.dpr.max(1.);
+        if lado_x.min(lado_y) * dpr < zoom::PIXELS_NITIDOS_A_PARTIR_DE {
+            return None;
+        }
+        let imagem = imagem.clone();
+        let (x0, y0) = (vista.x, vista.y);
+        let area = cena.area;
+        Some(
+            canvas(
+                |_, _, _| {},
+                move |limites, _, window, _| {
+                    let Some(bytes) = imagem.as_bytes(0) else {
+                        return;
+                    };
+                    if bytes.len() < iw * ih * 4 {
+                        return;
+                    }
+                    let faixa = |inicio: f32, lado: f32, fim: f32, total: usize| {
+                        let a = ((-inicio) / lado).floor().max(0.) as usize;
+                        let b = (((fim - inicio) / lado).ceil().max(0.) as usize).min(total);
+                        (a, b)
+                    };
+                    let (i0, i1) = faixa(x0, lado_x, area.largura, iw);
+                    let (j0, j1) = faixa(y0, lado_y, area.altura, ih);
+                    let borda = |inicio: f32, lado: f32, n: usize| {
+                        ((inicio + n as f32 * lado) * dpr).round() / dpr
+                    };
+                    let (ox, oy) = (f(limites.origin.x), f(limites.origin.y));
+                    for j in j0..j1 {
+                        let (ya, yb) = (borda(y0, lado_y, j), borda(y0, lado_y, j + 1));
+                        for i in i0..i1 {
+                            let (xa, xb) = (borda(x0, lado_x, i), borda(x0, lado_x, i + 1));
+                            let k = (j * iw + i) * 4;
+                            // BGRA, como toda `RenderImage` (ver `imagem.rs`).
+                            let cor = gpui_kit::Rgba {
+                                r: bytes[k + 2] as f32 / 255.,
+                                g: bytes[k + 1] as f32 / 255.,
+                                b: bytes[k] as f32 / 255.,
+                                a: 1.,
+                            };
+                            window.paint_quad(gpui_kit::fill(
+                                Bounds::new(
+                                    gpui_kit::point(px(ox + xa), px(oy + ya)),
+                                    gpui_kit::size(px(xb - xa), px(yb - ya)),
+                                ),
+                                cor,
+                            ));
+                        }
+                    }
+                },
+            )
+            .absolute()
+            .inset_0()
+            .into_any_element(),
+        )
+    }
+
     /// A caixa do `⌘ + arrastar`, desenhada por cima da foto.
     pub(super) fn caixa_de_zoom(&self) -> Option<AnyElement> {
         let (a, b) = self.navegacao.caixa?;
@@ -765,58 +879,139 @@ impl Revelacao {
         )
     }
 
-    /// "− Encaixar +", no canto de baixo do palco.
+    /// A barra de zoom do palco — a da prévia do motor (`pincel.html`), que o
+    /// dono preferiu à de antes (2026-09-27): *"muito útil quando estamos com
+    /// laço, carimbo, content-aware, band-aid"*.
+    ///
+    /// `Encaixar · Preencher · 1:1 │ − nível ▾ + ━━●━━ │ navegador`, flutuando
+    /// no canto de baixo da foto. Vale com e sem ferramenta da Revelação local:
+    /// é a mesma foto e o mesmo zoom.
+    ///
+    /// 🔑 **`occlude`**: o clique na barra não pode chegar ao palco, que o
+    /// tomaria por um clique na foto — com uma ferramenta, uma pincelada.
     pub(super) fn controle_de_zoom(&self, cx: &mut Context<Self>) -> AnyElement {
-        let desligado = self.cena().is_none();
-        let botao = |id: &'static str, icone: Icone| {
+        let vista = self.vista();
+        let desligado = vista.is_none();
+        let nivel = self.navegacao.zoom.nivel;
+        let ambar = crate::tema::cores::quente();
+        let texto: gpui_kit::Hsla = gpui_kit::rgb(0xd4d4d4).into();
+        let (escala, t, no_minimo, no_maximo) = match vista {
+            Some((c, v)) => (
+                v.escala,
+                zoom::slider_da_escala(v.escala, &c),
+                v.escala <= zoom::escala_minima(&c) * 1.0001,
+                v.escala >= zoom::escala_maxima(&c) * 0.9999,
+            ),
+            None => (1., 0., true, true),
+        };
+        let valor: SharedString = match (nivel, vista) {
+            (Nivel::Encaixar, _) | (_, None) => "Encaixar".into(),
+            (_, Some((c, _))) => zoom::porcentagem(zoom::razao_da_escala(escala, &c)).into(),
+        };
+
+        let separador = || {
+            div()
+                .w(px(1.))
+                .h(px(18.))
+                .mx(px(3.))
+                .bg(gpui_kit::rgb(0x333333))
+        };
+        let pilula =
+            |id: &'static str, alvo: Nivel, rotulo: &'static str, cx: &mut Context<Self>| {
+                let aceso = !desligado && nivel == alvo;
+                div()
+                    .id(id)
+                    .h(px(26.))
+                    .px(px(8.))
+                    .flex()
+                    .items_center()
+                    .rounded(px(6.))
+                    .text_size(px(11.5))
+                    .text_color(if aceso {
+                        ambar
+                    } else {
+                        gpui_kit::rgb(0x8f8f8f).into()
+                    })
+                    .when(aceso, |b| b.bg(ambar.opacity(0.14)))
+                    .when(!desligado, |b| {
+                        b.cursor_pointer()
+                            .hover(|s| s.bg(gpui_kit::rgb(0x2b2b2b)).text_color(texto))
+                            .on_click(cx.listener(move |tela, _, _, cx| {
+                                tela.navegacao.menu_de_niveis = false;
+                                tela.ir_para_nivel(alvo, None, cx)
+                            }))
+                    })
+                    .child(rotulo)
+            };
+        let icone = |id: &'static str, icone: Icone, apagado: bool, ligado: bool| {
             div()
                 .id(id)
-                .size(px(24.))
+                .size(px(26.))
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded(px(4.))
-                .text_color(gpui_kit::rgb(0xd4d4d4))
-                .when(!desligado, |b| {
-                    b.cursor_pointer()
-                        .hover(|s| s.bg(gpui_kit::rgba(0xffffff26)))
+                .rounded(px(6.))
+                .text_color(if ligado { ambar } else { texto })
+                .when(apagado, |b| b.opacity(0.35))
+                .when(!apagado, |b| {
+                    b.cursor_pointer().hover(|s| s.bg(gpui_kit::rgb(0x2b2b2b)))
                 })
                 .child(Icon::new(icone).size(px(14.)))
         };
+
         h_flex()
+            .id("barra-de-zoom")
             .absolute()
             .left(px(12.))
             .bottom(px(12.))
-            .gap(px(4.))
-            .p(px(2.))
-            .rounded(px(8.))
-            .bg(gpui_kit::rgba(0x000000a6))
-            .text_xs()
-            .text_color(gpui_kit::white())
+            .gap(px(2.))
+            .p(px(3.))
+            .rounded(px(9.))
+            .border_1()
+            .border_color(gpui_kit::rgb(0x333333))
+            .bg(gpui_kit::rgba(0x161616e6))
+            .shadow_lg()
+            .text_color(texto)
+            .cursor_default()
+            .occlude()
             .when(desligado, |d| d.opacity(0.5))
+            .child(pilula("zoom-encaixar", Nivel::Encaixar, "Encaixar", cx))
+            .child(pilula("zoom-preencher", Nivel::Preencher, "Preencher", cx))
+            .child(pilula("zoom-1-1", Nivel::Razao(1.), "1:1", cx))
+            .child(separador())
             .child(
-                botao("zoom-afastar", Icone::Minus)
-                    .on_click(cx.listener(|tela, _, _, cx| tela.passo_de_zoom(-1, cx))),
+                icone("zoom-afastar", Icone::Minus, no_minimo, false).when(!no_minimo, |b| {
+                    b.on_click(cx.listener(|tela, _, _, cx| tela.passo_de_zoom(-1, cx)))
+                }),
             )
+            .child(self.nivel_com_menu(valor, desligado, cx))
             .child(
-                div()
-                    .id("zoom-rotulo")
-                    .min_w(px(64.))
-                    .flex()
-                    .justify_center()
-                    .cursor_pointer()
-                    .child(zoom::rotulo_do_nivel(self.navegacao.zoom.nivel))
-                    .on_click(cx.listener(|tela, _, _, cx| tela.alternar_zoom(None, cx))),
+                icone("zoom-aproximar", Icone::Plus, no_maximo, false).when(!no_maximo, |b| {
+                    b.on_click(cx.listener(|tela, _, _, cx| tela.passo_de_zoom(1, cx)))
+                }),
             )
+            .child(self.trilho_do_zoom(t, desligado, cx))
+            .child(separador())
             .child(
-                botao("zoom-aproximar", Icone::Plus)
-                    .on_click(cx.listener(|tela, _, _, cx| tela.passo_de_zoom(1, cx))),
+                icone(
+                    "zoom-navegador",
+                    Icone::Map,
+                    desligado,
+                    self.navegacao.navegador_flutuante,
+                )
+                .when(!desligado, |b| {
+                    b.on_click(cx.listener(|tela, _, _, cx| {
+                        tela.navegacao.navegador_flutuante = !tela.navegacao.navegador_flutuante;
+                        cx.notify();
+                    }))
+                }),
             )
             .when(self.carregando_o_bruto(), |c| {
                 c.child(
                     h_flex()
                         .gap(px(6.))
                         .px(px(6.))
+                        .text_xs()
                         .text_color(gpui_kit::rgba(0xffffffcc))
                         .child(gpui_kit::component::spinner::Spinner::new().xsmall())
                         .child("resolução cheia…"),
@@ -825,8 +1020,378 @@ impl Revelacao {
             .into_any_element()
     }
 
-    fn centralizar_pela_miniatura(&mut self, posicao: Point<Pixels>, cx: &mut Context<Self>) {
-        let caixa = self.navegacao.miniatura;
+    /// O nível de agora, que abre a lista das paradas por cima da barra.
+    fn nivel_com_menu(
+        &self,
+        valor: SharedString,
+        desligado: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let aberto = self.navegacao.menu_de_niveis && !desligado;
+        let nivel = self.navegacao.zoom.nivel;
+        let mut opcoes: Vec<(Nivel, SharedString, &'static str)> = vec![
+            (Nivel::Encaixar, "Encaixar".into(), "⌘0"),
+            (Nivel::Preencher, "Preencher".into(), ""),
+        ];
+        for r in zoom::RAZOES_DO_MENU {
+            let rotulo = if r == 1. {
+                "100% (1:1)".to_string()
+            } else {
+                zoom::porcentagem(r)
+            };
+            opcoes.push((
+                Nivel::Razao(r),
+                rotulo.into(),
+                if r == 1. { "⌘⌥0" } else { "" },
+            ));
+        }
+        let menu = aberto.then(|| {
+            let mut lista = v_flex()
+                .id("zoom-menu")
+                .absolute()
+                .left_0()
+                .bottom(px(32.))
+                .min_w(px(160.))
+                .p(px(4.))
+                .rounded(px(8.))
+                .border_1()
+                .border_color(gpui_kit::rgb(0x3d3d3d))
+                .bg(gpui_kit::rgb(0x232323))
+                .shadow_lg()
+                .occlude();
+            for (i, (alvo, rotulo, tecla)) in opcoes.into_iter().enumerate() {
+                let aceso = nivel == alvo;
+                lista = lista.child(
+                    h_flex()
+                        .id(SharedString::from(format!("zoom-menu-{i}")))
+                        .gap(px(10.))
+                        .px(px(8.))
+                        .py(px(5.))
+                        .rounded(px(5.))
+                        .text_size(px(12.5))
+                        .cursor_pointer()
+                        .hover(|s| s.bg(gpui_kit::rgb(0x2b2b2b)))
+                        .text_color(if aceso {
+                            crate::tema::cores::quente()
+                        } else {
+                            gpui_kit::rgb(0xe6e6e6).into()
+                        })
+                        .child(rotulo)
+                        .child(
+                            div()
+                                .ml_auto()
+                                .text_size(px(11.))
+                                .text_color(gpui_kit::rgb(0x8f8f8f))
+                                .child(tecla),
+                        )
+                        .on_click(cx.listener(move |tela, _, _, cx| {
+                            tela.navegacao.menu_de_niveis = false;
+                            tela.ir_para_nivel(alvo, None, cx);
+                        })),
+                );
+            }
+            lista
+        });
+        div()
+            .relative()
+            // Fora do menu e do botão, qualquer clique o fecha.
+            .when(aberto, |d| {
+                d.on_mouse_down_out(cx.listener(|tela, _: &MouseDownEvent, _, cx| {
+                    tela.navegacao.menu_de_niveis = false;
+                    cx.notify();
+                }))
+            })
+            .child(
+                div()
+                    .id("zoom-rotulo")
+                    .min_w(px(62.))
+                    .h(px(26.))
+                    .px(px(6.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(6.))
+                    .border_1()
+                    .border_color(gpui_kit::rgb(0x3a3a3a))
+                    .text_size(px(12.))
+                    .text_color(gpui_kit::rgb(0xe6e6e6))
+                    .when(!desligado, |b| {
+                        b.cursor_pointer()
+                            .hover(|s| s.bg(gpui_kit::rgb(0x2b2b2b)))
+                            .on_click(cx.listener(|tela, _, _, cx| {
+                                tela.navegacao.menu_de_niveis = !tela.navegacao.menu_de_niveis;
+                                cx.notify();
+                            }))
+                    })
+                    .child(valor),
+            )
+            .children(menu)
+            .into_any_element()
+    }
+
+    /// O slider contínuo: o trilho é desenhado da vista de agora (nunca fica
+    /// para trás de uma pinça ou do `⌘=`), e o arrasto é ouvido na janela, para
+    /// não se perder quando o ponteiro sai dos 110 pontos dele.
+    fn trilho_do_zoom(&self, t: f32, desligado: bool, cx: &mut Context<Self>) -> AnyElement {
+        let ambar = crate::tema::cores::quente();
+        let medidor = cx.entity();
+        let ouvinte = cx.entity();
+        let arrastando = self.navegacao.arrastando_trilho;
+        let meio = (ALTURA_DO_TRILHO - 3.) / 2.;
+        div()
+            .id("zoom-trilho")
+            .relative()
+            .w(px(LARGURA_DO_TRILHO))
+            .h(px(ALTURA_DO_TRILHO))
+            .mx(px(6.))
+            .when(!desligado, |d| {
+                d.cursor_pointer().on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|tela, e: &MouseDownEvent, _, cx| {
+                        tela.navegacao.arrastando_trilho = true;
+                        tela.navegacao.menu_de_niveis = false;
+                        tela.zoom_pelo_trilho(e.position, cx);
+                    }),
+                )
+            })
+            .child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .top(px(meio))
+                    .w(px(LARGURA_DO_TRILHO))
+                    .h(px(3.))
+                    .rounded(px(2.))
+                    .bg(gpui_kit::rgba(0xffffff2e)),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .top(px(meio))
+                    .w(px(t * LARGURA_DO_TRILHO))
+                    .h(px(3.))
+                    .rounded(px(2.))
+                    .bg(ambar),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .left(px(t * LARGURA_DO_TRILHO - 6.))
+                    .top(px(ALTURA_DO_TRILHO / 2. - 6.))
+                    .size(px(12.))
+                    .rounded_full()
+                    .bg(ambar)
+                    .border_2()
+                    .border_color(gpui_kit::rgb(0x161616)),
+            )
+            .child(
+                canvas(
+                    move |bounds, _, cx| {
+                        medidor.update(cx, |tela, _| {
+                            if tela.navegacao.trilho != bounds {
+                                tela.navegacao.trilho = bounds;
+                            }
+                        });
+                    },
+                    move |_, _, window, _| {
+                        if !arrastando {
+                            return;
+                        }
+                        window.on_mouse_event({
+                            let esta = ouvinte.clone();
+                            move |e: &MouseMoveEvent, fase, _, cx| {
+                                if fase.bubble() {
+                                    esta.update(cx, |tela, cx| {
+                                        tela.zoom_pelo_trilho(e.position, cx)
+                                    });
+                                }
+                            }
+                        });
+                        window.on_mouse_event({
+                            let esta = ouvinte.clone();
+                            move |_: &MouseUpEvent, fase, _, cx| {
+                                if fase.bubble() {
+                                    esta.update(cx, |tela, cx| {
+                                        tela.navegacao.arrastando_trilho = false;
+                                        cx.notify();
+                                    });
+                                }
+                            }
+                        });
+                    },
+                )
+                .absolute()
+                .inset_0(),
+            )
+            .into_any_element()
+    }
+
+    /// O ponteiro no trilho vira escala, em torno do centro de agora.
+    pub(super) fn zoom_pelo_trilho(&mut self, posicao: Point<Pixels>, cx: &mut Context<Self>) {
+        let trilho = self.navegacao.trilho;
+        let Some((cena, vista)) = self.vista() else {
+            return;
+        };
+        if f(trilho.size.width) < 1. {
+            return;
+        }
+        let t = f(posicao.x - trilho.origin.x) / f(trilho.size.width);
+        let escala = zoom::escala_do_slider(t, &cena);
+        self.navegacao.zoom = EstadoDoZoom {
+            nivel: zoom::nivel_da_escala(escala, &cena),
+            centro: vista.centro,
+        };
+        cx.notify();
+    }
+
+    /// O navegador da prévia, flutuando no canto de cima à direita da foto:
+    /// com uma ferramenta na mão e a foto ampliada, é ele que diz onde se
+    /// está, sem tirar os olhos do palco. Em cima, e não embaixo como na
+    /// prévia: o canto de baixo é do carrinho flutuante do balcão.
+    pub(super) fn navegador_flutuante(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.navegacao.navegador_flutuante || self.edicao.is_some() {
+            return None;
+        }
+        let imagem = self.aberta.as_ref()?.desenhada.clone()?;
+        let tamanho = imagem.size(0);
+        let (iw, ih) = (tamanho.width.0 as f32, tamanho.height.0 as f32);
+        if iw < 1. || ih < 1. {
+            return None;
+        }
+        let escala = (LARGURA_DO_FLUTUANTE / iw).min(LARGURA_DO_FLUTUANTE / ih);
+        let (w, h) = (iw * escala, ih * escala);
+        let vista = self.vista();
+        let retangulo = vista.and_then(|(c, v)| {
+            zoom::passa_da_area(&v, &c).then(|| zoom::retangulo_visivel(&v, &c))
+        });
+        let pct = vista
+            .map(|(c, v)| zoom::porcentagem(zoom::razao_da_escala(v.escala, &c)))
+            .unwrap_or_default();
+        let medidor = cx.entity();
+        let sombra = gpui_kit::rgba(0x00000059);
+        let fora = |x: f32, y: f32, lw: f32, lh: f32| {
+            div()
+                .absolute()
+                .left(px(x))
+                .top(px(y))
+                .w(px(lw.max(0.)))
+                .h(px(lh.max(0.)))
+                .bg(sombra)
+        };
+        Some(
+            v_flex()
+                .id("navegador-flutuante")
+                .absolute()
+                .right(px(12.))
+                .top(px(12.))
+                .p(px(6.))
+                .gap(px(4.))
+                .rounded(px(9.))
+                .border_1()
+                .border_color(gpui_kit::rgb(0x333333))
+                .bg(gpui_kit::rgba(0x161616e6))
+                .shadow_lg()
+                .cursor_default()
+                .occlude()
+                .child(
+                    div()
+                        .id("navegador-flutuante-foto")
+                        .relative()
+                        .w(px(w))
+                        .h(px(h))
+                        .overflow_hidden()
+                        .rounded(px(4.))
+                        .cursor_pointer()
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|tela, e: &MouseDownEvent, _, cx| {
+                                tela.navegacao.arrastando_flutuante = true;
+                                tela.navegacao.menu_de_niveis = false;
+                                // Encaixada, o clique amplia no último nível já
+                                // centrado ali, como na prévia.
+                                if tela.navegacao.zoom.nivel == Nivel::Encaixar {
+                                    tela.navegacao.zoom.nivel = tela.navegacao.alvo_do_z;
+                                }
+                                let caixa = tela.navegacao.miniatura_flutuante;
+                                tela.centralizar_pela_miniatura(caixa, e.position, cx);
+                            }),
+                        )
+                        .on_mouse_move(cx.listener(|tela, e: &MouseMoveEvent, _, cx| {
+                            if tela.navegacao.arrastando_flutuante && e.dragging() {
+                                let caixa = tela.navegacao.miniatura_flutuante;
+                                tela.centralizar_pela_miniatura(caixa, e.position, cx);
+                            }
+                        }))
+                        .on_mouse_up(
+                            MouseButton::Left,
+                            cx.listener(|tela, _: &MouseUpEvent, _, _| {
+                                tela.navegacao.arrastando_flutuante = false;
+                            }),
+                        )
+                        .on_mouse_up_out(
+                            MouseButton::Left,
+                            cx.listener(|tela, _: &MouseUpEvent, _, _| {
+                                tela.navegacao.arrastando_flutuante = false;
+                            }),
+                        )
+                        .child(img(imagem).size_full().object_fit(ObjectFit::Fill))
+                        .children(retangulo.map(|r| {
+                            let (x, y, rw, rh) = (r.x * w, r.y * h, r.w * w, r.h * h);
+                            // O que está fora da tela escurece, como na prévia.
+                            div()
+                                .absolute()
+                                .inset_0()
+                                .child(fora(0., 0., w, y))
+                                .child(fora(0., y + rh, w, h - y - rh))
+                                .child(fora(0., y, x, rh))
+                                .child(fora(x + rw, y, w - x - rw, rh))
+                                .child(
+                                    div()
+                                        .absolute()
+                                        .left(px(x))
+                                        .top(px(y))
+                                        .w(px(rw))
+                                        .h(px(rh))
+                                        .rounded(px(2.))
+                                        .border_2()
+                                        .border_color(gpui_kit::white()),
+                                )
+                        }))
+                        .child(
+                            canvas(
+                                move |bounds, _, cx| {
+                                    medidor.update(cx, |tela, _| {
+                                        if tela.navegacao.miniatura_flutuante != bounds {
+                                            tela.navegacao.miniatura_flutuante = bounds;
+                                        }
+                                    });
+                                },
+                                |_, _, _, _| {},
+                            )
+                            .absolute()
+                            .inset_0(),
+                        ),
+                )
+                .child(
+                    h_flex()
+                        .justify_between()
+                        .px(px(2.))
+                        .text_size(px(10.5))
+                        .text_color(gpui_kit::rgb(0x8f8f8f))
+                        .child("Navegador")
+                        .child(pct),
+                )
+                .into_any_element(),
+        )
+    }
+
+    fn centralizar_pela_miniatura(
+        &mut self,
+        caixa: Bounds<Pixels>,
+        posicao: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
         if f(caixa.size.width) < 1. || f(caixa.size.height) < 1. {
             return;
         }
@@ -976,13 +1541,21 @@ impl Revelacao {
                                         MouseButton::Left,
                                         cx.listener(|tela, e: &MouseDownEvent, _, cx| {
                                             tela.navegacao.arrastando_miniatura = true;
-                                            tela.centralizar_pela_miniatura(e.position, cx);
+                                            tela.centralizar_pela_miniatura(
+                                                tela.navegacao.miniatura,
+                                                e.position,
+                                                cx,
+                                            );
                                         }),
                                     )
                                     .on_mouse_move(cx.listener(
                                         |tela, e: &MouseMoveEvent, _, cx| {
                                             if tela.navegacao.arrastando_miniatura && e.dragging() {
-                                                tela.centralizar_pela_miniatura(e.position, cx);
+                                                tela.centralizar_pela_miniatura(
+                                                    tela.navegacao.miniatura,
+                                                    e.position,
+                                                    cx,
+                                                );
                                             }
                                         },
                                     ))

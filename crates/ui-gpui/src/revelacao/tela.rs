@@ -2495,6 +2495,9 @@ impl Revelacao {
                             )
                             .into_any_element(),
                     })
+                    // Ampliada perto do pixel, os pixels nítidos por cima da
+                    // textura, que o GPU amplia borrando.
+                    .children(self.pixels_nitidos(imagem))
                     .children(self.caixa_de_zoom())
                     .children(self.overlay_de_corte(cx))
                     .children(self.marcacoes_locais(cx))
@@ -2502,10 +2505,12 @@ impl Revelacao {
                     // registrar ouvinte de mouse exige estar na fase de
                     // pintura, e um `div` comum não chega lá.
                     .child(self.medida_e_arrasto(cx))
-                    // "− Encaixar +", como no canto do palco do site; no
+                    // A barra de zoom da prévia e o navegador flutuante; no
                     // Enquadrar não há zoom, e o lugar é do transferidor.
                     .when(self.edicao.is_none(), |palco| {
-                        palco.child(self.controle_de_zoom(cx))
+                        palco
+                            .child(self.controle_de_zoom(cx))
+                            .children(self.navegador_flutuante(cx))
                     })
                     .children(self.folha_de_atalhos(cx)),
                 )
@@ -2558,7 +2563,20 @@ impl Revelacao {
                     }
                 });
             },
-            move |_bounds, _prepaint, window, _cx| {
+            move |bounds, _prepaint, window, _cx| {
+                // 🚨 **A pinça é ouvida na janela, e não com `on_pinch`**
+                // (achado no app real, 2026-09-27): o do elemento exige o
+                // palco "sob o mouse", e o GPUI desliga o hover depois de uma
+                // tecla até o ponteiro andar — a pinça não anda o ponteiro.
+                // Apertar J e pinçar em seguida não ampliava nada.
+                window.on_mouse_event({
+                    let esta = ouvinte.clone();
+                    move |evento: &gpui_kit::PinchEvent, fase, _window, cx| {
+                        if fase.bubble() && bounds.contains(&evento.position) {
+                            esta.update(cx, |tela, cx| tela.ao_pincar(evento, cx));
+                        }
+                    }
+                });
                 if !arrastando {
                     return;
                 }

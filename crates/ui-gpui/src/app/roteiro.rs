@@ -417,6 +417,24 @@ impl Aplicativo {
                     Err(erro) => eprintln!("[roteiro] mouse {tipo}: {erro}"),
                 }
             }
+            Passo::Pinca { delta, x, y } => {
+                let palco = self.revelacao.read(cx).palco_da_foto();
+                let posicao = gpui_kit::point(
+                    palco.origin.x + palco.size.width * *x,
+                    palco.origin.y + palco.size.height * *y,
+                );
+                let evento = gpui_kit::PinchEvent {
+                    position: posicao,
+                    delta: *delta,
+                    modifiers: Default::default(),
+                    phase: gpui_kit::TouchPhase::Moved,
+                };
+                // 🚨 Adiada, como a tecla: o despacho chega a esta raiz.
+                window.defer(cx, move |window, cx| {
+                    window.dispatch_event(gpui_kit::PlatformInput::Pinch(evento), cx);
+                });
+                eprintln!("[roteiro] pinça {delta} em ({x}, {y})");
+            }
             Passo::Fim => {
                 depuracao::vigia::relatar();
                 cx.quit();
