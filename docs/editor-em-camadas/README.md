@@ -46,3 +46,22 @@ geometria (girar/redimensionar) e levar o projeto ao site (divergência D23, ver
 | Janela do editor | `crates/ui-gpui/src/editor/` |
 | Resolução da fonte na Revelação | `crates/ui-gpui/src/revelacao/fonte.rs` |
 | Base neutra e catálogo | `crates/infrastructure` (`base_neutra.rs`, `database/edicoes.rs`, migration 025) |
+
+## Referência: PaintFE
+
+O [PaintFE](https://github.com/kylejckson/PaintFE) (Rust + egui + wgpu, licença MIT) é o editor que usamos
+como exemplo, a pedido do dono (27/09/2026). O que confirmou e o que veio de lá:
+
+| No PaintFE | Aqui |
+|---|---|
+| `canvas/tiled_image.rs`: camada em tiles esparsos `Option<Arc<RgbaImage>>`, cópia na escrita | `editor-core/src/tiles.rs` — o mesmo desenho, com tile de 256 px (o dele é 64): menos arquivos no projeto endereçado por conteúdo |
+| `brush_render.rs` `compute_brush_alpha`: dureza é a **opacidade da borda** (`1 + (h−1)·smoothstep(t)`), geometria com ±0,5 px de anti-aliasing | `pincel.rs` `Pincel::queda`, a mesma regra |
+| `rebuild_brush_lut`: tabela da queda indexada pela distância ao quadrado | `pincel.rs` `Tabela` — sem raiz por pixel |
+| Traço numa camada de prévia, confirmado no soltar | `Traco`: cobertura por máximo e recálculo a partir do tile de antes; um passo de desfazer por traço |
+| `components/history.rs`: `Command` com `description()` e `memory_size()`, poda por memória | `historico.rs`: `Comando::descricao`, teto de 256 MB |
+| `io.rs` `build_pfe` na thread da tela, `write_pfe` em segundo plano | `Sessao::instantaneo` (barato: tiles `Arc`) → `Projeto::salvar` fora da tela |
+| `dirty_rect` + `set_partial` na textura | `vista.rs`: só os ladrilhos sujos sobem para a GPU |
+
+O que **não** veio: o `.pfe` é um arquivo único em bincode, reescrito inteiro a cada salvamento. Aqui o projeto é
+uma pasta de tiles endereçados por conteúdo com o manifesto trocado por `rename` — o que dá a gravação atômica
+e a revisão anterior utilizável que o contrato pede (C33).

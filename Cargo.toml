@@ -40,6 +40,10 @@ members = [
     # paridade. O rollback agora é `git revert` do commit que o removeu, que é
     # um comando e traz os 21.352 LOC de volta inteiros; a referência de
     # paridade virou documento, e o código continua no histórico.
+    # 🖌️ O editor em camadas sem janela (2026-09-27): documento, tiles, pincel,
+    # histórico, composição e a gravação do projeto. A janela mora no `ui-gpui`;
+    # o contrato com a Revelação está em docs/editor-em-camadas/.
+    "crates/editor-core",
     "crates/ui-gpui",
 ]
 
