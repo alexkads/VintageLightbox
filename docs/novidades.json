@@ -1,9 +1,14 @@
 {
-  "versao": "0.1.21",
-  "titulo": "Os pretos do efeito RecordarFotos P&B voltam a ser pretos nos Macs antigos.",
+  "versao": "0.1.22",
+  "titulo": "Importar do cartão ficou rápido e nítido, e a galeria mostra na hora o efeito que você salvou.",
   "importante": true,
   "novidades": [
-    "Em Macs com placa de vídeo Intel (como o MacBook Pro 2014 com Big Sur), o efeito RecordarFotos P&B deixava roxos alguns pretos da foto. Agora o preto sai preto, igual aos Macs novos."
+    "Ao abrir o cartão da câmera, as miniaturas aparecem em poucos segundos e nítidas — antes demoravam e vinham borradas.",
+    "O ensaio sobe para o site uma vez só: o envio termina bem mais rápido, e o contador \"Subindo\" desce foto a foto.",
+    "Depois de trocar o efeito de todas as fotos (Sincronizar) e salvar, a galeria já mostra o efeito novo, sem voltar ao antigo enquanto o envio termina.",
+    "A foto que acabou de subir abre na Revelação na hora, sem esperar baixar do site.",
+    "Rejeitar (X) uma foto enquanto o salvar ainda envia não mostra mais \"envio recusado\".",
+    "Na Revelação, a bolinha âmbar agora quer dizer \"mudou e ainda não foi salvo\"; o ajuste que já está salvo aparece com uma bolinha cinza."
   ],
-  "por_que_atualizar": "Quem usa o P&B num Mac com vídeo Intel estava entregando fotos com manchas roxas nos pretos."
+  "por_que_atualizar": "Quem importa do cartão e revela o ensaio inteiro com o cliente na frente ganha minutos por sessão e vê na galeria exatamente o que salvou."
 }
