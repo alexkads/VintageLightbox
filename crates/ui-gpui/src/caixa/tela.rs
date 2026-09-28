@@ -299,6 +299,10 @@ pub(super) enum TipoDeRecado {
 }
 
 pub struct Caixa {
+    /// As três colunas no dock do gpui-kit (`crate::docas`): a lista de
+    /// sessões e o movimento se puxam pela borda e recolhem pelas setas; o
+    /// cupom fica no meio. Nasce no primeiro desenho, que tem a `Window`.
+    docas: Option<crate::docas::Docas>,
     pub(super) publicador: Arc<dyn Publicador>,
     pub(super) sessao: Option<Sessao>,
     /// A sessão escolhida na lista (o `?sessao=` do site).
@@ -431,6 +435,7 @@ impl Caixa {
             pedir_foco: false,
             busca,
             seletor_de_estudio: None,
+            docas: None,
             desconto: DescontoNoTotal::default(),
             pessoas: pessoas_lembradas(&lembranca),
             lembranca,
@@ -1121,7 +1126,38 @@ impl Render for Caixa {
             }
         }
         self.aplicar_pendencias_do_dialogo(window, cx);
+        if self.docas.is_none() {
+            self.montar_as_docas(window, cx);
+        }
         let (fundo, texto) = (cx.theme().background, cx.theme().foreground);
+        let area = self.docas.as_ref().map(|d| d.area.clone());
+        let seta = |id, lado, dica, cx: &mut Context<Self>| {
+            use crate::docas::Lado;
+            let aberta = self.docas.as_ref().is_none_or(|d| d.aberta(lado, cx));
+            let tela = cx.entity().downgrade();
+            crate::docas::seta(id, lado, aberta, dica, cx, move |_, window, cx| {
+                let _ = tela.update(cx, |tela, cx| {
+                    if let Some(docas) = tela.docas.as_ref() {
+                        docas.alternar(lado, window, cx);
+                    }
+                    cx.notify();
+                });
+            })
+            .when(lado == Lado::Esquerda, |s| s.mr(px(8.)))
+            .when(lado == Lado::Direita, |s| s.ml(px(8.)))
+        };
+        let seta_esquerda = seta(
+            "caixa-seta-esquerda",
+            crate::docas::Lado::Esquerda,
+            "Mostrar ou esconder a lista de sessões",
+            cx,
+        );
+        let seta_direita = seta(
+            "caixa-seta-direita",
+            crate::docas::Lado::Direita,
+            "Mostrar ou esconder o movimento do caixa",
+            cx,
+        );
         let dialogo = self.render_dialogo(window, cx);
         let recados = self.render_recados(window, cx);
 
@@ -1152,17 +1188,9 @@ impl Render for Caixa {
                     .flex()
                     .flex_1()
                     .min_h(px(0.))
-                    .gap(px(24.))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_1()
-                            .min_w(px(0.))
-                            .gap(px(16.))
-                            .child(self.lista_de_sessoes(cx))
-                            .child(self.cupom_da_tela(cx)),
-                    )
-                    .child(self.movimento_do_caixa(cx)),
+                    .child(seta_esquerda)
+                    .child(div().flex_1().min_w(px(0.)).h_full().children(area))
+                    .child(seta_direita),
             )
             .children(dialogo)
             .children(recados)
@@ -1171,6 +1199,71 @@ impl Render for Caixa {
 }
 
 impl Caixa {
+    /// O dock das três colunas: a lista de sessões, o cupom e o movimento.
+    ///
+    /// 🔑 **Os nomes são o que o dock guarda** — não mudar depois. O vão entre
+    /// as colunas fica dentro das docas: a borda que se puxa é a do cupom.
+    fn montar_as_docas(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::docas::{Docas, Lado, Lateral, Limites};
+        use std::rc::Rc;
+        let eu = cx.entity();
+        let docas = Docas::montar(
+            "caixa",
+            &eu,
+            (
+                "caixa:cupom",
+                Rc::new(|tela: &mut Self, _window, cx| {
+                    div()
+                        .flex()
+                        .size_full()
+                        .child(tela.cupom_da_tela(cx))
+                        .into_any_element()
+                }),
+            ),
+            vec![
+                (
+                    Lado::Esquerda,
+                    Lateral {
+                        nome: "caixa:sessoes",
+                        desenho: Rc::new(|tela: &mut Self, _window, cx| {
+                            div()
+                                .size_full()
+                                .pr(px(16.))
+                                .child(tela.lista_de_sessoes(cx))
+                                .into_any_element()
+                        }),
+                        limites: Limites {
+                            minimo: 220.,
+                            maximo: 480.,
+                            padrao: 288.,
+                        },
+                    },
+                ),
+                (
+                    Lado::Direita,
+                    Lateral {
+                        nome: "caixa:movimento",
+                        desenho: Rc::new(|tela: &mut Self, _window, cx| {
+                            div()
+                                .size_full()
+                                .pl(px(24.))
+                                .child(tela.movimento_do_caixa(cx))
+                                .into_any_element()
+                        }),
+                        limites: Limites {
+                            minimo: 240.,
+                            maximo: 520.,
+                            padrao: 344.,
+                        },
+                    },
+                ),
+            ],
+            window,
+            cx,
+        );
+        self.docas = Some(docas);
+    }
+
     fn cabecalho(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let apagado = cx.theme().muted_foreground;
         let (descricao, situacao, cor) = match &self.vista {
@@ -1381,8 +1474,7 @@ impl Caixa {
         });
 
         v_flex()
-            .w(px(272.))
-            .flex_none()
+            .size_full()
             .min_h(px(0.))
             .rounded(crate::tema::canto(10.))
             .border_1()
@@ -1915,7 +2007,7 @@ impl Caixa {
             }
         };
 
-        div().w(px(320.)).flex_none().min_h(px(0.)).child(
+        div().size_full().min_h(px(0.)).child(
             v_flex()
                 .id("caixa-movimento")
                 .max_h_full()
