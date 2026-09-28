@@ -292,8 +292,12 @@ impl Etapa {
         match self {
             Etapa::IntervaloDoQuadro => "intervalo entre quadros",
             Etapa::TempoDoQuadro => "tempo observado do quadro",
-            Etapa::MontagemDaInterface => "montagem da interface (render, layout, pintura)",
-            Etapa::Apresentacao => "apresentação (aprox., até a tarefa seguinte)",
+            Etapa::MontagemDaInterface => {
+                "montagem da interface pelo GPUI (render, layout, pintura), sem as etapas medidas"
+            }
+            Etapa::Apresentacao => {
+                "entrega ao renderizador (desenho, envio das imagens à placa e present — aprox.)"
+            }
             Etapa::Decodificacao => "leitura/decodificação da foto",
             Etapa::PreparacaoDosAjustes => "preparação dos ajustes",
             Etapa::RecorteNaCpu => "recorte e giro na CPU",

@@ -164,7 +164,11 @@ pub fn observacoes(resumo: &Resumo, contexto: &Contexto, maquina: Option<&Maquin
         o.push(format!("🚨 {motivo}."));
     }
     if let Some(m) = maquina {
-        if m.energia.as_deref().is_some_and(|e| e.contains("bateria")) {
+        // "sem bateria" (desktop) também contém a palavra: só "na bateria" vale.
+        if m.energia
+            .as_deref()
+            .is_some_and(|e| e.starts_with("na bateria"))
+        {
             o.push("O computador está na bateria: CPU e GPU podem estar em economia.".into());
         }
         // No macOS a memória "livre" é pouca de propósito (vira cache): o
@@ -682,6 +686,26 @@ mod testes {
         assert!(leitura.contains("dedicada disponível"), "{leitura}");
         let sozinha = leitura_do_gargalo(Etapa::GpuRevelacao, Some(&motor), None);
         assert!(sozinha.contains("limite do hardware"), "{sozinha}");
+    }
+
+    /// Um desktop Windows diz "sem bateria · plano Equilibrado": não é aviso.
+    #[test]
+    fn sem_bateria_nao_e_estar_na_bateria() {
+        let c = coletor_com_arrasto();
+        let r = c.resumo(2_000 * MS);
+        let contexto = Contexto::default();
+        let aviso = |energia: &str| {
+            let m = Maquina {
+                energia: Some(energia.into()),
+                ..Default::default()
+            };
+            observacoes(&r, &contexto, Some(&m))
+                .iter()
+                .any(|o| o.contains("na bateria"))
+        };
+        assert!(!aviso("sem bateria · plano Equilibrado"));
+        assert!(!aviso("na tomada · plano Equilibrado"));
+        assert!(aviso("na bateria · plano Economia"));
     }
 
     #[test]

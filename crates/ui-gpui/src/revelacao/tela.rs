@@ -2259,6 +2259,18 @@ impl Revelacao {
                     .unwrap_or_else(|| "?".into()),
                 mascaras: locais.camadas.len() as u32,
                 retoques: locais.retoques.len() as u32,
+                enquadramento: if self.edicao.is_some() {
+                    "enquadrar aberto"
+                } else if corte.tem_perspectiva() {
+                    "perspectiva"
+                } else if corte.angulo() != 0.0 {
+                    "endireitado"
+                } else if corte == transformacao::Corte::inteiro() {
+                    "nenhum"
+                } else {
+                    "reto"
+                }
+                .into(),
             });
         }
         drop(preparacao);
