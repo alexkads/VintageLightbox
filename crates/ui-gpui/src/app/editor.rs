@@ -165,6 +165,13 @@ impl Aplicativo {
                     v.revisao
                 ))
         );
+        self.a_fonte_da_foto_mudou(foto, cx);
+    }
+
+    /// A entrada da foto mudou (edição salva ou excluída): a Revelação troca a
+    /// fonte, e a foto do site vai para o depósito do "Salvar na galeria" — a
+    /// revelada que o cliente vê precisa ser refeita.
+    fn a_fonte_da_foto_mudou(&mut self, foto: &FotoDoEditor, cx: &mut Context<Self>) {
         self.revelacao.update(cx, |tela, cx| {
             tela.fonte_mudou(&foto.id, foto.pos_venda_foto_id.as_deref(), cx)
         });
@@ -178,6 +185,59 @@ impl Aplicativo {
             self.recontar_o_que_falta_subir(cx);
         }
         cx.notify();
+    }
+
+    /// "Excluir a edição" do menu da tira, já confirmado.
+    pub(super) fn excluir_a_edicao_pedida(&mut self, cx: &mut Context<Self>) {
+        let Some(foto) = self.revelacao.update(cx, |tela, _| tela.levar_a_excluir()) else {
+            return;
+        };
+        let Some(edicoes) = self.revelacao.read(cx).edicoes() else {
+            return;
+        };
+        let alvo = FotoDoEditor::da(&foto);
+        // A janela do editor desta foto fecha sem perguntar: o operador acabou
+        // de confirmar que a edição sai.
+        if let Some((janela, editor)) = self
+            .editores
+            .abertas
+            .get(&alvo.chave())
+            .and_then(|(j, e)| Some((*j, e.upgrade()?)))
+        {
+            let _ = janela.update(cx, |_, window, cx| {
+                editor.update(cx, |ed, cx| ed.descartar_e_fechar(window, cx))
+            });
+        }
+        let para_excluir = alvo.clone();
+        let trabalho = cx
+            .background_executor()
+            .spawn(async move { edicoes.excluir(&para_excluir) });
+        cx.spawn(async move |raiz, cx| {
+            let resultado = trabalho.await;
+            let _ = raiz.update(cx, |raiz, cx| match resultado {
+                Ok(_) => {
+                    crate::telemetria::avisar!("🖌️ [Editor] edição de {} excluída", alvo.nome);
+                    raiz.a_fonte_da_foto_mudou(&alvo, cx);
+                    raiz.avisar_em_toast(
+                        format!(
+                            "Camadas de {} excluídas — a foto volta ao arquivo bruto",
+                            alvo.nome
+                        ),
+                        false,
+                        cx,
+                    );
+                }
+                Err(erro) => raiz.avisar_em_toast(
+                    format!(
+                        "Não foi possível excluir as camadas de {}: {erro}",
+                        alvo.nome
+                    ),
+                    true,
+                    cx,
+                ),
+            });
+        })
+        .detach();
     }
 
     /// A receita **atual** da foto: a da tela, se ela está no palco; senão a
@@ -509,6 +569,57 @@ mod testes {
             .update(cx, |app, _w, cx| app.revelacao.read(cx).revisao_da_aberta())
             .unwrap();
         assert_eq!(revisao, 1);
+    }
+
+    /// "Excluir a edição" pela tira: a janela do editor daquela foto fecha, o
+    /// projeto sai e a Revelação volta ao bruto.
+    #[gpui_kit::test]
+    fn excluir_a_edicao_fecha_o_editor_e_volta_ao_bruto(cx: &mut TestAppContext) {
+        let (m, visual) = montar(cx);
+        m.janela
+            .update(cx, |app, _w, cx| {
+                app.revelacao
+                    .update(cx, |tela, cx| tela.pedir_edicao_para_teste(0, cx));
+            })
+            .unwrap();
+        visual.run_until_parked();
+        let (janela_do_editor, editor) = o_editor(&m, cx);
+        editor.update(cx, |ed, cx| {
+            ed.tracar_para_teste((10., 24.), (54., 24.), cx)
+        });
+        cx.update_window(janela_do_editor, |_, window, cx| {
+            editor.update(cx, |ed, cx| ed.salvar(false, window, cx))
+        })
+        .unwrap();
+        visual.run_until_parked();
+        drop(editor);
+        let revisao = m
+            .janela
+            .update(cx, |app, _w, cx| app.revelacao.read(cx).revisao_da_aberta())
+            .unwrap();
+        assert_eq!(revisao, 1);
+
+        m.janela
+            .update(cx, |app, window, cx| {
+                app.revelacao.update(cx, |tela, cx| {
+                    tela.seguir_o_roteiro_da_tira("excluir 0", window, cx)
+                });
+            })
+            .unwrap();
+        visual.run_until_parked();
+        let (abertos, revisao) = m
+            .janela
+            .update(cx, |app, _w, cx| {
+                (
+                    app.editores_abertos().len(),
+                    app.revelacao.read(cx).revisao_da_aberta(),
+                )
+            })
+            .unwrap();
+        assert_eq!(abertos, 0, "a janela do editor fechou");
+        assert_eq!(revisao, 0, "a Revelação voltou ao bruto");
+        use crate::editor::porta::Edicoes;
+        assert!(!m.edicoes.tem_projeto("id-0", None));
     }
 
     /// Fechar com alterações pergunta; "Descartar" fecha e a raiz esquece a

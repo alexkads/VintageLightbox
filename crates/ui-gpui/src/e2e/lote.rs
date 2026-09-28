@@ -398,7 +398,7 @@ fn o_botao_de_salvar_conta_o_que_ha_para_salvar(cx: &mut TestAppContext) {
     e.revelacao(cx, |tela, _w, _cx| {
         let botao = tela.botao_de_salvar();
         assert!(botao.habilitado, "a foto aberta tem receita nova");
-        assert_eq!(botao.dica, "Salva esta foto na galeria e fecha o editor");
+        assert_eq!(botao.dica, "Salva esta foto na galeria e fecha a Revelação");
     });
 
     // 3 · Enquanto o "Baixar JPEG" trabalha, ele fica quieto — o `ocupado`.
@@ -434,7 +434,7 @@ fn o_botao_de_salvar_conta_o_que_ha_para_salvar(cx: &mut TestAppContext) {
         let botao = tela.botao_de_salvar();
         assert!(botao.habilitado);
         assert_eq!(
-            botao.dica, "Salva esta e mais 1 com edição pendente, e fecha o editor",
+            botao.dica, "Salva esta e mais 1 com receita pendente, e fecha a Revelação",
             "a dica conta as que o Sincronizar deixou"
         );
     });

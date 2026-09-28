@@ -150,6 +150,18 @@ impl CatalogoDeEdicoes {
         Ok(feito.rows_affected() == 1)
     }
 
+    /// "Excluir a edição": a linha sai, e a Revelação volta ao bruto. Os
+    /// arquivos do projeto são apagados por quem chama, **depois** disto — a
+    /// linha é o que diz à Revelação que a imagem editada vale.
+    pub async fn excluir(&self, edicao_id: &str) -> Result<(), String> {
+        sqlx::query("DELETE FROM edicoes_de_foto WHERE edicao_id = ?")
+            .bind(edicao_id)
+            .execute(&self.pool)
+            .await
+            .map_err(erro)?;
+        Ok(())
+    }
+
     /// A foto editada antes de subir ganhou id no site.
     pub async fn ligar_ao_site(
         &self,
@@ -245,6 +257,15 @@ mod testes {
         let linha = &c.todas().await.unwrap()[0];
         assert!(!linha.ativa);
         assert_eq!(linha.versao(Path::new("/r")), None);
+    }
+
+    #[tokio::test]
+    async fn excluir_tira_a_linha() {
+        let c = catalogo().await;
+        c.criar(&linha()).await.unwrap();
+        c.confirmar("e1", 1, Some(&versao(1))).await.unwrap();
+        c.excluir("e1").await.unwrap();
+        assert!(c.todas().await.unwrap().is_empty());
     }
 
     #[tokio::test]

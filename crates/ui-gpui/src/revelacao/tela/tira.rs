@@ -83,6 +83,8 @@ pub(super) struct EstadoDaTira {
     pub(super) a_descartar: Vec<String>,
     /// A foto do "Editar Foto", até a raiz abrir a janela do editor.
     pub(super) a_editar: Option<PhotoViewModel>,
+    /// A foto do "Excluir a edição", até a raiz a atender.
+    pub(super) a_excluir: Option<PhotoViewModel>,
     /// Quantos quadros ainda tentam centralizar a aberta.
     ///
     /// ⚠️ **Dois**, porque a conta usa o leiaute do quadro anterior: no primeiro
@@ -116,6 +118,7 @@ impl EstadoDaTira {
             a_baixar: Vec::new(),
             a_descartar: Vec::new(),
             a_editar: None,
+            a_excluir: None,
             centrar: 0,
             pendentes: BTreeSet::new(),
             primeira_desenhada: 0,
@@ -318,7 +321,7 @@ fn dica(
         situacao.to_string(),
     ];
     if nao_salva {
-        partes.push("editada aqui, não salva".into());
+        partes.push("receita não salva".into());
     }
     if marcada && !escolhida {
         partes.push("escolhida para sincronizar".into());
@@ -333,6 +336,8 @@ struct Menu {
     e_a_aberta: bool,
     /// A clicada pode ir ao editor em camadas (ver `Revelacao::pode_editar`).
     editavel: bool,
+    /// A clicada tem edição (projeto) no editor — o "Excluir a edição".
+    com_edicao: bool,
     na_escolha: bool,
     alvos: Vec<PhotoViewModel>,
     quantas_zeram: usize,
@@ -721,6 +726,7 @@ impl Revelacao {
             arquivo: foto.name.clone(),
             e_a_aberta: clicada == self.posicao,
             editavel: Revelacao::pode_editar(foto),
+            com_edicao: self.tem_projeto_no_editor(foto),
             na_escolha: self.marcadas.contains(&clicada),
             quantas_zeram: outras + usize::from(aberta_zera),
             alvos,
@@ -787,7 +793,7 @@ impl Revelacao {
             .count();
         if pendentes > 0 {
             window.push_notification(
-                format!("{pendentes} têm edição não salva: o arquivo sai como está na galeria."),
+                format!("{pendentes} têm receita não salva: o arquivo sai como está na galeria."),
                 cx,
             );
         }
@@ -1029,6 +1035,9 @@ impl Revelacao {
         let levada = c.estado == Estado::LevadaNoBalcao && !c.apagada;
         let editavel = c.editavel();
         let revelada = !nao_salva && persistencia::ja_revelada(foto);
+        // 🖌️ A foto tem edição do editor em vigor — é **outra** coisa que a
+        // receita: pixels pintados, e não ajustes.
+        let editada = self.tem_edicao(foto);
         let miniatura = match self.miniaturas_da_tira.espiar(&foto.id) {
             Some(Miniatura::Pronta(imagem)) => Some(imagem),
             _ => None,
@@ -1147,6 +1156,35 @@ impl Revelacao {
                         .size(px(8.))
                         .rounded_full()
                         .bg(tema::cores::quente()),
+                )
+            })
+            // 🖌️ O selo das camadas: um lápis no canto de baixo à esquerda (os de
+            // cima são do cliente; o ponto de baixo à direita é da receita).
+            .when(editada, |t| {
+                t.child(
+                    div()
+                        .id(("selo-camadas", posicao))
+                        .debug_selector(move || format!("selo-camadas-{posicao}"))
+                        .absolute()
+                        .bottom(px(3.))
+                        .left(px(3.))
+                        .size(px(16.))
+                        .rounded_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .bg(gpui_kit::black().opacity(0.65))
+                        .child(
+                            Icon::new(Icone::Pencil)
+                                .size(px(10.))
+                                .text_color(gpui_kit::white()),
+                        )
+                        .tooltip(|window, cx| {
+                            Tooltip::new(
+                                "Com camadas do Editor — botão direito → Excluir as camadas",
+                            )
+                            .build(window, cx)
+                        }),
                 )
             })
             // 🚨 Fixa nos dois temas: a faixa se lê contra a foto.
@@ -1544,6 +1582,13 @@ impl Revelacao {
                 self.tira.menu_do_roteiro = None;
                 cx.notify();
             }
+            // 🖌️ O "Excluir as camadas" desta miniatura, já confirmado.
+            "excluir" => {
+                if let Some(foto) = na_posicao.and_then(|p| self.acervo.get(p).cloned()) {
+                    self.tira.a_excluir = Some(foto);
+                    cx.emit(PedidoDaRevelacao::ExcluirEdicao);
+                }
+            }
             // 🖌️ O "Editar Foto" do menu desta miniatura.
             "editar" => {
                 if let Some(posicao) = na_posicao {
@@ -1580,6 +1625,7 @@ fn montar_o_menu(
     let (para_zerar, para_baixar) = (esta.clone(), esta.clone());
     let (para_abrir, para_escolher) = (esta.clone(), esta.clone());
     let para_editar = esta.clone();
+    let para_excluir = esta.clone();
 
     menu.label(dados.arquivo)
         .separator()
@@ -1598,6 +1644,16 @@ fn montar_o_menu(
                 .disabled(!dados.editavel)
                 .on_click(move |_ev, _window, cx| {
                     let _ = para_editar.update(cx, |tela, cx| tela.pedir_edicao(clicada, cx));
+                }),
+        )
+        // 🖌️ Volta a foto ao bruto: o projeto e a imagem editada saem, e a
+        // **receita fica**. Pergunta antes — não tem volta.
+        .item(
+            PopupMenuItem::new("Excluir as camadas")
+                .disabled(!dados.com_edicao)
+                .on_click(move |_ev, window, cx| {
+                    let _ = para_excluir
+                        .update(cx, |tela, cx| tela.pedir_exclusao(clicada, window, cx));
                 }),
         )
         .item(
@@ -1663,9 +1719,9 @@ fn montar_o_menu(
         // fica como está na galeria (ver `descartar.rs`).
         .item(
             PopupMenuItem::new(if n_descartar > 1 {
-                format!("Descartar a edição de {n_descartar} fotos")
+                format!("Descartar a receita de {n_descartar} fotos")
             } else {
-                "Descartar a edição".to_string()
+                "Descartar a receita".to_string()
             })
             .disabled(n_descartar == 0)
             .on_click(move |_ev, window, cx| {
@@ -1814,7 +1870,7 @@ mod testes {
         let a = acervo();
         assert_eq!(
             dica(&a[2], 3, false, true, true),
-            "3. c — 5 estrelas — levada no balcão — editada aqui, não salva — escolhida para sincronizar"
+            "3. c — 5 estrelas — levada no balcão — receita não salva — escolhida para sincronizar"
         );
         assert_eq!(
             dica(&a[1], 2, true, true, false),

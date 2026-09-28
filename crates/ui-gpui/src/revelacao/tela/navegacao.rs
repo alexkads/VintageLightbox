@@ -47,7 +47,7 @@ pub(super) const ATALHOS: [(&str, &[(&str, &str)]); 5] = [
         &[
             ("R", "Entra e sai da ferramenta de enquadrar"),
             ("Enter", "Confirma o enquadramento e sai"),
-            ("Esc", "Fecha o editor (na ferramenta, só sai dela)"),
+            ("Esc", "Fecha a Revelação (na ferramenta, só sai dela)"),
             ("[", "Gira 90° à esquerda"),
             ("]", "Gira 90° à direita"),
             ("⇧H", "Espelha na horizontal"),

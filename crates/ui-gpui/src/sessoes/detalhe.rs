@@ -4685,9 +4685,9 @@ impl Detalhe {
                         .text_color(ambar)
                         .child(div().size(px(6.)).rounded_full().bg(ambar))
                         .child(if quantas == 1 {
-                            "1 edição não salva".to_string()
+                            "1 receita não salva".to_string()
                         } else {
-                            format!("{quantas} edições não salvas")
+                            format!("{quantas} receitas não salvas")
                         })
                         .tooltip(move |w, cx| {
                             gpui_kit::component::tooltip::Tooltip::new(if quantas == 1 {
@@ -5225,6 +5225,22 @@ impl Detalhe {
                                 self.nome_da_faixa(&foto.produto_efetivo),
                                 foto.downloads
                             ))),
+                    )
+                    // 🖌️ "· camadas": a foto tem camadas do Editor em vigor, e é
+                    // sobre elas que a receita se aplica. Outra coisa que a
+                    // receita não salva, logo ao lado.
+                    .when(
+                        crate::editor::porta::as_do_app()
+                            .is_some_and(|e| e.versao_de("", Some(foto.id.as_str())).is_some()),
+                        |linha| {
+                            linha.child(
+                                div()
+                                    .flex_none()
+                                    .pl(px(3.))
+                                    .text_color(cores::quente())
+                                    .child("· camadas"),
+                            )
+                        },
                     )
                     // 📌 O "· editada · não salva" do rodapé da web, em âmbar:
                     // ele não trunca, e a faixa cede o lugar.
@@ -5786,14 +5802,14 @@ impl Detalhe {
         let fotos = self.descartar_confirmando.as_ref()?;
         let (titulo, descricao, confirmar) = match fotos.as_slice() {
             [(_, arquivo)] => (
-                "Descartar a edição desta foto?".to_string(),
+                "Descartar a receita desta foto?".to_string(),
                 format!(
-                    "A revelação de {arquivo} feita aqui, que ainda não foi salva, é apagada. A foto fica como está na galeria do cliente, sem esta edição."
+                    "A receita de {arquivo} feita aqui, que ainda não foi salva, é apagada. A foto fica como está na galeria do cliente, sem esta receita."
                 ),
-                "Descartar a edição".to_string(),
+                "Descartar a receita".to_string(),
             ),
             varias => (
-                format!("Descartar a edição de {} fotos?", varias.len()),
+                format!("Descartar a receita de {} fotos?", varias.len()),
                 "As revelações feitas aqui, que ainda não foram salvas, são apagadas. Cada foto fica como está na galeria do cliente.".to_string(),
                 format!("Descartar as {}", varias.len()),
             ),
@@ -6862,7 +6878,7 @@ impl Detalhe {
                                 Button::new("lote-descartar-edicao")
                                     .debug_selector(|| "lote-descartar-edicao".into())
                                     .label(format!(
-                                        "Descartar a edição não salva ({pendentes_marcadas})"
+                                        "Descartar a receita não salva ({pendentes_marcadas})"
                                     ))
                                     .xsmall()
                                     .danger()
@@ -6931,12 +6947,12 @@ impl Detalhe {
                                 div()
                                     .text_xs()
                                     .text_color(cx.theme().warning)
-                                    .child("Edição feita aqui — ainda não salva na galeria."),
+                                    .child("Receita feita aqui — ainda não salva na galeria."),
                             )
                             .child(div().flex().child(
                                 Button::new("painel-descartar-edicao")
                                     .debug_selector(|| "painel-descartar-edicao".into())
-                                    .label("Descartar a edição")
+                                    .label("Descartar a receita")
                                     .xsmall()
                                     .danger()
                                     .ghost()

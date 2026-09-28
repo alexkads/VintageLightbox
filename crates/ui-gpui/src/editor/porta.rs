@@ -85,6 +85,15 @@ pub trait Edicoes: Send + Sync + 'static {
         documento: &Documento,
         historico: &Historico,
     ) -> Result<Option<VersaoEditada>, String>;
+
+    /// A foto tem projeto no editor (mesmo um que ficou sem efeito)? Síncrona,
+    /// do espelho — é o que acende o "Excluir a edição" do menu.
+    fn tem_projeto(&self, foto_id: &str, pos_venda_foto_id: Option<&str>) -> bool;
+
+    /// **Excluir a edição**: o projeto e a imagem editada saem, e a Revelação
+    /// volta ao bruto (a receita fica). **Bloqueante**. `Ok(false)` quando não
+    /// havia edição.
+    fn excluir(&self, foto: &FotoDoEditor) -> Result<bool, String>;
 }
 
 /// A porta do app, para quem mora numa thread própria e não recebe portas pela
@@ -213,6 +222,38 @@ fn texto(erro: ErroDoProjeto) -> String {
 }
 
 impl Edicoes for EdicoesDoCatalogo {
+    fn tem_projeto(&self, foto_id: &str, pos_venda_foto_id: Option<&str>) -> bool {
+        self.espelho
+            .lock()
+            .map(|e| e.iter().any(|l| l.e_da_foto(foto_id, pos_venda_foto_id)))
+            .unwrap_or(false)
+    }
+
+    fn excluir(&self, foto: &FotoDoEditor) -> Result<bool, String> {
+        let Some(linha) = self.linha_de(&foto.id, foto.pos_venda_foto_id.as_deref()) else {
+            return Ok(false);
+        };
+        // 1. O catálogo: daqui em diante a Revelação usa o bruto.
+        self.tokio
+            .block_on(self.catalogo.excluir(&linha.edicao_id))?;
+        self.espelho
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|l| l.edicao_id != linha.edicao_id);
+        self.projetos
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&linha.edicao_id);
+        // 2. Os arquivos. Uma falha aqui deixa lixo no disco, e não uma edição
+        // em vigor: o catálogo já não a aponta.
+        if let Err(erro) = std::fs::remove_dir_all(linha.pasta(&self.raiz)) {
+            crate::telemetria::avisar!(
+                "⚠️ [Editor] a pasta da edição excluída ficou no disco: {erro}"
+            );
+        }
+        Ok(true)
+    }
+
     fn versao_de(&self, foto_id: &str, pos_venda_foto_id: Option<&str>) -> Option<VersaoEditada> {
         self.linha_de(foto_id, pos_venda_foto_id)?
             .versao(&self.raiz)
@@ -342,6 +383,17 @@ pub mod mentira {
     }
 
     impl Edicoes for EdicoesDeMentira {
+        fn tem_projeto(&self, foto_id: &str, pos_venda: Option<&str>) -> bool {
+            self.estado
+                .lock()
+                .unwrap()
+                .contains_key(&Self::chave(foto_id, pos_venda))
+        }
+
+        fn excluir(&self, foto: &FotoDoEditor) -> Result<bool, String> {
+            Ok(self.estado.lock().unwrap().remove(&foto.chave()).is_some())
+        }
+
         fn versao_de(&self, foto_id: &str, pos_venda: Option<&str>) -> Option<VersaoEditada> {
             self.estado
                 .lock()

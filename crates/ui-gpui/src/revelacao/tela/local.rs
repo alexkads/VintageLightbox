@@ -2363,7 +2363,7 @@ impl Revelacao {
                     .text_xs()
                     .text_color(tema.warning)
                     .child(SharedString::from(format!(
-                        "A Revelação local desta foto foi feita numa versão mais nova do app e não pode ser editada aqui ({erro})."
+                        "A Revelação local desta foto foi feita numa versão mais nova do app e não pode ser alterada aqui ({erro})."
                     ))),
             );
         }

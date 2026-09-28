@@ -164,7 +164,7 @@ impl Revelacao {
                 .button_props(
                     DialogButtonProps::default()
                         .ok_text(if quantas == 1 {
-                            SharedString::from("Descartar a edição")
+                            SharedString::from("Descartar a receita")
                         } else {
                             SharedString::from(format!("Descartar as {quantas}"))
                         })
@@ -173,9 +173,9 @@ impl Revelacao {
                         .show_cancel(true),
                 )
                 .title(if quantas == 1 {
-                    SharedString::from("Descartar a edição desta foto?")
+                    SharedString::from("Descartar a receita desta foto?")
                 } else {
-                    SharedString::from(format!("Descartar a edição de {quantas} fotos?"))
+                    SharedString::from(format!("Descartar a receita de {quantas} fotos?"))
                 })
                 .child(div().text_sm().child(
                     "O que foi revelado aqui e ainda não foi salvo na galeria é apagado. \
@@ -278,7 +278,7 @@ impl Revelacao {
             .tooltip(if quantas == 0 {
                 "Nada a descartar: o que está no canvas já é o que está na galeria"
             } else {
-                "Descartar a edição não salva — a foto volta a ficar como está na galeria"
+                "Descartar a receita não salva — a foto volta a ficar como está na galeria"
             })
             .disabled(quantas == 0 || ocupado)
             .dropdown_menu_with_anchor(gpui_kit::Anchor::TopRight, move |menu, window, cx| {

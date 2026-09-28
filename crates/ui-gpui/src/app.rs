@@ -4071,6 +4071,7 @@ impl Aplicativo {
             }
             PedidoDaRevelacao::QueroOBruto => self.pedir_o_bruto(cx),
             PedidoDaRevelacao::EditarFoto => self.editar_a_foto_pedida(cx),
+            PedidoDaRevelacao::ExcluirEdicao => self.excluir_a_edicao_pedida(cx),
         }
     }
 
@@ -5402,9 +5403,9 @@ impl Aplicativo {
         self.recontar_o_que_falta_subir(cx);
         let mut aviso = match descartadas.as_slice() {
             [] => String::new(),
-            [uma] => format!("A edição de {uma} foi descartada — ela fica como está na galeria"),
+            [uma] => format!("A receita de {uma} foi descartada — ela fica como está na galeria"),
             varias => format!(
-                "{} edições descartadas — as fotos ficam como estão na galeria",
+                "{} receitas descartadas — as fotos ficam como estão na galeria",
                 varias.len()
             ),
         };

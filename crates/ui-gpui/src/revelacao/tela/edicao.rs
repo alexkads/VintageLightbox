@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use adapters::view_models::PhotoViewModel;
-use gpui_kit::Context;
+use gpui_kit::{Context, Window};
 
 use super::super::fonte;
 use super::super::persistencia;
@@ -51,6 +51,81 @@ impl Revelacao {
     #[cfg(test)]
     pub fn pedir_edicao_para_teste(&mut self, posicao: usize, cx: &mut Context<Self>) {
         self.pedir_edicao(posicao, cx);
+    }
+
+    /// A foto tem edição do editor **em vigor** — o selo "Editada".
+    pub fn tem_edicao(&self, foto: &PhotoViewModel) -> bool {
+        self.edicoes
+            .as_deref()
+            .is_some_and(|e| crate::editor::porta::versao_da_foto(e, foto).is_some())
+    }
+
+    /// A foto tem projeto no editor (mesmo sem efeito) — o "Excluir a edição".
+    pub fn tem_projeto_no_editor(&self, foto: &PhotoViewModel) -> bool {
+        self.edicoes
+            .as_deref()
+            .is_some_and(|e| e.tem_projeto(&foto.id, foto.pos_venda_foto_id.as_deref()))
+    }
+
+    /// "Excluir a edição": pergunta, e só então pede à raiz.
+    ///
+    /// 🔑 **A receita fica.** Excluir a edição é tirar os pixels pintados; os
+    /// ajustes, o corte e as máscaras da Revelação são outra coisa, e
+    /// continuam — agora aplicados sobre o bruto.
+    pub(super) fn pedir_exclusao(
+        &mut self,
+        posicao: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use gpui_kit::component::button::ButtonVariant;
+        use gpui_kit::component::dialog::DialogButtonProps;
+        use gpui_kit::component::WindowExt;
+        use gpui_kit::{div, prelude::*, SharedString};
+        let Some(foto) = self.acervo.get(posicao).cloned() else {
+            return;
+        };
+        if !self.tem_projeto_no_editor(&foto) {
+            return;
+        }
+        let esta = cx.entity();
+        let nome = foto.name.clone();
+        window.open_alert_dialog(cx, move |dialogo, _window, _cx| {
+            let para_ok = esta.clone();
+            let foto = foto.clone();
+            dialogo
+                .confirm()
+                .button_props(
+                    DialogButtonProps::default()
+                        .ok_text("Excluir as camadas")
+                        .ok_variant(ButtonVariant::Danger)
+                        .cancel_text("Cancelar")
+                        .show_cancel(true),
+                )
+                .title(SharedString::from(format!("Excluir as camadas de {nome}?")))
+                .child(div().text_sm().child(
+                    "O que foi pintado no Editor é apagado e a foto volta ao arquivo bruto. \
+                     A receita da Revelação (ajustes, corte e máscaras) continua, agora \
+                     sobre o bruto. Não dá para desfazer.",
+                ))
+                .on_ok(move |_ev, window, cx| {
+                    para_ok.update(cx, |tela, cx| {
+                        tela.tira.a_excluir = Some(foto.clone());
+                        cx.emit(PedidoDaRevelacao::ExcluirEdicao);
+                    });
+                    window.close_dialog(cx);
+                    false
+                })
+                .on_cancel(|_ev, window, cx| {
+                    window.close_dialog(cx);
+                    false
+                })
+        });
+    }
+
+    /// A foto que o menu mandou excluir — a raiz a leva uma vez.
+    pub fn levar_a_excluir(&mut self) -> Option<PhotoViewModel> {
+        self.tira.a_excluir.take()
     }
 
     /// A foto que o menu mandou editar — a raiz a leva uma vez.
@@ -410,6 +485,44 @@ mod testes {
                 assert_eq!(origem_rgb(tela).as_raw(), composta.as_raw());
                 tela.ir_para(2, window, cx);
                 assert_eq!(tela.revisao_da_aberta(), fonte::DO_BRUTO);
+            })
+            .unwrap();
+    }
+
+    /// 🔑 **Excluir a edição volta ao bruto e deixa a receita.** Edição e
+    /// receita são coisas diferentes: tirar os pixels pintados não mexe nos
+    /// ajustes, no corte nem nas máscaras.
+    #[gpui_kit::test]
+    fn excluir_a_edicao_volta_ao_bruto_e_mantem_a_receita(cx: &mut TestAppContext) {
+        let p = palco(cx);
+        editar_e_salvar(&p, 0);
+        let ajustes = p
+            .janela
+            .update(cx, |tela, _w, cx| {
+                tela.aplicar_para_teste(0, 1.2, cx);
+                tela.fonte_mudou("id-0", None, cx);
+                assert_eq!(tela.revisao_da_aberta(), 1);
+                assert!(tela.tem_edicao(&p.acervo[0]), "o selo acende");
+                assert!(!tela.tem_edicao(&p.acervo[1]), "só na editada");
+                assert!(tela.tem_projeto_no_editor(&p.acervo[0]));
+                tela.ajustes()
+            })
+            .unwrap();
+        assert!(p.edicoes.excluir(&FotoDoEditor::da(&p.acervo[0])).unwrap());
+        p.janela
+            .update(cx, |tela, _w, cx| {
+                tela.fonte_mudou("id-0", None, cx);
+                assert_eq!(tela.revisao_da_aberta(), fonte::DO_BRUTO);
+                // A prévia do bruto (JPEG, no cache), como antes da edição.
+                let bruto = p.previews.get_preview("id-0").unwrap().to_rgb8();
+                assert_eq!(
+                    origem_rgb(tela).as_raw(),
+                    bruto.as_raw(),
+                    "de volta ao bruto"
+                );
+                assert_eq!(tela.ajustes(), ajustes, "a receita ficou");
+                assert!(!tela.tem_edicao(&p.acervo[0]));
+                assert!(!tela.tem_projeto_no_editor(&p.acervo[0]));
             })
             .unwrap();
     }

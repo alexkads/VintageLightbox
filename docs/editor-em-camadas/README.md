@@ -3,6 +3,24 @@
 > Uso interno da equipe do estúdio, dentro do VintageLightbox. Aberto pela Revelação: botão direito numa
 > foto do FilmStrip → **"Editar Foto"** → janela própria para aquela foto.
 
+## Os nomes — regra do dono (27/set/2026)
+
+> *"Receita e edição precisam ser coisas diferentes!"* · *"Revelação usa receita; Editor usa camadas!
+> Primeiro vem arquivo bruto, editor de camadas e depois vem a receita."*
+
+```text
+arquivo bruto  →  camadas (Editor)  →  receita (Revelação)  →  JPEG / galeria
+```
+
+| Na tela | Quer dizer | Onde |
+|---|---|---|
+| **camadas** | o que foi pintado no Editor, por cima do bruto | selo "CAMADAS" no cabeçalho da Revelação, lápis na miniatura da tira, "· camadas" na grade da sessão, "Excluir as camadas" no menu da tira |
+| **receita** | os ajustes, o corte e as máscaras da Revelação | "Descartar a receita", "receita não salva", "N receitas não salvas" |
+| **Revelação** | a tela da receita (antes chamada de "editor" em alguns avisos) | "fecha a Revelação" |
+
+"Excluir as camadas" apaga o projeto do Editor e a foto volta ao arquivo bruto; a receita fica.
+"Descartar a receita" volta os ajustes ao que a galeria tem; as camadas ficam.
+
 ## Por que existe
 
 A Revelação só guarda **parâmetros** (ajustes, corte, máscaras de ajuste). Não há como pintar ou apagar

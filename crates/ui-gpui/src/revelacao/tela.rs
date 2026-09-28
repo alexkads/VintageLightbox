@@ -1103,14 +1103,14 @@ impl Revelacao {
             "Nada a salvar: o que está no canvas já está na galeria".to_string()
         } else if outras > 0 {
             if self.pode_revelar() {
-                format!("Salva esta e mais {outras} com edição pendente, e fecha o editor")
+                format!("Salva esta e mais {outras} com receita pendente, e fecha a Revelação")
             } else {
                 format!(
-                    "Esta foi comprada e não se revela; salva as {outras} pendentes e fecha o editor"
+                    "Esta foi comprada e não se revela; salva as {outras} pendentes e fecha a Revelação"
                 )
             }
         } else {
-            "Salva esta foto na galeria e fecha o editor".to_string()
+            "Salva esta foto na galeria e fecha a Revelação".to_string()
         };
         BotaoDeSalvar {
             rotulo: "Salvar na galeria e sair".to_string(),
@@ -2860,6 +2860,9 @@ pub enum PedidoDaRevelacao {
     /// "Editar Foto" do menu da tira: a raiz abre a janela do editor para a
     /// foto de [`Revelacao::levar_a_editar`] — a clicada, e só ela.
     EditarFoto,
+    /// "Excluir a edição" do menu da tira, já confirmado: a raiz apaga o
+    /// projeto da foto de [`Revelacao::levar_a_excluir`] e a devolve ao bruto.
+    ExcluirEdicao,
 }
 
 impl gpui_kit::EventEmitter<PedidoDaRevelacao> for Revelacao {}
@@ -3200,6 +3203,34 @@ impl Revelacao {
             // rendem diferente; aqui ele responde "a GPU está mesmo sendo usada,
             // e por qual caminho" — a pergunta que aparece toda vez que alguém
             // acha o arrasto lento.
+            // 🖌️ "CAMADAS": a foto aberta está sendo revelada a partir da
+            // imagem do editor, e não do bruto.
+            .when(self.revisao_da_aberta() != fonte::DO_BRUTO, |barra| {
+                barra.child(
+                    div()
+                        .id("selo-camadas-aberta")
+                        .debug_selector(|| "selo-camadas-aberta".into())
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .gap(px(3.))
+                        .px(px(4.))
+                        .py(px(1.))
+                        .rounded(px(3.))
+                        .bg(tema::cores::quente().opacity(0.2))
+                        .text_xs()
+                        .text_color(tema::cores::quente())
+                        .child(Icon::new(Icone::Pencil).size(px(10.)))
+                        .child("CAMADAS")
+                        .tooltip(|window, cx| {
+                            Tooltip::new(
+                                "A receita está sendo aplicada sobre as camadas do Editor. \
+                                 Botão direito na tira → Excluir as camadas volta ao arquivo bruto.",
+                            )
+                            .build(window, cx)
+                        }),
+                )
+            })
             .children(self.processador.backend().map(|backend| {
                 div()
                     .flex_none()
