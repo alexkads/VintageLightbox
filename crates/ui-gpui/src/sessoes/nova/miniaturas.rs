@@ -159,7 +159,7 @@ impl Miniaturas {
 }
 
 /// 🚨 **A ordem de leitura é a mesma de antes**: a versão revelada primeiro, o
-/// bruto depois — a grade mostra a foto com a receita, e não como ela veio.
+/// bruto depois — a grade mostra a foto com a revelação, e não como ela veio.
 fn laco(pedidos: Receiver<Pedido>, respostas: Sender<(String, Option<DynamicImage>)>) {
     while let Ok(pedido) = pedidos.recv() {
         let previews = &pedido.previews;

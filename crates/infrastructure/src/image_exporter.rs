@@ -39,7 +39,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use crate::gpu_adjustments::{
-    ajustes_da_entidade, locais_da_entidade, Ajustes, Motor, ReceitaLocal,
+    ajustes_da_entidade, locais_da_entidade, Ajustes, Motor, ParametrosLocais,
 };
 use crate::transformacao;
 
@@ -128,7 +128,7 @@ impl ImageExporterImpl {
         bytes: &[u8],
         ajustes: &Ajustes,
         corte: &CropSettings,
-        locais: &ReceitaLocal,
+        locais: &ParametrosLocais,
         qualidade: u8,
     ) -> DomainResult<Vec<u8>> {
         // De pé: o bruto do site pode ser o arquivo da câmera, com a etiqueta.
@@ -149,7 +149,7 @@ impl ImageExporterImpl {
     /// para medir as duas vinhetas no recorte (`Motor::definir_corte`). É
     /// definido a cada chamada porque o motor é compartilhado entre fotos.
     ///
-    /// 🔑 **A receita local também entra aqui**, e as máscaras são refeitas dos
+    /// 🔑 **A revelação local também entra aqui**, e as máscaras são refeitas dos
     /// parâmetros na resolução do arquivo — não é o bitmap do preview ampliado.
     /// Uma GPU que não desenha máscara faz a exportação falhar, em vez de
     /// entregar a foto sem o que foi pintado.
@@ -158,7 +158,7 @@ impl ImageExporterImpl {
         imagem: &DynamicImage,
         ajustes: &Ajustes,
         corte: &CropSettings,
-        locais: &ReceitaLocal,
+        locais: &ParametrosLocais,
     ) -> DomainResult<DynamicImage> {
         // 🚨 RGBA de 8 bits é o que a textura de entrada espera
         // (`Rgba8Unorm`). Um `to_rgb8` aqui daria três canais para um formato de
@@ -321,13 +321,15 @@ impl ImageExporter for ImageExporterImpl {
             .map_err(|e| DomainError::InfrastructureError(format!("Failed to encode JPEG: {}", e)))
     }
 
-    fn receita_para_o_site(&self, photo: &Photo) -> Option<serde_json::Value> {
+    fn parametros_para_o_site(&self, photo: &Photo) -> Option<serde_json::Value> {
         let ajustes = ajustes_da_entidade(photo);
         let corte = transformacao::corte_da_entidade(photo);
         if ajustes == Ajustes::default() && corte == CropSettings::default() {
             return None;
         }
-        Some(crate::pos_venda::receita::ajustes_em_json(&ajustes, &corte))
+        Some(crate::pos_venda::parametros::ajustes_em_json(
+            &ajustes, &corte,
+        ))
     }
 
     /// 🔑 **Mesmo caminho, ajustes e corte no neutro.** Ele passa pelo shader
@@ -341,7 +343,7 @@ impl ImageExporter for ImageExporterImpl {
     ) -> DomainResult<Option<Vec<u8>>> {
         // Nada revelado, nada a guardar: o próprio envio é o bruto.
         //
-        // 🚨 **A receita local conta como revelação.** Uma foto só com máscara
+        // 🚨 **A revelação local conta como revelação.** Uma foto só com máscara
         // (sliders no neutro) sobe o arquivo mascarado; sem esta conferência ele
         // seria tratado como o próprio bruto, e o bruto de verdade não subiria.
         let corte = transformacao::corte_da_entidade(photo);
@@ -363,7 +365,7 @@ impl ImageExporter for ImageExporterImpl {
             &img,
             &Ajustes::default(),
             &CropSettings::default(),
-            &ReceitaLocal::default(),
+            &ParametrosLocais::default(),
         )?;
         let mut saida = transformacao::aplicar(&revelada, &CropSettings::default(), true);
         if let Some(lado_maior) = options.longest_edge() {

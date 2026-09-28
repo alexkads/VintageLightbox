@@ -84,7 +84,7 @@ fn jeito_de_instalar() {
 /// faltava.
 ///
 /// 🔑 **O mesmo `.ico` do instalador** (`empacotamento/icones/icone.ico`, que o
-/// `packager.toml` já lista): dois arquivos para a mesma logo é a receita de um
+/// `packager.toml` já lista): dois arquivos para a mesma logo é a revelação de um
 /// deles envelhecer sem ninguém notar.
 fn icone_do_executavel(raiz: &Path) {
     // ⚠️ **O alvo, e não o host**: `cfg!(windows)` aqui falaria da máquina que

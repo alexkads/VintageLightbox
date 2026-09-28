@@ -2,7 +2,7 @@
 //!
 //! 🔑 **É o mesmo SQLite do catálogo**, e não um banco novo: o pool que chega
 //! aqui é o que abre `photos`, `presets` e as coleções. O que a tabela
-//! `revelacoes_do_site` acrescenta é o lugar de guardar a receita de uma foto
+//! `revelacoes_do_site` acrescenta é o lugar de guardar a revelação de uma foto
 //! que **não tem arquivo neste disco** — e por isso não é linha de `photos`,
 //! cujas duas migrations do pós-venda (017 e 019) dizem, cada uma à sua
 //! maneira, que ali mora "uma foto no disco".
@@ -160,9 +160,9 @@ mod testes {
     }
 
     /// 🚨 As máscaras da foto do site sobrevivem a salvar na galeria: o
-    /// `esquecer` é dos `ajustes`, que sobem; a receita local não sobe.
+    /// `esquecer` é dos `ajustes`, que sobem; a revelação local não sobe.
     #[tokio::test]
-    async fn a_receita_local_nao_vai_embora_com_o_esquecer() {
+    async fn a_parametros_locais_nao_vai_embora_com_o_esquecer() {
         let deposito = deposito().await;
         deposito
             .guardar("remota-1", r#"{"exposure":1.0}"#)

@@ -1,4 +1,4 @@
-//! A receita da revelação como o site a guarda: os ajustes e o enquadramento
+//! A revelação da revelação como o site a guarda: os ajustes e o enquadramento
 //! por nome, num objeto JSON — a coluna `ajustes` (JSONB) de `pos_venda_fotos`.
 //!
 //! 🔑 **Em JSON puro, sem compressão** (decisão do dono, 14/set/2026). O site e
@@ -30,7 +30,7 @@ pub fn ajustes_em_json(ajustes: &Ajustes, corte: &CropSettings) -> serde_json::V
             "corte_espelho_v".into(),
             i32::from(corte.flip_vertical()).into(),
         );
-        // A perspectiva guiada e o "restringir": só quando existem — a receita
+        // A perspectiva guiada e o "restringir": só quando existem — a revelação
         // de uma foto sem eles fica a mesma de antes (ver `perspectiva.rs` do
         // domínio).
         corte.perspectiva().em_json(objeto);
@@ -39,20 +39,20 @@ pub fn ajustes_em_json(ajustes: &Ajustes, corte: &CropSettings) -> serde_json::V
     json
 }
 
-/// Duas receitas dizem **a mesma coisa**? — o que o site guardou e o que o
+/// Duas revelações dizem **a mesma coisa**? — o que o site guardou e o que o
 /// catálogo tem agora.
 ///
 /// 🚨 **Comparar o JSON por igualdade fazia o ensaio inteiro subir duas vezes.**
-/// O corte 3:2 da receita padrão sai do catálogo como `f32` e, pelo caminho da
+/// O corte 3:2 da revelação padrão sai do catálogo como `f32` e, pelo caminho da
 /// subida, como `f64`: `corte_altura` virava `0.9988283514976501` de um lado e
-/// `0.99882835149765` do outro — 1 ulp. A raiz achava que a receita tinha mudado
+/// `0.99882835149765` do outro — 1 ulp. A raiz achava que a revelação tinha mudado
 /// enquanto a foto subia e mandava cada uma de novo como revelação (bilhete,
 /// JPEG, upload), e o "Subindo" do canto ficava parado em 48↔47 durante o envio
 /// inteiro (visto rodando o app com o cartão da D3100, 27/set/2026).
 ///
 /// 🔑 Número é igual quando a diferença cabe na precisão do `f32` que o
 /// catálogo guarda (1e-6 relativo); o resto compara como sempre.
-pub fn mesma_receita(a: &serde_json::Value, b: &serde_json::Value) -> bool {
+pub fn mesmos_parametros(a: &serde_json::Value, b: &serde_json::Value) -> bool {
     use serde_json::Value;
     match (a, b) {
         (Value::Number(x), Value::Number(y)) => match (x.as_f64(), y.as_f64()) {
@@ -62,23 +62,23 @@ pub fn mesma_receita(a: &serde_json::Value, b: &serde_json::Value) -> bool {
         (Value::Object(x), Value::Object(y)) => {
             x.len() == y.len()
                 && x.iter()
-                    .all(|(chave, vx)| y.get(chave).is_some_and(|vy| mesma_receita(vx, vy)))
+                    .all(|(chave, vx)| y.get(chave).is_some_and(|vy| mesmos_parametros(vx, vy)))
         }
         (Value::Array(x), Value::Array(y)) => {
-            x.len() == y.len() && x.iter().zip(y).all(|(vx, vy)| mesma_receita(vx, vy))
+            x.len() == y.len() && x.iter().zip(y).all(|(vx, vy)| mesmos_parametros(vx, vy))
         }
         _ => a == b,
     }
 }
 
-/// [`mesma_receita`] sobre o texto guardado. Texto que não é JSON compara como
+/// [`mesmos_parametros`] sobre o texto guardado. Texto que não é JSON compara como
 /// texto.
-pub fn mesma_receita_em_texto(a: &str, b: &str) -> bool {
+pub fn mesmos_parametros_em_texto(a: &str, b: &str) -> bool {
     match (
         serde_json::from_str::<serde_json::Value>(a),
         serde_json::from_str::<serde_json::Value>(b),
     ) {
-        (Ok(a), Ok(b)) => mesma_receita(&a, &b),
+        (Ok(a), Ok(b)) => mesmos_parametros(&a, &b),
         _ => a == b,
     }
 }
@@ -87,16 +87,16 @@ pub fn mesma_receita_em_texto(a: &str, b: &str) -> bool {
 mod testes {
     use super::*;
 
-    /// O caso medido: o corte 3:2 da receita padrão, pelos dois caminhos.
+    /// O caso medido: o corte 3:2 da revelação padrão, pelos dois caminhos.
     #[test]
-    fn o_mesmo_corte_em_f32_e_f64_e_a_mesma_receita() {
+    fn o_mesmo_corte_em_f32_e_f64_e_a_mesmos_parametros() {
         let agora = serde_json::json!({"saturation": -1.0, "corte_altura": 0.9988283514976501_f64});
         let subiu = serde_json::json!({"saturation": -1.0, "corte_altura": 0.99882835149765_f64});
         assert_ne!(agora, subiu, "por igualdade, eram diferentes");
-        assert!(mesma_receita(&agora, &subiu));
+        assert!(mesmos_parametros(&agora, &subiu));
 
         let de_f32 = ajustes_em_json(&Ajustes::default(), &CropSettings::default());
-        assert!(mesma_receita_em_texto(
+        assert!(mesmos_parametros_em_texto(
             &de_f32.to_string(),
             &de_f32.to_string()
         ));
@@ -106,24 +106,24 @@ mod testes {
     fn mudanca_de_verdade_continua_diferente() {
         let sepia = serde_json::json!({"contrast": 1.08, "split_shadow_sat": 45.0});
         let pb = serde_json::json!({"contrast": 1.15, "split_shadow_sat": 0.0});
-        assert!(!mesma_receita(&sepia, &pb));
-        assert!(!mesma_receita(
+        assert!(!mesmos_parametros(&sepia, &pb));
+        assert!(!mesmos_parametros(
             &serde_json::json!({"curva_m4": 127.5}),
             &serde_json::json!({"curva_m4": 127.6})
         ));
         assert!(
-            !mesma_receita(
+            !mesmos_parametros(
                 &serde_json::json!({"a": 1.0}),
                 &serde_json::json!({"a": 1.0, "b": 0.0})
             ),
-            "campo a mais é outra receita"
+            "campo a mais é outra revelação"
         );
     }
 
     #[test]
     fn o_corte_entra_por_nome_ao_lado_dos_ajustes() {
-        let receita = ajustes_em_json(&Ajustes::default(), &CropSettings::default());
-        let objeto = receita.as_object().expect("um objeto por nome");
+        let parametros = ajustes_em_json(&Ajustes::default(), &CropSettings::default());
+        let objeto = parametros.as_object().expect("um objeto por nome");
         for campo in [
             "corte_x",
             "corte_y",

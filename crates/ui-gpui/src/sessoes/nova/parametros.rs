@@ -1,5 +1,5 @@
-//! A receita padrão da nova sessão: o preset e o corte que a etapa 2 aplica
-//! sozinha às fotos do rascunho (`receita-padrao/receita.ts` e
+//! A revelação padrão da nova sessão: o preset e o corte que a etapa 2 aplica
+//! sozinha às fotos do rascunho (`revelacao-padrao/parametros.ts` e
 //! `nova/presets-da-sessao.ts` do site).
 //!
 //! # 🔑 O id é o do site
@@ -114,9 +114,9 @@ pub fn nome_do_preset(lista: &[PresetDaSessao], id: Option<&str>) -> Option<Stri
     )
 }
 
-/// Os ajustes da receita padrão. 🚨 **Sempre a partir do neutro**, mesmo para
+/// Os ajustes da revelação padrão. 🚨 **Sempre a partir do neutro**, mesmo para
 /// o preset que soma: trocar o preset da sessão troca o efeito, não empilha.
-pub fn ajustes_da_receita(preset: Option<&Preset>) -> Ajustes {
+pub fn ajustes_dos_parametros(preset: Option<&Preset>) -> Ajustes {
     let mut ajustes = Ajustes::default();
     if let Some(preset) = preset {
         presets::aplicar(&mut ajustes, &preset.adjustments);
@@ -209,12 +209,12 @@ mod testes {
     }
 
     #[test]
-    fn a_receita_parte_do_neutro() {
+    fn os_parametros_parte_do_neutro() {
         let soma = Preset::system("x", PresetAdjustments::vazia().com("exposure", 0.3));
-        let a = ajustes_da_receita(Some(&soma));
+        let a = ajustes_dos_parametros(Some(&soma));
         assert_eq!(a.exposure, 0.3);
         assert_eq!(a.contrast, Ajustes::default().contrast);
-        assert_eq!(ajustes_da_receita(None), Ajustes::default());
+        assert_eq!(ajustes_dos_parametros(None), Ajustes::default());
     }
 
     #[test]

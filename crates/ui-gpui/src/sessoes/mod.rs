@@ -25,11 +25,11 @@ pub mod nova;
 pub mod origem_das_fotos;
 /// A coluna da direita da galeria: aberta ou recolhida, lembrado.
 pub mod paineis;
-/// A receita padrão revelada em segundo plano (o `receita-padrao/` do site).
+/// A revelação padrão revelada em segundo plano (o `revelacao-padrao/` do site).
 pub mod periodo;
 /// O quadro "arraste ou escolha" das duas portas de importar.
 pub mod quadro_de_importacao;
-pub mod receita_padrao;
 /// A política de retenção do pós-venda (a rota `configuracoes` do site).
 pub mod retencao;
+pub mod revelacao_padrao;
 pub mod tela;

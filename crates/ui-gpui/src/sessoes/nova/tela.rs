@@ -45,7 +45,7 @@ use super::associacoes::{
     self as assoc, AgendamentoEscolhido, CompraEscolhida, ParceiroEscolhido, VoucherEscolhido,
 };
 use super::estado::{self, Campo, EstadoDaEtapa, Formulario, Rascunho};
-use super::receita::{self, PresetDaSessao};
+use super::parametros::{self, PresetDaSessao};
 use crate::biblioteca::acervo::Acervo;
 use crate::importacao::explorador::{Andamento, Freios, Importador};
 use crate::pos_venda::porta::{PedidoJson, Publicador, Recado};
@@ -73,9 +73,9 @@ pub enum PedidoDaNova {
     CatalogoMudou,
     /// O botão do menu lateral.
     AlternarMenu,
-    /// Fotos entraram na fila da receita padrão: a raiz liga a colheita dos
+    /// Fotos entraram na fila da revelação padrão: a raiz liga a colheita dos
     /// avisos, que ela repassa a esta tela e à da sessão.
-    RevelandoReceita,
+    RevelandoParametros,
     /// A cópia que continua depois de criar a sessão andou: a sessão mostra a
     /// barra dela, como mostraria a de uma importação feita lá.
     CopiaDaSessao {
@@ -210,9 +210,9 @@ pub(super) struct Aviso {
     ate: Instant,
 }
 
-/// O andamento da receita padrão sobre as fotos do rascunho.
+/// O andamento da revelação padrão sobre as fotos do rascunho.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(super) struct Receita {
+pub(super) struct Parametros {
     pub total: usize,
     pub prontas: usize,
 }
@@ -225,13 +225,13 @@ pub struct PortasDaNova {
     pub acervo: Arc<dyn Acervo>,
     pub gravador: Arc<dyn Gravador>,
     pub previews: Arc<PreviewManager>,
-    /// Quem revela a receita padrão em segundo plano.
+    /// Quem revela a revelação padrão em segundo plano.
     ///
     /// 🔑 **Porta, e não campo da tela.** O assistente sai de cena quando a
     /// sessão nasce, e a revelação não pode sair com ele — é o pedido do dono
     /// ("em segundo plano, e ao abrir a sessão ir acontecendo"). O mesmo serviço
     /// serve a sessão, e por isso as duas telas mostram a mesma imagem.
-    pub receita_padrao: Arc<crate::sessoes::receita_padrao::ReceitaPadrao>,
+    pub revelacao_padrao: Arc<crate::sessoes::revelacao_padrao::RevelacaoPadrao>,
     /// O "Do cartão ou pasta…" — as mesmas portas do da sessão.
     pub origem: PortasDaOrigem,
     pub presets_do_sistema: Vec<Preset>,
@@ -289,8 +289,8 @@ pub struct NovaSessao {
     pub(super) falhas_da_copia: Option<(usize, String)>,
     freios: Freios,
     escolhendo: bool,
-    pub(super) receita: Receita,
-    receita_aplicada: HashMap<String, String>,
+    pub(super) parametros: Parametros,
+    parametros_aplicados: HashMap<String, String>,
     pub(super) arrastando: bool,
     pub(super) aviso: Option<Aviso>,
     pub(super) rolagem: ScrollHandle,
@@ -301,9 +301,9 @@ pub struct NovaSessao {
     /// As miniaturas das fotos do rascunho. **Lidas fora da linha da
     /// interface** — ver [`super::miniaturas`].
     pub(super) miniaturas: super::miniaturas::Miniaturas,
-    /// Fotos foram para a fila da receita: o próximo quadro avisa a raiz.
+    /// Fotos foram para a fila da revelação: o próximo quadro avisa a raiz.
     ///
-    /// 🔑 **Bandeira, e não `cx.emit` direto**: `aplicar_receita` é chamado de
+    /// 🔑 **Bandeira, e não `cx.emit` direto**: `aplicar_parametros` é chamado de
     /// lugares sem `Context` (a releitura do catálogo, a chegada dos presets), e
     /// dar um `cx` a ela só para isto espalharia o contexto por meio módulo.
     pub(super) pedir_colheita_das_reveladas: bool,
@@ -514,8 +514,8 @@ impl NovaSessao {
             falhas_da_copia: None,
             freios: Freios::default(),
             escolhendo: false,
-            receita: Receita::default(),
-            receita_aplicada: HashMap::new(),
+            parametros: Parametros::default(),
+            parametros_aplicados: HashMap::new(),
             arrastando: false,
             aviso: None,
             rolagem: ScrollHandle::new(),
@@ -606,8 +606,8 @@ impl NovaSessao {
             agora(),
         );
         self.rascunho.etapa = 2;
-        self.receita_aplicada.clear();
-        self.receita = Receita::default();
+        self.parametros_aplicados.clear();
+        self.parametros = Parametros::default();
         self.falhas_da_copia = None;
         self.tentou = false;
         self.erro = None;
@@ -856,7 +856,7 @@ impl NovaSessao {
         cx.emit(PedidoDaNova::Voltar);
     }
 
-    // ── Etapa 2: fotos e receita ─────────────────────────────────────────
+    // ── Etapa 2: fotos e revelação ─────────────────────────────────────────
 
     /// "Escolher fotos" / "Adicionar mais fotos".
     pub fn escolher_fotos(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -992,8 +992,8 @@ impl NovaSessao {
         }
         self.rascunho.formulario.preset_id = id;
         self.guardar();
-        self.esquecer_a_fila_da_receita();
-        self.aplicar_receita();
+        self.esquecer_a_fila_dos_parametros();
+        self.aplicar_parametros();
         cx.notify();
     }
 
@@ -1004,8 +1004,8 @@ impl NovaSessao {
         }
         self.rascunho.formulario.proporcao = proporcao;
         self.guardar();
-        self.esquecer_a_fila_da_receita();
-        self.aplicar_receita();
+        self.esquecer_a_fila_dos_parametros();
+        self.aplicar_parametros();
         cx.notify();
     }
 
@@ -1040,7 +1040,7 @@ impl NovaSessao {
 
     /// Aplica o preset e o corte padrão às fotos do rascunho que ainda não os
     /// têm. **Parte sempre do neutro**: no rascunho ninguém revelou nada.
-    fn aplicar_receita(&mut self) {
+    fn aplicar_parametros(&mut self) {
         let f = &self.rascunho.formulario;
         let preset = self.preset_escolhido().map(|p| p.preset.clone());
         if f.preset_id.is_some() && preset.is_none() && !self.presets_chegaram {
@@ -1049,14 +1049,14 @@ impl NovaSessao {
         }
         let proporcao = f.proporcao.clone();
         let chave = format!("{:?}|{:?}", f.preset_id, proporcao);
-        let ajustes = receita::ajustes_da_receita(preset.as_ref());
+        let ajustes = parametros::ajustes_dos_parametros(preset.as_ref());
         let sem_efeito = f.preset_id.is_none() && proporcao.is_none();
         let mut pediu = false;
         for foto in &self.fotos {
-            let ja = self.receita_aplicada.get(&foto.id) == Some(&chave);
+            let ja = self.parametros_aplicados.get(&foto.id) == Some(&chave);
             if !ja {
-                // Sem efeito também grava: é o que desfaz a receita anterior.
-                if !(sem_efeito && !self.receita_aplicada.contains_key(&foto.id)) {
+                // Sem efeito também grava: é o que desfaz a revelação anterior.
+                if !(sem_efeito && !self.parametros_aplicados.contains_key(&foto.id)) {
                     // Os PARÂMETROS na hora, com o que se sabe agora — e o
                     // serviço os regrava com o corte medido na imagem.
                     //
@@ -1064,9 +1064,9 @@ impl NovaSessao {
                     // que ele não é o último a falar**: `width`/`height` vêm do
                     // EXIF (`PixelXDimension`), que JPEG, NEF e CR2 de verdade
                     // não trazem — medido em quatro arquivos, nenhum tinha.
-                    // Gravar aqui garante que a foto nunca fica **sem** receita
+                    // Gravar aqui garante que a foto nunca fica **sem** revelação
                     // (C8); quem põe o corte certo é quem abre a imagem.
-                    let corte = receita::corte_centralizado(
+                    let corte = parametros::corte_centralizado(
                         proporcao.as_deref(),
                         foto.width.unwrap_or(0),
                         foto.height.unwrap_or(0),
@@ -1080,12 +1080,12 @@ impl NovaSessao {
                     // revela em segundo plano e a barra segue **ele**.
                     //
                     // 🔑 **E é ele quem grava o corte de verdade**, medido na
-                    // imagem que abriu — o site faz igual: quem grava a receita
+                    // imagem que abriu — o site faz igual: quem grava a revelação
                     // é o trabalhador que revela (`exportacao/worker.ts`).
                     //
                     // A base da mescla é o que acabou de ser gravado: o serviço
                     // só troca por cima o que ninguém mexeu desde aqui.
-                    self.portas.receita_padrao.pedir(
+                    self.portas.revelacao_padrao.pedir(
                         foto.id.clone(),
                         ajustes,
                         proporcao.clone(),
@@ -1093,24 +1093,25 @@ impl NovaSessao {
                     );
                     pediu = true;
                 }
-                self.receita_aplicada.insert(foto.id.clone(), chave.clone());
+                self.parametros_aplicados
+                    .insert(foto.id.clone(), chave.clone());
             }
         }
         // O progresso é do serviço: quem conta é quem termina.
-        let andamento = self.portas.receita_padrao.progresso();
-        self.receita.total = andamento.total;
-        self.receita.prontas = andamento.prontas;
+        let andamento = self.portas.revelacao_padrao.progresso();
+        self.parametros.total = andamento.total;
+        self.parametros.prontas = andamento.prontas;
         if pediu {
             self.pedir_colheita_das_reveladas = true;
         }
     }
 
-    /// A receita mudou de cara: o que está na fila não vale mais.
+    /// A revelação mudou de cara: o que está na fila não vale mais.
     ///
     /// Chamado de `escolher_preset` e `escolher_proporcao`, antes de aplicar —
     /// é o `recomecar` do serviço visto daqui.
-    fn esquecer_a_fila_da_receita(&mut self) {
-        self.portas.receita_padrao.recomecar();
+    fn esquecer_a_fila_dos_parametros(&mut self) {
+        self.portas.revelacao_padrao.recomecar();
     }
 
     pub fn apagar_orfas(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1653,7 +1654,7 @@ impl NovaSessao {
                 };
                 if let Some(o_que) = o_que {
                     self.avisar_longo(format!(
-                        "O servidor criou a sessão mas não guardou {o_que}. A receita continua \
+                        "O servidor criou a sessão mas não guardou {o_que}. A revelação continua \
                          aplicada às fotos desta máquina; em outra máquina, escolha de novo na \
                          gaveta \"Atendimento\"."
                     ));
@@ -1710,8 +1711,8 @@ impl NovaSessao {
                 }
                 self.fase = None;
                 self.fotos.clear();
-                self.receita_aplicada.clear();
-                self.receita = Receita::default();
+                self.parametros_aplicados.clear();
+                self.parametros = Parametros::default();
                 // O próximo "Nova sessão" começa limpo.
                 self.rascunho = Rascunho::novo(
                     &uuid::Uuid::new_v4().to_string(),
@@ -1863,23 +1864,24 @@ impl NovaSessao {
     pub fn colher(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let mut mudou = false;
 
-        // 🚨 **O aviso de "estou revelando" sai daqui, e não de `aplicar_receita`.**
+        // 🚨 **O aviso de "estou revelando" sai daqui, e não de `aplicar_parametros`.**
         // Ela é chamada de lugares sem `Context` (a releitura do catálogo, a
         // chegada dos presets), então deixa a bandeira e quem tem `cx` a leva à
         // raiz. Sem este trecho o serviço revelava no disco, ninguém colhia os
         // avisos, as miniaturas ficavam nas de antes e a barra "Preset padrão"
-        // parava em 0/N — a receita acontecia e a tela não mostrava (achado do
+        // parava em 0/N — a revelação acontecia e a tela não mostrava (achado do
         // dono, 17/set/2026: *"aplicou o filtro padrão e corte e não faz o que
         // promete"*).
         if std::mem::take(&mut self.pedir_colheita_das_reveladas) {
-            cx.emit(PedidoDaNova::RevelandoReceita);
+            cx.emit(PedidoDaNova::RevelandoParametros);
         }
         // E o progresso é lido do serviço a cada volta: quem conta é quem
         // termina o trabalho.
-        let andamento = self.portas.receita_padrao.progresso();
-        if (andamento.total, andamento.prontas) != (self.receita.total, self.receita.prontas) {
-            self.receita.total = andamento.total;
-            self.receita.prontas = andamento.prontas;
+        let andamento = self.portas.revelacao_padrao.progresso();
+        if (andamento.total, andamento.prontas) != (self.parametros.total, self.parametros.prontas)
+        {
+            self.parametros.total = andamento.total;
+            self.parametros.prontas = andamento.prontas;
             mudou = true;
         }
 
@@ -1902,14 +1904,14 @@ impl NovaSessao {
                     "nova-presets" => {
                         let do_servidor = resultado
                             .as_ref()
-                            .map(receita::presets_do_servidor)
+                            .map(parametros::presets_do_servidor)
                             .unwrap_or_default();
-                        self.presets = receita::presets_da_sessao(
+                        self.presets = parametros::presets_da_sessao(
                             &self.portas.presets_do_sistema,
                             do_servidor,
                         );
                         self.presets_chegaram = true;
-                        self.aplicar_receita();
+                        self.aplicar_parametros();
                     }
                     "nova-criada" => self.receber_criacao(resultado),
                     "nova-parceiro-criado" => self.receber_cadastro(resultado, cx),
@@ -2049,7 +2051,7 @@ impl NovaSessao {
             // sem imagem. A releitura é o aviso de que vale pedir de novo —
             // sem isto ela ficaria cinza até a tela ser reaberta.
             self.miniaturas.esquecer_as_vazias();
-            self.aplicar_receita();
+            self.aplicar_parametros();
         }
 
         while let Ok(resultado) = self.catalogo.1.try_recv() {
@@ -2112,9 +2114,9 @@ impl NovaSessao {
             || self.aviso.is_some()
             || self.amostras.esperando()
             || self.miniaturas.esperando()
-            // A receita anda numa thread: enquanto ela não termina, a tela
+            // A revelação anda numa thread: enquanto ela não termina, a tela
             // continua acordando para colher os avisos e mover a barra.
-            || self.portas.receita_padrao.progresso().andando()
+            || self.portas.revelacao_padrao.progresso().andando()
             || self
                 .cadastro
                 .as_ref()
@@ -2142,12 +2144,12 @@ impl NovaSessao {
 
     /// Lê as miniaturas que faltam (até 60) e a foto das amostras.
     ///
-    /// 🚨 **A grade mostra a foto com a receita, e não como ela veio.** Era o
+    /// 🚨 **A grade mostra a foto com a revelação, e não como ela veio.** Era o
     /// contrário: a miniatura entrava no mapa uma vez e nunca mais era refeita,
     /// então escolher o preset padrão mudava os cartões do seletor e deixava os
     /// quadros na imagem de antes (achado do dono, 17/set/2026).
     ///
-    /// 🔑 **Quem revela é o serviço, não esta tela.** `sessoes::receita_padrao`
+    /// 🔑 **Quem revela é o serviço, não esta tela.** `sessoes::revelacao_padrao`
     /// grava a miniatura revelada em `revelada:<id>` e avisa; aqui só se lê,
     /// preferindo essa chave e caindo no bruto quando ela ainda não existe — é
     /// o mesmo arranjo do site, onde o trabalhador revela e a grade lê a prévia.
@@ -2170,7 +2172,7 @@ impl NovaSessao {
         });
     }
 
-    /// Uma foto acabou de ser revelada pela receita: a miniatura velha sai, e a
+    /// Uma foto acabou de ser revelada pela revelação: a miniatura velha sai, e a
     /// próxima passada de `preparar_miniaturas` lê a nova.
     ///
     /// 🔑 **Esquecer, e não gravar aqui.** Quem gravou foi o serviço, em disco;
@@ -2183,7 +2185,7 @@ impl NovaSessao {
     /// A amostra do cartão deste preset (`None` = "Nenhum").
     pub(super) fn amostra(&mut self, id: Option<&str>) -> Option<Arc<RenderImage>> {
         let preset = id.and_then(|id| self.presets.iter().find(|p| p.id == id));
-        let ajustes = receita::ajustes_da_receita(preset.map(|p| &p.preset));
+        let ajustes = parametros::ajustes_dos_parametros(preset.map(|p| &p.preset));
         self.amostras.obter(id.unwrap_or("nenhum"), ajustes)
     }
 

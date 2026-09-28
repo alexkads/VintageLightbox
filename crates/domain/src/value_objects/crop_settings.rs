@@ -7,7 +7,7 @@ use super::perspectiva::PerspectivaGuiada;
 /// (27/set/2026), mas **não** entram em [`CropSettings::new`]: os oito campos
 /// de sempre são os das colunas `edit_crop_*`, e quem constrói um corte novo a
 /// partir de outro leva os dois junto com [`CropSettings::herdar`]. Eles
-/// viajam na receita em JSON (`corte_persp_*`, `corte_guiaN_*`,
+/// viajam na revelação em JSON (`corte_persp_*`, `corte_guiaN_*`,
 /// `corte_restringir`), que é onde a foto guarda o que não tem coluna.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CropSettings {

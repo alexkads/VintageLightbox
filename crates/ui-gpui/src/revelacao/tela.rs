@@ -48,7 +48,7 @@ use super::presets::GuardaDePresets;
 use super::processador::{Ajustes, Pedido, Processador};
 use super::reposicao::APor;
 use super::sincronizacao::{self, Escolha, Grupo};
-use infrastructure::gpu_adjustments::ReceitaLocal;
+use infrastructure::gpu_adjustments::ParametrosLocais;
 use infrastructure::transformacao;
 
 /// O Enquadrar: retângulo, alças, transferidor e o painel dele.
@@ -99,7 +99,7 @@ const LADO_DOS_PRESETS: f32 = 224.0;
 const ALTURA_DO_CABECALHO: f32 = 48.0;
 
 /// O lado da miniatura revelada que a Revelação deixa para a grade — o mesmo
-/// do serviço da receita padrão (`sessoes::receita_padrao`), porque é a mesma
+/// do serviço da revelação padrão (`sessoes::revelacao_padrao`), porque é a mesma
 /// chave de cache e a mesma célula desenhando.
 const LADO_DA_REVELADA: u32 = 320;
 
@@ -238,8 +238,8 @@ pub struct Revelacao {
     corte: Corte,
     /// A Revelação local da foto aberta: máscaras e retoques. É parte do
     /// [`Estado`] — o histórico e a gravação a carregam como o corte.
-    locais: Arc<ReceitaLocal>,
-    /// A receita local da foto aberta não pôde ser lida (versão mais nova do
+    locais: Arc<ParametrosLocais>,
+    /// A revelação local da foto aberta não pôde ser lida (versão mais nova do
     /// app, ou corrompida): a tela mostra a foto sem ela e **não grava por
     /// cima** — o texto fica intacto para quem souber lê-lo.
     locais_ilegiveis: Option<String>,
@@ -262,17 +262,17 @@ pub struct Revelacao {
     ///
     /// 🔑 **É o que separa o que o operador fez do que a tira só guarda.** A
     /// cópia de cada foto na tira é um retrato de quando a Revelação abriu: a
-    /// receita padrão da sessão, aplicada depois, não chega a ela. Quem lê a
+    /// revelação padrão da sessão, aplicada depois, não chega a ela. Quem lê a
     /// tira para levar ao site o que mudou (`trazer_da_revelacao_as_que_subiram`)
-    /// levaria o retrato velho por cima da receita nova — e zeraria no site uma
+    /// levaria o retrato velho por cima da revelação nova — e zeraria no site uma
     /// foto que ninguém tocou (visto rodando o app, 24/set/2026).
     gravadas: std::collections::HashSet<String>,
-    /// A receita de cada foto **antes** do primeiro gesto desta abertura sobre
-    /// ela — a base da mescla quando a mesma foto muda por fora (a receita
+    /// A revelação de cada foto **antes** do primeiro gesto desta abertura sobre
+    /// ela — a base da mescla quando a mesma foto muda por fora (a revelação
     /// padrão da sessão, gravada em segundo plano). Ver
-    /// [`Self::receita_mudou_por_fora`].
-    bases: std::collections::HashMap<String, persistencia::Receita>,
-    /// A receita da foto aberta mudou por fora e os sliders ainda mostram a de
+    /// [`Self::parametros_mudaram_por_fora`].
+    bases: std::collections::HashMap<String, persistencia::Parametros>,
+    /// A revelação da foto aberta mudou por fora e os sliders ainda mostram a de
     /// antes: quem os acerta é o `render`, que tem a janela.
     sliders_atrasados: bool,
     /// A espera do próximo salvamento. Guardada porque **descartá-la cancela** —
@@ -290,7 +290,7 @@ pub struct Revelacao {
     /// Se a tela está mostrando o "antes" — a foto sem nenhum ajuste, no mesmo
     /// enquadramento. É o `\\` do legado.
     mostrando_original: bool,
-    /// Quantas fotos deste ensaio têm receita nova que o site ainda não recebeu.
+    /// Quantas fotos deste ensaio têm revelação nova que o site ainda não recebeu.
     ///
     /// 🔑 **Quem conta é a raiz** — a fila de envio é dela (`a_subir` e o
     /// depósito), e esta tela só a mostra. Existe porque desde 2026-09-11 o
@@ -300,8 +300,8 @@ pub struct Revelacao {
     nao_salvas: usize,
     /// A foto aberta está no depósito, esperando subir — quem sabe é a raiz.
     aberta_no_deposito: bool,
-    /// A receita com que a foto abriu: diferente dela, há o que salvar.
-    receita_ao_abrir: Option<Estado>,
+    /// A revelação com que a foto abriu: diferente dela, há o que salvar.
+    parametros_ao_abrir: Option<Estado>,
     /// A tela do cliente está aberta? O botão fica âmbar, como no site.
     cliente_aberto: bool,
     /// "Gerando o JPEG…" no botão de baixar.
@@ -686,7 +686,7 @@ impl Revelacao {
             mostrando_original: false,
             nao_salvas: 0,
             aberta_no_deposito: false,
-            receita_ao_abrir: None,
+            parametros_ao_abrir: None,
             cliente_aberto: false,
             gerando_jpeg: false,
             histograma: None,
@@ -812,24 +812,24 @@ impl Revelacao {
         self.posicao
     }
 
-    /// A receita de uma foto da tira mudou **por fora** — a receita padrão da
+    /// A revelação de uma foto da tira mudou **por fora** — a revelação padrão da
     /// sessão, gravada em segundo plano depois de a tira abrir.
     ///
     /// 🚨 **A cópia da tira é um retrato da abertura.** Sem isto, a foto aberta
     /// continuava nos sliders de antes, e o primeiro ajuste gravava a foto
     /// inteira a partir deles: o contraste 1,25 da sessão voltava a 1,0 (visto
     /// contra a pilha local, 24/set/2026). E se o ajuste veio primeiro, quem
-    /// escreveu por último foi a receita padrão — e a edição sumia.
+    /// escreveu por último foi a revelação padrão — e a edição sumia.
     ///
     /// 🔑 **A mescla é campo a campo** ([`persistencia::mesclar`]): o que o
     /// operador mudou desde a base fica, e o resto vem de fora. Se o resultado
     /// não é o que o catálogo tem, ele é gravado; se a foto está aberta, os
-    /// sliders e a imagem mudam, e o histórico é refeito sobre a receita nova —
+    /// sliders e a imagem mudam, e o histórico é refeito sobre a revelação nova —
     /// senão o `Cmd+Z` a desfaria.
-    pub fn receita_mudou_por_fora(
+    pub fn parametros_mudaram_por_fora(
         &mut self,
         id: &str,
-        deles: persistencia::Receita,
+        deles: persistencia::Parametros,
         cx: &mut Context<Self>,
     ) {
         let Some(copia) = self.acervo.iter().find(|f| f.id == id) else {
@@ -850,25 +850,25 @@ impl Revelacao {
             .copied()
             .or_else(|| {
                 aberta
-                    .then(|| self.receita_ao_abrir.clone())
+                    .then(|| self.parametros_ao_abrir.clone())
                     .flatten()
                     .map(|e| (e.ajustes, e.corte))
             })
             .unwrap_or(meu);
-        let mexeu = !persistencia::mesma_receita(meu, base);
+        let mexeu = !persistencia::mesmos_parametros(meu, base);
         let final_ = persistencia::mesclar(base, meu, deles);
         // 🚨 **O que veio de fora, sem o que veio do operador.** O serviço da
-        // receita padrão já mescla com o que o operador gravou (ver
-        // `receita_padrao::mesclada`), então `deles` pode trazer o ajuste dele.
+        // revelação padrão já mescla com o que o operador gravou (ver
+        // `revelacao_padrao::mesclada`), então `deles` pode trazer o ajuste dele.
         // Rebasear o histórico sobre `deles` punha o ajuste dentro do passo
         // zero, e o `⌘Z` não tinha mais o que tirar (achado pelo e2e).
         let fora = persistencia::mesclar(meu, base, deles);
 
         if mexeu {
-            // Daqui em diante, o que o operador mudar é sobre a receita nova.
+            // Daqui em diante, o que o operador mudar é sobre a revelação nova.
             self.bases.insert(id.to_string(), fora);
             if aberta {
-                // A receita local não vem de fora: cada passo guarda a sua.
+                // A revelação local não vem de fora: cada passo guarda a sua.
                 self.historico.rebasear(|passo| {
                     let (ajustes, corte) =
                         persistencia::mesclar(base, (passo.ajustes, passo.corte), fora);
@@ -880,16 +880,16 @@ impl Revelacao {
                 });
             }
         } else if aberta {
-            // Ninguém tinha mexido: a foto passa a abrir com a receita nova.
+            // Ninguém tinha mexido: a foto passa a abrir com a revelação nova.
             let estado = Estado {
                 ajustes: deles.0,
                 corte: deles.1,
                 locais: self.locais.clone(),
             };
-            self.receita_ao_abrir = Some(estado.clone());
+            self.parametros_ao_abrir = Some(estado.clone());
             self.historico = Historico::novo(estado);
         }
-        if persistencia::mesma_receita(final_, meu) {
+        if persistencia::mesmos_parametros(final_, meu) {
             return;
         }
 
@@ -908,7 +908,7 @@ impl Revelacao {
             self.atualizar_exibicao();
         }
         // O catálogo tem a de fora; a mescla ainda não está lá.
-        if !persistencia::mesma_receita(final_, deles) {
+        if !persistencia::mesmos_parametros(final_, deles) {
             self.gravador.gravar(id.to_string(), final_.0, final_.1);
             self.gravadas.insert(id.to_string());
         }
@@ -1016,15 +1016,15 @@ impl Revelacao {
         }
     }
 
-    /// A foto aberta tem receita que a galeria ainda não recebeu — o `sujo &&
+    /// A foto aberta tem revelação que a galeria ainda não recebeu — o `sujo &&
     /// podeRevelar` do site.
     pub fn aberta_a_salvar(&self) -> bool {
         self.pode_revelar()
             && (self.aberta_no_deposito
                 || self
-                    .receita_ao_abrir
+                    .parametros_ao_abrir
                     .as_ref()
-                    .is_some_and(|receita| *receita != self.estado()))
+                    .is_some_and(|parametros| *parametros != self.estado()))
     }
 
     /// Há o que salvar na galeria? Sem isso o botão se apaga.
@@ -1041,7 +1041,7 @@ impl Revelacao {
     /// 11/set/2026, dono: *"tá deixando as miniaturas e a foto central sem
     /// efeito"*) e que apareceu aqui em 18/set/2026: a grade desenha a foto do
     /// **site**, que só muda quando alguém salva na galeria; a Revelação abre
-    /// com a receita do **banco local**, que muda a cada gesto. Entre um e
+    /// com a revelação do **banco local**, que muda a cada gesto. Entre um e
     /// outro, a mesma foto tem duas caras — e quem vê as duas conclui,
     /// corretamente, que o sistema está mentindo em alguma delas.
     ///
@@ -1049,7 +1049,7 @@ impl Revelacao {
     /// com o enquadramento aplicado por cima, como na exportação), nas **duas**
     /// chaves de cache, porque a grade lê a miniatura e o painel lê o preview.
     ///
-    /// 🔑 **Receita neutra apaga a prévia** em vez de gravá-la: depois de um
+    /// 🔑 **Revelação neutra apaga a prévia** em vez de gravá-la: depois de um
     /// "Zerar tudo", o certo é voltar a mostrar a do servidor. É o mesmo que a
     /// web faz ao apagar a prévia local quando a foto sobe — a partir daí quem
     /// é mais novo é o site.
@@ -1064,9 +1064,9 @@ impl Revelacao {
         let chave = persistencia::chave_da_revelada(&aberta.foto.id);
         let neutro = self.sem_revelacao() && corte::e_inteiro(&self.enquadramento());
         // 🚨 **Só a local apaga no neutro.** Na foto do site, sem prévia a tira
-        // e a grade voltam à imagem da galeria — que ainda tem a receita antiga
+        // e a grade voltam à imagem da galeria — que ainda tem a revelação antiga
         // até o "Salvar" (dono, 2026-09-21: zerar não mudava a tira). Ela grava
-        // o neutro como qualquer outra receita, logo abaixo.
+        // o neutro como qualquer outra revelação, logo abaixo.
         if neutro && !persistencia::so_existe_no_site(&aberta.foto) {
             self.previews.apagar(&chave);
             return;
@@ -1140,7 +1140,7 @@ impl Revelacao {
         }
     }
 
-    /// A raiz gravou a receita nas marcadas: as cópias da tira passam a dizer
+    /// A raiz gravou a revelação nas marcadas: as cópias da tira passam a dizer
     /// o mesmo que o banco. Sem isto a seta seguinte abriria a foto
     /// recém-sincronizada com os sliders de antes.
     pub fn aplicar_sincronizadas(
@@ -1259,8 +1259,8 @@ impl Revelacao {
                 }))
                 .child(div().pt(px(8.)).text_xs().child(
                     // O texto do site (`sincronizar-dialogo.tsx`): sincronizar
-                    // copia a receita, e quem leva à galeria é o "Salvar".
-                    "A receita vai para cada foto marcada. Elas sobem para a galeria \
+                    // copia a revelação, e quem leva à galeria é o "Salvar".
+                    "A revelação vai para cada foto marcada. Elas sobem para a galeria \
                      quando você salvar.",
                 ))
                 // 🚨 **Fecha na hora, e devolve `false`.** Deixado à biblioteca,
@@ -1352,7 +1352,7 @@ impl Revelacao {
         // 🚨 **A foto do site tem bruto em outra chave.** Em `site:<id>` a
         // grade da sessão guarda a imagem da **galeria** — depois de "Salvar na
         // galeria", a foto revelada e com marca. Servir isso ao shader aplica a
-        // receita duas vezes, em 640px, e era o que a tela fazia até 7/set.
+        // revelação duas vezes, em 640px, e era o que a tela fazia até 7/set.
         //
         // O bruto dela é a **cópia de trabalho**, que a raiz busca no storage e
         // guarda em `trabalho:<id>` (ver `chave_do_trabalho`). Duas imagens,
@@ -1360,7 +1360,7 @@ impl Revelacao {
         // **espera** na tela enquanto o download não volta.
         let decodificacao = crate::desempenho::medir(crate::desempenho::Etapa::Decodificacao);
         // 🖌️ **A imagem editada, quando existe, é a entrada** (C32): o que o
-        // editor salvou é o que o motor recebe, e a receita vem por cima. Sem
+        // editor salvou é o que o motor recebe, e a revelação vem por cima. Sem
         // ela, a regra de sempre, logo abaixo.
         let editada = (fonte::revisao_de(self.edicoes.as_deref(), &foto) != fonte::DO_BRUTO)
             .then(|| fonte::copia_de_trabalho(&self.previews, self.edicoes.as_deref(), &foto))
@@ -1414,8 +1414,8 @@ impl Revelacao {
         self.corte = persistencia::corte_da_foto(&foto);
         self.local.esquecer_a_foto();
         match persistencia::locais_da_foto(&foto, &*self.gravador) {
-            persistencia::LocaisDaFoto::Lida(receita) => {
-                self.locais = Arc::new(receita);
+            persistencia::LocaisDaFoto::Lida(parametros) => {
+                self.locais = Arc::new(parametros);
                 self.locais_ilegiveis = None;
             }
             persistencia::LocaisDaFoto::Ilegivel { erro, .. } => {
@@ -1435,7 +1435,7 @@ impl Revelacao {
         // a primeira coisa que se faz numa foto não tem volta.
         self.historico = Historico::novo(self.estado());
         self.esquecer_a_resolucao();
-        self.receita_ao_abrir = Some(self.estado());
+        self.parametros_ao_abrir = Some(self.estado());
         self.aguardando = None;
         // 🔑 O que a GPU ainda devolver é da foto que saiu. Tomar um id novo
         // também faz a thread largar o pedido velho, se ele não começou.
@@ -1454,9 +1454,9 @@ impl Revelacao {
         // apagaria o sinalizador é o da outra.
         self.repondo = false;
 
-        // 🚨 **A foto crua não vai para a tela quando há receita a aplicar**
+        // 🚨 **A foto crua não vai para a tela quando há revelação a aplicar**
         // (dono, 17/set/2026: *"primeiro mostra sem efeito e depois é aplicado
-        // a receita"*). Ela ia — `revelada` nascia com a bruta e era desenhada
+        // a revelação"*). Ela ia — `revelada` nascia com a bruta e era desenhada
         // aqui —, e o resultado do motor a substituía alguns milissegundos
         // depois: duas exibições da mesma foto, a primeira mentindo sobre como
         // ela está revelada.
@@ -1508,7 +1508,7 @@ impl Revelacao {
         // operador não está mais olhando, e o que já carregou continua no cache.
         self.carregar_a_tira(cx);
 
-        // 🔑 **E a próxima já vai sendo revelada.** Com receita a aplicar, quem
+        // 🔑 **E a próxima já vai sendo revelada.** Com revelação a aplicar, quem
         // dispara é `colher`, ao fim desta; no neutro não há `colher` nenhum, e
         // sem esta chamada a antecipação nunca começaria numa sessão de fotos
         // ainda não trabalhadas — que é justamente a que se percorre inteira.
@@ -1568,7 +1568,7 @@ impl Revelacao {
             pixels: Arc::new(rgba.into_raw()),
         });
         aberta.bruta = Some(imagem.clone());
-        // 🚨 **Mesma regra da abertura**: com receita a aplicar, a cópia de
+        // 🚨 **Mesma regra da abertura**: com revelação a aplicar, a cópia de
         // trabalho não aparece crua antes de o motor responder — senão a foto do
         // site pisca duas vezes, uma ao chegar e outra ao ser revelada. No
         // neutro o resultado é igual à origem, e segurá-la só atrasaria.
@@ -1796,7 +1796,7 @@ impl Revelacao {
     }
 
     /// Manda o estado de agora para o banco, sem passar pelo histórico.
-    /// Grava a receita da foto aberta — no banco **e na cópia que está em
+    /// Grava a revelação da foto aberta — no banco **e na cópia que está em
     /// memória**.
     ///
     /// 🚨 **As duas, e a segunda foi a que faltou.** `mostrar` lê os sliders da
@@ -1844,7 +1844,7 @@ impl Revelacao {
         }
     }
 
-    /// A receita local vai ao banco **à parte** dos ajustes, e só quando mudou
+    /// A revelação local vai ao banco **à parte** dos ajustes, e só quando mudou
     /// — ver `Gravador::gravar_locais`. Ilegível, nunca: não se grava por cima
     /// do que não se leu.
     fn gravar_locais_se_mudou(&mut self, id: &str) {
@@ -1871,32 +1871,32 @@ impl Revelacao {
         }
     }
 
-    /// A receita local de uma foto do acervo: a da tela, se ela está aberta;
+    /// A revelação local de uma foto do acervo: a da tela, se ela está aberta;
     /// senão, a gravada.
-    pub(super) fn locais_de(&self, foto: &PhotoViewModel) -> Arc<ReceitaLocal> {
+    pub(super) fn locais_de(&self, foto: &PhotoViewModel) -> Arc<ParametrosLocais> {
         if self.aberta.as_ref().is_some_and(|a| a.foto.id == foto.id) {
             return self.locais.clone();
         }
         match persistencia::locais_da_foto(foto, &*self.gravador) {
-            persistencia::LocaisDaFoto::Lida(receita) => Arc::new(receita),
+            persistencia::LocaisDaFoto::Lida(parametros) => Arc::new(parametros),
             persistencia::LocaisDaFoto::Ilegivel { .. } => Arc::default(),
         }
     }
 
-    /// A receita local que a GPU revela agora — a da foto, mais o gesto que
+    /// A revelação local que a GPU revela agora — a da foto, mais o gesto que
     /// estiver em curso na Revelação local.
-    pub(super) fn locais_na_tela(&self) -> Arc<ReceitaLocal> {
+    pub(super) fn locais_na_tela(&self) -> Arc<ParametrosLocais> {
         self.locais_com_o_gesto()
     }
 
-    /// A receita local gravada de uma foto do acervo — a da tela, se ela está
+    /// A revelação local gravada de uma foto do acervo — a da tela, se ela está
     /// aberta. Para a segunda tela.
-    pub fn locais_da(&self, foto: &PhotoViewModel) -> Arc<ReceitaLocal> {
+    pub fn locais_da(&self, foto: &PhotoViewModel) -> Arc<ParametrosLocais> {
         self.locais_de(foto)
     }
 
-    /// A receita local da foto aberta — a segunda tela revela com ela.
-    pub fn locais(&self) -> Arc<ReceitaLocal> {
+    /// A revelação local da foto aberta — a segunda tela revela com ela.
+    pub fn locais(&self) -> Arc<ParametrosLocais> {
         if self.mostrando_original() {
             return Arc::default();
         }
@@ -1948,7 +1948,7 @@ impl Revelacao {
 
     /// O estado vira tela — sliders, corte, Revelação local e a GPU —, **sem
     /// gravar**. É o miolo do desfazer, e o do descarte, que não grava porque
-    /// quem manda na receita passa a ser a galeria (`descartar.rs`).
+    /// quem manda na revelação passa a ser a galeria (`descartar.rs`).
     fn mostrar_o_estado(&mut self, estado: Estado, window: &mut Window, cx: &mut Context<Self>) {
         self.ajustes = estado.ajustes;
         self.corte = estado.corte;
@@ -2054,7 +2054,7 @@ impl Revelacao {
     /// milímetro reprocessaria a foto dezenas de vezes por segundo para produzir
     /// exatamente a mesma imagem.
     /// 🔑 **Nada a revelar: ajustes no neutro e nenhuma máscara ou retoque.**
-    /// A pergunta é da receita inteira — olhar só os ajustes deixava a foto
+    /// A pergunta é da revelação inteira — olhar só os ajustes deixava a foto
     /// com Revelação local aparecer crua ao abrir (a GPU nem era chamada).
     fn sem_revelacao(&self) -> bool {
         self.ajustes == Ajustes::default()
@@ -2225,7 +2225,7 @@ impl Revelacao {
 
         // 🔑 **O que já foi revelado não é revelado de novo.** Voltar uma seta,
         // desfazer, tirar o ponteiro de cima de uma predefinição: nos três a
-        // receita é uma que já passou pelo motor, e a ida à GPU produziria
+        // revelação é uma que já passou pelo motor, e a ida à GPU produziria
         // exatamente o mesmo pixel. Com o palco esperando a resposta para
         // desenhar (ver `mostrar`), essa ida é o tempo de tela preta.
         if let Some(pronta) = self.reveladas.buscar(&chave) {
@@ -2319,7 +2319,7 @@ impl Revelacao {
     /// - **já há um especulativo** — um por vez; ver [`Self::antecipando`];
     /// - **o Enquadrar está aberto**, ou os pixels estão sendo repostos — nos
     ///   dois, cada movimento do operador vira pedido;
-    /// - **a próxima está no neutro** — sem receita ela aparece direto da prévia,
+    /// - **a próxima está no neutro** — sem revelação ela aparece direto da prévia,
     ///   e não há ida à GPU para poupar.
     fn antecipar_a_proxima(&mut self, cx: &mut Context<Self>) {
         if self.aguardando.is_some() || self.antecipando.is_some() {
@@ -2397,7 +2397,7 @@ impl Revelacao {
         revisao_da_fonte: u64,
         ajustes: Ajustes,
         corte: transformacao::Corte,
-        locais: Arc<ReceitaLocal>,
+        locais: Arc<ParametrosLocais>,
         cx: &mut Context<Self>,
     ) {
         if self.aguardando.is_some()
@@ -2523,7 +2523,7 @@ impl Revelacao {
 
             // 🔑 **Só o estado parado entra no cache.** No meio de um arrasto
             // chegam dezenas de resultados de valores que o dedo já passou;
-            // guardar cada um encheria o cache com receitas que ninguém vai
+            // guardar cada um encheria o cache com revelações que ninguém vai
             // pedir de volta e despejaria as fotos que valem.
             let ultimo_do_gesto = self.aguardando == Some(resultado.id);
             let antecipado = pendente
@@ -2549,7 +2549,7 @@ impl Revelacao {
                 }
             }
             // 🚨 **O pedido do Comparar que a thread largou volta para a fila.**
-            // Ela só atende o mais novo: se a aberta pediu depois (uma receita
+            // Ela só atende o mais novo: se a aberta pediu depois (uma revelação
             // que mudou por fora), a outra metade ficaria esperando para sempre.
             if self.pedido_do_comparar.is_some_and(|id| id < resultado.id) {
                 self.pedido_do_comparar = None;
@@ -2843,11 +2843,11 @@ pub enum PedidoDaRevelacao {
     /// original, na foto que já é da galeria aberta.
     SalvarNaGaleria,
     /// "Sincronizar N" do site: os ajustes desta foto vão para as marcadas na
-    /// tira — a receita para o catálogo, e a foto revelada para o site.
+    /// tira — a revelação para o catálogo, e a foto revelada para o site.
     Sincronizar,
     /// "Zerar N fotos": as marcadas na tira voltam ao neutro.
     ///
-    /// 🔑 **É a contrapartida do `Sincronizar`** — um leva a receita desta foto
+    /// 🔑 **É a contrapartida do `Sincronizar`** — um leva a revelação desta foto
     /// para as marcadas, o outro devolve todas ao neutro (pedido do dono,
     /// 2026-09-11). A foto aberta não vem por aqui: ela é zerada na própria
     /// tela, por `redefinir_ajustes`, para o `Cmd+Z` desfazer o gesto.
@@ -2856,7 +2856,7 @@ pub enum PedidoDaRevelacao {
     /// (`Revelacao::levar_a_baixar`).
     BaixarComo,
     /// "Descartar": as fotos de [`Revelacao::levar_a_descartar`] voltam à
-    /// receita que a galeria do site tem, e saem da fila do "Salvar".
+    /// revelação que a galeria do site tem, e saem da fila do "Salvar".
     Descartar,
     /// Outra foto entrou no palco — pela seta, pela tira ou ao abrir.
     ///
@@ -2864,7 +2864,7 @@ pub enum PedidoDaRevelacao {
     /// mas é ela quem sabe quando a foto trocou. Sem este aviso a raiz só
     /// buscava os pixels da foto do site **na abertura**: a seta seguinte
     /// caía numa foto sem bruto, e o que aparecia era a miniatura revelada da
-    /// galeria — em 640px e com a receita por cima da receita.
+    /// galeria — em 640px e com a revelação por cima da revelação.
     AbriuOutraFoto,
     /// O zoom passou da cópia de trabalho: a tela quer o bruto da foto aberta
     /// em resolução cheia ([`Revelacao::receber_bruto`]).
@@ -4148,7 +4148,7 @@ mod testes {
     ///
     /// O que a grade da sessão guarda em `site:<id>` é a miniatura da galeria —
     /// que, depois de "Salvar na galeria", é a foto **revelada**. Servir isso ao
-    /// shader aplicava a receita duas vezes, em 640px: a sépia salva ontem
+    /// shader aplicava a revelação duas vezes, em 640px: a sépia salva ontem
     /// aparecia com os sliders no neutro, e "sincronizar" a partir dela mandava
     /// o neutro às outras. A miniatura fica só como espera na tela; a origem
     /// chega pela cópia de trabalho (`receber_pixels`).
@@ -4200,7 +4200,7 @@ mod testes {
     fn a_copia_de_trabalho_do_site_fica_no_cache_e_a_volta_nao_baixa(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         // A imagem da galeria, na chave da grade: é a revelada, e não serve de
-        // origem — se ela vazar para o shader, a receita entra duas vezes.
+        // origem — se ela vazar para o shader, a revelação entra duas vezes.
         previews
             .save_preview("site:remota-1", &foto_cinza())
             .expect("gravar a miniatura da galeria");
@@ -4318,7 +4318,7 @@ mod testes {
     }
 
     /// 🚨 **Uma exibição só, e já revelada** (dono, 17/set/2026: *"primeiro
-    /// mostra sem efeito e depois é aplicado a receita"*).
+    /// mostra sem efeito e depois é aplicado a revelação"*).
     ///
     /// A tela desenhava a foto crua na abertura e a trocava pelo resultado do
     /// motor alguns milissegundos depois. Duas exibições da mesma foto, e a
@@ -4365,7 +4365,7 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
-    /// ⚠️ **No neutro a foto aparece na hora.** Sem receita a aplicar, o
+    /// ⚠️ **No neutro a foto aparece na hora.** Sem revelação a aplicar, o
     /// resultado do motor é a própria origem: segurar a tela ali seria um palco
     /// preto em troca de nada — e é o que separa esta regra de "nunca desenhar
     /// a crua".
@@ -4401,17 +4401,17 @@ mod testes {
             .expect("gravar preview");
 
         let janela = janela(cx, previews);
-        let receita = r#"{"versao":1,"camadas":[{"nome":"M","ajustes":{"exposicao_ev":1.0},
+        let parametros = r#"{"versao":1,"camadas":[{"nome":"M","ajustes":{"exposicao_ev":1.0},
             "componentes":[{"modo":"somar","tipo":"radial","centro":[0.5,0.5],"raio_x":0.2,
             "raio_y":0.2,"angulo":0.0,"feather":0.5,"fora":false}],"invertida":false}],"retoques":[]}"#;
         let com_mascara = PhotoViewModel {
-            locais: Some(receita.to_string()),
+            locais: Some(parametros.to_string()),
             ..foto("retrato.jpg")
         };
         janela
             .update(cx, |tela, window, cx| {
                 tela.abrir(com_mascara, window, cx);
-                assert_eq!(tela.locais.camadas.len(), 1, "a receita foi lida");
+                assert_eq!(tela.locais.camadas.len(), 1, "a revelação foi lida");
                 assert!(tela.aguardando.is_some(), "a máscara vai à GPU na abertura");
                 assert!(
                     tela.aberta.as_ref().unwrap().revelada.is_none(),
@@ -4431,14 +4431,14 @@ mod testes {
             .save_preview("id-retrato.jpg", &foto_cinza())
             .expect("gravar preview");
         let janela = janela(cx, previews);
-        let receita = r#"{"versao":1,"camadas":[{"nome":"M","ajustes":{"exposicao_ev":1.0},
+        let parametros = r#"{"versao":1,"camadas":[{"nome":"M","ajustes":{"exposicao_ev":1.0},
             "componentes":[{"modo":"somar","tipo":"radial","centro":[0.5,0.5],"raio_x":0.2,
             "raio_y":0.2,"angulo":0.0,"feather":0.5,"fora":false}],"invertida":false}],"retoques":[]}"#;
         janela
             .update(cx, |tela, window, cx| {
                 tela.abrir(
                     PhotoViewModel {
-                        locais: Some(receita.to_string()),
+                        locais: Some(parametros.to_string()),
                         ..foto("retrato.jpg")
                     },
                     window,
@@ -4456,7 +4456,7 @@ mod testes {
     /// 🚨 **A revelação já feita não é feita de novo.**
     ///
     /// Voltar uma seta, desfazer, tirar o ponteiro de cima de uma predefinição:
-    /// nos três a receita é uma que já passou pelo motor. Com o palco esperando
+    /// nos três a revelação é uma que já passou pelo motor. Com o palco esperando
     /// a resposta para desenhar, cada ida repetida é tempo de tela preta — e o
     /// pixel que volta é igual ao que já se tinha.
     ///
@@ -4470,22 +4470,22 @@ mod testes {
             .expect("gravar preview");
 
         let janela = janela(cx, previews);
-        let com_receita = PhotoViewModel {
+        let com_parametros = PhotoViewModel {
             edit_exposure: Some(1.5),
             ..foto("retrato.jpg")
         };
 
         janela
             .update(cx, |tela, _window, _cx| {
-                // A revelação desta foto com esta receita, como se o motor já a
+                // A revelação desta foto com esta revelação, como se o motor já a
                 // tivesse devolvido. `foto_cinza` tem 8x8, que é o tamanho da
                 // origem que `abrir` vai montar.
                 let chave = cache::Chave::nova(
-                    &com_receita.id,
+                    &com_parametros.id,
                     (8, 8),
-                    &persistencia::da_foto(&com_receita),
+                    &persistencia::da_foto(&com_parametros),
                     &transformacao::corte(&persistencia::para_crop_settings(
-                        &persistencia::corte_da_foto(&com_receita),
+                        &persistencia::corte_da_foto(&com_parametros),
                     )),
                     &Default::default(),
                 );
@@ -4495,7 +4495,7 @@ mod testes {
 
         janela
             .update(cx, |tela, window, cx| {
-                tela.abrir(com_receita.clone(), window, cx);
+                tela.abrir(com_parametros.clone(), window, cx);
 
                 assert!(
                     tela.aguardando.is_none(),
@@ -4509,43 +4509,43 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
-    /// ⚠️ **A receita faz parte da chave.** Guardado com uma, pedido com outra:
+    /// ⚠️ **A revelação faz parte da chave.** Guardado com uma, pedido com outra:
     /// é miss, e a GPU é chamada. Sem isto, mexer num slider e voltar à foto
     /// traria a revelação de antes do gesto — certa na aparência, errada no
     /// conteúdo.
     #[gpui_kit::test]
-    fn a_revelacao_guardada_com_outra_receita_nao_serve(cx: &mut TestAppContext) {
+    fn a_revelacao_guardada_com_outros_parametros_nao_serve(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         previews
             .save_preview("id-retrato.jpg", &foto_cinza())
             .expect("gravar preview");
 
         let janela = janela(cx, previews);
-        let com_receita = PhotoViewModel {
+        let com_parametros = PhotoViewModel {
             edit_exposure: Some(1.5),
             ..foto("retrato.jpg")
         };
 
         janela
             .update(cx, |tela, window, cx| {
-                let mut outra = persistencia::da_foto(&com_receita);
+                let mut outra = persistencia::da_foto(&com_parametros);
                 outra.exposure = -1.0;
                 let chave = cache::Chave::nova(
-                    &com_receita.id,
+                    &com_parametros.id,
                     (8, 8),
                     &outra,
                     &transformacao::corte(&persistencia::para_crop_settings(
-                        &persistencia::corte_da_foto(&com_receita),
+                        &persistencia::corte_da_foto(&com_parametros),
                     )),
                     &Default::default(),
                 );
                 tela.reveladas.guardar(chave, &foto_uniforme(200));
 
-                tela.abrir(com_receita.clone(), window, cx);
+                tela.abrir(com_parametros.clone(), window, cx);
 
                 assert!(
                     tela.aguardando.is_some(),
-                    "a receita é outra: o cache não pode responder por ela"
+                    "a revelação é outra: o cache não pode responder por ela"
                 );
                 assert!(tela.aberta.as_ref().unwrap().desenhada.is_none());
             })
@@ -4596,7 +4596,7 @@ mod testes {
             .update(cx, |tela, _window, _cx| {
                 assert!(
                     tela.antecipando.is_some(),
-                    "a próxima tinha receita e devia estar sendo revelada"
+                    "a próxima tinha revelação e devia estar sendo revelada"
                 );
             })
             .expect("a janela deve estar aberta");
@@ -4667,7 +4667,7 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
-    /// ⚠️ **No neutro não há o que antecipar.** Sem receita a foto aparece
+    /// ⚠️ **No neutro não há o que antecipar.** Sem revelação a foto aparece
     /// direto da prévia: adiantar a ida à GPU seria gastar a placa para poupar
     /// uma ida que não existe.
     #[gpui_kit::test]
@@ -7205,7 +7205,7 @@ mod testes {
     /// galeria e sair" apagado ao lado. Agora âmbar é "mudou desde que abriu"; o
     /// que já estava salvo leva o ponto cinza (`Marca::Ajustado`).
     #[gpui_kit::test]
-    fn a_receita_salva_leva_o_ponto_cinza_e_so_o_gesto_acende_ambar(cx: &mut TestAppContext) {
+    fn os_parametros_salvos_leva_o_ponto_cinza_e_so_o_gesto_acende_ambar(cx: &mut TestAppContext) {
         use crate::revelacao::controles::Marca;
         let (previews, _dir) = previews_descartaveis();
         previews
@@ -7567,7 +7567,7 @@ mod testes {
                 }
                 // No meio do gesto: a GPU vê, o histórico e o banco não.
                 assert_eq!(tela.locais_na_tela().camadas.len(), 1);
-                assert!(tela.locais.camadas.is_empty(), "provisório não é receita");
+                assert!(tela.locais.camadas.is_empty(), "provisório não é revelação");
                 assert!(!tela.historico.pode_desfazer());
                 assert!(gravador.locais_gravados().is_empty());
 
@@ -7586,7 +7586,7 @@ mod testes {
                 assert_eq!(
                     gravador.locais_gravados().len(),
                     1,
-                    "uma gravação da receita local"
+                    "uma gravação da revelação local"
                 );
 
                 tela.desfazer(window, cx);
@@ -7600,7 +7600,7 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
-    /// A receita local gravada volta ao reabrir a foto — e salvar a máscara não
+    /// A revelação local gravada volta ao reabrir a foto — e salvar a máscara não
     /// mexe nos ajustes nem no corte que a foto tinha.
     #[gpui_kit::test]
     fn a_mascara_volta_ao_reabrir_e_nao_mexe_no_corte(cx: &mut TestAppContext) {
@@ -7624,7 +7624,7 @@ mod testes {
         let (_, gravado) = gravador
             .locais_gravados()
             .pop()
-            .expect("gravou a receita local");
+            .expect("gravou a revelação local");
         let (_, ajustes, corte) = gravador.gravado().pop().expect("gravou a revelação");
         assert_eq!(ajustes, Ajustes::default(), "os ajustes ficam");
         assert_eq!(corte.largura, Some(0.8), "o corte fica");
@@ -8049,7 +8049,7 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
-    /// A foto reaberta traz guias e correção da receita.
+    /// A foto reaberta traz guias e correção da revelação.
     #[gpui_kit::test]
     fn a_perspectiva_volta_ao_reabrir(cx: &mut TestAppContext) {
         let (janela, gravador, _dir) = abrir_o_predio(cx);
@@ -8066,14 +8066,14 @@ mod testes {
         janela
             .update(cx, |tela, window, cx| {
                 let mut reaberta = foto("predio.jpg");
-                let receita = crate::pos_venda::porta::ajustes_em_json(
+                let parametros = crate::pos_venda::porta::ajustes_em_json(
                     &Ajustes::default(),
                     &CropSettings::default()
                         .with_perspectiva(p)
                         .with_restringir(false),
                 );
-                reaberta.receita = Some(receita.to_string());
-                reaberta.ler_perspectiva_da_receita(&receita);
+                reaberta.parametros = Some(parametros.to_string());
+                reaberta.ler_perspectiva_dos_parametros(&parametros);
                 tela.sair_do_corte(cx);
                 tela.abrir(reaberta, window, cx);
                 assert_eq!(*tela.corte_atual().perspectiva(), p);

@@ -59,7 +59,7 @@ impl LibraryController {
                     pos_venda_foto_id: photo.id_no_site().map(str::to_string),
                     sessao_id: photo.sessao().map(str::to_string),
                     ajustes_completos: None,
-                    receita: photo.receita().map(str::to_string),
+                    parametros: photo.parametros().map(str::to_string),
                     locais: photo.locais().map(str::to_string),
                     revelacao_travada: false,
                     width: metadata.and_then(|m| m.width),
@@ -134,12 +134,12 @@ impl LibraryController {
                     edit_crop_flip_v: photo.edit_crop_flip_v(),
                     ..Default::default()
                 };
-                // 🔑 A perspectiva guiada não tem coluna: mora na receita.
-                if let Some(receita) = photo
-                    .receita()
+                // 🔑 A perspectiva guiada não tem coluna: mora na revelação.
+                if let Some(parametros) = photo
+                    .parametros()
                     .and_then(|r| serde_json::from_str::<serde_json::Value>(r).ok())
                 {
-                    vm.ler_perspectiva_da_receita(&receita);
+                    vm.ler_perspectiva_dos_parametros(&parametros);
                 }
                 vm
             })

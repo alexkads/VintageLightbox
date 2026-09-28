@@ -877,7 +877,7 @@ fn revelacao_com_lote_e_acervo(
     use crate::revelacao::sincronizacao::Escolha;
 
     let (previews, dir) = previews_descartaveis();
-    // Só a aberta precisa de pixels: as outras recebem a receita pelo banco.
+    // Só a aberta precisa de pixels: as outras recebem a revelação pelo banco.
     previews
         .save_preview("id-00000", &cinza(16))
         .expect("gravar preview");
@@ -1104,7 +1104,7 @@ fn estresse_salvar_trezentas_na_galeria_com_desordem_e_falhas(cx: &mut TestAppCo
             assert!(!retrato.ha_envio_pendente(), "a fila esvaziou");
             assert!(vigia.na_bandeja(), "e o app segue na bandeja");
             // 🔑 **A tela saiu no clique** (o lote sobe em segundo plano), e o
-            // que não subiu continua na fila: é a receita no depósito que
+            // que não subiu continua na fila: é a revelação no depósito que
             // protege o trabalho, não a tela parada.
             assert_eq!(app.tela(), Tela::Sessao);
             assert!(app.revelacao.read(cx).ha_o_que_salvar());

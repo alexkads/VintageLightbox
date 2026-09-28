@@ -3,7 +3,7 @@
 //!
 //! A conta mora em `revelacao-core::perspectiva` (o domínio não conhece o
 //! motor); aqui estão os **parâmetros** — no sentido do contrato da foto, a
-//! fonte de verdade — e o jeito de levá-los ao JSON da receita e trazer de
+//! fonte de verdade — e o jeito de levá-los ao JSON da revelação e trazer de
 //! volta.
 //!
 //! ## 🔑 Guardar a correção, e não só as guias
@@ -16,10 +16,10 @@
 //!
 //! ## No JSON: achatado, só números, e só quando existe
 //!
-//! A API guarda a receita como objeto plano de números (`conferir_forma` no
+//! A API guarda a revelação como objeto plano de números (`conferir_forma` no
 //! backend: até 384 chaves e 16 KiB). As chaves vão com o prefixo `corte_`,
 //! como o resto do enquadramento, e **só aparecem quando há o que dizer**: uma
-//! foto sem perspectiva tem a mesma receita de antes, byte a byte — senão toda
+//! foto sem perspectiva tem a mesma revelação de antes, byte a byte — senão toda
 //! foto já enviada pareceria "mudada" e subiria de novo.
 
 use serde_json::{Map, Value};

@@ -2,7 +2,7 @@
 //! portas: o controller é `async` do tokio, o GPUI não roda futuros dele, e o
 //! `Handle` é capturado no `main` antes de `Application::run` tomar a thread.
 
-use infrastructure::gpu_adjustments::ReceitaLocal;
+use infrastructure::gpu_adjustments::ParametrosLocais;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
@@ -88,7 +88,7 @@ pub enum Recado {
     /// O revelado entrou no lugar do original — "Salvar na galeria e sair".
     ///
     /// 🔑 **Leva o id da foto no site**, e não é enfeite: é ele que tira a
-    /// receita do depósito local (`Gravador::esquecer_do_site`). A partir daqui
+    /// revelação do depósito local (`Gravador::esquecer_do_site`). A partir daqui
     /// a verdade daquela foto é o servidor, e guardar as duas abriria a
     /// pergunta de qual vale.
     RevelacaoSalva {
@@ -104,12 +104,12 @@ pub enum Recado {
     /// guerra!"*).
     ClassificadaSubiu {
         foto_id: String,
-        /// A receita que subiu junto, em JSON — `None` é a foto no neutro.
+        /// A revelação que subiu junto, em JSON — `None` é a foto no neutro.
         ///
         /// 🚨 **É a da leitura do começo da subida.** O ajuste feito enquanto a
         /// foto subia não está nela, e quem recebe o recado compara com o
         /// catálogo (`conciliar_o_que_subiu`).
-        receita: Option<String>,
+        parametros: Option<String>,
     },
     /// **Um envio de foto falhou, e com o nome de quem falhou.**
     ///
@@ -392,7 +392,7 @@ pub trait Publicador: Send + Sync + 'static {
     fn original(&self, _sessao: Sessao, foto_no_site: String, canal: Sender<Recado>) {
         let _ = canal.send(Recado::OriginalIndisponivel { foto_no_site });
     }
-    /// Baixa o original e o revela com a receita dada, **sem subir nada** —
+    /// Baixa o original e o revela com a revelação dada, **sem subir nada** —
     /// o "Baixar JPEG" do editor. Volta como [`Recado::JpegRevelado`].
     fn revelar_integral(
         &self,
@@ -437,7 +437,7 @@ pub struct PublicadorDaApi {
 /// De onde a porta tira a imagem editada de uma foto do site.
 pub type EditadaDoSite = Arc<dyn Fn(&str) -> Option<std::path::PathBuf> + Send + Sync>;
 
-/// De onde a porta tira a receita local de uma foto do site.
+/// De onde a porta tira a revelação local de uma foto do site.
 pub type LocaisDoSite = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 impl PublicadorDaApi {
@@ -461,19 +461,19 @@ impl PublicadorDaApi {
         self
     }
 
-    /// Liga a porta ao depósito da receita local (ver o campo).
+    /// Liga a porta ao depósito da revelação local (ver o campo).
     pub fn com_locais(mut self, locais_de: LocaisDoSite) -> Self {
         self.locais_de = locais_de;
         self
     }
 }
 
-/// A receita local de uma foto do site, lida — ilegível é erro, e não "sem
+/// A revelação local de uma foto do site, lida — ilegível é erro, e não "sem
 /// máscara": subir sem o que o operador pintou entregaria outra foto.
-fn locais_lidos(locais_de: &LocaisDoSite, foto_no_site: &str) -> Result<ReceitaLocal, String> {
+fn locais_lidos(locais_de: &LocaisDoSite, foto_no_site: &str) -> Result<ParametrosLocais, String> {
     match locais_de(foto_no_site) {
-        None => Ok(ReceitaLocal::default()),
-        Some(json) => ReceitaLocal::de_json(&json).map_err(|e| e.to_string()),
+        None => Ok(ParametrosLocais::default()),
+        Some(json) => ParametrosLocais::de_json(&json).map_err(|e| e.to_string()),
     }
 }
 
@@ -497,7 +497,7 @@ async fn revelar_e_salvar(
     foto_no_site: &str,
     ajustes: Ajustes,
     corte: CropSettings,
-    locais: ReceitaLocal,
+    locais: ParametrosLocais,
     editada: Option<std::path::PathBuf>,
 ) -> Result<(), String> {
     // 🔑 **Zerou tudo: o bruto volta ao lugar dele, e nada sobe.** Pelo caminho
@@ -507,7 +507,7 @@ async fn revelar_e_salvar(
     // do site faz (`semRevelacao` em `editor.tsx`); o gesto é o mesmo nos dois,
     // e o resultado tem de ser também.
     //
-    // 🖌️ **Menos com imagem editada** (C30): aí zerar a receita ainda sobe a
+    // 🖌️ **Menos com imagem editada** (C30): aí zerar a revelação ainda sobe a
     // edição — restaurar o bruto a apagaria da galeria.
     if ajustes == Ajustes::default()
         && corte == CropSettings::default()
@@ -544,10 +544,10 @@ async fn revelar_e_salvar(
         .await
 }
 
-/// A receita como o site a grava — mora no `infrastructure`, junto com a
-/// compressão com que ela sobe. Ver `infrastructure::pos_venda::receita`.
-pub(crate) use infrastructure::pos_venda::receita::{
-    ajustes_em_json, mesma_receita, mesma_receita_em_texto,
+/// A revelação como o site a grava — mora no `infrastructure`, junto com a
+/// compressão com que ela sobe. Ver `infrastructure::pos_venda::parametros`.
+pub(crate) use infrastructure::pos_venda::parametros::{
+    ajustes_em_json, mesmos_parametros, mesmos_parametros_em_texto,
 };
 
 impl Publicador for PublicadorDaApi {
@@ -804,7 +804,7 @@ impl Publicador for PublicadorDaApi {
             {
                 Ok(subida) => Recado::ClassificadaSubiu {
                     foto_id: foto_id.clone(),
-                    receita: subida.receita.map(|r| r.to_string()),
+                    parametros: subida.parametros.map(|r| r.to_string()),
                 },
                 Err(frase) => Recado::EnvioFalhou {
                     alvo: foto_id.clone(),
@@ -1006,11 +1006,11 @@ pub mod mentira {
         pub rejeitadas_na_nuvem: Mutex<Vec<String>>,
         #[allow(clippy::type_complexity)]
         pub ao_subir: Mutex<Option<Box<dyn Fn(&PublicadorDeMentira, &str, u32) + Send>>>,
-        /// A receita que o catálogo tem da foto **no instante em que a subida
+        /// A revelação que o catálogo tem da foto **no instante em que a subida
         /// a lê** — é ela que vai junto, como no `subir` de verdade. Sem gancho,
         /// a foto sobe no neutro.
         #[allow(clippy::type_complexity)]
-        pub receita_do_catalogo: Mutex<Option<Box<dyn Fn(&str) -> Option<String> + Send>>>,
+        pub parametros_do_catalogo: Mutex<Option<Box<dyn Fn(&str) -> Option<String> + Send>>>,
         /// As fotos tiradas do storage.
         pub tiradas: Mutex<Vec<String>>,
         /// O que foi negociado, por foto.
@@ -1376,7 +1376,7 @@ pub mod mentira {
                     frase,
                 },
                 None => {
-                    // 🔑 **A receita nova fica na linha da foto**, como no
+                    // 🔑 **A revelação nova fica na linha da foto**, como no
                     // servidor: é dela que a galeria relida reabre a foto
                     // depois que o depósito daqui se esvazia.
                     if let Some(foto) = self
@@ -1482,8 +1482,8 @@ pub mod mentira {
                     frase,
                 },
                 None => {
-                    let receita = self
-                        .receita_do_catalogo
+                    let parametros = self
+                        .parametros_do_catalogo
                         .lock()
                         .expect("o gancho")
                         .as_ref()
@@ -1491,7 +1491,10 @@ pub mod mentira {
                     if let Some(consequencia) = self.ao_subir.lock().expect("o gancho").as_ref() {
                         consequencia(self, &foto_id, ordem);
                     }
-                    Recado::ClassificadaSubiu { foto_id, receita }
+                    Recado::ClassificadaSubiu {
+                        foto_id,
+                        parametros,
+                    }
                 }
             };
             self.responder_ou_guardar(canal, recado);

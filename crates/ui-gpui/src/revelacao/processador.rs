@@ -52,7 +52,7 @@ pub struct Pedido {
     pub corte: Corte,
     /// A Revelação local: máscaras e retoques, refeitos pelo motor na
     /// resolução desta revelação.
-    pub locais: Arc<infrastructure::gpu_adjustments::ReceitaLocal>,
+    pub locais: Arc<infrastructure::gpu_adjustments::ParametrosLocais>,
     /// O maior lado, em pixels do dispositivo, da área onde a foto vai
     /// aparecer. `None` revela no tamanho que chegou.
     ///
@@ -236,7 +236,7 @@ fn laco(
         // Sem suporte a máscara na GPU a revelação sai sem elas — a tela
         // avisa (`Processador::mascaras_suportadas`), e a exportação falha.
         if let Err(erro) = motor.definir_locais(&pedido.locais) {
-            crate::telemetria::avisar!("⚠️ [Revelação] a receita local ficou de fora: {erro:?}");
+            crate::telemetria::avisar!("⚠️ [Revelação] a revelação local ficou de fora: {erro:?}");
         }
         if let Some(imagem) = motor.revelar(&pixels, largura, altura, &pedido.ajustes) {
             if medindo {

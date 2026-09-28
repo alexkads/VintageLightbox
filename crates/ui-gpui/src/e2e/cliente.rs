@@ -9,7 +9,7 @@ use crate::sessoes::detalhe::Pedido;
 /// A foto e a exposição que a tela do cliente recebeu por último.
 fn no_cliente(e: &super::Estudio, cx: &mut TestAppContext) -> Option<(String, f32)> {
     e.app(cx, |app, _w, _cx| {
-        app.receita_no_cliente()
+        app.parametros_no_cliente()
             .map(|(id, ajustes)| (id, ajustes.exposure))
     })
 }

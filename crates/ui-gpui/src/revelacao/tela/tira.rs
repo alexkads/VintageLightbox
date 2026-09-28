@@ -90,7 +90,7 @@ pub(super) struct EstadoDaTira {
     /// ⚠️ **Dois**, porque a conta usa o leiaute do quadro anterior: no primeiro
     /// depois de trocar o recorte as posições ainda são as velhas.
     centrar: u8,
-    /// As fotos (id no site) com receita que a galeria ainda não recebeu.
+    /// As fotos (id no site) com revelação que a galeria ainda não recebeu.
     pub(super) pendentes: BTreeSet<String>,
     /// O primeiro item da tira que virou elemento no último quadro — os que
     /// vêm antes são um espaçador (ver [`faixa_desenhada`]).
@@ -483,7 +483,7 @@ impl Revelacao {
             .collect()
     }
 
-    /// A raiz diz quais fotos (id no site) têm receita que não subiu.
+    /// A raiz diz quais fotos (id no site) têm revelação que não subiu.
     pub fn definir_pendentes(&mut self, pendentes: BTreeSet<String>, cx: &mut Context<Self>) {
         if self.tira.pendentes != pendentes {
             self.tira.pendentes = pendentes;
@@ -675,7 +675,7 @@ impl Revelacao {
     /// Põe na tira a foto **como ela está sendo revelada**.
     ///
     /// ⚠️ **Só a memória da tira, e não o cache em disco**: gravar a revelada
-    /// lá faria a próxima abertura aplicar a receita duas vezes (7/set).
+    /// lá faria a próxima abertura aplicar a revelação duas vezes (7/set).
     pub(super) fn atualizar_a_tira_com_o_revelado(&mut self) {
         let Some(Aberta {
             foto,
@@ -801,7 +801,7 @@ impl Revelacao {
         cx.emit(PedidoDaRevelacao::BaixarComo);
     }
 
-    /// A foto tem receita que a galeria ainda não recebeu — o ponto oco.
+    /// A foto tem revelação que a galeria ainda não recebeu — o ponto oco.
     pub(super) fn nao_salva(&self, posicao: usize, foto: &PhotoViewModel) -> bool {
         if foto.revelacao_travada {
             return false;
@@ -1036,7 +1036,7 @@ impl Revelacao {
         let editavel = c.editavel();
         let revelada = !nao_salva && persistencia::ja_revelada(foto);
         // 🖌️ A foto tem edição do editor em vigor — é **outra** coisa que a
-        // receita: pixels pintados, e não ajustes.
+        // revelação: pixels pintados, e não ajustes.
         let editada = self.tem_edicao(foto);
         let miniatura = match self.miniaturas_da_tira.espiar(&foto.id) {
             Some(Miniatura::Pronta(imagem)) => Some(imagem),
@@ -1159,7 +1159,7 @@ impl Revelacao {
                 )
             })
             // 🖌️ O selo "Editada": um lápis no canto de baixo à esquerda (os de
-            // cima são do cliente; o ponto de baixo à direita é da receita).
+            // cima são do cliente; o ponto de baixo à direita é da revelação).
             .when(editada, |t| {
                 t.child(
                     div()
@@ -1645,7 +1645,7 @@ fn montar_o_menu(
                 }),
         )
         // 🖌️ Volta a foto ao bruto: o projeto e a imagem editada saem, e a
-        // **receita fica**. Pergunta antes — não tem volta.
+        // **revelação fica**. Pergunta antes — não tem volta.
         .item(
             PopupMenuItem::new("Excluir a edição")
                 .disabled(!dados.com_edicao)

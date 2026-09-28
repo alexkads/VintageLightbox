@@ -6,5 +6,5 @@ pub mod associacoes;
 mod desenho;
 pub mod estado;
 pub mod miniaturas;
-pub mod receita;
+pub mod parametros;
 pub mod tela;

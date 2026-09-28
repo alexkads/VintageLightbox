@@ -2,7 +2,7 @@
 //! (`docs/editor-em-camadas/02-CONTRATO.md`, C28–C34).
 //!
 //! 🔑 **Três perguntas, cada uma com arquivo de verdade no disco:**
-//! 1. a foto exportada tem o traço do editor, com a receita por cima (C32);
+//! 1. a foto exportada tem o traço do editor, com a revelação por cima (C32);
 //! 2. o "bruto" que sobe ao site **não** tem o traço (C2, C34);
 //! 3. o JPEG da exportação e o do pós-venda (bytes da imagem editada) são o
 //!    mesmo arquivo — um caminho, uma resposta.
@@ -16,7 +16,7 @@ use domain::value_objects::{ExportOptions, FilePath};
 use editor_core::projeto::{DiscoReal, Projeto};
 use editor_core::{BaseRef, Documento, Historico, Sessao};
 use image::RgbImage;
-use infrastructure::gpu_adjustments::{Ajustes, ReceitaLocal};
+use infrastructure::gpu_adjustments::{Ajustes, ParametrosLocais};
 use infrastructure::image_exporter::ImageExporterImpl;
 
 struct Campos {
@@ -115,7 +115,7 @@ async fn a_exportacao_parte_da_imagem_editada_e_o_bruto_continua_o_bruto() {
     let foto = saturada(foto);
     let exportador = exportador_com(&foto, &editada);
 
-    // 1. A revelada tem o traço (e a receita: saturação sobre ele).
+    // 1. A revelada tem o traço (e a revelação: saturação sobre ele).
     let revelada = exportador
         .renderizar(&foto, &ExportOptions::default())
         .unwrap()
@@ -143,7 +143,7 @@ async fn a_exportacao_parte_da_imagem_editada_e_o_bruto_continua_o_bruto() {
         .renderizar_bruto_jpeg(&foto, &ExportOptions::default())
         .await
         .unwrap()
-        .expect("com receita, sobe o bruto à parte");
+        .expect("com revelação, sobe o bruto à parte");
     let bruto = image::load_from_memory(&bruto).unwrap().to_rgb8();
     assert!(!vermelho(bruto.get_pixel(60, 40).0));
     let p = base.get_pixel(60, 40).0;
@@ -171,7 +171,7 @@ async fn exportacao_e_pos_venda_saem_o_mesmo_arquivo() {
         .renderizar_jpeg(&foto, &ExportOptions::default().with_quality(92))
         .await
         .unwrap();
-    // O pós-venda revela os **bytes** da imagem editada (C32), com a mesma receita.
+    // O pós-venda revela os **bytes** da imagem editada (C32), com a mesma revelação.
     let ajustes = Ajustes {
         saturation: 30.0,
         ..Default::default()
@@ -181,7 +181,7 @@ async fn exportacao_e_pos_venda_saem_o_mesmo_arquivo() {
             &std::fs::read(&editada).unwrap(),
             &ajustes,
             &Default::default(),
-            &ReceitaLocal::default(),
+            &ParametrosLocais::default(),
             92,
         )
         .unwrap();

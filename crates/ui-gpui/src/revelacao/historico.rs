@@ -43,7 +43,7 @@
 
 use std::sync::Arc;
 
-use infrastructure::gpu_adjustments::ReceitaLocal;
+use infrastructure::gpu_adjustments::ParametrosLocais;
 
 use super::persistencia::Corte;
 use super::processador::Ajustes;
@@ -57,7 +57,7 @@ use super::processador::Ajustes;
 pub struct Estado {
     pub ajustes: Ajustes,
     pub corte: Corte,
-    pub locais: Arc<ReceitaLocal>,
+    pub locais: Arc<ParametrosLocais>,
 }
 
 /// Quantos passos cabem.
@@ -136,11 +136,11 @@ impl Historico {
         Some(self.passos[self.atual].clone())
     }
 
-    /// Refaz cada passo sobre uma receita que mudou por fora.
+    /// Refaz cada passo sobre uma revelação que mudou por fora.
     ///
-    /// 🔑 Os passos foram dados sobre a receita de antes: sem isto, o `Cmd+Z`
-    /// levaria a foto de volta a um estado sem a receita que chegou — e
-    /// gravaria isso (ver `Revelacao::receita_mudou_por_fora`).
+    /// 🔑 Os passos foram dados sobre a revelação de antes: sem isto, o `Cmd+Z`
+    /// levaria a foto de volta a um estado sem a revelação que chegou — e
+    /// gravaria isso (ver `Revelacao::parametros_mudaram_por_fora`).
     pub fn rebasear(&mut self, refazer: impl Fn(Estado) -> Estado) {
         for passo in &mut self.passos {
             *passo = refazer(passo.clone());

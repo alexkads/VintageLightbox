@@ -372,11 +372,11 @@ impl PublicarNoPosVendaUseCase {
             // o site trata o campo ausente como "o que subiu **é** o bruto".
             .filter(|bytes| !bytes.is_empty());
 
-        // 🔑 A receita anda com o bruto: é com ela que a foto reabre revelada
+        // 🔑 A revelação anda com o bruto: é com ela que a foto reabre revelada
         // no editor do site, e não no neutro.
-        let receita = bruto
+        let parametros = bruto
             .as_ref()
-            .and_then(|_| self.exportador.receita_para_o_site(&photo));
+            .and_then(|_| self.exportador.parametros_para_o_site(&photo));
         let enviada = self
             .api
             .enviar_foto(
@@ -385,7 +385,7 @@ impl PublicarNoPosVendaUseCase {
                 FotoParaEnviar {
                     nome: nome.clone(),
                     jpeg,
-                    ajustes: receita.clone(),
+                    ajustes: parametros.clone(),
                     bruto,
                     estado,
                     produto_id,
@@ -432,7 +432,7 @@ impl PublicarNoPosVendaUseCase {
             eprintln!("⚠️ [Pós-venda] {nome} subiu, mas o id do site não foi gravado: {erro}");
         }
 
-        Ok((Subida { nome, receita }, estado))
+        Ok((Subida { nome, parametros }, estado))
     }
 }
 
@@ -441,14 +441,14 @@ impl PublicarNoPosVendaUseCase {
 pub struct Subida {
     /// O nome que o cliente vê.
     pub nome: String,
-    /// A receita que foi junto com o arquivo — `None` é a foto no neutro.
+    /// A revelação que foi junto com o arquivo — `None` é a foto no neutro.
     ///
-    /// 🚨 **É a receita da leitura do começo da subida, e não a de agora.** A
+    /// 🚨 **É a revelação da leitura do começo da subida, e não a de agora.** A
     /// foto é lida, revelada e mandada em segundos, e o operador revela
     /// enquanto o ensaio sobe (C20): o ajuste feito nessa janela fica só no
-    /// catálogo. Quem subiu a foto compara esta receita com a do catálogo e
+    /// catálogo. Quem subiu a foto compara esta revelação com a do catálogo e
     /// manda a diferença (`conciliar_o_que_subiu`, no app).
-    pub receita: Option<serde_json::Value>,
+    pub parametros: Option<serde_json::Value>,
 }
 
 /// O nome que o cliente vê no site: o do arquivo de origem, com `.jpg`,
@@ -494,7 +494,7 @@ mod tests {
             async fn export(&self, photo: &Photo, output_path: &FilePath, options: &ExportOptions) -> DomainResult<()>;
             async fn renderizar_jpeg(&self, photo: &Photo, options: &ExportOptions) -> DomainResult<Vec<u8>>;
             async fn renderizar_bruto_jpeg(&self, photo: &Photo, options: &ExportOptions) -> DomainResult<Option<Vec<u8>>>;
-            fn receita_para_o_site(&self, photo: &Photo) -> Option<serde_json::Value>;
+            fn parametros_para_o_site(&self, photo: &Photo) -> Option<serde_json::Value>;
         }
     }
 
@@ -793,10 +793,10 @@ mod tests {
     }
 
     /// 🛡️ **Contrato da foto, C7** (`../recordarfotos-e-commerce/docs/CONTRATO_DA_FOTO.md`):
-    /// a foto que sobe revelada leva a receita junto com o bruto. Sem ela, o editor
+    /// a foto que sobe revelada leva a revelação junto com o bruto. Sem ela, o editor
     /// do site abre o bruto no neutro — a regressão de 14/set/2026.
     #[tokio::test]
-    async fn contrato_c7_a_foto_revelada_sobe_com_a_receita_e_o_bruto() {
+    async fn contrato_c7_a_foto_revelada_sobe_com_os_parametros_e_o_bruto() {
         let foto = foto("/ensaio/DSC_010.NEF", false);
         let mut repo = MockPhotoRepo::new();
         repo.expect_find_by_id().returning({
@@ -812,7 +812,7 @@ mod tests {
             .expect_renderizar_bruto_jpeg()
             .returning(|_, _| Ok(Some(vec![2])));
         exportador
-            .expect_receita_para_o_site()
+            .expect_parametros_para_o_site()
             .returning(|_| Some(serde_json::json!({ "exposure": 0.5 })));
         let api = Arc::new(ApiDeMentira::default());
 
@@ -831,7 +831,7 @@ mod tests {
         assert_eq!(
             recebidas[0].ajustes,
             Some(serde_json::json!({ "exposure": 0.5 })),
-            "e a receita sobe com ele"
+            "e a revelação sobe com ele"
         );
     }
 
@@ -1057,8 +1057,10 @@ mod tests {
             .expect_renderizar_bruto_jpeg()
             .times(1)
             .returning(|_, _| Ok(Some(b"como entrou".to_vec())));
-        // A receita que acompanha o bruto (contrato C7) não é o assunto aqui.
-        exportador.expect_receita_para_o_site().returning(|_| None);
+        // A revelação que acompanha o bruto (contrato C7) não é o assunto aqui.
+        exportador
+            .expect_parametros_para_o_site()
+            .returning(|_| None);
 
         let api = Arc::new(ApiDeMentira::default());
         let caso = PublicarNoPosVendaUseCase::new(

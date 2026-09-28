@@ -99,13 +99,13 @@ pub trait ImageExporter: Send + Sync {
         options: &crate::value_objects::ExportOptions,
     ) -> DomainResult<Option<Vec<u8>>>;
 
-    /// A receita com que [`Self::renderizar_jpeg`] revela esta foto, no formato
+    /// A revelação com que [`Self::renderizar_jpeg`] revela esta foto, no formato
     /// do site — `None` quando ela está no neutro, como o bruto.
     ///
     /// 🚨 **Ela sobe junto com o bruto** (dono, 14/set/2026). O editor do site
-    /// parte do bruto e aplica a receita que a foto tem gravada; a foto enviada
-    /// daqui chegava com o bruto e sem receita, e abria no navegador no neutro.
-    fn receita_para_o_site(&self, _photo: &crate::entities::Photo) -> Option<serde_json::Value> {
+    /// parte do bruto e aplica a revelação que a foto tem gravada; a foto enviada
+    /// daqui chegava com o bruto e sem revelação, e abria no navegador no neutro.
+    fn parametros_para_o_site(&self, _photo: &crate::entities::Photo) -> Option<serde_json::Value> {
         None
     }
 }

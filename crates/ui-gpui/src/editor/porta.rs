@@ -91,13 +91,13 @@ pub trait Edicoes: Send + Sync + 'static {
     fn tem_projeto(&self, foto_id: &str, pos_venda_foto_id: Option<&str>) -> bool;
 
     /// **Excluir a edição**: o projeto e a imagem editada saem, e a Revelação
-    /// volta ao bruto (a receita fica). **Bloqueante**. `Ok(false)` quando não
+    /// volta ao bruto (a revelação fica). **Bloqueante**. `Ok(false)` quando não
     /// havia edição.
     fn excluir(&self, foto: &FotoDoEditor) -> Result<bool, String>;
 }
 
 /// A porta do app, para quem mora numa thread própria e não recebe portas pela
-/// raiz — a receita padrão da sessão (`sessoes/receita_padrao.rs`).
+/// raiz — a revelação padrão da sessão (`sessoes/revelacao_padrao.rs`).
 ///
 /// ⚠️ **Só o `main` a define.** Os testes montam as portas deles, e uma global
 /// definida por um teste vazaria para os outros.

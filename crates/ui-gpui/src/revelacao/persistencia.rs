@@ -43,7 +43,7 @@ pub struct Corte {
     pub angulo: Option<f32>,
     pub espelho_h: Option<bool>,
     pub espelho_v: Option<bool>,
-    /// A perspectiva guiada (guias e correção) — sem coluna, anda na receita.
+    /// A perspectiva guiada (guias e correção) — sem coluna, anda na revelação.
     pub perspectiva: Option<PerspectivaGuiada>,
     /// "Restringir ao conteúdo"; ausente é ligado.
     pub restringir: Option<bool>,
@@ -100,26 +100,26 @@ pub trait Gravador: Send + Sync + 'static {
     /// Esta subiu para a galeria: o servidor passa a ser a verdade dela.
     fn esquecer_do_site(&self, _foto_no_site: String) {}
 
-    /// A última receita gravada **nesta abertura do app** para uma foto local.
+    /// A última revelação gravada **nesta abertura do app** para uma foto local.
     ///
     /// 🔑 **É o espelho que deixa dois escritores se enxergarem.** A Revelação
-    /// e a receita padrão gravam a mesma foto, cada uma de uma thread, e o disco
+    /// e a revelação padrão gravam a mesma foto, cada uma de uma thread, e o disco
     /// é assíncrono: sem uma memória comum, cada uma escrevia a foto inteira sem
     /// saber da outra (ver [`mesclar`]). `None` é "ninguém gravou ainda".
-    fn receita_de(&self, _id: &str) -> Option<Receita> {
+    fn parametros_de(&self, _id: &str) -> Option<Parametros> {
         None
     }
 
-    /// Grava a **receita local** (a Revelação local: máscaras e retoques) —
+    /// Grava a **revelação local** (a Revelação local: máscaras e retoques) —
     /// `None` apaga. À parte de [`Self::gravar`], de propósito: os outros
-    /// escritores da receita (sincronização, receita padrão, zerar) gravam
+    /// escritores da revelação (sincronização, revelação padrão, zerar) gravam
     /// ajustes e corte e **não podem** apagar máscara nenhuma. Ver
     /// `PhotoRepository::update`.
     ///
     /// O padrão não guarda nada.
     fn gravar_locais(&self, _id: String, _locais: Option<String>) {}
 
-    /// A receita local de uma foto **do site**, por id de lá — o que a tela lê
+    /// A revelação local de uma foto **do site**, por id de lá — o que a tela lê
     /// ao abrir e o que a subida manda junto. Em memória, como
     /// [`Self::guardadas_do_site`].
     fn locais_do_site(&self, _foto_no_site: &str) -> Option<String> {
@@ -143,10 +143,10 @@ pub struct GravadorDoBanco {
     /// presets) e acompanha cada gravação daqui em diante — assim a sessão
     /// reaberta mostra o que o operador acabou de ajustar, sem ida ao banco.
     do_site: Arc<std::sync::Mutex<std::collections::HashMap<String, String>>>,
-    /// A última receita de cada foto local, gravada nesta abertura — ver
-    /// [`Gravador::receita_de`].
-    locais: std::sync::Mutex<std::collections::HashMap<String, Receita>>,
-    /// A receita local das fotos do site, em memória — espelho de
+    /// A última revelação de cada foto local, gravada nesta abertura — ver
+    /// [`Gravador::parametros_de`].
+    locais: std::sync::Mutex<std::collections::HashMap<String, Parametros>>,
+    /// A revelação local das fotos do site, em memória — espelho de
     /// `locais_do_site` (migration 024). Ver [`Gravador::locais_do_site`].
     locais_do_site: std::sync::Mutex<std::collections::HashMap<String, String>>,
 }
@@ -168,7 +168,7 @@ impl GravadorDoBanco {
         }
     }
 
-    /// Semeia a receita local das fotos do site — o que a tabela tinha na
+    /// Semeia a revelação local das fotos do site — o que a tabela tinha na
     /// abertura do app (`EditorController::locais_do_site`).
     pub fn com_locais_do_site(self, locais: Vec<(String, String)>) -> Self {
         if let Ok(mut guardado) = self.locais_do_site.lock() {
@@ -187,7 +187,7 @@ impl Gravador for GravadorDoBanco {
         // por `save_edits`: o id dela é `site:<uuid>`, o use case responde
         // `PhotoNotFound`, e este `Gravador` não devolve `Result` para ninguém
         // notar. Era o *"os parâmetros de edição não estão sendo gravados"* de
-        // 8/set/2026 — cada gesto escrevendo na água. A receita dela vai para o
+        // 8/set/2026 — cada gesto escrevendo na água. A revelação dela vai para o
         // depósito das do site, no **mesmo** SQLite do catálogo, no formato que
         // sobe para a API.
         if let Some(no_site) = id_no_site(&id) {
@@ -197,7 +197,7 @@ impl Gravador for GravadorDoBanco {
                     .to_string();
             // O espelho em memória anda **na hora**: quem reabre a sessão no
             // segundo seguinte lê daqui, e esperar o disco faria a foto voltar
-            // com a receita de antes do último gesto.
+            // com a revelação de antes do último gesto.
             if let Ok(mut deposito) = self.do_site.lock() {
                 deposito.insert(no_site.clone(), json.clone());
             }
@@ -212,13 +212,13 @@ impl Gravador for GravadorDoBanco {
         }
 
         // O espelho anda **na hora**, antes do disco: é por ele que o outro
-        // escritor da foto enxerga este (`receita_de`).
+        // escritor da foto enxerga este (`parametros_de`).
         if let Ok(mut locais) = self.locais.lock() {
             locais.insert(id.clone(), (ajustes, corte));
         }
-        // A receita inteira vai junto das colunas: elas são só os 53 antigos, e
+        // A revelação inteira vai junto das colunas: elas são só os 53 antigos, e
         // os módulos novos voltavam zerados ao reabrir (divergência D7).
-        let receita =
+        let parametros =
             crate::pos_venda::porta::ajustes_em_json(&ajustes, &para_crop_settings(&corte))
                 .to_string();
         self.tokio.spawn(async move {
@@ -286,7 +286,7 @@ impl Gravador for GravadorDoBanco {
                     corte.angulo,
                     corte.espelho_h,
                     corte.espelho_v,
-                    Some(receita),
+                    Some(parametros),
                 )
                 .await;
 
@@ -317,7 +317,7 @@ impl Gravador for GravadorDoBanco {
         self.tokio.spawn(async move {
             if let Err(erro) = editor.esquecer_revelacao_do_site(&foto_no_site).await {
                 // Sobrou linha no depósito de uma foto que já subiu. Não é
-                // perda: na próxima abertura ela volta como "receita local" e
+                // perda: na próxima abertura ela volta como "revelação local" e
                 // diz o mesmo que o servidor — o que ela deixa de fazer é sair
                 // do caminho.
                 crate::telemetria::avisar!(
@@ -327,7 +327,7 @@ impl Gravador for GravadorDoBanco {
         });
     }
 
-    fn receita_de(&self, id: &str) -> Option<Receita> {
+    fn parametros_de(&self, id: &str) -> Option<Parametros> {
         self.locais.lock().ok()?.get(id).copied()
     }
 
@@ -336,7 +336,7 @@ impl Gravador for GravadorDoBanco {
         let nome = id.clone();
         if let Some(no_site) = id_no_site(&id) {
             let no_site = no_site.to_string();
-            // O espelho anda na hora; o disco, atrás — o mesmo da receita.
+            // O espelho anda na hora; o disco, atrás — o mesmo da revelação.
             if let Ok(mut guardado) = self.locais_do_site.lock() {
                 match &locais {
                     Some(json) => guardado.insert(no_site.clone(), json.clone()),
@@ -441,21 +441,21 @@ macro_rules! com_os_campos {
 /// é o que sobrevive a um `NULL` solto no banco, que nenhum dos dois apps sabe
 /// produzir hoje e o SQLite aceita sem reclamar.
 pub fn da_foto(foto: &PhotoViewModel) -> Ajustes {
-    // 🔑 A foto do site traz a receita inteira, com os módulos que as colunas
+    // 🔑 A foto do site traz a revelação inteira, com os módulos que as colunas
     // não têm; quando ela existe, é ela que vale.
     if let Some(completos) = foto.ajustes_completos.as_deref() {
         if let Some(ajustes) = Ajustes::de_vetor(completos) {
             return ajustes;
         }
     }
-    // A foto do catálogo guarda a receita inteira desde a migration 023; as
+    // A foto do catálogo guarda a revelação inteira desde a migration 023; as
     // colunas abaixo são só os 53 antigos, e valem para quem veio antes dela.
-    if let Some(receita) = foto
-        .receita
+    if let Some(parametros) = foto
+        .parametros
         .as_deref()
         .and_then(|r| serde_json::from_str::<serde_json::Value>(r).ok())
     {
-        return de_json(&receita).0;
+        return de_json(&parametros).0;
     }
     let mut ajustes = Ajustes::default();
 
@@ -474,7 +474,7 @@ pub fn da_foto(foto: &PhotoViewModel) -> Ajustes {
 
 /// O contrário de [`da_foto`]: escreve ajustes e corte **na** foto da grade.
 ///
-/// Existe para a sincronização: a Revelação grava a receita nas marcadas e
+/// Existe para a sincronização: a Revelação grava a revelação nas marcadas e
 /// precisa que as cópias que ela tem em memória digam o mesmo que o banco —
 /// senão a seta seguinte abriria a foto recém-sincronizada com os sliders de
 /// antes.
@@ -485,7 +485,7 @@ pub fn na_foto(foto: &mut PhotoViewModel, ajustes: Ajustes, corte: Corte) {
         };
     }
     com_os_campos!(escrever);
-    // A receita inteira vale para toda foto (ver `da_foto`): as colunas são só
+    // A revelação inteira vale para toda foto (ver `da_foto`): as colunas são só
     // os 53 antigos, e a cópia em memória não pode perder os módulos novos.
     foto.ajustes_completos = Some(ajustes.como_vetor().to_vec());
 
@@ -501,8 +501,8 @@ pub fn na_foto(foto: &mut PhotoViewModel, ajustes: Ajustes, corte: Corte) {
     foto.edit_crop_restringir = corte.restringir.filter(|r| !r);
 }
 
-/// Uma receita inteira: os ajustes e o enquadramento.
-pub type Receita = (Ajustes, Corte);
+/// Uma revelação inteira: os ajustes e o enquadramento.
+pub type Parametros = (Ajustes, Corte);
 
 /// O corte com cada campo escrito — ausente vira o neutro dele.
 ///
@@ -523,21 +523,21 @@ fn corte_por_extenso(corte: Corte) -> Corte {
     }
 }
 
-/// A receita que mudou **por fora** encontra a que o operador fez **por
+/// A revelação que mudou **por fora** encontra a que o operador fez **por
 /// dentro** — campo a campo, em três pontas.
 ///
 /// `base` é o que a foto tinha quando os dois lados partiram; `meu` é o que o
-/// operador fez desde então; `deles` é o que chegou de fora (a receita padrão
+/// operador fez desde então; `deles` é o que chegou de fora (a revelação padrão
 /// da sessão, gravada em segundo plano). Em cada campo, o que o operador mudou
 /// fica, e o resto vem de fora.
 ///
-/// 🚨 **Existe porque a receita padrão e a Revelação escreviam a foto inteira,
+/// 🚨 **Existe porque a revelação padrão e a Revelação escreviam a foto inteira,
 /// uma por cima da outra** (visto contra a pilha local, 24/set/2026). A
-/// Revelação abria a foto antes de a receita padrão chegar, e o primeiro ajuste
+/// Revelação abria a foto antes de a revelação padrão chegar, e o primeiro ajuste
 /// gravava tudo a partir do neutro: o contraste 1,25 da sessão voltava a 1,0. Na
-/// ordem inversa, a receita padrão gravava por cima do ajuste, e a edição
+/// ordem inversa, a revelação padrão gravava por cima do ajuste, e a edição
 /// sumia. Com a mescla, a foto fica com as duas.
-pub fn mesclar(base: Receita, meu: Receita, deles: Receita) -> Receita {
+pub fn mesclar(base: Parametros, meu: Parametros, deles: Parametros) -> Parametros {
     let (base_a, meu_a, deles_a) = (
         base.0.como_vetor(),
         meu.0.como_vetor(),
@@ -578,8 +578,8 @@ pub fn mesclar(base: Receita, meu: Receita, deles: Receita) -> Receita {
     (ajustes, corte)
 }
 
-/// As duas receitas dizem o mesmo — com o corte ausente igual ao neutro.
-pub fn mesma_receita(a: Receita, b: Receita) -> bool {
+/// As duas revelações dizem o mesmo — com o corte ausente igual ao neutro.
+pub fn mesmos_parametros(a: Parametros, b: Parametros) -> bool {
     a.0 == b.0 && corte_por_extenso(a.1) == corte_por_extenso(b.1)
 }
 
@@ -599,7 +599,7 @@ pub fn para_crop_settings(corte: &Corte) -> CropSettings {
     .with_restringir(corte.restringir.unwrap_or(true))
 }
 
-/// A receita como o site a guarda — os ajustes por nome e o corte com prefixo
+/// A revelação como o site a guarda — os ajustes por nome e o corte com prefixo
 /// `corte_` — de volta para o que a tela usa.
 ///
 /// É o `completar(foto.ajustes)` + `corteDeJson` do editor do site, e o inverso
@@ -608,7 +608,7 @@ pub fn para_crop_settings(corte: &Corte) -> CropSettings {
 /// é número finito também — um `NaN` no vetor apagaria a foto. Nome desconhecido
 /// é ignorado: uma revelação gravada por uma versão mais nova aplica o que dá.
 ///
-/// 🚨 **Sem isto, a foto já revelada abria no neutro.** A API mandava a receita e
+/// 🚨 **Sem isto, a foto já revelada abria no neutro.** A API mandava a revelação e
 /// o `http.rs` guardava só "tem ou não tem" — e a Revelação mostrava a miniatura
 /// revelada da galeria como se fosse o bruto, com os 53 sliders parados no
 /// meio. Sincronizar a partir dela mandava o neutro às outras.
@@ -652,7 +652,7 @@ pub fn de_json(json: &serde_json::Value) -> (Ajustes, Corte) {
 /// 🔑 É o que decide de onde vêm os pixels da Revelação. Para a local, o cache
 /// de previews tem o bruto importado. Para a do site, o que o cache tem é a
 /// **miniatura da galeria** — que, depois de "Salvar na galeria", é a foto
-/// **revelada**. Usá-la como origem aplicaria a receita duas vezes, em 640px.
+/// **revelada**. Usá-la como origem aplicaria a revelação duas vezes, em 640px.
 pub fn so_existe_no_site(foto: &PhotoViewModel) -> bool {
     foto.pos_venda_foto_id.is_some() && foto.path.is_empty()
 }
@@ -667,7 +667,7 @@ pub const PREFIXO_DO_SITE: &str = "site:";
 /// O id **no site** de uma foto que veio de lá — `None` para a foto local.
 ///
 /// É a direção de leitura do prefixo, e quem precisa dela é quem grava: a
-/// receita de uma foto do site não vai para `photos` (ela não tem arquivo neste
+/// revelação de uma foto do site não vai para `photos` (ela não tem arquivo neste
 /// disco), e o depósito que a recebe é indexado pelo id de lá.
 pub fn id_no_site(id: &str) -> Option<&str> {
     id.strip_prefix(PREFIXO_DO_SITE)
@@ -678,8 +678,8 @@ pub fn id_no_site(id: &str) -> Option<&str> {
 /// 🚨 **Tem de ser diferente da chave da miniatura, e é essa a lição.** Em
 /// `site:<id>` a grade da sessão guarda a imagem da galeria — que, depois de
 /// "Salvar na galeria", é a foto **revelada e com marca**. Enquanto a Revelação
-/// lia essa mesma chave, ela servia ao shader uma foto já revelada: receita por
-/// cima de receita, em 640 px. O conserto de 7/set foi desligar o cache para a
+/// lia essa mesma chave, ela servia ao shader uma foto já revelada: revelação por
+/// cima de revelação, em 640 px. O conserto de 7/set foi desligar o cache para a
 /// foto do site (`so_existe_no_site` → `origem: None`), e o preço apareceu no
 /// dia seguinte — *"voltou a ficar lento"*: cada seta virava um download.
 ///
@@ -691,15 +691,15 @@ pub fn chave_do_trabalho(foto_id: &str) -> String {
     format!("trabalho:{foto_id}")
 }
 
-/// A chave da **miniatura revelada** pela receita padrão — `revelada:<id>`.
+/// A chave da **miniatura revelada** pela revelação padrão — `revelada:<id>`.
 ///
 /// 🚨 **Terceira chave, e pelo motivo da segunda.** Quem lê aqui é a grade (a da
 /// sessão e a do assistente), que quer ver o preset aplicado. Quem **não** pode
 /// ler é a Revelação: ela lê `get_preview(&foto.id)`, o bruto, e receber daqui
-/// aplicaria receita sobre receita — o defeito de 7/set que o bloco acima
+/// aplicaria revelação sobre revelação — o defeito de 7/set que o bloco acima
 /// registra.
 ///
-/// 🔑 **Ausente é resposta válida.** Sem GPU, com receita neutra ou antes de a
+/// 🔑 **Ausente é resposta válida.** Sem GPU, com revelação neutra ou antes de a
 /// fila chegar nesta foto, não existe nada nesta chave, e quem desenha cai no
 /// bruto. É o que faz a grade nunca ficar vazia esperando a revelação.
 ///
@@ -724,18 +724,18 @@ pub fn ja_revelada(foto: &PhotoViewModel) -> bool {
         || foto.locais.is_some()
 }
 
-/// A receita local de uma foto, do jeito que a tela a abre.
+/// A revelação local de uma foto, do jeito que a tela a abre.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LocaisDaFoto {
-    /// Lida (ou a foto não tem máscara nem retoque: a receita vazia).
-    Lida(infrastructure::gpu_adjustments::ReceitaLocal),
+    /// Lida (ou a foto não tem máscara nem retoque: a revelação vazia).
+    Lida(infrastructure::gpu_adjustments::ParametrosLocais),
     /// 🚨 Gravada por uma versão mais nova do app, ou corrompida. A tela
     /// mostra a foto **sem** mexer nela e **não grava por cima**: o texto
     /// volta intacto para quem souber lê-lo.
     Ilegivel { texto: String, erro: String },
 }
 
-/// A receita local da foto: a do catálogo (`photos.edit_locais`) ou, para a
+/// A revelação local da foto: a do catálogo (`photos.edit_locais`) ou, para a
 /// foto do site, a do depósito (`locais_do_site`).
 pub fn locais_da_foto(foto: &PhotoViewModel, gravador: &dyn Gravador) -> LocaisDaFoto {
     let texto = match id_no_site(&foto.id) {
@@ -743,9 +743,9 @@ pub fn locais_da_foto(foto: &PhotoViewModel, gravador: &dyn Gravador) -> LocaisD
         None => foto.locais.clone(),
     };
     match texto {
-        None => LocaisDaFoto::Lida(infrastructure::gpu_adjustments::ReceitaLocal::default()),
-        Some(texto) => match infrastructure::gpu_adjustments::ReceitaLocal::de_json(&texto) {
-            Ok(receita) => LocaisDaFoto::Lida(receita),
+        None => LocaisDaFoto::Lida(infrastructure::gpu_adjustments::ParametrosLocais::default()),
+        Some(texto) => match infrastructure::gpu_adjustments::ParametrosLocais::de_json(&texto) {
+            Ok(parametros) => LocaisDaFoto::Lida(parametros),
             Err(erro) => LocaisDaFoto::Ilegivel {
                 texto,
                 erro: erro.to_string(),
@@ -771,11 +771,11 @@ pub mod mentira {
         gravado: Mutex<Vec<(String, Ajustes, Corte)>>,
         /// O depósito das fotos do site, como se já estivesse no disco.
         do_site: Mutex<Vec<(String, String)>>,
-        /// Onde a receita de uma foto **local** cai — o catálogo, que é o que
+        /// Onde a revelação de uma foto **local** cai — o catálogo, que é o que
         /// o gravador de verdade escreve e o que a subida do ensaio lê.
         #[allow(clippy::type_complexity)]
         pub no_catalogo: Mutex<Option<Box<dyn Fn(&str, Ajustes, Corte) + Send>>>,
-        /// Cada gravação da receita local, na ordem.
+        /// Cada gravação da revelação local, na ordem.
         locais: Mutex<Vec<(String, Option<String>)>>,
     }
 
@@ -795,7 +795,7 @@ pub mod mentira {
             }
         }
 
-        /// As gravações da receita local, na ordem.
+        /// As gravações da revelação local, na ordem.
         pub fn locais_gravados(&self) -> Vec<(String, Option<String>)> {
             self.locais.lock().expect("as gravações locais").clone()
         }
@@ -859,7 +859,7 @@ pub mod mentira {
                 .and_then(|(_, l)| l.clone())
         }
 
-        fn receita_de(&self, id: &str) -> Option<super::Receita> {
+        fn parametros_de(&self, id: &str) -> Option<super::Parametros> {
             if super::id_no_site(id).is_some() {
                 return None;
             }
@@ -878,7 +878,7 @@ pub mod mentira {
 mod testes_da_mescla {
     use super::*;
 
-    fn com(exposicao: f32, contraste: f32, largura: Option<f32>) -> Receita {
+    fn com(exposicao: f32, contraste: f32, largura: Option<f32>) -> Parametros {
         (
             Ajustes {
                 exposure: exposicao,
@@ -893,7 +893,7 @@ mod testes_da_mescla {
     }
 
     /// 🔑 O caso do dono: a Revelação abriu no neutro, o operador baixou a
-    /// exposição, e a receita padrão (contraste 1,25 e corte 3:2) chegou
+    /// exposição, e a revelação padrão (contraste 1,25 e corte 3:2) chegou
     /// depois. A foto fica com as duas.
     #[test]
     fn o_que_o_operador_mudou_fica_e_o_resto_vem_de_fora() {
@@ -902,7 +902,7 @@ mod testes_da_mescla {
         let deles = com(0., 1.25, Some(0.9));
         let (ajustes, corte) = mesclar(base, meu, deles);
         assert_eq!(ajustes.exposure, -0.5, "a edição fica");
-        assert_eq!(ajustes.contrast, 1.25, "a receita padrão entra");
+        assert_eq!(ajustes.contrast, 1.25, "a revelação padrão entra");
         assert_eq!(corte.largura, Some(0.9), "e o corte dela também");
     }
 
@@ -916,7 +916,7 @@ mod testes_da_mescla {
         assert_eq!(mesclar(base, meu, deles).1.largura, Some(0.9));
     }
 
-    /// Tirar da receita de fora o que veio do operador: `mesclar(meu, base,
+    /// Tirar da revelação de fora o que veio do operador: `mesclar(meu, base,
     /// deles)` devolve a base nos campos que ele mudou — é o ponto de partida
     /// do histórico refeito.
     #[test]
@@ -1025,7 +1025,7 @@ mod testes {
     /// O JSON do site, como o `corteParaJson` + `soOsAlterados` do editor o
     /// gravam: só o que saiu do neutro, e o corte com prefixo.
     #[test]
-    fn a_receita_do_site_volta_com_o_neutro_no_que_falta() {
+    fn os_parametros_do_site_volta_com_o_neutro_no_que_falta() {
         let json = serde_json::json!({
             "saturation": -1.0,
             "split_shadow_hue": 35,
@@ -1353,10 +1353,10 @@ mod testes {
 
     /// ✅ **Divergência D7 do contrato da foto** (`../recordarfotos-e-commerce/docs/CONTRATO_DA_FOTO.md`,
     /// C8): nenhum cliente descarta parâmetro. A foto do catálogo guarda a
-    /// receita inteira em `photos.edit_receita` (migration 023), e é ela que
+    /// revelação inteira em `photos.edit_receita` (migration 023), e é ela que
     /// vale quando existe — os ajustes sem coluna voltam por ali.
     #[test]
-    fn contrato_d7_a_receita_do_catalogo_traz_o_que_nao_tem_coluna() {
+    fn contrato_d7_os_parametros_do_catalogo_traz_o_que_nao_tem_coluna() {
         let ajustes = Ajustes {
             calib_red_hue: 12.0,
             bw_ativo: 1.0,
@@ -1364,14 +1364,14 @@ mod testes {
             dt_cb_shadows_h: 71.5,
             ..Ajustes::default()
         };
-        let receita = crate::pos_venda::porta::ajustes_em_json(
+        let parametros = crate::pos_venda::porta::ajustes_em_json(
             &ajustes,
             &para_crop_settings(&Corte::default()),
         )
         .to_string();
         let foto = PhotoViewModel {
             edit_exposure: Some(0.0),
-            receita: Some(receita),
+            parametros: Some(parametros),
             ..Default::default()
         };
         assert_eq!(da_foto(&foto), ajustes);
@@ -1381,7 +1381,7 @@ mod testes {
     ///
     /// São os 118 que o motor ganhou depois dos 53 — calibração, preto e
     /// branco, curva por ponto, a tonalização completa e os Controles RGB. Eles
-    /// não ganharam coluna: vão na receita inteira (`edit_receita`, migration
+    /// não ganharam coluna: vão na revelação inteira (`edit_receita`, migration
     /// 023), como na foto do site. Esta lista só descreve o caminho das colunas,
     /// que é o de quem foi revelado antes da migration 023.
     const SEM_COLUNA_NO_BANCO_LOCAL: [&str; 7] = [
@@ -1394,7 +1394,7 @@ mod testes {
         "dt_",
     ];
 
-    /// 🚨 A receita do site tem os módulos novos (`dt_*`), que as colunas
+    /// 🚨 A revelação do site tem os módulos novos (`dt_*`), que as colunas
     /// `edit_*` não têm: eles precisam atravessar a grade e voltar inteiros.
     #[test]
     fn os_modulos_novos_da_foto_do_site_nao_se_perdem() {

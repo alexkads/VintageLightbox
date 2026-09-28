@@ -623,9 +623,9 @@ fn esperar_a_foto(
 /// 🚨 **Percorrer uma tira de fotos reveladas não pode mostrar nenhuma delas
 /// crua — e a volta tem de ser instantânea.**
 ///
-/// Desde 17/set/2026 a foto com receita gravada **não** vai ao palco antes de o
+/// Desde 17/set/2026 a foto com revelação gravada **não** vai ao palco antes de o
 /// motor responder (dono: *"primeiro mostra sem efeito e depois é aplicado a
-/// receita"*). Isso troca um defeito visível por um custo: entre a seta e a
+/// revelação"*). Isso troca um defeito visível por um custo: entre a seta e a
 /// resposta da GPU o palco fica vazio. O cache de reveladas e a revelação
 /// antecipada (`revelacao/cache.rs` e `antecipar_a_proxima`) existem para pagar
 /// esse custo — *"precisa guardar um cache e fazer uma aplicação antecipada na
@@ -656,7 +656,7 @@ fn estresse_percorrer_a_tira_de_fotos_reveladas(cx: &mut TestAppContext) {
                 .save_preview(&format!("id-{i:05}"), &imagem(320 + i as u32 * 4, 240))
                 .expect("gravar preview");
             PhotoViewModel {
-                // Com receita gravada, senão não há revelação a esperar e o caso
+                // Com revelação gravada, senão não há revelação a esperar e o caso
                 // não exercita nada.
                 edit_exposure: Some(0.5 + i as f32 * 0.01),
                 ..foto(i)

@@ -30,15 +30,17 @@ pub struct Photo {
     /// soube ler — e aí [`Self::file_name`] volta a olhar o caminho, que é
     /// exatamente o que ela fazia antes.
     nome_original: Option<String>,
-    /// A receita inteira da revelação, em JSON (migration 023).
+    /// A revelação inteira da revelação, em JSON (migration 023).
     ///
     /// 🚨 As colunas `edit_*` são só os 53 ajustes antigos; o motor tem 171.
     /// Sem isto, os módulos novos voltavam zerados ao reabrir a foto
     /// (divergência D7 do contrato da foto). `None` = valem as colunas.
-    receita: Option<String>,
-    /// A receita **local** — máscaras e retoques — em JSON (migration 024).
+    // O nome antigo do campo, para o que já foi gravado continuar lendo.
+    #[serde(default, alias = "receita")]
+    parametros: Option<String>,
+    /// A revelação **local** — máscaras e retoques — em JSON (migration 024).
     ///
-    /// Coluna própria porque não sobe ao site como a `receita`: a API recusa
+    /// Coluna própria porque não sobe ao site como a `parametros`: a API recusa
     /// objeto aninhado. `None` = sem máscara nem retoque.
     locais: Option<String>,
     /// Classificação por estrelas (0-5)
@@ -307,7 +309,7 @@ impl Photo {
             id,
             file_path,
             nome_original: None,
-            receita: None,
+            parametros: None,
             locais: None,
             imported_at,
             modified_at,
@@ -609,26 +611,26 @@ impl Photo {
         self.nome_original = nome.filter(|n| !n.trim().is_empty());
     }
 
-    /// A receita inteira da revelação, em JSON — ver o campo.
-    pub fn receita(&self) -> Option<&str> {
-        self.receita.as_deref()
+    /// A revelação inteira da revelação, em JSON — ver o campo.
+    pub fn parametros(&self) -> Option<&str> {
+        self.parametros.as_deref()
     }
 
-    /// Guarda a receita inteira. Quem revela a chama junto de
+    /// Guarda a revelação inteira. Quem revela a chama junto de
     /// [`Self::set_edits`]; o repositório, ao reconstruir do banco.
     ///
     /// ⚠️ Não mexe em `modified_at`: `set_edits` já marca, e na reconstrução
     /// marcar modificação seria mentira.
-    pub fn definir_receita(&mut self, receita: Option<String>) {
-        self.receita = receita.filter(|r| !r.trim().is_empty());
+    pub fn definir_parametros(&mut self, parametros: Option<String>) {
+        self.parametros = parametros.filter(|r| !r.trim().is_empty());
     }
 
-    /// A receita local (máscaras e retoques), em JSON — ver o campo.
+    /// A revelação local (máscaras e retoques), em JSON — ver o campo.
     pub fn locais(&self) -> Option<&str> {
         self.locais.as_deref()
     }
 
-    /// Guarda a receita local. Mesmas regras de [`Self::definir_receita`]:
+    /// Guarda a revelação local. Mesmas regras de [`Self::definir_parametros`]:
     /// texto vazio é `None`, e `modified_at` não muda.
     pub fn definir_locais(&mut self, locais: Option<String>) {
         self.locais = locais.filter(|r| !r.trim().is_empty());

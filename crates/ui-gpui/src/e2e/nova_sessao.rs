@@ -43,7 +43,7 @@ fn foto_no_rascunho(e: &Estudio, id: &str, rascunho: &str) {
     e.acervo.fotos.lock().unwrap().push(foto);
 }
 
-/// 🎬 **Do começo ao fim**: fotos com a receita padrão, a etapa 3 que só
+/// 🎬 **Do começo ao fim**: fotos com a revelação padrão, a etapa 3 que só
 /// segura sem preço e estúdio, "Criar" que leva à pendência, o agendamento que
 /// completa o contato, e a sessão criada com as fotos passando para ela.
 #[gpui_kit::test]
@@ -80,7 +80,7 @@ fn a_sessao_nasce_com_o_atendimento_e_as_fotos(cx: &mut TestAppContext) {
         });
     });
     e.esperar(cx);
-    let (foto, ajustes, corte) = e.gravador.gravado().pop().expect("a receita foi gravada");
+    let (foto, ajustes, corte) = e.gravador.gravado().pop().expect("a revelação foi gravada");
     assert_eq!(foto, "id-nova-1");
     assert_eq!(ajustes.exposure, 0.5);
     let (w, h) = (corte.largura.unwrap() * 600., corte.altura.unwrap() * 400.);
@@ -731,7 +731,7 @@ fn clicar_no_titulo_e_digitar(cx: &mut TestAppContext) {
 /// Dono, 20/set/2026: *"não consigo digitar o título como se tivesse um bug no
 /// input"*, com a bandeja marcando 54 → 55 → 60 fotos esperando nota: as fotos
 /// entravam enquanto ele escrevia. A cada leva a tela relê o catálogo, refaz
-/// `self.fotos` e aplica a receita — e a colheita acorda a ~10 Hz.
+/// `self.fotos` e aplica a revelação — e a colheita acorda a ~10 Hz.
 #[gpui_kit::test]
 fn digitar_o_titulo_com_a_importacao_correndo(cx: &mut TestAppContext) {
     let e = abrir_o_app(cx, Cenario::default());

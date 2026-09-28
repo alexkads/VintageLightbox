@@ -440,7 +440,7 @@ pub(super) fn abrir_o_app(cx: &mut TestAppContext, cenario: Cenario) -> Estudio 
             }
         }
     }));
-    *site.receita_do_catalogo.lock().expect("o gancho") = Some(Box::new({
+    *site.parametros_do_catalogo.lock().expect("o gancho") = Some(Box::new({
         let acervo = acervo.clone();
         move |id| {
             let fotos = acervo.fotos.lock().expect("o acervo");

@@ -176,7 +176,7 @@ impl Aplicativo {
             tela.fonte_mudou(&foto.id, foto.pos_venda_foto_id.as_deref(), cx)
         });
         if let Some(no_site) = foto.pos_venda_foto_id.clone() {
-            let (ajustes, corte) = self.receita_para_subir(foto, cx);
+            let (ajustes, corte) = self.parametros_para_subir(foto, cx);
             if let Some(ja) = self.a_subir.iter_mut().find(|(id, _, _)| *id == no_site) {
                 *ja = (no_site, ajustes, corte);
             } else {
@@ -237,9 +237,9 @@ impl Aplicativo {
         .detach();
     }
 
-    /// A receita **atual** da foto: a da tela, se ela está no palco; senão a
+    /// A revelação **atual** da foto: a da tela, se ela está no palco; senão a
     /// que a foto guarda.
-    fn receita_para_subir(
+    fn parametros_para_subir(
         &self,
         foto: &FotoDoEditor,
         cx: &Context<Self>,

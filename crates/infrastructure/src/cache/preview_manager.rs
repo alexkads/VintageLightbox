@@ -187,7 +187,7 @@ impl PreviewManager {
     ///
     /// 🔑 **Quem apaga é quem sabe que a origem mudou de dono.** O caso que a
     /// fez nascer é a prévia revelada local (`revelada:<id>`): enquanto a foto
-    /// não subiu, ela é a verdade que a grade mostra; quando a receita volta ao
+    /// não subiu, ela é a verdade que a grade mostra; quando a revelação volta ao
     /// neutro, ou quando o site recebe a revelação, quem passa a ser mais novo é
     /// o servidor — e uma cópia local que ninguém mais atualiza faria a grade
     /// mostrar para sempre o que já mudou.

@@ -13,20 +13,22 @@
 //! campos, está na documentação de [`revelacao_core::ajustes`] e de
 //! [`revelacao_core::motor`].
 
-pub use revelacao_core::{Ajustes, Entrada, Motor, ReceitaLocal};
+pub use revelacao_core::{Ajustes, Entrada, Motor, ParametrosLocais};
 
-/// A receita local (máscaras e retoques) que a foto tem gravada
+/// A revelação local (máscaras e retoques) que a foto tem gravada
 /// (`photos.edit_locais`, migration 024).
 ///
-/// 🚨 **Ilegível é erro, e não "sem máscara".** Uma receita gravada por uma
+/// 🚨 **Ilegível é erro, e não "sem máscara".** Uma revelação gravada por uma
 /// versão mais nova do app, ou corrompida, exportada como vazia daria outra
 /// foto — a que o operador não revelou —, calada. Quem exporta falha alto.
-pub fn locais_da_entidade(foto: &domain::entities::Photo) -> domain::DomainResult<ReceitaLocal> {
+pub fn locais_da_entidade(
+    foto: &domain::entities::Photo,
+) -> domain::DomainResult<ParametrosLocais> {
     match foto.locais() {
-        None => Ok(ReceitaLocal::default()),
-        Some(json) => ReceitaLocal::de_json(json).map_err(|e| {
+        None => Ok(ParametrosLocais::default()),
+        Some(json) => ParametrosLocais::de_json(json).map_err(|e| {
             domain::DomainError::InfrastructureError(format!(
-                "a receita local da foto não pôde ser lida: {e}"
+                "a revelação local da foto não pôde ser lida: {e}"
             ))
         }),
     }
@@ -45,18 +47,18 @@ pub fn locais_da_entidade(foto: &domain::entities::Photo) -> domain::DomainResul
 /// não pode ser confundido com ausência — que é por que isto é `if let
 /// Some`, e não `unwrap_or_default`.
 ///
-/// 🚨 **A receita inteira vem antes das colunas** (migration 023): elas são só
-/// os 53 ajustes antigos, e sem a receita a foto exportada saía sem os módulos
+/// 🚨 **A revelação inteira vem antes das colunas** (migration 023): elas são só
+/// os 53 ajustes antigos, e sem a revelação a foto exportada saía sem os módulos
 /// novos (divergência D7 do contrato da foto). Campo ausente ou que não é
 /// número finito fica no neutro, como no `de_json` da tela.
 pub fn ajustes_da_entidade(foto: &domain::entities::Photo) -> Ajustes {
-    if let Some(receita) = foto
-        .receita()
+    if let Some(parametros) = foto
+        .parametros()
         .and_then(|r| serde_json::from_str::<serde_json::Value>(r).ok())
     {
         let mut vetor = Ajustes::default().como_vetor();
         for (posicao, nome) in Ajustes::NOMES.iter().enumerate() {
-            if let Some(valor) = receita
+            if let Some(valor) = parametros
                 .get(nome)
                 .and_then(serde_json::Value::as_f64)
                 .filter(|v| v.is_finite())
@@ -257,10 +259,10 @@ mod testes {
         );
     }
 
-    /// 🚨 Divergência D7: a foto do catálogo exporta com a receita inteira, e
+    /// 🚨 Divergência D7: a foto do catálogo exporta com a revelação inteira, e
     /// não só com os 53 ajustes que têm coluna.
     #[test]
-    fn a_receita_inteira_vale_mais_que_as_colunas() {
+    fn os_parametros_inteiros_vale_mais_que_as_colunas() {
         use domain::value_objects::CropSettings;
 
         let esperado = Ajustes {
@@ -272,14 +274,14 @@ mod testes {
         let mut foto = domain::entities::Photo::new(
             domain::value_objects::FilePath::new("/fotos/DSC_0001.jpg").expect("caminho"),
         );
-        foto.definir_receita(Some(
-            crate::pos_venda::receita::ajustes_em_json(&esperado, &CropSettings::default())
+        foto.definir_parametros(Some(
+            crate::pos_venda::parametros::ajustes_em_json(&esperado, &CropSettings::default())
                 .to_string(),
         ));
         assert_eq!(ajustes_da_entidade(&foto), esperado);
 
-        // Receita ilegível cai nas colunas, e não no vazio.
-        foto.definir_receita(Some("não é json".into()));
+        // Revelação ilegível cai nas colunas, e não no vazio.
+        foto.definir_parametros(Some("não é json".into()));
         assert_eq!(ajustes_da_entidade(&foto), Ajustes::default());
     }
 }

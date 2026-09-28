@@ -502,10 +502,10 @@ impl PosVendaApi for PosVendaApiHttp {
                 .mime_str("image/jpeg")
                 .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
             form = form.part("file_bruto", parte);
-            // 🔑 **E a receita, em JSON** — é com ela que o editor do site abre a
-            // foto revelada, e não no neutro. Ver `receita.rs`.
-            if let Some(receita) = &foto.ajustes {
-                form = form.text("ajustes", receita.to_string());
+            // 🔑 **E a revelação, em JSON** — é com ela que o editor do site abre a
+            // foto revelada, e não no neutro. Ver `parametros.rs`.
+            if let Some(parametros) = &foto.ajustes {
+                form = form.text("ajustes", parametros.to_string());
             }
         }
 

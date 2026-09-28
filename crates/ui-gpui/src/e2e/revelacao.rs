@@ -56,7 +56,7 @@ fn andar_pela_tira_revelar_e_desfazer_um_gesto_por_vez(cx: &mut TestAppContext) 
     assert!(gravado.iter().all(|(id, _, _)| id == "site:a"));
     assert!(
         e.gravador.deposito().iter().any(|(id, _)| id == "a"),
-        "a receita da foto do site fica no depósito até subir"
+        "a revelação da foto do site fica no depósito até subir"
     );
 
     // ⌘Z desfaz o contraste, e só ele.
@@ -89,12 +89,16 @@ fn andar_pela_tira_revelar_e_desfazer_um_gesto_por_vez(cx: &mut TestAppContext) 
         "o histórico vai para o banco também"
     );
 
-    // Esc sai para a galeria; voltar à foto traz a receita dela.
+    // Esc sai para a galeria; voltar à foto traz a revelação dela.
     e.teclar(cx, "escape");
     e.app(cx, |app, _w, _cx| assert_eq!(app.tela(), Tela::Sessao));
     e.revelar_a_do_site(cx, "a");
     e.revelacao(cx, |tela, _w, _cx| {
-        assert_eq!(tela.ajustes().exposure, 1.5, "sair e voltar traz a receita");
+        assert_eq!(
+            tela.ajustes().exposure,
+            1.5,
+            "sair e voltar traz a revelação"
+        );
         assert_eq!(tela.ajustes().contrast, 1.3);
         assert!(
             !tela.pode_desfazer(),
@@ -222,7 +226,7 @@ fn predefinicoes_prever_aplicar_criar_renomear_reordenar_importar_e_apagar(
             0.0,
             "a prévia não entra nos ajustes"
         );
-        let (ajustes_do_cliente, _) = tela.receita_para_o_cliente();
+        let (ajustes_do_cliente, _) = tela.parametros_para_o_cliente();
         assert_eq!(ajustes_do_cliente.exposure, 1.0, "o cliente vê a prévia");
         tela.prever(None, cx);
         assert!(tela.previa().is_none());

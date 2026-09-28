@@ -208,10 +208,10 @@ async fn main() {
     // 📸 **O que ficou por subir, lido uma vez** — como os presets, e pelo mesmo
     // motivo: quem consulta é a grade, no meio de um quadro. São as revelações
     // de fotos que só existem no site e que o operador ainda não salvou na
-    // galeria; sem elas, reabrir o app mostrava a foto com a receita do
+    // galeria; sem elas, reabrir o app mostrava a foto com a revelação do
     // servidor e o trabalho da véspera sumia.
     let guardadas = editor.revelacoes_do_site().await.unwrap_or_else(|erro| {
-        // Sem o depósito o app abre igual, e o que se perde é a receita não
+        // Sem o depósito o app abre igual, e o que se perde é a revelação não
         // enviada — não a foto. Um `expect` aqui impediria de revelar.
         eprintln!("⚠️ [Revelação] o depósito das fotos do site não abriu: {erro}");
         Vec::new()
@@ -332,7 +332,7 @@ async fn main() {
             Arc::new(exportador_de_fotos()),
             tokio::runtime::Handle::current(),
         )
-        // A receita local das fotos do site sobe e revela junto: a porta a lê do
+        // A revelação local das fotos do site sobe e revela junto: a porta a lê do
         // mesmo depósito que a tela grava.
         .com_locais({
             let gravador = gravador.clone();

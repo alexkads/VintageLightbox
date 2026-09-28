@@ -16,7 +16,7 @@
 //!
 //! A aberta já está desenhada (`Aberta::desenhada`). A outra é revelada pelo
 //! mesmo caminho da revelação antecipada (`antecipar_a_proxima`): a prévia do
-//! disco, a receita do catálogo, uma ida ao motor e o cache de reveladas.
+//! disco, a revelação do catálogo, uma ida ao motor e o cache de reveladas.
 //!
 //! 🚨 **Um pedido do Comparar por vez, e nunca por cima do da aberta.** O
 //! `Processador` só atende o pedido mais novo: dois seguidos perdem o primeiro.
@@ -271,7 +271,7 @@ impl Revelacao {
             .da_fonte(revisao_da_fonte);
         let sem_gpu = self.processador.disponivel() == Some(false);
         let pronta = if (ajustes == Ajustes::default() && locais.vazia()) || sem_gpu {
-            // Sem receita não há o que revelar; sem GPU, a crua é o que há.
+            // Sem revelação não há o que revelar; sem GPU, a crua é o que há.
             image::RgbaImage::from_raw(largura, altura, pixels.to_vec())
                 .map(image::DynamicImage::ImageRgba8)
         } else {

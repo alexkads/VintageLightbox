@@ -608,7 +608,7 @@ impl Revelacao {
     /// O que a tela do cliente mostra: **o mesmo que o palco** — o "Antes"
     /// segurado e a predefinição sob o mouse também, como no site
     /// (`anunciarAoCliente`).
-    pub fn receita_para_o_cliente(
+    pub fn parametros_para_o_cliente(
         &self,
     ) -> (
         crate::revelacao::processador::Ajustes,

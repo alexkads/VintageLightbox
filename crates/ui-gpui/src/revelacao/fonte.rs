@@ -36,7 +36,7 @@ pub const DO_BRUTO: u64 = 0;
 /// A chave do cache de prévias onde mora a cópia de trabalho **do bruto**.
 ///
 /// 🔑 A foto do site tem o bruto em `trabalho:<id>`; `site:<id>` é a imagem da
-/// galeria, já revelada — servi-la ao motor aplicaria a receita duas vezes.
+/// galeria, já revelada — servi-la ao motor aplicaria a revelação duas vezes.
 pub fn chave_do_bruto(foto: &PhotoViewModel) -> String {
     if persistencia::so_existe_no_site(foto) {
         persistencia::chave_do_trabalho(&foto.id)

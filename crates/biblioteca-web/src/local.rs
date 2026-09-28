@@ -22,9 +22,9 @@
 //!
 //! # A versão 2 — a miniatura revelada (2026-09-11)
 //!
-//! 🚨 **Guardar a receita e não guardar a imagem deixava a tela mentindo.**
+//! 🚨 **Guardar a revelação e não guardar a imagem deixava a tela mentindo.**
 //! Desde que o "Sincronizar" passou a copiar só parâmetros, as fotos alvo
-//! ficam com a receita nova e o JPEG **antigo** no acervo — e a tira e a grade
+//! ficam com a revelação nova e o JPEG **antigo** no acervo — e a tira e a grade
 //! desenham o JPEG do servidor. O operador sincronizava sete fotos e continuava
 //! vendo sete miniaturas sem efeito (dono, 2026-09-11): *"tá deixando as
 //! miniaturas e a foto central sem efeito"*.
@@ -59,7 +59,7 @@ pub const LOJA_GALERIAS: &str = "galerias";
 pub const LOJA_PARAMETROS: &str = "parametros";
 /// Por foto: a miniatura revelada que ainda não subiu para a galeria.
 ///
-/// 🔑 **É cache, e não verdade.** A verdade da foto é a receita em
+/// 🔑 **É cache, e não verdade.** A verdade da foto é a revelação em
 /// [`LOJA_REVELACOES`]; esta loja só evita refazer a imagem a cada abertura da
 /// tela. Some com o depósito sem prejuízo nenhum além de uma espera.
 pub const LOJA_PREVIAS: &str = "previas";

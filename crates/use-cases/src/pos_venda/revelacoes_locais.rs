@@ -5,7 +5,7 @@ use std::sync::Arc;
 use domain::repositories::RevelacoesDoSiteRepository;
 use domain::DomainResult;
 
-/// Guarda, lê e esquece a receita de uma foto que **só existe no site**.
+/// Guarda, lê e esquece a revelação de uma foto que **só existe no site**.
 ///
 /// # Por que existe
 ///
@@ -13,7 +13,7 @@ use domain::DomainResult;
 /// (o id dela é `site:<uuid>`), então `SavePhotoEditsUseCase` não tem onde
 /// escrever: até 8/set/2026 revelá-la não gravava nada, e o dono viu isso como
 /// *"os parâmetros de edição não estão sendo gravados"*. Este é o lugar onde a
-/// receita dela espera — o mesmo papel do depósito local do site.
+/// revelação dela espera — o mesmo papel do depósito local do site.
 ///
 /// # Três métodos, um caso de uso
 ///
@@ -32,7 +32,7 @@ impl RevelacoesLocaisUseCase {
         Self { repositorio }
     }
 
-    /// O gesto acabou de acontecer: a receita desta foto passa a ser esta.
+    /// O gesto acabou de acontecer: a revelação desta foto passa a ser esta.
     pub async fn guardar(&self, foto_no_site: &str, ajustes: &str) -> DomainResult<()> {
         self.repositorio.guardar(foto_no_site, ajustes).await
     }
@@ -47,7 +47,7 @@ impl RevelacoesLocaisUseCase {
         self.repositorio.esquecer(foto_no_site).await
     }
 
-    /// A receita local (máscaras e retoques) desta foto — `None` apaga. Não é
+    /// A revelação local (máscaras e retoques) desta foto — `None` apaga. Não é
     /// levada pelo [`Self::esquecer`]: ela ainda não sobe ao site.
     pub async fn guardar_locais(
         &self,
@@ -57,7 +57,7 @@ impl RevelacoesLocaisUseCase {
         self.repositorio.guardar_locais(foto_no_site, locais).await
     }
 
-    /// As receitas locais de todas as fotos do site, para a abertura do app.
+    /// As revelações locais de todas as fotos do site, para a abertura do app.
     pub async fn locais_de_todas(&self) -> DomainResult<Vec<(String, String)>> {
         self.repositorio.locais_de_todas().await
     }

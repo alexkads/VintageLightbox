@@ -6,7 +6,7 @@
 //! (andar pela tira em 1:1 não baixa um bruto por foto que só passou). Voltando
 //! ao encaixe, a cópia volta 1,5 s depois, e os sliders ficam leves de novo.
 //!
-//! A troca é **só do que a GPU desenha**: receita, histórico, tira e depósito
+//! A troca é **só do que a GPU desenha**: revelação, histórico, tira e depósito
 //! não mudam. O "1:1" já conta em pixels do bruto desde a abertura, porque o
 //! lado dele é medido antes ([`Revelacao::definir_lado_do_bruto`]).
 

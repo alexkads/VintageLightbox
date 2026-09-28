@@ -34,10 +34,10 @@ pub fn corte_da_entidade(foto: &Photo) -> CropSettings {
         foto.edit_crop_flip_h().unwrap_or(false),
         foto.edit_crop_flip_v().unwrap_or(false),
     );
-    // 🚨 A perspectiva não tem coluna: vem da receita inteira. Sem isto a
+    // 🚨 A perspectiva não tem coluna: vem da revelação inteira. Sem isto a
     // exportação entregaria a foto sem a correção que a tela mostrou.
     match foto
-        .receita()
+        .parametros()
         .and_then(|r| serde_json::from_str::<serde_json::Value>(r).ok())
     {
         Some(json) => corte
@@ -94,9 +94,9 @@ mod testes {
         );
     }
 
-    /// A correção guardada na receita chega ao motor — e à exportação.
+    /// A correção guardada na revelação chega ao motor — e à exportação.
     #[test]
-    fn a_perspectiva_da_receita_chega_ao_corte() {
+    fn a_perspectiva_dos_parametros_chegam_ao_corte() {
         let mut p = PerspectivaGuiada {
             rotacao: [9.0, -2.0, 1.0],
             foco: 1.4,
@@ -112,7 +112,7 @@ mod testes {
         p.em_json(&mut objeto);
         let mut foto =
             Photo::new(domain::value_objects::FilePath::new("/tmp/x.jpg").expect("caminho"));
-        foto.definir_receita(Some(serde_json::Value::Object(objeto).to_string()));
+        foto.definir_parametros(Some(serde_json::Value::Object(objeto).to_string()));
         let settings = corte_da_entidade(&foto);
         assert_eq!(settings.perspectiva(), &p);
         let c = corte(&settings);

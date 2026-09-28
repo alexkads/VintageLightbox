@@ -209,14 +209,14 @@ pub struct GaleriaDoPainel {
     /// O que o caixa cobrou desta sessão (2026-09-20). `None` = a API não
     /// soube dizer; `Some` com `vendas: 0` = não passou pelo caixa.
     pub caixa: Option<PagoNoCaixa>,
-    /// A **receita padrão** da sessão: a predefinição escolhida na etapa 2 do
+    /// A **revelação padrão** da sessão: a predefinição escolhida na etapa 2 do
     /// assistente (`sistema:<chave>` ou o id do banco).
     ///
     /// 🚨 **Ela não é enfeite da lista**: é o que faz a foto importada **dentro**
     /// da sessão nascer com o mesmo visual das que entraram pelo assistente. Sem
-    /// ela aqui, a sessão aplicava a receita só às fotos do rascunho, e as
+    /// ela aqui, a sessão aplicava a revelação só às fotos do rascunho, e as
     /// importadas depois ficavam cruas — na web o agendador as pega pelas duas
-    /// portas (`receita-padrao/agendador.ts` lê a receita **da galeria**).
+    /// portas (`revelacao-padrao/agendador.ts` lê a revelação **da galeria**).
     pub preset_padrao_id: Option<String>,
     /// A proporção do corte padrão (`"3:2"`, `"livre"`…), pelo mesmo motivo.
     pub proporcao_padrao: Option<String>,
@@ -393,10 +393,10 @@ pub struct FotoDaGaleria {
     pub downloads: u32,
     /// Se ela já foi revelada no navegador — os 46 ajustes estão gravados.
     pub revelada: bool,
-    /// A receita da revelação, como o site a guarda: os ajustes por nome e o
+    /// A revelação da revelação, como o site a guarda: os ajustes por nome e o
     /// enquadramento com prefixo `corte_`. `None` = nunca revelada.
     ///
-    /// 🚨 **Era só o `bool` acima, e a receita ficava pelo caminho.** Uma foto já
+    /// 🚨 **Era só o `bool` acima, e a revelação ficava pelo caminho.** Uma foto já
     /// revelada abria no app com os sliders no neutro e a miniatura revelada
     /// como se fosse o bruto — e "sincronizar" a partir dela mandava o neutro às
     /// outras. É o `ajustes` que reabre o editor do site com os sliders no
@@ -569,7 +569,7 @@ pub struct MudancaDaGaleria {
     pub como_conheceu: Option<Option<String>>,
     pub como_conheceu_detalhe: Option<Option<String>>,
     pub parceiro_id: Option<Option<String>>,
-    /// A receita padrão da sessão — muda o que as próximas fotos recebem.
+    /// A revelação padrão da sessão — muda o que as próximas fotos recebem.
     pub preset_padrao_id: Option<Option<String>>,
     pub proporcao_padrao: Option<Option<String>>,
 }
@@ -638,9 +638,9 @@ pub struct FotoParaEnviar {
     /// `None` quando a foto está no neutro: aí `jpeg` **é** o bruto dela, e
     /// mandar duas cópias iguais é banda e armazenamento por nada.
     pub bruto: Option<Vec<u8>>,
-    /// A receita com que `jpeg` foi revelado a partir do `bruto`, no formato do
+    /// A revelação com que `jpeg` foi revelado a partir do `bruto`, no formato do
     /// site (sobe em JSON, para a coluna `ajustes`). Só vai com o bruto: sem ele, `jpeg` **é** a foto
-    /// como entrou. Ver `ImageExporter::receita_para_o_site`.
+    /// como entrou. Ver `ImageExporter::parametros_para_o_site`.
     pub ajustes: Option<serde_json::Value>,
     pub estado: EstadoNoBalcao,
     /// A **faixa** desta foto, quando a leva escolheu uma. `None` = a da

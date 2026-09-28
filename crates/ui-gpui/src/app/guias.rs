@@ -68,7 +68,7 @@ const ALTURA_DA_FAIXA: f32 = 36.;
 const LARGURA_MAXIMA: f32 = 220.;
 const LARGURA_MINIMA: f32 = 96.;
 
-/// Uma revelação à espera do "Salvar na galeria": `(id no site, receita, corte)`.
+/// Uma revelação à espera do "Salvar na galeria": `(id no site, revelação, corte)`.
 pub(super) type Pendente = (String, Ajustes, CropSettings);
 
 /// A Revelação que uma guia deixou aberta ao sair da frente.
@@ -342,7 +342,7 @@ impl Guias {
 
     // ── O arquivo ────────────────────────────────────────────────────────
 
-    /// O que vai para o disco: a conta e as guias, sem as filas — a receita
+    /// O que vai para o disco: a conta e as guias, sem as filas — a revelação
     /// não salva já mora no depósito do app, e é de lá que ela volta.
     pub fn em_json(&self, conta: Option<&str>) -> String {
         serde_json::to_string_pretty(&Arquivo {

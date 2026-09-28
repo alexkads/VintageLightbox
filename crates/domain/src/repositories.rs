@@ -24,19 +24,19 @@ pub trait PhotoRepository: Send + Sync {
 
     /// Atualiza uma foto existente
     ///
-    /// ⚠️ **Não toca na receita local** (`edit_locais`): ela tem gravação
+    /// ⚠️ **Não toca na revelação local** (`edit_locais`): ela tem gravação
     /// própria, [`Self::atualizar_locais`]. Cada `update` reescreve a linha a
-    /// partir de uma leitura, e os escritores da receita (sincronização,
-    /// receita padrão, a Revelação) rodam em tarefas que terminam na ordem que
+    /// partir de uma leitura, e os escritores da revelação (sincronização,
+    /// revelação padrão, a Revelação) rodam em tarefas que terminam na ordem que
     /// quiserem: se as máscaras andassem aqui, qualquer um deles poderia
     /// devolver ao banco a versão velha delas.
     async fn update(&self, photo: &Photo) -> DomainResult<()>;
 
-    /// Grava **só** a receita local (máscaras e retoques) de uma foto — `None`
+    /// Grava **só** a revelação local (máscaras e retoques) de uma foto — `None`
     /// apaga. `PhotoNotFound` se a foto não existe.
     async fn atualizar_locais(&self, _id: &PhotoId, _locais: Option<&str>) -> DomainResult<()> {
         Err(crate::DomainError::InfrastructureError(
-            "este repositório não guarda a receita local".into(),
+            "este repositório não guarda a revelação local".into(),
         ))
     }
 
@@ -162,7 +162,7 @@ pub trait PresetRepository: Send + Sync {
 /// verdade é o servidor, e guardar as duas abriria a pergunta de qual vale.
 #[async_trait]
 pub trait RevelacoesDoSiteRepository: Send + Sync {
-    /// Guarda (ou substitui) a receita desta foto do site.
+    /// Guarda (ou substitui) a revelação desta foto do site.
     async fn guardar(&self, foto_no_site: &str, ajustes: &str) -> DomainResult<()>;
 
     /// Todas as que ainda não subiram, como `(id no site, ajustes em JSON)`.
@@ -175,7 +175,7 @@ pub trait RevelacoesDoSiteRepository: Send + Sync {
     /// verdade.
     async fn esquecer(&self, foto_no_site: &str) -> DomainResult<()>;
 
-    /// Guarda (ou, com `None`, apaga) a receita **local** desta foto do site —
+    /// Guarda (ou, com `None`, apaga) a revelação **local** desta foto do site —
     /// máscaras e retoques, em JSON (`locais_do_site`, migration 024).
     ///
     /// 🔑 **Não é apagada por [`Self::esquecer`]**: as máscaras ainda não sobem
@@ -186,7 +186,7 @@ pub trait RevelacoesDoSiteRepository: Send + Sync {
         Ok(())
     }
 
-    /// Todas as receitas locais de fotos do site, como `(id no site, JSON)`.
+    /// Todas as revelações locais de fotos do site, como `(id no site, JSON)`.
     async fn locais_de_todas(&self) -> DomainResult<Vec<(String, String)>> {
         Ok(Vec::new())
     }

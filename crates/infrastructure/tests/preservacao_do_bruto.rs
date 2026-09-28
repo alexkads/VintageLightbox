@@ -219,7 +219,7 @@ async fn so_o_corte_ja_pede_o_bruto() {
 /// 🛡️ **A garantia central do desktop: revelar não toca no arquivo de origem.**
 ///
 /// Aqui não há "cópia bruta" para guardar, e é de propósito — o bruto **é** o
-/// arquivo que está no disco do operador, e a revelação grava só a receita no
+/// arquivo que está no disco do operador, e a revelação grava só a revelação no
 /// catálogo. Toda a preservação do desktop depende de uma única coisa: que
 /// nenhum caminho reescreva aquele arquivo.
 ///

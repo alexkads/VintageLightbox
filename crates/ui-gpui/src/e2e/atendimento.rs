@@ -275,7 +275,8 @@ fn a_tela_do_cliente_mostra_a_foto_da_vez_em_cada_tela(cx: &mut TestAppContext) 
 
     let no_cliente = |cx: &mut TestAppContext| {
         e.app(cx, |app, _w, _cx| {
-            app.receita_no_cliente().map(|(id, aj)| (id, aj.exposure))
+            app.parametros_no_cliente()
+                .map(|(id, aj)| (id, aj.exposure))
         })
     };
 

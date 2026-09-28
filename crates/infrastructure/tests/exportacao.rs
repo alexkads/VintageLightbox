@@ -397,7 +397,7 @@ async fn reduzir_nunca_amplia() {
 
 /// 🚨 **A perspectiva guiada sai no arquivo** — a mesma que a tela mostra.
 ///
-/// Ela não tem coluna: mora na receita em JSON. Sem ler a receita, a
+/// Ela não tem coluna: mora na revelação em JSON. Sem ler a revelação, a
 /// exportação (e a impressão, que passa pelo mesmo `renderizar`) entregaria a
 /// foto torta que o operador acabou de endireitar na tela.
 #[tokio::test]
@@ -425,7 +425,7 @@ async fn a_perspectiva_guiada_sai_no_arquivo() {
     let mut objeto = serde_json::Map::new();
     p.em_json(&mut objeto);
     perspectiva::restringir_em_json(true, &mut objeto);
-    foto.definir_receita(Some(serde_json::Value::Object(objeto).to_string()));
+    foto.definir_parametros(Some(serde_json::Value::Object(objeto).to_string()));
 
     let exportada = exportar(&foto, &dir.path().join("corrigida.jpg")).await;
 
@@ -433,7 +433,7 @@ async fn a_perspectiva_guiada_sai_no_arquivo() {
     let rgba = original.to_rgba8();
     let (largura, altura) = (rgba.width(), rgba.height());
     let corte = transformacao::corte_da_entidade(&foto);
-    assert_eq!(corte.perspectiva(), &p, "a receita chega ao corte");
+    assert_eq!(corte.perspectiva(), &p, "a revelação chega ao corte");
     motor.definir_corte(&transformacao::corte(&corte));
     let revelada = motor
         .revelar(

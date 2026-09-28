@@ -21,12 +21,12 @@ impl EditorController {
         }
     }
 
-    /// Guarda a receita de uma foto que **não é do catálogo desta máquina**.
+    /// Guarda a revelação de uma foto que **não é do catálogo desta máquina**.
     ///
     /// 🚨 **É a outra metade de [`Self::save_edits`], e existe porque aquela não
     /// tem onde escrever.** A foto aberta de uma sessão do pós-venda tem o id
     /// `site:<uuid>` e nenhuma linha em `photos` — `save_edits` respondia
-    /// `PhotoNotFound` a cada gesto, calado, e a receita morria com a tela. Foi
+    /// `PhotoNotFound` a cada gesto, calado, e a revelação morria com a tela. Foi
     /// o *"os parâmetros de edição não estão sendo gravados"* de 8/set/2026.
     ///
     /// `ajustes` é o JSON que sobe para a API e volta dela: os 53 por nome mais
@@ -58,7 +58,7 @@ impl EditorController {
             .map_err(|e| e.to_string())
     }
 
-    /// Grava a receita local (máscaras e retoques) de uma foto do catálogo —
+    /// Grava a revelação local (máscaras e retoques) de uma foto do catálogo —
     /// só ela, à parte de [`Self::save_edits`]. `None` apaga.
     pub async fn save_locais(&self, id: &str, locais: Option<String>) -> Result<(), String> {
         let photo_id = PhotoId::from_string(id).map_err(|e| e.to_string())?;
@@ -68,7 +68,7 @@ impl EditorController {
             .map_err(|e| e.to_string())
     }
 
-    /// Guarda a receita local (máscaras e retoques) de uma foto do site —
+    /// Guarda a revelação local (máscaras e retoques) de uma foto do site —
     /// `None` apaga. Fica nesta máquina mesmo depois de a revelação subir.
     pub async fn guardar_locais_do_site(
         &self,
@@ -81,7 +81,7 @@ impl EditorController {
             .map_err(|e| e.to_string())
     }
 
-    /// As receitas locais de todas as fotos do site — lidas na abertura.
+    /// As revelações locais de todas as fotos do site — lidas na abertura.
     pub async fn locais_do_site(&self) -> Result<Vec<(String, String)>, String> {
         self.revelacoes_do_site
             .locais_de_todas()
@@ -164,7 +164,7 @@ impl EditorController {
         crop_angle: Option<f32>,
         crop_flip_h: Option<bool>,
         crop_flip_v: Option<bool>,
-        receita: Option<String>,
+        parametros: Option<String>,
     ) -> Result<(), String> {
         let photo_id = PhotoId::from_string(&id).map_err(|e| e.to_string())?;
 
@@ -232,7 +232,7 @@ impl EditorController {
                 crop_angle,
                 crop_flip_h,
                 crop_flip_v,
-                receita,
+                parametros,
             )
             .await
             .map_err(|e| e.to_string())

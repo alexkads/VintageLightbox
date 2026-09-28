@@ -29,7 +29,7 @@
 //! janela.
 //!
 //! ⚠️ **Ela não guarda nada em disco.** O que protege o trabalho contra um
-//! fechamento no meio é o depósito do gravador (a receita) e a nota no catálogo
+//! fechamento no meio é o depósito do gravador (a revelação) e a nota no catálogo
 //! — a fila é só a ordem em que as coisas saem nesta sessão do app. É a mesma
 //! divisão da web: o Worker não é a memória, o IndexedDB é.
 
@@ -97,7 +97,7 @@ impl Trabalho {
 pub enum Entrada {
     /// Entrou na fila.
     Nova,
-    /// A mesma foto esperava na fila, e recebeu a receita nova.
+    /// A mesma foto esperava na fila, e recebeu a revelação nova.
     Substituida,
     /// A mesma foto já esperava, e o pedido repetido não muda nada.
     JaNaFila,
@@ -179,7 +179,7 @@ pub enum Desfecho {
     /// Falhou [`TENTATIVAS`] vezes: a esteira larga esta foto.
     ///
     /// 🚨 **E quem pediu tem de dizer isso na tela**, com o nome do arquivo:
-    /// nada pode sumir em silêncio. A receita continua no depósito e a foto
+    /// nada pode sumir em silêncio. A revelação continua no depósito e a foto
     /// continua na conta do "falta subir", então repetir o gesto a manda de
     /// novo — o que não pode é o operador não saber.
     Desistiu { tentativas: u8 },
@@ -208,11 +208,11 @@ impl Esteira {
     /// faria duas versões dela disputarem qual chega por último — e, agora que
     /// a esteira repete, a repetição da primeira brigaria com a segunda.
     ///
-    /// 🔄 **A revelação que espera recebe a receita nova** (2026-09-21). Um
+    /// 🔄 **A revelação que espera recebe a revelação nova** (2026-09-21). Um
     /// segundo "Salvar na galeria" com a mesma foto ainda na fila trocava nada:
-    /// a receita velha subia. É o que o Worker do site faz — a mesma foto é
+    /// a revelação velha subia. É o que o Worker do site faz — a mesma foto é
     /// substituída. A que já está no ar segue como está: a raiz confere, na
-    /// resposta, se a receita mudou no caminho (`receita_mudou_no_envio`).
+    /// resposta, se a revelação mudou no caminho (`parametros_mudaram_no_envio`).
     pub fn empurrar(&mut self, trabalho: Trabalho) -> Entrada {
         let alvo = trabalho.alvo().to_string();
         if self.no_ar.contains_key(&alvo) {
@@ -459,10 +459,10 @@ mod testes {
         assert_eq!(esteira.progresso().total, 2);
     }
 
-    /// 🔄 A revelação que espera na fila recebe a receita do segundo "Salvar",
+    /// 🔄 A revelação que espera na fila recebe a revelação do segundo "Salvar",
     /// sem contar outra resposta; a que já está no ar não é tocada.
     #[test]
-    fn a_revelacao_que_espera_recebe_a_receita_nova() {
+    fn a_revelacao_que_espera_recebe_os_parametros_novos() {
         let revelacao = |exposicao: f32| Trabalho::Revelacao {
             foto_no_site: "a".into(),
             ajustes: Box::new(Ajustes {
@@ -479,7 +479,7 @@ mod testes {
         else {
             panic!("a revelação está na fila");
         };
-        assert_eq!(ajustes.exposure, 2.0, "vale a receita do último clique");
+        assert_eq!(ajustes.exposure, 2.0, "vale a revelação do último clique");
 
         let publicador = Arc::new(PublicadorDeMentira::default());
         let (canal, _recebe) = channel();

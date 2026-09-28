@@ -573,7 +573,7 @@ async fn a_foto_antiga_sem_a_coluna_continua_com_nome() {
 /// rascunho** (VintageLightbox, 26/set/2026: 40 fotos de 24 MB, 12 ficaram
 /// para trás).
 ///
-/// Nota, bandeira e a receita padrão leem a foto e regravam a linha. A cópia em
+/// Nota, bandeira e a revelação padrão leem a foto e regravam a linha. A cópia em
 /// segundo plano passa a foto do rascunho para a sessão **entre** as duas
 /// pontas — e a regravação, com o `sessao_id` lido antes, a levava de volta. Se
 /// isso acontecia depois da última troca, a foto ficava presa no rascunho e não
@@ -603,7 +603,7 @@ async fn a_regravacao_com_leitura_velha_nao_tira_a_foto_da_sessao() {
 }
 
 /// 🚨 **A troca mexe só na sessão**: o que foi gravado na foto depois de a
-/// troca começar (a receita padrão com o corte, a nota) não é apagado. Antes
+/// troca começar (a revelação padrão com o corte, a nota) não é apagado. Antes
 /// ela lia o catálogo inteiro e regravava cada foto com a leitura velha — no
 /// teste de carga, uma sessão terminou com 49 de 50 cortes.
 #[tokio::test]
@@ -617,7 +617,7 @@ async fn a_troca_so_mexe_na_sessao_e_so_nas_do_rascunho() {
     repo.save(&outra).await.unwrap();
 
     minha.rate(Rating::new(5).unwrap()).unwrap();
-    minha.definir_receita(Some("{\"exposure\":0.4}".into()));
+    minha.definir_parametros(Some("{\"exposure\":0.4}".into()));
     repo.update(&minha).await.unwrap();
 
     assert_eq!(repo.trocar_sessao("rascunho:1", "g1").await.unwrap(), 1);
@@ -630,7 +630,7 @@ async fn a_troca_so_mexe_na_sessao_e_so_nas_do_rascunho() {
     let minha = repo.find_by_id(&minha.id()).await.unwrap().unwrap();
     assert_eq!(minha.sessao(), Some("g1"));
     assert_eq!(minha.rating().map(|r| r.value()), Some(5));
-    assert_eq!(minha.receita(), Some("{\"exposure\":0.4}"));
+    assert_eq!(minha.parametros(), Some("{\"exposure\":0.4}"));
     let outra = repo.find_by_id(&outra.id()).await.unwrap().unwrap();
     assert_eq!(
         outra.sessao(),
@@ -639,11 +639,11 @@ async fn a_troca_so_mexe_na_sessao_e_so_nas_do_rascunho() {
     );
 }
 
-/// A receita local (máscaras e retoques) vai ao banco e volta igual. Ela entra
+/// A revelação local (máscaras e retoques) vai ao banco e volta igual. Ela entra
 /// pelo `save` (importação) e muda só pela gravação dirigida — e o `update`
 /// geral **não a toca**: um escritor com a leitura velha não apaga máscara.
 #[tokio::test]
-async fn a_receita_local_vai_e_volta_e_o_update_nao_a_apaga() {
+async fn a_parametros_locais_vao_e_volta_e_o_update_nao_a_apaga() {
     let repo = create_test_repository().await;
     let json = r#"{"versao":1,"camadas":[{"ajustes":{"exposicao_ev":1.0},"componentes":[{"modo":"somar","tipo":"pincel","raio":0.02,"feather":0.5,"opacidade":1.0,"pontos":[[0.1,0.2,1.0]]}],"invertida":false}],"retoques":[]}"#;
 
@@ -659,15 +659,15 @@ async fn a_receita_local_vai_e_volta_e_o_update_nao_a_apaga() {
     // O escritor de ajustes com a leitura velha (sem máscara): não apaga.
     let mut velha = foto.clone();
     velha.definir_locais(None);
-    velha.definir_receita(Some("{\"exposure\":0.4}".into()));
+    velha.definir_parametros(Some("{\"exposure\":0.4}".into()));
     repo.update(&velha).await.unwrap();
     let lida = repo.find_by_id(&foto.id()).await.unwrap().unwrap();
     assert_eq!(
         lida.locais(),
         Some(json),
-        "o update não mexe na receita local"
+        "o update não mexe na revelação local"
     );
-    assert_eq!(lida.receita(), Some("{\"exposure\":0.4}"));
+    assert_eq!(lida.parametros(), Some("{\"exposure\":0.4}"));
 
     // A gravação dirigida troca e apaga.
     let outra = json.replace("1.0}", "2.0}");

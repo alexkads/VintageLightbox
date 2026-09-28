@@ -4,7 +4,7 @@
 //!
 //! *"40 fotos de 24 MB, 12 ficaram para trás"* (26/set/2026). A importação
 //! sozinha passava limpa — 40 de 40 em 9 s —, e o defeito só aparecia com o
-//! resto do balcão ligado: a receita padrão revelando cada foto que entra
+//! resto do balcão ligado: a revelação padrão revelando cada foto que entra
 //! (preset **e** corte), a segunda tela mostrando a foto grande ao cliente,
 //! nota e bandeira sendo dadas, a releitura do catálogo e a cópia em segundo
 //! plano passando as fotos do rascunho para a sessão. Foi aqui que apareceram
@@ -14,7 +14,7 @@
 //! segundo monitor e ir classificando e sinalizando"*.
 //!
 //! Tudo aqui são as peças de verdade do `main.rs` — SQLite, cache de prévias,
-//! gerador, organizador, `ReceitaPadrao` na GPU —, num catálogo à parte.
+//! gerador, organizador, `RevelacaoPadrao` na GPU —, num catálogo à parte.
 //!
 //! ```bash
 //! VLB_CATALOG=/tmp/estresse cargo run --release -p ui-gpui \
@@ -133,7 +133,7 @@ async fn main() {
         Arc::new(use_cases::MarcarCompradaUseCase::new(fotos.clone())),
     ));
 
-    // 🎨 A receita padrão de verdade: preset + corte 3:2, revelada na GPU a
+    // 🎨 A revelação padrão de verdade: preset + corte 3:2, revelada na GPU a
     // partir da prévia de 2560, gravada pelo mesmo Gravador do main.rs.
     let editor = Arc::new(adapters::controllers::EditorController::new(
         Arc::new(use_cases::SavePhotoEditsUseCase::new(fotos.clone())),
@@ -149,15 +149,15 @@ async fn main() {
             Vec::new(),
         ));
     let (avisos, reveladas) = std::sync::mpsc::channel::<String>();
-    let servico = Arc::new(ui_gpui::sessoes::receita_padrao::ReceitaPadrao::nova(
+    let servico = Arc::new(ui_gpui::sessoes::revelacao_padrao::RevelacaoPadrao::nova(
         previews.clone(),
         gravador.clone(),
         avisos,
     ));
-    let mut preset_ajustes = ui_gpui::sessoes::nova::receita::ajustes_da_receita(None);
+    let mut preset_ajustes = ui_gpui::sessoes::nova::parametros::ajustes_dos_parametros(None);
     preset_ajustes.exposure = 0.4;
     preset_ajustes.contrast = 1.2;
-    let usar_receita = balcao;
+    let usar_parametros = balcao;
 
     // O que entrou, para o balcão ter em que mexer.
     let entradas: Arc<Mutex<Vec<String>>> = Arc::default();
@@ -338,9 +338,9 @@ async fn main() {
                     match ev {
                         Vm::Completed { photo_id, .. } => {
                             conta.anotar(Ok::<_, String>(()));
-                            if usar_receita {
-                                // O `aplicar_receita` da nova sessão, foto a foto.
-                                let corte = ui_gpui::sessoes::nova::receita::corte_centralizado(Some("3:2"), 0, 0);
+                            if usar_parametros {
+                                // O `aplicar_parametros` da nova sessão, foto a foto.
+                                let corte = ui_gpui::sessoes::nova::parametros::corte_centralizado(Some("3:2"), 0, 0);
                                 gravador.gravar(photo_id.clone(), preset_ajustes, corte);
                                 servico.pedir(photo_id.clone(), preset_ajustes, Some("3:2".into()), (preset_ajustes, corte));
                             }
@@ -387,7 +387,7 @@ async fn main() {
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
     println!(
-        "{:>6.1}s receita padrão terminou: {:?}",
+        "{:>6.1}s revelação padrão terminou: {:?}",
         inicio.elapsed().as_secs_f32(),
         servico.progresso()
     );
@@ -404,7 +404,7 @@ async fn main() {
     bandeira.mostrar("bandeira");
     println!(
         "  {:<14} {} avisos de revelada",
-        "receita",
+        "revelação",
         reveladas.try_iter().count()
     );
     releitura.mostrar("releitura");

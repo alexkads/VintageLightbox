@@ -1,5 +1,5 @@
 //! 📋 **A gaveta do atendimento** — o que o assistente gravou, e onde se
-//! corrige: agendamento, voucher, compra antecipada, como conheceu e a receita
+//! corrige: agendamento, voucher, compra antecipada, como conheceu e a revelação
 //! padrão. É o `atendimento-da-sessao.tsx` do site, com os mesmos textos.
 //!
 //! 🔑 **Os campos são os do assistente** ([`super::associacao`]): cartão com
@@ -43,7 +43,7 @@ use super::associacao::{Associador, Cartao, EventoDaAssociacao};
 use super::nova::amostras::Amostras;
 use super::nova::associacoes::{self as assoc, ParceiroEscolhido};
 use super::nova::estado::{rotulo_da_proporcao, PROPORCOES_PADRAO};
-use super::nova::receita::{self, Grupo, PresetDaSessao};
+use super::nova::parametros::{self, Grupo, PresetDaSessao};
 use super::nova::tela::{ItemDaBusca, TipoDeBusca};
 use crate::estilo;
 use crate::pos_venda::porta::{PedidoJson, Publicador, Recado};
@@ -365,7 +365,7 @@ impl Atendimento {
     pub fn definir_presets(&mut self, presets: Vec<Preset>) {
         self.presets_do_sistema = presets;
         if self.presets.is_empty() {
-            self.presets = receita::presets_da_sessao(&self.presets_do_sistema, Vec::new());
+            self.presets = parametros::presets_da_sessao(&self.presets_do_sistema, Vec::new());
         }
     }
 
@@ -649,7 +649,7 @@ impl Atendimento {
 
     fn amostra(&mut self, id: Option<&str>) -> Option<Arc<RenderImage>> {
         let preset = id.and_then(|id| self.presets.iter().find(|p| p.id == id));
-        let ajustes = receita::ajustes_da_receita(preset.map(|p| &p.preset));
+        let ajustes = parametros::ajustes_dos_parametros(preset.map(|p| &p.preset));
         self.amostras.obter(id.unwrap_or("nenhum"), ajustes)
     }
 
@@ -680,9 +680,9 @@ impl Atendimento {
             {
                 let do_servidor = resultado
                     .as_ref()
-                    .map(receita::presets_do_servidor)
+                    .map(parametros::presets_do_servidor)
                     .unwrap_or_default();
-                self.presets = receita::presets_da_sessao(&self.presets_do_sistema, do_servidor);
+                self.presets = parametros::presets_da_sessao(&self.presets_do_sistema, do_servidor);
                 // Sem a lista, o pedido pode ser refeito na próxima abertura.
                 self.presets_pedidos = resultado.is_ok();
                 self.presets_a_caminho = false;
@@ -915,7 +915,7 @@ impl Atendimento {
     fn seletor_de_preset(&mut self, window: &Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tema = cx.theme().clone();
         let escolhido = self.valores.preset_id.clone();
-        let razao = receita::valor_da_proporcao(self.valores.proporcao.as_deref())
+        let razao = parametros::valor_da_proporcao(self.valores.proporcao.as_deref())
             .unwrap_or(3. / 2.)
             .max(0.4);
         let com_foco = self.foco_dos_presets.contains_focused(window, cx);

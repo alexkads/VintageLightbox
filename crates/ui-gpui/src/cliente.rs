@@ -36,7 +36,7 @@ use infrastructure::transformacao;
 use crate::revelacao::processador::{Ajustes, Pedido, Processador};
 
 /// O que a raiz manda revelar na segunda tela: a foto **sem marca** e a
-/// receita dela.
+/// revelação dela.
 ///
 /// 🔑 **É o desenho do site** (`FotoNaTelaDoCliente`): a imagem é a cópia de
 /// trabalho, sem marca d'água, e a janela do cliente tem o próprio motor, que
@@ -54,7 +54,7 @@ pub struct ParaRevelar {
     pub ajustes: Ajustes,
     pub corte: CropSettings,
     /// A Revelação local: sem ela o cliente veria outra foto.
-    pub locais: Arc<infrastructure::gpu_adjustments::ReceitaLocal>,
+    pub locais: Arc<infrastructure::gpu_adjustments::ParametrosLocais>,
 }
 
 /// O pedido no motor: o id dele, a foto, onde ela está na sequência e o
@@ -67,9 +67,9 @@ struct MetadeNoCliente {
     posicao: Option<(usize, usize)>,
     /// `None` enquanto o motor revela: a metade mostra o aviso, e não a crua.
     imagem: Option<Arc<RenderImage>>,
-    /// A receita com que a imagem acima foi revelada — o que decide se vale
+    /// A revelação com que a imagem acima foi revelada — o que decide se vale
     /// revelar de novo quando a raiz reenvia o par (uma nota, a escolhida).
-    receita: (Ajustes, CropSettings),
+    parametros: (Ajustes, CropSettings),
 }
 
 /// As duas fotos do Comparar, e qual o operador está avaliando.
@@ -527,7 +527,7 @@ impl Cliente {
         }
     }
 
-    /// Revela esta foto com a receita dela e a mostra quando o motor responder.
+    /// Revela esta foto com a revelação dela e a mostra quando o motor responder.
     ///
     /// 🔑 **A foto anterior fica na tela até a nova estar pronta**, e só então
     /// cruza: nunca aparece um quadro preto nem a foto crua no meio.
@@ -542,7 +542,7 @@ impl Cliente {
     ///
     /// 🔑 **Só revela a metade que mudou.** A raiz reenvia o par a cada mudança
     /// (a outra foto trocou, a escolhida mudou, uma nota): a metade com a mesma
-    /// foto e a mesma receita fica como está, e a que já estava na tela como
+    /// foto e a mesma revelação fica como está, e a que já estava na tela como
     /// foto única vira a esquerda sem piscar — o motor a refaz por baixo.
     pub fn comparar(
         &mut self,
@@ -564,12 +564,12 @@ impl Cliente {
             .zip(self.revelando_lado);
         self.fila_do_par.clear();
         let metade = |lado: Lado, pedido: ParaRevelar, fila: &mut VecDeque<(Lado, ParaRevelar)>| {
-            let receita = (pedido.ajustes, pedido.corte.clone());
+            let parametros = (pedido.ajustes, pedido.corte.clone());
             let ja = anterior.as_ref().and_then(|p| {
                 [&p.esquerda, &p.direita]
                     .into_iter()
                     .find(|m| m.foto.id == pedido.foto.id)
-                    .map(|m| (m.imagem.clone(), Some(m.receita.clone())))
+                    .map(|m| (m.imagem.clone(), Some(m.parametros.clone())))
             });
             let ja = ja.or_else(|| {
                 unica
@@ -577,14 +577,15 @@ impl Cliente {
                     .filter(|(id, _)| *id == pedido.foto.id)
                     .map(|(_, imagem)| (Some(imagem.clone()), None))
             });
-            let (imagem, receita_da_imagem) = ja.unwrap_or((None, None));
-            let revelada_assim = imagem.is_some() && receita_da_imagem.as_ref() == Some(&receita);
+            let (imagem, parametros_da_imagem) = ja.unwrap_or((None, None));
+            let revelada_assim =
+                imagem.is_some() && parametros_da_imagem.as_ref() == Some(&parametros);
             let no_motor = em_voo.as_ref() == Some(&(pedido.foto.id.clone(), lado));
             let m = MetadeNoCliente {
                 foto: pedido.foto.clone(),
                 posicao: pedido.posicao,
                 imagem,
-                receita,
+                parametros,
             };
             if !revelada_assim && !no_motor {
                 fila.push_back((lado, pedido));

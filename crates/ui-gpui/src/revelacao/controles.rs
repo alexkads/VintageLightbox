@@ -12,7 +12,7 @@
 //! Preto e branco, Detalhe, Lente, Calibração, Tonalização e Efeitos na aba
 //! **sRGB**, e os cinco módulos em RGB linear (Exposição, Sombras e realces,
 //! Monocromático, Vinhetagem e Color balance) na aba **RGB**. Até aqui eram 53,
-//! e os outros 118 só chegavam por preset, pela receita do site ou por
+//! e os outros 118 só chegavam por preset, pela revelação do site ou por
 //! sincronização — sem como vê-los nem desfazê-los um a um.
 //!
 //! ⚠️ **Os 36 da curva por ponto estão na tabela, mas não viram slider.** Eles
@@ -22,7 +22,7 @@
 //!
 //! 🚧 **Divergência D7 do contrato da foto**: numa foto do catálogo local os 118
 //! novos ainda não têm coluna (`persistencia::SEM_COLUNA_NO_BANCO_LOCAL`) e
-//! somem ao reabrir. Na foto do site eles viajam inteiros pela receita.
+//! somem ao reabrir. Na foto do site eles viajam inteiros pela revelação.
 
 use super::processador::Ajustes;
 
@@ -1123,9 +1123,9 @@ pub fn aba_alterada(ajustes: &Ajustes, rgb: bool) -> bool {
 /// o ajuste que já estava salvo leva um ponto cinza.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Marca {
-    /// Algum controle mudou desde a receita com que a foto abriu.
+    /// Algum controle mudou desde a revelação com que a foto abriu.
     NaoSalvo,
-    /// Nada mudou, e a receita salva tem ajuste fora do neutro.
+    /// Nada mudou, e a revelação salva tem ajuste fora do neutro.
     Ajustado,
 }
 

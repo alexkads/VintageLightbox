@@ -4,7 +4,7 @@
 //! 🔑 **A janela do editor nunca escreve aqui.** Ela anuncia a versão salva à
 //! raiz, e a raiz chama [`Revelacao::fonte_mudou`] — que troca **só a entrada**
 //! da foto. Ajustes, corte, máscaras, histórico, lote e foco ficam como estavam:
-//! a receita é reaplicada sobre a imagem nova.
+//! a revelação é reaplicada sobre a imagem nova.
 
 use std::sync::Arc;
 
@@ -69,7 +69,7 @@ impl Revelacao {
 
     /// "Excluir a edição": pergunta, e só então pede à raiz.
     ///
-    /// 🔑 **A receita fica.** Excluir a edição é tirar os pixels pintados; os
+    /// 🔑 **A revelação fica.** Excluir a edição é tirar os pixels pintados; os
     /// ajustes, o corte e as máscaras da Revelação são outra coisa, e
     /// continuam — agora aplicados sobre o bruto.
     pub(super) fn pedir_exclusao(
@@ -142,7 +142,7 @@ impl Revelacao {
     ///
     /// Esquece **só o que é da foto** — as revelações guardadas, a miniatura da
     /// tira, a prévia revelada da grade e a cópia da revisão anterior — e, se
-    /// ela está no palco, troca a origem e reaplica a receita atual.
+    /// ela está no palco, troca a origem e reaplica a revelação atual.
     pub fn fonte_mudou(
         &mut self,
         foto_id: &str,
@@ -372,16 +372,18 @@ mod testes {
         let _ = cx;
     }
 
-    /// 🔑 **Salvar troca a entrada e mantém a receita** — sliders, corte,
+    /// 🔑 **Salvar troca a entrada e mantém a revelação** — sliders, corte,
     /// máscaras e histórico —, e a entrada é a base mais o traço, **sem** a
-    /// receita (nada de efeito duplicado).
+    /// revelação (nada de efeito duplicado).
     #[gpui_kit::test]
-    fn salvar_troca_a_fonte_e_mantem_receita_corte_mascaras_e_historico(cx: &mut TestAppContext) {
+    fn salvar_troca_a_fonte_e_mantem_parametros_corte_mascaras_e_historico(
+        cx: &mut TestAppContext,
+    ) {
         let p = palco(cx);
         let (ajustes, corte, locais, desfazer, refazer) = p
             .janela
             .update(cx, |tela, _w, cx| {
-                // Uma receita nada neutra aberta.
+                // Uma revelação nada neutra aberta.
                 tela.aplicar_para_teste(0, 1.2, cx);
                 tela.aplicar_para_teste(5, 40.0, cx);
                 assert_ne!(tela.ajustes(), Ajustes::default());
@@ -401,12 +403,12 @@ mod testes {
             .update(cx, |tela, _w, cx| {
                 tela.fonte_mudou("id-0", None, cx);
                 assert_eq!(tela.revisao_da_aberta(), 1);
-                // A entrada é a imagem editada **inteira e sem receita**.
+                // A entrada é a imagem editada **inteira e sem revelação**.
                 let origem = origem_rgb(tela);
                 assert_eq!(origem.as_raw(), composta.as_raw());
                 assert_eq!(origem.get_pixel(32, 24).0, [255, 0, 0]);
                 assert_eq!(origem.get_pixel(32, 5).0, base_da(0).get_pixel(32, 5).0);
-                // A receita não mudou.
+                // A revelação não mudou.
                 assert_eq!(tela.ajustes(), ajustes);
                 assert_eq!(tela.corte(), corte);
                 assert_eq!(tela.locais(), locais);
@@ -489,11 +491,11 @@ mod testes {
             .unwrap();
     }
 
-    /// 🔑 **Excluir a edição volta ao bruto e deixa a receita.** Edição e
-    /// receita são coisas diferentes: tirar os pixels pintados não mexe nos
+    /// 🔑 **Excluir a edição volta ao bruto e deixa a revelação.** Edição e
+    /// revelação são coisas diferentes: tirar os pixels pintados não mexe nos
     /// ajustes, no corte nem nas máscaras.
     #[gpui_kit::test]
-    fn excluir_a_edicao_volta_ao_bruto_e_mantem_a_receita(cx: &mut TestAppContext) {
+    fn excluir_a_edicao_volta_ao_bruto_e_mantem_os_parametros(cx: &mut TestAppContext) {
         let p = palco(cx);
         editar_e_salvar(&p, 0);
         let ajustes = p
@@ -520,7 +522,7 @@ mod testes {
                     bruto.as_raw(),
                     "de volta ao bruto"
                 );
-                assert_eq!(tela.ajustes(), ajustes, "a receita ficou");
+                assert_eq!(tela.ajustes(), ajustes, "a revelação ficou");
                 assert!(!tela.tem_edicao(&p.acervo[0]));
                 assert!(!tela.tem_projeto_no_editor(&p.acervo[0]));
             })

@@ -15,7 +15,7 @@
 //! 3. **composição** da imagem editada inteira;
 //! 4. **salvar** (tiles + PNG + manifesto) e **reabrir** o projeto;
 //! 5. **a Revelação depois de salvar** — a cópia de trabalho feita da PNG e a
-//!    revelação dela no motor de verdade (wgpu), com uma receita não neutra;
+//!    revelação dela no motor de verdade (wgpu), com uma revelação não neutra;
 //! 6. o **pico de memória** do processo.
 //!
 //! ⚠️ **Só vale em `--release`** — ver `CLAUDE.md`.

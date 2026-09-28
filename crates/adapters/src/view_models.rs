@@ -27,19 +27,20 @@ pub struct PhotoViewModel {
     /// **Todos** os ajustes da revelação, na ordem de `Ajustes::NOMES` do
     /// motor, quando a foto veio do site.
     ///
-    /// 🚨 As colunas `edit_*` abaixo são só os 53 ajustes antigos. A receita do
+    /// 🚨 As colunas `edit_*` abaixo são só os 53 ajustes antigos. A revelação do
     /// site tem os módulos novos (`dt_*`), e sem este campo eles se perdiam no
     /// caminho: a foto revelada em sépia no site abria neutra no desktop, e
     /// assim ia para a tela do cliente (2026-09-17). `None` = valem as colunas.
     #[serde(default)]
     pub ajustes_completos: Option<Vec<f32>>,
-    /// A receita inteira de uma foto **do catálogo**, em JSON, como o banco a
+    /// A revelação inteira de uma foto **do catálogo**, em JSON, como o banco a
     /// guarda (`photos.edit_receita`, migration 023). A tela a converte; este
     /// crate não conhece o motor. `None` = foto revelada antes da coluna, e
     /// valem as colunas `edit_*`.
-    #[serde(default)]
-    pub receita: Option<String>,
-    /// A receita **local** (máscaras e retoques) em JSON, como o banco a
+    // O nome antigo do campo, para o que já foi gravado continuar lendo.
+    #[serde(default, alias = "receita")]
+    pub parametros: Option<String>,
+    /// A revelação **local** (máscaras e retoques) em JSON, como o banco a
     /// guarda (`photos.edit_locais`, migration 024). `None` = sem máscara.
     #[serde(default)]
     pub locais: Option<String>,
@@ -120,25 +121,25 @@ pub struct PhotoViewModel {
     pub edit_crop_angle: Option<f32>,
     pub edit_crop_flip_h: Option<bool>,
     pub edit_crop_flip_v: Option<bool>,
-    /// A perspectiva guiada — sem coluna: vem da receita em JSON (`corte_persp_*`
+    /// A perspectiva guiada — sem coluna: vem da revelação em JSON (`corte_persp_*`
     /// e `corte_guiaN_*`). `None` = nenhuma.
     #[serde(skip)]
     pub edit_crop_perspectiva: Option<domain::value_objects::PerspectivaGuiada>,
-    /// "Restringir ao conteúdo" — da receita (`corte_restringir`). `None` =
+    /// "Restringir ao conteúdo" — da revelação (`corte_restringir`). `None` =
     /// ligado, o padrão.
     #[serde(skip)]
     pub edit_crop_restringir: Option<bool>,
 }
 
 impl PhotoViewModel {
-    /// A perspectiva e o "restringir" que a receita em JSON traz, nos dois
-    /// campos acima. Receita ausente, ilegível ou sem as chaves deixa os dois
+    /// A perspectiva e o "restringir" que a revelação em JSON traz, nos dois
+    /// campos acima. Revelação ausente, ilegível ou sem as chaves deixa os dois
     /// em `None`.
-    pub fn ler_perspectiva_da_receita(&mut self, receita: &serde_json::Value) {
-        let p = domain::value_objects::PerspectivaGuiada::de_json(receita);
+    pub fn ler_perspectiva_dos_parametros(&mut self, parametros: &serde_json::Value) {
+        let p = domain::value_objects::PerspectivaGuiada::de_json(parametros);
         self.edit_crop_perspectiva = (!p.e_neutra()).then_some(p);
         self.edit_crop_restringir =
-            (!domain::value_objects::perspectiva::restringir_de_json(receita)).then_some(false);
+            (!domain::value_objects::perspectiva::restringir_de_json(parametros)).then_some(false);
     }
 }
 

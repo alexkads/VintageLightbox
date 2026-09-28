@@ -1,4 +1,4 @@
-//! A receita padrão revelada em segundo plano — o `receita-padrao/agendador.ts`
+//! A revelação padrão revelada em segundo plano — o `revelacao-padrao/agendador.ts`
 //! do site, portado.
 //!
 //! # O que faltava
@@ -8,7 +8,7 @@
 //! local. É por isso que lá as fotos aparecem reveladas na galeria, aos poucos,
 //! sem ninguém pedir.
 //!
-//! Aqui, até 17/set/2026, só a primeira metade existia: `aplicar_receita`
+//! Aqui, até 17/set/2026, só a primeira metade existia: `aplicar_parametros`
 //! gravava os ajustes e parava. O operador entrava na sessão e via os brutos,
 //! com o preset escolhido e nada aplicado — e a barra "Preset padrão" enchia na
 //! hora, porque contava o **despacho** e não o trabalho (achado do dono).
@@ -24,8 +24,8 @@
 //!
 //! A miniatura revelada **não** pode ir para a chave do bruto. O editor lê os
 //! pixels da foto local por `get_preview(&foto.id)` (`revelacao/tela.rs`), e
-//! gravar a revelada ali serviria ao shader uma foto já revelada: receita por
-//! cima de receita, em 640 px. É o mesmo defeito que `chave_do_trabalho`
+//! gravar a revelada ali serviria ao shader uma foto já revelada: revelação por
+//! cima de revelação, em 640 px. É o mesmo defeito que `chave_do_trabalho`
 //! existe para não repetir. Daí [`persistencia::chave_da_revelada`].
 //!
 //! # 🚨 O corte entra aqui, e as dimensões são as da imagem
@@ -45,9 +45,9 @@
 //! # Quem grava os PARÂMETROS é este serviço
 //!
 //! Pelo mesmo motivo: o corte só é conhecido depois de a imagem abrir. O site
-//! faz igual — quem grava a receita é o trabalhador, depois de revelar
+//! faz igual — quem grava a revelação é o trabalhador, depois de revelar
 //! (`exportacao/worker.ts`). A tela grava sozinha só o caso de **desfazer**
-//! (receita sem efeito), que não precisa de imagem nenhuma.
+//! (revelação sem efeito), que não precisa de imagem nenhuma.
 //!
 //! # Uma por vez, numa thread só
 //!
@@ -72,7 +72,7 @@ use infrastructure::gpu_adjustments::Ajustes;
 use crate::revelacao::persistencia::{
     self, chave_da_revelada, chave_do_trabalho, para_crop_settings, Corte, Gravador,
 };
-use crate::sessoes::nova::receita;
+use crate::sessoes::nova::parametros;
 
 /// O lado maior da miniatura revelada que fica no cache.
 ///
@@ -96,14 +96,14 @@ const ESPERAS_ATE_DESISTIR: u32 = 150;
 const RESPIRO: Duration = Duration::from_millis(200);
 
 /// De onde sai o enquadramento desta foto — e quem grava os PARÂMETROS.
-enum Receita {
-    /// A receita padrão da sessão: a proporção vira corte centralizado **medido
+enum Parametros {
+    /// A revelação padrão da sessão: a proporção vira corte centralizado **medido
     /// na imagem**, e o serviço grava ajustes e corte no catálogo.
     Padrao {
         /// O rótulo da proporção (`"3:2"`, `"livre"`…), ou nenhuma.
         proporcao: Option<String>,
     },
-    /// A receita **já gravada** por quem pediu — o "Sincronizar N" da Revelação.
+    /// A revelação **já gravada** por quem pediu — o "Sincronizar N" da Revelação.
     ///
     /// 🔑 **Aqui o serviço não grava nada**: os PARÂMETROS já estão no catálogo
     /// (ou no depósito, para a foto do site), postos pelo próprio gesto. O que
@@ -113,15 +113,15 @@ enum Receita {
     Pronta { corte: Corte },
 }
 
-/// Uma foto esperando a receita.
+/// Uma foto esperando a revelação.
 struct Pedido {
     foto_id: String,
     ajustes: Ajustes,
-    receita: Receita,
-    /// A receita que a foto tinha quando a receita padrão foi pedida — a base
+    parametros: Parametros,
+    /// A revelação que a foto tinha quando a revelação padrão foi pedida — a base
     /// da mescla com o que o operador fizer enquanto ela espera. `None` na
     /// `Pronta`, que não grava nada.
-    base: Option<persistencia::Receita>,
+    base: Option<persistencia::Parametros>,
     /// Voltas dadas sem a prévia existir — ver [`ESPERAS_ATE_DESISTIR`].
     esperas: u32,
 }
@@ -149,18 +149,18 @@ impl Progresso {
 /// como as outras (`PortasDaNova`): o operador cria a sessão, o assistente sai
 /// de cena e a revelação continua — que é o pedido ("em segundo plano, e ao
 /// abrir a sessão ir acontecendo").
-pub struct ReceitaPadrao {
+pub struct RevelacaoPadrao {
     fila: Arc<Mutex<VecDeque<Pedido>>>,
     progresso: Arc<Mutex<Progresso>>,
     acordar: Sender<()>,
 }
 
-impl ReceitaPadrao {
+impl RevelacaoPadrao {
     /// Abre o serviço. `avisos` recebe o id de cada foto revelada, para a grade
     /// esquecer a miniatura velha e reler (C17).
     ///
     /// `gravador` é a mesma porta da Revelação: é por ela que os PARÂMETROS da
-    /// receita padrão — ajustes **e corte** — chegam ao catálogo.
+    /// revelação padrão — ajustes **e corte** — chegam ao catálogo.
     pub fn nova(
         previews: Arc<PreviewManager>,
         gravador: Arc<dyn Gravador>,
@@ -175,54 +175,59 @@ impl ReceitaPadrao {
             acordar,
         };
         std::thread::Builder::new()
-            .name("receita-padrao".into())
+            .name("revelacao-padrao".into())
             .spawn(move || laco(fila, progresso, previews, gravador, avisos, acordou))
-            .expect("abrir a thread da receita padrão");
+            .expect("abrir a thread da revelação padrão");
         servico
     }
 
-    /// Esta foto precisa da receita. Chamar de novo com a mesma foto na fila não
-    /// a duplica: a receita nova toma o lugar da que esperava.
+    /// Esta foto precisa da revelação. Chamar de novo com a mesma foto na fila não
+    /// a duplica: a revelação nova toma o lugar da que esperava.
     ///
-    /// `base` é a receita que a foto tem **agora**: o que o operador mudar
-    /// depois dela, na Revelação, sobrevive à receita padrão (ver
+    /// `base` é a revelação que a foto tem **agora**: o que o operador mudar
+    /// depois dela, na Revelação, sobrevive à revelação padrão (ver
     /// [`persistencia::mesclar`]).
     pub fn pedir(
         &self,
         foto_id: String,
         ajustes: Ajustes,
         proporcao: Option<String>,
-        base: persistencia::Receita,
+        base: persistencia::Parametros,
     ) {
-        self.enfileirar(foto_id, ajustes, Receita::Padrao { proporcao }, Some(base));
+        self.enfileirar(
+            foto_id,
+            ajustes,
+            Parametros::Padrao { proporcao },
+            Some(base),
+        );
     }
 
-    /// A receita **desta** foto já está gravada: só falta a miniatura revelada.
+    /// A revelação **desta** foto já está gravada: só falta a miniatura revelada.
     ///
     /// É o que o "Sincronizar N" pede para cada foto que recebeu os ajustes, e
     /// o que a Revelação pede para a foto que ela acabou de editar.
     pub fn pedir_a_miniatura(&self, foto_id: String, ajustes: Ajustes, corte: Corte) {
-        self.enfileirar(foto_id, ajustes, Receita::Pronta { corte }, None);
+        self.enfileirar(foto_id, ajustes, Parametros::Pronta { corte }, None);
     }
 
     fn enfileirar(
         &self,
         foto_id: String,
         ajustes: Ajustes,
-        receita: Receita,
-        base: Option<persistencia::Receita>,
+        parametros: Parametros,
+        base: Option<persistencia::Parametros>,
     ) {
         {
-            let mut fila = self.fila.lock().expect("a fila da receita");
-            // 🚨 **A mesma foto na fila recebe a receita nova**, e não é
+            let mut fila = self.fila.lock().expect("a fila da revelação");
+            // 🚨 **A mesma foto na fila recebe a revelação nova**, e não é
             // ignorada. Descartar o pedido novo deixava valer o velho: um
             // "Zerar" logo depois de um "Sincronizar" (com a foto ainda
-            // esperando a cópia de trabalho) terminava mostrando a receita
+            // esperando a cópia de trabalho) terminava mostrando a revelação
             // desfeita (dono, 2026-09-21). É o que o Worker do site faz — a
             // mesma foto é substituída.
             if let Some(pedido) = fila.iter_mut().find(|p| p.foto_id == foto_id) {
                 pedido.ajustes = ajustes;
-                pedido.receita = receita;
+                pedido.parametros = parametros;
                 // A base é a mais antiga: é dela que o operador partiu.
                 pedido.base = pedido.base.or(base);
                 return;
@@ -230,7 +235,7 @@ impl ReceitaPadrao {
             fila.push_back(Pedido {
                 foto_id,
                 ajustes,
-                receita,
+                parametros,
                 base,
                 esperas: 0,
             });
@@ -241,13 +246,13 @@ impl ReceitaPadrao {
         let _ = self.acordar.send(());
     }
 
-    /// A receita mudou: o que ainda não saiu da fila não vale mais.
+    /// A revelação mudou: o que ainda não saiu da fila não vale mais.
     ///
-    /// 🔑 **O que já foi revelado fica.** Ele é cache de uma receita antiga e
+    /// 🔑 **O que já foi revelado fica.** Ele é cache de uma revelação antiga e
     /// será substituído quando a foto voltar à fila; apagar aqui deixaria a
     /// grade vazia no meio da troca de preset, que é o pior momento.
     pub fn recomecar(&self) {
-        self.fila.lock().expect("a fila da receita").clear();
+        self.fila.lock().expect("a fila da revelação").clear();
         *self.progresso.lock().expect("o progresso") = Progresso::default();
     }
 
@@ -281,13 +286,13 @@ fn laco(
         // Um aviso pode cobrir vários pedidos: esvazia a fila antes de dormir.
         let mut adiados: Vec<Pedido> = Vec::new();
         loop {
-            let Some(mut pedido) = fila.lock().expect("a fila da receita").pop_front() else {
+            let Some(mut pedido) = fila.lock().expect("a fila da revelação").pop_front() else {
                 break;
             };
-            // 🔑 **A receita padrão avisa sempre que grava**, e não só quando há
+            // 🔑 **A revelação padrão avisa sempre que grava**, e não só quando há
             // cache novo: a Revelação que está com a foto aberta precisa saber
             // que os PARÂMETROS mudaram por fora (ver `mesclar`).
-            let gravou = matches!(pedido.receita, Receita::Padrao { .. });
+            let gravou = matches!(pedido.parametros, Parametros::Padrao { .. });
             match trabalhar(motor.as_mut(), &previews, gravador.as_ref(), &pedido) {
                 Desfecho::Feito { avisar } => {
                     if avisar || gravou {
@@ -315,7 +320,7 @@ fn laco(
             }
         }
         if !adiados.is_empty() {
-            let mut fila = fila.lock().expect("a fila da receita");
+            let mut fila = fila.lock().expect("a fila da revelação");
             for pedido in adiados {
                 fila.push_back(pedido);
             }
@@ -323,19 +328,19 @@ fn laco(
     }
 }
 
-/// A receita padrão sobre o que o operador fez desde que ela foi pedida.
+/// A revelação padrão sobre o que o operador fez desde que ela foi pedida.
 ///
 /// 🚨 **Ela escrevia a foto inteira**, e a Revelação também: o que chegasse por
 /// último apagava o outro. O operador que baixava a exposição de uma foto
-/// recém-importada perdia o ajuste quando a receita padrão chegava — ou a
-/// receita padrão, quando o ajuste chegava depois (visto contra a pilha local,
+/// recém-importada perdia o ajuste quando a revelação padrão chegava — ou a
+/// revelação padrão, quando o ajuste chegava depois (visto contra a pilha local,
 /// 24/set/2026). Aqui os campos que o operador mudou ficam.
 fn mesclada(
     gravador: &dyn Gravador,
     pedido: &Pedido,
-    deles: persistencia::Receita,
-) -> persistencia::Receita {
-    match (pedido.base, gravador.receita_de(&pedido.foto_id)) {
+    deles: persistencia::Parametros,
+) -> persistencia::Parametros {
+    match (pedido.base, gravador.parametros_de(&pedido.foto_id)) {
         (Some(base), Some(meu)) => persistencia::mesclar(base, meu, deles),
         _ => deles,
     }
@@ -353,7 +358,7 @@ enum Desfecho {
 ///
 /// 🚨 **Os PARÂMETROS primeiro, e sempre** (C8): eles são o que não pode faltar.
 /// A miniatura é cache (C15) e depende de GPU; se ela não sair, a foto aparece
-/// como veio e a receita continua valendo.
+/// como veio e a revelação continua valendo.
 fn trabalhar(
     motor: Option<&mut infrastructure::gpu_adjustments::Motor>,
     previews: &PreviewManager,
@@ -367,14 +372,14 @@ fn trabalhar(
     //
     // 🚨 **Na foto do site, só a cópia de trabalho** (dono, 2026-09-21: zerar e
     // sincronizar não mudavam a tira). `site:<id>` é a imagem **da galeria**, e
-    // ela já traz a receita que o site tem: revelar por cima empilhava o efeito
+    // ela já traz a revelação que o site tem: revelar por cima empilhava o efeito
     // (P&B sobre P&B), e o "neutro" feito dela continuava P&B. Sem a cópia no
-    // cache, o pedido espera — quem a baixa é a raiz (`pedir_a_previa_da_receita`).
+    // cache, o pedido espera — quem a baixa é a raiz (`pedir_a_previa_dos_parametros`).
     let do_site = pedido
         .foto_id
         .starts_with(crate::revelacao::persistencia::PREFIXO_DO_SITE);
     // 🖌️ **A imagem editada, quando há, é a entrada** (C32) — a mesma regra do
-    // palco (`revelacao/fonte.rs`), para a grade mostrar a edição com a receita.
+    // palco (`revelacao/fonte.rs`), para a grade mostrar a edição com a revelação.
     let editada = crate::editor::porta::as_do_app().and_then(|edicoes| {
         let no_site = pedido
             .foto_id
@@ -396,38 +401,38 @@ fn trabalhar(
         return Desfecho::SemImagem;
     };
 
-    let (ajustes, corte) = match &pedido.receita {
-        Receita::Padrao { proporcao } => {
+    let (ajustes, corte) = match &pedido.parametros {
+        Parametros::Padrao { proporcao } => {
             // O corte sai das dimensões **da imagem**, e não do EXIF. Ver o
             // cabeçalho.
             let corte =
-                receita::corte_centralizado(proporcao.as_deref(), base.width(), base.height());
+                parametros::corte_centralizado(proporcao.as_deref(), base.width(), base.height());
             let (ajustes, corte) = mesclada(gravador, pedido, (pedido.ajustes, corte));
             gravador.gravar(pedido.foto_id.clone(), ajustes, corte);
             (ajustes, corte)
         }
-        // Já gravada por quem pediu — ver `Receita::Pronta`.
-        Receita::Pronta { corte } => (pedido.ajustes, *corte),
+        // Já gravada por quem pediu — ver `Parametros::Pronta`.
+        Parametros::Pronta { corte } => (pedido.ajustes, *corte),
     };
 
     let tem_ajustes = ajustes != Ajustes::default();
     let tem_corte = corte != Corte::default()
         && !crate::revelacao::corte::e_inteiro(&para_crop_settings(&corte));
     if !tem_ajustes && !tem_corte {
-        // A receita é o neutro: o bruto **é** a foto com ela.
+        // A revelação é o neutro: o bruto **é** a foto com ela.
         //
         // 🚨 **Mas a prévia velha não pode ficar** (dono, 2026-09-21: *"quando
-        // eu zerar a receita de uma foto, devo conseguir selecionar as demais e
-        // sincronizá-las, para que a receita delas também seja zerada"*). Zerar
-        // ou sincronizar o neutro deixava a prévia da receita anterior no cache
+        // eu zerar a revelação de uma foto, devo conseguir selecionar as demais e
+        // sincronizá-las, para que a revelação delas também seja zerada"*). Zerar
+        // ou sincronizar o neutro deixava a prévia da revelação anterior no cache
         // — e a tira seguia mostrando o P&B. Na importação sem preset
-        // (`Receita::Padrao`) não há prévia para trocar.
-        if !matches!(pedido.receita, Receita::Pronta { .. }) {
+        // (`Parametros::Padrao`) não há prévia para trocar.
+        if !matches!(pedido.parametros, Parametros::Pronta { .. }) {
             return Desfecho::Feito { avisar: false };
         }
         let chave = chave_da_revelada(&pedido.foto_id);
         if do_site {
-            // A imagem da galeria ainda tem a receita antiga até o "Salvar":
+            // A imagem da galeria ainda tem a revelação antiga até o "Salvar":
             // a prévia neutra é o bruto, e é ela que a tira e a grade mostram.
             let _ = previews.save_preview(&chave, &base);
             let _ = previews.save_thumbnail(
@@ -506,14 +511,14 @@ mod testes {
         (previews, pasta)
     }
 
-    fn servico() -> (ReceitaPadrao, Receiver<String>) {
+    fn servico() -> (RevelacaoPadrao, Receiver<String>) {
         let pasta = tempfile::tempdir().expect("pasta temporária");
         let previews = Arc::new(PreviewManager::new_with_path(pasta.path().to_path_buf()));
         let (avisa, recebe) = channel();
         // A pasta vive enquanto o teste dura: soltá-la é de propósito.
         let _ = pasta.keep();
         (
-            ReceitaPadrao::nova(previews, Arc::new(GravadorDeMentira::default()), avisa),
+            RevelacaoPadrao::nova(previews, Arc::new(GravadorDeMentira::default()), avisa),
             recebe,
         )
     }
@@ -553,7 +558,7 @@ mod testes {
         let pedido = Pedido {
             foto_id: "foto-1".into(),
             ajustes: Ajustes::default(),
-            receita: Receita::Padrao {
+            parametros: Parametros::Padrao {
                 proporcao: Some("1:1".into()),
             },
             base: None,
@@ -588,7 +593,7 @@ mod testes {
         );
     }
 
-    /// A receita neutra é o bruto: gravar uma cópia dele sob outra chave
+    /// A revelação neutra é o bruto: gravar uma cópia dele sob outra chave
     /// dobraria o cache sem mudar um pixel na tela. Os PARÂMETROS, esses vão —
     /// é assim que a troca de preset **desfaz** a anterior.
     #[test]
@@ -598,7 +603,7 @@ mod testes {
         let pedido = Pedido {
             foto_id: "foto-1".into(),
             ajustes: Ajustes::default(),
-            receita: Receita::Padrao { proporcao: None },
+            parametros: Parametros::Padrao { proporcao: None },
             base: None,
             esperas: 0,
         };
@@ -608,14 +613,14 @@ mod testes {
         assert_eq!(gravador.gravado().len(), 1);
     }
 
-    /// 🚨 **A receita já gravada não é gravada de novo** — e o corte é o que
+    /// 🚨 **A revelação já gravada não é gravada de novo** — e o corte é o que
     /// veio, não um calculado por proporção.
     ///
     /// É o pedido do "Sincronizar N": os PARÂMETROS já foram para o catálogo (ou
     /// para o depósito, na foto do site) pelo próprio gesto, e regravá-los aqui
     /// poria a foto na fila de envio uma segunda vez. O que falta é só o cache.
     #[test]
-    fn a_receita_pronta_so_faz_o_cache() {
+    fn os_parametros_prontos_so_faz_o_cache() {
         let (previews, _pasta) = previews_com("foto-1", 600, 400);
         let gravador = GravadorDeMentira::default();
         let corte = Corte {
@@ -628,7 +633,7 @@ mod testes {
         let pedido = Pedido {
             foto_id: "foto-1".into(),
             ajustes: Ajustes::default(),
-            receita: Receita::Pronta { corte },
+            parametros: Parametros::Pronta { corte },
             base: None,
             esperas: 0,
         };
@@ -661,7 +666,7 @@ mod testes {
         let pedido = Pedido {
             foto_id: "foto-sem-previa".into(),
             ajustes: Ajustes::default(),
-            receita: Receita::Padrao {
+            parametros: Parametros::Padrao {
                 proporcao: Some("1:1".into()),
             },
             base: None,

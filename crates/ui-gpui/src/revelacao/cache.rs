@@ -5,7 +5,7 @@
 //! *"Essa tela de revelação precisa guardar um cache e fazer uma aplicação
 //! antecipada na próxima foto pra garantir mais velocidade"* (dono,
 //! 17/set/2026). Desde que o palco passou a esperar o motor para desenhar
-//! (`tela.rs`, `mostrar`), toda foto com receita custa uma ida à GPU antes de
+//! (`tela.rs`, `mostrar`), toda foto com revelação custa uma ida à GPU antes de
 //! aparecer — e voltar uma seta custava a mesma ida de novo, para produzir
 //! exatamente a mesma imagem.
 //!
@@ -15,14 +15,14 @@
 //! 2. **revelar a próxima antes de a seta chegar nela** (`tela.rs`,
 //!    `antecipar_a_proxima`), que é o que faz a ida sumir também na primeira vez.
 //!
-//! # 🔑 A chave é a foto **mais** a receita
+//! # 🔑 A chave é a foto **mais** a revelação
 //!
 //! Guardar por `foto.id` sozinho seria pior que não guardar: mexer num slider e
 //! voltar à foto traria a revelação de antes do gesto, sem erro nenhum e sem
 //! pista — o mesmo desfecho do cache de prévia servindo a foto com marca d'água
-//! ao balcão. A receita entra inteira ([`Ajustes::como_vetor`] e os oito campos
+//! ao balcão. A revelação entra inteira ([`Ajustes::como_vetor`] e os oito campos
 //! do corte), pelos **bits** dos `f32`: comparar `f32` por igualdade é o que se
-//! quer aqui, porque a pergunta não é "são parecidos?", é "é a mesma receita?".
+//! quer aqui, porque a pergunta não é "são parecidos?", é "é a mesma revelação?".
 //!
 //! ⚠️ **O corte entra na chave** porque entra no pedido: as duas vinhetas são
 //! medidas no recorte (`Motor::definir_corte`), então mudar o enquadramento muda
@@ -62,7 +62,7 @@ fn custo(imagem: &DynamicImage) -> u64 {
     u64::from(imagem.width()) * u64::from(imagem.height())
 }
 
-/// A identidade de uma revelação: a foto e a receita com que ela foi feita.
+/// A identidade de uma revelação: a foto e a revelação com que ela foi feita.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Chave {
     foto: String,
@@ -72,11 +72,11 @@ pub struct Chave {
     /// zoom devolveria a revelação da cópia com a cara da resolução cheia — e é
     /// pelo tamanho que as duas se distinguem sem carregar pixel nenhum.
     origem: (u32, u32),
-    /// Os `f32` da receita e do corte pelos **bits**. Ver o cabeçalho.
-    receita: Box<[u32]>,
+    /// Os `f32` da revelação e do corte pelos **bits**. Ver o cabeçalho.
+    parametros: Box<[u32]>,
     /// 🖌️ **A revisão da fonte**: 0 é o bruto, N é a imagem editada N
     /// (`revelacao/fonte.rs`). Uma edição nova da mesma foto, do mesmo tamanho
-    /// e com a mesma receita, é outra revelação — sem isto ela casaria com a da
+    /// e com a mesma revelação, é outra revelação — sem isto ela casaria com a da
     /// fonte antiga (C17).
     fonte: u64,
 }
@@ -87,10 +87,10 @@ impl Chave {
         origem: (u32, u32),
         ajustes: &Ajustes,
         corte: &Corte,
-        locais: &infrastructure::gpu_adjustments::ReceitaLocal,
+        locais: &infrastructure::gpu_adjustments::ParametrosLocais,
     ) -> Self {
-        let mut receita: Vec<u32> = ajustes.como_vetor().iter().map(|v| v.to_bits()).collect();
-        receita.extend(
+        let mut parametros: Vec<u32> = ajustes.como_vetor().iter().map(|v| v.to_bits()).collect();
+        parametros.extend(
             [
                 corte.x(),
                 corte.y(),
@@ -101,14 +101,14 @@ impl Chave {
             .iter()
             .map(|v| v.to_bits()),
         );
-        receita.push(corte.giro_90() as u32);
-        receita.push(u32::from(corte.espelho_h()));
-        receita.push(u32::from(corte.espelho_v()));
+        parametros.push(corte.giro_90() as u32);
+        parametros.push(u32::from(corte.espelho_h()));
+        parametros.push(u32::from(corte.espelho_v()));
         // 🔑 A perspectiva muda o quadro da vinheta: outra correção é outra
         // revelação. Sem ela a chave é a de antes, e o que já está no cache vale.
         if corte.tem_perspectiva() {
             let p = corte.perspectiva();
-            receita.extend(
+            parametros.extend(
                 [
                     p.rotacao[0],
                     p.rotacao[1],
@@ -128,13 +128,13 @@ impl Chave {
             let mut h = std::collections::hash_map::DefaultHasher::new();
             locais.em_json().hash(&mut h);
             let impressao = h.finish();
-            receita.push(impressao as u32);
-            receita.push((impressao >> 32) as u32);
+            parametros.push(impressao as u32);
+            parametros.push((impressao >> 32) as u32);
         }
         Self {
             foto: foto_id.to_string(),
             origem,
-            receita: receita.into_boxed_slice(),
+            parametros: parametros.into_boxed_slice(),
             fonte: 0,
         }
     }
@@ -181,7 +181,7 @@ impl CacheDeReveladas {
         }
     }
 
-    /// A revelação desta foto com esta receita, se estiver guardada.
+    /// A revelação desta foto com esta revelação, se estiver guardada.
     ///
     /// Clona: o palco precisa da imagem e o cache precisa continuar com ela.
     /// É uma cópia de prévia, não da foto inteira.
@@ -213,8 +213,8 @@ impl CacheDeReveladas {
 
     /// Esquece tudo o que é desta foto.
     ///
-    /// 🚨 **Quem grava uma receita nova não invalida nada** — a chave já leva a
-    /// receita, e a revelação antiga simplesmente deixa de ser procurada. Isto
+    /// 🚨 **Quem grava uma revelação nova não invalida nada** — a chave já leva a
+    /// revelação, e a revelação antiga simplesmente deixa de ser procurada. Isto
     /// aqui é para quando os **pixels de origem** mudam sob o mesmo id: a cópia
     /// de trabalho que chega do site e a troca para a resolução cheia. Aí a
     /// mesma chave passaria a mentir, e mentir com a cara certa.
@@ -255,10 +255,10 @@ mod testes {
         DynamicImage::ImageRgb8(RgbImage::new(largura, altura))
     }
 
-    /// 🚨 A receita faz parte da chave — senão o cache devolve a revelação de
+    /// 🚨 A revelação faz parte da chave — senão o cache devolve a revelação de
     /// antes do gesto, com a cara de certa.
     #[test]
-    fn a_mesma_foto_com_receitas_diferentes_tem_chaves_diferentes() {
+    fn a_mesma_foto_com_parametros_diferentes_tem_chaves_diferentes() {
         let mut ajustes = Ajustes::default();
         let neutra = Chave::nova("id-1", ORIGEM, &ajustes, &corte(), &Default::default());
         ajustes.exposure = 1.5;
@@ -278,7 +278,7 @@ mod testes {
     }
 
     /// 🖌️ **A revisão nova não casa com a chave da antiga** (C17): salvar no
-    /// editor não muda tamanho nem receita, e sem a fonte na chave a Revelação
+    /// editor não muda tamanho nem revelação, e sem a fonte na chave a Revelação
     /// devolveria do cache a foto de antes da edição.
     #[test]
     fn a_revisao_nova_nao_casa_com_a_chave_da_antiga() {
@@ -332,7 +332,7 @@ mod testes {
     }
 
     /// 🚨 A cópia de trabalho e o bruto em resolução cheia são a mesma foto com
-    /// a mesma receita — e não podem compartilhar a chave.
+    /// a mesma revelação — e não podem compartilhar a chave.
     #[test]
     fn o_tamanho_da_origem_entra_na_chave() {
         let ajustes = Ajustes::default();
@@ -354,7 +354,7 @@ mod testes {
         );
     }
 
-    /// Duas fotos com a mesma receita não se confundem.
+    /// Duas fotos com a mesma revelação não se confundem.
     #[test]
     fn a_foto_faz_parte_da_chave() {
         let ajustes = Ajustes::default();
@@ -431,19 +431,20 @@ mod testes {
         let mut ajustes = Ajustes::default();
         let uma = Chave::nova("id-1", ORIGEM, &ajustes, &corte(), &Default::default());
         ajustes.exposure = 1.0;
-        let outra_receita = Chave::nova("id-1", ORIGEM, &ajustes, &corte(), &Default::default());
+        let outros_parametros =
+            Chave::nova("id-1", ORIGEM, &ajustes, &corte(), &Default::default());
         let outra_foto = Chave::nova("id-2", ORIGEM, &ajustes, &corte(), &Default::default());
 
         cache.guardar(uma.clone(), &imagem(8, 8));
-        cache.guardar(outra_receita.clone(), &imagem(8, 8));
+        cache.guardar(outros_parametros.clone(), &imagem(8, 8));
         cache.guardar(outra_foto.clone(), &imagem(8, 8));
 
         cache.esquecer("id-1");
 
         assert!(cache.buscar(&uma).is_none());
         assert!(
-            cache.buscar(&outra_receita).is_none(),
-            "as duas receitas da mesma foto saem juntas"
+            cache.buscar(&outros_parametros).is_none(),
+            "as duas revelações da mesma foto saem juntas"
         );
         assert!(cache.buscar(&outra_foto).is_some(), "a outra foto fica");
     }

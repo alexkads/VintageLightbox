@@ -1,21 +1,21 @@
 //! A **Revelação local** na tela: as máscaras (pincel, gradientes, laço) com a
 //! exposição delas, e o retoque (carimbo, band-aid, Content-Aware).
 //!
-//! O motor, a receita e a matemática moram no `revelacao-core` (`locais.rs`,
+//! O motor, a revelação e a matemática moram no `revelacao-core` (`locais.rs`,
 //! `mascaras.rs`, `retoque.rs`, `preenchimento.rs`) e são os mesmos do site. O
 //! que mora aqui é o que só a tela tem: a ferramenta escolhida, o gesto em
 //! curso, a conta do ponteiro à foto, as marcações por cima da foto e o painel.
 //!
-//! # A receita é a fonte de verdade
+//! # A revelação é a fonte de verdade
 //!
-//! [`Revelacao::locais`] é a receita da foto aberta, e é ela que o histórico,
+//! [`Revelacao::locais`] é a revelação da foto aberta, e é ela que o histórico,
 //! a gravação e a GPU recebem. O gesto em curso é **provisório**: a GPU o
-//! revela a cada movimento (`locais_na_tela`), mas ele só entra na receita no
+//! revela a cada movimento (`locais_na_tela`), mas ele só entra na revelação no
 //! fim do gesto — um `⌘Z` por pincelada, como os sliders.
 //!
 //! # Coordenadas
 //!
-//! O ponteiro chega em pontos da área do palco; a receita quer a foto inteira
+//! O ponteiro chega em pontos da área do palco; a revelação quer a foto inteira
 //! de pé, antes do enquadramento. O caminho é a vista do zoom (área → quadro
 //! exibido) e o `do_quadro_para_a_foto` do motor (quadro → foto), a mesma conta
 //! que o `aplicar` usa para enquadrar — o teste dela está no `revelacao-core`.
@@ -31,7 +31,7 @@ use gpui_kit::{
 };
 use revelacao_core::locais::{
     self, AjustesLocais, BrushStroke, Camada, Carimbo, Componente, Forma, GradienteLinear,
-    GradienteRadial, Laco, Modo, Preenchimento, ReceitaLocal, Retoque,
+    GradienteRadial, Laco, Modo, ParametrosLocais, Preenchimento, Retoque,
 };
 use revelacao_core::transformacao;
 
@@ -434,16 +434,16 @@ fn cortar_na_foto(a: [f32; 2], b: [f32; 2]) -> Option<([f32; 2], [f32; 2])> {
 /// "Máscara N" com o menor N livre na foto — o contador corrido dava
 /// "Máscara 2" à primeira máscara depois de um ⌘Z, e seguia contando de uma
 /// foto para a outra.
-fn nome_livre(receita: &ReceitaLocal) -> String {
+fn nome_livre(parametros: &ParametrosLocais) -> String {
     (1..)
         .map(|n| format!("Máscara {n}"))
-        .find(|nome| receita.camadas.iter().all(|c| &c.nome != nome))
+        .find(|nome| parametros.camadas.iter().all(|c| &c.nome != nome))
         .unwrap_or_default()
 }
 
-/// 🧪 A receita numa linha, para o roteiro: camadas e retoques com o que
+/// 🧪 A revelação numa linha, para o roteiro: camadas e retoques com o que
 /// importa conferir.
-fn resumo_da_receita(r: &ReceitaLocal) -> String {
+fn resumo_dos_parametros(r: &ParametrosLocais) -> String {
     let camadas = r.camadas.iter().map(|c| {
         let formas: Vec<String> = c
             .componentes
@@ -501,18 +501,18 @@ fn sombra_leve() -> Hsla {
 }
 
 impl Revelacao {
-    // ------------------------------------------------------------ a receita
+    // ------------------------------------------------------------ a revelação
 
-    /// A receita que a GPU revela agora: a da foto, mais o gesto em curso.
-    pub(super) fn locais_com_o_gesto(&self) -> Arc<ReceitaLocal> {
+    /// A revelação que a GPU revela agora: a da foto, mais o gesto em curso.
+    pub(super) fn locais_com_o_gesto(&self) -> Arc<ParametrosLocais> {
         let Some(gesto) = &self.local.gesto else {
             return self.locais.clone();
         };
-        let mut receita = (*self.locais).clone();
+        let mut parametros = (*self.locais).clone();
         match gesto {
             Gesto::Componente { nova, componente } => {
                 if *nova {
-                    receita.camadas.push(Camada {
+                    parametros.camadas.push(Camada {
                         componentes: vec![componente.clone()],
                         ajustes: AjustesLocais {
                             exposicao_ev: self.exposicao_da_nova(),
@@ -522,16 +522,16 @@ impl Revelacao {
                 } else if let Some(camada) = self
                     .local
                     .mascara_sel
-                    .and_then(|i| receita.camadas.get_mut(i))
+                    .and_then(|i| parametros.camadas.get_mut(i))
                 {
                     camada.componentes.push(componente.clone());
                 }
             }
             // O Content-Aware sintetiza no fim do gesto, e não a cada ponto.
             Gesto::Retoque(Retoque::Preencher(_)) => {}
-            Gesto::Retoque(r) => receita.retoques.push(r.clone()),
+            Gesto::Retoque(r) => parametros.retoques.push(r.clone()),
             Gesto::Editando { indice, valor, .. } => {
-                if let Some(r) = receita.retoques.get_mut(*indice) {
+                if let Some(r) = parametros.retoques.get_mut(*indice) {
                     *r = valor.clone();
                 }
             }
@@ -541,7 +541,7 @@ impl Revelacao {
                 valor,
                 ..
             } => {
-                if let Some(k) = receita
+                if let Some(k) = parametros
                     .camadas
                     .get_mut(*camada)
                     .and_then(|c| c.componentes.get_mut(*componente))
@@ -550,7 +550,7 @@ impl Revelacao {
                 }
             }
         }
-        Arc::new(receita)
+        Arc::new(parametros)
     }
 
     /// A exposição com que nasce uma máscara nova: a do slider.
@@ -562,10 +562,10 @@ impl Revelacao {
             .unwrap_or(0.8)
     }
 
-    /// A receita nova vira um passo do histórico, e vai ao banco e à GPU.
-    fn comprometer(&mut self, receita: ReceitaLocal, cx: &mut Context<Self>) {
+    /// A revelação nova vira um passo do histórico, e vai ao banco e à GPU.
+    fn comprometer(&mut self, parametros: ParametrosLocais, cx: &mut Context<Self>) {
         self.gravar_o_que_estiver_pendente();
-        self.locais = Arc::new(receita);
+        self.locais = Arc::new(parametros);
         self.historico.registrar(self.estado());
         self.gravar();
         self.pedir_revelacao(cx);
@@ -624,7 +624,7 @@ impl Revelacao {
     }
 
     /// O raio da ferramenta na foto, agora: o tamanho na tela dividido pelo
-    /// zoom. É ele que o gesto grava na receita.
+    /// zoom. É ele que o gesto grava na revelação.
     fn raio_da_ferramenta(&self) -> f32 {
         self.raio_do_tamanho(self.local.tamanho, RAIO_MAXIMO_DA_FERRAMENTA)
     }
@@ -638,7 +638,7 @@ impl Revelacao {
         2.0 * self.raio_da_ferramenta() * lado
     }
 
-    /// Um raio da receita (fração do maior lado) em pontos da tela.
+    /// Um raio da revelação (fração do maior lado) em pontos da tela.
     fn raio_na_tela(&self, raio: f32) -> f32 {
         let lado = self
             .tamanho_da_copia()
@@ -736,7 +736,7 @@ impl Revelacao {
             "ferramenta={:?} raio={:.5} tamanho={:.1} feather={:.2} selecionado={:?} mascara_sel={:?} \
              camadas={} componentes={} retoques={} foco_no_palco={} marcacoes={} gesto={} \
              origem={:?} bruta={} revelada={} aguardando={:?} gpu={:?} cursor={:?} \
-             pontos_do_ultimo={} desfaz={} refaz={}\n        receita: {}",
+             pontos_do_ultimo={} desfaz={} refaz={}\n        revelação: {}",
             self.local.ferramenta,
             self.raio_da_ferramenta(),
             self.local.tamanho,
@@ -773,7 +773,7 @@ impl Revelacao {
                 }),
             self.historico.pode_desfazer(),
             self.historico.pode_refazer(),
-            resumo_da_receita(&self.locais),
+            resumo_dos_parametros(&self.locais),
         )
     }
 
@@ -795,7 +795,7 @@ impl Revelacao {
         self.palco.center()
     }
 
-    /// Quantos retoques a receita tem.
+    /// Quantos retoques a revelação tem.
     #[cfg(test)]
     pub fn retoques_locais(&self) -> usize {
         self.locais.retoques.len()
@@ -884,9 +884,9 @@ impl Revelacao {
                     &r,
                     (raio_do(&r) * fator).clamp(RAIO_MINIMO_DA_FERRAMENTA, RAIO_MAXIMO_DO_RETOQUE),
                 );
-                let mut receita = (*self.locais).clone();
-                receita.retoques[i] = novo;
-                self.comprometer(receita, cx);
+                let mut parametros = (*self.locais).clone();
+                parametros.retoques[i] = novo;
+                self.comprometer(parametros, cx);
             }
         }
         let novo = (self.local.tamanho * fator).clamp(TAMANHO_MINIMO, TAMANHO_MAXIMO);
@@ -902,12 +902,12 @@ impl Revelacao {
         let Some(i) = self.local.selecionado.take() else {
             return false;
         };
-        let mut receita = (*self.locais).clone();
-        if i >= receita.retoques.len() {
+        let mut parametros = (*self.locais).clone();
+        if i >= parametros.retoques.len() {
             return false;
         }
-        receita.retoques.remove(i);
-        self.comprometer(receita, cx);
+        parametros.retoques.remove(i);
+        self.comprometer(parametros, cx);
         true
     }
 
@@ -940,9 +940,9 @@ impl Revelacao {
                 };
                 if soltou {
                     self.local.gesto = None;
-                    let mut receita = (*self.locais).clone();
-                    receita.retoques[i] = novo;
-                    self.comprometer(receita, cx);
+                    let mut parametros = (*self.locais).clone();
+                    parametros.retoques[i] = novo;
+                    self.comprometer(parametros, cx);
                 } else {
                     self.local.gesto = Some(Gesto::Editando {
                         indice: i,
@@ -967,13 +967,13 @@ impl Revelacao {
         if i >= self.locais.camadas.len() {
             return;
         }
-        let mut receita = (*self.locais).clone();
-        receita.camadas[i].ajustes.exposicao_ev = valor;
+        let mut parametros = (*self.locais).clone();
+        parametros.camadas[i].ajustes.exposicao_ev = valor;
         if soltou {
-            self.comprometer(receita, cx);
+            self.comprometer(parametros, cx);
         } else {
-            // Ao vivo, sem passo: a receita da tela anda, o histórico não.
-            self.locais = Arc::new(receita);
+            // Ao vivo, sem passo: a revelação da tela anda, o histórico não.
+            self.locais = Arc::new(parametros);
             self.pedir_revelacao(cx);
         }
     }
@@ -1006,15 +1006,15 @@ impl Revelacao {
         cx: &mut Context<Self>,
         mudar: impl FnOnce(&mut Camada) -> bool,
     ) {
-        let mut receita = (*self.locais).clone();
-        let Some(camada) = receita.camadas.get_mut(i) else {
+        let mut parametros = (*self.locais).clone();
+        let Some(camada) = parametros.camadas.get_mut(i) else {
             return;
         };
         if mudar(camada) {
-            receita.camadas.remove(i);
+            parametros.camadas.remove(i);
             self.local.mascara_sel = None;
         }
-        self.comprometer(receita, cx);
+        self.comprometer(parametros, cx);
     }
 
     // ---------------------------------------------------------------- gestos
@@ -1503,7 +1503,7 @@ impl Revelacao {
         // 🚨 **Ponto repetido não entra** (achado no app real, 2026-09-26): o
         // arrasto é ouvido pela janela e pelo palco, e a mesma posição chegava
         // várias vezes — um traço de quatro movimentos saía com trinta pontos,
-        // que a receita grava e a GPU desenha. A tolerância só pega o idêntico
+        // que a revelação grava e a GPU desenha. A tolerância só pega o idêntico
         // (0,06 px numa foto de 6000 px).
         let passo = 1e-5;
         let andou = |ultimo: Option<[f32; 2]>| {
@@ -1650,7 +1650,7 @@ impl Revelacao {
     }
 
     /// Fim do gesto: vira **um** passo do histórico.
-    /// Larga a seleção que aponta para fora da receita — depois de um ⌘Z ou
+    /// Larga a seleção que aponta para fora da revelação — depois de um ⌘Z ou
     /// ⌘⇧Z, a camada ou o retoque escolhido pode não existir mais (achado no
     /// app real, 2026-09-27: o traço seguinte se perdia).
     pub(super) fn conferir_a_selecao_local(&mut self) {
@@ -1682,7 +1682,7 @@ impl Revelacao {
         let Some(gesto) = self.local.gesto.take() else {
             return;
         };
-        let mut receita = (*self.locais).clone();
+        let mut parametros = (*self.locais).clone();
         match gesto {
             Gesto::Mascara {
                 camada,
@@ -1697,7 +1697,7 @@ impl Revelacao {
                     cx.notify();
                     return;
                 }
-                if let Some(k) = receita
+                if let Some(k) = parametros
                     .camadas
                     .get_mut(camada)
                     .and_then(|c| c.componentes.get_mut(componente))
@@ -1717,10 +1717,10 @@ impl Revelacao {
                 let existe = self
                     .local
                     .mascara_sel
-                    .is_some_and(|i| i < receita.camadas.len());
+                    .is_some_and(|i| i < parametros.camadas.len());
                 if nova || !existe {
-                    let nome = nome_livre(&receita);
-                    receita.camadas.push(Camada {
+                    let nome = nome_livre(&parametros);
+                    parametros.camadas.push(Camada {
                         nome,
                         componentes: vec![componente],
                         ajustes: AjustesLocais {
@@ -1728,12 +1728,12 @@ impl Revelacao {
                         },
                         ..Default::default()
                     });
-                    self.local.mascara_sel = Some(receita.camadas.len() - 1);
+                    self.local.mascara_sel = Some(parametros.camadas.len() - 1);
                     self.local.criando = false;
                 } else if let Some(c) = self
                     .local
                     .mascara_sel
-                    .and_then(|i| receita.camadas.get_mut(i))
+                    .and_then(|i| parametros.camadas.get_mut(i))
                 {
                     c.componentes.push(componente);
                 }
@@ -1746,9 +1746,9 @@ impl Revelacao {
                     }
                 }
                 let com_origem = r.carimbo().is_some();
-                receita.retoques.push(r);
+                parametros.retoques.push(r);
                 if com_origem {
-                    self.local.selecionado = Some(receita.retoques.len() - 1);
+                    self.local.selecionado = Some(parametros.retoques.len() - 1);
                 }
             }
             Gesto::Editando {
@@ -1761,10 +1761,10 @@ impl Revelacao {
                     cx.notify();
                     return;
                 }
-                receita.retoques[indice] = valor;
+                parametros.retoques[indice] = valor;
             }
         }
-        self.comprometer(receita, cx);
+        self.comprometer(parametros, cx);
     }
 
     fn laco_pronto(
@@ -1777,9 +1777,9 @@ impl Revelacao {
             return;
         }
         let feather = self.local.feather * FEATHER_DO_LACO;
-        let mut receita = (*self.locais).clone();
+        let mut parametros = (*self.locais).clone();
         if ferramenta == Ferramenta::Preencher {
-            receita.retoques.push(Retoque::Preencher(Preenchimento {
+            parametros.retoques.push(Retoque::Preencher(Preenchimento {
                 caminho: Vec::new(),
                 raio: 0.01,
                 feather,
@@ -1797,12 +1797,12 @@ impl Revelacao {
                 forma: Forma::Laco(Laco { pontos, feather }),
             };
             match self.local.mascara_sel.filter(|_| !self.local.criando) {
-                Some(i) if i < receita.camadas.len() => {
-                    receita.camadas[i].componentes.push(componente)
+                Some(i) if i < parametros.camadas.len() => {
+                    parametros.camadas[i].componentes.push(componente)
                 }
                 _ => {
-                    let nome = nome_livre(&receita);
-                    receita.camadas.push(Camada {
+                    let nome = nome_livre(&parametros);
+                    parametros.camadas.push(Camada {
                         nome,
                         componentes: vec![componente],
                         ajustes: AjustesLocais {
@@ -1810,12 +1810,12 @@ impl Revelacao {
                         },
                         ..Default::default()
                     });
-                    self.local.mascara_sel = Some(receita.camadas.len() - 1);
+                    self.local.mascara_sel = Some(parametros.camadas.len() - 1);
                     self.local.criando = false;
                 }
             }
         }
-        self.comprometer(receita, cx);
+        self.comprometer(parametros, cx);
     }
 
     fn sincronizar_sliders_com_o_selecionado(
@@ -2901,11 +2901,11 @@ impl Revelacao {
                             .ghost()
                             .tooltip("Excluir retoque")
                             .on_click(cx.listener(move |tela, _e, _w, cx| {
-                                let mut receita = (*tela.locais).clone();
-                                if k < receita.retoques.len() {
-                                    receita.retoques.remove(k);
+                                let mut parametros = (*tela.locais).clone();
+                                if k < parametros.retoques.len() {
+                                    parametros.retoques.remove(k);
                                     tela.local.selecionado = None;
-                                    tela.comprometer(receita, cx);
+                                    tela.comprometer(parametros, cx);
                                 }
                             })),
                     ),
@@ -3450,8 +3450,8 @@ mod testes {
 
     #[test]
     fn o_nome_da_mascara_nova_e_o_menor_livre() {
-        use super::{Camada, ReceitaLocal};
-        let com = |nomes: &[&str]| ReceitaLocal {
+        use super::{Camada, ParametrosLocais};
+        let com = |nomes: &[&str]| ParametrosLocais {
             camadas: nomes
                 .iter()
                 .map(|n| Camada {

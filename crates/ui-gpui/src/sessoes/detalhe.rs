@@ -220,7 +220,7 @@ pub enum Pedido {
     /// "Apagar" em lote, depois da confirmação de todas as fotos editáveis.
     ApagarDoSiteEmLote(Vec<String>),
     /// 🗑️ "Descartar a edição" (ids no site): a revelação feita aqui e não
-    /// salva sai, e a foto fica como a galeria tem — quem sabe a receita do
+    /// salva sai, e a foto fica como a galeria tem — quem sabe a revelação do
     /// site e a fila é a raiz (`descartar_as_edicoes`).
     DescartarEdicao(Vec<String>),
     /// A tecla `X` em fotos que **só existem no disco**: a rejeição é gravada
@@ -591,7 +591,7 @@ pub struct Detalhe {
     copia_aqui: std::collections::HashSet<String>,
     /// As locais que estão subindo agora.
     subindo_agora: std::collections::HashSet<String>,
-    /// Quais fotos locais já têm a **revelada da receita padrão** no cache.
+    /// Quais fotos locais já têm a **revelada da revelação padrão** no cache.
     ///
     /// 🔑 **Consultado uma vez por foto, e não por quadro.** Saber se a chave
     /// existe custa disco; `chave_da_foto` roda por foto visível a cada quadro,
@@ -681,7 +681,7 @@ pub struct Detalhe {
     reveladas_avisadas: Vec<String>,
     /// As predefinições que este app conhece — para a gaveta dizer o **nome** do
     /// preset padrão, e não o id.
-    presets_da_receita: Vec<domain::entities::Preset>,
+    presets_dos_parametros: Vec<domain::entities::Preset>,
     /// O seletor da **faixa da próxima leva**, na barra de envio (site:
     /// `envio.tsx`). Criado no primeiro render, porque `nova` não tem `window`.
     escolha_da_leva: Option<Entity<SelectState<SearchableVec<OpcaoDaFaixa>>>>,
@@ -926,7 +926,7 @@ impl Detalhe {
             _assinaturas_da_origem: Vec::new(),
             #[cfg(test)]
             reveladas_avisadas: Vec::new(),
-            presets_da_receita: Vec::new(),
+            presets_dos_parametros: Vec::new(),
             escolha_da_leva: None,
             escolha_do_estudio: None,
             _escolhas_da_barra: Vec::new(),
@@ -2834,7 +2834,7 @@ impl Detalhe {
         }
     }
 
-    /// A receita padrão revelou esta foto: a miniatura velha sai do cache, e a
+    /// A revelação padrão revelou esta foto: a miniatura velha sai do cache, e a
     /// próxima passada de `preparar_miniaturas` lê a nova.
     ///
     /// 🔑 **É a metade visível do C17** ("mudou a origem, os caches derivados
@@ -3368,7 +3368,7 @@ impl Detalhe {
         // 🚨 **Na foto do site é a mesma prévia local da web**
         // (`usar-previas-reveladas.ts`): a grade desenha o que o servidor tem,
         // e o servidor só muda quando alguém salva na galeria — enquanto isso a
-        // Revelação já abre com a receita do banco local. O dono viu as duas
+        // Revelação já abre com a revelação do banco local. O dono viu as duas
         // caras da mesma foto em 18/set/2026: *"na galeria estava com um efeito,
         // dei dois cliques e a revelação estava com outro"*. A prévia local é o
         // que faz as duas dizerem a mesma coisa antes de subir.
@@ -3382,7 +3382,7 @@ impl Detalhe {
         base
     }
 
-    /// Esta foto local já tem a revelada da receita padrão? — pergunta ao disco
+    /// Esta foto local já tem a revelada da revelação padrão? — pergunta ao disco
     /// **uma vez** e guarda a resposta (ver `com_revelada`).
     fn resolver_revelada(&mut self, foto_id: &str) {
         if self.com_revelada.contains_key(foto_id) {
@@ -5340,7 +5340,7 @@ impl Detalhe {
 
     /// A raiz entrega as predefinições carregadas na abertura.
     pub fn definir_presets(&mut self, presets: Vec<domain::entities::Preset>) {
-        self.presets_da_receita = presets;
+        self.presets_dos_parametros = presets;
     }
 
     /// Abre ou fecha os detalhes da sessão (números e prazos).
@@ -5380,7 +5380,7 @@ impl Detalhe {
             .map(|f| f.id.clone())
             .find(|id| self.ids_locais.contains(id));
         let previews = self.previews.clone();
-        let presets = self.presets_da_receita.clone();
+        let presets = self.presets_dos_parametros.clone();
         self.atendimento.update(cx, |gaveta, cx| {
             gaveta.definir_presets(presets);
             gaveta.definir_base(primeira.clone(), || {
@@ -10072,7 +10072,7 @@ mod testes {
     ///
     /// O que o assistente coletou nas sete etapas ficava só no banco: a sessão
     /// abria sem dizer se havia agendamento, voucher, compra, como conheceu ou
-    /// receita padrão — e o estúdio não tinha onde ser corrigido.
+    /// revelação padrão — e o estúdio não tinha onde ser corrigido.
     #[gpui_kit::test]
     fn o_cabecalho_mostra_o_atendimento_e_troca_o_estudio(cx: &mut TestAppContext) {
         let publicador = publicador_com(
@@ -10236,7 +10236,7 @@ mod testes {
         }));
     }
 
-    /// 🚨 **A grade mostra a foto revelada pela receita padrão, e não o bruto.**
+    /// 🚨 **A grade mostra a foto revelada pela revelação padrão, e não o bruto.**
     ///
     /// O operador escolhe a predefinição e a proporção na etapa 2, vê as
     /// miniaturas mudarem — e ao entrar na sessão via os brutos de volta. Eram
@@ -10244,7 +10244,7 @@ mod testes {
     /// `save_preview` (`Large`) e a grade procurava por `get_thumbnail`
     /// (`Thumbnail`), na chave do bruto. Achado do dono, 17/set/2026.
     #[gpui_kit::test]
-    fn a_grade_mostra_a_revelada_da_receita_padrao(cx: &mut TestAppContext) {
+    fn a_grade_mostra_a_revelada_da_revelacao_padrao(cx: &mut TestAppContext) {
         let dir = tempfile::TempDir::new().expect("diretório temporário");
         let previews = Arc::new(PreviewManager::new_with_path(dir.path().to_path_buf()));
         let janela = janela_com_previews(

@@ -411,20 +411,20 @@ const VERDE: &str = "Green";
 const AZUL: &str = "Blue";
 
 /// O que a segunda tela mostra no Comparar: por metade, o id, a nota e a
-/// receita — e qual das duas é a escolhida.
+/// revelação — e qual das duas é a escolhida.
 type ChaveDoPar = (
     Vec<(
         String,
         i32,
         Ajustes,
         CropSettings,
-        Arc<ReceitaLocalDoCliente>,
+        Arc<ParametrosLocaisDoCliente>,
     )>,
     biblioteca_core::comparar::Lado,
 );
 
 /// A Revelação local que vai à segunda tela com cada foto.
-type ReceitaLocalDoCliente = infrastructure::gpu_adjustments::ReceitaLocal;
+type ParametrosLocaisDoCliente = infrastructure::gpu_adjustments::ParametrosLocais;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tela {
@@ -605,37 +605,37 @@ pub struct Aplicativo {
     /// canto mostra e que o G9 consulta; os downloads (cópia de trabalho,
     /// bruto, "Baixar JPEG") contam em `baixas` — ver `esperar_o_site`.
     sincronias_pendentes: usize,
-    /// As fotos que receberam receita nova aqui e cujo JPEG no site ainda é o
+    /// As fotos que receberam revelação nova aqui e cujo JPEG no site ainda é o
     /// de antes — a fila que o "Salvar na galeria" esvazia.
     ///
     /// 🚨 **Ela existe porque a foto do catálogo não tem depósito.** A que só
-    /// existe no site guarda a receita não enviada em
+    /// existe no site guarda a revelação não enviada em
     /// `Gravador::guardadas_do_site`, que é tabela e sobrevive a fechar o app; a
     /// que foi importada aqui e depois subiu grava no catálogo, e lá não há
     /// coluna dizendo "isto ainda não foi para o site". Enquanto não houver,
     /// esta lista é o que sabe — e o que ela sabe morre com a sessão aberta.
-    /// Fechar o app antes de salvar não perde ajuste nenhum (a receita está
+    /// Fechar o app antes de salvar não perde ajuste nenhum (a revelação está
     /// gravada, e a foto reabre com ela); perde o **aviso** de que o cliente
     /// ainda vê o JPEG antigo.
     a_subir: Vec<(String, Ajustes, CropSettings)>,
-    /// A receita que saiu em cada envio do "Salvar na galeria", por id no site
+    /// A revelação que saiu em cada envio do "Salvar na galeria", por id no site
     /// — no formato do depósito (`ajustes_em_json`).
     ///
-    /// 🚨 **É o que impede o envio de apagar uma receita mais nova.** A
+    /// 🚨 **É o que impede o envio de apagar uma revelação mais nova.** A
     /// confirmação do servidor tirava a foto da fila e do depósito sem olhar:
     /// um "Zerar" ou "Sincronizar" feito enquanto ela subia sumia, e o site
     /// ficava com a revelação de antes sem nada pendente. O site só dá baixa
-    /// se a receita no depósito ainda for a que subiu (`registrar-salva.ts`).
-    receitas_no_ar: std::collections::HashMap<String, String>,
-    /// A receita de um "Salvar" que pegou a foto **no ar** — ela sobe de novo,
+    /// se a revelação no depósito ainda for a que subiu (`registrar-salva.ts`).
+    parametros_no_ar: std::collections::HashMap<String, String>,
+    /// A revelação de um "Salvar" que pegou a foto **no ar** — ela sobe de novo,
     /// com esta, assim que a de antes responder. É o que o Worker do site faz:
-    /// a mesma foto vai para o fim da fila com a receita nova.
+    /// a mesma foto vai para o fim da fila com a revelação nova.
     reenviar_depois: std::collections::HashMap<String, (Ajustes, CropSettings)>,
-    /// A receita que **a galeria do site tem** de cada foto, por id no site —
+    /// A revelação que **a galeria do site tem** de cada foto, por id no site —
     /// a da API, antes de o depósito local passar por cima
     /// (`aplicar_o_deposito_do_site`). É para onde o "Descartar" devolve a
     /// foto (`descartar_as_edicoes`).
-    receitas_do_site: std::collections::HashMap<String, (Ajustes, persistencia::Corte)>,
+    parametros_do_site: std::collections::HashMap<String, (Ajustes, persistencia::Corte)>,
     /// A Revelação local que está no JPEG da galeria, por id no site.
     ///
     /// ⚠️ **O site não guarda máscara nem retoque** — eles vão queimados no
@@ -671,9 +671,9 @@ pub struct Aplicativo {
     /// foto ficaria em "Preparando…" com o preview já gravado no cache.
     _reposicao: Option<gpui_kit::Task<()>>,
     _reveladas: Option<gpui_kit::Task<()>>,
-    /// O serviço da receita padrão — a raiz o consulta para saber quando parar
+    /// O serviço da revelação padrão — a raiz o consulta para saber quando parar
     /// de colher.
-    receita_padrao: Arc<crate::sessoes::receita_padrao::ReceitaPadrao>,
+    revelacao_padrao: Arc<crate::sessoes::revelacao_padrao::RevelacaoPadrao>,
     /// Os avisos que ainda não viraram toast — `(texto, é erro)`.
     ///
     /// 🚨 **Aviso de ação é toast, como no site** (`sonner`): "revelação salva
@@ -712,7 +712,7 @@ pub struct Aplicativo {
     /// A lista é limpa quando o último toast sai, e aí todos já terminaram.
     _relogios_dos_toasts: Vec<Task<()>>,
     /// As predefinições que este app conhece — sistema e as do banco local.
-    /// É delas que sai a receita padrão da sessão aberta.
+    /// É delas que sai a revelação padrão da sessão aberta.
     presets_conhecidos: Vec<Preset>,
     /// O que este app **mandou subir sozinho** (C20), por id do catálogo: a
     /// curadoria que a foto tinha quando entrou na esteira, `(nota, rejeitada)`.
@@ -734,13 +734,13 @@ pub struct Aplicativo {
     /// sobe — dono: *"eu não posso impedir o atendente de fazer as
     /// marcações"*).
     subindo_sozinhas: std::collections::HashMap<String, (Option<u8>, bool, bool)>,
-    /// A receita que cada foto levou ao subir, pelo id local, até a
+    /// A revelação que cada foto levou ao subir, pelo id local, até a
     /// conciliação compará-la com a do catálogo — ver
-    /// [`Self::conciliar_a_receita_que_subiu`].
-    receitas_que_subiram: std::collections::HashMap<String, Option<String>>,
-    /// As locais que já subiram: o id do site e a receita que ele tem, pelo id
+    /// [`Self::conciliar_os_parametros_que_subiu`].
+    parametros_que_subiram: std::collections::HashMap<String, Option<String>>,
+    /// As locais que já subiram: o id do site e a revelação que ele tem, pelo id
     /// local — ver [`Self::trazer_da_revelacao_as_que_subiram`].
-    receita_no_site_das_que_subiram:
+    parametros_no_site_das_que_subiram:
         std::collections::HashMap<String, (String, Option<serde_json::Value>)>,
     /// As que terminaram de subir e cuja versão do site ainda não chegou à
     /// grade — ver `mostrar_as_locais_na_sessao`.
@@ -757,10 +757,10 @@ pub struct Aplicativo {
     _resgate: Option<gpui_kit::Task<()>>,
     /// 🧪 O desfecho do último resgate, para os cenários.
     ultimo_resgate: Option<resgate::Desfecho>,
-    /// A receita já aplicada a cada foto local, por id: `"<preset>|<proporção>"`.
-    /// O mesmo registro do assistente, e pelo mesmo motivo — sem ele a receita
+    /// A revelação já aplicada a cada foto local, por id: `"<preset>|<proporção>"`.
+    /// O mesmo registro do assistente, e pelo mesmo motivo — sem ele a revelação
     /// seria pedida de novo a cada releitura do catálogo.
-    receita_das_locais: std::collections::HashMap<String, String>,
+    parametros_das_locais: std::collections::HashMap<String, String>,
     /// 🚨 A inscrição na escolha da sessão. Descartada, a tela marca a linha e
     /// o resto do app continua sem saber em qual galeria as fotos entram.
     _sessao_escolhida: gpui_kit::Subscription,
@@ -806,8 +806,13 @@ pub struct Aplicativo {
     /// O que a segunda tela mostra agora: o id e se já foi com imagem. Evita
     /// refazer a imagem a cada notificação da mesma foto (a revelação notifica
     /// a cada milímetro de slider).
-    no_cliente: Option<(String, Ajustes, CropSettings, Arc<ReceitaLocalDoCliente>)>,
-    /// O par que a segunda tela mostra no Comparar (`⇧C`): as duas receitas e
+    no_cliente: Option<(
+        String,
+        Ajustes,
+        CropSettings,
+        Arc<ParametrosLocaisDoCliente>,
+    )>,
+    /// O par que a segunda tela mostra no Comparar (`⇧C`): as duas revelações e
     /// a escolhida. É o `no_cliente` das duas metades.
     par_no_cliente: Option<ChaveDoPar>,
     /// Os pixels sem marca das fotos que a segunda tela mostra, guardados para
@@ -878,7 +883,7 @@ pub struct Aplicativo {
     /// O canal por onde o acervo relido volta. A releitura é assíncrona: o
     /// `LibraryController` é `async` do tokio, e o GPUI não roda futuros dele.
     releituras: (Sender<Vec<PhotoViewModel>>, Receiver<Vec<PhotoViewModel>>),
-    /// Os ids que a receita padrão acabou de revelar, para as grades relerem.
+    /// Os ids que a revelação padrão acabou de revelar, para as grades relerem.
     ///
     /// ⚠️ **Um canal, dois destinos.** `mpsc` tem um `Receiver` só, então quem
     /// colhe é a raiz e ela repassa ao assistente e à sessão — as duas mostram
@@ -951,19 +956,19 @@ impl Aplicativo {
         // o destino.
         let importador_do_detalhe = portas.importador.clone();
         // 🧭 O assistente da nova sessão importa para o mesmo catálogo, aplica
-        // a receita pelo mesmo gravador e lê as mesmas prévias.
+        // a revelação pelo mesmo gravador e lê as mesmas prévias.
         let reveladas: (Sender<String>, Receiver<String>) = channel();
-        // 📸 A receita padrão revelada em segundo plano (o `receita-padrao/` do
+        // 📸 A revelação padrão revelada em segundo plano (o `revelacao-padrao/` do
         // site). Nasce aqui, na raiz, porque atravessa telas: o assistente pede,
         // a sessão mostra, e a raiz repassa os avisos às duas.
-        let receita_padrao = Arc::new(crate::sessoes::receita_padrao::ReceitaPadrao::nova(
+        let revelacao_padrao = Arc::new(crate::sessoes::revelacao_padrao::RevelacaoPadrao::nova(
             previews.clone(),
             portas.gravador.clone(),
             reveladas.0.clone(),
         ));
         // A lista inteira fica com a raiz: é ela que resolve o `preset_padrao_id`
         // da galeria aberta quando uma foto nova entra na sessão.
-        let presets_para_a_receita = presets.clone();
+        let presets_para_os_parametros = presets.clone();
         // 🔑 **O "Do cartão ou pasta…" é um componente só**, com as mesmas
         // portas nas duas telas que o mostram: a etapa 2 da nova sessão e o
         // modal "Importar fotos" da sessão (dono, 22/set/2026).
@@ -980,7 +985,7 @@ impl Aplicativo {
             acervo: portas.acervo.clone(),
             gravador: portas.gravador.clone(),
             previews: previews.clone(),
-            receita_padrao: receita_padrao.clone(),
+            revelacao_padrao: revelacao_padrao.clone(),
             origem: portas_da_origem.clone(),
             presets_do_sistema: presets.iter().filter(|p| p.is_system).cloned().collect(),
         };
@@ -1115,7 +1120,7 @@ impl Aplicativo {
             );
             // A gaveta do atendimento diz o **nome** do preset padrão, e não o
             // id: a lista é a mesma que a Revelação usa.
-            tela.definir_presets(presets_para_a_receita.clone());
+            tela.definir_presets(presets_para_os_parametros.clone());
             tela.definir_origem(portas_da_origem, cx);
             tela
         });
@@ -1333,9 +1338,9 @@ impl Aplicativo {
             _sincronia: None,
             sincronias_pendentes: 0,
             a_subir: Vec::new(),
-            receitas_no_ar: std::collections::HashMap::new(),
+            parametros_no_ar: std::collections::HashMap::new(),
             reenviar_depois: std::collections::HashMap::new(),
-            receitas_do_site: std::collections::HashMap::new(),
+            parametros_do_site: std::collections::HashMap::new(),
             locais_no_site: std::collections::HashMap::new(),
             tiradas_do_site: std::collections::HashSet::new(),
             repositor: portas.repositor,
@@ -1345,7 +1350,7 @@ impl Aplicativo {
             trabalhos_semeados: std::collections::HashSet::new(),
             _reposicao: None,
             _reveladas: None,
-            receita_padrao,
+            revelacao_padrao,
             toasts: Vec::new(),
             #[cfg(test)]
             avisos_dados: Vec::new(),
@@ -1353,17 +1358,17 @@ impl Aplicativo {
             mensagens_dadas: Vec::new(),
             proximo_toast: 0,
             _relogios_dos_toasts: Vec::new(),
-            presets_conhecidos: presets_para_a_receita,
+            presets_conhecidos: presets_para_os_parametros,
             subindo_sozinhas: std::collections::HashMap::new(),
-            receitas_que_subiram: std::collections::HashMap::new(),
-            receita_no_site_das_que_subiram: std::collections::HashMap::new(),
+            parametros_que_subiram: std::collections::HashMap::new(),
+            parametros_no_site_das_que_subiram: std::collections::HashMap::new(),
             recem_subidas: std::collections::HashSet::new(),
             rejeitadas_agora: std::collections::HashSet::new(),
             importador: portas.importador.clone(),
             marcador: portas.marcador.clone(),
             _resgate: None,
             ultimo_resgate: None,
-            receita_das_locais: std::collections::HashMap::new(),
+            parametros_das_locais: std::collections::HashMap::new(),
             _sessao_escolhida: sessao_escolhida,
             configuracoes: cx.new(|_| Configuracoes::nova(previews_das_configuracoes)),
             configurando: false,
@@ -1754,20 +1759,20 @@ impl Aplicativo {
         }));
     }
 
-    /// A releitura do catálogo com a receita que o gravador já sabe por cima.
+    /// A releitura do catálogo com a revelação que o gravador já sabe por cima.
     ///
     /// 🚨 **O disco anda atrás do espelho.** Quem grava (a Revelação, a
-    /// receita padrão) escreve no espelho na hora e no disco por uma tarefa do
+    /// revelação padrão) escreve no espelho na hora e no disco por uma tarefa do
     /// tokio; durante a importação, cada foto copiada pede uma releitura. Uma
     /// leitura que começava antes de a gravação chegar ao disco terminava
     /// depois dela e trocava a cópia da grade pela de antes — e a Revelação
-    /// abria a foto sem a receita padrão que o catálogo já tinha (visto contra
+    /// abria a foto sem a revelação padrão que o catálogo já tinha (visto contra
     /// a pilha local, 24/set/2026). É a mesma regra do depósito das do site
     /// (`aplicar_o_deposito_do_site`): o que ainda não chegou ao disco ganha
     /// dele.
     fn com_o_espelho_do_gravador(&self, fotos: &mut [PhotoViewModel]) {
         for foto in fotos {
-            if let Some((ajustes, corte)) = self.gravador.receita_de(&foto.id) {
+            if let Some((ajustes, corte)) = self.gravador.parametros_de(&foto.id) {
                 persistencia::na_foto(foto, ajustes, corte);
             }
         }
@@ -1881,7 +1886,7 @@ impl Aplicativo {
             // cada troca do catálogo, e reler é varrer o catálogo inteiro.
             PedidoDaNova::CatalogoMudou => self.pedir_releitura_do_acervo(cx),
             PedidoDaNova::AlternarMenu => self.alternar_menu_lateral(cx),
-            PedidoDaNova::RevelandoReceita => self.esperar_as_reveladas(cx),
+            PedidoDaNova::RevelandoParametros => self.esperar_as_reveladas(cx),
             // 🔑 A cópia que continua depois de criar aparece na barra da
             // sessão — o operador classifica vendo quantas ainda faltam.
             PedidoDaNova::CopiaDaSessao { galeria, andamento } => {
@@ -1974,7 +1979,7 @@ impl Aplicativo {
             tela.definir_subidas(subidas);
             tela.definir_locais(locais, cx)
         });
-        self.aplicar_a_receita_da_sessao(fotos, &galeria, cx);
+        self.aplicar_os_parametros_da_sessao(fotos, &galeria, cx);
         self.conciliar_o_que_subiu(fotos, cx);
         self.subir_o_que_falta_do_ensaio(fotos, &galeria, cx);
         // 📍 Onde cada foto está, para o selo do canto — depois da subida, que
@@ -2066,10 +2071,10 @@ impl Aplicativo {
     /// rejeitada não entra na esteira; a que já entrou sai dela pelo
     /// [`crate::envios::Esteira::tirar_da_fila`].
     ///
-    /// ⚠️ **A receita padrão da sessão vem primeiro.** Subir antes dela faria o
+    /// ⚠️ **A revelação padrão da sessão vem primeiro.** Subir antes dela faria o
     /// BRUTO chegar ao acervo com os PARÂMETROS neutros e o cliente veria a
     /// foto crua — o contrário do que o preset do ensaio existe para fazer
-    /// (C1, C5). Enquanto a fila da receita anda, esta passada não enfileira
+    /// (C1, C5). Enquanto a fila da revelação anda, esta passada não enfileira
     /// nada: [`Self::colher_reveladas`] chama de novo quando ela seca.
     fn subir_o_que_falta_do_ensaio(
         &mut self,
@@ -2077,7 +2082,7 @@ impl Aplicativo {
         galeria: &str,
         cx: &mut Context<Self>,
     ) {
-        if self.sessao().is_none() || self.receita_padrao.progresso().andando() {
+        if self.sessao().is_none() || self.revelacao_padrao.progresso().andando() {
             return;
         }
         let faixa = self.detalhe.read(cx).faixa().map(str::to_string);
@@ -2150,7 +2155,7 @@ impl Aplicativo {
     /// Conciliar o acervo inteiro faria o catálogo desta máquina vencer o que o
     /// site sabe — e apagaria a classificação feita no painel da web.
     fn conciliar_o_que_subiu(&mut self, fotos: &[PhotoViewModel], cx: &mut Context<Self>) {
-        self.conciliar_a_receita_que_subiu(fotos, cx);
+        self.conciliar_os_parametros_que_subiu(fotos, cx);
         if self.subindo_sozinhas.is_empty() {
             return;
         }
@@ -2200,7 +2205,7 @@ impl Aplicativo {
         }
     }
 
-    /// A **receita** que mudou enquanto a foto subia alcança o site — a
+    /// A **revelação** que mudou enquanto a foto subia alcança o site — a
     /// irmã de [`Self::conciliar_o_que_subiu`], que cuida da nota.
     ///
     /// 🚨 **Sem isto a revelação se desfaz sozinha** (dono, 24/set/2026:
@@ -2208,48 +2213,54 @@ impl Aplicativo {
     /// ensaio sobe enquanto o operador revela (C20): a subida lê a foto, revela
     /// e manda — segundos —, e o ajuste feito nessa janela vai só para o
     /// catálogo. Quando a subida responde, a foto passa a ser a do site, com a
-    /// receita que o site recebeu; a grade e a Revelação a mostram assim, e o
+    /// revelação que o site recebeu; a grade e a Revelação a mostram assim, e o
     /// que o operador fez some — a foto volta a ser a que acabou de importar.
     ///
-    /// 🔑 **A régua é a receita que de fato subiu** (`ClassificadaSubiu`), e
+    /// 🔑 **A régua é a revelação que de fato subiu** (`ClassificadaSubiu`), e
     /// não um palpite sobre quando a subida leu o catálogo. Diferente da de
     /// agora, a de agora vai para o depósito — a tela a mostra na hora — e sobe
-    /// como revelação, pelo mesmo caminho do "Salvar na galeria". A receita
+    /// como revelação, pelo mesmo caminho do "Salvar na galeria". A revelação
     /// de uma foto que ainda só está no disco sempre subiu sozinha, com ela;
     /// esta é a mesma promessa para o ajuste que perdeu a partida.
-    fn conciliar_a_receita_que_subiu(&mut self, fotos: &[PhotoViewModel], cx: &mut Context<Self>) {
-        if self.receitas_que_subiram.is_empty() || self.sessao().is_none() {
+    fn conciliar_os_parametros_que_subiu(
+        &mut self,
+        fotos: &[PhotoViewModel],
+        cx: &mut Context<Self>,
+    ) {
+        if self.parametros_que_subiram.is_empty() || self.sessao().is_none() {
             return;
         }
         let mut lote = Vec::new();
         for foto in fotos {
-            // ⚠️ A linha do site ainda não chegou ao catálogo: a receita que
+            // ⚠️ A linha do site ainda não chegou ao catálogo: a revelação que
             // subiu espera a próxima releitura.
             let Some(no_site) = foto.pos_venda_foto_id.clone() else {
                 continue;
             };
-            let Some(subiu) = self.receitas_que_subiram.remove(&foto.id) else {
+            let Some(subiu) = self.parametros_que_subiram.remove(&foto.id) else {
                 continue;
             };
             let ajustes = persistencia::da_foto(foto);
             let corte = persistencia::corte_da_foto(foto);
             let enquadramento = persistencia::para_crop_settings(&corte);
             // 🚨 **Comparadas no JSON que sobe, e não nos campos.** O catálogo
-            // guarda o corte intocado como ausente, e a receita que sobe o
+            // guarda o corte intocado como ausente, e a revelação que sobe o
             // escreve inteiro: comparar os campos acusaria diferença em toda
-            // foto com receita, e o ensaio inteiro subiria duas vezes.
+            // foto com revelação, e o ensaio inteiro subiria duas vezes.
             let agora = (ajustes != Ajustes::default() || enquadramento != CropSettings::default())
                 .then(|| crate::pos_venda::porta::ajustes_em_json(&ajustes, &enquadramento));
             let a_que_subiu =
                 subiu.and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok());
-            // A Revelação ainda pode estar aberta na cópia local: a receita
+            // A Revelação ainda pode estar aberta na cópia local: a revelação
             // que o site tem fica lembrada para a saída dela.
-            self.receita_no_site_das_que_subiram
+            self.parametros_no_site_das_que_subiram
                 .insert(foto.id.clone(), (no_site.clone(), agora.clone()));
-            // 🚨 Pela receita, e não pelo texto: o corte em `f32` e em `f64`
-            // difere em 1 ulp — ver `mesma_receita`.
+            // 🚨 Pela revelação, e não pelo texto: o corte em `f32` e em `f64`
+            // difere em 1 ulp — ver `mesmos_parametros`.
             let igual = match (&agora, &a_que_subiu) {
-                (Some(agora), Some(subiu)) => crate::pos_venda::porta::mesma_receita(agora, subiu),
+                (Some(agora), Some(subiu)) => {
+                    crate::pos_venda::porta::mesmos_parametros(agora, subiu)
+                }
                 (None, None) => true,
                 _ => false,
             };
@@ -2281,7 +2292,7 @@ impl Aplicativo {
     /// antes.** Sincronizada enquanto ainda era local, a prévia do efeito novo
     /// nasceu sob o id do catálogo (`revelada:<id>`); ao terminar de subir ela
     /// passa a ser desenhada como foto do site, que procura `revelada:site:<id>`
-    /// — e caía na imagem da galeria, feita com a receita antiga. Visto rodando
+    /// — e caía na imagem da galeria, feita com a revelação antiga. Visto rodando
     /// o app com o cartão da D3100 (27/set/2026): P&B sincronizado em 48, e a
     /// sessão mostrando Sépia nas que subiram no meio, até o lote terminar.
     ///
@@ -2295,7 +2306,7 @@ impl Aplicativo {
         }
         let para =
             persistencia::chave_da_revelada(&format!("{}{no_site}", persistencia::PREFIXO_DO_SITE));
-        // A prévia de lá, se houver, é de uma receita anterior a esta.
+        // A prévia de lá, se houver, é de uma revelação anterior a esta.
         self.previews.apagar(&para);
         for tipo in [PreviewType::Thumbnail, PreviewType::Large] {
             self.previews.copiar_se_faltar(&de, &para, tipo);
@@ -2312,25 +2323,25 @@ impl Aplicativo {
     /// local, e cada ajuste daí em diante cai na linha local do catálogo — que
     /// já não é a que a grade mostra nem a que o "Salvar" leva. Achado rodando
     /// o app contra a pilha local (24/set/2026): a foto subiu às 39,07 s, o
-    /// ajuste chegou às 40,49 s, e o servidor ficou com a receita da
+    /// ajuste chegou às 40,49 s, e o servidor ficou com a revelação da
     /// importação. A conciliação da subida não o via, porque já tinha passado.
     ///
-    /// 🔑 Na saída e no "Salvar", a receita que a Revelação tem de cada local
+    /// 🔑 Na saída e no "Salvar", a revelação que a Revelação tem de cada local
     /// que já subiu é comparada com a do site: diferente, vai para o depósito e
     /// para a fila do "Salvar" — o mesmo destino de um ajuste feito na foto do
     /// site.
     fn trazer_da_revelacao_as_que_subiram(&mut self, cx: &mut Context<Self>) {
-        if self.receita_no_site_das_que_subiram.is_empty() {
+        if self.parametros_no_site_das_que_subiram.is_empty() {
             return;
         }
         let revelacao = self.revelacao.read(cx);
         // 🚨 **Só as que esta Revelação gravou**: a cópia das outras na tira é
-        // velha, e levá-la ao site desfaria a receita padrão aplicada depois.
+        // velha, e levá-la ao site desfaria a revelação padrão aplicada depois.
         let na_revelacao: Vec<(String, Ajustes, persistencia::Corte)> = revelacao
             .acervo()
             .iter()
             .filter(|f| revelacao.gravadas().contains(&f.id))
-            .filter(|f| self.receita_no_site_das_que_subiram.contains_key(&f.id))
+            .filter(|f| self.parametros_no_site_das_que_subiram.contains_key(&f.id))
             .map(|f| {
                 (
                     f.id.clone(),
@@ -2345,13 +2356,13 @@ impl Aplicativo {
             let agora = (ajustes != Ajustes::default() || enquadramento != CropSettings::default())
                 .then(|| crate::pos_venda::porta::ajustes_em_json(&ajustes, &enquadramento));
             let Some((no_site, no_site_agora)) =
-                self.receita_no_site_das_que_subiram.get_mut(&local)
+                self.parametros_no_site_das_que_subiram.get_mut(&local)
             else {
                 continue;
             };
-            // Pela receita, e não pelo texto — ver `mesma_receita`.
+            // Pela revelação, e não pelo texto — ver `mesmos_parametros`.
             let igual = match (&*no_site_agora, &agora) {
-                (Some(la), Some(aqui)) => crate::pos_venda::porta::mesma_receita(la, aqui),
+                (Some(la), Some(aqui)) => crate::pos_venda::porta::mesmos_parametros(la, aqui),
                 (None, None) => true,
                 _ => false,
             };
@@ -2464,7 +2475,7 @@ impl Aplicativo {
     /// anteontem e chamar isso de "a foto".
     ///
     /// ⚠️ **Só o que está no depósito é tocado.** A foto sem linha lá abre com a
-    /// receita da API, que é a verdade dela — e é o caso da grande maioria.
+    /// revelação da API, que é a verdade dela — e é o caso da grande maioria.
     fn aplicar_o_deposito_do_site(&mut self) {
         let guardadas = self.gravador.guardadas_do_site();
         if guardadas.is_empty() {
@@ -2478,7 +2489,7 @@ impl Aplicativo {
             else {
                 continue;
             };
-            // JSON estragado não apaga a receita da API: ele é ignorado, e a
+            // JSON estragado não apaga a revelação da API: ele é ignorado, e a
             // foto abre com o que o servidor tem — que é pior que o depósito e
             // muito melhor que o neutro.
             let Ok(json) = serde_json::from_str::<serde_json::Value>(&ajustes) else {
@@ -2713,7 +2724,7 @@ impl Aplicativo {
     /// 8/set/2026 repetido uma tela adiante.** A foto do site entra como
     /// `PhotoViewModel` sem caminho e com o id remoto (`site:…`), e daí o passo
     /// 11 busca a cópia de trabalho no storage. A foto que **só está no disco**
-    /// entra como ela é no catálogo: id cru, caminho do arquivo, receita já
+    /// entra como ela é no catálogo: id cru, caminho do arquivo, revelação já
     /// gravada.
     ///
     /// Antes disto, toda foto da sessão virava foto do site: o id do catálogo
@@ -2744,7 +2755,7 @@ impl Aplicativo {
             .map(|foto| {
                 // 🔑 **A local vale pela linha do catálogo**, e não por uma
                 // cópia montada aqui: é ela que carrega o caminho do arquivo, a
-                // receita já gravada e o id sob o qual as previews estão no
+                // revelação já gravada e o id sob o qual as previews estão no
                 // cache. Recriá-la à mão perderia os três de uma vez.
                 if foto.no_disco {
                     if let Some(local) = do_catalogo.iter().find(|f| f.id == foto.id) {
@@ -2876,20 +2887,20 @@ impl Aplicativo {
     /// pelo estresse, 17/set/2026). O repositor responde cada foto, com a imagem
     /// ou com `Falhou`, e só para quando a janela morre — que é quando este
     /// laço para também.
-    /// 🚨 **A receita padrão da sessão vale para quem chega depois.**
+    /// 🚨 **A revelação padrão da sessão vale para quem chega depois.**
     ///
     /// A etapa 2 do assistente escolhe a predefinição e a proporção, e elas
     /// ficam **na galeria** (`preset_padrao_id`, `proporcao_padrao`). Quem
     /// importa mais fotos **dentro** da sessão — o botão "Importar fotos" da
     /// tela do ensaio — espera o mesmo visual, e era o que não acontecia: a
-    /// receita só era aplicada às fotos do rascunho, e a leva seguinte entrava
-    /// crua. Na web as duas portas caem no mesmo agendador, que lê a receita da
-    /// **galeria** (`receita-padrao/agendador.ts`).
+    /// revelação só era aplicada às fotos do rascunho, e a leva seguinte entrava
+    /// crua. Na web as duas portas caem no mesmo agendador, que lê a revelação da
+    /// **galeria** (`revelacao-padrao/agendador.ts`).
     ///
-    /// 🔑 **Só as que ainda não subiram.** A foto do site já tem a receita dela
+    /// 🔑 **Só as que ainda não subiram.** A foto do site já tem a revelação dela
     /// gravada lá; reaplicar aqui seria escrever por cima do que o operador fez
     /// no editor.
-    fn aplicar_a_receita_da_sessao(
+    fn aplicar_os_parametros_da_sessao(
         &mut self,
         fotos: &[PhotoViewModel],
         galeria: &str,
@@ -2909,30 +2920,33 @@ impl Aplicativo {
         // sozinho. Um id do servidor não está na lista local: a foto fica com o
         // corte, que é o que dá para honrar sem inventar ajustes.
         let preset = preset_id.as_deref().and_then(|id| {
-            crate::sessoes::nova::receita::presets_da_sessao(&self.presets_conhecidos, Vec::new())
-                .into_iter()
-                .find(|p| p.id == id)
-                .map(|p| p.preset)
+            crate::sessoes::nova::parametros::presets_da_sessao(
+                &self.presets_conhecidos,
+                Vec::new(),
+            )
+            .into_iter()
+            .find(|p| p.id == id)
+            .map(|p| p.preset)
         });
-        let ajustes = crate::sessoes::nova::receita::ajustes_da_receita(preset.as_ref());
+        let ajustes = crate::sessoes::nova::parametros::ajustes_dos_parametros(preset.as_ref());
         let chave = format!("{preset_id:?}|{proporcao:?}");
         let mut pediu = false;
         for foto in fotos {
             if foto.sessao_id.as_deref() != Some(galeria) || foto.pos_venda_foto_id.is_some() {
                 continue;
             }
-            if self.receita_das_locais.get(&foto.id) == Some(&chave) {
+            if self.parametros_das_locais.get(&foto.id) == Some(&chave) {
                 continue;
             }
-            self.receita_das_locais
+            self.parametros_das_locais
                 .insert(foto.id.clone(), chave.clone());
             // A base é o que a foto tem agora — do espelho do gravador, que
             // anda na hora, e senão do catálogo relido.
-            let base = self.gravador.receita_de(&foto.id).unwrap_or((
+            let base = self.gravador.parametros_de(&foto.id).unwrap_or((
                 persistencia::da_foto(foto),
                 persistencia::corte_da_foto(foto),
             ));
-            self.receita_padrao
+            self.revelacao_padrao
                 .pedir(foto.id.clone(), ajustes, proporcao.clone(), base);
             pediu = true;
         }
@@ -2973,23 +2987,23 @@ impl Aplicativo {
         self.mensagens_dadas.clone()
     }
 
-    /// 🧪 Quantas fotos a receita padrão já pegou — o que o e2e afirma.
+    /// 🧪 Quantas fotos a revelação padrão já pegou — o que o e2e afirma.
     #[cfg(test)]
-    pub(crate) fn receita_padrao_pedida(&self) -> usize {
-        self.receita_padrao.progresso().total
+    pub(crate) fn revelacao_padrao_pedida(&self) -> usize {
+        self.revelacao_padrao.progresso().total
     }
 
-    /// 🧪 A receita padrão ainda anda?
+    /// 🧪 A revelação padrão ainda anda?
     #[cfg(test)]
-    pub(crate) fn receita_padrao_andando(&self) -> bool {
-        self.receita_padrao.progresso().andando()
+    pub(crate) fn revelacao_padrao_andando(&self) -> bool {
+        self.revelacao_padrao.progresso().andando()
     }
 
-    /// Acompanha a receita padrão enquanto ela anda.
+    /// Acompanha a revelação padrão enquanto ela anda.
     ///
     /// 🔑 **Nasce do evento e morre com o trabalho**, como `esperar_a_reposicao`:
     /// um laço eterno para colher um canal que fica vazio a maior parte do dia
-    /// seria custo por nada. O `RevelandoReceita` o liga a cada lote pedido; se
+    /// seria custo por nada. O `RevelandoParametros` o liga a cada lote pedido; se
     /// já estiver ligado, o `is_some` o deixa em paz.
     fn esperar_as_reveladas(&mut self, cx: &mut Context<Self>) {
         if self._reveladas.is_some() {
@@ -3009,20 +3023,20 @@ impl Aplicativo {
         }));
     }
 
-    /// Repassa às grades as fotos que a receita revelou. Devolve se acabou.
+    /// Repassa às grades as fotos que a revelação revelou. Devolve se acabou.
     pub(crate) fn colher_reveladas(&mut self, cx: &mut Context<Self>) -> bool {
         let mut chegou = false;
         let mut de_fora = std::collections::HashMap::new();
         while let Ok(foto_id) = self.reveladas.1.try_recv() {
             chegou = true;
-            // 🔑 **A receita que o serviço gravou chega à Revelação**, que pode
+            // 🔑 **A revelação que o serviço gravou chega à Revelação**, que pode
             // estar com esta foto aberta — e com um ajuste feito em cima da
-            // receita de antes (ver `Revelacao::receita_mudou_por_fora`).
-            if let Some(receita) = self.gravador.receita_de(&foto_id) {
+            // revelação de antes (ver `Revelacao::parametros_mudaram_por_fora`).
+            if let Some(parametros) = self.gravador.parametros_de(&foto_id) {
                 self.revelacao.update(cx, |tela, cx| {
-                    tela.receita_mudou_por_fora(&foto_id, receita, cx)
+                    tela.parametros_mudaram_por_fora(&foto_id, parametros, cx)
                 });
-                de_fora.insert(foto_id.clone(), receita);
+                de_fora.insert(foto_id.clone(), parametros);
             }
             // As duas telas mostram as mesmas fotos; a que não tiver esta na mão
             // não tem o que esquecer, e o `remove` não custa nada.
@@ -3048,7 +3062,7 @@ impl Aplicativo {
         }
         // 🚨 **E à grade, que é de onde a Revelação abre a foto local.** Sem
         // isto, a foto aberta depois do aviso vinha da cópia de antes da
-        // receita padrão, e o primeiro ajuste gravava o neutro por cima (visto
+        // revelação padrão, e o primeiro ajuste gravava o neutro por cima (visto
         // contra a pilha local, 24/set/2026: o serviço gravou às 29,86 s, a
         // Revelação abriu a foto às 33,29 s com o contraste 1,0).
         self.escrever_na_grade(&de_fora, cx);
@@ -3058,8 +3072,8 @@ impl Aplicativo {
         // 🔑 **Só para quando a fila secou E o canal está vazio.** Parar pelo
         // progresso sozinho descartaria o último aviso, e a última foto do lote
         // ficaria com a miniatura velha até alguém rolar a grade.
-        let acabou = !chegou && !self.receita_padrao.progresso().andando();
-        // 🚨 **A subida do ensaio esperava por isto** (C20): enquanto a receita
+        let acabou = !chegou && !self.revelacao_padrao.progresso().andando();
+        // 🚨 **A subida do ensaio esperava por isto** (C20): enquanto a revelação
         // padrão andava, `subir_o_que_falta_do_ensaio` não enfileirava nada,
         // para o BRUTO não chegar ao acervo sem os PARÂMETROS do ensaio. Secou
         // a fila, o ensaio vai.
@@ -3073,7 +3087,7 @@ impl Aplicativo {
     ///
     /// 🔑 **O mesmo gesto por dois caminhos**: a releitura do catálogo (depois
     /// de importar) já traz a lista na mão; aqui ela é buscada, para os pontos
-    /// em que a lista não passa por perto — entrar na sessão e o fim da receita
+    /// em que a lista não passa por perto — entrar na sessão e o fim da revelação
     /// padrão.
     fn tentar_subir_o_ensaio(&mut self, cx: &mut Context<Self>) {
         let Some(galeria) = self.sessao_aberta.clone() else {
@@ -3432,8 +3446,12 @@ impl Aplicativo {
                 }
                 // 🔑 O mesmo desfecho do `Sincronizou`, com nome: o catálogo
                 // mudou e a grade relê. O nome serviu à esteira, acima.
-                PosVendaRecado::ClassificadaSubiu { foto_id, receita } => {
-                    self.receitas_que_subiram.insert(foto_id.clone(), receita);
+                PosVendaRecado::ClassificadaSubiu {
+                    foto_id,
+                    parametros,
+                } => {
+                    self.parametros_que_subiram
+                        .insert(foto_id.clone(), parametros);
                     self.recem_subidas.insert(foto_id);
                     self.ultimo_envio = Some(chrono::Utc::now().timestamp());
                     // 🚨 **A galeria também relê.** A releitura do acervo tira
@@ -3450,9 +3468,9 @@ impl Aplicativo {
                 // revelada. Sem ela o operador salvaria e continuaria vendo o
                 // "antes" — o pior desfecho, porque parece que não salvou.
                 PosVendaRecado::RevelacaoSalva { foto_no_site }
-                    if self.receita_mudou_no_envio(&foto_no_site) =>
+                    if self.parametros_mudaram_no_envio(&foto_no_site) =>
                 {
-                    // 🚨 **A receita mudou enquanto a foto subia** — um "Zerar"
+                    // 🚨 **A revelação mudou enquanto a foto subia** — um "Zerar"
                     // ou "Sincronizar" no meio do envio. O servidor tem a de
                     // antes; a nova fica pendente (fila, depósito e prévia
                     // local), e o próximo "Salvar" a leva. Dar baixa aqui era
@@ -3467,7 +3485,7 @@ impl Aplicativo {
                     mudou = true;
                 }
                 PosVendaRecado::RevelacaoSalva { foto_no_site } => {
-                    // 🔑 **Subiu: sai do depósito.** A partir daqui a receita
+                    // 🔑 **Subiu: sai do depósito.** A partir daqui a revelação
                     // desta foto é a do servidor, e deixá-la também aqui faria
                     // a abertura seguinte preferir uma cópia que ninguém mais
                     // atualiza — a foto voltaria ao que era antes do envio no
@@ -3479,7 +3497,7 @@ impl Aplicativo {
                     // 🔑 **A prévia local sai junto.** Ela existia porque o
                     // servidor ainda não tinha a revelação; agora tem, e é ele
                     // quem manda — uma cópia local que ninguém mais atualiza
-                    // faria a grade mostrar para sempre a receita deste
+                    // faria a grade mostrar para sempre a revelação deste
                     // momento. É o `apagarPreviaLocal` da web.
                     // ⚠️ **Mas só quando a miniatura nova chegar** — quem avisa
                     // é a grade (`PreviaLocalVencida`), pela função de sempre
@@ -3524,7 +3542,7 @@ impl Aplicativo {
                 PosVendaRecado::EnvioFalhou { alvo, .. }
                     if self.tiradas_do_site.contains(&alvo) =>
                 {
-                    self.receitas_no_ar.remove(&alvo);
+                    self.parametros_no_ar.remove(&alvo);
                     self.subindo_sozinhas.remove(&alvo);
                     self.revelacao
                         .update(cx, |tela, cx| tela.definir_gerando_jpeg(false, cx));
@@ -3535,9 +3553,9 @@ impl Aplicativo {
                     if vai_repetir {
                         continue;
                     }
-                    // A receita que falhou não está mais no ar; a de um
+                    // A revelação que falhou não está mais no ar; a de um
                     // "Salvar" feito enquanto ela subia ainda tem a vez dela.
-                    self.receitas_no_ar.remove(&alvo);
+                    self.parametros_no_ar.remove(&alvo);
                     self.reenviar_se_pedido(&alvo, cx);
                     // Uma falha definitiva não pode bloquear uma nova
                     // tentativa depois que o operador corrigir a causa —
@@ -3791,7 +3809,7 @@ impl Aplicativo {
         // 🚨 **E a grade precisa saber que ela mudou** (dono, 18/set/2026:
         // *"quando eu mando sincronizar os efeitos na revelação e volto para a
         // galeria, a primeira foto não é atualizada"*). A foto do palco não
-        // entra no lote do "Sincronizar" — ela já está com a receita, e o laço
+        // entra no lote do "Sincronizar" — ela já está com a revelação, e o laço
         // a pula —, então ninguém avisava a grade a respeito dela. A prévia
         // acabou de ser gravada acima; o que faltava era o recado.
         if let Some(id) = aberta {
@@ -3799,7 +3817,7 @@ impl Aplicativo {
             self.detalhe
                 .update(cx, |tela, _| tela.revelada_chegou(&na_grade));
         }
-        self.guardar_as_receitas_do_site(cx);
+        self.guardar_os_parametros_do_site(cx);
         // A grade da sessão diz quais ficaram "não salvas" — os gestos da
         // Revelação mudaram o depósito sem ninguém recontar.
         self.recontar_o_que_falta_subir(cx);
@@ -3926,7 +3944,7 @@ impl Aplicativo {
     ///
     /// 🚨 **A foto do site não tem linha no catálogo**: o id dela é
     /// `site:<uuid>`, e `save_edits` responde `PhotoNotFound` — calado, porque o
-    /// `Gravador` não devolve `Result`. Então o único lugar em que a receita
+    /// `Gravador` não devolve `Result`. Então o único lugar em que a revelação
     /// dela existe é a cópia em memória, e a cópia da Revelação morre quando a
     /// tela fecha. Sem isto, revelar uma foto do site e apertar Esc perdia tudo:
     /// a próxima abertura remontava o acervo a partir de `fotos_do_site`, que
@@ -3936,12 +3954,12 @@ impl Aplicativo {
     /// gesto numa foto do site vai para `revelacoes_do_site`, no mesmo SQLite do
     /// catálogo. Isto aqui é o espelho da tela; aquilo é o que atravessa o
     /// fechar do app.
-    fn guardar_as_receitas_do_site(&mut self, cx: &mut Context<Self>) {
-        self.levar_as_receitas_para_a_grade(cx);
+    fn guardar_os_parametros_do_site(&mut self, cx: &mut Context<Self>) {
+        self.levar_os_parametros_para_a_grade(cx);
         if self.fotos_do_site.is_empty() {
             return;
         }
-        let receitas: Vec<(String, Ajustes, persistencia::Corte)> = self
+        let parametros: Vec<(String, Ajustes, persistencia::Corte)> = self
             .revelacao
             .read(cx)
             .acervo()
@@ -3955,22 +3973,22 @@ impl Aplicativo {
                 )
             })
             .collect();
-        for (id, ajustes, corte) in receitas {
+        for (id, ajustes, corte) in parametros {
             if let Some(foto) = self.fotos_do_site.iter_mut().find(|f| f.id == id) {
                 persistencia::na_foto(foto, ajustes, corte);
             }
         }
     }
 
-    /// Escreve na grade a receita que a Revelação deixou em cada foto.
+    /// Escreve na grade a revelação que a Revelação deixou em cada foto.
     ///
     /// 🚨 **A tela do cliente lê a foto em foco da grade** (`foto_para_o_cliente`),
     /// e a grade guardava a cópia de antes da revelação: sair do editor fazia o
     /// cliente, que acabou de ver a foto revelada, ver de novo a foto crua — até
     /// a próxima releitura do catálogo, que a foto do site nem tem. Achado pelo
     /// cenário de ponta a ponta da tela do cliente (2026-09-17).
-    fn levar_as_receitas_para_a_grade(&mut self, cx: &mut Context<Self>) {
-        let receitas: std::collections::HashMap<String, (Ajustes, persistencia::Corte)> = self
+    fn levar_os_parametros_para_a_grade(&mut self, cx: &mut Context<Self>) {
+        let parametros: std::collections::HashMap<String, (Ajustes, persistencia::Corte)> = self
             .revelacao
             .read(cx)
             .acervo()
@@ -3982,17 +4000,17 @@ impl Aplicativo {
                 )
             })
             .collect();
-        self.escrever_na_grade(&receitas, cx);
+        self.escrever_na_grade(&parametros, cx);
     }
 
-    /// Escreve receitas na cópia do catálogo que a grade guarda — e de onde a
+    /// Escreve revelações na cópia do catálogo que a grade guarda — e de onde a
     /// Revelação abre as fotos locais (`revelar_da_sessao`).
     fn escrever_na_grade(
         &mut self,
-        receitas: &std::collections::HashMap<String, (Ajustes, persistencia::Corte)>,
+        parametros: &std::collections::HashMap<String, (Ajustes, persistencia::Corte)>,
         cx: &mut Context<Self>,
     ) {
-        if receitas.is_empty() {
+        if parametros.is_empty() {
             return;
         }
         let mut mudou = false;
@@ -4002,7 +4020,7 @@ impl Aplicativo {
             .todas_as_fotos()
             .into_iter()
             .map(|mut foto| {
-                if let Some((ajustes, corte)) = receitas.get(&foto.id) {
+                if let Some((ajustes, corte)) = parametros.get(&foto.id) {
                     let antes = (
                         persistencia::da_foto(&foto),
                         persistencia::corte_da_foto(&foto),
@@ -4080,7 +4098,7 @@ impl Aplicativo {
     ///
     /// # O que acontece com cada marcada
     ///
-    /// A **receita** dela recebe os grupos escolhidos na caixa e vai para o
+    /// A **revelação** dela recebe os grupos escolhidos na caixa e vai para o
     /// catálogo; o que não foi escolhido fica como estava, e o enquadramento
     /// só viaja se o operador o ligou (`sincronizacao::mesclar`). É o que
     /// `colar_revelacao` já fazia sem flags — e com a mesma regra: **cada
@@ -4099,7 +4117,7 @@ impl Aplicativo {
     ///
     /// O trabalho pesado não sumiu — mudou para onde ele é inevitável: o
     /// "Salvar na galeria", que agora sobe a aberta **e** as que ficaram no
-    /// depósito (`Gravador::guardadas_do_site`). Até lá a receita está gravada,
+    /// depósito (`Gravador::guardadas_do_site`). Até lá a revelação está gravada,
     /// a tira e a grade já mostram o resultado, e o cliente continua vendo o
     /// JPEG de antes — que é exatamente o que "ainda não salvei" significa.
     pub fn sincronizar_revelacao(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -4107,7 +4125,7 @@ impl Aplicativo {
         if !self.pode_trabalhar() {
             return;
         }
-        // O gesto a meio caminho fecha antes: a receita que viaja é a que o
+        // O gesto a meio caminho fecha antes: a revelação que viaja é a que o
         // operador está vendo, inclusive o arrasto de meio segundo atrás.
         self.revelacao
             .update(cx, |tela, _cx| tela.gravar_o_que_estiver_pendente());
@@ -4142,7 +4160,7 @@ impl Aplicativo {
             } else {
                 persistencia::corte_da_foto(alvo)
             };
-            // 🚨 **Só a receita.** Para a que só existe no site isto a põe no
+            // 🚨 **Só a revelação.** Para a que só existe no site isto a põe no
             // depósito; para a do catálogo, no catálogo. Nos dois casos o que
             // está no servidor continua sendo o JPEG de antes — e é por isso
             // que o aviso abaixo diz onde elas estão.
@@ -4165,12 +4183,12 @@ impl Aplicativo {
             .update(cx, |tela, cx| tela.aplicar_sincronizadas(&gravadas, cx));
         // 🚨 **E as miniaturas, senão nada muda na tela** (dono, 18/set/2026:
         // *"não atualiza o filmstrip da revelação, dá a sensação de que não
-        // aconteceu nada"*). O "Sincronizar" copia só a receita — o JPEG do
+        // aconteceu nada"*). O "Sincronizar" copia só a revelação — o JPEG do
         // servidor continua o de antes —, então a única coisa que pode mostrar
         // o efeito antes de salvar é a prévia local. É o que a web faz desde
         // 11/set/2026 (`usar-previas-reveladas.ts`), pelo mesmo relato.
         for (id, ajustes_dela, corte_dela) in &gravadas {
-            self.pedir_a_previa_da_receita(id, *ajustes_dela, *corte_dela, cx);
+            self.pedir_a_previa_dos_parametros(id, *ajustes_dela, *corte_dela, cx);
         }
         self.esperar_as_reveladas(cx);
         self.reler_o_acervo(cx);
@@ -4188,7 +4206,7 @@ impl Aplicativo {
     /// Devolve ao neutro as fotos marcadas na tira — o "Zerar tudo" em lote.
     ///
     /// 🔑 **É o caminho do [`Self::sincronizar_revelacao`], com o neutro no
-    /// lugar da receita da foto aberta**: grava, atualiza as cópias da tira e
+    /// lugar da revelação da foto aberta**: grava, atualiza as cópias da tira e
     /// enfileira para subir. A que está no palco não vem por aqui — a tela já a
     /// zerou pelo histórico, para o `Cmd+Z` desfazer.
     ///
@@ -4238,10 +4256,10 @@ impl Aplicativo {
         // 🚨 **As prévias das zeradas viram o neutro** — senão o gesto muda o
         // banco e não muda a tela (dono, 18/set/2026). Apagá-las não bastava:
         // na foto do site, sem prévia a tira volta à imagem da galeria, que
-        // ainda tem a receita até o "Salvar" (dono, 21/set/2026). É o que a web
+        // ainda tem a revelação até o "Salvar" (dono, 21/set/2026). É o que a web
         // faz — a miniatura neutra refeita pelo Worker.
         for (id, ajustes_dela, corte_dela) in &gravadas {
-            self.pedir_a_previa_da_receita(id, *ajustes_dela, *corte_dela, cx);
+            self.pedir_a_previa_dos_parametros(id, *ajustes_dela, *corte_dela, cx);
         }
         self.esperar_as_reveladas(cx);
         self.reler_o_acervo(cx);
@@ -4256,13 +4274,13 @@ impl Aplicativo {
         cx.notify();
     }
 
-    /// Pede a prévia local desta receita — a do "Sincronizar" e a do "Zerar".
+    /// Pede a prévia local desta revelação — a do "Sincronizar" e a do "Zerar".
     ///
     /// 🔑 **A foto do site precisa da cópia de trabalho** (o bruto reduzido): é
     /// dela que a prévia nasce, e não da imagem da galeria, que já traz a
-    /// receita antiga. Ela só está no cache das fotos já abertas na Revelação;
+    /// revelação antiga. Ela só está no cache das fotos já abertas na Revelação;
     /// para as outras, o download sai aqui, e o serviço espera por ele.
-    fn pedir_a_previa_da_receita(
+    fn pedir_a_previa_dos_parametros(
         &mut self,
         foto_id: &str,
         ajustes: Ajustes,
@@ -4279,7 +4297,7 @@ impl Aplicativo {
                 self.pedir_a_copia_de_trabalho(sessao, foto_id.to_string(), no_site, cx);
             }
         }
-        self.receita_padrao
+        self.revelacao_padrao
             .pedir_a_miniatura(foto_id.to_string(), ajustes, corte);
     }
 
@@ -4288,7 +4306,7 @@ impl Aplicativo {
     ///
     /// 🔑 **Uma função só para os dois sentidos.** Ela nasce quando a Revelação
     /// grava (`guardar_a_revelada_no_cache`) e morre em três situações: a foto
-    /// subiu (o servidor passou a ser mais novo), a receita voltou ao neutro, ou
+    /// subiu (o servidor passou a ser mais novo), a revelação voltou ao neutro, ou
     /// o lote foi zerado. Nas três, quem desenha precisa ser avisado — senão a
     /// tela continua mostrando o que já não existe.
     pub(crate) fn esquecer_a_previa_local(&mut self, foto_id: &str, cx: &mut Context<Self>) {
@@ -4525,7 +4543,7 @@ impl Aplicativo {
         }
     }
 
-    /// Leva à segunda tela a foto de agora, com a receita de agora — se uma
+    /// Leva à segunda tela a foto de agora, com a revelação de agora — se uma
     /// das duas mudou (ou se `forcar`).
     ///
     /// 🔑 **O cliente vê a edição acontecendo** (dono, 2026-09-11, no site):
@@ -4556,7 +4574,7 @@ impl Aplicativo {
         let na_revelacao = self.tela == Tela::Revelacao
             && self.revelacao.read(cx).foto_aberta().map(|f| &f.id) == Some(&foto.id);
         let (ajustes, corte) = if na_revelacao {
-            self.revelacao.read(cx).receita_para_o_cliente()
+            self.revelacao.read(cx).parametros_para_o_cliente()
         } else {
             (
                 persistencia::da_foto(&foto),
@@ -4617,7 +4635,7 @@ impl Aplicativo {
 
     /// Leva o par do Comparar à segunda tela — se ele mudou (ou se `forcar`).
     ///
-    /// 🔑 **A aberta vai com a receita da tela**, como na foto única; a outra,
+    /// 🔑 **A aberta vai com a revelação da tela**, como na foto única; a outra,
     /// com a do catálogo — a mesma com que a Revelação a mostra ao lado.
     fn comparar_no_cliente(
         &mut self,
@@ -4636,14 +4654,14 @@ impl Aplicativo {
                     PhotoViewModel,
                     Ajustes,
                     CropSettings,
-                    Arc<ReceitaLocalDoCliente>,
+                    Arc<ParametrosLocaisDoCliente>,
                 )>,
             > = [esquerda, direita]
                 .into_iter()
                 .map(|posicao| {
                     let foto = revelacao.acervo().get(posicao)?.clone();
                     let (ajustes, corte, locais) = if posicao == revelacao.posicao() {
-                        let (a, c) = revelacao.receita_para_o_cliente();
+                        let (a, c) = revelacao.parametros_para_o_cliente();
                         (a, c, revelacao.locais())
                     } else {
                         (
@@ -4932,7 +4950,7 @@ impl Aplicativo {
                 self.esperar_as_baixas(1, cx);
             }
             // A foto que ainda só está no disco sai pela exportação local, que
-            // lê a receita gravada — por isso o gesto em curso fecha antes.
+            // lê a revelação gravada — por isso o gesto em curso fecha antes.
             _ => {
                 self.revelacao
                     .update(cx, |tela, _| tela.gravar_o_que_estiver_pendente());
@@ -5003,7 +5021,7 @@ impl Aplicativo {
     /// # E as que o "Sincronizar" deixou pendentes
     ///
     /// 🔑 **Sobem aqui, junto.** Desde 2026-09-11 o "Sincronizar" copia só a
-    /// receita (ver [`Self::sincronizar_revelacao`]), e este é o momento em que
+    /// revelação (ver [`Self::sincronizar_revelacao`]), e este é o momento em que
     /// revelar é inevitável: o que estiver no depósito e for desta sessão entra
     /// no mesmo lote da aberta. Sem isto, sincronizar seria um botão que grava
     /// numa gaveta que ninguém esvazia — e o cliente continuaria vendo o JPEG
@@ -5041,7 +5059,7 @@ impl Aplicativo {
         let (_local, no_site) = foto;
 
         // 🔄 **Com um lote no ar, o novo "Salvar" soma a ele** (2026-09-21).
-        // Antes ele voltava calado: a receita nova de uma foto que ainda
+        // Antes ele voltava calado: a revelação nova de uma foto que ainda
         // esperava na esteira não subia, e o operador achava que tinha salvo.
         // O site enfileira do mesmo jeito (`naFilaDeAcoes`).
         // O que está pendente vai para o banco **antes** do envio: os mesmos
@@ -5049,12 +5067,12 @@ impl Aplicativo {
         // responder (`contar_o_salvar`).
         self.revelacao.update(cx, |tela, _cx| {
             tela.gravar_o_que_estiver_pendente();
-            // 🔑 A prévia da foto aberta **antes** de a receita dela ir ao
+            // 🔑 A prévia da foto aberta **antes** de a revelação dela ir ao
             // site: `trazer_da_revelacao_as_que_subiram` a leva para o id do
             // site, e a de antes deste ajuste levaria o efeito velho.
             tela.guardar_a_revelada_no_cache();
         });
-        self.guardar_as_receitas_do_site(cx);
+        self.guardar_os_parametros_do_site(cx);
         self.trazer_da_revelacao_as_que_subiram(cx);
 
         if self.sessao().is_none() {
@@ -5062,7 +5080,7 @@ impl Aplicativo {
         }
 
         // A aberta primeiro, quando ela é do site; e em seguida as que o
-        // "Sincronizar" deixou só com a receita, das duas procedências.
+        // "Sincronizar" deixou só com a revelação, das duas procedências.
         let mut lote: Vec<(String, Ajustes, CropSettings)> = Vec::new();
         // 🚨 **Nunca a comprada** — o `if (podeRevelar) salvar()` do site. Ela
         // não se revela, mas as pendentes atrás dela sobem assim mesmo.
@@ -5115,7 +5133,7 @@ impl Aplicativo {
         // *"Revelando em segundo plano. Pode continuar com o cliente"*. Segurar
         // o editor por uma ida à rede de segundos, no meio de uma revelação em
         // série com o cliente na frente, custa mais do que protege — e o que se
-        // perderia numa falha é nada: a receita já está no banco local, a foto
+        // perderia numa falha é nada: a revelação já está no banco local, a foto
         // continua no depósito e a recusa aparece no canto dos envios.
         //
         // ⚠️ **O envio continua contado** (`Natureza::Envio`): ele aparece em
@@ -5123,7 +5141,7 @@ impl Aplicativo {
         self.sair_da_revelacao(cx);
         self.avisar_onde_esta_olhando(
             match quantas {
-                // 🚨 Todas já subiam com esta receita: dizer "0 fotos na fila"
+                // 🚨 Todas já subiam com esta revelação: dizer "0 fotos na fila"
                 // logo depois de sincronizar 48 parecia que nada foi salvo
                 // (visto rodando o app, 27/set/2026).
                 0 if no_lote == 1 => {
@@ -5138,7 +5156,7 @@ impl Aplicativo {
     }
 
     /// Empurra revelações na esteira e conta as respostas que virão — o miolo
-    /// do "Salvar na galeria", e o que leva a receita que perdeu a subida.
+    /// do "Salvar na galeria", e o que leva a revelação que perdeu a subida.
     ///
     /// Devolve quantas respostas novas o lote vai receber.
     fn mandar_as_revelacoes(
@@ -5154,13 +5172,13 @@ impl Aplicativo {
                 ajustes: Box::new(ajustes),
                 corte: corte.clone(),
             });
-            // 🚨 **A que está no ar sobe de novo, com esta receita, quando a de
+            // 🚨 **A que está no ar sobe de novo, com esta revelação, quando a de
             // antes responder** — senão o segundo "Salvar" deixava no site a
-            // receita do primeiro (visto rodando o app: zerar e salvar com o
+            // revelação do primeiro (visto rodando o app: zerar e salvar com o
             // lote de P&B subindo terminava com duas fotos em P&B).
             if entrada == crate::envios::Entrada::JaNoAr
-                && !self.receitas_no_ar.get(&no_site).is_some_and(|no_ar| {
-                    crate::pos_venda::porta::mesma_receita_em_texto(no_ar, &json)
+                && !self.parametros_no_ar.get(&no_site).is_some_and(|no_ar| {
+                    crate::pos_venda::porta::mesmos_parametros_em_texto(no_ar, &json)
                 })
             {
                 if self
@@ -5173,11 +5191,11 @@ impl Aplicativo {
                 }
                 continue;
             }
-            // 🔑 Só o que vai sair com **esta** receita a registra: a que já
+            // 🔑 Só o que vai sair com **esta** revelação a registra: a que já
             // está no ar sobe a de antes, e é contra ela que a resposta confere.
             use crate::envios::Entrada;
             if matches!(entrada, Entrada::Nova | Entrada::Substituida) {
-                self.receitas_no_ar.insert(no_site, json);
+                self.parametros_no_ar.insert(no_site, json);
             }
             if entrada == Entrada::Nova {
                 quantas += 1;
@@ -5196,16 +5214,16 @@ impl Aplicativo {
         quantas
     }
 
-    /// Põe uma foto da galeria na fila de envio — a última receita ganha.
+    /// Põe uma foto da galeria na fila de envio — a última revelação ganha.
     ///
     /// 🔑 **Uma entrada por foto.** Sincronizar duas vezes seguidas com ajustes
     /// diferentes mandaria a foto duas vezes ao site, a segunda desfazendo a
     /// primeira depois de dois downloads e dois JPEGs — e a ordem de chegada
     /// decidiria o que o cliente vê.
-    /// A receita desta foto hoje é outra que a que subiu? Tira o registro do
+    /// A revelação desta foto hoje é outra que a que subiu? Tira o registro do
     /// envio de qualquer jeito — a resposta chegou.
     ///
-    /// 🔑 A receita de hoje é a da fila do "Salvar" (`a_subir`), senão a do
+    /// 🔑 A revelação de hoje é a da fila do "Salvar" (`a_subir`), senão a do
     /// depósito — a mesma ordem em que `salvar_na_galeria` monta o lote.
     /// Manda de novo a foto que um "Salvar" pegou no ar — ver
     /// [`Self::reenviar_depois`].
@@ -5213,7 +5231,7 @@ impl Aplicativo {
         let Some((ajustes, corte)) = self.reenviar_depois.remove(foto_no_site) else {
             return;
         };
-        self.receitas_no_ar.insert(
+        self.parametros_no_ar.insert(
             foto_no_site.to_string(),
             crate::pos_venda::porta::ajustes_em_json(&ajustes, &corte).to_string(),
         );
@@ -5228,8 +5246,8 @@ impl Aplicativo {
         self.despachar_os_envios(cx);
     }
 
-    fn receita_mudou_no_envio(&mut self, foto_no_site: &str) -> bool {
-        let Some(enviada) = self.receitas_no_ar.remove(foto_no_site) else {
+    fn parametros_mudaram_no_envio(&mut self, foto_no_site: &str) -> bool {
+        let Some(enviada) = self.parametros_no_ar.remove(foto_no_site) else {
             return false;
         };
         let atual = self
@@ -5246,12 +5264,13 @@ impl Aplicativo {
                     .find(|(id, _)| id == foto_no_site)
                     .map(|(_, json)| json)
             });
-        atual
-            .is_some_and(|atual| !crate::pos_venda::porta::mesma_receita_em_texto(&atual, &enviada))
+        atual.is_some_and(|atual| {
+            !crate::pos_venda::porta::mesmos_parametros_em_texto(&atual, &enviada)
+        })
     }
 
     /// Guarda o que a galeria tem de cada foto, na hora em que o site
-    /// responde — ver [`Self::receitas_do_site`] e [`Self::locais_no_site`].
+    /// responde — ver [`Self::parametros_do_site`] e [`Self::locais_no_site`].
     fn lembrar_o_que_o_site_tem(&mut self, fotos: &[PhotoViewModel]) {
         let no_deposito: std::collections::HashSet<String> = self
             .gravador
@@ -5263,13 +5282,13 @@ impl Aplicativo {
             let Some(no_site) = foto.pos_venda_foto_id.clone() else {
                 continue;
             };
-            let receita = (
+            let parametros = (
                 persistencia::da_foto(foto),
                 persistencia::corte_da_foto(foto),
             );
             // A que nunca foi revelada no site não tem máscara lá.
-            let nunca_revelada = persistencia::mesma_receita(
-                receita,
+            let nunca_revelada = persistencia::mesmos_parametros(
+                parametros,
                 (Ajustes::default(), persistencia::Corte::default()),
             );
             if !no_deposito.contains(&no_site) {
@@ -5278,7 +5297,7 @@ impl Aplicativo {
             } else if nunca_revelada {
                 self.locais_no_site.entry(no_site.clone()).or_insert(None);
             }
-            self.receitas_do_site.insert(no_site, receita);
+            self.parametros_do_site.insert(no_site, parametros);
         }
     }
 
@@ -5326,17 +5345,17 @@ impl Aplicativo {
         for no_site in ids {
             // Esperando a vez: sai da esteira. No ar: fica.
             let na_fila = self.esteira.tirar_da_fila(&no_site);
-            if !na_fila && self.receitas_no_ar.contains_key(&no_site) {
+            if !na_fila && self.parametros_no_ar.contains_key(&no_site) {
                 subindo += 1;
                 continue;
             }
             if na_fila {
-                self.receitas_no_ar.remove(&no_site);
+                self.parametros_no_ar.remove(&no_site);
                 self.sincronias_pendentes = self.sincronias_pendentes.saturating_sub(1);
                 self.tirar_do_lote_do_salvar(cx);
             }
             let (ajustes, corte) = self
-                .receitas_do_site
+                .parametros_do_site
                 .get(&no_site)
                 .copied()
                 .unwrap_or_default();
@@ -5354,17 +5373,23 @@ impl Aplicativo {
                 .unwrap_or_else(|| (do_site, "a foto".into()));
 
             if aberta.as_deref() == Some(no_site.as_str()) {
-                let receita_local = locais.clone().map(|texto| {
+                let parametros_locais = locais.clone().map(|texto| {
                     Arc::new(
                         texto
                             .and_then(|t| {
-                                infrastructure::gpu_adjustments::ReceitaLocal::de_json(&t).ok()
+                                infrastructure::gpu_adjustments::ParametrosLocais::de_json(&t).ok()
                             })
                             .unwrap_or_default(),
                     )
                 });
                 self.revelacao.update(cx, |tela, cx| {
-                    tela.assumir_a_receita_do_site(ajustes, corte, receita_local, window, cx)
+                    tela.assumir_os_parametros_do_site(
+                        ajustes,
+                        corte,
+                        parametros_locais,
+                        window,
+                        cx,
+                    )
                 });
             } else {
                 if let Some(locais) = locais {
@@ -5376,7 +5401,7 @@ impl Aplicativo {
                 }
                 outras.push((id.clone(), ajustes, corte));
             }
-            // 🔑 A foto do catálogo não tem depósito: a receita do site volta
+            // 🔑 A foto do catálogo não tem depósito: a revelação do site volta
             // para a linha dela.
             if persistencia::id_no_site(&id).is_none() {
                 self.gravador.gravar(id.clone(), ajustes, corte);
@@ -6542,7 +6567,7 @@ fn do_site_para_a_grade(
         revelacao_travada: foto.estado == EstadoDaFotoNoSite::Comprada || foto.apagada,
         ..Default::default()
     };
-    // 🔑 **A receita vem junto.** É o `completar(foto.ajustes)` do editor do
+    // 🔑 **A revelação vem junto.** É o `completar(foto.ajustes)` do editor do
     // site: sem isto a foto já revelada abria aqui com os 53 sliders no
     // neutro, e "sincronizar" a partir dela mandava o neutro às outras.
     if let Some(json) = &foto.ajustes {
@@ -6617,9 +6642,9 @@ impl Aplicativo {
         app
     }
 
-    /// A foto e a receita que a segunda tela recebeu por último — é o que os
+    /// A foto e a revelação que a segunda tela recebeu por último — é o que os
     /// cenários de ponta a ponta (`crate::e2e`) conferem na tela do cliente.
-    pub(crate) fn receita_no_cliente(&self) -> Option<(String, Ajustes)> {
+    pub(crate) fn parametros_no_cliente(&self) -> Option<(String, Ajustes)> {
         self.no_cliente
             .as_ref()
             .map(|(id, ajustes, _, _)| (id.clone(), *ajustes))
@@ -6628,7 +6653,7 @@ impl Aplicativo {
     /// O serviço das prévias ainda tem pedido na fila? Para o teste esperar a
     /// thread dele, que anda com relógio de verdade.
     pub(crate) fn previas_andando(&self) -> bool {
-        self.receita_padrao.progresso().andando()
+        self.revelacao_padrao.progresso().andando()
     }
 
     /// O que o site recusou nesta abertura — o canto "N envios recusados".
@@ -6810,7 +6835,7 @@ mod testes {
         DynamicImage::ImageRgba8(img)
     }
 
-    /// Uma foto do site como a API a devolve, com ou sem receita.
+    /// Uma foto do site como a API a devolve, com ou sem revelação.
     fn foto_do_site(
         id: &str,
         ajustes: Option<serde_json::Value>,
@@ -6837,12 +6862,12 @@ mod testes {
     /// 🚨 **O cenário do dono, 7/set/2026: "a sincronização não funciona".**
     ///
     /// Três fotos do site na tira, a primeira já revelada em sépia. Ela abria
-    /// com os sliders no neutro (a receita ficava no `http.rs`) e mostrando a
+    /// com os sliders no neutro (a revelação ficava no `http.rs`) e mostrando a
     /// miniatura revelada da galeria como se fosse o bruto; "Sincronizar 3"
     /// mandava esse neutro às outras duas — e nada mudava. Este teste anda o
     /// caminho inteiro: abrir, trocar de foto pela seta, voltar, sincronizar.
     #[gpui_kit::test]
-    fn sincronizar_a_partir_da_foto_do_site_leva_a_receita_dela_e_nao_o_neutro(
+    fn sincronizar_a_partir_da_foto_do_site_leva_os_parametros_dela_e_nao_o_neutro(
         cx: &mut TestAppContext,
     ) {
         use crate::revelacao::sincronizacao::Escolha;
@@ -6960,7 +6985,11 @@ mod testes {
             .update(cx, |app, window, cx| {
                 app.revelacao.update(cx, |tela, cx| {
                     tela.andar(-1, window, cx);
-                    assert_eq!(tela.ajustes().saturation, -1.0, "a receita voltou com ela");
+                    assert_eq!(
+                        tela.ajustes().saturation,
+                        -1.0,
+                        "a revelação voltou com ela"
+                    );
                     tela.marcar_todas(cx);
                     tela.definir_escolha_da_sincronizacao(Escolha::default());
                     assert_eq!(tela.alvos_da_sincronizacao().len(), 3);
@@ -6969,7 +6998,7 @@ mod testes {
             })
             .expect("a janela deve estar aberta");
 
-        // 🚨 **Sincronizar não sobe nada** — ele copia a receita, e só. Era o
+        // 🚨 **Sincronizar não sobe nada** — ele copia a revelação, e só. Era o
         // "muito lento" de 11/set/2026: três fotos, três downloads do original
         // e três JPEGs de 24 MP para um gesto que é uma casca de parâmetros.
         assert!(
@@ -6979,7 +7008,7 @@ mod testes {
         );
 
         // E é o "Salvar na galeria" que esvazia a gaveta: a aberta e as duas
-        // que ficaram só com a receita sobem no mesmo lote.
+        // que ficaram só com a revelação sobem no mesmo lote.
         janela
             .update(cx, |app, window, cx| {
                 app.salvar_na_galeria(window, cx);
@@ -6991,13 +7020,13 @@ mod testes {
         for (id, ajustes, _) in &reveladas {
             assert_eq!(
                 ajustes.saturation, -1.0,
-                "{id} recebe a receita da aberta — era o neutro que ia"
+                "{id} recebe a revelação da aberta — era o neutro que ia"
             );
             assert_eq!(ajustes.split_shadow_hue, 35.0, "{id}");
         }
     }
 
-    /// 🚨 **Revelar uma foto do site, sair e voltar: a receita tem de estar
+    /// 🚨 **Revelar uma foto do site, sair e voltar: a revelação tem de estar
     /// lá.**
     ///
     /// Achado do dono em 8/set: *"parece que os parâmetros de edição não estão
@@ -7010,7 +7039,7 @@ mod testes {
     /// O teste anda o gesto inteiro: revela, sai pela barra, e manda revelar de
     /// novo — que remonta o acervo a partir de `fotos_do_site`.
     #[gpui_kit::test]
-    fn revelar_a_foto_do_site_sair_e_voltar_traz_a_receita(cx: &mut TestAppContext) {
+    fn revelar_a_foto_do_site_sair_e_voltar_traz_os_parametros(cx: &mut TestAppContext) {
         use crate::sessoes::detalhe::FotoARevelar;
 
         let (previews, _dir) = previews_descartaveis();
@@ -7076,7 +7105,7 @@ mod testes {
     /// 🚨 **O depósito local ganha da galeria — e sai quando a foto sobe.**
     ///
     /// É a última metade do *"os parâmetros de edição não estão sendo
-    /// gravados"* (dono, 8/set/2026): a receita de uma foto do site que ainda
+    /// gravados"* (dono, 8/set/2026): a revelação de uma foto do site que ainda
     /// não subiu tem de atravessar o fechar do app. Ela mora em
     /// `revelacoes_do_site`, no mesmo SQLite do catálogo, e é lida na abertura;
     /// aqui o `GravadorDeMentira` faz o papel de "o app achou isto lá".
@@ -7115,7 +7144,7 @@ mod testes {
 
         janela
             .update(cx, |app, window, cx| {
-                // A API responde a receita **de quando a foto subiu** — outra.
+                // A API responde a revelação **de quando a foto subiu** — outra.
                 app.atender_a_sessao(
                     &DetalhePedido::FotosDoSite(vec![foto_do_site(
                         "remota-1",
@@ -7252,7 +7281,7 @@ mod testes {
         janela
             .update(cx, |app, window, cx| {
                 let tela = app.revelacao.read(cx);
-                assert_eq!(tela.ajustes().exposure, 0.25, "a receita da galeria");
+                assert_eq!(tela.ajustes().exposure, 0.25, "a revelação da galeria");
                 assert!(!tela.aberta_a_salvar(), "nada mais a salvar nesta foto");
                 assert_eq!(tela.quantas_a_descartar(), 1, "a outra continua pendente");
                 assert_eq!(no_deposito(&gravador), vec!["remota-2".to_string()]);
@@ -7282,7 +7311,7 @@ mod testes {
     }
 
     /// 🗑️ **"Descartar todas" leva também as que não estão abertas**: saem do
-    /// depósito, e as cópias da tira e da grade passam a ter a receita da
+    /// depósito, e as cópias da tira e da grade passam a ter a revelação da
     /// galeria — a que nunca foi revelada lá volta ao neutro.
     #[gpui_kit::test]
     fn descartar_todas_devolve_as_outras_ao_que_a_galeria_tem(cx: &mut TestAppContext) {
@@ -7393,7 +7422,7 @@ mod testes {
         let (janela, gravador, _dir) = sessao_com_duas_nao_salvas(cx);
         janela
             .update(cx, |app, window, cx| {
-                app.receitas_no_ar
+                app.parametros_no_ar
                     .insert("remota-2".into(), r#"{"exposure":0.8}"#.into());
                 app.descartar_as_edicoes(vec!["remota-2".into()], window, cx);
             })
@@ -7404,15 +7433,15 @@ mod testes {
         );
     }
 
-    /// 🚨 **A receita que muda enquanto a foto sobe não se perde.**
+    /// 🚨 **A revelação que muda enquanto a foto sobe não se perde.**
     ///
-    /// O "Salvar" mandou a receita A; antes de o servidor responder, o operador
-    /// zerou a foto (receita B). A confirmação chegava e tirava a foto da fila e
+    /// O "Salvar" mandou a revelação A; antes de o servidor responder, o operador
+    /// zerou a foto (revelação B). A confirmação chegava e tirava a foto da fila e
     /// do depósito sem olhar — o B sumia, e o site ficava com o A sem nada
-    /// pendente. O site só dá baixa se a receita ainda for a que subiu
+    /// pendente. O site só dá baixa se a revelação ainda for a que subiu
     /// (`registrar-salva.ts`).
     #[gpui_kit::test]
-    fn a_receita_que_muda_durante_o_envio_continua_pendente(cx: &mut TestAppContext) {
+    fn os_parametros_que_muda_durante_o_envio_continua_pendente(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         cx.update(gpui_kit::init);
         let publicador = Arc::new(PublicadorDeMentira::default());
@@ -7441,17 +7470,17 @@ mod testes {
 
         janela
             .update(cx, |app, _window, cx| {
-                // O envio saiu com a receita A.
+                // O envio saiu com a revelação A.
                 let a = Ajustes {
                     exposure: 1.25,
                     ..Ajustes::default()
                 };
-                app.receitas_no_ar.insert(
+                app.parametros_no_ar.insert(
                     "remota-1".into(),
                     crate::pos_venda::porta::ajustes_em_json(&a, &CropSettings::default())
                         .to_string(),
                 );
-                // No meio do envio, o "Zerar" (receita B).
+                // No meio do envio, o "Zerar" (revelação B).
                 app.enfileirar_para_subir(
                     "remota-1".into(),
                     Ajustes::default(),
@@ -7469,23 +7498,23 @@ mod testes {
                     "o zerar feito durante o envio continua na fila do Salvar"
                 );
                 assert!(
-                    app.receitas_no_ar.is_empty(),
+                    app.parametros_no_ar.is_empty(),
                     "a resposta chegou: o registro do envio sai"
                 );
             })
             .expect("a janela deve estar aberta");
         assert!(
             !gravador.deposito().is_empty(),
-            "e o depósito não perde a receita nova"
+            "e o depósito não perde a revelação nova"
         );
     }
 
     /// 🔄 **O "Salvar" que pega a foto no ar a manda de novo quando ela
-    /// responde**, com a receita nova — como o Worker do site. Visto rodando o
+    /// responde**, com a revelação nova — como o Worker do site. Visto rodando o
     /// app: zerar e salvar com o lote de P&B subindo terminava com duas fotos
     /// em P&B no site.
     #[gpui_kit::test]
-    fn a_foto_pega_no_ar_sobe_de_novo_com_a_receita_nova(cx: &mut TestAppContext) {
+    fn a_foto_pega_no_ar_sobe_de_novo_com_os_parametros_novos(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         cx.update(gpui_kit::init);
         let publicador = Arc::new(PublicadorDeMentira::default());
@@ -7512,7 +7541,7 @@ mod testes {
                     ..Ajustes::default()
                 };
                 // A de P&B está no ar; o segundo "Salvar" pediu o neutro.
-                app.receitas_no_ar.insert(
+                app.parametros_no_ar.insert(
                     "remota-1".into(),
                     crate::pos_venda::porta::ajustes_em_json(&pb, &CropSettings::default())
                         .to_string(),
@@ -7539,7 +7568,7 @@ mod testes {
             reveladas
                 .iter()
                 .any(|(id, ajustes, _)| id == "remota-1" && *ajustes == Ajustes::default()),
-            "a foto subiu de novo com a receita nova: {:?}",
+            "a foto subiu de novo com a revelação nova: {:?}",
             reveladas
                 .iter()
                 .map(|(id, a, _)| (id, a.saturation))
@@ -7547,14 +7576,14 @@ mod testes {
         );
     }
 
-    /// 🚨 **A receita do site chega à grade — e por ela à Revelação.**
+    /// 🚨 **A revelação do site chega à grade — e por ela à Revelação.**
     ///
     /// A API sempre mandou os ajustes por nome; o `http.rs` guardava só "tem ou
     /// não tem". A foto já revelada abria aqui com os 53 sliders no neutro, e
-    /// era essa receita vazia que "sincronizar" levava às outras.
+    /// era essa revelação vazia que "sincronizar" levava às outras.
     #[test]
-    fn a_foto_do_site_traz_a_receita_para_a_grade() {
-        let com_receita = do_site_para_a_grade(
+    fn a_foto_do_site_traz_os_parametros_para_a_grade() {
+        let com_parametros = do_site_para_a_grade(
             &foto_do_site(
                 "remota-1",
                 Some(serde_json::json!({
@@ -7566,12 +7595,16 @@ mod testes {
             ),
             Some("g1".into()),
         );
-        assert_eq!(com_receita.edit_saturation, Some(-1.0));
-        assert_eq!(com_receita.edit_split_shadow_hue, Some(35.0));
-        assert_eq!(com_receita.edit_contrast, Some(1.0), "ausente é o neutro");
-        assert_eq!(com_receita.edit_crop_x, Some(0.1));
-        assert!(persistencia::ja_revelada(&com_receita));
-        assert!(persistencia::so_existe_no_site(&com_receita));
+        assert_eq!(com_parametros.edit_saturation, Some(-1.0));
+        assert_eq!(com_parametros.edit_split_shadow_hue, Some(35.0));
+        assert_eq!(
+            com_parametros.edit_contrast,
+            Some(1.0),
+            "ausente é o neutro"
+        );
+        assert_eq!(com_parametros.edit_crop_x, Some(0.1));
+        assert!(persistencia::ja_revelada(&com_parametros));
+        assert!(persistencia::so_existe_no_site(&com_parametros));
 
         let nunca_revelada = do_site_para_a_grade(&foto_do_site("remota-2", None), None);
         assert_eq!(nunca_revelada.edit_saturation, None);
@@ -10864,7 +10897,7 @@ mod testes {
         );
     }
 
-    /// 🔑 **Sincronizar grava a receita nas marcadas, respeita as flags e
+    /// 🔑 **Sincronizar grava a revelação nas marcadas, respeita as flags e
     /// preserva o corte de cada uma** — o "Sincronizar" do site. E a tira já
     /// sabe: a seta seguinte abre a sincronizada com os sliders novos.
     #[gpui_kit::test]
@@ -11037,12 +11070,12 @@ mod testes {
     /// 🚨 **O ensaio inteiro subia duas vezes.**
     ///
     /// Visto rodando o app com o cartão da D3100 (27/set/2026): cada foto que
-    /// terminava de subir com a receita padrão (Sépia + corte 3:2) voltava para
+    /// terminava de subir com a revelação padrão (Sépia + corte 3:2) voltava para
     /// a fila como revelação, porque o `corte_altura` do catálogo (`f32`) e o
     /// que subiu (`f64`) diferiam em 1 ulp — e a comparação era por texto. O
     /// "Subindo" do canto ficou em 48↔47 o envio inteiro.
     #[gpui_kit::test]
-    fn a_receita_que_subiu_igual_nao_sobe_de_novo(cx: &mut TestAppContext) {
+    fn os_parametros_que_subiu_igual_nao_sobe_de_novo(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         cx.update(gpui_kit::init);
         let mut subida = foto("DSC_2670.JPG");
@@ -11053,7 +11086,7 @@ mod testes {
         subida.edit_crop_y = Some(0.000_585_8);
         subida.edit_crop_width = Some(1.0);
         subida.edit_crop_height = Some(0.998_828_35);
-        // O que a subida mandou: a mesma receita, com o corte em `f64`.
+        // O que a subida mandou: a mesma revelação, com o corte em `f64`.
         let mut que_subiu = crate::pos_venda::porta::ajustes_em_json(
             &persistencia::da_foto(&subida),
             &persistencia::para_crop_settings(&persistencia::corte_da_foto(&subida)),
@@ -11070,13 +11103,13 @@ mod testes {
 
         janela
             .update(cx, |app, _window, cx| {
-                app.receitas_que_subiram
+                app.parametros_que_subiram
                     .insert(subida.id.clone(), Some(que_subiu.to_string()));
-                app.conciliar_a_receita_que_subiu(std::slice::from_ref(&subida), cx);
+                app.conciliar_os_parametros_que_subiu(std::slice::from_ref(&subida), cx);
                 assert_eq!(
                     app.sincronias_pendentes(),
                     0,
-                    "a receita é a mesma: nada sobe de novo"
+                    "a revelação é a mesma: nada sobe de novo"
                 );
             })
             .expect("a janela deve estar aberta");
@@ -11089,7 +11122,7 @@ mod testes {
     /// procura a prévia sob `site:<id>` e caía na galeria em Sépia (visto
     /// rodando o app com o cartão da D3100, 27/set/2026).
     #[gpui_kit::test]
-    fn a_previa_local_acompanha_a_foto_que_subiu_com_a_receita_velha(cx: &mut TestAppContext) {
+    fn a_previa_local_acompanha_a_foto_que_subiu_com_os_parametros_velhos(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         cx.update(gpui_kit::init);
         let mut subida = foto("DSC_2677.JPG");
@@ -11121,10 +11154,10 @@ mod testes {
 
         janela
             .update(cx, |app, _window, cx| {
-                app.receitas_que_subiram
+                app.parametros_que_subiram
                     .insert(subida.id.clone(), Some(que_subiu.to_string()));
-                app.conciliar_a_receita_que_subiu(std::slice::from_ref(&subida), cx);
-                assert_eq!(app.sincronias_pendentes(), 1, "a receita nova sobe");
+                app.conciliar_os_parametros_que_subiu(std::slice::from_ref(&subida), cx);
+                assert_eq!(app.sincronias_pendentes(), 1, "a revelação nova sobe");
                 assert!(
                     previews.tem(
                         &persistencia::chave_da_revelada("site:remota-1"),
@@ -11295,7 +11328,7 @@ mod testes {
                     tela.definir_escolha_da_sincronizacao(Escolha::default());
                 });
                 app.sincronizar_revelacao(window, cx);
-                // Sincronizar copia a receita; quem manda ao site é o salvar.
+                // Sincronizar copia a revelação; quem manda ao site é o salvar.
                 assert_eq!(app.sincronias_pendentes(), 0, "o sincronizar não sobe nada");
                 app.salvar_na_galeria(window, cx);
 

@@ -68,7 +68,7 @@ impl PhotoRepositoryImpl {
         // coluna que ainda não existe no banco de alguém não pode derrubar a
         // leitura do catálogo inteiro.
         let nome_original: Option<String> = row.try_get("nome_original").ok().flatten();
-        let receita: Option<String> = row.try_get("edit_receita").ok().flatten();
+        let parametros: Option<String> = row.try_get("edit_receita").ok().flatten();
         let locais: Option<String> = row.try_get("edit_locais").ok().flatten();
         let is_edited: bool = row.try_get("is_edited").unwrap_or(false);
         let thumbnail_path_str: Option<String> = row.try_get("thumbnail_path").ok();
@@ -375,7 +375,7 @@ impl PhotoRepositoryImpl {
         photo.definir_id_no_site(pos_venda_foto_id);
         photo.definir_sessao(sessao_id);
         photo.definir_nome_original(nome_original);
-        photo.definir_receita(receita);
+        photo.definir_parametros(parametros);
         photo.definir_locais(locais);
         Ok(photo)
     }
@@ -393,7 +393,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
         let pos_venda_foto_id = photo.id_no_site().map(str::to_string);
         let sessao_id = photo.sessao().map(str::to_string);
         let nome_original = photo.nome_original().map(str::to_string);
-        let receita = photo.receita().map(str::to_string);
+        let parametros = photo.parametros().map(str::to_string);
         let locais = photo.locais().map(str::to_string);
         let is_edited = photo.is_edited();
         let imported_at = photo.imported_at().to_rfc3339();
@@ -481,7 +481,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(&pos_venda_foto_id)
         .bind(&sessao_id)
         .bind(&nome_original)
-        .bind(&receita)
+        .bind(&parametros)
         .bind(&locais)
         .bind(is_edited)
         .bind(&imported_at)
@@ -611,7 +611,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
     /// Regrava a foto — **menos a sessão**.
     ///
     /// 🚨 O `sessao_id` fica de fora de propósito: quem muda de sessão é
-    /// [`PhotoRepository::trocar_sessao`], numa tacada. Nota, bandeira e receita
+    /// [`PhotoRepository::trocar_sessao`], numa tacada. Nota, bandeira e revelação
     /// leem a foto antes e regravam depois; com a sessão na lista, uma leitura
     /// de antes da troca devolvia a foto ao rascunho, e ela sumia da sessão
     /// (40 fotos de 24 MB, 12 para trás — 26/set/2026).
@@ -624,7 +624,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
         let comprada_em = photo.comprada_em().map(|d| d.to_rfc3339());
         let pos_venda_foto_id = photo.id_no_site().map(str::to_string);
         let nome_original = photo.nome_original().map(str::to_string);
-        let receita = photo.receita().map(str::to_string);
+        let parametros = photo.parametros().map(str::to_string);
         let is_edited = photo.is_edited();
         let modified_at = photo.modified_at().to_rfc3339();
         let thumbnail_path = photo
@@ -719,7 +719,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(&comprada_em)
         .bind(&pos_venda_foto_id)
         .bind(&nome_original)
-        .bind(&receita)
+        .bind(&parametros)
         .bind(is_edited)
         .bind(&modified_at)
         .bind(metadata)
@@ -800,7 +800,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
     }
 
     async fn atualizar_locais(&self, id: &PhotoId, locais: Option<&str>) -> DomainResult<()> {
-        // Só a coluna da receita local — ver o `update` do trait.
+        // Só a coluna da revelação local — ver o `update` do trait.
         let resultado = sqlx::query("UPDATE photos SET edit_locais = ? WHERE id = ?")
             .bind(locais)
             .bind(id.to_string())

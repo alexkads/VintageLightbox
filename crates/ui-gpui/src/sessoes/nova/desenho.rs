@@ -15,7 +15,7 @@ use gpui_kit::{
 
 use super::associacoes::{self as assoc};
 use super::estado::{self, EstadoDaEtapa};
-use super::receita::Grupo;
+use super::parametros::Grupo;
 use super::tela::{Confirmacao, Fase, ItemDaBusca, NovaSessao, PedidoDaNova, TipoDeBusca};
 use crate::estilo;
 use crate::recursos::Icone;
@@ -146,7 +146,7 @@ impl Render for NovaSessao {
         // As amostras pedidas neste quadro chegam por canal: alguém tem de
         // acordar para recolhê-las.
         //
-        // 🚨 **A receita padrão entra na mesma condição.** Ela revela numa
+        // 🚨 **A revelação padrão entra na mesma condição.** Ela revela numa
         // thread e avisa por canal; sem alguém acordando, o trabalho acontecia
         // no disco e a tela não mudava — as miniaturas ficavam nas de antes e a
         // barra "Preset padrão" parava em 0/N.
@@ -157,7 +157,7 @@ impl Render for NovaSessao {
         if self.amostras.esperando()
             || self.miniaturas.esperando()
             || self.pedir_colheita_das_reveladas
-            || self.portas.receita_padrao.progresso().andando()
+            || self.portas.revelacao_padrao.progresso().andando()
         {
             self.acompanhar(window, cx);
         }
@@ -319,8 +319,9 @@ impl NovaSessao {
         let tema = cx.theme();
         let (borda, apagado, texto) = (tema.border, tema.muted_foreground, tema.foreground);
         let (total, copiadas, previas) = self.numeros_da_copia();
-        let receita = self.receita;
-        let trabalhando = copiadas < total || previas < copiadas || receita.prontas < receita.total;
+        let parametros = self.parametros;
+        let trabalhando =
+            copiadas < total || previas < copiadas || parametros.prontas < parametros.total;
         let fracoes = {
             let mut partes = vec![
                 if total > 0 {
@@ -334,8 +335,8 @@ impl NovaSessao {
                     1.
                 },
             ];
-            if receita.total > 0 {
-                partes.push(receita.prontas as f32 / receita.total as f32);
+            if parametros.total > 0 {
+                partes.push(parametros.prontas as f32 / parametros.total as f32);
             }
             partes.iter().sum::<f32>() / partes.len() as f32
         };
@@ -384,10 +385,10 @@ impl NovaSessao {
                             "{} · cópia {copiadas}/{total} · prévias {previas}/{copiadas}",
                             estado::plural(total, "foto", "fotos")
                         );
-                        if receita.total > 0 {
+                        if parametros.total > 0 {
                             frase.push_str(&format!(
                                 " · revelação {}/{}",
-                                receita.prontas, receita.total
+                                parametros.prontas, parametros.total
                             ));
                         }
                         c.child(
@@ -837,7 +838,7 @@ impl NovaSessao {
                 )
         };
         let copiando = copiadas < total;
-        let lote = self.receita;
+        let lote = self.parametros;
 
         v_flex()
             .gap(px(12.))
@@ -975,7 +976,7 @@ impl NovaSessao {
     fn seletor_de_preset(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let tema = cx.theme().clone();
         let escolhido = self.formulario().preset_id.clone();
-        let proporcao = receita_da_tela(self.formulario().proporcao.as_deref());
+        let proporcao = parametros_da_tela(self.formulario().proporcao.as_deref());
         let cartao = |id: Option<String>,
                       nome: String,
                       indice: usize,
@@ -1713,9 +1714,9 @@ impl NovaSessao {
             .find(|e| e.id == f.estudio_id)
             .map(|e| e.nome.clone())
             .unwrap_or_default();
-        let preset = super::receita::nome_do_preset(&self.presets, f.preset_id.as_deref());
+        let preset = super::parametros::nome_do_preset(&self.presets, f.preset_id.as_deref());
         let proporcao = f.proporcao.as_deref().map(estado::rotulo_da_proporcao);
-        let receita = match (preset, proporcao) {
+        let parametros = match (preset, proporcao) {
             (None, None) => String::new(),
             (p, c) => assoc::juntar(&[p.as_deref(), c.map(|c| format!("corte {c}")).as_deref()]),
         };
@@ -1755,7 +1756,7 @@ impl NovaSessao {
             ),
             ("Preço por foto", 3, produto),
             ("Estúdio", 3, estudio),
-            ("Preset padrão", 2, receita),
+            ("Preset padrão", 2, parametros),
             (
                 "Agendamento",
                 4,
@@ -2233,8 +2234,8 @@ fn colunas_do_item(item: &ItemDaBusca) -> [String; 4] {
 
 /// A razão largura÷altura do quadro das amostras: a do corte escolhido, ou
 /// 3:2 quando não há corte.
-fn receita_da_tela(proporcao: Option<&str>) -> f32 {
-    super::receita::valor_da_proporcao(proporcao).unwrap_or(3. / 2.)
+fn parametros_da_tela(proporcao: Option<&str>) -> f32 {
+    super::parametros::valor_da_proporcao(proporcao).unwrap_or(3. / 2.)
 }
 
 #[cfg(test)]

@@ -8,14 +8,14 @@
 //! servidor"*. Sem isto, o único jeito de apagar o "Salvar na galeria e sair"
 //! aceso era desfazer passo a passo, e o `⌘Z` só alcança a foto aberta.
 //!
-//! 🔑 **É o "Descartar a edição" da web** (`grade.tsx`): a receita local sai
+//! 🔑 **É o "Descartar a edição" da web** (`grade.tsx`): a revelação local sai
 //! do depósito, a foto sai da fila do "Salvar", e fica como a galeria tem.
 //!
 //! # Quem faz o quê
 //!
-//! A tela só sabe **quais** fotos: quem sabe a receita do site, a fila e o
+//! A tela só sabe **quais** fotos: quem sabe a revelação do site, a fila e o
 //! depósito é a raiz (`app.rs`, `descartar_as_edicoes`). A foto aberta volta
-//! por [`Revelacao::assumir_a_receita_do_site`], como um passo de histórico —
+//! por [`Revelacao::assumir_os_parametros_do_site`], como um passo de histórico —
 //! o `⌘Z` a traz de volta, e por isso ela não pergunta. As outras não têm
 //! histórico: descartá-las pergunta antes, como a web.
 //!
@@ -30,7 +30,7 @@ use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
 use gpui_kit::component::{Disableable, Icon, Sizable, WindowExt};
 use gpui_kit::{div, prelude::*, AnyElement, Context, SharedString, Window};
-use infrastructure::gpu_adjustments::ReceitaLocal;
+use infrastructure::gpu_adjustments::ParametrosLocais;
 
 use super::super::historico::Estado;
 use super::super::persistencia::{self, Corte};
@@ -91,9 +91,9 @@ impl Revelacao {
         }
     }
 
-    /// A foto que só existe aqui volta à receita com que abriu.
+    /// A foto que só existe aqui volta à revelação com que abriu.
     fn voltar_ao_que_abriu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(estado) = self.receita_ao_abrir.clone() else {
+        let Some(estado) = self.parametros_ao_abrir.clone() else {
             return;
         };
         self.gravar_o_que_estiver_pendente();
@@ -200,9 +200,9 @@ impl Revelacao {
         });
     }
 
-    /// A raiz devolveu a receita do site para a foto **aberta**.
+    /// A raiz devolveu a revelação do site para a foto **aberta**.
     ///
-    /// 🔑 **Vira passo de histórico e não grava.** Gravar poria a receita no
+    /// 🔑 **Vira passo de histórico e não grava.** Gravar poria a revelação no
     /// depósito numa tarefa do tokio, e a raiz a tira de lá em outra — sem
     /// ordem garantida entre as duas, o disco podia ficar com a linha, e a foto
     /// voltava "não salva" na próxima abertura do app. O `⌘Z` depois disto
@@ -210,11 +210,11 @@ impl Revelacao {
     ///
     /// `locais`: a Revelação local que está no site; `None` quando não se sabe
     /// (o site não a guarda — ver `app.rs`), e aí a de agora fica.
-    pub fn assumir_a_receita_do_site(
+    pub fn assumir_os_parametros_do_site(
         &mut self,
         ajustes: Ajustes,
         corte: Corte,
-        locais: Option<Arc<ReceitaLocal>>,
+        locais: Option<Arc<ParametrosLocais>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -233,7 +233,7 @@ impl Revelacao {
         self.historico.registrar(estado.clone());
         self.mostrar_o_estado(estado.clone(), window, cx);
         // O marco do botão de salvar passa a ser a galeria.
-        self.receita_ao_abrir = Some(estado);
+        self.parametros_ao_abrir = Some(estado);
         self.bases.remove(&id);
         if let Some(aberta) = self.aberta.as_mut() {
             persistencia::na_foto(&mut aberta.foto, ajustes, corte);
@@ -242,7 +242,7 @@ impl Revelacao {
         if let Some(foto) = acervo.iter_mut().find(|f| f.id == id) {
             persistencia::na_foto(foto, ajustes, corte);
         }
-        // A receita local não mora no depósito: tabela própria, sem corrida.
+        // A revelação local não mora no depósito: tabela própria, sem corrida.
         self.gravar_locais_se_mudou(&id);
         cx.notify();
     }
@@ -252,11 +252,11 @@ impl Revelacao {
     /// acabou de sair.
     pub fn aplicar_descartadas(
         &mut self,
-        receitas: &[(String, Ajustes, Corte)],
+        parametros: &[(String, Ajustes, Corte)],
         cx: &mut Context<Self>,
     ) {
         let acervo = Arc::make_mut(&mut self.acervo);
-        for (id, ajustes, corte) in receitas {
+        for (id, ajustes, corte) in parametros {
             if let Some(foto) = acervo.iter_mut().find(|f| &f.id == id) {
                 persistencia::na_foto(foto, *ajustes, *corte);
             }

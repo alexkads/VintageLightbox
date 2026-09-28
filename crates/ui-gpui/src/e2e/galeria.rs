@@ -146,14 +146,14 @@ fn faixa_e_preco_em_lote_pela_grade_e_filmstrip(cx: &mut TestAppContext) {
     assert_eq!(e.site.tiradas(), ["a", "d"], "a comprada fica de fora");
 }
 
-/// 🚨 **A receita padrão da sessão vale para quem chega depois.**
+/// 🚨 **A revelação padrão da sessão vale para quem chega depois.**
 ///
 /// A predefinição e a proporção escolhidas na etapa 2 do assistente ficam **na
 /// galeria**. Quem importa mais fotos dentro da sessão espera o mesmo visual — e
-/// era o que não acontecia: o serviço da receita só atendia o assistente, e a
+/// era o que não acontecia: o serviço da revelação só atendia o assistente, e a
 /// leva seguinte entrava crua (achado do dono, 17/set/2026).
 #[gpui_kit::test]
-fn a_foto_importada_na_sessao_recebe_a_receita_padrao(cx: &mut TestAppContext) {
+fn a_foto_importada_na_sessao_recebe_a_revelacao_padrao(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(
         cx,
         Cenario {
@@ -169,12 +169,12 @@ fn a_foto_importada_na_sessao_recebe_a_receita_padrao(cx: &mut TestAppContext) {
         },
     );
 
-    // As locais do ensaio já entram na conta da receita: elas são as que ainda
-    // não subiram, e é nelas que a receita da galeria manda.
+    // As locais do ensaio já entram na conta da revelação: elas são as que ainda
+    // não subiram, e é nelas que a revelação da galeria manda.
     e.app(cx, |app, _w, _cx| {
         assert!(
-            app.receita_padrao_pedida() > 0,
-            "a receita da galeria tinha de ser pedida para as fotos locais"
+            app.revelacao_padrao_pedida() > 0,
+            "a revelação da galeria tinha de ser pedida para as fotos locais"
         );
     });
 }
