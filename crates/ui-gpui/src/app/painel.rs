@@ -19,6 +19,7 @@
 
 use gpui_kit::component::button::Button;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
+use gpui_kit::component::sidebar::{Sidebar, SidebarGroup, SidebarItem, SidebarMenuItem};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
 use gpui_kit::{
@@ -113,6 +114,67 @@ struct ItemDoMenu {
     icone: Icone,
 }
 
+/// 🧭 Uma seção desenhada no `Sidebar` do gpui-kit: o `SidebarMenuItem` do
+/// kit, com o nome para os testes (`menu-<título>`) e o selo do chatbot por
+/// cima — o item do kit, recolhido, só desenha o ícone, e o selo de mensagens
+/// novas tem de continuar à vista com o menu fechado.
+#[derive(Clone)]
+struct SecaoDoMenu {
+    titulo: &'static str,
+    selo: Option<(String, gpui_kit::Hsla)>,
+    recolhida: bool,
+    item: SidebarMenuItem,
+}
+
+impl gpui_kit::component::Collapsible for SecaoDoMenu {
+    fn collapsed(mut self, recolhida: bool) -> Self {
+        self.recolhida = recolhida;
+        self
+    }
+
+    fn is_collapsed(&self) -> bool {
+        self.recolhida
+    }
+}
+
+impl SidebarItem for SecaoDoMenu {
+    fn render(
+        self,
+        id: impl Into<gpui_kit::ElementId>,
+        window: &mut Window,
+        cx: &mut gpui_kit::App,
+    ) -> impl IntoElement {
+        let titulo = self.titulo;
+        let recolhida = self.recolhida;
+        let tooltip_do_kit = self.item.collapsed(recolhida);
+        div()
+            .relative()
+            .debug_selector(move || format!("menu-{titulo}"))
+            .child(tooltip_do_kit.render(id, window, cx))
+            .when_some(self.selo, |d, (texto, cor)| {
+                let selo = div()
+                    .id("menu-selo-do-chatbot")
+                    .debug_selector(|| "menu-selo-do-chatbot".into())
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .min_w(px(16.))
+                    .h(px(16.))
+                    .px(px(4.))
+                    .rounded_full()
+                    .bg(cor)
+                    .text_color(gpui_kit::white())
+                    .text_xs()
+                    .child(texto);
+                d.child(if recolhida {
+                    div().absolute().top(px(-2.)).right(px(-2.)).child(selo)
+                } else {
+                    div().absolute().top(px(8.)).right(px(8.)).child(selo)
+                })
+            })
+    }
+}
+
 /// As seções que o app tem, em "Operação".
 ///
 /// 📦 O "Backup de arquivos" não está aqui: fica no menu da conta (dono,
@@ -164,53 +226,6 @@ impl Tela {
 }
 
 impl Aplicativo {
-    /// O número de conversas com novidade, no item "Chatbot" do menu — e o
-    /// vermelho quando há quem pediu atendente. `None` quando não há nada.
-    fn selo_do_chatbot(&self, aberto: bool, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let chatbot = self.chatbot.read(cx);
-        let (novidades, esperando) = (chatbot.quantas_novidades(), chatbot.alguem_esperando());
-        if novidades == 0 && !esperando {
-            return None;
-        }
-        let cor: gpui_kit::Hsla = if esperando {
-            gpui_kit::rgb(0xef4444).into()
-        } else {
-            gpui_kit::rgb(0x16a34a).into()
-        };
-        let selo = div()
-            .id("menu-selo-do-chatbot")
-            .debug_selector(|| "menu-selo-do-chatbot".into())
-            .flex()
-            .items_center()
-            .justify_center()
-            .min_w(px(16.))
-            .h(px(16.))
-            .px(px(4.))
-            .rounded_full()
-            .bg(cor)
-            .text_color(gpui_kit::white())
-            .text_xs()
-            .child(if novidades > 0 {
-                novidades.to_string()
-            } else {
-                "!".into()
-            });
-        Some(if aberto {
-            div()
-                .absolute()
-                .right(px(8.))
-                .child(selo)
-                .into_any_element()
-        } else {
-            div()
-                .absolute()
-                .top(px(-2.))
-                .right(px(-2.))
-                .child(selo)
-                .into_any_element()
-        })
-    }
-
     /// Troca de tela pelo menu, pelo cabeçalho ou pela barra de uma tela.
     ///
     /// 🔑 **Sair da galeria é sair da sessão**, como mudar de rota no site: a
@@ -432,90 +447,54 @@ impl Aplicativo {
     /// O menu lateral, aberto (256 px) ou recolhido em ícones (48 px).
     pub(super) fn menu_lateral(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let aberto = self.menu_aberto;
-        let tema = cx.theme();
-        let (fundo, borda, texto, acento, apagado) = (
-            tema.sidebar,
-            tema.sidebar_border,
-            tema.sidebar_foreground,
-            tema.sidebar_accent,
-            tema.sidebar_foreground.opacity(0.7),
-        );
         let secao = self.tela.secao();
-        let marca = self.marca(cx);
-        let conta = self.botao_da_conta(cx);
-
-        let itens: Vec<AnyElement> = MENU
+        let selo = self.selo_do_chatbot_dados(cx);
+        let itens: Vec<SecaoDoMenu> = MENU
             .iter()
             .map(|item| {
-                let ativo = item.tela == secao;
                 let destino = item.tela;
-                let titulo = item.titulo;
-                let base = h_flex()
-                    .id(SharedString::from(format!("menu-{titulo}")))
-                    // Para o teste clicar onde o dedo clica.
-                    .debug_selector(move || format!("menu-{titulo}"))
-                    .h(px(32.))
-                    .rounded(crate::tema::canto(8.))
-                    .gap(px(8.))
-                    .text_sm()
-                    .cursor_pointer()
-                    .hover(|s| s.bg(acento))
-                    .when(ativo, |d| d.bg(acento).font_weight(FontWeight::MEDIUM))
-                    .on_click(cx.listener(move |raiz, _, window, cx| {
-                        raiz.ir_para(destino, window, cx);
-                    }))
-                    .child(Icon::new(item.icone).size(px(16.)));
-                // 💬 O chatbot mostra quantas conversas têm mensagem nova, e
-                // pinta de vermelho quando alguém pediu atendente.
-                let selo = (item.tela == Tela::Chatbot)
-                    .then(|| self.selo_do_chatbot(aberto, cx))
-                    .flatten();
-                let base = base.relative().children(selo);
-                if aberto {
-                    base.px(px(8.)).child(titulo).into_any_element()
-                } else {
-                    base.w(px(32.))
-                        .justify_center()
-                        .tooltip(move |window, cx| Tooltip::new(titulo).build(window, cx))
-                        .into_any_element()
+                let raiz = cx.entity().downgrade();
+                SecaoDoMenu {
+                    titulo: item.titulo,
+                    selo: (item.tela == Tela::Chatbot).then(|| selo.clone()).flatten(),
+                    recolhida: !aberto,
+                    item: SidebarMenuItem::new(item.titulo)
+                        .icon(Icon::new(item.icone).size(px(16.)))
+                        .active(item.tela == secao)
+                        .on_click(move |_, window, cx| {
+                            let _ = raiz.update(cx, |raiz, cx| raiz.ir_para(destino, window, cx));
+                        }),
                 }
             })
             .collect();
 
-        v_flex()
-            .id("menu-lateral")
-            .flex_none()
-            .h_full()
-            .w(px(self.largura_do_menu()))
-            .bg(fundo)
-            .border_r_1()
-            .border_color(borda)
-            .text_color(texto)
-            .overflow_hidden()
-            // ── A marca ───────────────────────────────────────────────────
-            .child(div().p(px(8.)).child(marca))
-            // ── As seções ─────────────────────────────────────────────────
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_h(px(0.))
-                    .p(px(8.))
-                    .when(aberto, |d| {
-                        d.child(
-                            h_flex()
-                                .h(px(32.))
-                                .px(px(8.))
-                                .text_xs()
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(apagado)
-                                .child("Operação"),
-                        )
-                    })
-                    .children(itens),
-            )
-            .child(div().h(px(1.)).bg(borda))
-            // ── A conta ───────────────────────────────────────────────────
-            .child(div().p(px(8.)).child(conta))
+        Sidebar::new("menu-lateral")
+            .collapsed(!aberto)
+            .w(px(LARGURA_ABERTO))
+            .header(self.marca(cx))
+            .footer(self.botao_da_conta(cx))
+            .child(SidebarGroup::new("Operação").children(itens))
+    }
+
+    /// O selo do chatbot: quantas conversas têm mensagem nova, em verde, ou
+    /// "!" em vermelho quando alguém pediu atendente.
+    fn selo_do_chatbot_dados(&self, cx: &mut Context<Self>) -> Option<(String, gpui_kit::Hsla)> {
+        let chatbot = self.chatbot.read(cx);
+        let (novidades, esperando) = (chatbot.quantas_novidades(), chatbot.alguem_esperando());
+        if novidades == 0 && !esperando {
+            return None;
+        }
+        let cor: gpui_kit::Hsla = if esperando {
+            gpui_kit::rgb(0xef4444).into()
+        } else {
+            gpui_kit::rgb(0x16a34a).into()
+        };
+        let texto = if novidades > 0 {
+            novidades.to_string()
+        } else {
+            "!".into()
+        };
+        Some((texto, cor))
     }
 
     fn marca(&self, cx: &mut Context<Self>) -> AnyElement {
