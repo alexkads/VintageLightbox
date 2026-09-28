@@ -74,6 +74,11 @@ pub struct Chave {
     origem: (u32, u32),
     /// Os `f32` da receita e do corte pelos **bits**. Ver o cabeçalho.
     receita: Box<[u32]>,
+    /// 🖌️ **A revisão da fonte**: 0 é o bruto, N é a imagem editada N
+    /// (`revelacao/fonte.rs`). Uma edição nova da mesma foto, do mesmo tamanho
+    /// e com a mesma receita, é outra revelação — sem isto ela casaria com a da
+    /// fonte antiga (C17).
+    fonte: u64,
 }
 
 impl Chave {
@@ -113,7 +118,14 @@ impl Chave {
             foto: foto_id.to_string(),
             origem,
             receita: receita.into_boxed_slice(),
+            fonte: 0,
         }
+    }
+
+    /// A mesma chave, para a revelação de outra fonte (a imagem editada `revisao`).
+    pub fn da_fonte(mut self, revisao: u64) -> Self {
+        self.fonte = revisao;
+        self
     }
 
     pub fn e_da_foto(&self, foto_id: &str) -> bool {
@@ -134,6 +146,12 @@ impl Default for CacheDeReveladas {
     fn default() -> Self {
         Self::nova(TETO_DE_PIXELS)
     }
+}
+
+/// Um corte inteiro, para os testes de fora deste módulo montarem chaves.
+#[cfg(test)]
+pub fn tests_corte() -> Corte {
+    Corte::novo(0.0, 0.0, 1.0, 1.0, 0, 0.0, false, false)
 }
 
 impl CacheDeReveladas {
@@ -240,6 +258,27 @@ mod testes {
                 &Default::default()
             )
         );
+    }
+
+    /// 🖌️ **A revisão nova não casa com a chave da antiga** (C17): salvar no
+    /// editor não muda tamanho nem receita, e sem a fonte na chave a Revelação
+    /// devolveria do cache a foto de antes da edição.
+    #[test]
+    fn a_revisao_nova_nao_casa_com_a_chave_da_antiga() {
+        let ajustes = Ajustes::default();
+        let do_bruto = Chave::nova("id-1", ORIGEM, &ajustes, &corte(), &Default::default());
+        let r1 = do_bruto.clone().da_fonte(1);
+        let r2 = do_bruto.clone().da_fonte(2);
+        assert_ne!(do_bruto, r1);
+        assert_ne!(r1, r2);
+        let mut cache = CacheDeReveladas::default();
+        cache.guardar(r1.clone(), &imagem(10, 10));
+        assert!(cache.buscar(&r2).is_none());
+        assert!(cache.buscar(&do_bruto).is_none());
+        assert!(cache.buscar(&r1).is_some());
+        // E esquecer a foto leva todas as revisões dela.
+        cache.esquecer("id-1");
+        assert!(cache.buscar(&r1).is_none());
     }
 
     /// ⚠️ O corte também: as vinhetas são medidas no recorte, então enquadrar

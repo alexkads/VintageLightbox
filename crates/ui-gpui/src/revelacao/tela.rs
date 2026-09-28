@@ -39,6 +39,7 @@ use super::automatico;
 use super::cache::{self, CacheDeReveladas};
 use super::controles::{Definicao, CONTROLES};
 use super::corte;
+use super::fonte;
 use super::histograma::Histograma;
 use super::historico::{Estado, Historico};
 use super::lightroom::{Arquivo, EscolhaDePresets, Relatorio};
@@ -65,6 +66,8 @@ pub use local::Ferramenta;
 
 /// "Descartar": a foto volta ao que a galeria do site tem.
 mod descartar;
+/// "Editar Foto" e a troca da fonte quando uma edição é salva.
+mod edicao;
 /// A coluna da direita: cabeçalho, abas sRGB/RGB, painéis e gráficos.
 mod painel;
 /// Os gestos de ponteiro para os cenários de ponta a ponta. Só testes.
@@ -449,6 +452,10 @@ pub struct Revelacao {
     /// O recorte, a altura e o menu da tira (ver `tira.rs`).
     tira: tira::EstadoDaTira,
     resolucao: resolucao::Resolucao,
+    /// As edições em camadas: qual imagem editada vale para cada foto
+    /// (`docs/editor-em-camadas/02-CONTRATO.md`). `None` é o app sem editor —
+    /// os testes que não falam dele.
+    edicoes: Option<Arc<dyn crate::editor::porta::Edicoes>>,
 }
 
 struct Controle {
@@ -479,6 +486,9 @@ enum Destino {
 
 struct Aberta {
     foto: PhotoViewModel,
+    /// A revisão da imagem editada de que `origem` saiu — `fonte::DO_BRUTO`
+    /// quando é o bruto. Entra na chave do cache de reveladas (C17).
+    fonte: u64,
     /// Os pixels de origem, prontos para subir para a GPU.
     ///
     /// `None` quando o cache não tem nada gravado — não é erro, é foto ainda não
@@ -684,6 +694,7 @@ impl Revelacao {
             estado_do_painel: painel::EstadoDoPainel::default(),
             tira: tira::EstadoDaTira::novo(),
             resolucao: Default::default(),
+            edicoes: None,
         }
     }
 
@@ -1269,30 +1280,24 @@ impl Revelacao {
     /// terminam sozinhos. Cancelá-los seria jogar fora justamente o trabalho que
     /// a próxima seta vai querer.
     fn adiantar_as_vizinhas(&self, cx: &mut Context<Self>) {
-        let vizinhas: Vec<String> = [self.posicao.checked_sub(1), Some(self.posicao + 1)]
+        // 🔑 **A chave é a de onde a fonte daquela foto mora** (`fonte.rs`).
+        // Adiantar `site:<id>` aquecia a imagem da galeria — que a Revelação nem
+        // usa como origem —, e deixava fria justamente a que a seta vai pedir.
+        let vizinhas: Vec<PhotoViewModel> = [self.posicao.checked_sub(1), Some(self.posicao + 1)]
             .into_iter()
             .flatten()
-            .filter_map(|i| self.acervo.get(i))
-            // 🔑 **A chave é a de onde o bruto daquela foto mora.** Adiantar
-            // `site:<id>` aquecia a imagem da galeria — que a Revelação nem usa
-            // como origem —, e deixava fria justamente a que a seta vai pedir.
-            .map(|foto| {
-                if persistencia::so_existe_no_site(foto) {
-                    persistencia::chave_do_trabalho(&foto.id)
-                } else {
-                    foto.id.clone()
-                }
-            })
+            .filter_map(|i| self.acervo.get(i).cloned())
             .collect();
         if vizinhas.is_empty() {
             return;
         }
 
         let previews = self.previews.clone();
+        let edicoes = self.edicoes.clone();
         cx.background_executor()
             .spawn(async move {
-                for id in vizinhas {
-                    let _ = previews.get_preview(&id);
+                for foto in vizinhas {
+                    let _ = fonte::copia_de_trabalho(&previews, edicoes.as_deref(), &foto);
                 }
             })
             .detach();
@@ -1317,13 +1322,24 @@ impl Revelacao {
         // guarda em `trabalho:<id>` (ver `chave_do_trabalho`). Duas imagens,
         // duas chaves: aqui a origem sai da segunda, e a da galeria fica só como
         // **espera** na tela enquanto o download não volta.
+        // 🖌️ **A imagem editada, quando existe, é a entrada** (C32): o que o
+        // editor salvou é o que o motor recebe, e a receita vem por cima. Sem
+        // ela, a regra de sempre, logo abaixo.
+        let editada = (fonte::revisao_de(self.edicoes.as_deref(), &foto) != fonte::DO_BRUTO)
+            .then(|| fonte::copia_de_trabalho(&self.previews, self.edicoes.as_deref(), &foto))
+            .flatten()
+            .filter(|c| c.revisao != fonte::DO_BRUTO);
+        let revisao_da_fonte = editada.as_ref().map_or(fonte::DO_BRUTO, |c| c.revisao);
+
         let do_site = persistencia::so_existe_no_site(&foto);
-        let trabalho = do_site
-            .then(|| {
-                self.previews
-                    .get_preview(&persistencia::chave_do_trabalho(&foto.id))
-            })
-            .flatten();
+        let trabalho = editada.map(|c| c.imagem).or_else(|| {
+            do_site
+                .then(|| {
+                    self.previews
+                        .get_preview(&persistencia::chave_do_trabalho(&foto.id))
+                })
+                .flatten()
+        });
 
         // Preview primeiro, miniatura como queda. A miniatura fica borrada numa
         // tela inteira, e é de propósito: mostrar a foto em tamanho errado é
@@ -1337,7 +1353,11 @@ impl Revelacao {
         // 🔑 **Sem cópia de trabalho, a foto do site não tem origem** — e é a
         // ausência de origem que faz a raiz ir buscá-la (`tem_pixels`). Com ela,
         // a seta de volta não custa rede nenhuma.
-        let para_origem = if do_site { trabalho } else { bruta.clone() };
+        let para_origem = if do_site || revisao_da_fonte != fonte::DO_BRUTO {
+            trabalho
+        } else {
+            bruta.clone()
+        };
         let origem = para_origem.as_ref().map(|imagem| {
             let rgba = imagem.to_rgba8();
             Origem {
@@ -1417,6 +1437,7 @@ impl Revelacao {
         let vai_revelar = origem.is_some() && !self.sem_revelacao();
         self.aberta = Some(Aberta {
             foto,
+            fonte: revisao_da_fonte,
             origem,
             bruta: bruta.clone(),
             revelada: if vai_revelar { None } else { bruta },
@@ -1487,6 +1508,12 @@ impl Revelacao {
             return false;
         };
         if aberta.foto.id != foto_id {
+            return false;
+        }
+        // 🖌️ **Com imagem editada, a cópia do bruto que chega não entra**: a
+        // entrada desta foto é a edição (C32), e trocá-la pelo bruto apagaria o
+        // que o editor salvou da tela.
+        if aberta.fonte != fonte::DO_BRUTO {
             return false;
         }
 
@@ -2149,11 +2176,13 @@ impl Revelacao {
         let foto_id = foto.id.clone();
         let pixels = origem.pixels.clone();
         let (largura, altura) = (origem.largura, origem.altura);
+        let revisao_da_fonte = self.aberta.as_ref().map_or(fonte::DO_BRUTO, |a| a.fonte);
 
         let ajustes = self.ajustes_na_tela();
         let corte = transformacao::corte(&self.corte_na_tela());
         let locais = self.locais_na_tela();
-        let chave = cache::Chave::nova(&foto_id, (largura, altura), &ajustes, &corte, &locais);
+        let chave = cache::Chave::nova(&foto_id, (largura, altura), &ajustes, &corte, &locais)
+            .da_fonte(revisao_da_fonte);
 
         // 🔑 **O que já foi revelado não é revelado de novo.** Voltar uma seta,
         // desfazer, tirar o ponteiro de cima de uma predefinição: nos três a
@@ -2248,15 +2277,12 @@ impl Revelacao {
         let corte = transformacao::corte(&persistencia::para_crop_settings(
             &persistencia::corte_da_foto(&foto),
         ));
-        // A mesma chave que `adiantar_as_vizinhas` usa: o bruto da foto do site
-        // mora na cópia de trabalho, não na imagem da galeria.
-        let no_cache = if persistencia::so_existe_no_site(&foto) {
-            persistencia::chave_do_trabalho(&foto.id)
-        } else {
-            foto.id.clone()
-        };
-
+        // A fonte vem do mesmo lugar que a do palco (`fonte.rs`): a imagem
+        // editada, se houver; senão o bruto — que na foto do site mora na cópia
+        // de trabalho, não na imagem da galeria.
         let previews = self.previews.clone();
+        let edicoes = self.edicoes.clone();
+        let para_a_fonte = foto.clone();
         cx.spawn(async move |esta, cx| {
             // ⚠️ **A decodificação vai para o executor de fundo.** Ela custa os
             // ~16 ms que o prefetch das vizinhas mede, e gastá-los no quadro
@@ -2265,18 +2291,19 @@ impl Revelacao {
             let origem = cx
                 .background_executor()
                 .spawn(async move {
-                    let imagem = previews.get_preview(&no_cache)?;
-                    let rgba = imagem.to_rgba8();
+                    let copia =
+                        fonte::copia_de_trabalho(&previews, edicoes.as_deref(), &para_a_fonte)?;
+                    let rgba = copia.imagem.to_rgba8();
                     let (largura, altura) = (rgba.width(), rgba.height());
-                    Some((largura, altura, Arc::new(rgba.into_raw())))
+                    Some((largura, altura, Arc::new(rgba.into_raw()), copia.revisao))
                 })
                 .await;
-            let Some((largura, altura, pixels)) = origem else {
+            let Some((largura, altura, pixels, revisao)) = origem else {
                 return;
             };
             let _ = esta.update(cx, |tela, cx| {
                 tela.enfileirar_a_antecipacao(
-                    &foto.id, largura, altura, pixels, ajustes, corte, locais, cx,
+                    &foto.id, largura, altura, pixels, revisao, ajustes, corte, locais, cx,
                 );
             });
         })
@@ -2296,6 +2323,7 @@ impl Revelacao {
         largura: u32,
         altura: u32,
         pixels: Arc<Vec<u8>>,
+        revisao_da_fonte: u64,
         ajustes: Ajustes,
         corte: transformacao::Corte,
         locais: Arc<ReceitaLocal>,
@@ -2308,7 +2336,8 @@ impl Revelacao {
         {
             return;
         }
-        let chave = cache::Chave::nova(foto_id, (largura, altura), &ajustes, &corte, &locais);
+        let chave = cache::Chave::nova(foto_id, (largura, altura), &ajustes, &corte, &locais)
+            .da_fonte(revisao_da_fonte);
         if self.reveladas.buscar(&chave).is_some() {
             return;
         }
@@ -2768,6 +2797,9 @@ pub enum PedidoDaRevelacao {
     /// O zoom passou da cópia de trabalho: a tela quer o bruto da foto aberta
     /// em resolução cheia ([`Revelacao::receber_bruto`]).
     QueroOBruto,
+    /// "Editar Foto" do menu da tira: a raiz abre a janela do editor para a
+    /// foto de [`Revelacao::levar_a_editar`] — a clicada, e só ela.
+    EditarFoto,
 }
 
 impl gpui_kit::EventEmitter<PedidoDaRevelacao> for Revelacao {}

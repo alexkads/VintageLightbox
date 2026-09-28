@@ -180,19 +180,44 @@ impl Aplicativo {
         self.esperar_as_baixas(1, cx);
     }
 
+    /// Os bytes do bruto do site que já estão em mãos, se forem desta foto.
+    pub(super) fn bruto_em_maos(&self, no_site: &str) -> Option<Arc<Vec<u8>>> {
+        self.baixas
+            .em_maos
+            .as_ref()
+            .filter(|(ja, _)| ja == no_site)
+            .map(|(_, bytes)| bytes.clone())
+    }
+
     /// A tela pediu o bruto da foto aberta.
     pub(super) fn pedir_o_bruto(&mut self, cx: &mut Context<Self>) {
         let Some((id, no_site, caminho)) = self.aberta_para_o_bruto(cx) else {
             return;
         };
+        // 🖌️ **Com imagem editada, a resolução cheia é a dela** (C32): o zoom
+        // 1:1 mostra o que o motor revela, e o que o motor revela parte da
+        // edição — nunca do bruto por baixo dela.
+        let editada = {
+            let revelacao = self.revelacao.read(cx);
+            revelacao.foto_aberta().and_then(|foto| {
+                crate::revelacao::fonte::arquivo_editado(revelacao.edicoes().as_deref(), foto)
+            })
+        };
+        if let Some(versao) = editada.filter(|_| self.revelacao.read(cx).revisao_da_aberta() != 0) {
+            let arquivo = versao.arquivo;
+            self.decodificar_o_bruto(
+                id,
+                move || image::open(&arquivo).map_err(|e| e.to_string()),
+                cx,
+            );
+            return;
+        }
         if !caminho.is_empty() {
             let arquivo = PathBuf::from(caminho);
             self.decodificar_o_bruto(
                 id,
-                // De pé: a etiqueta de girar do EXIF — `infrastructure::orientacao`.
-                move || {
-                    infrastructure::orientacao::abrir_de_pe(&arquivo).map_err(|e| e.to_string())
-                },
+                // De pé, e o RAW pela LibRaw: a base neutra (C28).
+                move || infrastructure::base_neutra::base_neutra(&arquivo),
                 cx,
             );
             return;

@@ -29,6 +29,9 @@ pub mod docas;
 #[cfg(test)]
 mod e2e;
 /// Quando o app acaba — fechar a janela principal encerra o processo.
+/// 🖌️ O editor em camadas: a janela, a porta das edições e o contrato com a
+/// Revelação (docs/editor-em-camadas/).
+pub mod editor;
 pub mod encerramento;
 pub mod entrada;
 /// As peças do shadcn do site (botões, selos, cabeçalho de página).

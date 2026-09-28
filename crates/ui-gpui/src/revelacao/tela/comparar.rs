@@ -32,6 +32,7 @@ use gpui_kit::{div, img, prelude::*, px, Context, ObjectFit, RenderImage, Shared
 use infrastructure::transformacao;
 
 use super::super::cache;
+use super::super::fonte;
 use super::super::persistencia;
 use super::super::processador::{Ajustes, Pedido};
 use super::{tira, Destino, Pendente, Revelacao};
@@ -199,13 +200,10 @@ impl Revelacao {
 
         let ajustes = persistencia::da_foto(&foto);
         let crop = persistencia::para_crop_settings(&persistencia::corte_da_foto(&foto));
-        let no_cache = if persistencia::so_existe_no_site(&foto) {
-            persistencia::chave_do_trabalho(&foto.id)
-        } else {
-            foto.id.clone()
-        };
         let da_galeria = foto.id.clone();
         let previews = self.previews.clone();
+        let edicoes = self.edicoes.clone();
+        let para_a_fonte = foto.clone();
         cx.spawn(async move |esta, cx| {
             // A decodificação vai para o executor de fundo, como na antecipação.
             let origem = cx
@@ -215,17 +213,24 @@ impl Revelacao {
                     // ter a cópia de trabalho no disco: aqui, no palco do
                     // operador, a prévia da galeria serve até lá. A segunda tela
                     // não passa por aqui — ela pede a cópia sem marca.
-                    let imagem = previews
-                        .get_preview(&no_cache)
-                        .or_else(|| previews.get_preview(&da_galeria))?;
+                    // A fonte é a do palco (`fonte.rs`): a imagem editada,
+                    // se houver.
+                    let (imagem, revisao) = match fonte::copia_de_trabalho(
+                        &previews,
+                        edicoes.as_deref(),
+                        &para_a_fonte,
+                    ) {
+                        Some(c) => (c.imagem, c.revisao),
+                        None => (previews.get_preview(&da_galeria)?, fonte::DO_BRUTO),
+                    };
                     let rgba = imagem.to_rgba8();
                     let (largura, altura) = (rgba.width(), rgba.height());
-                    Some((largura, altura, Arc::new(rgba.into_raw())))
+                    Some((largura, altura, Arc::new(rgba.into_raw()), revisao))
                 })
                 .await;
             let _ = esta.update(cx, |tela, cx| match origem {
-                Some((largura, altura, pixels)) => tela.revelar_no_comparar(
-                    posicao, foto.id, largura, altura, pixels, ajustes, crop, cx,
+                Some((largura, altura, pixels, revisao)) => tela.revelar_no_comparar(
+                    posicao, foto.id, largura, altura, pixels, revisao, ajustes, crop, cx,
                 ),
                 None => tela.largar_do_comparar(posicao, cx),
             });
@@ -242,6 +247,7 @@ impl Revelacao {
         largura: u32,
         altura: u32,
         pixels: Arc<Vec<u8>>,
+        revisao_da_fonte: u64,
         ajustes: Ajustes,
         crop: domain::value_objects::CropSettings,
         cx: &mut Context<Self>,
@@ -261,7 +267,8 @@ impl Revelacao {
             .find(|f| f.id == foto_id)
             .map(|f| self.locais_de(f))
             .unwrap_or_default();
-        let chave = cache::Chave::nova(&foto_id, (largura, altura), &ajustes, &corte, &locais);
+        let chave = cache::Chave::nova(&foto_id, (largura, altura), &ajustes, &corte, &locais)
+            .da_fonte(revisao_da_fonte);
         let sem_gpu = self.processador.disponivel() == Some(false);
         let pronta = if (ajustes == Ajustes::default() && locais.vazia()) || sem_gpu {
             // Sem receita não há o que revelar; sem GPU, a crua é o que há.

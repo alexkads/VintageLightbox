@@ -373,7 +373,18 @@ fn trabalhar(
     let do_site = pedido
         .foto_id
         .starts_with(crate::revelacao::persistencia::PREFIXO_DO_SITE);
-    let base = if do_site {
+    // 🖌️ **A imagem editada, quando há, é a entrada** (C32) — a mesma regra do
+    // palco (`revelacao/fonte.rs`), para a grade mostrar a edição com a receita.
+    let editada = crate::editor::porta::as_do_app().and_then(|edicoes| {
+        let no_site = pedido
+            .foto_id
+            .strip_prefix(crate::revelacao::persistencia::PREFIXO_DO_SITE);
+        let versao = edicoes.versao_de(&pedido.foto_id, no_site)?;
+        crate::revelacao::fonte::copia_da_versao(previews, &versao, &pedido.foto_id)
+    });
+    let base = if editada.is_some() {
+        editada
+    } else if do_site {
         previews.get_preview(&chave_do_trabalho(&pedido.foto_id))
     } else {
         previews

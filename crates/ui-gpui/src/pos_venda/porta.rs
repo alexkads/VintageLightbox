@@ -429,7 +429,13 @@ pub struct PublicadorDaApi {
     /// A Revelação local de uma foto do site, pelo id de lá — o mesmo depósito
     /// que a tela grava (`Gravador::locais_do_site`).
     locais_de: LocaisDoSite,
+    /// 🖌️ A imagem editada vigente de uma foto do site, pelo id de lá
+    /// (`docs/editor-em-camadas/02-CONTRATO.md`, C32).
+    editada_de: EditadaDoSite,
 }
+
+/// De onde a porta tira a imagem editada de uma foto do site.
+pub type EditadaDoSite = Arc<dyn Fn(&str) -> Option<std::path::PathBuf> + Send + Sync>;
 
 /// De onde a porta tira a receita local de uma foto do site.
 pub type LocaisDoSite = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
@@ -445,7 +451,14 @@ impl PublicadorDaApi {
             exportador,
             tokio,
             locais_de: Arc::new(|_| None),
+            editada_de: Arc::new(|_| None),
         }
+    }
+
+    /// Liga a porta às edições em camadas (ver o campo).
+    pub fn com_editadas(mut self, editada_de: EditadaDoSite) -> Self {
+        self.editada_de = editada_de;
+        self
     }
 
     /// Liga a porta ao depósito da receita local (ver o campo).
@@ -484,6 +497,7 @@ async fn revelar_e_salvar(
     ajustes: Ajustes,
     corte: CropSettings,
     locais: ReceitaLocal,
+    editada: Option<std::path::PathBuf>,
 ) -> Result<(), String> {
     // 🔑 **Zerou tudo: o bruto volta ao lugar dele, e nada sobe.** Pelo caminho
     // de baixo isto seria baixar o original, revelá-lo com os ajustes neutros e
@@ -491,11 +505,24 @@ async fn revelar_e_salvar(
     // lugar do arquivo que ele deveria receber. É o mesmo atalho que o editor
     // do site faz (`semRevelacao` em `editor.tsx`); o gesto é o mesmo nos dois,
     // e o resultado tem de ser também.
-    if ajustes == Ajustes::default() && corte == CropSettings::default() && locais.vazia() {
+    //
+    // 🖌️ **Menos com imagem editada** (C30): aí zerar a receita ainda sobe a
+    // edição — restaurar o bruto a apagaria da galeria.
+    if ajustes == Ajustes::default()
+        && corte == CropSettings::default()
+        && locais.vazia()
+        && editada.is_none()
+    {
         return controlador.restaurar_original(sessao, foto_no_site).await;
     }
 
-    let original = controlador.original(sessao, foto_no_site).await?;
+    // 🖌️ A entrada é a imagem editada quando há (C32); senão o bruto do site.
+    let original = match editada {
+        Some(arquivo) => tokio::fs::read(&arquivo)
+            .await
+            .map_err(|e| format!("a imagem editada não abriu: {e}"))?,
+        None => controlador.original(sessao, foto_no_site).await?,
+    };
 
     let exportador = exportador.clone();
     let para_revelar = corte.clone();
@@ -602,6 +629,7 @@ impl Publicador for PublicadorDaApi {
         let controlador = self.controlador.clone();
         let exportador = self.exportador.clone();
         let locais = locais_lidos(&self.locais_de, &foto_no_site);
+        let editada = (self.editada_de)(&foto_no_site);
         self.tokio.spawn(async move {
             let feito = match locais {
                 Ok(locais) => {
@@ -613,6 +641,7 @@ impl Publicador for PublicadorDaApi {
                         ajustes,
                         corte,
                         locais,
+                        editada,
                     )
                     .await
                 }
@@ -658,11 +687,17 @@ impl Publicador for PublicadorDaApi {
         let controlador = self.controlador.clone();
         let exportador = self.exportador.clone();
         let locais = locais_lidos(&self.locais_de, &foto_no_site);
+        let editada = (self.editada_de)(&foto_no_site);
         self.tokio.spawn(async move {
             let revelado = async {
                 let locais = locais
                     .map_err(|e| format!("a Revelação local desta foto não pôde ser lida: {e}"))?;
-                let original = controlador.original(&sessao, &foto_no_site).await?;
+                let original = match editada {
+                    Some(arquivo) => tokio::fs::read(&arquivo)
+                        .await
+                        .map_err(|e| format!("a imagem editada não abriu: {e}"))?,
+                    None => controlador.original(&sessao, &foto_no_site).await?,
+                };
                 tokio::task::spawn_blocking(move || {
                     exportador.renderizar_bytes(&original, &ajustes, &corte, &locais, QUALIDADE)
                 })

@@ -10,6 +10,8 @@ pub mod cache;
 pub mod controles;
 pub mod corte;
 pub mod curva;
+/// De onde a Revelação tira os pixels: o bruto ou a imagem editada (C32).
+pub mod fonte;
 pub mod histograma;
 pub mod historico;
 pub mod lightroom;

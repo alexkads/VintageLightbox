@@ -219,6 +219,30 @@ async fn main() {
         eprintln!("⚠️ [Revelação local] o depósito das fotos do site não abriu: {erro}");
         Vec::new()
     });
+    // 🖌️ **As edições em camadas** (docs/editor-em-camadas/): o catálogo lido
+    // uma vez, com a reconciliação das gravações interrompidas. A mesma porta
+    // responde à Revelação, à exportação, à impressão e ao pós-venda — a
+    // imagem editada é a entrada de todos eles (C32).
+    let edicoes = Arc::new(
+        ui_gpui::editor::porta::EdicoesDoCatalogo::carregar(
+            catalogo.clone(),
+            infrastructure::database::CatalogoDeEdicoes::new(pool.clone()),
+            tokio::runtime::Handle::current(),
+        )
+        .await,
+    );
+    ui_gpui::editor::porta::definir_as_do_app(edicoes.clone());
+    let editada_da_foto: infrastructure::image_exporter::ImagemEditadaDe = {
+        use ui_gpui::editor::porta::Edicoes;
+        let edicoes = edicoes.clone();
+        Arc::new(move |foto: &domain::entities::Photo| {
+            edicoes
+                .versao_de(&foto.id().to_string(), foto.id_no_site())
+                .map(|v| v.arquivo)
+        })
+    };
+    let exportador_de_fotos =
+        || infrastructure::ImageExporterImpl::new().com_editadas(editada_da_foto.clone());
     let gravador: Arc<dyn Gravador> = Arc::new(
         GravadorDoBanco::novo(editor, tokio::runtime::Handle::current(), guardadas)
             .com_locais_do_site(locais_do_site),
@@ -239,7 +263,7 @@ async fn main() {
         Arc::new(adapters::controllers::ExportController::new(Arc::new(
             use_cases::ExportPhotoUseCase::new(
                 repositorio_de_fotos.clone(),
-                Arc::new(infrastructure::ImageExporterImpl::new()),
+                Arc::new(exportador_de_fotos()),
             ),
         ))),
         tokio::runtime::Handle::current(),
@@ -284,7 +308,7 @@ async fn main() {
                     api.clone(),
                     Arc::new(use_cases::pos_venda::PublicarNoPosVendaUseCase::new(
                         repositorio_de_fotos.clone(),
-                        Arc::new(infrastructure::ImageExporterImpl::new()),
+                        Arc::new(exportador_de_fotos()),
                         // O mesmo gerador das miniaturas prepara o que sobe: ele já
                         // abre RAW, TIFF e HEIC, e já reduz para um lado máximo.
                         Arc::new(infrastructure::ThumbnailGeneratorImpl::new()),
@@ -295,7 +319,7 @@ async fn main() {
             // 🔑 O mesmo exportador da exportação e da impressão: é ele que revela
             // o original quando o editor salva na galeria, e a foto do cliente não
             // pode depender de qual dos caminhos a produziu.
-            Arc::new(infrastructure::ImageExporterImpl::new()),
+            Arc::new(exportador_de_fotos()),
             tokio::runtime::Handle::current(),
         )
         // A receita local das fotos do site sobe e revela junto: a porta a lê do
@@ -303,6 +327,14 @@ async fn main() {
         .com_locais({
             let gravador = gravador.clone();
             Arc::new(move |foto_no_site: &str| gravador.locais_do_site(foto_no_site))
+        })
+        // 🖌️ E a imagem editada, quando houver: é ela que se revela (C32).
+        .com_editadas({
+            use ui_gpui::editor::porta::Edicoes;
+            let edicoes = edicoes.clone();
+            Arc::new(move |foto_no_site: &str| {
+                edicoes.versao_de("", Some(foto_no_site)).map(|v| v.arquivo)
+            })
         }),
     );
 
@@ -337,7 +369,7 @@ async fn main() {
     let folha: Arc<dyn ui_gpui::impressao::porta::Folha> =
         Arc::new(ui_gpui::impressao::porta::FolhaDoDisco::nova(
             repositorio_de_fotos.clone(),
-            Arc::new(infrastructure::ImageExporterImpl::new()),
+            Arc::new(exportador_de_fotos()),
             tokio::runtime::Handle::current(),
         ));
 
@@ -521,6 +553,8 @@ async fn main() {
                                 cx,
                             )
                         });
+                        // 🖌️ A Revelação resolve a imagem editada pela mesma porta.
+                        aplicativo.update(cx, |app, cx| app.definir_edicoes(edicoes.clone(), cx));
                         // Minimizar leva à bandeja; fechar com envio na fila só
                         // esconde (G9) — `ui_gpui::segundo_plano`.
                         ui_gpui::segundo_plano::ligar(aplicativo.downgrade(), window, cx);

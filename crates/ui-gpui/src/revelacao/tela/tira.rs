@@ -81,6 +81,8 @@ pub(super) struct EstadoDaTira {
     a_baixar: Vec<PhotoViewModel>,
     /// As fotos (id no site) do "Descartar", até a raiz as atender.
     pub(super) a_descartar: Vec<String>,
+    /// A foto do "Editar Foto", até a raiz abrir a janela do editor.
+    pub(super) a_editar: Option<PhotoViewModel>,
     /// Quantos quadros ainda tentam centralizar a aberta.
     ///
     /// ⚠️ **Dois**, porque a conta usa o leiaute do quadro anterior: no primeiro
@@ -113,6 +115,7 @@ impl EstadoDaTira {
             zerar_do_menu: None,
             a_baixar: Vec::new(),
             a_descartar: Vec::new(),
+            a_editar: None,
             centrar: 0,
             pendentes: BTreeSet::new(),
             primeira_desenhada: 0,
@@ -328,6 +331,8 @@ struct Menu {
     clicada: usize,
     arquivo: String,
     e_a_aberta: bool,
+    /// A clicada pode ir ao editor em camadas (ver `Revelacao::pode_editar`).
+    editavel: bool,
     na_escolha: bool,
     alvos: Vec<PhotoViewModel>,
     quantas_zeram: usize,
@@ -715,6 +720,7 @@ impl Revelacao {
             a_descartar,
             arquivo: foto.name.clone(),
             e_a_aberta: clicada == self.posicao,
+            editavel: Revelacao::pode_editar(foto),
             na_escolha: self.marcadas.contains(&clicada),
             quantas_zeram: outras + usize::from(aberta_zera),
             alvos,
@@ -1558,6 +1564,7 @@ fn montar_o_menu(
     let alvos_baixar = dados.alvos;
     let (para_zerar, para_baixar) = (esta.clone(), esta.clone());
     let (para_abrir, para_escolher) = (esta.clone(), esta.clone());
+    let para_editar = esta.clone();
 
     menu.label(dados.arquivo)
         .separator()
@@ -1566,6 +1573,16 @@ fn montar_o_menu(
                 .disabled(dados.e_a_aberta)
                 .on_click(move |_ev, window, cx| {
                     let _ = para_abrir.update(cx, |tela, cx| tela.ir_para(clicada, window, cx));
+                }),
+        )
+        // 🖌️ O editor em camadas, numa janela própria — **a clicada**, mesmo
+        // com várias marcadas: editar pixel é gesto de uma foto só, e o lote
+        // continua marcado para o que vier depois.
+        .item(
+            PopupMenuItem::new("Editar Foto")
+                .disabled(!dados.editavel)
+                .on_click(move |_ev, _window, cx| {
+                    let _ = para_editar.update(cx, |tela, cx| tela.pedir_edicao(clicada, cx));
                 }),
         )
         .item(

@@ -36,7 +36,7 @@ use infrastructure::cache::preview_manager::PreviewManager;
 /// `generate(&dest_path, 2560)`). Repor num lado diferente faria a mesma foto
 /// abrir com nitidez diferente conforme tivesse sido importada ou reposta — e
 /// ninguém encontraria o motivo, porque as duas telas estariam certas.
-const LADO_DO_PREVIEW: u32 = 2560;
+pub(crate) const LADO_DO_PREVIEW: u32 = 2560;
 
 /// E o da miniatura, pelo mesmo motivo.
 const LADO_DA_MINIATURA: u32 = 300;

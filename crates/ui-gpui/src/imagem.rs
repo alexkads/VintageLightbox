@@ -74,6 +74,16 @@ pub fn para_gpui(imagem: DynamicImage) -> Arc<RenderImage> {
     imagem
 }
 
+/// Pixels que **já estão em BGRA** viram imagem do GPUI, registrada na coleta
+/// como toda outra — os ladrilhos da vista do editor (`editor-core/src/vista.rs`
+/// já os entrega nessa ordem).
+pub fn de_bgra(largura: u32, altura: u32, bytes: Vec<u8>) -> Option<Arc<RenderImage>> {
+    let quadro = image::RgbaImage::from_raw(largura, altura, bytes)?;
+    let imagem = Arc::new(RenderImage::new(SmallVec::from_elem(Frame::new(quadro), 1)));
+    coleta::registrar(&imagem);
+    Some(imagem)
+}
+
 /// 🚨 **A textura na GPU não some quando a imagem some.**
 ///
 /// O atlas do GPUI guarda uma textura por `RenderImage` desenhada e só a solta

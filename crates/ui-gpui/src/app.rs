@@ -16,6 +16,8 @@ mod atalhos_da_revelacao;
 mod avisos;
 mod barra_do_pe;
 mod canto_dos_envios;
+/// 🖌️ A janela do editor em camadas, aberta pela tira da Revelação.
+mod editor;
 mod guias;
 mod painel;
 pub mod resgate;
@@ -258,6 +260,7 @@ const CONTEXTO: &str = "Aplicativo";
 const SEM_CAMPO_DE_TEXTO: &str = "Aplicativo && !Input";
 
 pub fn init(cx: &mut gpui_kit::App) {
+    crate::editor::init(cx);
     cx.bind_keys([
         gpui_kit::KeyBinding::new("f11", AlternarTelaCheiaDoApp, Some(CONTEXTO)),
         gpui_kit::KeyBinding::new("ctrl-cmd-f", AlternarTelaCheiaDoApp, Some(CONTEXTO)),
@@ -806,6 +809,8 @@ pub struct Aplicativo {
     /// O aviso de que a tela do cliente foi fechada **por fora** — o `X` da
     /// barra, o `Esc` de dentro, o sistema.
     _cliente_fechou: Option<gpui_kit::Subscription>,
+    /// 🖌️ As janelas do editor em camadas abertas, uma por foto.
+    editores: editor::Editores,
     /// 📤 **A esteira de envios** — a fila com teto que sobe as fotos em
     /// segundo plano, e o que na web é o Worker. Ver `crate::envios`.
     esteira: crate::envios::Esteira,
@@ -1346,6 +1351,7 @@ impl Aplicativo {
             barra_do_pe: Default::default(),
             _repeticoes: Vec::new(),
             _cliente_fechou: None,
+            editores: Default::default(),
             _releitura_agendada: None,
             _releitura_da_galeria: None,
             baixas: resolucao_cheia::Baixas::nova(),
@@ -4031,6 +4037,7 @@ impl Aplicativo {
                 self.recontar_o_que_falta_subir(cx);
             }
             PedidoDaRevelacao::QueroOBruto => self.pedir_o_bruto(cx),
+            PedidoDaRevelacao::EditarFoto => self.editar_a_foto_pedida(cx),
         }
     }
 
