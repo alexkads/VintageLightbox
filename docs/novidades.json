@@ -1,11 +1,12 @@
 {
-  "versao": "0.1.25",
-  "titulo": "O carimbo e o pincel acompanham o zoom: aproximou, o círculo já cobre só o detalhe — como no Lightroom.",
+  "versao": "0.1.26",
+  "titulo": "Novo botão Desempenho no rodapé: mede a fluidez da tela e mostra onde o tempo está indo, para acharmos a lentidão.",
   "importante": false,
   "novidades": [
-    "O círculo do carimbo, do band-aid e do pincel fica do mesmo tamanho na tela em qualquer zoom. Aproximar para tirar uma sarda já deixa a ferramenta fina, sem mexer no Tamanho.",
-    "O Tamanho agora mostra quantos pixels da foto o círculo cobre, e o número diminui conforme você aproxima.",
-    "O retoque feito com zoom continua do tamanho do detalhe quando a foto volta a caber na tela. Os retoques e máscaras que já existiam não mudam."
+    "No rodapé, o botão Desempenho abre uma janela própria, que pode ir para o outro monitor. Aperte Iniciar, repita o que está lento (rolar a galeria, trocar de foto, arrastar um ajuste, pintar uma máscara) e aperte Parar.",
+    "A janela mostra quantos quadros por segundo a tela fez, quais engasgaram e em que etapa o tempo foi gasto, e dá o diagnóstico numa frase.",
+    "Salvar no banco guarda a medição neste computador; Copiar relatório leva o texto completo, com o computador, a placa de vídeo e o driver, para você mandar ao suporte.",
+    "Na Revelação local, um botão no fim da barra de ferramentas sai de uma vez da ferramenta, da máscara e do retoque escolhidos (o mesmo que o Esc)."
   ],
-  "por_que_atualizar": "Retoque miúdo sem ficar descendo o Tamanho a cada zoom: o círculo que aparece antes do clique é o que a foto recebe."
+  "por_que_atualizar": "Com a medição de cada balcão (principalmente os de Windows) dá para saber se a lentidão é do programa ou do computador, e corrigir no lugar certo."
 }
