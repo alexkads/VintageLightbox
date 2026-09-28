@@ -1,12 +1,10 @@
 {
-  "versao": "0.1.31",
-  "titulo": "Revelação e Edição: o selo EDITADA mostra as fotos com edição, e \"Excluir a edição\" devolve a foto ao arquivo bruto.",
+  "versao": "0.1.32",
+  "titulo": "Por dentro: o banco do balcão e o site passam a chamar a revelação pelos parâmetros.",
   "importante": false,
   "novidades": [
-    "As fotos com edição (o que foi pintado em \"Editar Foto\") ganham um selo: EDITADA no alto da Revelação, um lápis no canto da miniatura da tira e \"· editada\" embaixo da foto na grade da sessão.",
-    "Botão direito na foto da tira → \"Excluir a edição\": o que foi pintado sai e a foto volta ao arquivo bruto. A revelação (ajustes, corte e máscaras) continua. O app pergunta antes, porque não tem volta.",
-    "Os nomes ficaram como no Lightroom e no Photoshop: Revelação são os ajustes; Edição são as camadas pintadas. Por isso o menu agora diz \"Descartar a revelação\", a barra diz \"revelações não salvas\" e a nova sessão diz \"Fotos e revelação\".",
-    "Sem edição e sem revelação, o que aparece é o arquivo bruto, como entrou na importação."
+    "Nada muda na tela: é uma arrumação por dentro. O que o app guarda de cada foto revelada agora se chama \"parâmetros da revelação\", no balcão e no site.",
+    "As fotos, as revelações e as edições que já existem continuam iguais; a troca de nome é feita sozinha na primeira abertura."
   ],
-  "por_que_atualizar": "Fica claro, de longe, quais fotos têm edição — e dá para voltar ao arquivo bruto sem perder a revelação."
+  "por_que_atualizar": "Deixa o balcão com os mesmos nomes do site, para as próximas melhorias da Revelação e da Edição."
 }
