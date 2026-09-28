@@ -1,11 +1,12 @@
 {
-  "versao": "0.1.30",
-  "titulo": "As medições do botão Desempenho agora vão para o servidor: as de todos os balcões ficam juntas para comparar.",
+  "versao": "0.1.31",
+  "titulo": "Revelação e Edição: o selo EDITADA mostra as fotos com edição, e \"Excluir a edição\" devolve a foto ao arquivo bruto.",
   "importante": false,
   "novidades": [
-    "Salvar no banco guarda a medição neste computador e também no servidor. Sem internet, ela fica guardada e sobe sozinha na próxima vez que a janela Desempenho abrir.",
-    "As medições que você já tinha salvado neste computador sobem ao servidor na primeira vez que abrir a janela Desempenho depois de atualizar.",
-    "As abas Sessões e Comparar mostram as medições de todos os computadores, e Comparar põe Windows, Linux e Mac lado a lado na mesma operação."
+    "As fotos com edição (o que foi pintado em \"Editar Foto\") ganham um selo: EDITADA no alto da Revelação, um lápis no canto da miniatura da tira e \"· editada\" embaixo da foto na grade da sessão.",
+    "Botão direito na foto da tira → \"Excluir a edição\": o que foi pintado sai e a foto volta ao arquivo bruto. A revelação (ajustes, corte e máscaras) continua. O app pergunta antes, porque não tem volta.",
+    "Os nomes ficaram como no Lightroom e no Photoshop: Revelação são os ajustes; Edição são as camadas pintadas. Por isso o menu agora diz \"Descartar a revelação\", a barra diz \"revelações não salvas\" e a nova sessão diz \"Fotos e revelação\".",
+    "Sem edição e sem revelação, o que aparece é o arquivo bruto, como entrou na importação."
   ],
-  "por_que_atualizar": "Sem exportar arquivo: basta medir e salvar em cada balcão para compararmos onde a tela fica lenta."
+  "por_que_atualizar": "Fica claro, de longe, quais fotos têm edição — e dá para voltar ao arquivo bruto sem perder a revelação."
 }
