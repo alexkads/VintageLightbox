@@ -1,13 +1,12 @@
 {
-  "versao": "0.1.35",
-  "titulo": "O app inteiro passa a usar as peças do gpui-kit: menu lateral, menus, abas, painéis e o Caixa que se ajusta à janela.",
+  "versao": "0.1.36",
+  "titulo": "O painel da foto na sessão fica igual ao do site: quem ela é, a nota e as ações em cima, e faixa, negociação e preço num lugar só.",
   "importante": false,
   "novidades": [
-    "O Caixa ajusta as três colunas ao tamanho da janela: a lista de sessões e o movimento se puxam pela borda e somem pelas setas, e o cupom nunca fica espremido — o total e o Finalizar pagamento aparecem sempre inteiros.",
-    "O menu lateral, o menu da conta, o menu do zoom, o \"Mais ações\" do chatbot e o estúdio do Caixa são os componentes padrão, com o mesmo jeito em todas as telas; o selo de mensagens novas do chatbot continua à vista com o menu recolhido.",
-    "Na Revelação, as abas (sRGB/RGB, HSL, canais da curva) e os painéis que abrem e fecham seguem o padrão do site; na galeria, \"Faixa, negociação e preço\" e \"Atalhos\" também.",
-    "Erros como \"a lista de sessões não carregou\" aparecem como aviso passageiro no canto, em vez de uma faixa fixa ocupando a tela.",
-    "Campos, listas de escolha e botões lado a lado têm a mesma altura em todas as telas."
+    "Na sessão, o painel da foto em foco virou um cartão em três partes: o nome, o estado e onde ela está (na nuvem, aqui ou subindo); a nota, com as estrelas clicáveis e um \"tirar\"; e os botões grandes \"Marcar como levada\" e \"Revelar\" (ou \"Revelar de novo\").",
+    "\"Faixa, negociação e preço\" mostra tamanho e downloads, a faixa, a negociação numa etiqueta âmbar (\"Desconto · R$ 20,00\") que abre o diálogo ao clicar, o preço de venda com \"Fixado em…; a faixa cobraria…\" e o \"Voltar à faixa\", e o Apagar no fim.",
+    "Com duas ou mais fotos marcadas, aparece só o painel do lote, como no site.",
+    "Sem valor fixado, o painel diz que o cliente paga o preço da faixa: no pós-venda não existe o desconto de quem compra antes do ensaio."
   ],
-  "por_que_atualizar": "O balcão fica com uma tela só, coerente, e o Caixa funciona bem mesmo em monitores pequenos."
+  "por_que_atualizar": "O operador acha cada botão no mesmo lugar do site, e o preço que o painel mostra é o que o cliente paga na galeria."
 }
