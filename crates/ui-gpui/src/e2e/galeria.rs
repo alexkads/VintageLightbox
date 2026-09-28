@@ -15,8 +15,9 @@ fn clicar(e: &Estudio, cx: &mut TestAppContext, alvo: &'static str) {
 }
 
 fn clicar_com(e: &Estudio, cx: &mut TestAppContext, alvo: &'static str, teclas: Modifiers) {
-    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
-    visual.run_until_parked();
+    // Um quadro novo antes de ler o lugar: o `debug_bounds` é o do último
+    // quadro desenhado (ver `chatbot::quadro_novo`).
+    let mut visual = super::chatbot::quadro_novo(e, cx);
     let onde = visual
         .debug_bounds(alvo)
         .unwrap_or_else(|| panic!("o botão {alvo} não está desenhado na tela"));
@@ -50,6 +51,10 @@ fn faixa_e_preco_em_lote_pela_grade_e_filmstrip(cx: &mut TestAppContext) {
         },
     );
 
+    // O cartão do lote inteiro à vista: numa janela mais baixa o harness não
+    // entrega o clique no preço e no "Apagar", no fim da coluna.
+    let visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    visual.simulate_resize(gpui_kit::size(gpui_kit::px(1600.), gpui_kit::px(1400.)));
     clicar(&e, cx, "sessao-tile-a");
     let aditivo = Modifiers {
         #[cfg(target_os = "macos")]
@@ -137,8 +142,6 @@ fn faixa_e_preco_em_lote_pela_grade_e_filmstrip(cx: &mut TestAppContext) {
     e.app(cx, |app, _, _| assert!(app.no_balcao()));
 
     e.app(cx, |app, window, cx| app.fechar_balcao(window, cx));
-    let visual = VisualTestContext::from_window(e.raiz.into(), cx);
-    visual.simulate_resize(gpui_kit::size(gpui_kit::px(1600.), gpui_kit::px(1100.)));
     clicar(&e, cx, "lote-apagar");
     assert!(e.site.tiradas().is_empty(), "apagar exige confirmação");
     clicar(&e, cx, "apagar-confirmar");
@@ -991,6 +994,10 @@ fn todo_dialogo_da_galeria_devolve_as_teclas(cx: &mut TestAppContext) {
     ];
     for (i, (nome, abre, fecha)) in dialogos.into_iter().enumerate() {
         let nota = i % 5 + 1;
+        {
+            let mut v = super::chatbot::quadro_novo(&e, cx);
+            eprintln!("DBG {abre}={:?}", v.debug_bounds(abre));
+        }
         clicar(&e, cx, abre);
         clicar(&e, cx, fecha);
         let antes = e.site.negociadas().len();

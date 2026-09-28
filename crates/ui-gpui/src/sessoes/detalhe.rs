@@ -6711,221 +6711,368 @@ impl Detalhe {
         // enganava: a nota e o "Marcar como levada" valem para todas as
         // marcadas, e não só para a foto que ele mostra.
         if let Some(campos) = self.campos_do_lote.as_ref() {
-            let pendentes_marcadas = self.nao_salvas_marcadas().len();
-            let (editaveis, aguardando, fixadas, negociadas) = self
-                .selecao
-                .marcadas()
-                .filter_map(|p| self.acervo.visivel(p))
-                .filter(|f| f.editavel())
-                .fold(
-                    (0, 0, 0, 0),
-                    |(editaveis, aguardando, fixadas, negociadas), f| {
-                        if self.ids_locais.contains(&f.id) {
-                            (editaveis, aguardando + 1, fixadas, negociadas)
-                        } else {
-                            (
-                                editaveis + 1,
-                                aguardando,
-                                fixadas + usize::from(f.preco_de_venda.is_some()),
-                                negociadas + usize::from(f.tem_negociacao()),
-                            )
-                        }
-                    },
-                );
-            return Some(
-                {
-                let apagado = cx.theme().muted_foreground;
-                let nota_do_lote = self
-                    .selecao
-                    .marcadas()
-                    .filter_map(|p| self.acervo.visivel(p))
-                    .map(|f| f.nota)
-                    .reduce(|a, b| if a == b { a } else { None })
-                    .flatten();
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(6.))
-                    .pb(px(10.))
-                    .border_b_1()
-                    .border_color(cx.theme().border)
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(format!("{} fotos selecionadas", campos.ids.len()))
-                            .child(
-                                Button::new("lote-limpar")
-                                    .debug_selector(|| "lote-limpar".into())
-                                    .label("Limpar")
-                                    .xsmall()
-                                    .ghost()
-                                    .on_click(cx.listener(|tela, _, _, cx| {
-                                        tela.limpar_selecao(cx)
-                                    })),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(apagado)
-                            .child(format!(
-                                "{editaveis} editáveis no site · {aguardando} aguardando envio. Compradas e excluídas ficam de fora."
-                            )),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(apagado)
-                            .child(format!(
-                                "{fixadas} com preço fixado · {negociadas} com negociação no balcão."
-                            )),
-                    )
-                    .child(div().text_xs().text_color(apagado).child("Nota das selecionadas"))
-                    .child(
-                        div().flex().gap(px(2.)).children((1..=5u8).map(|nota| {
-                            Button::new(SharedString::from(format!("lote-nota-{nota}")))
-                                .debug_selector(move || format!("lote-nota-{nota}"))
-                                .label(if nota_do_lote.is_some_and(|atual| nota <= atual) {
-                                    "★"
-                                } else {
-                                    "☆"
-                                })
-                                .xsmall()
-                                .ghost()
-                                .on_click(cx.listener(move |tela, _, _, cx| {
-                                    tela.dar_nota(if nota_do_lote == Some(nota) { 0 } else { nota }, cx)
-                                }))
-                        })),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .gap(px(5.))
-                            .child(
-                                Button::new("lote-marcar-levadas")
-                                    .debug_selector(|| "lote-marcar-levadas".into())
-                                    .label("Marcar como levadas")
-                                    .xsmall()
-                                    .disabled(editaveis + aguardando == 0)
-                                    .on_click(cx.listener(|tela, _, _, cx| {
-                                        tela.marcar_como(EstadoNoBalcao::LevadaNoBalcao, cx)
-                                    })),
-                            )
-                            .child(
-                                Button::new("lote-por-a-venda")
-                                    .debug_selector(|| "lote-por-a-venda".into())
-                                    .label("Pôr à venda")
-                                    .xsmall()
-                                    .disabled(editaveis + aguardando == 0)
-                                    .on_click(cx.listener(|tela, _, _, cx| {
-                                        tela.marcar_como(EstadoNoBalcao::Disponivel, cx)
-                                    })),
-                            ),
-                    )
-                    .child(div().text_xs().text_color(apagado).child("Faixa para a seleção"))
-                    .child(
-                        div()
-                            .debug_selector(|| "lote-faixa".into())
-                            .child(
-                                crate::estilo::campo(Select::new(&campos.faixa))
-                                    .xsmall()
-                                    .placeholder("Escolha a faixa para todas…")
-                                    .disabled(editaveis == 0)
-                                    .w_full(),
-                            ),
-                    )
-                    .when(fixadas > 0, |painel| {
-                        painel.child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().warning)
-                                .child("Preço fixado continua valendo após trocar a faixa."),
-                        )
-                    })
-                    .child(
-                        Button::new("lote-negociar")
-                            .debug_selector(|| "lote-negociar".into())
-                            .label("Negociação…")
-                            .xsmall()
-                            .disabled(editaveis == 0)
-                            .on_click(cx.listener(|tela, _, _, cx| {
-                                tela.pedir_negociacao(tela.marcadas(), false, cx);
-                            })),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(apagado)
-                            .child("Preço de venda online para a seleção"),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(5.))
-                            .child("R$")
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .debug_selector(|| "lote-preco".into())
-                                    .child(Input::new(&campos.preco).xsmall()),
-                            )
-                            .child(
-                                Button::new("lote-preco-aplicar")
-                                    .debug_selector(|| "lote-preco-aplicar".into())
-                                    .label("Aplicar")
-                                    .xsmall()
-                                    .disabled(editaveis == 0)
-                                    .on_click(cx.listener(|tela, _, _, cx| {
-                                        tela.aplicar_preco_do_lote(cx)
-                                    })),
-                            ),
-                    )
-                    .child(
-                        Button::new("lote-preco-voltar-faixa")
-                            .debug_selector(|| "lote-preco-voltar-faixa".into())
-                            .label("Remover preço fixado: usar a faixa")
-                            .xsmall()
-                            .disabled(editaveis == 0)
-                            .on_click(cx.listener(|tela, _, _, cx| {
-                                tela.mudar_preco_do_lote(None, cx)
-                            })),
-                    )
-                    .when(pendentes_marcadas > 0, |painel| {
-                        painel.child(
-                            Button::new("lote-descartar-edicao")
-                                .debug_selector(|| "lote-descartar-edicao".into())
-                                .label(format!(
-                                    "Descartar a revelação não salva ({pendentes_marcadas})"
-                                ))
-                                .xsmall()
-                                .danger()
-                                .ghost()
-                                .on_click(cx.listener(|tela, _, _, cx| {
-                                    tela.descartar_das_marcadas(cx)
-                                })),
-                        )
-                    })
-                    .child(
-                        Button::new("lote-apagar")
-                            .debug_selector(|| "lote-apagar".into())
-                            .label("Apagar")
-                            .xsmall()
-                            .danger()
-                            .ghost()
-                            .disabled(editaveis == 0)
-                            .on_click(cx.listener(|tela, _, _, cx| {
-                                tela.apagar_marcadas_do_site(cx)
-                            })),
-                    )
-                }
-                .into_any_element(),
-            );
+            return Some(self.cartao_do_lote(campos, cx));
         }
 
         Some(self.cartao_da_foto(foto, posicao, cx))
+    }
+
+    /// 📋 **O cartão do lote — o do painel do site com `n > 1`**, na mesma
+    /// gramática do [`Self::cartao_da_foto`] (dono, 28/09/2026: *"quando
+    /// seleciona várias fotos… o design também tá muito feio, use GPUI Kit"*).
+    ///
+    /// Eram quinze linhas do mesmo peso — contagens, rótulos soltos, botões
+    /// `xsmall` de larguras desencontradas. Agora são as faixas do cartão da
+    /// foto:
+    ///
+    /// 1. **quantas e quais podem mudar** — o título, "limpar" e, só quando há
+    ///    o que dizer, as que ficam de fora, as fixadas e as negociadas;
+    /// 2. **a nota** — as estrelas do cartão da foto, com "tirar";
+    /// 3. **o que se faz ao lote** — levadas/à venda em cima e grandes;
+    /// 4. **o que o cliente paga** — faixa, negociação, preço e apagar, com os
+    ///    rótulos do site ("Faixa", "Preço de venda online").
+    fn cartao_do_lote(
+        &self,
+        campos: &CamposDoLote,
+        cx: &mut Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        use crate::recursos::Icone;
+        use gpui_kit::component::Icon;
+
+        let tema = cx.theme();
+        let (borda, apagado) = (tema.border, tema.muted_foreground);
+        let pendentes_marcadas = self.nao_salvas_marcadas().len();
+        let (editaveis, aguardando, fixadas, negociadas) = self
+            .selecao
+            .marcadas()
+            .filter_map(|p| self.acervo.visivel(p))
+            .filter(|f| f.editavel())
+            .fold(
+                (0, 0, 0, 0),
+                |(editaveis, aguardando, fixadas, negociadas), f| {
+                    if self.ids_locais.contains(&f.id) {
+                        (editaveis, aguardando + 1, fixadas, negociadas)
+                    } else {
+                        (
+                            editaveis + 1,
+                            aguardando,
+                            fixadas + usize::from(f.preco_de_venda.is_some()),
+                            negociadas + usize::from(f.tem_negociacao()),
+                        )
+                    }
+                },
+            );
+        let total = campos.ids.len();
+        let podem = editaveis + aguardando;
+        let nota_do_lote = self
+            .selecao
+            .marcadas()
+            .filter_map(|p| self.acervo.visivel(p))
+            .map(|f| f.nota)
+            .reduce(|a, b| if a == b { a } else { None })
+            .flatten();
+
+        // ── 1. Quantas ───────────────────────────────────────────────────
+        // O resumo só fala do que foge do comum: com as três editáveis e nada
+        // fixado, a linha "0 aguardando · 0 fixadas" era ruído.
+        let mut resumo: Vec<String> = Vec::new();
+        if podem < total {
+            resumo.push(if podem == 0 {
+                "Nenhuma pode mudar: comprada e apagada ficam como estão.".into()
+            } else {
+                format!("{podem} podem mudar; comprada e apagada ficam como estão.")
+            });
+        }
+        if aguardando > 0 {
+            resumo.push(format!(
+                "{aguardando} aqui, ainda não subiu — faixa e preço esperam o envio."
+            ));
+        }
+        let cabecalho = div()
+            .flex()
+            .flex_col()
+            .gap(px(2.))
+            .p(px(12.))
+            .border_b_1()
+            .border_color(borda)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .debug_selector(|| "lote-titulo".into())
+                            .font_weight(gpui_kit::FontWeight::MEDIUM)
+                            .child(format!("{total} selecionadas")),
+                    )
+                    .child(
+                        crate::estilo::botao_raso("lote-limpar")
+                            .debug_selector(|| "lote-limpar".into())
+                            .label("limpar")
+                            .text_color(apagado)
+                            .on_click(cx.listener(|tela, _, _, cx| tela.limpar_selecao(cx))),
+                    ),
+            )
+            .children(resumo.into_iter().map(|frase| {
+                div().text_xs().text_color(apagado).child(frase)
+            }))
+            .when(fixadas + negociadas > 0, |cabecalho| {
+                cabecalho.child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .gap(px(6.))
+                        .pt(px(4.))
+                        .when(fixadas > 0, |selos| {
+                            selos.child(
+                                crate::estilo::selo_contorno(cx)
+                                    .text_xs()
+                                    .child(format!("{fixadas} com preço fixado")),
+                            )
+                        })
+                        .when(negociadas > 0, |selos| {
+                            selos.child(
+                                crate::estilo::selo_colorido(cores::selo_ambar())
+                                    .text_xs()
+                                    .child(Icon::new(Icone::Handshake).size(px(12.)))
+                                    .child(format!("{negociadas} negociadas no balcão")),
+                            )
+                        }),
+                )
+            })
+            // 📌 O que foi revelado aqui e ainda não subiu, com o caminho de
+            // volta — o mesmo aviso do cartão da foto.
+            .when(pendentes_marcadas > 0, |cabecalho| {
+                cabecalho.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .items_start()
+                        .gap(px(4.))
+                        .pt(px(6.))
+                        .child(div().text_xs().text_color(tema.warning).child(format!(
+                            "{pendentes_marcadas} com revelação feita aqui — ainda não salva na galeria."
+                        )))
+                        .child(
+                            crate::estilo::botao_raso("lote-descartar-edicao")
+                                .debug_selector(|| "lote-descartar-edicao".into())
+                                .label(format!("Descartar a revelação ({pendentes_marcadas})"))
+                                .text_color(tema.danger)
+                                .on_click(cx.listener(|tela, _, _, cx| {
+                                    tela.descartar_das_marcadas(cx)
+                                })),
+                        ),
+                )
+            });
+
+        // ── 2. A nota ────────────────────────────────────────────────────
+        // As estrelas do cartão da foto (à mão pelo mesmo motivo: o `Rating`
+        // do kit). Como no site, a estrela acesa do lote tira a nota — a
+        // seleção mista não tem nota, e só as iguais acendem.
+        let linha_da_nota = div()
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .px(px(12.))
+            .py(px(8.))
+            .border_b_1()
+            .border_color(borda)
+            .text_xs()
+            .child(div().text_color(apagado).child("Nota"))
+            .child(div().flex().children((1..=5u8).map(|estrela| {
+                let acesa = nota_do_lote.is_some_and(|atual| estrela <= atual);
+                div()
+                    .id(SharedString::from(format!("lote-nota-{estrela}")))
+                    .debug_selector(move || format!("lote-nota-{estrela}"))
+                    .cursor_pointer()
+                    .px(px(2.))
+                    .text_base()
+                    .line_height(px(18.))
+                    .text_color(if acesa {
+                        cores::nota()
+                    } else {
+                        apagado.opacity(0.6)
+                    })
+                    .hover(|estilo| estilo.text_color(cores::nota()))
+                    .child("★")
+                    .on_click(cx.listener(move |tela, _, _, cx| {
+                        tela.dar_nota(
+                            if nota_do_lote == Some(estrela) {
+                                0
+                            } else {
+                                estrela
+                            },
+                            cx,
+                        )
+                    }))
+            })))
+            .when(nota_do_lote.is_none(), |linha| {
+                linha.child(div().text_color(apagado).child("mista ou sem nota"))
+            })
+            .when(nota_do_lote.is_some(), |linha| {
+                linha.child(
+                    crate::estilo::botao_raso("lote-tirar-nota")
+                        .debug_selector(|| "lote-tirar-nota".into())
+                        .label("tirar")
+                        .text_color(apagado)
+                        .on_click(cx.listener(|tela, _, _, cx| tela.dar_nota(0, cx))),
+                )
+            });
+
+        // ── 3. O que se faz ao lote ──────────────────────────────────────
+        // Os botões grandes do cartão da foto, que quebram na coluna estreita.
+        let acoes = div()
+            .flex()
+            .flex_wrap()
+            .gap(px(8.))
+            .child(
+                crate::estilo::botao_contorno("lote-marcar-levadas", cx)
+                    .debug_selector(|| "lote-marcar-levadas".into())
+                    .flex_grow(1.)
+                    .label("Marcar como levadas")
+                    .disabled(podem == 0)
+                    .on_click(cx.listener(|tela, _, _, cx| {
+                        tela.marcar_como(EstadoNoBalcao::LevadaNoBalcao, cx)
+                    })),
+            )
+            .child(
+                crate::estilo::botao_contorno("lote-por-a-venda", cx)
+                    .debug_selector(|| "lote-por-a-venda".into())
+                    .flex_grow(1.)
+                    .label("Pôr à venda")
+                    .disabled(podem == 0)
+                    .on_click(cx.listener(|tela, _, _, cx| {
+                        tela.marcar_como(EstadoNoBalcao::Disponivel, cx)
+                    })),
+            );
+
+        // ── 4. O que o cliente paga ──────────────────────────────────────
+        // Faixa, negociação e preço só falam com as que estão no site.
+        let sem_site = editaveis == 0;
+        let rotulo = |texto: &'static str| div().text_xs().text_color(apagado).child(texto);
+        let site =
+            gpui_kit::component::v_flex()
+                .gap(px(10.))
+                .p(px(12.))
+                .border_t_1()
+                .border_color(borda)
+                .child(
+                    gpui_kit::component::v_flex()
+                        .gap(px(4.))
+                        .child(rotulo("Faixa"))
+                        .child(
+                            div().debug_selector(|| "lote-faixa".into()).child(
+                                crate::estilo::campo(Select::new(&campos.faixa))
+                                    .small()
+                                    .placeholder("Mudar para…")
+                                    .disabled(sem_site)
+                                    .w_full(),
+                            ),
+                        )
+                        .when(fixadas > 0, |faixa| {
+                            faixa.child(
+                                div().text_xs().text_color(tema.warning).child(
+                                    "O preço fixado continua valendo depois de trocar a faixa.",
+                                ),
+                            )
+                        }),
+                )
+                .child(
+                    crate::estilo::botao_contorno("lote-negociar", cx)
+                        .debug_selector(|| "lote-negociar".into())
+                        .w_full()
+                        .icon(Icon::new(Icone::Handshake))
+                        .label("Negociação…")
+                        .disabled(sem_site)
+                        .on_click(cx.listener(|tela, _, _, cx| {
+                            tela.pedir_negociacao(tela.marcadas(), false, cx);
+                        })),
+                )
+                .child(
+                    gpui_kit::component::v_flex()
+                        .gap(px(4.))
+                        .text_xs()
+                        .child(rotulo("Preço de venda online"))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(6.))
+                                .child(div().text_color(apagado).child("R$"))
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w(px(0.))
+                                        .debug_selector(|| "lote-preco".into())
+                                        .child(
+                                            crate::estilo::campo(Input::new(&campos.preco))
+                                                .small()
+                                                .disabled(sem_site),
+                                        ),
+                                )
+                                .child(
+                                    crate::estilo::botao_contorno("lote-preco-aplicar", cx)
+                                        .debug_selector(|| "lote-preco-aplicar".into())
+                                        .label("Aplicar")
+                                        .disabled(sem_site)
+                                        .on_click(cx.listener(|tela, _, _, cx| {
+                                            tela.aplicar_preco_do_lote(cx)
+                                        })),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .flex_wrap()
+                                .items_center()
+                                .gap_x(px(4.))
+                                .text_color(apagado)
+                                .child(if fixadas > 0 {
+                                    format!("{fixadas} com valor fixado;")
+                                } else {
+                                    "Sem valor fixado: vale o preço da faixa.".to_string()
+                                })
+                                .when(fixadas > 0, |frase| {
+                                    frase.child(
+                                        crate::estilo::botao_raso("lote-preco-voltar-faixa")
+                                            .debug_selector(|| "lote-preco-voltar-faixa".into())
+                                            .label("Voltar à faixa")
+                                            .text_color(apagado)
+                                            .px(px(0.))
+                                            .on_click(cx.listener(|tela, _, _, cx| {
+                                                tela.mudar_preco_do_lote(None, cx)
+                                            })),
+                                    )
+                                }),
+                        ),
+                )
+                .child(
+                    crate::estilo::botao_fantasma("lote-apagar", cx)
+                        .debug_selector(|| "lote-apagar".into())
+                        .w_full()
+                        .text_color(tema.danger)
+                        .icon(Icon::new(Icone::Trash2))
+                        .label(if sem_site {
+                            "Apagar".to_string()
+                        } else {
+                            format!("Apagar as {editaveis}")
+                        })
+                        .disabled(sem_site)
+                        .on_click(cx.listener(|tela, _, _, cx| tela.apagar_marcadas_do_site(cx))),
+                );
+
+        crate::estilo::cartao(cx)
+            .debug_selector(|| "painel-cartao-do-lote".into())
+            .flex()
+            .flex_col()
+            .text_sm()
+            .child(cabecalho)
+            .child(linha_da_nota)
+            .child(div().p(px(12.)).child(acoes))
+            .child(site)
+            .into_any_element()
     }
 
     /// 🗂️ **O cartão da foto em foco — o do painel do site** (`painel.tsx`,
