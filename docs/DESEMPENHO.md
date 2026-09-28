@@ -15,10 +15,18 @@ O código está em `crates/ui-gpui/src/desempenho/` (interface), `crates/revelac
    rouba o foco da janela principal.
 2. **Iniciar**, repetir a ação lenta (rolar a galeria ou a tira, trocar de foto, abrir a
    Revelação, arrastar um slider, pintar, gradiente, clone/heal), **Parar**.
-3. **Salvar no banco** grava a sessão, em lote e em segundo plano, no SQLite do catálogo.
+3. **Salvar no banco** grava a sessão, em lote e em segundo plano, no SQLite do catálogo **e no
+   servidor** (`POST /api/v2/app-desktop/desempenho`, tabela `app_desktop_desempenho` do Postgres
+   de produção — desde a 0.1.30, pedido do dono: *"O ideal era salvar no banco de dados"*). Sem
+   rede ou sem conta, ela entra numa fila em disco (`~/.vintagelightbox/desempenho/para-enviar/`)
+   e sobe quando a janela de Desempenho abrir de novo; a mesma sincronização manda as sessões
+   locais gravadas antes da 0.1.30.
    **Copiar relatório** leva o texto completo, com o diagnóstico e a máquina, para colar numa
    conversa.
-4. **Sessões** lista as guardadas; **Comparar** põe a mesma operação lado a lado por sistema.
+4. **Sessões** lista as guardadas **no servidor, de todos os computadores** (mais as locais que
+   ainda não subiram); **Comparar** põe a mesma operação lado a lado por sistema. Sem servidor, as
+   duas mostram só este computador e dizem isso. Apagar do servidor é de quem tem
+   `ViewSystemDiagnostics`; o operador apaga só a cópia local.
 5. Enquanto grava, o botão do rodapé fica vermelho ("● Medindo"), mesmo com a janela fechada.
 
 **Meça em build otimizado** (`--release`, ou o perfil `carga`). Em `debug` tudo custa até 57×
@@ -118,5 +126,5 @@ desempenho salvar
 fim
 ```
 
-Para comparar máquinas: **Exportar** numa máquina (todas as sessões num `.json`), **Importar** na
-outra, aba **Comparar**.
+Para comparar máquinas basta salvar em cada uma: a aba **Comparar** lê o servidor. **Exportar** e
+**Importar** continuam para quem mede sem conta (ou para levar a sessão a outro lugar).
