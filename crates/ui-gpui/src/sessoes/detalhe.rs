@@ -50,7 +50,7 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
-use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
+use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::component::{h_flex, ActiveTheme, Disableable, Sizable, WindowExt as _};
 use gpui_kit::{
     canvas, div, img, prelude::*, px, App, Context, Entity, EventEmitter, Focusable, SharedString,
@@ -4752,7 +4752,7 @@ impl Detalhe {
                     .child(
                         div()
                             .w(px(112.))
-                            .child(Slider::new(&self.zoom_slider).horizontal()),
+                            .child(crate::estilo::slider(&self.zoom_slider)),
                     )
                     .child(Icon::new(Icone::ZoomIn).size(px(16.))),
             )

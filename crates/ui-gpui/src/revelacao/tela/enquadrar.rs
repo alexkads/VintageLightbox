@@ -19,7 +19,7 @@
 //! | proporção | remodela o retângulo na hora, mantendo a área |
 
 use domain::value_objects::CropSettings;
-use gpui_kit::component::{h_flex, slider::Slider, v_flex, ActiveTheme, Icon};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
 use gpui_kit::{
     canvas, div, point, prelude::*, px, AnyElement, Bounds, Context, CursorStyle, MouseButton,
     MouseDownEvent, PathBuilder, Pixels, Point, SharedString, Window,
@@ -1001,7 +1001,7 @@ impl Revelacao {
                                     .child(rotulo_do_angulo(angulo)),
                             ),
                     )
-                    .child(div().mt(px(2.)).child(Slider::new(&self.angulo).horizontal()))
+                    .child(div().mt(px(2.)).child(crate::estilo::slider(&self.angulo).neutro(0.)))
                     .child(
                         h_flex()
                             .mt(px(8.))

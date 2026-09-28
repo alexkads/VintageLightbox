@@ -38,7 +38,6 @@ use domain::value_objects::perspectiva::MAXIMO_DE_GUIAS;
 use domain::value_objects::{CropSettings, EixoDaGuia, GuiaDePerspectiva, PerspectivaGuiada};
 use gpui_kit::component::button::Button;
 use gpui_kit::component::checkbox::Checkbox;
-use gpui_kit::component::slider::Slider;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon, Sizable as _};
 use gpui_kit::{
     canvas, div, point, prelude::*, px, AnyElement, Context, CursorStyle, Hsla, MouseButton,
@@ -863,7 +862,11 @@ impl Revelacao {
                                     .child(super::enquadrar::rotulo_do_angulo(valor)),
                             ),
                     )
-                    .child(div().mt(px(2.)).child(Slider::new(estado).horizontal()))
+                    .child(
+                        div()
+                            .mt(px(2.))
+                            .child(crate::estilo::slider(estado).neutro(0.)),
+                    )
             };
 
         v_flex()

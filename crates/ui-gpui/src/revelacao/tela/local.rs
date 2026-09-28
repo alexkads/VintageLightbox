@@ -23,7 +23,7 @@
 use std::sync::Arc;
 
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
+use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::component::{ActiveTheme, Disableable, Icon, Selectable, Sizable};
 use gpui_kit::{
     canvas, div, point, prelude::*, px, AnyElement, Context, Entity, Hsla, MouseDownEvent,
@@ -2528,7 +2528,7 @@ impl Revelacao {
                         .text_color(tema.muted_foreground)
                         .child(rotulo),
                 )
-                .child(div().flex_1().child(Slider::new(estado).horizontal()))
+                .child(div().flex_1().child(crate::estilo::slider(estado)))
                 .child(
                     div()
                         .w(px(42.))
@@ -2794,11 +2794,9 @@ impl Revelacao {
                                     .text_color(tema.muted_foreground)
                                     .child("Exposição"),
                             )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .child(Slider::new(&self.local.sliders.exposicao).horizontal()),
-                            )
+                            .child(div().flex_1().child(
+                                crate::estilo::slider(&self.local.sliders.exposicao).neutro(0.),
+                            ))
                             .child(div().w(px(42.)).flex().justify_end().child(
                                 SharedString::from(format!(
                                     "{}{ev:.2}",

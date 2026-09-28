@@ -286,6 +286,44 @@ pub struct Definicao {
     pub discreto: bool,
     pub aplicar: fn(&mut Ajustes, f32),
     pub ler: fn(&Ajustes) -> f32,
+    /// 🎨 O desenho da barra — ver [`Trilho`].
+    pub trilho: Trilho,
+}
+
+/// 🎨 **O que a barra de um controle desenha** — o trilho colorido do
+/// Lightroom (dono, 2026-09-28, depois da POC em WASM).
+///
+/// A cor só entra onde ela **diz** para onde o controle leva a foto: a
+/// Temperatura vai do azul ao amarelo, cada faixa do HSL aparece na própria
+/// cor. O resto é [`Trilho::Liso`], preenchido a partir do neutro.
+///
+/// Os matizes estão em graus (0–360); quem vira cor é o
+/// `slider_da_casa::paradas`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Trilho {
+    Liso,
+    /// Do azul ao amarelo.
+    Temperatura,
+    /// Do verde ao magenta.
+    VerdeMagenta,
+    /// Do cinza à roda de cores (Intensidade, Saturação).
+    Saturacao,
+    /// A roda inteira, 0–360° (os matizes da Tonalização).
+    Roda,
+    /// HSL · Cor: do cinza à cor da faixa.
+    HslSaturacao(f32),
+    /// HSL · Luminância: escuro → a cor → claro.
+    HslLuminancia(f32),
+    /// HSL · Matiz: a vizinha anterior → a cor → a vizinha seguinte.
+    HslMatiz(f32),
+}
+
+impl Definicao {
+    /// Esta definição com outro trilho — `const` para caber na tabela.
+    pub const fn com_trilho(mut self, trilho: Trilho) -> Self {
+        self.trilho = trilho;
+        self
+    }
 }
 
 /// Quantas posições distintas toda barra contínua precisa oferecer.
@@ -356,6 +394,7 @@ macro_rules! def {
             discreto: false,
             aplicar: |a, v| a.$campo = v,
             ler: |a| a.$campo,
+            trilho: Trilho::Liso,
         }
     };
 }
@@ -424,19 +463,24 @@ macro_rules! interruptor {
 
 /// As oito cores de uma família do HSL.
 macro_rules! hsl {
-    ($secao:expr, $min:expr, $max:expr, $r:ident, $o:ident, $y:ident, $g:ident, $a:ident, $b:ident, $p:ident, $m:ident) => {
+    ($secao:expr, $trilho:path, $min:expr, $max:expr, $r:ident, $o:ident, $y:ident, $g:ident, $a:ident, $b:ident, $p:ident, $m:ident) => {
         [
-            def!($secao, "Vermelho", $r, $min, $max, 0, true),
-            def!($secao, "Laranja", $o, $min, $max, 0, true),
-            def!($secao, "Amarelo", $y, $min, $max, 0, true),
-            def!($secao, "Verde", $g, $min, $max, 0, true),
-            def!($secao, "Água", $a, $min, $max, 0, true),
-            def!($secao, "Azul", $b, $min, $max, 0, true),
-            def!($secao, "Roxo", $p, $min, $max, 0, true),
-            def!($secao, "Magenta", $m, $min, $max, 0, true),
+            def!($secao, "Vermelho", $r, $min, $max, 0, true)
+                .com_trilho($trilho(MATIZ_DA_FAIXA[0])),
+            def!($secao, "Laranja", $o, $min, $max, 0, true).com_trilho($trilho(MATIZ_DA_FAIXA[1])),
+            def!($secao, "Amarelo", $y, $min, $max, 0, true).com_trilho($trilho(MATIZ_DA_FAIXA[2])),
+            def!($secao, "Verde", $g, $min, $max, 0, true).com_trilho($trilho(MATIZ_DA_FAIXA[3])),
+            def!($secao, "Água", $a, $min, $max, 0, true).com_trilho($trilho(MATIZ_DA_FAIXA[4])),
+            def!($secao, "Azul", $b, $min, $max, 0, true).com_trilho($trilho(MATIZ_DA_FAIXA[5])),
+            def!($secao, "Roxo", $p, $min, $max, 0, true).com_trilho($trilho(MATIZ_DA_FAIXA[6])),
+            def!($secao, "Magenta", $m, $min, $max, 0, true).com_trilho($trilho(MATIZ_DA_FAIXA[7])),
         ]
     };
 }
+
+/// O matiz (graus) do centro de cada uma das oito faixas do HSL, na ordem
+/// Vermelho, Laranja, Amarelo, Verde, Água, Azul, Roxo, Magenta.
+pub const MATIZ_DA_FAIXA: [f32; 8] = [0.0, 30.0, 55.0, 120.0, 180.0, 220.0, 275.0, 315.0];
 
 /// Um ponto da curva por ponto: 0–255, inteiro.
 macro_rules! ponto {
@@ -447,6 +491,7 @@ macro_rules! ponto {
 
 const HSL_COR: [Definicao; 8] = hsl!(
     Secao::HslCor,
+    Trilho::HslSaturacao,
     -100.0,
     100.0,
     hsl_red_sat,
@@ -460,6 +505,7 @@ const HSL_COR: [Definicao; 8] = hsl!(
 );
 const HSL_LUMINANCIA: [Definicao; 8] = hsl!(
     Secao::HslLuminancia,
+    Trilho::HslLuminancia,
     -100.0,
     100.0,
     hsl_red_lum,
@@ -474,6 +520,7 @@ const HSL_LUMINANCIA: [Definicao; 8] = hsl!(
 // −180 a 180 porque matiz é um círculo: o dobro da faixa das outras duas.
 const HSL_MATIZ: [Definicao; 8] = hsl!(
     Secao::HslMatiz,
+    Trilho::HslMatiz,
     -180.0,
     180.0,
     hsl_red_hue,
@@ -497,15 +544,16 @@ pub const CONTROLES: &[Definicao] = &[
     // ---------------------------------------------------------------- Básico
     def!(S::Basico, "Exposição", exposure, -5.0, 5.0, 2, true),
     def!(S::Basico, "Contraste", contrast, 0.0, 2.0, 2, false),
-    def!(S::Basico, "Temperatura", temperature, -10.0, 10.0, 1, true),
-    def!(S::Basico, "Matiz", tint, -10.0, 10.0, 1, true),
+    def!(S::Basico, "Temperatura", temperature, -10.0, 10.0, 1, true)
+        .com_trilho(Trilho::Temperatura),
+    def!(S::Basico, "Matiz", tint, -10.0, 10.0, 1, true).com_trilho(Trilho::VerdeMagenta),
     cem!(S::Basico, "Altas luzes", highlights),
     cem!(S::Basico, "Sombras", shadows),
     cem!(S::Basico, "Brancos", whites),
     cem!(S::Basico, "Pretos", blacks),
     unitario!("Textura", clarity),
-    unitario!("Intensidade", vibrance),
-    unitario!("Saturação", saturation),
+    unitario!("Intensidade", vibrance).com_trilho(Trilho::Saturacao),
+    unitario!("Saturação", saturation).com_trilho(Trilho::Saturacao),
     // --------------------------------------------------------- Curva de tons
     cem!(S::CurvaDeTons, "Sombras", tone_curve_shadows),
     cem!(S::CurvaDeTons, "Escuros", tone_curve_darks),
@@ -604,26 +652,28 @@ pub const CONTROLES: &[Definicao] = &[
     cem!(S::Lente, "Vinheta", lens_vignette_amount),
     cento!(S::Lente, "Meio da vinheta", lens_vignette_midpoint),
     // ------------------------------------------------------------ Calibração
-    cem!(S::Calibracao, "Sombras — matiz", calib_shadow_tint),
-    matiz!(S::Calibracao, "Vermelho — matiz", calib_red_hue),
-    cem!(S::Calibracao, "Vermelho — saturação", calib_red_sat),
-    matiz!(S::Calibracao, "Verde — matiz", calib_green_hue),
-    cem!(S::Calibracao, "Verde — saturação", calib_green_sat),
-    matiz!(S::Calibracao, "Azul — matiz", calib_blue_hue),
-    cem!(S::Calibracao, "Azul — saturação", calib_blue_sat),
+    cem!(S::Calibracao, "Sombras — matiz", calib_shadow_tint).com_trilho(Trilho::VerdeMagenta),
+    matiz!(S::Calibracao, "Vermelho — matiz", calib_red_hue).com_trilho(Trilho::Roda),
+    cem!(S::Calibracao, "Vermelho — saturação", calib_red_sat)
+        .com_trilho(Trilho::HslSaturacao(0.0)),
+    matiz!(S::Calibracao, "Verde — matiz", calib_green_hue).com_trilho(Trilho::Roda),
+    cem!(S::Calibracao, "Verde — saturação", calib_green_sat)
+        .com_trilho(Trilho::HslSaturacao(120.0)),
+    matiz!(S::Calibracao, "Azul — matiz", calib_blue_hue).com_trilho(Trilho::Roda),
+    cem!(S::Calibracao, "Azul — saturação", calib_blue_sat).com_trilho(Trilho::HslSaturacao(220.0)),
     // ----------------------------------------------------------- Tonalização
     // As três faixas e o global do Color Grading; a Mistura abre em 50.
-    matiz!(S::Tonalizacao, "Sombras — matiz", split_shadow_hue),
+    matiz!(S::Tonalizacao, "Sombras — matiz", split_shadow_hue).com_trilho(Trilho::Roda),
     cento!(S::Tonalizacao, "Sombras — saturação", split_shadow_sat),
-    matiz!(S::Tonalizacao, "Tons médios — matiz", split_midtone_hue),
+    matiz!(S::Tonalizacao, "Tons médios — matiz", split_midtone_hue).com_trilho(Trilho::Roda),
     cento!(S::Tonalizacao, "Tons médios — saturação", split_midtone_sat),
-    matiz!(S::Tonalizacao, "Altas luzes — matiz", split_highlight_hue),
+    matiz!(S::Tonalizacao, "Altas luzes — matiz", split_highlight_hue).com_trilho(Trilho::Roda),
     cento!(
         S::Tonalizacao,
         "Altas luzes — saturação",
         split_highlight_sat
     ),
-    matiz!(S::Tonalizacao, "Global — matiz", split_global_hue),
+    matiz!(S::Tonalizacao, "Global — matiz", split_global_hue).com_trilho(Trilho::Roda),
     cento!(S::Tonalizacao, "Global — saturação", split_global_sat),
     cem!(S::Tonalizacao, "Balanço", split_balance),
     cento!(S::Tonalizacao, "Mistura", split_blending),
@@ -844,7 +894,8 @@ pub const CONTROLES: &[Definicao] = &[
         0.0,
         360.0,
         2
-    ),
+    )
+    .com_trilho(Trilho::Roda),
     faixa!(
         S::RgbColorBalance,
         "Meios-tons — luminância",
@@ -868,7 +919,8 @@ pub const CONTROLES: &[Definicao] = &[
         0.0,
         360.0,
         2
-    ),
+    )
+    .com_trilho(Trilho::Roda),
     faixa!(
         S::RgbColorBalance,
         "Realces — luminância",
@@ -892,7 +944,8 @@ pub const CONTROLES: &[Definicao] = &[
         0.0,
         360.0,
         2
-    ),
+    )
+    .com_trilho(Trilho::Roda),
     faixa!(
         S::RgbColorBalance,
         "Global — luminância",
@@ -916,7 +969,8 @@ pub const CONTROLES: &[Definicao] = &[
         0.0,
         360.0,
         2
-    ),
+    )
+    .com_trilho(Trilho::Roda),
     faixa!(
         S::RgbColorBalance,
         "Deslocamento de matiz",
@@ -1463,5 +1517,80 @@ mod testes {
         assert!(aba_alterada(&ajustes, false));
         assert!(painel_alterado(&ajustes, Painel::CurvaPorPonto));
         assert!(!painel_alterado(&ajustes, Painel::Hsl));
+    }
+}
+
+/// 🎨 O trilho de cada controle — o desenho do Lightroom.
+#[cfg(test)]
+mod trilho_dos_controles {
+    use super::*;
+
+    fn def(secao: Secao, rotulo: &str) -> &'static Definicao {
+        CONTROLES
+            .iter()
+            .find(|d| d.secao == secao && d.rotulo == rotulo)
+            .unwrap_or_else(|| panic!("`{rotulo}` sumiu da tabela"))
+    }
+
+    #[test]
+    fn o_equilibrio_de_branco_tem_as_cores_do_lightroom() {
+        assert_eq!(
+            def(Secao::Basico, "Temperatura").trilho,
+            Trilho::Temperatura
+        );
+        assert_eq!(def(Secao::Basico, "Matiz").trilho, Trilho::VerdeMagenta);
+        assert_eq!(def(Secao::Basico, "Intensidade").trilho, Trilho::Saturacao);
+        assert_eq!(def(Secao::Basico, "Saturação").trilho, Trilho::Saturacao);
+    }
+
+    /// Cada uma das 24 barras do HSL está na cor da própria faixa, e a família
+    /// (Cor, Luminância, Matiz) decide o desenho.
+    #[test]
+    fn cada_faixa_do_hsl_tem_a_propria_cor() {
+        for (secao, familia) in [
+            (Secao::HslCor, Trilho::HslSaturacao as fn(f32) -> Trilho),
+            (Secao::HslLuminancia, Trilho::HslLuminancia),
+            (Secao::HslMatiz, Trilho::HslMatiz),
+        ] {
+            let da_secao: Vec<_> = CONTROLES.iter().filter(|d| d.secao == secao).collect();
+            assert_eq!(da_secao.len(), 8);
+            for (d, matiz) in da_secao.iter().zip(MATIZ_DA_FAIXA) {
+                assert_eq!(d.trilho, familia(matiz), "{:?} `{}`", secao, d.rotulo);
+            }
+        }
+    }
+
+    /// Todo controle que **escolhe** um matiz (0–360°) mostra a roda inteira.
+    #[test]
+    fn quem_escolhe_matiz_mostra_a_roda() {
+        for d in CONTROLES
+            .iter()
+            .filter(|d| d.minimo == 0.0 && d.maximo == 360.0)
+        {
+            assert_eq!(d.trilho, Trilho::Roda, "`{}`", d.rotulo);
+        }
+    }
+
+    /// O resto é liso: a cor só entra onde ela diz algo.
+    #[test]
+    fn os_de_tom_sao_lisos() {
+        for rotulo in [
+            "Exposição",
+            "Contraste",
+            "Altas luzes",
+            "Sombras",
+            "Brancos",
+            "Pretos",
+        ] {
+            assert_eq!(
+                def(Secao::Basico, rotulo).trilho,
+                Trilho::Liso,
+                "`{rotulo}`"
+            );
+        }
+        assert!(CONTROLES
+            .iter()
+            .filter(|d| d.discreto)
+            .all(|d| d.trilho == Trilho::Liso));
     }
 }

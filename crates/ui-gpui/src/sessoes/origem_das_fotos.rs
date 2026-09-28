@@ -23,7 +23,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui_kit::component::checkbox::Checkbox;
-use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
+use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
 use gpui_kit::{
     div, img, prelude::*, px, AnyElement, ClickEvent, Context, Div, Entity, EventEmitter,
@@ -711,7 +711,7 @@ impl OrigemDasFotos {
                                         .child(
                                             div()
                                                 .w(px(240.))
-                                                .child(Slider::new(&self.zoom).horizontal()),
+                                                .child(crate::estilo::slider(&self.zoom)),
                                         )
                                         .child(Icon::new(Icone::ZoomIn).size(px(15.)))
                                         .child(

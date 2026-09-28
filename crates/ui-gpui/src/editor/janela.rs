@@ -23,7 +23,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use editor_core::{BaseRef, Documento, Ferramenta, Historico, Sessao, VersaoEditada};
-use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
+use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::component::{ActiveTheme, Disableable};
 use gpui_kit::{
     canvas, div, img, prelude::*, px, Bounds, Context, Entity, EventEmitter, FocusHandle,
@@ -929,22 +929,14 @@ impl EditorDeFoto {
                     )),
             )
             .child(rotulo("Tamanho  [  ]"))
-            .child(
-                div()
-                    .h(px(20.))
-                    .child(Slider::new(&self.tamanho).horizontal()),
-            )
+            .child(div().h(px(20.)).child(crate::estilo::slider(&self.tamanho)))
             .child(rotulo("Dureza"))
-            .child(
-                div()
-                    .h(px(20.))
-                    .child(Slider::new(&self.dureza).horizontal()),
-            )
+            .child(div().h(px(20.)).child(crate::estilo::slider(&self.dureza)))
             .child(rotulo("Opacidade do pincel"))
             .child(
                 div()
                     .h(px(20.))
-                    .child(Slider::new(&self.opacidade).horizontal()),
+                    .child(crate::estilo::slider(&self.opacidade)),
             )
             .child(rotulo("Cor"))
             .child(
@@ -996,7 +988,7 @@ impl EditorDeFoto {
             .child(
                 div()
                     .h(px(20.))
-                    .child(Slider::new(&self.opacidade_da_camada).horizontal()),
+                    .child(crate::estilo::slider(&self.opacidade_da_camada)),
             )
     }
 

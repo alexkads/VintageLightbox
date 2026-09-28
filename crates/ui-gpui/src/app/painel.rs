@@ -302,7 +302,7 @@ impl Aplicativo {
         self.escolha_de_tema
     }
 
-    /// Claro, Escuro, Sistema, Matrix ou Cyberpunk — e a escolha fica para a
+    /// Claro, Escuro, Sistema, Matrix, Cyberpunk ou Lightroom — e a escolha fica para a
     /// próxima abertura.
     pub fn escolher_tema(&mut self, escolha: Escolha, window: &mut Window, cx: &mut Context<Self>) {
         self.escolha_de_tema = escolha;
@@ -949,6 +949,12 @@ impl Aplicativo {
                     Icone::Zap,
                     "Cyberpunk",
                     Escolha::Cyberpunk,
+                ))
+                .item(tema_do_menu(
+                    "tema-lightroom",
+                    Icone::Camera,
+                    "Lightroom",
+                    Escolha::Lightroom,
                 ))
                 .separator()
                 .item(

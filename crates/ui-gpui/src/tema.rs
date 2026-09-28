@@ -21,6 +21,22 @@
 //! | Matrix | preto esverdeado `#030d06` | o verde fósforo `#00ff41` | a mono do sistema |
 //! | Cyberpunk | azul-noite `#0a0a1f` | amarelo neon `#fcee0a`, rosa `#ff2a6d` no menu lateral, ciano `#05d9e8` no foco | a do sistema |
 //!
+//! ## 🎞️ Lightroom — o terceiro tema fixo
+//!
+//! Pedido do dono em 2026-09-28 (*"Eu quero um novo tema inspirado no
+//! Lightroom"*), aprovado numa POC em WASM antes de entrar aqui. Os cinzas do
+//! Lightroom Classic: painéis `#2b2b2b`, janela `#1e1e1e`, o palco cinza médio
+//! `#5a5a5a` atrás da foto, o cabeçalho da sanfona `#353535` e um único azul,
+//! o do foco. A cor fica só onde ela diz algo — o trilho dos sliders.
+//!
+//! 🎚️ **Os componentes eram quase monocromáticos**, e só a paleta não
+//! bastava: o `Slider` do gpui-kit pinta uma cor e preenche da esquerda. Por
+//! isso o app desenha o slider com as peças do `gpui_kit::base`
+//! (`slider_da_casa`): o trilho de cada controle (`controles::Trilho`) vai do
+//! azul ao amarelo na Temperatura, na cor da faixa no HSL, e o preenchimento
+//! parte do neutro. Isso vale **em todos os temas**; nos outros quatro o
+//! trilho liso continua o âmbar do kit (`o_slider_dos_temas_de_antes_e_o_de_sempre`).
+//!
 //! O âmbar da nota, o verde de "deu certo" e as etiquetas continuam os de
 //! sempre: são o significado da foto, e não decoração do tema.
 //!
@@ -114,6 +130,18 @@ mod paleta {
         /// Atrás de uma foto.
         pub poco: u32,
         pub rolagem: u32,
+        /// 🎚️ O trilho da barra dos sliders. `None` é o do gpui-kit: o
+        /// preenchimento a 20% sobre o que estiver atrás.
+        pub trilho: Option<u32>,
+        /// O preenchimento do slider, do neutro ao valor.
+        pub preenchimento: u32,
+        /// O punho do slider.
+        pub punho: u32,
+        /// Barra fina e punho pequeno, como no Lightroom — ou as medidas do
+        /// `Slider` do gpui-kit.
+        pub slider_fino: bool,
+        /// O fundo do cabeçalho de cada painel sanfonado. `None`: nenhum.
+        pub sanfona: Option<u32>,
     }
 
     /// A paleta de um modo, montada dos tokens do template.
@@ -164,6 +192,11 @@ mod paleta {
                 t.hex("muted")
             },
             rolagem: t.com_luz("border", if escuro { 0.371 } else { 0.87 }),
+            trilho: None,
+            preenchimento: AMBAR_400,
+            punho: 0xffffff,
+            slider_fino: false,
+            sanfona: None,
         }
     }
 
@@ -194,6 +227,11 @@ mod paleta {
         borda_lateral: 0x114225,
         poco: 0x000000,
         rolagem: 0x17592f,
+        trilho: None,
+        preenchimento: AMBAR_400,
+        punho: 0xffffff,
+        slider_fino: false,
+        sanfona: None,
     };
 
     /// 🌆 Cyberpunk: neon amarelo, rosa e ciano sobre azul-noite.
@@ -223,6 +261,51 @@ mod paleta {
         borda_lateral: 0x2c2c66,
         poco: 0x05050f,
         rolagem: 0x3a3a80,
+        trilho: None,
+        preenchimento: AMBAR_400,
+        punho: 0xffffff,
+        slider_fino: false,
+        sanfona: None,
+    };
+
+    /// 🎞️ Lightroom: cinzas graduados, o palco cinza médio atrás da foto, e a
+    /// cor só onde ela diz algo (os trilhos dos sliders, o histograma).
+    pub const LIGHTROOM: Paleta = Paleta {
+        fundo: 0x1e1e1e,
+        texto: 0xc4c4c4,
+        cartao: 0x333333,
+        primaria: 0xd6d6d6,
+        // `bg-primary/80` sobre o fundo.
+        primaria_pairando: 0xb1b1b1,
+        sobre_primaria: 0x1a1a1a,
+        apagado: 0x333333,
+        texto_apagado: 0x8c8c8c,
+        acento: 0x404040,
+        sobre_acento: 0xececec,
+        secundaria: 0x3c3c3c,
+        sobre_secundaria: 0xd0d0d0,
+        destrutiva: 0xe34850,
+        borda: 0x141414,
+        campo: 0x4a4a4a,
+        // O único azul: o foco, como o da Adobe.
+        anel: 0x378ef0,
+        lateral: 0x2b2b2b,
+        texto_lateral: 0xc4c4c4,
+        // O quadrado do "Lr".
+        marca: 0x31a8ff,
+        sobre_marca: 0x001e36,
+        acento_lateral: 0x404040,
+        borda_lateral: 0x161616,
+        // O palco: o cinza médio que o Lightroom põe atrás da foto.
+        poco: 0x5a5a5a,
+        rolagem: 0x505050,
+        // Linha cinza mais clara que o painel, como no Lightroom — escura,
+        // ela sumia no fundo da sanfona (#1e1e1e).
+        trilho: Some(0x505050),
+        preenchimento: 0xa8a8a8,
+        punho: 0xc8c8c8,
+        slider_fino: true,
+        sanfona: Some(0x353535),
     };
 
     // ── Tailwind 4, as famílias que o site usa por nome ────────────────────
@@ -310,9 +393,15 @@ static PALETA_AGORA: AtomicU8 = AtomicU8::new(1);
 
 /// As paletas, na ordem do índice de [`PALETA_AGORA`]: as duas do template e
 /// os dois temas fixos.
-fn paletas() -> [&'static paleta::Paleta; 4] {
+fn paletas() -> [&'static paleta::Paleta; 5] {
     let (claro, escuro) = paletas_do_template();
-    [claro, escuro, &paleta::MATRIX, &paleta::CYBERPUNK]
+    [
+        claro,
+        escuro,
+        &paleta::MATRIX,
+        &paleta::CYBERPUNK,
+        &paleta::LIGHTROOM,
+    ]
 }
 
 fn paleta_atual() -> &'static paleta::Paleta {
@@ -333,6 +422,8 @@ pub enum Escolha {
     Matrix,
     /// 🌆 Neon sobre azul-noite.
     Cyberpunk,
+    /// 🎞️ Os cinzas do Lightroom, com os trilhos coloridos.
+    Lightroom,
 }
 
 impl Escolha {
@@ -343,6 +434,7 @@ impl Escolha {
             "sistema" => Some(Self::Sistema),
             "matrix" => Some(Self::Matrix),
             "cyberpunk" => Some(Self::Cyberpunk),
+            "lightroom" => Some(Self::Lightroom),
             _ => None,
         }
     }
@@ -351,7 +443,7 @@ impl Escolha {
     pub fn modo(self, aparencia: WindowAppearance) -> ThemeMode {
         match self {
             Self::Claro => ThemeMode::Light,
-            Self::Escuro | Self::Matrix | Self::Cyberpunk => ThemeMode::Dark,
+            Self::Escuro | Self::Matrix | Self::Cyberpunk | Self::Lightroom => ThemeMode::Dark,
             Self::Sistema => match aparencia {
                 WindowAppearance::Dark | WindowAppearance::VibrantDark => ThemeMode::Dark,
                 WindowAppearance::Light | WindowAppearance::VibrantLight => ThemeMode::Light,
@@ -364,6 +456,7 @@ impl Escolha {
         match self {
             Self::Matrix => 2,
             Self::Cyberpunk => 3,
+            Self::Lightroom => 4,
             Self::Claro | Self::Escuro | Self::Sistema => 1,
         }
     }
@@ -372,6 +465,7 @@ impl Escolha {
         match self {
             Self::Matrix => "Matrix",
             Self::Cyberpunk => "Cyberpunk",
+            Self::Lightroom => "Lightroom",
             Self::Claro | Self::Escuro | Self::Sistema => "RecordarFotos Escuro",
         }
     }
@@ -487,6 +581,22 @@ pub mod cores {
     /// O fundo de tudo que encosta numa imagem.
     pub fn poco() -> Hsla {
         cor(paleta_atual().poco)
+    }
+
+    /// 🎚️ O slider do tema: (trilho, preenchimento, punho, fino).
+    pub fn slider() -> (Hsla, Hsla, Hsla, bool) {
+        let p = paleta_atual();
+        let preenchimento = cor(p.preenchimento);
+        let trilho = p
+            .trilho
+            .map(cor)
+            .unwrap_or_else(|| preenchimento.opacity(0.2));
+        (trilho, preenchimento, cor(p.punho), p.slider_fino)
+    }
+
+    /// O fundo do cabeçalho de um painel sanfonado, se o tema tiver um.
+    pub fn sanfona() -> Option<Hsla> {
+        paleta_atual().sanfona.map(cor)
     }
 
     /// Âmbar: o recorte aceso da galeria, sessão e balcão.
@@ -787,9 +897,10 @@ fn cores(p: &paleta::Paleta) -> Vec<(&'static str, u32)> {
         ("table.active.border", p.anel),
         ("table.even.background", p.fundo),
         ("table.row.border", p.borda),
-        // O âmbar dos controles deslizantes do site (revelação e zoom).
-        ("slider.background", AMBAR_400),
-        ("slider.thumb.background", 0xffffff),
+        // O âmbar dos controles deslizantes do site (revelação e zoom) —
+        // no Lightroom, o cinza. Quem desenha é o `slider_da_casa`.
+        ("slider.background", p.preenchimento),
+        ("slider.thumb.background", p.punho),
         ("progress.bar.background", p.primaria),
         ("switch.background", p.primaria),
         ("switch.thumb.background", p.fundo),
@@ -1041,13 +1152,15 @@ mod testes {
         assert_eq!(paletas()[1].marca, 0x1447e6, "oklch(0.488 0.243 264.376)");
     }
 
-    /// 🟩🌆 Matrix e Cyberpunk: toda cor é `#rrggbb`, toda chave existe no
-    /// esquema, o texto é legível (WCAG, 4,5:1) e o `bg-primary/80` é a conta.
+    /// 🟩🌆🎞️ Matrix, Cyberpunk e Lightroom: toda cor é `#rrggbb`, toda chave
+    /// existe no esquema, o texto é legível (WCAG, 4,5:1) e o `bg-primary/80`
+    /// é a conta.
     #[test]
     fn matrix_e_cyberpunk_sao_legiveis() {
         for (nome, p) in [
             ("Matrix", &paleta::MATRIX),
             ("Cyberpunk", &paleta::CYBERPUNK),
+            ("Lightroom", &paleta::LIGHTROOM),
         ] {
             let config = tema_da_paleta(nome, ThemeMode::Dark, p, Some("Menlo".into()));
             assert_eq!(config.font_family.as_deref(), Some("Menlo"), "{nome}");
@@ -1090,6 +1203,7 @@ mod testes {
         for (nome, escolha) in [
             ("matrix", Escolha::Matrix),
             ("cyberpunk", Escolha::Cyberpunk),
+            ("lightroom", Escolha::Lightroom),
         ] {
             assert_eq!(Escolha::do_nome(nome), Some(escolha));
             assert_eq!(escolha.modo(WindowAppearance::Light), ThemeMode::Dark);
@@ -1110,6 +1224,32 @@ mod testes {
             paletas()[Escolha::Escuro.paleta_escura() as usize],
             paletas()[1]
         );
+        assert_eq!(
+            paletas()[Escolha::Lightroom.paleta_escura() as usize],
+            &paleta::LIGHTROOM
+        );
+    }
+
+    /// 🎚️ **O slider dos temas que já existiam não muda de cor**: o âmbar
+    /// cheio, o trilho a 20% dele (o do gpui-kit), o punho branco, a barra
+    /// na medida do kit e o cabeçalho da sanfona sem fundo. Só o Lightroom
+    /// traz trilho, punho e sanfona próprios.
+    #[test]
+    fn o_slider_dos_temas_de_antes_e_o_de_sempre() {
+        for (i, p) in paletas().iter().enumerate().take(4) {
+            assert_eq!(p.trilho, None, "paleta {i}");
+            assert_eq!(p.preenchimento, AMBAR_400, "paleta {i}");
+            assert_eq!(p.punho, 0xffffff, "paleta {i}");
+            assert!(!p.slider_fino, "paleta {i}");
+            assert_eq!(p.sanfona, None, "paleta {i}");
+        }
+        let lr = &paleta::LIGHTROOM;
+        assert!(lr.slider_fino);
+        assert!(lr.trilho.is_some() && lr.sanfona.is_some());
+        // O punho claro precisa aparecer sobre o trilho, e o trilho sobre o
+        // fundo da sanfona (a primeira versão, #1a1a1a sobre #1e1e1e, sumia).
+        assert!(contraste(lr.trilho.unwrap(), lr.punho) >= 4.5);
+        assert!(contraste(lr.fundo, lr.trilho.unwrap()) >= 2.0);
     }
 
     #[test]

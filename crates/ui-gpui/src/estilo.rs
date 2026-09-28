@@ -562,3 +562,11 @@ pub fn alternador(id: impl Into<SharedString>, ligado: bool, cx: &App) -> Button
             }
         })
 }
+
+/// 🎚️ O slider do app: o `SliderState` do kit com o desenho do tema — trilho
+/// colorido e preenchimento a partir do neutro (ver `slider_da_casa`).
+pub fn slider(
+    estado: &gpui_kit::Entity<gpui_kit::component::slider::SliderState>,
+) -> crate::slider_da_casa::SliderDaCasa {
+    crate::slider_da_casa::SliderDaCasa::new(estado)
+}

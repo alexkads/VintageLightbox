@@ -28,7 +28,6 @@ use std::rc::Rc;
 use gpui_kit::component::accordion::Accordion;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::button::ButtonVariants as _;
-use gpui_kit::component::slider::Slider;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{h_flex, ActiveTheme, Disableable, Icon, Sizable};
 use gpui_kit::{
@@ -646,8 +645,13 @@ impl Revelacao {
             .flex_none()
             .when(borda, |a| a.rounded(crate::tema::canto(6.)))
             .item(|item| {
+                // 🎞️ No Lightroom o cabeçalho do painel tem fundo próprio.
+                let mut cabecalho = StyleRefinement::default().px(px(12.)).py(px(8.));
+                if let Some(fundo) = tema::cores::sanfona() {
+                    cabecalho = cabecalho.bg(fundo);
+                }
                 item.open(aberto)
-                    .title_style(StyleRefinement::default().px(px(12.)).py(px(8.)))
+                    .title_style(cabecalho)
                     .content_style(StyleRefinement::default().p(px(0.)))
                     .title(
                         h_flex()
@@ -840,7 +844,12 @@ impl Revelacao {
                             },
                         ))
                     })
-                    .child(Slider::new(&controle.estado).horizontal().disabled(!ligado)),
+                    .child(
+                        crate::estilo::slider(&controle.estado)
+                            .trilho(definicao.trilho)
+                            .neutro(definicao.neutro())
+                            .disabled(!ligado),
+                    ),
             )
             .into_any_element()
     }

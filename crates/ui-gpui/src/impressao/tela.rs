@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 
 use adapters::view_models::PhotoViewModel;
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
+use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::component::{ActiveTheme, Disableable, Selectable, Sizable};
 use gpui_kit::{
     canvas, div, img, prelude::*, px, uniform_list, App, Context, Entity, MouseButton,
@@ -1144,7 +1144,7 @@ fn medida(rotulo: &str, valor: f32, estado: &Entity<SliderState>, cx: &App) -> i
                         .child(SharedString::from(format!("{valor:.0} mm"))),
                 ),
         )
-        .child(Slider::new(estado).horizontal())
+        .child(crate::estilo::slider(estado))
 }
 
 #[cfg(test)]
