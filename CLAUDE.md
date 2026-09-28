@@ -241,6 +241,11 @@ em `docs/historico/PARIDADE-UI.md`.
 - As telas ficam em `crates/ui-gpui/src/{biblioteca,revelacao,importacao,impressao}/`
 - As duas telas grandes vivem num **dock**: os painéis se arrastam e se
   redimensionam, e o arranjo é gravado ao lado do catálogo (`arranjo-*.json`)
+- 🎨 **O visual sai do `crates/ui-gpui/template.toml`** (o código de um preset do
+  ui.shadcn.com/create, ou eixo por eixo: estilo, cores, fonte, ícones, raio). Cores, medidas
+  e cantos das telas derivam dele (`tema::medidas`, `tema::canto`); fonte e ícones que não são
+  do sistema/lucide se baixam com `scripts/baixar-do-template.py`. Matrix e Cyberpunk são temas
+  fixos, fora do template. Para experimentar: `VLB_TEMPLATE=lyra cargo run -p ui-gpui`.
 - Imagem: `DynamicImage → RgbaImage → Frame → RenderImage` (`imagem.rs`)
   ⚠️ **em BGRA** — o GPUI espera essa ordem e o crate `image` produz RGBA
 - Seletor de arquivos nativo via `rfd`; o motor de revelação é wgpu próprio,
