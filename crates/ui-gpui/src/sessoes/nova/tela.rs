@@ -204,9 +204,16 @@ pub(super) enum Fase {
     Movendo,
 }
 
+/// O aviso do que acabou de acontecer — a `Notification` do kit
+/// (`estilo::toast`). O `ate` é o tempo em que ele conta como "na tela" para
+/// esta tela (a sessão criada não cobre um aviso anterior).
 pub(super) struct Aviso {
     pub texto: String,
     pub erro: bool,
+    /// O aviso que fica até o operador fechar — o recado que ele precisa ler.
+    longo: bool,
+    /// Já foi entregue à lista do kit.
+    entregue: bool,
     ate: Instant,
 }
 
@@ -839,7 +846,29 @@ impl NovaSessao {
         self.aviso = Some(Aviso {
             texto: texto.into(),
             erro,
+            longo: false,
+            entregue: false,
             ate: Instant::now() + DURACAO_DO_AVISO,
+        });
+    }
+
+    /// Entrega o aviso novo à lista do kit — o `render` tem a `window`.
+    ///
+    /// 🔑 **Sucesso e erro no alto e no meio**, com as cores do site; o
+    /// recado longo é o alerta do canto de baixo, que fica até ser fechado.
+    pub(super) fn entregar_o_aviso(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(aviso) = self.aviso.as_mut().filter(|a| !a.entregue) else {
+            return;
+        };
+        aviso.entregue = true;
+        let tipo = match (aviso.erro, aviso.longo) {
+            (true, _) => crate::estilo::Toast::Erro,
+            (false, true) => crate::estilo::Toast::Alerta,
+            (false, false) => crate::estilo::Toast::Sucesso,
+        };
+        let nota = crate::estilo::toast(aviso.texto.clone(), tipo, cx).autohide(!aviso.longo);
+        window.defer(cx, move |window, cx| {
+            crate::estilo::mostrar_toast(nota, window, cx);
         });
     }
 
@@ -847,6 +876,8 @@ impl NovaSessao {
         self.aviso = Some(Aviso {
             texto: texto.into(),
             erro: false,
+            longo: true,
+            entregue: false,
             ate: Instant::now() + DURACAO_DO_AVISO_LONGO,
         });
     }

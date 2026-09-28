@@ -166,7 +166,7 @@ impl Render for FantasmaDoPreset {
         div()
             .px(px(6.))
             .py(px(4.))
-            .rounded(px(4.))
+            .rounded(crate::tema::canto(4.))
             .bg(cx.theme().muted)
             .opacity(0.85)
             .text_size(px(12.))
@@ -923,7 +923,7 @@ impl Revelacao {
                                 .items_start()
                                 .gap(px(8.))
                                 .p(px(16.))
-                                .rounded(px(8.))
+                                .rounded(crate::tema::canto(8.))
                                 .border_1()
                                 .border_color(borda)
                                 .bg(cartao)
@@ -958,7 +958,7 @@ impl Revelacao {
                     Styled::h(Input::new(&self.busca_de_presets).xsmall(), px(28.))
                         .text_size(px(12.))
                         .px(px(8.))
-                        .rounded(px(4.))
+                        .rounded(crate::tema::canto(4.))
                         .bg(tema.popover),
                 ),
             )
@@ -1018,7 +1018,7 @@ impl Revelacao {
 
         Some(
             div()
-                .rounded(px(4.))
+                .rounded(crate::tema::canto(4.))
                 .border_1()
                 .border_color(borda)
                 .bg(cartao)
@@ -1030,7 +1030,7 @@ impl Revelacao {
                     Styled::h(Input::new(&self.nome_do_preset).xsmall(), px(28.))
                         .text_size(px(12.))
                         .px(px(8.))
-                        .rounded(px(4.))
+                        .rounded(crate::tema::canto(4.))
                         .bg(fundo),
                 )
                 .child(
@@ -1040,7 +1040,7 @@ impl Revelacao {
                         .flex()
                         .items_start()
                         .gap(px(6.))
-                        .rounded(px(4.))
+                        .rounded(crate::tema::canto(4.))
                         .px(px(2.))
                         .py(px(4.))
                         .text_size(px(11.))
@@ -1125,7 +1125,7 @@ impl Revelacao {
 
         Some(
             div()
-                .rounded(px(4.))
+                .rounded(crate::tema::canto(4.))
                 .border_1()
                 .border_color(borda)
                 .bg(cartao)
@@ -1303,7 +1303,7 @@ impl Revelacao {
             .flex()
             .items_center()
             .gap(px(4.))
-            .rounded(px(4.))
+            .rounded(crate::tema::canto(4.))
             .px(px(4.))
             .hover(move |s| s.bg(realce))
             .when(arrastando, |d| d.opacity(0.4))
@@ -1320,7 +1320,7 @@ impl Revelacao {
                     .left(px(4.))
                     .right(px(4.))
                     .h(px(2.))
-                    .rounded(px(1.))
+                    .rounded(crate::tema::canto(1.))
                     .bg(cores::quente())
                     .when(depois, |d| d.bottom(px(-1.)))
                     .when(!depois, |d| d.top(px(-1.)))
@@ -1525,7 +1525,7 @@ impl Revelacao {
                     Styled::h(Input::new(&self.renome_do_preset).xsmall(), px(28.))
                         .text_size(px(12.))
                         .px(px(8.))
-                        .rounded(px(4.))
+                        .rounded(crate::tema::canto(4.))
                         .bg(tema.background),
                 ),
             )
@@ -1568,7 +1568,7 @@ fn icone_de_botao(
         .flex_none()
         .size(px(lado + 8.))
         .px(px(0.))
-        .rounded(px(4.))
+        .rounded(crate::tema::canto(4.))
         .text_color(cx.theme().muted_foreground)
         .child(Icon::new(icone).size(px(lado)))
         .tooltip(rotulo.into())
@@ -1599,7 +1599,7 @@ fn botao_pequeno(
                 )
             }
         })
-        .rounded(px(4.))
+        .rounded(crate::tema::canto(4.))
         .px(px(8.))
         .text_size(px(12.))
         .child(rotulo)

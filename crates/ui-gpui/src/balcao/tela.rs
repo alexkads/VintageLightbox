@@ -592,7 +592,7 @@ impl Render for Balcao {
                 v_flex()
                     .id(SharedString::from(format!("balcao-tipo-{}", t.rotulo())))
                     .gap(px(2.))
-                    .rounded(px(10.))
+                    .rounded(crate::tema::canto(10.))
                     .cursor_pointer()
                     .map(|d| {
                         if ativo {
@@ -777,7 +777,7 @@ impl Render for Balcao {
                     .top(px(16.))
                     .right(px(16.))
                     .size(px(20.))
-                    .rounded(px(4.))
+                    .rounded(crate::tema::canto(4.))
                     .flex()
                     .items_center()
                     .justify_center()

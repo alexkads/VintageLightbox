@@ -489,6 +489,8 @@ async fn main() {
             // Devolve à GPU as texturas das imagens que saíram de uso — sem
             // isso a memória de vídeo só cresce (`imagem::coleta`).
             ui_gpui::imagem::coleta::ligar(cx);
+            // 🎨 As fontes do template, antes do tema que as nomeia.
+            tema::fontes::registrar(cx);
             // E logo em seguida o tema do site, no modo que o operador escolheu
             // (Claro, Escuro ou Sistema, no menu da conta).
             tema::aplicar(

@@ -1396,7 +1396,7 @@ impl Caixa {
                 if minimizado {
                     d.rounded_full()
                 } else {
-                    d.rounded(px(12.))
+                    d.rounded(crate::tema::canto(12.))
                 }
             })
             .child(conteudo)
@@ -1555,7 +1555,7 @@ impl Caixa {
 
         let botao_de_icone = |id: &'static str, icone: Icone, dica: &'static str| {
             crate::estilo::botao_icone(id, icone, 28., 16.)
-                .rounded(px(6.))
+                .rounded(crate::tema::canto(6.))
                 .text_color(apagado)
                 .tooltip(dica)
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -1786,7 +1786,7 @@ impl Caixa {
                 .xsmall()
                 .map(|b| if destaque { b.primary() } else { b.outline() })
                 .px(px(6.))
-                .rounded(px(6.))
+                .rounded(crate::tema::canto(6.))
                 .text_size(px(11.))
                 .child(
                     div()
@@ -1976,7 +1976,7 @@ impl Caixa {
                     conta.push(
                         div()
                             .px(px(4.))
-                            .rounded(px(4.))
+                            .rounded(crate::tema::canto(4.))
                             .bg(fundo_ambar)
                             .text_color(texto_ambar)
                             .child(e.clone())
@@ -2100,7 +2100,7 @@ impl Caixa {
                             .gap(px(4.))
                             .px(px(6.))
                             .py(px(2.))
-                            .rounded(px(6.))
+                            .rounded(crate::tema::canto(6.))
                             .border_1()
                             .text_size(px(11.))
                             .map(|d| {
@@ -2217,7 +2217,7 @@ impl Caixa {
                 .max_h(px(180.))
                 .overflow_y_scroll()
                 .p(px(4.))
-                .rounded(px(6.))
+                .rounded(crate::tema::canto(6.))
                 .border_1()
                 .border_color(borda)
                 .bg(fundo)
@@ -2228,7 +2228,7 @@ impl Caixa {
                         .h(px(28.))
                         .px(px(8.))
                         .gap(px(8.))
-                        .rounded(px(4.))
+                        .rounded(crate::tema::canto(4.))
                         .justify_between()
                         .cursor_pointer()
                         .hover(move |s| s.bg(realce))
@@ -2303,7 +2303,7 @@ impl Caixa {
             .grid_cols(4)
             .gap(px(4.))
             .p(px(4.))
-            .rounded(px(8.))
+            .rounded(crate::tema::canto(8.))
             .bg(realce)
             .children(
                 chips
@@ -2317,7 +2317,7 @@ impl Caixa {
                             .gap(px(2.))
                             .px(px(4.))
                             .py(px(6.))
-                            .rounded(px(6.))
+                            .rounded(crate::tema::canto(6.))
                             .text_xs()
                             .cursor_pointer()
                             .when(pendente, |d| d.opacity(0.5))
@@ -2378,7 +2378,7 @@ impl Caixa {
                         .h(px(26.))
                         .px(px(10.))
                         .gap(px(4.))
-                        .rounded(px(6.))
+                        .rounded(crate::tema::canto(6.))
                         .bg(frente)
                         .text_color(fundo)
                         .text_xs()
@@ -2397,7 +2397,7 @@ impl Caixa {
                 v_flex()
                     .gap(px(8.))
                     .p(px(10.))
-                    .rounded(px(6.))
+                    .rounded(crate::tema::canto(6.))
                     .border_1()
                     .border_color(borda)
                     .bg(realce.opacity(0.4))
@@ -2432,7 +2432,7 @@ impl Caixa {
                 v_flex()
                     .gap(px(8.))
                     .p(px(10.))
-                    .rounded(px(6.))
+                    .rounded(crate::tema::canto(6.))
                     .border_1()
                     .border_color(borda)
                     .bg(realce.opacity(0.4))
@@ -2505,7 +2505,7 @@ impl Caixa {
         v_flex()
             .mx(px(8.))
             .my(px(8.))
-            .rounded(px(8.))
+            .rounded(crate::tema::canto(8.))
             .border_1()
             .border_color(frente.opacity(0.2))
             .bg(cartao)
@@ -2543,7 +2543,7 @@ impl Caixa {
                     )
                     .child(
                         crate::estilo::botao_icone("caixa-rapido-fechar", Icone::X, 24., 14.)
-                            .rounded(px(6.))
+                            .rounded(crate::tema::canto(6.))
                             .text_color(apagado)
                             .on_click(
                                 cx.listener(|t, _: &ClickEvent, w, cx| t.fechar_edicao(w, cx)),
@@ -2678,7 +2678,7 @@ impl Caixa {
                         .xsmall()
                         .outline()
                         .px(px(6.))
-                        .rounded(px(6.))
+                        .rounded(crate::tema::canto(6.))
                         .when(editando_lote, |d| {
                             d.border_color(cores::quente())
                                 .bg(cores::quente())
@@ -2696,7 +2696,7 @@ impl Caixa {
                         .xsmall()
                         .ghost()
                         .px(px(6.))
-                        .rounded(px(6.))
+                        .rounded(crate::tema::canto(6.))
                         .child("Desmarcar")
                         .on_click(cx.listener(|t, _: &ClickEvent, _, cx| {
                             if let Some(p) = t.painel_mut() {

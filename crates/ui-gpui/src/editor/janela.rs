@@ -958,7 +958,7 @@ impl EditorDeFoto {
                         div()
                             .id(("editor-cor", i))
                             .size(px(22.))
-                            .rounded(px(4.))
+                            .rounded(crate::tema::canto(4.))
                             .border_2()
                             .border_color(if escolhida { tema.ring } else { tema.border })
                             .bg(gpui_kit::rgb(

@@ -299,6 +299,13 @@ pub enum Pedido {
     /// vermelha fixa sobre a grade dizia "quebrou" e ficava lá até outro
     /// gesto. Na Revelação ela nem aparecia — a tecla vale lá também.
     Avisar(SharedString),
+    /// ❌ Um gesto que o site (ou o disco) recusou agora — o toast vermelho da
+    /// raiz, no alto e no meio, que some sozinho.
+    ///
+    /// 🔑 **A faixa de erro fica para o que persiste** (a sessão que não
+    /// carregou, a tela sem conta): uma nota recusada é um instante, e a faixa
+    /// vermelha fixa sobre a grade a fazia parecer a tela quebrada.
+    Falhou(SharedString),
 }
 
 /// Uma foto da grade da sessão, no que a Revelação precisa para abri-la.
@@ -733,7 +740,15 @@ pub struct Detalhe {
     /// formulário de propósito — fechá-lo no meio não perde a resposta.
     gravando_dados: Option<(MotivoDoFormulario, DadosDoCliente)>,
     carregando: bool,
+    /// O que impede a tela de mostrar a sessão — a faixa vermelha sobre a
+    /// grade. Os gestos recusados vão por [`Detalhe::avisar`].
     erro: Option<SharedString>,
+    /// 🧪 Os avisos de gesto desde a abertura, para os cenários — a
+    /// `Notification` é da raiz, e a tela só a pede.
+    #[cfg(test)]
+    avisos_dados: Vec<(String, bool)>,
+    /// O último arquivo que a importação recusou: vai no aviso do fim do lote.
+    ultima_falha_da_importacao: Option<String>,
     recados: (Sender<Recado>, Receiver<Recado>),
     colhendo: bool,
     _colheita: Option<Task<()>>,
@@ -945,6 +960,9 @@ impl Detalhe {
             gravando_dados: None,
             carregando: false,
             erro: None,
+            #[cfg(test)]
+            avisos_dados: Vec::new(),
+            ultima_falha_da_importacao: None,
             recados: channel(),
             colhendo: false,
             _colheita: None,
@@ -1063,14 +1081,33 @@ impl Detalhe {
         self.link.as_ref()
     }
 
-    /// Um recado da raiz para esta tela — o que aconteceu com o site.
-    ///
-    /// 🔑 Cai no mesmo lugar do erro porque é o mesmo lugar de olhar: a linha
-    /// do cabeçalho. Dois lugares para dizer "algo aconteceu" fariam o operador
-    /// aprender a ignorar um deles.
+    /// Um gesto que não pôde ir: o alerta do kit, no canto de baixo.
     pub fn recado(&mut self, texto: String, cx: &mut Context<Self>) {
-        self.erro = Some(texto.into());
-        cx.notify();
+        self.avisar_do_gesto(texto, false, cx);
+    }
+
+    /// Pede à raiz a `Notification` do gesto: alerta (`Avisar`) para o que
+    /// ficou de fora, erro (`Falhou`) para o que o site recusou.
+    fn avisar_do_gesto(
+        &mut self,
+        texto: impl Into<SharedString>,
+        falhou: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let texto: SharedString = texto.into();
+        #[cfg(test)]
+        self.avisos_dados.push((texto.to_string(), falhou));
+        cx.emit(if falhou {
+            Pedido::Falhou(texto)
+        } else {
+            Pedido::Avisar(texto)
+        });
+    }
+
+    /// 🧪 O último aviso de gesto pedido à raiz.
+    #[cfg(test)]
+    pub(crate) fn ultimo_aviso(&self) -> Option<&str> {
+        self.avisos_dados.last().map(|(texto, _)| texto.as_str())
     }
 
     pub fn erro(&self) -> Option<&SharedString> {
@@ -1232,8 +1269,7 @@ impl Detalhe {
             });
         }
         if !recados.is_empty() {
-            self.erro = Some(recados.join(" ").into());
-            cx.notify();
+            self.avisar_do_gesto(recados.join(" "), false, cx);
         }
     }
 
@@ -1875,9 +1911,8 @@ impl Detalhe {
         }
         // ⚠️ **Depois da mudança, e não antes**: `mudar_as_marcadas` limpa o
         // erro ao despachar, e o aviso posto antes morreria no mesmo gesto.
-        if aviso.is_some() {
-            self.erro = aviso;
-            cx.notify();
+        if let Some(aviso) = aviso {
+            self.avisar_do_gesto(aviso, false, cx);
         }
     }
 
@@ -2024,12 +2059,12 @@ impl Detalhe {
                 // Preço negociado e observação são do site: esperam a foto
                 // chegar lá, sem sumir em silêncio.
                 _ => {
-                    self.erro = Some(
-                        "estas fotos ainda estão subindo — a negociação fica para quando \
-                         chegarem ao site"
-                            .into(),
+                    self.avisar_do_gesto(
+                        "Estas fotos ainda estão subindo: a negociação fica para quando \
+                         chegarem ao site.",
+                        false,
+                        cx,
                     );
-                    cx.notify();
                 }
             }
         }
@@ -2483,6 +2518,7 @@ impl Detalhe {
         }
 
         self.erro = None;
+        self.ultima_falha_da_importacao = None;
         self.importacao = Some(Importacao {
             total: caminhos.len(),
             feitas: 0,
@@ -3017,7 +3053,7 @@ impl Detalhe {
                     if let Some(lote) = self.importacao.as_mut() {
                         lote.falhas += 1;
                     }
-                    self.erro = Some(format!("{caminho}: {erro}").into());
+                    self.ultima_falha_da_importacao = Some(format!("{caminho}: {erro}"));
                 }
                 Andamento::Terminou {
                     sucesso,
@@ -3031,8 +3067,18 @@ impl Detalhe {
                     });
                 }
             }
-            if self.importacao.is_some_and(|l| l.terminou()) {
+            if let Some(lote) = self.importacao.filter(|l| l.terminou()) {
                 entrou_foto = true;
+                // ❌ **Um aviso por lote, e não um por arquivo**: 20 de 500
+                // que falharam seriam 20 toasts cobrindo o nome da foto.
+                if let Some(ultima) = self.ultima_falha_da_importacao.take() {
+                    let quantos = if lote.falhas <= 1 {
+                        "1 arquivo não entrou na sessão".to_string()
+                    } else {
+                        format!("{} arquivos não entraram na sessão", lote.falhas)
+                    };
+                    self.avisar_do_gesto(format!("{quantos}. O último: {ultima}"), true, cx);
+                }
             }
         }
         self.despachar_a_fila(cx);
@@ -3199,7 +3245,7 @@ impl Detalhe {
                         if !self.na_vez.contains_key(&foto_id) {
                             self.na_mao.remove(&foto_id);
                         }
-                        self.erro = Some(erro.into());
+                        self.avisar_do_gesto(erro, true, cx);
                     }
                     // A vez desta foto: o que foi pedido enquanto a outra
                     // estava no ar sai agora, numa ida só.
@@ -3296,13 +3342,19 @@ impl Detalhe {
                             formulario.erro = Some(frase.into());
                             formulario.campo_do_erro = None;
                         }
-                        None => self.erro = Some(frase.into()),
+                        None => self.avisar_do_gesto(frase, true, cx),
                     }
                 }
+                // 🔑 **Carga e gesto chegam pelo mesmo recado.** Com a sessão
+                // ainda carregando, a falha é a da tela — a faixa, que fica.
+                // Depois dela, foi um gesto (o link, a exportação): o toast.
                 Recado::Falhou(erro) => {
-                    self.carregando = false;
                     self.pedindo_link = false;
-                    self.erro = Some(erro.into());
+                    if std::mem::take(&mut self.carregando) {
+                        self.erro = Some(erro.into());
+                    } else {
+                        self.avisar_do_gesto(erro, true, cx);
+                    }
                 }
                 _ => {}
             }
@@ -5071,7 +5123,7 @@ impl Detalhe {
                     .overflow_hidden()
                     // 🎨 O cartão do site: canto de 10 px, a foto sobre o poço.
                     .bg(cores::poco())
-                    .rounded(px(10.))
+                    .rounded(crate::tema::canto(10.))
                     // 🔑 A marcação é **borda**, e não fundo: fundo colorido
                     // mudaria a cor que o olho usa para julgar a foto ao lado.
                     .border_2()
@@ -6603,7 +6655,7 @@ impl Detalhe {
         let tecla = |t: &'static str| {
             div()
                 .px(px(4.))
-                .rounded(px(3.))
+                .rounded(crate::tema::canto(3.))
                 .border_1()
                 .border_color(cx.theme().border)
                 .child(t)
@@ -9595,13 +9647,12 @@ mod testes {
                 tela.clicar(p, Modificadores::default(), cx);
                 tela.alternar_levada(cx);
                 assert!(
-                    tela.erro
-                        .as_deref()
+                    tela.ultimo_aviso()
                         .is_some_and(|e| e.contains("classifique")),
                     "a sem nota pede a nota: {:?}",
-                    tela.erro
+                    tela.ultimo_aviso()
                 );
-                tela.erro = None;
+                tela.avisos_dados.clear();
 
                 let mut com_nota = local("nova-1");
                 com_nota.nota = Some(4);
@@ -9609,7 +9660,11 @@ mod testes {
                 let p = tela.acervo.posicao_de("nova-1").expect("a local na grade");
                 tela.clicar(p, Modificadores::default(), cx);
                 tela.alternar_levada(cx);
-                assert_eq!(tela.erro, None, "o B não pede para esperar o envio");
+                assert_eq!(
+                    tela.ultimo_aviso(),
+                    None,
+                    "o B não pede para esperar o envio"
+                );
                 // 🚨 Sem releitura no meio: o segundo `B` chega antes dela.
                 tela.alternar_levada(cx);
             })
@@ -9696,11 +9751,9 @@ mod testes {
                 tela.clicar(1, Modificadores::default(), cx);
                 tela.alternar_rejeicao(cx);
                 assert!(
-                    tela.erro
-                        .as_deref()
-                        .is_some_and(|e| e.contains("compradas")),
+                    tela.ultimo_aviso().is_some_and(|e| e.contains("compradas")),
                     "a comprada fica de fora com aviso: {:?}",
-                    tela.erro
+                    tela.ultimo_aviso()
                 );
             })
             .expect("a janela deve estar aberta");
@@ -9867,11 +9920,10 @@ mod testes {
                 tela.selecionar_tudo(cx);
                 tela.marcar_como(EstadoNoBalcao::LevadaNoBalcao, cx);
                 assert!(
-                    tela.erro
-                        .as_deref()
+                    tela.ultimo_aviso()
                         .is_some_and(|e| e.contains("rejeitada") && e.contains("r1.jpg")),
                     "diz quem ficou de fora: {:?}",
-                    tela.erro
+                    tela.ultimo_aviso()
                 );
             })
             .expect("a janela deve estar aberta");
@@ -9914,11 +9966,10 @@ mod testes {
                 tela.clicar(0, Modificadores::default(), cx);
                 tela.alternar_rejeicao(cx);
                 assert!(
-                    tela.erro
-                        .as_deref()
+                    tela.ultimo_aviso()
                         .is_some_and(|e| e.contains("levadas no balcão") && e.contains("l1.jpg")),
                     "{:?}",
-                    tela.erro
+                    tela.ultimo_aviso()
                 );
             })
             .expect("a janela deve estar aberta");
@@ -10419,7 +10470,7 @@ mod testes {
             .update(cx, |tela, _window, cx| {
                 tela.selecionar_tudo(cx);
                 tela.alternar_levada(cx);
-                assert_eq!(tela.erro, None, "o B vale na foto que ainda sobe");
+                assert_eq!(tela.ultimo_aviso(), None, "o B vale na foto que ainda sobe");
             })
             .expect("a janela deve estar aberta");
         assert!(publicador.negociadas().is_empty());

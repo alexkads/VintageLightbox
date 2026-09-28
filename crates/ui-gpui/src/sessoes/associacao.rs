@@ -800,7 +800,7 @@ impl Associador {
             None => h_flex()
                 .gap(px(12.))
                 .p(px(12.))
-                .rounded(px(8.))
+                .rounded(crate::tema::canto(8.))
                 .border_1()
                 .border_dashed()
                 .border_color(tema.border)
@@ -827,7 +827,7 @@ impl Associador {
                 .items_start()
                 .gap(px(12.))
                 .p(px(12.))
-                .rounded(px(8.))
+                .rounded(crate::tema::canto(8.))
                 .border_1()
                 .border_color(tema.border)
                 .bg(tema.muted.opacity(0.2))
@@ -948,7 +948,7 @@ impl Associador {
         v_flex()
             .gap(px(12.))
             .p(px(16.))
-            .rounded(px(8.))
+            .rounded(crate::tema::canto(8.))
             .border_1()
             .border_color(tema.border)
             .child(
@@ -996,7 +996,12 @@ impl Associador {
                 c.child(
                     h_flex()
                         .gap(px(8.))
-                        .child(div().text_sm().text_color(cor(VERMELHO)).child(erro))
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(cor(VERMELHO))
+                                .child(crate::erro_da_api::legivel(&erro)),
+                        )
                         .when_some(cadastro.existente.clone(), |c, p| {
                             c.child(
                                 estilo::botao_contorno(self.id("usar-existente"), cx)
@@ -1141,7 +1146,7 @@ impl Associador {
                     .flex_1()
                     .min_h(px(160.))
                     .overflow_y_scroll()
-                    .rounded(px(8.))
+                    .rounded(crate::tema::canto(8.))
                     .border_1()
                     .border_color(tema.border)
                     .child(
@@ -1170,7 +1175,7 @@ impl Associador {
                                     .p(px(16.))
                                     .text_sm()
                                     .text_color(cor(VERMELHO))
-                                    .child(erro.clone()),
+                                    .child(crate::erro_da_api::legivel(erro)),
                             )
                         } else if busca.itens.is_empty() {
                             lista.child(

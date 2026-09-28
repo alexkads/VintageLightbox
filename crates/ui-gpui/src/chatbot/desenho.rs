@@ -144,7 +144,7 @@ impl Render for Chatbot {
                     .flex_1()
                     .min_h(px(0.))
                     .items_start()
-                    .rounded(px(12.))
+                    .rounded(crate::tema::canto(12.))
                     .border_1()
                     .border_color(cx.theme().border)
                     .overflow_hidden()
@@ -507,7 +507,7 @@ impl Chatbot {
             selos.push(
                 div()
                     .px(px(6.))
-                    .rounded(px(6.))
+                    .rounded(crate::tema::canto(6.))
                     .bg(vermelho())
                     .text_color(gpui_kit::white())
                     .text_xs()
@@ -938,7 +938,7 @@ impl Chatbot {
                         .debug_selector(move || format!("chatbot-resposta-{i}"))
                         .w_full()
                         .p(px(8.))
-                        .rounded(px(6.))
+                        .rounded(crate::tema::canto(6.))
                         .border_1()
                         .border_color(borda)
                         .cursor_pointer()
@@ -1008,7 +1008,7 @@ impl Chatbot {
                 .max_w(px(480.))
                 .px(px(12.))
                 .py(px(6.))
-                .rounded(px(10.))
+                .rounded(crate::tema::canto(10.))
                 .bg(cor_do_canal(canal).opacity(0.15))
                 .when(falhou, |d| d.border_1().border_color(perigo))
                 .child(div().child(pendente.texto.clone()))
@@ -1033,7 +1033,13 @@ impl Chatbot {
                             .justify_between()
                             .border_t_1()
                             .border_color(perigo.opacity(0.3))
-                            .child(div().truncate().text_xs().text_color(perigo).child(erro))
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_xs()
+                                    .text_color(perigo)
+                                    .child(crate::erro_da_api::legivel(&erro)),
+                            )
                             .child(
                                 h_flex()
                                     .gap(px(4.))
@@ -1281,7 +1287,7 @@ impl Chatbot {
                     .id("chatbot-urgencias")
                     .max_h(px(520.))
                     .overflow_y_scroll()
-                    .rounded(px(8.))
+                    .rounded(crate::tema::canto(8.))
                     .border_1()
                     .border_color(if self.urgencias.is_empty() {
                         borda
@@ -1482,7 +1488,7 @@ fn balao(mensagem: &Mensagem, canal: Canal, cx: &mut Context<Chatbot>) -> impl I
             .max_w(px(480.))
             .px(px(12.))
             .py(px(6.))
-            .rounded(px(10.))
+            .rounded(crate::tema::canto(10.))
             .when(mensagem.saida, |d| d.bg(cor_do_canal(canal).opacity(0.15)))
             .when(!mensagem.saida, |d| {
                 d.bg(fundo).border_1().border_color(borda)

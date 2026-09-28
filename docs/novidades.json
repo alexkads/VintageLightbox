@@ -1,10 +1,12 @@
 {
-  "versao": "0.1.32",
-  "titulo": "Por dentro: o banco do balcão e o site passam a chamar a revelação pelos parâmetros.",
+  "versao": "0.1.34",
+  "titulo": "Os avisos do app passam a ser os do site, e o erro do servidor vira uma frase que dá para entender.",
   "importante": false,
   "novidades": [
-    "Nada muda na tela: é uma arrumação por dentro. O que o app guarda de cada foto revelada agora se chama \"parâmetros da revelação\", no balcão e no site.",
-    "As fotos, as revelações e as edições que já existem continuam iguais; a troca de nome é feita sozinha na primeira abertura."
+    "Quando o site recusa ou não responde, o aviso diz o que aconteceu (sem internet, sem permissão, o site teve um problema) em vez de mostrar o código do servidor.",
+    "Os avisos aparecem no alto e no meio, em verde quando deu certo e em vermelho quando falhou, e somem sozinhos em alguns segundos.",
+    "Na galeria da sessão, uma nota ou negociação recusada vira aviso passageiro em vez da faixa vermelha fixa sobre as fotos; a importação dá um aviso só no fim do lote, com quantos arquivos não entraram.",
+    "No \"Baixar como\" da Revelação, o aviso das fotos sem revelação salva vai para o canto de baixo e não cobre mais os botões do alto."
   ],
-  "por_que_atualizar": "Deixa o balcão com os mesmos nomes do site, para as próximas melhorias da Revelação e da Edição."
+  "por_que_atualizar": "Quando algo falhar no balcão, o operador entende o motivo e sabe se basta tentar de novo."
 }

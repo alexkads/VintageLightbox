@@ -1850,7 +1850,7 @@ impl Caixa {
                     .top(px(16.))
                     .right(px(16.))
                     .size(px(20.))
-                    .rounded(px(4.))
+                    .rounded(crate::tema::canto(4.))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -2175,7 +2175,7 @@ impl Caixa {
             v_flex()
                 .gap(px(12.))
                 .p(px(12.))
-                .rounded(px(10.))
+                .rounded(crate::tema::canto(10.))
                 .border_1()
                 .border_color(borda)
                 .child(campo_de_valor(
@@ -2197,7 +2197,7 @@ impl Caixa {
                                         .xsmall()
                                         .h(px(30.))
                                         .px(px(8.))
-                                        .rounded(px(6.))
+                                        .rounded(crate::tema::canto(6.))
                                         .text_xs()
                                         .selected(escolhida)
                                         .child(div().truncate().child(*nome))
@@ -2233,7 +2233,7 @@ impl Caixa {
 
         let lancados = (!form.lancados.is_empty()).then(|| {
             v_flex()
-                .rounded(px(10.))
+                .rounded(crate::tema::canto(10.))
                 .border_1()
                 .border_color(borda)
                 .font_family(mono.clone())
@@ -2261,7 +2261,7 @@ impl Caixa {
                         .child(dinheiro::formatar(p.valor))
                         .child(
                             estilo::botao_icone(format!("caixa-tirar-{i}"), Icone::X, 20., 16.)
-                                .rounded(px(4.))
+                                .rounded(crate::tema::canto(4.))
                                 .text_color(apagado)
                                 .on_click(cx.listener(move |t, _: &ClickEvent, _, cx| {
                                     if let Some(Dialogo::Pagamento(form)) = t.dialogo.as_mut() {
@@ -2314,7 +2314,7 @@ impl Caixa {
             .flex_none()
             .gap(px(8.))
             .p(px(12.))
-            .rounded(px(10.))
+            .rounded(crate::tema::canto(10.))
             .bg(frente)
             .text_color(fundo)
             .font_family(mono)
@@ -2441,7 +2441,7 @@ impl Caixa {
                 .into_any_element()
         } else {
             v_flex()
-                .rounded(px(10.))
+                .rounded(crate::tema::canto(10.))
                 .border_1()
                 .border_color(borda)
                 .children(vendas.into_iter().enumerate().map(|(i, v)| {
@@ -2549,7 +2549,7 @@ impl Caixa {
                     .when(!c.movimentos.is_empty(), |d| {
                         d.child(
                             v_flex()
-                                .rounded(px(10.))
+                                .rounded(crate::tema::canto(10.))
                                 .border_1()
                                 .border_color(borda)
                                 .font_family(mono.clone())
@@ -2624,7 +2624,7 @@ impl Caixa {
             div()
                 .px(px(12.))
                 .py(px(8.))
-                .rounded(px(6.))
+                .rounded(crate::tema::canto(6.))
                 .border_1()
                 .border_color(borda_ambar)
                 .bg(fundo)
@@ -2635,7 +2635,7 @@ impl Caixa {
         });
 
         let fotos = v_flex()
-            .rounded(px(10.))
+            .rounded(crate::tema::canto(10.))
             .border_1()
             .border_color(borda)
             .children(form.venda.itens.iter().enumerate().map(|(i, item)| {
@@ -2924,7 +2924,7 @@ impl Caixa {
                 v_flex()
                     .id(SharedString::from(format!("caixa-negociacao-{t:?}")))
                     .gap(px(2.))
-                    .rounded(px(10.))
+                    .rounded(crate::tema::canto(10.))
                     .cursor_pointer()
                     .map(|d| {
                         if ativo {
@@ -3132,7 +3132,10 @@ fn campo_de_valor(rotulo: &str, campo: &Entity<InputState>, cx: &Context<Caixa>)
 }
 
 fn erro_do_form(erro: String, cx: &Context<Caixa>) -> Div {
-    div().text_sm().text_color(cx.theme().danger).child(erro)
+    div()
+        .text_sm()
+        .text_color(cx.theme().danger)
+        .child(crate::erro_da_api::legivel(&erro))
 }
 
 /// Os pares de botão do site: `default` quando escolhido, `outline` quando não.

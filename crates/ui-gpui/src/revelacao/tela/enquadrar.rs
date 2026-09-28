@@ -673,7 +673,7 @@ impl Revelacao {
                 .left(px(w * fx - LADO_DA_ALCA / 2.))
                 .top(px(h * fy - LADO_DA_ALCA / 2.))
                 .size(px(LADO_DA_ALCA))
-                .rounded(px(2.))
+                .rounded(crate::tema::canto(2.))
                 .bg(gpui_kit::white())
                 .border_1()
                 .border_color(gpui_kit::rgba(0x17171799))
@@ -801,7 +801,7 @@ impl Revelacao {
                         .top(ate.y - origem.y - px(10.))
                         .px(px(6.))
                         .py(px(2.))
-                        .rounded(px(4.))
+                        .rounded(crate::tema::canto(4.))
                         .bg(gpui_kit::rgba(0x000000b3))
                         .font_family("Menlo")
                         .text_size(px(11.))
@@ -859,7 +859,7 @@ impl Revelacao {
                             .left(px(LARGURA_DO_TRANSFERIDOR / 2. - 130.))
                             .w(px(260.))
                             .h_full()
-                            .rounded(px(10.))
+                            .rounded(crate::tema::canto(10.))
                             .bg(faixa),
                     )
                     .child(

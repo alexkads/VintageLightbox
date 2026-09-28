@@ -64,7 +64,13 @@ pub struct Backup {
     /// Onde estou, relativo à raiz. Vazio é a raiz.
     pasta: String,
     entradas: Vec<EntradaDoAcervo>,
+    /// A pasta que não pôde ser lida — a faixa, que fica. O que falha num
+    /// gesto (apagar, baixar, compactar) vai por [`Backup::avisar`].
     erro: Option<String>,
+    /// 🧪 Os toasts pedidos, para os testes: a lista do kit mora no `Root`,
+    /// que as janelas de teste desta tela não têm.
+    #[cfg(test)]
+    avisos_dados: Vec<(String, estilo::Toast)>,
     lendo: bool,
     arrastando: bool,
     converter: bool,
@@ -125,6 +131,8 @@ impl Backup {
             pasta: String::new(),
             entradas: Vec::new(),
             erro: None,
+            #[cfg(test)]
+            avisos_dados: Vec::new(),
             lendo: false,
             arrastando: false,
             converter: true,
@@ -195,6 +203,22 @@ impl Backup {
         );
     }
 
+    /// O que acabou de acontecer num gesto: a `Notification` do kit, que some
+    /// sozinha — e não a faixa, que ficaria até a próxima pasta.
+    fn avisar(
+        &mut self,
+        texto: impl Into<String>,
+        tipo: estilo::Toast,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let texto: String = texto.into();
+        #[cfg(test)]
+        self.avisos_dados.push((texto.clone(), tipo));
+        estilo::mostrar_toast(estilo::toast(texto, tipo, cx), window, cx);
+        cx.notify();
+    }
+
     /// Apaga um arquivo e relê a pasta.
     pub fn apagar(&mut self, caminho: String, window: &mut Window, cx: &mut Context<Self>) {
         let Some(sessao) = self.sessao.clone() else {
@@ -208,7 +232,12 @@ impl Backup {
             cx,
             |tela, resposta: Result<(), String>, window, cx| {
                 if let Err(erro) = resposta {
-                    tela.erro = Some(erro);
+                    tela.avisar(
+                        format!("Não foi possível apagar: {erro}"),
+                        estilo::Toast::Erro,
+                        window,
+                        cx,
+                    );
                 }
                 let pasta = tela.pasta.clone();
                 tela.abrir(pasta, window, cx);
@@ -232,8 +261,12 @@ impl Backup {
         }
         let arrastados = arquivos_soltos(&soltos);
         if arrastados.is_empty() {
-            self.erro = Some("Nada para enviar: a pasta estava vazia ou não pôde ser lida.".into());
-            cx.notify();
+            self.avisar(
+                "Nada para enviar: a pasta estava vazia ou não pôde ser lida.",
+                estilo::Toast::Alerta,
+                window,
+                cx,
+            );
             return;
         }
 
@@ -392,10 +425,12 @@ impl Backup {
             cx,
             move |tela, resposta: Result<ParaBaixar, String>, window, cx| match resposta {
                 Ok(arquivo) => tela.carregar_a_previa(arquivo, posicao, window, cx),
-                Err(erro) => {
-                    tela.erro = Some(erro);
-                    cx.notify();
-                }
+                Err(erro) => tela.avisar(
+                    format!("A prévia não abriu: {erro}"),
+                    estilo::Toast::Erro,
+                    window,
+                    cx,
+                ),
             },
         );
     }
@@ -416,7 +451,7 @@ impl Backup {
             dali,
             window,
             cx,
-            move |tela, resposta: Result<(String, Vec<u8>), String>, _window, cx| {
+            move |tela, resposta: Result<(String, Vec<u8>), String>, window, cx| {
                 match resposta {
                     Ok((caminho, bytes)) => match image::load_from_memory(&bytes) {
                         Ok(imagem) => {
@@ -432,14 +467,19 @@ impl Backup {
                         // Um formato que o `image` não abre (RAW de câmera
                         // nova, PSD) não é falha do acervo: o arquivo está lá e
                         // baixa normalmente.
-                        Err(_) => {
-                            tela.erro = Some(
-                                "Este formato não abre na prévia — baixe o arquivo para vê-lo."
-                                    .into(),
-                            );
-                        }
+                        Err(_) => tela.avisar(
+                            "Este formato não abre na prévia: baixe o arquivo para vê-lo.",
+                            estilo::Toast::Alerta,
+                            window,
+                            cx,
+                        ),
                     },
-                    Err(erro) => tela.erro = Some(erro),
+                    Err(erro) => tela.avisar(
+                        format!("A prévia não abriu: {erro}"),
+                        estilo::Toast::Erro,
+                        window,
+                        cx,
+                    ),
                 }
                 cx.notify();
             },
@@ -485,15 +525,19 @@ impl Backup {
             window,
             cx,
             move |tela, resposta: Result<Arvore, String>, window, cx| match resposta {
-                Ok(arvore) if arvore.arquivos.is_empty() => {
-                    tela.erro = Some("Pasta vazia: não há o que compactar aqui.".into());
-                    cx.notify();
-                }
+                Ok(arvore) if arvore.arquivos.is_empty() => tela.avisar(
+                    "Pasta vazia: não há o que compactar aqui.",
+                    estilo::Toast::Alerta,
+                    window,
+                    cx,
+                ),
                 Ok(arvore) => tela.pedir_o_destino(arvore, window, cx),
-                Err(erro) => {
-                    tela.erro = Some(erro);
-                    cx.notify();
-                }
+                Err(erro) => tela.avisar(
+                    format!("Não foi possível baixar a pasta: {erro}"),
+                    estilo::Toast::Erro,
+                    window,
+                    cx,
+                ),
             },
         );
     }
@@ -526,10 +570,12 @@ impl Backup {
                         });
                         tela.proximo_do_zip(window, cx);
                     }
-                    Err(erro) => {
-                        tela.erro = Some(format!("não deu para criar o arquivo: {erro}"));
-                        cx.notify();
-                    }
+                    Err(erro) => tela.avisar(
+                        format!("Não deu para criar o arquivo: {erro}"),
+                        estilo::Toast::Erro,
+                        window,
+                        cx,
+                    ),
                 }
             },
         );
@@ -557,8 +603,13 @@ impl Backup {
                     self.erro = None;
                 }
                 Err(erro) => {
-                    self.erro = Some(format!("o zip não pôde ser fechado: {erro}"));
                     let _ = std::fs::remove_file(&destino);
+                    self.avisar(
+                        format!("O zip não pôde ser fechado: {erro}"),
+                        estilo::Toast::Erro,
+                        window,
+                        cx,
+                    );
                 }
             }
             cx.notify();
@@ -578,12 +629,16 @@ impl Backup {
                 match resposta {
                     Ok((caminho, bytes)) => {
                         if let Err(erro) = zip.compactador.por(&caminho, &bytes) {
-                            tela.erro = Some(format!("{caminho}: {erro}"));
                             let abortado = tela.zip.take();
                             if let Some(abortado) = abortado {
                                 let _ = std::fs::remove_file(&abortado.destino);
                             }
-                            cx.notify();
+                            tela.avisar(
+                                format!("O zip parou em {caminho}: {erro}"),
+                                estilo::Toast::Erro,
+                                window,
+                                cx,
+                            );
                             return;
                         }
                         zip.feitos += 1;
@@ -594,7 +649,12 @@ impl Backup {
                         // contrário do envio. Um zip com 299 de 300 fotos é um
                         // backup que parece completo e não é — e ninguém
                         // confere o número ao abrir.
-                        tela.erro = Some(format!("o download parou: {erro}"));
+                        tela.avisar(
+                            format!("O download parou: {erro}"),
+                            estilo::Toast::Erro,
+                            window,
+                            cx,
+                        );
                         if let Some(abortado) = tela.zip.take() {
                             let _ = std::fs::remove_file(&abortado.destino);
                         }
@@ -1100,13 +1160,13 @@ impl Backup {
                         div()
                             .w(px(36.))
                             .h(px(20.))
-                            .rounded(px(10.))
+                            .rounded(crate::tema::canto(10.))
                             .bg(if ligado { primaria } else { borda })
                             .p(px(2.))
                             .child(
                                 div()
                                     .size(px(16.))
-                                    .rounded(px(8.))
+                                    .rounded(crate::tema::canto(8.))
                                     .bg(gpui_kit::white())
                                     .ml(if ligado { px(16.) } else { px(0.) }),
                             ),
@@ -1153,7 +1213,7 @@ impl Backup {
             .w_full()
             .gap(px(12.))
             .p(px(16.))
-            .rounded(px(10.))
+            .rounded(crate::tema::canto(10.))
             .border_2()
             .border_dashed()
             .border_color(if self.arrastando { primaria } else { borda })
@@ -1250,7 +1310,9 @@ impl Backup {
                                 )
                                 .when_some(peca.erro.clone(), |l, erro| {
                                     l.child(
-                                        div().text_color(perigo).child(SharedString::from(erro)),
+                                        div()
+                                            .text_color(perigo)
+                                            .child(crate::erro_da_api::legivel(&erro)),
                                     )
                                 })
                                 .when(peca.erro.is_none(), |l| {
@@ -1443,7 +1505,7 @@ impl Backup {
             .w_full()
             .flex_1()
             .min_h(px(0.))
-            .rounded(px(10.))
+            .rounded(crate::tema::canto(10.))
             .border_1()
             .border_color(borda)
             .overflow_y_scroll()
@@ -2058,7 +2120,11 @@ mod testes {
         assert!(escolha.nome_pedido.lock().unwrap().is_none());
         janela
             .update(cx, |tela, _window, _cx| {
-                assert!(tela.erro.as_deref().is_some_and(|e| e.contains("vazia")));
+                assert!(
+                    tela.avisos_dados.last().is_some_and(
+                        |(e, tipo)| e.contains("vazia") && *tipo == estilo::Toast::Alerta
+                    )
+                );
             })
             .expect("a janela abriu");
     }

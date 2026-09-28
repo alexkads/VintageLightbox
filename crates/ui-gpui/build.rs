@@ -5,10 +5,15 @@
 //! como ícone vazio na tela — o que o teste `todo_icone_do_app_existe` cobra.
 
 use std::fmt::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// O leitor do template, o mesmo que o app usa — ver `src/tema/preset.rs`.
+#[path = "src/tema/preset.rs"]
+mod preset;
 
 fn main() {
     let raiz = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let template = template(raiz);
     let mut tabela = String::from("&[\n");
     for (pasta, prefixo) in [("icones", "icons/"), ("imagens", "imagens/")] {
         let dir = raiz.join(pasta);
@@ -26,7 +31,13 @@ fn main() {
             .collect();
         arquivos.sort();
         for arquivo in arquivos {
-            let nome = arquivo.file_name().unwrap().to_string_lossy();
+            let nome = arquivo.file_name().unwrap().to_string_lossy().to_string();
+            // 🎨 O ícone da biblioteca do template, quando ela tem este.
+            let arquivo = if pasta == "icones" {
+                icone_do_template(raiz, template.icones, &nome).unwrap_or(arquivo)
+            } else {
+                arquivo
+            };
             writeln!(
                 tabela,
                 "    ({:?}, include_bytes!({:?}) as &[u8]),",
@@ -36,12 +47,110 @@ fn main() {
             .unwrap();
         }
     }
+    for arquivo in fontes_do_template(raiz, &template) {
+        let nome = arquivo.strip_prefix(raiz).unwrap().display().to_string();
+        writeln!(
+            tabela,
+            "    ({:?}, include_bytes!({:?}) as &[u8]),",
+            nome.replace('\\', "/"),
+            arquivo.display().to_string()
+        )
+        .unwrap();
+    }
     tabela.push(']');
     let saida = Path::new(&std::env::var("OUT_DIR").unwrap()).join("recursos.rs");
     std::fs::write(saida, tabela).unwrap();
 
     icone_do_executavel(raiz);
     jeito_de_instalar();
+}
+
+/// 🎨 **O template deste binário** — `crates/ui-gpui/template.toml`, ou o
+/// `VLB_TEMPLATE` de quem compila, que vale por cima do arquivo para
+/// experimentar sem editá-lo:
+///
+/// ```sh
+/// VLB_TEMPLATE=bIkeymG cargo run -p ui-gpui          # o código do /create
+/// VLB_TEMPLATE=lyra cargo run -p ui-gpui             # um preset com nome
+/// VLB_TEMPLATE=outro-template.toml cargo run -p ui-gpui
+/// ```
+///
+/// O resultado vai para `VLB_TEMPLATE_RESOLVIDO`, que `tema::template()` lê.
+/// Template ilegível **para a compilação** com a linha e o que vale: um erro
+/// aqui chega a todo balcão, e o lugar de vê-lo é antes do `make producao`.
+fn template(raiz: &Path) -> preset::Preset {
+    let arquivo = raiz.join("template.toml");
+    println!("cargo:rerun-if-changed={}", arquivo.display());
+    println!("cargo:rerun-if-env-changed=VLB_TEMPLATE");
+    let (origem, texto) = match std::env::var("VLB_TEMPLATE") {
+        Ok(valor) if Path::new(&valor).is_file() => {
+            println!("cargo:rerun-if-changed={valor}");
+            (valor.clone(), std::fs::read_to_string(&valor).unwrap())
+        }
+        Ok(valor) if !valor.trim().is_empty() => (
+            "VLB_TEMPLATE".to_string(),
+            format!("preset = \"{}\"", valor.trim()),
+        ),
+        _ => (
+            arquivo.display().to_string(),
+            std::fs::read_to_string(&arquivo).unwrap_or_default(),
+        ),
+    };
+    let template = preset::ler(&texto).unwrap_or_else(|erro| panic!("\n🎨 {origem}: {erro}\n"));
+    println!(
+        "cargo:rustc-env=VLB_TEMPLATE_RESOLVIDO={}",
+        template.parametros()
+    );
+    template
+}
+
+/// O SVG de `icones-<biblioteca>/` com o mesmo nome do lucide, se houver.
+/// O que a biblioteca não tem continua lucide (`template/icones.json`).
+fn icone_do_template(raiz: &Path, biblioteca: &str, nome: &str) -> Option<PathBuf> {
+    if biblioteca == "lucide" {
+        return None;
+    }
+    let pasta = raiz.join(format!("icones-{biblioteca}"));
+    println!("cargo:rerun-if-changed={}", pasta.display());
+    if !pasta.is_dir() {
+        panic!(
+            "\n🎨 O template pede os ícones `{biblioteca}`, e `{}` não existe.\n   \
+             python3 scripts/baixar-do-template.py --icones {biblioteca}\n",
+            pasta.display()
+        );
+    }
+    let arquivo = pasta.join(nome);
+    arquivo.is_file().then_some(arquivo)
+}
+
+/// Os `.ttf` da fonte do corpo e da dos títulos. `sistema` não embute nada.
+fn fontes_do_template(raiz: &Path, template: &preset::Preset) -> Vec<PathBuf> {
+    let mut slugs = vec![template.fonte, template.fonte_dos_titulos];
+    slugs.retain(|s| *s != preset::FONTE_DO_SISTEMA && *s != preset::HERDAR);
+    slugs.dedup();
+    let mut arquivos = Vec::new();
+    for slug in slugs {
+        let pasta = raiz.join("fontes").join(slug);
+        println!("cargo:rerun-if-changed={}", pasta.display());
+        let mut da_familia: Vec<_> = std::fs::read_dir(&pasta)
+            .map(|dir| {
+                dir.filter_map(|e| e.ok())
+                    .map(|e| e.path())
+                    .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("ttf"))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if da_familia.is_empty() {
+            panic!(
+                "\n🎨 O template pede a fonte `{slug}`, e `{}` não tem nenhum .ttf.\n   \
+                 python3 scripts/baixar-do-template.py --fonte {slug}\n",
+                pasta.display()
+            );
+        }
+        da_familia.sort();
+        arquivos.extend(da_familia);
+    }
+    arquivos
 }
 
 /// 🔄 **Como este binário vai ser atualizado** — gravado nele, em

@@ -1,5 +1,10 @@
 //! As peças do shadcn do site, com as mesmas medidas, para as telas do app.
 //!
+//! 🎨 **As medidas são as do estilo do template** (`tema::medidas`): a altura
+//! do botão, o respiro do diálogo e os cantos mudam com o `estilo` e o `raio`
+//! do `template.toml`. O visual da casa é o `nova` do site, com os números de
+//! sempre (32 px de botão, 16 de respiro, 12 de canto no diálogo).
+//!
 //! 🔑 **Uma peça, um lugar.** O botão de contorno do site tem 32 px de altura,
 //! canto de 8 px e `shadow-xs`; escrito à mão em cada tela, ele diverge na
 //! terceira. As telas montam o conteúdo (ícone, rótulo, tecla) e chamam
@@ -20,15 +25,24 @@
 
 use gpui_kit::component::alert::Alert;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::notification::Notification;
 use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{
     h_flex, v_flex, ActiveTheme, Disableable as _, Icon, Selectable as _, Sizable as _,
 };
 use gpui_kit::{
-    div, prelude::*, px, AnyElement, App, Div, FontWeight, Hsla, SharedString, Stateful,
+    div, prelude::*, px, Anchor, AnyElement, App, Div, FontWeight, Hsla, SharedString, Stateful,
+    Window,
 };
 
 use crate::recursos::Icone;
+use crate::tema::fontes;
+use crate::tema::medidas::{Canto, Medidas};
+
+/// As medidas do estilo do template (ver `tema::medidas`).
+fn m() -> &'static Medidas {
+    crate::tema::medidas()
+}
 
 // 🔘 **Os botões são o `Button` do gpui-kit** desde 2026-09-26 (dono: trocar
 // o que é desenhado à mão por componentes do kit, *"para reduzir a
@@ -46,7 +60,10 @@ use crate::recursos::Icone;
 /// tamanho. (Comparado lado a lado com as fotos de antes: o médio deixava
 /// todo rótulo maior que o do site.)
 fn botao(id: impl Into<SharedString>) -> Button {
-    Button::new(id.into()).small().h(px(32.)).px(px(10.))
+    Button::new(id.into())
+        .small()
+        .h(px(m().botao.altura))
+        .px(px(m().botao.lados))
 }
 
 /// `Button variant="outline"`.
@@ -75,9 +92,10 @@ pub fn desligado(botao: Button, desligar: bool) -> Button {
     botao.disabled(desligar)
 }
 
-/// O `SidebarTrigger`: 28 px, fantasma, com o ícone do painel em 16.
+/// O `SidebarTrigger` (`Button size="icon-sm"`): fantasma, com o ícone do
+/// painel em 16 — 28 px no visual da casa.
 pub fn botao_do_menu(id: impl Into<SharedString>, _cx: &App) -> Button {
-    botao_icone(id, Icone::PanelLeft, 28., 16.)
+    botao_icone(id, Icone::PanelLeft, m().botao_icone, 16.)
 }
 
 /// `Button variant="ghost" size="icon"`: quadrado de `lado` px, só o ícone.
@@ -100,18 +118,19 @@ pub fn botao_raso(id: impl Into<SharedString>) -> Button {
         .xsmall()
         .h(px(20.))
         .px(px(6.))
-        .rounded(px(4.))
+        .rounded(m().canto_da_tela(4.))
 }
 
 /// `Badge variant="outline"`: a `Tag` do gpui-kit, em pílula de 22 px com a
 /// borda da página — as medidas do site por cima das do kit.
 pub fn selo_contorno(_cx: &App) -> Tag {
+    let selo = m().selo;
     Tag::secondary()
         .outline()
-        .rounded_full()
+        .rounded(px(m().canto(selo.canto)))
         .flex_none()
-        .h(px(22.))
-        .px(px(8.))
+        .h(px(selo.altura + 2.))
+        .px(px(selo.lados))
         .py(px(0.))
         .gap(px(6.))
         .font_weight(FontWeight::MEDIUM)
@@ -122,9 +141,9 @@ pub fn selo_contorno(_cx: &App) -> Tag {
 pub fn selo_colorido(cores: (Hsla, Hsla, Hsla)) -> Tag {
     let (fundo, borda, texto) = cores;
     Tag::custom(fundo, texto, borda)
-        .rounded(px(6.))
+        .rounded(m().canto_da_tela(6.))
         .flex_none()
-        .h(px(20.))
+        .h(px(m().selo.altura))
         .px(px(6.))
         .py(px(0.))
         .font_weight(FontWeight::MEDIUM)
@@ -140,7 +159,7 @@ pub fn selo_colorido(cores: (Hsla, Hsla, Hsla)) -> Tag {
 pub fn tecla(texto: impl Into<SharedString>) -> Div {
     div()
         .px(px(4.))
-        .rounded(px(4.))
+        .rounded(m().canto_da_tela(4.))
         .border_1()
         .border_color(gpui_kit::rgba(0x80808066))
         .text_size(px(10.))
@@ -171,6 +190,7 @@ pub fn cabecalho_da_pagina(
                     div()
                         .text_2xl()
                         .font_weight(FontWeight::SEMIBOLD)
+                        .when_some(fontes::dos_titulos(), |d, f| d.font_family(f))
                         .child(titulo.into()),
                 )
                 .when_some(descricao, |d, descricao| {
@@ -185,6 +205,72 @@ pub fn cabecalho_da_pagina(
         })
 }
 
+/// O tipo de um aviso passageiro — ver [`toast`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Toast {
+    /// Deu certo: verde, no alto e no meio.
+    Sucesso,
+    /// O site (ou o disco) recusou: vermelho, no alto e no meio.
+    Erro,
+    /// O gesto deixou algo de fora: o alerta do kit, no canto de baixo.
+    Alerta,
+}
+
+/// Um aviso do que **acabou de acontecer** — a `Notification` do gpui-kit, que
+/// some sozinha em 5 s. O que persiste (a tela que não carregou, o campo
+/// recusado) é [`aviso`], na tela.
+///
+/// 🎨 **Sucesso e erro com as cores do `richColors` do site**, no alto e no
+/// meio como o `sonner` (`position="top-center"`): no canto superior direito,
+/// o padrão da lista, o aviso tapava "Tela do cliente" e "Baixar JPEG". O
+/// alerta vai para o canto de baixo, longe dos botões do alto.
+pub fn toast(texto: impl Into<SharedString>, tipo: Toast, cx: &App) -> Notification {
+    let texto: SharedString = texto.into();
+    let tema = cx.theme();
+    let (fundo, letra, icone) = match tipo {
+        Toast::Alerta => {
+            return Notification::warning(texto).placement(Anchor::BottomRight);
+        }
+        Toast::Sucesso => (
+            tema.success,
+            tema.success_foreground,
+            gpui_kit::component::IconName::CircleCheck,
+        ),
+        Toast::Erro => (
+            tema.danger,
+            tema.danger_foreground,
+            gpui_kit::component::IconName::CircleX,
+        ),
+    };
+    // O erro do site chega cru (`o site respondeu 500 …: <html>`).
+    let texto: SharedString = if tipo == Toast::Erro {
+        crate::erro_da_api::legivel(&texto).into()
+    } else {
+        texto
+    };
+    Notification::new()
+        .message(texto)
+        .icon(Icon::new(icone).text_color(letra))
+        .placement(Anchor::TopCenter)
+        .bg(fundo)
+        .border_color(fundo)
+        .text_color(letra)
+}
+
+/// Mostra o `toast` na janela — se ela tiver a raiz do kit, que é onde mora a
+/// lista das notificações. As janelas dos testes de uma tela só não têm, e o
+/// `push_notification` do kit entra em pânico sem ela.
+pub fn mostrar_toast(nota: Notification, window: &mut Window, cx: &mut App) {
+    use gpui_kit::component::WindowExt as _;
+    if window
+        .root::<gpui_kit::component::Root>()
+        .flatten()
+        .is_some()
+    {
+        window.push_notification(nota, cx);
+    }
+}
+
 /// `Alert`: o do gpui-kit — o padrão já é o do site (texto, fundo da página,
 /// borda); com `perigo`, o vermelho do texto e da borda, **sem** o fundo
 /// tingido que o `error` do kit põe, porque o do site não tem. Respiro e canto
@@ -192,6 +278,13 @@ pub fn cabecalho_da_pagina(
 pub fn aviso(texto: impl Into<SharedString>, perigo: bool, cx: &App) -> Alert {
     let tema = cx.theme();
     let texto: SharedString = texto.into();
+    // O erro do site chega cru (`o site respondeu 500 …: <html>`); aqui ele
+    // vira a frase que o operador lê (`crate::erro_da_api`).
+    let texto: SharedString = if perigo {
+        crate::erro_da_api::legivel(&texto).into()
+    } else {
+        texto
+    };
     let alerta = if perigo {
         Alert::error(texto.clone(), texto)
             .icon(Icon::new(Icone::CircleAlert).size(px(16.)))
@@ -200,7 +293,11 @@ pub fn aviso(texto: impl Into<SharedString>, perigo: bool, cx: &App) -> Alert {
     } else {
         Alert::new(texto.clone(), texto).icon(Icon::new(Icone::Info).size(px(16.)))
     };
-    alerta.small().px(px(16.)).py(px(12.)).rounded(px(10.))
+    alerta
+        .small()
+        .px(px(16.))
+        .py(px(12.))
+        .rounded(px(m().canto(Canto::LG)))
 }
 
 /// O véu do `Dialog` do site, e a caixa dele — as duas peças de um diálogo.
@@ -241,15 +338,19 @@ pub fn conteudo_do_dialogo() -> Div {
     v_flex().gap(px(16.))
 }
 
-/// A caixa do `DialogContent`: canto de 12 px, fundo do `popover`, 16 px de
-/// respiro e 16 px entre as partes.
+/// A caixa do `DialogContent`: fundo do `popover`, com o respiro, o vão e o
+/// canto do estilo (16, 16 e `rounded-xl` no visual da casa).
+///
+/// A largura fica de fora do template: o conteúdo de cada diálogo do app foi
+/// escrito para 440 px, e o `max-w-sm`/`max-w-md` do shadcn o quebraria.
 pub fn caixa_do_dialogo(cx: &App) -> Div {
     let tema = cx.theme();
+    let dialogo = m().dialogo;
     v_flex()
         .w(px(440.))
-        .p(px(16.))
-        .gap(px(16.))
-        .rounded(px(12.))
+        .p(px(dialogo.respiro))
+        .gap(px(dialogo.vao))
+        .rounded(px(m().canto(dialogo.canto)))
         .border_1()
         .border_color(tema.border)
         .bg(tema.popover)
@@ -274,6 +375,7 @@ pub fn cabecalho_do_dialogo(
                 .items_center()
                 .text_lg()
                 .font_weight(FontWeight::SEMIBOLD)
+                .when_some(fontes::dos_titulos(), |d, f| d.font_family(f))
                 .children(icone.map(|i| Icon::new(i).size(px(18.))))
                 .child(titulo.into()),
         )
@@ -307,12 +409,12 @@ pub fn opcao_do_dialogo(id: impl Into<SharedString>, cx: &App) -> Stateful<Div> 
         .px(px(12.))
         // `py-3` do site: 12 px em cima e embaixo, e a altura sai do conteúdo.
         .py(px(12.))
-        .rounded(px(8.))
+        .rounded(px(m().canto(m().botao.canto)))
         .border_1()
         .border_color(borda)
         .bg(fundo)
         .shadow_xs()
-        .text_sm()
+        .text_size(px(m().letra))
         .cursor_pointer()
         .hover(move |s| s.bg(acento))
 }
@@ -323,11 +425,11 @@ pub fn rodape_do_dialogo() -> Div {
     h_flex().justify_end().gap(px(8.))
 }
 
-/// Um cartão (`rounded-lg border`), com o fundo da página.
+/// Um cartão (`Card`), com o fundo da página e o canto do estilo.
 pub fn cartao(cx: &App) -> Div {
     let tema = cx.theme();
     div()
-        .rounded(px(10.))
+        .rounded(px(m().canto(m().cartao.canto)))
         .border_1()
         .border_color(tema.border)
         .overflow_hidden()
@@ -358,7 +460,7 @@ pub fn chip(id: impl Into<SharedString>, escolhido: bool) -> Button {
         .ghost()
         .xsmall()
         .px(px(8.))
-        .rounded(px(4.))
+        .rounded(m().canto_da_tela(4.))
         .text_xs()
         .selected(escolhido)
 }
@@ -366,11 +468,14 @@ pub fn chip(id: impl Into<SharedString>, escolhido: bool) -> Button {
 /// Um botão de ligar e desligar (o `Toggle` do site): contorno apagado, e o
 /// âmbar do tema quando ligado.
 pub fn alternador(id: impl Into<SharedString>, ligado: bool, cx: &App) -> Button {
-    Button::new(id.into()).small().rounded(px(4.)).map(|b| {
-        if ligado {
-            b.custom(crate::tema::botao_quente(cx))
-        } else {
-            b.outline()
-        }
-    })
+    Button::new(id.into())
+        .small()
+        .rounded(m().canto_da_tela(4.))
+        .map(|b| {
+            if ligado {
+                b.custom(crate::tema::botao_quente(cx))
+            } else {
+                b.outline()
+            }
+        })
 }

@@ -460,7 +460,7 @@ impl Revelacao {
         }
         Some(
             div()
-                .rounded(px(4.))
+                .rounded(crate::tema::canto(4.))
                 .border_1()
                 .border_color(cx.theme().border)
                 .bg(cx.theme().secondary)
@@ -643,7 +643,7 @@ impl Revelacao {
             .bordered(borda)
             .h_auto()
             .flex_none()
-            .when(borda, |a| a.rounded(px(6.)))
+            .when(borda, |a| a.rounded(crate::tema::canto(6.)))
             .item(|item| {
                 item.open(aberto)
                     .title_style(StyleRefinement::default().px(px(12.)).py(px(8.)))

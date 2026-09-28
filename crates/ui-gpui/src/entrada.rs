@@ -416,13 +416,13 @@ impl Render for Entrada {
                                 .max_w(px(448.))
                                 .px(px(12.))
                                 .py(px(8.))
-                                .rounded(px(8.))
+                                .rounded(crate::tema::canto(8.))
                                 .bg(cx.theme().danger.opacity(0.2))
                                 .border_1()
                                 .border_color(cx.theme().danger.opacity(0.6))
                                 .text_sm()
                                 .text_color(cor(capa::TEXTO))
-                                .child(erro),
+                                .child(crate::erro_da_api::legivel(&erro)),
                         )
                     }),
             )

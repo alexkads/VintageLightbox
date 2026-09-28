@@ -421,7 +421,7 @@ impl Render for FantasmaDaGuia {
             .gap(px(6.))
             .px(px(12.))
             .h(px(ALTURA_DA_FAIXA - 6.))
-            .rounded(px(6.))
+            .rounded(crate::tema::canto(6.))
             .bg(cx.theme().background)
             .border_1()
             .border_color(cx.theme().border)
@@ -1107,7 +1107,7 @@ impl Aplicativo {
                         .items_center()
                         .justify_center()
                         .size(px(20.))
-                        .rounded(px(4.))
+                        .rounded(crate::tema::canto(4.))
                         .hover(move |b| b.bg(borda))
                         .child(Icon::new(Icone::X).size(px(12.)))
                         .on_click(cx.listener(move |raiz, _, window, cx| {

@@ -47,14 +47,14 @@ pub fn quadro_de_importacao(
         .justify_center()
         .gap(px(12.))
         .p(px(32.))
-        .rounded(px(10.))
+        .rounded(crate::tema::canto(10.))
         .border_1()
         .border_dashed()
         .border_color(tema.border)
         .child(
             div()
                 .p(px(8.))
-                .rounded(px(8.))
+                .rounded(crate::tema::canto(8.))
                 .bg(tema.muted)
                 .child(Icon::new(Icone::ImagePlus).size(px(24.))),
         )

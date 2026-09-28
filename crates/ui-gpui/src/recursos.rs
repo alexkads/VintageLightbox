@@ -46,6 +46,14 @@ pub fn imagem(nome: &str) -> Option<&'static [u8]> {
         .map(|(_, bytes)| *bytes)
 }
 
+/// 🔤 Os `.ttf` que o template embutiu (`fontes/<slug>/…`, ver `tema::fontes`).
+pub fn fontes() -> impl Iterator<Item = &'static [u8]> {
+    ARQUIVOS
+        .iter()
+        .filter(|(nome, _)| nome.starts_with("fontes/"))
+        .map(|(_, bytes)| *bytes)
+}
+
 /// Os ícones que as telas do app usam, com o nome do lucide.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Icone {

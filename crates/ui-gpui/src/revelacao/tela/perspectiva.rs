@@ -715,7 +715,7 @@ impl Revelacao {
                 .left(px(mx + 8.))
                 .top(px(my - 9.))
                 .px(px(5.))
-                .rounded(px(3.))
+                .rounded(crate::tema::canto(3.))
                 .bg(gpui_kit::rgba(0x000000b3))
                 .font_family("Menlo")
                 .text_size(px(10.))
@@ -800,7 +800,7 @@ impl Revelacao {
                 .items_center()
                 .px(px(6.))
                 .py(px(3.))
-                .rounded(px(4.))
+                .rounded(crate::tema::canto(4.))
                 .when(selecionada == Some(i), |l| l.bg(muted))
                 .child(div().size(px(8.)).rounded_full().bg(gpui_kit::rgb(cor)))
                 .child(
@@ -815,7 +815,7 @@ impl Revelacao {
                         .outline()
                         .xsmall()
                         .px(px(6.))
-                        .rounded(px(3.))
+                        .rounded(crate::tema::canto(3.))
                         .text_xs()
                         .text_color(gpui_kit::rgb(cor))
                         .tooltip("Trocar Vertical ↔ Horizontal")
@@ -826,7 +826,7 @@ impl Revelacao {
                 )
                 .child(
                     estilo::botao_icone(format!("guia-apagar-{i}"), Icone::X, 16., 12.)
-                        .rounded(px(3.))
+                        .rounded(crate::tema::canto(3.))
                         .text_color(mudo)
                         .tooltip("Apagar a guia")
                         .on_click(

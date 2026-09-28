@@ -216,7 +216,7 @@ pub fn desenhar_conteudo<T: 'static>(
             .p(px(0.))
             // O `rounded-xl` do `DialogContent` do site: 14 px com o
             // `--radius` de 10.
-            .rounded(px(14.))
+            .rounded(crate::tema::canto(14.))
             .bg(cx.theme().popover)
             .text_color(cx.theme().popover_foreground)
             .close_button(jeito.x)
@@ -306,7 +306,7 @@ pub fn cabecalho_com_x(
         .child(
             crate::estilo::botao_icone(id, crate::recursos::Icone::X, 20., 16.)
                 .debug_selector(move || id.into())
-                .rounded(px(4.))
+                .rounded(crate::tema::canto(4.))
                 .on_click(fechar),
         )
 }

@@ -157,7 +157,7 @@ impl Agenda {
                     .debug_selector(move || format!("agenda-estudio-{i}"))
                     .px(px(8.))
                     .py(px(6.))
-                    .rounded(px(6.))
+                    .rounded(crate::tema::canto(6.))
                     .cursor_pointer()
                     .hover(move |s| s.bg(acento))
                     .when(escolhido, |d| d.font_weight(FontWeight::MEDIUM))
@@ -215,7 +215,7 @@ impl Agenda {
                         .right_0()
                         .w(px(240.))
                         .p(px(4.))
-                        .rounded(px(8.))
+                        .rounded(crate::tema::canto(8.))
                         .border_1()
                         .border_color(borda)
                         .bg(popover)
@@ -262,7 +262,7 @@ impl Agenda {
                 )
         };
         v_flex()
-            .rounded(px(10.))
+            .rounded(crate::tema::canto(10.))
             .border_1()
             .border_color(borda)
             .child(
@@ -329,7 +329,7 @@ impl Agenda {
             }
         };
         v_flex()
-            .rounded(px(10.))
+            .rounded(crate::tema::canto(10.))
             .border_1()
             .border_color(borda)
             .p(px(12.))
@@ -389,7 +389,7 @@ impl Agenda {
             .w_full()
             .px(px(6.))
             .py(px(2.))
-            .rounded(px(4.))
+            .rounded(crate::tema::canto(4.))
             .bg(c.opacity(0.18))
             .border_l_2()
             .border_color(c)
@@ -601,7 +601,7 @@ impl Agenda {
                                     .h(px(24.))
                                     .items_center()
                                     .justify_center()
-                                    .rounded(px(4.))
+                                    .rounded(crate::tema::canto(4.))
                                     .cursor_pointer()
                                     .text_xs()
                                     .when(e_hoje, |d| d.bg(primario).text_color(sobre_primario))
@@ -758,7 +758,7 @@ impl Agenda {
             })
             .collect();
         v_flex()
-            .rounded(px(10.))
+            .rounded(crate::tema::canto(10.))
             .border_1()
             .border_color(borda)
             .p(px(12.))
@@ -789,7 +789,7 @@ impl Agenda {
         let i = self.indicadores.unwrap_or_default();
         let taxa = i.taxa_de_confirmacao();
         v_flex()
-            .rounded(px(10.))
+            .rounded(crate::tema::canto(10.))
             .border_1()
             .border_color(borda)
             .p(px(12.))
@@ -1157,7 +1157,11 @@ impl Agenda {
             .child(Self::campo("Nova data e hora de início", &self.inicio))
             .child(Self::campo("Nova data e hora de término", &self.fim))
             .when_some(erro, |d, erro| {
-                d.child(div().text_color(perigo).child(erro))
+                d.child(
+                    div()
+                        .text_color(perigo)
+                        .child(crate::erro_da_api::legivel(&erro)),
+                )
             })
             .child(self.rodape_do_formulario(
                 "reagendar-confirmar",
@@ -1196,7 +1200,11 @@ impl Agenda {
                     .child(Textarea::new(&self.observacoes)),
             )
             .when_some(erro, |d, erro| {
-                d.child(div().text_color(perigo).child(erro))
+                d.child(
+                    div()
+                        .text_color(perigo)
+                        .child(crate::erro_da_api::legivel(&erro)),
+                )
             })
             .child(self.rodape_do_formulario(
                 "atendimento-confirmar",

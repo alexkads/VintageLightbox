@@ -186,7 +186,7 @@ impl Aplicativo {
                 .h(px(20.))
                 .px(px(6.))
                 .gap(px(6.))
-                .rounded(px(4.))
+                .rounded(crate::tema::canto(4.))
                 .items_center()
                 .text_xs()
         };
@@ -205,7 +205,7 @@ impl Aplicativo {
             .child(
                 div()
                     .px(px(6.))
-                    .rounded(px(4.))
+                    .rounded(crate::tema::canto(4.))
                     .border_1()
                     .border_color(borda)
                     .text_color(frente)
@@ -440,7 +440,7 @@ impl Aplicativo {
                 .max_h(px(360.))
                 .p(px(12.))
                 .gap(px(8.))
-                .rounded(px(10.))
+                .rounded(crate::tema::canto(10.))
                 .border_1()
                 .border_color(borda)
                 .bg(fundo)

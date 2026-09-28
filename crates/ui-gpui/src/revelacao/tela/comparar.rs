@@ -414,7 +414,7 @@ impl Revelacao {
                 .min_w(px(0.))
                 .overflow_hidden()
                 .border_4()
-                .rounded(px(4.))
+                .rounded(crate::tema::canto(4.))
                 .border_color(if ativa {
                     gpui_kit::rgb(0xfbbf24).into()
                 } else {

@@ -103,7 +103,7 @@ fn alerta(
         .items_start()
         .gap(px(12.))
         .p(px(16.))
-        .rounded(px(10.))
+        .rounded(crate::tema::canto(10.))
         .border_1()
         .border_color(borda)
         .bg(fundo)
@@ -142,6 +142,7 @@ fn linha_apagada(texto: String, cx: &App) -> Div {
 impl Render for NovaSessao {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.focar_pendente(window, cx);
+        self.entregar_o_aviso(window, cx);
         self.preparar_miniaturas();
         // As amostras pedidas neste quadro chegam por canal: alguém tem de
         // acordar para recolhê-las.
@@ -247,33 +248,6 @@ impl Render for NovaSessao {
             )
             .children(confirmacao)
             .children(busca)
-            .when_some(self.aviso.as_ref(), |t, aviso| {
-                t.child(
-                    div()
-                        .absolute()
-                        .bottom(px(88.))
-                        .right(px(24.))
-                        .max_w(px(420.))
-                        .px(px(16.))
-                        .py(px(12.))
-                        .rounded(px(8.))
-                        .border_1()
-                        .border_color(if aviso.erro {
-                            cor(VERMELHO).opacity(0.5)
-                        } else {
-                            borda
-                        })
-                        .bg(cx.theme().popover)
-                        .shadow_lg()
-                        .text_sm()
-                        .text_color(if aviso.erro {
-                            cor(VERMELHO)
-                        } else {
-                            cx.theme().foreground
-                        })
-                        .child(aviso.texto.clone()),
-                )
-            })
     }
 }
 
@@ -526,7 +500,7 @@ impl NovaSessao {
                     .gap(px(12.))
                     .px(px(8.))
                     .py(px(6.))
-                    .rounded(px(8.))
+                    .rounded(crate::tema::canto(8.))
                     .cursor_pointer()
                     .when(e_atual, |p| p.bg(tema.muted))
                     .hover(|p| p.bg(tema.accent))
@@ -691,7 +665,7 @@ impl NovaSessao {
             .max_w(px(640.))
             .gap(px(16.))
             .p(px(24.))
-            .rounded(px(12.))
+            .rounded(crate::tema::canto(12.))
             .border_1()
             .border_color(tema.border)
             .child(
@@ -844,7 +818,7 @@ impl NovaSessao {
                     .flex_wrap()
                     .gap(px(12.))
                     .p(px(12.))
-                    .rounded(px(10.))
+                    .rounded(crate::tema::canto(10.))
                     .border_1()
                     .border_dashed()
                     .border_color(tema.border)
@@ -874,7 +848,7 @@ impl NovaSessao {
                 v_flex()
                     .gap(px(8.))
                     .p(px(12.))
-                    .rounded(px(10.))
+                    .rounded(crate::tema::canto(10.))
                     .border_1()
                     .border_color(tema.border)
                     .child(
@@ -944,7 +918,7 @@ impl NovaSessao {
                     .children(com_previa.into_iter().map(|(nome, imagem)| {
                         div()
                             .size(px(72.))
-                            .rounded(px(6.))
+                            .rounded(crate::tema::canto(6.))
                             .overflow_hidden()
                             .bg(tema.muted)
                             .child(
@@ -990,7 +964,7 @@ impl NovaSessao {
                 .w(px(112.))
                 .p(px(6.))
                 .gap(px(6.))
-                .rounded(px(8.))
+                .rounded(crate::tema::canto(8.))
                 .border_1()
                 .border_color(if marcado || em_foco {
                     tema.primary
@@ -1005,7 +979,7 @@ impl NovaSessao {
                         .w_full()
                         .h(px(100. / proporcao.max(0.4)))
                         .max_h(px(160.))
-                        .rounded(px(4.))
+                        .rounded(crate::tema::canto(4.))
                         .overflow_hidden()
                         .bg(tema.muted)
                         .when_some(amostra, |c, imagem| {
@@ -1088,7 +1062,7 @@ impl NovaSessao {
                 .max_h(px(420.))
                 .overflow_y_scroll()
                 .p(px(8.))
-                .rounded(px(8.))
+                .rounded(crate::tema::canto(8.))
                 .border_1()
                 .border_color(tema.border)
                 .child({
@@ -1099,7 +1073,7 @@ impl NovaSessao {
                                 .id("nova-preset-fora")
                                 .w(px(112.))
                                 .p(px(6.))
-                                .rounded(px(8.))
+                                .rounded(crate::tema::canto(8.))
                                 .border_2()
                                 .border_color(tema.primary)
                                 .text_xs()
@@ -1147,7 +1121,7 @@ impl NovaSessao {
                         .items_center()
                         .justify_center()
                         .h(px(36.))
-                        .rounded(px(8.))
+                        .rounded(crate::tema::canto(8.))
                         .border_1()
                         .border_color(tema.input)
                         .text_sm()
@@ -1276,7 +1250,7 @@ impl NovaSessao {
             None => h_flex()
                 .gap(px(12.))
                 .p(px(12.))
-                .rounded(px(8.))
+                .rounded(crate::tema::canto(8.))
                 .border_1()
                 .border_dashed()
                 .border_color(tema.border)
@@ -1301,7 +1275,7 @@ impl NovaSessao {
                 .items_start()
                 .gap(px(12.))
                 .p(px(12.))
-                .rounded(px(8.))
+                .rounded(crate::tema::canto(8.))
                 .border_1()
                 .border_color(tema.border)
                 .child(Icon::new(icone).size(px(18.)).mt(px(2.)))
@@ -1583,7 +1557,7 @@ impl NovaSessao {
         v_flex()
             .gap(px(12.))
             .p(px(16.))
-            .rounded(px(8.))
+            .rounded(crate::tema::canto(8.))
             .border_1()
             .border_color(tema.border)
             .child(
@@ -1644,7 +1618,12 @@ impl NovaSessao {
                 c.child(
                     h_flex()
                         .gap(px(8.))
-                        .child(div().text_sm().text_color(cor(VERMELHO)).child(erro))
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(cor(VERMELHO))
+                                .child(crate::erro_da_api::legivel(&erro)),
+                        )
                         .when_some(cadastro.existente.clone(), |c, p| {
                             c.child(
                                 estilo::botao_contorno("nova-usar-existente", cx)
@@ -1788,7 +1767,7 @@ impl NovaSessao {
         v_flex()
             .p(px(20.))
             .gap(px(10.))
-            .rounded(px(12.))
+            .rounded(crate::tema::canto(12.))
             .border_1()
             .border_color(tema.border)
             .child(
@@ -1931,7 +1910,7 @@ impl NovaSessao {
                     .items_center()
                     .justify_center()
                     .gap(px(12.))
-                    .rounded(px(16.))
+                    .rounded(crate::tema::canto(16.))
                     .border_2()
                     .border_dashed()
                     .border_color(cor(AMBAR))
@@ -2125,7 +2104,7 @@ impl NovaSessao {
                     .flex_1()
                     .min_h(px(160.))
                     .overflow_y_scroll()
-                    .rounded(px(8.))
+                    .rounded(crate::tema::canto(8.))
                     .border_1()
                     .border_color(tema.border)
                     .child(
@@ -2154,7 +2133,7 @@ impl NovaSessao {
                                     .p(px(16.))
                                     .text_sm()
                                     .text_color(cor(VERMELHO))
-                                    .child(erro.clone()),
+                                    .child(crate::erro_da_api::legivel(erro)),
                             )
                         } else if busca.itens.is_empty() {
                             lista.child(

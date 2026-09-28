@@ -208,6 +208,10 @@ pub enum Passo {
     /// `desempenho iniciar` · `parar` · `salvar` · `abrir` · `fechar` ·
     /// `relatorio` (imprime o texto do "Copiar relatório" no terminal).
     Desempenho(String),
+    /// `aviso ok <texto>` · `aviso erro <texto>` — o toast da raiz, para
+    /// conferir na tela o que o operador vê (o erro passa pela tradução do
+    /// `erro_da_api`).
+    Aviso { erro: bool, texto: String },
     /// `fim` — fecha o app.
     Fim,
 }
@@ -332,6 +336,10 @@ pub fn ler_roteiro(texto: &str) -> Result<Vec<Passo>, String> {
                 dy: numero(4)?,
             },
             "desempenho" => Passo::Desempenho(argumentos.join(" ")),
+            "aviso" => Passo::Aviso {
+                erro: argumentos.first() == Some(&"erro"),
+                texto: argumentos.get(1..).unwrap_or_default().join(" "),
+            },
             "fim" => Passo::Fim,
             outro => return Err(format!("linha {}: passo desconhecido: '{outro}'", i + 1)),
         };

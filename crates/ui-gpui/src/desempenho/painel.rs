@@ -565,7 +565,7 @@ impl PainelDeDesempenho {
             .min_w(px(110.))
             .p(px(10.))
             .gap(px(2.))
-            .rounded(px(8.))
+            .rounded(crate::tema::canto(8.))
             .border_1()
             .border_color(t.border)
             .child(
@@ -611,7 +611,7 @@ impl PainelDeDesempenho {
                 .bottom(px(0.))
                 .w(px(3.))
                 .h(px(h))
-                .rounded(px(1.))
+                .rounded(crate::tema::canto(1.))
                 .bg(cor_da_operacao(q.operacao, cx))
         });
         let travas = r.travamentos.iter().map(|tr| {
@@ -631,7 +631,7 @@ impl PainelDeDesempenho {
                     .relative()
                     .w(px(LARGURA))
                     .h(px(ALTURA))
-                    .rounded(px(6.))
+                    .rounded(crate::tema::canto(6.))
                     .bg(t.muted)
                     .overflow_hidden()
                     .child(
@@ -666,7 +666,7 @@ impl PainelDeDesempenho {
                             .child(
                                 div()
                                     .size(px(8.))
-                                    .rounded(px(2.))
+                                    .rounded(crate::tema::canto(2.))
                                     .bg(cor_da_operacao(op, cx)),
                             )
                             .child(op.rotulo())
@@ -790,7 +790,7 @@ impl PainelDeDesempenho {
                         div()
                             .px(px(8.))
                             .py(px(2.))
-                            .rounded(px(10.))
+                            .rounded(crate::tema::canto(10.))
                             .bg(cor_da_operacao(op, cx).opacity(0.25))
                             .border_1()
                             .border_color(cor_da_operacao(op, cx))
@@ -979,7 +979,7 @@ impl PainelDeDesempenho {
                     .gap(px(10.))
                     .px(px(6.))
                     .py(px(4.))
-                    .rounded(px(6.))
+                    .rounded(crate::tema::canto(6.))
                     .text_xs()
                     .cursor_pointer()
                     .when(selecionada, |d| d.bg(t.accent))
@@ -1039,7 +1039,7 @@ impl PainelDeDesempenho {
                 .child(
                     div()
                         .p(px(8.))
-                        .rounded(px(6.))
+                        .rounded(crate::tema::canto(6.))
                         .bg(t.muted)
                         .text_xs()
                         .font_family("monospace")
@@ -1127,7 +1127,7 @@ impl PainelDeDesempenho {
                 v_flex()
                     .p(px(8.))
                     .gap(px(2.))
-                    .rounded(px(8.))
+                    .rounded(crate::tema::canto(8.))
                     .border_1()
                     .border_color(t.border)
                     .child(
@@ -1299,7 +1299,7 @@ impl Render for PainelDeDesempenho {
                         div()
                             .px(px(8.))
                             .py(px(1.))
-                            .rounded(px(10.))
+                            .rounded(crate::tema::canto(10.))
                             .text_xs()
                             .when(ativa, |d| d.bg(t.danger.opacity(0.2)).text_color(t.danger))
                             .when(!ativa, |d| d.bg(t.muted).text_color(t.muted_foreground))

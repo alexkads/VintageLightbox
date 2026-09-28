@@ -2273,7 +2273,7 @@ impl Revelacao {
             .items_center()
             .gap(px(2.))
             .p(px(3.))
-            .rounded(px(8.))
+            .rounded(crate::tema::canto(8.))
             .bg(tema.muted);
         for f in Ferramenta::MASCARA {
             barra = barra.child(botao_da_ferramenta(f, cx));
@@ -2426,7 +2426,7 @@ impl Revelacao {
                 .flex()
                 .gap(px(2.))
                 .p(px(2.))
-                .rounded(px(7.))
+                .rounded(crate::tema::canto(7.))
                 .bg(tema.muted);
             // 🚨 **O escolhido tem de aparecer** (visto no app real,
             // 2026-09-27): o `Button` fantasma marcado ganha o mesmo fundo
@@ -2440,7 +2440,7 @@ impl Revelacao {
                         .flex_1()
                         .justify_center()
                         .py(px(3.))
-                        .rounded(px(5.))
+                        .rounded(crate::tema::canto(5.))
                         .text_xs()
                         .cursor_pointer()
                         .when(ativo, |d| {
@@ -2468,7 +2468,7 @@ impl Revelacao {
             .flex_col()
             .gap(px(8.))
             .p(px(10.))
-            .rounded(px(8.))
+            .rounded(crate::tema::canto(8.))
             .border_1()
             .border_color(tema.border)
             .child(
@@ -2638,7 +2638,7 @@ impl Revelacao {
                     .gap(px(6.))
                     .px(px(6.))
                     .py(px(4.))
-                    .rounded(px(6.))
+                    .rounded(crate::tema::canto(6.))
                     .border_1()
                     .border_color(if sel {
                         gpui_kit::rgb(0xe0a24a).into()
@@ -2857,7 +2857,7 @@ impl Revelacao {
                     .gap(px(6.))
                     .px(px(6.))
                     .py(px(4.))
-                    .rounded(px(6.))
+                    .rounded(crate::tema::canto(6.))
                     .border_1()
                     .border_color(if sel {
                         gpui_kit::rgb(0xe0a24a).into()

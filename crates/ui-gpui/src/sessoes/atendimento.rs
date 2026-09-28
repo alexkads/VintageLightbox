@@ -948,7 +948,7 @@ impl Atendimento {
                 .w(px(122.))
                 .p(px(6.))
                 .gap(px(6.))
-                .rounded(px(8.))
+                .rounded(crate::tema::canto(8.))
                 .border_1()
                 .border_color(if marcado || em_foco {
                     tema.primary
@@ -963,7 +963,7 @@ impl Atendimento {
                         .w_full()
                         .h(px(110. / razao))
                         .max_h(px(160.))
-                        .rounded(px(4.))
+                        .rounded(crate::tema::canto(4.))
                         .overflow_hidden()
                         .bg(tema.muted)
                         .when_some(amostra, |c, imagem| {
@@ -1020,7 +1020,7 @@ impl Atendimento {
                 div()
                     .w(px(122.))
                     .p(px(6.))
-                    .rounded(px(8.))
+                    .rounded(crate::tema::canto(8.))
                     .border_2()
                     .border_color(tema.primary)
                     .text_xs()
@@ -1054,7 +1054,7 @@ impl Atendimento {
             )
             .w_full()
             .p(px(8.))
-            .rounded(px(8.))
+            .rounded(crate::tema::canto(8.))
             .border_1()
             .border_color(tema.border)
             .child(grade(nenhum))
