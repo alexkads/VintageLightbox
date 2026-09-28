@@ -3537,7 +3537,7 @@ impl Detalhe {
             self.carregar_miniatura(&chave);
         }
         self.lembrar_as_imagens(&perto);
-        if self.preparar_as_grandes(grade_vista_medida.clone()) {
+        if self.preparar_as_grandes(grade_vista_medida.clone(), tira_vista.clone()) {
             faltou = true;
         }
         // 📏 `VLB_MEDIR_GRADE=1`: a cada quadro, quantas células à vista estão
@@ -3603,14 +3603,30 @@ impl Detalhe {
         self.lado_da_celula() > LADO_DA_MINIATURA as f32
     }
 
+    /// O mesmo critério para a tira: a célula dela passou da miniatura?
+    fn tira_quer_as_grandes(&self) -> bool {
+        altura_da_tira::lado_da_miniatura(self.altura_da_tira) * altura_da_tira::PROPORCAO
+            > LADO_DA_MINIATURA as f32
+    }
+
     /// Lê do disco as prévias grandes das fotos à vista, poucas por quadro.
     /// Devolve se ficou alguma para o próximo.
-    fn preparar_as_grandes(&mut self, vista: Range<usize>) -> bool {
-        if !self.quer_as_grandes() {
+    ///
+    /// 🔑 **A tira também pede as dela** quando a célula passa da miniatura:
+    /// a tira alta é o zoom (ver [`altura_da_tira`]), e a foto enche a célula
+    /// como no site — com a de 320 px, ela sairia esticada e mole.
+    fn preparar_as_grandes(&mut self, grade: Range<usize>, tira: Range<usize>) -> bool {
+        let grade = if self.quer_as_grandes() { grade } else { 0..0 };
+        let tira = if self.tira_quer_as_grandes() { tira } else { 0..0 };
+        if grade.is_empty() && tira.is_empty() {
             return false;
         }
+        // As duas vistas cabem juntas, senão uma expulsa a outra a cada quadro.
+        let capacidade = (grade.len() + tira.len()).max(GRANDES_GUARDADAS);
+        self.grandes
+            .ajustar_capacidade(NonZeroUsize::new(capacidade).expect("o piso não é zero"));
         let mut lidas = 0;
-        for posicao in vista {
+        for posicao in grade.chain(tira) {
             let Some(foto) = self.acervo.visivel(posicao) else {
                 continue;
             };
@@ -7635,11 +7651,22 @@ impl Detalhe {
     ) -> gpui_kit::AnyElement {
         let em_foco = self.selecao.foco() == Some(posicao);
         let marcada = self.selecao.tem(posicao);
-        let miniatura = match self.miniaturas.espiar(&self.chave_da_foto(&foto.id)) {
+        let chave = self.chave_da_foto(&foto.id);
+        // Na tira alta, a prévia grande — quando já está na memória.
+        let grande = self
+            .tira_quer_as_grandes()
+            .then(|| match self.grandes.espiar(&chave) {
+                Some(Miniatura::Pronta(imagem)) => Some(imagem.clone()),
+                _ => None,
+            })
+            .flatten();
+        let miniatura = grande.or_else(|| match self.miniaturas.espiar(&chave) {
             Some(Miniatura::Pronta(imagem)) => Some(imagem.clone()),
             // A mesma lembrança da grade: a tira não fica preta na subida.
             _ => self.imagens_vistas.get(&foto.id).cloned(),
-        };
+        });
+        // O miolo da célula, dentro da borda de 2px.
+        let miolo = gpui_kit::size(px(largura - 4.0), px(lado - 4.0));
         let nota = foto.nota.unwrap_or(0).min(5) as usize;
         let levada = foto.estado == acervo::Estado::LevadaNoBalcao && !foto.apagada;
         let comprada = !foto.editavel() && !foto.apagada;
@@ -7673,18 +7700,21 @@ impl Detalhe {
             })
             .cursor_pointer()
             .when_some(miniatura, |celula, imagem| {
+                // 🔑 **A foto enche a célula**, como no site (dono, 28/set/2026:
+                // *"a tira da WEB preenche todo o espaço vertical"*). Com só
+                // `max_w_full`/`max_h_full` ela ficava no tamanho natural da
+                // miniatura — 320 px — e a tira alta sobrava em volta.
+                // 🚨 E **nunca `size_full`**: o `Img` do GPUI grava
+                // `style.aspect_ratio` com a proporção da foto, o taffy tira a
+                // altura da largura e o `overflow_hidden` daqui vira **corte**
+                // no retrato (17 e 18/set/2026). A conta vem pronta.
+                let encaixe = crate::imagem::cabe_em(miolo, imagem.size(0));
+                let id = foto.id.clone();
                 celula.child(
                     img(imagem)
-                        // 🚨 **`max_*`, e nunca `size_full`.** O `Img` do GPUI
-                        // grava `style.aspect_ratio` com a proporção da foto em
-                        // todo layout: com os dois lados em 100% o taffy tira a
-                        // altura da largura, o elemento fica mais alto que a
-                        // miniatura e o `overflow_hidden` daqui vira **corte** —
-                        // visível só no retrato, porque a miniatura é paisagem.
-                        // Mesma armadilha da tela do cliente e da grade ao lado
-                        // (17 e 18/set/2026).
-                        .max_w_full()
-                        .max_h_full()
+                        .debug_selector(move || format!("tira-foto-{id}"))
+                        .w(encaixe.width)
+                        .h(encaixe.height)
                         // 🚨 `Contain`, e não `Cover`. Preencher o retângulo
                         // custa **cortar**, e numa foto que já foi
                         // **enquadrada** isso corta o que o operador escolheu
@@ -10995,6 +11025,80 @@ mod testes {
                 assert!(Arc::ptr_eq(velha, &da_local));
             })
             .expect("a janela deve estar aberta");
+    }
+
+    /// 🔄 **Na tira alta, a foto enche a célula** (dono, 28/set/2026: *"a
+    /// tira da WEB preenche todo o espaço vertical da filmstrip"*). Com só
+    /// `max_w_full`/`max_h_full`, a miniatura ficava no tamanho dela e a
+    /// célula sobrava em volta — a paisagem e o retrato.
+    #[gpui_kit::test]
+    fn na_tira_alta_a_foto_enche_a_celula(cx: &mut TestAppContext) {
+        let dir = tempfile::TempDir::new().expect("diretório temporário");
+        let previews = Arc::new(PreviewManager::new_with_path(dir.path().to_path_buf()));
+        let cheia = |largura: u32, altura: u32| {
+            image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+                largura,
+                altura,
+                image::Rgb([120, 90, 60]),
+            ))
+        };
+        previews
+            .save_thumbnail("deitada", &cheia(64, 48))
+            .expect("gravar a paisagem");
+        previews
+            .save_thumbnail("em-pe", &cheia(48, 64))
+            .expect("gravar o retrato");
+        let janela = janela_com_previews(
+            cx,
+            publicador_com(Vec::new(), false),
+            Arc::new(SeletorDeMentira::default()),
+            Arc::new(ImportadorDeMentira::default()),
+            previews,
+        );
+        entrar(cx, &janela);
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.definir_locais(vec![local("deitada"), local("em-pe")], cx);
+                tela.altura_da_tira = altura_da_tira::ALTURA_MAXIMA;
+            })
+            .expect("a janela deve estar aberta");
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        for _ in 0..3 {
+            janela
+                .update(&mut visual, |_tela, _w, cx| cx.notify())
+                .expect("a janela deve estar aberta");
+            visual.run_until_parked();
+        }
+        let lado = altura_da_tira::lado_da_miniatura(altura_da_tira::ALTURA_MAXIMA);
+        let miolo = lado - 4.0;
+        let medir = |visual: &mut gpui_kit::VisualTestContext, id: &str| {
+            let celula = visual
+                .debug_bounds(Box::leak(format!("tira-{id}").into_boxed_str()))
+                .unwrap_or_else(|| panic!("a célula {id} não está na tira"));
+            let foto = visual
+                .debug_bounds(Box::leak(format!("tira-foto-{id}").into_boxed_str()))
+                .unwrap_or_else(|| panic!("a foto {id} não está na célula"));
+            (celula, foto)
+        };
+        let (celula, foto) = medir(&mut visual, "deitada");
+        assert!(
+            (f32::from(foto.size.width) - (lado * altura_da_tira::PROPORCAO - 4.0)).abs() < 1.0
+                || (f32::from(foto.size.height) - miolo).abs() < 1.0,
+            "a paisagem encosta num dos lados do miolo: {foto:?} em {celula:?}"
+        );
+        assert!(
+            f32::from(foto.size.height) > miolo * 0.9,
+            "a paisagem enche a altura: {foto:?} em {celula:?}"
+        );
+        let (celula, foto) = medir(&mut visual, "em-pe");
+        assert!(
+            (f32::from(foto.size.height) - miolo).abs() < 1.0,
+            "o retrato enche a altura: {foto:?} em {celula:?}"
+        );
+        assert!(
+            foto.size.width < celula.size.width,
+            "e cabe inteiro na largura: {foto:?} em {celula:?}"
+        );
     }
 
     /// 🔄 **No topo do zoom, uma foto por linha** (dono, 2026-09-21: *"o
