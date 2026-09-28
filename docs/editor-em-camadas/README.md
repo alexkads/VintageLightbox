@@ -65,3 +65,22 @@ como exemplo, a pedido do dono (27/09/2026). O que confirmou e o que veio de lá
 O que **não** veio: o `.pfe` é um arquivo único em bincode, reescrito inteiro a cada salvamento. Aqui o projeto é
 uma pasta de tiles endereçados por conteúdo com o manifesto trocado por `rename` — o que dá a gravação atômica
 e a revisão anterior utilizável que o contrato pede (C33).
+
+## Abrir o editor sozinho (para testar)
+
+Sem conta do site, sem sessão e sem Revelação — a mesma janela, para um arquivo qualquer:
+
+```bash
+cargo run --release -p ui-gpui --bin editor -- foto.jpg
+cargo run --release -p ui-gpui --bin editor -- foto.NEF --catalogo /tmp/edicoes
+```
+
+- A base é a mesma do app (`base_neutra`: LibRaw para RAW).
+- O projeto vai para um catálogo de edições próprio: `--catalogo`, ou `VLB_CATALOG`, ou
+  `<pasta da foto>/.editor-avulso`. Nunca o do balcão, a menos que se aponte para ele.
+- Salvar imprime `salva revisão N: <arquivo>` no stdout. Reabrir o mesmo arquivo traz o projeto e o
+  histórico.
+- Roteiro automático (`VLB_ROTEIRO` + `VLB_FOTOS`), começando quando a foto abre: `esperar ms`,
+  `mouse apertar|arrastar|soltar fx fy` (fração da foto, evento real do AppKit), `tecla <keyCode> [cmd…]`,
+  `foto <nome>`, `estado`, `fim`. No app inteiro os mesmos passos valem com o prefixo `editor`, depois de
+  `tira editar N`.

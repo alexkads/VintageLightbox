@@ -494,7 +494,14 @@ impl EditorDeFoto {
                         if let Some(s) = ed.sessao_mut() {
                             s.salvo(&historico);
                         }
-                        ed.aviso = Some(("Salvo — a Revelação já usa esta versão".into(), false));
+                        ed.aviso = Some((
+                            match &versao {
+                                Some(v) => format!("Salvo — revisão {}", v.revisao),
+                                None => "Salvo — sem efeito, a foto fica como o bruto".into(),
+                            }
+                            .into(),
+                            false,
+                        ));
                         cx.emit(EventoDoEditor::Salva { foto, versao });
                         if e_fechar {
                             ed.liberada = true;
@@ -540,6 +547,80 @@ impl EditorDeFoto {
     pub fn cancelar_fechar(&mut self, cx: &mut Context<Self>) {
         self.perguntando = false;
         cx.notify();
+    }
+
+    /// Um gesto do roteiro de depuração nesta janela — o do app inteiro
+    /// (`editor …` depois de `tira editar N`) e o do editor avulso (`bin/editor.rs`).
+    ///
+    /// - `mouse apertar|arrastar|soltar|clicar fx fy` — evento **real** do
+    ///   AppKit, numa fração da foto;
+    /// - `tecla <keyCode> [shift|ctrl|alt|cmd…]` — tecla física;
+    /// - `foto <nome>` — a janela em PNG, em `pasta`;
+    /// - `estado` — uma linha no stderr.
+    pub fn seguir_o_roteiro(
+        &mut self,
+        gesto: &str,
+        pasta: Option<&std::path::Path>,
+        window: &mut Window,
+        _cx: &mut Context<Self>,
+    ) {
+        let partes: Vec<&str> = gesto.split_whitespace().collect();
+        let numero = |i: usize| {
+            partes
+                .get(i)
+                .and_then(|v| v.parse::<f32>().ok())
+                .unwrap_or(0.0)
+        };
+        match partes.first().copied().unwrap_or_default() {
+            "mouse" => {
+                let tipo = partes.get(1).copied().unwrap_or("clicar");
+                let Some(area) = self.area_na_janela() else {
+                    eprintln!("[roteiro] editor: a foto ainda não está desenhada");
+                    return;
+                };
+                let x = f32::from(area.origin.x) + f32::from(area.size.width) * numero(2);
+                let y = f32::from(area.origin.y) + f32::from(area.size.height) * numero(3);
+                let r = crate::depuracao::mouse_nativo(window, tipo, x, y, 0);
+                eprintln!("[roteiro] editor mouse {tipo} ({x:.0}, {y:.0}): {r:?}");
+            }
+            "tecla" => {
+                let codigo = numero(1) as u16;
+                let mods = partes
+                    .iter()
+                    .skip(2)
+                    .map(|n| match *n {
+                        "shift" => 1 << 17,
+                        "ctrl" => 1 << 18,
+                        "alt" => 1 << 19,
+                        "cmd" => 1 << 20,
+                        _ => 0,
+                    })
+                    .fold(0, |a, b| a | b);
+                let r = crate::depuracao::tecla_nativa(window, codigo, mods);
+                eprintln!("[roteiro] editor tecla {codigo} mods={mods:#x}: {r:?}");
+            }
+            "foto" => {
+                let Some(pasta) = pasta else {
+                    eprintln!("[roteiro] editor foto: sem VLB_FOTOS");
+                    return;
+                };
+                let destino = pasta.join(format!("{}.png", partes.get(1).unwrap_or(&"editor")));
+                let r = crate::depuracao::fotografar(window, &destino);
+                eprintln!("[foto] {}: {r:?}", destino.display());
+            }
+            "estado" => eprintln!(
+                "[roteiro] editor: foto={} pronta={} falha={:?} alterado={} salvando={} aviso={:?} passos={} medidas={:?}",
+                self.foto.id,
+                self.pronta(),
+                self.falha(),
+                self.alterado(),
+                self.salvando,
+                self.aviso(),
+                self.sessao().map_or(0, |s| s.historico().posicao()),
+                self.medidas,
+            ),
+            outro => eprintln!("[roteiro] gesto do editor desconhecido: {outro}"),
+        }
     }
 
     /// 🧪 Um traço de `de` a `ate`, em pixels da foto — o que o ponteiro faz,
@@ -832,11 +913,23 @@ impl EditorDeFoto {
                     )),
             )
             .child(rotulo("Tamanho  [  ]"))
-            .child(Slider::new(&self.tamanho).horizontal())
+            .child(
+                div()
+                    .h(px(20.))
+                    .child(Slider::new(&self.tamanho).horizontal()),
+            )
             .child(rotulo("Dureza"))
-            .child(Slider::new(&self.dureza).horizontal())
+            .child(
+                div()
+                    .h(px(20.))
+                    .child(Slider::new(&self.dureza).horizontal()),
+            )
             .child(rotulo("Opacidade do pincel"))
-            .child(Slider::new(&self.opacidade).horizontal())
+            .child(
+                div()
+                    .h(px(20.))
+                    .child(Slider::new(&self.opacidade).horizontal()),
+            )
             .child(rotulo("Cor"))
             .child(
                 div()
@@ -884,7 +977,11 @@ impl EditorDeFoto {
                     ),
             )
             .child(rotulo("Opacidade da camada"))
-            .child(Slider::new(&self.opacidade_da_camada).horizontal())
+            .child(
+                div()
+                    .h(px(20.))
+                    .child(Slider::new(&self.opacidade_da_camada).horizontal()),
+            )
     }
 
     fn pergunta_de_fechar(

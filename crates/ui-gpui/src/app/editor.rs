@@ -206,7 +206,9 @@ impl Aplicativo {
         }
     }
 
-    /// Um gesto do roteiro de depuração na janela do editor aberta.
+    /// Um gesto do roteiro de depuração na janela do editor aberta — os
+    /// gestos são da janela (`EditorDeFoto::seguir_o_roteiro`), e o `editor
+    /// estado` ganha aqui o que a Revelação diz.
     pub(super) fn seguir_o_roteiro_do_editor(
         &mut self,
         gesto: &str,
@@ -217,79 +219,22 @@ impl Aplicativo {
             eprintln!("[roteiro] editor: nenhuma janela do editor aberta");
             return;
         };
-        let partes: Vec<&str> = gesto.split_whitespace().collect();
-        let numero = |i: usize| {
-            partes
-                .get(i)
-                .and_then(|v| v.parse::<f32>().ok())
-                .unwrap_or(0.0)
-        };
-        match partes.first().copied().unwrap_or_default() {
-            "mouse" => {
-                let tipo = partes.get(1).copied().unwrap_or("clicar").to_string();
-                let (fx, fy) = (numero(2), numero(3));
-                let Some(area) = editor.read(cx).area_na_janela() else {
-                    eprintln!("[roteiro] editor: a foto ainda não está desenhada");
-                    return;
-                };
-                let x = f32::from(area.origin.x) + f32::from(area.size.width) * fx;
-                let y = f32::from(area.origin.y) + f32::from(area.size.height) * fy;
-                let r = janela.update(cx, |_, window, _| {
-                    crate::depuracao::mouse_nativo(window, &tipo, x, y, 0)
-                });
-                eprintln!("[roteiro] editor mouse {tipo} ({x:.0}, {y:.0}): {r:?}");
-            }
-            "tecla" => {
-                let codigo = numero(1) as u16;
-                let mods = partes
-                    .iter()
-                    .skip(2)
-                    .map(|n| match *n {
-                        "shift" => 1 << 17,
-                        "ctrl" => 1 << 18,
-                        "alt" => 1 << 19,
-                        "cmd" => 1 << 20,
-                        _ => 0,
-                    })
-                    .sum::<usize>();
-                let r = janela.update(cx, |_, window, _| {
-                    crate::depuracao::tecla_nativa(window, codigo, mods)
-                });
-                eprintln!("[roteiro] editor tecla {codigo} mods={mods:#x}: {r:?}");
-            }
-            "foto" => {
-                let Some(pasta) = pasta else {
-                    eprintln!("[roteiro] editor foto: sem VLB_FOTOS");
-                    return;
-                };
-                let destino = pasta.join(format!("{}.png", partes.get(1).unwrap_or(&"editor")));
-                let r = janela
-                    .update(cx, |_, window, _| {
-                        crate::depuracao::fotografar(window, &destino)
-                    })
-                    .map_err(|e| e.to_string())
-                    .and_then(|r| r);
-                eprintln!("[foto] {}: {r:?}", destino.display());
-            }
-            "estado" => {
-                let ed = editor.read(cx);
-                let revisao = self.revelacao.read(cx).revisao_da_aberta();
-                eprintln!(
-                    "[roteiro] editor: foto={} pronta={} alterado={} salvando={} aviso={:?} passos={} medidas={:?} | revelação: revisão={} marcadas={:?} posição={}",
-                    ed.foto().id,
-                    ed.pronta(),
-                    ed.alterado(),
-                    ed.salvando(),
-                    ed.aviso(),
-                    ed.sessao().map_or(0, |s| s.historico().posicao()),
-                    ed.medidas(),
-                    revisao,
-                    self.revelacao.read(cx).marcadas(),
-                    self.revelacao.read(cx).posicao(),
-                );
-            }
-            outro => eprintln!("[roteiro] gesto do editor desconhecido: {outro}"),
+        if gesto.trim() == "estado" {
+            let revelacao = self.revelacao.read(cx);
+            eprintln!(
+                "[roteiro] revelação: revisão={} marcadas={:?} posição={}",
+                revelacao.revisao_da_aberta(),
+                revelacao.marcadas(),
+                revelacao.posicao(),
+            );
         }
+        let pasta = pasta.map(|p| p.to_path_buf());
+        let gesto = gesto.to_string();
+        let _ = janela.update(cx, |_, window, cx| {
+            editor.update(cx, |ed, cx| {
+                ed.seguir_o_roteiro(&gesto, pasta.as_deref(), window, cx)
+            })
+        });
     }
 
     /// As janelas do editor abertas (testes e roteiro).
