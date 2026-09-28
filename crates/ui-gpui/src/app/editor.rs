@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use adapters::view_models::PhotoViewModel;
-use gpui_kit::{AppContext, Context, Entity, Subscription};
+use gpui_kit::{AppContext, Context, Entity, Subscription, WeakEntity};
 
 use super::Aplicativo;
 use crate::editor::porta::{Edicoes, FotoDoEditor};
@@ -27,7 +27,10 @@ const ESPERA_DO_BRUTO: Duration = Duration::from_secs(180);
 /// As janelas do editor abertas, uma por foto.
 #[derive(Default)]
 pub(super) struct Editores {
-    abertas: HashMap<String, (gpui_kit::AnyWindowHandle, Entity<EditorDeFoto>)>,
+    /// 🚨 **Referência fraca.** A janela é dona do editor; guardar a entidade
+    /// forte aqui a manteria viva depois de a janela fechar — e o aviso de que
+    /// ela fechou (`observe_release`) nunca viria.
+    abertas: HashMap<String, (gpui_kit::AnyWindowHandle, WeakEntity<EditorDeFoto>)>,
     assinaturas: HashMap<String, Vec<Subscription>>,
 }
 
@@ -104,7 +107,7 @@ impl Aplicativo {
         });
         self.editores
             .abertas
-            .insert(chave.clone(), (janela.into(), editor));
+            .insert(chave.clone(), (janela.into(), editor.downgrade()));
         self.editores
             .assinaturas
             .insert(chave, vec![fechou, salvou]);
@@ -204,11 +207,11 @@ impl Aplicativo {
     }
 
     /// As janelas do editor abertas (testes e roteiro).
-    pub fn editores_abertos(&self) -> Vec<Entity<EditorDeFoto>> {
+    pub fn editores_abertos(&self) -> Vec<(gpui_kit::AnyWindowHandle, Entity<EditorDeFoto>)> {
         self.editores
             .abertas
             .values()
-            .map(|(_, e)| e.clone())
+            .filter_map(|(janela, e)| Some((*janela, e.upgrade()?)))
             .collect()
     }
 
@@ -216,5 +219,321 @@ impl Aplicativo {
     pub fn definir_edicoes(&mut self, edicoes: Arc<dyn Edicoes>, cx: &mut Context<Self>) {
         self.revelacao
             .update(cx, |tela, _| tela.definir_edicoes(edicoes));
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use std::sync::atomic::Ordering;
+    use std::sync::Arc;
+
+    use adapters::view_models::PhotoViewModel;
+    use gpui_kit::{AppContext, Focusable, TestAppContext, VisualTestContext};
+    use image::{DynamicImage, RgbImage};
+    use infrastructure::cache::preview_manager::PreviewManager;
+
+    use super::super::testes::portas;
+    use super::super::Aplicativo;
+    use crate::editor::porta::mentira::EdicoesDeMentira;
+    use crate::editor::EditorDeFoto;
+
+    fn base_da(i: u32) -> RgbImage {
+        RgbImage::from_fn(64, 48, move |x, y| {
+            image::Rgb([(x * 3 + i * 20) as u8, (y * 4) as u8, 90])
+        })
+    }
+
+    struct Montado {
+        janela: gpui_kit::WindowHandle<Aplicativo>,
+        edicoes: Arc<EdicoesDeMentira>,
+        _dir: tempfile::TempDir,
+    }
+
+    /// Quatro fotos no disco, a Revelação aberta na primeira, a tira desenhada.
+    fn montar(cx: &mut TestAppContext) -> (Montado, VisualTestContext) {
+        let dir = tempfile::tempdir().unwrap();
+        let previews = Arc::new(PreviewManager::new_with_path(dir.path().join("cache")));
+        let acervo: Vec<PhotoViewModel> = (0..4)
+            .map(|i| {
+                let caminho = dir.path().join(format!("f{i}.png"));
+                base_da(i).save(&caminho).unwrap();
+                let id = format!("id-{i}");
+                let imagem = DynamicImage::ImageRgb8(base_da(i));
+                previews.save_preview(&id, &imagem).unwrap();
+                previews.save_thumbnail(&id, &imagem).unwrap();
+                PhotoViewModel {
+                    id,
+                    name: format!("f{i}.png"),
+                    path: caminho.to_string_lossy().into_owned(),
+                    ..Default::default()
+                }
+            })
+            .collect();
+        let edicoes = Arc::new(EdicoesDeMentira::default());
+        cx.update(gpui_kit::init);
+        cx.update(super::super::init);
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            move |window, cx| {
+                Aplicativo::ja_dentro(acervo, previews, Vec::new(), portas(), window, cx)
+            }
+        });
+        let para_o_app = edicoes.clone();
+        janela
+            .update(cx, |app, window, cx| {
+                app.definir_edicoes(para_o_app, cx);
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(0), cx));
+                app.revelar(window, cx);
+            })
+            .unwrap();
+        let visual = VisualTestContext::from_window(janela.into(), cx);
+        visual.run_until_parked();
+        (
+            Montado {
+                janela,
+                edicoes,
+                _dir: dir,
+            },
+            visual,
+        )
+    }
+
+    fn o_editor(
+        m: &Montado,
+        cx: &mut TestAppContext,
+    ) -> (gpui_kit::AnyWindowHandle, gpui_kit::Entity<EditorDeFoto>) {
+        let abertos = m
+            .janela
+            .update(cx, |app, _w, _cx| app.editores_abertos())
+            .unwrap();
+        assert_eq!(abertos.len(), 1, "uma janela de editor");
+        abertos[0].clone()
+    }
+
+    /// 🔑 **O alvo é a foto do botão direito**, mesmo com três marcadas — pelo
+    /// mesmo menu que o clique abre, dirigido pelo teclado (↓ ↓ ↓ Enter:
+    /// título, "Abrir esta foto", "Editar Foto"). Lote, posição e as outras
+    /// opções do menu ficam onde estavam.
+    #[gpui_kit::test]
+    fn editar_foto_pelo_menu_abre_a_janela_da_clicada(cx: &mut TestAppContext) {
+        let (m, mut visual) = montar(cx);
+        let janelas_antes = cx.windows().len();
+        m.janela
+            .update(cx, |app, window, cx| {
+                app.revelacao.update(cx, |tela, cx| {
+                    tela.seguir_o_roteiro_da_tira("marcar 1", window, cx);
+                    tela.seguir_o_roteiro_da_tira("marcar 2", window, cx);
+                    tela.seguir_o_roteiro_da_tira("menu 3", window, cx);
+                });
+                let menu = app
+                    .revelacao
+                    .read(cx)
+                    .menu_do_roteiro()
+                    .expect("o menu da miniatura 3");
+                window.focus(&menu.focus_handle(cx), cx);
+            })
+            .unwrap();
+        visual.run_until_parked();
+        visual.simulate_keystrokes("down down down enter");
+        visual.run_until_parked();
+
+        let (_, editor) = o_editor(&m, cx);
+        assert_eq!(editor.read_with(cx, |ed, _| ed.foto().id.clone()), "id-3");
+        assert_eq!(cx.windows().len(), janelas_antes + 1);
+        m.janela
+            .update(cx, |app, _w, cx| {
+                let tela = app.revelacao.read(cx);
+                assert_eq!(
+                    tela.marcadas().iter().copied().collect::<Vec<_>>(),
+                    vec![0, 1, 2]
+                );
+                assert_eq!(tela.posicao(), 0);
+            })
+            .unwrap();
+
+        // E a opção logo abaixo continua lá: ↓ ×4 é "Escolher também".
+        m.janela
+            .update(cx, |app, window, cx| {
+                app.revelacao.update(cx, |tela, cx| {
+                    tela.seguir_o_roteiro_da_tira("menu 3", window, cx)
+                });
+                let menu = app.revelacao.read(cx).menu_do_roteiro().unwrap();
+                window.focus(&menu.focus_handle(cx), cx);
+            })
+            .unwrap();
+        visual.run_until_parked();
+        visual.simulate_keystrokes("down down down down enter");
+        visual.run_until_parked();
+        m.janela
+            .update(cx, |app, _w, cx| {
+                let marcadas: Vec<usize> =
+                    app.revelacao.read(cx).marcadas().iter().copied().collect();
+                assert_eq!(
+                    marcadas,
+                    vec![0, 1, 2, 3],
+                    "\"Escolher também\" pôs a 3 no lote"
+                );
+            })
+            .unwrap();
+    }
+
+    /// Pedir de novo a mesma foto traz a janela que já está aberta.
+    #[gpui_kit::test]
+    fn a_mesma_foto_nao_abre_duas_janelas(cx: &mut TestAppContext) {
+        let (m, visual) = montar(cx);
+        let antes = cx.windows().len();
+        for _ in 0..2 {
+            m.janela
+                .update(cx, |app, _w, cx| {
+                    let foto = app.revelacao.read(cx).acervo()[2].clone();
+                    app.abrir_o_editor(foto, cx);
+                })
+                .unwrap();
+            visual.run_until_parked();
+        }
+        assert_eq!(cx.windows().len(), antes + 1);
+    }
+
+    /// 🚨 **Abrir o editor não tira as setas da Revelação**: a janela
+    /// principal continua com o foco dela.
+    #[gpui_kit::test]
+    fn as_setas_andam_depois_de_abrir_o_editor(cx: &mut TestAppContext) {
+        let (m, mut visual) = montar(cx);
+        m.janela
+            .update(cx, |app, _w, cx| {
+                app.revelacao
+                    .update(cx, |tela, cx| tela.pedir_edicao_para_teste(2, cx));
+            })
+            .unwrap();
+        visual.run_until_parked();
+        o_editor(&m, cx);
+        visual.simulate_keystrokes("right");
+        visual.run_until_parked();
+        let posicao = m
+            .janela
+            .update(cx, |app, _w, cx| app.revelacao.read(cx).posicao())
+            .unwrap();
+        assert_eq!(posicao, 1, "a seta andou na Revelação");
+    }
+
+    /// Pintar, salvar, e a Revelação usar a versão salva — e a falha de
+    /// gravação deixando a anterior de pé e as alterações marcadas.
+    #[gpui_kit::test]
+    fn pintar_salvar_e_a_revelacao_usar_a_versao(cx: &mut TestAppContext) {
+        let (m, visual) = montar(cx);
+        m.janela
+            .update(cx, |app, _w, cx| {
+                app.revelacao
+                    .update(cx, |tela, cx| tela.pedir_edicao_para_teste(0, cx));
+            })
+            .unwrap();
+        visual.run_until_parked();
+        let (janela_do_editor, editor) = o_editor(&m, cx);
+        assert!(editor.read_with(cx, |ed, _| ed.pronta()), "a base carregou");
+        assert!(!editor.read_with(cx, |ed, _| ed.alterado()));
+
+        editor.update(cx, |ed, cx| {
+            ed.tracar_para_teste((10., 24.), (54., 24.), cx)
+        });
+        assert!(editor.read_with(cx, |ed, _| ed.alterado()));
+        assert!(editor.read_with(cx, |ed, _| ed.titulo().ends_with('•')));
+
+        cx.update_window(janela_do_editor, |_, window, cx| {
+            editor.update(cx, |ed, cx| ed.salvar(false, window, cx))
+        })
+        .unwrap();
+        visual.run_until_parked();
+        assert_eq!(m.edicoes.salvamentos.load(Ordering::SeqCst), 1);
+        assert!(!editor.read_with(cx, |ed, _| ed.alterado()), "salvo");
+        let revisao = m
+            .janela
+            .update(cx, |app, _w, cx| app.revelacao.read(cx).revisao_da_aberta())
+            .unwrap();
+        assert_eq!(revisao, 1, "a Revelação passou a usar a revisão 1");
+
+        // O disco falha na segunda: a Revelação continua na 1, o editor avisa
+        // e continua "alterado".
+        editor.update(cx, |ed, cx| {
+            ed.tracar_para_teste((10., 10.), (54., 10.), cx)
+        });
+        m.edicoes.falhar.store(true, Ordering::SeqCst);
+        cx.update_window(janela_do_editor, |_, window, cx| {
+            editor.update(cx, |ed, cx| ed.salvar(false, window, cx))
+        })
+        .unwrap();
+        visual.run_until_parked();
+        let (aviso, erro) = editor.read_with(cx, |ed, _| {
+            let (t, e) = ed.aviso().unwrap();
+            (t.to_string(), e)
+        });
+        assert!(erro, "{aviso}");
+        assert!(
+            aviso.contains("versão anterior continua valendo"),
+            "{aviso}"
+        );
+        assert!(editor.read_with(cx, |ed, _| ed.alterado()));
+        let revisao = m
+            .janela
+            .update(cx, |app, _w, cx| app.revelacao.read(cx).revisao_da_aberta())
+            .unwrap();
+        assert_eq!(revisao, 1);
+    }
+
+    /// Fechar com alterações pergunta; "Descartar" fecha e a raiz esquece a
+    /// janela. Reabrir traz o que foi **salvo**.
+    #[gpui_kit::test]
+    fn fechar_com_alteracoes_pergunta_e_reabrir_traz_o_salvo(cx: &mut TestAppContext) {
+        let (m, visual) = montar(cx);
+        m.janela
+            .update(cx, |app, _w, cx| {
+                app.revelacao
+                    .update(cx, |tela, cx| tela.pedir_edicao_para_teste(1, cx));
+            })
+            .unwrap();
+        visual.run_until_parked();
+        let (janela_do_editor, editor) = o_editor(&m, cx);
+        editor.update(cx, |ed, cx| {
+            ed.tracar_para_teste((10., 24.), (54., 24.), cx)
+        });
+        cx.update_window(janela_do_editor, |_, window, cx| {
+            editor.update(cx, |ed, cx| ed.salvar(false, window, cx))
+        })
+        .unwrap();
+        visual.run_until_parked();
+        let salvo = editor.read_with(cx, |ed, _| ed.sessao().unwrap().documento().clone());
+
+        // Mais um traço, sem salvar, e o Fechar pergunta.
+        editor.update(cx, |ed, cx| ed.tracar_para_teste((5., 5.), (60., 40.), cx));
+        cx.update_window(janela_do_editor, |_, window, cx| {
+            editor.update(cx, |ed, cx| ed.fechar(window, cx))
+        })
+        .unwrap();
+        assert!(editor.read_with(cx, |ed, _| ed.perguntando()));
+        cx.update_window(janela_do_editor, |_, window, cx| {
+            editor.update(cx, |ed, cx| ed.descartar_e_fechar(window, cx))
+        })
+        .unwrap();
+        drop(editor);
+        visual.run_until_parked();
+        let abertos = m
+            .janela
+            .update(cx, |app, _w, _cx| app.editores_abertos().len())
+            .unwrap();
+        assert_eq!(abertos, 0, "a raiz esqueceu a janela fechada");
+
+        // Reabrir: o projeto salvo, intacto — sem o traço descartado.
+        m.janela
+            .update(cx, |app, _w, cx| {
+                app.revelacao
+                    .update(cx, |tela, cx| tela.pedir_edicao_para_teste(1, cx));
+            })
+            .unwrap();
+        visual.run_until_parked();
+        let (_, reaberto) = o_editor(&m, cx);
+        let doc = reaberto.read_with(cx, |ed, _| ed.sessao().unwrap().documento().clone());
+        assert_eq!(doc, salvo);
+        assert!(!reaberto.read_with(cx, |ed, _| ed.alterado()));
+        assert!(reaberto.read_with(cx, |ed, _| ed.sessao().unwrap().historico().pode_desfazer()));
     }
 }

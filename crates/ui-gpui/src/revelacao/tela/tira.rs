@@ -1435,6 +1435,15 @@ impl Revelacao {
 }
 
 impl Revelacao {
+    /// 🧪 O menu que o roteiro abriu (`tira menu N`), para o teste o dirigir
+    /// pelo teclado — o mesmo menu do botão direito.
+    #[cfg(test)]
+    pub(crate) fn menu_do_roteiro(
+        &self,
+    ) -> Option<gpui_kit::Entity<gpui_kit::component::menu::PopupMenu>> {
+        self.tira.menu_do_roteiro.as_ref().map(|(m, _)| m.clone())
+    }
+
     /// O centro da `k`-ésima miniatura desenhada, na janela — onde um teste dá o
     /// botão direito. `None` antes do primeiro desenho.
     #[cfg(test)]

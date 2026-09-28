@@ -47,6 +47,12 @@ impl Revelacao {
         cx.emit(PedidoDaRevelacao::EditarFoto);
     }
 
+    /// 🧪 O "Editar Foto" do menu, para os testes da raiz.
+    #[cfg(test)]
+    pub fn pedir_edicao_para_teste(&mut self, posicao: usize, cx: &mut Context<Self>) {
+        self.pedir_edicao(posicao, cx);
+    }
+
     /// A foto que o menu mandou editar — a raiz a leva uma vez.
     pub fn levar_a_editar(&mut self) -> Option<PhotoViewModel> {
         self.tira.a_editar.take()

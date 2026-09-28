@@ -537,6 +537,20 @@ impl EditorDeFoto {
         cx.notify();
     }
 
+    /// 🧪 Um traço de `de` a `ate`, em pixels da foto — o que o ponteiro faz,
+    /// sem precisar do palco medido.
+    #[cfg(test)]
+    pub fn tracar_para_teste(&mut self, de: (f32, f32), ate: (f32, f32), cx: &mut Context<Self>) {
+        if let Some(s) = self.sessao_mut() {
+            s.pincel.dureza = 1.0;
+            s.pincel.raio = 4.0;
+            s.apertar(de.0, de.1);
+            s.arrastar(ate.0, ate.1);
+            s.soltar();
+        }
+        cx.notify();
+    }
+
     // ------------------------------------------------------------ desenho
 
     /// Sobe para a GPU os ladrilhos que o último gesto sujou.
