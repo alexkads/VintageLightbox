@@ -654,7 +654,8 @@ impl EditorDeFoto {
         }
     }
 
-    fn palco(&self, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+    fn palco(&self, window: &Window, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        let fator_da_tela = window.scale_factor().max(1.0);
         let medidor = cx.entity();
         let ouvinte = cx.entity();
         let pintando = self.pintando;
@@ -720,16 +721,31 @@ impl EditorDeFoto {
                                 continue;
                             };
                             let r = vista.retangulo_do_ladrilho((lx, ly));
+                            // 🚨 **Alinhado aos pixels da tela, e sobrando um.**
+                            // Com a posição fracionária, a borda de dois
+                            // ladrilhos vizinhos caía no meio de um pixel e
+                            // abria uma fresta escura (visto no app real,
+                            // 27/set/2026). Início para baixo, fim para cima e
+                            // um pixel do dispositivo a mais: o vizinho cobre.
+                            let alinhar = |v: f32, cima: bool| {
+                                let d = v * fator_da_tela;
+                                (if cima { d.ceil() } else { d.floor() }) / fator_da_tela
+                            };
+                            let x0 = f32::from(origem.x) + r.x as f32 * escala;
+                            let y0 = f32::from(origem.y) + r.y as f32 * escala;
+                            let (esq, topo) = (alinhar(x0, false), alinhar(y0, false));
+                            let dir =
+                                alinhar(x0 + r.largura as f32 * escala, true) + 1.0 / fator_da_tela;
+                            let baixo =
+                                alinhar(y0 + r.altura as f32 * escala, true) + 1.0 / fator_da_tela;
                             palco = palco.child(
                                 img(imagem.clone())
                                     .object_fit(ObjectFit::Fill)
                                     .absolute()
-                                    .left(origem.x + px(r.x as f32 * escala))
-                                    .top(origem.y + px(r.y as f32 * escala))
-                                    // Meio pixel a mais para não abrir fresta
-                                    // entre dois ladrilhos no arredondamento.
-                                    .w(px(r.largura as f32 * escala + 0.5))
-                                    .h(px(r.altura as f32 * escala + 0.5)),
+                                    .left(px(esq))
+                                    .top(px(topo))
+                                    .w(px(dir - esq))
+                                    .h(px(baixo - topo)),
                             );
                         }
                     }
@@ -1120,7 +1136,7 @@ impl Render for EditorDeFoto {
                     .flex()
                     .flex_1()
                     .min_h(px(0.))
-                    .child(self.palco(cx))
+                    .child(self.palco(window, cx))
                     .child(self.painel(cx)),
             )
             .children(pergunta)
