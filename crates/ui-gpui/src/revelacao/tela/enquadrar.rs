@@ -1213,12 +1213,11 @@ impl Revelacao {
                     .vista()
                     .map(|(c, v)| crate::revelacao::zoom::razao_da_escala(v.escala, &c));
                 eprintln!(
-                    "[zoom] nivel={:?} razao={:?} centro=({:.3},{:.3}) menu={} navegador={} palco={:?} trilho={:?}",
+                    "[zoom] nivel={:?} razao={:?} centro=({:.3},{:.3}) navegador={} palco={:?} trilho={:?}",
                     n.zoom.nivel,
                     razao,
                     n.zoom.centro.x,
                     n.zoom.centro.y,
-                    n.menu_de_niveis,
                     n.navegador_flutuante,
                     self.palco,
                     n.trilho,

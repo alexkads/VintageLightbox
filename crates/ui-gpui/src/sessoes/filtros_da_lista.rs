@@ -28,6 +28,15 @@ pub struct Opcao {
     titulo: SharedString,
 }
 
+impl Opcao {
+    pub fn nova(valor: impl Into<String>, titulo: impl Into<SharedString>) -> Self {
+        Self {
+            valor: valor.into(),
+            titulo: titulo.into(),
+        }
+    }
+}
+
 impl SelectItem for Opcao {
     type Value = String;
 

@@ -17,6 +17,7 @@
 //! 🔑 **O que não está pronto no app não aparece nele**: o menu tem só as
 //! seções que o app já atende, e nenhuma a mais.
 
+use gpui_kit::component::button::Button;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
@@ -1131,9 +1132,14 @@ impl Aplicativo {
                     })
                     .when(recusados > 0, |d| {
                         d.child(
-                            pilula()
-                                .id("recusas-botao")
-                                .cursor_pointer()
+                            Button::new("recusas-botao")
+                                .outline()
+                                .h(px(34.))
+                                .px(px(12.))
+                                .rounded(px(10.))
+                                .bg(fundo)
+                                .shadow_lg()
+                                .text_xs()
                                 .border_color(perigo.opacity(0.4))
                                 .text_color(perigo)
                                 .child(Icon::new(Icone::TriangleAlert).size(px(14.)))
@@ -1143,7 +1149,7 @@ impl Aplicativo {
                                     format!("{recusados} envios recusados")
                                 })
                                 .on_click(cx.listener(|raiz, _, _window, cx| {
-                                    raiz.vendo_recusas = !raiz.vendo_recusas;
+                                    raiz.vendo_recusas = true;
                                     cx.notify();
                                 })),
                         )

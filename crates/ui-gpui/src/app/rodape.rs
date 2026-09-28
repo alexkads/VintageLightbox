@@ -38,8 +38,9 @@
 use std::sync::{Arc, OnceLock};
 
 use biblioteca_core::acervo::{Estado, Filtro};
+use gpui_kit::component::popover::Popover;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon, Selectable};
-use gpui_kit::{div, prelude::*, px, AnyElement, Context, FontWeight, MouseButton, SharedString};
+use gpui_kit::{div, prelude::*, px, AnyElement, Context, FontWeight, SharedString};
 
 use super::{Aplicativo, PedidoDeAtualizacao, Tela};
 use crate::atualizacao::faixa;
@@ -235,16 +236,41 @@ impl Aplicativo {
         }
         if let Some(texto) = frases.recusados {
             trecho_dos_envios = trecho_dos_envios.child(
-                botao("rodape-recusados")
-                    .text_color(perigo)
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(Icon::new(Icone::TriangleAlert).size(px(12.)))
-                    .child(texto)
-                    .tooltip("Ver o que o site recusou")
-                    .on_click(cx.listener(|raiz, _, _window, cx| {
-                        raiz.vendo_recusas = !raiz.vendo_recusas;
-                        cx.notify();
-                    })),
+                // 🪟 A lista abre no `Popover` do gpui-kit, por cima do rodapé,
+                // e fecha no clique fora e no Esc. Controlado por
+                // `vendo_recusas`, porque o canto dos envios e o roteiro também
+                // a abrem.
+                {
+                    let raiz = cx.entity().downgrade();
+                    let do_conteudo = raiz.clone();
+                    Popover::new("rodape-recusas")
+                        .anchor(gpui_kit::Anchor::BottomLeft)
+                        .appearance(false)
+                        .open(self.vendo_recusas && !self.recusas.is_empty())
+                        .on_open_change(move |aberto, _window, cx| {
+                            let aberto = *aberto;
+                            let _ = raiz.update(cx, |raiz, cx| {
+                                raiz.vendo_recusas = aberto;
+                                cx.notify();
+                            });
+                        })
+                        .content(move |_, _window, cx| {
+                            do_conteudo
+                                .upgrade()
+                                .and_then(|raiz| {
+                                    raiz.update(cx, |raiz, cx| raiz.lista_das_recusas(cx))
+                                })
+                                .unwrap_or_else(|| div().into_any_element())
+                        })
+                        .trigger(
+                            botao("rodape-recusados")
+                                .text_color(perigo)
+                                .font_weight(FontWeight::MEDIUM)
+                                .child(Icon::new(Icone::TriangleAlert).size(px(12.)))
+                                .child(texto)
+                                .tooltip("Ver o que o site recusou"),
+                        )
+                },
             );
         }
         if let Some(texto) = frases.calmo {
@@ -365,8 +391,9 @@ impl Aplicativo {
 
     /// A lista do que o site recusou nesta abertura, sobre o rodapé — aberta
     /// pelo "N envios recusados" do rodapé ou do canto dos envios.
-    pub(super) fn lista_das_recusas(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.vendo_recusas || self.recusas.is_empty() {
+    /// A lista do que o site recusou — o conteúdo do `Popover` do rodapé.
+    fn lista_das_recusas(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.recusas.is_empty() {
             return None;
         }
         let tema = cx.theme();
@@ -408,9 +435,7 @@ impl Aplicativo {
             v_flex()
                 .id("lista-das-recusas")
                 .debug_selector(|| "lista-das-recusas".into())
-                .absolute()
-                .left(px(8.))
-                .bottom(px(ALTURA_DO_RODAPE + 6.))
+                .mb(px(6.))
                 .w(px(440.))
                 .max_h(px(360.))
                 .p(px(12.))
@@ -420,8 +445,6 @@ impl Aplicativo {
                 .border_color(borda)
                 .bg(fundo)
                 .shadow_lg()
-                .occlude()
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(
                     div()
                         .text_sm()

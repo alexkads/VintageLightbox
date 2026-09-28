@@ -21,7 +21,9 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon, Sizable};
+use gpui_kit::component::button::Button;
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Disableable, Icon, Sizable};
 use gpui_kit::{
     canvas, div, img, prelude::*, px, AnyElement, Bounds, Context, Div, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, PinchEvent, Pixels, Point,
@@ -170,8 +172,6 @@ pub(super) struct Navegacao {
     /// O zoom de antes do último clique — o duplo clique que entra na edição
     /// devolve o que o primeiro clique do par mudou.
     pub zoom_antes_do_clique: Option<EstadoDoZoom>,
-    /// A lista de níveis da barra do palco, aberta.
-    pub menu_de_niveis: bool,
     /// O slider da barra: onde está na janela, e se está sendo arrastado.
     pub trilho: Bounds<Pixels>,
     pub arrastando_trilho: bool,
@@ -196,7 +196,6 @@ impl Default for Navegacao {
             ultimo_ponteiro: None,
             ajuda: false,
             zoom_antes_do_clique: None,
-            menu_de_niveis: false,
             trilho: Bounds::default(),
             arrastando_trilho: false,
             navegador_flutuante: false,
@@ -920,33 +919,34 @@ impl Revelacao {
                 .mx(px(3.))
                 .bg(gpui_kit::rgb(0x333333))
         };
-        let pilula =
-            |id: &'static str, alvo: Nivel, rotulo: &'static str, cx: &mut Context<Self>| {
-                let aceso = !desligado && nivel == alvo;
-                div()
-                    .id(id)
-                    .h(px(26.))
-                    .px(px(8.))
-                    .flex()
-                    .items_center()
-                    .rounded(px(6.))
-                    .text_size(px(11.5))
-                    .text_color(if aceso {
-                        ambar
-                    } else {
-                        gpui_kit::rgb(0x8f8f8f).into()
-                    })
-                    .when(aceso, |b| b.bg(ambar.opacity(0.14)))
-                    .when(!desligado, |b| {
-                        b.cursor_pointer()
-                            .hover(|s| s.bg(gpui_kit::rgb(0x2b2b2b)).text_color(texto))
-                            .on_click(cx.listener(move |tela, _, _, cx| {
-                                tela.navegacao.menu_de_niveis = false;
-                                tela.ir_para_nivel(alvo, None, cx)
-                            }))
-                    })
-                    .child(rotulo)
-            };
+        let pilula = |id: &'static str,
+                      alvo: Nivel,
+                      rotulo: &'static str,
+                      cx: &mut Context<Self>| {
+            let aceso = !desligado && nivel == alvo;
+            div()
+                .id(id)
+                .h(px(26.))
+                .px(px(8.))
+                .flex()
+                .items_center()
+                .rounded(px(6.))
+                .text_size(px(11.5))
+                .text_color(if aceso {
+                    ambar
+                } else {
+                    gpui_kit::rgb(0x8f8f8f).into()
+                })
+                .when(aceso, |b| b.bg(ambar.opacity(0.14)))
+                .when(!desligado, |b| {
+                    b.cursor_pointer()
+                        .hover(|s| s.bg(gpui_kit::rgb(0x2b2b2b)).text_color(texto))
+                        .on_click(
+                            cx.listener(move |tela, _, _, cx| tela.ir_para_nivel(alvo, None, cx)),
+                        )
+                })
+                .child(rotulo)
+        };
         let icone = |id: &'static str, icone: Icone, apagado: bool, ligado: bool| {
             div()
                 .id(id)
@@ -1024,14 +1024,14 @@ impl Revelacao {
             .into_any_element()
     }
 
-    /// O nível de agora, que abre a lista das paradas por cima da barra.
+    /// O nível de agora, que abre a lista das paradas por cima da barra — o
+    /// `DropdownMenu` do gpui-kit, com a parada de agora marcada.
     fn nivel_com_menu(
         &self,
         valor: SharedString,
         desligado: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let aberto = self.navegacao.menu_de_niveis && !desligado;
         let nivel = self.navegacao.zoom.nivel;
         let mut opcoes: Vec<(Nivel, SharedString, &'static str)> = vec![
             (Nivel::Encaixar, "Encaixar".into(), "⌘0"),
@@ -1049,87 +1049,58 @@ impl Revelacao {
                 if r == 1. { "⌘⌥0" } else { "" },
             ));
         }
-        let menu = aberto.then(|| {
-            let mut lista = v_flex()
-                .id("zoom-menu")
-                .absolute()
-                .left_0()
-                .bottom(px(32.))
-                .min_w(px(160.))
-                .p(px(4.))
-                .rounded(px(8.))
-                .border_1()
-                .border_color(gpui_kit::rgb(0x3d3d3d))
-                .bg(gpui_kit::rgb(0x232323))
-                .shadow_lg()
-                .occlude();
-            for (i, (alvo, rotulo, tecla)) in opcoes.into_iter().enumerate() {
-                let aceso = nivel == alvo;
-                lista = lista.child(
-                    h_flex()
-                        .id(SharedString::from(format!("zoom-menu-{i}")))
-                        .gap(px(10.))
-                        .px(px(8.))
-                        .py(px(5.))
-                        .rounded(px(5.))
-                        .text_size(px(12.5))
-                        .cursor_pointer()
-                        .hover(|s| s.bg(gpui_kit::rgb(0x2b2b2b)))
-                        .text_color(if aceso {
-                            crate::tema::cores::quente()
-                        } else {
-                            gpui_kit::rgb(0xe6e6e6).into()
-                        })
-                        .child(rotulo)
-                        .child(
-                            div()
-                                .ml_auto()
-                                .text_size(px(11.))
-                                .text_color(gpui_kit::rgb(0x8f8f8f))
-                                .child(tecla),
+        let tela = cx.entity().downgrade();
+        Button::new("zoom-rotulo")
+            .debug_selector(|| "zoom-rotulo".into())
+            .xsmall()
+            .outline()
+            .min_w(px(62.))
+            .h(px(26.))
+            .px(px(6.))
+            .rounded(px(6.))
+            .border_color(gpui_kit::rgb(0x3a3a3a))
+            .bg(gpui_kit::transparent_black())
+            .text_size(px(12.))
+            .text_color(gpui_kit::rgb(0xe6e6e6))
+            .disabled(desligado)
+            .child(valor)
+            .dropdown_menu_with_anchor(gpui_kit::Anchor::BottomLeft, move |menu, window, cx| {
+                let menu = match window.focused(cx) {
+                    Some(antes) => menu.action_context(antes),
+                    None => menu,
+                };
+                let apagado = cx.theme().muted_foreground;
+                opcoes.iter().cloned().enumerate().fold(
+                    menu.min_w(px(160.))
+                        .check_side(gpui_kit::component::Side::Right),
+                    |menu, (i, (alvo, rotulo, tecla))| {
+                        let id = format!("zoom-menu-{i}");
+                        let tela = tela.clone();
+                        menu.item(
+                            PopupMenuItem::element(move |_, _| {
+                                let id = id.clone();
+                                h_flex()
+                                    .debug_selector(move || id)
+                                    .w_full()
+                                    .gap(px(10.))
+                                    .child(rotulo.clone())
+                                    .child(
+                                        div()
+                                            .ml_auto()
+                                            .text_size(px(11.))
+                                            .text_color(apagado)
+                                            .child(tecla),
+                                    )
+                            })
+                            .checked(nivel == alvo)
+                            .on_click(move |_, _, cx| {
+                                let _ =
+                                    tela.update(cx, |tela, cx| tela.ir_para_nivel(alvo, None, cx));
+                            }),
                         )
-                        .on_click(cx.listener(move |tela, _, _, cx| {
-                            tela.navegacao.menu_de_niveis = false;
-                            tela.ir_para_nivel(alvo, None, cx);
-                        })),
-                );
-            }
-            lista
-        });
-        div()
-            .relative()
-            // Fora do menu e do botão, qualquer clique o fecha.
-            .when(aberto, |d| {
-                d.on_mouse_down_out(cx.listener(|tela, _: &MouseDownEvent, _, cx| {
-                    tela.navegacao.menu_de_niveis = false;
-                    cx.notify();
-                }))
+                    },
+                )
             })
-            .child(
-                div()
-                    .id("zoom-rotulo")
-                    .min_w(px(62.))
-                    .h(px(26.))
-                    .px(px(6.))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(6.))
-                    .border_1()
-                    .border_color(gpui_kit::rgb(0x3a3a3a))
-                    .text_size(px(12.))
-                    .text_color(gpui_kit::rgb(0xe6e6e6))
-                    .when(!desligado, |b| {
-                        b.cursor_pointer()
-                            .hover(|s| s.bg(gpui_kit::rgb(0x2b2b2b)))
-                            .on_click(cx.listener(|tela, _, _, cx| {
-                                tela.navegacao.menu_de_niveis = !tela.navegacao.menu_de_niveis;
-                                cx.notify();
-                            }))
-                    })
-                    .child(valor),
-            )
-            .children(menu)
             .into_any_element()
     }
 
@@ -1153,7 +1124,6 @@ impl Revelacao {
                     MouseButton::Left,
                     cx.listener(|tela, e: &MouseDownEvent, _, cx| {
                         tela.navegacao.arrastando_trilho = true;
-                        tela.navegacao.menu_de_niveis = false;
                         tela.zoom_pelo_trilho(e.position, cx);
                     }),
                 )
@@ -1311,7 +1281,6 @@ impl Revelacao {
                             MouseButton::Left,
                             cx.listener(|tela, e: &MouseDownEvent, _, cx| {
                                 tela.navegacao.arrastando_flutuante = true;
-                                tela.navegacao.menu_de_niveis = false;
                                 // Encaixada, o clique amplia no último nível já
                                 // centrado ali, como na prévia.
                                 if tela.navegacao.zoom.nivel == Nivel::Encaixar {

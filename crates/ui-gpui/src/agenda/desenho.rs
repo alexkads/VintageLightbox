@@ -9,6 +9,7 @@
 
 use chrono::{Datelike, NaiveDate, Utc};
 use gpui_kit::component::input::{Input, Textarea};
+use gpui_kit::component::progress::Progress;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
 use gpui_kit::{
     div, prelude::*, px, rgb, AnyElement, Context, FontWeight, Hsla, SharedString, Window,
@@ -784,8 +785,7 @@ impl Agenda {
 
     fn visao_da_semana(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let tema = cx.theme();
-        let (apagado, borda, primario, muted) =
-            (tema.muted_foreground, tema.border, tema.primary, tema.muted);
+        let (apagado, borda, primario) = (tema.muted_foreground, tema.border, tema.primary);
         let i = self.indicadores.unwrap_or_default();
         let taxa = i.taxa_de_confirmacao();
         v_flex()
@@ -820,13 +820,10 @@ impl Agenda {
                     ),
             )
             .child(
-                div().h(px(6.)).w_full().rounded_full().bg(muted).child(
-                    div()
-                        .h_full()
-                        .rounded_full()
-                        .bg(primario)
-                        .w(gpui_kit::relative(taxa as f32 / 100.)),
-                ),
+                Progress::new("agenda-taxa-de-confirmacao")
+                    .h(px(6.))
+                    .value(taxa as f32)
+                    .color(primario),
             )
             .child(div().text_xs().text_color(apagado).child(format!(
                 "{} de {} agendamentos futuros",

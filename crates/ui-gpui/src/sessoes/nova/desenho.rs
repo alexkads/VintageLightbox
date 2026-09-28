@@ -9,7 +9,7 @@ use gpui_kit::component::progress::Progress;
 use gpui_kit::component::select::Select;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
 use gpui_kit::{
-    div, img, prelude::*, px, relative, AnyElement, App, Context, Div, Entity, FontWeight, Hsla,
+    div, img, prelude::*, px, AnyElement, App, Context, Div, Entity, FontWeight, Hsla,
     KeyDownEvent, Pixels, RenderImage, SharedString, Stateful, Window,
 };
 
@@ -439,13 +439,15 @@ impl NovaSessao {
             )
             .when(total > 0, |c| {
                 c.child(
-                    div()
+                    Progress::new("progresso-da-barra")
                         .absolute()
                         .bottom_0()
                         .left_0()
+                        .w_full()
                         .h(px(2.))
-                        .w(relative(fracoes.clamp(0., 1.)))
-                        .bg(if trabalhando {
+                        .rounded(px(0.))
+                        .value(fracoes.clamp(0., 1.) * 100.)
+                        .color(if trabalhando {
                             cor(AMBAR)
                         } else {
                             cor(ESMERALDA)

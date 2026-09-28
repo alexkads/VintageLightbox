@@ -33,7 +33,8 @@ use biblioteca_core::caixa::{
 use biblioteca_core::dinheiro;
 use domain::services::pos_venda::Sessao;
 use gpui_kit::component::input::{Input, InputState};
-use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
+use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectState};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon, Sizable};
 use gpui_kit::{
     div, prelude::*, px, AnyElement, App, ClickEvent, Context, Div, EventEmitter, FocusHandle,
     FontWeight, Hsla, SharedString, Task, Window,
@@ -49,6 +50,7 @@ use super::flutuante::{Lote, Modo};
 use crate::estilo;
 use crate::pos_venda::porta::{PedidoJson, Publicador, Recado};
 use crate::recursos::Icone;
+use crate::sessoes::filtros_da_lista::Opcao;
 use crate::tema::cores;
 
 /// De quanto em quanto a tela pergunta se o site respondeu.
@@ -316,7 +318,14 @@ pub struct Caixa {
     /// Pôr o foco na tela no próximo quadro (a tela apareceu, um diálogo fechou).
     pub(super) pedir_foco: bool,
     busca: gpui_kit::Entity<InputState>,
-    menu_do_estudio: bool,
+    /// O `Select` do estúdio, a escuta da escolha e a lista que ele mostra
+    /// (para refazer só quando os estúdios mudam). Nasce no primeiro desenho,
+    /// que é quando há `Window`.
+    seletor_de_estudio: Option<(
+        gpui_kit::Entity<SelectState<SearchableVec<Opcao>>>,
+        gpui_kit::Subscription,
+        Vec<(String, String)>,
+    )>,
     // O PDV.
     pub(super) desconto: DescontoNoTotal,
     pub(super) pessoas: Pessoas,
@@ -421,7 +430,7 @@ impl Caixa {
             foco_do_dialogo: cx.focus_handle(),
             pedir_foco: false,
             busca,
-            menu_do_estudio: false,
+            seletor_de_estudio: None,
             desconto: DescontoNoTotal::default(),
             pessoas: pessoas_lembradas(&lembranca),
             lembranca,
@@ -507,7 +516,6 @@ impl Caixa {
     ) {
         self.estudio_pedido = estudio.clone();
         self.escolhida = sessao.clone();
-        self.menu_do_estudio = false;
         let Some(conta) = self.sessao.clone() else {
             cx.notify();
             return;
@@ -1136,7 +1144,7 @@ impl Render for Caixa {
             .bg(fundo)
             .text_color(texto)
             .text_sm()
-            .child(self.cabecalho(cx))
+            .child(self.cabecalho(window, cx))
             .children(self.avisos_da_pagina(cx))
             .child(
                 // `flex` sem `items_center`: as colunas esticam até o rodapé.
@@ -1163,7 +1171,7 @@ impl Render for Caixa {
 }
 
 impl Caixa {
-    fn cabecalho(&mut self, cx: &mut Context<Self>) -> Div {
+    fn cabecalho(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let apagado = cx.theme().muted_foreground;
         let (descricao, situacao, cor) = match &self.vista {
             None if self.sessao.is_none() => (
@@ -1210,7 +1218,7 @@ impl Caixa {
         };
         let acoes = h_flex()
             .gap(px(8.))
-            .child(self.seletor_de_estudio(cx))
+            .child(self.seletor_de_estudio(window, cx))
             .child(
                 com_tecla(
                     estilo::botao_contorno("caixa-f6", cx),
@@ -1251,101 +1259,69 @@ impl Caixa {
         )
     }
 
-    /// O `Select` do estúdio: um botão de 224 px e a lista embaixo.
-    fn seletor_de_estudio(&mut self, cx: &mut Context<Self>) -> Div {
-        let tema = cx.theme();
-        let (apagado, fundo_do_menu, borda, acento) = (
-            tema.muted_foreground,
-            tema.popover,
-            tema.border,
-            tema.accent,
-        );
-        let estudios = self
+    /// O `Select` do estúdio: o do gpui-kit, com 224 px, como o do site.
+    fn seletor_de_estudio(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Select<SearchableVec<Opcao>> {
+        let lista: Vec<(String, String)> = self
             .vista
             .as_ref()
-            .map(|v| v.estudios.clone())
+            .map(|v| {
+                v.estudios
+                    .iter()
+                    .map(|e| (e.id.clone(), e.nome.clone()))
+                    .collect()
+            })
             .unwrap_or_default();
         let atual = self.vista.as_ref().and_then(|v| v.estudio_id.clone());
-        let nome = self
-            .vista
-            .as_ref()
-            .and_then(Vista::estudio)
-            .map(|e| e.nome.clone());
-
-        let botao = estilo::botao_contorno("caixa-estudio", cx)
+        let opcoes = |lista: &[(String, String)]| {
+            SearchableVec::new(
+                lista
+                    .iter()
+                    .map(|(id, nome)| Opcao::nova(id.clone(), nome.clone()))
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let estado = match self.seletor_de_estudio.as_mut() {
+            Some((estado, _, vista)) => {
+                if *vista != lista {
+                    estado.update(cx, |estado, cx| {
+                        estado.set_items(opcoes(&lista), window, cx)
+                    });
+                    *vista = lista;
+                }
+                estado.clone()
+            }
+            None => {
+                let estado = cx.new(|cx| SelectState::new(opcoes(&lista), None, window, cx));
+                let escolha = cx.subscribe_in(
+                    &estado,
+                    window,
+                    |t, _, evento: &SelectEvent<SearchableVec<Opcao>>, _, cx| {
+                        let SelectEvent::Confirm(Some(id)) = evento else {
+                            return;
+                        };
+                        if Some(id) != t.vista.as_ref().and_then(|v| v.estudio_id.as_ref()) {
+                            t.navegar(Some(id.clone()), None, cx);
+                        }
+                    },
+                );
+                self.seletor_de_estudio = Some((estado.clone(), escolha, lista));
+                estado
+            }
+        };
+        if estado.read(cx).selected_value() != atual.as_ref() {
+            estado.update(cx, |estado, cx| match &atual {
+                Some(id) => estado.set_selected_value(id, window, cx),
+                None => estado.set_selected_index(None, window, cx),
+            });
+        }
+        Select::new(&estado)
             .w(px(224.))
-            .justify_between()
-            .child(
-                // `flex_1`: o conteúdo do `Button` centraliza, e o seletor do
-                // site tem o nome à esquerda e a seta à direita.
-                div()
-                    .flex_1()
-                    .truncate()
-                    .when(nome.is_none(), |d| d.text_color(apagado))
-                    .child(nome.unwrap_or_else(|| "Estúdio…".into())),
-            )
-            .child(
-                Icon::new(Icone::ChevronDown)
-                    .size(px(16.))
-                    .text_color(apagado),
-            )
-            .on_click(cx.listener(|t, _: &ClickEvent, _, cx| {
-                t.menu_do_estudio = !t.menu_do_estudio;
-                cx.notify();
-            }));
-
-        let menu = self.menu_do_estudio.then(|| {
-            gpui_kit::deferred(
-                gpui_kit::anchored()
-                    .snap_to_window_with_margin(px(8.))
-                    .child(
-                        v_flex()
-                            .id("caixa-estudios")
-                            .occlude()
-                            .mt(px(4.))
-                            .w(px(224.))
-                            .p(px(4.))
-                            .rounded(px(8.))
-                            .border_1()
-                            .border_color(borda)
-                            .bg(fundo_do_menu)
-                            .shadow_md()
-                            .on_mouse_down_out(cx.listener(|t, _, _, cx| {
-                                t.menu_do_estudio = false;
-                                cx.notify();
-                            }))
-                            .children(estudios.into_iter().map(|e| {
-                                let escolhido = atual.as_deref() == Some(e.id.as_str());
-                                let id = e.id.clone();
-                                h_flex()
-                                    .id(SharedString::from(format!("caixa-estudio-{}", e.id)))
-                                    .h(px(32.))
-                                    .px(px(8.))
-                                    .gap(px(8.))
-                                    .rounded(px(6.))
-                                    .justify_between()
-                                    .cursor_pointer()
-                                    .hover(move |s| s.bg(acento))
-                                    .child(div().truncate().child(e.nome))
-                                    .when(escolhido, |d| {
-                                        d.child(Icon::new(Icone::Check).size(px(16.)))
-                                    })
-                                    .on_click(cx.listener(move |t, _: &ClickEvent, _, cx| {
-                                        t.menu_do_estudio = false;
-                                        if Some(&id)
-                                            != t.vista.as_ref().and_then(|v| v.estudio_id.as_ref())
-                                        {
-                                            t.navegar(Some(id.clone()), None, cx);
-                                        }
-                                        cx.notify();
-                                    }))
-                            })),
-                    ),
-            )
-            .with_priority(1)
-        });
-
-        div().child(botao).children(menu)
+            .small()
+            .placeholder("Estúdio…")
     }
 
     fn avisos_da_pagina(&self, cx: &mut Context<Self>) -> Option<Div> {
