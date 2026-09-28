@@ -6489,16 +6489,9 @@ impl Render for Aplicativo {
             .when(crate::desempenho::ativa(), |raiz| {
                 raiz.child(crate::desempenho::sentinela::sentinela())
             })
-            // 🚨 **As camadas do `gpui-component`.** Sem elas, `open_dialog` e
-            // `push_notification` não aparecem em lugar nenhum — a caixa do
-            // "Sincronizar N" abria no vazio e o botão parecia morto.
-            // 🪟 A camada das gavetas (`Sheet`), **abaixo** da dos diálogos:
-            // um diálogo aberto de dentro de uma gaveta nasce por cima dela.
-            .children(gpui_kit::component::Root::render_sheet_layer(window, cx))
-            .children(gpui_kit::component::Root::render_dialog_layer(window, cx))
-            .children(gpui_kit::component::Root::render_notification_layer(
-                window, cx,
-            ))
+            // 🪟 Diálogos, gavetas e avisos do kit: desde o gpui-kit 0.7 a
+            // `Root` os hospeda sozinha (os plugins que o `gpui_kit::init`
+            // registra), e as camadas à mão (`render_*_layer`) saíram.
             .into_any_element()
     }
 }

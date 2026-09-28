@@ -325,6 +325,7 @@ pub struct Caixa {
     /// O `Select` do estúdio, a escuta da escolha e a lista que ele mostra
     /// (para refazer só quando os estúdios mudam). Nasce no primeiro desenho,
     /// que é quando há `Window`.
+    #[allow(clippy::type_complexity)]
     seletor_de_estudio: Option<(
         gpui_kit::Entity<SelectState<SearchableVec<Opcao>>>,
         gpui_kit::Subscription,

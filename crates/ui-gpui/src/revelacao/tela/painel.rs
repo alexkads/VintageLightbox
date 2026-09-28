@@ -625,6 +625,7 @@ impl Revelacao {
     /// (aberto ou não), e só quando muda — alternar a cada chamada fecharia o
     /// painel no primeiro arrasto, e gravar sempre escreveria o arquivo a cada
     /// clique.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn sanfona(
         &self,
         titulo: &'static str,

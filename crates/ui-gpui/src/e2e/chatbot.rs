@@ -261,11 +261,8 @@ pub(super) fn mensagens(
 /// Quantos toasts do kit (`Notification`) estão na tela agora.
 fn toasts_do_kit(e: &Estudio, cx: &mut TestAppContext) -> usize {
     e.app(cx, |_app, window, cx| {
-        gpui_kit::component::Root::read(window, cx)
-            .notification
-            .read(cx)
-            .notifications()
-            .len()
+        use gpui_kit::component::WindowExt as _;
+        window.notifications(cx).len()
     })
 }
 

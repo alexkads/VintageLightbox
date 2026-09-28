@@ -634,8 +634,13 @@ impl Estudio {
                  elemento que sumiu, e só a rede da raiz o salvou — use \
                  crate::modal::Modal"
             );
+            // 🪟 Desde o gpui-kit 0.7 o diálogo e a gaveta abertos pela
+            // `Root` (`window.open_dialog`) são desenhados por ela, fora da
+            // árvore do app: com um deles na frente, o foco é dele.
+            use gpui_kit::component::WindowExt as _;
+            let sobreposicao = window.has_active_dialog(cx) || window.has_active_sheet(cx);
             assert!(
-                app.foco_da_raiz().contains_focused(window, cx),
+                sobreposicao || app.foco_da_raiz().contains_focused(window, cx),
                 "nada desenhado tem o foco: as teclas não chegam a ninguém"
             );
         });

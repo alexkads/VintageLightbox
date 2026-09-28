@@ -35,6 +35,7 @@ impl<M: InputModeKind> TrocarValor for Estado<M> {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let valor: SharedString = valor.into();
         self.set_value(valor, window, cx);
         cx.emit(InputEvent::Change);
     }
