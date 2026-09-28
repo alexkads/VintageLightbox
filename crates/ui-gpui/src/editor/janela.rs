@@ -271,6 +271,11 @@ impl EditorDeFoto {
         }
     }
 
+    /// Onde a foto está desenhada, em pontos da janela — o roteiro mira nela.
+    pub fn area_na_janela(&self) -> Option<Bounds<Pixels>> {
+        area_da_foto(self.palco, self.sessao()?).map(|(area, _)| area)
+    }
+
     pub fn pronta(&self) -> bool {
         self.sessao().is_some()
     }

@@ -96,9 +96,9 @@ fn saturada(foto: Photo) -> Photo {
     )
 }
 
-fn exportador_com(foto: &Photo, editada: &PathBuf) -> ImageExporterImpl {
+fn exportador_com(foto: &Photo, editada: &std::path::Path) -> ImageExporterImpl {
     let id = foto.id();
-    let editada = editada.clone();
+    let editada = editada.to_path_buf();
     ImageExporterImpl::new().com_editadas(Arc::new(move |p: &Photo| {
         (p.id() == id).then(|| editada.clone())
     }))

@@ -104,6 +104,11 @@ pub enum Passo {
     /// tira da Revelação aberta (a posição é a da tira, contando de 0). O
     /// `menu` dá um botão direito de verdade sobre a miniatura.
     Tira(String),
+    /// 🖌️ A janela do editor em camadas aberta (`tira editar N` a abre):
+    /// `editor mouse apertar|arrastar|soltar fx fy` (fração da foto, evento
+    /// **real** do AppKit na janela do editor) · `editor tecla <keyCode> [mods]`
+    /// · `editor foto <nome>` · `editor estado` (uma linha no stderr).
+    Editor(String),
     /// `guias menu 1` · `guias fechar_menu` · `guias renomear 1` · `guias nome 1
     /// Prova` · `guias cor 1 purple` · `guias mover 1 0` — a faixa das guias
     /// (posição contando de 0). O `menu` desenha o mesmo menu do botão direito
@@ -247,6 +252,7 @@ pub fn ler_roteiro(texto: &str) -> Result<Vec<Passo>, String> {
             "revelacao" => Passo::Revelacao(argumentos.join(" ")),
             "predefinicoes" => Passo::Predefinicoes(argumentos.join(" ")),
             "tira" => Passo::Tira(argumentos.join(" ")),
+            "editor" => Passo::Editor(argumentos.join(" ")),
             "guias" => Passo::Guias(argumentos.join(" ")),
             "importar_modal" => Passo::ImportarModal,
             "importar_origem" => Passo::ImportarOrigem,

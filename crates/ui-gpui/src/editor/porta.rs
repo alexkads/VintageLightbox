@@ -304,11 +304,14 @@ impl Edicoes for EdicoesDoCatalogo {
 pub mod mentira {
     use super::*;
 
+    /// O que a mentira lembra de cada foto: documento, histórico, versão e revisão.
+    type Guardado = (Documento, Historico, Option<VersaoEditada>, u64);
+
     /// As edições em memória, com os projetos numa pasta temporária — para a
     /// Revelação ler a imagem editada de verdade.
     pub struct EdicoesDeMentira {
         pasta: tempfile::TempDir,
-        estado: Mutex<HashMap<String, (Documento, Historico, Option<VersaoEditada>, u64)>>,
+        estado: Mutex<HashMap<String, Guardado>>,
         /// Faz o próximo `salvar` falhar, como um disco cheio.
         pub falhar: std::sync::atomic::AtomicBool,
         pub salvamentos: std::sync::atomic::AtomicUsize,

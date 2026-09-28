@@ -309,6 +309,10 @@ impl Aplicativo {
                     tela.seguir_o_roteiro_da_tira(&gesto, window, cx)
                 });
             }
+            Passo::Editor(gesto) => {
+                let gesto = gesto.clone();
+                self.seguir_o_roteiro_do_editor(&gesto, pasta, cx);
+            }
             Passo::Predefinicoes(gesto) => {
                 let gesto = gesto.clone();
                 self.revelacao.update(cx, |tela, cx| {

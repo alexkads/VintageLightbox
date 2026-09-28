@@ -1544,6 +1544,12 @@ impl Revelacao {
                 self.tira.menu_do_roteiro = None;
                 cx.notify();
             }
+            // 🖌️ O "Editar Foto" do menu desta miniatura.
+            "editar" => {
+                if let Some(posicao) = na_posicao {
+                    self.pedir_edicao(posicao, cx);
+                }
+            }
             outro => eprintln!("[roteiro] gesto da tira desconhecido: {outro}"),
         }
     }

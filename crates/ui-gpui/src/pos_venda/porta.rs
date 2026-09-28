@@ -489,6 +489,7 @@ const QUALIDADE: u8 = 92;
 /// `spawn_blocking`: dentro de uma tarefa do tokio ele seguraria a thread do
 /// executor, e com ela toda a rede do app — inclusive o upload que vem logo
 /// depois.
+#[allow(clippy::too_many_arguments)]
 async fn revelar_e_salvar(
     controlador: &PosVendaController,
     exportador: &Arc<ImageExporterImpl>,
