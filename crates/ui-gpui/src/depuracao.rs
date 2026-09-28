@@ -16,6 +16,12 @@
 use std::path::Path;
 use std::time::Duration;
 
+/// O roteiro e o cofre em arquivo valem: em `debug`, ou num binário otimizado
+/// compilado com a feature `roteiro` — o de medir desempenho.
+pub const fn ferramentas_ligadas() -> bool {
+    cfg!(debug_assertions) || cfg!(feature = "roteiro")
+}
+
 /// Um passo do roteiro. Linha vazia e linha começando com `#` são ignoradas.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Passo {
@@ -180,6 +186,28 @@ pub enum Passo {
         intervalo: Duration,
         passo: Box<Passo>,
     },
+    /// `varrer 60 16 520 700 760 700` — um arrasto com o botão esquerdo, em
+    /// pontos da janela: aperta no primeiro ponto, anda N vezes até o segundo
+    /// (um movimento a cada `ms`) e solta. Entra pelo `dispatch_event` do
+    /// GPUI, e por isso vale no **Windows e no Linux** também — é o cenário
+    /// reproduzível da ferramenta de desempenho (um slider, um pincel).
+    Varrer {
+        vezes: usize,
+        intervalo: Duration,
+        de: (f32, f32),
+        ate: (f32, f32),
+    },
+    /// `rolar 40 16 800 500 -60` — N giros da roda em `(x, y)` da janela, de
+    /// `dy` pixels cada, com o intervalo em milissegundos.
+    Rolar {
+        vezes: usize,
+        intervalo: Duration,
+        em: (f32, f32),
+        dy: f32,
+    },
+    /// `desempenho iniciar` · `parar` · `salvar` · `abrir` · `fechar` ·
+    /// `relatorio` (imprime o texto do "Copiar relatório" no terminal).
+    Desempenho(String),
     /// `fim` — fecha o app.
     Fim,
 }
@@ -291,6 +319,19 @@ pub fn ler_roteiro(texto: &str) -> Result<Vec<Passo>, String> {
                     passo: Box::new(passo),
                 }
             }
+            "varrer" => Passo::Varrer {
+                vezes: numero(0)? as usize,
+                intervalo: Duration::from_millis(numero(1)? as u64),
+                de: (numero(2)?, numero(3)?),
+                ate: (numero(4)?, numero(5)?),
+            },
+            "rolar" => Passo::Rolar {
+                vezes: numero(0)? as usize,
+                intervalo: Duration::from_millis(numero(1)? as u64),
+                em: (numero(2)?, numero(3)?),
+                dy: numero(4)?,
+            },
+            "desempenho" => Passo::Desempenho(argumentos.join(" ")),
             "fim" => Passo::Fim,
             outro => return Err(format!("linha {}: passo desconhecido: '{outro}'", i + 1)),
         };

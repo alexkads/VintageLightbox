@@ -75,7 +75,7 @@ O acesso a disco passa pela trait `Disco`; os testes usam `DiscoComFalha { etapa
   abre** e explica por quê: pintar sobre outra base desalinharia tudo sem aviso (o bruto não deveria mudar —
   C2 —, então isto é um alarme, não um caso normal).
 
-## No catálogo — migration `025_edicoes_de_foto.sql`
+## No catálogo — migration `026_edicoes_de_foto.sql`
 
 ```sql
 CREATE TABLE IF NOT EXISTS edicoes_de_foto (

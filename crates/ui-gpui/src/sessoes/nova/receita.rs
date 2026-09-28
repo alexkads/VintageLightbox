@@ -170,6 +170,8 @@ pub fn corte_centralizado(proporcao: Option<&str>, largura: u32, altura: u32) ->
         angulo: Some(recortado.angle()),
         espelho_h: Some(recortado.flip_horizontal()),
         espelho_v: Some(recortado.flip_vertical()),
+        perspectiva: None,
+        restringir: None,
     }
 }
 

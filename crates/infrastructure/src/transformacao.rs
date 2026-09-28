@@ -11,7 +11,9 @@
 use image::DynamicImage;
 
 use domain::entities::Photo;
-use domain::value_objects::CropSettings;
+use domain::value_objects::perspectiva;
+use domain::value_objects::{CropSettings, PerspectivaGuiada};
+use revelacao_core::perspectiva::Perspectiva;
 pub use revelacao_core::Corte;
 
 /// O enquadramento gravado na foto, ou a foto inteira quando não há nenhum.
@@ -22,7 +24,7 @@ pub use revelacao_core::Corte;
 /// errado — e o sintoma seria o arquivo exportado com um enquadramento que a
 /// tela nunca mostrou.
 pub fn corte_da_entidade(foto: &Photo) -> CropSettings {
-    CropSettings::new(
+    let corte = CropSettings::new(
         foto.edit_crop_x().unwrap_or(0.0),
         foto.edit_crop_y().unwrap_or(0.0),
         foto.edit_crop_width().unwrap_or(1.0),
@@ -31,12 +33,26 @@ pub fn corte_da_entidade(foto: &Photo) -> CropSettings {
         foto.edit_crop_angle().unwrap_or(0.0),
         foto.edit_crop_flip_h().unwrap_or(false),
         foto.edit_crop_flip_v().unwrap_or(false),
-    )
+    );
+    // 🚨 A perspectiva não tem coluna: vem da receita inteira. Sem isto a
+    // exportação entregaria a foto sem a correção que a tela mostrou.
+    match foto
+        .receita()
+        .and_then(|r| serde_json::from_str::<serde_json::Value>(r).ok())
+    {
+        Some(json) => corte
+            .with_perspectiva(PerspectivaGuiada::de_json(&json))
+            .with_restringir(perspectiva::restringir_de_json(&json)),
+        None => corte,
+    }
 }
 
 /// O `CropSettings` do `domain` como o [`Corte`] do motor: os mesmos oito
-/// campos, e o mesmo `clamp` dos dois lados — a conversão não move nada.
+/// campos, e o mesmo `clamp` dos dois lados — a conversão não move nada. A
+/// perspectiva vai junto; as guias não (o motor aplica a correção, não a
+/// resolve).
 pub fn corte(settings: &CropSettings) -> Corte {
+    let p = settings.perspectiva();
     Corte::novo(
         settings.crop_x(),
         settings.crop_y(),
@@ -47,6 +63,12 @@ pub fn corte(settings: &CropSettings) -> Corte {
         settings.flip_horizontal(),
         settings.flip_vertical(),
     )
+    .com_perspectiva(Perspectiva::nova(
+        p.rotacao,
+        p.foco,
+        p.vertical,
+        p.horizontal,
+    ))
 }
 
 /// A foto pronta para a tela — ver [`revelacao_core::transformacao::aplicar`].
@@ -61,6 +83,43 @@ pub fn aplicar(imagem: &DynamicImage, settings: &CropSettings, recortar: bool) -
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    /// O domínio repete o foco padrão do motor (não depende dele); os dois têm
+    /// de ser o mesmo, senão a foto sem foco gravado abriria com outra lente.
+    #[test]
+    fn o_foco_padrao_e_o_do_motor() {
+        assert_eq!(
+            perspectiva::FOCO_PADRAO,
+            revelacao_core::perspectiva::F0 as f32
+        );
+    }
+
+    /// A correção guardada na receita chega ao motor — e à exportação.
+    #[test]
+    fn a_perspectiva_da_receita_chega_ao_corte() {
+        let mut p = PerspectivaGuiada {
+            rotacao: [9.0, -2.0, 1.0],
+            foco: 1.4,
+            vertical: 2.0,
+            ..Default::default()
+        };
+        p.guias[0] = Some(domain::value_objects::GuiaDePerspectiva {
+            de: [0.2, 0.1],
+            ate: [0.2, 0.9],
+            eixo: domain::value_objects::EixoDaGuia::Vertical,
+        });
+        let mut objeto = serde_json::Map::new();
+        p.em_json(&mut objeto);
+        let mut foto =
+            Photo::new(domain::value_objects::FilePath::new("/tmp/x.jpg").expect("caminho"));
+        foto.definir_receita(Some(serde_json::Value::Object(objeto).to_string()));
+        let settings = corte_da_entidade(&foto);
+        assert_eq!(settings.perspectiva(), &p);
+        let c = corte(&settings);
+        assert!(c.tem_perspectiva());
+        assert_eq!(c.perspectiva().rotacao, [9.0, -2.0, 1.0]);
+        assert_eq!(c.perspectiva().vertical, 2.0);
+    }
 
     /// 🔑 A conversão preserva os oito campos — inclusive depois do `clamp`.
     ///

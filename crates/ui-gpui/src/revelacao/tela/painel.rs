@@ -161,6 +161,8 @@ fn corte_inteiro() -> Corte {
         angulo: Some(0.0),
         espelho_h: Some(false),
         espelho_v: Some(false),
+        perspectiva: Some(Default::default()),
+        restringir: Some(true),
     }
 }
 

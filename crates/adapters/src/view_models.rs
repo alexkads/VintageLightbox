@@ -120,6 +120,26 @@ pub struct PhotoViewModel {
     pub edit_crop_angle: Option<f32>,
     pub edit_crop_flip_h: Option<bool>,
     pub edit_crop_flip_v: Option<bool>,
+    /// A perspectiva guiada — sem coluna: vem da receita em JSON (`corte_persp_*`
+    /// e `corte_guiaN_*`). `None` = nenhuma.
+    #[serde(skip)]
+    pub edit_crop_perspectiva: Option<domain::value_objects::PerspectivaGuiada>,
+    /// "Restringir ao conteúdo" — da receita (`corte_restringir`). `None` =
+    /// ligado, o padrão.
+    #[serde(skip)]
+    pub edit_crop_restringir: Option<bool>,
+}
+
+impl PhotoViewModel {
+    /// A perspectiva e o "restringir" que a receita em JSON traz, nos dois
+    /// campos acima. Receita ausente, ilegível ou sem as chaves deixa os dois
+    /// em `None`.
+    pub fn ler_perspectiva_da_receita(&mut self, receita: &serde_json::Value) {
+        let p = domain::value_objects::PerspectivaGuiada::de_json(receita);
+        self.edit_crop_perspectiva = (!p.e_neutra()).then_some(p);
+        self.edit_crop_restringir =
+            (!domain::value_objects::perspectiva::restringir_de_json(receita)).then_some(false);
+    }
 }
 
 /// ViewModel de um arquivo listado na grade de importação

@@ -104,6 +104,23 @@ impl Chave {
         receita.push(corte.giro_90() as u32);
         receita.push(u32::from(corte.espelho_h()));
         receita.push(u32::from(corte.espelho_v()));
+        // 🔑 A perspectiva muda o quadro da vinheta: outra correção é outra
+        // revelação. Sem ela a chave é a de antes, e o que já está no cache vale.
+        if corte.tem_perspectiva() {
+            let p = corte.perspectiva();
+            receita.extend(
+                [
+                    p.rotacao[0],
+                    p.rotacao[1],
+                    p.rotacao[2],
+                    p.foco,
+                    p.vertical,
+                    p.horizontal,
+                ]
+                .iter()
+                .map(|v| v.to_bits()),
+            );
+        }
         // 🔑 A Revelação local entra pela impressão do JSON dela: a mesma foto
         // com outra máscara é outra revelação, e o cache não pode devolvê-la.
         if !locais.vazia() {

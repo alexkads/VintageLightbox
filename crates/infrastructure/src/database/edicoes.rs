@@ -1,4 +1,4 @@
-//! O catálogo das edições em camadas — a tabela `edicoes_de_foto` (migration 025).
+//! O catálogo das edições em camadas — a tabela `edicoes_de_foto` (migration 026).
 //!
 //! Guarda a relação foto ↔ projeto ↔ imagem editada vigente, e nenhum pixel
 //! (`docs/editor-em-camadas/03-GRAVACAO-E-CATALOGO.md`). É o passo 4 da

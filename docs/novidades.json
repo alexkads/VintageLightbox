@@ -1,11 +1,13 @@
 {
-  "versao": "0.1.25",
-  "titulo": "O carimbo e o pincel acompanham o zoom: aproximou, o círculo já cobre só o detalhe — como no Lightroom.",
+  "versao": "0.1.27",
+  "titulo": "Perspectiva guiada no Enquadrar: trace sobre a foto o que devia estar reto, e as paredes, portas e janelas ficam em pé.",
   "importante": false,
   "novidades": [
-    "O círculo do carimbo, do band-aid e do pincel fica do mesmo tamanho na tela em qualquer zoom. Aproximar para tirar uma sarda já deixa a ferramenta fina, sem mexer no Tamanho.",
-    "O Tamanho agora mostra quantos pixels da foto o círculo cobre, e o número diminui conforme você aproxima.",
-    "O retoque feito com zoom continua do tamanho do detalhe quando a foto volta a caber na tela. Os retoques e máscaras que já existiam não mudam."
+    "No Enquadrar, o botão Guias liga a perspectiva guiada. Arraste sobre a foto ao longo de algo que devia estar reto (um batente, a quina da parede, o rodapé): o traço em pé vira guia Vertical, o deitado vira Horizontal. Com duas guias a foto se corrige ao soltar; cabem quatro.",
+    "As pontas das guias se arrastam para acertar; clique numa guia e tecle Delete para apagá-la, ou use o × no painel. O rótulo Vertical/Horizontal no painel troca o eixo.",
+    "Os controles Vertical e Horizontal fazem o ajuste fino por cima das guias, e Redefinir perspectiva volta a foto ao que era.",
+    "Restringir ao conteúdo (ligado) mantém o recorte dentro da foto, sem cantos vazios, também ao endireitar e ao arrastar as alças. Desligado, os cantos vazios saem brancos no arquivo.",
+    "A correção vale em tudo: tela do cliente, JPEG, impressão, envio ao site e sincronização (no grupo Enquadramento). Desfazer e refazer funcionam gesto a gesto, e girar ou espelhar depois mantém a foto corrigida."
   ],
-  "por_que_atualizar": "Retoque miúdo sem ficar descendo o Tamanho a cada zoom: o círculo que aparece antes do clique é o que a foto recebe."
+  "por_que_atualizar": "Fotos de ambiente tiradas de baixo ou de lado saem com as paredes e as portas tortas; agora elas se endireitam no próprio balcão, sem outro programa."
 }

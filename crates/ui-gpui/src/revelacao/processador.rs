@@ -79,6 +79,8 @@ pub struct Processador {
     disponivel: Arc<Mutex<Option<bool>>>,
     /// Qual API gráfica respondeu — o selo da barra, como no site.
     backend: Arc<Mutex<Option<&'static str>>>,
+    /// Quem é a GPU do motor — para a ferramenta de desempenho.
+    info: Arc<Mutex<Option<revelacao_core::InfoDoAdaptador>>>,
 }
 
 impl Processador {
@@ -88,11 +90,13 @@ impl Processador {
         let id_atual = Arc::new(Mutex::new(0u64));
         let disponivel = Arc::new(Mutex::new(None));
         let backend = Arc::new(Mutex::new(None));
+        let info = Arc::new(Mutex::new(None));
 
         {
             let id_atual = id_atual.clone();
             let disponivel = disponivel.clone();
             let backend = backend.clone();
+            let info = info.clone();
             std::thread::spawn(move || {
                 laco(
                     recebe_pedido,
@@ -100,6 +104,7 @@ impl Processador {
                     id_atual,
                     disponivel,
                     backend,
+                    info,
                 );
             });
         }
@@ -110,6 +115,7 @@ impl Processador {
             id_atual,
             disponivel,
             backend,
+            info,
         }
     }
 
@@ -125,6 +131,11 @@ impl Processador {
     /// Qual API gráfica respondeu. `None` enquanto a thread abre o dispositivo.
     pub fn backend(&self) -> Option<&'static str> {
         *self.backend.lock()
+    }
+
+    /// A GPU do motor, com driver e suporte a timestamp. `None` enquanto abre.
+    pub fn info(&self) -> Option<revelacao_core::InfoDoAdaptador> {
+        self.info.lock().clone()
     }
 
     pub fn proximo_id(&self) -> u64 {
@@ -169,12 +180,14 @@ fn laco(
     id_atual: Arc<Mutex<u64>>,
     disponivel: Arc<Mutex<Option<bool>>>,
     backend: Arc<Mutex<Option<&'static str>>>,
+    info: Arc<Mutex<Option<revelacao_core::InfoDoAdaptador>>>,
 ) {
     let Some(mut motor) = Motor::abrir() else {
         *disponivel.lock() = Some(false);
         return;
     };
     *backend.lock() = Some(motor.backend());
+    *info.lock() = Some(motor.info().clone());
     *disponivel.lock() = Some(true);
     eprintln!(
         "[Revelação] motor aberto: {} · máscaras {}",
@@ -195,6 +208,10 @@ fn laco(
         }
 
         let comeco = std::time::Instant::now();
+        // ⏱️ A ferramenta de desempenho: carimbar as passadas só enquanto ela
+        // grava (desligada, a revelação é a de sempre).
+        let medindo = crate::desempenho::ativa();
+        motor.definir_medicao(medindo);
         let (pixels, largura, altura) = match pedido
             .lado_na_tela
             .and_then(|lado| tamanho_reduzido(pedido.largura, pedido.altura, &pedido.corte, lado))
@@ -211,6 +228,7 @@ fn laco(
             ),
             None => (pedido.pixels.clone(), pedido.largura, pedido.altura),
         };
+        let reducao = comeco.elapsed();
         // Os módulos locais medem em pixels da foto: na cópia reduzida o raio
         // encolhe junto, e o rascunho mostra o mesmo efeito que a cópia inteira.
         motor.definir_escala_do_original(largura as f32 / pedido.largura.max(1) as f32);
@@ -221,6 +239,21 @@ fn laco(
             crate::telemetria::avisar!("⚠️ [Revelação] a receita local ficou de fora: {erro:?}");
         }
         if let Some(imagem) = motor.revelar(&pixels, largura, altura, &pedido.ajustes) {
+            if medindo {
+                crate::desempenho::revelacao_do_motor(
+                    crate::desempenho::RevelacaoNoMotor {
+                        em_us: 0,
+                        operacao: crate::desempenho::Operacao::Nenhuma,
+                        largura,
+                        altura,
+                        rascunho: pedido.lado_na_tela.is_some() && largura < pedido.largura,
+                        reducao_ms: reducao.as_secs_f32() * 1000.0,
+                        tempos: motor.ultimos_tempos(),
+                        total_ms: comeco.elapsed().as_secs_f32() * 1000.0,
+                    },
+                    Some(motor.info()),
+                );
+            }
             let _ = resultados.send(Resultado {
                 id: pedido.id,
                 imagem,

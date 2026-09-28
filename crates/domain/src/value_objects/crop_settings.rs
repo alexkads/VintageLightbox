@@ -1,5 +1,14 @@
+use super::perspectiva::PerspectivaGuiada;
+
 /// Represents crop and rotation settings for a photo.
 /// All crop coordinates are normalized (0.0 to 1.0) relative to the original image dimensions.
+///
+/// 🔑 **A perspectiva guiada e o "restringir ao conteúdo" moram aqui também**
+/// (27/set/2026), mas **não** entram em [`CropSettings::new`]: os oito campos
+/// de sempre são os das colunas `edit_crop_*`, e quem constrói um corte novo a
+/// partir de outro leva os dois junto com [`CropSettings::herdar`]. Eles
+/// viajam na receita em JSON (`corte_persp_*`, `corte_guiaN_*`,
+/// `corte_restringir`), que é onde a foto guarda o que não tem coluna.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CropSettings {
     crop_x: f32,
@@ -10,6 +19,10 @@ pub struct CropSettings {
     angle: f32,
     flip_horizontal: bool,
     flip_vertical: bool,
+    perspectiva: PerspectivaGuiada,
+    /// O retângulo não passa da área com foto (os cantos que o endireitar e a
+    /// perspectiva deixam vazios). Ligado é o padrão de sempre.
+    restringir: bool,
 }
 
 impl CropSettings {
@@ -60,7 +73,38 @@ impl CropSettings {
             angle,
             flip_horizontal,
             flip_vertical,
+            perspectiva: PerspectivaGuiada::default(),
+            restringir: true,
         }
+    }
+
+    /// O mesmo corte com a perspectiva guiada.
+    pub fn with_perspectiva(mut self, perspectiva: PerspectivaGuiada) -> Self {
+        self.perspectiva = perspectiva;
+        self
+    }
+
+    /// O mesmo corte com "restringir ao conteúdo" ligado ou desligado.
+    pub fn with_restringir(mut self, restringir: bool) -> Self {
+        self.restringir = restringir;
+        self
+    }
+
+    /// 🚨 **Leva a perspectiva e o restringir de `outro`.** Toda conta que
+    /// monta um corte novo com [`CropSettings::new`] a partir de um existente
+    /// (girar, espelhar, arrastar, endireitar) passa por aqui — senão girar a
+    /// foto apagaria a correção, calada.
+    pub fn herdar(self, outro: &CropSettings) -> Self {
+        self.with_perspectiva(outro.perspectiva)
+            .with_restringir(outro.restringir)
+    }
+
+    pub fn perspectiva(&self) -> &PerspectivaGuiada {
+        &self.perspectiva
+    }
+
+    pub fn restringir(&self) -> bool {
+        self.restringir
     }
 
     // Getters
@@ -118,7 +162,7 @@ impl CropSettings {
 
     /// Returns true if any crop/rotate/flip modifications are applied
     pub fn has_modifications(&self) -> bool {
-        self.is_cropped() || self.is_rotated() || self.is_flipped()
+        self.is_cropped() || self.is_rotated() || self.is_flipped() || self.perspectiva.corrige()
     }
 
     /// Transforms crop coordinates from original image space to visual (rotated) space.
@@ -228,6 +272,7 @@ impl CropSettings {
             self.flip_horizontal,
             self.flip_vertical,
         )
+        .herdar(self)
     }
 }
 
@@ -242,6 +287,8 @@ impl Default for CropSettings {
             angle: 0.0,
             flip_horizontal: false,
             flip_vertical: false,
+            perspectiva: PerspectivaGuiada::default(),
+            restringir: true,
         }
     }
 }

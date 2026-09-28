@@ -30,6 +30,11 @@ pub fn ajustes_em_json(ajustes: &Ajustes, corte: &CropSettings) -> serde_json::V
             "corte_espelho_v".into(),
             i32::from(corte.flip_vertical()).into(),
         );
+        // A perspectiva guiada e o "restringir": só quando existem — a receita
+        // de uma foto sem eles fica a mesma de antes (ver `perspectiva.rs` do
+        // domínio).
+        corte.perspectiva().em_json(objeto);
+        domain::value_objects::perspectiva::restringir_em_json(corte.restringir(), objeto);
     }
     json
 }

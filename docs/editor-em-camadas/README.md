@@ -45,7 +45,7 @@ geometria (girar/redimensionar) e levar o projeto ao site (divergência D23, ver
 | Documento, tiles, pincel, histórico, composição, gravação do projeto, contrato | `crates/editor-core` (sem GPUI, sem `revelacao-core`) |
 | Janela do editor | `crates/ui-gpui/src/editor/` |
 | Resolução da fonte na Revelação | `crates/ui-gpui/src/revelacao/fonte.rs` |
-| Base neutra e catálogo | `crates/infrastructure` (`base_neutra.rs`, `database/edicoes.rs`, migration 025) |
+| Base neutra e catálogo | `crates/infrastructure` (`base_neutra.rs`, `database/edicoes.rs`, migration 026) |
 
 ## Referência: PaintFE
 

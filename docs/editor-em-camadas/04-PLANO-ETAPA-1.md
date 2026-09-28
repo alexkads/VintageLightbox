@@ -19,7 +19,7 @@ Dependências já presentes no `Cargo.lock`: `image` (só `png`), `serde`, `serd
 
 - `base_neutra.rs` — `base_neutra(caminho)` e `base_neutra_de_bytes(bytes)` (C28). A exportação local e o zoom
   passam a usá-la.
-- `migrations/025_edicoes_de_foto.sql` e `database/edicoes.rs` (sqlx): carregar tudo, gravar revisão, ligar o
+- `migrations/026_edicoes_de_foto.sql` e `database/edicoes.rs` (sqlx): carregar tudo, gravar revisão, ligar o
   id do site.
 - `image_exporter.rs` — `com_fontes`.
 

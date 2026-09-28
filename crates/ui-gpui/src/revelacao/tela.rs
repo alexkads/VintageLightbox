@@ -58,6 +58,8 @@ mod enquadrar;
 mod local;
 /// O zoom no palco e o Navegador.
 mod navegacao;
+/// A perspectiva guiada, dentro do Enquadrar.
+mod perspectiva;
 /// A coluna das predefinições.
 mod predefinicoes;
 /// O bruto em resolução cheia quando o zoom passa da cópia.
@@ -309,6 +311,9 @@ pub struct Revelacao {
     histograma: Option<Histograma>,
     /// O slider de endireitamento. Entidade própria, como os 42 do painel.
     angulo: Entity<SliderState>,
+    /// Os dois sliders do ajuste fino da perspectiva (graus, nos eixos da tela).
+    persp_vertical: Entity<SliderState>,
+    persp_horizontal: Entity<SliderState>,
     /// O tamanho do palco no último quadro, medido no `canvas`. Sem ele não dá
     /// para converter pixel de ponteiro em fração de foto.
     palco: Bounds<Pixels>,
@@ -553,6 +558,7 @@ impl Revelacao {
                         tela.fim_do_gesto(cx);
                         return;
                     };
+                    crate::desempenho::operacao(crate::desempenho::Operacao::ArrastoDeSlider);
                     (definicao.aplicar)(&mut tela.ajustes, valor.start());
                     tela.gesto_do_slider(cx);
                     tela.pedir_revelacao(cx);
@@ -616,9 +622,35 @@ impl Revelacao {
                 let SliderEvent::Change(valor) = evento else {
                     return;
                 };
+                crate::desempenho::operacao(crate::desempenho::Operacao::ArrastoDeSlider);
                 tela.angulo_do_slider(valor.start(), cx);
             },
         ));
+
+        // O ajuste fino da perspectiva: dois sliders, mesmo caminho do ângulo.
+        let slider_da_perspectiva = |cx: &mut Context<Self>| {
+            cx.new(|_| {
+                SliderState::new()
+                    .min(-revelacao_core::perspectiva::AJUSTE_MAXIMO)
+                    .max(revelacao_core::perspectiva::AJUSTE_MAXIMO)
+                    .step(perspectiva::PASSO_DO_AJUSTE)
+                    .default_value(0.0)
+            })
+        };
+        let persp_vertical = slider_da_perspectiva(cx);
+        let persp_horizontal = slider_da_perspectiva(cx);
+        for (estado, vertical) in [(&persp_vertical, true), (&persp_horizontal, false)] {
+            assinaturas.push(cx.subscribe_in(
+                estado,
+                window,
+                move |tela: &mut Self, _estado, evento: &SliderEvent, _window, cx| {
+                    let SliderEvent::Change(valor) = evento else {
+                        return;
+                    };
+                    tela.ajuste_do_slider(vertical, valor.start(), cx);
+                },
+            ));
+        }
 
         Self {
             previews,
@@ -659,6 +691,8 @@ impl Revelacao {
             gerando_jpeg: false,
             histograma: None,
             angulo,
+            persp_vertical,
+            persp_horizontal,
             palco: Bounds::default(),
             guarda_de_presets,
             nome_do_preset,
@@ -1256,6 +1290,7 @@ impl Revelacao {
     }
 
     fn mostrar_a_posicao(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        crate::desempenho::operacao(crate::desempenho::Operacao::TrocaDeFoto);
         // Dentro do lote, o lote fica; fora dele, recomeça (`selecaoAoTrocar`).
         self.marcadas = tira::ao_trocar(&self.marcadas, self.posicao);
         let foto = self.acervo[self.posicao].clone();
@@ -1297,6 +1332,7 @@ impl Revelacao {
         cx.background_executor()
             .spawn(async move {
                 for foto in vizinhas {
+                    let _m = crate::desempenho::medir(crate::desempenho::Etapa::Decodificacao);
                     let _ = fonte::copia_de_trabalho(&previews, edicoes.as_deref(), &foto);
                 }
             })
@@ -1322,6 +1358,7 @@ impl Revelacao {
         // guarda em `trabalho:<id>` (ver `chave_do_trabalho`). Duas imagens,
         // duas chaves: aqui a origem sai da segunda, e a da galeria fica só como
         // **espera** na tela enquanto o download não volta.
+        let decodificacao = crate::desempenho::medir(crate::desempenho::Etapa::Decodificacao);
         // 🖌️ **A imagem editada, quando existe, é a entrada** (C32): o que o
         // editor salvou é o que o motor recebe, e a receita vem por cima. Sem
         // ela, a regra de sempre, logo abaixo.
@@ -1366,6 +1403,7 @@ impl Revelacao {
                 pixels: Arc::new(rgba.into_raw()),
             }
         });
+        drop(decodificacao);
 
         // Os ajustes vêm da **foto**, e não do que estava no painel: é o que o
         // legado faz ao selecionar (`app.rs`, "Load saved edits FIRST"), e é o
@@ -1919,14 +1957,19 @@ impl Revelacao {
         // O Enquadrar continua aberto, como no site: o retângulo é lido do
         // corte da foto, e o pedido do operador recomeça do que voltou.
         if let Some(edicao) = self.edicao.as_mut() {
+            // O traçado de guias continua ligado: desfazer uma guia e traçar
+            // outra é o gesto seguido mais comum da perspectiva guiada.
+            let armadas = edicao.guias.armadas;
             *edicao = Edicao {
                 proporcao: edicao.proporcao,
                 ..Edicao::default()
             };
+            edicao.guias.armadas = armadas;
         }
         let graus = self.corte_atual().angle();
         self.angulo
             .update(cx, |estado, cx| estado.set_value(graus, window, cx));
+        self.sincronizar_sliders_da_perspectiva(window, cx);
         self.espalhar_nos_sliders(window, cx);
         self.pedir_revelacao_cruzando(cx);
         // O corte não passa pela GPU: quem o mostra é a exibição.
@@ -1994,16 +2037,7 @@ impl Revelacao {
     }
 
     fn corte_atual(&self) -> CropSettings {
-        CropSettings::new(
-            self.corte.x.unwrap_or(0.0),
-            self.corte.y.unwrap_or(0.0),
-            self.corte.largura.unwrap_or(1.0),
-            self.corte.altura.unwrap_or(1.0),
-            self.corte.rotacao.unwrap_or(0),
-            self.corte.angulo.unwrap_or(0.0),
-            self.corte.espelho_h.unwrap_or(false),
-            self.corte.espelho_v.unwrap_or(false),
-        )
+        persistencia::para_crop_settings(&self.corte)
     }
 
     /// O tamanho da **cópia de trabalho**, mesmo com o bruto na tela: é nele
@@ -2064,12 +2098,16 @@ impl Revelacao {
             aberta.revelada.as_ref()
         };
 
-        let exibida = fonte.map(|imagem| transformacao::aplicar(imagem, &corte, recortar));
+        let exibida = {
+            let _m = crate::desempenho::medir(crate::desempenho::Etapa::RecorteNaCpu);
+            fonte.map(|imagem| transformacao::aplicar(imagem, &corte, recortar))
+        };
 
         // 🔑 O histograma mede **o que está na tela**, e não a foto crua: com os
         // sliders mexidos, o histograma do cru descreveria uma imagem que ninguém
         // está vendo. É o que o legado faz (ele calcula depois do `process_image`).
         if medir {
+            let _m = crate::desempenho::medir(crate::desempenho::Etapa::Histograma);
             self.histograma = exibida.as_ref().map(Histograma::da_imagem);
         }
 
@@ -2165,6 +2203,7 @@ impl Revelacao {
     }
 
     fn pedir_revelacao(&mut self, cx: &mut Context<Self>) {
+        let preparacao = crate::desempenho::medir(crate::desempenho::Etapa::PreparacaoDosAjustes);
         let Some(Aberta {
             foto,
             origem: Some(origem),
@@ -2205,6 +2244,25 @@ impl Revelacao {
 
         let lado_na_tela = self.lado_do_rascunho();
         let id = self.processador.proximo_id();
+        if crate::desempenho::ativa() {
+            crate::desempenho::imagem(crate::desempenho::Imagem {
+                largura,
+                altura,
+                formato: self
+                    .aberta
+                    .as_ref()
+                    .and_then(|a| {
+                        std::path::Path::new(&a.foto.name)
+                            .extension()
+                            .map(|e| e.to_string_lossy().to_lowercase())
+                    })
+                    .unwrap_or_else(|| "?".into()),
+                mascaras: locais.camadas.len() as u32,
+                retoques: locais.retoques.len() as u32,
+            });
+        }
+        drop(preparacao);
+        crate::desempenho::pedido_ao_motor(id);
         self.processador.pedir(Pedido {
             id,
             pixels,
@@ -2291,6 +2349,7 @@ impl Revelacao {
             let origem = cx
                 .background_executor()
                 .spawn(async move {
+                    let _m = crate::desempenho::medir(crate::desempenho::Etapa::Decodificacao);
                     let copia =
                         fonte::copia_de_trabalho(&previews, edicoes.as_deref(), &para_a_fonte)?;
                     let rgba = copia.imagem.to_rgba8();
@@ -2505,6 +2564,7 @@ impl Revelacao {
                     aberta.revelada = Some(resultado.imagem);
                 }
                 self.atualizar_exibicao();
+                crate::desempenho::foto_na_tela(resultado.id);
                 // Só larga a espera se o que voltou é o último pedido. No meio de
                 // um arrasto chegam resultados de valores já ultrapassados, e
                 // parar de colher ali deixaria a foto congelada num ajuste que o
@@ -2838,6 +2898,7 @@ impl Render for Revelacao {
             let graus = self.corte_atual().angle();
             self.angulo
                 .update(cx, |estado, cx| estado.set_value(graus, window, cx));
+            self.sincronizar_sliders_da_perspectiva(window, cx);
             self.espalhar_nos_sliders(window, cx);
         }
         self.acompanhar_a_resolucao(cx);
@@ -7602,5 +7663,386 @@ mod testes {
                 );
             })
             .expect("a janela deve estar aberta");
+    }
+
+    // ------------------------------------------------ perspectiva guiada
+
+    /// Um "prédio fotografado de baixo": duas colunas escuras que se aproximam
+    /// no topo, sobre fundo claro. 600×400, x das colunas de baixo para cima:
+    /// 150 → 190 e 450 → 410.
+    fn predio_de_baixo() -> DynamicImage {
+        DynamicImage::ImageRgba8(RgbaImage::from_fn(600, 400, |x, y| {
+            let yf = y as f32 + 0.5;
+            let coluna = |base: f32, topo: f32| base + (topo - base) * (1.0 - yf / 400.0);
+            let xf = x as f32 + 0.5;
+            if (xf - coluna(150., 190.)).abs() < 3. || (xf - coluna(450., 410.)).abs() < 3. {
+                Rgba([20, 20, 20, 255])
+            } else {
+                Rgba([235, 235, 235, 255])
+            }
+        }))
+    }
+
+    /// O palco de 400×300 dos testes. 🚨 Fixado **dentro** de cada `update`:
+    /// entre um e outro a janela desenha, e o `canvas` remede o palco com o
+    /// tamanho dela.
+    fn palco_de_teste(tela: &mut Revelacao) {
+        tela.palco = Bounds::new(
+            gpui_kit::point(px(0.), px(0.)),
+            gpui_kit::size(px(400.), px(300.)),
+        );
+    }
+
+    /// Onde o pixel `(x, y)` da foto 600×400 **aparece** agora no palco —
+    /// girado, endireitado e corrigido como a tela o mostra. É onde o operador
+    /// clicaria.
+    fn onde_aparece(tela: &Revelacao, x: f32, y: f32) -> gpui_kit::Point<Pixels> {
+        let (px_, py_) = tela
+            .ponto_no_palco([x / 600., y / 400.])
+            .expect("o ponto aparece no palco");
+        gpui_kit::point(px(px_), px(py_))
+    }
+
+    /// Traça uma guia sobre os pixels `de` e `ate` da foto, como eles aparecem.
+    fn tracar(
+        tela: &mut Revelacao,
+        de: (f32, f32),
+        ate: (f32, f32),
+        window: &mut Window,
+        cx: &mut Context<Revelacao>,
+    ) {
+        palco_de_teste(tela);
+        let (a, b) = (
+            onde_aparece(tela, de.0, de.1),
+            onde_aparece(tela, ate.0, ate.1),
+        );
+        tela.comecar_guia(a, cx);
+        tela.mover_no_corte(
+            gpui_kit::point((a.x + b.x) / 2., (a.y + b.y) / 2.),
+            window,
+            cx,
+        );
+        tela.mover_no_corte(b, window, cx);
+        tela.soltar_no_corte(window, cx);
+    }
+
+    fn abrir_o_predio(
+        cx: &mut TestAppContext,
+    ) -> (
+        gpui_kit::WindowHandle<Revelacao>,
+        Arc<GravadorDeMentira>,
+        TempDir,
+    ) {
+        let (previews, dir) = previews_descartaveis();
+        previews
+            .save_preview("id-predio.jpg", &predio_de_baixo())
+            .expect("gravar preview");
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let janela = com_gravador(cx, previews, gravador.clone());
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("predio.jpg"), window, cx);
+                tela.palco = Bounds::new(
+                    gpui_kit::point(px(0.), px(0.)),
+                    gpui_kit::size(px(400.), px(300.)),
+                );
+                tela.alternar_corte(window, cx);
+                tela.alternar_guias(cx);
+            })
+            .expect("a janela deve estar aberta");
+        (janela, gravador, dir)
+    }
+
+    /// 🚨 **Duas guias sobre as colunas endireitam a foto**, cada guia é um
+    /// passo, e o arquivo sai com as colunas paralelas.
+    #[gpui_kit::test]
+    fn duas_guias_endireitam_o_predio(cx: &mut TestAppContext) {
+        let (janela, gravador, _dir) = abrir_o_predio(cx);
+        janela
+            .update(cx, |tela, window, cx| {
+                // Um ângulo antigo: a correção guiada o zera ao ligar.
+                tela.angulo_como_gesto(3.0, window, cx);
+
+                tracar(tela, (151., 380.), (188., 20.), window, cx);
+                let p = *tela.corte_atual().perspectiva();
+                assert_eq!(p.quantas_guias(), 1);
+                assert!(!p.corrige(), "uma guia só não corrige");
+                assert!(
+                    tela.edicao
+                        .as_ref()
+                        .unwrap()
+                        .guias
+                        .aviso
+                        .as_ref()
+                        .is_some_and(|a| a.contains("mais uma")),
+                    "o painel pede a segunda guia"
+                );
+
+                tracar(tela, (449., 380.), (412., 20.), window, cx);
+                let c = tela.corte_atual();
+                let p = *c.perspectiva();
+                assert_eq!(p.quantas_guias(), 2);
+                assert!(p.corrige(), "duas guias corrigem");
+                assert!(p
+                    .guias
+                    .iter()
+                    .flatten()
+                    .all(|g| g.eixo == domain::value_objects::EixoDaGuia::Vertical));
+                assert_eq!(
+                    c.angle(),
+                    0.,
+                    "o endireitar volta a zero quando a correção liga"
+                );
+                assert!(
+                    c.crop_width() < 1.0,
+                    "restringir encolheu o retângulo para fora dos cantos vazios"
+                );
+
+                // O arquivo: as colunas ficam paralelas.
+                let origem = predio_de_baixo();
+                let arquivo =
+                    infrastructure::transformacao::aplicar(&origem, &tela.enquadramento(), true)
+                        .to_rgba8();
+                let centro = |y: u32| -> Vec<f32> {
+                    let mut xs = Vec::new();
+                    let mut dentro = None;
+                    for x in 0..arquivo.width() {
+                        let escuro = arquivo.get_pixel(x, y).0[0] < 128;
+                        match (escuro, dentro) {
+                            (true, None) => dentro = Some(x),
+                            (false, Some(x0)) => {
+                                xs.push((x0 + x - 1) as f32 / 2.);
+                                dentro = None;
+                            }
+                            _ => {}
+                        }
+                    }
+                    xs
+                };
+                let (alto, baixo) = (
+                    centro(arquivo.height() / 6),
+                    centro(arquivo.height() * 5 / 6),
+                );
+                assert_eq!(alto.len(), 2, "{alto:?}");
+                assert_eq!(baixo.len(), 2, "{baixo:?}");
+                for k in 0..2 {
+                    assert!(
+                        (alto[k] - baixo[k]).abs() <= 2.0,
+                        "coluna {k}: {} × {}",
+                        alto[k],
+                        baixo[k]
+                    );
+                }
+            })
+            .expect("a janela deve estar aberta");
+
+        let gravado = gravador.gravado();
+        // ângulo, guia 1, guia 2 (esta já com o ângulo a zero, no mesmo passo)
+        assert_eq!(gravado.len(), 3, "um passo por gesto");
+        let ultimo = gravado.last().unwrap().2;
+        assert_eq!(ultimo.angulo, Some(0.));
+        assert!(ultimo
+            .perspectiva
+            .is_some_and(|p| p.corrige() && p.quantas_guias() == 2));
+    }
+
+    /// Desfazer tira a correção da segunda guia; refazer a devolve.
+    #[gpui_kit::test]
+    fn desfazer_e_refazer_a_perspectiva(cx: &mut TestAppContext) {
+        let (janela, _gravador, _dir) = abrir_o_predio(cx);
+        janela
+            .update(cx, |tela, window, cx| {
+                tracar(tela, (151., 380.), (188., 20.), window, cx);
+                tracar(tela, (449., 380.), (412., 20.), window, cx);
+                let corrigida = *tela.corte_atual().perspectiva();
+                assert!(corrigida.corrige());
+
+                tela.desfazer(window, cx);
+                let p = *tela.corte_atual().perspectiva();
+                assert_eq!(p.quantas_guias(), 1);
+                assert!(!p.corrige());
+                assert!(tela.tracando_guias(), "desfazer não desliga o traçado");
+
+                tela.refazer(window, cx);
+                assert_eq!(*tela.corte_atual().perspectiva(), corrigida);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// Trocar o eixo, apagar pela tecla, e o `Esc` que larga o traçado.
+    #[gpui_kit::test]
+    fn eixo_apagar_e_esc_das_guias(cx: &mut TestAppContext) {
+        let (janela, _gravador, _dir) = abrir_o_predio(cx);
+        janela
+            .update(cx, |tela, window, cx| {
+                tracar(tela, (151., 380.), (188., 20.), window, cx);
+                tracar(tela, (449., 380.), (412., 20.), window, cx);
+                // Um traço deitado vira guia horizontal.
+                tracar(tela, (100., 300.), (500., 305.), window, cx);
+                let p = *tela.corte_atual().perspectiva();
+                assert_eq!(
+                    p.guias[2].unwrap().eixo,
+                    domain::value_objects::EixoDaGuia::Horizontal
+                );
+
+                tela.trocar_eixo(2, window, cx);
+                assert_eq!(
+                    tela.corte_atual().perspectiva().guias[2].unwrap().eixo,
+                    domain::value_objects::EixoDaGuia::Vertical
+                );
+                // Vertical "deitada" demais: fica de fora da conta, e o painel diz.
+                assert!(tela
+                    .edicao
+                    .as_ref()
+                    .unwrap()
+                    .guias
+                    .aviso
+                    .as_ref()
+                    .is_some_and(|a| a.contains("guia 3")));
+
+                tela.edicao.as_mut().unwrap().guias.selecionada = Some(2);
+                assert!(tela.apagar_guia_selecionada(window, cx));
+                assert_eq!(tela.corte_atual().perspectiva().quantas_guias(), 2);
+                assert!(
+                    tela.corte_atual().perspectiva().corrige(),
+                    "as duas verticais continuam valendo"
+                );
+
+                // Esc: primeiro desliga o traçado, depois sai do Enquadrar.
+                tela.cancelar_corte(cx);
+                assert!(tela.cortando() && !tela.tracando_guias());
+                tela.cancelar_corte(cx);
+                assert!(!tela.cortando());
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// Arrastar a ponta de uma guia não reamostra nada até soltar: o corte
+    /// não muda no meio do gesto, e o soltar é um passo só.
+    #[gpui_kit::test]
+    fn arrastar_a_ponta_corrige_ao_soltar(cx: &mut TestAppContext) {
+        let (janela, gravador, _dir) = abrir_o_predio(cx);
+        janela
+            .update(cx, |tela, window, cx| {
+                tracar(tela, (151., 380.), (188., 20.), window, cx);
+                tracar(tela, (449., 380.), (400., 20.), window, cx); // topo errado
+                let antes = tela.corte_atual();
+                let gravados = gravador.gravado().len();
+
+                palco_de_teste(tela);
+                // A foto na tela está corrigida pelas guias de agora: o ponto
+                // (412, 20) da foto aparece onde a conta de agora o põe.
+                let alvo = onde_aparece(tela, 412., 20.);
+                tela.comecar_arrasto_da_ponta(1, super::perspectiva::Ponta::Ate, cx);
+                tela.mover_no_corte(onde_aparece(tela, 406., 20.), window, cx);
+                tela.mover_no_corte(alvo, window, cx);
+                assert_eq!(tela.corte_atual(), antes, "no meio do arrasto a foto fica");
+                assert_eq!(gravador.gravado().len(), gravados, "e nada grava");
+                tela.soltar_no_corte(window, cx);
+                assert_ne!(tela.corte_atual(), antes);
+                assert_eq!(gravador.gravado().len(), gravados + 1);
+                let g = tela.corte_atual().perspectiva().guias[1].unwrap();
+                assert!((g.ate[0] - 412. / 600.).abs() < 0.01, "{:?}", g.ate);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// Os sliders fazem o ajuste fino por cima; restringir desligado devolve
+    /// o retângulo pedido; redefinir tira tudo.
+    #[gpui_kit::test]
+    fn ajuste_fino_restringir_e_redefinir(cx: &mut TestAppContext) {
+        let (janela, gravador, _dir) = abrir_o_predio(cx);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.ajuste_do_slider(true, 6.0, cx);
+                tela.gravar_o_que_estiver_pendente();
+                let c = tela.corte_atual();
+                assert_eq!(c.perspectiva().vertical, 6.0);
+                assert!(c.crop_width() < 1.0, "o topo alargou: o retângulo encolheu");
+
+                tela.alternar_restringir(window, cx);
+                let c = tela.corte_atual();
+                assert!(!c.restringir());
+                assert_eq!(
+                    (c.crop_width(), c.crop_height()),
+                    (1.0, 1.0),
+                    "sem restringir, o retângulo pedido volta"
+                );
+
+                tela.redefinir_perspectiva(window, cx);
+                assert!(tela.corte_atual().perspectiva().e_neutra());
+            })
+            .expect("a janela deve estar aberta");
+        let gravado = gravador.gravado();
+        assert!(gravado.iter().any(|g| g.2.restringir == Some(false)));
+        assert!(gravado.last().unwrap().2.perspectiva.is_none());
+    }
+
+    /// Girar depois leva guias e correção junto: a foto girada continua
+    /// corrigida, e o eixo da guia aparece trocado na tela.
+    #[gpui_kit::test]
+    fn girar_depois_mantem_a_perspectiva(cx: &mut TestAppContext) {
+        let (janela, _gravador, _dir) = abrir_o_predio(cx);
+        janela
+            .update(cx, |tela, window, cx| {
+                tracar(tela, (151., 380.), (188., 20.), window, cx);
+                tracar(tela, (449., 380.), (412., 20.), window, cx);
+                let p = *tela.corte_atual().perspectiva();
+                tela.girar(cx);
+                assert_eq!(
+                    *tela.corte_atual().perspectiva(),
+                    p,
+                    "girar não apaga a correção"
+                );
+                assert_eq!(tela.corte_atual().rotation_90(), 1);
+                let g = p.guias[0].unwrap();
+                assert_eq!(
+                    tela.eixo_na_tela(g.eixo),
+                    domain::value_objects::EixoDaGuia::Horizontal
+                );
+                tela.espelhar_horizontal(cx);
+                assert_eq!(*tela.corte_atual().perspectiva(), p);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// A foto reaberta traz guias e correção da receita.
+    #[gpui_kit::test]
+    fn a_perspectiva_volta_ao_reabrir(cx: &mut TestAppContext) {
+        let (janela, gravador, _dir) = abrir_o_predio(cx);
+        let mut p = domain::value_objects::PerspectivaGuiada {
+            rotacao: [7.0, 0.0, 0.5],
+            vertical: 1.5,
+            ..Default::default()
+        };
+        p.guias[0] = Some(domain::value_objects::GuiaDePerspectiva {
+            de: [0.25, 0.95],
+            ate: [0.31, 0.05],
+            eixo: domain::value_objects::EixoDaGuia::Vertical,
+        });
+        janela
+            .update(cx, |tela, window, cx| {
+                let mut reaberta = foto("predio.jpg");
+                let receita = crate::pos_venda::porta::ajustes_em_json(
+                    &Ajustes::default(),
+                    &CropSettings::default()
+                        .with_perspectiva(p)
+                        .with_restringir(false),
+                );
+                reaberta.receita = Some(receita.to_string());
+                reaberta.ler_perspectiva_da_receita(&receita);
+                tela.sair_do_corte(cx);
+                tela.abrir(reaberta, window, cx);
+                assert_eq!(*tela.corte_atual().perspectiva(), p);
+                assert!(!tela.corte_atual().restringir());
+                tela.alternar_corte(window, cx);
+                assert_eq!(
+                    tela.persp_vertical.read(cx).value().start(),
+                    1.5,
+                    "o slider abre no valor da foto"
+                );
+            })
+            .expect("a janela deve estar aberta");
+        let _ = gravador;
     }
 }

@@ -461,6 +461,26 @@ pub enum Tela {
     /// 📅 A agenda dos ensaios — `/dashboard/agendamentos` (2026-09-25).
     Agenda,
 }
+
+impl Tela {
+    /// O nome estável da tela na ferramenta de desempenho.
+    pub fn nome_para_desempenho(self) -> &'static str {
+        match self {
+            Tela::Biblioteca => "biblioteca",
+            Tela::Revelacao => "revelacao",
+            Tela::Impressao => "impressao",
+            Tela::Sessoes => "sessoes",
+            Tela::Sessao => "sessao",
+            Tela::Caixa => "caixa",
+            Tela::Retencao => "retencao",
+            Tela::NovaSessao => "nova_sessao",
+            Tela::Backup => "backup",
+            Tela::Chatbot => "chatbot",
+            Tela::Agenda => "agenda",
+        }
+    }
+}
+
 pub struct Aplicativo {
     pub(crate) biblioteca: Entity<Biblioteca>,
     pub(crate) revelacao: Entity<Revelacao>,
@@ -490,6 +510,11 @@ pub struct Aplicativo {
     pub(crate) caixa: Entity<Caixa>,
     /// 🧾 O caixa flutuante da galeria — por cima da grade e da revelação.
     pub(crate) caixa_flutuante: Entity<Caixa>,
+    /// ⏱️ O painel de Desempenho, aberto pelo botão do rodapé.
+    pub(crate) desempenho: Entity<crate::desempenho::painel::PainelDeDesempenho>,
+    /// O rodapé se redesenha quando a janela de Desempenho abre ou fecha, ou
+    /// a captura começa ou para.
+    _desempenho_mudou: gpui_kit::Subscription,
     _pedido_do_caixa: gpui_kit::Subscription,
     /// A galeria foi aberta pelo caixa: a volta dela é para o caixa.
     veio_do_caixa: bool,
@@ -1111,6 +1136,7 @@ impl Aplicativo {
             },
         );
 
+        let desempenho = cx.new(|_| crate::desempenho::painel::PainelDeDesempenho::novo());
         let caixa = cx.new(|cx| Caixa::nova(publicador_do_caixa.clone(), window, cx));
         let caixa_flutuante = cx.new({
             let detalhe = detalhe.clone();
@@ -1263,6 +1289,11 @@ impl Aplicativo {
             detalhe,
             caixa,
             caixa_flutuante,
+            desempenho: desempenho.clone(),
+            _desempenho_mudou: cx.subscribe(
+                &desempenho,
+                |_, _, _: &crate::desempenho::painel::MudouOEstado, cx| cx.notify(),
+            ),
             _pedido_do_caixa: pedido_do_caixa,
             veio_do_caixa: false,
             retencao,
@@ -2755,6 +2786,7 @@ impl Aplicativo {
             let detalhe = self.detalhe.read(cx);
             (detalhe.filtro(), detalhe.marcadas())
         };
+        crate::desempenho::operacao(crate::desempenho::Operacao::AberturaDaRevelacao);
         self.revelacao.update(cx, |tela, cx| {
             tela.abrir_no_acervo(acervo, inicial, window, cx);
             tela.herdar_da_sessao(recorte, &marcadas, cx);
@@ -3683,6 +3715,7 @@ impl Aplicativo {
 
         // 📸 Passo 11 — os pixels do storage, quando o cache não tem o bruto —
         // é pedido por `AbriuOutraFoto`, que `abrir_no_acervo` emite.
+        crate::desempenho::operacao(crate::desempenho::Operacao::AberturaDaRevelacao);
         self.revelacao.update(cx, |tela, cx| {
             tela.abrir_no_acervo(acervo, posicao, window, cx)
         });
@@ -4184,6 +4217,8 @@ impl Aplicativo {
                 angulo: Some(0.),
                 espelho_h: Some(false),
                 espelho_v: Some(false),
+                perspectiva: Some(Default::default()),
+                restringir: Some(true),
             };
             self.gravador
                 .gravar(alvo.id.clone(), Ajustes::default(), corte);
@@ -5675,13 +5710,17 @@ impl Aplicativo {
     fn ao_apagar_fotos(
         &mut self,
         _acao: &ApagarFotos,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         // Na Revelação, o `Delete` é do retoque selecionado — nunca da foto.
         if self.tela == Tela::Revelacao {
-            self.revelacao
-                .update(cx, |tela, cx| tela.apagar_retoque_selecionado(cx));
+            // No Enquadrar, com uma guia de perspectiva selecionada, é dela.
+            self.revelacao.update(cx, |tela, cx| {
+                if !tela.apagar_guia_selecionada(window, cx) {
+                    tela.apagar_retoque_selecionado(cx);
+                }
+            });
             return;
         }
         // ⚠️ Só na Biblioteca. Na Revelação a tecla apagaria a foto que está
@@ -6100,6 +6139,21 @@ impl Aplicativo {
 impl Render for Aplicativo {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _t = crate::regua::trecho("raiz: render");
+        // ⏱️ O começo do quadro, para a ferramenta de desempenho (uma leitura
+        // atômica com ela desligada). O fim é o sentinela, lá embaixo.
+        crate::desempenho::quadro_comecou();
+        if crate::desempenho::ativa() {
+            let escala = window.scale_factor();
+            let tamanho = window.viewport_size();
+            crate::desempenho::janela_principal(
+                self.tela.nome_para_desempenho(),
+                (
+                    (f32::from(tamanho.width) * escala).round() as u32,
+                    (f32::from(tamanho.height) * escala).round() as u32,
+                ),
+                escala,
+            );
+        }
         // 🚨 A porta vem antes de tudo, inclusive das teclas: com o app inteiro
         // desenhado por baixo, as quinze teclas de triagem continuariam
         // chegando à Biblioteca por trás da tela de login.
@@ -6394,6 +6448,11 @@ impl Render for Aplicativo {
             .children(self.barra_do_pe(cx))
             // A lista das recusas, sobre o rodapé que a abre.
             .children(self.lista_das_recusas(cx))
+            // ⏱️ O sentinela, que marca o fim de cada quadro enquanto a captura
+            // grava. O painel é outra janela (`desempenho::painel`).
+            .when(crate::desempenho::ativa(), |raiz| {
+                raiz.child(crate::desempenho::sentinela::sentinela())
+            })
             // 🚨 **As camadas do `gpui-component`.** Sem elas, `open_dialog` e
             // `push_notification` não aparecem em lugar nenhum — a caixa do
             // "Sincronizar N" abria no vazio e o botão parecia morto.

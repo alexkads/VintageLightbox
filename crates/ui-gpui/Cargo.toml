@@ -26,6 +26,11 @@ default-run = "ui-gpui"
 # Metal do próprio macOS, na abertura. O pacote do `make empacotar` continua
 # com os shaders prontos.
 shaders-em-tempo-de-execucao = ["dep:gpui_platform", "gpui_platform/runtime_shaders"]
+# ⏱️ O roteiro de depuração (`VLB_ROTEIRO`, `VLB_FOTOS`, `VLB_SESSAO_EM_ARQUIVO`)
+# num binário **otimizado**, para medir desempenho com um cenário
+# reproduzível: `cargo build --profile carga -p ui-gpui --features roteiro`.
+# Sem a feature (o balcão), só o `debug` lê essas variáveis — como sempre.
+roteiro = []
 
 [dependencies]
 # gpui-kit como a documentação manda (https://gpui-kit.com/docs/getting-started):

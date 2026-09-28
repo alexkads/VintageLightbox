@@ -44,7 +44,9 @@ use ui_gpui::tema;
 /// (`ui_gpui::depuracao::CofreEmArquivo`), para um roteiro não parar no diálogo
 /// do macOS a cada recompilação. O binário do balcão nem olha a variável.
 fn cofre_da_sessao(pilha_local: bool) -> Arc<dyn domain::services::pos_venda::CofreDeSessao> {
-    if cfg!(debug_assertions) && std::env::var_os("VLB_SESSAO_EM_ARQUIVO").is_some() {
+    if ui_gpui::depuracao::ferramentas_ligadas()
+        && std::env::var_os("VLB_SESSAO_EM_ARQUIVO").is_some()
+    {
         return Arc::new(ui_gpui::depuracao::CofreEmArquivo::padrao());
     }
     // 🚨 **A pilha local nunca usa o item de produção do chaveiro.** Eram o
@@ -300,6 +302,14 @@ async fn main() {
     // 📡 O app falando de si com o servidor: o aviso de versão por SSE e os
     // relatos de panic e erro. Mesmo cliente, mesmo token.
     ui_gpui::telemetria::ligar(api_do_site.clone(), tokio::runtime::Handle::current());
+    // ⏱️ A ferramenta de desempenho grava as sessões no mesmo SQLite do
+    // catálogo, em segundo plano (`desempenho::porta`).
+    ui_gpui::desempenho::painel::instalar(Arc::new(
+        ui_gpui::desempenho::porta::DepositoNoBanco::novo(
+            Arc::new(infrastructure::SqliteDesempenho::new(pool.clone())),
+            tokio::runtime::Handle::current(),
+        ),
+    ));
     let publicador: Arc<dyn Publicador> = Arc::new(
         PublicadorDaApi::novo(
             Arc::new({

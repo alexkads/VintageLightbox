@@ -32,7 +32,7 @@ pub mod transformacao;
 
 // Re-exports for main.rs compatibility
 pub use database::{
-    create_pool, run_migrations, CollectionRepositoryImpl, PhotoRepositoryImpl,
+    create_pool, run_migrations, CollectionRepositoryImpl, PhotoRepositoryImpl, SqliteDesempenho,
     SqlitePresetRepository, SqliteRevelacoesDoSite,
 };
 pub use exif_reader::ExifReader;

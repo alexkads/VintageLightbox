@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use adapters::controllers::EditorController;
 use adapters::view_models::PhotoViewModel;
-use domain::value_objects::CropSettings;
+use domain::value_objects::{CropSettings, PerspectivaGuiada};
 
 use super::processador::Ajustes;
 
@@ -43,6 +43,10 @@ pub struct Corte {
     pub angulo: Option<f32>,
     pub espelho_h: Option<bool>,
     pub espelho_v: Option<bool>,
+    /// A perspectiva guiada (guias e correção) — sem coluna, anda na receita.
+    pub perspectiva: Option<PerspectivaGuiada>,
+    /// "Restringir ao conteúdo"; ausente é ligado.
+    pub restringir: Option<bool>,
 }
 
 /// O corte que a foto já tinha, para ser devolvido intacto na gravação.
@@ -56,6 +60,8 @@ pub fn corte_da_foto(foto: &PhotoViewModel) -> Corte {
         angulo: foto.edit_crop_angle,
         espelho_h: foto.edit_crop_flip_h,
         espelho_v: foto.edit_crop_flip_v,
+        perspectiva: foto.edit_crop_perspectiva,
+        restringir: foto.edit_crop_restringir,
     }
 }
 
@@ -491,6 +497,8 @@ pub fn na_foto(foto: &mut PhotoViewModel, ajustes: Ajustes, corte: Corte) {
     foto.edit_crop_angle = corte.angulo;
     foto.edit_crop_flip_h = corte.espelho_h;
     foto.edit_crop_flip_v = corte.espelho_v;
+    foto.edit_crop_perspectiva = corte.perspectiva.filter(|p| !p.e_neutra());
+    foto.edit_crop_restringir = corte.restringir.filter(|r| !r);
 }
 
 /// Uma receita inteira: os ajustes e o enquadramento.
@@ -510,6 +518,8 @@ fn corte_por_extenso(corte: Corte) -> Corte {
         angulo: Some(corte.angulo.unwrap_or(0.)),
         espelho_h: Some(corte.espelho_h.unwrap_or(false)),
         espelho_v: Some(corte.espelho_v.unwrap_or(false)),
+        perspectiva: Some(corte.perspectiva.unwrap_or_default()),
+        restringir: Some(corte.restringir.unwrap_or(true)),
     }
 }
 
@@ -562,6 +572,8 @@ pub fn mesclar(base: Receita, meu: Receita, deles: Receita) -> Receita {
         angulo: campo(b.angulo, m.angulo, d.angulo),
         espelho_h: campo(b.espelho_h, m.espelho_h, d.espelho_h),
         espelho_v: campo(b.espelho_v, m.espelho_v, d.espelho_v),
+        perspectiva: campo(b.perspectiva, m.perspectiva, d.perspectiva),
+        restringir: campo(b.restringir, m.restringir, d.restringir),
     };
     (ajustes, corte)
 }
@@ -583,6 +595,8 @@ pub fn para_crop_settings(corte: &Corte) -> CropSettings {
         corte.espelho_h.unwrap_or(false),
         corte.espelho_v.unwrap_or(false),
     )
+    .with_perspectiva(corte.perspectiva.unwrap_or_default())
+    .with_restringir(corte.restringir.unwrap_or(true))
 }
 
 /// A receita como o site a guarda — os ajustes por nome e o corte com prefixo
@@ -625,6 +639,9 @@ pub fn de_json(json: &serde_json::Value) -> (Ajustes, Corte) {
         angulo: numero("corte_angulo"),
         espelho_h: numero("corte_espelho_h").map(|v| v == 1.0),
         espelho_v: numero("corte_espelho_v").map(|v| v == 1.0),
+        perspectiva: Some(PerspectivaGuiada::de_json(json)).filter(|p| !p.e_neutra()),
+        restringir: (!domain::value_objects::perspectiva::restringir_de_json(json))
+            .then_some(false),
     };
 
     (ajustes, corte)
@@ -1068,6 +1085,23 @@ mod testes {
             angulo: Some(-3.0),
             espelho_h: Some(true),
             espelho_v: Some(false),
+            // 🔑 A perspectiva guiada e o "restringir" fazem a mesma viagem.
+            perspectiva: Some({
+                let mut p = PerspectivaGuiada {
+                    rotacao: [9.5, -1.0, 0.5],
+                    foco: 1.4,
+                    vertical: 2.0,
+                    horizontal: -1.0,
+                    ..Default::default()
+                };
+                p.guias[1] = Some(domain::value_objects::GuiaDePerspectiva {
+                    de: [0.2, 0.1],
+                    ate: [0.22, 0.85],
+                    eixo: domain::value_objects::EixoDaGuia::Vertical,
+                });
+                p
+            }),
+            restringir: Some(false),
         };
 
         let json = crate::pos_venda::porta::ajustes_em_json(&ajustes, &para_crop_settings(&corte));
@@ -1196,6 +1230,8 @@ mod testes {
                 angulo: Some(-2.5),
                 espelho_h: Some(true),
                 espelho_v: Some(false),
+                perspectiva: None,
+                restringir: None,
             }
         );
     }
