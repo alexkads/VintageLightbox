@@ -1,12 +1,10 @@
 {
-  "versao": "0.1.36",
-  "titulo": "O painel da foto na sessão fica igual ao do site: quem ela é, a nota e as ações em cima, e faixa, negociação e preço num lugar só.",
+  "versao": "0.1.37",
+  "titulo": "Na sessão, a tira de baixo mostra a foto do tamanho da tira, como no site.",
   "importante": false,
   "novidades": [
-    "Na sessão, o painel da foto em foco virou um cartão em três partes: o nome, o estado e onde ela está (na nuvem, aqui ou subindo); a nota, com as estrelas clicáveis e um \"tirar\"; e os botões grandes \"Marcar como levada\" e \"Revelar\" (ou \"Revelar de novo\").",
-    "\"Faixa, negociação e preço\" mostra tamanho e downloads, a faixa, a negociação numa etiqueta âmbar (\"Desconto · R$ 20,00\") que abre o diálogo ao clicar, o preço de venda com \"Fixado em…; a faixa cobraria…\" e o \"Voltar à faixa\", e o Apagar no fim.",
-    "Com duas ou mais fotos marcadas, aparece só o painel do lote, como no site.",
-    "Sem valor fixado, o painel diz que o cliente paga o preço da faixa: no pós-venda não existe o desconto de quem compra antes do ensaio."
+    "Puxando a tira da sessão para cima, a foto cresce junto e ocupa a altura inteira da tira; antes ficava pequena no meio, com sobra em volta.",
+    "Com a tira alta, ela usa a prévia maior da foto, para a imagem não sair borrada."
   ],
-  "por_que_atualizar": "O operador acha cada botão no mesmo lugar do site, e o preço que o painel mostra é o que o cliente paga na galeria."
+  "por_que_atualizar": "A tira grande serve para ver a foto de perto, do mesmo jeito que no site."
 }
