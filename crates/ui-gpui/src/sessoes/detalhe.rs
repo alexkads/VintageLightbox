@@ -6316,7 +6316,14 @@ impl Detalhe {
 
         // O preço fixado vem como decimal em texto ("19.90"); a tela fala em
         // vírgula, como o resto do dinheiro no app.
-        let preco = cx.new(|cx| InputState::new(window, cx).placeholder("19,90"));
+        // O exemplo do campo é o que a faixa cobraria — o `placeholder` do
+        // site —, e não um número qualquer que parece o preço desta foto.
+        let exemplo = self
+            .do_site(&foto.id)
+            .and_then(|f| self.preco_da_faixa(f))
+            .map(|centavos| format!("{},{:02}", centavos / 100, centavos % 100))
+            .unwrap_or_else(|| "19,90".to_string());
+        let preco = cx.new(|cx| InputState::new(window, cx).placeholder(exemplo));
         // O campo fala em vírgula, como o resto do dinheiro no app; a API leva
         // decimal com ponto (ver `aplicar_preco_de_venda`).
         let valor = foto
@@ -6709,462 +6716,748 @@ impl Detalhe {
             })
     }
 
-    fn painel_da_foto(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    fn painel_da_foto(&self, cx: &mut Context<Self>) -> Option<gpui_kit::AnyElement> {
         let foto = self.em_foco()?;
         let posicao = self.selecao.foco()? + 1;
-        let negociada = foto.tem_negociacao();
-        let pendentes_marcadas = self.nao_salvas_marcadas().len();
-        let (editaveis, aguardando, fixadas, negociadas) = self
-            .selecao
-            .marcadas()
-            .filter_map(|p| self.acervo.visivel(p))
-            .filter(|f| f.editavel())
-            .fold(
-                (0, 0, 0, 0),
-                |(editaveis, aguardando, fixadas, negociadas), f| {
-                    if self.ids_locais.contains(&f.id) {
-                        (editaveis, aguardando + 1, fixadas, negociadas)
-                    } else {
-                        (
-                            editaveis + 1,
-                            aguardando,
-                            fixadas + usize::from(f.preco_de_venda.is_some()),
-                            negociadas + usize::from(f.tem_negociacao()),
-                        )
-                    }
-                },
-            );
 
-        Some(
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(6.))
-                .children(self.campos_do_lote.as_ref().map(|campos| {
-                    let apagado = cx.theme().muted_foreground;
-                    let nota_do_lote = self
-                        .selecao
-                        .marcadas()
-                        .filter_map(|p| self.acervo.visivel(p))
-                        .map(|f| f.nota)
-                        .reduce(|a, b| if a == b { a } else { None })
-                        .flatten();
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(6.))
-                        .pb(px(10.))
-                        .border_b_1()
-                        .border_color(cx.theme().border)
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .child(format!("{} fotos selecionadas", campos.ids.len()))
-                                .child(
-                                    Button::new("lote-limpar")
-                                        .debug_selector(|| "lote-limpar".into())
-                                        .label("Limpar")
-                                        .xsmall()
-                                        .ghost()
-                                        .on_click(cx.listener(|tela, _, _, cx| {
-                                            tela.limpar_selecao(cx)
-                                        })),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(apagado)
-                                .child(format!(
-                                    "{editaveis} editáveis no site · {aguardando} aguardando envio. Compradas e excluídas ficam de fora."
-                                )),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(apagado)
-                                .child(format!(
-                                    "{fixadas} com preço fixado · {negociadas} com negociação no balcão."
-                                )),
-                        )
-                        .child(div().text_xs().text_color(apagado).child("Nota das selecionadas"))
-                        .child(
-                            div().flex().gap(px(2.)).children((1..=5u8).map(|nota| {
-                                Button::new(SharedString::from(format!("lote-nota-{nota}")))
-                                    .debug_selector(move || format!("lote-nota-{nota}"))
-                                    .label(if nota_do_lote.is_some_and(|atual| nota <= atual) {
-                                        "★"
-                                    } else {
-                                        "☆"
-                                    })
-                                    .xsmall()
-                                    .ghost()
-                                    .on_click(cx.listener(move |tela, _, _, cx| {
-                                        tela.dar_nota(if nota_do_lote == Some(nota) { 0 } else { nota }, cx)
-                                    }))
-                            })),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .gap(px(5.))
-                                .child(
-                                    Button::new("lote-marcar-levadas")
-                                        .debug_selector(|| "lote-marcar-levadas".into())
-                                        .label("Marcar como levadas")
-                                        .xsmall()
-                                        .disabled(editaveis + aguardando == 0)
-                                        .on_click(cx.listener(|tela, _, _, cx| {
-                                            tela.marcar_como(EstadoNoBalcao::LevadaNoBalcao, cx)
-                                        })),
-                                )
-                                .child(
-                                    Button::new("lote-por-a-venda")
-                                        .debug_selector(|| "lote-por-a-venda".into())
-                                        .label("Pôr à venda")
-                                        .xsmall()
-                                        .disabled(editaveis + aguardando == 0)
-                                        .on_click(cx.listener(|tela, _, _, cx| {
-                                            tela.marcar_como(EstadoNoBalcao::Disponivel, cx)
-                                        })),
-                                ),
-                        )
-                        .child(div().text_xs().text_color(apagado).child("Faixa para a seleção"))
-                        .child(
-                            div()
-                                .debug_selector(|| "lote-faixa".into())
-                                .child(
-                                    crate::estilo::campo(Select::new(&campos.faixa))
-                                        .xsmall()
-                                        .placeholder("Escolha a faixa para todas…")
-                                        .disabled(editaveis == 0)
-                                        .w_full(),
-                                ),
-                        )
-                        .when(fixadas > 0, |painel| {
-                            painel.child(
-                                div()
-                                    .text_xs()
-                                    .text_color(cx.theme().warning)
-                                    .child("Preço fixado continua valendo após trocar a faixa."),
+        // 📋 **Duas ou mais marcadas: o painel do lote, e só ele** — como no
+        // site (`painel.tsx`, `n > 1`). O cartão da foto em foco embaixo dele
+        // enganava: a nota e o "Marcar como levada" valem para todas as
+        // marcadas, e não só para a foto que ele mostra.
+        if let Some(campos) = self.campos_do_lote.as_ref() {
+            let pendentes_marcadas = self.nao_salvas_marcadas().len();
+            let (editaveis, aguardando, fixadas, negociadas) = self
+                .selecao
+                .marcadas()
+                .filter_map(|p| self.acervo.visivel(p))
+                .filter(|f| f.editavel())
+                .fold(
+                    (0, 0, 0, 0),
+                    |(editaveis, aguardando, fixadas, negociadas), f| {
+                        if self.ids_locais.contains(&f.id) {
+                            (editaveis, aguardando + 1, fixadas, negociadas)
+                        } else {
+                            (
+                                editaveis + 1,
+                                aguardando,
+                                fixadas + usize::from(f.preco_de_venda.is_some()),
+                                negociadas + usize::from(f.tem_negociacao()),
                             )
-                        })
-                        .child(
-                            Button::new("lote-negociar")
-                                .debug_selector(|| "lote-negociar".into())
-                                .label("Negociação…")
-                                .xsmall()
-                                .disabled(editaveis == 0)
-                                .on_click(cx.listener(|tela, _, _, cx| {
-                                    tela.pedir_negociacao(tela.marcadas(), false, cx);
-                                })),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(apagado)
-                                .child("Preço de venda online para a seleção"),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(px(5.))
-                                .child("R$")
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .debug_selector(|| "lote-preco".into())
-                                        .child(Input::new(&campos.preco).xsmall()),
-                                )
-                                .child(
-                                    Button::new("lote-preco-aplicar")
-                                        .debug_selector(|| "lote-preco-aplicar".into())
-                                        .label("Aplicar")
-                                        .xsmall()
-                                        .disabled(editaveis == 0)
-                                        .on_click(cx.listener(|tela, _, _, cx| {
-                                            tela.aplicar_preco_do_lote(cx)
-                                        })),
-                                ),
-                        )
-                        .child(
-                            Button::new("lote-preco-voltar-faixa")
-                                .debug_selector(|| "lote-preco-voltar-faixa".into())
-                                .label("Remover preço fixado: usar a faixa")
-                                .xsmall()
-                                .disabled(editaveis == 0)
-                                .on_click(cx.listener(|tela, _, _, cx| {
-                                    tela.mudar_preco_do_lote(None, cx)
-                                })),
-                        )
-                        .when(pendentes_marcadas > 0, |painel| {
-                            painel.child(
-                                Button::new("lote-descartar-edicao")
-                                    .debug_selector(|| "lote-descartar-edicao".into())
-                                    .label(format!(
-                                        "Descartar a revelação não salva ({pendentes_marcadas})"
-                                    ))
+                        }
+                    },
+                );
+            return Some(
+                {
+                let apagado = cx.theme().muted_foreground;
+                let nota_do_lote = self
+                    .selecao
+                    .marcadas()
+                    .filter_map(|p| self.acervo.visivel(p))
+                    .map(|f| f.nota)
+                    .reduce(|a, b| if a == b { a } else { None })
+                    .flatten();
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.))
+                    .pb(px(10.))
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(format!("{} fotos selecionadas", campos.ids.len()))
+                            .child(
+                                Button::new("lote-limpar")
+                                    .debug_selector(|| "lote-limpar".into())
+                                    .label("Limpar")
                                     .xsmall()
-                                    .danger()
                                     .ghost()
                                     .on_click(cx.listener(|tela, _, _, cx| {
-                                        tela.descartar_das_marcadas(cx)
+                                        tela.limpar_selecao(cx)
+                                    })),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(apagado)
+                            .child(format!(
+                                "{editaveis} editáveis no site · {aguardando} aguardando envio. Compradas e excluídas ficam de fora."
+                            )),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(apagado)
+                            .child(format!(
+                                "{fixadas} com preço fixado · {negociadas} com negociação no balcão."
+                            )),
+                    )
+                    .child(div().text_xs().text_color(apagado).child("Nota das selecionadas"))
+                    .child(
+                        div().flex().gap(px(2.)).children((1..=5u8).map(|nota| {
+                            Button::new(SharedString::from(format!("lote-nota-{nota}")))
+                                .debug_selector(move || format!("lote-nota-{nota}"))
+                                .label(if nota_do_lote.is_some_and(|atual| nota <= atual) {
+                                    "★"
+                                } else {
+                                    "☆"
+                                })
+                                .xsmall()
+                                .ghost()
+                                .on_click(cx.listener(move |tela, _, _, cx| {
+                                    tela.dar_nota(if nota_do_lote == Some(nota) { 0 } else { nota }, cx)
+                                }))
+                        })),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(5.))
+                            .child(
+                                Button::new("lote-marcar-levadas")
+                                    .debug_selector(|| "lote-marcar-levadas".into())
+                                    .label("Marcar como levadas")
+                                    .xsmall()
+                                    .disabled(editaveis + aguardando == 0)
+                                    .on_click(cx.listener(|tela, _, _, cx| {
+                                        tela.marcar_como(EstadoNoBalcao::LevadaNoBalcao, cx)
                                     })),
                             )
-                        })
-                        .child(
-                            Button::new("lote-apagar")
-                                .debug_selector(|| "lote-apagar".into())
-                                .label("Apagar")
+                            .child(
+                                Button::new("lote-por-a-venda")
+                                    .debug_selector(|| "lote-por-a-venda".into())
+                                    .label("Pôr à venda")
+                                    .xsmall()
+                                    .disabled(editaveis + aguardando == 0)
+                                    .on_click(cx.listener(|tela, _, _, cx| {
+                                        tela.marcar_como(EstadoNoBalcao::Disponivel, cx)
+                                    })),
+                            ),
+                    )
+                    .child(div().text_xs().text_color(apagado).child("Faixa para a seleção"))
+                    .child(
+                        div()
+                            .debug_selector(|| "lote-faixa".into())
+                            .child(
+                                crate::estilo::campo(Select::new(&campos.faixa))
+                                    .xsmall()
+                                    .placeholder("Escolha a faixa para todas…")
+                                    .disabled(editaveis == 0)
+                                    .w_full(),
+                            ),
+                    )
+                    .when(fixadas > 0, |painel| {
+                        painel.child(
+                            div()
+                                .text_xs()
+                                .text_color(cx.theme().warning)
+                                .child("Preço fixado continua valendo após trocar a faixa."),
+                        )
+                    })
+                    .child(
+                        Button::new("lote-negociar")
+                            .debug_selector(|| "lote-negociar".into())
+                            .label("Negociação…")
+                            .xsmall()
+                            .disabled(editaveis == 0)
+                            .on_click(cx.listener(|tela, _, _, cx| {
+                                tela.pedir_negociacao(tela.marcadas(), false, cx);
+                            })),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(apagado)
+                            .child("Preço de venda online para a seleção"),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(5.))
+                            .child("R$")
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .debug_selector(|| "lote-preco".into())
+                                    .child(Input::new(&campos.preco).xsmall()),
+                            )
+                            .child(
+                                Button::new("lote-preco-aplicar")
+                                    .debug_selector(|| "lote-preco-aplicar".into())
+                                    .label("Aplicar")
+                                    .xsmall()
+                                    .disabled(editaveis == 0)
+                                    .on_click(cx.listener(|tela, _, _, cx| {
+                                        tela.aplicar_preco_do_lote(cx)
+                                    })),
+                            ),
+                    )
+                    .child(
+                        Button::new("lote-preco-voltar-faixa")
+                            .debug_selector(|| "lote-preco-voltar-faixa".into())
+                            .label("Remover preço fixado: usar a faixa")
+                            .xsmall()
+                            .disabled(editaveis == 0)
+                            .on_click(cx.listener(|tela, _, _, cx| {
+                                tela.mudar_preco_do_lote(None, cx)
+                            })),
+                    )
+                    .when(pendentes_marcadas > 0, |painel| {
+                        painel.child(
+                            Button::new("lote-descartar-edicao")
+                                .debug_selector(|| "lote-descartar-edicao".into())
+                                .label(format!(
+                                    "Descartar a revelação não salva ({pendentes_marcadas})"
+                                ))
                                 .xsmall()
                                 .danger()
                                 .ghost()
-                                .disabled(editaveis == 0)
                                 .on_click(cx.listener(|tela, _, _, cx| {
-                                    tela.apagar_marcadas_do_site(cx)
+                                    tela.descartar_das_marcadas(cx)
                                 })),
                         )
-                }))
-                .when(self.campos_do_lote.is_some(), |painel| {
-                    painel.child(
+                    })
+                    .child(
+                        Button::new("lote-apagar")
+                            .debug_selector(|| "lote-apagar".into())
+                            .label("Apagar")
+                            .xsmall()
+                            .danger()
+                            .ghost()
+                            .disabled(editaveis == 0)
+                            .on_click(cx.listener(|tela, _, _, cx| {
+                                tela.apagar_marcadas_do_site(cx)
+                            })),
+                    )
+                }
+                .into_any_element(),
+            );
+        }
+
+        Some(self.cartao_da_foto(foto, posicao, cx))
+    }
+
+    /// 🗂️ **O cartão da foto em foco — o do painel do site** (`painel.tsx`,
+    /// dono, 28/09/2026: *"Esse layout tá muito melhor Web, faça o mesmo no
+    /// desktop"*).
+    ///
+    /// A hierarquia é a do balcão, em três faixas separadas por linha:
+    ///
+    /// 1. **quem ela é** — número, arquivo, estado, onde está, se foi revelada;
+    /// 2. **a nota** — o olhar do fotógrafo, que vale até para a comprada;
+    /// 3. **o que se faz a cada foto** (marcar levada, revelar) em cima e grande,
+    ///    e o que se faz uma vez por atendimento — faixa, negociação, preço,
+    ///    apagar — atrás de "Faixa, negociação e preço", fechada por padrão.
+    ///
+    /// Antes eram linhas de texto do mesmo peso e botões pequenos, e o operador
+    /// procurava o botão a cada foto.
+    fn cartao_da_foto(
+        &self,
+        foto: &acervo::Foto,
+        posicao: usize,
+        cx: &mut Context<Self>,
+    ) -> gpui_kit::AnyElement {
+        use crate::recursos::Icone;
+        use gpui_kit::component::Icon;
+
+        let tema = cx.theme();
+        let (borda, apagado) = (tema.border, tema.muted_foreground);
+        let lugar = self.lugar_de(&foto.id);
+        let local = self.ids_locais.contains(&foto.id);
+        let do_site = self.do_site(&foto.id);
+
+        // ── 1. Quem ela é ────────────────────────────────────────────────
+        let estado = if foto.apagada {
+            "Apagada".to_string()
+        } else if foto.rejeitada {
+            // C21: o que ela é agora, e o que isso quer dizer.
+            "Rejeitada — fora da galeria do cliente; X desfaz".to_string()
+        } else {
+            foto.estado.rotulo().to_string()
+        };
+        // 📍 **Onde ela está**, com o mesmo par de ícones da célula: a do acervo
+        // sobrevive a este computador; a que está só no disco, não.
+        let onde = if !lugar.nuvem {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(4.))
+                .px(px(6.))
+                .rounded_full()
+                .bg(cores::atencao().opacity(0.15))
+                .text_color(cores::quente_clara())
+                .child(Icon::new(Icone::HardDrive).size(px(12.)))
+                .child(if lugar.transito {
+                    "subindo agora"
+                } else {
+                    "aqui, ainda não subiu"
+                })
+                .into_any_element()
+        } else if !foto.apagada {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(4.))
+                        .text_color(cores::nuvem())
+                        .child(Icon::new(Icone::Cloud).size(px(12.)))
+                        .child("na nuvem"),
+                )
+                // Os dois lugares, quando são os dois — em cinza: com ela já no
+                // acervo, a cópia daqui é espaço, não risco.
+                .when(lugar.disco, |linha| {
+                    linha.child(
                         div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child("Foto em foco"),
+                            .flex()
+                            .items_center()
+                            .gap(px(4.))
+                            .child(Icon::new(Icone::HardDrive).size(px(12.)))
+                            .child("e aqui"),
                     )
                 })
-                .child(
+                .into_any_element()
+        } else {
+            div().into_any_element()
+        };
+        let cabecalho = div()
+            .flex()
+            .flex_col()
+            .gap(px(2.))
+            .p(px(12.))
+            .border_b_1()
+            .border_color(borda)
+            .child(
+                div()
+                    .debug_selector(|| "painel-arquivo".into())
+                    .text_sm()
+                    .font_weight(gpui_kit::FontWeight::MEDIUM)
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .gap(px(4.))
+                            .child(div().text_color(apagado).child(format!("{posicao}.")))
+                            .child(SharedString::from(foto.arquivo.clone())),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_x(px(8.))
+                    .text_xs()
+                    .text_color(apagado)
+                    .child(estado)
+                    .child(onde)
+                    .when(foto.revelada, |linha| linha.child("· revelada")),
+            )
+            // 📌 O `EdicaoLocal` do painel da web, com o caminho de volta.
+            .when(self.nao_salvas.contains(&foto.id), |cabecalho| {
+                let (id, arquivo) = (foto.id.clone(), foto.arquivo.clone());
+                cabecalho.child(
                     div()
-                        .text_sm()
-                        .truncate()
-                        .child(SharedString::from(format!("{posicao}. {}", foto.arquivo))),
+                        .flex()
+                        .flex_col()
+                        .items_start()
+                        .gap(px(4.))
+                        .pt(px(6.))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(tema.warning)
+                                .child("Revelação feita aqui — ainda não salva na galeria."),
+                        )
+                        .child(
+                            crate::estilo::botao_raso("painel-descartar-edicao")
+                                .debug_selector(|| "painel-descartar-edicao".into())
+                                .label("Descartar a revelação")
+                                .text_color(tema.danger)
+                                .on_click(cx.listener(move |tela, _ev, _window, cx| {
+                                    tela.pedir_descartar(vec![(id.clone(), arquivo.clone())], cx)
+                                })),
+                        ),
                 )
+            });
+
+        // ── 2. A nota ────────────────────────────────────────────────────
+        // Vale para qualquer foto, comprada e apagada inclusive: é o olhar do
+        // fotógrafo, não cobrança. As teclas 1–5 e 0 fazem o mesmo.
+        //
+        // ⭐ **As estrelas ficam à mão**, e não no `Rating` do kit: ele apaga a
+        // nota ao clicar na estrela acesa, e a regra do app é não apagar por
+        // engano — tirar é o "tirar" ao lado (ou a tecla 0), como no site.
+        let nota = foto.nota.unwrap_or(0);
+        let linha_da_nota = div()
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .px(px(12.))
+            .py(px(8.))
+            .border_b_1()
+            .border_color(borda)
+            .text_xs()
+            .child(div().text_color(apagado).child("Nota"))
+            .child(div().flex().children((1..=5u8).map(|estrela| {
+                let acesa = estrela <= nota;
+                div()
+                    .id(SharedString::from(format!("painel-nota-{estrela}")))
+                    .debug_selector(move || format!("painel-nota-{estrela}"))
+                    .cursor_pointer()
+                    .px(px(2.))
+                    .text_base()
+                    .line_height(px(18.))
+                    .text_color(if acesa {
+                        cores::nota()
+                    } else {
+                        apagado.opacity(0.6)
+                    })
+                    .hover(|estilo| estilo.text_color(cores::nota()))
+                    .child("★")
+                    .on_click(cx.listener(move |tela, _ev, _window, cx| {
+                        tela.dar_nota(estrela, cx);
+                    }))
+            })))
+            .when(foto.nota.is_some(), |linha| {
+                linha.child(
+                    crate::estilo::botao_raso("painel-tirar-nota")
+                        .debug_selector(|| "painel-tirar-nota".into())
+                        .label("tirar")
+                        .text_color(apagado)
+                        .on_click(cx.listener(|tela, _ev, _window, cx| tela.dar_nota(0, cx))),
+                )
+            });
+
+        // ── 3. O que se faz ──────────────────────────────────────────────
+        // 📐 **Quebram quando não cabem.** O `Button` do kit não encolhe
+        // (`flex_shrink_0`), e a coluna do desktop é mais estreita que a do
+        // site: lado a lado, "Revelar de novo" passava da borda do cartão.
+        // Crescendo a partir do próprio tamanho, dividem a linha quando cabem e
+        // vão um embaixo do outro quando não.
+        let acoes = foto.editavel().then(|| {
+            div()
+                .flex()
+                .flex_wrap()
+                .gap(px(8.))
                 .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(if foto.rejeitada && !foto.apagada {
-                            // C21: o que ela é agora, e o que isso quer dizer.
-                            "Rejeitada — fora da galeria do cliente; X desfaz".to_string()
+                    crate::estilo::botao_contorno("painel-estado", cx)
+                        .debug_selector(|| "painel-estado".into())
+                        .flex_grow(1.)
+                        .label(if foto.estado == acervo::Estado::LevadaNoBalcao {
+                            "Pôr à venda"
                         } else {
-                            foto.estado.rotulo().to_string()
-                        }),
+                            "Marcar como levada"
+                        })
+                        .on_click(cx.listener(|tela, _ev, _window, cx| tela.alternar_levada(cx))),
                 )
                 .child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(match foto.nota {
-                            Some(n) => format!("Nota {}", "★".repeat(n as usize)),
-                            None => "Sem nota".to_string(),
-                        }),
+                    // A comprada não se revela (o site responde 409 — o cliente
+                    // pode já ter baixado): o par só aparece na editável.
+                    crate::estilo::botao_contorno("painel-revelar", cx)
+                        .debug_selector(|| "painel-revelar".into())
+                        .flex_grow(1.)
+                        .icon(Icon::new(Icone::SlidersHorizontal))
+                        .label(if foto.revelada {
+                            "Revelar de novo"
+                        } else {
+                            "Revelar"
+                        })
+                        .on_click(cx.listener(|tela, _ev, _window, cx| tela.revelar_a_do_foco(cx))),
                 )
-                // 📌 O `EdicaoLocal` do painel da web, com o caminho de volta.
-                .when(self.nao_salvas.contains(&foto.id), |painel| {
-                    let (id, arquivo) = (foto.id.clone(), foto.arquivo.clone());
-                    painel.child(
+        });
+
+        // 📂 **A sanfona do site**: tamanho, faixa, negociação, preço e apagar.
+        // A foto que só está no disco não tem nada disso no servidor — os
+        // controles falariam com uma foto que não existe lá.
+        let sanfona = (!local).then(|| {
+            let tamanho = do_site
+                .and_then(|f| f.tamanho_bytes)
+                .map(|bytes| format!("{:.1} MB", bytes as f64 / 1_048_576.0).replace('.', ","));
+            let linha = |rotulo: &'static str, valor: String| {
+                div()
+                    .flex()
+                    .gap(px(6.))
+                    .child(div().flex_none().text_color(apagado).child(rotulo))
+                    .child(div().min_w(px(0.)).child(valor))
+            };
+            let dados = div()
+                .flex()
+                .flex_col()
+                .gap(px(2.))
+                .text_xs()
+                .children(tamanho.map(|t| linha("Tamanho", t)))
+                .child(linha("Downloads", foto.downloads.to_string()));
+
+            // 🤝 A negociação no balcão: a etiqueta âmbar do site quando há, o
+            // convite quando não há. Clicar abre o diálogo, já preenchido.
+            let negociacao =
+                if foto.tem_negociacao() {
+                    let etiqueta = biblioteca_core::negociacao::descrever(
+                        foto.preco_negociado,
+                        foto.observacao.as_deref(),
+                    );
+                    let (fundo, contorno, texto) = cores::selo_ambar();
+                    let editavel = foto.editavel();
+                    // Numa linha própria, para a etiqueta ter o tamanho do texto
+                    // (o `inline-flex` do site), e não a largura da coluna.
+                    Some(
+                        div()
+                            .flex()
+                            .child(
+                                div()
+                                    .id("painel-negociacao")
+                                    .debug_selector(|| "painel-negociar".into())
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(4.))
+                                    .max_w_full()
+                                    .px(px(6.))
+                                    .py(px(2.))
+                                    .rounded(tema.radius)
+                                    .border_1()
+                                    .border_color(contorno)
+                                    .bg(fundo)
+                                    .text_color(texto)
+                                    .text_xs()
+                                    .when(editavel, |selo| selo.cursor_pointer())
+                                    .child(Icon::new(Icone::Handshake).size(px(12.)))
+                                    .child(
+                                        div()
+                                            .truncate()
+                                            .font_weight(gpui_kit::FontWeight::MEDIUM)
+                                            .child(etiqueta.titulo),
+                                    )
+                                    .children(etiqueta.detalhe.map(|d| {
+                                        div().truncate().opacity(0.8).child(format!("— {d}"))
+                                    }))
+                                    .when(editavel, |selo| {
+                                        selo.on_click(cx.listener(|tela, _ev, _window, cx| {
+                                            if let Some(foto) = tela.em_foco().cloned() {
+                                                tela.pedir_negociacao(vec![foto.id], true, cx);
+                                            }
+                                        }))
+                                    }),
+                            )
+                            .into_any_element(),
+                    )
+                } else {
+                    // Numa linha própria: solto na coluna, o botão estica e o kit
+                    // centraliza o rótulo; o convite do site fica à esquerda.
+                    foto.editavel().then(|| {
+                        div()
+                            .flex()
+                            .child(
+                                crate::estilo::botao_raso("painel-negociar")
+                                    .debug_selector(|| "painel-negociar".into())
+                                    .icon(Icon::new(Icone::Handshake))
+                                    .label("Negociação…")
+                                    .text_color(apagado)
+                                    .px(px(0.))
+                                    .on_click(cx.listener(|tela, _ev, _window, cx| {
+                                        if let Some(foto) = tela.em_foco().cloned() {
+                                            tela.pedir_negociacao(vec![foto.id], true, cx);
+                                        }
+                                    })),
+                            )
+                            .into_any_element()
+                    })
+                };
+
+            // 🧾 Faixa e preço de venda online — o que o cliente vê e paga na
+            // galeria dele (`FaixaDaFoto` e `PrecoDeVendaDaFoto` do site).
+            let da_faixa = do_site.and_then(|f| self.preco_da_faixa(f));
+            let campos = self.campos_do_painel.as_ref().map(|campos| {
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.))
+                    .child(
+                        div().debug_selector(|| "painel-faixa".into()).child(
+                            crate::estilo::campo(Select::new(&campos.faixa))
+                                .small()
+                                .placeholder("Escolha…")
+                                .disabled(!foto.editavel())
+                                .w_full(),
+                        ),
+                    )
+                    .children(negociacao)
+                    .child(
                         div()
                             .flex()
                             .flex_col()
                             .gap(px(4.))
+                            .text_xs()
+                            .child(div().text_color(apagado).child("Preço de venda online"))
                             .child(
                                 div()
-                                    .text_xs()
-                                    .text_color(cx.theme().warning)
-                                    .child("Revelação feita aqui — ainda não salva na galeria."),
-                            )
-                            .child(div().flex().child(
-                                Button::new("painel-descartar-edicao")
-                                    .debug_selector(|| "painel-descartar-edicao".into())
-                                    .label("Descartar a revelação")
-                                    .xsmall()
-                                    .danger()
-                                    .ghost()
-                                    .on_click(cx.listener(move |tela, _ev, _window, cx| {
-                                        tela.pedir_descartar(vec![(id.clone(), arquivo.clone())], cx)
-                                    })),
-                            )),
-                    )
-                })
-                .child(
-                    div()
-                        .flex()
-                        .gap(px(6.))
-                        .child(
-                            Button::new("painel-estado")
-                                .label(if foto.estado == acervo::Estado::LevadaNoBalcao {
-                                    "Pôr à venda"
-                                } else {
-                                    "Levada no balcão"
-                                })
-                                .xsmall()
-                                .disabled(!foto.editavel())
-                                .on_click(
-                                    cx.listener(|tela, _ev, _window, cx| tela.alternar_levada(cx)),
-                                ),
-                        )
-                        .child(
-                            // A web só oferece o botão quando a foto é
-                            // editável: a comprada não se revela (o site
-                            // responde 409 — o cliente pode já ter baixado).
-                            Button::new("painel-revelar")
-                                .label("Revelar")
-                                .xsmall()
-                                .disabled(!foto.editavel())
-                                .on_click(
-                                    cx.listener(|tela, _ev, _window, cx| {
-                                        tela.revelar_a_do_foco(cx)
-                                    }),
-                                ),
-                        ),
-                )
-                // 📂 **A sanfona do site**: tamanho, faixa, negociação, preço e
-                // apagar ficam atrás de "Faixa, negociação e preço", fechada por
-                // padrão. Antes eram onze controles empilhados com o mesmo peso,
-                // e o operador procurava o botão a cada foto.
-                .child(
-                    Collapsible::new()
-                        .open(self.faixa_e_precos_aberto)
-                        .gap(px(6.))
-                        .child(
-                            gatilho_da_sanfona(
-                                "painel-sanfona",
-                                "Faixa, negociação e preço",
-                                self.faixa_e_precos_aberto,
-                                cx,
-                            )
-                            .on_click(cx.listener(|tela, _ev, _w, cx| {
-                                tela.faixa_e_precos_aberto = !tela.faixa_e_precos_aberto;
-                                cx.notify();
-                            })),
-                        )
-                        .content(gpui_kit::component::v_flex().gap(px(6.))
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(SharedString::from({
-                                    // "12,7 MB · Downloads 0 · na nuvem" — as três
-                                    // linhas do painel do site numa só, porque aqui a
-                                    // coluna é estreita.
-                                    let tamanho = self
-                                        .do_site(&foto.id)
-                                        .and_then(|f| f.tamanho_bytes)
-                                        .map(|bytes| {
-                                            format!("{:.1} MB · ", bytes as f64 / 1_048_576.0)
-                                                .replace('.', ",")
-                                        })
-                                        .unwrap_or_default();
-                                    let onde = if self.ids_locais.contains(&foto.id) {
-                                        "neste computador"
-                                    } else {
-                                        "na nuvem"
-                                    };
-                                    format!("{tamanho}Downloads {} · {onde}", foto.downloads)
-                                })),
-                        )
-                        // 🧾 **Faixa e preço, como no painel do site** (`FaixaDaFoto` e
-                        // `PrecoDeVendaDaFoto`). Eles não existiam aqui, e a frase que
-                        // mandava ao Balcão não resolvia: lá se registra o que **entrou
-                        // no balcão**; a faixa e o preço de venda são o que o cliente vê
-                        // e paga na galeria dele.
-                        .children(self.campos_do_painel.as_ref().map(|campos| {
-                            let apagado = cx.theme().muted_foreground;
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap(px(6.))
-                                .child(div().text_xs().text_color(apagado).child("Faixa"))
-                                .child(
-                                    crate::estilo::campo(Select::new(&campos.faixa))
-                                        .xsmall()
-                                        .placeholder("Escolha…")
-                                        .w_full(),
-                                )
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(apagado)
-                                        .child("Preço de venda online"),
-                                )
-                                .child(
-                                    div()
-                                        .flex()
-                                        .gap(px(6.))
-                                        .items_center()
-                                        .child(div().text_xs().text_color(apagado).child("R$"))
-                                        .child(
-                                            div()
-                                                .flex_1()
-                                                .child(Input::new(&campos.preco).xsmall()),
-                                        )
-                                        .child(
-                                            Button::new("painel-preco-aplicar")
-                                                .label("Aplicar")
-                                                .xsmall()
-                                                .disabled(!foto.editavel())
-                                                .on_click(cx.listener(|tela, _ev, _window, cx| {
-                                                    tela.aplicar_preco_de_venda(cx)
-                                                })),
-                                        ),
-                                )
-                                .child(div().text_xs().text_color(apagado).child(
-                                    match foto.preco_de_venda {
-                                        Some(centavos) => format!(
-                                            "O cliente paga {} por esta foto.",
-                                            dinheiro::formatar(centavos)
-                                        ),
-                                        None => {
-                                            "Sem valor fixado: vale o preço da faixa.".to_string()
-                                        }
-                                    },
-                                ))
-                        }))
-                        .when(negociada, |painel| {
-                            painel.child(div().text_xs().text_color(cx.theme().warning).child(
-                                match foto.preco_negociado {
-                                    Some(centavos) => {
-                                        format!("Balcão: {}", dinheiro::formatar(centavos))
-                                    }
-                                    None => "Balcão: registrado".to_string(),
-                                },
-                            ))
-                        })
-                        // 🤝 **Negociação e apagar**, os dois últimos controles que o
-                        // painel do site tem e este não tinha.
-                        .when(foto.editavel(), |painel| {
-                            painel.child(
-                                div()
                                     .flex()
+                                    .items_center()
                                     .gap(px(6.))
+                                    .child(div().text_color(apagado).child("R$"))
                                     .child(
-                                        Button::new("painel-negociar")
-                                            .label("Negociação…")
-                                            .xsmall()
-                                            .on_click(cx.listener(|tela, _ev, _window, cx| {
-                                                let Some(foto) = tela.em_foco().cloned() else {
-                                                    return;
-                                                };
-                                                tela.pedir_negociacao(vec![foto.id], true, cx);
-                                            })),
+                                        div()
+                                            .w(px(96.))
+                                            .debug_selector(|| "painel-preco".into())
+                                            .child(
+                                                crate::estilo::campo(Input::new(&campos.preco))
+                                                    .small()
+                                                    .disabled(!foto.editavel()),
+                                            ),
                                     )
                                     .child(
-                                        Button::new("painel-apagar")
-                                            .label("Apagar")
-                                            .xsmall()
-                                            .danger()
-                                            .ghost()
+                                        crate::estilo::botao_contorno("painel-preco-aplicar", cx)
+                                            .debug_selector(|| "painel-preco-aplicar".into())
+                                            .label("Aplicar")
+                                            .disabled(!foto.editavel())
                                             .on_click(cx.listener(|tela, _ev, _window, cx| {
-                                                tela.apagar_do_site(cx)
+                                                tela.aplicar_preco_de_venda(cx)
                                             })),
                                     ),
                             )
+                            .child(match (foto.preco_de_venda, da_faixa) {
+                                (Some(fixado), faixa) => div()
+                                    .flex()
+                                    .flex_wrap()
+                                    .items_center()
+                                    .gap_x(px(4.))
+                                    .text_color(apagado)
+                                    .child("Fixado em")
+                                    .child(
+                                        div()
+                                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                                            .text_color(tema.foreground)
+                                            .child(format!("{};", dinheiro::formatar(fixado))),
+                                    )
+                                    .child(match faixa {
+                                        Some(centavos) => format!(
+                                            "a faixa cobraria {}.",
+                                            dinheiro::formatar(centavos)
+                                        ),
+                                        None => "a faixa cobraria outro valor.".to_string(),
+                                    })
+                                    .when(foto.editavel(), |frase| {
+                                        frase.child(
+                                            crate::estilo::botao_raso("painel-voltar-a-faixa")
+                                                .debug_selector(|| "painel-voltar-a-faixa".into())
+                                                .label("Voltar à faixa")
+                                                .text_color(apagado)
+                                                .px(px(0.))
+                                                .on_click(cx.listener(|tela, _ev, window, cx| {
+                                                    tela.voltar_a_faixa(window, cx)
+                                                })),
+                                        )
+                                    }),
+                                (None, Some(centavos)) => div().text_color(apagado).child(format!(
+                                    "Sem valor fixado: o cliente paga {} (preço da loja).",
+                                    dinheiro::formatar(centavos)
+                                )),
+                                (None, None) => div()
+                                    .text_color(apagado)
+                                    .child("Sem valor fixado: vale o preço da faixa."),
+                            }),
+                    )
+            });
+
+            let aberto = self.faixa_e_precos_aberto;
+            crate::estilo::cartao(cx).child(
+                Collapsible::new()
+                    .open(aberto)
+                    .child(
+                        gatilho_da_sanfona(
+                            "painel-sanfona",
+                            "Faixa, negociação e preço",
+                            aberto,
+                            cx,
+                        )
+                        .w_full()
+                        .h(px(36.))
+                        .px(px(12.))
+                        .gap(px(8.))
+                        .text_color(cx.theme().foreground)
+                        .font_weight(gpui_kit::FontWeight::MEDIUM)
+                        .rounded(px(0.))
+                        // O kit centraliza o conteúdo do botão; a sobra
+                        // depois do rótulo o encosta à esquerda, como a
+                        // sanfona do site.
+                        .child(div().flex_1())
+                        .on_click(cx.listener(|tela, _ev, _w, cx| {
+                            tela.faixa_e_precos_aberto = !tela.faixa_e_precos_aberto;
+                            cx.notify();
                         })),
-                ),
-        )
+                    )
+                    .content(
+                        gpui_kit::component::v_flex()
+                            .gap(px(10.))
+                            .p(px(12.))
+                            .border_t_1()
+                            .border_color(borda)
+                            .child(dados)
+                            .children(campos)
+                            .when(foto.editavel(), |conteudo| {
+                                conteudo.child(
+                                    crate::estilo::botao_fantasma("painel-apagar", cx)
+                                        .debug_selector(|| "painel-apagar".into())
+                                        .w_full()
+                                        .text_color(cx.theme().danger)
+                                        .icon(Icon::new(Icone::Trash2))
+                                        .label("Apagar")
+                                        .on_click(cx.listener(|tela, _ev, _window, cx| {
+                                            tela.apagar_do_site(cx)
+                                        })),
+                                )
+                            }),
+                    ),
+            )
+        });
+
+        crate::estilo::cartao(cx)
+            .debug_selector(|| "painel-cartao-da-foto".into())
+            .flex()
+            .flex_col()
+            .text_sm()
+            .child(cabecalho)
+            .child(linha_da_nota)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.))
+                    .p(px(12.))
+                    .children(acoes)
+                    .children(sanfona),
+            )
+            .into_any_element()
+    }
+
+    /// "Voltar à faixa": tira o preço fixado desta foto, e o cliente volta a
+    /// pagar o da faixa — o botão da frase "Fixado em…" do site. O campo se
+    /// esvazia junto, como lá: o valor que ele mostrava deixou de valer.
+    fn voltar_a_faixa(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(foto) = self.em_foco().cloned() else {
+            return;
+        };
+        if !foto.editavel() {
+            return;
+        }
+        if let Some(campos) = self.campos_do_painel.as_ref() {
+            campos.preco.update(cx, |campo, cx| {
+                campo.trocar_valor(String::new(), window, cx)
+            });
+        }
+        let mudanca = domain::services::pos_venda::MudancaDaFoto {
+            preco_de_venda: Some(None),
+            ..Default::default()
+        };
+        self.pedir_mudanca(foto.id.clone(), mudanca, cx);
     }
 
     /// A tira do rodapé — **o porte da `TiraDaBiblioteca` do site**.
