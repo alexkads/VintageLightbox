@@ -1,12 +1,13 @@
 {
-  "versao": "0.1.26",
-  "titulo": "Novo botão Desempenho no rodapé: mede a fluidez da tela e mostra onde o tempo está indo, para acharmos a lentidão.",
+  "versao": "0.1.27",
+  "titulo": "Perspectiva guiada no Enquadrar: trace sobre a foto o que devia estar reto, e as paredes, portas e janelas ficam em pé.",
   "importante": false,
   "novidades": [
-    "No rodapé, o botão Desempenho abre uma janela própria, que pode ir para o outro monitor. Aperte Iniciar, repita o que está lento (rolar a galeria, trocar de foto, arrastar um ajuste, pintar uma máscara) e aperte Parar.",
-    "A janela mostra quantos quadros por segundo a tela fez, quais engasgaram e em que etapa o tempo foi gasto, e dá o diagnóstico numa frase.",
-    "Salvar no banco guarda a medição neste computador; Copiar relatório leva o texto completo, com o computador, a placa de vídeo e o driver, para você mandar ao suporte.",
-    "Na Revelação local, um botão no fim da barra de ferramentas sai de uma vez da ferramenta, da máscara e do retoque escolhidos (o mesmo que o Esc)."
+    "No Enquadrar, o botão Guias liga a perspectiva guiada. Arraste sobre a foto ao longo de algo que devia estar reto (um batente, a quina da parede, o rodapé): o traço em pé vira guia Vertical, o deitado vira Horizontal. Com duas guias a foto se corrige ao soltar; cabem quatro.",
+    "As pontas das guias se arrastam para acertar; clique numa guia e tecle Delete para apagá-la, ou use o × no painel. O rótulo Vertical/Horizontal no painel troca o eixo.",
+    "Os controles Vertical e Horizontal fazem o ajuste fino por cima das guias, e Redefinir perspectiva volta a foto ao que era.",
+    "Restringir ao conteúdo (ligado) mantém o recorte dentro da foto, sem cantos vazios, também ao endireitar e ao arrastar as alças. Desligado, os cantos vazios saem brancos no arquivo.",
+    "A correção vale em tudo: tela do cliente, JPEG, impressão, envio ao site e sincronização (no grupo Enquadramento). Desfazer e refazer funcionam gesto a gesto, e girar ou espelhar depois mantém a foto corrigida."
   ],
-  "por_que_atualizar": "Com a medição de cada balcão (principalmente os de Windows) dá para saber se a lentidão é do programa ou do computador, e corrigir no lugar certo."
+  "por_que_atualizar": "Fotos de ambiente tiradas de baixo ou de lado saem com as paredes e as portas tortas; agora elas se endireitam no próprio balcão, sem outro programa."
 }
