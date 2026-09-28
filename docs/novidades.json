@@ -1,11 +1,11 @@
 {
-  "versao": "0.1.29",
-  "titulo": "Desempenho mais certeiro: o diagnóstico aponta a etapa que realmente segura a tela e registra o enquadramento da foto.",
+  "versao": "0.1.30",
+  "titulo": "As medições do botão Desempenho agora vão para o servidor: as de todos os balcões ficam juntas para comparar.",
   "importante": false,
   "novidades": [
-    "O diagnóstico da janela Desempenho separa o desenho da tela das etapas da foto que acontecem junto com ele: quando o recorte da foto trava a tela, é o recorte que aparece como culpado.",
-    "Cada medição passa a registrar como a foto estava enquadrada (sem corte, recorte reto, endireitada, perspectiva ou Enquadrar aberto), porque isso muda muito o custo de cada ajuste.",
-    "Computador de mesa sem bateria não recebe mais o aviso de que está na bateria."
+    "Salvar no banco guarda a medição neste computador e também no servidor. Sem internet, ela fica guardada e sobe sozinha na próxima vez que a janela Desempenho abrir.",
+    "As medições que você já tinha salvado neste computador sobem ao servidor na primeira vez que abrir a janela Desempenho depois de atualizar.",
+    "As abas Sessões e Comparar mostram as medições de todos os computadores, e Comparar põe Windows, Linux e Mac lado a lado na mesma operação."
   ],
-  "por_que_atualizar": "Para a próxima medição dizer com precisão onde a lentidão está, antes da correção que vem a seguir."
+  "por_que_atualizar": "Sem exportar arquivo: basta medir e salvar em cada balcão para compararmos onde a tela fica lenta."
 }
