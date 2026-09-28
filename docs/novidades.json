@@ -1,13 +1,11 @@
 {
-  "versao": "0.1.28",
-  "titulo": "Editor de fotos: pinte e apague sobre a foto numa janela própria, e a Revelação passa a usar a foto editada.",
+  "versao": "0.1.29",
+  "titulo": "Desempenho mais certeiro: o diagnóstico aponta a etapa que realmente segura a tela e registra o enquadramento da foto.",
   "importante": false,
   "novidades": [
-    "Na Revelação, clique com o botão direito numa foto da tira e escolha \"Editar Foto\": abre uma janela só para aquela foto — a clicada, mesmo com várias marcadas. A seleção e as setas da Revelação continuam como estavam.",
-    "Na janela do editor: Pincel (B) e Borracha (E), com tamanho ([ e ]), dureza, opacidade e cor. A pintura fica numa camada por cima da foto, que dá para esconder (H) e deixar mais transparente; a foto de baixo nunca muda.",
-    "Desfazer (Cmd/Ctrl+Z) e refazer (Cmd/Ctrl+Shift+Z), e o aviso \"Alterações não salvas\" enquanto houver o que salvar. Fechar com alterações pergunta se quer salvar.",
-    "Salvar (Cmd/Ctrl+S) atualiza a Revelação na hora: os ajustes, o corte e as máscaras continuam, agora aplicados sobre a foto editada. O JPEG, a impressão e o \"Salvar na galeria\" saem com a edição.",
-    "Reabrir o editor da mesma foto traz a pintura e o desfazer como estavam, mesmo depois de fechar o app."
+    "O diagnóstico da janela Desempenho separa o desenho da tela das etapas da foto que acontecem junto com ele: quando o recorte da foto trava a tela, é o recorte que aparece como culpado.",
+    "Cada medição passa a registrar como a foto estava enquadrada (sem corte, recorte reto, endireitada, perspectiva ou Enquadrar aberto), porque isso muda muito o custo de cada ajuste.",
+    "Computador de mesa sem bateria não recebe mais o aviso de que está na bateria."
   ],
-  "por_que_atualizar": "Tirar um fio, cobrir uma mancha ou pintar um detalhe agora se faz no próprio balcão, sem outro programa — e a foto editada segue pela revelação e pela entrega como qualquer outra."
+  "por_que_atualizar": "Para a próxima medição dizer com precisão onde a lentidão está, antes da correção que vem a seguir."
 }
