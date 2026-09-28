@@ -386,7 +386,7 @@ impl NovaSessao {
                         );
                         if receita.total > 0 {
                             frase.push_str(&format!(
-                                " · receita {}/{}",
+                                " · revelação {}/{}",
                                 receita.prontas, receita.total
                             ));
                         }

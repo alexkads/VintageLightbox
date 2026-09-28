@@ -1103,7 +1103,7 @@ impl Revelacao {
             "Nada a salvar: o que está no canvas já está na galeria".to_string()
         } else if outras > 0 {
             if self.pode_revelar() {
-                format!("Salva esta e mais {outras} com receita pendente, e fecha a Revelação")
+                format!("Salva esta e mais {outras} com revelação pendente, e fecha a Revelação")
             } else {
                 format!(
                     "Esta foi comprada e não se revela; salva as {outras} pendentes e fecha a Revelação"
@@ -3215,13 +3215,13 @@ impl Revelacao {
             // rendem diferente; aqui ele responde "a GPU está mesmo sendo usada,
             // e por qual caminho" — a pergunta que aparece toda vez que alguém
             // acha o arrasto lento.
-            // 🖌️ "CAMADAS": a foto aberta está sendo revelada a partir da
+            // 🖌️ "EDITADA": a foto aberta está sendo revelada a partir da
             // imagem do editor, e não do bruto.
             .when(self.revisao_da_aberta() != fonte::DO_BRUTO, |barra| {
                 barra.child(
                     div()
-                        .id("selo-camadas-aberta")
-                        .debug_selector(|| "selo-camadas-aberta".into())
+                        .id("selo-editada-aberta")
+                        .debug_selector(|| "selo-editada-aberta".into())
                         .flex_none()
                         .flex()
                         .items_center()
@@ -3233,11 +3233,11 @@ impl Revelacao {
                         .text_xs()
                         .text_color(tema::cores::quente())
                         .child(Icon::new(Icone::Pencil).size(px(10.)))
-                        .child("CAMADAS")
+                        .child("EDITADA")
                         .tooltip(|window, cx| {
                             Tooltip::new(
-                                "A receita está sendo aplicada sobre as camadas do Editor. \
-                                 Botão direito na tira → Excluir as camadas volta ao arquivo bruto.",
+                                "Editada: a revelação está sendo aplicada sobre a edição. \
+                                 Botão direito na tira → Excluir a edição volta ao arquivo bruto.",
                             )
                             .build(window, cx)
                         }),

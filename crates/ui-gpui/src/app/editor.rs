@@ -220,7 +220,7 @@ impl Aplicativo {
                     raiz.a_fonte_da_foto_mudou(&alvo, cx);
                     raiz.avisar_em_toast(
                         format!(
-                            "Camadas de {} excluídas — a foto volta ao arquivo bruto",
+                            "Edição de {} excluída — a foto volta ao arquivo bruto",
                             alvo.nome
                         ),
                         false,
@@ -228,10 +228,7 @@ impl Aplicativo {
                     );
                 }
                 Err(erro) => raiz.avisar_em_toast(
-                    format!(
-                        "Não foi possível excluir as camadas de {}: {erro}",
-                        alvo.nome
-                    ),
+                    format!("Não foi possível excluir a edição de {}: {erro}", alvo.nome),
                     true,
                     cx,
                 ),

@@ -321,7 +321,7 @@ fn dica(
         situacao.to_string(),
     ];
     if nao_salva {
-        partes.push("receita não salva".into());
+        partes.push("revelação não salva".into());
     }
     if marcada && !escolhida {
         partes.push("escolhida para sincronizar".into());
@@ -793,7 +793,7 @@ impl Revelacao {
             .count();
         if pendentes > 0 {
             window.push_notification(
-                format!("{pendentes} têm receita não salva: o arquivo sai como está na galeria."),
+                format!("{pendentes} têm revelação não salva: o arquivo sai como está na galeria."),
                 cx,
             );
         }
@@ -1158,13 +1158,13 @@ impl Revelacao {
                         .bg(tema::cores::quente()),
                 )
             })
-            // 🖌️ O selo das camadas: um lápis no canto de baixo à esquerda (os de
+            // 🖌️ O selo "Editada": um lápis no canto de baixo à esquerda (os de
             // cima são do cliente; o ponto de baixo à direita é da receita).
             .when(editada, |t| {
                 t.child(
                     div()
-                        .id(("selo-camadas", posicao))
-                        .debug_selector(move || format!("selo-camadas-{posicao}"))
+                        .id(("selo-editada", posicao))
+                        .debug_selector(move || format!("selo-editada-{posicao}"))
                         .absolute()
                         .bottom(px(3.))
                         .left(px(3.))
@@ -1180,10 +1180,8 @@ impl Revelacao {
                                 .text_color(gpui_kit::white()),
                         )
                         .tooltip(|window, cx| {
-                            Tooltip::new(
-                                "Com camadas do Editor — botão direito → Excluir as camadas",
-                            )
-                            .build(window, cx)
+                            Tooltip::new("Editada — botão direito → Excluir a edição")
+                                .build(window, cx)
                         }),
                 )
             })
@@ -1582,7 +1580,7 @@ impl Revelacao {
                 self.tira.menu_do_roteiro = None;
                 cx.notify();
             }
-            // 🖌️ O "Excluir as camadas" desta miniatura, já confirmado.
+            // 🖌️ O "Excluir a edição" desta miniatura, já confirmado.
             "excluir" => {
                 if let Some(foto) = na_posicao.and_then(|p| self.acervo.get(p).cloned()) {
                     self.tira.a_excluir = Some(foto);
@@ -1649,7 +1647,7 @@ fn montar_o_menu(
         // 🖌️ Volta a foto ao bruto: o projeto e a imagem editada saem, e a
         // **receita fica**. Pergunta antes — não tem volta.
         .item(
-            PopupMenuItem::new("Excluir as camadas")
+            PopupMenuItem::new("Excluir a edição")
                 .disabled(!dados.com_edicao)
                 .on_click(move |_ev, window, cx| {
                     let _ = para_excluir
@@ -1719,9 +1717,9 @@ fn montar_o_menu(
         // fica como está na galeria (ver `descartar.rs`).
         .item(
             PopupMenuItem::new(if n_descartar > 1 {
-                format!("Descartar a receita de {n_descartar} fotos")
+                format!("Descartar a revelação de {n_descartar} fotos")
             } else {
-                "Descartar a receita".to_string()
+                "Descartar a revelação".to_string()
             })
             .disabled(n_descartar == 0)
             .on_click(move |_ev, window, cx| {
@@ -1870,7 +1868,7 @@ mod testes {
         let a = acervo();
         assert_eq!(
             dica(&a[2], 3, false, true, true),
-            "3. c — 5 estrelas — levada no balcão — receita não salva — escolhida para sincronizar"
+            "3. c — 5 estrelas — levada no balcão — revelação não salva — escolhida para sincronizar"
         );
         assert_eq!(
             dica(&a[1], 2, true, true, false),

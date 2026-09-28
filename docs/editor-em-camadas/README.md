@@ -3,23 +3,18 @@
 > Uso interno da equipe do estúdio, dentro do VintageLightbox. Aberto pela Revelação: botão direito numa
 > foto do FilmStrip → **"Editar Foto"** → janela própria para aquela foto.
 
-## Os nomes — regra do dono (27/set/2026)
+## Os nomes — o contrato "revelar e editar" (dono, 28/set/2026)
 
-> *"Receita e edição precisam ser coisas diferentes!"* · *"Revelação usa receita; Editor usa camadas!
-> Primeiro vem arquivo bruto, editor de camadas e depois vem a receita."*
+> *"Temos Revelação e Edição, é tipo Lightroom e Photoshop."*
 
 ```text
-arquivo bruto  →  camadas (Editor)  →  receita (Revelação)  →  JPEG / galeria
+arquivo bruto  →  edição (camadas, o editor)  →  revelação (parâmetros, a Revelação)
 ```
 
-| Na tela | Quer dizer | Onde |
-|---|---|---|
-| **camadas** | o que foi pintado no Editor, por cima do bruto | selo "CAMADAS" no cabeçalho da Revelação, lápis na miniatura da tira, "· camadas" na grade da sessão, "Excluir as camadas" no menu da tira |
-| **receita** | os ajustes, o corte e as máscaras da Revelação | "Descartar a receita", "receita não salva", "N receitas não salvas" |
-| **Revelação** | a tela da receita (antes chamada de "editor" em alguns avisos) | "fecha a Revelação" |
-
-"Excluir as camadas" apaga o projeto do Editor e a foto volta ao arquivo bruto; a receita fica.
-"Descartar a receita" volta os ajustes ao que a galeria tem; as camadas ficam.
+Na tela: "Editar Foto", selo **EDITADA** (cabeçalho da Revelação, lápis na tira, "· editada" na grade
+da sessão), "Excluir a edição" — e, do outro lado, "revelação não salva", "Descartar a revelação".
+**"Receita" não aparece em texto nenhum.** O contrato inteiro:
+`recordarfotos-e-commerce/docs/REVELAR_E_EDITAR.md`.
 
 ## Por que existe
 

@@ -72,6 +72,13 @@ O que o app sobe e lê do pós-venda segue o contrato do site:
 bruto + parâmetros ao SQLite antes de a nuvem apagar (C21), e cada versão dos parâmetros fica no
 histórico, que anda com a foto (C23–C26). As divergências deste app estão lá como D7, D8, D14 e D15. Onde o código diverge do contrato, o código está errado.
 
+## 🗣️ Revelar e editar — os nomes na tela
+
+`../recordarfotos-e-commerce/docs/REVELAR_E_EDITAR.md` (dono, 28/set/2026): **revelar** é o Lightroom
+(parâmetros sobre o bruto — a tela Revelação) e **editar** é o Photoshop (camadas — o editor, aberto
+por "Editar Foto"). Nenhum texto da tela diz **"receita"**, "edição" nunca quer dizer parâmetro, e
+"o editor" nunca é a Revelação. Nomes internos do código podem ficar.
+
 ## Build and Test Commands
 
 **Comece por `make`** — sem argumento ele lista tudo que segue, com uma linha cada:

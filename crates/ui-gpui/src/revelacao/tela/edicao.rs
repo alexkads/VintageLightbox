@@ -97,16 +97,16 @@ impl Revelacao {
                 .confirm()
                 .button_props(
                     DialogButtonProps::default()
-                        .ok_text("Excluir as camadas")
+                        .ok_text("Excluir a edição")
                         .ok_variant(ButtonVariant::Danger)
                         .cancel_text("Cancelar")
                         .show_cancel(true),
                 )
-                .title(SharedString::from(format!("Excluir as camadas de {nome}?")))
+                .title(SharedString::from(format!("Excluir a edição de {nome}?")))
                 .child(div().text_sm().child(
-                    "O que foi pintado no Editor é apagado e a foto volta ao arquivo bruto. \
-                     A receita da Revelação (ajustes, corte e máscaras) continua, agora \
-                     sobre o bruto. Não dá para desfazer.",
+                    "O que foi pintado no editor é apagado e a foto volta ao arquivo bruto. \
+                     A revelação (ajustes, corte e máscaras) continua, agora sobre o \
+                     bruto. Não dá para desfazer.",
                 ))
                 .on_ok(move |_ev, window, cx| {
                     para_ok.update(cx, |tela, cx| {
@@ -523,6 +523,37 @@ mod testes {
                 assert_eq!(tela.ajustes(), ajustes, "a receita ficou");
                 assert!(!tela.tem_edicao(&p.acervo[0]));
                 assert!(!tela.tem_projeto_no_editor(&p.acervo[0]));
+            })
+            .unwrap();
+    }
+
+    /// 🔑 **Sem edição e sem revelação, aparece o arquivo bruto** (contrato
+    /// "revelar e editar"): excluir a edição e zerar a revelação deixam no
+    /// palco exatamente a prévia do bruto.
+    #[gpui_kit::test]
+    fn sem_edicao_e_sem_revelacao_aparece_o_bruto(cx: &mut TestAppContext) {
+        let p = palco(cx);
+        editar_e_salvar(&p, 0);
+        p.janela
+            .update(cx, |tela, window, cx| {
+                tela.aplicar_para_teste(0, 1.2, cx);
+                tela.fonte_mudou("id-0", None, cx);
+                assert_eq!(tela.revisao_da_aberta(), 1);
+                assert!(p.edicoes.excluir(&FotoDoEditor::da(&p.acervo[0])).unwrap());
+                tela.fonte_mudou("id-0", None, cx);
+                tela.redefinir_ajustes(window, cx);
+                assert_eq!(tela.ajustes(), Ajustes::default(), "a revelação zerou");
+                // O que o motor recebe: a entrada é o bruto, e os parâmetros
+                // estão todos no neutro — o que sai dele é o próprio bruto.
+                assert!(tela.sem_revelacao(), "nenhum parâmetro da revelação");
+                assert!(!tela.enquadrada(), "sem corte");
+                assert_eq!(tela.revisao_da_aberta(), fonte::DO_BRUTO, "nenhuma edição");
+                let bruto = p.previews.get_preview("id-0").unwrap().to_rgb8();
+                assert_eq!(
+                    origem_rgb(tela).as_raw(),
+                    bruto.as_raw(),
+                    "a entrada é o arquivo bruto"
+                );
             })
             .unwrap();
     }

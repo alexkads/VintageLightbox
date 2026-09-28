@@ -1010,7 +1010,7 @@ impl EditorDeFoto {
                 .gap(px(16.))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(crate::estilo::cabecalho_do_dialogo(
-                    "Salvar as camadas antes de fechar?",
+                    "Salvar a edição antes de fechar?",
                     SharedString::from(format!(
                         "{} tem alterações que ainda não foram salvas. Descartar fecha a janela e mantém a última versão salva.",
                         self.foto.nome

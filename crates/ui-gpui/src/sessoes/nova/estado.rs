@@ -58,7 +58,7 @@ pub struct Formulario {
 
 pub const ETAPAS: [&str; 7] = [
     "Aplicativo",
-    "Fotos e receita",
+    "Fotos e revelação",
     "Cliente e preço",
     "Agendamento",
     "Voucher",

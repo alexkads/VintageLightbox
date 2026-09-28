@@ -5403,9 +5403,9 @@ impl Aplicativo {
         self.recontar_o_que_falta_subir(cx);
         let mut aviso = match descartadas.as_slice() {
             [] => String::new(),
-            [uma] => format!("A receita de {uma} foi descartada — ela fica como está na galeria"),
+            [uma] => format!("A revelação de {uma} foi descartada — ela fica como está na galeria"),
             varias => format!(
-                "{} receitas descartadas — as fotos ficam como estão na galeria",
+                "{} revelações descartadas — as fotos ficam como estão na galeria",
                 varias.len()
             ),
         };

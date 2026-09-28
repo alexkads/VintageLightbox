@@ -434,7 +434,7 @@ fn o_botao_de_salvar_conta_o_que_ha_para_salvar(cx: &mut TestAppContext) {
         let botao = tela.botao_de_salvar();
         assert!(botao.habilitado);
         assert_eq!(
-            botao.dica, "Salva esta e mais 1 com receita pendente, e fecha a Revelação",
+            botao.dica, "Salva esta e mais 1 com revelação pendente, e fecha a Revelação",
             "a dica conta as que o Sincronizar deixou"
         );
     });
