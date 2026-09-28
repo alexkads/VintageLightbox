@@ -56,6 +56,8 @@ pub struct Retencao {
     erros: [Option<&'static str>; 4],
     /// A frase do servidor quando ele recusa (`Alert` "Não foi possível salvar").
     recusa: Option<SharedString>,
+    /// A última recusa que virou toast (ver `estilo::toast_quando_mudar`).
+    recusa_vista: Option<SharedString>,
     salvando: bool,
     salvou: bool,
     recados: (Sender<Recado>, Receiver<Recado>),
@@ -80,6 +82,7 @@ impl Retencao {
             atualizada_em: None,
             erros: [None; 4],
             recusa: None,
+            recusa_vista: None,
             salvando: false,
             salvou: false,
             recados: channel(),
@@ -281,7 +284,16 @@ fn data_e_hora_br(iso: &str) -> Option<String> {
 }
 
 impl Render for Retencao {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        estilo::toast_quando_mudar(
+            &mut self.recusa_vista,
+            self.recusa
+                .clone()
+                .map(|recusa| format!("Não foi possível salvar. {recusa}").into()),
+            estilo::Toast::Erro,
+            window,
+            cx,
+        );
         let tema = cx.theme();
         let (apagado, texto) = (tema.muted_foreground, tema.foreground);
 
@@ -348,7 +360,11 @@ impl Retencao {
                         .font_weight(FontWeight::MEDIUM)
                         .child(prazo.rotulo()),
                 )
-                .child(div().w(px(128.)).child(Input::new(&self.campos[i])))
+                .child(
+                    div()
+                        .w(px(128.))
+                        .child(crate::estilo::campo(Input::new(&self.campos[i]))),
+                )
                 .child(div().text_xs().text_color(apagado).child(prazo.ajuda()))
                 .when_some(self.erros[i], |d, erro| {
                     d.child(div().text_sm().text_color(perigo).child(erro))
@@ -385,13 +401,6 @@ impl Retencao {
                         .text_color(apagado)
                         .child(format!("Última alteração em {quando}.")),
                 )
-            })
-            .when_some(self.recusa.clone(), |d, recusa| {
-                d.child(estilo::aviso(
-                    format!("Não foi possível salvar. {recusa}"),
-                    true,
-                    cx,
-                ))
             })
             .children(campos)
             .child(

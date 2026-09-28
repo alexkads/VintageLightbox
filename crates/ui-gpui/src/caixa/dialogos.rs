@@ -1982,9 +1982,12 @@ impl Caixa {
                 div()
                     .font_family(cx.theme().mono_font_family.clone())
                     .text_lg()
-                    .child(Input::new(&texto_campo)),
+                    .child(crate::estilo::campo(Input::new(&texto_campo))),
             ))
-            .child(rotulado("Motivo (opcional)", Input::new(&motivo)))
+            .child(rotulado(
+                "Motivo (opcional)",
+                crate::estilo::campo(Input::new(&motivo)),
+            ))
             .child(resultado)
             .child(
                 rodape()
@@ -2032,7 +2035,7 @@ impl Caixa {
                         .gap(px(8.))
                         .child(
                             div().flex_1().min_w(px(0.)).child(
-                                Select::new(&form.escolhas[papel])
+                                crate::estilo::campo(Select::new(&form.escolhas[papel]))
                                     .placeholder(*dica)
                                     .search_placeholder(*dica)
                                     .cleanable(true)
@@ -2085,20 +2088,18 @@ impl Caixa {
         };
         v_flex()
             .gap(px(16.))
-            .child(rotulado("Nome", Input::new(&c.nome)))
+            .child(rotulado("Nome", crate::estilo::campo(Input::new(&c.nome))))
             .child(
                 h_flex()
                     .gap(px(12.))
-                    .child(
-                        div()
-                            .flex_1()
-                            .child(rotulado("WhatsApp (opcional)", Input::new(&c.whatsapp))),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .child(rotulado("E-mail (opcional)", Input::new(&c.email))),
-                    ),
+                    .child(div().flex_1().child(rotulado(
+                        "WhatsApp (opcional)",
+                        crate::estilo::campo(Input::new(&c.whatsapp)),
+                    )))
+                    .child(div().flex_1().child(rotulado(
+                        "E-mail (opcional)",
+                        crate::estilo::campo(Input::new(&c.email)),
+                    ))),
             )
             .children(c.erro.clone().map(|e| erro_do_form(e, cx)))
             .child(
@@ -2219,7 +2220,10 @@ impl Caixa {
                     )
                 })
                 .when(forma != FormaDePagamento::Dinheiro, |d| {
-                    d.child(rotulado(forma.dica_do_detalhe(), Input::new(&form.detalhe)))
+                    d.child(rotulado(
+                        forma.dica_do_detalhe(),
+                        crate::estilo::campo(Input::new(&form.detalhe)),
+                    ))
                 })
                 .child(
                     com_tecla(
@@ -2392,7 +2396,10 @@ impl Caixa {
             .gap(px(16.))
             .child(tipos)
             .child(campo_de_valor("Valor", &form.valor, cx))
-            .child(rotulado("Motivo", Input::new(&form.motivo)))
+            .child(rotulado(
+                "Motivo",
+                crate::estilo::campo(Input::new(&form.motivo)),
+            ))
             .children(form.erro.clone().map(|e| erro_do_form(e, cx)))
             .child(
                 rodape().child(
@@ -2707,7 +2714,7 @@ impl Caixa {
                         ))
                     }),
                 ))
-                .child(Input::new(&form.detalhe))
+                .child(crate::estilo::campo(Input::new(&form.detalhe)))
         });
 
         let des_sinalizar = form.des_sinalizar;
@@ -2742,7 +2749,10 @@ impl Caixa {
                     }),
             )
             .children(devolucao)
-            .child(rotulado("Motivo", Input::new(&form.motivo)))
+            .child(rotulado(
+                "Motivo",
+                crate::estilo::campo(Input::new(&form.motivo)),
+            ))
             .child(
                 h_flex()
                     .id("caixa-estorno-des-sinalizar")
@@ -2828,7 +2838,7 @@ impl Caixa {
                 )
                 .child(rotulado(
                     "Observação (opcional)",
-                    Input::new(&form.observacao),
+                    crate::estilo::campo(Input::new(&form.observacao)),
                 ))
                 .child(
                     rodape()
@@ -2955,8 +2965,14 @@ impl Caixa {
                 .grid()
                 .grid_cols(2)
                 .gap(px(12.))
-                .child(rotulado("Site", Select::new(&form.site)))
-                .child(rotulado("Cupom", Input::new(&form.cupom)))
+                .child(rotulado(
+                    "Site",
+                    crate::estilo::campo(Select::new(&form.site)),
+                ))
+                .child(rotulado(
+                    "Cupom",
+                    crate::estilo::campo(Input::new(&form.cupom)),
+                ))
         });
         let preco = (form.tipo != Tipo::Cortesia).then(|| {
             let rotulo = match form.tipo {
@@ -2969,7 +2985,11 @@ impl Caixa {
                 h_flex()
                     .gap(px(8.))
                     .child(div().text_sm().text_color(apagado).child("R$"))
-                    .child(div().w(px(128.)).child(Input::new(&form.preco)))
+                    .child(
+                        div()
+                            .w(px(128.))
+                            .child(crate::estilo::campo(Input::new(&form.preco))),
+                    )
                     .children(form.preco_da_faixa.map(|p| {
                         div()
                             .text_xs()
@@ -2984,7 +3004,7 @@ impl Caixa {
             } else {
                 "Motivo (opcional)"
             },
-            Input::new(&form.motivo),
+            crate::estilo::campo(Input::new(&form.motivo)),
         );
         let enviando = form.enviando;
         let existente = form.existente;

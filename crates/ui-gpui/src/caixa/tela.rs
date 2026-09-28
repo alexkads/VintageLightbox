@@ -312,6 +312,8 @@ pub struct Caixa {
     /// dock usava (`docas-caixa.json`).
     arrumacao: crate::docas::Arrumacao,
     _colunas: gpui_kit::Subscription,
+    /// Os avisos da página que já viraram toast — cada um sai uma vez.
+    avisos_vistos: Vec<String>,
     pub(super) publicador: Arc<dyn Publicador>,
     pub(super) sessao: Option<Sessao>,
     /// A sessão escolhida na lista (o `?sessao=` do site).
@@ -452,6 +454,7 @@ impl Caixa {
             colunas,
             arrumacao: crate::docas::ler(COLUNAS),
             _colunas,
+            avisos_vistos: Vec::new(),
             desconto: DescontoNoTotal::default(),
             pessoas: pessoas_lembradas(&lembranca),
             lembranca,
@@ -1142,6 +1145,7 @@ impl Render for Caixa {
             }
         }
         self.aplicar_pendencias_do_dialogo(window, cx);
+        self.avisos_em_toast(window, cx);
         let (fundo, texto) = (cx.theme().background, cx.theme().foreground);
         let colunas = self.colunas_do_caixa(cx);
         let seta = |id, lado, dica, cx: &mut Context<Self>| {
@@ -1189,7 +1193,6 @@ impl Render for Caixa {
             .text_color(texto)
             .text_sm()
             .child(self.cabecalho(window, cx))
-            .children(self.avisos_da_pagina(cx))
             .child(
                 // `flex` sem `items_center`: as colunas esticam até o rodapé.
                 div()
@@ -1395,10 +1398,7 @@ impl Caixa {
                 fechar.on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.abrir_ou_fechar(w, cx))),
             )
             .child(
-                estilo::botao_fantasma("caixa-f1", cx)
-                    .w(px(32.))
-                    .px(px(0.))
-                    .child(Icon::new(Icone::Keyboard).size(px(16.)))
+                estilo::botao_icone_padrao("caixa-f1", Icone::Keyboard)
                     .tooltip("Atalhos (F1)")
                     .on_click(cx.listener(|t, _: &ClickEvent, w, cx| {
                         t.abrir_dialogo(TipoDeDialogo::Atalhos, w, cx)
@@ -1473,26 +1473,40 @@ impl Caixa {
                 None => estado.set_selected_index(None, window, cx),
             });
         }
-        Select::new(&estado).w(px(224.)).placeholder("Estúdio…")
+        crate::estilo::campo(Select::new(&estado))
+            .w(px(224.))
+            .placeholder("Estúdio…")
     }
 
-    fn avisos_da_pagina(&self, cx: &mut Context<Self>) -> Option<Div> {
-        let vista = self.vista.as_ref()?;
-        if !vista.indisponivel && vista.avisos.is_empty() {
-            return None;
+    /// 🍞 Os avisos da página — o caixa que não respondeu, a lista que não
+    /// carregou — no toast do gpui-kit, cada um uma vez, quando aparece.
+    fn avisos_em_toast(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(vista) = self.vista.as_ref() else {
+            return;
+        };
+        let mut agora: Vec<(String, estilo::Toast)> = Vec::new();
+        if vista.indisponivel {
+            agora.push((
+                "O caixa não respondeu: não dá para saber se ele está aberto. Recarregue a página."
+                    .into(),
+                estilo::Toast::Erro,
+            ));
         }
-        Some(
-            v_flex()
-                .gap(px(8.))
-                .when(vista.indisponivel, |d| {
-                    d.child(estilo::aviso(
-                        "O caixa não respondeu: não dá para saber se ele está aberto. Recarregue a página.",
-                        true,
-                        cx,
-                    ))
-                })
-                .children(vista.avisos.iter().map(|a| estilo::aviso(a.clone(), false, cx))),
-        )
+        agora.extend(
+            vista
+                .avisos
+                .iter()
+                .map(|a| (a.clone(), estilo::Toast::Alerta)),
+        );
+        for (texto, tipo) in &agora {
+            if !self.avisos_vistos.contains(texto) {
+                let nota = estilo::toast(texto.clone(), *tipo, cx);
+                window.defer(cx, move |window, cx| {
+                    estilo::mostrar_toast(nota, window, cx)
+                });
+            }
+        }
+        self.avisos_vistos = agora.into_iter().map(|(texto, _)| texto).collect();
     }
 
     fn lista_de_sessoes(&mut self, cx: &mut Context<Self>) -> Div {
@@ -1544,7 +1558,7 @@ impl Caixa {
             .overflow_hidden()
             .child(
                 div().p(px(8.)).border_b_1().border_color(borda).child(
-                    Input::new(&self.busca)
+                    crate::estilo::campo(Input::new(&self.busca))
                         .prefix(Icon::new(Icone::Search).size(px(16.)).text_color(apagado)),
                 ),
             )

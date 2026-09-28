@@ -969,11 +969,13 @@ impl Associador {
                     .gap(px(12.))
                     .child(campo(
                         "Nome",
-                        Input::new(&cadastro.nome).w_full().into_any_element(),
+                        crate::estilo::campo(Input::new(&cadastro.nome))
+                            .w_full()
+                            .into_any_element(),
                     ))
                     .child(campo(
                         "Tipo",
-                        Select::new(&cadastro.tipo)
+                        crate::estilo::campo(Select::new(&cadastro.tipo))
                             .placeholder("Escolha…")
                             .w_full()
                             .into_any_element(),
@@ -985,11 +987,15 @@ impl Associador {
                     .gap(px(12.))
                     .child(campo(
                         "WhatsApp (opcional)",
-                        Input::new(&cadastro.whatsapp).w_full().into_any_element(),
+                        crate::estilo::campo(Input::new(&cadastro.whatsapp))
+                            .w_full()
+                            .into_any_element(),
                     ))
                     .child(campo(
                         "E-mail (opcional)",
-                        Input::new(&cadastro.email).w_full().into_any_element(),
+                        crate::estilo::campo(Input::new(&cadastro.email))
+                            .w_full()
+                            .into_any_element(),
                     )),
             )
             .when_some(cadastro.erro.clone(), |c, erro| {
@@ -1136,7 +1142,7 @@ impl Associador {
                     .child(descricao),
             )
             .child(
-                Input::new(&busca.campo)
+                crate::estilo::campo(Input::new(&busca.campo))
                     .w_full()
                     .prefix(Icon::new(Icone::Search).size(px(16.))),
             )

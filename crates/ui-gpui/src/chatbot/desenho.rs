@@ -380,7 +380,7 @@ impl Chatbot {
                                             tela.aplicar_busca(cx)
                                         },
                                     ))
-                                    .child(Input::new(&self.busca).prefix(
+                                    .child(crate::estilo::campo(Input::new(&self.busca)).prefix(
                                         Icon::new(Icone::Search).size(px(16.)).text_color(apagado),
                                     )),
                             )
@@ -1205,7 +1205,7 @@ impl Chatbot {
                                 tela.confirmar_quem_assume(window, cx)
                             },
                         ))
-                        .child(Input::new(&self.nome_do_atendente)),
+                        .child(crate::estilo::campo(Input::new(&self.nome_do_atendente))),
                 )
                 .child(
                     estilo::rodape_do_dialogo()
@@ -1240,7 +1240,7 @@ impl Chatbot {
                             "Digite {} para confirmar",
                             super::pedidos::CONFIRMACAO_DE_EXCLUSAO
                         ))
-                        .child(Input::new(&self.confirmacao)),
+                        .child(crate::estilo::campo(Input::new(&self.confirmacao))),
                 )
                 .child(
                     estilo::rodape_do_dialogo()

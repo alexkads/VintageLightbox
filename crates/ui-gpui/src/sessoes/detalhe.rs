@@ -740,9 +740,11 @@ pub struct Detalhe {
     /// formulário de propósito — fechá-lo no meio não perde a resposta.
     gravando_dados: Option<(MotivoDoFormulario, DadosDoCliente)>,
     carregando: bool,
-    /// O que impede a tela de mostrar a sessão — a faixa vermelha sobre a
-    /// grade. Os gestos recusados vão por [`Detalhe::avisar`].
+    /// O que impede a tela de mostrar a sessão — um toast do kit, uma vez.
+    /// Os gestos recusados vão por [`Detalhe::avisar`].
     erro: Option<SharedString>,
+    /// O último erro que virou toast (ver `estilo::toast_quando_mudar`).
+    erro_visto: Option<SharedString>,
     /// 🧪 Os avisos de gesto desde a abertura, para os cenários — a
     /// `Notification` é da raiz, e a tela só a pede.
     #[cfg(test)]
@@ -960,6 +962,7 @@ impl Detalhe {
             gravando_dados: None,
             carregando: false,
             erro: None,
+            erro_visto: None,
             #[cfg(test)]
             avisos_dados: Vec::new(),
             ultima_falha_da_importacao: None,
@@ -3873,6 +3876,13 @@ impl Render for Detalhe {
         if self.docas.is_none() {
             self.montar_as_docas(window, cx);
         }
+        crate::estilo::toast_quando_mudar(
+            &mut self.erro_visto,
+            self.erro.clone(),
+            crate::estilo::Toast::Erro,
+            window,
+            cx,
+        );
         self.largura_da_coluna = self.medir_a_coluna(cx);
         // 🚨 **Antes de montar qualquer célula.** É o que tira o decode de dentro
         // do quadro; `celula` e `tira` daqui para baixo só leem da memória.
@@ -4021,14 +4031,6 @@ impl Render for Detalhe {
             // a que aparece (25/set/2026).
             .children(envio)
             .children(barra)
-            .when_some(self.erro.clone(), |tela, erro| {
-                tela.child(
-                    div()
-                        .px(px(12.))
-                        .pt(px(8.))
-                        .child(crate::estilo::aviso(erro, true, cx)),
-                )
-            })
             .child(
                 div()
                     .flex()
@@ -4409,7 +4411,7 @@ impl Detalhe {
                             r.child(div().text_color(perigo).child("*"))
                         }),
                 )
-                .child(Input::new(estado))
+                .child(crate::estilo::campo(Input::new(estado)))
                 .children(erro.map(|e| div().text_xs().text_color(perigo).child(e)))
         };
 
@@ -6834,7 +6836,7 @@ impl Detalhe {
                             div()
                                 .debug_selector(|| "lote-faixa".into())
                                 .child(
-                                    Select::new(&campos.faixa)
+                                    crate::estilo::campo(Select::new(&campos.faixa))
                                         .xsmall()
                                         .placeholder("Escolha a faixa para todas…")
                                         .disabled(editaveis == 0)
@@ -7077,7 +7079,7 @@ impl Detalhe {
                                 .gap(px(6.))
                                 .child(div().text_xs().text_color(apagado).child("Faixa"))
                                 .child(
-                                    Select::new(&campos.faixa)
+                                    crate::estilo::campo(Select::new(&campos.faixa))
                                         .xsmall()
                                         .placeholder("Escolha…")
                                         .w_full(),

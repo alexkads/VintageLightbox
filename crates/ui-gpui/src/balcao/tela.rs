@@ -628,9 +628,12 @@ impl Render for Balcao {
                     "Site",
                     div()
                         .debug_selector(|| "balcao-site".into())
-                        .child(Select::new(&self.lista_de_parceiros)),
+                        .child(crate::estilo::campo(Select::new(&self.lista_de_parceiros))),
                 ))
-                .child(rotulado("Cupom", Input::new(&self.cupom)))
+                .child(rotulado(
+                    "Cupom",
+                    crate::estilo::campo(Input::new(&self.cupom)),
+                ))
         });
 
         let preco = (tipo != Tipo::Cortesia).then(|| {
@@ -644,7 +647,11 @@ impl Render for Balcao {
                 h_flex()
                     .gap(px(8.))
                     .child(div().text_sm().text_color(apagado).child("R$"))
-                    .child(div().w(px(128.)).child(Input::new(&self.preco)))
+                    .child(
+                        div()
+                            .w(px(128.))
+                            .child(crate::estilo::campo(Input::new(&self.preco))),
+                    )
                     .children(self.preco_da_faixa.map(|p| {
                         div()
                             .text_xs()
@@ -660,7 +667,7 @@ impl Render for Balcao {
             } else {
                 "Motivo (opcional)"
             },
-            Input::new(&self.motivo),
+            crate::estilo::campo(Input::new(&self.motivo)),
         );
 
         let fora = (self.fora > 0).then(|| {

@@ -1105,7 +1105,7 @@ impl Agenda {
         v_flex()
             .gap(px(4.))
             .child(div().font_weight(FontWeight::MEDIUM).child(rotulo))
-            .child(Input::new(campo))
+            .child(crate::estilo::campo(Input::new(campo)))
     }
 
     fn rodape_do_formulario(

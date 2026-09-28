@@ -238,6 +238,8 @@ pub struct Sessoes {
     filtros: super::filtros_da_lista::FiltrosDaLista,
     carregando: bool,
     erro: Option<SharedString>,
+    /// O último erro que virou toast (ver `estilo::toast_quando_mudar`).
+    erro_visto: Option<SharedString>,
     /// 🗑️ Quem entrou é o SuperAdmin? Só ele vê a lixeira — o backend confere
     /// de novo, e é ele quem vale.
     super_admin: bool,
@@ -431,6 +433,7 @@ impl Sessoes {
             filtros: super::filtros_da_lista::FiltrosDaLista::novos(window, cx),
             carregando: false,
             erro: None,
+            erro_visto: None,
             super_admin: false,
             exclusao: None,
             sobras_em_voo: 0,
@@ -1301,6 +1304,13 @@ fn nao_vazio(texto: &str) -> Option<String> {
 
 impl Render for Sessoes {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        crate::estilo::toast_quando_mudar(
+            &mut self.erro_visto,
+            self.erro.clone(),
+            crate::estilo::Toast::Erro,
+            window,
+            cx,
+        );
         // 🪟 Os diálogos são o `Dialog` do gpui-kit (`crate::dialogo`) — a escolha
         // do estúdio é o "sem saída" do site: nem Esc, nem clique fora, nem X.
         let dialogo_do_estudio = {
@@ -1382,9 +1392,6 @@ impl Render for Sessoes {
             .when(!self.na_aba_de_excluidas, |tela| {
                 tela.child(self.barra(&contagens, cx))
                     .child(self.indicadores(&soma, visiveis.len(), filtrando, cx))
-            })
-            .when_some(self.erro.clone(), |tela, erro| {
-                tela.child(crate::estilo::aviso(erro, true, cx))
             })
             .when(self.sessao.is_none(), |tela| {
                 tela.child(crate::estilo::aviso(
@@ -2200,7 +2207,10 @@ impl Sessoes {
                                         .child(exclusao::FRASE_DE_CONFIRMACAO),
                                 ),
                         )
-                        .child(Input::new(&aberta.frase).disabled(aberta.enviando)),
+                        .child(
+                            crate::estilo::campo(Input::new(&aberta.frase))
+                                .disabled(aberta.enviando),
+                        ),
                 )
                 .child(
                     estilo::rodape_do_dialogo()
@@ -2299,7 +2309,7 @@ impl Sessoes {
             )
             .child(
                 div().w(px(320.)).child(
-                    Input::new(&self.busca)
+                    crate::estilo::campo(Input::new(&self.busca))
                         .prefix(Icon::new(Icone::Search).size(px(16.)).text_color(apagado))
                         .cleanable(true),
                 ),

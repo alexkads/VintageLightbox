@@ -67,6 +67,8 @@ pub struct Backup {
     /// A pasta que não pôde ser lida — a faixa, que fica. O que falha num
     /// gesto (apagar, baixar, compactar) vai por [`Backup::avisar`].
     erro: Option<String>,
+    /// O último erro que virou toast (ver `estilo::toast_quando_mudar`).
+    erro_visto: Option<SharedString>,
     /// 🧪 Os toasts pedidos, para os testes: a lista do kit mora no `Root`,
     /// que as janelas de teste desta tela não têm.
     #[cfg(test)]
@@ -131,6 +133,7 @@ impl Backup {
             pasta: String::new(),
             entradas: Vec::new(),
             erro: None,
+            erro_visto: None,
             #[cfg(test)]
             avisos_dados: Vec::new(),
             lendo: false,
@@ -982,6 +985,13 @@ fn nome_do(caminho: &str) -> String {
 
 impl Render for Backup {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        estilo::toast_quando_mudar(
+            &mut self.erro_visto,
+            self.erro.clone().map(SharedString::from),
+            estilo::Toast::Erro,
+            window,
+            cx,
+        );
         let tema = cx.theme();
         let apagado = tema.muted_foreground;
         let andamento = andamento_de(&self.pecas);
@@ -1014,9 +1024,6 @@ impl Render for Backup {
                 cx,
             ))
             .child(self.barra(cx))
-            .when_some(self.erro.clone(), |tela, erro| {
-                tela.child(estilo::aviso(erro, true, cx))
-            })
             .child(self.lona(andamento, cx))
             .child(self.lista(apagado, cx))
             .children(self.previa(window, cx))

@@ -98,6 +98,20 @@ pub fn botao_do_menu(id: impl Into<SharedString>, _cx: &App) -> Button {
     botao_icone(id, Icone::PanelLeft, m().botao_icone, 16.)
 }
 
+/// 📏 **Um campo na altura do template** (`Input`, `Select`): a mesma do
+/// botão, para campo e botão lado a lado ficarem alinhados (dono,
+/// 28/09/2026: *"não deixe os tamanhos fora de padrão"*). O `xsmall` das
+/// linhas densas (filtros, preço na grade) é escolha, e fica.
+pub fn campo<E: Styled>(elemento: E) -> E {
+    elemento.h(px(m().campo.altura))
+}
+
+/// O botão só de ícone na altura do botão do template — o que fica ao lado
+/// dos botões com texto de uma barra.
+pub fn botao_icone_padrao(id: impl Into<SharedString>, icone: Icone) -> Button {
+    botao_icone(id, icone, m().botao.altura, 16.)
+}
+
 /// `Button variant="ghost" size="icon"`: quadrado de `lado` px, só o ícone.
 /// É o X dos diálogos, as setas e os "voltar" dos cabeçalhos.
 pub fn botao_icone(id: impl Into<SharedString>, icone: Icone, lado: f32, icone_px: f32) -> Button {
@@ -268,6 +282,27 @@ pub fn mostrar_toast(nota: Notification, window: &mut Window, cx: &mut App) {
         .is_some()
     {
         window.push_notification(nota, cx);
+    }
+}
+
+/// 🍞 Um erro que a tela guarda (`erro: Option<…>`) vira **toast do kit uma
+/// vez**, quando aparece ou muda — e não uma faixa fixa na página (dono,
+/// 28/09/2026: *"Tem que usar o Toast do GPUI Kit"*). `visto` é a memória da
+/// tela do último mostrado. Chamar no `render`; o toast sai depois do quadro.
+pub fn toast_quando_mudar(
+    visto: &mut Option<SharedString>,
+    texto: Option<SharedString>,
+    tipo: Toast,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if *visto == texto {
+        return;
+    }
+    visto.clone_from(&texto);
+    if let Some(texto) = texto {
+        let nota = toast(texto, tipo, cx);
+        window.defer(cx, move |window, cx| mostrar_toast(nota, window, cx));
     }
 }
 

@@ -53,7 +53,7 @@ fn rotulo(texto: &str, obrigatorio: bool) -> Div {
 /// passa a nascer com a largura certa, em vez de depender de quem o escreve
 /// lembrar do `.w_full()`.
 fn entrada(estado: &Entity<InputState>) -> Input {
-    Input::new(estado).w_full()
+    crate::estilo::campo(Input::new(estado)).w_full()
 }
 
 fn campo(
@@ -1179,7 +1179,7 @@ impl NovaSessao {
                         v_flex().flex_1().min_w(px(0.)).child(campo(
                             "Preço por foto",
                             true,
-                            Select::new(&self.escolha_do_produto)
+                            crate::estilo::campo(Select::new(&self.escolha_do_produto))
                                 .placeholder("Escolha…")
                                 .w_full(),
                             self.erro_de(estado::FALTA_PRECO),
@@ -1191,7 +1191,7 @@ impl NovaSessao {
                         v_flex().flex_1().min_w(px(0.)).child(campo(
                             "Estúdio",
                             true,
-                            Select::new(&self.escolha_do_estudio)
+                            crate::estilo::campo(Select::new(&self.escolha_do_estudio))
                                 .placeholder("Escolha…")
                                 .w_full(),
                             self.erro_de(estado::FALTA_ESTUDIO),
@@ -1584,14 +1584,18 @@ impl NovaSessao {
                         None,
                         cx,
                     )))
-                    .child(v_flex().flex_1().min_w(px(0.)).child(campo(
-                        "Tipo",
-                        false,
-                        Select::new(&cadastro.tipo).placeholder("Escolha…").w_full(),
-                        None,
-                        None,
-                        cx,
-                    ))),
+                    .child(
+                        v_flex().flex_1().min_w(px(0.)).child(campo(
+                            "Tipo",
+                            false,
+                            crate::estilo::campo(Select::new(&cadastro.tipo))
+                                .placeholder("Escolha…")
+                                .w_full(),
+                            None,
+                            None,
+                            cx,
+                        )),
+                    ),
             )
             .child(
                 h_flex()
@@ -2245,7 +2249,7 @@ mod testes {
             .collect();
         assert_eq!(
             soltos,
-            vec!["Input::new(estado).w_full()"],
+            vec!["crate::estilo::campo(Input::new(estado)).w_full()"],
             "há `Input::new` fora de `entrada()` — ele nasceria sem largura"
         );
     }

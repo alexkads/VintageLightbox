@@ -2356,7 +2356,11 @@ impl Caixa {
                         .text_color(apagado)
                         .child(texto.to_string()),
                 )
-                .child(h_flex().gap(px(6.)).child(Input::new(campo)))
+                .child(
+                    h_flex()
+                        .gap(px(6.))
+                        .child(crate::estilo::campo(Input::new(campo))),
+                )
         };
         let acoes = |cx: &mut Context<Self>| {
             h_flex()

@@ -1586,7 +1586,7 @@ impl Biblioteca {
             .child(
                 div()
                     .w(px(240.))
-                    .child(Input::new(&self.busca).cleanable(true)),
+                    .child(crate::estilo::campo(Input::new(&self.busca)).cleanable(true)),
             )
             .child(rotulo_do_grupo("nota mínima", cx))
             .child(div().flex().gap(px(4.)).children(notas))

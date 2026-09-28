@@ -877,7 +877,7 @@ impl Atendimento {
                         .children(
                             self.detalhe
                                 .as_ref()
-                                .map(|campo| Input::new(campo).w_full()),
+                                .map(|campo| crate::estilo::campo(Input::new(campo)).w_full()),
                         ),
                 )
             })
@@ -1172,11 +1172,9 @@ impl Render for Atendimento {
                                             .font_weight(FontWeight::MEDIUM)
                                             .child("Proporção do corte"),
                                     )
-                                    .children(
-                                        self.corte
-                                            .as_ref()
-                                            .map(|escolha| Select::new(escolha).w_full()),
-                                    ),
+                                    .children(self.corte.as_ref().map(|escolha| {
+                                        crate::estilo::campo(Select::new(escolha)).w_full()
+                                    })),
                             ),
                     )),
             )
