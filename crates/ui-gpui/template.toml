@@ -1,0 +1,37 @@
+# 🎨 O template do VintageLightbox — o visual de todos os balcões.
+#
+# Os eixos e os valores são os do https://ui.shadcn.com/create. Para trocar:
+#
+#   1. Monte o visual no /create e clique em "Share" (ou copie o comando).
+#   2. Cole aqui o código (`b…`), o endereço da página ou o comando inteiro:
+#        preset = "bIkeymG"
+#        preset = "https://ui.shadcn.com/create?preset=bIkeymG"
+#        preset = "npx shadcn@latest init --preset bIkeymG"
+#      Um preset com nome também vale: nova, vega, maia, lyra, mira, luma,
+#      rhea, sera.
+#   3. Se a fonte ou os ícones mudaram, baixe-os (a compilação diz o comando):
+#        python3 scripts/baixar-do-template.py --fonte geist --icones tabler
+#   4. `make producao` no e-commerce leva o app com o visual novo a todo balcão.
+#
+# Uma linha por eixo vale por cima do preset. Sem `preset`, o ponto de partida
+# é o visual do site (nova, neutral, lucide) com a marca e a letra do sistema.
+#
+# | Eixo               | Valores                                                     |
+# |--------------------|-------------------------------------------------------------|
+# | estilo             | nova vega maia lyra mira luma rhea sera                     |
+# | cor_base           | neutral stone zinc mauve olive mist taupe                   |
+# | tema               | a cor base, amber blue cyan emerald fuchsia green indigo    |
+# |                    | lime orange pink purple red rose sky teal violet yellow,    |
+# |                    | ou recordarfotos (o #445566 da marca)                       |
+# | fonte              | as 26 do /create (inter, geist, figtree…) ou sistema        |
+# | fonte_dos_titulos  | inherit (a do corpo) ou uma das 26                          |
+# | icones             | lucide tabler hugeicons phosphor remixicon                  |
+# | raio               | default none small medium large                             |
+# | destaque_do_menu   | subtle bold                                                 |
+# | cor_do_menu        | default inverted (no desktop, escurece o menu lateral)      |
+#
+# Para experimentar sem editar este arquivo:
+#   VLB_TEMPLATE=lyra cargo run -p ui-gpui
+
+tema = "recordarfotos"
+fonte = "sistema"

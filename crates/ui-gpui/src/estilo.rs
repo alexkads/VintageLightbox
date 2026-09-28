@@ -1,5 +1,10 @@
 //! As peças do shadcn do site, com as mesmas medidas, para as telas do app.
 //!
+//! 🎨 **As medidas são as do estilo do template** (`tema::medidas`): a altura
+//! do botão, o respiro do diálogo e os cantos mudam com o `estilo` e o `raio`
+//! do `template.toml`. O visual da casa é o `nova` do site, com os números de
+//! sempre (32 px de botão, 16 de respiro, 12 de canto no diálogo).
+//!
 //! 🔑 **Uma peça, um lugar.** O botão de contorno do site tem 32 px de altura,
 //! canto de 8 px e `shadow-xs`; escrito à mão em cada tela, ele diverge na
 //! terceira. As telas montam o conteúdo (ícone, rótulo, tecla) e chamam
@@ -27,6 +32,13 @@ use gpui_kit::{
 };
 
 use crate::recursos::Icone;
+use crate::tema::fontes;
+use crate::tema::medidas::{Canto, Medidas};
+
+/// As medidas do estilo do template (ver `tema::medidas`).
+fn m() -> &'static Medidas {
+    crate::tema::medidas()
+}
 
 // 🔘 **Os botões são o `Button` do gpui-kit** desde 2026-09-26 (dono: trocar
 // o que é desenhado à mão por componentes do kit, *"para reduzir a
@@ -44,7 +56,10 @@ use crate::recursos::Icone;
 /// tamanho. (Comparado lado a lado com as fotos de antes: o médio deixava
 /// todo rótulo maior que o do site.)
 fn botao(id: impl Into<SharedString>) -> Button {
-    Button::new(id.into()).small().h(px(32.)).px(px(10.))
+    Button::new(id.into())
+        .small()
+        .h(px(m().botao.altura))
+        .px(px(m().botao.lados))
 }
 
 /// `Button variant="outline"`.
@@ -73,12 +88,13 @@ pub fn desligado(botao: Button, desligar: bool) -> Button {
     botao.disabled(desligar)
 }
 
-/// O `SidebarTrigger`: 28 px, fantasma, com o ícone do painel em 16.
+/// O `SidebarTrigger` (`Button size="icon-sm"`): fantasma, com o ícone do
+/// painel em 16 — 28 px no visual da casa.
 pub fn botao_do_menu(id: impl Into<SharedString>, _cx: &App) -> Button {
     Button::new(id.into())
         .ghost()
         .small()
-        .size(px(28.))
+        .size(px(m().botao_icone))
         .px(px(0.))
         .child(Icon::new(Icone::PanelLeft).size(px(16.)))
 }
@@ -86,12 +102,13 @@ pub fn botao_do_menu(id: impl Into<SharedString>, _cx: &App) -> Button {
 /// `Badge variant="outline"`: a `Tag` do gpui-kit, em pílula de 22 px com a
 /// borda da página — as medidas do site por cima das do kit.
 pub fn selo_contorno(_cx: &App) -> Tag {
+    let selo = m().selo;
     Tag::secondary()
         .outline()
-        .rounded_full()
+        .rounded(px(m().canto(selo.canto)))
         .flex_none()
-        .h(px(22.))
-        .px(px(8.))
+        .h(px(selo.altura + 2.))
+        .px(px(selo.lados))
         .py(px(0.))
         .gap(px(6.))
         .font_weight(FontWeight::MEDIUM)
@@ -102,9 +119,9 @@ pub fn selo_contorno(_cx: &App) -> Tag {
 pub fn selo_colorido(cores: (Hsla, Hsla, Hsla)) -> Tag {
     let (fundo, borda, texto) = cores;
     Tag::custom(fundo, texto, borda)
-        .rounded(px(6.))
+        .rounded(m().canto_da_tela(6.))
         .flex_none()
-        .h(px(20.))
+        .h(px(m().selo.altura))
         .px(px(6.))
         .py(px(0.))
         .font_weight(FontWeight::MEDIUM)
@@ -120,7 +137,7 @@ pub fn selo_colorido(cores: (Hsla, Hsla, Hsla)) -> Tag {
 pub fn tecla(texto: impl Into<SharedString>) -> Div {
     div()
         .px(px(4.))
-        .rounded(px(4.))
+        .rounded(m().canto_da_tela(4.))
         .border_1()
         .border_color(gpui_kit::rgba(0x80808066))
         .text_size(px(10.))
@@ -151,6 +168,7 @@ pub fn cabecalho_da_pagina(
                     div()
                         .text_2xl()
                         .font_weight(FontWeight::SEMIBOLD)
+                        .when_some(fontes::dos_titulos(), |d, f| d.font_family(f))
                         .child(titulo.into()),
                 )
                 .when_some(descricao, |d, descricao| {
@@ -180,7 +198,11 @@ pub fn aviso(texto: impl Into<SharedString>, perigo: bool, cx: &App) -> Alert {
     } else {
         Alert::new(texto.clone(), texto).icon(Icon::new(Icone::Info).size(px(16.)))
     };
-    alerta.small().px(px(16.)).py(px(12.)).rounded(px(10.))
+    alerta
+        .small()
+        .px(px(16.))
+        .py(px(12.))
+        .rounded(px(m().canto(Canto::LG)))
 }
 
 /// O véu do `Dialog` do site, e a caixa dele — as duas peças de um diálogo.
@@ -221,15 +243,19 @@ pub fn conteudo_do_dialogo() -> Div {
     v_flex().gap(px(16.))
 }
 
-/// A caixa do `DialogContent`: canto de 12 px, fundo do `popover`, 16 px de
-/// respiro e 16 px entre as partes.
+/// A caixa do `DialogContent`: fundo do `popover`, com o respiro, o vão e o
+/// canto do estilo (16, 16 e `rounded-xl` no visual da casa).
+///
+/// A largura fica de fora do template: o conteúdo de cada diálogo do app foi
+/// escrito para 440 px, e o `max-w-sm`/`max-w-md` do shadcn o quebraria.
 pub fn caixa_do_dialogo(cx: &App) -> Div {
     let tema = cx.theme();
+    let dialogo = m().dialogo;
     v_flex()
         .w(px(440.))
-        .p(px(16.))
-        .gap(px(16.))
-        .rounded(px(12.))
+        .p(px(dialogo.respiro))
+        .gap(px(dialogo.vao))
+        .rounded(px(m().canto(dialogo.canto)))
         .border_1()
         .border_color(tema.border)
         .bg(tema.popover)
@@ -254,6 +280,7 @@ pub fn cabecalho_do_dialogo(
                 .items_center()
                 .text_lg()
                 .font_weight(FontWeight::SEMIBOLD)
+                .when_some(fontes::dos_titulos(), |d, f| d.font_family(f))
                 .children(icone.map(|i| Icon::new(i).size(px(18.))))
                 .child(titulo.into()),
         )
@@ -287,12 +314,12 @@ pub fn opcao_do_dialogo(id: impl Into<SharedString>, cx: &App) -> Stateful<Div> 
         .px(px(12.))
         // `py-3` do site: 12 px em cima e embaixo, e a altura sai do conteúdo.
         .py(px(12.))
-        .rounded(px(8.))
+        .rounded(px(m().canto(m().botao.canto)))
         .border_1()
         .border_color(borda)
         .bg(fundo)
         .shadow_xs()
-        .text_sm()
+        .text_size(px(m().letra))
         .cursor_pointer()
         .hover(move |s| s.bg(acento))
 }
@@ -303,11 +330,11 @@ pub fn rodape_do_dialogo() -> Div {
     h_flex().justify_end().gap(px(8.))
 }
 
-/// Um cartão (`rounded-lg border`), com o fundo da página.
+/// Um cartão (`Card`), com o fundo da página e o canto do estilo.
 pub fn cartao(cx: &App) -> Div {
     let tema = cx.theme();
     div()
-        .rounded(px(10.))
+        .rounded(px(m().canto(m().cartao.canto)))
         .border_1()
         .border_color(tema.border)
         .overflow_hidden()
