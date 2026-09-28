@@ -1,13 +1,11 @@
 {
-  "versao": "0.1.28",
-  "titulo": "Editor de fotos: pinte e apague sobre a foto numa janela própria, e a Revelação passa a usar a foto editada.",
+  "versao": "0.1.30",
+  "titulo": "As medições do botão Desempenho agora vão para o servidor: as de todos os balcões ficam juntas para comparar.",
   "importante": false,
   "novidades": [
-    "Na Revelação, clique com o botão direito numa foto da tira e escolha \"Editar Foto\": abre uma janela só para aquela foto — a clicada, mesmo com várias marcadas. A seleção e as setas da Revelação continuam como estavam.",
-    "Na janela do editor: Pincel (B) e Borracha (E), com tamanho ([ e ]), dureza, opacidade e cor. A pintura fica numa camada por cima da foto, que dá para esconder (H) e deixar mais transparente; a foto de baixo nunca muda.",
-    "Desfazer (Cmd/Ctrl+Z) e refazer (Cmd/Ctrl+Shift+Z), e o aviso \"Alterações não salvas\" enquanto houver o que salvar. Fechar com alterações pergunta se quer salvar.",
-    "Salvar (Cmd/Ctrl+S) atualiza a Revelação na hora: os ajustes, o corte e as máscaras continuam, agora aplicados sobre a foto editada. O JPEG, a impressão e o \"Salvar na galeria\" saem com a edição.",
-    "Reabrir o editor da mesma foto traz a pintura e o desfazer como estavam, mesmo depois de fechar o app."
+    "Salvar no banco guarda a medição neste computador e também no servidor. Sem internet, ela fica guardada e sobe sozinha na próxima vez que a janela Desempenho abrir.",
+    "As medições que você já tinha salvado neste computador sobem ao servidor na primeira vez que abrir a janela Desempenho depois de atualizar.",
+    "As abas Sessões e Comparar mostram as medições de todos os computadores, e Comparar põe Windows, Linux e Mac lado a lado na mesma operação."
   ],
-  "por_que_atualizar": "Tirar um fio, cobrir uma mancha ou pintar um detalhe agora se faz no próprio balcão, sem outro programa — e a foto editada segue pela revelação e pela entrega como qualquer outra."
+  "por_que_atualizar": "Sem exportar arquivo: basta medir e salvar em cada balcão para compararmos onde a tela fica lenta."
 }

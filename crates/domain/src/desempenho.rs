@@ -16,7 +16,12 @@
 use serde::{Deserialize, Serialize};
 
 /// O cabeçalho: quando, onde e em quê.
+///
+/// `#[serde(default)]`: uma sessão que volta do servidor, gravada por outra
+/// versão do app, pode não ter um campo novo — e não pode sumir da lista por
+/// isso.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct CabecalhoDaSessao {
     pub id: String,
     /// RFC 3339.
@@ -69,6 +74,7 @@ pub struct CabecalhoDaSessao {
 
 /// Uma distribuição agregada: operação × etapa.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct MetricaDeDesempenho {
     pub operacao: String,
     pub etapa: String,
@@ -84,6 +90,7 @@ pub struct MetricaDeDesempenho {
 
 /// Um quadro individual da amostra guardada.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct QuadroGravado {
     pub indice: u64,
     /// Desde o começo da sessão.
@@ -104,6 +111,7 @@ pub struct QuadroGravado {
 
 /// Uma sessão inteira.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SessaoDeDesempenho {
     pub cabecalho: CabecalhoDaSessao,
     pub metricas: Vec<MetricaDeDesempenho>,

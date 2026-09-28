@@ -219,6 +219,9 @@ pub struct Imagem {
     pub formato: String,
     pub mascaras: u32,
     pub retoques: u32,
+    /// `nenhum`, `reto`, `endireitado`, `perspectiva` ou `enquadrar aberto` —
+    /// o que decide o custo do recorte na CPU (0,3 ms × 36 ms no M2).
+    pub enquadramento: String,
 }
 
 // ── A operação em curso ────────────────────────────────────────────────────
@@ -240,6 +243,10 @@ pub struct Coletor {
     primeiro_sinal: Option<(u64, Option<u64>)>,
     ultima_batida_us: Option<u64>,
     inicio_do_quadro_us: Option<u64>,
+    /// As etapas da thread da interface medidas **dentro** do quadro em
+    /// montagem (o recorte da Revelação roda no `render`) — ver
+    /// [`Coletor::quadro_pintado`].
+    dentro_da_montagem_ms: f32,
     ultima_pintura_us: Option<u64>,
     pendentes: [f32; ETAPAS_DA_INTERFACE.len()],
     seq: u64,
@@ -272,6 +279,7 @@ impl Coletor {
             primeiro_sinal: None,
             ultima_batida_us: None,
             inicio_do_quadro_us: None,
+            dentro_da_montagem_ms: 0.0,
             ultima_pintura_us: None,
             pendentes: [0.0; ETAPAS_DA_INTERFACE.len()],
             seq: 0,
@@ -484,11 +492,17 @@ impl Coletor {
                 *self.acima_por_operacao.entry(operacao).or_default() += 1;
             }
         }
+        // 🔑 **A montagem é do GPUI sem as etapas que o app mede dentro dela.**
+        // O recorte da Revelação roda dentro do `render`: um recorte de 250 ms
+        // aparecia como "montagem de 270 ms", e o diagnóstico culpava o desenho
+        // da janela (balcão Windows, 27/09). O quadro guarda o total; a etapa
+        // fica com o que sobra.
+        let dentro = std::mem::take(&mut self.dentro_da_montagem_ms);
         if operacao != Operacao::Nenhuma {
             self.anotar(
                 operacao,
                 Etapa::MontagemDaInterface,
-                q.montagem_us as f32 / 1000.0,
+                (q.montagem_us as f32 / 1000.0 - dentro).max(0.0),
             );
         }
         if self.quadros.len() == CAPACIDADE_DE_QUADROS {
@@ -577,6 +591,9 @@ impl Coletor {
         if na_interface {
             if let Some(i) = etapa.indice_na_interface() {
                 self.pendentes[i] += ms;
+                if self.inicio_do_quadro_us.is_some_and(|inicio| t >= inicio) {
+                    self.dentro_da_montagem_ms += ms;
+                }
             }
         }
     }
@@ -1000,6 +1017,32 @@ mod testes {
         let r = c.resumo(400 * MS);
         assert_eq!(r.quadros_interacao, 0);
         assert_eq!(r.lentos_recentes.len(), 1, "31 ms de quadro");
+    }
+
+    /// Balcão Windows (27/09): o recorte de 250 ms roda dentro do `render`.
+    /// A montagem do GPUI fica com o que sobra, e o gargalo é o recorte.
+    #[test]
+    fn a_etapa_dentro_do_render_sai_da_montagem_e_vira_o_gargalo() {
+        let mut c = Coletor::novo(60.0);
+        c.operacao(Operacao::ArrastoDeSlider, 0);
+        c.quadro_pintado(MS);
+        c.operacao(Operacao::ArrastoDeSlider, 2 * MS);
+        c.quadro_comecou(3 * MS);
+        c.etapa(Etapa::RecorteNaCpu, 250.0, true, 4 * MS);
+        let s = c.quadro_pintado(273 * MS);
+        c.quadro_apresentado(s, 275 * MS);
+        let q = *c.quadros().back().unwrap();
+        assert_eq!(q.montagem_us, 270_000, "o quadro guarda o total");
+        let r = c.resumo(300 * MS);
+        let op = &r.por_operacao[0];
+        let montagem = op
+            .etapas
+            .iter()
+            .find(|(e, _)| *e == Etapa::MontagemDaInterface)
+            .unwrap()
+            .1;
+        assert!((montagem.pior_ms - 20.0).abs() < 0.2, "{montagem:?}");
+        assert_eq!(op.gargalo.unwrap().0, Etapa::RecorteNaCpu);
     }
 
     /// Mouse a 60 Hz num monitor de 120 Hz: a janela desenha a 60 Hz, e isso
