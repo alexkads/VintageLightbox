@@ -7357,7 +7357,7 @@ impl Detalhe {
                                         )
                                     }),
                                 (None, Some(centavos)) => div().text_color(apagado).child(format!(
-                                    "Sem valor fixado: o cliente paga {} (preço da loja).",
+                                    "Sem valor fixado: o cliente paga {} (preço da faixa).",
                                     dinheiro::formatar(centavos)
                                 )),
                                 (None, None) => div()
