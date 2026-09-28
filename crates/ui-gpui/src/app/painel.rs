@@ -17,11 +17,13 @@
 //! 🔑 **O que não está pronto no app não aparece nele**: o menu tem só as
 //! seções que o app já atende, e nenhuma a mais.
 
+use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
 use gpui_kit::{
-    canvas, div, prelude::*, px, AnyElement, Context, FontWeight, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, SharedString, Window,
+    canvas, div, prelude::*, px, AnyElement, Context, DismissEvent, Entity, Focusable as _,
+    FontWeight, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, SharedString,
+    Subscription, Window,
 };
 
 use super::{Aplicativo, Tela};
@@ -215,7 +217,7 @@ impl Aplicativo {
     /// estava aberto. A revelação e a impressão são de dentro da galeria, e
     /// não passam por aqui.
     pub fn ir_para(&mut self, tela: Tela, window: &mut Window, cx: &mut Context<Self>) {
-        self.menu_da_conta = false;
+        self.menu_da_conta = None;
         // 💬 O chatbot só relê com a tela na frente; escondido, ele só acende
         // as novidades e avisa.
         if (self.tela == Tela::Chatbot) != (tela == Tela::Chatbot) {
@@ -269,13 +271,15 @@ impl Aplicativo {
         cx.notify();
     }
 
-    pub fn alternar_menu_da_conta(&mut self, cx: &mut Context<Self>) {
-        self.menu_da_conta = !self.menu_da_conta;
+    pub fn alternar_menu_da_conta(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.menu_da_conta.take().is_none() {
+            self.menu_da_conta = Some(self.montar_menu_da_conta(window, cx));
+        }
         cx.notify();
     }
 
     pub fn menu_da_conta_aberto(&self) -> bool {
-        self.menu_da_conta
+        self.menu_da_conta.is_some()
     }
 
     pub fn escolha_de_tema(&self) -> Escolha {
@@ -301,7 +305,7 @@ impl Aplicativo {
 
     /// O "Sair" do menu da conta: esquece a sessão e volta para a capa.
     pub fn sair_da_conta(&mut self, cx: &mut Context<Self>) {
-        self.menu_da_conta = false;
+        self.menu_da_conta = None;
         self.largar_a_revelacao(cx);
         if self.sessao_aberta.is_some() {
             self.sair_da_sessao(cx);
@@ -617,7 +621,7 @@ impl Aplicativo {
         let tema = cx.theme();
         let acento = tema.sidebar_accent;
         let apagado = tema.sidebar_foreground.opacity(0.7);
-        let aberto = self.menu_da_conta;
+        let aberto = self.menu_da_conta.is_some();
         let base = h_flex()
             .id("menu-conta")
             .rounded(px(8.))
@@ -625,7 +629,7 @@ impl Aplicativo {
             .cursor_pointer()
             .hover(|s| s.bg(acento))
             .when(aberto, |d| d.bg(acento))
-            .on_click(cx.listener(|raiz, _, _window, cx| raiz.alternar_menu_da_conta(cx)))
+            .on_click(cx.listener(|raiz, _, window, cx| raiz.alternar_menu_da_conta(window, cx)))
             .child(self.retrato(cx));
         if self.menu_aberto {
             base.h(px(48.))
@@ -794,117 +798,134 @@ impl Aplicativo {
         )
     }
 
-    /// O menu da conta, ao lado do botão dela.
-    pub(super) fn menu_da_conta(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let tema = cx.theme();
-        let (fundo, borda, apagado, acento, perigo) = (
-            tema.popover,
-            tema.border,
-            tema.muted_foreground,
-            tema.accent,
-            tema.danger,
-        );
+    /// O menu da conta: o `PopupMenu` do gpui-kit, aberto ao lado do botão
+    /// dela. Aberto por estado da raiz (e não pelo `DropdownMenu`, que guarda
+    /// o próprio) porque o roteiro e os testes o abrem por código; fechar é o
+    /// `DismissEvent` do kit — clique fora, `Esc` ou um item escolhido.
+    fn montar_menu_da_conta(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> (Entity<PopupMenu>, Subscription) {
+        let raiz = cx.entity().downgrade();
         let escolha = self.escolha_de_tema;
-        let separador = || div().h(px(1.)).mx(px(-4.)).my(px(4.)).bg(borda);
-        let item = |id: &'static str, icone: Icone| {
-            h_flex()
-                .id(id)
-                .h(px(32.))
-                .px(px(6.))
-                .gap(px(8.))
-                .rounded(px(6.))
-                .cursor_pointer()
-                .hover(move |s| s.bg(acento))
-                // 🔑 `flex_none`: com algo à direita (a versão, o ✓) o
-                // flex encolhia a caixa do ícone, o desenho de 16 px invadia
-                // o espaço e o texto encostava nele (dono, 2026-09-26).
-                .child(
-                    Icon::new(icone)
-                        .size(px(16.))
-                        .flex_none()
-                        .text_color(apagado),
-                )
-        };
-        let opcao = |id: &'static str,
-                     icone: Icone,
-                     rotulo: &'static str,
-                     valor: Escolha,
-                     cx: &mut Context<Self>| {
-            item(id, icone)
-                .child(rotulo)
-                .when(escolha == valor, |d| {
-                    d.child(div().ml_auto().child(Icon::new(Icone::Check).size(px(16.))))
-                })
-                .on_click(cx.listener(move |raiz, _, window, cx| {
-                    raiz.escolher_tema(valor, window, cx);
-                }))
-        };
         let site = crate::pos_venda::config::ler().site();
-
-        // Uma camada que cobre a janela: clicar fora fecha o menu, como no site.
-        div()
-            .id("menu-conta-fora")
-            .absolute()
-            .inset_0()
-            .occlude()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|raiz, _, _window, cx| {
-                    raiz.menu_da_conta = false;
-                    cx.notify();
-                }),
-            )
-            .child(
-                v_flex()
-                    .id("menu-conta-caixa")
-                    .absolute()
-                    .left(px(self.largura_do_menu() - 4.))
-                    // O botão da conta fica no pé do menu, logo acima do rodapé.
-                    .bottom(px(8. + super::rodape::ALTURA_DO_RODAPE))
-                    .min_w(px(240.))
-                    .p(px(4.))
-                    .rounded(px(10.))
-                    .border_1()
-                    .border_color(borda)
-                    .bg(fundo)
-                    .shadow_md()
-                    .text_sm()
-                    .text_color(tema.popover_foreground)
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(
+        let (nome, email): (SharedString, SharedString) = match &self.conta {
+            Some(conta) => (
+                conta.exibido().to_string().into(),
+                conta.email.clone().into(),
+            ),
+            None => ("Conta RecordarFotos".into(), "carregando…".into()),
+        };
+        let retrato = self.retrato.clone();
+        let inicial: SharedString = self
+            .conta
+            .as_ref()
+            .map(Conta::inicial)
+            .unwrap_or_else(|| "·".into())
+            .into();
+        let antes = window.focused(cx);
+        let menu = PopupMenu::build(window, cx, move |menu, _window, cx| {
+            let tema = cx.theme();
+            let (apagado, fundo_do_retrato, perigo) =
+                (tema.muted_foreground, tema.sidebar_accent, tema.danger);
+            let agir = |f: fn(&mut Aplicativo, &mut Window, &mut Context<Aplicativo>)| {
+                let raiz = raiz.clone();
+                move |_: &gpui_kit::ClickEvent, window: &mut Window, cx: &mut gpui_kit::App| {
+                    let _ = raiz.update(cx, |raiz, cx| f(raiz, window, cx));
+                }
+            };
+            let tema_do_menu = |id: &'static str, icone: Icone, rotulo: &'static str, valor| {
+                let raiz = raiz.clone();
+                estilo::item_de_menu(id, rotulo, None)
+                    .icon(icone)
+                    .checked(escolha == valor)
+                    .on_click(move |_, window, cx| {
+                        let _ = raiz.update(cx, |raiz, cx| raiz.escolher_tema(valor, window, cx));
+                    })
+            };
+            let (nome, email, retrato, inicial) = (
+                nome.clone(),
+                email.clone(),
+                retrato.clone(),
+                inicial.clone(),
+            );
+            let menu = match antes.clone() {
+                Some(antes) => menu.action_context(antes),
+                None => menu,
+            };
+            menu.min_w(px(240.))
+                .check_side(gpui_kit::component::Side::Right)
+                // A conta, no alto: o retrato, o nome e o e-mail.
+                .item(PopupMenuItem::element(move |_, _| {
+                    h_flex()
+                        .gap(px(8.))
+                        .py(px(2.))
+                        .child(match retrato.clone() {
+                            Some(retrato) => gpui_kit::img(retrato)
+                                .flex_none()
+                                .size(px(32.))
+                                .rounded(px(8.))
+                                .object_fit(gpui_kit::ObjectFit::Cover)
+                                .into_any_element(),
+                            None => div()
+                                .flex_none()
+                                .size(px(32.))
+                                .rounded(px(8.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .bg(fundo_do_retrato)
+                                .text_xs()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(inicial.clone())
+                                .into_any_element(),
+                        })
+                        .child(
+                            v_flex()
+                                .min_w(px(0.))
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .truncate()
+                                        .child(nome.clone()),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(apagado)
+                                        .truncate()
+                                        .child(email.clone()),
+                                ),
+                        )
+                }))
+                .separator()
+                .item(
+                    estilo::item_de_menu("conta-loja", "Ver a loja", None)
+                        .icon(Icone::Store)
+                        .on_click(move |_, _, cx| {
+                            cx.open_url(&format!("{}/loja", site.trim_end_matches('/')));
+                        }),
+                )
+                // 📦 O acervo de arquivos no R2 — `/dashboard/backup` no
+                // site, portado do `file-manager` do legado em 2026-09-18.
+                // Aqui, e não no menu lateral: é de uso de vez em quando.
+                .item(
+                    estilo::item_de_menu("conta-backup", "Backup de arquivos", None)
+                        .icon(Icone::FolderOpen)
+                        .on_click(agir(|raiz, window, cx| {
+                            raiz.ir_para(Tela::Backup, window, cx)
+                        })),
+                )
+                // 🔄 A procura da abertura é silenciosa; esta responde
+                // sempre, na faixa do rodapé — inclusive "está em dia".
+                .item(
+                    PopupMenuItem::element(move |_, _| {
                         h_flex()
-                            .gap(px(8.))
-                            .px(px(6.))
-                            .py(px(6.))
-                            .child(self.retrato(cx))
-                            .child(self.nome_e_email(apagado)),
-                    )
-                    .child(separador())
-                    .child(
-                        item("conta-loja", Icone::Store)
-                            .child("Ver a loja")
-                            .on_click(cx.listener(move |raiz, _, _window, cx| {
-                                cx.open_url(&format!("{}/loja", site.trim_end_matches('/')));
-                                raiz.menu_da_conta = false;
-                                cx.notify();
-                            })),
-                    )
-                    // 📦 O acervo de arquivos no R2 — `/dashboard/backup` no
-                    // site, portado do `file-manager` do legado em 2026-09-18.
-                    // Aqui, e não no menu lateral: é de uso de vez em quando.
-                    .child(
-                        item("conta-backup", Icone::FolderOpen)
-                            .debug_selector(|| "conta-backup".into())
-                            .child("Backup de arquivos")
-                            .on_click(cx.listener(|raiz, _, window, cx| {
-                                raiz.ir_para(Tela::Backup, window, cx);
-                            })),
-                    )
-                    // 🔄 A procura da abertura é silenciosa; esta responde
-                    // sempre, na faixa do rodapé — inclusive "está em dia".
-                    .child(
-                        item("conta-atualizacoes", Icone::RefreshCw)
                             .debug_selector(|| "conta-atualizacoes".into())
+                            .w_full()
+                            .gap(px(8.))
                             .child("Verificar atualizações")
                             .child(
                                 div()
@@ -913,66 +934,72 @@ impl Aplicativo {
                                     .text_color(apagado)
                                     .child(concat!("v", env!("CARGO_PKG_VERSION"))),
                             )
-                            .on_click(cx.listener(|raiz, _, _window, cx| {
-                                raiz.menu_da_conta = false;
-                                raiz.verificar_atualizacoes(cx);
-                            })),
-                    )
-                    .child(separador())
-                    .child(
-                        div()
-                            .px(px(6.))
-                            .py(px(4.))
-                            .text_xs()
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(apagado)
-                            .child("Tema"),
-                    )
-                    .child(opcao("tema-claro", Icone::Sun, "Claro", Escolha::Claro, cx))
-                    .child(opcao(
-                        "tema-escuro",
-                        Icone::Moon,
-                        "Escuro",
-                        Escolha::Escuro,
-                        cx,
-                    ))
-                    .child(opcao(
-                        "tema-sistema",
-                        Icone::Monitor,
-                        "Sistema",
-                        Escolha::Sistema,
-                        cx,
-                    ))
-                    .child(opcao(
-                        "tema-matrix",
-                        Icone::SquareTerminal,
-                        "Matrix",
-                        Escolha::Matrix,
-                        cx,
-                    ))
-                    .child(opcao(
-                        "tema-cyberpunk",
-                        Icone::Zap,
-                        "Cyberpunk",
-                        Escolha::Cyberpunk,
-                        cx,
-                    ))
-                    .child(separador())
-                    .child(
-                        h_flex()
-                            .id("conta-sair")
-                            .h(px(32.))
-                            .px(px(6.))
-                            .gap(px(8.))
-                            .rounded(px(6.))
-                            .cursor_pointer()
-                            .text_color(perigo)
-                            .hover(move |s| s.bg(perigo.opacity(0.1)))
-                            .child(Icon::new(Icone::LogOut).size(px(16.)).flex_none())
-                            .child("Sair")
-                            .on_click(cx.listener(|raiz, _, _window, cx| raiz.sair_da_conta(cx))),
-                    ),
+                    })
+                    .icon(Icone::RefreshCw)
+                    .on_click(agir(|raiz, _, cx| raiz.verificar_atualizacoes(cx))),
+                )
+                .separator()
+                .label("Tema")
+                .item(tema_do_menu(
+                    "tema-claro",
+                    Icone::Sun,
+                    "Claro",
+                    Escolha::Claro,
+                ))
+                .item(tema_do_menu(
+                    "tema-escuro",
+                    Icone::Moon,
+                    "Escuro",
+                    Escolha::Escuro,
+                ))
+                .item(tema_do_menu(
+                    "tema-sistema",
+                    Icone::Monitor,
+                    "Sistema",
+                    Escolha::Sistema,
+                ))
+                .item(tema_do_menu(
+                    "tema-matrix",
+                    Icone::SquareTerminal,
+                    "Matrix",
+                    Escolha::Matrix,
+                ))
+                .item(tema_do_menu(
+                    "tema-cyberpunk",
+                    Icone::Zap,
+                    "Cyberpunk",
+                    Escolha::Cyberpunk,
+                ))
+                .separator()
+                .item(
+                    estilo::item_de_menu("conta-sair", "Sair", Some(perigo))
+                        .icon(Icon::new(Icone::LogOut).text_color(perigo))
+                        .on_click(agir(|raiz, _, cx| raiz.sair_da_conta(cx))),
+                )
+        });
+        window.focus(&menu.focus_handle(cx), cx);
+        let fechou = cx.subscribe(&menu, |raiz, _, _: &DismissEvent, cx| {
+            raiz.menu_da_conta = None;
+            cx.notify();
+        });
+        (menu, fechou)
+    }
+
+    /// O menu da conta aberto, preso ao pé do menu lateral, logo acima do
+    /// rodapé — onde fica o botão da conta.
+    pub(super) fn menu_da_conta(&self, window: &Window) -> Option<impl IntoElement> {
+        let (menu, _) = self.menu_da_conta.as_ref()?;
+        let pe = window.viewport_size().height - px(8. + super::rodape::ALTURA_DO_RODAPE);
+        Some(
+            gpui_kit::deferred(
+                gpui_kit::anchored()
+                    .position_mode(gpui_kit::AnchoredPositionMode::Window)
+                    .anchor(gpui_kit::Anchor::BottomLeft)
+                    .position(gpui_kit::point(px(self.largura_do_menu() - 4.), pe))
+                    .child(menu.clone()),
             )
+            .with_priority(1),
+        )
     }
 
     /// O canto de baixo: fotos subindo e o que o site recusou.

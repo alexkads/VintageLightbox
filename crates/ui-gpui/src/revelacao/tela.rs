@@ -2987,6 +2987,7 @@ impl Render for Revelacao {
             )
             .children(seta_de_baixo)
             .children(tira)
+            .children(self.pergunta_de_apagar(window, cx))
     }
 }
 

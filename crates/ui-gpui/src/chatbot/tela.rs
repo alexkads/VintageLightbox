@@ -184,7 +184,6 @@ pub struct Chatbot {
     proximo_pendente: u64,
     pub(crate) compositor: Entity<TextareaState>,
     pub(crate) respostas_abertas: bool,
-    pub(crate) mais_acoes: bool,
     /// Trocou de conversa: o campo esvazia no próximo desenho (esvaziar pede a
     /// janela, que o `abrir` não tem).
     pub(crate) limpar_compositor: bool,
@@ -291,7 +290,6 @@ impl Chatbot {
             proximo_pendente: 0,
             compositor,
             respostas_abertas: false,
-            mais_acoes: false,
             limpar_compositor: false,
             rolagem: gpui_kit::ScrollHandle::new(),
             rolagem_vista: None,
@@ -368,9 +366,6 @@ impl Chatbot {
     pub fn mostrar(&mut self, visivel: bool, cx: &mut Context<Self>) {
         let voltou = visivel && !self.visivel;
         self.visivel = visivel;
-        if !visivel {
-            self.mais_acoes = false;
-        }
         if voltou && (self.desatualizado || !self.carregou) {
             self.recarregar(cx);
         }
@@ -926,7 +921,6 @@ impl Chatbot {
     pub fn abrir(&mut self, chave: Chave, cx: &mut Context<Self>) {
         let mesma = self.aberta.as_ref() == Some(&chave);
         self.novidades.remove(&chave);
-        self.mais_acoes = false;
         if !mesma {
             self.tudo = false;
             self.respostas_abertas = false;
@@ -1094,7 +1088,6 @@ impl Chatbot {
 
     /// "Copiar número" / "Copiar IGSID" / "Copiar ID da conversa".
     pub fn copiar_id(&mut self, cx: &mut Context<Self>) {
-        self.mais_acoes = false;
         let Some(chave) = self.aberta.clone() else {
             return;
         };
@@ -1111,13 +1104,7 @@ impl Chatbot {
         cx.notify();
     }
 
-    pub fn alternar_mais_acoes(&mut self, cx: &mut Context<Self>) {
-        self.mais_acoes = !self.mais_acoes;
-        cx.notify();
-    }
-
     pub fn pedir_exclusao(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.mais_acoes = false;
         let Some(chave) = self.aberta.clone().filter(|c| c.canal == Canal::WhatsApp) else {
             return;
         };

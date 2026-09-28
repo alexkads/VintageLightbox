@@ -7,6 +7,7 @@
 
 use crate::campo::TrocarValor as _;
 use gpui_kit::component::input::{Input, Textarea};
+use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
 use gpui_kit::{
     div, prelude::*, px, rgb, AnyElement, Context, FontWeight, Hsla, SharedString, Window,
@@ -663,7 +664,6 @@ impl Chatbot {
             Canal::Web => conversa.presenca(),
             _ => conversa.chave.id.clone(),
         };
-        let menu = self.mais_acoes.then(|| self.menu_de_acoes(canal, cx));
 
         h_flex()
             .relative()
@@ -749,58 +749,54 @@ impl Chatbot {
                 )
                 .child(Icon::new(Icone::EllipsisVertical).size(px(16.)))
                 .tooltip("Mais ações")
-                .on_click(cx.listener(|tela, _, _, cx| tela.alternar_mais_acoes(cx))),
+                .map(|botao| self.menu_de_acoes(botao, canal, cx)),
             )
-            .children(menu)
     }
 
-    fn menu_de_acoes(&self, canal: Canal, cx: &mut Context<Self>) -> impl IntoElement {
-        let tema = cx.theme();
-        let (popover, borda, acento, perigo) =
-            (tema.popover, tema.border, tema.accent, tema.danger);
-        let item = |id: &'static str, rotulo: &'static str| {
-            div()
-                .id(id)
-                .debug_selector(move || id.to_string())
-                .px(px(8.))
-                .py(px(6.))
-                .rounded(px(6.))
-                .cursor_pointer()
-                .hover(move |s| s.bg(acento))
-                .child(rotulo)
-        };
-        v_flex()
-            .absolute()
-            .top(px(48.))
-            .right(px(8.))
-            .w(px(220.))
-            .p(px(4.))
-            .rounded(px(8.))
-            .border_1()
-            .border_color(borda)
-            .bg(popover)
-            .shadow_lg()
-            .occlude()
-            .child(
-                item(
+    /// "Mais ações": o `DropdownMenu` do gpui-kit, preso ao botão ⋮.
+    fn menu_de_acoes(
+        &self,
+        botao: gpui_kit::component::button::Button,
+        canal: Canal,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let perigo = cx.theme().danger;
+        let tela = cx.entity().downgrade();
+        botao.dropdown_menu_with_anchor(gpui_kit::Anchor::TopRight, move |menu, window, cx| {
+            let menu = match window.focused(cx) {
+                Some(antes) => menu.action_context(antes),
+                None => menu,
+            };
+            let copiar = tela.clone();
+            let menu = menu.min_w(px(220.)).item(
+                estilo::item_de_menu(
                     "chatbot-copiar",
                     match canal {
                         Canal::WhatsApp => "Copiar número",
                         Canal::Instagram => "Copiar IGSID",
                         _ => "Copiar ID da conversa",
                     },
+                    None,
                 )
-                .on_click(cx.listener(|tela, _, _, cx| tela.copiar_id(cx))),
+                .on_click(move |_, _, cx| {
+                    let _ = copiar.update(cx, |tela, cx| tela.copiar_id(cx));
+                }),
+            );
+            if canal != Canal::WhatsApp {
+                return menu;
+            }
+            let excluir = tela.clone();
+            menu.item(
+                estilo::item_de_menu(
+                    "chatbot-excluir-historico",
+                    "Excluir histórico",
+                    Some(perigo),
+                )
+                .on_click(move |_, window, cx| {
+                    let _ = excluir.update(cx, |tela, cx| tela.pedir_exclusao(window, cx));
+                }),
             )
-            .when(canal == Canal::WhatsApp, |d| {
-                d.child(
-                    item("chatbot-excluir-historico", "Excluir histórico")
-                        .text_color(perigo)
-                        .on_click(
-                            cx.listener(|tela, _, window, cx| tela.pedir_exclusao(window, cx)),
-                        ),
-                )
-            })
+        })
     }
 
     fn historico(

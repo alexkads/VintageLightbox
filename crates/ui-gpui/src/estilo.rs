@@ -75,12 +75,30 @@ pub fn desligado(botao: Button, desligar: bool) -> Button {
 
 /// O `SidebarTrigger`: 28 px, fantasma, com o ícone do painel em 16.
 pub fn botao_do_menu(id: impl Into<SharedString>, _cx: &App) -> Button {
+    botao_icone(id, Icone::PanelLeft, 28., 16.)
+}
+
+/// `Button variant="ghost" size="icon"`: quadrado de `lado` px, só o ícone.
+/// É o X dos diálogos, as setas e os "voltar" dos cabeçalhos.
+pub fn botao_icone(id: impl Into<SharedString>, icone: Icone, lado: f32, icone_px: f32) -> Button {
     Button::new(id.into())
         .ghost()
         .small()
-        .size(px(28.))
+        .size(px(lado))
         .px(px(0.))
-        .child(Icon::new(Icone::PanelLeft).size(px(16.)))
+        .child(Icon::new(icone).size(px(icone_px)))
+}
+
+/// Um item clicável de barra (o rodapé, os links pequenos): o `Button`
+/// fantasma do kit em 20 px e `text-xs`, sem a altura de 32 do botão do site.
+/// Cor e fundo próprios vão por cima, como no resto do kit.
+pub fn botao_raso(id: impl Into<SharedString>) -> Button {
+    Button::new(id.into())
+        .ghost()
+        .xsmall()
+        .h(px(20.))
+        .px(px(6.))
+        .rounded(px(4.))
 }
 
 /// `Badge variant="outline"`: a `Tag` do gpui-kit, em pílula de 22 px com a
@@ -311,4 +329,22 @@ pub fn cartao(cx: &App) -> Div {
         .border_1()
         .border_color(tema.border)
         .overflow_hidden()
+}
+
+/// Um item do `PopupMenu` do gpui-kit **com nome**: o rótulo vai num `div`
+/// com `debug_selector`, para os testes o acharem e clicarem como antes (o
+/// item do kit não tem nome próprio). O clique no rótulo sobe até o item, que
+/// fecha o menu e chama o `on_click`.
+pub fn item_de_menu(
+    id: &'static str,
+    rotulo: impl Into<SharedString>,
+    cor: Option<Hsla>,
+) -> gpui_kit::component::menu::PopupMenuItem {
+    let rotulo: SharedString = rotulo.into();
+    gpui_kit::component::menu::PopupMenuItem::element(move |_, _| {
+        div()
+            .debug_selector(move || id.into())
+            .when_some(cor, |d, cor| d.text_color(cor))
+            .child(rotulo.clone())
+    })
 }

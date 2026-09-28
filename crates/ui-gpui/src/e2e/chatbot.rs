@@ -1078,7 +1078,7 @@ fn mais_acoes_copia_o_id_e_so_o_whatsapp_exclui(cx: &mut TestAppContext) {
         Some("ig-1")
     );
     assert!(toasts(&e, cx).contains(&("IGSID copiado.".into(), false)));
-    chatbot(&e, cx, |t, _w, _cx| assert!(!t.mais_acoes, "o menu fecha"));
+    assert!(!desenhado(&e, cx, "chatbot-copiar"), "o menu fecha");
 }
 
 /// 🗑️ **Excluir histórico só com `QUERO EXCLUIR!` letra por letra** — o

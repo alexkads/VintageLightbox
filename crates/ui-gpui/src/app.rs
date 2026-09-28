@@ -538,7 +538,11 @@ pub struct Aplicativo {
     /// como no site (`defaultOpen={false}`).
     menu_aberto: bool,
     /// O menu da conta (tema e Sair) está aberto.
-    menu_da_conta: bool,
+    /// O menu da conta aberto, e a escuta do fechar dele.
+    menu_da_conta: Option<(
+        Entity<gpui_kit::component::menu::PopupMenu>,
+        gpui_kit::Subscription,
+    )>,
     /// Quem está logado, de `/auth/me`.
     conta: Option<Conta>,
     /// A foto do perfil, baixada ao entrar. Sem ela, o retrato é a inicial.
@@ -1312,7 +1316,7 @@ impl Aplicativo {
             nova_sessao,
             _pedidos_da_nova: pedidos_da_nova,
             menu_aberto: false,
-            menu_da_conta: false,
+            menu_da_conta: None,
             conta: None,
             retrato: None,
             _retrato: None,
@@ -6464,9 +6468,7 @@ impl Render for Aplicativo {
             .children(aviso_de_saida)
             .when(false, |raiz| raiz)
             .children(modal_de_configuracoes)
-            .when(self.menu_da_conta, |raiz| {
-                raiz.child(self.menu_da_conta(cx))
-            })
+            .children(self.menu_da_conta(window))
             // As novidades da versão: por cima de tudo, só quando pedidas.
             .children(self.novidades_da_versao(cx))
             // 📏 A barra do pé: por cima da tela e dos modais, sem pegar clique

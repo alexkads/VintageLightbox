@@ -42,8 +42,10 @@ use biblioteca_core::caixa::{self as regras, ItemDoCupom, TipoDeMovimento};
 use biblioteca_core::dinheiro;
 use biblioteca_core::negociacao::{self, Negociacao, Tipo, PARCEIROS};
 use biblioteca_core::Modificadores;
+use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{Input, InputState};
-use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Disableable, Icon, Sizable};
 use gpui_kit::{
     canvas, div, prelude::*, px, AnyElement, AnyWindowHandle, ClickEvent, Context, Div, Entity,
     FocusHandle, Focusable, FontWeight, Hsla, KeystrokeEvent, MouseButton, MouseDownEvent,
@@ -1477,12 +1479,7 @@ impl Caixa {
 
     fn painel_minimizado(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let tema = cx.theme();
-        let (apagado, mono, frente, realce) = (
-            tema.muted_foreground,
-            tema.mono_font_family.clone(),
-            tema.foreground,
-            tema.muted,
-        );
+        let (apagado, mono) = (tema.muted_foreground, tema.mono_font_family.clone());
         let (situacao, cor) = self.situacao_do_painel(cx);
         let n = self.cupom().itens.len();
         self.alca("caixa-alca-minimizada", cx)
@@ -1528,21 +1525,10 @@ impl Caixa {
                     .child(dinheiro::formatar(self.a_receber())),
             )
             .child(
-                div()
-                    .id("caixa-maximizar")
-                    .size(px(28.))
+                crate::estilo::botao_icone("caixa-maximizar", Icone::Maximize2, 28., 16.)
                     .rounded_full()
-                    .flex()
-                    .items_center()
-                    .justify_center()
                     .text_color(apagado)
-                    .cursor_pointer()
-                    .hover(move |s| s.bg(realce).text_color(frente))
-                    .child(Icon::new(Icone::Maximize2).size(px(16.)))
-                    .tooltip(|window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new("Abrir o caixa (F9)")
-                            .build(window, cx)
-                    })
+                    .tooltip("Abrir o caixa (F9)")
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(|t, _: &ClickEvent, _, cx| t.alternar_painel(cx))),
             )
@@ -1568,20 +1554,10 @@ impl Caixa {
             .cloned();
 
         let botao_de_icone = |id: &'static str, icone: Icone, dica: &'static str| {
-            div()
-                .id(id)
-                .size(px(28.))
+            crate::estilo::botao_icone(id, icone, 28., 16.)
                 .rounded(px(6.))
-                .flex()
-                .items_center()
-                .justify_center()
                 .text_color(apagado)
-                .cursor_pointer()
-                .hover(move |s| s.bg(realce).text_color(frente))
-                .child(Icon::new(icone).size(px(16.)))
-                .tooltip(move |window, cx| {
-                    gpui_kit::component::tooltip::Tooltip::new(dica).build(window, cx)
-                })
+                .tooltip(dica)
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         };
 
@@ -1806,27 +1782,12 @@ impl Caixa {
 
         let aberto = self.vista.as_ref().is_some_and(|v| v.caixa.is_some());
         let atalho = |id: &'static str, tecla: &'static str, rotulo: String, destaque: bool| {
-            h_flex()
-                .id(id)
-                .gap(px(4.))
+            Button::new(id)
+                .xsmall()
+                .map(|b| if destaque { b.primary() } else { b.outline() })
                 .px(px(6.))
-                .py(px(2.))
                 .rounded(px(6.))
-                .border_1()
                 .text_size(px(11.))
-                .cursor_pointer()
-                .map(|d| {
-                    if destaque {
-                        d.border_color(frente)
-                            .bg(frente)
-                            .text_color(fundo)
-                            .hover(|s| s.opacity(0.9))
-                    } else {
-                        d.border_color(borda)
-                            .text_color(frente)
-                            .hover(move |s| s.bg(realce))
-                    }
-                })
                 .child(
                     div()
                         .font_family(mono.clone())
@@ -2074,24 +2035,19 @@ impl Caixa {
                         t.clicar_item(&id, false, gesto(evento), w, cx)
                     }))
                     // ☑️ A caixinha de marcar: alterna sem desfazer o resto.
-                    .child(
+                    .child(StatefulInteractiveElement::on_click(
                         caixinha(
                             SharedString::from(format!("caixa-marcar-{}", i.foto_id)),
                             marcado,
-                            false,
-                            cartao,
-                            frente,
                         )
                         .absolute()
                         .left(px(12.))
-                        .top(px(7.))
-                        .on_click(cx.listener(
-                            move |t, evento: &ClickEvent, w, cx| {
-                                cx.stop_propagation();
-                                t.clicar_item(&id_da_caixinha, true, gesto(evento), w, cx)
-                            },
-                        )),
-                    )
+                        .top(px(7.)),
+                        cx.listener(move |t, evento: &ClickEvent, w, cx| {
+                            cx.stop_propagation();
+                            t.clicar_item(&id_da_caixinha, true, gesto(evento), w, cx)
+                        }),
+                    ))
                     .child(
                         h_flex()
                             .gap(px(8.))
@@ -2222,15 +2178,12 @@ impl Caixa {
                 .child(texto.to_uppercase())
         };
         let link = |id: &'static str, texto: String, desligado: bool| {
-            div()
-                .id(id)
+            Button::new(id)
+                .link()
+                .xsmall()
                 .text_size(px(11.))
                 .text_color(apagado)
-                .when(desligado, |d| d.opacity(0.4))
-                .when(!desligado, move |d| {
-                    d.cursor_pointer()
-                        .hover(move |s| s.text_color(frente).underline())
-                })
+                .disabled(desligado)
                 .child(texto)
         };
 
@@ -2589,17 +2542,9 @@ impl Caixa {
                             .child(arquivo),
                     )
                     .child(
-                        div()
-                            .id("caixa-rapido-fechar")
-                            .size(px(24.))
+                        crate::estilo::botao_icone("caixa-rapido-fechar", Icone::X, 24., 14.)
                             .rounded(px(6.))
-                            .flex()
-                            .items_center()
-                            .justify_center()
                             .text_color(apagado)
-                            .cursor_pointer()
-                            .hover(move |s| s.bg(realce).text_color(frente))
-                            .child(Icon::new(Icone::X).size(px(14.)))
                             .on_click(
                                 cx.listener(|t, _: &ClickEvent, w, cx| t.fechar_edicao(w, cx)),
                             ),
@@ -2677,13 +2622,7 @@ impl Caixa {
     /// eles somam, e — com dois ou mais — o ajuste do lote e o "desmarcar".
     fn cabecalho_da_selecao(&self, cupom: &regras::Cupom, cx: &mut Context<Self>) -> Div {
         let tema = cx.theme();
-        let (borda, apagado, realce, cartao, frente) = (
-            tema.border,
-            tema.muted_foreground,
-            tema.muted,
-            tema.popover,
-            tema.foreground,
-        );
+        let (borda, apagado, frente) = (tema.border, tema.muted_foreground, tema.foreground);
         let marcados = self
             .painel_ref()
             .map(|p| p.selecao.marcados())
@@ -2728,38 +2667,22 @@ impl Caixa {
             .border_color(borda)
             .text_size(px(11.))
             .text_color(apagado)
-            .child(
-                caixinha(
-                    "caixa-marcar-todos".into(),
-                    todos,
-                    n > 0 && !todos,
-                    cartao,
-                    frente,
-                )
-                .on_click(cx.listener(|t, _: &ClickEvent, _, cx| t.alternar_todos_no_cupom(cx))),
-            )
+            .child(StatefulInteractiveElement::on_click(
+                caixinha("caixa-marcar-todos".into(), todos),
+                cx.listener(|t, _: &ClickEvent, _, cx| t.alternar_todos_no_cupom(cx)),
+            ))
             .child(div().flex_1().min_w(px(0.)).truncate().child(texto))
             .when(n >= 2, |d| {
                 d.child(
-                    h_flex()
-                        .id("caixa-ajustar-marcados")
-                        .gap(px(4.))
+                    Button::new("caixa-ajustar-marcados")
+                        .xsmall()
+                        .outline()
                         .px(px(6.))
-                        .py(px(2.))
                         .rounded(px(6.))
-                        .border_1()
-                        .cursor_pointer()
-                        .map(|d| {
-                            if editando_lote {
-                                d.border_color(cores::quente())
-                                    .bg(cores::quente())
-                                    .text_color(cores::sobre_quente())
-                            } else {
-                                d.border_color(borda)
-                                    .bg(cartao)
-                                    .text_color(frente)
-                                    .hover(move |s| s.bg(realce))
-                            }
+                        .when(editando_lote, |d| {
+                            d.border_color(cores::quente())
+                                .bg(cores::quente())
+                                .text_color(cores::sobre_quente())
                         })
                         .child(Icon::new(Icone::SlidersHorizontal).size(px(12.)))
                         .child(format!("Ajustar {n}"))
@@ -2769,13 +2692,11 @@ impl Caixa {
                         ),
                 )
                 .child(
-                    div()
-                        .id("caixa-desmarcar")
+                    Button::new("caixa-desmarcar")
+                        .xsmall()
+                        .ghost()
                         .px(px(6.))
-                        .py(px(2.))
                         .rounded(px(6.))
-                        .cursor_pointer()
-                        .hover(move |s| s.bg(realce).text_color(frente))
                         .child("Desmarcar")
                         .on_click(cx.listener(|t, _: &ClickEvent, _, cx| {
                             if let Some(p) = t.painel_mut() {
@@ -2789,40 +2710,14 @@ impl Caixa {
 }
 
 /// ☑️ A caixinha de marcar (o "flag" de seleção que o dono pediu em
-/// 2026-09-26) — a mesma do site. `mista` é o cabeçalho com parte marcada.
-fn caixinha(
-    id: SharedString,
-    marcada: bool,
-    mista: bool,
-    cartao: Hsla,
-    frente: Hsla,
-) -> Stateful<Div> {
-    let acesa = marcada || mista;
-    div()
-        .id(id)
-        .flex_none()
-        .size(px(16.))
-        .rounded(px(4.))
-        .border_1()
-        .flex()
-        .items_center()
-        .justify_center()
-        .cursor_pointer()
-        .map(|d| {
-            if acesa {
-                d.border_color(cores::quente())
-                    .bg(cores::quente())
-                    .text_color(cores::sobre_quente())
-            } else {
-                d.border_color(frente.opacity(0.4))
-                    .bg(cartao)
-                    .hover(move |s| s.border_color(frente))
-            }
-        })
-        .when(mista, |d| d.child(Icon::new(Icone::Minus).size(px(12.))))
-        .when(marcada && !mista, |d| {
-            d.child(Icon::new(Icone::Check).size(px(12.)))
-        })
+/// 2026-09-26): o `Checkbox` do gpui-kit, o mesmo das outras telas.
+///
+/// O clique entra pelo `on_click` do elemento (e não pelo do `Checkbox`, que
+/// só diz o novo valor), porque a caixinha do item lê o ⇧ e o ⌘ do gesto.
+/// O kit não tem o estado misto: o cabeçalho com parte marcada fica
+/// desmarcado, e clicar nele marca todas — como o `indeterminate` do site.
+fn caixinha(id: SharedString, marcada: bool) -> Checkbox {
+    Checkbox::new(id).checked(marcada).flex_none()
 }
 
 fn corpo_da_negociacao(preco: Option<i64>, observacao: Option<String>) -> Value {

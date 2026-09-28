@@ -65,8 +65,8 @@ fn da_porta_ao_sair_pela_conta(cx: &mut TestAppContext) {
 
     // O menu da conta: tema Escuro, Claro e Sistema — cada um chega ao tema
     // que a tela pinta.
-    e.app(cx, |app, _w, cx| {
-        app.alternar_menu_da_conta(cx);
+    e.app(cx, |app, window, cx| {
+        app.alternar_menu_da_conta(window, cx);
         assert!(app.menu_da_conta_aberto());
     });
     for (escolha, escuro) in [
@@ -96,10 +96,10 @@ fn da_porta_ao_sair_pela_conta(cx: &mut TestAppContext) {
     });
 
     // Entra num ensaio e sai da conta de dentro dele: a sessão fecha junto.
-    e.app(cx, |app, _w, cx| {
+    e.app(cx, |app, window, cx| {
         app.entrar_na_sessao(GALERIA.into(), cx);
         assert!(app.pode_trabalhar());
-        app.alternar_menu_da_conta(cx);
+        app.alternar_menu_da_conta(window, cx);
         app.sair_da_conta(cx);
     });
     e.esperar(cx);
@@ -137,7 +137,7 @@ fn o_backup_se_abre_pelo_menu_da_conta(cx: &mut TestAppContext) {
         "o Backup saiu do menu lateral"
     );
 
-    e.app(cx, |app, _w, cx| app.alternar_menu_da_conta(cx));
+    e.app(cx, |app, window, cx| app.alternar_menu_da_conta(window, cx));
     clicar(&e, cx, "conta-backup");
     e.app(cx, |app, _w, _cx| {
         assert_eq!(app.tela(), Tela::Backup);

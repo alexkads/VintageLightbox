@@ -4109,24 +4109,17 @@ impl Detalhe {
                     .on_click(cx.listener(|_tela, _ev, _window, cx| cx.emit(Pedido::AlternarMenu))),
             )
             .child(
-                div()
-                    .id("galeria-voltar")
-                    .flex_none()
-                    .cursor_pointer()
+                estilo::botao_icone("galeria-voltar", Icone::ChevronLeft, 28., 20.)
                     .text_color(apagado)
-                    .hover(move |s| s.text_color(texto))
-                    .child(Icon::new(Icone::ChevronLeft).size(px(20.)))
                     .on_click(cx.listener(|_tela, _ev, _window, cx| cx.emit(Pedido::Voltar))),
             )
             .child(
                 // ✏️ Clicar no título edita — o mesmo gesto da web.
-                div()
-                    .id("sessao-titulo")
-                    .flex()
+                Button::new("sessao-titulo")
+                    .ghost()
+                    .small()
                     .flex_none()
-                    .items_center()
-                    .gap(px(8.))
-                    .cursor_pointer()
+                    .px(px(6.))
                     .child(Icon::new(Icone::Pencil).size(px(14.)).text_color(apagado))
                     .child(
                         div()

@@ -38,11 +38,12 @@
 use std::sync::{Arc, OnceLock};
 
 use biblioteca_core::acervo::{Estado, Filtro};
-use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon, Selectable};
 use gpui_kit::{div, prelude::*, px, AnyElement, Context, FontWeight, MouseButton, SharedString};
 
 use super::{Aplicativo, PedidoDeAtualizacao, Tela};
 use crate::atualizacao::faixa;
+use crate::estilo;
 use crate::pos_venda::config::SITE_PADRAO;
 use crate::recursos::Icone;
 use crate::segundo_plano::frases::{ha_quanto, plural};
@@ -167,14 +168,13 @@ impl Aplicativo {
     /// O rodapé inteiro. Ver o [módulo](self).
     pub(super) fn rodape(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let tema = cx.theme();
-        let (borda, fundo, frente, apagado, aviso, perigo, acento) = (
+        let (borda, fundo, frente, apagado, aviso, perigo) = (
             tema.border,
             tema.background,
             tema.foreground,
             tema.muted_foreground,
             tema.warning,
             tema.danger,
-            tema.accent,
         );
         let destaque = faixa::em_destaque(&self.atualizacao);
         let item = |id: &'static str| {
@@ -189,13 +189,16 @@ impl Aplicativo {
                 .items_center()
                 .text_xs()
         };
+        let botao = |id: &'static str| {
+            estilo::botao_raso(id)
+                .debug_selector(move || id.into())
+                .flex_none()
+        };
         let separador = || div().flex_none().w(px(1.)).h(px(12.)).bg(borda);
 
         // ── A versão ──────────────────────────────────────────────────────
-        let versao = item("rodape-versao")
+        let versao = botao("rodape-versao")
             .text_color(apagado)
-            .cursor_pointer()
-            .hover(move |s| s.bg(acento))
             .child(Icon::new(Icone::Sparkles).size(px(12.)))
             .child("VintageLightbox")
             .child(
@@ -208,10 +211,7 @@ impl Aplicativo {
                     .font_weight(FontWeight::MEDIUM)
                     .child(concat!("versão ", env!("CARGO_PKG_VERSION"))),
             )
-            .tooltip(|window, cx| {
-                gpui_kit::component::tooltip::Tooltip::new("Ver as novidades desta versão")
-                    .build(window, cx)
-            })
+            .tooltip("Ver as novidades desta versão")
             .on_click(cx.listener(|raiz, _, _window, cx| {
                 raiz.atender(PedidoDeAtualizacao::VerEstaVersao, cx);
             }));
@@ -235,17 +235,12 @@ impl Aplicativo {
         }
         if let Some(texto) = frases.recusados {
             trecho_dos_envios = trecho_dos_envios.child(
-                item("rodape-recusados")
+                botao("rodape-recusados")
                     .text_color(perigo)
                     .font_weight(FontWeight::MEDIUM)
-                    .cursor_pointer()
-                    .hover(move |s| s.bg(perigo.opacity(0.12)))
                     .child(Icon::new(Icone::TriangleAlert).size(px(12.)))
                     .child(texto)
-                    .tooltip(|window, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new("Ver o que o site recusou")
-                            .build(window, cx)
-                    })
+                    .tooltip("Ver o que o site recusou")
                     .on_click(cx.listener(|raiz, _, _window, cx| {
                         raiz.vendo_recusas = !raiz.vendo_recusas;
                         cx.notify();
@@ -284,16 +279,15 @@ impl Aplicativo {
         // captura grava — mesmo com o painel fechado.
         let medindo = crate::desempenho::ativa();
         let painel_aberto = self.desempenho.read(cx).aberto();
-        let desempenho = item("rodape-desempenho")
-            .cursor_pointer()
-            .hover(move |s| s.bg(acento))
+        let desempenho = botao("rodape-desempenho")
+            .selected(painel_aberto && !medindo)
             .map(|d| {
                 if medindo {
                     d.text_color(perigo)
                         .font_weight(FontWeight::SEMIBOLD)
                         .bg(perigo.opacity(0.12))
                 } else if painel_aberto {
-                    d.text_color(frente).bg(acento)
+                    d.text_color(frente)
                 } else {
                     d.text_color(apagado)
                 }
@@ -301,13 +295,10 @@ impl Aplicativo {
             .child(Icon::new(Icone::ChartColumn).size(px(12.)))
             .when(medindo, |d| d.child("● Medindo"))
             .when(!medindo, |d| d.child("Desempenho"))
-            .tooltip(move |window, cx| {
-                gpui_kit::component::tooltip::Tooltip::new(if medindo {
-                    "A captura de desempenho está gravando — clique para ver"
-                } else {
-                    "Medir quadros, etapas de CPU e GPU e a máquina"
-                })
-                .build(window, cx)
+            .tooltip(if medindo {
+                "A captura de desempenho está gravando — clique para ver"
+            } else {
+                "Medir quadros, etapas de CPU e GPU e a máquina"
             })
             .on_click(cx.listener(|raiz, _, _window, cx| {
                 raiz.desempenho.update(cx, |p, cx| p.alternar(cx));
@@ -319,9 +310,7 @@ impl Aplicativo {
         let producao = *producao;
         let endereco: SharedString = endereco_curto(site).to_string().into();
         let para_abrir = site.clone();
-        let servidor = item("rodape-servidor")
-            .cursor_pointer()
-            .hover(move |s| s.bg(acento))
+        let servidor = botao("rodape-servidor")
             .map(|d| {
                 if producao {
                     d.text_color(apagado)
@@ -332,13 +321,10 @@ impl Aplicativo {
             .child(Icon::new(Icone::Globe).size(px(12.)))
             .when(!producao, |d| d.child("Fora da produção ·"))
             .child(endereco)
-            .tooltip(move |window, cx| {
-                let dica = if producao {
-                    "O site em que as fotos e as vendas ficam"
-                } else {
-                    "Este app não está falando com o site de produção"
-                };
-                gpui_kit::component::tooltip::Tooltip::new(dica).build(window, cx)
+            .tooltip(if producao {
+                "O site em que as fotos e as vendas ficam"
+            } else {
+                "Este app não está falando com o site de produção"
             })
             .on_click(move |_, _window, cx| cx.open_url(&para_abrir));
 

@@ -261,7 +261,9 @@ impl Entrada {
 impl Render for Entrada {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         use capa::cor;
-        use gpui_kit::component::{h_flex, v_flex, Icon};
+        use gpui_kit::component::button::{Button, ButtonVariants};
+        use gpui_kit::component::spinner::Spinner;
+        use gpui_kit::component::{h_flex, v_flex, Icon, Sizable};
         use gpui_kit::{
             img, linear_color_stop, linear_gradient, relative, Animation, AnimationExt, FontWeight,
             ObjectFit, StyledImage,
@@ -310,15 +312,9 @@ impl Render for Entrada {
             })
             .when(ocupado, |b| {
                 b.cursor_default().child(
-                    Icon::new(Icone::LoaderCircle).size(px(18.)).with_animation(
-                        "entrada-girando",
-                        Animation::new(std::time::Duration::from_secs(1)).repeat(),
-                        |icone, delta| {
-                            icone.transform(gpui_kit::Transformation::rotate(gpui_kit::percentage(
-                                delta,
-                            )))
-                        },
-                    ),
+                    Spinner::new()
+                        .with_size(px(18.))
+                        .color(cor(capa::SOBRE_O_BOTAO)),
                 )
             })
             .child(rotulo)
@@ -404,13 +400,11 @@ impl Render for Entrada {
                     // a única coisa clicável da tela nesse estado.
                     .when(self.no_navegador, |d| {
                         d.child(
-                            div()
-                                .id("entrada-desistir")
+                            Button::new("entrada-desistir")
+                                .link()
                                 .mt(px(12.))
                                 .text_sm()
-                                .cursor_pointer()
                                 .text_color(cor(capa::OURO).opacity(0.85))
-                                .hover(|s| s.text_color(cor(capa::OURO)))
                                 .child("Cancelar e voltar")
                                 .on_click(cx.listener(|tela, _ev, _window, cx| tela.desistir(cx))),
                         )

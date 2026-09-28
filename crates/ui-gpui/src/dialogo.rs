@@ -290,9 +290,8 @@ pub fn cabecalho_com_x(
     id: &'static str,
     titulo: impl Into<SharedString>,
     fechar: impl Fn(&gpui_kit::ClickEvent, &mut Window, &mut gpui_kit::App) + 'static,
-    cx: &gpui_kit::App,
+    _cx: &gpui_kit::App,
 ) -> gpui_kit::Div {
-    let acento = cx.theme().accent;
     gpui_kit::component::h_flex()
         .items_start()
         .gap(px(8.))
@@ -305,19 +304,9 @@ pub fn cabecalho_com_x(
                 .child(titulo.into()),
         )
         .child(
-            gpui_kit::div()
-                .id(id)
+            crate::estilo::botao_icone(id, crate::recursos::Icone::X, 20., 16.)
                 .debug_selector(move || id.into())
-                .flex_none()
-                .size(px(20.))
                 .rounded(px(4.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .opacity(0.7)
-                .cursor_pointer()
-                .hover(move |s| s.opacity(1.).bg(acento))
-                .child(gpui_kit::component::Icon::new(crate::recursos::Icone::X).size(px(16.)))
                 .on_click(fechar),
         )
 }

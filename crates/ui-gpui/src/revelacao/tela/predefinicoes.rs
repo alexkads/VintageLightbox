@@ -27,15 +27,15 @@ use std::time::Duration;
 #[cfg(test)]
 use domain::entities::preset::PresetAdjustments;
 use domain::entities::{Preset, PresetId};
+use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants};
 use gpui_kit::component::input::{Escape, Input, InputEvent, InputState};
 use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon, Sizable};
-use gpui_kit::Div;
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Disableable, Icon, Sizable};
 use gpui_kit::{
     actions, anchored, canvas, deferred, div, point, prelude::*, px, relative, rgb, Anchor,
     AnchoredPositionMode, AnyElement, App, Context, CursorStyle, DragMoveEvent, Entity,
-    FocusHandle, FontWeight, HighlightStyle, Hsla, KeyBinding, MouseButton, Pixels, SharedString,
-    Size, Stateful, StyledText, Subscription, Window,
+    FocusHandle, FontWeight, HighlightStyle, KeyBinding, MouseButton, Pixels, SharedString, Size,
+    StyledText, Subscription, Window,
 };
 
 use super::Revelacao;
@@ -834,129 +834,66 @@ impl Revelacao {
                 .absolute()
                 .size_0()
             })
-            .children(self.pergunta_de_apagar(cx))
             .children(self.avisos_da_coluna(cx))
     }
 
-    /// "Apagar "X"?" — o `useConfirmacao` do site, sobre a tela inteira.
-    fn pergunta_de_apagar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// "Apagar "X"?" — o `useConfirmacao` do site, no `Dialog` do gpui-kit.
+    ///
+    /// Desenhada pelo `render` da Revelação (a coluna não tem a `Window`). O
+    /// clique fora cancela, como o `onOpenChange` do site; Enter e Esc são do
+    /// contexto da pergunta, para o Esc não chegar à raiz e sair da Revelação.
+    pub(super) fn pergunta_de_apagar(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let (_, nome) = self.predefinicoes.pergunta.aberto()?;
         let foco = self.predefinicoes.foco_da_pergunta.clone()?;
-        let tamanho = self.predefinicoes.janela.get();
-        let tema = cx.theme();
-        let (cartao, frente, apagado, borda, realce, perigo, fundo) = (
-            tema.popover,
-            tema.foreground,
-            tema.muted_foreground,
-            tema.border,
-            tema.muted,
-            tema.danger,
-            tema.background,
-        );
-        let largura = px(448.).min(tamanho.width - px(32.));
-
-        Some(
-            deferred(
-                anchored()
-                    .position(point(px(0.), px(0.)))
-                    .position_mode(AnchoredPositionMode::Window)
-                    .child(
-                        div()
-                            .id("pergunta-da-predefinicao")
-                            .occlude()
-                            .w(tamanho.width)
-                            .h(tamanho.height)
-                            .bg(gpui_kit::black().opacity(0.1))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            // Clicar fora cancela, como o `onOpenChange` do site.
-                            .on_click(cx.listener(|tela, _ev, window, cx| {
-                                tela.responder_pergunta(false, window, cx);
-                            }))
-                            .child(
-                                v_flex()
-                                    .id("cartao-da-pergunta")
-                                    .track_focus(&foco)
-                                    .key_context(CONTEXTO_DA_PERGUNTA)
-                                    .on_action(cx.listener(
-                                        |tela, _: &ConfirmarPergunta, window, cx| {
-                                            tela.responder_pergunta(true, window, cx);
-                                        },
-                                    ))
-                                    .on_action(cx.listener(
-                                        |tela, _: &CancelarPergunta, window, cx| {
-                                            tela.responder_pergunta(false, window, cx);
-                                        },
-                                    ))
-                                    // O clique no cartão não é "fora".
-                                    .on_click(|_, _, cx| cx.stop_propagation())
-                                    .w(largura)
-                                    .rounded(px(12.))
-                                    .border_1()
-                                    .border_color(frente.opacity(0.1))
-                                    .bg(cartao)
-                                    .text_color(frente)
-                                    .shadow_lg()
-                                    .overflow_hidden()
-                                    .child(
-                                        v_flex()
-                                            .p(px(16.))
-                                            .gap(px(6.))
-                                            .child(
-                                                div()
-                                                    .text_size(px(16.))
-                                                    .font_weight(FontWeight::MEDIUM)
-                                                    .child(format!("Apagar \"{nome}\"?")),
-                                            )
-                                            .child(
-                                                div()
-                                                    .text_size(px(14.))
-                                                    .text_color(apagado)
-                                                    .child("A predefinição sai da lista."),
-                                            ),
-                                    )
-                                    .child(
-                                        h_flex()
-                                            .justify_end()
-                                            .gap(px(8.))
-                                            .p(px(16.))
-                                            .border_t_1()
-                                            .border_color(borda)
-                                            .bg(realce.opacity(0.5))
-                                            .child(
-                                                botao_da_pergunta(
-                                                    "cancelar-apagar",
-                                                    "Cancelar",
-                                                    cx,
-                                                )
-                                                .border_1()
-                                                .border_color(borda)
-                                                .bg(fundo)
-                                                .hover(move |s| s.bg(realce))
-                                                .on_click(cx.listener(|tela, _ev, window, cx| {
-                                                    tela.responder_pergunta(false, window, cx);
-                                                })),
-                                            )
-                                            .child(
-                                                botao_da_pergunta("confirmar-apagar", "Apagar", cx)
-                                                    .bg(perigo)
-                                                    .text_color(gpui_kit::white())
-                                                    .hover(move |s| s.bg(perigo.opacity(0.9)))
-                                                    .on_click(cx.listener(
-                                                        |tela, _ev, window, cx| {
-                                                            tela.responder_pergunta(
-                                                                true, window, cx,
-                                                            );
-                                                        },
-                                                    )),
-                                            ),
-                                    ),
-                            ),
-                    ),
+        let miolo = div()
+            .id("pergunta-da-predefinicao")
+            .track_focus(&foco)
+            .key_context(CONTEXTO_DA_PERGUNTA)
+            .on_action(cx.listener(|tela, _: &ConfirmarPergunta, window, cx| {
+                tela.responder_pergunta(true, window, cx);
+            }))
+            .on_action(cx.listener(|tela, _: &CancelarPergunta, window, cx| {
+                tela.responder_pergunta(false, window, cx);
+            }))
+            .child(crate::dialogo::miolo_da_pergunta(
+                "cartao-da-pergunta",
+                format!("Apagar \"{nome}\"?"),
+                "A predefinição sai da lista.",
+                cx,
+            ))
+            .into_any_element();
+        let rodape = crate::dialogo::rodape_da_pergunta(cx)
+            .child(
+                crate::estilo::botao_contorno("cancelar-apagar", cx)
+                    .child("Cancelar")
+                    .on_click(cx.listener(|tela, _ev, window, cx| {
+                        tela.responder_pergunta(false, window, cx);
+                    })),
             )
-            .with_priority(2)
-            .into_any_element(),
+            .child(
+                crate::estilo::botao_perigo("confirmar-apagar", cx)
+                    .child("Apagar")
+                    .on_click(cx.listener(|tela, _ev, window, cx| {
+                        tela.responder_pergunta(true, window, cx);
+                    })),
+            )
+            .into_any_element();
+        crate::dialogo::desenhar_conteudo(
+            Some(miolo),
+            Some(rodape),
+            crate::dialogo::Jeito {
+                largura: 448.,
+                esc: false,
+                veu: true,
+                x: false,
+            },
+            |tela, window, cx| tela.responder_pergunta(false, window, cx),
+            window,
+            cx,
         )
     }
 
@@ -1537,7 +1474,7 @@ impl Revelacao {
             return Vec::new();
         }
         let id = preset.id;
-        let discreto = |botao: Stateful<Div>| {
+        let discreto = |botao: Button| {
             botao.opacity(0.).group_hover(grupo.clone(), move |s| {
                 s.opacity(if travada { 0.4 } else { 1. })
             })
@@ -1615,7 +1552,8 @@ impl Revelacao {
     }
 }
 
-/// O `IconeBotao` do site: `rounded p-1`, apagado, acende ao passar o mouse.
+/// O `IconeBotao` do site (`rounded p-1`, apagado): o `Button` fantasma do
+/// kit só com o ícone, com a dica e o desligado que **não clica**.
 fn icone_de_botao(
     id: impl Into<SharedString>,
     icone: Icone,
@@ -1623,69 +1561,47 @@ fn icone_de_botao(
     rotulo: impl Into<SharedString>,
     desligado: bool,
     cx: &App,
-) -> Stateful<Div> {
-    let tema = cx.theme();
-    let (apagado, frente, realce) = (tema.muted_foreground, tema.foreground, tema.muted);
-    let rotulo: SharedString = rotulo.into();
-    div()
-        .id(id.into())
+) -> Button {
+    Button::new(id.into())
+        .ghost()
+        .xsmall()
         .flex_none()
+        .size(px(lado + 8.))
+        .px(px(0.))
         .rounded(px(4.))
-        .p(px(4.))
-        .text_color(apagado)
+        .text_color(cx.theme().muted_foreground)
         .child(Icon::new(icone).size(px(lado)))
-        .tooltip(move |window, cx| Tooltip::new(rotulo.clone()).build(window, cx))
-        .when(desligado, |b| b.opacity(0.4))
-        .when(!desligado, |b| {
-            b.cursor_pointer()
-                .hover(move |s| s.bg(realce).text_color(frente))
-        })
+        .tooltip(rotulo.into())
+        .disabled(desligado)
 }
 
-/// Um botão do rodapé da pergunta: `h-8 px-2.5 rounded-lg text-sm`.
-fn botao_da_pergunta(id: &'static str, rotulo: &'static str, _cx: &App) -> Stateful<Div> {
-    h_flex()
-        .id(id)
-        .h(px(32.))
-        .px(px(10.))
-        .rounded(px(8.))
-        .justify_center()
-        .text_size(px(14.))
-        .font_weight(FontWeight::MEDIUM)
-        .cursor_pointer()
-        .child(rotulo)
-}
-
-/// O `BotaoPequeno` do site: "Cancelar" apagado, "Salvar" em âmbar.
+/// O `BotaoPequeno` do site: "Cancelar" apagado, "Salvar" em âmbar — o
+/// `Button` do kit em `text-xs`, com a variante âmbar do tema.
 fn botao_pequeno(
     id: &'static str,
     rotulo: &'static str,
     destaque: bool,
     desligado: bool,
     cx: &App,
-) -> Stateful<Div> {
-    let tema = cx.theme();
-    let (fundo, texto, pairando): (Hsla, Hsla, Hsla) = if destaque {
-        (cores::quente(), gpui_kit::black(), rgb(0xffd230).into())
-    } else {
-        (
-            tema.muted,
-            tema.foreground.opacity(0.9),
-            tema.muted.opacity(0.7),
-        )
-    };
-    div()
-        .id(id)
+) -> Button {
+    Button::new(id)
+        .xsmall()
+        .map(|b| {
+            if destaque {
+                b.custom(crate::tema::botao_quente(cx))
+            } else {
+                b.custom(
+                    ButtonCustomVariant::new(cx)
+                        .color(cx.theme().muted)
+                        .foreground(cx.theme().foreground.opacity(0.9))
+                        .hover(cx.theme().muted.opacity(0.7))
+                        .active(cx.theme().muted.opacity(0.7)),
+                )
+            }
+        })
         .rounded(px(4.))
         .px(px(8.))
-        .py(px(4.))
         .text_size(px(12.))
-        .line_height(px(16.))
-        .bg(fundo)
-        .text_color(texto)
         .child(rotulo)
-        .when(desligado, |b| b.opacity(0.4))
-        .when(!desligado, |b| {
-            b.cursor_pointer().hover(move |s| s.bg(pairando))
-        })
+        .disabled(desligado)
 }

@@ -364,13 +364,8 @@ impl NovaSessao {
                         ),
                     )
                     .child(
-                        div()
-                            .id("nova-voltar")
-                            .flex_none()
-                            .cursor_pointer()
+                        estilo::botao_icone("nova-voltar", Icone::ChevronLeft, 28., 20.)
                             .text_color(apagado)
-                            .hover(move |s| s.text_color(texto))
-                            .child(Icon::new(Icone::ChevronLeft).size(px(20.)))
                             .on_click(cx.listener(|tela, _, _, cx| tela.voltar_as_sessoes(cx))),
                     )
                     .child(
