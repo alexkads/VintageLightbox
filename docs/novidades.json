@@ -1,13 +1,13 @@
 {
-  "versao": "0.1.27",
-  "titulo": "Perspectiva guiada no Enquadrar: trace sobre a foto o que devia estar reto, e as paredes, portas e janelas ficam em pé.",
+  "versao": "0.1.28",
+  "titulo": "Editor de fotos: pinte e apague sobre a foto numa janela própria, e a Revelação passa a usar a foto editada.",
   "importante": false,
   "novidades": [
-    "No Enquadrar, o botão Guias liga a perspectiva guiada. Arraste sobre a foto ao longo de algo que devia estar reto (um batente, a quina da parede, o rodapé): o traço em pé vira guia Vertical, o deitado vira Horizontal. Com duas guias a foto se corrige ao soltar; cabem quatro.",
-    "As pontas das guias se arrastam para acertar; clique numa guia e tecle Delete para apagá-la, ou use o × no painel. O rótulo Vertical/Horizontal no painel troca o eixo.",
-    "Os controles Vertical e Horizontal fazem o ajuste fino por cima das guias, e Redefinir perspectiva volta a foto ao que era.",
-    "Restringir ao conteúdo (ligado) mantém o recorte dentro da foto, sem cantos vazios, também ao endireitar e ao arrastar as alças. Desligado, os cantos vazios saem brancos no arquivo.",
-    "A correção vale em tudo: tela do cliente, JPEG, impressão, envio ao site e sincronização (no grupo Enquadramento). Desfazer e refazer funcionam gesto a gesto, e girar ou espelhar depois mantém a foto corrigida."
+    "Na Revelação, clique com o botão direito numa foto da tira e escolha \"Editar Foto\": abre uma janela só para aquela foto — a clicada, mesmo com várias marcadas. A seleção e as setas da Revelação continuam como estavam.",
+    "Na janela do editor: Pincel (B) e Borracha (E), com tamanho ([ e ]), dureza, opacidade e cor. A pintura fica numa camada por cima da foto, que dá para esconder (H) e deixar mais transparente; a foto de baixo nunca muda.",
+    "Desfazer (Cmd/Ctrl+Z) e refazer (Cmd/Ctrl+Shift+Z), e o aviso \"Alterações não salvas\" enquanto houver o que salvar. Fechar com alterações pergunta se quer salvar.",
+    "Salvar (Cmd/Ctrl+S) atualiza a Revelação na hora: os ajustes, o corte e as máscaras continuam, agora aplicados sobre a foto editada. O JPEG, a impressão e o \"Salvar na galeria\" saem com a edição.",
+    "Reabrir o editor da mesma foto traz a pintura e o desfazer como estavam, mesmo depois de fechar o app."
   ],
-  "por_que_atualizar": "Fotos de ambiente tiradas de baixo ou de lado saem com as paredes e as portas tortas; agora elas se endireitam no próprio balcão, sem outro programa."
+  "por_que_atualizar": "Tirar um fio, cobrir uma mancha ou pintar um detalhe agora se faz no próprio balcão, sem outro programa — e a foto editada segue pela revelação e pela entrega como qualquer outra."
 }
