@@ -25,12 +25,16 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use gpui_kit::component::accordion::Accordion;
 use gpui_kit::component::button::Button;
+use gpui_kit::component::button::ButtonVariants as _;
 use gpui_kit::component::slider::Slider;
-use gpui_kit::component::{ActiveTheme, Disableable, Icon, Sizable};
+use gpui_kit::component::tab::{Tab, TabBar};
+use gpui_kit::component::{h_flex, ActiveTheme, Disableable, Icon, Sizable};
 use gpui_kit::{
     canvas, div, prelude::*, px, AnyElement, Bounds, Context, DragMoveEvent, Empty, Hsla,
-    MouseButton, MouseDownEvent, MouseUpEvent, PathBuilder, Pixels, SharedString, Window,
+    MouseButton, MouseDownEvent, MouseUpEvent, PathBuilder, Pixels, SharedString, StyleRefinement,
+    Window,
 };
 
 use super::{Aberta, Controle, PedidoDaRevelacao, Revelacao};
@@ -137,11 +141,6 @@ impl EstadoDoPainel {
         if !self.aberto(chave, false) {
             self.definir(chave, true);
         }
-    }
-
-    fn alternar(&mut self, chave: &str, padrao: bool) {
-        let valor = !self.aberto(chave, padrao);
-        self.definir(chave, valor);
     }
 
     fn no_rgb(&self) -> bool {
@@ -577,44 +576,22 @@ impl Revelacao {
     fn abas_de_espaco(&self, cx: &mut Context<Self>) -> AnyElement {
         let no_rgb = self.estado_do_painel.no_rgb();
         let aba = |rgb: bool, rotulo: &'static str, dica: &'static str, cx: &mut Context<Self>| {
-            let escolhida = no_rgb == rgb;
             let marca = controles::marca_da_aba(&self.ajustes, &self.salvo(), rgb);
-            div()
-                .id(SharedString::from(format!("aba-espaco-{rotulo}")))
-                .flex()
+            Tab::new()
+                .label(rotulo)
                 .flex_1()
-                .items_center()
-                .justify_center()
-                .gap(px(6.))
-                .py(px(4.))
-                .rounded(px(4.))
-                .cursor_pointer()
-                .when(escolhida, |a| {
-                    a.bg(cx.theme().muted).text_color(cx.theme().foreground)
-                })
-                .when(!escolhida, |a| {
-                    a.text_color(cx.theme().muted_foreground)
-                        .hover(|a| a.text_color(cx.theme().foreground))
-                })
+                .debug_selector(move || format!("aba-espaco-{rotulo}"))
                 .tooltip(move |window, cx| {
                     gpui_kit::component::tooltip::Tooltip::new(dica).build(window, cx)
                 })
-                .child(rotulo)
-                .when_some(marca, |a, m| a.child(ponto(m, cx)))
-                .on_click(cx.listener(move |tela, _ev, _window, cx| {
-                    tela.estado_do_painel.definir(CHAVE_DA_ABA_RGB, rgb);
-                    cx.notify();
-                }))
+                .when_some(marca, |a, m| a.suffix(ponto(m, cx)))
         };
-
-        div()
-            .flex()
-            .gap(px(4.))
-            .p(px(2.))
-            .rounded(px(6.))
-            .border_1()
-            .border_color(cx.theme().border)
-            .text_xs()
+        let tela = cx.entity().downgrade();
+        TabBar::new("abas-de-espaco")
+            .segmented()
+            .xsmall()
+            .w_full()
+            .selected_index(if no_rgb { 1 } else { 0 })
             .child(aba(
                 false,
                 "sRGB",
@@ -627,45 +604,74 @@ impl Revelacao {
                 "Os módulos em RGB linear, fiéis aos estilos do darktable — rodam antes dos sRGB",
                 cx,
             ))
+            .on_click(move |i, _window, cx| {
+                let rgb = *i == 1;
+                let _ = tela.update(cx, |tela, cx| {
+                    tela.estado_do_painel.definir(CHAVE_DA_ABA_RGB, rgb);
+                    cx.notify();
+                });
+            })
             .into_any_element()
     }
 
-    /// Um cabeçalho de sanfona — o `PainelColapsavel` do site.
-    pub(super) fn cabecalho_da_sanfona(
+    /// Uma sanfona — o `PainelColapsavel` do site, no `Accordion` do gpui-kit.
+    ///
+    /// Aberta ou fechada é o `estado_do_painel` que diz (lembrado entre
+    /// sessões); `dentro` só vem quando está aberta.
+    ///
+    /// ⚠️ **O `on_toggle_click` do kit escuta o clique no acordeão inteiro**,
+    /// e não só no cabeçalho: um clique num slider também o chama, com o mesmo
+    /// conjunto de abertos. Por isso o estado se grava pelo que o kit diz
+    /// (aberto ou não), e só quando muda — alternar a cada chamada fecharia o
+    /// painel no primeiro arrasto, e gravar sempre escreveria o arquivo a cada
+    /// clique.
+    pub(super) fn sanfona(
         &self,
         titulo: &'static str,
-        aberto: bool,
-        marca: Option<controles::Marca>,
         chave: String,
         padrao: bool,
+        marca: Option<controles::Marca>,
+        borda: bool,
+        dentro: Option<AnyElement>,
         cx: &mut Context<Self>,
-    ) -> gpui_kit::Stateful<gpui_kit::Div> {
-        div()
-            .id(SharedString::from(format!("sanfona-{chave}")))
-            .flex()
-            .items_center()
-            .gap(px(8.))
-            .px(px(12.))
-            .py(px(8.))
-            .cursor_pointer()
-            .text_xs()
-            .font_weight(gpui_kit::FontWeight::MEDIUM)
+    ) -> AnyElement {
+        let aberto = self.estado_do_painel.aberto(&chave, padrao);
+        let id = format!("sanfona-{chave}");
+        let tela = cx.entity().downgrade();
+        Accordion::new(SharedString::from(id.clone()))
+            .xsmall()
+            .bordered(borda)
+            .h_auto()
+            .flex_none()
+            .when(borda, |a| a.rounded(px(6.)))
+            .item(|item| {
+                item.open(aberto)
+                    .title_style(StyleRefinement::default().px(px(12.)).py(px(8.)))
+                    .content_style(StyleRefinement::default().p(px(0.)))
+                    .title(
+                        h_flex()
+                            .debug_selector(move || id)
+                            .flex_1()
+                            .min_w(px(0.))
+                            .gap(px(8.))
+                            .text_xs()
+                            .font_weight(gpui_kit::FontWeight::MEDIUM)
+                            .child(div().flex_1().min_w(px(0.)).truncate().child(titulo))
+                            .when_some(marca, |c, m| c.child(ponto(m, cx))),
+                    )
+                    .children(dentro)
+            })
+            .on_toggle_click(move |abertos, _window, cx| {
+                let quer = abertos.contains(&0);
+                let _ = tela.update(cx, |tela, cx| {
+                    if tela.estado_do_painel.aberto(&chave, padrao) != quer {
+                        tela.estado_do_painel.definir(&chave, quer);
+                        cx.notify();
+                    }
+                });
+            })
             .text_color(cx.theme().foreground)
-            .child(
-                Icon::new(if aberto {
-                    Icone::ChevronDown
-                } else {
-                    Icone::ChevronRight
-                })
-                .size(px(14.))
-                .text_color(cx.theme().muted_foreground),
-            )
-            .child(div().flex_1().min_w(px(0.)).truncate().child(titulo))
-            .when_some(marca, |c, m| c.child(ponto(m, cx)))
-            .on_click(cx.listener(move |tela, _ev, _window, cx| {
-                tela.estado_do_painel.alternar(&chave, padrao);
-                cx.notify();
-            }))
+            .into_any_element()
     }
 
     /// Um painel sanfonado: o cabeçalho sempre, o conteúdo só quando aberto.
@@ -678,9 +684,6 @@ impl Revelacao {
         let padrao = painel.nasce_aberto();
         let aberto = self.estado_do_painel.aberto(&chave, padrao);
         let marca = controles::marca_do_painel(&self.ajustes, &self.salvo(), painel);
-
-        let cabecalho =
-            self.cabecalho_da_sanfona(painel.rotulo(), aberto, marca, chave, padrao, cx);
 
         let conteudo = aberto.then(|| {
             let mut dentro: Vec<AnyElement> = Vec::new();
@@ -705,18 +708,10 @@ impl Revelacao {
                 .border_t_1()
                 .border_color(cx.theme().border)
                 .children(dentro)
+                .into_any_element()
         });
 
-        div()
-            .flex()
-            .flex_col()
-            .flex_none()
-            .rounded(px(6.))
-            .border_1()
-            .border_color(cx.theme().border)
-            .child(cabecalho)
-            .children(conteudo)
-            .into_any_element()
+        self.sanfona(painel.rotulo(), chave, padrao, marca, true, conteudo, cx)
     }
 
     /// A fileira de abas do HSL — Cor, Luminância, Matiz.
@@ -724,48 +719,35 @@ impl Revelacao {
     /// ⚠️ **A aba que não está à mostra também precisa se anunciar**: o
     /// sublinhado âmbar na aba fechada (`underline decoration-amber-400`).
     fn abas(&self, secoes: &'static [Secao], visivel: Secao, cx: &mut Context<Self>) -> AnyElement {
-        div()
-            .flex()
-            .gap(px(4.))
-            .text_xs()
-            .children(
-                secoes
-                    .iter()
-                    .map(|secao| {
-                        let secao = *secao;
-                        let escolhida = secao == visivel;
-                        let marca = controles::marca_da_secao(&self.ajustes, &self.salvo(), secao);
-
-                        div()
-                            .id(SharedString::from(format!("aba-{}", secao.rotulo())))
-                            .px(px(8.))
-                            .py(px(4.))
-                            .rounded(px(4.))
-                            .cursor_pointer()
-                            .when(escolhida, |aba| {
-                                aba.bg(cx.theme().muted).text_color(cx.theme().foreground)
-                            })
-                            .when(!escolhida, |aba| {
-                                aba.text_color(cx.theme().muted_foreground)
-                                    .hover(|a| a.text_color(cx.theme().foreground))
-                            })
-                            .when_some(marca.filter(|_| !escolhida), |aba, m| {
-                                aba.underline().text_decoration_color(match m {
-                                    controles::Marca::NaoSalvo => tema::cores::quente(),
-                                    controles::Marca::Ajustado => {
-                                        cx.theme().muted_foreground.opacity(0.5)
-                                    }
-                                })
-                            })
-                            .child(Painel::aba(secao))
-                            .on_click(cx.listener(move |tela, _ev, _window, cx| {
-                                tela.estado_do_painel.aba_hsl = secao;
-                                cx.notify();
-                            }))
-                            .into_any_element()
+        let tela = cx.entity().downgrade();
+        TabBar::new("abas-do-hsl")
+            .segmented()
+            .xsmall()
+            .selected_index(secoes.iter().position(|s| *s == visivel).unwrap_or(0))
+            .children(secoes.iter().map(|secao| {
+                let secao = *secao;
+                let escolhida = secao == visivel;
+                let marca = controles::marca_da_secao(&self.ajustes, &self.salvo(), secao);
+                let rotulo = secao.rotulo();
+                Tab::new()
+                    .label(Painel::aba(secao))
+                    .debug_selector(move || format!("aba-{rotulo}"))
+                    .when_some(marca.filter(|_| !escolhida), |aba, m| {
+                        aba.underline().text_decoration_color(match m {
+                            controles::Marca::NaoSalvo => tema::cores::quente(),
+                            controles::Marca::Ajustado => cx.theme().muted_foreground.opacity(0.5),
+                        })
                     })
-                    .collect::<Vec<_>>(),
-            )
+            }))
+            .on_click(move |i, _window, cx| {
+                let Some(secao) = secoes.get(*i).copied() else {
+                    return;
+                };
+                let _ = tela.update(cx, |tela, cx| {
+                    tela.estado_do_painel.aba_hsl = secao;
+                    cx.notify();
+                });
+            })
             .into_any_element()
     }
 
@@ -883,67 +865,56 @@ impl Revelacao {
         };
         let cor = cor_do_canal(canal, cx);
 
-        let botoes: Vec<AnyElement> = Canal::TODOS
-            .into_iter()
-            .map(|c| {
+        let tela = cx.entity().downgrade();
+        let botoes = TabBar::new("canais-da-curva")
+            .segmented()
+            .xsmall()
+            .selected_index(Canal::TODOS.iter().position(|c| *c == canal).unwrap_or(0))
+            .children(Canal::TODOS.into_iter().map(|c| {
                 let escolhido = c == canal;
                 let usado = !curva::curva_eh_neutra(&c.alturas(&self.ajustes));
-                let cor = cor_do_canal(c, cx);
-                div()
-                    .id(SharedString::from(format!("canal-{}", c.rotulo())))
-                    .flex()
-                    .items_center()
-                    .gap(px(4.))
-                    .px(px(8.))
-                    .py(px(2.))
-                    .rounded(px(4.))
-                    .cursor_pointer()
+                let rotulo = c.rotulo();
+                Tab::new()
+                    .label(rotulo)
+                    .debug_selector(move || format!("canal-{rotulo}"))
                     .text_size(px(11.))
-                    .when(escolhido, |b| b.bg(cx.theme().muted).text_color(cor))
-                    .when(!escolhido, |b| {
-                        b.text_color(cx.theme().muted_foreground)
-                            .hover(|b| b.bg(cx.theme().muted).text_color(cx.theme().foreground))
-                    })
-                    .child(c.rotulo())
+                    .when(escolhido, |t| t.text_color(cor_do_canal(c, cx)))
                     // 🔑 O ponto avisa que **outro** canal tem curva: sem ele, um
                     // preset que mexe só no azul parece não ter feito nada.
-                    .when(usado, |b| b.child(div().text_size(px(8.)).child("●")))
-                    .on_click(cx.listener(move |tela, _ev, _window, cx| {
-                        tela.estado_do_painel.canal = c;
-                        cx.notify();
-                    }))
-                    .into_any_element()
-            })
-            .collect();
+                    .when(usado, |t| t.suffix(div().text_size(px(8.)).child("●")))
+            }))
+            .on_click(move |i, _window, cx| {
+                let Some(c) = Canal::TODOS.get(*i).copied() else {
+                    return;
+                };
+                let _ = tela.update(cx, |tela, cx| {
+                    tela.estado_do_painel.canal = c;
+                    cx.notify();
+                });
+            });
 
         let neutro = curva::curva_eh_neutra(&alturas);
-        let zerar = div()
-            .id("zerar-canal")
+        let zerar = Button::new("zerar-canal")
+            .ghost()
+            .xsmall()
             .px(px(6.))
-            .py(px(2.))
-            .rounded(px(4.))
             .text_size(px(11.))
             .text_color(cx.theme().muted_foreground)
-            .tooltip(|window, cx| {
-                gpui_kit::component::tooltip::Tooltip::new("Devolve este canal à reta")
-                    .build(window, cx)
-            })
-            .when(!ligado || neutro, |z| z.opacity(0.4))
+            .tooltip("Devolve este canal à reta")
+            .disabled(!ligado || neutro)
             .when(ligado && !neutro, |z| {
-                z.cursor_pointer()
-                    .hover(|z| z.bg(cx.theme().muted).text_color(cx.theme().foreground))
-                    .on_click(cx.listener(move |tela, _ev, window, cx| {
-                        let neutra = curva::curva_neutra();
-                        tela.gesto_discreto(
-                            |a| {
-                                for (i, v) in neutra.iter().enumerate() {
-                                    canal.definir(a, i, *v);
-                                }
-                            },
-                            window,
-                            cx,
-                        );
-                    }))
+                z.on_click(cx.listener(move |tela, _ev, window, cx| {
+                    let neutra = curva::curva_neutra();
+                    tela.gesto_discreto(
+                        |a| {
+                            for (i, v) in neutra.iter().enumerate() {
+                                canal.definir(a, i, *v);
+                            }
+                        },
+                        window,
+                        cx,
+                    );
+                }))
             })
             .child("Zerar");
 
@@ -1073,7 +1044,7 @@ impl Revelacao {
                     .items_center()
                     .justify_between()
                     .gap(px(8.))
-                    .child(div().flex().gap(px(4.)).children(botoes))
+                    .child(botoes)
                     .child(zerar),
             )
             .child(quadro)
@@ -1093,22 +1064,27 @@ impl Revelacao {
         let com_histograma = estado.aberto(CHAVE_DO_HISTOGRAMA, false);
         let com_curva = estado.aberto(CHAVE_DA_CURVA_RESULTANTE, false);
 
-        let cabecalho_hist = self.cabecalho_da_sanfona(
-            "Histograma",
-            com_histograma,
-            None,
-            CHAVE_DO_HISTOGRAMA.to_string(),
-            true,
-            cx,
-        );
-        let cabecalho_curva = self.cabecalho_da_sanfona(
-            "Curva resultante",
-            com_curva,
-            None,
-            CHAVE_DA_CURVA_RESULTANTE.to_string(),
-            true,
-            cx,
-        );
+        let histograma = com_histograma.then(|| {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                .px(px(12.))
+                .pb(px(8.))
+                .child(self.histograma(cx))
+                // O "Auto" mora aqui, junto da medida que ele usa: o
+                // Básico do site não tem esse botão, e ele ficou no
+                // lugar que só o desktop tem.
+                .child(self.botao_do_automatico(cx))
+                .into_any_element()
+        });
+        let curva = com_curva.then(|| {
+            div()
+                .px(px(12.))
+                .pb(px(8.))
+                .child(self.curva_de_tons(cx))
+                .into_any_element()
+        });
 
         div()
             .flex()
@@ -1117,26 +1093,24 @@ impl Revelacao {
             .overflow_hidden()
             .border_b_1()
             .border_color(cx.theme().border)
-            .child(cabecalho_hist)
-            .when(com_histograma, |g| {
-                g.child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(6.))
-                        .px(px(12.))
-                        .pb(px(8.))
-                        .child(self.histograma(cx))
-                        // O "Auto" mora aqui, junto da medida que ele usa: o
-                        // Básico do site não tem esse botão, e ele ficou no
-                        // lugar que só o desktop tem.
-                        .child(self.botao_do_automatico(cx)),
-                )
-            })
-            .child(cabecalho_curva)
-            .when(com_curva, |g| {
-                g.child(div().px(px(12.)).pb(px(8.)).child(self.curva_de_tons(cx)))
-            })
+            .child(self.sanfona(
+                "Histograma",
+                CHAVE_DO_HISTOGRAMA.to_string(),
+                false,
+                None,
+                false,
+                histograma,
+                cx,
+            ))
+            .child(self.sanfona(
+                "Curva resultante",
+                CHAVE_DA_CURVA_RESULTANTE.to_string(),
+                false,
+                None,
+                false,
+                curva,
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -1464,7 +1438,7 @@ mod testes {
         assert!(estado.no_rgb());
         assert!(estado.arquivo.is_none());
         assert!(estado.aberto("revelacao:Básico", true));
-        estado.alternar("revelacao:Básico", true);
+        estado.definir("revelacao:Básico", false);
         assert!(!estado.aberto("revelacao:Básico", true));
     }
 }

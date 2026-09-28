@@ -44,6 +44,7 @@ use domain::services::pos_venda::{
 };
 use domain::services::PreviewType;
 use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::collapsible::Collapsible;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::progress::Progress;
@@ -6597,8 +6598,6 @@ impl Detalhe {
     /// (`painel.tsx`), fechados por padrão e lembrados. Só entra aqui o que
     /// esta grade faz: o laço de arrastar e o `Enter` da prévia são do site.
     fn atalhos(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        use crate::recursos::Icone;
-        use gpui_kit::component::Icon;
         let apagado = cx.theme().muted_foreground;
         let aberto = self.paineis.atalhos_abertos();
         let tecla = |t: &'static str| {
@@ -6616,25 +6615,8 @@ impl Detalhe {
             .text_xs()
             .text_color(apagado)
             .child(
-                div()
-                    .id("painel-atalhos")
-                    .debug_selector(|| "painel-atalhos".into())
-                    .flex()
-                    .items_center()
-                    .gap(px(6.))
-                    .py(px(4.))
-                    .cursor_pointer()
+                gatilho_da_sanfona("painel-atalhos", "Atalhos", aberto, cx)
                     .text_color(cx.theme().foreground)
-                    .child(
-                        Icon::new(if aberto {
-                            Icone::ChevronDown
-                        } else {
-                            Icone::ChevronRight
-                        })
-                        .size(px(14.))
-                        .text_color(apagado),
-                    )
-                    .child("Atalhos")
                     .on_click(cx.listener(|tela, _, _, cx| {
                         tela.paineis.alternar_atalhos();
                         cx.notify();
@@ -6674,8 +6656,6 @@ impl Detalhe {
     }
 
     fn painel_da_foto(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-        use crate::recursos::Icone;
-        use gpui_kit::component::Icon;
         let foto = self.em_foco()?;
         let posicao = self.selecao.foco()? + 1;
         let negociada = foto.tem_negociacao();
@@ -6992,31 +6972,22 @@ impl Detalhe {
                 // padrão. Antes eram onze controles empilhados com o mesmo peso,
                 // e o operador procurava o botão a cada foto.
                 .child(
-                    div()
-                        .id("painel-sanfona")
-                        .flex()
-                        .items_center()
+                    Collapsible::new()
+                        .open(self.faixa_e_precos_aberto)
                         .gap(px(6.))
-                        .py(px(4.))
-                        .cursor_pointer()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
                         .child(
-                            Icon::new(if self.faixa_e_precos_aberto {
-                                Icone::ChevronDown
-                            } else {
-                                Icone::ChevronRight
-                            })
-                            .size(px(14.)),
+                            gatilho_da_sanfona(
+                                "painel-sanfona",
+                                "Faixa, negociação e preço",
+                                self.faixa_e_precos_aberto,
+                                cx,
+                            )
+                            .on_click(cx.listener(|tela, _ev, _w, cx| {
+                                tela.faixa_e_precos_aberto = !tela.faixa_e_precos_aberto;
+                                cx.notify();
+                            })),
                         )
-                        .child("Faixa, negociação e preço")
-                        .on_click(cx.listener(|tela, _ev, _w, cx| {
-                            tela.faixa_e_precos_aberto = !tela.faixa_e_precos_aberto;
-                            cx.notify();
-                        })),
-                )
-                .when(self.faixa_e_precos_aberto, |painel| {
-                    painel
+                        .content(gpui_kit::component::v_flex().gap(px(6.))
                         .child(
                             div()
                                 .text_xs()
@@ -7137,8 +7108,8 @@ impl Detalhe {
                                             })),
                                     ),
                             )
-                        })
-                }),
+                        })),
+                ),
         )
     }
 
@@ -7808,6 +7779,32 @@ fn para_o_core(foto: &FotoDaGaleria) -> acervo::Foto {
         nota: foto.nota,
         ordem: foto.ordem as i64,
     }
+}
+
+/// O gatilho de uma sanfona do painel (o `CollapsibleTrigger` do site): o
+/// `Button` fantasma do kit, com a seta que vira ao abrir.
+fn gatilho_da_sanfona(
+    id: &'static str,
+    rotulo: &'static str,
+    aberto: bool,
+    cx: &gpui_kit::App,
+) -> Button {
+    Button::new(id)
+        .debug_selector(move || id.into())
+        .ghost()
+        .xsmall()
+        .justify_start()
+        .px(px(0.))
+        .text_color(cx.theme().muted_foreground)
+        .child(
+            gpui_kit::component::Icon::new(if aberto {
+                crate::recursos::Icone::ChevronDown
+            } else {
+                crate::recursos::Icone::ChevronRight
+            })
+            .size(px(14.)),
+        )
+        .child(rotulo)
 }
 
 #[cfg(test)]

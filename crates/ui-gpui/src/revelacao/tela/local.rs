@@ -2329,24 +2329,9 @@ impl Revelacao {
         // ou retoque salvos — fechado, o painel não pode esconder que há.
         let chave = CHAVE_DO_PAINEL_LOCAL.to_string();
         let aberto = self.estado_do_painel.aberto(&chave, false);
-        let cabecalho = self.cabecalho_da_sanfona(
-            "Revelação local",
-            aberto,
-            self.marca_da_revelacao_local(),
-            chave,
-            false,
-            cx,
-        );
-        let caixa = div()
-            .flex()
-            .flex_col()
-            .flex_none()
-            .rounded(px(6.))
-            .border_1()
-            .border_color(tema.border)
-            .child(cabecalho);
+        let marca = self.marca_da_revelacao_local();
         if !aberto {
-            return caixa.into_any_element();
+            return self.sanfona("Revelação local", chave, false, marca, true, None, cx);
         }
 
         let mut secao = div()
@@ -2372,7 +2357,15 @@ impl Revelacao {
         }
         secao = secao.child(self.lista_de_mascaras(cx));
         secao = secao.child(self.lista_de_retoques(cx));
-        caixa.child(secao).into_any_element()
+        self.sanfona(
+            "Revelação local",
+            chave,
+            false,
+            marca,
+            true,
+            Some(secao.into_any_element()),
+            cx,
+        )
     }
 
     fn dica_da_ferramenta(&self, f: Ferramenta) -> String {
