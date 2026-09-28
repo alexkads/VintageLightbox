@@ -996,7 +996,12 @@ impl Associador {
                 c.child(
                     h_flex()
                         .gap(px(8.))
-                        .child(div().text_sm().text_color(cor(VERMELHO)).child(erro))
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(cor(VERMELHO))
+                                .child(crate::erro_da_api::legivel(&erro)),
+                        )
                         .when_some(cadastro.existente.clone(), |c, p| {
                             c.child(
                                 estilo::botao_contorno(self.id("usar-existente"), cx)
@@ -1170,7 +1175,7 @@ impl Associador {
                                     .p(px(16.))
                                     .text_sm()
                                     .text_color(cor(VERMELHO))
-                                    .child(erro.clone()),
+                                    .child(crate::erro_da_api::legivel(erro)),
                             )
                         } else if busca.itens.is_empty() {
                             lista.child(

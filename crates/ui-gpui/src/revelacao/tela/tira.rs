@@ -792,8 +792,19 @@ impl Revelacao {
             })
             .count();
         if pendentes > 0 {
+            // ⚠️ O alerta do kit no canto de baixo, como os outros avisos de
+            // gesto (`DetalhePedido::Avisar`): no canto de cima à direita, o
+            // padrão da lista, ele tapava "Baixar JPEG" e "Tela do cliente".
+            let quantas = if pendentes == 1 {
+                "1 foto tem revelação não salva".to_string()
+            } else {
+                format!("{pendentes} fotos têm revelação não salva")
+            };
             window.push_notification(
-                format!("{pendentes} têm revelação não salva: o arquivo sai como está na galeria."),
+                gpui_kit::component::notification::Notification::warning(format!(
+                    "{quantas}: o arquivo sai como está na galeria."
+                ))
+                .placement(gpui_kit::Anchor::BottomRight),
                 cx,
             );
         }

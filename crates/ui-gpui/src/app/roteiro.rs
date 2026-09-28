@@ -484,6 +484,7 @@ impl Aplicativo {
             }
             // Desenrolados pelo laço do roteiro.
             Passo::Varrer { .. } | Passo::Rolar { .. } => {}
+            Passo::Aviso { erro, texto } => self.avisar_em_toast(texto.clone(), *erro, cx),
             Passo::Desempenho(acao) => {
                 let painel = self.desempenho.clone();
                 match acao.as_str() {

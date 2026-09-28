@@ -1160,7 +1160,11 @@ impl Agenda {
             .child(Self::campo("Nova data e hora de início", &self.inicio))
             .child(Self::campo("Nova data e hora de término", &self.fim))
             .when_some(erro, |d, erro| {
-                d.child(div().text_color(perigo).child(erro))
+                d.child(
+                    div()
+                        .text_color(perigo)
+                        .child(crate::erro_da_api::legivel(&erro)),
+                )
             })
             .child(self.rodape_do_formulario(
                 "reagendar-confirmar",
@@ -1199,7 +1203,11 @@ impl Agenda {
                     .child(Textarea::new(&self.observacoes)),
             )
             .when_some(erro, |d, erro| {
-                d.child(div().text_color(perigo).child(erro))
+                d.child(
+                    div()
+                        .text_color(perigo)
+                        .child(crate::erro_da_api::legivel(&erro)),
+                )
             })
             .child(self.rodape_do_formulario(
                 "atendimento-confirmar",

@@ -231,11 +231,12 @@ fn caminho_do_modo_do_cliente() -> std::path::PathBuf {
 /// bastante para o teclado continuar respondendo.
 const RESPIRO_DA_RELEITURA: std::time::Duration = std::time::Duration::from_millis(450);
 
-/// Quanto tempo um toast fica na tela — os 4s do `sonner` do site.
-const DURACAO_DO_TOAST: std::time::Duration = std::time::Duration::from_secs(4);
-
 /// Quantos toasts cabem empilhados antes de os antigos caírem.
 const MAXIMO_DE_TOASTS: usize = 3;
+
+/// O `id` dos avisos da raiz na lista de notificações do kit: com ele, a raiz
+/// tira o mais antigo quando passa de [`MAXIMO_DE_TOASTS`].
+struct AvisoDaRaiz;
 
 const CONTEXTO: &str = "Aplicativo";
 
@@ -689,10 +690,18 @@ pub struct Aplicativo {
     /// galeria e sair": cada aviso apagava os três botões por alguns segundos, e
     /// o que se via era o botão sumir sozinho. O `sonner` do site é
     /// `position="top-center"` (`app/layout.tsx`) — sobre o nome do arquivo, que
-    /// não é clicável. Esta lista é a de cá, desenhada no mesmo lugar.
+    /// não é clicável. Os avisos vão para a `Notification` do kit com
+    /// `placement(TopCenter)`, e esta lista é o que está no ar — o kit a avisa
+    /// pelo `on_close` quando um some.
     ///
-    /// Cada um é `(id, texto, é erro)`; o id é o que o relógio usa para tirá-lo.
+    /// Cada um é `(id, texto, é erro)`.
     toasts: Vec<(usize, SharedString, bool)>,
+    /// Os avisos que ainda não chegaram ao kit. Quem avisa não tem a `window`
+    /// na mão; o `render` da raiz tem, e é ele que os entrega
+    /// (`entregar_os_avisos`).
+    avisos_a_entregar: Vec<(usize, SharedString, bool)>,
+    /// Os avisos que passaram do limite e o kit ainda precisa tirar.
+    avisos_a_tirar: Vec<usize>,
     /// O próximo id de toast. Nunca reaproveitado: dois avisos iguais em
     /// sequência são dois avisos.
     proximo_toast: usize,
@@ -705,12 +714,6 @@ pub struct Aplicativo {
     /// é daqui que os cenários leem o que foi mostrado.
     #[cfg(test)]
     mensagens_dadas: Vec<(String, Option<String>, String)>,
-    /// Os relógios que tiram os toasts vencidos — **um por toast**.
-    ///
-    /// 🚨 **Um campo só, sobrescrito, cancelaria o anterior**: `Task` aborta ao
-    /// ser largado, e o segundo aviso deixava o primeiro na tela para sempre.
-    /// A lista é limpa quando o último toast sai, e aí todos já terminaram.
-    _relogios_dos_toasts: Vec<Task<()>>,
     /// As predefinições que este app conhece — sistema e as do banco local.
     /// É delas que sai a revelação padrão da sessão aberta.
     presets_conhecidos: Vec<Preset>,
@@ -1357,7 +1360,8 @@ impl Aplicativo {
             #[cfg(test)]
             mensagens_dadas: Vec::new(),
             proximo_toast: 0,
-            _relogios_dos_toasts: Vec::new(),
+            avisos_a_entregar: Vec::new(),
+            avisos_a_tirar: Vec::new(),
             presets_conhecidos: presets_para_os_parametros,
             subindo_sozinhas: std::collections::HashMap::new(),
             parametros_que_subiram: std::collections::HashMap::new(),
@@ -2709,6 +2713,8 @@ impl Aplicativo {
                     cx,
                 );
             }
+            // ❌ O gesto que o site recusou: o toast vermelho do alto.
+            DetalhePedido::Falhou(texto) => self.avisar_falha(texto.to_string(), cx),
         }
     }
 
@@ -2972,7 +2978,7 @@ impl Aplicativo {
 
     /// 🧪 Todos os avisos desde a abertura — inclusive os que já sumiram.
     ///
-    /// 🔑 **Existe porque o toast some sozinho** (4 s), e a espera de um cenário
+    /// 🔑 **Existe porque o toast some sozinho** (5 s, o do kit), e a espera de um cenário
     /// passa desse tempo: afirmar sobre `avisos_para_teste` depois de duas
     /// esperas mediria o autohide, e não o aviso.
     #[cfg(test)]
@@ -5570,88 +5576,90 @@ impl Aplicativo {
         self.avisar_em_toast(texto, true, cx);
     }
 
-    /// Põe o aviso na lista dos toasts e liga o relógio que o tira.
+    /// Põe o aviso na fila; o próximo `render` o entrega ao kit.
     ///
     /// 🔑 **Autohide**, como o `sonner` do site: o aviso conta o que acabou de
     /// acontecer, e ficar na tela depois disso é ruído que o operador aprende a
-    /// ignorar.
+    /// ignorar. O tempo é o do kit (5 s).
     fn avisar_em_toast(&mut self, texto: String, erro: bool, cx: &mut Context<Self>) {
-        // Ninguém na tela: os relógios anteriores já terminaram o trabalho
-        // deles, e a lista pode começar limpa.
-        if self.toasts.is_empty() {
-            self._relogios_dos_toasts.clear();
-        }
+        // O erro do site chega cru; o toast mostra a frase (`erro_da_api`).
+        let texto = if erro {
+            crate::erro_da_api::legivel(&texto)
+        } else {
+            texto
+        };
         #[cfg(test)]
         self.avisos_dados.push((texto.clone(), erro));
         self.proximo_toast = self.proximo_toast.wrapping_add(1);
-        let id = self.proximo_toast;
-        self.toasts.push((id, SharedString::from(texto), erro));
+        let aviso = (self.proximo_toast, SharedString::from(texto), erro);
+        self.toasts.push(aviso.clone());
+        self.avisos_a_entregar.push(aviso);
         // ⚠️ **Nunca mais do que cabe na tela.** Uma esteira que falha em série
         // empilharia um aviso por foto; o site descarta os antigos do mesmo
         // jeito.
         while self.toasts.len() > MAXIMO_DE_TOASTS {
-            self.toasts.remove(0);
+            let (velho, _, _) = self.toasts.remove(0);
+            // O que nem chegou ao kit sai da fila; o que chegou, o kit tira.
+            let na_fila = self.avisos_a_entregar.len();
+            self.avisos_a_entregar.retain(|(id, _, _)| *id != velho);
+            if self.avisos_a_entregar.len() == na_fila {
+                self.avisos_a_tirar.push(velho);
+            }
         }
-        self.ligar_o_relogio_do_toast(id, cx);
         cx.notify();
     }
 
-    /// Tira este toast quando o tempo dele passar.
-    ///
-    /// 🔑 **Um relógio por toast, e não um laço que varre a lista**: assim o
-    /// segundo aviso não herda o tempo que o primeiro já gastou, que é o que faz
-    /// dois avisos seguidos sumirem juntos.
-    fn ligar_o_relogio_do_toast(&mut self, id: usize, cx: &mut Context<Self>) {
-        self._relogios_dos_toasts
-            .push(cx.spawn(async move |raiz, cx| {
-                cx.background_executor().timer(DURACAO_DO_TOAST).await;
-                let _ = raiz.update(cx, |raiz, cx| {
-                    raiz.toasts.retain(|(este, _, _)| *este != id);
-                    cx.notify();
-                });
-            }));
-    }
-
-    /// A camada dos toasts: no alto, no meio, por cima de tudo.
+    /// Entrega ao kit os avisos da fila: no alto, no meio, por cima da tela.
     ///
     /// 🎨 **As cores do `richColors` do site**: verde para o que deu certo,
-    /// vermelho para o que falhou — e não o cinza do tema, que faz um erro
+    /// vermelho para o que falhou — e não o cinza do popover, que faz um erro
     /// parecer um recado.
-    fn camada_dos_toasts(&self, cx: &Context<Self>) -> Option<gpui_kit::AnyElement> {
-        if self.toasts.is_empty() {
-            return None;
+    ///
+    /// 🚨 **Pelo `window.defer`**: a lista do kit mora no `Root`, que está no
+    /// meio do quadro quando a raiz se desenha.
+    fn entregar_os_avisos(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use gpui_kit::component::WindowExt as _;
+        if self.avisos_a_entregar.is_empty() && self.avisos_a_tirar.is_empty() {
+            return;
         }
-        let tema = cx.theme();
-        Some(
-            div()
-                .absolute()
-                .top(px(12.))
-                .left_0()
-                .right_0()
-                .flex()
-                .flex_col()
-                .items_center()
-                .gap(px(6.))
-                .children(self.toasts.iter().map(|(_, texto, erro)| {
-                    let (fundo, borda, letra) = if *erro {
-                        (tema.danger, tema.danger, tema.danger_foreground)
-                    } else {
-                        (tema.success, tema.success, tema.success_foreground)
-                    };
-                    div()
-                        .px(px(14.))
-                        .py(px(8.))
-                        .rounded(crate::tema::canto(8.))
-                        .bg(fundo)
-                        .border_1()
-                        .border_color(borda)
-                        .text_sm()
-                        .text_color(letra)
-                        .shadow_lg()
-                        .child(texto.clone())
-                }))
-                .into_any_element(),
-        )
+        let tirar = std::mem::take(&mut self.avisos_a_tirar);
+        let raiz = cx.entity().downgrade();
+        let avisos: Vec<_> = std::mem::take(&mut self.avisos_a_entregar)
+            .into_iter()
+            .map(|(id, texto, erro)| {
+                let tipo = if erro {
+                    crate::estilo::Toast::Erro
+                } else {
+                    crate::estilo::Toast::Sucesso
+                };
+                let raiz = raiz.clone();
+                crate::estilo::toast(texto, tipo, cx)
+                    .id1::<AvisoDaRaiz>(id)
+                    .on_close(move |_, cx| {
+                        let _ = raiz.update(cx, |raiz, cx| {
+                            raiz.toasts.retain(|(este, _, _)| *este != id);
+                            cx.notify();
+                        });
+                    })
+            })
+            .collect();
+        window.defer(cx, move |window, cx| {
+            // Sem a raiz do kit (as janelas de teste de uma tela só) não há
+            // lista onde pôr o aviso — e o `WindowExt` entraria em pânico.
+            if window
+                .root::<gpui_kit::component::Root>()
+                .flatten()
+                .is_none()
+            {
+                return;
+            }
+            for id in tirar {
+                window.remove_notification1::<AvisoDaRaiz>(id, cx);
+            }
+            for aviso in avisos {
+                window.push_notification(aviso, cx);
+            }
+        });
     }
 
     /// A porta foi respondida: o app passa a existir.
@@ -6197,6 +6205,8 @@ impl Render for Aplicativo {
         // ela na tela, os botões de janela moram nela, e as barras de baixo
         // não desenham os seus (`janela::controles_da_tela`).
         let faixa_das_guias = self.faixa_das_guias(window, cx);
+        // 🔔 Os avisos da fila vão para a lista do kit (`avisar_em_toast`).
+        self.entregar_os_avisos(window, cx);
         // Os modais da raiz são o `Dialog` do gpui-kit (`crate::dialogo`).
         let modal_de_importacao = self
             .importando
@@ -6482,9 +6492,6 @@ impl Render for Aplicativo {
             // 🚨 **As camadas do `gpui-component`.** Sem elas, `open_dialog` e
             // `push_notification` não aparecem em lugar nenhum — a caixa do
             // "Sincronizar N" abria no vazio e o botão parecia morto.
-            // 🚨 **Os toasts vêm antes das camadas do `gpui-component`** e
-            // depois de todo o resto: eles ficam sobre a tela, e sob o diálogo.
-            .children(self.camada_dos_toasts(cx))
             // 🪟 A camada das gavetas (`Sheet`), **abaixo** da dos diálogos:
             // um diálogo aberto de dentro de uma gaveta nasce por cima dela.
             .children(gpui_kit::component::Root::render_sheet_layer(window, cx))

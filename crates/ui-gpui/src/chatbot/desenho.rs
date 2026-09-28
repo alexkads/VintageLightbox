@@ -1037,7 +1037,13 @@ impl Chatbot {
                             .justify_between()
                             .border_t_1()
                             .border_color(perigo.opacity(0.3))
-                            .child(div().truncate().text_xs().text_color(perigo).child(erro))
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_xs()
+                                    .text_color(perigo)
+                                    .child(crate::erro_da_api::legivel(&erro)),
+                            )
                             .child(
                                 h_flex()
                                     .gap(px(4.))

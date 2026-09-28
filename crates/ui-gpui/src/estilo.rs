@@ -25,10 +25,12 @@
 
 use gpui_kit::component::alert::Alert;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::notification::Notification;
 use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Disableable as _, Icon, Sizable as _};
 use gpui_kit::{
-    div, prelude::*, px, AnyElement, App, Div, FontWeight, Hsla, SharedString, Stateful,
+    div, prelude::*, px, Anchor, AnyElement, App, Div, FontWeight, Hsla, SharedString, Stateful,
+    Window,
 };
 
 use crate::recursos::Icone;
@@ -183,6 +185,72 @@ pub fn cabecalho_da_pagina(
         })
 }
 
+/// O tipo de um aviso passageiro — ver [`toast`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Toast {
+    /// Deu certo: verde, no alto e no meio.
+    Sucesso,
+    /// O site (ou o disco) recusou: vermelho, no alto e no meio.
+    Erro,
+    /// O gesto deixou algo de fora: o alerta do kit, no canto de baixo.
+    Alerta,
+}
+
+/// Um aviso do que **acabou de acontecer** — a `Notification` do gpui-kit, que
+/// some sozinha em 5 s. O que persiste (a tela que não carregou, o campo
+/// recusado) é [`aviso`], na tela.
+///
+/// 🎨 **Sucesso e erro com as cores do `richColors` do site**, no alto e no
+/// meio como o `sonner` (`position="top-center"`): no canto superior direito,
+/// o padrão da lista, o aviso tapava "Tela do cliente" e "Baixar JPEG". O
+/// alerta vai para o canto de baixo, longe dos botões do alto.
+pub fn toast(texto: impl Into<SharedString>, tipo: Toast, cx: &App) -> Notification {
+    let texto: SharedString = texto.into();
+    let tema = cx.theme();
+    let (fundo, letra, icone) = match tipo {
+        Toast::Alerta => {
+            return Notification::warning(texto).placement(Anchor::BottomRight);
+        }
+        Toast::Sucesso => (
+            tema.success,
+            tema.success_foreground,
+            gpui_kit::component::IconName::CircleCheck,
+        ),
+        Toast::Erro => (
+            tema.danger,
+            tema.danger_foreground,
+            gpui_kit::component::IconName::CircleX,
+        ),
+    };
+    // O erro do site chega cru (`o site respondeu 500 …: <html>`).
+    let texto: SharedString = if tipo == Toast::Erro {
+        crate::erro_da_api::legivel(&texto).into()
+    } else {
+        texto
+    };
+    Notification::new()
+        .message(texto)
+        .icon(Icon::new(icone).text_color(letra))
+        .placement(Anchor::TopCenter)
+        .bg(fundo)
+        .border_color(fundo)
+        .text_color(letra)
+}
+
+/// Mostra o `toast` na janela — se ela tiver a raiz do kit, que é onde mora a
+/// lista das notificações. As janelas dos testes de uma tela só não têm, e o
+/// `push_notification` do kit entra em pânico sem ela.
+pub fn mostrar_toast(nota: Notification, window: &mut Window, cx: &mut App) {
+    use gpui_kit::component::WindowExt as _;
+    if window
+        .root::<gpui_kit::component::Root>()
+        .flatten()
+        .is_some()
+    {
+        window.push_notification(nota, cx);
+    }
+}
+
 /// `Alert`: o do gpui-kit — o padrão já é o do site (texto, fundo da página,
 /// borda); com `perigo`, o vermelho do texto e da borda, **sem** o fundo
 /// tingido que o `error` do kit põe, porque o do site não tem. Respiro e canto
@@ -190,6 +258,13 @@ pub fn cabecalho_da_pagina(
 pub fn aviso(texto: impl Into<SharedString>, perigo: bool, cx: &App) -> Alert {
     let tema = cx.theme();
     let texto: SharedString = texto.into();
+    // O erro do site chega cru (`o site respondeu 500 …: <html>`); aqui ele
+    // vira a frase que o operador lê (`crate::erro_da_api`).
+    let texto: SharedString = if perigo {
+        crate::erro_da_api::legivel(&texto).into()
+    } else {
+        texto
+    };
     let alerta = if perigo {
         Alert::error(texto.clone(), texto)
             .icon(Icon::new(Icone::CircleAlert).size(px(16.)))

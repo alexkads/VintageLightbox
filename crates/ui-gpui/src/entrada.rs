@@ -428,7 +428,7 @@ impl Render for Entrada {
                                 .border_color(cx.theme().danger.opacity(0.6))
                                 .text_sm()
                                 .text_color(cor(capa::TEXTO))
-                                .child(erro),
+                                .child(crate::erro_da_api::legivel(&erro)),
                         )
                     }),
             )

@@ -142,6 +142,7 @@ fn linha_apagada(texto: String, cx: &App) -> Div {
 impl Render for NovaSessao {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.focar_pendente(window, cx);
+        self.entregar_o_aviso(window, cx);
         self.preparar_miniaturas();
         // As amostras pedidas neste quadro chegam por canal: alguém tem de
         // acordar para recolhê-las.
@@ -247,33 +248,6 @@ impl Render for NovaSessao {
             )
             .children(confirmacao)
             .children(busca)
-            .when_some(self.aviso.as_ref(), |t, aviso| {
-                t.child(
-                    div()
-                        .absolute()
-                        .bottom(px(88.))
-                        .right(px(24.))
-                        .max_w(px(420.))
-                        .px(px(16.))
-                        .py(px(12.))
-                        .rounded(crate::tema::canto(8.))
-                        .border_1()
-                        .border_color(if aviso.erro {
-                            cor(VERMELHO).opacity(0.5)
-                        } else {
-                            borda
-                        })
-                        .bg(cx.theme().popover)
-                        .shadow_lg()
-                        .text_sm()
-                        .text_color(if aviso.erro {
-                            cor(VERMELHO)
-                        } else {
-                            cx.theme().foreground
-                        })
-                        .child(aviso.texto.clone()),
-                )
-            })
     }
 }
 
@@ -1647,7 +1621,12 @@ impl NovaSessao {
                 c.child(
                     h_flex()
                         .gap(px(8.))
-                        .child(div().text_sm().text_color(cor(VERMELHO)).child(erro))
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(cor(VERMELHO))
+                                .child(crate::erro_da_api::legivel(&erro)),
+                        )
                         .when_some(cadastro.existente.clone(), |c, p| {
                             c.child(
                                 estilo::botao_contorno("nova-usar-existente", cx)
@@ -2157,7 +2136,7 @@ impl NovaSessao {
                                     .p(px(16.))
                                     .text_sm()
                                     .text_color(cor(VERMELHO))
-                                    .child(erro.clone()),
+                                    .child(crate::erro_da_api::legivel(erro)),
                             )
                         } else if busca.itens.is_empty() {
                             lista.child(

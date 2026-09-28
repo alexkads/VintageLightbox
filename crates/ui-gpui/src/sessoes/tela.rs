@@ -1204,12 +1204,24 @@ impl Sessoes {
                     rotulo: "restauracao",
                     resultado,
                 } => self.receber_restauracao(resultado, cx),
+                // 🔑 **A carga da lista e a criação da sessão nova chegam pelo
+                // mesmo recado.** A nova no ar é a que falhou: o toast, com o
+                // diálogo aberto para tentar de novo. Senão, foi a lista — a
+                // faixa, que fica até a próxima leitura.
                 Recado::Falhou(erro) => {
-                    self.carregando = false;
-                    if let Some(nova) = self.nova.as_mut() {
-                        nova.enviando = false;
+                    let criando = self
+                        .nova
+                        .as_mut()
+                        .is_some_and(|nova| std::mem::replace(&mut nova.enviando, false));
+                    if criando {
+                        cx.emit(AvisoDaLista {
+                            texto: format!("Não foi possível criar a sessão: {erro}"),
+                            erro: true,
+                        });
+                    } else {
+                        self.carregando = false;
+                        self.erro = Some(erro.into());
                     }
-                    self.erro = Some(erro.into());
                 }
                 // Entrar, publicar e link são de outras telas.
                 _ => {}

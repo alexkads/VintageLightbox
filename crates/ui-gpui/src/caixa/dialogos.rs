@@ -3140,7 +3140,10 @@ fn campo_de_valor(rotulo: &str, campo: &Entity<InputState>, cx: &Context<Caixa>)
 }
 
 fn erro_do_form(erro: String, cx: &Context<Caixa>) -> Div {
-    div().text_sm().text_color(cx.theme().danger).child(erro)
+    div()
+        .text_sm()
+        .text_color(cx.theme().danger)
+        .child(crate::erro_da_api::legivel(&erro))
 }
 
 /// Os pares de botão do site: `default` quando escolhido, `outline` quando não.

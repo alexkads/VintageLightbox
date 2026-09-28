@@ -278,9 +278,10 @@ fn importar_classificar_e_levar_pelas_teclas(cx: &mut TestAppContext) {
     e.teclar(cx, "b");
     e.detalhe(cx, |tela, _w, _cx| {
         assert!(
-            tela.erro().is_some_and(|f| f.contains("classifique")),
+            tela.ultimo_aviso()
+                .is_some_and(|f| f.contains("classifique")),
             "sinalizar a que não subiu avisa: {:?}",
-            tela.erro()
+            tela.ultimo_aviso()
         );
     });
 
