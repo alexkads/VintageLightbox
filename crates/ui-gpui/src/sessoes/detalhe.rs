@@ -44,13 +44,14 @@ use domain::services::pos_venda::{
 };
 use domain::services::PreviewType;
 use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::collapsible::Collapsible;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
 use gpui_kit::component::slider::{Slider, SliderEvent, SliderState};
-use gpui_kit::component::{ActiveTheme, Disableable, Sizable, WindowExt as _};
+use gpui_kit::component::{h_flex, ActiveTheme, Disableable, Sizable, WindowExt as _};
 use gpui_kit::{
     canvas, div, img, prelude::*, px, App, Context, Entity, EventEmitter, Focusable, SharedString,
     Task, Window,
@@ -3617,7 +3618,11 @@ impl Detalhe {
     /// como no site — com a de 320 px, ela sairia esticada e mole.
     fn preparar_as_grandes(&mut self, grade: Range<usize>, tira: Range<usize>) -> bool {
         let grade = if self.quer_as_grandes() { grade } else { 0..0 };
-        let tira = if self.tira_quer_as_grandes() { tira } else { 0..0 };
+        let tira = if self.tira_quer_as_grandes() {
+            tira
+        } else {
+            0..0
+        };
         if grade.is_empty() && tira.is_empty() {
             return false;
         }
@@ -4134,25 +4139,13 @@ impl Detalhe {
         // sem travar nada — quem pede é o link e o aviso.
         let sem_email = self.aberta.is_some() && !self.tem_email();
         let tema = cx.theme();
-        let (borda, apagado, texto, campo) = (
-            tema.border,
-            tema.muted_foreground,
-            tema.foreground,
-            tema.input,
-        );
+        let (borda, apagado, texto) = (tema.border, tema.muted_foreground, tema.foreground);
         let sem_galeria = self.aberta.is_none();
 
+        // Os selos são a `Tag` do gpui-kit (`estilo::selo_colorido`).
         let selo = |cores: (gpui_kit::Hsla, gpui_kit::Hsla, gpui_kit::Hsla),
                     rotulo: &'static str| {
-            let (fundo, _, frente) = cores;
-            div()
-                .flex_none()
-                .px(px(6.))
-                .rounded_full()
-                .bg(fundo)
-                .text_color(frente)
-                .text_size(px(10.))
-                .child(rotulo)
+            estilo::selo_colorido(cores).text_xs().child(rotulo)
         };
 
         // 🚨 **No Linux esta barra é a barra de título da galeria.** A tela da
@@ -4180,7 +4173,7 @@ impl Detalhe {
                     .on_click(cx.listener(|_tela, _ev, _window, cx| cx.emit(Pedido::AlternarMenu))),
             )
             .child(
-                estilo::botao_icone("galeria-voltar", Icone::ChevronLeft, 28., 20.)
+                estilo::botao_icone_pequeno("galeria-voltar", Icone::ChevronLeft)
                     .text_color(apagado)
                     .on_click(cx.listener(|_tela, _ev, _window, cx| cx.emit(Pedido::Voltar))),
             )
@@ -4256,7 +4249,6 @@ impl Detalhe {
                             // Os números da galeria, como o "detalhes" do site.
                             estilo::botao_contorno("sessao-contagem", cx)
                                 .debug_selector(|| "sessao-contagem".into())
-                                .text_xs()
                                 .text_color(apagado)
                                 .child(Icon::new(Icone::Info).size(px(14.)))
                                 .child(format!(
@@ -4277,9 +4269,7 @@ impl Detalhe {
             // No site é uma gaveta ao lado do "Dados do cliente", e é onde se
             // corrige um voucher errado sem recriar a sessão.
             .child(estilo::desligado(
-                estilo::botao_fantasma("sessao-atendimento", cx)
-                    .border_1()
-                    .border_color(campo)
+                estilo::botao_contorno("sessao-atendimento", cx)
                     .child(Icon::new(Icone::ClipboardList).size(px(16.)))
                     .child(SharedString::from(match self.quantas_associacoes() {
                         0 => "Atendimento".to_string(),
@@ -4296,13 +4286,11 @@ impl Detalhe {
             .children(self.escolha_do_estudio.as_ref().map(|escolha| {
                 div()
                     .w(px(200.))
-                    .child(Select::new(escolha).xsmall().placeholder("Estúdio…"))
+                    .child(estilo::campo(Select::new(escolha).placeholder("Estúdio…")))
             }))
             .child(estilo::desligado(
-                estilo::botao_fantasma("sessao-editar-cliente", cx)
+                estilo::botao_contorno("sessao-editar-cliente", cx)
                     .debug_selector(|| "sessao-editar-cliente".into())
-                    .border_1()
-                    .border_color(campo)
                     .child(Icon::new(Icone::ClipboardList).size(px(16.)))
                     .child("Dados do cliente")
                     .when(!sem_galeria, |b| {
@@ -4547,20 +4535,20 @@ impl Detalhe {
         );
 
         // "Entram como": as fichas do site, a escolhida em âmbar.
-        let ficha = |rotulo: &'static str,
-                     valor: Option<EstadoNoBalcao>,
-                     cx: &mut Context<Self>| {
-            pilula(
-                SharedString::from(format!("detalhe-leva-{rotulo}")),
-                rotulo,
-                None,
-                leva == valor,
-                cx,
-            )
-            .when(!ocupado, |p| {
-                p.on_click(cx.listener(move |tela, _ev, _window, cx| tela.escolher_leva(valor, cx)))
-            })
-        };
+        let ficha =
+            |rotulo: &'static str, valor: Option<EstadoNoBalcao>, cx: &mut Context<Self>| {
+                estilo::ficha(
+                    SharedString::from(format!("detalhe-leva-{rotulo}")),
+                    rotulo,
+                    None,
+                    leva == valor,
+                    cx,
+                )
+                .disabled(ocupado)
+                .on_click(
+                    cx.listener(move |tela, _ev: &bool, _window, cx| tela.escolher_leva(valor, cx)),
+                )
+            };
 
         let andamento = match lote {
             // 🔑 **O número inteiro, e não só o que já foi.** Quem mandou 500
@@ -4656,7 +4644,7 @@ impl Detalhe {
             .children(self.escolha_da_leva.as_ref().map(|escolha| {
                 div()
                     .w(px(232.))
-                    .child(Select::new(escolha).xsmall().placeholder("Faixa…"))
+                    .child(estilo::campo(Select::new(escolha).placeholder("Faixa…")))
             }))
             .child(
                 div()
@@ -4714,14 +4702,14 @@ impl Detalhe {
                 // sumir o filtro ativo tiraria o caminho de volta.
                 let mostrar = filtro == Filtro::Todas || quantas > 0 || ativo == filtro;
                 mostrar.then(|| {
-                    pilula(
+                    estilo::ficha(
                         SharedString::from(format!("sessao-filtro-{rotulo}")),
                         rotulo,
                         Some(quantas),
                         ativo == filtro,
                         cx,
                     )
-                    .on_click(cx.listener(move |tela, _ev, _window, cx| tela.filtrar(filtro, cx)))
+                    .on_click(cx.listener(move |tela, _ev: &bool, _window, cx| tela.filtrar(filtro, cx)))
                 })
             }))
             // 📌 **O aviso de pendência, e o atalho para ela** — o da web
@@ -4731,35 +4719,21 @@ impl Detalhe {
                 let quantas = self.nao_salvas.len();
                 let ambar = cx.theme().warning;
                 barra.child(
-                    div()
-                        .id("sessao-nao-salvas")
+                    // O `Button` de contorno do kit, no âmbar do aviso.
+                    estilo::botao_contorno("sessao-nao-salvas", cx)
+                        .warning()
                         .debug_selector(|| "sessao-nao-salvas".into())
-                        .flex()
-                        .items_center()
-                        .gap(px(6.))
-                        .h(px(28.))
-                        .px(px(10.))
                         .rounded_full()
-                        .border_1()
-                        .border_color(ambar.opacity(0.6))
-                        .bg(ambar.opacity(0.1))
-                        .hover(move |s| s.bg(ambar.opacity(0.2)))
-                        .cursor_pointer()
-                        .text_xs()
-                        .text_color(ambar)
                         .child(div().size(px(6.)).rounded_full().bg(ambar))
                         .child(if quantas == 1 {
                             "1 revelação não salva".to_string()
                         } else {
                             format!("{quantas} revelações não salvas")
                         })
-                        .tooltip(move |w, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new(if quantas == 1 {
-                                "Uma revelação está só neste computador. Clique para ir até ela — ela chega ao cliente quando você salvar na galeria."
-                            } else {
-                                "Estas revelações estão só neste computador. Clique para marcá-las — elas chegam ao cliente quando você salvar na galeria."
-                            })
-                            .build(w, cx)
+                        .tooltip(if quantas == 1 {
+                            "Uma revelação está só neste computador. Clique para ir até ela — ela chega ao cliente quando você salvar na galeria."
+                        } else {
+                            "Estas revelações estão só neste computador. Clique para marcá-las — elas chegam ao cliente quando você salvar na galeria."
                         })
                         .on_click(cx.listener(|tela, _ev, _window, cx| {
                             tela.ir_ate_as_nao_salvas(cx)
@@ -4785,8 +4759,8 @@ impl Detalhe {
             // 🔑 **Sem exigir foco**, como o botão da barra do site: entra no
             // modo e a tira faz o resto.
             .child(estilo::desligado(
-                estilo::botao_fantasma("sessao-revelar", cx)
-                    .bg(acento)
+                // `variante="secondary"`, como o `AbrirRevelacao` da grade do site.
+                estilo::botao_secundario("sessao-revelar", cx)
                     .child(Icon::new(Icone::SlidersHorizontal).size(px(16.)))
                     .child("Revelar")
                     .when(pode_revelar, |b| {
@@ -4844,30 +4818,26 @@ impl Detalhe {
                             })),
                     )
             })
-            .child(estilo::desligado(
-                estilo::botao_fantasma("sessao-selecionar-visiveis", cx)
-                    .text_color(apagado)
-                    .child(
-                        Icon::new(if todas_marcadas {
-                            Icone::SquareCheck
-                        } else {
-                            Icone::Square
-                        })
-                        .size(px(16.)),
-                    )
-                    .child(format!(
-                        "{} as {visiveis} visíveis",
-                        if todas_marcadas {
-                            "Desmarcar"
-                        } else {
-                            "Selecionar"
-                        }
-                    ))
-                    .when(visiveis > 0, |b| {
-                        b.on_click(cx.listener(|tela, _ev, _window, cx| tela.alternar_todas(cx)))
-                    }),
-                visiveis == 0,
-            ))
+            // ☑️ O `Checkbox` do gpui-kit, na altura dos botões da barra.
+            .child(
+                estilo::campo(h_flex().flex_none()).child(
+                    Checkbox::new("sessao-selecionar-visiveis")
+                        .small()
+                        .checked(todas_marcadas)
+                        .disabled(visiveis == 0)
+                        .label(format!(
+                            "{} as {visiveis} visíveis",
+                            if todas_marcadas {
+                                "Desmarcar"
+                            } else {
+                                "Selecionar"
+                            }
+                        ))
+                        .on_click(cx.listener(|tela, _ev: &bool, _window, cx| {
+                            tela.alternar_todas(cx)
+                        })),
+                ),
+            )
     }
 
     /// As fotos que vão para a tira da Revelação: **as da sessão, na ordem da
@@ -7909,47 +7879,6 @@ fn selo_do_lugar(lugar: Lugar) -> gpui_kit::Div {
 }
 
 /// Uma tecla escrita, como os `<kbd>` do site.
-/// Uma ficha da galeria do site: pílula com borda, a acesa em âmbar.
-fn pilula(
-    id: SharedString,
-    rotulo: &'static str,
-    quantas: Option<usize>,
-    acesa: bool,
-    cx: &App,
-) -> gpui_kit::Stateful<gpui_kit::Div> {
-    let tema = cx.theme();
-    let (borda, apagado, acento) = (tema.border, tema.muted_foreground, tema.accent);
-    div()
-        .id(id)
-        .flex()
-        .flex_none()
-        .items_center()
-        .gap(px(6.))
-        .h(px(28.))
-        .px(px(10.))
-        .rounded_full()
-        .border_1()
-        .text_sm()
-        .cursor_pointer()
-        .when(acesa, |p| {
-            p.bg(cores::quente())
-                .border_color(cores::quente())
-                .text_color(cores::sobre_quente())
-        })
-        .when(!acesa, |p| {
-            p.border_color(borda).hover(move |s| s.bg(acento))
-        })
-        .child(rotulo)
-        .when_some(quantas, |p, n| {
-            p.child(
-                div()
-                    .when(!acesa, |d| d.text_color(apagado))
-                    .when(acesa, |d| d.opacity(0.75))
-                    .child(n.to_string()),
-            )
-        })
-}
-
 fn tecla(rotulo: &str, cx: &App) -> impl IntoElement {
     div()
         .px(px(3.))

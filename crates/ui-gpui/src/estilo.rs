@@ -24,7 +24,7 @@
 //! | `Dialog` (véu, caixa, cabeçalho, opção, rodapé) | [`veu_do_dialogo`], [`caixa_do_dialogo`], [`cabecalho_do_dialogo`], [`opcao_do_dialogo`], [`rodape_do_dialogo`] |
 
 use gpui_kit::component::alert::Alert;
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::button::{Button, ButtonVariants as _, Toggle, ToggleVariants as _};
 use gpui_kit::component::notification::Notification;
 use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{
@@ -76,6 +76,11 @@ pub fn botao_primario(id: impl Into<SharedString>, _cx: &App) -> Button {
     botao(id).primary()
 }
 
+/// `Button variant="secondary"`: o fundo apagado, sem borda.
+pub fn botao_secundario(id: impl Into<SharedString>, _cx: &App) -> Button {
+    botao(id).secondary()
+}
+
 /// `Button variant="destructive"`.
 pub fn botao_perigo(id: impl Into<SharedString>, _cx: &App) -> Button {
     botao(id).danger()
@@ -110,6 +115,12 @@ pub fn campo<E: Styled>(elemento: E) -> E {
 /// dos botões com texto de uma barra.
 pub fn botao_icone_padrao(id: impl Into<SharedString>, icone: Icone) -> Button {
     botao_icone(id, icone, m().botao.altura, 16.)
+}
+
+/// O botão só de ícone no lado do `SidebarTrigger` (`size="icon-sm"`) — o
+/// "voltar" que mora ao lado dele num cabeçalho.
+pub fn botao_icone_pequeno(id: impl Into<SharedString>, icone: Icone) -> Button {
+    botao_icone(id, icone, m().botao_icone, 16.)
 }
 
 /// `Button variant="ghost" size="icon"`: quadrado de `lado` px, só o ícone.
@@ -498,6 +509,43 @@ pub fn chip(id: impl Into<SharedString>, escolhido: bool) -> Button {
         .rounded(m().canto_da_tela(4.))
         .text_xs()
         .selected(escolhido)
+}
+
+/// 🏷️ **Uma ficha de recorte** (as pílulas "Todas 21", "sem marcação"…): o
+/// `Toggle` do gpui-kit, de contorno, em pílula e **na altura do botão do
+/// template** — elas dividem a linha com os botões, e com 28 px à mão ficavam
+/// mais baixas que eles (dono, 28/09/2026: *"componentes fora de padrão, com
+/// altura errada"*). A acesa leva o âmbar do tema; o número vem apagado.
+pub fn ficha(
+    id: impl Into<SharedString>,
+    rotulo: impl Into<SharedString>,
+    quantas: Option<usize>,
+    acesa: bool,
+    cx: &App,
+) -> Toggle {
+    let apagado = cx.theme().muted_foreground;
+    let controle = m().botao;
+    Toggle::new(id.into())
+        .outline()
+        .small()
+        .checked(acesa)
+        .flex_none()
+        .gap(px(6.))
+        .h(px(controle.altura))
+        .px(px(controle.lados))
+        .rounded_full()
+        .when(acesa, |f| {
+            f.bg(crate::tema::cores::quente())
+                .border_color(crate::tema::cores::quente())
+                .text_color(crate::tema::cores::sobre_quente())
+        })
+        .child(div().child(rotulo.into()))
+        .children(quantas.map(|n| {
+            div()
+                .when(!acesa, |d| d.text_color(apagado))
+                .when(acesa, |d| d.opacity(0.75))
+                .child(n.to_string())
+        }))
 }
 
 /// Um botão de ligar e desligar (o `Toggle` do site): contorno apagado, e o
