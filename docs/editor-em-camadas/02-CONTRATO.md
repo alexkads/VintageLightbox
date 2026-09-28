@@ -94,7 +94,7 @@ Síncrona, porque quem pergunta é o quadro. Espelho em memória carregado no `m
   `editada:<foto.id>:<rev>` do `PreviewManager`; se faltar, decodifica a PNG, reduz ao lado das prévias e grava.
   Sem versão: exatamente a regra de hoje. O `u64` é a revisão da fonte (0 = bruto).
 - `resolucao_cheia(...)`: a mesma escolha em resolução cheia (a PNG ou `base_neutra` do bruto).
-- Palco, antecipação, Comparar, zoom e receita padrão passam por aqui.
+- Palco, antecipação, Comparar, zoom e revelação padrão passam por aqui.
 - Aqui mora a conferência do C31.
 
 ### Aviso — `EdicaoSalva`
@@ -103,7 +103,7 @@ A janela do editor é uma entidade GPUI que emite `EdicaoSalva(VersaoEditada)` (
 Quem assina é a raiz (`Aplicativo`), ao abrir a janela. **A janela não toca na Revelação.** A raiz:
 
 1. chama `revelacao.update(|t, cx| t.fonte_mudou(&foto_id, cx))`;
-2. para foto do site, põe a foto no depósito do "Salvar na galeria" com a receita atual — a revelada do site
+2. para foto do site, põe a foto no depósito do "Salvar na galeria" com a revelação atual — a revelada do site
    precisa ser refeita com a edição.
 
 ### `Revelacao::fonte_mudou(foto_id)`
@@ -112,7 +112,7 @@ Quem assina é a raiz (`Aplicativo`), ao abrir a janela. **A janela não toca na
   prévias `revelada:<id>` e `editada:<id>:<rev anterior>`.
 - Se ela estiver aberta: troca `origem` e `bruta` pelo resolvedor, recomeça a resolução cheia na cópia e pede
   revelação.
-- **Não mexe** em ajustes, corte, receita local, histórico, marcadas, posição nem foco.
+- **Não mexe** em ajustes, corte, revelação local, histórico, marcadas, posição nem foco.
 
 ### Chave do cache
 
@@ -130,7 +130,7 @@ Quem assina é a raiz (`Aplicativo`), ao abrir a janela. **A janela não toca na
 
 1. A base do editor é `base_neutra` do bruto (C28) — nunca uma chave de cache.
 2. A imagem editada com camada vazia é a base byte a byte (C30) → revelá-la dá o mesmo que revelar o bruto.
-3. Com receita não neutra aberta, salvar no editor produz uma origem igual a **base + traço**, sem a receita.
+3. Com revelação não neutra aberta, salvar no editor produz uma origem igual a **base + traço**, sem a revelação.
 4. A chave do cache inclui a fonte; a revelação velha não volta.
 
 Os quatro viram testes (ver `04-PLANO-ETAPA-1.md`).

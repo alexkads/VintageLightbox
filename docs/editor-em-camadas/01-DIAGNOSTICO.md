@@ -24,7 +24,7 @@ Não há um resolvedor. São sete leitores, cada um com a regra dele:
 | Antecipação da próxima — `tela.rs` (≈ l. 2254) | as mesmas chaves |
 | Comparar (`⇧C`) — `tela/comparar.rs` (≈ l. 203) | as mesmas chaves |
 | Zoom em resolução cheia — `app/resolucao_cheia.rs` `pedir_o_bruto` | `orientacao::abrir_de_pe(path)` ou `publicador.original` → `decodificar_de_pe` |
-| Receita padrão da sessão — `sessoes/receita_padrao.rs` (≈ l. 377) | `trabalho:<id>` ou o preview |
+| Revelação padrão da sessão — `sessoes/revelacao_padrao.rs` (≈ l. 377) | `trabalho:<id>` ou o preview |
 | Exportação local — `infrastructure/src/image_exporter.rs` `renderizar` | `abrir_de_pe(photo.file_path)` |
 | Pós-venda — `pos_venda/porta.rs` `revelar_e_salvar`, `revelar_integral` | `controlador.original()`: baixa o bruto do site e revela |
 
@@ -55,7 +55,7 @@ base. Uma entrada com outra proporção deslocaria máscara e corte sem erro nen
 
 ## Caches
 
-- `revelacao/cache.rs` — `CacheDeReveladas`, chave `Chave { foto, origem: (l, a), receita }`. Não sabe de
+- `revelacao/cache.rs` — `CacheDeReveladas`, chave `Chave { foto, origem: (l, a), revelação }`. Não sabe de
   **qual fonte** a revelação veio: uma imagem editada nova, do mesmo tamanho, casaria com a revelação da fonte
   antiga.
 - `PreviewManager` (SQLite de cache + LRU): `foto.id`, `trabalho:<id>`, `revelada:<id>` (a miniatura revelada

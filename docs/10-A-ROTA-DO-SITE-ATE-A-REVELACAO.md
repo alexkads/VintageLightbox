@@ -410,7 +410,7 @@ Lightroom: coloque flags, escolhe tudo e desmarcar algumas coisas"*), o que fica
 como estava no destino**, e o enquadramento **nasce desmarcado** (*"o retângulo que endireita o
 horizonte de uma foto corta a cabeça de outra"*). A escolha fica em `localStorage`.
 
-🚨 *"Aqui não há 'só copiar a configuração'. O Lightroom guarda a receita e revela na exportação; a
+🚨 *"Aqui não há 'só copiar a configuração'. O Lightroom guarda a revelação e revela na exportação; a
 nossa galeria guarda **o JPEG revelado**."* Sincronizar baixa o original de cada alvo, revela na GPU,
 codifica e sobe — **uma de cada vez**, para não ter duas de 24 MP decodificadas na memória.
 

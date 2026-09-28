@@ -13,7 +13,7 @@ arquivo bruto  →  edição (camadas, o editor)  →  revelação (parâmetros,
 
 Na tela: "Editar Foto", selo **EDITADA** (cabeçalho da Revelação, lápis na tira, "· editada" na grade
 da sessão), "Excluir a edição" — e, do outro lado, "revelação não salva", "Descartar a revelação".
-**"Receita" não aparece em texto nenhum.** O contrato inteiro:
+**"Revelação" não aparece em texto nenhum.** O contrato inteiro:
 `recordarfotos-e-commerce/docs/REVELAR_E_EDITAR.md`.
 
 ## Por que existe

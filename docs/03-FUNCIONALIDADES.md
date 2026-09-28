@@ -829,7 +829,7 @@ struct Purchase {
 **Relatórios Disponíveis**:
 1. **Resumo de Vendas**
    - Total de fotos vendidas
-   - Receita total
+   - Revelação total
    - Vendas por período
    - Formato mais vendido
 

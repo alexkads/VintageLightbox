@@ -54,7 +54,7 @@ Dependências já presentes no `Cargo.lock`: `image` (só `png`), `serde`, `serd
 ### Revelação
 
 - `revelacao/fonte.rs` (resolvedor), `Revelacao::com_fontes` (setter: os construtores dos testes não mudam),
-  `fonte_mudou`, `cache::Chave.fonte`, e os leitores de `tela.rs`, `comparar.rs`, `receita_padrao.rs` e
+  `fonte_mudou`, `cache::Chave.fonte`, e os leitores de `tela.rs`, `comparar.rs`, `revelacao_padrao.rs` e
   `app/resolucao_cheia.rs` passando pelo resolvedor.
 
 ### Pós-venda — `pos_venda/porta.rs`
@@ -74,11 +74,11 @@ frente do catálogo é adotado · `.tmp` que sobrou é ignorado · a coleta não
 
 **ui-gpui** (portas de mentira): "Editar Foto" usa a clicada, dentro e fora da seleção · abre uma janela para
 aquela foto e não duplica · preserva seleção, posição e setas · o menu mantém as outras opções · salvar troca
-a fonte e mantém receita, corte, máscaras e histórico · só os caches daquela foto são esquecidos · a revisão
+a fonte e mantém revelação, corte, máscaras e histórico · só os caches daquela foto são esquecidos · a revisão
 nova não casa com a chave da antiga · sem efeito duplicado · versão com outra proporção é recusada ·
 pós-venda revela a editada e não restaura o bruto.
 
-**Prévia × JPEG × pós-venda** (GPU): com foto editada e receita não neutra, a prévia do palco, o JPEG exportado
+**Prévia × JPEG × pós-venda** (GPU): com foto editada e revelação não neutra, a prévia do palco, o JPEG exportado
 (reduzido ao mesmo tamanho) e os bytes entregues ao pós-venda têm o traço e diferem em média menos de 2/255;
 exportação e pós-venda saem iguais entre si.
 
@@ -97,5 +97,5 @@ Os números do Mac entram em `05-MEDIDAS.md`. O Windows precisa de um balcão Wi
 ## Conferência no app real
 
 Roteiro (`VLB_ROTEIRO`) com uma cópia do catálogo: marcar três fotos, botão direito na segunda, `tira editar`,
-pintar na janela do editor, salvar, fechar; conferir nas capturas que o palco mostra o traço com a receita por
+pintar na janela do editor, salvar, fechar; conferir nas capturas que o palco mostra o traço com a revelação por
 cima, que as marcadas e as setas continuam, que reabrir traz a camada, e que o JPEG exportado tem o traço.

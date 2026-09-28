@@ -76,7 +76,7 @@ histórico, que anda com a foto (C23–C26). As divergências deste app estão l
 
 `../recordarfotos-e-commerce/docs/REVELAR_E_EDITAR.md` (dono, 28/set/2026): **revelar** é o Lightroom
 (parâmetros sobre o bruto — a tela Revelação) e **editar** é o Photoshop (camadas — o editor, aberto
-por "Editar Foto"). Nenhum texto da tela diz **"receita"**, "edição" nunca quer dizer parâmetro, e
+por "Editar Foto"). Nenhum texto da tela diz **"revelação"**, "edição" nunca quer dizer parâmetro, e
 "o editor" nunca é a Revelação. Nomes internos do código podem ficar.
 
 ## Build and Test Commands

@@ -34,7 +34,7 @@ As duas metades estavam certas, e são defeitos diferentes.
 da foto do site (`so_existe_no_site` → `origem: None`), e por um bom motivo: em
 `site:<id>` a grade da sessão guarda a **imagem da galeria**, que depois de
 "Salvar na galeria" é a foto **revelada e com marca**. Servi-la ao shader
-aplicava a receita duas vezes, em 640 px. O conserto certo não era desligar o
+aplicava a revelação duas vezes, em 640 px. O conserto certo não era desligar o
 cache — era parar de guardar **duas imagens diferentes na mesma chave**, que é a
 mesma lição de 6/set logo abaixo, uma linha acima na mesma tabela.
 
@@ -62,14 +62,14 @@ buracos:
   (`andar_e_voltar_preserva_o_que_foi_ajustado` prende isso).
 - Para a foto do site nem o banco respondia: o id dela é `site:<uuid>`, que não
   é linha do catálogo — `save_edits` devolve `PhotoNotFound`, e o `Gravador` não
-  tem como contar isso a ninguém (não devolve `Result`, de propósito). A receita
+  tem como contar isso a ninguém (não devolve `Result`, de propósito). A revelação
   só existia na cópia em memória, que morre quando a tela fecha.
 
 Hoje `gravar` escreve nos dois lugares (banco e acervo em memória), e sair da
-Revelação devolve as receitas às fotos do site que a raiz guarda.
+Revelação devolve as revelações às fotos do site que a raiz guarda.
 
 ✅ **E ela atravessa o fechar do app** — a terceira parte, no mesmo dia. A
-receita da foto do site vai para `revelacoes_do_site`, **no mesmo SQLite do
+revelação da foto do site vai para `revelacoes_do_site`, **no mesmo SQLite do
 catálogo** (migration 021): não em `photos`, porque as migrations 017 e 019 dizem,
 cada uma à sua maneira, que ali mora "uma foto no disco", e esta não está neste
 disco. É o equivalente ao depósito que o site guarda no navegador
@@ -88,7 +88,7 @@ sabe gravar uma revelação":
 🔑 **A leitura é síncrona porque quem lê é a grade, no meio de um quadro.** O
 disco foi consultado uma vez, na abertura; o que o `Gravador` devolve é o espelho
 em memória, que anda junto com cada gesto — esperar o banco faria a sessão
-reaberta mostrar a receita de antes do último arrasto.
+reaberta mostrar a revelação de antes do último arrasto.
 
 ## 🚨 A tira da Revelação repetiu os dois defeitos da grade da sessão — 8/set/2026
 

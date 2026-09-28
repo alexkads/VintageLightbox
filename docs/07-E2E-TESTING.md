@@ -135,7 +135,7 @@ recebidos pelo `PublicadorDeMentira`; não comprova que as fotos foram alteradas
 |---|---|
 | `conta` | a porta, `/auth/me`, o tema, o menu lateral e o Sair |
 | `sessoes` | a lista, a busca, os recortes, a sessão nova, a retenção e o caixa |
-| `nova_sessao` | as sete etapas: rascunho, fotos sob `rascunho:<uuid>`, receita padrão, criar |
+| `nova_sessao` | as sete etapas: rascunho, fotos sob `rascunho:<uuid>`, revelação padrão, criar |
 | `galeria` | dentro da sessão: importar, classificar, levar, negociar, imprimir, exportar, o link |
 | **`atendimento`** | **as fotos**: quais entram em cada recorte, o que cada gesto faz *nelas*, a tira da revelação e o que o cliente vê |
 | `caixa` | o caixa flutuante na galeria e na revelação |
@@ -169,7 +169,7 @@ Alguns cenários e o que cada um prende:
 
 🔑 **Os observadores são `#[cfg(test)]` e leem o estado usado pelo desenho**: `Detalhe::ids_visiveis`,
 `Detalhe::como_esta` (estado, nota, revelada), `Revelacao::ids_na_tira`,
-`Aplicativo::receita_no_cliente` (a foto **e os ajustes** que a segunda tela recebeu). Nenhum deles
+`Aplicativo::parametros_no_cliente` (a foto **e os ajustes** que a segunda tela recebeu). Nenhum deles
 inventa estado: todos saem de onde o render lê.
 
 ⚠️ **A foto remota chega por uma porta assíncrona de memória, e o cenário espera por ela.**
