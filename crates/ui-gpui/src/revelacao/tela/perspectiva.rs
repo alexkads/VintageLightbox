@@ -36,8 +36,10 @@
 
 use domain::value_objects::perspectiva::MAXIMO_DE_GUIAS;
 use domain::value_objects::{CropSettings, EixoDaGuia, GuiaDePerspectiva, PerspectivaGuiada};
+use gpui_kit::component::button::Button;
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::slider::Slider;
-use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon, Sizable as _};
 use gpui_kit::{
     canvas, div, point, prelude::*, px, AnyElement, Context, CursorStyle, Hsla, MouseButton,
     MouseDownEvent, PathBuilder, Pixels, Point, SharedString, Window,
@@ -778,12 +780,7 @@ impl Revelacao {
         let atual = self.corte_atual();
         let p = *atual.perspectiva();
         let tema = cx.theme();
-        let (mudo, frente, borda, muted) = (
-            tema.muted_foreground,
-            tema.foreground,
-            tema.border,
-            tema.muted,
-        );
+        let (mudo, frente, muted) = (tema.muted_foreground, tema.foreground, tema.muted);
         let armadas = self.tracando_guias();
         let selecionada = self.guias().and_then(|g| g.selecionada);
         let guias = self.guias_vigentes();
@@ -814,43 +811,27 @@ impl Revelacao {
                         .child(format!("Guia {}", i + 1)),
                 )
                 .child(
-                    div()
-                        .id(SharedString::from(format!("guia-eixo-{i}")))
+                    Button::new(SharedString::from(format!("guia-eixo-{i}")))
+                        .outline()
+                        .xsmall()
                         .px(px(6.))
-                        .py(px(1.))
                         .rounded(px(3.))
-                        .border_1()
-                        .border_color(borda)
                         .text_xs()
                         .text_color(gpui_kit::rgb(cor))
-                        .cursor_pointer()
-                        .hover(move |s| s.bg(muted))
-                        .tooltip(|w, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new(
-                                "Trocar Vertical ↔ Horizontal",
-                            )
-                            .build(w, cx)
-                        })
+                        .tooltip("Trocar Vertical ↔ Horizontal")
                         .on_click(
                             cx.listener(move |tela, _, window, cx| tela.trocar_eixo(i, window, cx)),
                         )
                         .child(nome),
                 )
                 .child(
-                    div()
-                        .id(SharedString::from(format!("guia-apagar-{i}")))
-                        .p(px(2.))
+                    estilo::botao_icone(format!("guia-apagar-{i}"), Icone::X, 16., 12.)
                         .rounded(px(3.))
                         .text_color(mudo)
-                        .cursor_pointer()
-                        .hover(move |s| s.bg(muted).text_color(frente))
-                        .tooltip(|w, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new("Apagar a guia").build(w, cx)
-                        })
+                        .tooltip("Apagar a guia")
                         .on_click(
                             cx.listener(move |tela, _, window, cx| tela.apagar_guia(i, window, cx)),
-                        )
-                        .child(Icon::new(Icone::X).size(px(12.))),
+                        ),
                 )
         };
 
@@ -893,28 +874,11 @@ impl Revelacao {
                     .items_center()
                     .child(div().text_xs().text_color(mudo).child("Perspectiva guiada"))
                     .child(
-                        div()
-                            .id("perspectiva-guias")
+                        estilo::alternador("perspectiva-guias", armadas, cx)
                             .h(px(26.))
                             .px(px(8.))
-                            .flex()
-                            .items_center()
-                            .gap(px(6.))
-                            .rounded(px(4.))
-                            .border_1()
-                            .border_color(borda)
                             .text_xs()
-                            .cursor_pointer()
-                            .when(armadas, |b| {
-                                b.bg(gpui_kit::rgb(AMBAR)).text_color(gpui_kit::black())
-                            })
-                            .when(!armadas, |b| b.text_color(frente.opacity(0.9)).hover(move |s| s.bg(muted)))
-                            .tooltip(|w, cx| {
-                                gpui_kit::component::tooltip::Tooltip::new(
-                                    "Trace sobre a foto retas que deviam ser verticais ou horizontais",
-                                )
-                                .build(w, cx)
-                            })
+                            .tooltip("Trace sobre a foto retas que deviam ser verticais ou horizontais")
                             .on_click(cx.listener(|tela, _, _, cx| tela.alternar_guias(cx)))
                             .child(Icon::new(Icone::Building2).size(px(14.)))
                             .child("Guias"),
@@ -945,29 +909,17 @@ impl Revelacao {
                 &self.persp_horizontal,
             ))
             .child(
-                h_flex()
-                    .id("corte-restringir")
-                    .gap(px(6.))
-                    .items_center()
-                    .cursor_pointer()
-                    .text_xs()
+                Checkbox::new("corte-restringir")
+                    .checked(restringir)
+                    .xsmall()
                     .text_color(frente.opacity(0.9))
-                    .tooltip(|w, cx| {
-                        gpui_kit::component::tooltip::Tooltip::new(
-                            "O retângulo não passa dos cantos sem foto que o endireitar e a perspectiva deixam",
-                        )
-                        .build(w, cx)
-                    })
-                    .on_click(cx.listener(|tela, _, window, cx| tela.alternar_restringir(window, cx)))
-                    .child(
-                        Icon::new(if restringir {
-                            Icone::SquareCheck
-                        } else {
-                            Icone::Square
-                        })
-                        .size(px(14.)),
+                    .label("Restringir ao conteúdo")
+                    .tooltip(
+                        "O retângulo não passa dos cantos sem foto que o endireitar e a perspectiva deixam",
                     )
-                    .child("Restringir ao conteúdo"),
+                    .on_click(cx.listener(|tela, _: &bool, window, cx| {
+                        tela.alternar_restringir(window, cx)
+                    })),
             )
             .child({
                 estilo::desligado(

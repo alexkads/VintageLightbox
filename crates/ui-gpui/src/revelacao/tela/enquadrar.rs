@@ -929,35 +929,15 @@ impl Revelacao {
         let angulo = atual.angle();
         let proporcao = self.edicao.as_ref().and_then(|e| e.proporcao);
         let tema = cx.theme();
-        let (mudo, frente, borda, muted) = (
-            tema.muted_foreground,
-            tema.foreground,
-            tema.border,
-            tema.muted,
-        );
+        let (mudo, frente) = (tema.muted_foreground, tema.foreground);
         let saida = self.espaco().map(|espaco| {
             let r = corte::retangulo_de(&atual, espaco);
             (r.w.round() as u32, r.h.round() as u32)
         });
 
         let botao = |id: &'static str, icone: Icone, ligado: bool| {
-            div()
-                .id(id)
+            estilo::alternador(id, ligado, cx)
                 .h(px(32.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(4.))
-                .border_1()
-                .border_color(borda)
-                .cursor_pointer()
-                .when(ligado, |b| {
-                    b.bg(gpui_kit::rgb(0xfbbf24)).text_color(gpui_kit::black())
-                })
-                .when(!ligado, |b| {
-                    b.text_color(frente.opacity(0.9))
-                        .hover(move |s| s.bg(muted))
-                })
                 .child(Icon::new(icone).size(px(16.)))
         };
 
@@ -973,22 +953,22 @@ impl Revelacao {
                             .gap(px(4.))
                             .child(
                                 botao("corte-girar-esquerda", Icone::RotateCcw, false)
-                                    .tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new("Girar à esquerda").build(w, cx))
+                                    .tooltip("Girar à esquerda")
                                     .on_click(cx.listener(|tela, _, _, cx| tela.girar_a_esquerda(cx))),
                             )
                             .child(
                                 botao("corte-girar", Icone::RotateCw, false)
-                                    .tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new("Girar à direita").build(w, cx))
+                                    .tooltip("Girar à direita")
                                     .on_click(cx.listener(|tela, _, _, cx| tela.girar(cx))),
                             )
                             .child(
                                 botao("corte-espelho-h", Icone::FlipHorizontal, atual.flip_horizontal())
-                                    .tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new("Espelhar na horizontal").build(w, cx))
+                                    .tooltip("Espelhar na horizontal")
                                     .on_click(cx.listener(|tela, _, _, cx| tela.espelhar_horizontal(cx))),
                             )
                             .child(
                                 botao("corte-espelho-v", Icone::FlipVertical, atual.flip_vertical())
-                                    .tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new("Espelhar na vertical").build(w, cx))
+                                    .tooltip("Espelhar na vertical")
                                     .on_click(cx.listener(|tela, _, _, cx| tela.espelhar_vertical(cx))),
                             ),
                     ),
@@ -1050,7 +1030,7 @@ impl Revelacao {
                                 botao("corte-regua", Icone::Ruler, armada)
                                     .w(px(36.))
                                     .h(px(28.))
-                                    .tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new("Régua: trace sobre algo que devia ser reto (ou ⌘ + arrastar na foto)").build(w, cx))
+                                    .tooltip("Régua: trace sobre algo que devia ser reto (ou ⌘ + arrastar na foto)")
                                     .on_click(cx.listener(|tela, _, _, cx| tela.alternar_regua(cx)))
                             }),
                     )
@@ -1071,17 +1051,8 @@ impl Revelacao {
                             |(rotulo, valor)| {
                                 let escolhida = proporcao == *valor;
                                 let valor = *valor;
-                                div()
-                                    .id(SharedString::from(format!("prop-{rotulo}")))
-                                    .px(px(8.))
-                                    .py(px(4.))
-                                    .rounded(px(4.))
-                                    .text_xs()
-                                    .cursor_pointer()
-                                    .when(escolhida, |b| b.bg(muted).text_color(frente))
-                                    .when(!escolhida, |b| {
-                                        b.text_color(mudo).hover(move |s| s.text_color(frente))
-                                    })
+                                estilo::chip(format!("prop-{rotulo}"), escolhida)
+                                    .when(!escolhida, |b| b.text_color(mudo))
                                     .on_click(cx.listener(move |tela, _, _, cx| {
                                         tela.travar_proporcao(valor, cx)
                                     }))

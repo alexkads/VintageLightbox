@@ -21,7 +21,9 @@
 use gpui_kit::component::alert::Alert;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::tag::Tag;
-use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Disableable as _, Icon, Sizable as _};
+use gpui_kit::component::{
+    h_flex, v_flex, ActiveTheme, Disableable as _, Icon, Selectable as _, Sizable as _,
+};
 use gpui_kit::{
     div, prelude::*, px, AnyElement, App, Div, FontWeight, Hsla, SharedString, Stateful,
 };
@@ -346,5 +348,29 @@ pub fn item_de_menu(
             .debug_selector(move || id.into())
             .when_some(cor, |d, cor| d.text_color(cor))
             .child(rotulo.clone())
+    })
+}
+
+/// Uma opção de um grupo de escolha (o `ToggleGroupItem` do site): o `Button`
+/// fantasma do kit, pequeno, **aceso quando escolhido** (`selected`).
+pub fn chip(id: impl Into<SharedString>, escolhido: bool) -> Button {
+    Button::new(id.into())
+        .ghost()
+        .xsmall()
+        .px(px(8.))
+        .rounded(px(4.))
+        .text_xs()
+        .selected(escolhido)
+}
+
+/// Um botão de ligar e desligar (o `Toggle` do site): contorno apagado, e o
+/// âmbar do tema quando ligado.
+pub fn alternador(id: impl Into<SharedString>, ligado: bool, cx: &App) -> Button {
+    Button::new(id.into()).small().rounded(px(4.)).map(|b| {
+        if ligado {
+            b.custom(crate::tema::botao_quente(cx))
+        } else {
+            b.outline()
+        }
     })
 }

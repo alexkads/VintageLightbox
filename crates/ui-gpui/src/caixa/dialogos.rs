@@ -20,9 +20,11 @@ use biblioteca_core::caixa::{
 };
 use biblioteca_core::dinheiro;
 use biblioteca_core::negociacao::{self, Negociacao, Tipo, PARCEIROS};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
-use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon, Sizable};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon, Selectable as _, Sizable};
 use gpui_kit::{
     div, prelude::*, px, AnyElement, ClickEvent, Context, Div, Entity, FocusHandle, Focusable,
     FontWeight, KeyContext, SharedString, Subscription, Window,
@@ -2139,15 +2141,13 @@ impl Caixa {
         let total = self.a_receber();
         let conta = regras::conta_do_pagamento(total, &form.lancados);
         let tema = cx.theme();
-        let (borda, apagado, frente, fundo, primaria, secundario, sobre_secundario, acento) = (
+        let (borda, apagado, frente, fundo, secundario, sobre_secundario) = (
             tema.border,
             tema.muted_foreground,
             tema.foreground,
             tema.background,
-            tema.primary,
             tema.secondary,
             tema.secondary_foreground,
-            tema.accent,
         );
         let mono = tema.mono_font_family.clone();
 
@@ -2192,22 +2192,14 @@ impl Caixa {
                                 BANDEIRAS.iter().map(|(id, nome)| {
                                     let escolhida = bandeira == Some(*id);
                                     let id = *id;
-                                    h_flex()
-                                        .id(SharedString::from(format!("caixa-bandeira-{id}")))
-                                        .gap(px(8.))
+                                    Button::new(SharedString::from(format!("caixa-bandeira-{id}")))
+                                        .outline()
+                                        .xsmall()
+                                        .h(px(30.))
                                         .px(px(8.))
-                                        .py(px(6.))
                                         .rounded(px(6.))
-                                        .border_1()
                                         .text_xs()
-                                        .cursor_pointer()
-                                        .map(|d| {
-                                            if escolhida {
-                                                d.border_color(primaria).bg(primaria.opacity(0.1))
-                                            } else {
-                                                d.border_color(borda).hover(move |s| s.bg(acento))
-                                            }
-                                        })
+                                        .selected(escolhida)
                                         .child(div().truncate().child(*nome))
                                         // Clicar na escolhida desmarca: a bandeira é opcional.
                                         .on_click(cx.listener(move |t, _: &ClickEvent, _, cx| {
@@ -2268,14 +2260,9 @@ impl Caixa {
                         )
                         .child(dinheiro::formatar(p.valor))
                         .child(
-                            div()
-                                .id(SharedString::from(format!("caixa-tirar-{i}")))
-                                .p(px(2.))
+                            estilo::botao_icone(format!("caixa-tirar-{i}"), Icone::X, 20., 16.)
                                 .rounded(px(4.))
                                 .text_color(apagado)
-                                .cursor_pointer()
-                                .hover(move |s| s.bg(acento).text_color(frente))
-                                .child(Icon::new(Icone::X).size(px(16.)))
                                 .on_click(cx.listener(move |t, _: &ClickEvent, _, cx| {
                                     if let Some(Dialogo::Pagamento(form)) = t.dialogo.as_mut() {
                                         if i < form.lancados.len() {
@@ -2672,7 +2659,10 @@ impl Caixa {
                                 }))
                         }
                     })
-                    .child(caixa_de_marcar(marcada, cx))
+                    .child(caixa_de_marcar(
+                        format!("caixa-estorno-marcar-{i}"),
+                        marcada,
+                    ))
                     .child(
                         div()
                             .flex_1()
@@ -2736,12 +2726,11 @@ impl Caixa {
                     ))
                     .when(editado, |d| {
                         d.child(
-                            div()
-                                .id("caixa-estorno-sugerido")
+                            Button::new("caixa-estorno-sugerido")
+                                .link()
+                                .xsmall()
                                 .text_xs()
                                 .text_color(apagado)
-                                .cursor_pointer()
-                                .hover(|s| s.underline())
                                 .child(format!(
                                     "Voltar ao sugerido ({})",
                                     dinheiro::formatar(sugerido)
@@ -2759,7 +2748,10 @@ impl Caixa {
                     .id("caixa-estorno-des-sinalizar")
                     .gap(px(8.))
                     .cursor_pointer()
-                    .child(caixa_de_marcar(des_sinalizar, cx))
+                    .child(caixa_de_marcar(
+                        "caixa-estorno-des-sinalizar-marca",
+                        des_sinalizar,
+                    ))
                     .child("Des-sinalizar as fotos estornadas (voltam a “à venda”)")
                     .on_click(cx.listener(|t, _: &ClickEvent, _, cx| {
                         if let Some(Dialogo::Estorno(form)) = t.dialogo.as_mut() {
@@ -3175,27 +3167,10 @@ fn botao_secundario(
 }
 
 /// O quadradinho de marcar (`role="checkbox"` do site).
-fn caixa_de_marcar(marcada: bool, cx: &Context<Caixa>) -> Div {
-    let tema = cx.theme();
-    let (primaria, sobre, borda) = (tema.primary, tema.primary_foreground, tema.border);
-    div()
-        .flex_none()
-        .size(px(16.))
-        .rounded(px(4.))
-        .border_1()
-        .flex()
-        .items_center()
-        .justify_center()
-        .map(|d| {
-            if marcada {
-                d.border_color(primaria)
-                    .bg(primaria)
-                    .text_color(sobre)
-                    .child(Icon::new(Icone::Check).size(px(12.)))
-            } else {
-                d.border_color(borda)
-            }
-        })
+fn caixa_de_marcar(id: impl Into<SharedString>, marcada: bool) -> Checkbox {
+    // Só o desenho: o clique é da linha inteira, que o `Checkbox` sem
+    // `on_click` deixa passar.
+    Checkbox::new(id.into()).checked(marcada).flex_none()
 }
 
 /// A tabela do fechamento: contado, esperado e diferença por forma.

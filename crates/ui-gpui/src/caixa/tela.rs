@@ -34,7 +34,7 @@ use biblioteca_core::dinheiro;
 use domain::services::pos_venda::Sessao;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectState};
-use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon, Sizable};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
 use gpui_kit::{
     div, prelude::*, px, AnyElement, App, ClickEvent, Context, Div, EventEmitter, FocusHandle,
     FontWeight, Hsla, SharedString, Task, Window,
@@ -1318,10 +1318,7 @@ impl Caixa {
                 None => estado.set_selected_index(None, window, cx),
             });
         }
-        Select::new(&estado)
-            .w(px(224.))
-            .small()
-            .placeholder("Estúdio…")
+        Select::new(&estado).w(px(224.)).placeholder("Estúdio…")
     }
 
     fn avisos_da_pagina(&self, cx: &mut Context<Self>) -> Option<Div> {
