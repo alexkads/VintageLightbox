@@ -461,7 +461,7 @@ impl Revelacao {
         }
         Some(
             div()
-                .rounded(px(4.))
+                .rounded(crate::tema::canto(4.))
                 .border_1()
                 .border_color(cx.theme().border)
                 .bg(cx.theme().secondary)
@@ -587,7 +587,7 @@ impl Revelacao {
                 .justify_center()
                 .gap(px(6.))
                 .py(px(4.))
-                .rounded(px(4.))
+                .rounded(crate::tema::canto(4.))
                 .cursor_pointer()
                 .when(escolhida, |a| {
                     a.bg(cx.theme().muted).text_color(cx.theme().foreground)
@@ -611,7 +611,7 @@ impl Revelacao {
             .flex()
             .gap(px(4.))
             .p(px(2.))
-            .rounded(px(6.))
+            .rounded(crate::tema::canto(6.))
             .border_1()
             .border_color(cx.theme().border)
             .text_xs()
@@ -711,7 +711,7 @@ impl Revelacao {
             .flex()
             .flex_col()
             .flex_none()
-            .rounded(px(6.))
+            .rounded(crate::tema::canto(6.))
             .border_1()
             .border_color(cx.theme().border)
             .child(cabecalho)
@@ -740,7 +740,7 @@ impl Revelacao {
                             .id(SharedString::from(format!("aba-{}", secao.rotulo())))
                             .px(px(8.))
                             .py(px(4.))
-                            .rounded(px(4.))
+                            .rounded(crate::tema::canto(4.))
                             .cursor_pointer()
                             .when(escolhida, |aba| {
                                 aba.bg(cx.theme().muted).text_color(cx.theme().foreground)
@@ -896,7 +896,7 @@ impl Revelacao {
                     .gap(px(4.))
                     .px(px(8.))
                     .py(px(2.))
-                    .rounded(px(4.))
+                    .rounded(crate::tema::canto(4.))
                     .cursor_pointer()
                     .text_size(px(11.))
                     .when(escolhido, |b| b.bg(cx.theme().muted).text_color(cor))
@@ -921,7 +921,7 @@ impl Revelacao {
             .id("zerar-canal")
             .px(px(6.))
             .py(px(2.))
-            .rounded(px(4.))
+            .rounded(crate::tema::canto(4.))
             .text_size(px(11.))
             .text_color(cx.theme().muted_foreground)
             .tooltip(|window, cx| {

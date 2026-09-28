@@ -5641,7 +5641,7 @@ impl Aplicativo {
                     div()
                         .px(px(14.))
                         .py(px(8.))
-                        .rounded(px(8.))
+                        .rounded(crate::tema::canto(8.))
                         .bg(fundo)
                         .border_1()
                         .border_color(borda)

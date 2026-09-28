@@ -1684,7 +1684,7 @@ impl Biblioteca {
                                     // as barras seriam um fio.
                                     .w(px(120.0 * quantas as f32 / maior as f32))
                                     .min_w(px(1.))
-                                    .rounded(px(2.))
+                                    .rounded(crate::tema::canto(2.))
                                     .bg(cx.theme().primary),
                             )
                             .child(

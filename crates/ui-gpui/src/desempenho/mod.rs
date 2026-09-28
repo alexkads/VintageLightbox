@@ -675,25 +675,33 @@ mod testes {
             }
         };
 
-        let desligada = Instant::now();
-        for _ in 0..quadros {
-            um_quadro();
-        }
-        let desligada = desligada.elapsed() / quadros;
+        // 🔑 O menor de cinco blocos: na bateria paralela o teste disputa a CPU
+        // com mil outros, e um bloco inteiro pode cair numa preempção. O menor
+        // é o custo do código; os outros medem a máquina.
+        let bloco = quadros / 5;
+        let menor_de_cinco = |um_quadro: &dyn Fn()| {
+            (0..5)
+                .map(|_| {
+                    let t = Instant::now();
+                    for _ in 0..bloco {
+                        um_quadro();
+                    }
+                    t.elapsed() / bloco
+                })
+                .min()
+                .unwrap_or_default()
+        };
+        let desligada = menor_de_cinco(&um_quadro);
 
         iniciar(Contexto {
             hz: 120.0,
             hz_origem: "sistema",
             ..Default::default()
         });
-        let ligada = Instant::now();
-        for _ in 0..quadros {
-            um_quadro();
-        }
-        let ligada = ligada.elapsed() / quadros;
+        let ligada = menor_de_cinco(&um_quadro);
         let encerrada = parar().expect("a captura existia");
         eprintln!("custo por quadro: desligada {desligada:?}, ligada {ligada:?}");
-        assert_eq!(encerrada.coletor.quadros().len(), quadros as usize);
+        assert_eq!(encerrada.coletor.quadros().len(), (bloco * 5) as usize);
         assert!(desligada < Duration::from_micros(2), "{desligada:?}");
         assert!(ligada < Duration::from_micros(80), "{ligada:?}");
     }

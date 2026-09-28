@@ -166,7 +166,7 @@ impl Render for FantasmaDoPreset {
         div()
             .px(px(6.))
             .py(px(4.))
-            .rounded(px(4.))
+            .rounded(crate::tema::canto(4.))
             .bg(cx.theme().muted)
             .opacity(0.85)
             .text_size(px(12.))
@@ -892,7 +892,7 @@ impl Revelacao {
                                     // O clique no cartão não é "fora".
                                     .on_click(|_, _, cx| cx.stop_propagation())
                                     .w(largura)
-                                    .rounded(px(12.))
+                                    .rounded(crate::tema::canto(12.))
                                     .border_1()
                                     .border_color(frente.opacity(0.1))
                                     .bg(cartao)
@@ -986,7 +986,7 @@ impl Revelacao {
                                 .items_start()
                                 .gap(px(8.))
                                 .p(px(16.))
-                                .rounded(px(8.))
+                                .rounded(crate::tema::canto(8.))
                                 .border_1()
                                 .border_color(borda)
                                 .bg(cartao)
@@ -1021,7 +1021,7 @@ impl Revelacao {
                     Styled::h(Input::new(&self.busca_de_presets).xsmall(), px(28.))
                         .text_size(px(12.))
                         .px(px(8.))
-                        .rounded(px(4.))
+                        .rounded(crate::tema::canto(4.))
                         .bg(tema.popover),
                 ),
             )
@@ -1081,7 +1081,7 @@ impl Revelacao {
 
         Some(
             div()
-                .rounded(px(4.))
+                .rounded(crate::tema::canto(4.))
                 .border_1()
                 .border_color(borda)
                 .bg(cartao)
@@ -1093,7 +1093,7 @@ impl Revelacao {
                     Styled::h(Input::new(&self.nome_do_preset).xsmall(), px(28.))
                         .text_size(px(12.))
                         .px(px(8.))
-                        .rounded(px(4.))
+                        .rounded(crate::tema::canto(4.))
                         .bg(fundo),
                 )
                 .child(
@@ -1103,7 +1103,7 @@ impl Revelacao {
                         .flex()
                         .items_start()
                         .gap(px(6.))
-                        .rounded(px(4.))
+                        .rounded(crate::tema::canto(4.))
                         .px(px(2.))
                         .py(px(4.))
                         .text_size(px(11.))
@@ -1188,7 +1188,7 @@ impl Revelacao {
 
         Some(
             div()
-                .rounded(px(4.))
+                .rounded(crate::tema::canto(4.))
                 .border_1()
                 .border_color(borda)
                 .bg(cartao)
@@ -1366,7 +1366,7 @@ impl Revelacao {
             .flex()
             .items_center()
             .gap(px(4.))
-            .rounded(px(4.))
+            .rounded(crate::tema::canto(4.))
             .px(px(4.))
             .hover(move |s| s.bg(realce))
             .when(arrastando, |d| d.opacity(0.4))
@@ -1383,7 +1383,7 @@ impl Revelacao {
                     .left(px(4.))
                     .right(px(4.))
                     .h(px(2.))
-                    .rounded(px(1.))
+                    .rounded(crate::tema::canto(1.))
                     .bg(cores::quente())
                     .when(depois, |d| d.bottom(px(-1.)))
                     .when(!depois, |d| d.top(px(-1.)))
@@ -1588,7 +1588,7 @@ impl Revelacao {
                     Styled::h(Input::new(&self.renome_do_preset).xsmall(), px(28.))
                         .text_size(px(12.))
                         .px(px(8.))
-                        .rounded(px(4.))
+                        .rounded(crate::tema::canto(4.))
                         .bg(tema.background),
                 ),
             )
@@ -1630,7 +1630,7 @@ fn icone_de_botao(
     div()
         .id(id.into())
         .flex_none()
-        .rounded(px(4.))
+        .rounded(crate::tema::canto(4.))
         .p(px(4.))
         .text_color(apagado)
         .child(Icon::new(icone).size(px(lado)))
@@ -1648,7 +1648,7 @@ fn botao_da_pergunta(id: &'static str, rotulo: &'static str, _cx: &App) -> State
         .id(id)
         .h(px(32.))
         .px(px(10.))
-        .rounded(px(8.))
+        .rounded(crate::tema::canto(8.))
         .justify_center()
         .text_size(px(14.))
         .font_weight(FontWeight::MEDIUM)
@@ -1676,7 +1676,7 @@ fn botao_pequeno(
     };
     div()
         .id(id)
-        .rounded(px(4.))
+        .rounded(crate::tema::canto(4.))
         .px(px(8.))
         .py(px(4.))
         .text_size(px(12.))

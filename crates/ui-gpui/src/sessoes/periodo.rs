@@ -223,7 +223,7 @@ pub fn calendario<T: 'static>(
                             .flex()
                             .items_center()
                             .justify_center()
-                            .rounded(px(6.))
+                            .rounded(crate::tema::canto(6.))
                             .text_sm()
                             .cursor_pointer()
                             .when(escolhido, |d| {

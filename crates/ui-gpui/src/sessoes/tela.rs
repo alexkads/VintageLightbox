@@ -1332,7 +1332,14 @@ impl Render for Sessoes {
         let dialogo_dos_graficos = crate::dialogo::desenhar(
             self,
             self.graficos_abertos,
-            crate::dialogo::Jeito::dialogo(1000.),
+            // 🚨 **Sem o X do kit**: o cabeçalho já tem o dele
+            // (`cabecalho_com_x`, que os testes acham pelo nome). Com os dois,
+            // o canto mostrava um X grande e outro pequeno por cima (visto nas
+            // fotos do roteiro, 28/09). `Esc` e clique fora continuam fechando.
+            crate::dialogo::Jeito {
+                x: false,
+                ..crate::dialogo::Jeito::dialogo(1000.)
+            },
             Self::dialogo_dos_graficos,
             |tela, _, cx| tela.fechar_graficos(cx),
             window,
@@ -1445,7 +1452,7 @@ impl Sessoes {
         let moldura = div()
             .flex_none()
             .size(px(lado))
-            .rounded(px(8.))
+            .rounded(crate::tema::canto(8.))
             .overflow_hidden()
             .bg(tema.muted);
         match self.capas.get(&estudio.id) {
@@ -1571,7 +1578,7 @@ impl Sessoes {
                         .flex()
                         .gap(px(12.))
                         .p(px(12.))
-                        .rounded(px(12.))
+                        .rounded(crate::tema::canto(12.))
                         .border_1()
                         .border_color(tema.border)
                         .bg(tema.popover)
@@ -1702,7 +1709,7 @@ impl Sessoes {
                                 div()
                                     .flex_none()
                                     .size(px(LADO_DA_CAPA as f32))
-                                    .rounded(px(8.))
+                                    .rounded(crate::tema::canto(8.))
                                     .bg(cx.theme().muted)
                                     .flex()
                                     .items_center()
@@ -2106,7 +2113,7 @@ impl Sessoes {
                 gpui_kit::component::v_flex()
                     .gap(px(6.))
                     .p(px(12.))
-                    .rounded(px(8.))
+                    .rounded(crate::tema::canto(8.))
                     .border_1()
                     .border_color(borda)
                     .bg(fundo)
@@ -2175,7 +2182,7 @@ impl Sessoes {
                                 .child(
                                     div()
                                         .px(px(4.))
-                                        .rounded(px(4.))
+                                        .rounded(crate::tema::canto(4.))
                                         .bg(tema.muted)
                                         .font_family("monospace")
                                         .child(exclusao::FRASE_DE_CONFIRMACAO),
@@ -2516,7 +2523,7 @@ impl Sessoes {
                 .flex_col()
                 .gap(px(8.))
                 .p(px(12.))
-                .rounded(px(10.))
+                .rounded(crate::tema::canto(10.))
                 .border_1()
                 .border_color(borda)
                 .child(div().text_xs().text_color(apagado).child(titulo))
@@ -2527,7 +2534,7 @@ impl Sessoes {
                 .items_center()
                 .gap(px(6.))
                 .text_xs()
-                .child(div().size(px(8.)).rounded(px(2.)).bg(cor))
+                .child(div().size(px(8.)).rounded(crate::tema::canto(2.)).bg(cor))
                 .child(rotulo)
         };
 
@@ -2822,7 +2829,7 @@ impl Sessoes {
             .flex_col()
             .gap(px(2.))
             .p(px(12.))
-            .rounded(px(10.))
+            .rounded(crate::tema::canto(10.))
             .border_1()
             .border_color(borda)
             .cursor_pointer()
@@ -2870,7 +2877,7 @@ impl Sessoes {
             .flex_col()
             .gap(px(2.))
             .p(px(12.))
-            .rounded(px(10.))
+            .rounded(crate::tema::canto(10.))
             .border_1()
             .border_color(borda_boa)
             .bg(fundo_bom)
@@ -3374,7 +3381,7 @@ fn lixeira(sessao: &SessaoFotografica, apagado: Hsla, cx: &Context<Sessoes>) -> 
         .flex()
         .items_center()
         .justify_center()
-        .rounded(px(6.))
+        .rounded(crate::tema::canto(6.))
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
     if let Some(b) = exclusao::bloqueio(sessao.fotos.levadas_no_balcao, sessao.fotos.compradas) {
         let dica = format!(
@@ -3439,7 +3446,7 @@ fn celula_do_caixa(
                 .flex_none()
                 .h(px(22.))
                 .px(px(8.))
-                .rounded(px(6.))
+                .rounded(crate::tema::canto(6.))
                 .border_1()
                 .border_color(borda)
                 .bg(fundo)

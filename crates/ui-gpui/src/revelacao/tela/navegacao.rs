@@ -654,7 +654,7 @@ impl Revelacao {
         let tecla = move |texto: &'static str| {
             div()
                 .flex_none()
-                .rounded(px(4.))
+                .rounded(crate::tema::canto(4.))
                 .border_1()
                 .border_color(borda)
                 .bg(fundo_da_tecla)
@@ -718,7 +718,7 @@ impl Revelacao {
                 .child(
                     v_flex()
                         .max_h_full()
-                        .rounded(px(8.))
+                        .rounded(crate::tema::canto(8.))
                         .border_1()
                         .border_color(borda)
                         .bg(cartao)
@@ -929,7 +929,7 @@ impl Revelacao {
                     .px(px(8.))
                     .flex()
                     .items_center()
-                    .rounded(px(6.))
+                    .rounded(crate::tema::canto(6.))
                     .text_size(px(11.5))
                     .text_color(if aceso {
                         ambar
@@ -954,7 +954,7 @@ impl Revelacao {
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded(px(6.))
+                .rounded(crate::tema::canto(6.))
                 .text_color(if ligado { ambar } else { texto })
                 .when(apagado, |b| b.opacity(0.35))
                 .when(!apagado, |b| {
@@ -970,7 +970,7 @@ impl Revelacao {
             .bottom(px(12.))
             .gap(px(2.))
             .p(px(3.))
-            .rounded(px(9.))
+            .rounded(crate::tema::canto(9.))
             .border_1()
             .border_color(gpui_kit::rgb(0x333333))
             .bg(gpui_kit::rgba(0x161616e6))
@@ -1057,7 +1057,7 @@ impl Revelacao {
                 .bottom(px(32.))
                 .min_w(px(160.))
                 .p(px(4.))
-                .rounded(px(8.))
+                .rounded(crate::tema::canto(8.))
                 .border_1()
                 .border_color(gpui_kit::rgb(0x3d3d3d))
                 .bg(gpui_kit::rgb(0x232323))
@@ -1071,7 +1071,7 @@ impl Revelacao {
                         .gap(px(10.))
                         .px(px(8.))
                         .py(px(5.))
-                        .rounded(px(5.))
+                        .rounded(crate::tema::canto(5.))
                         .text_size(px(12.5))
                         .cursor_pointer()
                         .hover(|s| s.bg(gpui_kit::rgb(0x2b2b2b)))
@@ -1114,7 +1114,7 @@ impl Revelacao {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .rounded(px(6.))
+                    .rounded(crate::tema::canto(6.))
                     .border_1()
                     .border_color(gpui_kit::rgb(0x3a3a3a))
                     .text_size(px(12.))
@@ -1165,7 +1165,7 @@ impl Revelacao {
                     .top(px(meio))
                     .w(px(LARGURA_DO_TRILHO))
                     .h(px(3.))
-                    .rounded(px(2.))
+                    .rounded(crate::tema::canto(2.))
                     .bg(gpui_kit::rgba(0xffffff2e)),
             )
             .child(
@@ -1175,7 +1175,7 @@ impl Revelacao {
                     .top(px(meio))
                     .w(px(t * LARGURA_DO_TRILHO))
                     .h(px(3.))
-                    .rounded(px(2.))
+                    .rounded(crate::tema::canto(2.))
                     .bg(ambar),
             )
             .child(
@@ -1291,7 +1291,7 @@ impl Revelacao {
                 .top(px(12.))
                 .p(px(6.))
                 .gap(px(4.))
-                .rounded(px(9.))
+                .rounded(crate::tema::canto(9.))
                 .border_1()
                 .border_color(gpui_kit::rgb(0x333333))
                 .bg(gpui_kit::rgba(0x161616e6))
@@ -1305,7 +1305,7 @@ impl Revelacao {
                         .w(px(w))
                         .h(px(h))
                         .overflow_hidden()
-                        .rounded(px(4.))
+                        .rounded(crate::tema::canto(4.))
                         .cursor_pointer()
                         .on_mouse_down(
                             MouseButton::Left,
@@ -1357,7 +1357,7 @@ impl Revelacao {
                                         .top(px(y))
                                         .w(px(rw))
                                         .h(px(rh))
-                                        .rounded(px(2.))
+                                        .rounded(crate::tema::canto(2.))
                                         .border_2()
                                         .border_color(gpui_kit::white()),
                                 )
@@ -1421,7 +1421,7 @@ impl Revelacao {
                 .id(id)
                 .px(px(6.))
                 .py(px(2.))
-                .rounded(px(4.))
+                .rounded(crate::tema::canto(4.))
                 .text_size(px(11.))
                 .when(aceso, |b| b.bg(ambar).text_color(gpui_kit::black()))
                 .when(!aceso, |b| b.text_color(apagado))
@@ -1537,7 +1537,7 @@ impl Revelacao {
                             .w(px(w))
                             .h(px(h))
                             .overflow_hidden()
-                            .rounded(px(2.))
+                            .rounded(crate::tema::canto(2.))
                             .bg(fundo)
                             .when(retangulo.is_some() && !desligado, |d| {
                                 d.cursor_move()
@@ -1602,7 +1602,7 @@ impl Revelacao {
                         None => div()
                             .w(px(LARGURA_DO_NAVEGADOR))
                             .h(px(ALTURA_DO_NAVEGADOR))
-                            .rounded(px(2.))
+                            .rounded(crate::tema::canto(2.))
                             .bg(fundo)
                             .into_any_element(),
                     }),

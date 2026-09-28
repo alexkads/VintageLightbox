@@ -5077,7 +5077,7 @@ impl Detalhe {
                     .overflow_hidden()
                     // 🎨 O cartão do site: canto de 10 px, a foto sobre o poço.
                     .bg(cores::poco())
-                    .rounded(px(10.))
+                    .rounded(crate::tema::canto(10.))
                     // 🔑 A marcação é **borda**, e não fundo: fundo colorido
                     // mudaria a cor que o olho usa para julgar a foto ao lado.
                     .border_2()
@@ -6611,7 +6611,7 @@ impl Detalhe {
         let tecla = |t: &'static str| {
             div()
                 .px(px(4.))
-                .rounded(px(3.))
+                .rounded(crate::tema::canto(3.))
                 .border_1()
                 .border_color(cx.theme().border)
                 .child(t)

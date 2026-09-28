@@ -1063,7 +1063,7 @@ impl Revelacao {
             .items_center()
             .justify_center()
             .overflow_hidden()
-            .rounded(px(4.))
+            .rounded(crate::tema::canto(4.))
             .bg(fundo)
             .border_2()
             .cursor_pointer()

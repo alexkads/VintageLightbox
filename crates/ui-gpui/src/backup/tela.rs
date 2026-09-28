@@ -1100,13 +1100,13 @@ impl Backup {
                         div()
                             .w(px(36.))
                             .h(px(20.))
-                            .rounded(px(10.))
+                            .rounded(crate::tema::canto(10.))
                             .bg(if ligado { primaria } else { borda })
                             .p(px(2.))
                             .child(
                                 div()
                                     .size(px(16.))
-                                    .rounded(px(8.))
+                                    .rounded(crate::tema::canto(8.))
                                     .bg(gpui_kit::white())
                                     .ml(if ligado { px(16.) } else { px(0.) }),
                             ),
@@ -1153,7 +1153,7 @@ impl Backup {
             .w_full()
             .gap(px(12.))
             .p(px(16.))
-            .rounded(px(10.))
+            .rounded(crate::tema::canto(10.))
             .border_2()
             .border_dashed()
             .border_color(if self.arrastando { primaria } else { borda })
@@ -1443,7 +1443,7 @@ impl Backup {
             .w_full()
             .flex_1()
             .min_h(px(0.))
-            .rounded(px(10.))
+            .rounded(crate::tema::canto(10.))
             .border_1()
             .border_color(borda)
             .overflow_y_scroll()
