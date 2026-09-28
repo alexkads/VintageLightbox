@@ -1,10 +1,13 @@
 {
-  "versao": "0.1.37",
-  "titulo": "Na sessão, a tira de baixo mostra a foto do tamanho da tira, como no site.",
+  "versao": "0.1.38",
+  "titulo": "Tema novo, Lightroom: cinzas de estúdio e sliders coloridos que mostram para onde cada ajuste leva a foto.",
   "importante": false,
   "novidades": [
-    "Puxando a tira da sessão para cima, a foto cresce junto e ocupa a altura inteira da tira; antes ficava pequena no meio, com sobra em volta.",
-    "Com a tira alta, ela usa a prévia maior da foto, para a imagem não sair borrada."
+    "No menu da conta, em Tema, há o \"Lightroom\": painéis em cinzas, a foto sobre um fundo cinza médio e a cor só onde ela diz algo.",
+    "Na Revelação, em todos os temas, a Temperatura vai do azul ao amarelo, o Matiz do verde ao magenta, e cada cor do HSL aparece na própria barra.",
+    "Os sliders de tom (Exposição, Sombras, Brancos…) pintam a partir do zero: no neutro a barra fica vazia, e dá para ver de relance o que foi mexido.",
+    "Na sessão, com duas ou mais fotos marcadas, o painel do lote segue o desenho do painel da foto: estrelas com \"tirar\", levadas e à venda em destaque, faixa, negociação e preço num lugar só.",
+    "Puxando a tira da sessão para cima, a foto cresce junto e usa a prévia maior, sem sair borrada."
   ],
-  "por_que_atualizar": "A tira grande serve para ver a foto de perto, do mesmo jeito que no site."
+  "por_que_atualizar": "O Lightroom é o tema que o fotógrafo já conhece, e as barras coloridas deixam cada ajuste mais fácil de ler em qualquer tema."
 }
