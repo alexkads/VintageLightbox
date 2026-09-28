@@ -33,6 +33,9 @@ use biblioteca_core::caixa::{
 use biblioteca_core::dinheiro;
 use domain::services::pos_venda::Sessao;
 use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::resizable::{
+    h_resizable, resizable_panel, ResizablePanelEvent, ResizableState,
+};
 use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectState};
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
 use gpui_kit::{
@@ -299,10 +302,16 @@ pub(super) enum TipoDeRecado {
 }
 
 pub struct Caixa {
-    /// As três colunas no dock do gpui-kit (`crate::docas`): a lista de
-    /// sessões e o movimento se puxam pela borda e recolhem pelas setas; o
-    /// cupom fica no meio. Nasce no primeiro desenho, que tem a `Window`.
-    docas: Option<crate::docas::Docas>,
+    /// 📐 As três colunas no `Resizable` do gpui-kit: a lista de sessões e o
+    /// movimento se puxam pela borda e recolhem pelas setas, e o cupom fica
+    /// no meio com a largura mínima dele — quem encolhe numa janela estreita
+    /// são as laterais, até o mínimo delas. (Foi um dock até 28/09/2026; o
+    /// `DockArea` não tem mínimo para o centro, e o cupom sumia entre as duas.)
+    colunas: gpui_kit::Entity<ResizableState>,
+    /// Aberta ou não e com que largura — por máquina, no mesmo arquivo que o
+    /// dock usava (`docas-caixa.json`).
+    arrumacao: crate::docas::Arrumacao,
+    _colunas: gpui_kit::Subscription,
     pub(super) publicador: Arc<dyn Publicador>,
     pub(super) sessao: Option<Sessao>,
     /// A sessão escolhida na lista (o `?sessao=` do site).
@@ -419,6 +428,10 @@ impl Caixa {
         let busca =
             cx.new(|cx| InputState::new(window, cx).placeholder("Buscar sessão ou cliente…"));
         cx.observe(&busca, |_, _, cx| cx.notify()).detach();
+        let colunas = cx.new(|_| ResizableState::default());
+        let _colunas = cx.subscribe(&colunas, |t: &mut Self, _, _: &ResizablePanelEvent, cx| {
+            t.guardar_as_colunas(cx)
+        });
         Self {
             publicador,
             sessao: None,
@@ -436,7 +449,9 @@ impl Caixa {
             pedir_foco: false,
             busca,
             seletor_de_estudio: None,
-            docas: None,
+            colunas,
+            arrumacao: crate::docas::ler(COLUNAS),
+            _colunas,
             desconto: DescontoNoTotal::default(),
             pessoas: pessoas_lembradas(&lembranca),
             lembranca,
@@ -1127,22 +1142,14 @@ impl Render for Caixa {
             }
         }
         self.aplicar_pendencias_do_dialogo(window, cx);
-        if self.docas.is_none() {
-            self.montar_as_docas(window, cx);
-        }
         let (fundo, texto) = (cx.theme().background, cx.theme().foreground);
-        let area = self.docas.as_ref().map(|d| d.area.clone());
+        let colunas = self.colunas_do_caixa(cx);
         let seta = |id, lado, dica, cx: &mut Context<Self>| {
             use crate::docas::Lado;
-            let aberta = self.docas.as_ref().is_none_or(|d| d.aberta(lado, cx));
+            let aberta = self.coluna(lado).aberta;
             let tela = cx.entity().downgrade();
-            crate::docas::seta(id, lado, aberta, dica, cx, move |_, window, cx| {
-                let _ = tela.update(cx, |tela, cx| {
-                    if let Some(docas) = tela.docas.as_ref() {
-                        docas.alternar(lado, window, cx);
-                    }
-                    cx.notify();
-                });
+            crate::docas::seta(id, lado, aberta, dica, cx, move |_, _window, cx| {
+                let _ = tela.update(cx, |tela, cx| tela.alternar_coluna(lado, cx));
             })
             .when(lado == Lado::Esquerda, |s| s.mr(px(8.)))
             .when(lado == Lado::Direita, |s| s.ml(px(8.)))
@@ -1190,7 +1197,7 @@ impl Render for Caixa {
                     .flex_1()
                     .min_h(px(0.))
                     .child(seta_esquerda)
-                    .child(div().flex_1().min_w(px(0.)).h_full().children(area))
+                    .child(div().flex_1().min_w(px(0.)).h_full().child(colunas))
                     .child(seta_direita),
             )
             .children(dialogo)
@@ -1199,70 +1206,124 @@ impl Render for Caixa {
     }
 }
 
+/// O nome da arrumação das colunas (`docas-caixa.json`).
+const COLUNAS: &str = "caixa";
+/// O mínimo do cupom: o total inteiro, com os botões quebrando de linha.
+/// 🔑 Os três mínimos somados (740) cabem numa janela de 1100 pt com o menu
+/// aberto — somando mais, a coluna da direita vazava pela borda.
+const LARGURA_MINIMA_DO_CUPOM: f32 = 340.;
+const LIMITES_DAS_SESSOES: crate::docas::Limites = crate::docas::Limites {
+    minimo: 200.,
+    maximo: 480.,
+    padrao: 288.,
+};
+const LIMITES_DO_MOVIMENTO: crate::docas::Limites = crate::docas::Limites {
+    minimo: 200.,
+    maximo: 520.,
+    padrao: 336.,
+};
+
 impl Caixa {
-    /// O dock das três colunas: a lista de sessões, o cupom e o movimento.
-    ///
-    /// 🔑 **Os nomes são o que o dock guarda** — não mudar depois. O vão entre
-    /// as colunas fica dentro das docas: a borda que se puxa é a do cupom.
-    fn montar_as_docas(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        use crate::docas::{Docas, Lado, Lateral, Limites};
-        use std::rc::Rc;
-        let eu = cx.entity();
-        let docas = Docas::montar(
-            "caixa",
-            &eu,
-            (
-                "caixa:cupom",
-                Rc::new(|tela: &mut Self, _window, cx| {
+    /// A coluna de um lado como está: a lembrada, ou a padrão.
+    fn coluna(&self, lado: crate::docas::Lado) -> crate::docas::Coluna {
+        use crate::docas::{Coluna, Lado};
+        let (lembrada, limites) = match lado {
+            Lado::Direita => (self.arrumacao.direita, LIMITES_DO_MOVIMENTO),
+            _ => (self.arrumacao.esquerda, LIMITES_DAS_SESSOES),
+        };
+        let coluna = lembrada.unwrap_or(Coluna {
+            aberta: true,
+            largura: limites.padrao,
+        });
+        Coluna {
+            largura: limites.limitar(coluna.largura),
+            ..coluna
+        }
+    }
+
+    /// A seta de um lado: mostra ou esconde a coluna, e lembra.
+    pub(super) fn alternar_coluna(&mut self, lado: crate::docas::Lado, cx: &mut Context<Self>) {
+        use crate::docas::{Coluna, Lado};
+        let coluna = self.coluna(lado);
+        let nova = Some(Coluna {
+            aberta: !coluna.aberta,
+            ..coluna
+        });
+        match lado {
+            Lado::Direita => self.arrumacao.direita = nova,
+            _ => self.arrumacao.esquerda = nova,
+        }
+        crate::docas::gravar(COLUNAS, &self.arrumacao);
+        cx.notify();
+    }
+
+    /// A borda puxada: as larguras das laterais à vista passam a valer.
+    fn guardar_as_colunas(&mut self, cx: &mut Context<Self>) {
+        use crate::docas::{Coluna, Lado};
+        let larguras: Vec<f32> = self
+            .colunas
+            .read(cx)
+            .sizes()
+            .iter()
+            .map(|l| f32::from(*l))
+            .collect();
+        let [sessoes, _, movimento] = larguras[..] else {
+            return;
+        };
+        for (lado, largura) in [(Lado::Esquerda, sessoes), (Lado::Direita, movimento)] {
+            let coluna = self.coluna(lado);
+            if !coluna.aberta || largura <= 0. {
+                continue;
+            }
+            let nova = Some(Coluna { largura, ..coluna });
+            match lado {
+                Lado::Direita => self.arrumacao.direita = nova,
+                _ => self.arrumacao.esquerda = nova,
+            }
+        }
+        crate::docas::gravar(COLUNAS, &self.arrumacao);
+    }
+
+    /// As três colunas, no `h_resizable` do gpui-kit.
+    fn colunas_do_caixa(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        use crate::docas::Lado;
+        let (sessoes, movimento) = (self.coluna(Lado::Esquerda), self.coluna(Lado::Direita));
+        let lateral = |coluna: crate::docas::Coluna, limites: crate::docas::Limites| {
+            // 🔑 A largura vai como `flex_basis`, e não como `size`: com
+            // `size` o kit trava a coluna (`flex_none`) até alguém puxar a
+            // borda, e numa janela estreita ela vazava pela direita em vez de
+            // encolher até o mínimo. Não cresce com a janela: a sobra é do
+            // cupom.
+            resizable_panel()
+                .visible(coluna.aberta)
+                .size_range(px(limites.minimo)..px(limites.maximo))
+                .flex_basis(px(coluna.largura))
+                .flex_grow_0()
+                .flex_shrink(1.)
+        };
+        h_resizable("caixa-colunas")
+            .with_state(&self.colunas)
+            .child(
+                lateral(sessoes, LIMITES_DAS_SESSOES).child(
                     div()
-                        .flex()
                         .size_full()
-                        .child(tela.cupom_da_tela(cx))
-                        .into_any_element()
-                }),
-            ),
-            vec![
-                (
-                    Lado::Esquerda,
-                    Lateral {
-                        nome: "caixa:sessoes",
-                        desenho: Rc::new(|tela: &mut Self, _window, cx| {
-                            div()
-                                .size_full()
-                                .pr(px(16.))
-                                .child(tela.lista_de_sessoes(cx))
-                                .into_any_element()
-                        }),
-                        limites: Limites {
-                            minimo: 220.,
-                            maximo: 480.,
-                            padrao: 288.,
-                        },
-                    },
+                        .pr(px(16.))
+                        .child(self.lista_de_sessoes(cx)),
                 ),
-                (
-                    Lado::Direita,
-                    Lateral {
-                        nome: "caixa:movimento",
-                        desenho: Rc::new(|tela: &mut Self, _window, cx| {
-                            div()
-                                .size_full()
-                                .pl(px(24.))
-                                .child(tela.movimento_do_caixa(cx))
-                                .into_any_element()
-                        }),
-                        limites: Limites {
-                            minimo: 240.,
-                            maximo: 520.,
-                            padrao: 344.,
-                        },
-                    },
+            )
+            .child(
+                resizable_panel()
+                    .size_range(px(LARGURA_MINIMA_DO_CUPOM)..gpui_kit::Pixels::MAX)
+                    .child(self.cupom_da_tela(cx)),
+            )
+            .child(
+                lateral(movimento, LIMITES_DO_MOVIMENTO).child(
+                    div()
+                        .size_full()
+                        .pl(px(16.))
+                        .child(self.movimento_do_caixa(cx)),
                 ),
-            ],
-            window,
-            cx,
-        );
-        self.docas = Some(docas);
+            )
     }
 
     fn cabecalho(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
@@ -1848,7 +1909,10 @@ impl Caixa {
                     .child(dinheiro::formatar(a_receber)),
             );
 
+        // Numa coluna estreita os botões quebram de linha, em vez de o
+        // "Finalizar pagamento" sair cortado da borda.
         let acoes = h_flex()
+            .flex_wrap()
             .gap(px(8.))
             .p(px(12.))
             .child(

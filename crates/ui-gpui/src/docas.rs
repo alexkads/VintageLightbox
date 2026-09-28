@@ -149,7 +149,7 @@ pub fn ler(tela: &str) -> Arrumacao {
         .unwrap_or_default()
 }
 
-fn gravar(tela: &str, arrumacao: &Arrumacao) {
+pub fn gravar(tela: &str, arrumacao: &Arrumacao) {
     let Some(caminho) = arquivo(tela) else {
         return;
     };
