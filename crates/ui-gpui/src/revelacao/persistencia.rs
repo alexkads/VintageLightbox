@@ -1353,7 +1353,7 @@ mod testes {
 
     /// ✅ **Divergência D7 do contrato da foto** (`../recordarfotos-e-commerce/docs/CONTRATO_DA_FOTO.md`,
     /// C8): nenhum cliente descarta parâmetro. A foto do catálogo guarda a
-    /// revelação inteira em `photos.edit_receita` (migration 023), e é ela que
+    /// revelação inteira em `photos.edit_parametros` (migration 023), e é ela que
     /// vale quando existe — os ajustes sem coluna voltam por ali.
     #[test]
     fn contrato_d7_os_parametros_do_catalogo_traz_o_que_nao_tem_coluna() {
@@ -1381,7 +1381,7 @@ mod testes {
     ///
     /// São os 118 que o motor ganhou depois dos 53 — calibração, preto e
     /// branco, curva por ponto, a tonalização completa e os Controles RGB. Eles
-    /// não ganharam coluna: vão na revelação inteira (`edit_receita`, migration
+    /// não ganharam coluna: vão na revelação inteira (`edit_parametros`, migration
     /// 023), como na foto do site. Esta lista só descreve o caminho das colunas,
     /// que é o de quem foi revelado antes da migration 023.
     const SEM_COLUNA_NO_BANCO_LOCAL: [&str; 7] = [

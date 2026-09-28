@@ -34,7 +34,7 @@ pub struct PhotoViewModel {
     #[serde(default)]
     pub ajustes_completos: Option<Vec<f32>>,
     /// A revelação inteira de uma foto **do catálogo**, em JSON, como o banco a
-    /// guarda (`photos.edit_receita`, migration 023). A tela a converte; este
+    /// guarda (`photos.edit_parametros`, migrations 023 e 027). A tela a converte; este
     /// crate não conhece o motor. `None` = foto revelada antes da coluna, e
     /// valem as colunas `edit_*`.
     // O nome antigo do campo, para o que já foi gravado continuar lendo.
