@@ -83,6 +83,8 @@ pub struct PainelDeDesempenho {
     montando: bool,
     aviso: Option<(String, bool)>,
     salvas: Vec<CabecalhoDaSessao>,
+    /// A lista veio do servidor (todas as máquinas), ou só deste computador.
+    lista_do_servidor: bool,
     vendo: Option<Arc<SessaoDeDesempenho>>,
     comparar: Operacao,
     comparacao: Vec<LinhaDeComparacao>,
@@ -109,6 +111,7 @@ impl PainelDeDesempenho {
             montando: false,
             aviso: None,
             salvas: Vec::new(),
+            lista_do_servidor: false,
             vendo: None,
             comparar: Operacao::ArrastoDeSlider,
             comparacao: Vec::new(),
@@ -141,6 +144,7 @@ impl PainelDeDesempenho {
         if !self.ja_importou {
             self.ja_importou = true;
             self.importar(super::porta::travamentos_pendentes(), true, cx);
+            self.sincronizar(cx);
         }
         self.recarregar_lista(cx);
         if super::ativa() {
@@ -281,7 +285,7 @@ impl PainelDeDesempenho {
             let resposta = recebe.await.unwrap_or_else(|_| Err("sem resposta".into()));
             let _ = painel.update(cx, |p, cx| {
                 match resposta {
-                    Ok(()) => {
+                    Ok(destino) => {
                         p.salva = true;
                         // A fotografia do vigia desta sessão virou redundante.
                         if let Some(pasta) = super::vigia::pasta_dos_pendentes() {
@@ -289,9 +293,17 @@ impl PainelDeDesempenho {
                                 pasta.join(format!("{}.json", sessao.cabecalho.id)),
                             );
                         }
+                        let onde = match destino {
+                            super::porta::Destino::Servidor => {
+                                "neste computador e no servidor".to_string()
+                            }
+                            super::porta::Destino::SoNesteComputador(motivo) => {
+                                format!("neste computador; sobe ao servidor quando der ({motivo})")
+                            }
+                        };
                         p.avisar(
                             format!(
-                                "Sessão salva no banco ({} quadros, {} métricas).",
+                                "Sessão salva {onde} — {} quadros, {} métricas.",
                                 sessao.quadros.len(),
                                 sessao.metricas.len()
                             ),
@@ -307,6 +319,29 @@ impl PainelDeDesempenho {
         .detach();
     }
 
+    /// Manda ao servidor a fila e as sessões locais que ele não tem, e
+    /// relê a lista.
+    fn sincronizar(&mut self, cx: &mut Context<Self>) {
+        let Some(deposito) = deposito() else {
+            return;
+        };
+        let recebe = deposito.sincronizar();
+        cx.spawn(async move |painel, cx| {
+            let subiram = recebe.await.unwrap_or(0);
+            let _ = painel.update(cx, |p, cx| {
+                if subiram > 0 {
+                    p.avisar(
+                        format!("{subiram} sessão(ões) deste computador subiram ao servidor."),
+                        false,
+                        cx,
+                    );
+                }
+                p.recarregar_lista(cx);
+            });
+        })
+        .detach();
+    }
+
     fn recarregar_lista(&mut self, cx: &mut Context<Self>) {
         let Some(deposito) = deposito() else {
             return;
@@ -315,7 +350,8 @@ impl PainelDeDesempenho {
         cx.spawn(async move |painel, cx| {
             let lista = recebe.await.unwrap_or_default();
             let _ = painel.update(cx, |p, cx| {
-                p.salvas = lista;
+                p.salvas = lista.sessoes;
+                p.lista_do_servidor = lista.do_servidor;
                 cx.notify();
             });
         })
@@ -909,7 +945,16 @@ impl PainelDeDesempenho {
 
     fn sessoes(&self, cx: &mut Context<Self>) -> AnyElement {
         let t = cx.theme().clone();
-        let mut v = v_flex().gap(px(4.));
+        let mut v =
+            v_flex()
+                .gap(px(4.))
+                .child(div().text_xs().text_color(t.muted_foreground).child(
+                if self.lista_do_servidor {
+                    "Sessões do servidor: todos os computadores (e as deste que ainda não subiram)."
+                } else {
+                    "Sem o servidor agora: só as sessões deste computador."
+                },
+            ));
         if self.salvas.is_empty() {
             v = v.child(
                 div()

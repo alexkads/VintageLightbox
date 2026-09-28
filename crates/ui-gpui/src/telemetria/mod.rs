@@ -235,6 +235,27 @@ pub fn reagir(versao: &str, reacao: &str, detalhe: Option<String>) {
     t.novo_relato.notify_one();
 }
 
+/// Uma chamada à API com a conta aberta, para os outros acessórios do app (a
+/// ferramenta de desempenho manda e lê as sessões por aqui). `None` sem
+/// telemetria ligada, sem conta ou sem rede — quem chama guarda para depois.
+pub async fn chamar(metodo: &str, caminho: &str, corpo: Option<Vec<u8>>) -> Option<(u16, Vec<u8>)> {
+    let t = TELEMETRIA.get()?;
+    let sessao = t.sessao.lock().unwrap_or_else(|e| e.into_inner()).clone()?;
+    t.api
+        .chamar(
+            Some(&sessao),
+            metodo,
+            caminho,
+            corpo.map(|bytes| CorpoCru {
+                tipo: "application/json".into(),
+                bytes,
+            }),
+        )
+        .await
+        .ok()
+        .map(|r| (r.status, r.bytes))
+}
+
 /// Se a telemetria foi ligada — o app de verdade, e não um teste.
 pub fn ligada() -> bool {
     TELEMETRIA.get().is_some()
