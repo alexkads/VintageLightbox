@@ -1,9 +1,11 @@
 {
-  "versao": "0.1.40",
-  "titulo": "Na sessão, o botão das contagens ficou pequeno: só o ícone, com os números na dica.",
+  "versao": "0.1.41",
+  "titulo": "As barras da sessão e da Revelação ficaram do mesmo tamanho, e cabem inteiras em telas menores.",
   "importante": false,
   "novidades": [
-    "O botão \"levadas · à venda · compradas\" do alto da sessão virou só o ícone de informação: passe o mouse para ver os números, ou clique para abrir os detalhes como antes."
+    "Os botões, fichas e seletores das três barras de cima da sessão ficaram menores, na mesma medida da barra da Revelação: em telas de notebook a barra de cima não corta mais o \"Copiar link\" nem esconde o \"Avisar cliente\".",
+    "O botão \"levadas · à venda · compradas\" virou só o ícone de informação: passe o mouse para ver os números, ou clique para abrir os detalhes como antes.",
+    "Na Revelação, \"Antes\", \"Enquadrar\" e \"Tela do cliente\" agora são botões iguais a \"Descartar\" e \"Baixar JPEG\": mesma borda, mesma altura, mesma letra. Ligados, acendem na cor do tema."
   ],
-  "por_que_atualizar": "Sobra espaço na barra de cima da sessão para os botões que se usam o dia todo."
+  "por_que_atualizar": "Tudo cabe na tela sem cortar botão, e as duas telas do dia a dia falam a mesma língua visual."
 }
