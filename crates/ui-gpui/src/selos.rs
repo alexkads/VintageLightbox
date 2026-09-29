@@ -143,6 +143,20 @@ pub fn faixa(selos: &Selos, cx: &App) -> impl IntoElement {
 /// só as acesas desenhadas, distinguir 3 de 4 exige contar; com a régua inteira,
 /// é a proporção que se lê.
 pub fn estrelas(nota: i32, cx: &App) -> impl IntoElement {
+    estrelas_em(
+        nota,
+        cores::nota(),
+        cx.theme().muted_foreground.opacity(0.25),
+    )
+}
+
+/// ⭐ As estrelas numa tinta só — a acesa cheia, a apagada a 25% —, para
+/// quando o fundo muda de claro para escuro (a célula em foco do Lightroom).
+pub fn estrelas_na_tinta(nota: i32, tinta: Hsla) -> impl IntoElement {
+    estrelas_em(nota, tinta, tinta.opacity(0.25))
+}
+
+fn estrelas_em(nota: i32, acesa: Hsla, apagada: Hsla) -> impl IntoElement {
     // ⚡ **Um texto só, com dois trechos de cor** (25/set/2026). Eram cinco
     // caixas, cada uma com o seu "★": 11 nós de leiaute e 5 textos a medir
     // **por célula**, e a grade da sessão desenha dezenas de células por
@@ -161,13 +175,10 @@ pub fn estrelas(nota: i32, cx: &App) -> impl IntoElement {
     };
     let mut trechos = Vec::with_capacity(2);
     if corte > 0 {
-        trechos.push((0..corte, cor(cores::nota())));
+        trechos.push((0..corte, cor(acesa)));
     }
     if corte < TODAS.len() {
-        trechos.push((
-            corte..TODAS.len(),
-            cor(cx.theme().muted_foreground.opacity(0.25)),
-        ));
+        trechos.push((corte..TODAS.len(), cor(apagada)));
     }
     div()
         .flex_none()

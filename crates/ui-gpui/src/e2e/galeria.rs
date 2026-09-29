@@ -1332,9 +1332,7 @@ fn a_seta_da_tira_fica_abaixo_da_tira(cx: &mut TestAppContext) {
     let id = e.detalhe(cx, |tela, _w, _cx| tela.ids_visiveis()[0].clone());
     let seletor: &'static str = format!("tira-foto-{id}").leak();
     let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
-    let foto = visual
-        .debug_bounds(seletor)
-        .expect("a tira está na tela");
+    let foto = visual.debug_bounds(seletor).expect("a tira está na tela");
     let seta = visual
         .debug_bounds("galeria-seta-da-tira")
         .expect("a seta está na tela");
