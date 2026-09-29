@@ -1,13 +1,13 @@
 {
-  "versao": "0.1.38",
-  "titulo": "Tema novo, Lightroom: cinzas de estúdio e sliders coloridos que mostram para onde cada ajuste leva a foto.",
+  "versao": "0.1.39",
+  "titulo": "O tema Lightroom ficou ainda mais parecido com o Lightroom: seleção em cinza, estrelas brancas e a grade em células.",
   "importante": false,
   "novidades": [
-    "No menu da conta, em Tema, há o \"Lightroom\": painéis em cinzas, a foto sobre um fundo cinza médio e a cor só onde ela diz algo.",
-    "Na Revelação, em todos os temas, a Temperatura vai do azul ao amarelo, o Matiz do verde ao magenta, e cada cor do HSL aparece na própria barra.",
-    "Os sliders de tom (Exposição, Sombras, Brancos…) pintam a partir do zero: no neutro a barra fica vazia, e dá para ver de relance o que foi mexido.",
-    "Na sessão, com duas ou mais fotos marcadas, o painel do lote segue o desenho do painel da foto: estrelas com \"tirar\", levadas e à venda em destaque, faixa, negociação e preço num lugar só.",
-    "Puxando a tira da sessão para cima, a foto cresce junto e usa a prévia maior, sem sair borrada."
+    "No tema Lightroom, o que está escolhido (o filtro, a foto marcada, o botão ligado, o zoom) acende em cinza-claro, e não mais em âmbar.",
+    "As estrelas da nota ficam brancas, como no Lightroom.",
+    "Na sessão, cada foto fica numa célula cinza, e a foto em foco fica mais clara, como na Biblioteca do Lightroom.",
+    "Botões, fichas e painéis têm cantos retos, e os painéis da Revelação viram faixas corridas com o título à direita.",
+    "\"Levada\", \"editada\" e \"não salva\" continuam em âmbar: são a situação da foto e precisam chamar atenção em qualquer tema."
   ],
-  "por_que_atualizar": "O Lightroom é o tema que o fotógrafo já conhece, e as barras coloridas deixam cada ajuste mais fácil de ler em qualquer tema."
+  "por_que_atualizar": "Quem vem do Lightroom encontra o mesmo desenho: o que está escolhido, a nota e a grade se leem do mesmo jeito."
 }
