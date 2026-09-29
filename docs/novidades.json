@@ -1,12 +1,11 @@
 {
-  "versao": "0.1.42",
-  "titulo": "Tema novo, Âmbar Rouge: claro, rosa-pó e vinho, com a seleção em âmbar dourado. E o Matrix e o Cyberpunk ficaram com uma cor só.",
+  "versao": "0.1.43",
+  "titulo": "No Enquadrar, a proporção já vem travada na da foto: a sessão importada em 4:3 abre em 4:3, e puxar uma alça não tira mais a foto do papel sem querer.",
   "importante": false,
   "novidades": [
-    "No menu da conta, em Tema, há o \"Âmbar Rouge\": fundo rosa-pó, letra vinho, botões em rouge e o que está escolhido em âmbar dourado. É o único tema fixo claro.",
-    "No tema Matrix não há mais âmbar: o que está escolhido, as estrelas, os sliders e os avisos (levada, editada, não salva) são todos verde fósforo.",
-    "No tema Cyberpunk, tudo o que acende usa o mesmo amarelo neon da marca, e não mais um segundo amarelo.",
-    "Os trilhos coloridos da Revelação (Temperatura, Matiz, HSL) continuam em todos os temas: eles mostram a cor que o ajuste põe na foto."
+    "Ao abrir o Enquadrar, a proporção já aparece escolhida: a que a sessão pediu na importação (4:3, 3:2…), a que você escolheu antes naquela foto, ou a da câmera numa foto sem corte. Para recortar solto, clique em \"Livre\".",
+    "Com a proporção travada, girar a foto 90° vira a trava junto (4:3 passa a 3:4): o retângulo fica em pé e o próximo arrasto não o deita de novo.",
+    "Na sessão, a seta que mostra e esconde a tira de fotos fica abaixo da tira, na beirada de baixo da janela, como no Lightroom."
   ],
-  "por_que_atualizar": "Cada tema fala uma cor só, e quem prefere um visual claro e delicado tem o Âmbar Rouge."
+  "por_que_atualizar": "A foto não sai mais da proporção do papel por um arrasto sem querer no Enquadrar."
 }
