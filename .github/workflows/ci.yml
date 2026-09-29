@@ -5,11 +5,12 @@ name: CI
 # nome inexistente, o CI só rodava em `main`, ou seja, depois de o trabalho já
 # estar mesclado. Um CI que não dispara onde se trabalha não é um CI verde: é um
 # CI mudo.
+#
+# ⏸️ Desligado em 29/set/2026 (dono): problemas de pagamento no GitHub, e cada
+# push gastava minutos de Actions. Só roda à mão, pela aba Actions. Para religar,
+# volte o `push` e o `pull_request` em `main` e `dev`.
 on:
-  push:
-    branches: [ main, dev ]
-  pull_request:
-    branches: [ main, dev ]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
