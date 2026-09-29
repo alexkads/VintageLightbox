@@ -168,10 +168,9 @@ mod paleta {
         pub aceso_ativo: u32,
         /// ⭐ A estrela acesa da nota.
         pub estrela: u32,
-        /// 🎞️ A grade de fotos em células, como a Biblioteca do Lightroom:
-        /// (fundo da grade, célula, célula em foco). `None`: a foto solta
-        /// sobre o fundo, como no site.
-        pub celulas: Option<(u32, u32, u32)>,
+        /// 🎞️ A grade de fotos em células, como a Biblioteca do Lightroom.
+        /// `None`: a foto solta sobre o fundo, como no site.
+        pub celulas: Option<Celulas>,
         /// Cantos retos (o Lightroom quase não arredonda nada).
         pub cantos_retos: bool,
         /// Painéis da coluna corridos, sem moldura, com o título à direita.
@@ -183,6 +182,18 @@ mod paleta {
         /// ou uma cor que o tema não tem (dono, 28/09: *"No tema Matrix
         /// existe cor âmbar?"*).
         pub quente_da_marca: bool,
+    }
+
+    /// 🎞️ As cores da grade em células.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    pub struct Celulas {
+        /// O vão entre as células.
+        pub grade: u32,
+        pub celula: u32,
+        /// A que está na seleção, sem ser a do foco.
+        pub marcada: u32,
+        /// A do foco — clara, e o texto nela escuro.
+        pub foco: u32,
     }
 
     /// A paleta de um modo, montada dos tokens do template.
@@ -342,51 +353,80 @@ mod paleta {
 
     /// 🎞️ Lightroom: cinzas graduados, o palco cinza médio atrás da foto, e a
     /// cor só onde ela diz algo (os trilhos dos sliders, o histograma).
+    ///
+    /// 📏 **Os cinzas são medidos** nas capturas do Lightroom Classic que o
+    /// dono mandou em 29/09 (*"quero que fique o mais fiel possível"*) — a
+    /// cor mais frequente de cada região, e não de memória:
+    ///
+    /// | Região do Lightroom | Medido | Campo |
+    /// |---|---|---|
+    /// | Faixa do título do painel, moldura | `#333333` | `fundo`, `sanfona` |
+    /// | Corpo do painel | `#505050` | `lateral` (e a sanfona aberta) |
+    /// | Linha entre seções | `#1e1e1e` | `borda` |
+    /// | Diálogo de importação | `#424242` | `cartao` |
+    /// | Botão em segmento aceso | `#858585` | `acento` |
+    /// | Grade: vão / célula / marcada / em foco | `#424242` / `#6c6c6c` / `#858585` / `#a9a9a9`–`#cbcbcb` | `celulas` |
+    ///
+    /// ⚠️ A célula fica um pouco abaixo da medida (`#5a5a5a`): em `#6c6c6c` o
+    /// nome da foto, em cinza-claro, não chegava a 4,5 de contraste.
+    ///
+    /// A primeira versão (28/09) era um Lightroom lembrado, e saiu escura
+    /// demais: painéis `#2b2b2b` sobre `#1e1e1e`.
     pub const LIGHTROOM: Paleta = Paleta {
-        fundo: 0x1e1e1e,
-        texto: 0xc4c4c4,
-        cartao: 0x333333,
-        primaria: 0xd6d6d6,
+        fundo: 0x333333,
+        texto: 0xd4d4d4,
+        cartao: 0x424242,
+        primaria: 0xcfcfcf,
         // `bg-primary/80` sobre o fundo.
-        primaria_pairando: 0xb1b1b1,
+        primaria_pairando: 0xb0b0b0,
         sobre_primaria: 0x1a1a1a,
-        apagado: 0x333333,
-        texto_apagado: 0x8c8c8c,
-        acento: 0x404040,
-        sobre_acento: 0xececec,
-        secundaria: 0x3c3c3c,
-        sobre_secundaria: 0xd0d0d0,
+        apagado: 0x3d3d3d,
+        texto_apagado: 0xa8a8a8,
+        // O segmento aceso e a linha sob o ponteiro, um degrau acima do painel.
+        acento: 0x626262,
+        sobre_acento: 0xf2f2f2,
+        secundaria: 0x484848,
+        sobre_secundaria: 0xd8d8d8,
         destrutiva: 0xe34850,
-        borda: 0x141414,
-        campo: 0x4a4a4a,
+        // A linha quase preta que separa as seções.
+        borda: 0x1e1e1e,
+        // Os campos do Lightroom são afundados: moldura escura.
+        campo: 0x262626,
         // O único azul: o foco, como o da Adobe.
         anel: 0x378ef0,
-        lateral: 0x2b2b2b,
-        texto_lateral: 0xc4c4c4,
+        // O corpo do painel, o cinza médio das colunas do Lightroom.
+        lateral: 0x505050,
+        texto_lateral: 0xd4d4d4,
         // O quadrado do "Lr".
         marca: 0x31a8ff,
         sobre_marca: 0x001e36,
-        acento_lateral: 0x404040,
-        borda_lateral: 0x161616,
+        acento_lateral: 0x626262,
+        borda_lateral: 0x2a2a2a,
         // O palco: o cinza médio que o Lightroom põe atrás da foto.
         poco: 0x5a5a5a,
-        rolagem: 0x505050,
-        // Linha cinza mais clara que o painel, como no Lightroom — escura,
-        // ela sumia no fundo da sanfona (#1e1e1e).
-        trilho: Some(0x505050),
+        // A barra de rolagem do Lightroom é clara sobre o cinza.
+        rolagem: 0x8a8a8a,
+        // O sulco escuro do slider, sobre o corpo do painel (#505050).
+        trilho: Some(0x1f1f1f),
         preenchimento: 0xa8a8a8,
-        punho: 0xc8c8c8,
+        punho: 0xd0d0d0,
         slider_fino: true,
-        sanfona: Some(0x353535),
+        sanfona: Some(0x333333),
         // O aceso do Lightroom: cinza-claro com letra escura.
-        aceso: 0xd6d6d6,
+        aceso: 0xcbcbcb,
         sobre_aceso: 0x1a1a1a,
-        aceso_pairando: 0xeaeaea,
-        aceso_ativo: 0xbdbdbd,
-        // As estrelas do Lightroom são brancas, e não âmbar.
-        estrela: 0xdedede,
-        // A Biblioteca: células cinza sobre o fundo, a em foco mais clara.
-        celulas: Some((0x303030, 0x3d3d3d, 0x555555)),
+        aceso_pairando: 0xdedede,
+        aceso_ativo: 0xb4b4b4,
+        // As estrelas do Lightroom são claras, e não âmbar.
+        estrela: 0xe6e6e6,
+        // A Biblioteca: células cinza sobre o vão escuro, a marcada um
+        // degrau acima, e a em foco quase branca, como no Lightroom.
+        celulas: Some(Celulas {
+            grade: 0x424242,
+            celula: 0x5a5a5a,
+            marcada: 0x858585,
+            foco: 0xb4b4b4,
+        }),
         cantos_retos: true,
         paineis_corridos: true,
         // A situação da foto continua âmbar, como as etiquetas do Lightroom.
@@ -481,6 +521,8 @@ mod paleta {
 
     /// Texto escuro sobre âmbar, amarelo e verde.
     pub const SOBRE_CLARO: u32 = 0x1a1206;
+    /// Texto escuro sobre cinza-claro, sem o tom quente do [`SOBRE_CLARO`].
+    pub const SOBRE_ESCURO_NEUTRO: u32 = 0x1a1a1a;
 }
 
 use paleta::*;
@@ -793,12 +835,31 @@ pub mod cores {
         cor(paleta_atual().sobre_aceso)
     }
 
-    /// 🎞️ A grade em células, se o tema desenhar assim: (fundo da grade,
-    /// célula, célula em foco).
-    pub fn celulas() -> Option<(Hsla, Hsla, Hsla)> {
-        paleta_atual()
-            .celulas
-            .map(|(grade, celula, foco)| (cor(grade), cor(celula), cor(foco)))
+    /// 🎞️ O vão da grade em células, se o tema desenhar assim.
+    pub fn grade_em_celulas() -> Option<Hsla> {
+        paleta_atual().celulas.map(|c| cor(c.grade))
+    }
+
+    /// 🎞️ O fundo de uma célula da grade e a tinta do texto sobre ela, se o
+    /// tema desenhar células. A tinta é o texto do tema enquanto ele se lê
+    /// (4,5); na marcada e na em foco, claras como no Lightroom, é escura.
+    pub fn celula(marcada: bool, em_foco: bool) -> Option<(Hsla, Hsla)> {
+        let p = paleta_atual();
+        let c = p.celulas?;
+        let fundo = cor(if em_foco {
+            c.foco
+        } else if marcada {
+            c.marcada
+        } else {
+            c.celula
+        });
+        let texto = cor(p.texto);
+        let tinta = if contraste(fundo, texto) >= 4.5 {
+            texto
+        } else {
+            cor(paleta::SOBRE_ESCURO_NEUTRO)
+        };
+        Some((fundo, tinta))
     }
 
     /// Painéis corridos, sem moldura e com o título à direita (Lightroom).
@@ -1121,7 +1182,16 @@ fn cores(p: &paleta::Paleta) -> Vec<(&'static str, u32)> {
         ("tab.active.foreground", p.texto),
         ("drag.border", AZUL_500),
         ("drop_target.background", AZUL_500),
-        ("accordion.background", p.fundo),
+        // 🎞️ O corpo do painel sanfonado: nos painéis corridos (Lightroom) é
+        // o cinza médio da coluna, e não o fundo da janela.
+        (
+            "accordion.background",
+            if p.paineis_corridos {
+                p.lateral
+            } else {
+                p.fundo
+            },
+        ),
         ("group_box.background", p.cartao),
         ("group_box.foreground", p.texto),
         ("group_box.title.foreground", p.texto_apagado),
@@ -1525,9 +1595,9 @@ mod testes {
         assert!(lr.slider_fino);
         assert!(lr.trilho.is_some() && lr.sanfona.is_some());
         // O punho claro precisa aparecer sobre o trilho, e o trilho sobre o
-        // fundo da sanfona (a primeira versão, #1a1a1a sobre #1e1e1e, sumia).
+        // corpo da sanfona (a primeira versão, #1a1a1a sobre #1e1e1e, sumia).
         assert!(contraste(lr.trilho.unwrap(), lr.punho) >= 4.5);
-        assert!(contraste(lr.fundo, lr.trilho.unwrap()) >= 2.0);
+        assert!(contraste(lr.lateral, lr.trilho.unwrap()) >= 2.0);
     }
 
     /// 🌹 **O Âmbar Rouge é o tema fixo claro**: abre no claro mesmo com o
@@ -1605,10 +1675,24 @@ mod testes {
         let lr = &paleta::LIGHTROOM;
         assert!(contraste(lr.aceso, lr.sobre_aceso) >= 4.5);
         assert!(contraste(lr.fundo, lr.estrela) >= 4.5);
-        let (grade, celula, foco) = lr.celulas.expect("o Lightroom desenha células");
-        assert!(celula != grade && foco != celula, "as três se distinguem");
-        assert!(contraste(foco, lr.texto) >= 4.0, "o nome na célula em foco");
-        assert!(contraste(celula, lr.texto) >= 4.5, "o nome na célula");
+        let c = lr.celulas.expect("o Lightroom desenha células");
+        let fundos = [c.grade, c.celula, c.marcada, c.foco];
+        for (i, a) in fundos.iter().enumerate() {
+            for b in &fundos[i + 1..] {
+                assert!(a != b, "as quatro se distinguem");
+            }
+        }
+        assert!(contraste(c.celula, lr.texto) >= 4.5, "o nome na célula");
+        // Na marcada e na em foco, claras, o nome é escuro.
+        for fundo in [c.marcada, c.foco] {
+            assert!(
+                contraste(fundo, lr.texto) >= 4.5 || contraste(fundo, SOBRE_ESCURO_NEUTRO) >= 4.5,
+                "o nome sobre #{fundo:06x}"
+            );
+        }
+        // O texto do painel sobre o corpo do painel, e o apagado sobre a moldura.
+        assert!(contraste(lr.lateral, lr.texto_lateral) >= 4.5);
+        assert!(contraste(lr.fundo, lr.texto_apagado) >= 4.5);
         assert!(lr.cantos_retos && lr.paineis_corridos);
     }
 

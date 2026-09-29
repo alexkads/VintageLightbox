@@ -5057,7 +5057,7 @@ impl Detalhe {
             .gap(px(VAO_DA_GRADE))
             // 🎞️ No Lightroom a grade é a Biblioteca: células sobre um fundo
             // próprio. Só a cor — o vão e a largura continuam os da conta.
-            .when_some(cores::celulas(), |grade, (fundo, _, _)| grade.bg(fundo))
+            .when_some(cores::grade_em_celulas(), |grade, fundo| grade.bg(fundo))
             .overflow_y_scroll()
             .children(filhos)
             .into_any_element()
@@ -5077,6 +5077,10 @@ impl Detalhe {
         // A rejeitada fica esmaecida: continua ali para ser desfeita, e não
         // compete com as que estão em jogo.
         let miniatura = self.imagem_da_celula(&foto.id, if foto.rejeitada { 0.4 } else { 1. });
+        // 🎞️ Na grade em células (Lightroom), a seleção é a célula que clareia,
+        // e o texto dela escurece junto.
+        let celula = cores::celula(marcada, em_foco);
+        let tinta = celula.map(|(_, tinta)| tinta);
 
         div()
             .id(SharedString::from(format!("sessao-tile-{}", foto.id)))
@@ -5088,13 +5092,15 @@ impl Detalhe {
             .flex()
             .flex_col()
             .gap(px(2.))
-            // 🎞️ A célula da Biblioteca do Lightroom: cinza, e mais clara em
-            // foco. O respiro fica dentro da largura da conta.
-            .when_some(cores::celulas(), |celula, (_, fundo, foco)| {
+            // 🎞️ A célula da Biblioteca do Lightroom: cinza, um degrau mais
+            // clara marcada e quase branca em foco. O respiro fica dentro da
+            // largura da conta.
+            .when_some(celula, |celula, (fundo, tinta)| {
                 celula
                     .p(px(6.))
                     .rounded(crate::tema::canto(2.))
-                    .bg(if em_foco { foco } else { fundo })
+                    .bg(fundo)
+                    .text_color(tinta)
             })
             .cursor_pointer()
             .on_click(
@@ -5125,12 +5131,21 @@ impl Detalhe {
                     .justify_center()
                     .overflow_hidden()
                     // 🎨 O cartão do site: canto de 10 px, a foto sobre o poço.
-                    .bg(cores::poco())
+                    // No Lightroom a miniatura fica direto sobre a célula.
+                    .when(celula.is_none(), |quadro| quadro.bg(cores::poco()))
                     .rounded(crate::tema::canto(10.))
                     // 🔑 A marcação é **borda**, e não fundo: fundo colorido
                     // mudaria a cor que o olho usa para julgar a foto ao lado.
                     .border_2()
-                    .border_color(if em_foco {
+                    .border_color(if celula.is_some() {
+                        // A célula já diz a seleção; a moldura fina da foto em
+                        // foco é a do Lightroom.
+                        if em_foco {
+                            gpui_kit::white()
+                        } else {
+                            gpui_kit::transparent_black()
+                        }
+                    } else if em_foco {
                         cx.theme().primary
                     } else if marcada {
                         cores::aceso()
@@ -5260,13 +5275,24 @@ impl Detalhe {
                     // só sobe o que foi classificado). Sem nota, a fileira fica
                     // apagada — é como se encontra o que subiu sem passar pela
                     // triagem.
-                    .child(selos::estrelas(foto.nota.unwrap_or(0) as i32, cx)),
+                    .child(match tinta {
+                        Some(tinta) => {
+                            selos::estrelas_na_tinta(foto.nota.unwrap_or(0) as i32, tinta)
+                                .into_any_element()
+                        }
+                        None => {
+                            selos::estrelas(foto.nota.unwrap_or(0) as i32, cx).into_any_element()
+                        }
+                    }),
             )
             .child(
                 div()
                     .flex()
                     .text_xs()
-                    .text_color(cx.theme().muted_foreground)
+                    .text_color(match tinta {
+                        Some(tinta) => tinta.opacity(0.7),
+                        None => cx.theme().muted_foreground,
+                    })
                     .child(
                         div()
                             .min_w(px(0.))

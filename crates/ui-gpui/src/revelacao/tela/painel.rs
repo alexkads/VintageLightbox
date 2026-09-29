@@ -669,7 +669,13 @@ impl Revelacao {
                             .gap(px(8.))
                             .text_xs()
                             .font_weight(gpui_kit::FontWeight::MEDIUM)
-                            .when(corridos, |c| c.justify_end())
+                            // 🎞️ O título do painel do Lightroom é maior que
+                            // o corpo, e sem negrito.
+                            .when(corridos, |c| {
+                                c.justify_end()
+                                    .text_sm()
+                                    .font_weight(gpui_kit::FontWeight::NORMAL)
+                            })
                             .when_some(marca.filter(|_| corridos), |c, m| c.child(ponto(m, cx)))
                             .child(
                                 div()
