@@ -44,6 +44,10 @@ members = [
     # histórico, composição e a gravação do projeto. A janela mora no `ui-gpui`;
     # o contrato com a Revelação está em docs/editor-em-camadas/.
     "crates/editor-core",
+    # 💾 Recuperar as fotos de um cartão formatado (2026-09-29): varre os
+    # setores atrás de JPEG e RAW, sem janela e sem dispositivo — a leitura do
+    # cartão de verdade mora no `infrastructure`.
+    "crates/recuperacao-core",
     "crates/ui-gpui",
 ]
 

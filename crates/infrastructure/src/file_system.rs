@@ -6,8 +6,13 @@ use domain::DomainResult;
 use std::path::{Path, PathBuf};
 
 /// Extensões de arquivo suportadas
+///
+/// ⚠️ O `cr3` faltava aqui até 29/set/2026, embora o decodificador
+/// (`raw_processing`) e a descrição da importação o conhecessem: o RAW da Canon
+/// atual nunca aparecia na grade da importação. Apareceu ao recuperar cartão,
+/// que devolve `.cr3` para a mesma grade.
 pub const SUPPORTED_EXTENSIONS: &[&str] = &[
-    "jpg", "jpeg", "png", "tiff", "tif", "cr2", "nef", "arw", "dng", "raf", "orf", "rw2",
+    "jpg", "jpeg", "png", "tiff", "tif", "cr2", "cr3", "nef", "arw", "dng", "raf", "orf", "rw2",
 ];
 
 /// Scanner de arquivos de fotos
@@ -155,6 +160,14 @@ mod tests {
         fs::write(base_path.join(".hidden/photo7.jpg"), b"in hidden dir").unwrap();
 
         temp_dir
+    }
+
+    #[test]
+    fn o_cr3_da_canon_aparece_na_varredura() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("IMG_0001.CR3"), b"x").unwrap();
+        let achados = FileScanner::new().scan_directory(dir.path()).unwrap();
+        assert_eq!(achados.len(), 1);
     }
 
     #[test]

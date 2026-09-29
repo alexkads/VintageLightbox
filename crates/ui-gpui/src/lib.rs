@@ -57,6 +57,7 @@ pub mod menu;
 /// O contrato de toda sobreposição: abrir guarda o foco, fechar o devolve.
 pub mod modal;
 pub mod pos_venda;
+pub mod recuperacao;
 /// Os ícones do site e as imagens da capa, embutidos.
 pub mod recursos;
 pub mod regua;

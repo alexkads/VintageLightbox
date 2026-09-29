@@ -73,6 +73,19 @@ async fn main() {
         println!("{}", env!("CARGO_PKG_VERSION"));
         return;
     }
+    // 💾 `--recuperar <dispositivo> <destino> [tamanho]`: a varredura do
+    // cartão formatado, no processo que o `pkexec`/`osascript`/UAC abriu como
+    // administrador (`ui_gpui::recuperacao::elevar`). Sai antes de tudo pelo
+    // mesmo motivo do `--versao`, e por mais um: este processo roda como root,
+    // e nada do catálogo, da janela ou do chaveiro pode nascer de root.
+    {
+        let args: Vec<String> = std::env::args().collect();
+        if args.iter().any(|a| a == "--recuperar") {
+            std::process::exit(infrastructure::recuperacao::rodar_pela_linha_de_comando(
+                &args,
+            ));
+        }
+    }
     // 🧯 O panic vai para o depósito **antes** de qualquer coisa — janela,
     // catálogo, rede. Um panic na abertura também fica registrado, e sobe
     // quando a conta entrar (`telemetria`).
@@ -447,6 +460,10 @@ async fn main() {
         tokio::runtime::Handle::current(),
     ));
     let seletor: Arc<dyn SeletorDePasta> = Arc::new(SeletorNativo::novo());
+    let recuperador: Arc<dyn ui_gpui::recuperacao::porta::Recuperador> =
+        Arc::new(ui_gpui::recuperacao::porta::RecuperadorDoDisco::novo(
+            Arc::new(infrastructure::devices::brutos::CartoesDoSistema),
+        ));
     let seletor_de_fotos: Arc<dyn ui_gpui::sessoes::arquivos::SeletorDeFotos> = Arc::new(
         ui_gpui::sessoes::arquivos::SeletorDeFotosNativo::novo(tokio::runtime::Handle::current()),
     );
@@ -567,6 +584,8 @@ async fn main() {
                         });
                         // 🖌️ A Revelação resolve a imagem editada pela mesma porta.
                         aplicativo.update(cx, |app, cx| app.definir_edicoes(edicoes.clone(), cx));
+                        aplicativo
+                            .update(cx, |app, cx| app.ligar_recuperacao(recuperador.clone(), cx));
                         // Minimizar leva à bandeja; fechar com envio na fila só
                         // esconde (G9) — `ui_gpui::segundo_plano`.
                         ui_gpui::segundo_plano::ligar(aplicativo.downgrade(), window, cx);

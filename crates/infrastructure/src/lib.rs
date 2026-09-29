@@ -23,6 +23,9 @@ pub mod paths;
 pub mod pos_venda;
 pub mod previa_embutida;
 pub mod raw_processing;
+/// Recuperar as fotos de um cartão formatado — o processo elevado do
+/// `ui-gpui --recuperar`.
+pub mod recuperacao;
 pub mod scan_directory;
 pub mod source_scanner;
 pub mod thumbnail_generator;

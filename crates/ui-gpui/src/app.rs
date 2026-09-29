@@ -4816,6 +4816,17 @@ impl Aplicativo {
         self.configurando
     }
 
+    /// 💾 Liga o "Recuperar cartão formatado…" do modal de importação
+    /// (montagem no `main`, como [`Self::definir_edicoes`]).
+    pub fn ligar_recuperacao(
+        &mut self,
+        porta: Arc<dyn crate::recuperacao::porta::Recuperador>,
+        cx: &mut Context<Self>,
+    ) {
+        self.importacao
+            .update(cx, |importacao, cx| importacao.ligar_recuperacao(porta, cx));
+    }
+
     /// Abre o modal de importação sobre a Biblioteca.
     /// Abre a importação. Dentro de um ensaio, o lote entra **nele**.
     pub fn importar(&mut self, window: &mut Window, cx: &mut Context<Self>) {

@@ -1,3 +1,4 @@
+pub mod brutos;
 pub mod history_repo;
 pub mod ptp;
 pub mod repository;

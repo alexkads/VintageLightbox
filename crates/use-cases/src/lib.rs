@@ -16,6 +16,7 @@ pub mod pos_venda;
 pub mod presets;
 pub mod preview_before_import;
 pub mod rate_photo;
+pub mod recuperacao;
 pub mod remove_photo_from_collection;
 pub mod save_photo_edits;
 pub mod set_color_label;
