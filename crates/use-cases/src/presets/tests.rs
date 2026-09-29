@@ -3,7 +3,8 @@
 //! Tests using mockall for PresetRepository mock.
 
 use crate::presets::{
-    presets_de_sistema, DeletePresetUseCase, ListPresetsUseCase, SavePresetUseCase,
+    presets_de_sistema, DeletePresetUseCase, ListPresetsUseCase, RenamePresetUseCase,
+    SavePresetUseCase,
 };
 use domain::{
     entities::{preset::PresetAdjustments, Preset, PresetId},
@@ -384,4 +385,117 @@ fn a_do_operador_nao_substitui() {
         !dele.replaces,
         "mudar isso reescreveria o que ele ja salvou"
     );
+}
+
+// ============================================
+// RenamePresetUseCase Tests
+// ============================================
+
+#[tokio::test]
+async fn renomear_regrava_a_mesma_linha_com_o_nome_novo() {
+    let original = Preset::user(
+        "Antigo".to_string(),
+        PresetAdjustments::vazia().com("exposure", 0.5),
+    );
+    let id = original.id;
+
+    let mut repo = MockPresetRepo::new();
+    let achado = original.clone();
+    repo.expect_find_by_id()
+        .times(1)
+        .returning(move |_| Ok(Some(achado.clone())));
+    // 🔑 Renomear não cria id novo nem mexe nos ajustes: é a mesma linha.
+    let esperado = original.clone();
+    repo.expect_save()
+        .times(1)
+        .withf(move |p| {
+            p.id == esperado.id
+                && p.name == "Novo"
+                && p.adjustments == esperado.adjustments
+                && !p.is_system
+        })
+        .returning(|_| Ok(()));
+
+    let uso = RenamePresetUseCase::new(Arc::new(repo));
+    assert!(uso.execute(&id, "Novo".to_string()).await.is_ok());
+}
+
+#[tokio::test]
+async fn renomear_aparo_o_nome_antes_de_gravar() {
+    let original = Preset::user("Antigo".to_string(), PresetAdjustments::vazia());
+    let id = original.id;
+
+    let mut repo = MockPresetRepo::new();
+    repo.expect_find_by_id()
+        .returning(move |_| Ok(Some(original.clone())));
+    repo.expect_save()
+        .times(1)
+        .withf(|p| p.name == "Com espaços")
+        .returning(|_| Ok(()));
+
+    let uso = RenamePresetUseCase::new(Arc::new(repo));
+    assert!(uso
+        .execute(&id, "  Com espaços \n".to_string())
+        .await
+        .is_ok());
+}
+
+#[tokio::test]
+async fn renomear_para_nome_vazio_e_recusado_sem_tocar_no_banco() {
+    // Sem `expect_*`: qualquer chamada ao repositório derruba o teste.
+    let uso = RenamePresetUseCase::new(Arc::new(MockPresetRepo::new()));
+    let id = PresetId::new();
+
+    for nome in ["", "   ", "\t\n"] {
+        let erro = uso.execute(&id, nome.to_string()).await.unwrap_err();
+        assert!(matches!(erro, DomainError::InvalidOperation(_)), "{nome:?}");
+    }
+}
+
+#[tokio::test]
+async fn renomear_o_que_nao_existe_e_recusado_e_nao_grava() {
+    let mut repo = MockPresetRepo::new();
+    repo.expect_find_by_id().times(1).returning(|_| Ok(None));
+    repo.expect_save().never();
+
+    let uso = RenamePresetUseCase::new(Arc::new(repo));
+    let erro = uso
+        .execute(&PresetId::new(), "Qualquer".to_string())
+        .await
+        .unwrap_err();
+    assert!(matches!(erro, DomainError::InvalidOperation(_)));
+}
+
+#[tokio::test]
+async fn predefinicao_de_sistema_nao_se_renomeia() {
+    let sistema = presets_de_sistema().remove(0);
+    let id = sistema.id;
+
+    let mut repo = MockPresetRepo::new();
+    repo.expect_find_by_id()
+        .returning(move |_| Ok(Some(sistema.clone())));
+    // Gravar criaria uma cópia ao lado da original na próxima listagem.
+    repo.expect_save().never();
+
+    let uso = RenamePresetUseCase::new(Arc::new(repo));
+    let erro = uso.execute(&id, "Outro".to_string()).await.unwrap_err();
+    assert!(matches!(erro, DomainError::InvalidOperation(_)));
+}
+
+#[tokio::test]
+async fn renomear_propaga_o_erro_do_banco() {
+    let original = Preset::user("Antigo".to_string(), PresetAdjustments::vazia());
+    let id = original.id;
+
+    let mut repo = MockPresetRepo::new();
+    repo.expect_find_by_id()
+        .returning(move |_| Ok(Some(original.clone())));
+    repo.expect_save()
+        .returning(|_| Err(DomainError::InfrastructureError("DB error".into())));
+
+    let uso = RenamePresetUseCase::new(Arc::new(repo));
+    assert!(matches!(
+        uso.execute(&id, "Novo".to_string()).await,
+        Err(DomainError::InfrastructureError(_))
+    ));
 }

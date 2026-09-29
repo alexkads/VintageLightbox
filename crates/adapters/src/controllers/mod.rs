@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod apoio_de_teste;
 pub mod collection_controller;
 pub mod editor_controller;
 pub mod export_controller;
@@ -6,6 +8,9 @@ pub mod library_controller;
 pub mod photo_controller;
 pub mod pos_venda_controller;
 pub mod preset_controller;
+
+#[cfg(test)]
+mod testes;
 
 pub use collection_controller::{CollectionController, CollectionViewModel};
 pub use editor_controller::EditorController;
