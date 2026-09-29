@@ -21,6 +21,15 @@
 //! | Matrix | preto esverdeado `#030d06` | o verde fósforo `#00ff41` | a mono do sistema |
 //! | Cyberpunk | azul-noite `#0a0a1f` | amarelo neon `#fcee0a`, rosa `#ff2a6d` no menu lateral, ciano `#05d9e8` no foco | a do sistema |
 //!
+//! ## 🌹 Âmbar Rouge — o tema fixo claro
+//!
+//! Pedido do dono em 2026-09-28 (*"Crie um tema feminino chamado Ambar
+//! Rouge"*). Fundo rosa-pó `#fff7f5`, letra vinho `#3b1624`, a marca e os
+//! botões em rouge `#9e2a4a`, e o que acende (filtro, seleção, foco) em âmbar
+//! dourado `#e8a33d` — daí o nome. É o único tema fixo **claro**: por isso o
+//! modo não se deduz mais do índice da paleta (`ESCURO_AGORA`), e o claro
+//! também escolhe a sua (`Escolha::paleta_clara`).
+//!
 //! ## 🎞️ Lightroom — o terceiro tema fixo
 //!
 //! Pedido do dono em 2026-09-28 (*"Eu quero um novo tema inspirado no
@@ -34,11 +43,17 @@
 //! isso o app desenha o slider com as peças do `gpui_kit::base`
 //! (`slider_da_casa`): o trilho de cada controle (`controles::Trilho`) vai do
 //! azul ao amarelo na Temperatura, na cor da faixa no HSL, e o preenchimento
-//! parte do neutro. Isso vale **em todos os temas**; nos outros quatro o
-//! trilho liso continua o âmbar do kit (`o_slider_dos_temas_de_antes_e_o_de_sempre`).
+//! parte do neutro. Isso vale **em todos os temas**; no Claro e no Escuro o
+//! trilho liso continua o âmbar do kit (`o_slider_dos_temas_de_antes_e_o_de_sempre`),
+//! e no Matrix e no Cyberpunk é a marca de cada um.
 //!
-//! O âmbar da nota, o verde de "deu certo" e as etiquetas continuam os de
-//! sempre: são o significado da foto, e não decoração do tema.
+//! 🔥 **Desde 2026-09-28 os dois não têm âmbar.** O que acende (filtro,
+//! seleção, slider), a estrela e a família quente (levada, editada, não salva,
+//! o aviso do gpui-kit) são a marca de cada um — `quente_da_marca`. Antes o
+//! âmbar do site valia em todo tema, e no Matrix ele era a única cor fora do
+//! verde (dono: *"No tema Matrix existe cor âmbar?"*). O verde de "deu certo",
+//! as etiquetas e os trilhos coloridos dos sliders continuam: dizem a cor da
+//! foto.
 //!
 //! | Token do site | Claro | Escuro |
 //! |---|---|---|
@@ -83,7 +98,7 @@ pub mod tokens;
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::OnceLock;
 
 use medidas::Medidas;
@@ -161,6 +176,13 @@ mod paleta {
         pub cantos_retos: bool,
         /// Painéis da coluna corridos, sem moldura, com o título à direita.
         pub paineis_corridos: bool,
+        /// 🔥 **A família quente é a marca do tema**, e não o âmbar do site:
+        /// a situação da foto (levada, editada, não salva), o selo de atenção,
+        /// o aviso do gpui-kit (`warning`). No Matrix tudo é verde fósforo,
+        /// no Cyberpunk o amarelo neon — o âmbar ali era um segundo amarelo,
+        /// ou uma cor que o tema não tem (dono, 28/09: *"No tema Matrix
+        /// existe cor âmbar?"*).
+        pub quente_da_marca: bool,
     }
 
     /// A paleta de um modo, montada dos tokens do template.
@@ -224,6 +246,7 @@ mod paleta {
             celulas: None,
             cantos_retos: false,
             paineis_corridos: false,
+            quente_da_marca: false,
         }
     }
 
@@ -255,18 +278,20 @@ mod paleta {
         poco: 0x000000,
         rolagem: 0x17592f,
         trilho: None,
-        preenchimento: AMBAR_400,
-        punho: 0xffffff,
+        preenchimento: 0x00ff41,
+        punho: 0x8dffb0,
         slider_fino: false,
         sanfona: None,
-        aceso: AMBAR_400,
-        sobre_aceso: SOBRE_CLARO,
-        aceso_pairando: AMBAR_300,
-        aceso_ativo: AMBAR_500,
-        estrela: NOTA,
+        // 🟩 Tudo o que acende é o verde fósforo (ver `quente_da_marca`).
+        aceso: 0x00ff41,
+        sobre_aceso: 0x021a08,
+        aceso_pairando: 0x5cff8f,
+        aceso_ativo: 0x01cf35,
+        estrela: 0x00ff41,
         celulas: None,
         cantos_retos: false,
         paineis_corridos: false,
+        quente_da_marca: true,
     };
 
     /// 🌆 Cyberpunk: neon amarelo, rosa e ciano sobre azul-noite.
@@ -297,18 +322,22 @@ mod paleta {
         poco: 0x05050f,
         rolagem: 0x3a3a80,
         trilho: None,
-        preenchimento: AMBAR_400,
-        punho: 0xffffff,
+        preenchimento: 0xfcee0a,
+        // O punho no ciano do foco: as três cores do neon numa barra só.
+        punho: 0x05d9e8,
         slider_fino: false,
         sanfona: None,
-        aceso: AMBAR_400,
-        sobre_aceso: SOBRE_CLARO,
-        aceso_pairando: AMBAR_300,
-        aceso_ativo: AMBAR_500,
-        estrela: NOTA,
+        // 🌆 Tudo o que acende é o amarelo neon da marca, e não um segundo
+        // amarelo (o âmbar), com o texto azul-noite por cima.
+        aceso: 0xfcee0a,
+        sobre_aceso: 0x0a0a1f,
+        aceso_pairando: 0xfdf35c,
+        aceso_ativo: 0xccc00e,
+        estrela: 0xfcee0a,
         celulas: None,
         cantos_retos: false,
         paineis_corridos: false,
+        quente_da_marca: true,
     };
 
     /// 🎞️ Lightroom: cinzas graduados, o palco cinza médio atrás da foto, e a
@@ -360,6 +389,60 @@ mod paleta {
         celulas: Some((0x303030, 0x3d3d3d, 0x555555)),
         cantos_retos: true,
         paineis_corridos: true,
+        // A situação da foto continua âmbar, como as etiquetas do Lightroom.
+        quente_da_marca: false,
+    };
+
+    /// 🌹 Âmbar Rouge: o tema claro e feminino — rosa-pó, letra vinho, a marca
+    /// em rouge e o que acende em âmbar dourado (dono, 28/09: *"Crie um tema
+    /// feminino chamado Ambar Rouge"*).
+    pub const AMBAR_ROUGE: Paleta = Paleta {
+        fundo: 0xfff7f5,
+        texto: 0x3b1624,
+        cartao: 0xffffff,
+        primaria: 0x9e2a4a,
+        // `bg-primary/80` sobre o fundo.
+        primaria_pairando: 0xb1536c,
+        sobre_primaria: 0xfff7f5,
+        apagado: 0xfbecef,
+        texto_apagado: 0x87566a,
+        acento: 0xf9dde3,
+        sobre_acento: 0x5c1a33,
+        secundaria: 0xf9e1e6,
+        sobre_secundaria: 0x5c1a33,
+        destrutiva: 0xc0262d,
+        borda: 0xf0d3d9,
+        campo: 0xe6c0c9,
+        // O foco em âmbar dourado.
+        anel: 0xd99a3a,
+        lateral: 0xfbeef0,
+        texto_lateral: 0x3b1624,
+        marca: 0x9e2a4a,
+        sobre_marca: 0xfff7f5,
+        acento_lateral: 0xf6dde3,
+        borda_lateral: 0xefd0d7,
+        // Atrás da foto, um rosado quase neutro: não pode tingir o julgamento
+        // da cor.
+        poco: 0xf2e9ea,
+        rolagem: 0xe0b8c1,
+        // O slider em rouge, com o trilho a 20% dele e o punho branco.
+        trilho: None,
+        preenchimento: 0x9e2a4a,
+        punho: 0xffffff,
+        slider_fino: false,
+        sanfona: None,
+        // O que acende é o âmbar dourado, com a letra vinho.
+        aceso: 0xe8a33d,
+        sobre_aceso: 0x3b1624,
+        aceso_pairando: 0xf0bb63,
+        aceso_ativo: 0xcc8a26,
+        // A estrela em âmbar mel, escura o bastante para o fundo claro.
+        estrela: 0xb8741a,
+        celulas: None,
+        cantos_retos: false,
+        paineis_corridos: false,
+        // A situação da foto no âmbar do site: combina com o nome.
+        quente_da_marca: false,
     };
 
     // ── Tailwind 4, as famílias que o site usa por nome ────────────────────
@@ -456,14 +539,20 @@ fn paletas_do_template() -> &'static (paleta::Paleta, paleta::Paleta) {
     })
 }
 
-/// Se a tela está no escuro agora. As cores sem `cx` ([`cores`]) leem daqui.
-/// Qual paleta está na tela: a de [`Escolha::paleta_escura`] no escuro, a
-/// clara no claro. Guardada como o índice de [`paletas`].
+/// Qual paleta está na tela: a de [`Escolha::paleta_escura`] no escuro, a de
+/// [`Escolha::paleta_clara`] no claro. Guardada como o índice de [`paletas`].
 static PALETA_AGORA: AtomicU8 = AtomicU8::new(1);
+
+/// Se a tela está no escuro agora. As cores sem `cx` ([`cores`]) leem daqui.
+///
+/// 🚨 **Não se deduz do índice da paleta**: até o Âmbar Rouge todo tema fixo
+/// era escuro, e "índice diferente de 0" queria dizer escuro. Um tema fixo
+/// claro pintaria os selos e o texto âmbar na versão do escuro.
+static ESCURO_AGORA: AtomicBool = AtomicBool::new(true);
 
 /// As paletas, na ordem do índice de [`PALETA_AGORA`]: as duas do template e
 /// os dois temas fixos.
-fn paletas() -> [&'static paleta::Paleta; 5] {
+fn paletas() -> [&'static paleta::Paleta; 6] {
     let (claro, escuro) = paletas_do_template();
     [
         claro,
@@ -471,6 +560,7 @@ fn paletas() -> [&'static paleta::Paleta; 5] {
         &paleta::MATRIX,
         &paleta::CYBERPUNK,
         &paleta::LIGHTROOM,
+        &paleta::AMBAR_ROUGE,
     ]
 }
 
@@ -494,6 +584,9 @@ pub enum Escolha {
     Cyberpunk,
     /// 🎞️ Os cinzas do Lightroom, com os trilhos coloridos.
     Lightroom,
+    /// 🌹 Rosa-pó, vinho, rouge e âmbar dourado — o único tema fixo claro.
+    #[serde(rename = "ambar_rouge")]
+    AmbarRouge,
 }
 
 impl Escolha {
@@ -505,6 +598,7 @@ impl Escolha {
             "matrix" => Some(Self::Matrix),
             "cyberpunk" => Some(Self::Cyberpunk),
             "lightroom" => Some(Self::Lightroom),
+            "ambar_rouge" | "ambar-rouge" => Some(Self::AmbarRouge),
             _ => None,
         }
     }
@@ -512,7 +606,7 @@ impl Escolha {
     /// O modo que vale com esta escolha e esta aparência do sistema.
     pub fn modo(self, aparencia: WindowAppearance) -> ThemeMode {
         match self {
-            Self::Claro => ThemeMode::Light,
+            Self::Claro | Self::AmbarRouge => ThemeMode::Light,
             Self::Escuro | Self::Matrix | Self::Cyberpunk | Self::Lightroom => ThemeMode::Dark,
             Self::Sistema => match aparencia {
                 WindowAppearance::Dark | WindowAppearance::VibrantDark => ThemeMode::Dark,
@@ -527,7 +621,22 @@ impl Escolha {
             Self::Matrix => 2,
             Self::Cyberpunk => 3,
             Self::Lightroom => 4,
-            Self::Claro | Self::Escuro | Self::Sistema => 1,
+            Self::Claro | Self::Escuro | Self::Sistema | Self::AmbarRouge => 1,
+        }
+    }
+
+    /// O índice em [`paletas`] da paleta que esta escolha pinta no claro.
+    fn paleta_clara(self) -> u8 {
+        match self {
+            Self::AmbarRouge => 5,
+            _ => 0,
+        }
+    }
+
+    fn nome_do_claro(self) -> &'static str {
+        match self {
+            Self::AmbarRouge => "Âmbar Rouge",
+            _ => "RecordarFotos Claro",
         }
     }
 
@@ -536,7 +645,7 @@ impl Escolha {
             Self::Matrix => "Matrix",
             Self::Cyberpunk => "Cyberpunk",
             Self::Lightroom => "Lightroom",
-            Self::Claro | Self::Escuro | Self::Sistema => "RecordarFotos Escuro",
+            Self::Claro | Self::Escuro | Self::Sistema | Self::AmbarRouge => "RecordarFotos Escuro",
         }
     }
 }
@@ -590,6 +699,7 @@ pub fn aplicar(escolha: Escolha, window: Option<&mut Window>, cx: &mut App) {
         .unwrap_or_else(|| cx.window_appearance());
     let modo = escolha.modo(aparencia);
     let escura = escolha.paleta_escura();
+    let clara = escolha.paleta_clara();
     // 🟩 O Matrix escreve com a mono que o próprio gpui-kit escolheu para este
     // sistema (Menlo, Consolas…) — nome de fonte escrito à mão faltaria em
     // algum balcão.
@@ -614,9 +724,9 @@ pub fn aplicar(escolha: Escolha, window: Option<&mut Window>, cx: &mut App) {
     let tema = Theme::global_mut(cx);
     let todas = paletas();
     tema.apply_config(&Rc::new(tema_da_paleta(
-        "RecordarFotos Claro",
+        escolha.nome_do_claro(),
         ThemeMode::Light,
-        todas[0],
+        todas[clara as usize],
         Some(do_template),
     )));
     tema.apply_config(&Rc::new(tema_da_paleta(
@@ -628,14 +738,18 @@ pub fn aplicar(escolha: Escolha, window: Option<&mut Window>, cx: &mut App) {
     // 📣 Os toasts do canto de baixo (chatbot e agenda) sobem acima do
     // rodapé da janela, em vez de cair em cima da versão.
     tema.notification.margins.bottom = gpui_kit::px(16. + crate::app::rodape::ALTURA_DO_RODAPE);
-    PALETA_AGORA.store(if modo.is_dark() { escura } else { 0 }, Ordering::Relaxed);
+    PALETA_AGORA.store(
+        if modo.is_dark() { escura } else { clara },
+        Ordering::Relaxed,
+    );
+    ESCURO_AGORA.store(modo.is_dark(), Ordering::Relaxed);
     Theme::change(modo, window, cx);
 }
 
 /// As cores que a tela pede pelo nome, e o tema do `gpui-component` não tem
 /// nome para. Seguem o modo da tela.
 pub mod cores {
-    use super::{paleta, paleta_atual, PALETA_AGORA};
+    use super::{paleta, paleta_atual, ESCURO_AGORA};
     use domain::value_objects::ColorLabel;
     use gpui_kit::Hsla;
     use std::sync::atomic::Ordering;
@@ -645,7 +759,7 @@ pub mod cores {
     }
 
     fn escuro() -> bool {
-        PALETA_AGORA.load(Ordering::Relaxed) != 0
+        ESCURO_AGORA.load(Ordering::Relaxed)
     }
 
     /// O fundo de tudo que encosta numa imagem.
@@ -694,11 +808,25 @@ pub mod cores {
 
     /// Âmbar: o recorte aceso da galeria, sessão e balcão.
     pub fn quente() -> Hsla {
-        cor(paleta::AMBAR_400)
+        match marca_quente() {
+            Some((marca, _)) => marca,
+            None => cor(paleta::AMBAR_400),
+        }
+    }
+
+    /// A marca e o texto sobre ela, quando o tema faz da marca a família
+    /// quente (Matrix, Cyberpunk).
+    fn marca_quente() -> Option<(Hsla, Hsla)> {
+        let p = paleta_atual();
+        p.quente_da_marca
+            .then(|| (cor(p.primaria), cor(p.sobre_primaria)))
     }
 
     /// Âmbar para texto: `text-amber-700 dark:text-amber-400`.
     pub fn quente_clara() -> Hsla {
+        if let Some((marca, _)) = marca_quente() {
+            return marca;
+        }
         cor(if escuro() {
             paleta::AMBAR_400
         } else {
@@ -708,12 +836,18 @@ pub mod cores {
 
     /// O texto que fica legível sobre o âmbar.
     pub fn sobre_quente() -> Hsla {
-        cor(paleta::SOBRE_CLARO)
+        match marca_quente() {
+            Some((_, sobre)) => sobre,
+            None => cor(paleta::SOBRE_CLARO),
+        }
     }
 
     /// O selo âmbar: `border-amber-300 bg-amber-50 text-amber-800`, e no escuro
     /// `bg-amber-950/40 text-amber-300`. Devolve (fundo, borda, texto).
     pub fn selo_ambar() -> (Hsla, Hsla, Hsla) {
+        if let Some((marca, _)) = marca_quente() {
+            return (marca.opacity(0.12), marca, marca);
+        }
         if escuro() {
             (
                 cor(paleta::AMBAR_950).opacity(0.4),
@@ -802,7 +936,10 @@ pub mod cores {
 
     /// O âmbar de "atenção" mais forte (`amber-500`).
     pub fn atencao() -> Hsla {
-        cor(paleta::AMBAR_500)
+        match marca_quente() {
+            Some((marca, _)) => marca,
+            None => cor(paleta::AMBAR_500),
+        }
     }
 
     /// O véu atrás de um diálogo: `bg-black/50` do site.
@@ -1013,10 +1150,39 @@ fn cores(p: &paleta::Paleta) -> Vec<(&'static str, u32)> {
         ("danger.hover.background", p.destrutiva),
         ("danger.active.background", p.destrutiva),
         ("danger.foreground", 0xffffff),
-        ("warning.background", AMBAR_400),
-        ("warning.hover.background", AMBAR_300),
-        ("warning.active.background", AMBAR_500),
-        ("warning.foreground", SOBRE_CLARO),
+        // 🔥 O aviso do kit é a família quente: âmbar, ou a marca do tema.
+        (
+            "warning.background",
+            if p.quente_da_marca {
+                p.primaria
+            } else {
+                AMBAR_400
+            },
+        ),
+        (
+            "warning.hover.background",
+            if p.quente_da_marca {
+                p.aceso_pairando
+            } else {
+                AMBAR_300
+            },
+        ),
+        (
+            "warning.active.background",
+            if p.quente_da_marca {
+                p.primaria_pairando
+            } else {
+                AMBAR_500
+            },
+        ),
+        (
+            "warning.foreground",
+            if p.quente_da_marca {
+                p.sobre_primaria
+            } else {
+                SOBRE_CLARO
+            },
+        ),
         ("success.background", ESMERALDA_400),
         ("success.hover.background", ESMERALDA_300),
         ("success.active.background", ESMERALDA_700),
@@ -1260,6 +1426,7 @@ mod testes {
             ("Matrix", &paleta::MATRIX),
             ("Cyberpunk", &paleta::CYBERPUNK),
             ("Lightroom", &paleta::LIGHTROOM),
+            ("Âmbar Rouge", &paleta::AMBAR_ROUGE),
         ] {
             let config = tema_da_paleta(nome, ThemeMode::Dark, p, Some("Menlo".into()));
             assert_eq!(config.font_family.as_deref(), Some("Menlo"), "{nome}");
@@ -1335,7 +1502,8 @@ mod testes {
     /// traz trilho, punho e sanfona próprios.
     #[test]
     fn o_slider_dos_temas_de_antes_e_o_de_sempre() {
-        for (i, p) in paletas().iter().enumerate().take(4) {
+        // Os dois do site (Claro e Escuro): o âmbar do shadcn.
+        for (i, p) in paletas().iter().enumerate().take(2) {
             // O aceso, a estrela e a grade de sempre.
             assert_eq!(p.aceso, AMBAR_400, "paleta {i}");
             assert_eq!(p.sobre_aceso, SOBRE_CLARO, "paleta {i}");
@@ -1360,6 +1528,74 @@ mod testes {
         // fundo da sanfona (a primeira versão, #1a1a1a sobre #1e1e1e, sumia).
         assert!(contraste(lr.trilho.unwrap(), lr.punho) >= 4.5);
         assert!(contraste(lr.fundo, lr.trilho.unwrap()) >= 2.0);
+    }
+
+    /// 🌹 **O Âmbar Rouge é o tema fixo claro**: abre no claro mesmo com o
+    /// sistema no escuro, fica lembrado, pinta a própria paleta no claro, e o
+    /// que acende (âmbar dourado) e a estrela continuam legíveis sobre o
+    /// rosa-pó.
+    #[test]
+    fn o_ambar_rouge_e_claro_e_fica_lembrado() {
+        let escolha = Escolha::AmbarRouge;
+        assert_eq!(Escolha::do_nome("ambar_rouge"), Some(escolha));
+        assert_eq!(escolha.modo(WindowAppearance::Dark), ThemeMode::Light);
+        assert_eq!(
+            paletas()[escolha.paleta_clara() as usize],
+            &paleta::AMBAR_ROUGE
+        );
+        // Os outros continuam com a paleta clara do template.
+        assert_eq!(Escolha::Claro.paleta_clara(), 0);
+        let pasta = tempfile::tempdir().unwrap();
+        let arquivo = pasta.path().join("tema.json");
+        guardar_escolha(&arquivo, escolha);
+        assert_eq!(escolha_guardada(&arquivo), escolha);
+        assert_eq!(
+            std::fs::read_to_string(&arquivo).unwrap(),
+            "\"ambar_rouge\""
+        );
+        let p = &paleta::AMBAR_ROUGE;
+        assert!(contraste(p.aceso, p.sobre_aceso) >= 4.5, "o aceso");
+        assert!(
+            contraste(p.fundo, p.estrela) >= 3.0,
+            "a estrela (objeto gráfico)"
+        );
+        assert!(contraste(p.cartao, p.texto) >= 4.5, "o texto no cartão");
+        assert!(!p.quente_da_marca && !p.cantos_retos && p.celulas.is_none());
+    }
+
+    /// 🟩🌆 **Matrix e Cyberpunk não têm âmbar** (dono, 28/09: *"No tema
+    /// Matrix existe cor âmbar?"*): o que acende, a estrela, o slider e a
+    /// família quente são a marca de cada um — e o texto por cima continua
+    /// legível.
+    #[test]
+    fn matrix_e_cyberpunk_acendem_na_propria_marca() {
+        let ambares = [AMBAR_300, AMBAR_400, AMBAR_500, NOTA];
+        for (nome, p) in [
+            ("Matrix", &paleta::MATRIX),
+            ("Cyberpunk", &paleta::CYBERPUNK),
+        ] {
+            assert!(p.quente_da_marca, "{nome}");
+            for (campo, c) in [
+                ("aceso", p.aceso),
+                ("aceso_pairando", p.aceso_pairando),
+                ("aceso_ativo", p.aceso_ativo),
+                ("estrela", p.estrela),
+                ("preenchimento", p.preenchimento),
+            ] {
+                assert!(!ambares.contains(&c), "{nome}: `{campo}` ainda é âmbar");
+            }
+            assert_eq!(p.aceso, p.primaria, "{nome}: o aceso é a marca");
+            assert!(contraste(p.aceso, p.sobre_aceso) >= 4.5, "{nome}");
+            assert!(contraste(p.fundo, p.estrela) >= 4.5, "{nome}");
+            // O aviso do gpui-kit também é a marca.
+            let config = tema_da_paleta(nome, ThemeMode::Dark, p, None);
+            let de_volta = serde_json::to_value(&config.colors).unwrap();
+            assert_eq!(
+                de_volta.get("warning.background").and_then(|v| v.as_str()),
+                Some(hex(p.primaria).as_str()),
+                "{nome}"
+            );
+        }
     }
 
     /// 🎞️ O pente fino do Lightroom continua legível: o texto sobre o aceso,

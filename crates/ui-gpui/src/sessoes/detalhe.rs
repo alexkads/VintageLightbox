@@ -5197,8 +5197,10 @@ impl Detalhe {
                                         .gap(px(4.))
                                         .px(px(6.))
                                         .rounded_full()
-                                        .bg(gpui_kit::rgb(0xffb900))
-                                        .text_color(gpui_kit::black())
+                                        // A família quente do tema: o âmbar do
+                                        // site, ou a marca (Matrix, Cyberpunk).
+                                        .bg(cores::quente())
+                                        .text_color(cores::sobre_quente())
                                         .text_size(px(10.))
                                         .line_height(px(20.))
                                         .child(
