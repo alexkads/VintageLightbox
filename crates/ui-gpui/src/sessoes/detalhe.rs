@@ -4251,7 +4251,9 @@ impl Detalhe {
                                 .debug_selector(|| "sessao-contagem".into())
                                 .text_color(apagado)
                                 .child(Icon::new(Icone::Info).size(px(14.)))
-                                .child(format!(
+                                // Só o ícone: os números moram no painel que abre,
+                                // e a dica dá o resumo sem ocupar a barra.
+                                .tooltip(format!(
                                     "{levadas} levadas · {a_venda} à venda · {compradas} compradas"
                                 ))
                                 // A seta do `ChevronDown` do site, que vira quando abre.

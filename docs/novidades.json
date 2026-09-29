@@ -1,13 +1,9 @@
 {
-  "versao": "0.1.39",
-  "titulo": "O tema Lightroom ficou ainda mais parecido com o Lightroom: seleção em cinza, estrelas brancas e a grade em células.",
+  "versao": "0.1.40",
+  "titulo": "Na sessão, o botão das contagens ficou pequeno: só o ícone, com os números na dica.",
   "importante": false,
   "novidades": [
-    "No tema Lightroom, o que está escolhido (o filtro, a foto marcada, o botão ligado, o zoom) acende em cinza-claro, e não mais em âmbar.",
-    "As estrelas da nota ficam brancas, como no Lightroom.",
-    "Na sessão, cada foto fica numa célula cinza, e a foto em foco fica mais clara, como na Biblioteca do Lightroom.",
-    "Botões, fichas e painéis têm cantos retos, e os painéis da Revelação viram faixas corridas com o título à direita.",
-    "\"Levada\", \"editada\" e \"não salva\" continuam em âmbar: são a situação da foto e precisam chamar atenção em qualquer tema."
+    "O botão \"levadas · à venda · compradas\" do alto da sessão virou só o ícone de informação: passe o mouse para ver os números, ou clique para abrir os detalhes como antes."
   ],
-  "por_que_atualizar": "Quem vem do Lightroom encontra o mesmo desenho: o que está escolhido, a nota e a grade se leem do mesmo jeito."
+  "por_que_atualizar": "Sobra espaço na barra de cima da sessão para os botões que se usam o dia todo."
 }
