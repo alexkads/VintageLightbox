@@ -13,7 +13,7 @@ fn perto(a: f32, b: f32) -> bool {
 /// 🎬 **Enquadrar de ponta a ponta**, numa foto de 160×120: `R` entra, a
 /// alça recorta, `]` e `[` giram **levando o retângulo**, `⇧H`/`⇧V`
 /// espelham, o endireitar encolhe e cresce de volta, a proporção 1:1 segura
-/// o arrasto, `Enter` confirma, `Esc` só sai da ferramenta, "Voltar à foto
+/// o arrasto, a trava abre na proporção da foto, `Enter` confirma, `Esc` só sai da ferramenta, "Voltar à foto
 /// inteira" recomeça e o `⌘Z` devolve o enquadramento.
 #[gpui_kit::test]
 fn enquadrar_girar_espelhar_endireitar_e_proporcao(cx: &mut TestAppContext) {
@@ -22,8 +22,11 @@ fn enquadrar_girar_espelhar_endireitar_e_proporcao(cx: &mut TestAppContext) {
 
     // R entra na ferramenta; o zoom fica desligado nela.
     e.teclar(cx, "r");
-    e.revelacao(cx, |tela, _w, _cx| {
+    e.revelacao(cx, |tela, _w, cx| {
         assert!(tela.cortando(), "R abre o Enquadrar");
+        // A foto de 160×120 é 4:3 inteira: a trava abre nela, e "Livre" solta.
+        assert_eq!(tela.proporcao_travada(), Some(4. / 3.));
+        tela.travar_proporcao(None, cx);
         assert_eq!(tela.proporcao_travada(), None);
     });
     e.teclar(cx, "z");
@@ -160,4 +163,28 @@ fn enquadrar_girar_espelhar_endireitar_e_proporcao(cx: &mut TestAppContext) {
     // Esc fora da ferramenta fecha o editor.
     e.teclar(cx, "escape");
     e.app(cx, |app, _w, _cx| assert_eq!(app.tela(), Tela::Sessao));
+}
+
+/// 🎬 **A trava segue o giro** (dono, 2026-09-28): a foto 4:3 abre travada em
+/// 4:3; girada, a trava vira 3:4 e o arrasto de alça a mantém em pé — antes o
+/// primeiro arrasto a deitava de novo.
+#[gpui_kit::test]
+fn a_trava_abre_na_proporcao_da_foto_e_segue_o_giro(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    e.revelar_a_do_site(cx, "a");
+    e.teclar(cx, "r");
+    e.revelacao(cx, |tela, _w, _cx| {
+        assert_eq!(tela.proporcao_travada(), Some(4. / 3.));
+    });
+    e.teclar(cx, "]");
+    e.revelacao(cx, |tela, window, cx| {
+        tela.arrastar_no_corte(Some(Alca::Esquerda), 20., 0., window, cx);
+        let c = tela.corte_na_ferramenta();
+        assert_eq!(c.rotation_90(), 1);
+        // No espaço girado a foto é 120×160: o retângulo continua 3:4.
+        let razao = (c.crop_width() * 120.) / (c.crop_height() * 160.);
+        // O arrasto arredonda para pixels inteiros: 100×133.
+        assert!((razao - 3. / 4.).abs() < 1e-2, "razão = {razao}");
+        assert!(c.crop_width() < 1., "a alça recortou");
+    });
 }

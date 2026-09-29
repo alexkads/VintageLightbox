@@ -133,16 +133,8 @@ pub fn valor_da_proporcao(p: Option<&str>) -> Option<f32> {
         .and_then(|(_, v)| *v)
 }
 
-/// A proporção **na orientação da foto**: "3:2" é o papel 10×15, deitado na
-/// foto deitada e em pé na foto em pé. A quadrada fica como está escrita.
-pub fn proporcao_na_orientacao(valor: Option<f32>, largura: f32, altura: f32) -> Option<f32> {
-    let valor = valor.filter(|v| *v > 0.)?;
-    if largura == altura {
-        return Some(valor);
-    }
-    let longa = valor.max(1. / valor);
-    Some(if largura > altura { longa } else { 1. / longa })
-}
+/// A conta mora no corte, que é quem também trava a proporção no Enquadrar.
+pub use crate::revelacao::corte::proporcao_na_orientacao;
 
 /// O corte centralizado desta foto: o maior retângulo na proporção, no meio.
 /// Sem proporção (ou sem tamanho conhecido), a foto inteira.

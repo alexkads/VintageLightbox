@@ -138,7 +138,15 @@ impl Revelacao {
         self.angulo
             .update(cx, |estado, cx| estado.set_value(graus, window, cx));
         self.sincronizar_sliders_da_perspectiva(window, cx);
-        self.edicao = Some(Edicao::default());
+        // 🔑 **A trava abre na proporção que o corte já tem** — a sessão
+        // importada em 4:3 abre travada em 4:3. Ver `proporcao_do_retangulo`.
+        let proporcao = self.espaco().and_then(|espaco| {
+            corte::proporcao_do_retangulo(corte::retangulo_de(&self.corte_atual(), espaco))
+        });
+        self.edicao = Some(Edicao {
+            proporcao,
+            ..Edicao::default()
+        });
         self.atualizar_exibicao();
         self.revelar_de_novo_se_a_vinheta_segue_o_corte(cx);
         cx.notify();
@@ -261,6 +269,20 @@ impl Revelacao {
         }
         self.angulo
             .update(cx, |estado, cx| estado.set_value(0., window, cx));
+    }
+
+    /// A trava **na orientação do retângulo**: girar 90° leva 4:3 a 3:4.
+    ///
+    /// 🚨 Sem isto, a foto girada com a trava em 4:3 ficava em pé e o primeiro
+    /// arrasto de canto a deitava de novo. Escolher 2:3 remodela o retângulo em
+    /// pé na hora, então a orientação dele é sempre a da escolha.
+    pub(super) fn trava(&self) -> Option<f32> {
+        let proporcao = self.edicao.as_ref().and_then(|e| e.proporcao);
+        let Some(espaco) = self.espaco() else {
+            return proporcao;
+        };
+        let r = corte::retangulo_de(&self.corte_atual(), espaco);
+        corte::proporcao_na_orientacao(proporcao, r.w, r.h)
     }
 
     /// A proporção remodela o retângulo **na hora**, mantendo a área.
@@ -545,7 +567,8 @@ impl Revelacao {
         let Some(arrasto) = edicao.arrasto else {
             return;
         };
-        let proporcao = edicao.proporcao;
+        let proporcao =
+            corte::proporcao_na_orientacao(edicao.proporcao, arrasto.inicial.w, arrasto.inicial.h);
         let (Some(espaco), Some(area)) = (self.espaco(), self.area_da_foto()) else {
             return;
         };
@@ -927,7 +950,7 @@ impl Revelacao {
     pub(super) fn painel_de_corte(&self, cx: &mut Context<Self>) -> AnyElement {
         let atual = self.corte_atual();
         let angulo = atual.angle();
-        let proporcao = self.edicao.as_ref().and_then(|e| e.proporcao);
+        let proporcao = self.trava();
         let tema = cx.theme();
         let (mudo, frente) = (tema.muted_foreground, tema.foreground);
         let saida = self.espaco().map(|espaco| {
@@ -1066,7 +1089,7 @@ impl Revelacao {
                             .text_size(px(11.))
                             .text_color(mudo)
                             .child(
-                                "Escolher remodela o retângulo na hora, mantendo a área; depois ela vale para cada arrasto de alça. Arrastar o meio só move.",
+                                "Abre na proporção que o corte da foto já tem. Escolher remodela o retângulo na hora, mantendo a área; depois ela vale para cada arrasto de alça. Arrastar o meio só move.",
                             ),
                     ),
             )

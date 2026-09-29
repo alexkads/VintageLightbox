@@ -603,6 +603,42 @@ pub const PROPORCOES: [(&str, Option<f32>); 7] = [
     ("16:9", Some(16. / 9.)),
 ];
 
+/// A proporção **na orientação da foto**: "3:2" é o papel 10×15, deitado na
+/// foto deitada e em pé na foto em pé. A quadrada fica como está escrita.
+pub fn proporcao_na_orientacao(valor: Option<f32>, largura: f32, altura: f32) -> Option<f32> {
+    let valor = valor.filter(|v| *v > 0.)?;
+    if largura == altura {
+        return Some(valor);
+    }
+    let longa = valor.max(1. / valor);
+    Some(if largura > altura { longa } else { 1. / longa })
+}
+
+/// A proporção da lista em que o retângulo **já está** — ou `None`, livre
+/// (`proporcaoDoRetangulo` do site).
+///
+/// # Por que a trava abre por aqui (dono, 2026-09-28)
+///
+/// *"Eu defini 4:3 na importação e a revelação ficou livre, isso pode fazer o
+/// usuário mexer nas proporções sem querer."* A foto chega com o corte em 4:3,
+/// e abrir o Enquadrar em "Livre" deixava um arrasto de alça tirá-la do papel
+/// sem ninguém perceber. Lendo a proporção do próprio corte, a trava abre no
+/// que a foto tem — a da sessão, a que o operador escolheu antes, ou a da
+/// câmera numa foto inteira —, e soltá-la é um clique em "Livre".
+///
+/// A folga de 1% absorve o arredondamento dos pixels; as proporções da lista
+/// estão todas a mais de 10% umas das outras.
+pub fn proporcao_do_retangulo(r: Retangulo) -> Option<f32> {
+    if !(r.w > 0. && r.h > 0.) {
+        return None;
+    }
+    let razao = r.w / r.h;
+    PROPORCOES
+        .iter()
+        .filter_map(|(_, v)| *v)
+        .find(|v| (razao / v - 1.).abs() < 0.01)
+}
+
 /// O retângulo depois de um arrasto, **em pixels do espaço girado**
 /// (`arrastar` do site).
 ///
@@ -1309,5 +1345,31 @@ mod testes {
             "voltou à foto inteira"
         );
         assert_eq!(endireitar(&inteiro, 80., espaco, None).angle(), 45.);
+    }
+
+    #[test]
+    fn a_trava_abre_na_proporcao_que_o_corte_ja_tem() {
+        let r = |w, h| Retangulo { x: 0., y: 0., w, h };
+        // O caso do dono: o 4:3 da importação, com o arredondamento dos pixels.
+        assert_eq!(proporcao_do_retangulo(r(1822., 1367.)), Some(4. / 3.));
+        assert_eq!(proporcao_do_retangulo(r(1367., 1822.)), Some(3. / 4.));
+        // A foto inteira da câmera trava na dela.
+        assert_eq!(proporcao_do_retangulo(r(6000., 4000.)), Some(3. / 2.));
+        // Fora da lista, livre.
+        assert_eq!(proporcao_do_retangulo(r(1500., 1200.)), None);
+        assert_eq!(proporcao_do_retangulo(r(0., 100.)), None);
+    }
+
+    #[test]
+    fn a_trava_segue_o_retangulo_girado() {
+        assert_eq!(
+            proporcao_na_orientacao(Some(4. / 3.), 3., 4.),
+            Some(3. / 4.)
+        );
+        assert_eq!(
+            proporcao_na_orientacao(Some(3. / 4.), 4., 3.),
+            Some(4. / 3.)
+        );
+        assert_eq!(proporcao_na_orientacao(None, 4., 3.), None);
     }
 }
