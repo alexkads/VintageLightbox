@@ -2985,8 +2985,9 @@ impl Render for Revelacao {
                     .child(div().flex_1().min_w(px(0.)).h_full().children(area))
                     .child(seta_direita),
             )
-            .children(seta_de_baixo)
+            // A seta abaixo da tira, na beirada da janela, como no Lightroom.
             .children(tira)
+            .children(seta_de_baixo)
             .children(self.pergunta_de_apagar(window, cx))
     }
 }

@@ -1324,6 +1324,26 @@ fn a_coluna_da_foto_fica_reservada_mostra_os_atalhos_e_se_recolhe(cx: &mut TestA
     });
 }
 
+/// 🎞️ **A seta da tira fica abaixo dela** (dono, 28/set/2026): como no
+/// Lightroom, na beirada de baixo da janela — não entre a grade e a tira.
+#[gpui_kit::test]
+fn a_seta_da_tira_fica_abaixo_da_tira(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    let id = e.detalhe(cx, |tela, _w, _cx| tela.ids_visiveis()[0].clone());
+    let seletor: &'static str = format!("tira-foto-{id}").leak();
+    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    let foto = visual
+        .debug_bounds(seletor)
+        .expect("a tira está na tela");
+    let seta = visual
+        .debug_bounds("galeria-seta-da-tira")
+        .expect("a seta está na tela");
+    assert!(
+        seta.top() >= foto.bottom(),
+        "a seta ({seta:?}) fica abaixo da tira ({foto:?})"
+    );
+}
+
 /// ✏️ **Os dados do cliente num modal, como no site** (dono, 24/set/2026).
 /// O botão do cabeçalho abre o modal por cima da galeria; a recusa do e-mail
 /// aparece embaixo do campo dele; "Cancelar" fecha sem gravar — tudo pelo

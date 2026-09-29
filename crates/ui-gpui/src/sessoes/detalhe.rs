@@ -4071,8 +4071,10 @@ impl Render for Detalhe {
                             .child(seta_direita),
                     ),
             )
-            .child(seta_de_baixo)
+            // A seta da tira fica na beirada de baixo, **abaixo** da tira —
+            // como no Lightroom: cada seta mora na borda de fora da janela.
             .children(tira_el)
+            .child(seta_de_baixo)
             // 🪟 **Os diálogos são o `Dialog` do gpui-kit** (`crate::dialogo`),
             // que se desenha adiado e ancorado no canto da janela: fica acima
             // da grade e do caixa flutuante — filho da raiz, desenhado depois
