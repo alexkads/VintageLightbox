@@ -423,7 +423,11 @@ impl Revelacao {
                     .id("painel-de-ajustes")
                     .flex()
                     .flex_col()
-                    .gap(px(16.))
+                    .gap(px(if tema::cores::paineis_corridos() {
+                        2.
+                    } else {
+                        16.
+                    }))
                     .flex_1()
                     .min_h(px(0.))
                     .p(px(12.))
@@ -638,6 +642,10 @@ impl Revelacao {
         let aberto = self.estado_do_painel.aberto(&chave, padrao);
         let id = format!("sanfona-{chave}");
         let tela = cx.entity().downgrade();
+        // 🎞️ No Lightroom os painéis são faixas corridas: sem moldura, o título
+        // encostado à direita, junto da seta.
+        let corridos = tema::cores::paineis_corridos();
+        let borda = borda && !corridos;
         Accordion::new(SharedString::from(id.clone()))
             .xsmall()
             .bordered(borda)
@@ -661,8 +669,16 @@ impl Revelacao {
                             .gap(px(8.))
                             .text_xs()
                             .font_weight(gpui_kit::FontWeight::MEDIUM)
-                            .child(div().flex_1().min_w(px(0.)).truncate().child(titulo))
-                            .when_some(marca, |c, m| c.child(ponto(m, cx))),
+                            .when(corridos, |c| c.justify_end())
+                            .when_some(marca.filter(|_| corridos), |c, m| c.child(ponto(m, cx)))
+                            .child(
+                                div()
+                                    .when(!corridos, |d| d.flex_1())
+                                    .min_w(px(0.))
+                                    .truncate()
+                                    .child(titulo),
+                            )
+                            .when_some(marca.filter(|_| !corridos), |c, m| c.child(ponto(m, cx))),
                     )
                     .children(dentro)
             })

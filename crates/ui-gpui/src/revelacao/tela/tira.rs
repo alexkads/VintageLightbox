@@ -887,14 +887,21 @@ impl Revelacao {
                                 .gap(px(6.))
                                 .h(px(24.))
                                 .px(px(8.))
-                                .rounded_full()
+                                // 🎞️ Pílula no site; retângulo no Lightroom.
+                                .map(|chip| {
+                                    if tema::cantos_retos() {
+                                        chip.rounded(tema::canto(2.))
+                                    } else {
+                                        chip.rounded_full()
+                                    }
+                                })
                                 .border_1()
                                 .text_size(px(11.))
                                 .cursor_pointer()
                                 .when(aceso, |chip| {
-                                    chip.border_color(tema::cores::quente())
-                                        .bg(tema::cores::quente())
-                                        .text_color(gpui_kit::black())
+                                    chip.border_color(tema::cores::aceso())
+                                        .bg(tema::cores::aceso())
+                                        .text_color(tema::cores::sobre_aceso())
                                 })
                                 .when(!aceso, |chip| {
                                     chip.border_color(borda)
@@ -1057,8 +1064,8 @@ impl Revelacao {
 
         let tema = cx.theme();
         // `border-amber-500 dark:border-amber-400`, e a marcada a 40%.
-        let ambar = if tema.mode.is_dark() {
-            tema::cores::quente()
+        let cor_acesa = if tema.mode.is_dark() {
+            tema::cores::aceso()
         } else {
             tema::cores::atencao()
         };
@@ -1078,10 +1085,10 @@ impl Revelacao {
             .bg(fundo)
             .border_2()
             .cursor_pointer()
-            .when(escolhida, |t| t.border_color(ambar))
+            .when(escolhida, |t| t.border_color(cor_acesa))
             .when(candidata, |t| t.border_color(gpui_kit::rgb(0x38bdf8)))
             .when(!escolhida && !candidata && marcada, |t| {
-                t.border_color(ambar.opacity(0.4))
+                t.border_color(cor_acesa.opacity(0.4))
             })
             .when(!escolhida && !candidata && !marcada, |t| {
                 t.border_color(gpui_kit::transparent_black())

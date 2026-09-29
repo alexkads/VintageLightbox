@@ -2029,8 +2029,8 @@ impl Caixa {
                     .font_family(mono.clone())
                     .cursor_pointer()
                     .hover(move |s| s.bg(realce.opacity(0.6)))
-                    .when(marcado, |d| d.bg(cores::quente().opacity(0.10)))
-                    .when(e_o_foco, |d| d.bg(cores::quente().opacity(0.15)))
+                    .when(marcado, |d| d.bg(cores::aceso().opacity(0.10)))
+                    .when(e_o_foco, |d| d.bg(cores::aceso().opacity(0.15)))
                     .on_click(cx.listener(move |t, evento: &ClickEvent, w, cx| {
                         t.clicar_item(&id, false, gesto(evento), w, cx)
                     }))
@@ -2105,9 +2105,9 @@ impl Caixa {
                             .text_size(px(11.))
                             .map(|d| {
                                 if aberto {
-                                    d.border_color(cores::quente())
-                                        .bg(cores::quente())
-                                        .text_color(cores::sobre_quente())
+                                    d.border_color(cores::aceso())
+                                        .bg(cores::aceso())
+                                        .text_color(cores::sobre_aceso())
                                 } else {
                                     d.border_color(borda)
                                         .bg(cartao)
@@ -2323,8 +2323,8 @@ impl Caixa {
                             .when(pendente, |d| d.opacity(0.5))
                             .map(|d| {
                                 if ativo {
-                                    d.bg(cores::quente())
-                                        .text_color(cores::sobre_quente())
+                                    d.bg(cores::aceso())
+                                        .text_color(cores::sobre_aceso())
                                         .font_weight(FontWeight::MEDIUM)
                                 } else {
                                     d.hover(move |s| s.bg(fundo))
@@ -2469,7 +2469,7 @@ impl Caixa {
                                             )
                                             .h(px(26.))
                                             .text_xs()
-                                            .when(escolhido, |d| d.border_color(cores::quente()))
+                                            .when(escolhido, |d| d.border_color(cores::aceso()))
                                             .child(p)
                                             .on_click(
                                                 cx.listener(move |t, _: &ClickEvent, _, cx| {
@@ -2684,9 +2684,9 @@ impl Caixa {
                         .px(px(6.))
                         .rounded(crate::tema::canto(6.))
                         .when(editando_lote, |d| {
-                            d.border_color(cores::quente())
-                                .bg(cores::quente())
-                                .text_color(cores::sobre_quente())
+                            d.border_color(cores::aceso())
+                                .bg(cores::aceso())
+                                .text_color(cores::sobre_aceso())
                         })
                         .child(Icon::new(Icone::SlidersHorizontal).size(px(12.)))
                         .child(format!("Ajustar {n}"))

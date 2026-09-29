@@ -1006,7 +1006,7 @@ impl Revelacao {
         let (apagado, frente, borda) = (tema.muted_foreground, tema.foreground, tema.border);
         let (cartao, fundo, realce) = (tema.popover, tema.background, tema.muted);
         let marca = if tema.mode.is_dark() {
-            cores::quente()
+            cores::aceso()
         } else {
             rgb(0xe17100).into()
         };
@@ -1321,7 +1321,7 @@ impl Revelacao {
                     .right(px(4.))
                     .h(px(2.))
                     .rounded(crate::tema::canto(1.))
-                    .bg(cores::quente())
+                    .bg(cores::aceso())
                     .when(depois, |d| d.bottom(px(-1.)))
                     .when(!depois, |d| d.top(px(-1.)))
             }));
@@ -1588,7 +1588,7 @@ fn botao_pequeno(
         .xsmall()
         .map(|b| {
             if destaque {
-                b.custom(crate::tema::botao_quente(cx))
+                b.custom(crate::tema::botao_aceso(cx))
             } else {
                 b.custom(
                     ButtonCustomVariant::new(cx)

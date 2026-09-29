@@ -896,7 +896,7 @@ impl Revelacao {
         let vista = self.vista();
         let desligado = vista.is_none();
         let nivel = self.navegacao.zoom.nivel;
-        let ambar = crate::tema::cores::quente();
+        let cor_acesa = crate::tema::cores::aceso();
         let texto: gpui_kit::Hsla = gpui_kit::rgb(0xd4d4d4).into();
         let (escala, t, no_minimo, no_maximo) = match vista {
             Some((c, v)) => (
@@ -933,11 +933,11 @@ impl Revelacao {
                 .rounded(crate::tema::canto(6.))
                 .text_size(px(11.5))
                 .text_color(if aceso {
-                    ambar
+                    cor_acesa
                 } else {
                     gpui_kit::rgb(0x8f8f8f).into()
                 })
-                .when(aceso, |b| b.bg(ambar.opacity(0.14)))
+                .when(aceso, |b| b.bg(cor_acesa.opacity(0.14)))
                 .when(!desligado, |b| {
                     b.cursor_pointer()
                         .hover(|s| s.bg(gpui_kit::rgb(0x2b2b2b)).text_color(texto))
@@ -955,7 +955,7 @@ impl Revelacao {
                 .items_center()
                 .justify_center()
                 .rounded(crate::tema::canto(6.))
-                .text_color(if ligado { ambar } else { texto })
+                .text_color(if ligado { cor_acesa } else { texto })
                 .when(apagado, |b| b.opacity(0.35))
                 .when(!apagado, |b| {
                     b.cursor_pointer().hover(|s| s.bg(gpui_kit::rgb(0x2b2b2b)))
@@ -1108,7 +1108,7 @@ impl Revelacao {
     /// para trás de uma pinça ou do `⌘=`), e o arrasto é ouvido na janela, para
     /// não se perder quando o ponteiro sai dos 110 pontos dele.
     fn trilho_do_zoom(&self, t: f32, desligado: bool, cx: &mut Context<Self>) -> AnyElement {
-        let ambar = crate::tema::cores::quente();
+        let cor_acesa = crate::tema::cores::aceso();
         let medidor = cx.entity();
         let ouvinte = cx.entity();
         let arrastando = self.navegacao.arrastando_trilho;
@@ -1146,7 +1146,7 @@ impl Revelacao {
                     .w(px(t * LARGURA_DO_TRILHO))
                     .h(px(3.))
                     .rounded(crate::tema::canto(2.))
-                    .bg(ambar),
+                    .bg(cor_acesa),
             )
             .child(
                 div()
@@ -1155,7 +1155,7 @@ impl Revelacao {
                     .top(px(ALTURA_DO_TRILHO / 2. - 6.))
                     .size(px(12.))
                     .rounded_full()
-                    .bg(ambar)
+                    .bg(cor_acesa)
                     .border_2()
                     .border_color(gpui_kit::rgb(0x161616)),
             )
@@ -1382,7 +1382,7 @@ impl Revelacao {
         let (apagado, borda, fundo) = (tema.muted_foreground, tema.border, tema.muted);
         let desligado = self.edicao.is_some() || self.aberta.is_none();
         let nivel = self.navegacao.zoom.nivel;
-        let ambar = crate::tema::cores::quente();
+        let cor_acesa = crate::tema::cores::aceso();
 
         let botao = |id: &'static str, alvo: Nivel, texto: SharedString, cx: &mut Context<Self>| {
             let aceso = nivel == alvo;
@@ -1392,7 +1392,10 @@ impl Revelacao {
                 .py(px(2.))
                 .rounded(crate::tema::canto(4.))
                 .text_size(px(11.))
-                .when(aceso, |b| b.bg(ambar).text_color(gpui_kit::black()))
+                .when(aceso, |b| {
+                    b.bg(cor_acesa)
+                        .text_color(crate::tema::cores::sobre_aceso())
+                })
                 .when(!aceso, |b| b.text_color(apagado))
                 .when(desligado, |b| b.opacity(0.4))
                 .when(!desligado, |b| {

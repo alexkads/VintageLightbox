@@ -142,6 +142,25 @@ mod paleta {
         pub slider_fino: bool,
         /// O fundo do cabeçalho de cada painel sanfonado. `None`: nenhum.
         pub sanfona: Option<u32>,
+        /// ✨ **O que está aceso**: o filtro escolhido, a foto marcada, o
+        /// botão ligado, o trilho do zoom. Nos temas do site é o âmbar; no
+        /// Lightroom, o cinza-claro. Não confundir com [`super::cores::quente`],
+        /// que é **situação** da foto (levada, editada, não salva) e continua
+        /// âmbar em todo tema.
+        pub aceso: u32,
+        pub sobre_aceso: u32,
+        pub aceso_pairando: u32,
+        pub aceso_ativo: u32,
+        /// ⭐ A estrela acesa da nota.
+        pub estrela: u32,
+        /// 🎞️ A grade de fotos em células, como a Biblioteca do Lightroom:
+        /// (fundo da grade, célula, célula em foco). `None`: a foto solta
+        /// sobre o fundo, como no site.
+        pub celulas: Option<(u32, u32, u32)>,
+        /// Cantos retos (o Lightroom quase não arredonda nada).
+        pub cantos_retos: bool,
+        /// Painéis da coluna corridos, sem moldura, com o título à direita.
+        pub paineis_corridos: bool,
     }
 
     /// A paleta de um modo, montada dos tokens do template.
@@ -197,6 +216,14 @@ mod paleta {
             punho: 0xffffff,
             slider_fino: false,
             sanfona: None,
+            aceso: AMBAR_400,
+            sobre_aceso: SOBRE_CLARO,
+            aceso_pairando: AMBAR_300,
+            aceso_ativo: AMBAR_500,
+            estrela: NOTA,
+            celulas: None,
+            cantos_retos: false,
+            paineis_corridos: false,
         }
     }
 
@@ -232,6 +259,14 @@ mod paleta {
         punho: 0xffffff,
         slider_fino: false,
         sanfona: None,
+        aceso: AMBAR_400,
+        sobre_aceso: SOBRE_CLARO,
+        aceso_pairando: AMBAR_300,
+        aceso_ativo: AMBAR_500,
+        estrela: NOTA,
+        celulas: None,
+        cantos_retos: false,
+        paineis_corridos: false,
     };
 
     /// 🌆 Cyberpunk: neon amarelo, rosa e ciano sobre azul-noite.
@@ -266,6 +301,14 @@ mod paleta {
         punho: 0xffffff,
         slider_fino: false,
         sanfona: None,
+        aceso: AMBAR_400,
+        sobre_aceso: SOBRE_CLARO,
+        aceso_pairando: AMBAR_300,
+        aceso_ativo: AMBAR_500,
+        estrela: NOTA,
+        celulas: None,
+        cantos_retos: false,
+        paineis_corridos: false,
     };
 
     /// 🎞️ Lightroom: cinzas graduados, o palco cinza médio atrás da foto, e a
@@ -306,6 +349,17 @@ mod paleta {
         punho: 0xc8c8c8,
         slider_fino: true,
         sanfona: Some(0x353535),
+        // O aceso do Lightroom: cinza-claro com letra escura.
+        aceso: 0xd6d6d6,
+        sobre_aceso: 0x1a1a1a,
+        aceso_pairando: 0xeaeaea,
+        aceso_ativo: 0xbdbdbd,
+        // As estrelas do Lightroom são brancas, e não âmbar.
+        estrela: 0xdedede,
+        // A Biblioteca: células cinza sobre o fundo, a em foco mais clara.
+        celulas: Some((0x303030, 0x3d3d3d, 0x555555)),
+        cantos_retos: true,
+        paineis_corridos: true,
     };
 
     // ── Tailwind 4, as famílias que o site usa por nome ────────────────────
@@ -372,7 +426,23 @@ pub fn medidas() -> &'static Medidas {
 /// dali, e continua 8 px no visual da casa. Com `raio = "large"` vira 11,2; com
 /// `none`, ou num estilo quadrado (`lyra`, `sera`), some.
 pub fn canto(px_com_raio_10: f32) -> gpui_kit::Pixels {
-    medidas().canto_da_tela(px_com_raio_10)
+    no_tema(medidas().canto_da_tela(px_com_raio_10))
+}
+
+/// 🎞️ **Um canto já medido, levado ao tema**: o Lightroom quase não
+/// arredonda — no máximo 2 px. Nos outros temas, o canto passa como veio.
+pub fn no_tema(canto: gpui_kit::Pixels) -> gpui_kit::Pixels {
+    let maximo = gpui_kit::px(2.);
+    if paleta_atual().cantos_retos && canto > maximo {
+        maximo
+    } else {
+        canto
+    }
+}
+
+/// Se o tema pede cantos retos — a pílula (`rounded_full`) vira retângulo.
+pub fn cantos_retos() -> bool {
+    paleta_atual().cantos_retos
 }
 
 /// As duas paletas do template: (claro, escuro).
@@ -599,6 +669,29 @@ pub mod cores {
         paleta_atual().sanfona.map(cor)
     }
 
+    /// ✨ O que está aceso (seleção, filtro escolhido, botão ligado).
+    pub fn aceso() -> Hsla {
+        cor(paleta_atual().aceso)
+    }
+
+    /// O texto legível sobre o [`aceso`].
+    pub fn sobre_aceso() -> Hsla {
+        cor(paleta_atual().sobre_aceso)
+    }
+
+    /// 🎞️ A grade em células, se o tema desenhar assim: (fundo da grade,
+    /// célula, célula em foco).
+    pub fn celulas() -> Option<(Hsla, Hsla, Hsla)> {
+        paleta_atual()
+            .celulas
+            .map(|(grade, celula, foco)| (cor(grade), cor(celula), cor(foco)))
+    }
+
+    /// Painéis corridos, sem moldura e com o título à direita (Lightroom).
+    pub fn paineis_corridos() -> bool {
+        paleta_atual().paineis_corridos
+    }
+
     /// Âmbar: o recorte aceso da galeria, sessão e balcão.
     pub fn quente() -> Hsla {
         cor(paleta::AMBAR_400)
@@ -717,9 +810,9 @@ pub mod cores {
         gpui_kit::rgba(0x00000080).into()
     }
 
-    /// A estrela acesa.
+    /// A estrela acesa — âmbar, ou a branca do Lightroom.
     pub fn nota() -> Hsla {
-        cor(paleta::NOTA)
+        cor(paleta_atual().estrela)
     }
 
     /// O sinalizador de escolhida.
@@ -773,13 +866,15 @@ pub mod cores {
     }
 }
 
-/// O botão da família âmbar: o recorte aceso da galeria.
-pub fn botao_quente(cx: &App) -> ButtonCustomVariant {
+/// O botão aceso: o recorte escolhido da galeria, o alternador ligado — o
+/// âmbar do site, ou o cinza-claro do Lightroom.
+pub fn botao_aceso(cx: &App) -> ButtonCustomVariant {
+    let p = paleta_atual();
     ButtonCustomVariant::new(cx)
-        .color(cores::quente())
-        .foreground(cores::sobre_quente())
-        .hover(gpui_kit::rgb(AMBAR_300).into())
-        .active(gpui_kit::rgb(AMBAR_500).into())
+        .color(cores::aceso())
+        .foreground(cores::sobre_aceso())
+        .hover(gpui_kit::rgb(p.aceso_pairando).into())
+        .active(gpui_kit::rgb(p.aceso_ativo).into())
 }
 
 /// O tema do site num modo — o que o app sempre instalou.
@@ -807,14 +902,18 @@ fn tema_da_paleta(
     // 🎨 Os cantos e a letra do estilo do template: `radius` é o dos botões e
     // campos do gpui-kit, `radius.lg` o dos menus, cartões e diálogos dele.
     let m = medidas();
-    config.insert(
-        "radius".into(),
-        Value::from(m.canto(m.campo.canto).round() as usize),
-    );
-    config.insert(
-        "radius.lg".into(),
-        Value::from(m.canto(m.cartao.canto).round() as usize),
-    );
+    // 🎞️ Com cantos retos, os do gpui-kit também: 2 nos controles, 3 nos
+    // menus, cartões e diálogos.
+    let (raio, raio_grande) = if p.cantos_retos {
+        (2, 3)
+    } else {
+        (
+            m.canto(m.campo.canto).round() as usize,
+            m.canto(m.cartao.canto).round() as usize,
+        )
+    };
+    config.insert("radius".into(), Value::from(raio));
+    config.insert("radius.lg".into(), Value::from(raio_grande));
     config.insert("font.size".into(), Value::from(m.letra));
     // O `shadow-xs` dos botões e campos do shadcn.
     config.insert("shadow".into(), Value::Bool(true));
@@ -1237,6 +1336,17 @@ mod testes {
     #[test]
     fn o_slider_dos_temas_de_antes_e_o_de_sempre() {
         for (i, p) in paletas().iter().enumerate().take(4) {
+            // O aceso, a estrela e a grade de sempre.
+            assert_eq!(p.aceso, AMBAR_400, "paleta {i}");
+            assert_eq!(p.sobre_aceso, SOBRE_CLARO, "paleta {i}");
+            assert_eq!(
+                (p.aceso_pairando, p.aceso_ativo),
+                (AMBAR_300, AMBAR_500),
+                "paleta {i}"
+            );
+            assert_eq!(p.estrela, NOTA, "paleta {i}");
+            assert_eq!(p.celulas, None, "paleta {i}");
+            assert!(!p.cantos_retos && !p.paineis_corridos, "paleta {i}");
             assert_eq!(p.trilho, None, "paleta {i}");
             assert_eq!(p.preenchimento, AMBAR_400, "paleta {i}");
             assert_eq!(p.punho, 0xffffff, "paleta {i}");
@@ -1250,6 +1360,20 @@ mod testes {
         // fundo da sanfona (a primeira versão, #1a1a1a sobre #1e1e1e, sumia).
         assert!(contraste(lr.trilho.unwrap(), lr.punho) >= 4.5);
         assert!(contraste(lr.fundo, lr.trilho.unwrap()) >= 2.0);
+    }
+
+    /// 🎞️ O pente fino do Lightroom continua legível: o texto sobre o aceso,
+    /// a estrela sobre o fundo, e o nome da foto na célula em foco.
+    #[test]
+    fn o_lightroom_acende_em_cinza_e_continua_legivel() {
+        let lr = &paleta::LIGHTROOM;
+        assert!(contraste(lr.aceso, lr.sobre_aceso) >= 4.5);
+        assert!(contraste(lr.fundo, lr.estrela) >= 4.5);
+        let (grade, celula, foco) = lr.celulas.expect("o Lightroom desenha células");
+        assert!(celula != grade && foco != celula, "as três se distinguem");
+        assert!(contraste(foco, lr.texto) >= 4.0, "o nome na célula em foco");
+        assert!(contraste(celula, lr.texto) >= 4.5, "o nome na célula");
+        assert!(lr.cantos_retos && lr.paineis_corridos);
     }
 
     #[test]

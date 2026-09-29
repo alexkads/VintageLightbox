@@ -5051,6 +5051,9 @@ impl Detalhe {
             .flex_wrap()
             .content_start()
             .gap(px(VAO_DA_GRADE))
+            // 🎞️ No Lightroom a grade é a Biblioteca: células sobre um fundo
+            // próprio. Só a cor — o vão e a largura continuam os da conta.
+            .when_some(cores::celulas(), |grade, (fundo, _, _)| grade.bg(fundo))
             .overflow_y_scroll()
             .children(filhos)
             .into_any_element()
@@ -5081,6 +5084,14 @@ impl Detalhe {
             .flex()
             .flex_col()
             .gap(px(2.))
+            // 🎞️ A célula da Biblioteca do Lightroom: cinza, e mais clara em
+            // foco. O respiro fica dentro da largura da conta.
+            .when_some(cores::celulas(), |celula, (_, fundo, foco)| {
+                celula
+                    .p(px(6.))
+                    .rounded(crate::tema::canto(2.))
+                    .bg(if em_foco { foco } else { fundo })
+            })
             .cursor_pointer()
             .on_click(
                 cx.listener(move |tela, evento: &gpui_kit::ClickEvent, _window, cx| {
@@ -5118,7 +5129,7 @@ impl Detalhe {
                     .border_color(if em_foco {
                         cx.theme().primary
                     } else if marcada {
-                        cores::quente()
+                        cores::aceso()
                     } else {
                         gpui_kit::transparent_black()
                     })

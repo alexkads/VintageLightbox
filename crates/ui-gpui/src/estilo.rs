@@ -143,7 +143,7 @@ pub fn botao_raso(id: impl Into<SharedString>) -> Button {
         .xsmall()
         .h(px(20.))
         .px(px(6.))
-        .rounded(m().canto_da_tela(4.))
+        .rounded(crate::tema::canto(4.))
 }
 
 /// `Badge variant="outline"`: a `Tag` do gpui-kit, em pílula de 22 px com a
@@ -152,7 +152,7 @@ pub fn selo_contorno(_cx: &App) -> Tag {
     let selo = m().selo;
     Tag::secondary()
         .outline()
-        .rounded(px(m().canto(selo.canto)))
+        .rounded(crate::tema::no_tema(px(m().canto(selo.canto))))
         .flex_none()
         .h(px(selo.altura + 2.))
         .px(px(selo.lados))
@@ -166,7 +166,7 @@ pub fn selo_contorno(_cx: &App) -> Tag {
 pub fn selo_colorido(cores: (Hsla, Hsla, Hsla)) -> Tag {
     let (fundo, borda, texto) = cores;
     Tag::custom(fundo, texto, borda)
-        .rounded(m().canto_da_tela(6.))
+        .rounded(crate::tema::canto(6.))
         .flex_none()
         .h(px(m().selo.altura))
         .px(px(6.))
@@ -184,7 +184,7 @@ pub fn selo_colorido(cores: (Hsla, Hsla, Hsla)) -> Tag {
 pub fn tecla(texto: impl Into<SharedString>) -> Div {
     div()
         .px(px(4.))
-        .rounded(m().canto_da_tela(4.))
+        .rounded(crate::tema::canto(4.))
         .border_1()
         .border_color(gpui_kit::rgba(0x80808066))
         .text_size(px(10.))
@@ -343,7 +343,7 @@ pub fn aviso(texto: impl Into<SharedString>, perigo: bool, cx: &App) -> Alert {
         .small()
         .px(px(16.))
         .py(px(12.))
-        .rounded(px(m().canto(Canto::LG)))
+        .rounded(crate::tema::no_tema(px(m().canto(Canto::LG))))
 }
 
 /// O véu do `Dialog` do site, e a caixa dele — as duas peças de um diálogo.
@@ -396,7 +396,7 @@ pub fn caixa_do_dialogo(cx: &App) -> Div {
         .w(px(440.))
         .p(px(dialogo.respiro))
         .gap(px(dialogo.vao))
-        .rounded(px(m().canto(dialogo.canto)))
+        .rounded(crate::tema::no_tema(px(m().canto(dialogo.canto))))
         .border_1()
         .border_color(tema.border)
         .bg(tema.popover)
@@ -455,7 +455,7 @@ pub fn opcao_do_dialogo(id: impl Into<SharedString>, cx: &App) -> Stateful<Div> 
         .px(px(12.))
         // `py-3` do site: 12 px em cima e embaixo, e a altura sai do conteúdo.
         .py(px(12.))
-        .rounded(px(m().canto(m().botao.canto)))
+        .rounded(crate::tema::no_tema(px(m().canto(m().botao.canto))))
         .border_1()
         .border_color(borda)
         .bg(fundo)
@@ -475,7 +475,7 @@ pub fn rodape_do_dialogo() -> Div {
 pub fn cartao(cx: &App) -> Div {
     let tema = cx.theme();
     div()
-        .rounded(px(m().canto(m().cartao.canto)))
+        .rounded(crate::tema::no_tema(px(m().canto(m().cartao.canto))))
         .border_1()
         .border_color(tema.border)
         .overflow_hidden()
@@ -506,7 +506,7 @@ pub fn chip(id: impl Into<SharedString>, escolhido: bool) -> Button {
         .ghost()
         .xsmall()
         .px(px(8.))
-        .rounded(m().canto_da_tela(4.))
+        .rounded(crate::tema::canto(4.))
         .text_xs()
         .selected(escolhido)
 }
@@ -533,11 +533,18 @@ pub fn ficha(
         .gap(px(6.))
         .h(px(controle.altura))
         .px(px(controle.lados))
-        .rounded_full()
+        // 🎞️ A pílula do site; no Lightroom, retângulo.
+        .map(|f| {
+            if crate::tema::cantos_retos() {
+                f.rounded(crate::tema::canto(2.))
+            } else {
+                f.rounded_full()
+            }
+        })
         .when(acesa, |f| {
-            f.bg(crate::tema::cores::quente())
-                .border_color(crate::tema::cores::quente())
-                .text_color(crate::tema::cores::sobre_quente())
+            f.bg(crate::tema::cores::aceso())
+                .border_color(crate::tema::cores::aceso())
+                .text_color(crate::tema::cores::sobre_aceso())
         })
         .child(div().child(rotulo.into()))
         .children(quantas.map(|n| {
@@ -549,14 +556,14 @@ pub fn ficha(
 }
 
 /// Um botão de ligar e desligar (o `Toggle` do site): contorno apagado, e o
-/// âmbar do tema quando ligado.
+/// aceso do tema quando ligado (o âmbar do site, o cinza do Lightroom).
 pub fn alternador(id: impl Into<SharedString>, ligado: bool, cx: &App) -> Button {
     Button::new(id.into())
         .small()
-        .rounded(m().canto_da_tela(4.))
+        .rounded(crate::tema::canto(4.))
         .map(|b| {
             if ligado {
-                b.custom(crate::tema::botao_quente(cx))
+                b.custom(crate::tema::botao_aceso(cx))
             } else {
                 b.outline()
             }
