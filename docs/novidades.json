@@ -1,11 +1,12 @@
 {
-  "versao": "0.1.41",
-  "titulo": "As barras da sessão e da Revelação ficaram do mesmo tamanho, e cabem inteiras em telas menores.",
+  "versao": "0.1.42",
+  "titulo": "Tema novo, Âmbar Rouge: claro, rosa-pó e vinho, com a seleção em âmbar dourado. E o Matrix e o Cyberpunk ficaram com uma cor só.",
   "importante": false,
   "novidades": [
-    "Os botões, fichas e seletores das três barras de cima da sessão ficaram menores, na mesma medida da barra da Revelação: em telas de notebook a barra de cima não corta mais o \"Copiar link\" nem esconde o \"Avisar cliente\".",
-    "O botão \"levadas · à venda · compradas\" virou só o ícone de informação: passe o mouse para ver os números, ou clique para abrir os detalhes como antes.",
-    "Na Revelação, \"Antes\", \"Enquadrar\" e \"Tela do cliente\" agora são botões iguais a \"Descartar\" e \"Baixar JPEG\": mesma borda, mesma altura, mesma letra. Ligados, acendem na cor do tema."
+    "No menu da conta, em Tema, há o \"Âmbar Rouge\": fundo rosa-pó, letra vinho, botões em rouge e o que está escolhido em âmbar dourado. É o único tema fixo claro.",
+    "No tema Matrix não há mais âmbar: o que está escolhido, as estrelas, os sliders e os avisos (levada, editada, não salva) são todos verde fósforo.",
+    "No tema Cyberpunk, tudo o que acende usa o mesmo amarelo neon da marca, e não mais um segundo amarelo.",
+    "Os trilhos coloridos da Revelação (Temperatura, Matiz, HSL) continuam em todos os temas: eles mostram a cor que o ajuste põe na foto."
   ],
-  "por_que_atualizar": "Tudo cabe na tela sem cortar botão, e as duas telas do dia a dia falam a mesma língua visual."
+  "por_que_atualizar": "Cada tema fala uma cor só, e quem prefere um visual claro e delicado tem o Âmbar Rouge."
 }
