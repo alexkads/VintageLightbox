@@ -71,6 +71,46 @@ pub fn botao_contorno(id: impl Into<SharedString>, _cx: &App) -> Button {
     botao(id).outline()
 }
 
+/// 📏 **O `Button size="sm"` do template** — as barras densas, como as três da
+/// sessão, na escala da barra da Revelação (dono, 28/09/2026: *"eles são
+/// maiores em relação à tela de revelação"*). Altura, respiro e letra saem de
+/// `Medidas::botao_pequeno`: 28 px e 12,8 no visual da casa.
+///
+/// ⚠️ **A letra vem do tamanho do kit, e não de `text_size`**: o `Button`
+/// escreve o rótulo num conteúdo interno com o `button_text_size` do tamanho
+/// (`small` = 14, `xsmall` = 12) e ignora o `text_size` de fora — a primeira
+/// versão pedia 12,8 e saía 14, do tamanho do botão normal. O `xsmall` dá 12,
+/// a letra das pílulas que a Revelação tinha; altura e respiro são os do
+/// template.
+fn botao_pequeno(id: impl Into<SharedString>) -> Button {
+    let c = m().botao_pequeno;
+    Button::new(id.into())
+        .xsmall()
+        .h(px(c.altura))
+        .px(px(c.lados))
+}
+
+/// [`botao_contorno`] no tamanho pequeno.
+pub fn botao_contorno_pequeno(id: impl Into<SharedString>, _cx: &App) -> Button {
+    botao_pequeno(id).outline()
+}
+
+/// [`botao_primario`] no tamanho pequeno.
+pub fn botao_primario_pequeno(id: impl Into<SharedString>, _cx: &App) -> Button {
+    botao_pequeno(id).primary()
+}
+
+/// [`botao_secundario`] no tamanho pequeno.
+pub fn botao_secundario_pequeno(id: impl Into<SharedString>, _cx: &App) -> Button {
+    botao_pequeno(id).secondary()
+}
+
+/// Um campo (`Select`, `Input`) na altura do botão pequeno, para ficar
+/// alinhado a ele numa barra densa.
+pub fn campo_pequeno<E: Styled>(elemento: E) -> E {
+    elemento.h(px(m().botao_pequeno.altura))
+}
+
 /// `Button` padrão: a cor da marca.
 pub fn botao_primario(id: impl Into<SharedString>, _cx: &App) -> Button {
     botao(id).primary()
@@ -524,10 +564,11 @@ pub fn ficha(
     cx: &App,
 ) -> Toggle {
     let apagado = cx.theme().muted_foreground;
-    let controle = m().botao;
+    // 📏 A ficha mora nas barras densas da sessão: o tamanho pequeno.
+    let controle = m().botao_pequeno;
     Toggle::new(id.into())
         .outline()
-        .small()
+        .xsmall()
         .checked(acesa)
         .flex_none()
         .gap(px(6.))

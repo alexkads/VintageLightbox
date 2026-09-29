@@ -3285,9 +3285,7 @@ impl Revelacao {
             .child(
                 pilula("revelacao-antes", self.mostrando_original, !pronto, cx)
                     .child("Antes")
-                    .tooltip(|w, cx| {
-                        Tooltip::new("Segure para ver a foto sem ajuste (ou a tecla \\)").build(w, cx)
-                    })
+                    .tooltip("Segure para ver a foto sem ajuste (ou a tecla \\)")
                     .when(pronto, |b| {
                         b.on_mouse_down(
                             MouseButton::Left,
@@ -3297,15 +3295,13 @@ impl Revelacao {
                             MouseButton::Left,
                             cx.listener(|tela, _, _, cx| tela.ver_o_antes(false, cx)),
                         )
+                        // Soltar fora do botão também devolve a revelada. Sem
+                        // `on_hover` aqui: o `Button` do kit já registra o dele,
+                        // e o GPUI aceita um só por elemento.
                         .on_mouse_up_out(
                             MouseButton::Left,
                             cx.listener(|tela, _, _, cx| tela.ver_o_antes(false, cx)),
                         )
-                        .on_hover(cx.listener(|tela, dentro: &bool, _, cx| {
-                            if !dentro {
-                                tela.ver_o_antes(false, cx);
-                            }
-                        }))
                     }),
             )
             .child(
@@ -3317,9 +3313,7 @@ impl Revelacao {
                 )
                 .child(Icon::new(Icone::Crop).size(px(14.)))
                 .child("Enquadrar")
-                .tooltip(|w, cx| {
-                    Tooltip::new("Girar, espelhar, endireitar e recortar (tecla R)").build(w, cx)
-                })
+                .tooltip("Girar, espelhar, endireitar e recortar (tecla R)")
                 .when(pronto && pode_revelar, |b| {
                     b.on_click(cx.listener(|tela, _ev, window, cx| {
                         tela.prever(None, cx);
@@ -3341,19 +3335,16 @@ impl Revelacao {
                     .when(self.cliente_aberto, |b| {
                         b.child(crate::cliente::tecla_da_tela_cheia())
                     })
-                    .tooltip({
-                        let texto = if self.cliente_aberto {
-                            format!(
-                                "Fechar a tela do cliente · {} põe e tira a tela cheia",
-                                crate::cliente::texto_da_tela_cheia()
-                            )
-                        } else {
-                            format!(
-                                "Abrir a tela do cliente no outro monitor: ela mostra esta foto, revelada, enquanto você ajusta · depois, {} põe e tira a tela cheia",
-                                crate::cliente::texto_da_tela_cheia()
-                            )
-                        };
-                        move |w, cx| Tooltip::new(texto.clone()).build(w, cx)
+                    .tooltip(if self.cliente_aberto {
+                        format!(
+                            "Fechar a tela do cliente · {} põe e tira a tela cheia",
+                            crate::cliente::texto_da_tela_cheia()
+                        )
+                    } else {
+                        format!(
+                            "Abrir a tela do cliente no outro monitor: ela mostra esta foto, revelada, enquanto você ajusta · depois, {} põe e tira a tela cheia",
+                            crate::cliente::texto_da_tela_cheia()
+                        )
                     })
                     .on_click(cx.listener(|_tela, _ev, _window, cx| {
                         cx.emit(PedidoDaRevelacao::TelaDoCliente);
@@ -3365,11 +3356,9 @@ impl Revelacao {
             .when(self.marcadas.len() > 1, |barra| {
                 let quantas = self.marcadas.len();
                 barra.child(
-                    Button::new("revelacao-sincronizar")
+                    crate::estilo::botao_contorno_pequeno("revelacao-sincronizar", cx)
                         .icon(Icon::new(Icone::Copy))
                         .label(format!("Sincronizar {quantas}"))
-                        .small()
-                        .outline()
                         .tooltip(
                             "Copiar os ajustes desta foto para as outras escolhidas na tira — elas sobem quando você salvar",
                         )
@@ -3386,7 +3375,7 @@ impl Revelacao {
             // sair". Aqui elas **pedem à raiz**, que é quem tem o modal da
             // pasta de destino e a conversa com o pós-venda.
             .child(
-                Button::new("revelacao-exportar")
+                crate::estilo::botao_contorno_pequeno("revelacao-exportar", cx)
                     .when(!self.gerando_jpeg, |b| b.icon(Icon::new(Icone::Download)))
                     .loading(self.gerando_jpeg)
                     .label(if self.gerando_jpeg {
@@ -3394,8 +3383,6 @@ impl Revelacao {
                     } else {
                         "Baixar JPEG"
                     })
-                    .small()
-                    .outline()
                     // O `ocupado` do site: um JPEG por vez, e nenhum enquanto o
                     // lote do "Salvar" está subindo.
                     .disabled(!pronto || ocupado)
@@ -3409,12 +3396,10 @@ impl Revelacao {
                     dica,
                     habilitado,
                 } = self.botao_de_salvar();
-                Button::new("revelacao-salvar-na-galeria")
+                crate::estilo::botao_primario_pequeno("revelacao-salvar-na-galeria", cx)
                     .icon(Icon::new(Icone::Save))
                     .label(rotulo)
                     .tooltip(dica)
-                    .small()
-                    .primary()
                     .disabled(!habilitado)
                     .on_click(cx.listener(|_tela, _ev, _window, cx| {
                         cx.emit(PedidoDaRevelacao::SalvarNaGaleria);
@@ -3448,34 +3433,20 @@ impl Revelacao {
     }
 }
 
-/// Os botões pequenos da barra do site (`rounded px-2 py-1 text-xs`):
-/// cinza, ou âmbar quando ligados.
-fn pilula(
-    id: &'static str,
-    ligada: bool,
-    desligada: bool,
-    cx: &mut Context<Revelacao>,
-) -> gpui_kit::Stateful<gpui_kit::Div> {
-    let (fundo, texto) = (cx.theme().muted, cx.theme().foreground);
-    div()
-        .id(id)
-        .flex()
-        .items_center()
-        .gap(px(4.))
-        .px(px(8.))
-        .py(px(4.))
-        .rounded(crate::tema::canto(4.))
-        .text_xs()
-        .when(ligada, |b| {
-            b.bg(gpui_kit::rgb(0xfbbf24)).text_color(gpui_kit::black())
-        })
-        .when(!ligada, |b| {
-            b.bg(fundo)
-                .text_color(texto.opacity(0.9))
-                .hover(move |s| s.text_color(texto))
-        })
-        .when(desligada, |b| b.opacity(0.4))
-        .when(!desligada, |b| b.cursor_pointer())
+/// 📏 **Os botões de estado da barra** ("Antes", "Enquadrar", "Tela do
+/// cliente"): o `Button` de contorno do kit no tamanho pequeno do template —
+/// o mesmo de "Descartar", "Baixar JPEG" e das barras da sessão (dono,
+/// 28/09/2026: *"botões fora de padrão"*; eram pílulas desenhadas à mão, sem
+/// borda e com letra menor que a dos vizinhos). Ligado, acende no aceso do
+/// tema.
+fn pilula(id: &'static str, ligada: bool, desligada: bool, cx: &mut Context<Revelacao>) -> Button {
+    let botao = crate::estilo::botao_contorno_pequeno(id, cx);
+    let botao = if ligada {
+        botao.custom(crate::tema::botao_aceso(cx))
+    } else {
+        botao
+    };
+    botao.disabled(desligada)
 }
 
 /// Ajuste **ou** enquadramento fora do neutro — o `temOQueZerar` do site.

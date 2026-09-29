@@ -4247,7 +4247,7 @@ impl Detalhe {
                         })
                         .trigger(
                             // Os números da galeria, como o "detalhes" do site.
-                            estilo::botao_contorno("sessao-contagem", cx)
+                            estilo::botao_contorno_pequeno("sessao-contagem", cx)
                                 .debug_selector(|| "sessao-contagem".into())
                                 .text_color(apagado)
                                 .child(Icon::new(Icone::Info).size(px(14.)))
@@ -4271,8 +4271,8 @@ impl Detalhe {
             // No site é uma gaveta ao lado do "Dados do cliente", e é onde se
             // corrige um voucher errado sem recriar a sessão.
             .child(estilo::desligado(
-                estilo::botao_contorno("sessao-atendimento", cx)
-                    .child(Icon::new(Icone::ClipboardList).size(px(16.)))
+                estilo::botao_contorno_pequeno("sessao-atendimento", cx)
+                    .child(Icon::new(Icone::ClipboardList).size(px(14.)))
                     .child(SharedString::from(match self.quantas_associacoes() {
                         0 => "Atendimento".to_string(),
                         n => format!("Atendimento · {n}"),
@@ -4286,14 +4286,14 @@ impl Detalhe {
             ))
             // 🏠 **O estúdio da sessão**, como no cabeçalho do site.
             .children(self.escolha_do_estudio.as_ref().map(|escolha| {
-                div()
-                    .w(px(200.))
-                    .child(estilo::campo(Select::new(escolha).placeholder("Estúdio…")))
+                div().w(px(200.)).child(estilo::campo_pequeno(
+                    Select::new(escolha).xsmall().placeholder("Estúdio…"),
+                ))
             }))
             .child(estilo::desligado(
-                estilo::botao_contorno("sessao-editar-cliente", cx)
+                estilo::botao_contorno_pequeno("sessao-editar-cliente", cx)
                     .debug_selector(|| "sessao-editar-cliente".into())
-                    .child(Icon::new(Icone::ClipboardList).size(px(16.)))
+                    .child(Icon::new(Icone::ClipboardList).size(px(14.)))
                     .child("Dados do cliente")
                     .when(!sem_galeria, |b| {
                         b.on_click(
@@ -4303,8 +4303,8 @@ impl Detalhe {
                 sem_galeria,
             ))
             .child(estilo::desligado(
-                estilo::botao_contorno("sessao-link", cx)
-                    .child(Icon::new(Icone::Link2).size(px(16.)))
+                estilo::botao_contorno_pequeno("sessao-link", cx)
+                    .child(Icon::new(Icone::Link2).size(px(14.)))
                     .child(if self.link.is_some() {
                         "Copiar de novo"
                     } else {
@@ -4319,8 +4319,8 @@ impl Detalhe {
             // contato — o mesmo gesto da web. Só com WhatsApp, sem botão.
             .when(email.is_some() || sem_email, |cabecalho| {
                 cabecalho.child(estilo::desligado(
-                    estilo::botao_contorno("sessao-avisar", cx)
-                        .child(Icon::new(Icone::Send).size(px(16.)))
+                    estilo::botao_contorno_pequeno("sessao-avisar", cx)
+                        .child(Icon::new(Icone::Send).size(px(14.)))
                         .child(if self.avisando {
                             "Avisando…"
                         } else {
@@ -4590,7 +4590,7 @@ impl Detalhe {
             .items_center()
             .gap(px(8.))
             .px(px(12.))
-            .py(px(8.))
+            .py(px(6.))
             .border_b_1()
             // O destaque de "solte aqui": a faixa acende enquanto o arrasto passa.
             .border_color(if self.arrastando { primaria } else { borda })
@@ -4613,9 +4613,9 @@ impl Detalhe {
             // escolhida. `debug_selector` é o que deixa o teste clicar onde o
             // dedo clica.
             .child(estilo::desligado(
-                estilo::botao_primario("detalhe-importar", cx)
+                estilo::botao_primario_pequeno("detalhe-importar", cx)
                     .debug_selector(|| "detalhe-importar".into())
-                    .child(Icon::new(Icone::Upload).size(px(16.)))
+                    .child(Icon::new(Icone::Upload).size(px(14.)))
                     .child("Importar fotos")
                     .when(!(ocupado || sem_sessao), |b| {
                         b.on_click(
@@ -4627,16 +4627,16 @@ impl Detalhe {
             // ⚠️ **Exportar mora ao lado de Importar**: por aqui as fotos
             // entram, por ali saem. Sem seleção exporta o que a grade mostra.
             .child(estilo::desligado(
-                estilo::botao_contorno("detalhe-exportar", cx)
+                estilo::botao_contorno_pequeno("detalhe-exportar", cx)
                     .debug_selector(|| "detalhe-exportar".into())
-                    .child(Icon::new(Icone::FolderInput).size(px(16.)))
+                    .child(Icon::new(Icone::FolderInput).size(px(14.)))
                     .child("Exportar")
                     .when(!(sem_sessao || visiveis == 0), |b| {
                         b.on_click(cx.listener(|_tela, _ev, _window, cx| cx.emit(Pedido::Exportar)))
                     }),
                 sem_sessao || visiveis == 0,
             ))
-            .child(div().text_sm().text_color(apagado).child("Entram como"))
+            .child(div().text_xs().text_color(apagado).child("Entram como"))
             .child(ficha("sem marcação", None, cx))
             .child(ficha("à venda", Some(EstadoNoBalcao::Disponivel), cx))
             .child(ficha("levadas", Some(EstadoNoBalcao::LevadaNoBalcao), cx))
@@ -4644,9 +4644,9 @@ impl Detalhe {
             // arquivos, como no site: a sessão mista sobe em levas, e sem ela
             // toda foto nascia na faixa da galeria.
             .children(self.escolha_da_leva.as_ref().map(|escolha| {
-                div()
-                    .w(px(232.))
-                    .child(estilo::campo(Select::new(escolha).placeholder("Faixa…")))
+                div().w(px(232.)).child(estilo::campo_pequeno(
+                    Select::new(escolha).xsmall().placeholder("Faixa…"),
+                ))
             }))
             .child(
                 div()
@@ -4695,7 +4695,7 @@ impl Detalhe {
             .items_center()
             .gap(px(6.))
             .px(px(12.))
-            .py(px(8.))
+            .py(px(6.))
             .border_b_1()
             .border_color(borda)
             .children(FILTROS.into_iter().filter_map(|(rotulo, filtro)| {
@@ -4722,7 +4722,7 @@ impl Detalhe {
                 let ambar = cx.theme().warning;
                 barra.child(
                     // O `Button` de contorno do kit, no âmbar do aviso.
-                    estilo::botao_contorno("sessao-nao-salvas", cx)
+                    estilo::botao_contorno_pequeno("sessao-nao-salvas", cx)
                         .warning()
                         .debug_selector(|| "sessao-nao-salvas".into())
                         .rounded_full()
@@ -4750,20 +4750,20 @@ impl Detalhe {
                     .items_center()
                     .gap(px(6.))
                     .text_color(apagado)
-                    .child(Icon::new(Icone::ZoomOut).size(px(16.)))
+                    .child(Icon::new(Icone::ZoomOut).size(px(14.)))
                     .child(
                         div()
                             .w(px(112.))
                             .child(crate::estilo::slider(&self.zoom_slider)),
                     )
-                    .child(Icon::new(Icone::ZoomIn).size(px(16.))),
+                    .child(Icon::new(Icone::ZoomIn).size(px(14.))),
             )
             // 🔑 **Sem exigir foco**, como o botão da barra do site: entra no
             // modo e a tira faz o resto.
             .child(estilo::desligado(
                 // `variante="secondary"`, como o `AbrirRevelacao` da grade do site.
-                estilo::botao_secundario("sessao-revelar", cx)
-                    .child(Icon::new(Icone::SlidersHorizontal).size(px(16.)))
+                estilo::botao_secundario_pequeno("sessao-revelar", cx)
+                    .child(Icon::new(Icone::SlidersHorizontal).size(px(14.)))
                     .child("Revelar")
                     .when(pode_revelar, |b| {
                         b.on_click(cx.listener(|tela, _ev, _window, cx| tela.revelar_todas(cx)))
@@ -4771,9 +4771,9 @@ impl Detalhe {
                 !pode_revelar,
             ))
             .child(
-                estilo::botao_contorno("sessao-tela-do-cliente", cx)
+                estilo::botao_contorno_pequeno("sessao-tela-do-cliente", cx)
                     .when(self.cliente_aberta, |b| b.bg(acento))
-                    .child(Icon::new(Icone::Monitor).size(px(16.)))
+                    .child(Icon::new(Icone::Monitor).size(px(14.)))
                     .child(if self.cliente_aberta {
                         "Fechar a tela do cliente"
                     } else {
@@ -4804,16 +4804,16 @@ impl Detalhe {
             .when(marcadas > 0, |barra| {
                 barra
                     .child(
-                        estilo::botao_contorno("sessao-negociar", cx)
-                            .child(Icon::new(Icone::ShoppingCart).size(px(16.)))
+                        estilo::botao_contorno_pequeno("sessao-negociar", cx)
+                            .child(Icon::new(Icone::ShoppingCart).size(px(14.)))
                             .child(format!("Negociação… ({marcadas})"))
                             .on_click(cx.listener(|tela, _ev, _window, cx| {
                                 tela.pedir_negociacao(tela.marcadas(), false, cx)
                             })),
                     )
                     .child(
-                        estilo::botao_contorno("sessao-imprimir", cx)
-                            .child(Icon::new(Icone::Printer).size(px(16.)))
+                        estilo::botao_contorno_pequeno("sessao-imprimir", cx)
+                            .child(Icon::new(Icone::Printer).size(px(14.)))
                             .child("Imprimir…")
                             .on_click(cx.listener(|tela, _ev, _window, cx| {
                                 cx.emit(Pedido::Imprimir(tela.marcadas()))
@@ -4822,9 +4822,9 @@ impl Detalhe {
             })
             // ☑️ O `Checkbox` do gpui-kit, na altura dos botões da barra.
             .child(
-                estilo::campo(h_flex().flex_none()).child(
+                estilo::campo_pequeno(h_flex().flex_none()).child(
                     Checkbox::new("sessao-selecionar-visiveis")
-                        .small()
+                        .xsmall()
                         .checked(todas_marcadas)
                         .disabled(visiveis == 0)
                         .label(format!(

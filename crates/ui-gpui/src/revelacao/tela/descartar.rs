@@ -25,10 +25,10 @@
 use std::sync::Arc;
 
 use adapters::view_models::PhotoViewModel;
-use gpui_kit::component::button::{Button, ButtonVariant};
+use gpui_kit::component::button::ButtonVariant;
 use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::menu::{DropdownMenu, PopupMenuItem};
-use gpui_kit::component::{Disableable, Icon, Sizable, WindowExt};
+use gpui_kit::component::{Disableable, Icon, WindowExt};
 use gpui_kit::{div, prelude::*, AnyElement, Context, SharedString, Window};
 use infrastructure::gpu_adjustments::ParametrosLocais;
 
@@ -270,11 +270,9 @@ impl Revelacao {
         let quantas = self.quantas_a_descartar();
         let esta_mudou = self.aberta_a_salvar();
         let tela = cx.entity().downgrade();
-        Button::new("revelacao-descartar")
+        crate::estilo::botao_contorno_pequeno("revelacao-descartar", cx)
             .icon(Icon::new(Icone::RotateCcw))
             .label("Descartar")
-            .small()
-            .outline()
             .tooltip(if quantas == 0 {
                 "Nada a descartar: o que está no canvas já é o que está na galeria"
             } else {
