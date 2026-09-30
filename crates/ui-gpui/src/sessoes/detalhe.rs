@@ -4031,6 +4031,21 @@ impl Detalhe {
                 ) {
                     cx.emit(Pedido::ClienteNoBot(aviso.into()));
                 }
+                // O que o bot gravou (e-mail, WhatsApp, origem) chega ao
+                // cabeçalho e ao "Avisar cliente": relê a sessão — ver
+                // `mudou_algum_dado`.
+                if super::qr_do_bot::mudou_algum_dado(
+                    self.bot.anteriores.as_deref(),
+                    &situacao.clientes,
+                ) {
+                    if let (Some(sessao), Some(id)) = (self.sessao.clone(), self.galeria_id.clone())
+                    {
+                        self.publicador
+                            .abrir_galeria(sessao, id, self.recados.0.clone());
+                        self.carregando = true;
+                        self.acompanhar(cx);
+                    }
+                }
                 self.bot.anteriores = Some(situacao.clientes.clone());
                 self.bot.situacao = Some(situacao);
                 cx.emit(Pedido::ConviteNaTela(self.bot.para_a_tela_do_cliente()));
@@ -8999,6 +9014,11 @@ mod testes {
         assert!(
             vistos.contains(&"chegou: Maria iniciou a conversa pelo WhatsApp".to_string()),
             "{vistos:?}"
+        );
+        assert_eq!(
+            publicador.abertas().len(),
+            2,
+            "o bot gravou: a sessão é relida (o e-mail chega ao cabeçalho e ao Avisar)"
         );
         assert_eq!(vistos.last().unwrap(), "tela: RF-ABC234 Conversando");
 

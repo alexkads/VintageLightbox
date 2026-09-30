@@ -48,6 +48,9 @@ pub struct ClienteNoBot {
     pub nome_completo: Option<String>,
     /// RFC 3339, como o site manda — só serve de chave.
     pub iniciado_em: String,
+    /// RFC 3339 — muda a cada resposta; é o que diz que o bot gravou algo.
+    #[serde(default)]
+    pub atualizado_em: String,
 }
 
 /// O caminho da situação no site.
@@ -144,6 +147,28 @@ pub fn novidades_do_bot(antes: Option<&[ClienteNoBot]>, depois: &[ClienteNoBot])
             Some(_) => None,
         })
         .collect()
+}
+
+/// O bot gravou algo novo na sessão entre duas leituras?
+///
+/// 🔑 **É o que decide reler a sessão**, e não só o cartão: o e-mail que o
+/// cliente respondeu tem de chegar ao cabeçalho e ao "Avisar cliente" — senão
+/// o balconista clica em Avisar e recebe o pedido de um e-mail que já está
+/// gravado. A primeira leitura não conta: é o estado que já existia. O
+/// `mudouAlgumDado` do site.
+pub fn mudou_algum_dado(antes: Option<&[ClienteNoBot]>, depois: &[ClienteNoBot]) -> bool {
+    let Some(antes) = antes else {
+        return false;
+    };
+    let marca = |lista: &[ClienteNoBot]| {
+        let mut v: Vec<String> = lista
+            .iter()
+            .map(|c| format!("{}:{}:{}", c.canal, c.iniciado_em, c.atualizado_em))
+            .collect();
+        v.sort();
+        v
+    };
+    marca(antes) != marca(depois)
 }
 
 /// O que a sessão manda à segunda tela.
@@ -287,7 +312,31 @@ mod testes {
             passo: passo.into(),
             nome_completo: nome_completo.map(str::to_string),
             iniciado_em: "2026-09-30T12:00:00Z".into(),
+            atualizado_em: "2026-09-30T12:00:00Z".into(),
         }
+    }
+
+    #[test]
+    fn rele_a_sessao_so_quando_o_bot_gravou_algo_novo() {
+        let um = cliente("web", "nome", None);
+        assert!(
+            !mudou_algum_dado(None, std::slice::from_ref(&um)),
+            "a primeira leitura não relê"
+        );
+        assert!(!mudou_algum_dado(
+            Some(std::slice::from_ref(&um)),
+            std::slice::from_ref(&um)
+        ));
+        assert!(
+            mudou_algum_dado(Some(&[]), std::slice::from_ref(&um)),
+            "chegou alguém"
+        );
+        let mut respondeu = um.clone();
+        respondeu.atualizado_em = "2026-09-30T12:01:00Z".into();
+        assert!(
+            mudou_algum_dado(Some(&[um]), &[respondeu]),
+            "respondeu uma pergunta"
+        );
     }
 
     #[test]
