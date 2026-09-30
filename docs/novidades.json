@@ -1,12 +1,13 @@
 {
-  "versao": "0.1.44",
-  "titulo": "Formatou o cartão sem querer? A Importação agora recupera as fotos que ainda estão nele.",
+  "versao": "0.1.45",
+  "titulo": "Cartão apagado ou formatado? \"Recuperar cartão\" agora fica no menu lateral.",
   "importante": false,
   "novidades": [
-    "Na Importação, o botão \"Recuperar cartão formatado…\" busca as fotos de um cartão formatado antes de importar. Escolha o cartão e uma pasta no computador, digite a senha do computador e acompanhe a busca; no fim, \"Importar\" abre as fotos achadas.",
-    "Até terminar, não grave nada no cartão e não tire fotos com ele: cada foto nova apaga o que ainda dá para salvar.",
-    "Fotos CR3 (Canon) passam a aparecer na grade da Importação.",
-    "Na Biblioteca, a grade ganhou as cores do Lightroom: a foto marcada fica um tom mais clara e a foto em foco quase branca."
+    "A recuperação saiu de dentro da Importação e ganhou lugar próprio no menu lateral: \"Recuperar cartão\". Escolha o cartão e uma pasta no computador, digite a senha do computador e acompanhe a busca.",
+    "Serve para fotos apagadas por engano e para cartão formatado sem querer, sem precisar de programa de fora.",
+    "No fim, \"Importar\" leva você às sessões: abra a do cliente e, em Importar fotos › Do cartão ou pasta…, as fotos recuperadas são a primeira opção.",
+    "Os JPEG da Nikon voltam inteiros e uma vez só: antes, cada foto vinha acompanhada de duas miniaturas como se fossem fotos a mais.",
+    "Até terminar, não grave nada no cartão e não tire fotos com ele: cada foto nova apaga o que ainda dá para salvar."
   ],
-  "por_que_atualizar": "Um cartão formatado sem querer não perde mais a sessão."
+  "por_que_atualizar": "Quem formatou o cartão acha a recuperação no menu, na hora do susto, e as fotos voltam sem duplicatas."
 }
