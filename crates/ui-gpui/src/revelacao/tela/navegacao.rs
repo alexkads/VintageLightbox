@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::component::button::Button;
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Disableable, Icon, Sizable};
 use gpui_kit::{
     canvas, div, img, prelude::*, px, AnyElement, Bounds, Context, Div, MouseButton,
@@ -1531,12 +1532,84 @@ impl Revelacao {
         cx.notify();
     }
 
+    /// 🔍 Recolhe ou abre o Navegador da coluna, e lembra neste computador.
+    pub fn alternar_navegador(&mut self, cx: &mut Context<Self>) {
+        self.predefinicoes.ordem.alternar_navegador();
+        crate::revelacao::presets::ordem::gravar(&self.predefinicoes.ordem);
+        cx.notify();
+    }
+
     /// O Navegador do site: o nível, os atalhos de zoom e a miniatura com o
     /// retângulo do que está na tela, arrastável.
+    ///
+    /// 📁 **Recolhível** (dono, 2026-09-30: *"dê a opção de recolher o painel
+    /// do zoom"*): o título é a pasta, com a seta das predefinições logo
+    /// abaixo. Recolhido, fica só a linha do título com o nível — a lista
+    /// ganha a altura dos botões e da miniatura, e o zoom continua pelo palco
+    /// e pelos atalhos.
     pub(super) fn navegador(&self, cx: &mut Context<Self>) -> AnyElement {
         let tema = cx.theme();
-        let (apagado, borda, fundo) = (tema.muted_foreground, tema.border, tema.muted);
+        let (apagado, borda, frente) = (tema.muted_foreground, tema.border, tema.foreground);
+        let recolhido = self.predefinicoes.ordem.navegador_recolhido();
         let desligado = self.edicao.is_some() || self.aberta.is_none();
+        let nivel = self.navegacao.zoom.nivel;
+
+        v_flex()
+            .pb(px(12.))
+            .mb(px(12.))
+            .border_b_1()
+            .border_color(borda)
+            .child(
+                h_flex()
+                    .id("navegador-pasta")
+                    .debug_selector(|| "navegador-pasta".into())
+                    .when(!recolhido, |d| d.mb(px(4.)))
+                    .items_center()
+                    .gap(px(4.))
+                    .rounded(crate::tema::canto(4.))
+                    .text_size(crate::tema::letra::em(11.))
+                    .text_color(apagado)
+                    .cursor_pointer()
+                    .hover(move |s| s.text_color(frente))
+                    .child(
+                        Icon::new(if recolhido {
+                            Icone::ChevronRight
+                        } else {
+                            Icone::ChevronDown
+                        })
+                        .size(px(12.)),
+                    )
+                    .child("NAVEGADOR")
+                    .child(
+                        div()
+                            .ml_auto()
+                            .text_color(frente)
+                            .child(zoom::rotulo_do_nivel(nivel)),
+                    )
+                    .tooltip(move |window, cx| {
+                        Tooltip::new(if recolhido {
+                            "Abrir o Navegador"
+                        } else {
+                            "Recolher o Navegador"
+                        })
+                        .build(window, cx)
+                    })
+                    .on_click(cx.listener(|tela, ev: &gpui_kit::ClickEvent, _, cx| {
+                        if ev.standard_click() {
+                            tela.alternar_navegador(cx);
+                        }
+                    })),
+            )
+            .when(!recolhido, |bloco| {
+                bloco.child(self.corpo_do_navegador(desligado, cx))
+            })
+            .into_any_element()
+    }
+
+    /// Os atalhos de zoom e a miniatura — o que some com o Navegador recolhido.
+    fn corpo_do_navegador(&self, desligado: bool, cx: &mut Context<Self>) -> impl IntoElement {
+        let tema = cx.theme();
+        let (apagado, fundo) = (tema.muted_foreground, tema.muted);
         let nivel = self.navegacao.zoom.nivel;
         let cor_acesa = crate::tema::cores::aceso();
 
@@ -1591,23 +1664,6 @@ impl Revelacao {
         let medidor = cx.entity();
 
         v_flex()
-            .pb(px(12.))
-            .mb(px(12.))
-            .border_b_1()
-            .border_color(borda)
-            .child(
-                h_flex()
-                    .mb(px(4.))
-                    .text_size(crate::tema::letra::em(11.))
-                    .text_color(apagado)
-                    .child("NAVEGADOR")
-                    .child(
-                        div()
-                            .ml_auto()
-                            .text_color(tema.foreground)
-                            .child(zoom::rotulo_do_nivel(nivel)),
-                    ),
-            )
             .child(
                 h_flex()
                     .mb(px(6.))
@@ -1661,6 +1717,7 @@ impl Revelacao {
                     .child(match miniatura {
                         Some((imagem, w, h)) => div()
                             .id("navegador-miniatura")
+                            .debug_selector(|| "navegador-miniatura".into())
                             .relative()
                             .w(px(w))
                             .h(px(h))

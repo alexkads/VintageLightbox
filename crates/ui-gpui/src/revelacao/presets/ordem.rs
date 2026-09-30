@@ -151,6 +151,9 @@ pub fn deslocar(ids: &[String], id: &str, passo: i32) -> Vec<String> {
     saida
 }
 
+/// A chave do Navegador entre os recolhidos — ao lado das dos grupos.
+const NAVEGADOR: &str = "navegador";
+
 /// As listas guardadas.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Ordem {
@@ -162,7 +165,8 @@ pub struct Ordem {
     #[serde(default)]
     pub favoritas: Vec<String>,
     /// 📁 Os grupos fechados na coluna — a pasta recolhida do Lightroom
-    /// (dono, 2026-09-30: *"essa listagem de preset tá ruim de usar"*).
+    /// (dono, 2026-09-30: *"essa listagem de preset tá ruim de usar"*) —, e o
+    /// Navegador, se estiver recolhido.
     #[serde(default)]
     pub recolhidos: Vec<String>,
 }
@@ -192,15 +196,34 @@ impl Ordem {
     }
 
     pub fn recolhido(&self, grupo: Grupo) -> bool {
-        self.recolhidos.iter().any(|c| c == grupo.chave())
+        self.recolhido_por_chave(grupo.chave())
     }
 
     /// Abre ou fecha a pasta de um grupo.
     pub fn alternar_recolhido(&mut self, grupo: Grupo) {
-        if self.recolhido(grupo) {
-            self.recolhidos.retain(|c| c != grupo.chave());
+        self.alternar_por_chave(grupo.chave());
+    }
+
+    /// 🔍 O Navegador recolhido no topo da coluna (dono, 2026-09-30: *"dê a
+    /// opção de recolher o painel do zoom"*). Mora na mesma lista das pastas:
+    /// é a mesma arrumação da coluna, deste computador.
+    pub fn navegador_recolhido(&self) -> bool {
+        self.recolhido_por_chave(NAVEGADOR)
+    }
+
+    pub fn alternar_navegador(&mut self) {
+        self.alternar_por_chave(NAVEGADOR);
+    }
+
+    fn recolhido_por_chave(&self, chave: &str) -> bool {
+        self.recolhidos.iter().any(|c| c == chave)
+    }
+
+    fn alternar_por_chave(&mut self, chave: &str) {
+        if self.recolhido_por_chave(chave) {
+            self.recolhidos.retain(|c| c != chave);
         } else {
-            self.recolhidos.push(grupo.chave().to_string());
+            self.recolhidos.push(chave.to_string());
         }
     }
 

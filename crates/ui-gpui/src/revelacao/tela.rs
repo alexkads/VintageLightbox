@@ -6341,6 +6341,66 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
+    /// 🔍 **O Navegador recolhe pelo título** (dono, 2026-09-30: *"dê a opção
+    /// de recolher o painel do zoom"*): some a miniatura com os botões, fica a
+    /// linha do título, e a lista de predefinições ganha a altura. O segundo
+    /// clique devolve tudo.
+    #[gpui_kit::test]
+    fn o_navegador_recolhe_pelo_titulo_e_a_lista_ganha_a_altura(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let janela = com_presets(
+            cx,
+            previews,
+            Arc::new(GravadorDeMentira::default()),
+            use_cases::presets::presets_de_sistema(),
+        );
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx)
+            })
+            .expect("a janela deve estar aberta");
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_resize(gpui_kit::size(px(1280.), px(720.)));
+        visual.run_until_parked();
+
+        let altura_da_lista = |visual: &mut gpui_kit::VisualTestContext| {
+            visual
+                .debug_bounds("lista-de-predefinicoes")
+                .expect("a lista é desenhada")
+                .size
+                .height
+        };
+        let aberta = altura_da_lista(&mut visual);
+        assert!(visual.debug_bounds("navegador-miniatura").is_some());
+
+        let pasta = visual.debug_bounds("navegador-pasta").expect("o título");
+        visual.simulate_click(pasta.center(), gpui_kit::Modifiers::none());
+        visual.run_until_parked();
+        assert!(
+            visual.debug_bounds("navegador-miniatura").is_none(),
+            "recolhido, a miniatura sai"
+        );
+        let recolhida = altura_da_lista(&mut visual);
+        assert!(
+            recolhida >= aberta + px(150.),
+            "a lista não ganhou a altura: {aberta:?} → {recolhida:?}"
+        );
+        janela
+            .update(cx, |tela, _, _| {
+                assert!(tela.predefinicoes.ordem.navegador_recolhido())
+            })
+            .expect("a janela deve estar aberta");
+
+        let pasta = visual.debug_bounds("navegador-pasta").expect("o título");
+        visual.simulate_click(pasta.center(), gpui_kit::Modifiers::none());
+        visual.run_until_parked();
+        assert!(visual.debug_bounds("navegador-miniatura").is_some());
+        assert_eq!(altura_da_lista(&mut visual), aberta);
+    }
+
     /// 🖱️ **O botão direito abre o menu da linha, e não aplica.** O GPUI chama
     /// o `on_click` também no botão direito: o primeiro menu aplicava a
     /// predefinição ao abrir. O menu abre com o foco e lê a linha clicada.
