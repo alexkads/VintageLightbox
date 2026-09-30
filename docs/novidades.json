@@ -1,14 +1,10 @@
 {
-  "versao": "0.1.51",
-  "titulo": "Comandos diretos para o bot da sessão: o QR é do cliente, e o painel fica onde você puser.",
+  "versao": "0.1.52",
+  "titulo": "O bot da sessão num botão só, e o QR do cliente sem texto vazando.",
   "importante": false,
   "novidades": [
-    "A barra da sessão ganhou três botões, com o estado escrito: \"QR do cliente\" (a tecla I faz o mesmo), \"Painel do bot\" e \"Novo QR\". Cada um faz uma coisa só.",
-    "O QR aparece só na tela do cliente, e sempre que ela abre. Só você o desliga, e fechar o painel do bot não mexe nele.",
-    "O painel do bot mostra quem chegou e em que pergunta está, sem QR. Ele fica por cima do caixa, arrasta pelo título e guarda o lugar.",
-    "\"Novo QR\" troca o código para a próxima pessoa da mesma sessão; quem já começou a conversa continua.",
-    "Quem escreve \"sair\" no meio do cadastro aparece como \"parou no meio\", e não mais como cadastro concluído.",
-    "No celular do cliente, o bot agora responde com botões em todos os canais, e sempre oferece sair ou continuar o cadastro."
+    "Os três botões do bot viraram um: \"Bot · QR ligado\". Ele abre um menu com \"QR na tela do cliente\" (tecla I), \"Painel do bot\" e \"Novo QR para a próxima pessoa\".",
+    "Na tela do cliente, o texto embaixo do QR agora fica dentro do cartão: a frase quebra em duas linhas e o \"conversa iniciada\" não é mais cortado."
   ],
-  "por_que_atualizar": "Sem esta versão, o QR podia sumir da tela do cliente sem você perceber, e quem desistia do cadastro aparecia como concluído."
+  "por_que_atualizar": "Sem esta versão, o texto do QR saía para fora do cartão na tela do cliente."
 }
