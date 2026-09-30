@@ -576,9 +576,13 @@ mod tests {
             self.recebidas.lock().unwrap().push(foto);
             Ok(FotoEnviada { id: "f".into() })
         }
-        async fn avisar_fotos_prontas(&self, _: &Sessao, galeria_id: &str) -> DomainResult<()> {
+        async fn avisar_fotos_prontas(
+            &self,
+            _: &Sessao,
+            galeria_id: &str,
+        ) -> DomainResult<Vec<domain::services::pos_venda::EntregaNoCanal>> {
             self.avisadas.lock().unwrap().push(galeria_id.to_string());
-            Ok(())
+            Ok(Vec::new())
         }
 
         // Os quatro do balcão não entram na publicação: ela cria a galeria e

@@ -38,6 +38,9 @@ pub enum Recado {
         gesto: GestoDoFim,
         frase: String,
     },
+    /// 📸 O "Avisar cliente" saiu: o e-mail, e o que foi (ou não) pelos canais
+    /// de conversa.
+    Avisado(Vec<domain::services::pos_venda::EntregaNoCanal>),
     /// Título ou contato gravados na sessão (`PATCH /galerias/{id}`).
     GaleriaAtualizada,
     /// O site recusou a edição. Separado de [`Recado::Falhou`] para a frase ir
@@ -932,7 +935,7 @@ impl Publicador for PublicadorDaApi {
         let controlador = self.controlador.clone();
         self.tokio.spawn(async move {
             let recado = match controlador.avisar(&sessao, &galeria_id).await {
-                Ok(()) => Recado::Sincronizou,
+                Ok(canais) => Recado::Avisado(canais),
                 Err(RecusaDoFimDaSessao::FaltaEmail(frase)) => Recado::FaltaEmail {
                     gesto: GestoDoFim::Avisar,
                     frase,
@@ -1592,7 +1595,7 @@ pub mod mentira {
                 return;
             }
             self.avisadas.lock().expect("as avisadas").push(galeria_id);
-            let _ = canal.send(Recado::Sincronizou);
+            let _ = canal.send(Recado::Avisado(Vec::new()));
         }
 
         /// Grava na galeria guardada — a próxima abertura e o próximo link a

@@ -307,6 +307,14 @@ pub enum Pedido {
     /// carregou, a tela sem conta): uma nota recusada é um instante, e a faixa
     /// vermelha fixa sobre a grade a fazia parecer a tela quebrada.
     Falhou(SharedString),
+    /// ✅ Um gesto que deu certo — o toast verde da raiz ("Aviso enviado por
+    /// e-mail e WhatsApp").
+    Sucesso(SharedString),
+    /// 📸 O cliente chegou pelo bot, ou concluiu o cadastro: o toast verde e,
+    /// com o app atrás de outra janela, o aviso do sistema.
+    ClienteNoBot(SharedString),
+    /// 📸 O QR que a segunda tela mostra — `None` tira.
+    ConviteNaTela(Option<super::qr_do_bot::ConviteNaTela>),
 }
 
 /// Uma foto da grade da sessão, no que a Revelação precisa para abri-la.
@@ -755,6 +763,11 @@ pub struct Detalhe {
     recados: (Sender<Recado>, Receiver<Recado>),
     colhendo: bool,
     _colheita: Option<Task<()>>,
+    /// 📸 O QR do bot da sessão (`super::qr_do_bot`).
+    bot: super::qr_do_bot::EstadoDoQr,
+    /// O tempo real — a raiz entrega (`com_escuta`); sem ele, o cartão só
+    /// relê ao entrar na sessão.
+    escuta: Option<Arc<dyn crate::tempo_real::Escuta>>,
 }
 
 /// Por que o formulário dos dados do cliente está aberto — e o que fazer depois
@@ -970,7 +983,15 @@ impl Detalhe {
             recados: channel(),
             colhendo: false,
             _colheita: None,
+            bot: Default::default(),
+            escuta: None,
         }
+    }
+
+    /// 📡 O tempo real da sessão — o que faz o cartão do QR acusar quem
+    /// chegou pelo bot sem ninguém recarregar.
+    pub fn com_escuta(&mut self, escuta: Arc<dyn crate::tempo_real::Escuta>) {
+        self.escuta = Some(escuta);
     }
 
     pub fn definir_sessao(&mut self, sessao: Sessao) {
@@ -1035,6 +1056,11 @@ impl Detalhe {
         self.publicador
             .abrir_galeria(sessao, galeria_id, self.recados.0.clone());
         self.acompanhar(cx);
+        // 📸 O QR desta sessão: o da anterior sai da segunda tela já.
+        self.bot = Default::default();
+        cx.emit(Pedido::ConviteNaTela(None));
+        self.ler_o_bot(cx);
+        self.escutar_o_bot(cx);
         cx.notify();
     }
 
@@ -3241,6 +3267,16 @@ impl Detalhe {
                 Recado::Sincronizou => {
                     self.avisando = false;
                 }
+                // 📸 O "Avisar" saiu: o e-mail e, desde 30/set/2026, os
+                // canais de conversa — o que foi e o que ficou de fora.
+                Recado::Avisado(canais) => {
+                    self.avisando = false;
+                    let resumo = super::qr_do_bot::resumo_do_aviso(self.email_da_sessao(), &canais);
+                    self.avisar_sucesso(resumo.sucesso, cx);
+                    for falha in resumo.falhas {
+                        self.avisar_do_gesto(falha, false, cx);
+                    }
+                }
                 Recado::Negociou { foto_id, erro } => {
                     self.no_ar.remove(&foto_id);
                     if let Some(erro) = erro {
@@ -3360,6 +3396,11 @@ impl Detalhe {
                         self.avisar_do_gesto(erro, true, cx);
                     }
                 }
+                Recado::Json { rotulo, resultado }
+                    if rotulo == super::qr_do_bot::PEDIDO_DA_SITUACAO =>
+                {
+                    self.chegou_o_bot(resultado, cx);
+                }
                 _ => {}
             }
         }
@@ -3381,7 +3422,8 @@ impl Detalhe {
             || self.baixando > 0
             || self.avisando
             || self.pedindo_link
-            || self.gravando_dados.is_some();
+            || self.gravando_dados.is_some()
+            || self.bot.lendo;
         if !continua {
             self.colhendo = false;
         }
@@ -3889,6 +3931,330 @@ fn reduzir(imagem: &image::DynamicImage, lado: u32) -> image::DynamicImage {
         return imagem.clone();
     }
     imagem.thumbnail(lado, lado)
+}
+
+/// 📸 O QR do bot da sessão — ver `super::qr_do_bot`.
+impl Detalhe {
+    /// O e-mail da sessão, para o resumo do "Avisar".
+    fn email_da_sessao(&self) -> &str {
+        self.aberta
+            .as_ref()
+            .and_then(|a| a.galeria.email.as_deref())
+            .unwrap_or("")
+    }
+
+    fn avisar_sucesso(&mut self, texto: impl Into<SharedString>, cx: &mut Context<Self>) {
+        let texto: SharedString = texto.into();
+        #[cfg(test)]
+        self.avisos_dados.push((texto.to_string(), false));
+        cx.emit(Pedido::Sucesso(texto));
+    }
+
+    /// Pede ao site a situação do bot. Com uma leitura no ar, marca outra
+    /// para depois — dois eventos seguidos não viram duas idas simultâneas.
+    fn ler_o_bot(&mut self, cx: &mut Context<Self>) {
+        let (Some(sessao), Some(id)) = (self.sessao.clone(), self.galeria_id.clone()) else {
+            return;
+        };
+        if self.bot.lendo {
+            self.bot.releitura_pendente = true;
+            return;
+        }
+        self.bot.lendo = true;
+        self.publicador.pedir_json(
+            sessao,
+            crate::pos_venda::porta::PedidoJson::ler(
+                super::qr_do_bot::PEDIDO_DA_SITUACAO,
+                super::qr_do_bot::caminho_da_situacao(&id),
+            ),
+            self.recados.0.clone(),
+        );
+        self.acompanhar(cx);
+    }
+
+    /// Abre o tempo real desta sessão. Um laço leve (meio segundo) olha os
+    /// sinais e relê o cartão quando o evento é do bot — ou quando o fluxo
+    /// abriu de novo, e o que aconteceu no intervalo se perdeu.
+    fn escutar_o_bot(&mut self, cx: &mut Context<Self>) {
+        let (Some(escuta), Some(sessao), Some(id)) = (
+            self.escuta.clone(),
+            self.sessao.clone(),
+            self.galeria_id.clone(),
+        ) else {
+            return;
+        };
+        let (envia, recebe) = channel();
+        self.bot.guarda = Some(escuta.escutar(
+            sessao,
+            vec![("galeria", super::qr_do_bot::caminho_dos_eventos(&id))],
+            envia,
+        ));
+        self.bot.vigia = Some(cx.spawn(async move |esta, cx| loop {
+            cx.background_executor()
+                .timer(Duration::from_millis(500))
+                .await;
+            let mut reler = false;
+            loop {
+                match recebe.try_recv() {
+                    Ok(crate::tempo_real::Sinal::Evento { dados, .. }) => {
+                        reler |= super::qr_do_bot::evento_do_bot(&dados);
+                    }
+                    Ok(crate::tempo_real::Sinal::Pronto { .. })
+                    | Ok(crate::tempo_real::Sinal::Sincronizar { .. }) => reler = true,
+                    Ok(crate::tempo_real::Sinal::Conexao { .. }) => {}
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    // A guarda caiu (outra sessão, sair da conta): o laço acaba.
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => return,
+                }
+            }
+            if reler && esta.update(cx, |tela, cx| tela.ler_o_bot(cx)).is_err() {
+                return;
+            }
+        }));
+    }
+
+    /// A situação chegou: acusa o que é novo, redesenha o cartão e manda o
+    /// QR à segunda tela.
+    fn chegou_o_bot(
+        &mut self,
+        resultado: Result<serde_json::Value, String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.bot.lendo = false;
+        match resultado.and_then(|v| {
+            serde_json::from_value::<super::qr_do_bot::SituacaoDoBot>(v).map_err(|e| e.to_string())
+        }) {
+            Ok(situacao) => {
+                for aviso in super::qr_do_bot::novidades_do_bot(
+                    self.bot.anteriores.as_deref(),
+                    &situacao.clientes,
+                ) {
+                    cx.emit(Pedido::ClienteNoBot(aviso.into()));
+                }
+                self.bot.anteriores = Some(situacao.clientes.clone());
+                self.bot.situacao = Some(situacao);
+                cx.emit(Pedido::ConviteNaTela(self.bot.para_a_tela_do_cliente()));
+            }
+            // Site sem a rota (versão anterior) ou fora do ar: o cartão não
+            // aparece, e a sessão segue igual.
+            Err(erro) => crate::telemetria::avisar!("⚠️ [Bot da sessão] situação: {erro}"),
+        }
+        if std::mem::take(&mut self.bot.releitura_pendente) {
+            self.ler_o_bot(cx);
+        }
+        cx.notify();
+    }
+
+    /// 🔑 A tecla `I`: esconde e mostra o QR — aqui e na segunda tela.
+    pub fn alternar_o_qr(&mut self, cx: &mut Context<Self>) {
+        self.bot.escondido = !self.bot.escondido;
+        cx.emit(Pedido::ConviteNaTela(self.bot.para_a_tela_do_cliente()));
+        cx.notify();
+    }
+
+    pub fn qr_escondido(&self) -> bool {
+        self.bot.escondido
+    }
+
+    /// O nome completo que o cliente deu vira o título da sessão.
+    fn usar_como_titulo(&mut self, nome: String, cx: &mut Context<Self>) {
+        let (Some(sessao), Some(id), Some(aberta)) = (
+            self.sessao.clone(),
+            self.galeria_id.clone(),
+            self.aberta.as_ref(),
+        ) else {
+            return;
+        };
+        if self.gravando_dados.is_some() {
+            return;
+        }
+        self.gravando_dados = Some((
+            MotivoDoFormulario::Editar,
+            DadosDoCliente {
+                titulo: nome.clone(),
+                email: aberta.galeria.email.clone(),
+                whatsapp: aberta.galeria.whatsapp.clone(),
+            },
+        ));
+        self.publicador.atualizar_galeria(
+            sessao,
+            id,
+            MudancaDaGaleria {
+                titulo: Some(nome),
+                ..Default::default()
+            },
+            self.recados.0.clone(),
+        );
+        self.acompanhar(cx);
+        cx.notify();
+    }
+
+    /// O cartão do canto — a raiz o põe acima do caixa flutuante, que mora
+    /// no mesmo canto (`App::canto_do_qr`). `None` sem situação.
+    pub(crate) fn cartao_do_qr(&mut self, cx: &mut Context<Self>) -> Option<gpui_kit::AnyElement> {
+        use super::qr_do_bot::{
+            desenho_do_qr, estado_do_bot, nome_do_canal, quem_e, rotulo_do_passo, EstadoDoBot,
+        };
+        use crate::recursos::Icone;
+        let situacao = self.bot.situacao.as_ref()?;
+        let tema = cx.theme();
+        let (fundo, borda, fraco) = (tema.popover, tema.border, tema.muted_foreground);
+
+        if self.bot.escondido {
+            return Some(
+                crate::estilo::botao_icone_padrao("qr-mostrar", Icone::Bot)
+                    .tooltip("Mostrar o QR do bot (tecla I)")
+                    .on_click(cx.listener(|tela, _, _, cx| tela.alternar_o_qr(cx)))
+                    .into_any_element(),
+            );
+        }
+
+        let estado = estado_do_bot(&situacao.clientes);
+        let mostra_qr = estado != EstadoDoBot::Concluido || self.bot.qr_aberto;
+        let titulo_atual = self
+            .aberta
+            .as_ref()
+            .map(|a| a.galeria.titulo.clone())
+            .unwrap_or_default();
+
+        let cabecalho = h_flex()
+            .gap(px(6.))
+            .items_center()
+            .child(
+                gpui_kit::component::Icon::new(Icone::Bot)
+                    .size(px(14.))
+                    .text_color(fraco),
+            )
+            .child(div().text_sm().child("Cadastro pelo bot"))
+            .child(div().flex_1())
+            .child(
+                crate::estilo::botao_icone("qr-esconder", Icone::X, 24., 14.)
+                    .tooltip("Esconder (tecla I)")
+                    .on_click(cx.listener(|tela, _, _, cx| tela.alternar_o_qr(cx))),
+            );
+
+        let qr = mostra_qr.then(|| {
+            div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(px(4.))
+                .child(
+                    div()
+                        .p(px(5.))
+                        .bg(gpui_kit::white())
+                        .rounded(crate::tema::canto(6.))
+                        .child(desenho_do_qr(Arc::new(situacao.qr.clone()), 128.)),
+                )
+                .child(div().text_xs().text_color(fraco).child(format!(
+                    "Cliente lê com a câmera · {}",
+                    situacao.convite.codigo
+                )))
+        });
+
+        let clientes = situacao.clientes.iter().enumerate().map(|(i, c)| {
+            let concluido = c.passo == "concluido";
+            let nome_completo = c.nome_completo.clone();
+            let pode_titulo = nome_completo
+                .as_deref()
+                .is_some_and(|n| n.trim() != titulo_atual.trim());
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(1.))
+                .child(
+                    h_flex()
+                        .gap(px(6.))
+                        .items_center()
+                        .child(
+                            gpui_kit::component::Icon::new(if concluido {
+                                Icone::CircleCheck
+                            } else {
+                                Icone::MessageCircle
+                            })
+                            .size(px(13.))
+                            .text_color(if concluido {
+                                gpui_kit::rgb(0x16a34a)
+                            } else {
+                                gpui_kit::rgb(0xd97706)
+                            }),
+                        )
+                        .child(div().text_xs().child(quem_e(c)))
+                        .child(div().flex_1())
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(fraco)
+                                .child(nome_do_canal(&c.canal)),
+                        ),
+                )
+                .child(
+                    div()
+                        .pl(px(19.))
+                        .text_xs()
+                        .text_color(fraco)
+                        .child(rotulo_do_passo(&c.passo)),
+                )
+                .when_some(nome_completo.filter(|_| pode_titulo), |d, nome| {
+                    d.child(
+                        div().pl(px(15.)).child(
+                            crate::estilo::botao_fantasma(format!("qr-titulo-{i}"), cx)
+                                .xsmall()
+                                .label(format!("Usar \"{nome}\" como título"))
+                                .on_click(cx.listener(move |tela, _, _, cx| {
+                                    tela.usar_como_titulo(nome.clone(), cx)
+                                })),
+                        ),
+                    )
+                })
+        });
+
+        let rodape = (estado == EstadoDoBot::Concluido).then(|| {
+            crate::estilo::botao_fantasma("qr-outra-pessoa", cx)
+                .xsmall()
+                .label(if self.bot.qr_aberto {
+                    "Recolher o QR"
+                } else {
+                    "Mostrar o QR para outra pessoa"
+                })
+                .on_click(cx.listener(|tela, _, _, cx| {
+                    tela.bot.qr_aberto = !tela.bot.qr_aberto;
+                    cx.notify();
+                }))
+        });
+
+        Some(
+            div()
+                .id("qr-do-bot")
+                .occlude()
+                .w(px(212.))
+                .p(px(10.))
+                .flex()
+                .flex_col()
+                .gap(px(8.))
+                .bg(fundo)
+                .border_1()
+                .border_color(borda)
+                .rounded(crate::tema::canto(8.))
+                .shadow_lg()
+                .child(cabecalho)
+                .children(qr)
+                .when(!situacao.clientes.is_empty(), |d| {
+                    d.child(
+                        div()
+                            .pt(px(6.))
+                            .border_t_1()
+                            .border_color(borda)
+                            .flex()
+                            .flex_col()
+                            .gap(px(6.))
+                            .children(clientes),
+                    )
+                })
+                .children(rodape)
+                .into_any_element(),
+        )
+    }
 }
 
 impl Render for Detalhe {
@@ -8545,6 +8911,144 @@ mod testes {
             let _ = janela.update(cx, |tela, _window, cx| tela.colher(cx));
             cx.run_until_parked();
         }
+    }
+
+    /// 📸 A situação do bot como o site manda.
+    fn situacao_do_bot(clientes: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "convite": { "codigo": "RF-ABC234", "url": "https://x/s/RF-ABC234", "expira_em": "2026-10-02T03:00:00Z" },
+            "qr": [[true, false], [false, true]],
+            "clientes": clientes,
+        })
+    }
+
+    /// 📸 O QR do bot na sessão: entrar pede a situação, o cartão aparece, o
+    /// tempo real relê quando o cliente responde, a chegada é acusada com nome
+    /// e canal, e o `I` esconde — aqui e na segunda tela.
+    #[gpui_kit::test]
+    fn o_qr_do_bot_acusa_quem_chegou_e_a_tecla_i_esconde(cx: &mut TestAppContext) {
+        let publicador = publicador_com(vec![], false);
+        publicador.responder_json(
+            crate::sessoes::qr_do_bot::PEDIDO_DA_SITUACAO,
+            Ok(situacao_do_bot(serde_json::json!([]))),
+        );
+        let escuta = Arc::new(crate::tempo_real::porta::mentira::EscutaDeMentira::default());
+        let janela = janela_com(
+            cx,
+            publicador.clone(),
+            Arc::new(SeletorDeMentira::default()),
+        );
+        janela
+            .update(cx, |tela, _w, _cx| tela.com_escuta(escuta.clone()))
+            .unwrap();
+
+        let tela = janela.root(cx).expect("a raiz da janela");
+        let pedidos: Arc<std::sync::Mutex<Vec<String>>> = Default::default();
+        let _inscricao = cx.update({
+            let pedidos = pedidos.clone();
+            move |cx| {
+                cx.subscribe(&tela, move |_tela, pedido: &Pedido, _cx| {
+                    let texto = match pedido {
+                        Pedido::ClienteNoBot(t) => format!("chegou: {t}"),
+                        Pedido::ConviteNaTela(Some(c)) => {
+                            format!("tela: {} {:?}", c.codigo, c.estado)
+                        }
+                        Pedido::ConviteNaTela(None) => "tela: nada".into(),
+                        _ => return,
+                    };
+                    pedidos.lock().unwrap().push(texto);
+                })
+            }
+        });
+
+        entrar(cx, &janela);
+        assert!(publicador
+            .pedidos_json()
+            .iter()
+            .any(|p| p.caminho == "/pos-venda/galerias/g1/bot"));
+        assert_eq!(
+            escuta.caminhos_da_fonte("galeria"),
+            vec!["/pos-venda/galerias/g1/eventos"]
+        );
+        janela
+            .update(cx, |tela, _w, cx| {
+                assert!(tela.cartao_do_qr(cx).is_some(), "o cartão aparece");
+            })
+            .unwrap();
+        assert_eq!(
+            pedidos.lock().unwrap().clone(),
+            vec!["tela: nada", "tela: RF-ABC234 Aguardando"],
+            "a primeira leitura não é novidade"
+        );
+
+        // O cliente leu o QR: o site publica, e o cartão relê.
+        publicador.responder_json(
+            crate::sessoes::qr_do_bot::PEDIDO_DA_SITUACAO,
+            Ok(situacao_do_bot(serde_json::json!([{
+                "canal": "whatsapp", "nome": "Maria", "passo": "nome", "nome_completo": null,
+                "iniciado_em": "2026-09-30T12:00:00Z"
+            }]))),
+        );
+        escuta.mandar(crate::tempo_real::Sinal::Evento {
+            fonte: "galeria",
+            dados: serde_json::json!({ "tipo": "cliente_no_bot", "galeria_id": "g1", "em": "x" }),
+        });
+        cx.executor().advance_clock(Duration::from_millis(600));
+        colher_ate_parar(cx, &janela);
+        let vistos = pedidos.lock().unwrap().clone();
+        assert!(
+            vistos.contains(&"chegou: Maria iniciou a conversa pelo WhatsApp".to_string()),
+            "{vistos:?}"
+        );
+        assert_eq!(vistos.last().unwrap(), "tela: RF-ABC234 Conversando");
+
+        // `I`: some daqui e da segunda tela; de novo, volta.
+        janela
+            .update(cx, |tela, _w, cx| tela.alternar_o_qr(cx))
+            .unwrap();
+        assert_eq!(pedidos.lock().unwrap().last().unwrap(), "tela: nada");
+        janela
+            .update(cx, |tela, _w, cx| {
+                assert!(tela.qr_escondido());
+                tela.alternar_o_qr(cx);
+                assert!(!tela.qr_escondido());
+            })
+            .unwrap();
+        assert_eq!(
+            pedidos.lock().unwrap().last().unwrap(),
+            "tela: RF-ABC234 Conversando"
+        );
+    }
+
+    /// 📸 O "Avisar" diz por onde saiu e o que ficou de fora.
+    #[gpui_kit::test]
+    fn o_avisar_diz_o_que_saiu_por_cada_canal(cx: &mut TestAppContext) {
+        let (janela, _publicador) = janela(cx, vec![]);
+        entrar(cx, &janela);
+        janela
+            .update(cx, |tela, _w, cx| {
+                let _ = tela.recados.0.send(Recado::Avisado(vec![
+                    domain::services::pos_venda::EntregaNoCanal {
+                        canal: "whatsapp".into(),
+                        enviado: false,
+                        motivo: Some("a janela de 24 horas fechou há 2 dias".into()),
+                    },
+                ]));
+                tela.avisando = true;
+                tela.colher(cx);
+                let avisos: Vec<String> =
+                    tela.avisos_dados.iter().map(|(t, _)| t.clone()).collect();
+                assert!(
+                    avisos.contains(&"Aviso enviado por e-mail (ana@x.com).".to_string()),
+                    "{avisos:?}"
+                );
+                assert_eq!(
+                    tela.ultimo_aviso(),
+                    Some("WhatsApp ficou de fora: a janela de 24 horas fechou há 2 dias")
+                );
+                assert!(!tela.avisando);
+            })
+            .unwrap();
     }
 
     fn entrar(cx: &mut TestAppContext, janela: &gpui_kit::WindowHandle<Detalhe>) {

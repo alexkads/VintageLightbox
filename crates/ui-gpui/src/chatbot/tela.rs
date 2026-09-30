@@ -324,7 +324,7 @@ impl Chatbot {
         self.ja_abriu.clear();
         let fontes = Canal::TODOS
             .into_iter()
-            .map(|canal| (canal.prefixo(), canal.fluxo()))
+            .map(|canal| (canal.prefixo(), canal.fluxo().to_string()))
             .collect();
         self.guarda = Some(self.escuta.escutar(sessao.clone(), fontes, envia));
         self.sessao = Some(sessao);

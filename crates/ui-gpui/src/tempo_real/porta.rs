@@ -102,10 +102,13 @@ impl Guarda {
 pub trait Escuta: Send + Sync + 'static {
     /// Abre um fluxo por `(fonte, caminho)` e manda os sinais pelo canal.
     /// Devolve na hora.
+    ///
+    /// O caminho é `String` desde 30/set/2026: o tempo real de **uma** sessão
+    /// fotográfica leva o id dela (`/pos-venda/galerias/{id}/eventos`).
     fn escutar(
         &self,
         sessao: Sessao,
-        fontes: Vec<(&'static str, &'static str)>,
+        fontes: Vec<(&'static str, String)>,
         canal: Sender<Sinal>,
     ) -> Guarda;
 }
@@ -154,7 +157,7 @@ impl Escuta for EscutaHttp {
     fn escutar(
         &self,
         sessao: Sessao,
-        fontes: Vec<(&'static str, &'static str)>,
+        fontes: Vec<(&'static str, String)>,
         canal: Sender<Sinal>,
     ) -> Guarda {
         let tarefas = fontes
@@ -176,7 +179,7 @@ async fn manter_aberto(
     api: Arc<PosVendaApiHttp>,
     sessao: Sessao,
     fonte: &'static str,
-    caminho: &'static str,
+    caminho: String,
     canal: Sender<Sinal>,
 ) {
     let mut tentativa = 0u32;
@@ -188,7 +191,7 @@ async fn manter_aberto(
         let mut leitor = LeitorSse::default();
         let mut abriu = false;
         let resultado = api
-            .escutar(&sessao, caminho, SILENCIO_MAXIMO, |pedaco| {
+            .escutar(&sessao, &caminho, SILENCIO_MAXIMO, |pedaco| {
                 for evento in leitor.ler(pedaco) {
                     let sinal = match evento.nome.as_str() {
                         "pronto" => {
@@ -251,7 +254,7 @@ pub mod mentira {
     use std::sync::Mutex;
 
     /// Uma escuta aberta: os caminhos, os rótulos das fontes e o canal.
-    type Aberta = (Vec<&'static str>, Vec<&'static str>, Sender<Sinal>);
+    type Aberta = (Vec<String>, Vec<&'static str>, Sender<Sinal>);
 
     #[derive(Default)]
     pub struct EscutaDeMentira {
@@ -305,7 +308,7 @@ pub mod mentira {
         }
 
         /// Os caminhos da escuta mais recente que tem esta fonte.
-        pub fn caminhos_da_fonte(&self, fonte: &str) -> Vec<&'static str> {
+        pub fn caminhos_da_fonte(&self, fonte: &str) -> Vec<String> {
             self.canais
                 .lock()
                 .unwrap()
@@ -321,11 +324,11 @@ pub mod mentira {
         fn escutar(
             &self,
             _sessao: Sessao,
-            fontes: Vec<(&'static str, &'static str)>,
+            fontes: Vec<(&'static str, String)>,
             canal: Sender<Sinal>,
         ) -> Guarda {
             self.canais.lock().unwrap().push((
-                fontes.iter().map(|(_, c)| *c).collect(),
+                fontes.iter().map(|(_, c)| c.clone()).collect(),
                 fontes.iter().map(|(f, _)| *f).collect(),
                 canal,
             ));
@@ -409,7 +412,11 @@ event: pronto\ndata: 1\n\n:keep-alive\n\ndata: {\"tipo\":\"mensagem_recebida\",\
             tokio.handle().clone(),
         );
         let (envia, recebe) = channel();
-        let _guarda = escuta.escutar(sessao(), vec![("whatsapp", "/whatsapp/eventos")], envia);
+        let _guarda = escuta.escutar(
+            sessao(),
+            vec![("whatsapp", "/whatsapp/eventos".into())],
+            envia,
+        );
 
         let sinais = colher(&recebe, 6);
         use EstadoDaConexao::*;
@@ -469,7 +476,7 @@ event: pronto\ndata: 1\n\n:keep-alive\n\ndata: {\"tipo\":\"mensagem_recebida\",\
         let (envia, recebe) = channel();
         let _guarda = escuta.escutar(
             sessao(),
-            vec![("agenda", "/bookings/agenda/eventos")],
+            vec![("agenda", "/bookings/agenda/eventos".into())],
             envia,
         );
         let sinais = colher(&recebe, 2);
@@ -502,7 +509,11 @@ event: pronto\ndata: 1\n\n:keep-alive\n\ndata: {\"tipo\":\"mensagem_recebida\",\
             tokio.handle().clone(),
         );
         let (envia, recebe) = channel();
-        let guarda = escuta.escutar(sessao(), vec![("whatsapp", "/whatsapp/eventos")], envia);
+        let guarda = escuta.escutar(
+            sessao(),
+            vec![("whatsapp", "/whatsapp/eventos".into())],
+            envia,
+        );
         colher(&recebe, 3);
         drop(guarda);
         std::thread::sleep(Duration::from_millis(100));

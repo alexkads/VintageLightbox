@@ -27,10 +27,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use domain::services::pos_venda::{
-    AvisoDaGaleria, CofreDeSessao, ContagemDeFotos, EstadoDaFotoNoSite, Estudio, FaixaDaGaleria,
-    FotoDaGaleria, FotoEnviada, FotoParaEnviar, Galeria, GaleriaAberta, GaleriaDoPainel,
-    LinkDeAcesso, MudancaDaFoto, MudancaDaGaleria, NovaGaleria, PagoNoCaixa, PosVendaApi, Produto,
-    ResumoSimples, ResumosDoAtendimento, Sessao, TotaisDaGaleria,
+    AvisoDaGaleria, CofreDeSessao, ContagemDeFotos, EntregaNoCanal, EstadoDaFotoNoSite, Estudio,
+    FaixaDaGaleria, FotoDaGaleria, FotoEnviada, FotoParaEnviar, Galeria, GaleriaAberta,
+    GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto, MudancaDaGaleria, NovaGaleria, PagoNoCaixa,
+    PosVendaApi, Produto, ResumoSimples, ResumosDoAtendimento, Sessao, TotaisDaGaleria,
 };
 use domain::{DomainError, DomainResult};
 use serde::Deserialize;
@@ -522,7 +522,11 @@ impl PosVendaApi for PosVendaApiHttp {
         Ok(FotoEnviada { id: enviada.id })
     }
 
-    async fn avisar_fotos_prontas(&self, sessao: &Sessao, galeria_id: &str) -> DomainResult<()> {
+    async fn avisar_fotos_prontas(
+        &self,
+        sessao: &Sessao,
+        galeria_id: &str,
+    ) -> DomainResult<Vec<EntregaNoCanal>> {
         let resposta = self
             .client
             .post(self.url(&format!("/pos-venda/galerias/{galeria_id}/avisar")))
@@ -534,7 +538,18 @@ impl PosVendaApi for PosVendaApiHttp {
         if !resposta.status().is_success() {
             return Err(recusa(resposta).await);
         }
-        Ok(())
+        // O aviso por e-mail e, desde 30/set/2026, os canais de conversa. O
+        // site anterior só mandava o aviso: sem `canais`, a lista é vazia.
+        #[derive(Deserialize)]
+        struct Resposta {
+            #[serde(default)]
+            canais: Vec<EntregaNoCanal>,
+        }
+        Ok(resposta
+            .json::<Resposta>()
+            .await
+            .map(|r| r.canais)
+            .unwrap_or_default())
     }
 
     async fn galerias(&self, sessao: &Sessao) -> DomainResult<Vec<GaleriaDoPainel>> {
@@ -1729,7 +1744,13 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/api/v2/pos-venda/galerias/g1/avisar"))
             .and(header("authorization", "Bearer tok"))
-            .respond_with(ResponseTemplate::new(201).set_body_json(json!({ "id": "a1" })))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+                "id": "a1",
+                "canais": [
+                    { "canal": "whatsapp", "enviado": true, "motivo": null },
+                    { "canal": "instagram", "enviado": false, "motivo": "a janela de 24 horas fechou" }
+                ]
+            })))
             .mount(&servidor)
             .await;
         Mock::given(method("POST"))
@@ -1742,7 +1763,13 @@ mod tests {
 
         let api = PosVendaApiHttp::nova(servidor.uri());
         let sessao = sessao_valida();
-        api.avisar_fotos_prontas(&sessao, "g1").await.unwrap();
+        let canais = api.avisar_fotos_prontas(&sessao, "g1").await.unwrap();
+        assert_eq!(canais.len(), 2);
+        assert!(canais[0].enviado);
+        assert_eq!(
+            canais[1].motivo.as_deref(),
+            Some("a janela de 24 horas fechou")
+        );
         let erro = api.avisar_fotos_prontas(&sessao, "g2").await.unwrap_err();
         assert!(erro.to_string().contains("nao tem e-mail"), "{erro}");
     }

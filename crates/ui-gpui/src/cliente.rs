@@ -422,6 +422,10 @@ pub struct Cliente {
     /// Onde a foto está na sequência do operador, e de quantas. Ver `info`.
     posicao: Option<(usize, usize)>,
     mostrar_info: bool,
+    /// 📸 O QR do bot da sessão, no canto inferior direito (dono,
+    /// 30/set/2026). A raiz manda o da sessão aberta; o `I` o esconde junto
+    /// com o rodapé.
+    convite: Option<crate::sessoes::qr_do_bot::ConviteNaTela>,
     /// O motor desta janela, aberto na primeira foto.
     processador: Option<Processador>,
     /// O maior lado do monitor desta janela, em pixels do dispositivo — o
@@ -481,6 +485,7 @@ impl Cliente {
             // Nasce ligado, como no legado — quem mostra ao cliente costuma
             // querer o nome do arquivo à vista, e desligar é uma tecla.
             mostrar_info: true,
+            convite: None,
             processador: None,
             lado_do_monitor: None,
             revelando: None,
@@ -765,6 +770,99 @@ impl Cliente {
 
     pub fn mostrando_info(&self) -> bool {
         self.mostrar_info
+    }
+
+    /// 📸 O QR da sessão — `None` tira.
+    pub fn definir_convite(
+        &mut self,
+        convite: Option<crate::sessoes::qr_do_bot::ConviteNaTela>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.convite != convite {
+            self.convite = convite;
+            cx.notify();
+        }
+    }
+
+    pub fn convite(&self) -> Option<&crate::sessoes::qr_do_bot::ConviteNaTela> {
+        self.convite.as_ref()
+    }
+
+    /// 📸 O QR para o cliente ler com a câmera — grande, legível do outro lado
+    /// do balcão. Depois da primeira resposta vira a confirmação de que deu
+    /// certo e o resto é no celular. O mesmo desenho da tela do cliente do site.
+    fn qr_na_tela(&self) -> Option<gpui_kit::AnyElement> {
+        use crate::sessoes::qr_do_bot::EstadoDoBot;
+        let convite = self.convite.as_ref().filter(|_| self.mostrar_info)?;
+        if convite.estado == EstadoDoBot::Concluido {
+            return None;
+        }
+        let corpo = match convite.estado {
+            EstadoDoBot::Aguardando => div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(px(8.))
+                .child(
+                    div()
+                        .p(px(8.))
+                        .bg(gpui_kit::white())
+                        .rounded(crate::tema::canto(8.))
+                        .child(crate::sessoes::qr_do_bot::desenho_do_qr(
+                            convite.qr.clone(),
+                            208.,
+                        )),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(gpui_kit::rgb(0xf5f5f5))
+                        .child("Aponte a câmera do celular para receber suas fotos"),
+                )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(gpui_kit::rgb(0x9a9a9a))
+                        .child(convite.codigo.clone()),
+                ),
+            _ => div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(px(6.))
+                .child(
+                    gpui_kit::component::Icon::new(crate::recursos::Icone::CircleCheck)
+                        .size(px(40.))
+                        .text_color(gpui_kit::rgb(0x34d399)),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(gpui_kit::rgb(0xf5f5f5))
+                        .child("Conversa iniciada — continue pelo celular"),
+                )
+                .children(convite.quem.clone().map(|quem| {
+                    div()
+                        .text_xs()
+                        .text_color(gpui_kit::rgb(0x9a9a9a))
+                        .child(quem)
+                })),
+        };
+        Some(
+            div()
+                .absolute()
+                .right(px(24.))
+                .bottom(px(24.))
+                .w(px(256.))
+                .p(px(16.))
+                .rounded(crate::tema::canto(12.))
+                .bg(gpui_kit::rgba(0x000000c0))
+                .flex()
+                .flex_col()
+                .items_center()
+                .child(corpo)
+                .into_any_element(),
+        )
     }
 
     pub fn alternar_info(&mut self, cx: &mut Context<Self>) {
@@ -1131,7 +1229,17 @@ impl Cliente {
                         )),
                 )
             })
-            .child(palco)
+            .child(
+                // 📸 O QR fica sobre o palco, no canto — nos dois modos (uma
+                // foto e o Comparar).
+                div()
+                    .relative()
+                    .flex_1()
+                    .w_full()
+                    .flex()
+                    .child(palco)
+                    .children(self.qr_na_tela()),
+            )
             .into_any_element()
     }
 
@@ -1662,6 +1770,39 @@ mod testes {
     ///
     /// Ela tem contexto e foco próprios — e ligação que não casa **não falha**,
     /// ela só não faz nada. É o defeito que custou dois commits na Revelação.
+    /// 📸 O QR do bot na segunda tela: aparece quando a sessão manda, o `I`
+    /// o esconde junto com o rodapé, e o cadastro concluído o tira.
+    #[gpui_kit::test]
+    fn o_qr_do_bot_aparece_e_o_i_esconde(cx: &mut TestAppContext) {
+        use crate::sessoes::qr_do_bot::{ConviteNaTela, EstadoDoBot};
+        cx.update(init);
+        let janela = cx.add_window(|window, cx| Cliente::novo(None, window, cx));
+        let convite = |estado| ConviteNaTela {
+            codigo: "RF-ABC234".into(),
+            qr: Arc::new(vec![vec![true, false], vec![false, true]]),
+            estado,
+            quem: None,
+        };
+        janela
+            .update(cx, |cliente, _w, cx| {
+                assert!(cliente.qr_na_tela().is_none(), "sem sessão, sem QR");
+                cliente.definir_convite(Some(convite(EstadoDoBot::Aguardando)), cx);
+                assert!(cliente.qr_na_tela().is_some());
+            })
+            .unwrap();
+
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_keystrokes("i");
+        janela
+            .update(cx, |cliente, _w, cx| {
+                assert!(cliente.qr_na_tela().is_none(), "o I esconde");
+                cliente.alternar_info(cx);
+                cliente.definir_convite(Some(convite(EstadoDoBot::Concluido)), cx);
+                assert!(cliente.qr_na_tela().is_none(), "concluído, o QR sai");
+            })
+            .unwrap();
+    }
+
     #[gpui_kit::test]
     fn a_tecla_i_liga_e_desliga_o_rodape(cx: &mut TestAppContext) {
         cx.update(init);

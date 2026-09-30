@@ -177,6 +177,8 @@ actions!(
         Rejeitar,
         Desmarcar,
         AlternarComprada,
+        // 📸 `I`: esconde e mostra o QR do bot da sessão.
+        AlternarQrDoBot,
         SelecionarTudo,
         LimparSelecao,
         // `Cmd/Ctrl+B`, o atalho do menu lateral do site.
@@ -327,6 +329,9 @@ pub fn init(cx: &mut gpui_kit::App) {
         // `B` de balcão: a foto que o cliente levou. Não é tecla do Lightroom —
         // é a única decisão deste fluxo que ele não tem onde guardar.
         gpui_kit::KeyBinding::new("b", AlternarComprada, Some(SEM_CAMPO_DE_TEXTO)),
+        // 📸 `I` esconde e mostra o QR do bot da sessão (dono, 30/set/2026) —
+        // aqui e na segunda tela. Sem campo de texto: ali é a letra.
+        gpui_kit::KeyBinding::new("i", AlternarQrDoBot, Some(SEM_CAMPO_DE_TEXTO)),
         // `Cmd+A` e `Cmd+D`, da Biblioteca. Levam `CONTEXTO` e não
         // `SEM_CAMPO_DE_TEXTO`: com modificador não há disputa com o texto — e
         // o campo de busca tem o **próprio** `Cmd+A` (selecionar tudo no
@@ -808,6 +813,11 @@ pub struct Aplicativo {
     /// A segunda tela, quando aberta. É uma **janela**, e não uma tela desta —
     /// as duas existem ao mesmo tempo, em monitores diferentes.
     cliente: Option<gpui_kit::WindowHandle<Cliente>>,
+    /// 📸 O QR do bot que a segunda tela mostra — guardado para a janela que
+    /// abrir depois de ele chegar.
+    convite_no_cliente: Option<crate::sessoes::qr_do_bot::ConviteNaTela>,
+    /// O último QR entregue à segunda tela — o `render` só manda quando muda.
+    convite_entregue: Option<Option<crate::sessoes::qr_do_bot::ConviteNaTela>>,
     /// A tela do cliente abre como **janela arrastável**, e não tomando o
     /// monitor? Guardada em disco: quem contornou um monitor mal detectado uma
     /// vez não quer refazer o contorno a cada abertura.
@@ -1143,6 +1153,8 @@ impl Aplicativo {
             // id: a lista é a mesma que a Revelação usa.
             tela.definir_presets(presets_para_os_parametros.clone());
             tela.definir_origem(portas_da_origem, cx);
+            // 📸 O tempo real da sessão — o QR do bot acusa quem chegou.
+            tela.com_escuta(portas.escuta.clone());
             tela
         });
         // 🔑 `subscribe_in`, e não `subscribe`: revelar precisa da janela — os
@@ -1399,6 +1411,8 @@ impl Aplicativo {
             configurando: false,
             saida: None,
             cliente: None,
+            convite_no_cliente: None,
+            convite_entregue: None,
             previews: previews_do_cliente,
             _observador: observador,
             _cliente_na_galeria: cliente_na_galeria,
@@ -2765,6 +2779,29 @@ impl Aplicativo {
             }
             // ❌ O gesto que o site recusou: o toast vermelho do alto.
             DetalhePedido::Falhou(texto) => self.avisar_falha(texto.to_string(), cx),
+            // ✅ O gesto que deu certo: o toast verde do alto.
+            DetalhePedido::Sucesso(texto) => self.avisar_em_toast(texto.to_string(), false, cx),
+            // 📸 O cliente chegou pelo bot: o toast e, com o app escondido, o
+            // aviso do sistema — quem está no caixa precisa saber.
+            DetalhePedido::ClienteNoBot(texto) => {
+                self.avisar_em_toast(texto.to_string(), false, cx);
+                if !window.is_window_active() {
+                    let (cliques, _) = std::sync::mpsc::channel();
+                    self.avisador.avisar(
+                        crate::tempo_real::Aviso {
+                            titulo: "Cliente no bot".into(),
+                            corpo: texto.to_string(),
+                            destino: "sessao".into(),
+                        },
+                        cliques,
+                    );
+                }
+            }
+            // 📸 O QR da sessão na segunda tela.
+            DetalhePedido::ConviteNaTela(convite) => {
+                self.convite_no_cliente = convite.clone();
+                cx.notify();
+            }
         }
     }
 
@@ -4537,6 +4574,8 @@ impl Aplicativo {
                 self.cliente = Some(janela);
                 self.detalhe
                     .update(cx, |tela, cx| tela.definir_cliente_aberta(true, cx));
+                // 📸 A janela nova ainda não tem o QR: o próximo `render` manda.
+                self.convite_entregue = None;
                 self.no_cliente = None;
                 self.atualizar_o_cliente(true, cx);
             }
@@ -4574,6 +4613,64 @@ impl Aplicativo {
     #[cfg(test)]
     pub fn janela_do_cliente_para_teste(&self) -> Option<gpui_kit::WindowHandle<Cliente>> {
         self.cliente
+    }
+
+    /// 📸 O QR do bot na segunda tela: o da sessão aberta (e da Revelação dela),
+    /// e nada fora dela — o próximo cliente não pode ler o código do anterior.
+    /// Manda só quando muda.
+    fn entregar_o_convite_ao_cliente(&mut self, na_sessao: bool, cx: &mut Context<Self>) {
+        let Some(janela) = self.cliente else {
+            return;
+        };
+        let desejado = na_sessao.then(|| self.convite_no_cliente.clone()).flatten();
+        if self.convite_entregue.as_ref() == Some(&desejado) {
+            return;
+        }
+        self.convite_entregue = Some(desejado.clone());
+        cx.defer(move |cx| {
+            let _ = janela.update(cx, |cliente, _w, cx| cliente.definir_convite(desejado, cx));
+        });
+    }
+
+    /// 📸 O cartão do QR do bot, no canto inferior direito da sessão — acima
+    /// do caixa flutuante quando ele está no mesmo canto.
+    fn canto_do_qr(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui_kit::AnyElement> {
+        if self.tela != Tela::Sessao {
+            return None;
+        }
+        let cartao = self.detalhe.update(cx, |tela, cx| tela.cartao_do_qr(cx))?;
+        const MARGEM: f32 = 16.;
+        let rodape = crate::app::rodape::ALTURA_DO_RODAPE;
+        let janela = window.viewport_size();
+        // A altura do cartão com o QR, e o que as barras do alto ocupam.
+        const ALTURA_DO_CARTAO: f32 = 250.;
+        const BARRAS_DO_ALTO: f32 = 190.;
+        let altura_util = f32::from(janela.height) - rodape;
+        let (direita, base) = match self.caixa_flutuante.read(cx).canto_ocupado() {
+            // O caixa na coluna da direita: o QR sobe acima dele se couber
+            // abaixo das barras; senão fica ao lado dele, na base.
+            Some((dir, de_baixo, largura, altura)) if dir < MARGEM + 220. && largura > 0. => {
+                let acima = de_baixo + altura + 8.;
+                if altura_util - acima - BARRAS_DO_ALTO >= ALTURA_DO_CARTAO {
+                    (MARGEM, acima)
+                } else {
+                    (dir + largura + 8., MARGEM)
+                }
+            }
+            _ => (MARGEM, MARGEM),
+        };
+        Some(
+            div()
+                .absolute()
+                .right(px(direita))
+                .bottom(px(rodape + base))
+                .child(cartao)
+                .into_any_element(),
+        )
     }
 
     /// Tela cheia na tela do cliente, a partir da janela principal.
@@ -6367,6 +6464,7 @@ impl Render for Aplicativo {
         crate::janela::marcar_faixa_com_controles(faixa_das_guias.is_some(), window, cx);
 
         let com_caixa = matches!(self.tela, Tela::Sessao | Tela::Revelacao);
+        self.entregar_o_convite_ao_cliente(com_caixa, cx);
         self.caixa_flutuante
             .update(cx, |caixa, _| caixa.definir_visivel(com_caixa));
         let cliente_aberto = self.cliente_aberto();
@@ -6500,6 +6598,11 @@ impl Render for Aplicativo {
             .on_action(cx.listener(|este, _: &Desmarcar, _w, cx| {
                 este.na_biblioteca(cx, |tela, cx| tela.sinalizar(0, cx))
             }))
+            .on_action(cx.listener(|este, _: &AlternarQrDoBot, _w, cx| {
+                if este.tela == Tela::Sessao {
+                    este.detalhe.update(cx, |tela, cx| tela.alternar_o_qr(cx));
+                }
+            }))
             .on_action(cx.listener(|este, _: &AlternarComprada, _w, cx| {
                 este.na_grade(
                     cx,
@@ -6601,6 +6704,8 @@ impl Render for Aplicativo {
             // toda tela (`rodape.rs`).
             .child(self.rodape(cx))
             .when(com_caixa, |raiz| raiz.child(self.caixa_flutuante.clone()))
+            // 📸 O QR do bot, no mesmo canto do caixa — acima dele.
+            .children(self.canto_do_qr(window, cx))
             .children(self.canto_dos_envios(window, cx))
             .children(modal_de_importacao)
             .children(modal_de_exportacao)

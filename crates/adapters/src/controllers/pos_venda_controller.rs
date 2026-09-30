@@ -188,7 +188,7 @@ impl PosVendaController {
         &self,
         sessao: &Sessao,
         galeria_id: &str,
-    ) -> Result<(), RecusaDoFimDaSessao> {
+    ) -> Result<Vec<domain::services::pos_venda::EntregaNoCanal>, RecusaDoFimDaSessao> {
         self.api
             .avisar_fotos_prontas(sessao, galeria_id)
             .await

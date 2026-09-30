@@ -201,7 +201,7 @@ impl Agenda {
         self.ja_abriu = false;
         self.guarda = Some(self.escuta.escutar(
             sessao.clone(),
-            vec![(FONTE, "/bookings/agenda/eventos")],
+            vec![(FONTE, "/bookings/agenda/eventos".to_string())],
             envia,
         ));
         self.sessao = Some(sessao);

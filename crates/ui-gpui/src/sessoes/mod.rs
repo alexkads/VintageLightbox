@@ -28,6 +28,7 @@ pub mod paineis;
 /// A revelação padrão revelada em segundo plano (o `revelacao-padrao/` do site).
 pub mod periodo;
 /// O quadro "arraste ou escolha" das duas portas de importar.
+pub mod qr_do_bot;
 pub mod quadro_de_importacao;
 /// A política de retenção do pós-venda (a rota `configuracoes` do site).
 pub mod retencao;

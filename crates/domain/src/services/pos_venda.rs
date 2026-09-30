@@ -307,6 +307,20 @@ pub struct LinkDeAcesso {
     pub validade_em_segundos: Option<i64>,
 }
 
+/// 📸 Um canal de conversa no "Avisar cliente": mandou, ou por que não.
+///
+/// Desde 30/set/2026 o aviso sai também pelo WhatsApp e pelos canais em que o
+/// cliente chegou pelo QR do balcão — cada um **se a regra dele deixar** (a
+/// janela de 24 horas da Meta, o cliente que nunca escreveu). O e-mail continua
+/// saindo sempre, e não entra nesta lista.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct EntregaNoCanal {
+    /// `whatsapp`, `instagram`, `telegram`, `messenger` ou `web`.
+    pub canal: String,
+    pub enviado: bool,
+    pub motivo: Option<String>,
+}
+
 /// Como o **site** vê o estado de uma foto.
 ///
 /// 🚨 **São três, e o [`EstadoNoBalcao`] tem dois.** A diferença não é
@@ -745,7 +759,14 @@ pub trait PosVendaApi: Send + Sync {
     ///
     /// 🔚 Galeria sem e-mail volta como
     /// [`crate::DomainError::FaltaEmail`] (`422`).
-    async fn avisar_fotos_prontas(&self, sessao: &Sessao, galeria_id: &str) -> DomainResult<()>;
+    ///
+    /// 📸 Devolve o que saiu pelos canais de conversa ([`EntregaNoCanal`]) —
+    /// vazio quando o site é anterior a eles ou não havia canal nenhum.
+    async fn avisar_fotos_prontas(
+        &self,
+        sessao: &Sessao,
+        galeria_id: &str,
+    ) -> DomainResult<Vec<EntregaNoCanal>>;
 
     /// As galerias que já existem — para subir numa delas em vez de criar uma
     /// por leva de fotos.
