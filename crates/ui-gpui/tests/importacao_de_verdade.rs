@@ -102,13 +102,19 @@ async fn montar() -> (
             previews.clone(),
         )),
         Arc::new(use_cases::CheckDuplicatesUseCase::new(repositorio.clone())),
-        Arc::new(use_cases::ImportWithOptionsUseCase::new(
-            repositorio.clone(),
-            extrator.clone(),
-            miniaturas,
-            previews,
-            organizador,
-        )),
+        // Montado como o `main.rs` monta: com a revelação do Lightroom.
+        Arc::new(
+            use_cases::ImportWithOptionsUseCase::new(
+                repositorio.clone(),
+                extrator.clone(),
+                miniaturas,
+                previews,
+                organizador,
+            )
+            .com_revelacao_do_arquivo(Arc::new(
+                infrastructure::revelacao_do_arquivo::LeitorDoLightroom,
+            )),
+        ),
         Arc::new(use_cases::GetImportSourcesUseCase::new(dispositivos)),
         Arc::new(use_cases::ScanSourceUseCase::new(Arc::new(
             infrastructure::SourceScannerImpl::new(),
@@ -324,4 +330,124 @@ async fn cancelar_um_lote_pausado_termina_e_nao_cataloga() {
         depois.is_empty(),
         "o catálogo tem de continuar vazio: {depois:#?}"
     );
+}
+
+/// 🎞️ O DNG revelado no Lightroom e o NEF com `.xmp` ao lado entram com a
+/// revelação nos parâmetros — pelo importador que o app usa.
+///
+/// `#[ignore]`: os dois RAW são do acervo do dono. Com `VLB_SAIDA=<pasta>`, a
+/// exportação revelada de cada um fica lá para ser olhada.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn o_raw_revelado_no_lightroom_entra_com_a_revelacao() {
+    use domain::repositories::PhotoRepository;
+    use domain::services::ImageExporter;
+
+    const DNG: &str = "/Users/alexkads/Documents/FotosParaSite/_CSF7953.dng";
+    const NEF: &str = "/Users/alexkads/Downloads/arquivos_2026_2026-01-04_DSC_4645.NEF";
+    if !std::path::Path::new(DNG).exists() || !std::path::Path::new(NEF).exists() {
+        return;
+    }
+
+    let (_explorador, importador, repositorio, dir) = montar().await;
+    let origem = dir.path().join("cartao");
+    std::fs::create_dir_all(&origem).unwrap();
+    let dng = origem.join("_CSF7953.dng");
+    let nef = origem.join("DSC_4645.NEF");
+    std::fs::copy(DNG, &dng).unwrap();
+    std::fs::copy(NEF, &nef).unwrap();
+    // O `.xmp` que o Lightroom grava ao lado de um NEF: P&B, +0,8 de exposição,
+    // corte de 80% e remoção de névoa (que este motor não tem).
+    std::fs::write(
+        origem.join("DSC_4645.xmp"),
+        r#"<x:xmpmeta><rdf:RDF><rdf:Description crs:WhiteBalance="As Shot"
+        crs:Exposure2012="+0.80" crs:ConvertToGrayscale="True" crs:Dehaze="+15"
+        crs:HasCrop="True" crs:CropLeft="0.1" crs:CropTop="0.1" crs:CropRight="0.9"
+        crs:CropBottom="0.9" crs:CropAngle="0"/></rdf:RDF></x:xmpmeta>"#,
+    )
+    .unwrap();
+
+    let (envio, recepcao) = channel::<Andamento>();
+    importador.importar(
+        vec![
+            dng.to_string_lossy().to_string(),
+            nef.to_string_lossy().to_string(),
+        ],
+        domain::value_objects::ImportOptions {
+            source_root: Some(origem.to_string_lossy().to_string()),
+            ..Default::default()
+        },
+        Freios::default(),
+        envio,
+    );
+
+    let mut reveladas = Vec::new();
+    loop {
+        match recepcao.recv_timeout(Duration::from_secs(120)).unwrap() {
+            Andamento::Feito {
+                caminho,
+                revelacao_de_fora,
+                ..
+            } => reveladas.push((caminho, revelacao_de_fora)),
+            Andamento::Falhou { caminho, erro } => panic!("{caminho}: {erro}"),
+            Andamento::Terminou { .. } => break,
+            _ => {}
+        }
+    }
+    assert_eq!(reveladas.len(), 2);
+    assert!(
+        reveladas.iter().all(|(_, r)| r.is_some()),
+        "as duas entraram com a revelação: {reveladas:?}"
+    );
+    let do_nef = reveladas
+        .iter()
+        .find(|(c, _)| c.to_lowercase().ends_with(".nef"))
+        .and_then(|(_, r)| r.clone())
+        .unwrap();
+    assert_eq!(do_nef, ["remoção de névoa"]);
+    assert_eq!(
+        importador.reveladas_fora().len(),
+        2,
+        "o app pede as miniaturas reveladas"
+    );
+    assert!(
+        importador.reveladas_fora().is_empty(),
+        "quem pergunta esvazia"
+    );
+
+    let fotos = repositorio.find_all().await.unwrap();
+    let nef_no_catalogo = fotos
+        .iter()
+        .find(|f| f.nome_original() == Some("DSC_4645.NEF"))
+        .unwrap();
+    let ajustes = infrastructure::gpu_adjustments::ajustes_da_entidade(nef_no_catalogo);
+    assert!((ajustes.exposure - 0.8).abs() < 1e-4);
+    assert_eq!(ajustes.saturation, -1.0);
+    let corte = infrastructure::transformacao::corte_da_entidade(nef_no_catalogo);
+    assert!((corte.crop_width() - 0.8).abs() < 1e-4);
+    // O `.xmp` foi junto, com o nome do arquivo no destino.
+    let destino = std::path::Path::new(nef_no_catalogo.file_path().as_ref() as &std::path::Path);
+    assert!(
+        destino.with_extension("xmp").is_file(),
+        "{}",
+        destino.display()
+    );
+
+    if let Some(saida) = std::env::var_os("VLB_SAIDA") {
+        let saida = std::path::PathBuf::from(saida);
+        std::fs::create_dir_all(&saida).unwrap();
+        let exportador = infrastructure::image_exporter::ImageExporterImpl::new();
+        for foto in &fotos {
+            let nome = foto.nome_original().unwrap_or("foto").to_string();
+            let caminho = saida.join(format!("{nome}-revelada.jpg"));
+            exportador
+                .export(
+                    foto,
+                    &domain::value_objects::FilePath::new(caminho.to_str().unwrap()).unwrap(),
+                    &domain::value_objects::ExportOptions::default(),
+                )
+                .await
+                .unwrap();
+        }
+    }
 }

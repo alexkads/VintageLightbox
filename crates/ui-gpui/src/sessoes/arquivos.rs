@@ -23,9 +23,9 @@ use std::sync::mpsc::Sender;
 /// preparador do envio abre RAW pela LibRaw, coisa que o navegador não faz. Quem
 /// solta um `.NEF` na sessão recebe o JPEG revelado dele — o que o cliente veria
 /// de qualquer jeito.
-pub const EXTENSOES: [&str; 17] = [
+pub const EXTENSOES: [&str; 22] = [
     "jpg", "jpeg", "png", "tif", "tiff", "webp", "avif", "heic", "heif", "bmp", "gif", "nef",
-    "cr2", "cr3", "arw", "dng", "raf",
+    "cr2", "cr3", "arw", "dng", "raf", "orf", "rw2", "pef", "srw", "nrw",
 ];
 
 pub trait SeletorDeFotos: Send + Sync + 'static {

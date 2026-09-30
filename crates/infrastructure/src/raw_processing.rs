@@ -52,29 +52,16 @@ impl RawDecoder for RawDecoderImpl {
     }
 }
 
-/// Verifica se um arquivo é RAW baseado na extensão
+/// Verifica se um arquivo é RAW baseado na extensão.
+///
+/// 🔑 **Uma lista só**, a do `raw-codec`: o site e este app decidem "é RAW"
+/// pela mesma regra, e uma segunda lista aqui divergiria no primeiro formato
+/// novo (já divergia: `nrw`, `3fr` e `iiq` abriam no site e não aqui).
 pub fn is_raw_file(path: &str) -> bool {
-    let ext = std::path::Path::new(path)
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase());
-    matches!(
-        ext.as_deref(),
-        Some(
-            "nef"
-                | "cr2"
-                | "cr3"
-                | "arw"
-                | "dng"
-                | "orf"
-                | "raw"
-                | "rw2"
-                | "raf"
-                | "pef"
-                | "srw"
-                | "x3f"
-        )
-    )
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(raw_codec::eh_raw)
 }
 
 /// Carrega um arquivo RAW e converte para DynamicImage RGB
