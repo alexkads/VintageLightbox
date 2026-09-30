@@ -37,6 +37,7 @@ use gpui_kit::{
 
 use crate::recursos::Icone;
 use crate::tema::fontes;
+use crate::tema::letra::em;
 use crate::tema::medidas::{Canto, Medidas};
 
 /// As medidas do estilo do template (ver `tema::medidas`).
@@ -62,8 +63,8 @@ fn m() -> &'static Medidas {
 fn botao(id: impl Into<SharedString>) -> Button {
     Button::new(id.into())
         .small()
-        .h(px(m().botao.altura))
-        .px(px(m().botao.lados))
+        .h(em(m().botao.altura))
+        .px(em(m().botao.lados))
 }
 
 /// `Button variant="outline"`.
@@ -86,8 +87,8 @@ fn botao_pequeno(id: impl Into<SharedString>) -> Button {
     let c = m().botao_pequeno;
     Button::new(id.into())
         .xsmall()
-        .h(px(c.altura))
-        .px(px(c.lados))
+        .h(em(c.altura))
+        .px(em(c.lados))
 }
 
 /// [`botao_contorno`] no tamanho pequeno.
@@ -108,7 +109,7 @@ pub fn botao_secundario_pequeno(id: impl Into<SharedString>, _cx: &App) -> Butto
 /// Um campo (`Select`, `Input`) na altura do botão pequeno, para ficar
 /// alinhado a ele numa barra densa.
 pub fn campo_pequeno<E: Styled>(elemento: E) -> E {
-    elemento.h(px(m().botao_pequeno.altura))
+    elemento.h(em(m().botao_pequeno.altura))
 }
 
 /// `Button` padrão: a cor da marca.
@@ -148,7 +149,7 @@ pub fn botao_do_menu(id: impl Into<SharedString>, _cx: &App) -> Button {
 /// 28/09/2026: *"não deixe os tamanhos fora de padrão"*). O `xsmall` das
 /// linhas densas (filtros, preço na grade) é escolha, e fica.
 pub fn campo<E: Styled>(elemento: E) -> E {
-    elemento.h(px(m().campo.altura))
+    elemento.h(em(m().campo.altura))
 }
 
 /// O botão só de ícone na altura do botão do template — o que fica ao lado
@@ -227,7 +228,7 @@ pub fn tecla(texto: impl Into<SharedString>) -> Div {
         .rounded(crate::tema::canto(4.))
         .border_1()
         .border_color(gpui_kit::rgba(0x80808066))
-        .text_size(px(10.))
+        .text_size(em(10.))
         .opacity(0.7)
         .child(texto.into())
 }
@@ -500,7 +501,7 @@ pub fn opcao_do_dialogo(id: impl Into<SharedString>, cx: &App) -> Stateful<Div> 
         .border_color(borda)
         .bg(fundo)
         .shadow_xs()
-        .text_size(px(m().letra))
+        .text_size(em(m().letra))
         .cursor_pointer()
         .hover(move |s| s.bg(acento))
 }

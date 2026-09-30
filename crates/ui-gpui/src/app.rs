@@ -11154,6 +11154,66 @@ mod testes {
         }
     }
 
+    /// 🔠 **`Cmd +`/`Cmd −`/`Cmd 0` mudam a letra fora da Revelação** — o
+    /// gesto do Zed (dono, 29/09/2026) — e **na Revelação continuam da foto**,
+    /// como no Lightroom. A letra entra no `font_size` do tema, que a `Root`
+    /// do kit leva ao `rem_size` da janela.
+    #[gpui_kit::test]
+    fn cmd_mais_e_menos_mudam_a_letra_fora_da_revelacao(cx: &mut TestAppContext) {
+        use gpui_kit::component::Theme;
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_kit::init);
+        cx.update(init);
+        let base = crate::tema::medidas().letra;
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
+        });
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        for (tecla, esperado) in [
+            ("cmd-=", base + 1.),
+            ("cmd-=", base + 2.),
+            ("cmd--", base + 1.),
+            ("ctrl-=", base + 2.),
+            ("cmd-0", base),
+        ] {
+            visual.simulate_keystrokes(tecla);
+            janela
+                .update(cx, |app, _window, cx| {
+                    assert_ne!(app.tela(), Tela::Revelacao);
+                    assert_eq!(
+                        Theme::global(cx).font_size,
+                        gpui_kit::px(esperado),
+                        "{tecla} fora da Revelação"
+                    );
+                })
+                .expect("a janela deve estar aberta");
+        }
+
+        janela
+            .update(cx, |app, window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(0), cx));
+                app.revelar(window, cx);
+                assert_eq!(app.tela(), Tela::Revelacao);
+            })
+            .expect("a janela deve estar aberta");
+        // O zoom em si não anda aqui (a foto do teste não tem imagem); quem
+        // confere a foto aproximando é o roteiro no app real.
+        visual.simulate_keystrokes("cmd-=");
+        visual.simulate_keystrokes("cmd-=");
+        janela
+            .update(cx, |_app, _window, cx| {
+                assert_eq!(
+                    Theme::global(cx).font_size,
+                    gpui_kit::px(base),
+                    "na Revelação a tecla é da foto, e a letra fica"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
     /// 🚨 **O laço espera uma resposta por foto, e não só a primeira.**
     ///
     /// Num lote, cada foto baixa, revela e sobe — as respostas chegam

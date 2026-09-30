@@ -1165,6 +1165,11 @@ impl PainelDeDesempenho {
 
 impl Render for PainelDeDesempenho {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 🔠 **A janela própria não tem a `Root` do kit**, que é quem põe a
+        // letra do tema no `rem_size` — sem isto, ela ficaria no rem de 16 do
+        // GPUI e os botões de `estilo` (em rems) sairiam maiores que os da
+        // janela principal, e surdos ao `Cmd +`/`Cmd −` (`tema::letra`).
+        window.set_rem_size(cx.theme().font_size);
         let t = cx.theme().clone();
         let ativa = super::ativa();
         // No Linux (GNOME, KDE…) o app desenha a barra da janela: sem ela não

@@ -2100,7 +2100,7 @@ impl NovaSessao {
             .child(
                 div()
                     .pr(px(24.))
-                    .text_size(px(16.))
+                    .text_size(crate::tema::letra::em(16.))
                     .font_weight(FontWeight::MEDIUM)
                     .child(titulo),
             )

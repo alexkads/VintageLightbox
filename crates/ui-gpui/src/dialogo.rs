@@ -256,7 +256,7 @@ pub fn miolo_da_pergunta(
         .gap(px(6.))
         .child(
             gpui_kit::div()
-                .text_size(px(16.))
+                .text_size(crate::tema::letra::em(16.))
                 .font_weight(gpui_kit::FontWeight::MEDIUM)
                 .child(titulo.into()),
         )
@@ -299,7 +299,7 @@ pub fn cabecalho_com_x(
             gpui_kit::div()
                 .flex_1()
                 .min_w(px(0.))
-                .text_size(px(16.))
+                .text_size(crate::tema::letra::em(16.))
                 .font_weight(gpui_kit::FontWeight::MEDIUM)
                 .child(titulo.into()),
         )

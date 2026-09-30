@@ -5218,7 +5218,7 @@ impl Detalhe {
                                         // site, ou a marca (Matrix, Cyberpunk).
                                         .bg(cores::quente())
                                         .text_color(cores::sobre_quente())
-                                        .text_size(px(10.))
+                                        .text_size(crate::tema::letra::em(10.))
                                         .line_height(px(20.))
                                         .child(
                                             gpui_kit::component::Icon::new(

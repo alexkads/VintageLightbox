@@ -757,7 +757,7 @@ impl Render for Balcao {
                     .gap(px(6.))
                     .child(
                         div()
-                            .text_size(px(16.))
+                            .text_size(crate::tema::letra::em(16.))
                             .font_weight(FontWeight::MEDIUM)
                             .child(self.titulo.clone()),
                     )

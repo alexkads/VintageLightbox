@@ -483,7 +483,7 @@ pub fn seta(
         .on_click(ao_clicar)
         .child(
             div()
-                .text_size(px(11.))
+                .text_size(crate::tema::letra::em(11.))
                 .line_height(px(11.))
                 .child(SharedString::new_static(lado.triangulo(aberta))),
         );

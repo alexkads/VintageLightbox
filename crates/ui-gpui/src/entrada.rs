@@ -303,7 +303,7 @@ impl Render for Entrada {
             ))
             .shadow_lg()
             .text_color(cor(capa::SOBRE_O_BOTAO))
-            .text_size(px(16.))
+            .text_size(crate::tema::letra::em(16.))
             .font_weight(FontWeight::SEMIBOLD)
             .when(!ocupado, |b| {
                 b.cursor_pointer()
@@ -342,7 +342,7 @@ impl Render for Entrada {
                     )))
                     .child(
                         div()
-                            .text_size(px(11.))
+                            .text_size(crate::tema::letra::em(11.))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(cor(capa::OURO))
                             .child("R E V E L A Ç Ã O   ·   C L A S S I F I C A Ç Ã O   ·   B A L C Ã O"),
@@ -351,7 +351,7 @@ impl Render for Entrada {
             .child(
                 div()
                     .font_family(capa::SERIFADA)
-                    .text_size(px(72.))
+                    .text_size(crate::tema::letra::em(72.))
                     .line_height(relative(1.05))
                     .font_weight(FontWeight::BOLD)
                     .text_color(cor(capa::TITULO))
@@ -365,7 +365,7 @@ impl Render for Entrada {
                     .child(div().w(px(64.)).h(px(1.)).bg(cor(capa::OURO).opacity(0.6)))
                     .child(
                         div()
-                            .text_size(px(8.))
+                            .text_size(crate::tema::letra::em(8.))
                             .text_color(cor(capa::OURO))
                             .child("◆"),
                     )
@@ -375,7 +375,7 @@ impl Render for Entrada {
                 div()
                     .max_w(px(448.))
                     .font_family(capa::SERIFADA)
-                    .text_size(px(18.))
+                    .text_size(crate::tema::letra::em(18.))
                     .line_height(relative(1.6))
                     .text_color(cor(capa::PARAGRAFO).opacity(0.9))
                     .child(

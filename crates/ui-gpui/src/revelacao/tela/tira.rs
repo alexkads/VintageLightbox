@@ -896,7 +896,7 @@ impl Revelacao {
                                     }
                                 })
                                 .border_1()
-                                .text_size(px(11.))
+                                .text_size(crate::tema::letra::em(11.))
                                 .cursor_pointer()
                                 .when(aceso, |chip| {
                                     chip.border_color(tema::cores::aceso())
@@ -1121,7 +1121,7 @@ impl Revelacao {
                         .flex()
                         .items_center()
                         .justify_center()
-                        .text_size(px(10.))
+                        .text_size(crate::tema::letra::em(10.))
                         .text_color(apagado.opacity(0.6))
                         .child("sem prévia"),
                 ),
@@ -1134,7 +1134,7 @@ impl Revelacao {
                         .absolute()
                         .top(px(2.))
                         .left(px(4.))
-                        .text_size(px(10.))
+                        .text_size(crate::tema::letra::em(10.))
                         .line_height(px(10.))
                         .text_color(tema::cores::nota())
                         .child(SharedString::from("★".repeat(nota.min(5)))),
@@ -1213,7 +1213,7 @@ impl Revelacao {
                         .right_0()
                         .py(px(2.))
                         .text_center()
-                        .text_size(px(10.))
+                        .text_size(crate::tema::letra::em(10.))
                         .bg(gpui_kit::black().opacity(0.7))
                         .text_color(gpui_kit::rgb(0xd4d4d4))
                         .child(if c.apagada { "apagada" } else { "comprada" }),

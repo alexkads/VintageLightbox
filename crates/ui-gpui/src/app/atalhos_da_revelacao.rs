@@ -14,6 +14,13 @@
 //! | Espaço | tocado alterna o zoom; segurado, é a mão |
 //! | `\` | segurado, mostra a foto sem ajuste |
 //! | `⌘=` · `⌘−` · `⌘0` · `⌘⌥0` | aproxima · afasta · encaixa · 1:1 |
+//!
+//! 🔠 **Fora da Revelação, `⌘=` · `⌘−` · `⌘0` são a letra do app** — o gesto
+//! do Zed (`tema::letra`). Na Revelação a tecla continua sendo da foto, como
+//! no Lightroom.
+//!
+//! | Tecla | Faz |
+//! |---|---|
 //! | Home · End · PgDn · PgUp | percorrem a foto ampliada |
 //! | `⇧C` | o Comparar: duas fotos lado a lado, aqui e na tela do cliente |
 //! | `Tab` · `⇧Tab` | esconde e mostra as colunas · as colunas e a tira (também na galeria da sessão) |
@@ -123,6 +130,21 @@ pub(super) fn ligar(cx: &mut gpui_kit::App) {
         KeyBinding::new("shift-tab", AlternarPaineis, solta),
     ]);
 }
+
+/// 🔠 A letra do app um passo maior (`1`), menor (`-1`) ou de volta à do
+/// template (`0`), com o toast do kit dizendo o tamanho.
+fn mudar_letra(delta: i32, window: &mut Window, cx: &mut Context<Aplicativo>) {
+    let tamanho = crate::tema::letra::passo(delta, cx);
+    // O `info` do kit, neutro: não deu certo nem errado, só mudou.
+    let nota =
+        gpui_kit::component::notification::Notification::info(format!("Letra em {tamanho:.0} px"))
+            .placement(gpui_kit::Anchor::TopCenter)
+            .id::<LetraDoApp>();
+    crate::estilo::mostrar_toast(nota, window, cx);
+}
+
+/// A chave do toast da letra: um toque novo troca o aviso, em vez de empilhar.
+struct LetraDoApp;
 
 impl Aplicativo {
     /// Faz na Revelação, e só nela. Fora dela a tecla segue adiante — Home e
@@ -300,13 +322,22 @@ impl Aplicativo {
         .on_action(cx.listener(|este, _: &VerOAntes, _w, cx| {
             este.na_revelacao(cx, |tela, cx| tela.ver_o_antes(true, cx))
         }))
-        .on_action(cx.listener(|este, _: &Aproximar, _w, cx| {
+        .on_action(cx.listener(|este, _: &Aproximar, window, cx| {
+            if este.tela != Tela::Revelacao {
+                return mudar_letra(1, window, cx);
+            }
             este.na_revelacao(cx, |tela, cx| tela.passo_de_zoom(1, cx))
         }))
-        .on_action(cx.listener(|este, _: &Afastar, _w, cx| {
+        .on_action(cx.listener(|este, _: &Afastar, window, cx| {
+            if este.tela != Tela::Revelacao {
+                return mudar_letra(-1, window, cx);
+            }
             este.na_revelacao(cx, |tela, cx| tela.passo_de_zoom(-1, cx))
         }))
-        .on_action(cx.listener(|este, _: &ZoomEncaixar, _w, cx| {
+        .on_action(cx.listener(|este, _: &ZoomEncaixar, window, cx| {
+            if este.tela != Tela::Revelacao {
+                return mudar_letra(0, window, cx);
+            }
             este.na_revelacao(cx, |tela, cx| {
                 if !tela.cortando() {
                     tela.ir_para_nivel(Nivel::Encaixar, None, cx)

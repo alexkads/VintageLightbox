@@ -690,14 +690,14 @@ impl Revelacao {
                 .px(px(6.))
                 .py(px(2.))
                 .font_family("Menlo")
-                .text_size(px(11.))
+                .text_size(crate::tema::letra::em(11.))
                 .text_color(frente)
                 .child(texto)
         };
         let titulo = move |texto: &'static str| {
             div()
                 .mb(px(6.))
-                .text_size(px(11.))
+                .text_size(crate::tema::letra::em(11.))
                 .text_color(mudo)
                 .child(texto.to_uppercase())
         };
@@ -779,7 +779,7 @@ impl Revelacao {
                         .child(
                             div()
                                 .mt(px(16.))
-                                .text_size(px(11.))
+                                .text_size(crate::tema::letra::em(11.))
                                 .text_color(mudo)
                                 .child("Clique em qualquer lugar, ou aperte ?, para fechar."),
                         ),
@@ -961,7 +961,7 @@ impl Revelacao {
                 .flex()
                 .items_center()
                 .rounded(crate::tema::canto(6.))
-                .text_size(px(11.5))
+                .text_size(crate::tema::letra::em(11.5))
                 .text_color(if aceso {
                     cor_acesa
                 } else {
@@ -1216,7 +1216,7 @@ impl Revelacao {
             .rounded(crate::tema::canto(6.))
             .border_color(gpui_kit::rgb(0x3a3a3a))
             .bg(gpui_kit::transparent_black())
-            .text_size(px(12.))
+            .text_size(crate::tema::letra::em(12.))
             .text_color(gpui_kit::rgb(0xe6e6e6))
             .disabled(desligado)
             .child(valor)
@@ -1243,7 +1243,7 @@ impl Revelacao {
                                     .child(
                                         div()
                                             .ml_auto()
-                                            .text_size(px(11.))
+                                            .text_size(crate::tema::letra::em(11.))
                                             .text_color(apagado)
                                             .child(tecla),
                                     )
@@ -1506,7 +1506,7 @@ impl Revelacao {
                     h_flex()
                         .justify_between()
                         .px(px(2.))
-                        .text_size(px(10.5))
+                        .text_size(crate::tema::letra::em(10.5))
                         .text_color(gpui_kit::rgb(0x8f8f8f))
                         .child("Navegador")
                         .child(pct),
@@ -1547,7 +1547,7 @@ impl Revelacao {
                 .px(px(6.))
                 .py(px(2.))
                 .rounded(crate::tema::canto(4.))
-                .text_size(px(11.))
+                .text_size(crate::tema::letra::em(11.))
                 .when(aceso, |b| {
                     b.bg(cor_acesa)
                         .text_color(crate::tema::cores::sobre_aceso())
@@ -1598,7 +1598,7 @@ impl Revelacao {
             .child(
                 h_flex()
                     .mb(px(4.))
-                    .text_size(px(11.))
+                    .text_size(crate::tema::letra::em(11.))
                     .text_color(apagado)
                     .child("NAVEGADOR")
                     .child(

@@ -1834,7 +1834,7 @@ impl Caixa {
                     .pr(px(24.))
                     .child(
                         div()
-                            .text_size(px(16.))
+                            .text_size(crate::tema::letra::em(16.))
                             .font_weight(FontWeight::MEDIUM)
                             .child(titulo),
                     )
@@ -2306,7 +2306,8 @@ impl Caixa {
                 .child(
                     div()
                         .when(destaque, |d| {
-                            d.text_size(px(24.)).font_weight(FontWeight::BOLD)
+                            d.text_size(crate::tema::letra::em(24.))
+                                .font_weight(FontWeight::BOLD)
                         })
                         .when(!destaque, |d| d.text_base())
                         .child(valor),

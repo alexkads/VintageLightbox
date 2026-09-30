@@ -169,7 +169,7 @@ impl Render for FantasmaDoPreset {
             .rounded(crate::tema::canto(4.))
             .bg(cx.theme().muted)
             .opacity(0.85)
-            .text_size(px(12.))
+            .text_size(crate::tema::letra::em(12.))
             .line_height(px(16.))
             .text_color(cx.theme().foreground)
             .child(self.nome.clone())
@@ -801,7 +801,7 @@ impl Revelacao {
             // que já existe.
             div()
                 .py(px(16.))
-                .text_size(px(11.))
+                .text_size(crate::tema::letra::em(11.))
                 .line_height(relative(1.375))
                 .text_color(apagado)
                 .child(if buscando {
@@ -867,7 +867,7 @@ impl Revelacao {
             .child(
                 div()
                     .flex_none()
-                    .text_size(px(11.))
+                    .text_size(crate::tema::letra::em(11.))
                     .line_height(relative(1.375))
                     .text_color(fraco)
                     .child(rodape),
@@ -976,7 +976,7 @@ impl Revelacao {
                                 .border_color(borda)
                                 .bg(cartao)
                                 .shadow_lg()
-                                .text_size(px(13.))
+                                .text_size(crate::tema::letra::em(13.))
                                 .child(Icon::new(icone).size(px(16.)).text_color(cor))
                                 .child(
                                     div()
@@ -1004,7 +1004,7 @@ impl Revelacao {
             .child(
                 div().flex_1().min_w(px(0.)).child(
                     Styled::h(Input::new(&self.busca_de_presets).xsmall(), px(28.))
-                        .text_size(px(12.))
+                        .text_size(crate::tema::letra::em(12.))
                         .px(px(8.))
                         .rounded(crate::tema::canto(4.))
                         .bg(tema.popover),
@@ -1076,7 +1076,7 @@ impl Revelacao {
                 }))
                 .child(
                     Styled::h(Input::new(&self.nome_do_preset).xsmall(), px(28.))
-                        .text_size(px(12.))
+                        .text_size(crate::tema::letra::em(12.))
                         .px(px(8.))
                         .rounded(crate::tema::canto(4.))
                         .bg(fundo),
@@ -1091,7 +1091,7 @@ impl Revelacao {
                         .rounded(crate::tema::canto(4.))
                         .px(px(2.))
                         .py(px(4.))
-                        .text_size(px(11.))
+                        .text_size(crate::tema::letra::em(11.))
                         .line_height(relative(1.375))
                         .text_color(frente.opacity(0.9))
                         .cursor_pointer()
@@ -1123,7 +1123,7 @@ impl Revelacao {
                 .child(
                     div()
                         .mt(px(6.))
-                        .text_size(px(11.))
+                        .text_size(crate::tema::letra::em(11.))
                         .line_height(relative(1.375))
                         .text_color(apagado)
                         .child(presets::o_que_guarda(&alterados, inteiro)),
@@ -1178,7 +1178,7 @@ impl Revelacao {
                 .border_color(borda)
                 .bg(cartao)
                 .p(px(8.))
-                .text_size(px(11.))
+                .text_size(crate::tema::letra::em(11.))
                 .line_height(relative(1.375))
                 .text_color(apagado)
                 .child(
@@ -1257,7 +1257,7 @@ impl Revelacao {
             .mb(px(4.))
             .items_center()
             .gap(px(6.))
-            .text_size(px(10.))
+            .text_size(crate::tema::letra::em(10.))
             .line_height(px(15.))
             .font_weight(FontWeight::MEDIUM)
             .text_color(apagado)
@@ -1297,7 +1297,7 @@ impl Revelacao {
                 .flex_none()
                 .px(px(4.))
                 .pb(px(4.))
-                .text_size(px(11.))
+                .text_size(crate::tema::letra::em(11.))
                 .line_height(relative(1.375))
                 .text_color(fraco)
                 .child(texto)
@@ -1502,7 +1502,7 @@ impl Revelacao {
                     .min_w(px(0.))
                     .truncate()
                     .py(px(6.))
-                    .text_size(px(12.))
+                    .text_size(crate::tema::letra::em(12.))
                     .line_height(px(16.))
                     .text_color(if travada { fraco } else { frente })
                     .when(!travada, |d| d.cursor_pointer())
@@ -1521,7 +1521,7 @@ impl Revelacao {
                 div()
                     .id(SharedString::from(format!("campos-{id}")))
                     .flex_none()
-                    .text_size(px(10.))
+                    .text_size(crate::tema::letra::em(10.))
                     .text_color(fraco)
                     .child(SharedString::from(quantos.to_string()))
                     .tooltip(move |window, cx| {
@@ -1648,7 +1648,7 @@ impl Revelacao {
             .child(
                 div().flex_1().min_w(px(0.)).child(
                     Styled::h(Input::new(&self.renome_do_preset).xsmall(), px(28.))
-                        .text_size(px(12.))
+                        .text_size(crate::tema::letra::em(12.))
                         .px(px(8.))
                         .rounded(crate::tema::canto(4.))
                         .bg(tema.background),
@@ -1726,7 +1726,7 @@ fn botao_pequeno(
         })
         .rounded(crate::tema::canto(4.))
         .px(px(8.))
-        .text_size(px(12.))
+        .text_size(crate::tema::letra::em(12.))
         .child(rotulo)
         .disabled(desligado)
 }

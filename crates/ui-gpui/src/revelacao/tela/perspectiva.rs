@@ -717,7 +717,7 @@ impl Revelacao {
                 .rounded(crate::tema::canto(3.))
                 .bg(gpui_kit::rgba(0x000000b3))
                 .font_family("Menlo")
-                .text_size(px(10.))
+                .text_size(crate::tema::letra::em(10.))
                 .text_color(cor(*eixo))
                 .child(format!(
                     "{}{}",
@@ -889,7 +889,7 @@ impl Revelacao {
             )
             .when(armadas, |secao| {
                 secao.child(
-                    div().text_size(px(11.)).text_color(mudo).child(
+                    div().text_size(crate::tema::letra::em(11.)).text_color(mudo).child(
                         "Arraste sobre a foto ao longo de um batente, uma quina, o rodapé. Duas guias bastam; cabem quatro. A foto se corrige ao soltar.",
                     ),
                 )
@@ -902,7 +902,7 @@ impl Revelacao {
                         .filter_map(|(i, g)| g.map(|g| linha_da_guia(i, g))),
                 ),
             )
-            .children(aviso.map(|t| div().text_size(px(11.)).text_color(gpui_kit::rgb(AMBAR)).child(t)))
+            .children(aviso.map(|t| div().text_size(crate::tema::letra::em(11.)).text_color(gpui_kit::rgb(AMBAR)).child(t)))
             .child(slider("Vertical", "persp-rotulo-vertical", true, p.vertical, &self.persp_vertical))
             .child(slider(
                 "Horizontal",

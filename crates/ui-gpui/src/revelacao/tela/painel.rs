@@ -468,7 +468,7 @@ impl Revelacao {
                 .border_color(cx.theme().border)
                 .bg(cx.theme().secondary)
                 .p(px(8.))
-                .text_size(px(11.))
+                .text_size(crate::tema::letra::em(11.))
                 .line_height(px(15.))
                 .text_color(cx.theme().muted_foreground)
                 .child(
@@ -495,7 +495,7 @@ impl Revelacao {
         let (largura, altura) = self.tamanho_da_foto()?;
         Some(
             div()
-                .text_size(px(11.))
+                .text_size(crate::tema::letra::em(11.))
                 .line_height(px(15.))
                 .text_color(cx.theme().muted_foreground)
                 .child(SharedString::from(format!(
@@ -909,11 +909,13 @@ impl Revelacao {
                 Tab::new()
                     .label(rotulo)
                     .debug_selector(move || format!("canal-{rotulo}"))
-                    .text_size(px(11.))
+                    .text_size(crate::tema::letra::em(11.))
                     .when(escolhido, |t| t.text_color(cor_do_canal(c, cx)))
                     // 🔑 O ponto avisa que **outro** canal tem curva: sem ele, um
                     // preset que mexe só no azul parece não ter feito nada.
-                    .when(usado, |t| t.suffix(div().text_size(px(8.)).child("●")))
+                    .when(usado, |t| {
+                        t.suffix(div().text_size(crate::tema::letra::em(8.)).child("●"))
+                    })
             }))
             .on_click(move |i, _window, cx| {
                 let Some(c) = Canal::TODOS.get(*i).copied() else {
@@ -930,7 +932,7 @@ impl Revelacao {
             .ghost()
             .xsmall()
             .px(px(6.))
-            .text_size(px(11.))
+            .text_size(crate::tema::letra::em(11.))
             .text_color(cx.theme().muted_foreground)
             .tooltip("Devolve este canal à reta")
             .disabled(!ligado || neutro)

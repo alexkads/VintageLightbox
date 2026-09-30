@@ -1825,7 +1825,7 @@ impl Caixa {
                                 h_flex()
                                     .flex_wrap()
                                     .gap_x(px(8.))
-                                    .text_size(px(11.))
+                                    .text_size(crate::tema::letra::em(11.))
                                     .text_color(apagado)
                                     .children(conta),
                             ),
@@ -1917,7 +1917,7 @@ impl Caixa {
             )
             .child(
                 div()
-                    .text_size(px(36.))
+                    .text_size(crate::tema::letra::em(36.))
                     .line_height(px(36.))
                     .font_weight(FontWeight::BOLD)
                     .child(dinheiro::formatar(a_receber)),

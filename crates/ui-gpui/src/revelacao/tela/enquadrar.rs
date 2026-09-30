@@ -827,7 +827,7 @@ impl Revelacao {
                         .rounded(crate::tema::canto(4.))
                         .bg(gpui_kit::rgba(0x000000b3))
                         .font_family("Menlo")
-                        .text_size(px(11.))
+                        .text_size(crate::tema::letra::em(11.))
                         .text_color(ambar)
                         .child(rotulo_do_angulo(graus))
                 }))
@@ -934,7 +934,7 @@ impl Revelacao {
                             .flex()
                             .justify_center()
                             .font_family("Menlo")
-                            .text_size(px(11.))
+                            .text_size(crate::tema::letra::em(11.))
                             .text_color(if angulo == 0. {
                                 gpui_kit::rgba(0xffffff99).into()
                             } else {
@@ -1063,7 +1063,7 @@ impl Revelacao {
                         } else {
                             e.aviso.clone()
                         };
-                        texto.map(|t| div().mt(px(6.)).text_size(px(11.)).text_color(mudo).child(t))
+                        texto.map(|t| div().mt(px(6.)).text_size(crate::tema::letra::em(11.)).text_color(mudo).child(t))
                     })),
             )
             .child(
@@ -1086,7 +1086,7 @@ impl Revelacao {
                     .child(
                         div()
                             .mt(px(4.))
-                            .text_size(px(11.))
+                            .text_size(crate::tema::letra::em(11.))
                             .text_color(mudo)
                             .child(
                                 "Abre na proporção que o corte da foto já tem. Escolher remodela o retângulo na hora, mantendo a área; depois ela vale para cada arrasto de alça. Arrastar o meio só move.",
@@ -1112,7 +1112,7 @@ impl Revelacao {
             })
             .children(saida.map(|(largura, altura)| {
                 div()
-                    .text_size(px(11.))
+                    .text_size(crate::tema::letra::em(11.))
                     .line_height(px(15.))
                     .text_color(mudo)
                     .child(

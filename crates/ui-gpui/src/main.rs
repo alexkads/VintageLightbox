@@ -510,6 +510,8 @@ async fn main() {
             tema::fontes::registrar(cx);
             // E logo em seguida o tema do site, no modo que o operador escolheu
             // (Claro, Escuro ou Sistema, no menu da conta).
+            // 🔠 O tamanho da letra do `Cmd +`/`Cmd −`, antes do tema que o usa.
+            tema::letra::carregar();
             tema::aplicar(
                 tema::escolha_guardada(&tema::arquivo_da_escolha()),
                 None,

@@ -1512,7 +1512,7 @@ impl Caixa {
             .child(
                 div()
                     .font_family(mono.clone())
-                    .text_size(px(11.))
+                    .text_size(crate::tema::letra::em(11.))
                     .text_color(apagado)
                     .child("TOTAL"),
             )
@@ -1624,7 +1624,7 @@ impl Caixa {
                         .child(
                             div()
                                 .truncate()
-                                .text_size(px(11.))
+                                .text_size(crate::tema::letra::em(11.))
                                 .text_color(apagado)
                                 .child(detalhe),
                         ),
@@ -1632,7 +1632,7 @@ impl Caixa {
                 .child(
                     div()
                         .flex_none()
-                        .text_size(px(24.))
+                        .text_size(crate::tema::letra::em(24.))
                         .font_weight(FontWeight::BOLD)
                         .child(valor),
                 )
@@ -1774,7 +1774,7 @@ impl Caixa {
             )
             .child(
                 div()
-                    .text_size(px(36.))
+                    .text_size(crate::tema::letra::em(36.))
                     .line_height(px(36.))
                     .font_weight(FontWeight::BOLD)
                     .child(dinheiro::formatar(self.a_receber())),
@@ -1787,7 +1787,7 @@ impl Caixa {
                 .map(|b| if destaque { b.primary() } else { b.outline() })
                 .px(px(6.))
                 .rounded(crate::tema::canto(6.))
-                .text_size(px(11.))
+                .text_size(crate::tema::letra::em(11.))
                 .child(
                     div()
                         .font_family(mono.clone())
@@ -1812,7 +1812,7 @@ impl Caixa {
             .gap(px(6.))
             .px(px(12.))
             .py(px(8.))
-            .text_size(px(11.))
+            .text_size(crate::tema::letra::em(11.))
             .text_color(apagado)
             .child(
                 h_flex()
@@ -2085,7 +2085,7 @@ impl Caixa {
                             .gap_x(px(8.))
                             .pl(px(108.))
                             .pr(px(80.))
-                            .text_size(px(11.))
+                            .text_size(crate::tema::letra::em(11.))
                             .text_color(apagado)
                             .children(conta),
                     )
@@ -2102,7 +2102,7 @@ impl Caixa {
                             .py(px(2.))
                             .rounded(crate::tema::canto(6.))
                             .border_1()
-                            .text_size(px(11.))
+                            .text_size(crate::tema::letra::em(11.))
                             .map(|d| {
                                 if aberto {
                                     d.border_color(cores::aceso())
@@ -2129,7 +2129,7 @@ impl Caixa {
                             .child(
                                 div()
                                     .font_family(mono.clone())
-                                    .text_size(px(10.))
+                                    .text_size(crate::tema::letra::em(10.))
                                     .opacity(0.7)
                                     .child("E"),
                             )
@@ -2172,7 +2172,7 @@ impl Caixa {
 
         let rotulo = |texto: &str| {
             div()
-                .text_size(px(11.))
+                .text_size(crate::tema::letra::em(11.))
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(apagado)
                 .child(texto.to_uppercase())
@@ -2181,7 +2181,7 @@ impl Caixa {
             Button::new(id)
                 .link()
                 .xsmall()
-                .text_size(px(11.))
+                .text_size(crate::tema::letra::em(11.))
                 .text_color(apagado)
                 .disabled(desligado)
                 .child(texto)
@@ -2334,7 +2334,7 @@ impl Caixa {
                             .child(
                                 div()
                                     .font_family(mono.clone())
-                                    .text_size(px(10.))
+                                    .text_size(crate::tema::letra::em(10.))
                                     .opacity(0.6)
                                     .child(tecla),
                             )
@@ -2352,7 +2352,7 @@ impl Caixa {
                 .flex_1()
                 .child(
                     div()
-                        .text_size(px(11.))
+                        .text_size(crate::tema::letra::em(11.))
                         .text_color(apagado)
                         .child(texto.to_string()),
                 )
@@ -2390,7 +2390,12 @@ impl Caixa {
                         .cursor_pointer()
                         .hover(|s| s.opacity(0.9))
                         .child("Gravar")
-                        .child(div().text_size(px(10.)).opacity(0.7).child("↵"))
+                        .child(
+                            div()
+                                .text_size(crate::tema::letra::em(10.))
+                                .opacity(0.7)
+                                .child("↵"),
+                        )
                         .on_click(
                             cx.listener(|t, _: &ClickEvent, _, cx| t.enviar_campo_rapido(cx)),
                         ),
@@ -2425,7 +2430,7 @@ impl Caixa {
                             .child(
                                 div()
                                     .pb(px(8.))
-                                    .text_size(px(11.))
+                                    .text_size(crate::tema::letra::em(11.))
                                     .text_color(apagado)
                                     .child(format!("faixa {}", dinheiro::formatar(item.cheio))),
                             ),
@@ -2448,15 +2453,18 @@ impl Caixa {
                                 v_flex()
                                     .flex_1()
                                     .gap(px(4.))
-                                    .child(div().text_size(px(11.)).text_color(apagado).child(
-                                        if em_todos {
-                                            format!("Site · em todos os {n_editaveis} itens")
-                                        } else if lote {
-                                            format!("Site · nos {} marcados", do_lote.len())
-                                        } else {
-                                            "Site".into()
-                                        },
-                                    ))
+                                    .child(
+                                        div()
+                                            .text_size(crate::tema::letra::em(11.))
+                                            .text_color(apagado)
+                                            .child(if em_todos {
+                                                format!("Site · em todos os {n_editaveis} itens")
+                                            } else if lote {
+                                                format!("Site · nos {} marcados", do_lote.len())
+                                            } else {
+                                                "Site".into()
+                                            }),
+                                    )
                                     .child(h_flex().flex_wrap().gap(px(4.)).children(
                                         PARCEIROS.iter().enumerate().map(|(n, p)| {
                                             let escolhido = e.parceiro == *p;
@@ -2541,7 +2549,7 @@ impl Caixa {
                             .min_w(px(0.))
                             .truncate()
                             .font_family(mono.clone())
-                            .text_size(px(11.))
+                            .text_size(crate::tema::letra::em(11.))
                             .text_color(apagado)
                             .child(arquivo),
                     )
@@ -2594,7 +2602,7 @@ impl Caixa {
                             .when(
                                 !lote && item.tipo == Some(Tipo::Outro) && modo.is_none(),
                                 |d| {
-                                    d.child(div().text_size(px(11.)).text_color(apagado).child(
+                                    d.child(div().text_size(crate::tema::letra::em(11.)).text_color(apagado).child(
                                     "Esta foto tem um acerto em texto livre — use “Editar acerto”.",
                                 ))
                                 },
@@ -2610,7 +2618,7 @@ impl Caixa {
                     .py(px(6.))
                     .border_t_1()
                     .border_color(borda)
-                    .text_size(px(10.))
+                    .text_size(crate::tema::letra::em(10.))
                     .text_color(apagado)
                     .when(lote, |d| d.child("C, D, S e ⌫ valem para os marcados ·"))
                     .child(crate::estilo::tecla("Shift"))
@@ -2669,7 +2677,7 @@ impl Caixa {
             .py(px(4.))
             .border_b_1()
             .border_color(borda)
-            .text_size(px(11.))
+            .text_size(crate::tema::letra::em(11.))
             .text_color(apagado)
             .child(StatefulInteractiveElement::on_click(
                 caixinha("caixa-marcar-todos".into(), todos),
@@ -2690,7 +2698,12 @@ impl Caixa {
                         })
                         .child(Icon::new(Icone::SlidersHorizontal).size(px(12.)))
                         .child(format!("Ajustar {n}"))
-                        .child(div().text_size(px(10.)).opacity(0.7).child("E"))
+                        .child(
+                            div()
+                                .text_size(crate::tema::letra::em(10.))
+                                .opacity(0.7)
+                                .child("E"),
+                        )
                         .on_click(
                             cx.listener(|t, _: &ClickEvent, w, cx| t.ajustar_marcados(w, cx)),
                         ),

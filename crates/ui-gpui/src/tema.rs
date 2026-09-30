@@ -92,6 +92,7 @@
 //! `Theme::change` com o modo escolhido: é ele que decide qual das duas vale.
 
 pub mod fontes;
+pub mod letra;
 pub mod medidas;
 pub mod preset;
 pub mod tokens;
@@ -1112,7 +1113,9 @@ fn tema_da_paleta(
     };
     config.insert("radius".into(), Value::from(raio));
     config.insert("radius.lg".into(), Value::from(raio_grande));
-    config.insert("font.size".into(), Value::from(m.letra));
+    // 🔠 A letra do template, com o ajuste do `Cmd +`/`Cmd −` (`letra`): trocar
+    // de tema não desfaz o tamanho que o operador escolheu.
+    config.insert("font.size".into(), Value::from(letra::tamanho()));
     // O `shadow-xs` dos botões e campos do shadcn.
     config.insert("shadow".into(), Value::Bool(true));
     if let Some(letra) = letra {
