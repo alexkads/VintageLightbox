@@ -66,6 +66,32 @@ pub fn caminho_dos_eventos(galeria_id: &str) -> String {
 /// O rótulo com que a tela pede a situação — o que volta no `Recado::Json`.
 pub const PEDIDO_DA_SITUACAO: &str = "bot-da-sessao";
 
+/// O "Novo QR": vence o código atual e devolve a situação com o novo.
+pub const PEDIDO_DO_NOVO_QR: &str = "bot-da-sessao-novo-qr";
+
+pub fn caminho_do_novo_qr(galeria_id: &str) -> String {
+    format!("/pos-venda/galerias/{galeria_id}/bot/novo-convite")
+}
+
+/// O lugar padrão do painel do atendente: 24 pt da direita e 150 do alto —
+/// logo abaixo das barras da sessão, longe do caixa flutuante, que mora no
+/// canto de baixo e, aberto, cobriria o painel.
+pub const POSICAO_PADRAO: (f32, f32) = (24., 150.);
+
+/// Mantém o painel inteiro dentro da tela da sessão. `posicao` e o resultado
+/// são (distância da direita, distância do alto); `painel` e `janela` são
+/// (largura, altura). Painel ainda não medido (`0, 0`) não limita nada além da
+/// margem.
+pub fn dentro_da_janela(posicao: (f32, f32), painel: (f32, f32), janela: (f32, f32)) -> (f32, f32) {
+    const MARGEM: f32 = 8.;
+    let max_direita = (janela.0 - painel.0 - MARGEM).max(MARGEM);
+    let max_base = (janela.1 - painel.1 - MARGEM).max(MARGEM);
+    (
+        posicao.0.clamp(MARGEM, max_direita),
+        posicao.1.clamp(MARGEM, max_base),
+    )
+}
+
 /// O evento do site que muda o cartão.
 pub fn evento_do_bot(dados: &serde_json::Value) -> bool {
     matches!(
@@ -93,6 +119,7 @@ pub fn rotulo_do_passo(passo: &str) -> &'static str {
         "como_conheceu" | "como_conheceu_detalhe" => "respondendo como conheceu",
         "escolher_galeria" => "escolhendo a sessão",
         "concluido" => "cadastro concluído",
+        "interrompido" => "parou no meio (escreveu \"sair\")",
         _ => "conversando",
     }
 }
@@ -274,15 +301,25 @@ pub fn desenho_do_qr(qr: Arc<Vec<Vec<bool>>>, lado: f32) -> impl IntoElement {
 }
 
 /// O que a tela da sessão guarda sobre o bot.
-#[derive(Default)]
+///
+/// 🔑 **Quem liga e desliga o QR é o balconista, e só ele** (dono,
+/// 30/set/2026: *"o QRCode tem que ser exibido sempre quando abrir e fechar a
+/// tela do cliente e desativar quando o balconista quiser"*). Até a 0.1.50 o
+/// QR sumia sozinho da tela do cliente no fim do cadastro, dependia também do
+/// `I` daquela janela e, escondido, virava um ícone solto no canto — e o dono
+/// ficava sem achar como trazê-lo de volta. Agora: um interruptor na barra
+/// ("QR do bot") e o `I`; abrir a tela do cliente religa.
 pub struct EstadoDoQr {
     pub situacao: Option<SituacaoDoBot>,
     /// Os clientes da leitura anterior — `None` antes da primeira.
     pub anteriores: Option<Vec<ClienteNoBot>>,
-    /// A tecla `I`.
-    pub escondido: bool,
-    /// Depois de concluído o QR recolhe; o operador o abre para outra pessoa.
-    pub qr_aberto: bool,
+    /// O interruptor do atendente: o QR na tela do cliente (o botão "QR do
+    /// cliente" e a tecla `I`).
+    pub ligado: bool,
+    /// O painel de status na tela do atendente — independente do QR.
+    pub painel_aberto: bool,
+    /// O "Novo QR" no ar.
+    pub trocando: bool,
     pub lendo: bool,
     pub releitura_pendente: bool,
     /// Enquanto viva, o tempo real desta sessão fica aberto.
@@ -290,10 +327,28 @@ pub struct EstadoDoQr {
     pub vigia: Option<gpui_kit::Task<()>>,
 }
 
+impl Default for EstadoDoQr {
+    /// Nasce **ligado**: é a sessão que começa, e o QR está lá para isso.
+    fn default() -> Self {
+        Self {
+            situacao: None,
+            anteriores: None,
+            ligado: true,
+            painel_aberto: true,
+            trocando: false,
+            lendo: false,
+            releitura_pendente: false,
+            guarda: None,
+            vigia: None,
+        }
+    }
+}
+
 impl EstadoDoQr {
-    /// O convite que a segunda tela deve mostrar agora — `None` escondido.
+    /// O convite que a segunda tela deve mostrar agora — `None` desligado.
+    /// Sem nenhuma outra condição: o cadastro concluído não o tira.
     pub fn para_a_tela_do_cliente(&self) -> Option<ConviteNaTela> {
-        if self.escondido {
+        if !self.ligado {
             return None;
         }
         self.situacao.as_ref().map(convite_para_a_tela)
@@ -372,6 +427,21 @@ mod testes {
             vec!["Maria Souza concluiu o cadastro pelo chat do site"]
         );
         assert!(novidades_do_bot(Some(&depois), &depois).is_empty());
+    }
+
+    #[test]
+    fn o_painel_fica_dentro_da_tela_e_o_que_cabe_nao_muda() {
+        let (painel, janela) = ((232., 160.), (1280., 800.));
+        assert_eq!(dentro_da_janela((300., 200.), painel, janela), (300., 200.));
+        assert_eq!(
+            dentro_da_janela((5000., 5000.), painel, janela),
+            (1040., 632.)
+        );
+        assert_eq!(dentro_da_janela((-40., -5.), painel, janela), (8., 8.));
+        assert_eq!(
+            rotulo_do_passo("interrompido"),
+            "parou no meio (escreveu \"sair\")"
+        );
     }
 
     #[test]

@@ -4632,47 +4632,6 @@ impl Aplicativo {
         });
     }
 
-    /// 📸 O cartão do QR do bot, no canto inferior direito da sessão — acima
-    /// do caixa flutuante quando ele está no mesmo canto.
-    fn canto_do_qr(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Option<gpui_kit::AnyElement> {
-        if self.tela != Tela::Sessao {
-            return None;
-        }
-        let cartao = self.detalhe.update(cx, |tela, cx| tela.cartao_do_qr(cx))?;
-        const MARGEM: f32 = 16.;
-        let rodape = crate::app::rodape::ALTURA_DO_RODAPE;
-        let janela = window.viewport_size();
-        // A altura do cartão com o QR, e o que as barras do alto ocupam.
-        const ALTURA_DO_CARTAO: f32 = 250.;
-        const BARRAS_DO_ALTO: f32 = 190.;
-        let altura_util = f32::from(janela.height) - rodape;
-        let (direita, base) = match self.caixa_flutuante.read(cx).canto_ocupado() {
-            // O caixa na coluna da direita: o QR sobe acima dele se couber
-            // abaixo das barras; senão fica ao lado dele, na base.
-            Some((dir, de_baixo, largura, altura)) if dir < MARGEM + 220. && largura > 0. => {
-                let acima = de_baixo + altura + 8.;
-                if altura_util - acima - BARRAS_DO_ALTO >= ALTURA_DO_CARTAO {
-                    (MARGEM, acima)
-                } else {
-                    (dir + largura + 8., MARGEM)
-                }
-            }
-            _ => (MARGEM, MARGEM),
-        };
-        Some(
-            div()
-                .absolute()
-                .right(px(direita))
-                .bottom(px(rodape + base))
-                .child(cartao)
-                .into_any_element(),
-        )
-    }
-
     /// Tela cheia na tela do cliente, a partir da janela principal.
     ///
     /// ⚠️ **Adiado**: esta janela está no meio do próprio `update`, e a do
@@ -6704,8 +6663,6 @@ impl Render for Aplicativo {
             // toda tela (`rodape.rs`).
             .child(self.rodape(cx))
             .when(com_caixa, |raiz| raiz.child(self.caixa_flutuante.clone()))
-            // 📸 O QR do bot, no mesmo canto do caixa — acima dele.
-            .children(self.canto_do_qr(window, cx))
             .children(self.canto_dos_envios(window, cx))
             .children(modal_de_importacao)
             .children(modal_de_exportacao)

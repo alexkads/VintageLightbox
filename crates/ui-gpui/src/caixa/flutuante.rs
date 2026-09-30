@@ -281,19 +281,6 @@ impl Caixa {
         self.painel_ref().is_some_and(|p| p.visivel)
     }
 
-    /// 📸 O canto que o painel ocupa no último quadro: a distância da borda
-    /// direita, a da base (acima do rodapé), a largura e a altura. `None`
-    /// quando ele não está desenhado. É por isto que o QR do bot da sessão, que
-    /// mora no mesmo canto, sobe acima dele.
-    pub fn canto_ocupado(&self) -> Option<(f32, f32, f32, f32)> {
-        let p = self.painel_ref()?;
-        if !p.visivel || self.vista.is_none() || self.escolhida.is_none() {
-            return None;
-        }
-        let (largura, altura) = p.tamanho.get();
-        Some((MARGEM - p.posicao.0, MARGEM - p.posicao.1, largura, altura))
-    }
-
     /// O centro do painel no último quadro, na janela de tamanho `janela` —
     /// onde um teste clica no cupom.
     #[cfg(test)]

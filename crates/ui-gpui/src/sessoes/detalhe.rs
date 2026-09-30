@@ -768,6 +768,13 @@ pub struct Detalhe {
     /// O tempo real — a raiz entrega (`com_escuta`); sem ele, o cartão só
     /// relê ao entrar na sessão.
     escuta: Option<Arc<dyn crate::tempo_real::Escuta>>,
+    /// 📸 Onde o painel do bot está: a distância da borda direita e da de
+    /// baixo. Fora do `bot` de propósito: a posição que o atendente escolheu
+    /// vale para a sessão seguinte também.
+    posicao_do_painel_do_bot: (f32, f32),
+    tamanho_do_painel_do_bot: std::rc::Rc<std::cell::Cell<(f32, f32)>>,
+    /// O arrasto em curso: onde o mouse desceu e onde o painel estava.
+    arrasto_do_painel_do_bot: Option<((f32, f32), (f32, f32))>,
 }
 
 /// Por que o formulário dos dados do cliente está aberto — e o que fazer depois
@@ -985,6 +992,9 @@ impl Detalhe {
             _colheita: None,
             bot: Default::default(),
             escuta: None,
+            posicao_do_painel_do_bot: super::qr_do_bot::POSICAO_PADRAO,
+            tamanho_do_painel_do_bot: Default::default(),
+            arrasto_do_painel_do_bot: None,
         }
     }
 
@@ -1971,6 +1981,11 @@ impl Detalhe {
     pub fn definir_cliente_aberta(&mut self, aberta: bool, cx: &mut Context<Self>) {
         if self.cliente_aberta != aberta {
             self.cliente_aberta = aberta;
+            // 📸 Abrir a tela do cliente religa o QR (dono, 30/set/2026): é o
+            // momento em que o cliente vai olhar para ela.
+            if aberta && self.galeria_id.is_some() {
+                self.definir_o_qr(true, cx);
+            }
             cx.notify();
         }
     }
@@ -3401,6 +3416,26 @@ impl Detalhe {
                 {
                     self.chegou_o_bot(resultado, cx);
                 }
+                Recado::Json { rotulo, resultado }
+                    if rotulo == super::qr_do_bot::PEDIDO_DO_NOVO_QR =>
+                {
+                    self.bot.trocando = false;
+                    match resultado {
+                        Ok(v) => {
+                            let codigo = v["convite"]["codigo"]
+                                .as_str()
+                                .unwrap_or_default()
+                                .to_string();
+                            self.bot.ligado = true;
+                            self.chegou_o_bot(Ok(v), cx);
+                            self.avisar_sucesso(
+                                format!("Novo QR na tela do cliente: {codigo}. O anterior não abre mais conversa."),
+                                cx,
+                            );
+                        }
+                        Err(erro) => self.avisar_do_gesto(erro, true, cx),
+                    }
+                }
                 _ => {}
             }
         }
@@ -3423,7 +3458,8 @@ impl Detalhe {
             || self.avisando
             || self.pedindo_link
             || self.gravando_dados.is_some()
-            || self.bot.lendo;
+            || self.bot.lendo
+            || self.bot.trocando;
         if !continua {
             self.colhendo = false;
         }
@@ -4062,13 +4098,37 @@ impl Detalhe {
 
     /// 🔑 A tecla `I`: esconde e mostra o QR — aqui e na segunda tela.
     pub fn alternar_o_qr(&mut self, cx: &mut Context<Self>) {
-        self.bot.escondido = !self.bot.escondido;
+        self.definir_o_qr(!self.bot.ligado, cx);
+        // O atendente precisa saber o que a tecla fez — o QR mora na outra tela.
+        self.avisar_sucesso(
+            if self.bot.ligado {
+                "QR ligado na tela do cliente"
+            } else {
+                "QR desligado na tela do cliente"
+            },
+            cx,
+        );
+    }
+
+    /// Abre e fecha o painel do bot — só o do atendente.
+    pub fn alternar_o_painel_do_bot(&mut self, cx: &mut Context<Self>) {
+        self.bot.painel_aberto = !self.bot.painel_aberto;
+        cx.notify();
+    }
+
+    /// Liga ou desliga o QR — nas duas telas. Ligar sem a situação na mão
+    /// (a primeira leitura falhou) pede de novo: o botão nunca fica sem efeito.
+    pub fn definir_o_qr(&mut self, ligado: bool, cx: &mut Context<Self>) {
+        self.bot.ligado = ligado;
+        if ligado && self.bot.situacao.is_none() {
+            self.ler_o_bot(cx);
+        }
         cx.emit(Pedido::ConviteNaTela(self.bot.para_a_tela_do_cliente()));
         cx.notify();
     }
 
     pub fn qr_escondido(&self) -> bool {
-        self.bot.escondido
+        !self.bot.ligado
     }
 
     /// O nome completo que o cliente deu vira o título da sessão.
@@ -4104,68 +4164,115 @@ impl Detalhe {
         cx.notify();
     }
 
-    /// O cartão do canto — a raiz o põe acima do caixa flutuante, que mora
-    /// no mesmo canto (`App::canto_do_qr`). `None` sem situação.
-    pub(crate) fn cartao_do_qr(&mut self, cx: &mut Context<Self>) -> Option<gpui_kit::AnyElement> {
-        use super::qr_do_bot::{
-            desenho_do_qr, estado_do_bot, nome_do_canal, quem_e, rotulo_do_passo, EstadoDoBot,
-        };
+    /// 📸 O painel do bot na tela do atendente — **sem QR** (o QR é do
+    /// cliente, e mora na tela dele). Diz se o QR está ligado lá, o código,
+    /// quem chegou e em que pergunta está.
+    ///
+    /// 🔑 **Posição definida, e só o atendente a muda** (dono, 30/set/2026):
+    /// nasce no canto de baixo à direita, acima da barra do caixa, e dali só sai
+    /// arrastado pelo título — dois cliques no título o devolvem ao canto. O ✕
+    /// fecha só o painel; o QR do cliente fica como está.
+    fn painel_do_bot(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui_kit::AnyElement> {
+        use super::qr_do_bot::{nome_do_canal, quem_e, rotulo_do_passo};
         use crate::recursos::Icone;
+        if !self.bot.painel_aberto {
+            return None;
+        }
         let situacao = self.bot.situacao.as_ref()?;
         let tema = cx.theme();
         let (fundo, borda, fraco) = (tema.popover, tema.border, tema.muted_foreground);
-
-        if self.bot.escondido {
-            return Some(
-                crate::estilo::botao_icone_padrao("qr-mostrar", Icone::Bot)
-                    .tooltip("Mostrar o QR do bot (tecla I)")
-                    .on_click(cx.listener(|tela, _, _, cx| tela.alternar_o_qr(cx)))
-                    .into_any_element(),
-            );
-        }
-
-        let estado = estado_do_bot(&situacao.clientes);
-        let mostra_qr = estado != EstadoDoBot::Concluido || self.bot.qr_aberto;
         let titulo_atual = self
             .aberta
             .as_ref()
             .map(|a| a.galeria.titulo.clone())
             .unwrap_or_default();
+        let janela = window.viewport_size();
+        let janela = (f32::from(janela.width), f32::from(janela.height));
+        let (direita, topo) = super::qr_do_bot::dentro_da_janela(
+            self.posicao_do_painel_do_bot,
+            self.tamanho_do_painel_do_bot.get(),
+            janela,
+        );
+        let ligado = self.bot.ligado;
 
         let cabecalho = h_flex()
+            .id("painel-do-bot-titulo")
             .gap(px(6.))
             .items_center()
+            .cursor_move()
+            .on_mouse_down(
+                gpui_kit::MouseButton::Left,
+                cx.listener(|tela, e: &gpui_kit::MouseDownEvent, _w, cx| {
+                    if e.click_count >= 2 {
+                        tela.posicao_do_painel_do_bot = super::qr_do_bot::POSICAO_PADRAO;
+                        tela.arrasto_do_painel_do_bot = None;
+                    } else {
+                        let ponto = (f32::from(e.position.x), f32::from(e.position.y));
+                        tela.arrasto_do_painel_do_bot =
+                            Some((ponto, tela.posicao_do_painel_do_bot));
+                    }
+                    cx.notify();
+                }),
+            )
+            .tooltip(|window, cx| {
+                gpui_kit::component::tooltip::Tooltip::new(
+                    "Arraste para mover · dois cliques voltam ao canto",
+                )
+                .build(window, cx)
+            })
+            .child(
+                gpui_kit::component::Icon::new(Icone::GripVertical)
+                    .size(px(13.))
+                    .text_color(fraco),
+            )
             .child(
                 gpui_kit::component::Icon::new(Icone::Bot)
                     .size(px(14.))
                     .text_color(fraco),
             )
-            .child(div().text_sm().child("Cadastro pelo bot"))
+            .child(div().text_sm().child("Bot da sessão"))
             .child(div().flex_1())
             .child(
-                crate::estilo::botao_icone("qr-esconder", Icone::X, 24., 14.)
-                    .tooltip("Esconder (tecla I)")
-                    .on_click(cx.listener(|tela, _, _, cx| tela.alternar_o_qr(cx))),
+                crate::estilo::botao_icone("painel-do-bot-fechar", Icone::X, 24., 14.)
+                    .tooltip("Fechar o painel (o QR do cliente continua como está)")
+                    .on_click(cx.listener(|tela, _, _, cx| {
+                        tela.bot.painel_aberto = false;
+                        cx.notify();
+                    })),
             );
 
-        let qr = mostra_qr.then(|| {
-            div()
-                .flex()
-                .flex_col()
-                .items_center()
-                .gap(px(4.))
-                .child(
-                    div()
-                        .p(px(5.))
-                        .bg(gpui_kit::white())
-                        .rounded(crate::tema::canto(6.))
-                        .child(desenho_do_qr(Arc::new(situacao.qr.clone()), 128.)),
-                )
-                .child(div().text_xs().text_color(fraco).child(format!(
-                    "Cliente lê com a câmera · {}",
-                    situacao.convite.codigo
-                )))
-        });
+        let estado_do_qr = div()
+            .flex()
+            .flex_col()
+            .gap(px(1.))
+            .child(
+                h_flex()
+                    .gap(px(6.))
+                    .items_center()
+                    .child(div().size(px(8.)).rounded_full().bg(if ligado {
+                        gpui_kit::rgb(0x10b981)
+                    } else {
+                        gpui_kit::rgb(0x71717a)
+                    }))
+                    .child(div().text_xs().child("QR na tela do cliente:"))
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                            .child(if ligado { "ligado" } else { "desligado" }),
+                    ),
+            )
+            .child(
+                div()
+                    .pl(px(14.))
+                    .text_xs()
+                    .text_color(fraco)
+                    .child(format!("código {}", situacao.convite.codigo)),
+            );
 
         let clientes = situacao.clientes.iter().enumerate().map(|(i, c)| {
             let concluido = c.passo == "concluido";
@@ -4224,38 +4331,64 @@ impl Detalhe {
                 })
         });
 
-        let rodape = (estado == EstadoDoBot::Concluido).then(|| {
-            crate::estilo::botao_fantasma("qr-outra-pessoa", cx)
-                .xsmall()
-                .label(if self.bot.qr_aberto {
-                    "Recolher o QR"
-                } else {
-                    "Mostrar o QR para outra pessoa"
-                })
-                .on_click(cx.listener(|tela, _, _, cx| {
-                    tela.bot.qr_aberto = !tela.bot.qr_aberto;
-                    cx.notify();
-                }))
+        let tamanho = self.tamanho_do_painel_do_bot.clone();
+        let arrastando = self.arrasto_do_painel_do_bot.is_some();
+        let arrasto = arrastando.then(|| {
+            let fraca = cx.entity().downgrade();
+            canvas(
+                |_, _, _| {},
+                move |_, _, window, _| {
+                    let para_mover = fraca.clone();
+                    window.on_mouse_event(move |e: &gpui_kit::MouseMoveEvent, _, _, cx| {
+                        if let Some(t) = para_mover.upgrade() {
+                            t.update(cx, |t, cx| t.arrastar_o_painel_do_bot(e, janela, cx));
+                        }
+                    });
+                    let para_soltar = fraca.clone();
+                    window.on_mouse_event(move |_: &gpui_kit::MouseUpEvent, _, _, cx| {
+                        if let Some(t) = para_soltar.upgrade() {
+                            t.update(cx, |t, cx| {
+                                t.arrasto_do_painel_do_bot = None;
+                                cx.notify();
+                            });
+                        }
+                    });
+                },
+            )
+            .absolute()
+            .size_full()
         });
 
+        // 🔑 **Por cima de tudo** (`deferred`), inclusive do caixa flutuante,
+        // que a raiz desenha depois desta tela: o painel está onde o atendente
+        // o pôs, e não escondido atrás do cupom aberto.
         Some(
-            div()
-                .id("qr-do-bot")
-                .occlude()
-                .w(px(212.))
-                .p(px(10.))
-                .flex()
-                .flex_col()
-                .gap(px(8.))
-                .bg(fundo)
-                .border_1()
-                .border_color(borda)
-                .rounded(crate::tema::canto(8.))
-                .shadow_lg()
-                .child(cabecalho)
-                .children(qr)
-                .when(!situacao.clientes.is_empty(), |d| {
-                    d.child(
+            gpui_kit::deferred(
+                div()
+                    .id("painel-do-bot")
+                    .occlude()
+                    .absolute()
+                    .right(px(direita))
+                    .top(px(topo))
+                    .w(px(232.))
+                    .p(px(10.))
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.))
+                    .bg(fundo)
+                    .border_1()
+                    .border_color(borda)
+                    .rounded(crate::tema::canto(8.))
+                    .shadow_lg()
+                    .child(cabecalho)
+                    .child(estado_do_qr)
+                    .child(if situacao.clientes.is_empty() {
+                        div()
+                            .text_xs()
+                            .text_color(fraco)
+                            .child("Ninguém leu o QR ainda.")
+                            .into_any_element()
+                    } else {
                         div()
                             .pt(px(6.))
                             .border_t_1()
@@ -4263,12 +4396,69 @@ impl Detalhe {
                             .flex()
                             .flex_col()
                             .gap(px(6.))
-                            .children(clientes),
+                            .children(clientes)
+                            .into_any_element()
+                    })
+                    .child(
+                        canvas(
+                            move |limites, _, _| {
+                                tamanho.set((
+                                    f32::from(limites.size.width),
+                                    f32::from(limites.size.height),
+                                ))
+                            },
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .inset_0(),
                     )
-                })
-                .children(rodape)
-                .into_any_element(),
+                    .children(arrasto),
+            )
+            .with_priority(1)
+            .into_any_element(),
         )
+    }
+
+    fn arrastar_o_painel_do_bot(
+        &mut self,
+        e: &gpui_kit::MouseMoveEvent,
+        janela: (f32, f32),
+        cx: &mut Context<Self>,
+    ) {
+        let Some((inicio, de)) = self.arrasto_do_painel_do_bot else {
+            return;
+        };
+        let (x, y) = (f32::from(e.position.x), f32::from(e.position.y));
+        // Arrastar para a direita **diminui** a distância da borda direita;
+        // para baixo, aumenta a do alto.
+        let nova = (de.0 - (x - inicio.0), de.1 + (y - inicio.1));
+        self.posicao_do_painel_do_bot =
+            super::qr_do_bot::dentro_da_janela(nova, self.tamanho_do_painel_do_bot.get(), janela);
+        cx.notify();
+    }
+
+    /// 📸 "Novo QR": o código atual para de abrir conversa nova, e outro vai
+    /// para a tela do cliente.
+    pub fn novo_qr(&mut self, cx: &mut Context<Self>) {
+        let (Some(sessao), Some(id)) = (self.sessao.clone(), self.galeria_id.clone()) else {
+            return;
+        };
+        if self.bot.trocando {
+            return;
+        }
+        self.bot.trocando = true;
+        self.publicador.pedir_json(
+            sessao,
+            crate::pos_venda::porta::PedidoJson::gravar(
+                super::qr_do_bot::PEDIDO_DO_NOVO_QR,
+                "POST",
+                super::qr_do_bot::caminho_do_novo_qr(&id),
+                serde_json::json!({}),
+            ),
+            self.recados.0.clone(),
+        );
+        self.acompanhar(cx);
+        cx.notify();
     }
 }
 
@@ -4278,6 +4468,7 @@ impl Render for Detalhe {
         if self.docas.is_none() {
             self.montar_as_docas(window, cx);
         }
+        let painel_do_bot = self.painel_do_bot(window, cx);
         crate::estilo::toast_quando_mudar(
             &mut self.erro_visto,
             self.erro.clone(),
@@ -4423,6 +4614,7 @@ impl Render for Detalhe {
             // 🚨 **Ela é a tela inteira**, e a grade dentro dela é que recebe o
             // `flex_1`.
             .size_full()
+            .relative()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .children(cabecalho)
@@ -4477,6 +4669,8 @@ impl Render for Detalhe {
             .children(dialogo_de_apagar)
             .children(dialogo_de_descartar)
             .children(formulario_do_cliente)
+            // 📸 O painel do bot, na posição que o atendente escolheu.
+            .children(painel_do_bot)
     }
 }
 
@@ -5182,6 +5376,58 @@ impl Detalhe {
                         cx.listener(|_tela, _ev, _window, cx| cx.emit(Pedido::TelaDoCliente)),
                     ),
             )
+            // 📸 O interruptor do QR do bot — sempre à vista, aceso quando
+            // ligado. É o mesmo que a tecla `I` (dono, 30/set/2026).
+            // 📸 Os comandos do bot da sessão (dono, 30/set/2026: *"comandos
+            // diretos para o atendente saber o que está fazendo"*): o QR na
+            // tela do cliente (tecla `I`), o painel do atendente e o Novo QR.
+            // Os dois primeiros são interruptores independentes.
+            .child(
+                estilo::botao_contorno_pequeno("sessao-qr-do-cliente", cx)
+                    .when(self.bot.ligado, |b| b.bg(acento))
+                    .child(Icon::new(Icone::MonitorSmartphone).size(px(14.)))
+                    // O estado por escrito: o QR mora na outra tela, e a cor
+                    // sozinha não diz ao atendente o que está lá.
+                    .child(if self.bot.ligado {
+                        "QR do cliente: ligado"
+                    } else {
+                        "QR do cliente: desligado"
+                    })
+                    .tooltip(if self.bot.ligado {
+                        "O QR está na tela do cliente — clique para tirar (tecla I)"
+                    } else {
+                        "O QR não está na tela do cliente — clique para mostrar (tecla I)"
+                    })
+                    .on_click(cx.listener(|tela, _ev, _window, cx| tela.alternar_o_qr(cx))),
+            )
+            .child(
+                estilo::botao_contorno_pequeno("sessao-painel-do-bot", cx)
+                    .when(self.bot.painel_aberto, |b| b.bg(acento))
+                    .child(Icon::new(Icone::Bot).size(px(14.)))
+                    .child(if self.bot.painel_aberto {
+                        "Painel do bot: aberto"
+                    } else {
+                        "Painel do bot: fechado"
+                    })
+                    .tooltip(if self.bot.painel_aberto {
+                        "Fechar o painel do bot (o QR do cliente continua como está)"
+                    } else {
+                        "Abrir o painel do bot: quem chegou pelo QR e em que pergunta está"
+                    })
+                    .on_click(cx.listener(|tela, _ev, _window, cx| {
+                        tela.alternar_o_painel_do_bot(cx)
+                    })),
+            )
+            .child(estilo::desligado(
+                estilo::botao_contorno_pequeno("sessao-novo-qr", cx)
+                    .child(Icon::new(Icone::RefreshCw).size(px(14.)))
+                    .child("Novo QR")
+                    .tooltip(
+                        "Trocar o código para a próxima pessoa desta sessão — quem já começou a conversa continua",
+                    )
+                    .on_click(cx.listener(|tela, _ev, _window, cx| tela.novo_qr(cx))),
+                self.bot.trocando,
+            ))
             // 🖨️ O que se faz **com as marcadas**: a negociação do balcão (o
             // "Negociação…" do site) e a folha de impressão, que só o desktop tem.
             .when(marcadas > 0, |barra| {
@@ -8987,7 +9233,9 @@ mod testes {
         );
         janela
             .update(cx, |tela, _w, cx| {
-                assert!(tela.cartao_do_qr(cx).is_some(), "o cartão aparece");
+                assert!(tela.bot.situacao.is_some(), "o painel tem o que mostrar");
+                assert!(tela.bot.painel_aberto, "e nasce aberto");
+                let _ = cx;
             })
             .unwrap();
         assert_eq!(
@@ -9038,6 +9286,75 @@ mod testes {
             pedidos.lock().unwrap().last().unwrap(),
             "tela: RF-ABC234 Conversando"
         );
+
+        // Desligado pelo balconista, abrir a tela do cliente religa.
+        janela
+            .update(cx, |tela, _w, cx| {
+                tela.alternar_o_qr(cx);
+                assert!(tela.qr_escondido());
+                assert!(tela.bot.painel_aberto, "desligar o QR não fecha o painel");
+                tela.definir_cliente_aberta(true, cx);
+                assert!(!tela.qr_escondido(), "abrir a tela do cliente religa o QR");
+            })
+            .unwrap();
+        assert_eq!(
+            pedidos.lock().unwrap().last().unwrap(),
+            "tela: RF-ABC234 Conversando"
+        );
+    }
+
+    /// 📸 Os comandos do atendente são independentes: fechar o painel não
+    /// mexe no QR do cliente, e o Novo QR pede um código novo e religa o QR.
+    #[gpui_kit::test]
+    fn os_comandos_do_bot_sao_independentes(cx: &mut TestAppContext) {
+        let publicador = publicador_com(vec![], false);
+        publicador.responder_json(
+            crate::sessoes::qr_do_bot::PEDIDO_DA_SITUACAO,
+            Ok(situacao_do_bot(serde_json::json!([]))),
+        );
+        publicador.responder_json(
+            crate::sessoes::qr_do_bot::PEDIDO_DO_NOVO_QR,
+            Ok(serde_json::json!({
+                "convite": { "codigo": "RF-NOVO23", "url": "https://x/s/RF-NOVO23" },
+                "qr": [[true]],
+                "clientes": [],
+            })),
+        );
+        let janela = janela_com(
+            cx,
+            publicador.clone(),
+            Arc::new(SeletorDeMentira::default()),
+        );
+        entrar(cx, &janela);
+        janela
+            .update(cx, |tela, _w, cx| {
+                tela.alternar_o_painel_do_bot(cx);
+                assert!(!tela.bot.painel_aberto);
+                assert!(tela.bot.ligado, "fechar o painel não tira o QR do cliente");
+                tela.alternar_o_qr(cx);
+                assert!(!tela.bot.ligado);
+                assert_eq!(tela.ultimo_aviso(), Some("QR desligado na tela do cliente"));
+                assert!(!tela.bot.painel_aberto, "o QR não abre nem fecha o painel");
+                tela.novo_qr(cx);
+            })
+            .unwrap();
+        colher_ate_parar(cx, &janela);
+        assert!(publicador
+            .pedidos_json()
+            .iter()
+            .any(|p| p.metodo == "POST" && p.caminho == "/pos-venda/galerias/g1/bot/novo-convite"));
+        janela
+            .update(cx, |tela, _w, _cx| {
+                assert!(tela.bot.ligado, "o Novo QR religa o QR do cliente");
+                assert_eq!(
+                    tela.bot.situacao.as_ref().unwrap().convite.codigo,
+                    "RF-NOVO23"
+                );
+                assert!(tela
+                    .ultimo_aviso()
+                    .is_some_and(|a| a.starts_with("Novo QR na tela do cliente: RF-NOVO23")));
+            })
+            .unwrap();
     }
 
     /// 📸 O "Avisar" diz por onde saiu e o que ficou de fora.
