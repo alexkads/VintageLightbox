@@ -151,6 +151,7 @@ impl Aplicativo {
                 "backup" => self.ir_para(Tela::Backup, window, cx),
                 "chatbot" => self.ir_para(Tela::Chatbot, window, cx),
                 "agenda" => self.ir_para(Tela::Agenda, window, cx),
+                "recuperacao" => self.ir_para(Tela::Recuperacao, window, cx),
                 outro => eprintln!("[roteiro] não sei ir para '{outro}'"),
             },
             Passo::AbrirSessao(posicao) => match self.sessoes.read(cx).id_na_posicao(*posicao) {

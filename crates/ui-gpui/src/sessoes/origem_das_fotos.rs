@@ -489,6 +489,9 @@ impl OrigemDasFotos {
 
     /// "Do cartão ou pasta…", com o menu dos cartões e o "Escolher pasta…".
     pub fn botao(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let recuperada = cx
+            .try_global::<crate::recuperacao::PastaRecuperada>()
+            .cloned();
         let tema = cx.theme();
         div()
             .relative()
@@ -515,6 +518,33 @@ impl OrigemDasFotos {
                         .border_color(tema.border)
                         .bg(tema.popover)
                         .shadow_lg()
+                        // 💾 O que a "Recuperar cartão" trouxe de volta, antes
+                        // dos cartões: foi para isso que o operador veio.
+                        .when_some(recuperada, |m, recuperada| {
+                            let caminho = recuperada.caminho.clone();
+                            m.child(
+                                h_flex()
+                                    .id("origem-recuperadas")
+                                    .debug_selector(|| "origem-recuperadas".into())
+                                    .gap(px(8.))
+                                    .px(px(8.))
+                                    .py(px(6.))
+                                    .rounded(crate::tema::canto(4.))
+                                    .text_sm()
+                                    .cursor_pointer()
+                                    .hover(|h| h.bg(tema.accent))
+                                    .child(Icon::new(Icone::RefreshCw).size(px(16.)))
+                                    .child(SharedString::from(format!(
+                                        "Fotos recuperadas ({})",
+                                        recuperada.fotos
+                                    )))
+                                    .on_click(cx.listener(move |origem, _, window, cx| {
+                                        cx.stop_propagation();
+                                        origem.ler_cartao(caminho.clone(), window, cx)
+                                    })),
+                            )
+                            .child(div().my(px(4.)).h(px(1.)).bg(tema.border))
+                        })
                         .child(
                             div()
                                 .px(px(8.))
@@ -977,6 +1007,11 @@ impl OrigemDasFotos {
             selecao.fotos = fotos.iter().map(|f| (f.to_string(), false)).collect();
         }
         cx.notify();
+    }
+
+    /// 🧪 De onde a janela de escolher está lendo.
+    pub(crate) fn raiz_da_selecao(&self) -> Option<&str> {
+        self.selecao.as_ref().map(|s| s.raiz.as_str())
     }
 
     /// 🧪 Quantas fotos estão marcadas na janela.

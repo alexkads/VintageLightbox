@@ -461,6 +461,10 @@ pub enum Tela {
     Chatbot,
     /// 📅 A agenda dos ensaios — `/dashboard/agendamentos` (2026-09-25).
     Agenda,
+    /// 💾 Recuperar as fotos de um cartão formatado ou apagado sem querer
+    /// (2026-09-29). Só no app: ler o cartão setor por setor não se faz do
+    /// navegador.
+    Recuperacao,
 }
 
 impl Tela {
@@ -478,6 +482,7 @@ impl Tela {
             Tela::Backup => "backup",
             Tela::Chatbot => "chatbot",
             Tela::Agenda => "agenda",
+            Tela::Recuperacao => "recuperacao",
         }
     }
 }
@@ -530,6 +535,10 @@ pub struct Aplicativo {
     /// 📅 A agenda. Vive o tempo todo, como o chatbot.
     pub(crate) agenda: Entity<Agenda>,
     _pedido_da_agenda: gpui_kit::Subscription,
+    /// 💾 A recuperação de cartão, quando a montagem a liga
+    /// ([`Aplicativo::ligar_recuperacao`]). Sem ela, o item do menu não aparece.
+    pub(crate) recuperacao: Option<Entity<crate::recuperacao::tela::Recuperacao>>,
+    _pedido_da_recuperacao: Option<gpui_kit::Subscription>,
     avisador: Arc<dyn crate::tempo_real::Avisador>,
     /// O assistente da nova sessão.
     pub(crate) nova_sessao: Entity<NovaSessao>,
@@ -1315,6 +1324,8 @@ impl Aplicativo {
             _pedido_do_chatbot: pedido_do_chatbot,
             agenda,
             _pedido_da_agenda: pedido_da_agenda,
+            recuperacao: None,
+            _pedido_da_recuperacao: None,
             avisador,
             nova_sessao,
             _pedidos_da_nova: pedidos_da_nova,
@@ -4816,15 +4827,53 @@ impl Aplicativo {
         self.configurando
     }
 
-    /// 💾 Liga o "Recuperar cartão formatado…" do modal de importação
-    /// (montagem no `main`, como [`Self::definir_edicoes`]).
+    /// 💾 Liga a tela "Recuperar cartão" do menu lateral (montagem no `main`,
+    /// como [`Self::definir_edicoes`]).
+    ///
+    /// 🔑 **É tela do menu, e não botão da importação** (dono, 29/set/2026): o
+    /// cartão formatado é problema recorrente do estúdio, e quem precisa dele
+    /// não está necessariamente importando — está no susto, procurando onde
+    /// fica.
     pub fn ligar_recuperacao(
         &mut self,
         porta: Arc<dyn crate::recuperacao::porta::Recuperador>,
+        seletor: Arc<dyn SeletorDePasta>,
         cx: &mut Context<Self>,
     ) {
-        self.importacao
-            .update(cx, |importacao, cx| importacao.ligar_recuperacao(porta, cx));
+        use crate::recuperacao::tela::{Pedido, Recuperacao};
+        let painel = cx.new(|_cx| Recuperacao::nova(porta, seletor));
+        self._pedido_da_recuperacao = Some(cx.subscribe(
+            &painel,
+            |raiz, _painel, pedido: &Pedido, cx| match pedido {
+                Pedido::Importar { pasta, fotos } => {
+                    raiz.levar_recuperadas(pasta.clone(), *fotos, cx)
+                }
+            },
+        ));
+        self.recuperacao = Some(painel);
+    }
+
+    /// 💾 "Importar N fotos" no fim da recuperação.
+    ///
+    /// 🚨 **Tudo entra numa sessão** (regra de 6/set): a recuperação não sabe
+    /// de qual cliente é o cartão. A pasta vira a primeira opção do "Do cartão
+    /// ou pasta…" ([`crate::recuperacao::PastaRecuperada`]) e o app vai para a
+    /// lista de sessões.
+    fn levar_recuperadas(&mut self, pasta: String, fotos: usize, cx: &mut Context<Self>) {
+        cx.set_global(crate::recuperacao::PastaRecuperada {
+            caminho: pasta,
+            fotos,
+        });
+        self.tela = Tela::Sessoes;
+        self.sessoes.update(cx, |t, cx| t.recarregar(cx));
+        self.avisar_em_toast(
+            "Abra a sessão do cliente: em Importar fotos › Do cartão ou pasta…, as fotos \
+             recuperadas são a primeira opção."
+                .into(),
+            false,
+            cx,
+        );
+        cx.notify();
     }
 
     /// Abre o modal de importação sobre a Biblioteca.
@@ -5901,7 +5950,8 @@ impl Aplicativo {
             | Tela::NovaSessao
             | Tela::Backup
             | Tela::Chatbot
-            | Tela::Agenda => {}
+            | Tela::Agenda
+            | Tela::Recuperacao => {}
         }
     }
 
@@ -5935,7 +5985,8 @@ impl Aplicativo {
             | Tela::Retencao
             | Tela::NovaSessao
             | Tela::Chatbot
-            | Tela::Agenda => {}
+            | Tela::Agenda
+            | Tela::Recuperacao => {}
         }
     }
 
@@ -5996,7 +6047,8 @@ impl Aplicativo {
             | Tela::NovaSessao
             | Tela::Backup
             | Tela::Chatbot
-            | Tela::Agenda => cx.propagate(),
+            | Tela::Agenda
+            | Tela::Recuperacao => cx.propagate(),
         }
     }
 
@@ -6471,6 +6523,7 @@ impl Render for Aplicativo {
                                     Tela::NovaSessao => self.nova_sessao.clone().into_any_element(),
                                     Tela::Chatbot => self.chatbot.clone().into_any_element(),
                                     Tela::Agenda => self.agenda.clone().into_any_element(),
+                                    Tela::Recuperacao => self.tela_de_recuperacao(),
                                 }),
                             ),
                     ),
