@@ -1,9 +1,13 @@
 {
-  "versao": "0.1.47",
-  "titulo": "Passar o mouse por uma predefinição não deixa mais o efeito na foto.",
+  "versao": "0.1.48",
+  "titulo": "O RAW da câmera e o DNG do Lightroom entram com a revelação feita no Lightroom.",
   "importante": false,
   "novidades": [
-    "Na Revelação, às vezes o efeito de uma predefinição ficava na foto só de passar o mouse por cima dela, principalmente ao arrastar a barra de zoom. Agora, ao tirar o mouse, a foto volta exatamente como estava."
+    "O DNG exportado pelo Lightroom abre em qualquer computador do balcão, inclusive o DNG com compressão com perdas, que antes dava erro ao importar.",
+    "A revelação feita no Lightroom vem junto: ao importar um DNG revelado, ou um NEF/CR2 com o arquivo .xmp ao lado, a foto já entra com exposição, contraste, cores, tonalização, grão e o corte do Lightroom nos controles da Revelação.",
+    "O rodapé da importação conta quantas fotos vieram com a revelação do Lightroom e avisa o que ele fez e este app ainda não tem (por exemplo, remoção de névoa).",
+    "Na nova sessão, a predefinição padrão não passa por cima das fotos que já vieram reveladas do Lightroom.",
+    "A sessão aceita também ORF, RW2, PEF, SRW e NRW."
   ],
-  "por_que_atualizar": "A foto na tela sempre mostra o que foi aplicado de verdade."
+  "por_que_atualizar": "Quem revela no Lightroom não precisa refazer a revelação foto a foto: ela chega aos controles na importação."
 }
