@@ -14,6 +14,9 @@ members = [
     # os dois também no navegador — e o DNG com perdas, que a LibRaw do
     # `rsraw-sys` recusa. Usa o rawler vendorizado em `vendor/rawler`.
     "crates/raw-codec",
+    # O mesmo, compilado para a importação do site (wasm-bindgen, sem GPU).
+    # Separado do `revelacao-web` para só descer quando a leva tem RAW.
+    "crates/raw-web",
     # O mesmo codificador compilado para o navegador do **cliente** — sem GPU,
     # só para converter o WebP guardado no JPEG que ele leva ao laboratório.
     "crates/conversao-web",
