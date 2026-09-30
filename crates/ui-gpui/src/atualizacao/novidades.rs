@@ -133,6 +133,18 @@ pub fn jeito_desta_instalacao() -> JeitoDaInstalacao {
     JeitoDaInstalacao::do_texto(env!("VLB_JEITO_DE_INSTALAR"))
 }
 
+/// 📡 O anúncio do servidor ainda não virou versão na tela?
+///
+/// 🚨 **O servidor e o app leem o `novidades.json` em caches diferentes.** O
+/// `raw` do GitHub guarda o arquivo por 5 minutos em cada ponta da CDN: o
+/// servidor (nos EUA) viu a 0.1.45 e anunciou às 21:52 de 29/09, e o Mac do
+/// dono, perguntando segundos depois, ainda recebeu a 0.1.44 — e ficou em
+/// silêncio, porque o servidor não repete o anúncio da mesma versão. Enquanto
+/// isto for verdade, a procura se repete.
+pub fn anuncio_pendente(anunciada: &str, atual: &str, na_tela: Option<&str>) -> bool {
+    mais_nova(anunciada, atual) && na_tela.is_none_or(|v| mais_nova(anunciada, v))
+}
+
 /// O aviso para quem instalou compilando: há versão nova no `main`?
 pub fn aviso_do_main(atual: &str, novidades: Option<Novidades>) -> Option<VersaoNova> {
     let novidades = novidades?;
@@ -322,6 +334,19 @@ mod testes {
     /// 🔑 **O `novidades.json` do repositório é da versão do `Cargo.toml`.**
     /// Subir a versão sem escrever as novidades (ou o contrário) faz os balcões
     /// ou não serem avisados, ou serem avisados do que não existe.
+    #[test]
+    fn o_anuncio_fica_pendente_ate_a_versao_chegar_a_tela() {
+        // O cache devolveu a versão velha: a tela não tem nada.
+        assert!(anuncio_pendente("0.1.45", "0.1.44", None));
+        // Ou tem uma mais velha que a anunciada.
+        assert!(anuncio_pendente("0.1.46", "0.1.44", Some("0.1.45")));
+        // Chegou a anunciada (ou uma mais nova): para.
+        assert!(!anuncio_pendente("0.1.45", "0.1.44", Some("0.1.45")));
+        assert!(!anuncio_pendente("0.1.45", "0.1.44", Some("0.1.46")));
+        // Anúncio de versão que este app já tem: nada a fazer.
+        assert!(!anuncio_pendente("0.1.44", "0.1.44", None));
+    }
+
     #[test]
     fn o_novidades_json_anda_com_a_versao_do_cargo() {
         let n = desta_versao().expect("docs/novidades.json legível, com versão e título");

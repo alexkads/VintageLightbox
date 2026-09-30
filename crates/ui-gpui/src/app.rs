@@ -1514,14 +1514,35 @@ impl Aplicativo {
         if !crate::telemetria::ligada() {
             return None;
         }
+        // 🔁 Se a procura voltar sem a versão anunciada (o cache do GitHub
+        // ainda com a anterior), ela se repete a cada minuto, por dez minutos
+        // — o dobro da vida do cache (`novidades::anuncio_pendente`).
+        const INTERVALO: u32 = 60;
+        const TENTATIVAS: u32 = 10;
+        let mut pendente: Option<(String, u32, u32)> = None;
         Some(cx.spawn(async move |raiz, cx| loop {
             cx.background_executor()
                 .timer(std::time::Duration::from_secs(1))
                 .await;
-            let Some(versao) = crate::telemetria::tomar_anuncio() else {
+            if let Some(versao) = crate::telemetria::tomar_anuncio() {
+                pendente = Some((versao, 0, 0));
+            }
+            let Some((versao, tentativas, espera)) = pendente.as_mut() else {
                 continue;
             };
-            let vivo = raiz.update(cx, |raiz, cx| {
+            if *espera > 0 {
+                *espera -= 1;
+                continue;
+            }
+            let procurou = raiz.update(cx, |raiz, cx| {
+                let na_tela = raiz.atualizacao.versao.as_ref().map(|v| v.versao.as_str());
+                if !crate::atualizacao::novidades::anuncio_pendente(
+                    versao,
+                    env!("CARGO_PKG_VERSION"),
+                    na_tela,
+                ) {
+                    return None;
+                }
                 let ocupada = raiz.atualizacao.instalando
                     || raiz.atualizacao.verificando
                     || matches!(raiz.atualizacao.aviso, Some(Aviso::Instalada(_)));
@@ -1531,9 +1552,18 @@ impl Aplicativo {
                         .procurar(raiz.avisos_de_versao.0.clone(), false);
                     raiz._atualizacao = Some(Self::esperar_aviso(cx));
                 }
+                Some(())
             });
-            if vivo.is_err() {
-                return;
+            match procurou {
+                Err(_) => return,
+                Ok(None) => pendente = None,
+                Ok(Some(())) => {
+                    *tentativas += 1;
+                    *espera = INTERVALO;
+                    if *tentativas >= TENTATIVAS {
+                        pendente = None;
+                    }
+                }
             }
         }))
     }
