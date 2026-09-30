@@ -38,8 +38,6 @@ use super::explorador::{
     SeletorDePasta,
 };
 use crate::biblioteca::miniaturas::{CacheDeMiniaturas, Miniatura};
-use crate::recuperacao::porta::Recuperador;
-use crate::recuperacao::tela::{Pedido, Recuperacao};
 
 actions!(
     importacao,
@@ -113,12 +111,6 @@ pub struct Importacao {
     rolagem: UniformListScrollHandle,
     /// Qual célula abrir grande. `None` é a lupa fechada.
     lupa: Option<usize>,
-    /// O painel de recuperar cartão formatado, quando a montagem o liga
-    /// ([`Importacao::ligar_recuperacao`]).
-    recuperacao: Option<gpui_kit::Entity<Recuperacao>>,
-    /// Se o painel está no lugar da grade.
-    recuperando_cartao: bool,
-    _pedidos_da_recuperacao: Option<gpui_kit::Subscription>,
     _colheita: Option<Task<()>>,
 }
 
@@ -162,48 +154,8 @@ impl Importacao {
             foco: cx.focus_handle(),
             rolagem: UniformListScrollHandle::new(),
             lupa: None,
-            recuperacao: None,
-            recuperando_cartao: false,
-            _pedidos_da_recuperacao: None,
             _colheita: None,
         }
-    }
-
-    /// Liga o "Recuperar cartão formatado…". Separado do [`Importacao::nova`]
-    /// porque a recuperação é um acessório da importação: sem ela ligada, o
-    /// botão não aparece e o resto do modal é o mesmo.
-    pub fn ligar_recuperacao(&mut self, porta: Arc<dyn Recuperador>, cx: &mut Context<Self>) {
-        let seletor = self.seletor.clone();
-        let painel = cx.new(|_cx| Recuperacao::nova(porta, seletor));
-        self._pedidos_da_recuperacao =
-            Some(cx.subscribe(&painel, |tela, _painel, pedido: &Pedido, cx| {
-                tela.recuperando_cartao = false;
-                if let Pedido::Importar(pasta) = pedido {
-                    // 🔑 A grade de sempre, com as fotos que voltaram: a
-                    // duplicata, a marcação e o destino continuam valendo.
-                    tela.abrir_origem(pasta.clone(), cx);
-                }
-                cx.notify();
-            }));
-        self.recuperacao = Some(painel);
-    }
-
-    /// Troca a grade pelo painel de recuperação.
-    pub fn abrir_recuperacao(&mut self, cx: &mut Context<Self>) {
-        let Some(painel) = self.recuperacao.clone() else {
-            return;
-        };
-        if self.importando() {
-            return;
-        }
-        self.recuperando_cartao = true;
-        self.lupa = None;
-        painel.update(cx, |p, cx| p.listar(cx));
-        cx.notify();
-    }
-
-    pub fn recuperando_cartao(&self) -> bool {
-        self.recuperando_cartao
     }
 
     /// Põe o foco no modal. Chamado quando ele aparece — `track_focus` rastreia,
@@ -608,17 +560,6 @@ impl Importacao {
                     .text_color(cx.theme().muted_foreground)
                     .child(origem),
             )
-            .when(self.recuperacao.is_some(), |linha| {
-                linha.child(
-                    Button::new("recuperar-cartao")
-                        .label("Recuperar cartão formatado…")
-                        .xsmall()
-                        .disabled(self.importando())
-                        .on_click(cx.listener(|tela, _ev, _window, cx| {
-                            tela.abrir_recuperacao(cx);
-                        })),
-                )
-            })
             .child(
                 Checkbox::new("subpastas")
                     .label("Incluir subpastas")
@@ -1211,21 +1152,6 @@ impl EventEmitter<Importou> for Importacao {}
 
 impl Render for Importacao {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // 💾 A recuperação ocupa o modal inteiro enquanto está aberta: a grade,
-        // o destino e o rodapé falam de uma importação que ainda não existe.
-        if let (true, Some(painel)) = (self.recuperando_cartao, self.recuperacao.clone()) {
-            return div()
-                .key_context(CONTEXTO)
-                .track_focus(&self.foco)
-                .flex()
-                .flex_col()
-                .size_full()
-                .p(px(12.))
-                .bg(cx.theme().background)
-                .text_color(cx.theme().foreground)
-                .child(painel)
-                .into_any_element();
-        }
         let lendo = self.estado.varrendo || self.estado.descrevendo;
 
         div()
@@ -1276,7 +1202,6 @@ impl Render for Importacao {
             )
             .child(self.rodape(cx))
             .children(self.lupa(cx))
-            .into_any_element()
     }
 }
 

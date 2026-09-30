@@ -1,16 +1,16 @@
-//! O painel de recuperação, desenhado dentro do modal de Importação.
+//! A tela "Recuperar cartão", do menu lateral.
 //!
 //! Três passos numa tela só: **qual cartão**, **para onde** e **recuperar**. No
-//! fim, "Importar as N fotos" devolve o operador à grade da importação,
-//! apontada para a pasta onde as fotos voltaram.
+//! fim, "Importar N fotos" leva o operador às sessões, e a próxima importação
+//! já abre na pasta onde as fotos voltaram.
 
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
-use gpui_kit::component::button::{Button, ButtonVariants};
+use crate::estilo;
 use gpui_kit::component::progress::Progress;
-use gpui_kit::component::{ActiveTheme, Disableable, Selectable, Sizable};
+use gpui_kit::component::{ActiveTheme, Disableable, Selectable};
 use gpui_kit::{div, prelude::*, px, Context, EventEmitter, SharedString, Task, Window};
 
 use super::estado::{aplicar, frase, Estado, Fase, Recado};
@@ -20,13 +20,11 @@ use crate::importacao::explorador::SeletorDePasta;
 
 const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(150);
 
-/// O que o painel pede ao modal que o contém.
+/// O que a tela pede ao aplicativo.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Pedido {
-    /// Importar o que voltou, desta pasta.
-    Importar(String),
-    /// Voltar à importação sem nada.
-    Fechar,
+    /// Importar as `fotos` que voltaram, desta pasta.
+    Importar { pasta: String, fotos: usize },
 }
 
 impl EventEmitter<Pedido> for Recuperacao {}
@@ -168,11 +166,16 @@ impl Recuperacao {
                 tamanho_legivel(cartao.tamanho),
                 cartao.dispositivo
             );
+            let id = SharedString::from(format!("cartao-{i}"));
+            let botao = if escolhido {
+                estilo::botao_primario(id.clone(), cx)
+            } else {
+                estilo::botao_contorno(id.clone(), cx)
+            };
             lista = lista.child(
-                Button::new(SharedString::from(format!("cartao-{i}")))
+                botao
+                    .debug_selector(move || id.to_string())
                     .label(SharedString::from(rotulo))
-                    .small()
-                    .when(escolhido, |b| b.primary())
                     .selected(escolhido)
                     .disabled(travado)
                     .on_click(cx.listener(move |tela, _ev, _window, cx| {
@@ -183,9 +186,9 @@ impl Recuperacao {
         }
         lista.child(
             div().child(
-                Button::new("procurar-cartoes")
+                estilo::botao_fantasma("procurar-cartoes", cx)
+                    .debug_selector(|| "procurar-cartoes".into())
                     .label("Procurar de novo")
-                    .xsmall()
                     .disabled(travado)
                     .on_click(cx.listener(|tela, _ev, _window, cx| tela.listar(cx))),
             ),
@@ -223,31 +226,19 @@ impl Recuperacao {
         let mut linha = div().flex().items_center().gap(px(8.)).pt(px(8.));
         match &self.estado.fase {
             Fase::Escolhendo => {
-                linha = linha
-                    .child(
-                        Button::new("recuperacao-voltar")
-                            .label("Voltar à importação")
-                            .xsmall()
-                            .on_click(cx.listener(|_tela, _ev, _window, cx| {
-                                cx.emit(Pedido::Fechar);
-                            })),
-                    )
-                    .child(div().flex_1())
-                    .child(
-                        Button::new("recuperacao-comecar")
-                            .label("Recuperar")
-                            .xsmall()
-                            .primary()
-                            .disabled(!self.estado.pode_comecar())
-                            .on_click(cx.listener(|tela, _ev, _window, cx| tela.comecar(cx))),
-                    );
+                linha = linha.child(div().flex_1()).child(
+                    estilo::botao_primario("recuperacao-comecar", cx)
+                        .debug_selector(|| "recuperacao-comecar".into())
+                        .label("Recuperar")
+                        .disabled(!self.estado.pode_comecar())
+                        .on_click(cx.listener(|tela, _ev, _window, cx| tela.comecar(cx))),
+                );
             }
             Fase::Recuperando { parando, .. } => {
                 linha = linha.child(div().flex_1()).child(
-                    Button::new("recuperacao-parar")
+                    estilo::botao_perigo("recuperacao-parar", cx)
+                        .debug_selector(|| "recuperacao-parar".into())
                         .label("Parar")
-                        .xsmall()
-                        .danger()
                         .disabled(*parando)
                         .on_click(cx.listener(|tela, _ev, _window, cx| tela.parar(cx))),
                 );
@@ -256,37 +247,29 @@ impl Recuperacao {
                 let achadas = *achadas;
                 linha = linha
                     .child(
-                        Button::new("recuperacao-outro")
+                        estilo::botao_contorno("recuperacao-outro", cx)
+                            .debug_selector(|| "recuperacao-outro".into())
                             .label("Recuperar outro cartão")
-                            .xsmall()
                             .on_click(cx.listener(|tela, _ev, _window, cx| {
                                 tela.estado.recomecar();
                                 tela.listar(cx);
                             })),
                     )
                     .child(div().flex_1())
-                    .when(achadas == 0, |l| {
+                    .when(achadas > 0, move |l| {
                         l.child(
-                            Button::new("recuperacao-voltar-fim")
-                                .label("Voltar à importação")
-                                .xsmall()
-                                .on_click(cx.listener(|_tela, _ev, _window, cx| {
-                                    cx.emit(Pedido::Fechar);
-                                })),
-                        )
-                    })
-                    .when(achadas > 0, |l| {
-                        l.child(
-                            Button::new("recuperacao-importar")
+                            estilo::botao_primario("recuperacao-importar", cx)
+                                .debug_selector(|| "recuperacao-importar".into())
                                 .label(SharedString::from(format!(
                                     "Importar {achadas} {}",
                                     if achadas == 1 { "foto" } else { "fotos" }
                                 )))
-                                .xsmall()
-                                .primary()
-                                .on_click(cx.listener(|tela, _ev, _window, cx| {
-                                    if let Some(destino) = tela.estado.destino.clone() {
-                                        cx.emit(Pedido::Importar(destino));
+                                .on_click(cx.listener(move |tela, _ev, _window, cx| {
+                                    if let Some(pasta) = tela.estado.destino.clone() {
+                                        cx.emit(Pedido::Importar {
+                                            pasta,
+                                            fotos: achadas,
+                                        });
                                     }
                                 })),
                         )
@@ -317,11 +300,6 @@ impl Render for Recuperacao {
             .overflow_y_scroll()
             .gap(px(12.))
             .py(px(8.))
-            .child(
-                div()
-                    .text_base()
-                    .child("Recuperar fotos de um cartão formatado"),
-            )
             .child(div().text_xs().text_color(cx.theme().warning).child(
                 "🚨 Não tire fotos nem grave nada neste cartão até terminar: cada \
                          arquivo novo pode apagar de vez uma foto que ainda dá para salvar.",
@@ -339,9 +317,9 @@ impl Render for Recuperacao {
                     .items_center()
                     .gap(px(8.))
                     .child(
-                        Button::new("recuperacao-destino")
+                        estilo::botao_contorno("recuperacao-destino", cx)
+                            .debug_selector(|| "recuperacao-destino".into())
                             .label("Escolher pasta…")
-                            .xsmall()
                             .disabled(travado)
                             .on_click(cx.listener(|tela, _ev, _window, cx| {
                                 tela.escolher_destino(cx);
@@ -469,13 +447,19 @@ mod testes {
         );
         j.update(cx, |t, _w, cx| {
             assert_eq!(t.estado.recuperadas(), Some(83));
-            cx.emit(Pedido::Importar(t.estado.destino.clone().unwrap()));
+            cx.emit(Pedido::Importar {
+                pasta: t.estado.destino.clone().unwrap(),
+                fotos: 83,
+            });
         })
         .unwrap();
         cx.run_until_parked();
         assert_eq!(
             *pedidos.lock().unwrap(),
-            [Pedido::Importar("/home/ana/Recuperadas".into())]
+            [Pedido::Importar {
+                pasta: "/home/ana/Recuperadas".into(),
+                fotos: 83
+            }]
         );
     }
 

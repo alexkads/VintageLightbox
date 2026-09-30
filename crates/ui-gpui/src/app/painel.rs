@@ -180,7 +180,7 @@ impl SidebarItem for SecaoDoMenu {
 /// 📦 O "Backup de arquivos" não está aqui: fica no menu da conta (dono,
 /// 2026-09-25: *"não é tão utilizado no dia a dia"*). O menu lateral é o que o
 /// balcão usa o dia inteiro.
-const MENU: [ItemDoMenu; 4] = [
+const MENU: [ItemDoMenu; 5] = [
     ItemDoMenu {
         tela: Tela::Sessoes,
         titulo: "Sessões fotográficas",
@@ -204,6 +204,14 @@ const MENU: [ItemDoMenu; 4] = [
         titulo: "Agendamentos",
         icone: Icone::CalendarDays,
     },
+    // 💾 O cartão formatado ou apagado sem querer (dono, 29/set/2026: *"é um
+    // problema recorrente no meu estúdio e não quero mais depender de software
+    // de terceiros"*). Só no app — o site não lê cartão.
+    ItemDoMenu {
+        tela: Tela::Recuperacao,
+        titulo: "Recuperar cartão",
+        icone: Icone::HardDrive,
+    },
 ];
 
 impl Tela {
@@ -215,6 +223,7 @@ impl Tela {
             Tela::Backup => Tela::Backup,
             Tela::Chatbot => Tela::Chatbot,
             Tela::Agenda => Tela::Agenda,
+            Tela::Recuperacao => Tela::Recuperacao,
             _ => Tela::Sessoes,
         }
     }
@@ -270,11 +279,40 @@ impl Aplicativo {
                         .update(cx, |t, cx| t.com_sessao(sessao, window, cx));
                 }
             }
+            // 💾 O cartão costuma ser plugado depois do susto: a lista é
+            // pedida a cada visita.
+            Tela::Recuperacao => {
+                if let Some(painel) = self.recuperacao.clone() {
+                    painel.update(cx, |t, cx| t.listar(cx));
+                }
+            }
             _ => {}
         }
         self.tela = tela;
         window.focus(&self.foco, cx);
         cx.notify();
+    }
+
+    /// 💾 A tela de recuperação, com a margem e a largura das outras telas de
+    /// formulário.
+    pub(super) fn tela_de_recuperacao(&self) -> AnyElement {
+        let Some(painel) = self.recuperacao.clone() else {
+            return div().into_any_element();
+        };
+        v_flex()
+            .flex_1()
+            .min_h(px(0.))
+            .px(px(24.))
+            .py(px(16.))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .w_full()
+                    .max_w(px(720.))
+                    .child(painel),
+            )
+            .into_any_element()
     }
 
     pub fn menu_lateral_aberto(&self) -> bool {
@@ -451,6 +489,7 @@ impl Aplicativo {
         let selo = self.selo_do_chatbot_dados(cx);
         let itens: Vec<SecaoDoMenu> = MENU
             .iter()
+            .filter(|item| item.tela != Tela::Recuperacao || self.recuperacao.is_some())
             .map(|item| {
                 let destino = item.tela;
                 let raiz = cx.entity().downgrade();
@@ -763,6 +802,22 @@ impl Aplicativo {
                 h_flex()
                     .gap(px(8.))
                     .child(titulo("Catálogo desta máquina"))
+                    .into_any_element(),
+            ),
+            Tela::Recuperacao => Some(
+                h_flex()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .gap(px(8.))
+                    .child(titulo("Recuperar cartão"))
+                    .child(
+                        div()
+                            .min_w(px(0.))
+                            .text_xs()
+                            .text_color(apagado)
+                            .truncate()
+                            .child("Fotos apagadas ou de um cartão formatado sem querer."),
+                    )
                     .into_any_element(),
             ),
             _ => None,

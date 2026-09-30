@@ -5951,6 +5951,12 @@ impl Detalhe {
         }
     }
 
+    /// 🧪 O "Do cartão ou pasta…" desta tela.
+    #[cfg(test)]
+    pub(crate) fn origem_para_teste(&self) -> Option<Entity<OrigemDasFotos>> {
+        self.origem.clone()
+    }
+
     pub fn importacao_aberta(&self) -> bool {
         self.importacao_aberta
     }

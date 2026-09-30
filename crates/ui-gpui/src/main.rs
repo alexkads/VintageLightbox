@@ -584,8 +584,9 @@ async fn main() {
                         });
                         // 🖌️ A Revelação resolve a imagem editada pela mesma porta.
                         aplicativo.update(cx, |app, cx| app.definir_edicoes(edicoes.clone(), cx));
-                        aplicativo
-                            .update(cx, |app, cx| app.ligar_recuperacao(recuperador.clone(), cx));
+                        aplicativo.update(cx, |app, cx| {
+                            app.ligar_recuperacao(recuperador.clone(), seletor.clone(), cx)
+                        });
                         // Minimizar leva à bandeja; fechar com envio na fila só
                         // esconde (G9) — `ui_gpui::segundo_plano`.
                         ui_gpui::segundo_plano::ligar(aplicativo.downgrade(), window, cx);

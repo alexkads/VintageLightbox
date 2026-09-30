@@ -65,6 +65,7 @@ mod galeria;
 mod janela;
 mod lote;
 mod nova_sessao;
+mod recuperacao;
 mod revelacao;
 mod revelacao_local;
 mod segundo_plano;
