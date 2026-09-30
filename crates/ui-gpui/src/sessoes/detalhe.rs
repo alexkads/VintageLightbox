@@ -773,6 +773,12 @@ pub struct Detalhe {
     /// baixo. Fora do `bot` de propósito: a posição que o atendente escolheu
     /// vale para a sessão seguinte também.
     posicao_do_painel_do_bot: (f32, f32),
+    /// 📸 O QR também no painel do atendente — interruptor à parte (dono,
+    /// 30/set/2026: *"Eu gostava quando aparecia o QRCode nesse painel, mas
+    /// deixo como ligar e desligar"*). Nasce ligado e, como a posição do
+    /// painel, vale de uma sessão para a outra: é gosto do atendente, e não
+    /// estado da sessão.
+    qr_no_painel: bool,
     tamanho_do_painel_do_bot: std::rc::Rc<std::cell::Cell<(f32, f32)>>,
     /// O arrasto em curso: onde o mouse desceu e onde o painel estava.
     arrasto_do_painel_do_bot: Option<((f32, f32), (f32, f32))>,
@@ -994,6 +1000,7 @@ impl Detalhe {
             bot: Default::default(),
             escuta: None,
             posicao_do_painel_do_bot: super::qr_do_bot::POSICAO_PADRAO,
+            qr_no_painel: true,
             tamanho_do_painel_do_bot: Default::default(),
             arrasto_do_painel_do_bot: None,
         }
@@ -4117,6 +4124,13 @@ impl Detalhe {
         cx.notify();
     }
 
+    /// O QR também no painel do atendente, ou não — só aqui; o da tela do
+    /// cliente fica como está.
+    pub fn alternar_o_qr_no_painel(&mut self, cx: &mut Context<Self>) {
+        self.qr_no_painel = !self.qr_no_painel;
+        cx.notify();
+    }
+
     /// Liga ou desliga o QR — nas duas telas. Ligar sem a situação na mão
     /// (a primeira leitura falhou) pede de novo: o botão nunca fica sem efeito.
     pub fn definir_o_qr(&mut self, ligado: bool, cx: &mut Context<Self>) {
@@ -4186,6 +4200,7 @@ impl Detalhe {
         let situacao = self.bot.situacao.as_ref()?;
         let tema = cx.theme();
         let (fundo, borda, fraco) = (tema.popover, tema.border, tema.muted_foreground);
+        let destaque = tema.primary;
         let titulo_atual = self
             .aberta
             .as_ref()
@@ -4238,6 +4253,16 @@ impl Detalhe {
             .child(div().text_sm().child("Bot da sessão"))
             .child(div().flex_1())
             .child(
+                crate::estilo::botao_icone("painel-do-bot-qr", Icone::QrCode, 24., 14.)
+                    .when(self.qr_no_painel, |b| b.text_color(destaque))
+                    .tooltip(if self.qr_no_painel {
+                        "Tirar o QR deste painel"
+                    } else {
+                        "Mostrar o QR neste painel"
+                    })
+                    .on_click(cx.listener(|tela, _, _, cx| tela.alternar_o_qr_no_painel(cx))),
+            )
+            .child(
                 crate::estilo::botao_icone("painel-do-bot-fechar", Icone::X, 24., 14.)
                     .tooltip("Fechar o painel (o QR do cliente continua como está)")
                     .on_click(cx.listener(|tela, _, _, cx| {
@@ -4274,6 +4299,18 @@ impl Detalhe {
                     .text_color(fraco)
                     .child(format!("código {}", situacao.convite.codigo)),
             );
+        let qr_no_painel = self.qr_no_painel.then(|| {
+            h_flex().justify_center().child(
+                div()
+                    .p(px(6.))
+                    .bg(gpui_kit::white())
+                    .rounded(crate::tema::canto(6.))
+                    .child(super::qr_do_bot::desenho_do_qr(
+                        std::sync::Arc::new(situacao.qr.clone()),
+                        148.,
+                    )),
+            )
+        });
 
         let clientes = situacao.clientes.iter().enumerate().map(|(i, c)| {
             let concluido = c.passo == "concluido";
@@ -4383,6 +4420,7 @@ impl Detalhe {
                     .shadow_lg()
                     .child(cabecalho)
                     .child(estado_do_qr)
+                    .children(qr_no_painel)
                     .child(if situacao.clientes.is_empty() {
                         div()
                             .text_xs()
@@ -5384,8 +5422,12 @@ impl Detalhe {
             // botão; o menu marca os dois interruptores, que são independentes.
             .child({
                 let esta = cx.entity().downgrade();
-                let (ligado, painel, trocando) =
-                    (self.bot.ligado, self.bot.painel_aberto, self.bot.trocando);
+                let (ligado, painel, trocando, qr_no_painel) = (
+                    self.bot.ligado,
+                    self.bot.painel_aberto,
+                    self.bot.trocando,
+                    self.qr_no_painel,
+                );
                 estilo::botao_contorno_pequeno("sessao-bot", cx)
                     .when(ligado, |b| b.bg(acento))
                     .child(Icon::new(Icone::Bot).size(px(14.)))
@@ -5394,7 +5436,8 @@ impl Detalhe {
                     .child(if ligado { "Bot · QR ligado" } else { "Bot · QR desligado" })
                     .child(Icon::new(Icone::ChevronDown).size(px(12.)))
                     .dropdown_menu(move |menu, _window, _cx| {
-                        let (a, b, c) = (esta.clone(), esta.clone(), esta.clone());
+                        let (a, b, c, d) =
+                            (esta.clone(), esta.clone(), esta.clone(), esta.clone());
                         menu.item(
                             PopupMenuItem::new("QR na tela do cliente  (I)")
                                 .checked(ligado)
@@ -5407,6 +5450,14 @@ impl Detalhe {
                                 .checked(painel)
                                 .on_click(move |_, _, cx| {
                                     b.update(cx, |tela, cx| tela.alternar_o_painel_do_bot(cx))
+                                        .ok();
+                                }),
+                        )
+                        .item(
+                            PopupMenuItem::new("QR no painel")
+                                .checked(qr_no_painel)
+                                .on_click(move |_, _, cx| {
+                                    d.update(cx, |tela, cx| tela.alternar_o_qr_no_painel(cx))
                                         .ok();
                                 }),
                         )
@@ -9328,6 +9379,10 @@ mod testes {
                 assert!(!tela.bot.ligado);
                 assert_eq!(tela.ultimo_aviso(), Some("QR desligado na tela do cliente"));
                 assert!(!tela.bot.painel_aberto, "o QR não abre nem fecha o painel");
+                assert!(tela.qr_no_painel, "o QR no painel nasce ligado");
+                tela.alternar_o_qr_no_painel(cx);
+                assert!(!tela.qr_no_painel);
+                assert!(!tela.bot.ligado, "o QR no painel não mexe no do cliente");
                 tela.novo_qr(cx);
             })
             .unwrap();

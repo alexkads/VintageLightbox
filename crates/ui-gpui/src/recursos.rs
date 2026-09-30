@@ -178,6 +178,8 @@ pub enum Icone {
     Spline,
     Pentagon,
     Scan,
+    // O QR do bot da sessão no painel do atendente.
+    QrCode,
     // O Enquadrar.
     Ruler,
 }
@@ -296,6 +298,7 @@ impl Icone {
         Icone::Spline,
         Icone::Pentagon,
         Icone::Scan,
+        Icone::QrCode,
         Icone::Ruler,
     ];
 
@@ -413,6 +416,7 @@ impl Icone {
             Icone::Spline => "spline",
             Icone::Pentagon => "pentagon",
             Icone::Scan => "scan",
+            Icone::QrCode => "qr-code",
             Icone::Ruler => "ruler",
         }
     }
