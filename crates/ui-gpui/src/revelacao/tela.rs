@@ -3635,6 +3635,108 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
+    /// A barra de zoom anda pela alça (dono, 2026-09-29: *"a barra de zoom
+    /// deve ser arrastável"*): o arrasto leva a barra junto, não passa da borda
+    /// do palco e o duplo clique na alça a devolve ao canto de baixo.
+    #[gpui_kit::test]
+    fn a_barra_de_zoom_anda_pela_alca_sem_sair_do_palco(cx: &mut TestAppContext) {
+        use gpui_kit::{
+            Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Point,
+        };
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx)
+            })
+            .expect("a janela deve estar aberta");
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_resize(gpui_kit::size(px(1280.), px(800.)));
+        visual.run_until_parked();
+
+        let barra = visual
+            .debug_bounds("barra-de-zoom")
+            .expect("a barra é desenhada");
+        let alca = visual
+            .debug_bounds("zoom-alca")
+            .expect("a alça é desenhada");
+        let palco = janela
+            .update(cx, |tela, _, _| tela.palco)
+            .expect("a janela deve estar aberta");
+        let arrastar =
+            |visual: &mut gpui_kit::VisualTestContext, de: Point<Pixels>, ate: Point<Pixels>| {
+                visual.simulate_event(MouseDownEvent {
+                    position: de,
+                    button: MouseButton::Left,
+                    modifiers: Modifiers::none(),
+                    click_count: 1,
+                    first_mouse: false,
+                });
+                visual.run_until_parked();
+                visual.simulate_event(MouseMoveEvent {
+                    position: ate,
+                    pressed_button: Some(MouseButton::Left),
+                    modifiers: Modifiers::none(),
+                });
+                visual.run_until_parked();
+                visual.simulate_event(MouseUpEvent {
+                    position: ate,
+                    button: MouseButton::Left,
+                    modifiers: Modifiers::none(),
+                    click_count: 1,
+                });
+                visual.run_until_parked();
+            };
+
+        // Para cima e para a direita: a barra anda o mesmo que o ponteiro.
+        let ate = alca.center() + gpui_kit::point(px(60.), px(-300.));
+        arrastar(&mut visual, alca.center(), ate);
+        let movida = visual.debug_bounds("barra-de-zoom").expect("a barra segue");
+        assert!(
+            (f32::from(movida.origin.x - barra.origin.x) - 60.).abs() < 1.5
+                && (f32::from(movida.origin.y - barra.origin.y) + 300.).abs() < 1.5,
+            "a barra não acompanhou o ponteiro: {barra:?} → {movida:?}"
+        );
+
+        // Muito além do canto de cima à esquerda: fica dentro do palco.
+        let alca = visual.debug_bounds("zoom-alca").expect("a alça segue");
+        arrastar(
+            &mut visual,
+            alca.center(),
+            gpui_kit::point(px(-500.), px(-500.)),
+        );
+        let no_canto = visual.debug_bounds("barra-de-zoom").expect("a barra segue");
+        assert!(
+            no_canto.origin.x >= palco.origin.x && no_canto.origin.y >= palco.origin.y,
+            "a barra saiu do palco: {no_canto:?} fora de {palco:?}"
+        );
+
+        // O duplo clique na alça a devolve ao lugar de sempre.
+        let alca = visual.debug_bounds("zoom-alca").expect("a alça segue");
+        visual.simulate_event(MouseDownEvent {
+            position: alca.center(),
+            button: MouseButton::Left,
+            modifiers: Modifiers::none(),
+            click_count: 2,
+            first_mouse: false,
+        });
+        visual.simulate_event(MouseUpEvent {
+            position: alca.center(),
+            button: MouseButton::Left,
+            modifiers: Modifiers::none(),
+            click_count: 2,
+        });
+        visual.run_until_parked();
+        let de_volta = visual.debug_bounds("barra-de-zoom").expect("a barra segue");
+        assert_eq!(
+            de_volta.origin, barra.origin,
+            "o duplo clique não a devolveu"
+        );
+    }
+
     /// 🚨 **"Não tem preview no cache" era um beco sem saída.**
     ///
     /// A foto está catalogada, o JPEG está no disco, e a Revelação parava numa

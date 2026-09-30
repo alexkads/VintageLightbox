@@ -42,6 +42,11 @@ const LARGURA_DO_TRILHO: f32 = 110.;
 const ALTURA_DO_TRILHO: f32 = 20.;
 const LARGURA_DO_FLUTUANTE: f32 = 190.;
 
+/// A barra de zoom no lugar de sempre, e o mínimo que ela guarda da borda do
+/// palco quando é arrastada.
+const MARGEM_DA_BARRA: f32 = 12.;
+const FOLGA_DA_BARRA: f32 = 4.;
+
 /// A folha de atalhos — o `ATALHOS` de `atalhos.ts`, na mesma ordem.
 pub(super) const ATALHOS: [(&str, &[(&str, &str)]); 5] = [
     (
@@ -179,6 +184,13 @@ pub(super) struct Navegacao {
     pub navegador_flutuante: bool,
     pub miniatura_flutuante: Bounds<Pixels>,
     pub arrastando_flutuante: bool,
+    /// A barra de zoom na janela, e onde o dono a deixou: o canto de cima à
+    /// esquerda, em pontos do palco. `None` é o lugar de sempre, embaixo à
+    /// esquerda.
+    pub barra: Bounds<Pixels>,
+    pub posicao_da_barra: Option<Point<f32>>,
+    /// O arrasto pela alça: o ponteiro e a posição da barra quando começou.
+    pub arrasto_da_barra: Option<(Point<Pixels>, Point<f32>)>,
 }
 
 impl Default for Navegacao {
@@ -201,12 +213,30 @@ impl Default for Navegacao {
             navegador_flutuante: false,
             miniatura_flutuante: Bounds::default(),
             arrastando_flutuante: false,
+            barra: Bounds::default(),
+            posicao_da_barra: None,
+            arrasto_da_barra: None,
         }
     }
 }
 
 fn f(p: Pixels) -> f32 {
     f32::from(p)
+}
+
+/// O canto da barra dentro do palco, com a folga da borda; palco menor que a
+/// barra a encosta em cima à esquerda.
+fn limitar_a_barra(
+    p: Point<f32>,
+    barra: gpui_kit::Size<Pixels>,
+    palco: gpui_kit::Size<Pixels>,
+) -> Point<f32> {
+    let max_x = (f(palco.width) - f(barra.width) - FOLGA_DA_BARRA).max(FOLGA_DA_BARRA);
+    let max_y = (f(palco.height) - f(barra.height) - FOLGA_DA_BARRA).max(FOLGA_DA_BARRA);
+    Point {
+        x: p.x.clamp(FOLGA_DA_BARRA, max_x),
+        y: p.y.clamp(FOLGA_DA_BARRA, max_y),
+    }
 }
 
 impl Revelacao {
@@ -963,11 +993,16 @@ impl Revelacao {
                 .child(Icon::new(icone).size(px(14.)))
         };
 
-        h_flex()
+        let barra = match self.posicao_da_barra() {
+            Some(p) => h_flex().left(px(p.x)).top(px(p.y)),
+            None => h_flex()
+                .left(px(MARGEM_DA_BARRA))
+                .bottom(px(MARGEM_DA_BARRA)),
+        };
+        barra
             .id("barra-de-zoom")
+            .debug_selector(|| "barra-de-zoom".into())
             .absolute()
-            .left(px(12.))
-            .bottom(px(12.))
             .gap(px(2.))
             .p(px(3.))
             .rounded(crate::tema::canto(9.))
@@ -979,6 +1014,7 @@ impl Revelacao {
             .cursor_default()
             .occlude()
             .when(desligado, |d| d.opacity(0.5))
+            .child(self.alca_da_barra(cx))
             .child(pilula("zoom-encaixar", Nivel::Encaixar, "Encaixar", cx))
             .child(pilula("zoom-preencher", Nivel::Preencher, "Preencher", cx))
             .child(pilula("zoom-1-1", Nivel::Razao(1.), "1:1", cx))
@@ -1010,6 +1046,23 @@ impl Revelacao {
                     }))
                 }),
             )
+            // A barra inteira medida: o tamanho limita o arrasto, e a origem
+            // é de onde ele parte.
+            .child({
+                let medidor = cx.entity();
+                canvas(
+                    move |bounds, _, cx| {
+                        medidor.update(cx, |tela, _| {
+                            if tela.navegacao.barra != bounds {
+                                tela.navegacao.barra = bounds;
+                            }
+                        });
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .inset_0()
+            })
             .when(self.carregando_o_bruto(), |c| {
                 c.child(
                     h_flex()
@@ -1022,6 +1075,109 @@ impl Revelacao {
                 )
             })
             .into_any_element()
+    }
+
+    /// Onde a barra fica, já dentro do palco — a janela pode ter encolhido
+    /// desde que o dono a deixou ali. `None` é o canto de baixo à esquerda.
+    fn posicao_da_barra(&self) -> Option<Point<f32>> {
+        let p = self.navegacao.posicao_da_barra?;
+        Some(limitar_a_barra(
+            p,
+            self.navegacao.barra.size,
+            self.palco.size,
+        ))
+    }
+
+    /// A alça na ponta da barra: arrastar leva a barra para qualquer canto do
+    /// palco, e o duplo clique a devolve ao lugar de sempre. O arrasto é ouvido
+    /// na janela, como o do trilho, para não se perder no movimento rápido.
+    fn alca_da_barra(&self, cx: &mut Context<Self>) -> AnyElement {
+        let ouvinte = cx.entity();
+        let arrastando = self.navegacao.arrasto_da_barra.is_some();
+        div()
+            .id("zoom-alca")
+            .debug_selector(|| "zoom-alca".into())
+            .relative()
+            .w(px(16.))
+            .h(px(26.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(crate::tema::canto(6.))
+            .text_color(gpui_kit::rgb(0x6f6f6f))
+            .cursor_move()
+            .hover(|s| s.text_color(gpui_kit::rgb(0xd4d4d4)))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|tela, e: &MouseDownEvent, _, cx| {
+                    if e.click_count >= 2 {
+                        tela.navegacao.posicao_da_barra = None;
+                        tela.navegacao.arrasto_da_barra = None;
+                        cx.notify();
+                        return;
+                    }
+                    let barra = tela.navegacao.barra;
+                    let inicio = Point {
+                        x: f(barra.origin.x - tela.palco.origin.x),
+                        y: f(barra.origin.y - tela.palco.origin.y),
+                    };
+                    tela.navegacao.arrasto_da_barra = Some((e.position, inicio));
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            )
+            .child(Icon::new(Icone::GripVertical).size(px(13.)))
+            .child(
+                canvas(
+                    |_, _, _| {},
+                    move |_, _, window, _| {
+                        if !arrastando {
+                            return;
+                        }
+                        window.on_mouse_event({
+                            let esta = ouvinte.clone();
+                            move |e: &MouseMoveEvent, fase, _, cx| {
+                                if fase.bubble() {
+                                    esta.update(cx, |tela, cx| {
+                                        tela.arrastar_a_barra(e.position, cx)
+                                    });
+                                }
+                            }
+                        });
+                        window.on_mouse_event({
+                            let esta = ouvinte.clone();
+                            move |_: &MouseUpEvent, fase, _, cx| {
+                                if fase.bubble() {
+                                    esta.update(cx, |tela, cx| {
+                                        tela.navegacao.arrasto_da_barra = None;
+                                        cx.notify();
+                                    });
+                                }
+                            }
+                        });
+                    },
+                )
+                .absolute()
+                .inset_0(),
+            )
+            .into_any_element()
+    }
+
+    /// O ponteiro arrastando a alça: a barra anda junto, sem sair do palco.
+    pub(super) fn arrastar_a_barra(&mut self, posicao: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some((ponteiro, inicio)) = self.navegacao.arrasto_da_barra else {
+            return;
+        };
+        let alvo = Point {
+            x: inicio.x + f(posicao.x - ponteiro.x),
+            y: inicio.y + f(posicao.y - ponteiro.y),
+        };
+        self.navegacao.posicao_da_barra = Some(limitar_a_barra(
+            alvo,
+            self.navegacao.barra.size,
+            self.palco.size,
+        ));
+        cx.notify();
     }
 
     /// O nível de agora, que abre a lista das paradas por cima da barra — o
