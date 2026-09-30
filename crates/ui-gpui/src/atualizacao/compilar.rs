@@ -122,6 +122,52 @@ pub fn decidir(
     }
 }
 
+/// 🔎 A decisão em uma frase, para o `procurou` que vai ao servidor: o que
+/// o app fez com a procura e **por quê** — em 29/09 o Mac ficou calado sem
+/// que ninguém soubesse o motivo.
+pub fn motivo(
+    atual: &str,
+    main: Option<&Novidades>,
+    memoria: &Memoria,
+    ocupado: bool,
+    agora: u64,
+    decisao: &Decisao,
+) -> String {
+    match decisao {
+        Decisao::Avisar {
+            versao,
+            automatico: true,
+        } => format!("avisou a {} e a compilação começa sozinha", versao.versao),
+        Decisao::Avisar { versao, .. } => {
+            let porque = if ocupado {
+                "outra atualização está compilando nesta máquina".to_string()
+            } else if memoria.falhou.as_deref() == Some(versao.versao.as_str()) {
+                let ha = memoria
+                    .quando
+                    .map(|q| agora.saturating_sub(q) / 60)
+                    .unwrap_or(0);
+                format!("esta versão falhou há {ha} min e espera 24 h para tentar sozinha")
+            } else {
+                "pacote assinado: espera o clique em Atualizar".to_string()
+            };
+            format!("avisou a {} sem começar sozinha: {porque}", versao.versao)
+        }
+        Decisao::Nada => match main {
+            None => "silêncio: nenhum endereço respondeu".into(),
+            Some(n) if !novidades::mais_nova(&n.versao, atual) => {
+                format!(
+                    "silêncio: a mais nova conhecida ({}) não passa da instalada ({atual})",
+                    n.versao
+                )
+            }
+            Some(n) => format!(
+                "silêncio com a {} disponível (instalação de desenvolvimento)",
+                n.versao
+            ),
+        },
+    }
+}
+
 // ── O disco ────────────────────────────────────────────────────────────────
 
 /// `~/.vintagelightbox` — a mesma casa do instalador (`$HOME/.vintagelightbox`
@@ -468,6 +514,46 @@ mod testes {
     }
 
     const AGORA: u64 = 1_800_000_000;
+
+    /// 🔎 O motivo diz o que o dono precisa ler no painel — o caso de 29/09
+    /// (cache do GitHub com a versão velha) inclusive.
+    #[test]
+    fn o_motivo_explica_cada_decisao() {
+        let decide = |main: Option<Novidades>, memoria: &Memoria, ocupado: bool| {
+            let d = decidir(
+                JeitoDaInstalacao::Compilado,
+                "0.1.44",
+                None,
+                main.clone(),
+                memoria,
+                ocupado,
+                AGORA,
+            );
+            motivo("0.1.44", main.as_ref(), memoria, ocupado, AGORA, &d)
+        };
+        assert_eq!(
+            decide(main("0.1.44"), &Memoria::default(), false),
+            "silêncio: a mais nova conhecida (0.1.44) não passa da instalada (0.1.44)"
+        );
+        assert_eq!(
+            decide(None, &Memoria::default(), false),
+            "silêncio: nenhum endereço respondeu"
+        );
+        assert_eq!(
+            decide(main("0.1.45"), &Memoria::default(), false),
+            "avisou a 0.1.45 e a compilação começa sozinha"
+        );
+        let falhou = Memoria {
+            falhou: Some("0.1.45".into()),
+            quando: Some(AGORA - 600),
+        };
+        assert_eq!(
+            decide(main("0.1.45"), &falhou, false),
+            "avisou a 0.1.45 sem começar sozinha: esta versão falhou há 10 min e espera 24 h para tentar sozinha"
+        );
+        assert!(decide(main("0.1.45"), &Memoria::default(), true)
+            .contains("outra atualização está compilando"));
+    }
 
     #[test]
     fn a_instalacao_compilada_compila_sozinha_a_versao_do_main() {

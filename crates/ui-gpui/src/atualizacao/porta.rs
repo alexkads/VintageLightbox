@@ -129,6 +129,20 @@ pub trait Atualizador: Send + Sync + 'static {
     /// houve um clique esperando resposta.
     fn procurar(&self, canal: Sender<Aviso>, pedida: bool);
 
+    /// 🔎 A procura com o que a disparou, para o rastro (`procurou`). Com o
+    /// anúncio do servidor (SSE), a versão anunciada vale mesmo que o
+    /// `novidades.json` do GitHub ainda esteja no cache velho
+    /// ([`super::novidades::a_mais_nova`]).
+    fn procurar_por(
+        &self,
+        canal: Sender<Aviso>,
+        gatilho: Gatilho,
+        anunciada: Option<super::novidades::Novidades>,
+    ) {
+        let _ = anunciada;
+        self.procurar(canal, gatilho == Gatilho::Pedida);
+    }
+
     /// Baixa, confere a assinatura e instala. A resposta chega pelo canal.
     fn instalar(&self, canal: Sender<Aviso>);
 
@@ -192,8 +206,14 @@ mod real {
         }
     }
 
-    impl Atualizador for AtualizadorDaWeb {
-        fn procurar(&self, canal: Sender<Aviso>, pedida: bool) {
+    impl AtualizadorDaWeb {
+        fn procurar_com(
+            &self,
+            canal: Sender<Aviso>,
+            gatilho: Gatilho,
+            anunciada: Option<super::super::novidades::Novidades>,
+        ) {
+            let pedida = gatilho == Gatilho::Pedida;
             let atual = self.versao_atual.clone();
             // 🚨 Uma thread do sistema, e **não** `tokio::spawn`. O
             // `check_update` é bloqueante e monta um runtime próprio por dentro
@@ -233,10 +253,13 @@ mod real {
                         }
                     }
                 };
-                let main = if jeito == JeitoDaInstalacao::Desenvolvimento {
-                    None
+                let comeco = std::time::Instant::now();
+                let versao_anunciada = anunciada.as_ref().map(|n| n.versao.clone());
+                let (main, rastro_do_github) = if jeito == JeitoDaInstalacao::Desenvolvimento {
+                    (None, vec!["não consulta (desenvolvimento)".to_string()])
                 } else {
-                    novidades::buscar()
+                    let (do_github, rastro) = novidades::buscar_com_rastro();
+                    (novidades::a_mais_nova(do_github, anunciada), rastro)
                 };
                 respondeu |= main.is_some();
                 let agora = compilar::agora();
@@ -248,8 +271,50 @@ mod real {
                 let ocupado = casa
                     .as_ref()
                     .is_some_and(|c| compilar::ocupado(&c.join("atualizando.trava"), agora));
+                let pacote_rastro = match (&pacote, &motivo_da_falha) {
+                    (Some(p), _) => format!("pacote {}", p.versao),
+                    (None, Some(m)) => format!("pacote: {m}"),
+                    (None, None) if jeito == JeitoDaInstalacao::Compilado => String::new(),
+                    (None, None) => "pacote: nada novo".into(),
+                };
+                let usada = main.as_ref().map(|n| n.versao.clone());
+                let decisao = compilar::decidir(
+                    jeito,
+                    &atual,
+                    pacote,
+                    main.clone(),
+                    &memoria,
+                    ocupado,
+                    agora,
+                );
+                // 🔎 O rastro da procura, para o servidor: o que a disparou, o
+                // que cada lado respondeu, o que se decidiu e por quê.
+                let mut partes = vec![
+                    format!("gatilho: {}", gatilho.como_texto()),
+                    format!("instalada: {atual} ({jeito:?})"),
+                    format!("github: {}", rastro_do_github.join("; ")),
+                ];
+                if !pacote_rastro.is_empty() {
+                    partes.push(pacote_rastro);
+                }
+                partes.push(format!(
+                    "anunciada: {}",
+                    versao_anunciada.as_deref().unwrap_or("—")
+                ));
+                partes.push(format!(
+                    "decisão: {}",
+                    compilar::motivo(&atual, main.as_ref(), &memoria, ocupado, agora, &decisao)
+                ));
+                partes.push(format!("{} ms", comeco.elapsed().as_millis()));
+                let detalhe = partes.join(" · ");
+                eprintln!("🔎 [Atualização] {detalhe}");
+                crate::telemetria::reagir(
+                    usada.as_deref().unwrap_or(&atual),
+                    "procurou",
+                    Some(detalhe),
+                );
                 // Silêncio é a resposta normal: nada novo, nada na tela.
-                match compilar::decidir(jeito, &atual, pacote, main, &memoria, ocupado, agora) {
+                match decisao {
                     compilar::Decisao::Avisar { versao, automatico } => {
                         let _ = canal.send(Aviso::Disponivel { versao, automatico });
                     }
@@ -265,6 +330,26 @@ mod real {
                     }
                 }
             });
+        }
+    }
+
+    impl Atualizador for AtualizadorDaWeb {
+        fn procurar(&self, canal: Sender<Aviso>, pedida: bool) {
+            let gatilho = if pedida {
+                Gatilho::Pedida
+            } else {
+                Gatilho::Abertura
+            };
+            self.procurar_com(canal, gatilho, None);
+        }
+
+        fn procurar_por(
+            &self,
+            canal: Sender<Aviso>,
+            gatilho: Gatilho,
+            anunciada: Option<super::super::novidades::Novidades>,
+        ) {
+            self.procurar_com(canal, gatilho, anunciada);
         }
 
         fn instalar(&self, canal: Sender<Aviso>) {
@@ -337,6 +422,30 @@ mod real {
     }
 }
 
+/// 🔎 O que disparou uma procura por versão nova.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Gatilho {
+    /// A abertura do app.
+    Abertura,
+    /// O anúncio do servidor, pelo SSE.
+    Anuncio,
+    /// A de hora em hora (como o `start_polling` do Zed).
+    Hora,
+    /// O clique em "Verificar atualizações".
+    Pedida,
+}
+
+impl Gatilho {
+    pub fn como_texto(self) -> &'static str {
+        match self {
+            Gatilho::Abertura => "abertura",
+            Gatilho::Anuncio => "anúncio do servidor",
+            Gatilho::Hora => "de hora em hora",
+            Gatilho::Pedida => "clique em Verificar atualizações",
+        }
+    }
+}
+
 /// O atualizador dos testes: responde o que lhe mandarem, e conta os pedidos.
 #[cfg(test)]
 pub mod mentira {
@@ -350,6 +459,10 @@ pub mod mentira {
         /// O que `instalar` envia.
         pub desfecho: Mutex<Option<Aviso>>,
         pub procuras: Mutex<usize>,
+        /// As versões que `procurar_por` recebeu anunciadas.
+        pub anunciadas: Mutex<Vec<String>>,
+        /// O que disparou cada `procurar_por`.
+        pub gatilhos: Mutex<Vec<Gatilho>>,
         pub instalacoes: Mutex<usize>,
         /// As versões que `compilar` recebeu, em ordem.
         pub compilacoes: Mutex<Vec<String>>,
@@ -389,6 +502,22 @@ pub mod mentira {
                 }
                 None => {}
             }
+        }
+
+        fn procurar_por(
+            &self,
+            canal: Sender<Aviso>,
+            gatilho: Gatilho,
+            anunciada: Option<crate::atualizacao::novidades::Novidades>,
+        ) {
+            self.gatilhos.lock().expect("os gatilhos").push(gatilho);
+            if let Some(anunciada) = anunciada {
+                self.anunciadas
+                    .lock()
+                    .expect("as anunciadas")
+                    .push(anunciada.versao);
+            }
+            self.procurar(canal, gatilho == Gatilho::Pedida);
         }
 
         fn instalar(&self, canal: Sender<Aviso>) {

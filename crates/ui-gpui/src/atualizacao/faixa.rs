@@ -107,8 +107,13 @@ impl Estado {
             .is_some_and(|n| n.importante)
     }
 
+    /// A versão que veio só do anúncio do servidor não tem a lista: o botão
+    /// das novidades não abre um painel vazio.
     fn tem_novidades(&self) -> bool {
-        self.versao.as_ref().is_some_and(|v| v.novidades.is_some())
+        self.versao
+            .as_ref()
+            .and_then(|v| v.novidades.as_ref())
+            .is_some_and(|n| !n.novidades.is_empty())
     }
 
     /// O que a faixa mostra agora — `None` quando não há nada a dizer.

@@ -85,7 +85,7 @@ pub fn desta_versao() -> Option<Novidades> {
     ler(include_str!("../../../../docs/novidades.json"))
 }
 
-fn versao_em_numeros(versao: &str) -> Option<Vec<u64>> {
+pub fn versao_em_numeros(versao: &str) -> Option<Vec<u64>> {
     let limpa = versao.trim().trim_start_matches('v');
     let numeros: Option<Vec<u64>> = limpa
         .split('.')
@@ -133,16 +133,37 @@ pub fn jeito_desta_instalacao() -> JeitoDaInstalacao {
     JeitoDaInstalacao::do_texto(env!("VLB_JEITO_DE_INSTALAR"))
 }
 
-/// 📡 O anúncio do servidor ainda não virou versão na tela?
+impl Novidades {
+    /// 📡 A versão que o servidor anunciou pelo SSE: número, título e
+    /// destaque, sem a lista (que só o arquivo tem).
+    pub fn do_anuncio(versao: String, titulo: String, importante: bool) -> Self {
+        Self {
+            versao,
+            titulo,
+            importante,
+            novidades: Vec::new(),
+            por_que_atualizar: String::new(),
+        }
+    }
+}
+
+/// 📡 **O anúncio do servidor vale por si** — como o Zed, que pergunta ao
+/// próprio servidor (`/releases/stable/latest`) e não a um arquivo em CDN.
 ///
-/// 🚨 **O servidor e o app leem o `novidades.json` em caches diferentes.** O
-/// `raw` do GitHub guarda o arquivo por 5 minutos em cada ponta da CDN: o
-/// servidor (nos EUA) viu a 0.1.45 e anunciou às 21:52 de 29/09, e o Mac do
-/// dono, perguntando segundos depois, ainda recebeu a 0.1.44 — e ficou em
-/// silêncio, porque o servidor não repete o anúncio da mesma versão. Enquanto
-/// isto for verdade, a procura se repete.
-pub fn anuncio_pendente(anunciada: &str, atual: &str, na_tela: Option<&str>) -> bool {
-    mais_nova(anunciada, atual) && na_tela.is_none_or(|v| mais_nova(anunciada, v))
+/// 🚨 O servidor e o app leem o `novidades.json` em pontas diferentes do
+/// cache do `raw` do GitHub (5 minutos cada). Em 29/09 o servidor, nos EUA,
+/// viu a 0.1.45 e anunciou às 21:52; o Mac do dono, perguntando em São Paulo
+/// segundos depois, recebeu a 0.1.44 e ficou em silêncio. As máquinas que
+/// reconectaram o fluxo três minutos depois receberam o anúncio de novo, já
+/// com o cache em dia — e foi só por isso que a rotina "sempre funcionou".
+///
+/// Fica a mais nova das duas; empatadas, a do arquivo, que tem a lista.
+pub fn a_mais_nova(arquivo: Option<Novidades>, anunciada: Option<Novidades>) -> Option<Novidades> {
+    match (arquivo, anunciada) {
+        (Some(a), Some(n)) if mais_nova(&n.versao, &a.versao) => Some(n),
+        (Some(a), _) => Some(a),
+        (None, n) => n,
+    }
 }
 
 /// O aviso para quem instalou compilando: há versão nova no `main`?
@@ -171,18 +192,54 @@ pub fn para_o_pacote(versao_do_pacote: &str, novidades: Option<Novidades>) -> Op
 /// Busca o arquivo nos [`ENDERECOS`], em ordem. **Bloqueia**: chamar fora da
 /// thread da interface (a procura já roda numa thread própria).
 pub fn buscar() -> Option<Novidades> {
-    let cliente = cargo_packager_updater::reqwest::blocking::Client::builder()
+    buscar_com_rastro().0
+}
+
+/// 🔎 [`buscar`], contando o que cada endereço respondeu e em quanto tempo —
+/// o que vai no `procurou` para o servidor (`raw 0.1.44 em 180 ms`).
+pub fn buscar_com_rastro() -> (Option<Novidades>, Vec<String>) {
+    let mut rastro = Vec::new();
+    let Ok(cliente) = cargo_packager_updater::reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .build()
-        .ok()?;
-    ENDERECOS.iter().find_map(|endereco| {
-        let resposta = cliente.get(*endereco).send().ok()?;
-        if !resposta.status().is_success() {
-            eprintln!("[novidades] {endereco} respondeu {}", resposta.status());
-            return None;
+    else {
+        rastro.push("sem cliente HTTP".into());
+        return (None, rastro);
+    };
+    for endereco in ENDERECOS {
+        let nome = if endereco.contains("raw.githubusercontent") {
+            "raw"
+        } else {
+            "pages"
+        };
+        let inicio = std::time::Instant::now();
+        let resposta = cliente.get(endereco).send();
+        let ms = inicio.elapsed().as_millis();
+        match resposta {
+            Err(erro) => rastro.push(format!("{nome}: sem resposta em {ms} ms ({erro})")),
+            Ok(r) if !r.status().is_success() => {
+                eprintln!("[novidades] {endereco} respondeu {}", r.status());
+                rastro.push(format!("{nome}: HTTP {} em {ms} ms", r.status().as_u16()));
+            }
+            Ok(r) => {
+                // O `raw` do GitHub conta a idade da cópia em `source-age`.
+                let idade = ["source-age", "age"]
+                    .iter()
+                    .find_map(|c| r.headers().get(*c))
+                    .and_then(|v| v.to_str().ok())
+                    .map(|v| format!(", cache de {v} s"))
+                    .unwrap_or_default();
+                match r.text().ok().as_deref().and_then(ler) {
+                    Some(n) => {
+                        rastro.push(format!("{nome} {} em {ms} ms{idade}", n.versao));
+                        return (Some(n), rastro);
+                    }
+                    None => rastro.push(format!("{nome}: arquivo ilegível em {ms} ms")),
+                }
+            }
         }
-        ler(&resposta.text().ok()?)
-    })
+    }
+    (None, rastro)
 }
 
 /// O que o operador faz para atualizar, neste sistema.
@@ -335,16 +392,48 @@ mod testes {
     /// Subir a versão sem escrever as novidades (ou o contrário) faz os balcões
     /// ou não serem avisados, ou serem avisados do que não existe.
     #[test]
-    fn o_anuncio_fica_pendente_ate_a_versao_chegar_a_tela() {
-        // O cache devolveu a versão velha: a tela não tem nada.
-        assert!(anuncio_pendente("0.1.45", "0.1.44", None));
-        // Ou tem uma mais velha que a anunciada.
-        assert!(anuncio_pendente("0.1.46", "0.1.44", Some("0.1.45")));
-        // Chegou a anunciada (ou uma mais nova): para.
-        assert!(!anuncio_pendente("0.1.45", "0.1.44", Some("0.1.45")));
-        assert!(!anuncio_pendente("0.1.45", "0.1.44", Some("0.1.46")));
-        // Anúncio de versão que este app já tem: nada a fazer.
-        assert!(!anuncio_pendente("0.1.44", "0.1.44", None));
+    fn o_anuncio_vence_o_cache_velho_do_github() {
+        let arquivo = |v: &str| {
+            let mut n = Novidades::do_anuncio(v.into(), "do arquivo".into(), false);
+            n.novidades = vec!["item".into()];
+            n
+        };
+        let anuncio = |v: &str| Novidades::do_anuncio(v.into(), "do anúncio".into(), false);
+        // 29/09: o cache devolveu a 0.1.44 e o servidor anunciou a 0.1.45.
+        let fica = a_mais_nova(Some(arquivo("0.1.44")), Some(anuncio("0.1.45"))).unwrap();
+        assert_eq!(fica.versao, "0.1.45");
+        assert!(
+            aviso_do_main("0.1.44", Some(fica)).is_some(),
+            "a faixa aparece"
+        );
+        // Empatadas, fica o arquivo, que tem a lista.
+        let fica = a_mais_nova(Some(arquivo("0.1.45")), Some(anuncio("0.1.45"))).unwrap();
+        assert_eq!(fica.titulo, "do arquivo");
+        // O GitHub fora do ar: vale o anúncio.
+        assert_eq!(
+            a_mais_nova(None, Some(anuncio("0.1.45"))).unwrap().versao,
+            "0.1.45"
+        );
+        // Sem anúncio, o de sempre.
+        assert_eq!(
+            a_mais_nova(Some(arquivo("0.1.45")), None).unwrap().versao,
+            "0.1.45"
+        );
+    }
+
+    /// Contra a rede de verdade: o rastro diz qual endereço respondeu, a
+    /// versão e o tempo. `cargo test -p ui-gpui --lib o_rastro_da_busca -- --ignored`
+    #[test]
+    #[ignore]
+    fn o_rastro_da_busca_de_verdade() {
+        let (achou, rastro) = buscar_com_rastro();
+        eprintln!("{rastro:?}");
+        let achou = achou.expect("o GitHub respondeu");
+        assert!(rastro
+            .last()
+            .unwrap()
+            .starts_with(&format!("raw {}", achou.versao)));
+        assert!(rastro.last().unwrap().contains(" ms"));
     }
 
     #[test]

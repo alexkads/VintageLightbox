@@ -63,7 +63,7 @@ struct Telemetria {
     /// O fluxo e o envio, vivos enquanto a conta está dentro.
     tarefas: Mutex<Vec<tokio::task::JoinHandle<()>>>,
     /// A versão que o servidor anunciou e a tela ainda não recolheu.
-    anuncio: Mutex<Option<String>>,
+    anuncio: Mutex<Option<crate::atualizacao::novidades::Novidades>>,
     /// Acorda o envio quando entra relato novo.
     novo_relato: tokio::sync::Notify,
     repetidos: Mutex<HashMap<(String, String), Instant>>,
@@ -262,7 +262,7 @@ pub fn ligada() -> bool {
 }
 
 /// A versão que o servidor anunciou desde a última vez que a tela olhou.
-pub fn tomar_anuncio() -> Option<String> {
+pub fn tomar_anuncio() -> Option<crate::atualizacao::novidades::Novidades> {
     TELEMETRIA
         .get()?
         .anuncio
@@ -350,16 +350,29 @@ async fn manter_o_fluxo(sessao: Sessao) {
 }
 
 /// A versão anunciada, se o evento é o `versao_nova` do servidor
-/// (`handlers/app_desktop.rs`: `event: versao_nova`, `data: {"versao": …}`).
-pub fn anuncio_do_evento(evento: &crate::tempo_real::sse::EventoSse) -> Option<String> {
+/// (`handlers/app_desktop.rs`: `event: versao_nova`,
+/// `data: {"versao": …, "titulo": …, "importante": …}`).
+pub fn anuncio_do_evento(
+    evento: &crate::tempo_real::sse::EventoSse,
+) -> Option<crate::atualizacao::novidades::Novidades> {
     if evento.nome != "versao_nova" {
         return None;
     }
-    serde_json::from_str::<serde_json::Value>(&evento.dados)
-        .ok()?
-        .get("versao")?
-        .as_str()
-        .map(str::to_string)
+    let dados = serde_json::from_str::<serde_json::Value>(&evento.dados).ok()?;
+    let versao = dados.get("versao")?.as_str()?.to_string();
+    crate::atualizacao::novidades::versao_em_numeros(&versao)?;
+    let titulo = dados
+        .get("titulo")
+        .and_then(|t| t.as_str())
+        .filter(|t| !t.trim().is_empty())
+        .map_or_else(|| format!("Versão {versao}"), str::to_string);
+    let importante = dados
+        .get("importante")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    Some(crate::atualizacao::novidades::Novidades::do_anuncio(
+        versao, titulo, importante,
+    ))
 }
 
 /// Esvazia o depósito quando entra relato novo, quando o fluxo abre e a cada
@@ -462,7 +475,10 @@ mod testes {
             .iter()
             .filter_map(super::anuncio_do_evento)
             .collect();
-        assert_eq!(anuncios, vec!["0.1.19".to_string()]);
+        assert_eq!(anuncios.len(), 1);
+        assert_eq!(anuncios[0].versao, "0.1.19");
+        assert_eq!(anuncios[0].titulo, "t");
+        assert!(anuncios[0].importante);
     }
 
     #[test]

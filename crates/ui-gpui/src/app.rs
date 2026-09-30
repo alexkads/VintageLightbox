@@ -954,9 +954,11 @@ impl Aplicativo {
         // avisar já passou. `procurar` devolve na hora; a resposta chega pelo
         // canal, e `esperar_aviso` é quem a recolhe.
         let avisos_de_versao = channel();
-        portas
-            .atualizador
-            .procurar(avisos_de_versao.0.clone(), false);
+        portas.atualizador.procurar_por(
+            avisos_de_versao.0.clone(),
+            crate::atualizacao::porta::Gatilho::Abertura,
+            None,
+        );
         let atualizacao = Self::esperar_aviso(cx);
         let anuncios_do_servidor = Self::ouvir_os_anuncios(cx);
 
@@ -1514,56 +1516,51 @@ impl Aplicativo {
         if !crate::telemetria::ligada() {
             return None;
         }
-        // 🔁 Se a procura voltar sem a versão anunciada (o cache do GitHub
-        // ainda com a anterior), ela se repete a cada minuto, por dez minutos
-        // — o dobro da vida do cache (`novidades::anuncio_pendente`).
-        const INTERVALO: u32 = 60;
-        const TENTATIVAS: u32 = 10;
-        let mut pendente: Option<(String, u32, u32)> = None;
+        // 🕐 **Uma procura a cada hora**, como o `start_polling` do Zed: a
+        // rede de segurança para o anúncio que se perde (o fluxo caído na
+        // hora, o Mac dormindo). A da abertura já foi feita no `novo`.
+        const A_CADA_HORA: u32 = 60 * 60;
+        let mut segundos = 0u32;
         Some(cx.spawn(async move |raiz, cx| loop {
             cx.background_executor()
                 .timer(std::time::Duration::from_secs(1))
                 .await;
-            if let Some(versao) = crate::telemetria::tomar_anuncio() {
-                pendente = Some((versao, 0, 0));
-            }
-            let Some((versao, tentativas, espera)) = pendente.as_mut() else {
-                continue;
-            };
-            if *espera > 0 {
-                *espera -= 1;
+            segundos = segundos.wrapping_add(1);
+            let anuncio = crate::telemetria::tomar_anuncio();
+            let de_hora = segundos.is_multiple_of(A_CADA_HORA);
+            if anuncio.is_none() && !de_hora {
                 continue;
             }
-            let procurou = raiz.update(cx, |raiz, cx| {
-                let na_tela = raiz.atualizacao.versao.as_ref().map(|v| v.versao.as_str());
-                if !crate::atualizacao::novidades::anuncio_pendente(
-                    versao,
-                    env!("CARGO_PKG_VERSION"),
-                    na_tela,
-                ) {
-                    return None;
+            let vivo = raiz.update(cx, |raiz, cx| {
+                // A de hora em hora só procura enquanto nenhuma versão chegou à
+                // faixa: não mexe na que falhou nem na que foi dispensada.
+                if anuncio.is_none() && raiz.atualizacao.versao.is_some() {
+                    return;
                 }
                 let ocupada = raiz.atualizacao.instalando
                     || raiz.atualizacao.verificando
                     || matches!(raiz.atualizacao.aviso, Some(Aviso::Instalada(_)));
-                if !ocupada {
-                    eprintln!("📡 [Atualização] o servidor anunciou a {versao}: procurando");
-                    raiz.atualizador
-                        .procurar(raiz.avisos_de_versao.0.clone(), false);
-                    raiz._atualizacao = Some(Self::esperar_aviso(cx));
+                if ocupada {
+                    return;
                 }
-                Some(())
-            });
-            match procurou {
-                Err(_) => return,
-                Ok(None) => pendente = None,
-                Ok(Some(())) => {
-                    *tentativas += 1;
-                    *espera = INTERVALO;
-                    if *tentativas >= TENTATIVAS {
-                        pendente = None;
+                let canal = raiz.avisos_de_versao.0.clone();
+                use crate::atualizacao::porta::Gatilho;
+                match anuncio {
+                    // 📡 O anúncio vale por si (`novidades::a_mais_nova`).
+                    Some(anunciada) => {
+                        eprintln!(
+                            "📡 [Atualização] o servidor anunciou a {}: procurando",
+                            anunciada.versao
+                        );
+                        raiz.atualizador
+                            .procurar_por(canal, Gatilho::Anuncio, Some(anunciada));
                     }
+                    None => raiz.atualizador.procurar_por(canal, Gatilho::Hora, None),
                 }
+                raiz._atualizacao = Some(Self::esperar_aviso(cx));
+            });
+            if vivo.is_err() {
+                return;
             }
         }))
     }
@@ -1608,8 +1605,11 @@ impl Aplicativo {
             // Pedir de novo é querer ver a versão que se dispensou antes.
             self.atualizacao.dispensada = None;
             self.atualizacao.novidades_abertas = false;
-            self.atualizador
-                .procurar(self.avisos_de_versao.0.clone(), true);
+            self.atualizador.procurar_por(
+                self.avisos_de_versao.0.clone(),
+                crate::atualizacao::porta::Gatilho::Pedida,
+                None,
+            );
             self._atualizacao = Some(Self::esperar_aviso(cx));
         }
         cx.notify();
