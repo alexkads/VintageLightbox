@@ -1,14 +1,12 @@
 {
-  "versao": "0.1.45",
-  "titulo": "Doze predefinições Vintage, favoritas com um coração, e \"Recuperar cartão\" no menu lateral.",
+  "versao": "0.1.46",
+  "titulo": "A versão nova chega com o app aberto, sem precisar sair dele.",
   "importante": false,
   "novidades": [
-    "Na coluna de predefinições da Revelação, o grupo \"Vintage ·\" traz doze visuais prontos: Foto envelhecida, Polaroid antiga, Anos passados, Processo cruzado, Cianótipo, Cinza antigo, Bleach bypass, Positivo direto, Kodachrome, Portra 400, Ektachrome anos 70 e Desbotado anos 70. Cada uma começa do zero: aplicar troca o tratamento que estava na foto, em vez de somar a ele.",
-    "Passe o mouse numa predefinição e clique no coração: ela vai para o grupo \"Favoritas\", no topo. Arraste pela alça para pôr as favoritas na ordem que quiser; outro clique no coração tira. Elas também vêm primeiro na escolha do preset padrão da Nova sessão.",
-    "Só as listas rolam: o navegador e a busca ficam parados, e as suas predefinições (\"Minhas\") aparecem sempre, sem precisar descer a coluna inteira.",
-    "A recuperação de fotos ganhou lugar próprio no menu lateral: \"Recuperar cartão\". Escolha o cartão e uma pasta no computador, digite a senha do computador e acompanhe a busca. Serve para fotos apagadas por engano e para cartão formatado sem querer.",
-    "No fim, \"Importar\" leva você às sessões: abra a do cliente e, em Importar fotos › Do cartão ou pasta…, as fotos recuperadas são a primeira opção. Os JPEG da Nikon voltam inteiros e uma vez só.",
-    "Até terminar a recuperação, não grave nada no cartão e não tire fotos com ele: cada foto nova apaga o que ainda dá para salvar."
+    "Quando sai uma versão nova, o app confia no aviso do servidor e começa a atualizar sozinho. Antes, às vezes o aviso chegava antes de a versão estar disponível na internet, e ela só aparecia na próxima vez que o app fosse aberto.",
+    "O app também procura versão nova a cada hora, caso algum aviso se perca.",
+    "Cada procura de versão fica registrada no painel Computadores do site: o que disparou, o que foi encontrado e o que o app fez.",
+    "Esta atualização talvez ainda peça para reabrir o app uma última vez; a partir dela, não precisa mais."
   ],
-  "por_que_atualizar": "Doze visuais de época a um clique, as suas preferidas sempre no topo, e a recuperação do cartão à mão na hora do susto."
+  "por_que_atualizar": "As próximas versões chegam sozinhas, sem fechar o app, e qualquer problema fica rastreado."
 }
