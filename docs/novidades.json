@@ -1,10 +1,13 @@
 {
-  "versao": "0.1.53",
-  "titulo": "O QR volta ao painel do bot — e você liga e desliga.",
+  "versao": "0.1.54",
+  "titulo": "As predefinições da Revelação cabem em tela pequena.",
   "importante": false,
   "novidades": [
-    "O painel do bot mostra o QR de novo. O botão de QR no título dele (ou \"QR no painel\", no menu do Bot) tira e põe, e a escolha vale para as próximas sessões.",
-    "Tirar o QR do painel não mexe no QR da tela do cliente."
+    "A lista de predefinições rola inteira, com barra, e o navegador e a busca ficam parados no topo. Antes, numa tela baixa, \"Do sistema\" mostrava só duas.",
+    "Cada grupo (Favoritas, Minhas, Do sistema) abre e fecha no título, e o app lembra como você deixou. Buscar abre todos.",
+    "As suas predefinições vêm antes das do sistema.",
+    "A predefinição que está na foto fica marcada com uma barra âmbar.",
+    "O botão direito numa predefinição abre um menu: aplicar, favoritar, renomear e apagar."
   ],
-  "por_que_atualizar": "Traz de volta o QR no painel do bot, agora com o seu interruptor."
+  "por_que_atualizar": "Deixa a lista de predefinições fácil de usar em notebook e tela pequena."
 }
