@@ -6,6 +6,7 @@
     "Quando sai uma versão nova, o app confia no aviso do servidor e começa a atualizar sozinho. Antes, às vezes o aviso chegava antes de a versão estar disponível na internet, e ela só aparecia na próxima vez que o app fosse aberto.",
     "O app também procura versão nova a cada hora, caso algum aviso se perca.",
     "Cada procura de versão fica registrada no painel Computadores do site: o que disparou, o que foi encontrado e o que o app fez.",
+    "Na Revelação, a barra de zoom embaixo da foto pode mudar de lugar: arraste pela alça na ponta esquerda e deixe onde não atrapalha. Duplo clique na alça a devolve ao canto.",
     "Esta atualização talvez ainda peça para reabrir o app uma última vez; a partir dela, não precisa mais."
   ],
   "por_que_atualizar": "As próximas versões chegam sozinhas, sem fechar o app, e qualquer problema fica rastreado."
