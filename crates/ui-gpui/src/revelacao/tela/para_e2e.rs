@@ -117,10 +117,10 @@ impl Revelacao {
 
     /// As predefinições que a coluna mostra: `(do sistema, minhas)`, em nome.
     pub(crate) fn coluna_de_predefinicoes(&self, cx: &gpui_kit::App) -> (Vec<String>, Vec<String>) {
-        let (sistema, minhas) = self.grupos_da_coluna(cx);
+        let coluna = self.grupos_da_coluna(cx);
         (
-            sistema.iter().map(|p| p.name.clone()).collect(),
-            minhas.iter().map(|p| p.name.clone()).collect(),
+            coluna.sistema.iter().map(|p| p.name.clone()).collect(),
+            coluna.minhas.iter().map(|p| p.name.clone()).collect(),
         )
     }
 
@@ -139,7 +139,7 @@ impl Revelacao {
     ) {
         let chaves: Vec<String> = self
             .grupos_da_coluna(cx)
-            .0
+            .sistema
             .into_iter()
             .map(ordem::chave)
             .collect();

@@ -258,6 +258,8 @@ pub struct NovaSessao {
     pub(super) estudios: Vec<Estudio>,
     galerias: Option<Vec<GaleriaDoPainel>>,
     pub(super) presets: Vec<PresetDaSessao>,
+    /// 💛 As chaves com o coração aceso na Revelação, lidas junto com a lista.
+    pub(super) favoritas: Vec<String>,
     presets_chegaram: bool,
     pub(super) titulo: Entity<InputState>,
     pub(super) email: Entity<InputState>,
@@ -500,6 +502,7 @@ impl NovaSessao {
             estudios: Vec::new(),
             galerias: None,
             presets: Vec::new(),
+            favoritas: Vec::new(),
             presets_chegaram: false,
             titulo,
             email,
@@ -1937,9 +1940,13 @@ impl NovaSessao {
                             .as_ref()
                             .map(parametros::presets_do_servidor)
                             .unwrap_or_default();
-                        self.presets = parametros::presets_da_sessao(
-                            &self.portas.presets_do_sistema,
-                            do_servidor,
+                        self.favoritas = crate::revelacao::presets::ordem::ler().favoritas;
+                        self.presets = parametros::favoritas_primeiro(
+                            parametros::presets_da_sessao(
+                                &self.portas.presets_do_sistema,
+                                do_servidor,
+                            ),
+                            &self.favoritas,
                         );
                         self.presets_chegaram = true;
                         self.aplicar_parametros();

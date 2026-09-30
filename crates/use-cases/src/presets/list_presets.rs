@@ -9,7 +9,7 @@ use std::sync::Arc;
 /// Eles não moram na tabela `presets`: são construídos aqui a cada listagem, e a
 /// tela os separa dos do usuário por `is_system`.
 ///
-/// # 🔑 São os oito do site, e são os mesmos números
+/// # 🔑 São os vinte do site, e são os mesmos números
 ///
 /// Até 7/set/2026 eram quatro — "B&W", "Warm", "Cool" e "High Contrast" —, e o
 /// site tinha outros sete, em português, guardados em
@@ -186,6 +186,219 @@ pub fn presets_de_sistema() -> Vec<Preset> {
                 ("dt_cb_saturation_highlights", 0.16030002),
                 ("dt_cb_saturation_midtones", 0.13459992),
                 ("dt_cb_brilliance_midtones", 0.14740002),
+            ],
+        ),
+        // 🎞️ **Os doze "Vintage ·"** (dono, 2026-09-28) — os mesmos do site
+        // (`presets-do-sistema.ts`), campo a campo e na mesma ordem: os
+        // clássicos do próprio Lightroom (Aged Photo, Old Polaroid, Yesteryear,
+        // Cross Process, Cyanotype, Antique Grayscale, Bleach Bypass, Direct
+        // Positive) e quatro emulações de filme, traduzidos pelas conversões do
+        // importador de `.xmp`. Temperatura e matiz são os relativos do modo
+        // JPEG (sRGB) do Lightroom: a foto do balcão já chega revelada.
+        //
+        // ⚠️ Os números foram aprovados na POC do site
+        // (`public/revelacao/poc-vintage.html`), sobre fotos reais do estúdio no
+        // mesmo motor. Todos recomeçam do neutro — o "Zerar os outros ajustes ao
+        // aplicar" ligado.
+        monte(
+            "Vintage · Foto envelhecida",
+            &[
+                ("contrast", 0.9),
+                ("saturation", -0.45),
+                ("vibrance", -0.2),
+                ("split_shadow_hue", 40.0),
+                ("split_shadow_sat", 35.0),
+                ("split_highlight_hue", 50.0),
+                ("split_highlight_sat", 25.0),
+                ("curva_m0", 22.0),
+                ("curva_m1", 45.0),
+                ("curva_m8", 238.0),
+                ("grain_amount", 25.0),
+                ("grain_size", 30.0),
+                ("lens_vignette_amount", -20.0),
+            ],
+        ),
+        monte(
+            "Vintage · Polaroid antiga",
+            &[
+                ("temperature", 1.5),
+                ("contrast", 0.88),
+                ("saturation", -0.2),
+                ("highlights", -20.0),
+                ("split_shadow_hue", 185.0),
+                ("split_shadow_sat", 10.0),
+                ("split_highlight_hue", 40.0),
+                ("split_highlight_sat", 22.0),
+                ("curva_m0", 30.0),
+                ("curva_m1", 50.0),
+                ("curva_m8", 232.0),
+                ("lens_vignette_amount", -25.0),
+                ("grain_amount", 15.0),
+            ],
+        ),
+        monte(
+            "Vintage · Anos passados",
+            &[
+                ("saturation", -0.35),
+                ("clarity", -0.15),
+                ("contrast", 0.92),
+                ("split_shadow_hue", 30.0),
+                ("split_shadow_sat", 20.0),
+                ("split_highlight_hue", 45.0),
+                ("split_highlight_sat", 18.0),
+                ("curva_m0", 25.0),
+                ("curva_m1", 42.0),
+                ("lens_vignette_amount", -15.0),
+            ],
+        ),
+        monte(
+            "Vintage · Processo cruzado",
+            &[
+                ("contrast", 1.1),
+                ("saturation", 0.1),
+                ("curva_r2", 54.0),
+                ("curva_r6", 200.0),
+                ("curva_g2", 58.0),
+                ("curva_g6", 197.0),
+                ("curva_b0", 24.0),
+                ("curva_b2", 70.0),
+                ("curva_b6", 184.0),
+                ("curva_b8", 222.0),
+                ("split_highlight_hue", 55.0),
+                ("split_highlight_sat", 12.0),
+            ],
+        ),
+        monte(
+            "Vintage · Cianótipo",
+            &[
+                ("bw_ativo", 1.0),
+                ("saturation", -1.0),
+                ("contrast", 1.1),
+                ("split_shadow_hue", 220.0),
+                ("split_shadow_sat", 50.0),
+                ("split_highlight_hue", 205.0),
+                ("split_highlight_sat", 20.0),
+            ],
+        ),
+        monte(
+            "Vintage · Cinza antigo",
+            &[
+                ("bw_ativo", 1.0),
+                ("saturation", -1.0),
+                ("contrast", 0.95),
+                ("split_shadow_hue", 40.0),
+                ("split_shadow_sat", 25.0),
+                ("split_highlight_hue", 50.0),
+                ("split_highlight_sat", 15.0),
+                ("curva_m0", 15.0),
+                ("grain_amount", 20.0),
+                ("grain_size", 25.0),
+                ("lens_vignette_amount", -15.0),
+            ],
+        ),
+        monte(
+            "Vintage · Bleach bypass",
+            &[
+                ("saturation", -0.6),
+                ("contrast", 1.35),
+                ("clarity", 0.4),
+                ("blacks", -20.0),
+                ("whites", 10.0),
+                ("highlights", -10.0),
+            ],
+        ),
+        monte(
+            "Vintage · Positivo direto",
+            &[
+                ("contrast", 1.3),
+                ("saturation", 0.25),
+                ("vibrance", 0.2),
+                ("blacks", -15.0),
+                ("curva_r2", 55.0),
+                ("curva_r6", 200.0),
+                ("curva_b0", 20.0),
+                ("curva_b8", 238.0),
+                ("split_highlight_hue", 50.0),
+                ("split_highlight_sat", 10.0),
+            ],
+        ),
+        monte(
+            "Vintage · Kodachrome",
+            &[
+                ("contrast", 1.2),
+                ("saturation", 0.08),
+                ("temperature", 0.5),
+                ("hsl_red_sat", 15.0),
+                ("hsl_red_hue", -3.0),
+                ("hsl_blue_sat", 10.0),
+                ("hsl_blue_hue", -6.0),
+                ("hsl_green_sat", -15.0),
+                ("hsl_green_hue", 6.0),
+                ("hsl_yellow_sat", -10.0),
+                ("calib_red_sat", 10.0),
+                ("calib_blue_sat", 15.0),
+                ("split_shadow_hue", 210.0),
+                ("split_shadow_sat", 8.0),
+                ("curva_m1", 27.0),
+                ("curva_m7", 228.0),
+            ],
+        ),
+        monte(
+            "Vintage · Portra 400",
+            &[
+                ("contrast", 0.9),
+                ("highlights", -30.0),
+                ("shadows", 20.0),
+                ("saturation", -0.1),
+                ("vibrance", -0.1),
+                ("temperature", 0.8),
+                ("hsl_orange_sat", -5.0),
+                ("hsl_orange_lum", 10.0),
+                ("hsl_green_sat", -20.0),
+                ("hsl_green_hue", 9.0),
+                ("hsl_blue_sat", -15.0),
+                ("calib_red_hue", 5.0),
+                ("calib_blue_sat", 15.0),
+                ("curva_m0", 12.0),
+                ("curva_m8", 248.0),
+                ("grain_amount", 15.0),
+                ("grain_size", 20.0),
+            ],
+        ),
+        monte(
+            "Vintage · Ektachrome anos 70",
+            &[
+                ("contrast", 1.1),
+                ("saturation", -0.1),
+                ("temperature", -0.3),
+                ("shadows", 12.0),
+                ("hsl_blue_sat", 15.0),
+                ("hsl_aqua_sat", 10.0),
+                ("hsl_green_hue", 12.0),
+                ("split_shadow_hue", 200.0),
+                ("split_shadow_sat", 10.0),
+                ("split_highlight_hue", 45.0),
+                ("split_highlight_sat", 10.0),
+                ("curva_m0", 18.0),
+                ("grain_amount", 18.0),
+            ],
+        ),
+        monte(
+            "Vintage · Desbotado anos 70",
+            &[
+                ("temperature", 2.0),
+                ("saturation", -0.25),
+                ("contrast", 0.9),
+                ("curva_m0", 35.0),
+                ("curva_m1", 52.0),
+                ("curva_m8", 230.0),
+                ("curva_b0", 45.0),
+                ("split_shadow_hue", 35.0),
+                ("split_shadow_sat", 25.0),
+                ("split_highlight_hue", 45.0),
+                ("split_highlight_sat", 15.0),
+                ("grain_amount", 20.0),
+                ("lens_vignette_amount", -20.0),
             ],
         ),
         // ⚠️ O raio começa em 0,5 porque raio zero não tem pixel de vizinhança —

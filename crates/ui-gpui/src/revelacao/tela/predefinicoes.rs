@@ -572,20 +572,32 @@ impl Revelacao {
 
     // ------------------------------------------------------ reordenar
 
-    /// Os dois grupos como a coluna os mostra agora.
-    pub(super) fn grupos_da_coluna(&self, cx: &App) -> (Vec<&Preset>, Vec<&Preset>) {
+    /// Os grupos como a coluna os mostra agora.
+    pub(super) fn grupos_da_coluna(&self, cx: &App) -> presets::Coluna<'_> {
         let busca = self.busca_de_presets.read(cx).value().to_string();
         presets::da_coluna(&self.presets, &busca, &self.predefinicoes.ordem)
     }
 
     /// As chaves de um grupo, na ordem da tela.
+    ///
+    /// 💛 As favoritas reordenam sobre a lista **guardada**: uma chave que a
+    /// tela não mostra (predefinição que ainda não carregou) não pode perder o
+    /// coração num arrasto — o `reordenacao` do site.
     fn chaves_do_grupo(&self, grupo: Grupo, cx: &App) -> Vec<String> {
-        let (sistema, minhas) = self.grupos_da_coluna(cx);
+        let coluna = self.grupos_da_coluna(cx);
         let lista = match grupo {
-            Grupo::Sistema => sistema,
-            Grupo::Minhas => minhas,
+            Grupo::Favoritas => return self.predefinicoes.ordem.favoritas.clone(),
+            Grupo::Sistema => coluna.sistema,
+            Grupo::Minhas => coluna.minhas,
         };
         lista.into_iter().map(ordem::chave).collect()
+    }
+
+    /// 💛 O coração da linha: põe no fim das favoritas, ou tira delas.
+    pub fn alternar_favorita(&mut self, chave: &str, cx: &mut Context<Self>) {
+        self.predefinicoes.ordem.alternar_favorita(chave);
+        ordem::gravar(&self.predefinicoes.ordem);
+        cx.notify();
     }
 
     /// Se as linhas podem ser arrastadas agora.
@@ -690,7 +702,7 @@ impl Revelacao {
         cx: &mut Context<Self>,
     ) {
         let (comando, argumento) = gesto.split_once(' ').unwrap_or((gesto, ""));
-        let primeira_minha = self.grupos_da_coluna(cx).1.first().map(|p| p.id);
+        let primeira_minha = self.grupos_da_coluna(cx).minhas.first().map(|p| p.id);
         match comando {
             "criar" => self.alternar_formulario_de_preset(window, cx),
             "nome" => self.nome_do_preset.update(cx, |campo, cx| {
@@ -721,12 +733,29 @@ impl Revelacao {
             // primeira) — o clique na linha da coluna.
             "aplicar" => {
                 let n: usize = argumento.parse().unwrap_or(0);
-                if let Some(preset) = self.grupos_da_coluna(cx).0.get(n).map(|p| (*p).clone()) {
+                if let Some(preset) = self
+                    .grupos_da_coluna(cx)
+                    .sistema
+                    .get(n)
+                    .map(|p| (*p).clone())
+                {
                     self.aplicar_preset(&preset, window, cx);
                 }
             }
             "responder" => self.responder_pergunta(argumento == "sim", window, cx),
             "ordem" => self.definir_ordem_dos_presets(Grupo::Sistema, None, cx),
+            // 💛 O coração da N-ésima do sistema (0 é a primeira).
+            "favoritar" => {
+                let n: usize = argumento.parse().unwrap_or(0);
+                if let Some(chave) = self
+                    .grupos_da_coluna(cx)
+                    .sistema
+                    .get(n)
+                    .map(|p| ordem::chave(p))
+                {
+                    self.alternar_favorita(&chave, cx);
+                }
+            }
             "importar" => {
                 let caminho = std::path::Path::new(argumento);
                 let arquivo = Arquivo {
@@ -741,7 +770,7 @@ impl Revelacao {
                 let indice: usize = argumento.parse().unwrap_or(0);
                 let preset = self
                     .grupos_da_coluna(cx)
-                    .0
+                    .sistema
                     .get(indice)
                     .map(|p| (*p).clone());
                 self.prever(preset.as_ref(), cx);
@@ -755,8 +784,12 @@ impl Revelacao {
 
     /// A lista de predefinições — o desenho do site (`painel-presets.tsx`).
     pub(super) fn presets(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let (do_sistema, minhas) = self.grupos_da_coluna(cx);
-        let nenhuma = do_sistema.is_empty() && minhas.is_empty();
+        let presets::Coluna {
+            favoritas,
+            sistema: do_sistema,
+            minhas,
+        } = self.grupos_da_coluna(cx);
+        let nenhuma = favoritas.is_empty() && do_sistema.is_empty() && minhas.is_empty();
         let buscando = !self.busca_de_presets.read(cx).value().trim().is_empty();
         let apagado = cx.theme().muted_foreground;
         let fraco = apagado.opacity(0.6);
@@ -778,8 +811,17 @@ impl Revelacao {
                 })
                 .into_any_element()
         } else {
+            // 🔑 **Só as listas rolam, cada grupo a sua** (dono, 2026-09-29), como
+            // no site: "Favoritas" tem teto próprio, "Minhas" não passa de 45% e
+            // "Do sistema" fica com o resto — com as vinte dela, as do fotógrafo
+            // sumiam abaixo da dobra. Cada uma tem um mínimo.
             v_flex()
+                .flex_1()
+                .min_h(px(0.))
                 .gap(px(12.))
+                .when(!favoritas.is_empty(), |d| {
+                    d.child(self.grupo_de_presets(Grupo::Favoritas, &favoritas, None, cx))
+                })
                 .child(self.grupo_de_presets(Grupo::Sistema, &do_sistema, None, cx))
                 .child(self.grupo_de_presets(
                     Grupo::Minhas,
@@ -795,7 +837,10 @@ impl Revelacao {
         // ⚠️ **O texto conta as duas regras**, e não só a de somar: enquanto ele
         // prometia "os outros ficam como estão", quem aplicava "Preto e branco"
         // sobre uma sépia via a tonalização de pé e não entendia por quê.
-        const RODAPE: &str = "Passe o mouse para ver na foto, clique para aplicar. As que definem o visual recomeçam do neutro; as que só acrescentam — como a nitidez — somam ao que já está. O enquadramento nunca muda. Arraste pela alça para reordenar: a ordem fica guardada neste computador.";
+        //
+        // Curto (29/set/2026): com as listas rolando, cada linha dele é uma
+        // predefinição a menos à vista.
+        const RODAPE: &str = "Passe o mouse para ver, clique para aplicar. As que definem o visual recomeçam do neutro; a nitidez soma. Arraste pela alça para reordenar.";
         const DESTAQUE: &str = "recomeçam do neutro";
         let inicio = RODAPE.find(DESTAQUE).unwrap_or(0);
         let rodape = StyledText::new(RODAPE).with_highlights([(
@@ -808,6 +853,8 @@ impl Revelacao {
 
         v_flex()
             .id("predefinicoes")
+            .flex_1()
+            .min_h(px(0.))
             .gap(px(12.))
             // Soltar fora de uma linha (no vão entre os grupos) só termina.
             .on_drop(cx.listener(|tela, _: &ArrastoDePreset, _window, cx| {
@@ -819,6 +866,7 @@ impl Revelacao {
             .child(grupos)
             .child(
                 div()
+                    .flex_none()
                     .text_size(px(11.))
                     .line_height(relative(1.375))
                     .text_color(fraco)
@@ -1196,12 +1244,16 @@ impl Revelacao {
         let (apagado, frente) = (tema.muted_foreground, tema.foreground);
         let fraco = apagado.opacity(0.6);
         let titulo = match grupo {
+            Grupo::Favoritas => "FAVORITAS",
             Grupo::Sistema => "DO SISTEMA",
             Grupo::Minhas => "MINHAS",
         };
-        let reordenada = !self.predefinicoes.ordem.do_grupo(grupo).is_empty();
+        // As favoritas não têm "ordem padrão": a lista guardada é a escolha.
+        let reordenada =
+            grupo != Grupo::Favoritas && !self.predefinicoes.ordem.do_grupo(grupo).is_empty();
 
         let cabeca = h_flex()
+            .flex_none()
             .mb(px(4.))
             .items_center()
             .gap(px(6.))
@@ -1239,8 +1291,10 @@ impl Revelacao {
                 )
             });
 
+        let so_o_aviso = lista.is_empty() && vazio.is_some();
         let corpo: AnyElement = match (lista.is_empty(), vazio) {
             (true, Some(texto)) => div()
+                .flex_none()
                 .px(px(4.))
                 .pb(px(4.))
                 .text_size(px(11.))
@@ -1249,18 +1303,36 @@ impl Revelacao {
                 .child(texto)
                 .into_any_element(),
             _ => v_flex()
+                .id(SharedString::from(format!("lista-{titulo}")))
+                .min_h(px(0.))
+                .when(grupo == Grupo::Sistema, |d| d.flex_1())
+                .when(grupo == Grupo::Favoritas, |d| d.max_h(px(128.)))
+                .overflow_y_scroll()
                 .gap(px(2.))
                 .children(lista.iter().map(|preset| {
                     if self.predefinicoes.renomeando.aberto() == Some(&preset.id) {
                         self.nome_em_edicao(preset.id, cx)
                     } else {
-                        self.linha_de_preset(preset, cx)
+                        self.linha_de_preset(preset, grupo, cx)
                     }
                 }))
                 .into_any_element(),
         };
 
-        div().child(cabeca).child(corpo).into_any_element()
+        let bloco = v_flex()
+            .debug_selector(move || format!("grupo-{titulo}"))
+            .min_h(px(0.))
+            .child(cabeca)
+            .child(corpo);
+        // Cada grupo guarda ao menos o título e duas linhas (60 px): numa
+        // janela baixa, os três encolhem juntos em vez de um sair da coluna.
+        match grupo {
+            _ if so_o_aviso => bloco.flex_none(),
+            Grupo::Favoritas => bloco.flex_shrink(1.).min_h(px(60.)),
+            Grupo::Sistema => bloco.flex_1().flex_basis(px(0.)).min_h(px(60.)),
+            Grupo::Minhas => bloco.max_h(relative(0.45)).min_h(px(60.)),
+        }
+        .into_any_element()
     }
 
     /// Uma predefinição na lista.
@@ -1271,13 +1343,13 @@ impl Revelacao {
     ///
     /// 🚨 **O clique mora no nome, e não na linha**: com o `on_click` na linha
     /// inteira, clicar na lixeira aplicaria a predefinição antes da pergunta.
-    fn linha_de_preset(&self, preset: &Preset, cx: &mut Context<Self>) -> AnyElement {
+    fn linha_de_preset(&self, preset: &Preset, grupo: Grupo, cx: &mut Context<Self>) -> AnyElement {
         let tema = cx.theme();
         let (apagado, frente, realce) = (tema.muted_foreground, tema.foreground, tema.muted);
         let fraco = apagado.opacity(0.6);
         let travada = self.predefinicoes_travadas();
-        let grupo = Grupo::de(preset);
         let chave = ordem::chave(preset);
+        let favorita = self.predefinicoes.ordem.eh_favorita(&chave);
         let reordena = self.reordenar_ligado(cx);
         let arrasto = self.predefinicoes.arrasto.as_ref();
         let arrastando = arrasto.is_some_and(|a| a.chave == chave);
@@ -1286,6 +1358,7 @@ impl Revelacao {
             .map(|a| a.depois);
         let marca_do_grupo = SharedString::from(format!("linha-{chave}"));
         let nome = SharedString::from(preset.name.clone());
+        let coracao = self.coracao(chave.clone(), favorita, &nome, &marca_do_grupo, cx);
         let quantos = presets::quantos_campos(preset);
         let dica = SharedString::from(format!(
             "{}\n{}",
@@ -1455,7 +1528,59 @@ impl Revelacao {
                         Tooltip::new(format!("{quantos} controles")).build(window, cx)
                     }),
             )
+            .child(coracao)
             .children(self.acoes_do_preset(preset, &marca_do_grupo, travada, cx))
+            .into_any_element()
+    }
+
+    /// 💛 O coração da linha — o `Heart` do site: aceso fica sempre à vista;
+    /// apagado, só no passar do mouse (vinte corações vazios encheriam a coluna).
+    fn coracao(
+        &self,
+        chave: String,
+        favorita: bool,
+        nome: &SharedString,
+        linha: &SharedString,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let tema = cx.theme();
+        let (apagado, frente, realce) = (tema.muted_foreground, tema.foreground, tema.muted);
+        let dica = SharedString::from(if favorita {
+            format!("Tirar {nome} das favoritas")
+        } else {
+            format!("Pôr {nome} nas favoritas — elas ficam no topo")
+        });
+        let seletor = format!("favorita-{chave}");
+        div()
+            .id(SharedString::from(seletor.clone()))
+            .debug_selector(move || seletor)
+            .flex_none()
+            .p(px(4.))
+            .rounded(crate::tema::canto(4.))
+            .cursor_pointer()
+            // Um `hover` só: o GPUI recusa o segundo ("hover style already set").
+            .hover(move |s| {
+                let s = s.bg(realce);
+                if favorita {
+                    s
+                } else {
+                    s.text_color(frente)
+                }
+            })
+            .when(favorita, |d| {
+                d.text_color(rgb(0xf43f5e))
+                    .child(Icon::new(Icone::HeartCheio).size(px(12.)))
+            })
+            .when(!favorita, |d| {
+                d.text_color(apagado)
+                    .opacity(0.)
+                    .group_hover(linha.clone(), |s| s.opacity(1.))
+                    .child(Icon::new(Icone::Heart).size(px(12.)))
+            })
+            .tooltip(move |window, cx| Tooltip::new(dica.clone()).build(window, cx))
+            .on_click(cx.listener(move |tela, _ev, _window, cx| {
+                tela.alternar_favorita(&chave, cx);
+            }))
             .into_any_element()
     }
 

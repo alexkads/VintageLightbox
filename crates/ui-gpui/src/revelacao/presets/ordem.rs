@@ -4,7 +4,8 @@
 //!
 //! # Onde ela mora
 //!
-//! 🔑 **Neste computador, uma lista por grupo** — "Do sistema" e "Minhas" —,
+//! 🔑 **Neste computador, uma lista por grupo** — "Do sistema", "Minhas" e
+//! "Favoritas" —,
 //! num JSON ao lado do catálogo, como a escolha da sincronização. No site é o
 //! `localStorage` da máquina, pelo mesmo raciocínio: é arrumação de quem está no
 //! balcão, não dado da galeria. Dois operadores em máquinas diferentes põem no
@@ -29,9 +30,16 @@ use domain::entities::Preset;
 use infrastructure::paths::AppPaths;
 use serde::{Deserialize, Serialize};
 
-/// Os dois grupos da coluna. Cada um reordena só dentro dele.
+/// Os grupos da coluna. Cada um reordena só dentro dele.
+///
+/// 💛 **"Favoritas" é um grupo como os outros** (dono, 2026-09-29: *"clicar num
+/// coraçãozinho deixando os preferidos primeiro"*): a lista guardada dele é ao
+/// mesmo tempo **quais** são as favoritas e **em que ordem**. O coração põe no
+/// fim; o arrasto reordena dentro dela. Uma favorita sai do grupo de origem
+/// enquanto estiver lá — o `ordem-dos-presets.ts` do site.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Grupo {
+    Favoritas,
     Sistema,
     Minhas,
 }
@@ -56,8 +64,31 @@ const IDS_DO_SISTEMA: &[(&str, &str)] = &[
     ("Hora dourada", "hora-dourada"),
     ("Alta-chave", "alta-chave"),
     ("RecordarFotos P&B", "recordarfotos-pb"),
+    ("Vintage · Foto envelhecida", "vintage-envelhecida"),
+    ("Vintage · Polaroid antiga", "vintage-polaroid"),
+    ("Vintage · Anos passados", "vintage-anos-passados"),
+    ("Vintage · Processo cruzado", "vintage-processo-cruzado"),
+    ("Vintage · Cianótipo", "vintage-cianotipo"),
+    ("Vintage · Cinza antigo", "vintage-cinza-antigo"),
+    ("Vintage · Bleach bypass", "vintage-bleach-bypass"),
+    ("Vintage · Positivo direto", "vintage-positivo-direto"),
+    ("Vintage · Kodachrome", "vintage-kodachrome"),
+    ("Vintage · Portra 400", "vintage-portra"),
+    ("Vintage · Ektachrome anos 70", "vintage-ektachrome"),
+    ("Vintage · Desbotado anos 70", "vintage-desbotado-70"),
     ("Nitidez para impressão", "para-impressao"),
 ];
+
+/// O id que o site dá a uma predefinição do sistema, pelo nome — `sepia` para
+/// "Sépia à moda antiga". É a **única** tabela do app: a Nova sessão também
+/// lê daqui (era uma cópia com oito linhas, e as doze Vintage teriam ficado de
+/// fora do preset padrão sem aviso nenhum).
+pub fn id_do_site(nome: &str) -> Option<&'static str> {
+    IDS_DO_SISTEMA
+        .iter()
+        .find(|(n, _)| *n == nome)
+        .map(|(_, id)| *id)
+}
 
 /// A chave com que a ordem guarda uma predefinição.
 pub fn chave(preset: &Preset) -> String {
@@ -111,29 +142,48 @@ pub fn deslocar(ids: &[String], id: &str, passo: i32) -> Vec<String> {
     saida
 }
 
-/// As duas listas guardadas.
+/// As listas guardadas.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Ordem {
     #[serde(default)]
     pub sistema: Vec<String>,
     #[serde(default)]
     pub minhas: Vec<String>,
+    /// As chaves com o coração aceso, na ordem em que aparecem no topo.
+    #[serde(default)]
+    pub favoritas: Vec<String>,
 }
 
 impl Ordem {
     pub fn do_grupo(&self, grupo: Grupo) -> &[String] {
         match grupo {
+            Grupo::Favoritas => &self.favoritas,
             Grupo::Sistema => &self.sistema,
             Grupo::Minhas => &self.minhas,
         }
     }
 
-    /// Troca a lista de um grupo. `None` (ou lista vazia) volta à ordem padrão.
+    /// Troca a lista de um grupo. `None` (ou lista vazia) volta à ordem padrão
+    /// — e, nas favoritas, a nenhuma.
     pub fn definir(&mut self, grupo: Grupo, ids: Option<Vec<String>>) {
         let ids = ids.unwrap_or_default();
         match grupo {
+            Grupo::Favoritas => self.favoritas = ids,
             Grupo::Sistema => self.sistema = ids,
             Grupo::Minhas => self.minhas = ids,
+        }
+    }
+
+    pub fn eh_favorita(&self, chave: &str) -> bool {
+        self.favoritas.iter().any(|c| c == chave)
+    }
+
+    /// Liga ou desliga o coração: entra no fim das favoritas, ou sai delas.
+    pub fn alternar_favorita(&mut self, chave: &str) {
+        if self.eh_favorita(chave) {
+            self.favoritas.retain(|c| c != chave);
+        } else {
+            self.favoritas.push(chave.to_string());
         }
     }
 }
@@ -168,7 +218,7 @@ pub fn gravar(ordem: &Ordem) {
 }
 
 pub fn gravar_em(caminho: &Path, ordem: &Ordem) {
-    if ordem.sistema.is_empty() && ordem.minhas.is_empty() {
+    if ordem.sistema.is_empty() && ordem.minhas.is_empty() && ordem.favoritas.is_empty() {
         let _ = std::fs::remove_file(caminho);
         return;
     }
@@ -221,6 +271,29 @@ mod testes {
             ordenar(&["b", "novo", "a"], &["a", "apagada", "b"]),
             lista(&["a", "b", "novo"])
         );
+    }
+
+    // ----------------------------------------------------- favoritas (site)
+
+    #[test]
+    fn o_coracao_poe_no_fim_das_favoritas_e_o_segundo_clique_tira() {
+        let mut ordem = Ordem::default();
+        ordem.alternar_favorita("c");
+        ordem.alternar_favorita("a");
+        assert_eq!(ordem.favoritas, lista(&["c", "a"]));
+        ordem.alternar_favorita("c");
+        assert_eq!(ordem.favoritas, lista(&["a"]));
+        assert!(ordem.eh_favorita("a") && !ordem.eh_favorita("c"));
+    }
+
+    /// Um arquivo gravado antes do coração não tem `favoritas`: abre sem
+    /// nenhuma, e sem perder a ordem que já tinha.
+    #[test]
+    fn a_ordem_de_antes_do_coracao_abre_sem_favoritas() {
+        let ordem: Ordem = serde_json::from_str(r#"{"sistema":["sistema:sepia"],"minhas":[]}"#)
+            .expect("o formato de antes");
+        assert_eq!(ordem.sistema, lista(&["sistema:sepia"]));
+        assert!(ordem.favoritas.is_empty());
     }
 
     // -------------------------------------------------------- mover (site)

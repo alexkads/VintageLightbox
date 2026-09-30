@@ -1021,6 +1021,7 @@ impl NovaSessao {
             .as_deref()
             .filter(|id| self.presets.iter().all(|p| p.id != *id))
             .is_some();
+        let mut favoritas = Vec::new();
         let mut do_sistema = Vec::new();
         let mut minhas = Vec::new();
         let lista: Vec<(String, String, Grupo)> = self
@@ -1029,9 +1030,14 @@ impl NovaSessao {
             .map(|p| (p.id.clone(), p.nome.clone(), p.grupo))
             .collect();
         for (id, nome, grupo) in lista {
+            // `self.presets` já vem com as favoritas na frente
+            // (`favoritas_primeiro`): as seções saem contíguas, e as setas
+            // andam na mesma ordem que a tela mostra.
+            let favorita = self.favoritas.contains(&id);
             let c = cartao(Some(id), nome, indice, self, cx);
             indice += 1;
             match grupo {
+                _ if favorita => favoritas.push(c),
                 Grupo::Sistema => do_sistema.push(c),
                 Grupo::Minhas => minhas.push(c),
             }
@@ -1081,6 +1087,9 @@ impl NovaSessao {
                         );
                     }
                     grade(primeira)
+                })
+                .when(!favoritas.is_empty(), |c| {
+                    c.child(secao("Favoritas")).child(grade(favoritas))
                 })
                 .when(!do_sistema.is_empty(), |c| {
                     c.child(secao("Do sistema")).child(grade(do_sistema))

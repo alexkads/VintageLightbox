@@ -3419,17 +3419,22 @@ impl Revelacao {
     }
 
     /// A coluna da esquerda: só as predefinições, sem título e sem aba.
+    ///
+    /// 🔑 **A coluna não rola; só as listas** (dono, 2026-09-29): com as vinte
+    /// do sistema ela descia inteira, e o navegador e a busca saíam de vista
+    /// justamente quando se procura uma predefinição. Cada grupo rola a sua.
     fn coluna_dos_presets(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
+        gpui_kit::component::v_flex()
             .id("coluna-de-presets")
+            .debug_selector(|| "coluna-de-presets".into())
             .size_full()
             .p(px(8.))
-            .overflow_y_scroll()
+            .overflow_hidden()
             .bg(cx.theme().sidebar)
             .border_r_1()
             .border_color(cx.theme().border)
             // O Navegador vem antes das predefinições, como no site.
-            .child(self.navegador(cx))
+            .child(div().flex_none().child(self.navegador(cx)))
             .child(self.presets(cx))
     }
 }
@@ -6034,6 +6039,99 @@ mod testes {
         assert_eq!(guarda.renomeados(), vec![(id, "Retrato claro".into())]);
     }
 
+    /// 🔑 **A coluna não rola; as listas, sim** (dono, 2026-09-29: *"precisa
+    /// aparecer os presets criados por mim"*). Com as vinte do sistema, doze
+    /// próprias e duas favoritas numa janela de 1280×720, os três grupos têm de
+    /// estar desenhados **dentro** da coluna e com altura de gente — e o
+    /// coração, clicado de verdade, leva a predefinição ao topo.
+    #[gpui_kit::test]
+    fn com_as_vinte_do_sistema_as_minhas_e_as_favoritas_continuam_a_vista(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let mut presets = use_cases::presets::presets_de_sistema();
+        presets.extend((1..=12).map(|i| {
+            Preset::user(
+                format!("Minha {i}"),
+                PresetAdjustments::vazia().com("exposure", 0.5),
+            )
+        }));
+        let janela = com_presets(
+            cx,
+            previews,
+            Arc::new(GravadorDeMentira::default()),
+            presets,
+        );
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+                tela.alternar_favorita("sistema:vintage-portra", cx);
+                tela.alternar_favorita("sistema:vintage-kodachrome", cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_resize(gpui_kit::size(px(1280.), px(720.)));
+        visual.run_until_parked();
+
+        let coluna = visual
+            .debug_bounds("coluna-de-presets")
+            .expect("a coluna é desenhada");
+        assert!(
+            coluna.bottom() <= px(720.5),
+            "a coluna passou da janela: {coluna:?}"
+        );
+        let mut anterior: Option<gpui_kit::Bounds<Pixels>> = None;
+        for grupo in ["grupo-FAVORITAS", "grupo-DO SISTEMA", "grupo-MINHAS"] {
+            let b = visual
+                .debug_bounds(grupo)
+                .unwrap_or_else(|| panic!("{grupo} não foi desenhado"));
+            assert!(b.size.height >= px(59.5), "{grupo} esmagado: {b:?}");
+            assert!(
+                b.top() >= coluna.top() && b.bottom() <= coluna.bottom() + px(0.5),
+                "{grupo} fora da coluna: {b:?} em {coluna:?}"
+            );
+            if let Some(a) = anterior {
+                assert!(a.bottom() <= b.top() + px(0.5), "{grupo} fora de ordem");
+            }
+            anterior = Some(b);
+        }
+
+        // 💛 O coração, pelo clique: a primeira do sistema (a única linha
+        // inteira à vista nesta janela baixa) vai para o fim das favoritas.
+        let coracao = visual
+            .debug_bounds("favorita-sistema:pb-classico")
+            .expect("o coração da linha");
+        visual.simulate_click(coracao.center(), gpui_kit::Modifiers::none());
+        visual.run_until_parked();
+        janela
+            .update(cx, |tela, _window, cx| {
+                let favoritas: Vec<String> = tela
+                    .grupos_da_coluna(cx)
+                    .favoritas
+                    .iter()
+                    .map(|p| p.name.clone())
+                    .collect();
+                assert_eq!(
+                    favoritas,
+                    [
+                        "Vintage · Portra 400",
+                        "Vintage · Kodachrome",
+                        "Preto e branco clássico"
+                    ]
+                );
+                assert!(
+                    tela.grupos_da_coluna(cx)
+                        .sistema
+                        .iter()
+                        .all(|p| p.name != "Preto e branco clássico"),
+                    "a favorita sai do grupo de origem"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
     /// Reordenar: ↑ ↓ andam uma posição, soltar põe antes ou depois, e "ordem
     /// padrão" desfaz. Com a busca ativa, nada se move.
     #[gpui_kit::test]
@@ -6051,7 +6149,7 @@ mod testes {
         );
         let nomes = |tela: &Revelacao, cx: &App| -> Vec<String> {
             tela.grupos_da_coluna(cx)
-                .0
+                .sistema
                 .iter()
                 .map(|p| p.name.clone())
                 .collect()

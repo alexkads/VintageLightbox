@@ -1,6 +1,6 @@
 //! Presets: um punhado de ajustes com nome, aplicados de uma vez.
 //!
-//! A entidade, os oito de sistema e a gravação existem nas camadas internas
+//! A entidade, os vinte de sistema e a gravação existem nas camadas internas
 //! (`domain::entities::Preset`, `use_cases::presets`) — aqui é a ponte entre o
 //! mapa `nome → valor` que elas guardam e os [`Ajustes`] que o motor usa.
 //!
@@ -307,8 +307,16 @@ fn sem_acento(c: char) -> char {
     }
 }
 
-/// Os dois grupos da coluna, prontos para desenhar: na ordem guardada e com a
+/// Os grupos da coluna, prontos para desenhar: na ordem guardada e com a
 /// busca aplicada.
+pub struct Coluna<'a> {
+    /// 💛 As do coração, na ordem guardada — fora dos outros dois grupos.
+    pub favoritas: Vec<&'a Preset>,
+    pub sistema: Vec<&'a Preset>,
+    pub minhas: Vec<&'a Preset>,
+}
+
+/// A coluna como a tela a mostra.
 ///
 /// A busca é por pedaço do nome, sem caixa — o `toLocaleLowerCase().includes()`
 /// do site —, e busca vazia é "mostre tudo". ⚠️ **Sem dobra de acento, como
@@ -318,11 +326,11 @@ fn sem_acento(c: char) -> char {
 /// 🔑 **"Minhas" em ordem alfabética quando não há ordem guardada** — o
 /// `ordenar` do site, que a lista recebe a cada criação, importação e troca de
 /// nome. A do sistema fica na ordem do código, que é a do site.
-pub fn da_coluna<'a>(
-    presets: &'a [Preset],
-    busca: &str,
-    guardada: &ordem::Ordem,
-) -> (Vec<&'a Preset>, Vec<&'a Preset>) {
+///
+/// 💛 **Uma favorita aparece só no topo** (`separarFavoritas` do site), e uma
+/// chave guardada sem predefinição (apagada) não aparece — mas continua
+/// guardada.
+pub fn da_coluna<'a>(presets: &'a [Preset], busca: &str, guardada: &ordem::Ordem) -> Coluna<'a> {
     let (sistema, mut minhas) = separar(presets);
     minhas.sort_by(|a, b| comparar_nomes(&a.name, &b.name));
     let alvo = busca.trim().to_lowercase();
@@ -333,18 +341,30 @@ pub fn da_coluna<'a>(
             .collect()
     };
     let chave = |p: &&Preset| ordem::chave(p);
-    (
-        filtrar(ordem::aplicar_ordem(
-            sistema,
+    let fora_das_favoritas = |lista: Vec<&'a Preset>| -> Vec<&'a Preset> {
+        lista
+            .into_iter()
+            .filter(|p| !guardada.eh_favorita(&ordem::chave(p)))
+            .collect()
+    };
+    let favoritas = guardada
+        .do_grupo(ordem::Grupo::Favoritas)
+        .iter()
+        .filter_map(|c| presets.iter().find(|p| ordem::chave(p) == *c))
+        .collect();
+    Coluna {
+        favoritas: filtrar(favoritas),
+        sistema: filtrar(ordem::aplicar_ordem(
+            fora_das_favoritas(sistema),
             guardada.do_grupo(ordem::Grupo::Sistema),
             chave,
         )),
-        filtrar(ordem::aplicar_ordem(
-            minhas,
+        minhas: filtrar(ordem::aplicar_ordem(
+            fora_das_favoritas(minhas),
             guardada.do_grupo(ordem::Grupo::Minhas),
             chave,
         )),
-    )
+    }
 }
 
 /// Separa os de sistema dos do usuário, mantendo a ordem de cada grupo.
@@ -604,9 +624,9 @@ mod testes {
             Preset::user("Meu retrato".into(), PresetAdjustments::vazia()),
         ];
 
-        let (sistema, usuario) = da_coluna(&presets, "   ", &ordem::Ordem::default());
-        assert_eq!(sistema.len(), 1);
-        assert_eq!(usuario.len(), 1);
+        let coluna = da_coluna(&presets, "   ", &ordem::Ordem::default());
+        assert_eq!(coluna.sistema.len(), 1);
+        assert_eq!(coluna.minhas.len(), 1);
     }
 
     /// E ela acha por pedaço do nome, sem caixa, nos dois grupos ao mesmo
@@ -619,13 +639,21 @@ mod testes {
             Preset::user("Dourado meu".into(), PresetAdjustments::vazia()),
         ];
 
-        let (sistema, usuario) = da_coluna(&presets, "DOURAD", &ordem::Ordem::default());
+        let coluna = da_coluna(&presets, "DOURAD", &ordem::Ordem::default());
         assert_eq!(
-            sistema.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+            coluna
+                .sistema
+                .iter()
+                .map(|p| p.name.as_str())
+                .collect::<Vec<_>>(),
             ["Hora dourada"]
         );
         assert_eq!(
-            usuario.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+            coluna
+                .minhas
+                .iter()
+                .map(|p| p.name.as_str())
+                .collect::<Vec<_>>(),
             ["Dourado meu"]
         );
     }
@@ -718,9 +746,9 @@ mod testes {
     // ------------------------------------ presets-do-sistema.test.ts
 
     #[test]
-    fn as_do_sistema_sao_oito_com_nomes_distintos() {
+    fn as_do_sistema_sao_vinte_com_nomes_distintos() {
         let lista = use_cases::presets::presets_de_sistema();
-        assert_eq!(lista.len(), 8);
+        assert_eq!(lista.len(), 20);
         let nomes: std::collections::HashSet<_> = lista.iter().map(|p| &p.name).collect();
         assert_eq!(nomes.len(), lista.len());
         assert!(lista.iter().all(|p| p.is_system));
@@ -758,6 +786,40 @@ mod testes {
             assert!(substitui(&sistema(nome)), "{nome} define o visual");
         }
         assert!(!substitui(&sistema("Nitidez para impressão")));
+    }
+
+    /// 🎞️ **As doze "Vintage ·" recomeçam do neutro** (dono, 2026-09-28): é o
+    /// "Zerar os outros ajustes ao aplicar" ligado. Um filme somado a outro
+    /// tratamento dá uma terceira imagem que nenhum dos dois é.
+    #[test]
+    fn as_doze_vintage_recomecam_do_neutro() {
+        let vintage: Vec<_> = use_cases::presets::presets_de_sistema()
+            .into_iter()
+            .filter(|p| p.name.starts_with("Vintage · "))
+            .collect();
+        assert_eq!(vintage.len(), 12);
+        for preset in &vintage {
+            assert!(substitui(preset), "{} tem de substituir", preset.name);
+            let depois = aplicado(
+                &Ajustes {
+                    exposure: 1.5,
+                    hsl_red_sat: 60.0,
+                    ..Default::default()
+                },
+                preset,
+            );
+            assert_eq!(
+                depois.exposure, 0.0,
+                "{} não zerou a exposição",
+                preset.name
+            );
+            assert_eq!(
+                depois.hsl_red_sat,
+                preset.adjustments.get("hsl_red_sat").unwrap_or(0.0),
+                "{} não zerou o HSL que não é dele",
+                preset.name
+            );
+        }
     }
 
     /// Ele conta com o `replaces` para apagar a tonalização da sépia; escrever
@@ -864,16 +926,38 @@ mod testes {
         ];
         let nomes = |lista: Vec<&Preset>| lista.iter().map(|p| p.name.clone()).collect::<Vec<_>>();
 
-        let (_, minhas) = da_coluna(&presets, "", &ordem::Ordem::default());
+        let minhas = da_coluna(&presets, "", &ordem::Ordem::default()).minhas;
         assert_eq!(nomes(minhas), ["Árvore", "bosque", "zebra"]);
 
         let mut guardada = ordem::Ordem::default();
         guardada.definir(ordem::Grupo::Minhas, Some(vec![presets[1].id.to_string()]));
-        let (_, minhas) = da_coluna(&presets, "", &guardada);
+        let minhas = da_coluna(&presets, "", &guardada).minhas;
         assert_eq!(nomes(minhas), ["zebra", "Árvore", "bosque"]);
 
         // A busca filtra depois de ordenar.
-        let (_, minhas) = da_coluna(&presets, "O", &guardada);
+        let minhas = da_coluna(&presets, "O", &guardada).minhas;
         assert_eq!(nomes(minhas), ["Árvore", "bosque"]);
+    }
+
+    /// 💛 **A favorita sobe e sai do grupo de origem**, na ordem do coração, e
+    /// uma chave guardada sem predefinição não aparece — o `separarFavoritas`
+    /// do site.
+    #[test]
+    fn a_favorita_sobe_para_o_topo_e_sai_do_grupo_dela() {
+        let presets = vec![
+            Preset::system("Hora dourada", PresetAdjustments::vazia()),
+            Preset::system("Sépia à moda antiga", PresetAdjustments::vazia()),
+            Preset::user("Meu".into(), PresetAdjustments::vazia()),
+        ];
+        let nomes = |lista: Vec<&Preset>| lista.iter().map(|p| p.name.clone()).collect::<Vec<_>>();
+        let mut guardada = ordem::Ordem::default();
+        guardada.alternar_favorita(&ordem::chave(&presets[2]));
+        guardada.alternar_favorita("sistema:apagada");
+        guardada.alternar_favorita(&ordem::chave(&presets[1]));
+
+        let coluna = da_coluna(&presets, "", &guardada);
+        assert_eq!(nomes(coluna.favoritas), ["Meu", "Sépia à moda antiga"]);
+        assert_eq!(nomes(coluna.sistema), ["Hora dourada"]);
+        assert!(coluna.minhas.is_empty());
     }
 }

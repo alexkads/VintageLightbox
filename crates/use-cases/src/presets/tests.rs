@@ -105,11 +105,11 @@ async fn test_list_presets_returns_system_and_user() {
     assert!(result.is_ok());
     let presets = result.unwrap();
 
-    // Os oito de sistema mais o do usuário. Eram quatro até 7/set/2026, com os
+    // Os vinte de sistema mais o do usuário. Eram quatro até 7/set/2026, com os
     // nomes em inglês do app antigo; agora são os do site — com o estilo do
-    // estúdio no darktable desde 17/set/2026 —, e o que a lista devolve tem de
-    // trazer os dois grupos.
-    assert_eq!(presets.len(), 9);
+    // estúdio no darktable desde 17/set/2026 e os doze "Vintage ·" desde
+    // 28/set/2026 —, e o que a lista devolve tem de trazer os dois grupos.
+    assert_eq!(presets.len(), 21);
 
     let system_names: Vec<_> = presets
         .iter()
@@ -126,6 +126,18 @@ async fn test_list_presets_returns_system_and_user() {
             "Hora dourada",
             "Alta-chave",
             "RecordarFotos P&B",
+            "Vintage · Foto envelhecida",
+            "Vintage · Polaroid antiga",
+            "Vintage · Anos passados",
+            "Vintage · Processo cruzado",
+            "Vintage · Cianótipo",
+            "Vintage · Cinza antigo",
+            "Vintage · Bleach bypass",
+            "Vintage · Positivo direto",
+            "Vintage · Kodachrome",
+            "Vintage · Portra 400",
+            "Vintage · Ektachrome anos 70",
+            "Vintage · Desbotado anos 70",
             "Nitidez para impressão",
         ]
     );
@@ -210,6 +222,11 @@ fn faixa_do_slider(campo: &str) -> (f32, f32) {
         // A roda de cor inteira: estes **escolhem** a cor que entra.
         "split_shadow_hue" | "split_highlight_hue" => (0.0, 360.0),
         "split_shadow_sat" | "split_highlight_sat" => (0.0, 100.0),
+        // A curva por ponto guarda a altura de cada um dos nove pontos, em
+        // níveis de 0 a 255 — a faixa do `CURVA_POR_PONTO` do site.
+        campo if campo.starts_with("curva_") => (0.0, 255.0),
+        // Interruptor do preto e branco.
+        "bw_ativo" => (0.0, 1.0),
         // Os oito do HSL giram a cor que o pixel já tem: é um desvio.
         campo if campo.ends_with("_hue") => (-180.0, 180.0),
         _ => (-100.0, 100.0),
@@ -268,12 +285,12 @@ fn cada_preset_de_sistema_move_alguma_coisa() {
 
 /// ⚠️ **A lista é a mesma do site, e na mesma ordem.**
 ///
-/// São oito nomes escritos em dois lugares (aqui e em
+/// São vinte nomes escritos em dois lugares (aqui e em
 /// `revelacao/presets-do-sistema.ts`), e nada liga um ao outro em tempo de
 /// compilação. Um nome trocado aqui não quebra nada: só faz o fotógrafo
 /// procurar no app a predefinição que ele usou no navegador.
 #[test]
-fn os_oito_do_sistema_sao_os_do_site() {
+fn os_vinte_do_sistema_sao_os_do_site() {
     let nomes: Vec<String> = presets_de_sistema()
         .into_iter()
         .map(|preset| preset.name)
@@ -289,6 +306,18 @@ fn os_oito_do_sistema_sao_os_do_site() {
             "Hora dourada",
             "Alta-chave",
             "RecordarFotos P&B",
+            "Vintage · Foto envelhecida",
+            "Vintage · Polaroid antiga",
+            "Vintage · Anos passados",
+            "Vintage · Processo cruzado",
+            "Vintage · Cianótipo",
+            "Vintage · Cinza antigo",
+            "Vintage · Bleach bypass",
+            "Vintage · Positivo direto",
+            "Vintage · Kodachrome",
+            "Vintage · Portra 400",
+            "Vintage · Ektachrome anos 70",
+            "Vintage · Desbotado anos 70",
             "Nitidez para impressão",
         ]
     );
@@ -303,7 +332,10 @@ fn cada_uma_escreve_a_mesma_quantidade_de_campos_do_site() {
         .map(|preset| preset.adjustments.len())
         .collect();
 
-    assert_eq!(quantos, vec![5, 8, 9, 6, 7, 7, 24, 4]);
+    assert_eq!(
+        quantos,
+        vec![5, 8, 9, 6, 7, 7, 24, 13, 13, 10, 12, 7, 11, 6, 10, 16, 17, 13, 13, 4]
+    );
 }
 
 // ============================================

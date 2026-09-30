@@ -34,22 +34,19 @@ pub struct PresetDaSessao {
 
 /// A chave de cada predefinição do sistema no site
 /// (`[id]/revelacao/presets-do-sistema.ts`), pelo nome — que é igual nos dois.
-const CHAVES_DO_SISTEMA: [(&str, &str); 8] = [
-    ("Preto e branco clássico", "pb-classico"),
-    ("Sépia à moda antiga", "sepia"),
-    ("Retrato suave", "retrato-suave"),
-    ("Luz de estúdio", "luz-de-estudio"),
-    ("Hora dourada", "hora-dourada"),
-    ("Alta-chave", "alta-chave"),
-    ("RecordarFotos P&B", "recordarfotos-pb"),
-    ("Nitidez para impressão", "para-impressao"),
-];
-
 pub fn id_do_sistema(nome: &str) -> Option<String> {
-    CHAVES_DO_SISTEMA
-        .iter()
-        .find(|(n, _)| *n == nome)
-        .map(|(_, chave)| format!("sistema:{chave}"))
+    crate::revelacao::presets::ordem::id_do_site(nome).map(|chave| format!("sistema:{chave}"))
+}
+
+/// 💛 As favoritas do coração da Revelação primeiro, na ordem delas; o resto
+/// como veio — o `SeletorDePreset` do site. É o mesmo operador escolhendo, e
+/// ele procura as mesmas.
+pub fn favoritas_primeiro(lista: Vec<PresetDaSessao>, favoritas: &[String]) -> Vec<PresetDaSessao> {
+    let (mut primeiro, resto): (Vec<_>, Vec<_>) =
+        lista.into_iter().partition(|p| favoritas.contains(&p.id));
+    primeiro.sort_by_key(|p| favoritas.iter().position(|f| *f == p.id));
+    primeiro.extend(resto);
+    primeiro
 }
 
 /// As predefinições do servidor, como `GET /revelacao/presets` as devolve.
@@ -177,10 +174,31 @@ mod testes {
         for preset in use_cases::presets::presets_de_sistema() {
             assert!(
                 id_do_sistema(&preset.name).is_some(),
-                "`{}` não tem chave em CHAVES_DO_SISTEMA — a sessão iria sem preset padrão",
+                "`{}` não tem chave em `ordem::IDS_DO_SISTEMA` — a sessão iria sem preset padrão",
                 preset.name
             );
         }
+    }
+
+    #[test]
+    fn as_favoritas_vem_primeiro_na_ordem_do_coracao() {
+        let lista = presets_da_sessao(&use_cases::presets::presets_de_sistema(), Vec::new());
+        let favoritas = vec![
+            "sistema:vintage-portra".to_string(),
+            "sistema:apagada".to_string(),
+            "sistema:sepia".to_string(),
+        ];
+        let ordenada = favoritas_primeiro(lista.clone(), &favoritas);
+        let ids: Vec<&str> = ordenada.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(
+            &ids[..3],
+            [
+                "sistema:vintage-portra",
+                "sistema:sepia",
+                "sistema:pb-classico"
+            ]
+        );
+        assert_eq!(ordenada.len(), lista.len(), "nenhuma some nem se repete");
     }
 
     #[test]
