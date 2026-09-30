@@ -1,14 +1,9 @@
 {
-  "versao": "0.1.49",
-  "titulo": "O QR do bot na sessão: o cliente se cadastra pelo celular, e a tela avisa quando ele chegou.",
+  "versao": "0.1.50",
+  "titulo": "O que o cliente responde no bot aparece na sessão na hora.",
   "importante": false,
   "novidades": [
-    "Durante a sessão, um QR aparece no canto de baixo à direita. O cliente lê com a câmera e escolhe WhatsApp, Instagram, Telegram, Messenger ou o chat do site; o bot pergunta nome, telefone, e-mail e como conheceu, e grava na sessão.",
-    "O cartão do QR avisa na hora quem começou a conversa e em que pergunta está; quando o cadastro termina, o nome completo vira título com um clique.",
-    "A tecla I esconde e mostra o QR, aqui e na tela do cliente.",
-    "A tela do cliente mostra o mesmo QR, grande, e troca por \"Conversa iniciada\" depois da primeira resposta.",
-    "Avisar cliente sai também pelo WhatsApp quando a conversa das últimas 24 horas está aberta, e diz por onde o aviso foi e o que ficou de fora.",
-    "Depois, o cliente escreve \"minhas fotos\" no bot e recebe o link da sessão de novo."
+    "Quando o cliente responde o e-mail (ou o telefone) pelo bot, a sessão aberta se atualiza sozinha: o \"sem e-mail\" some e o Avisar cliente já manda para o e-mail que ele deu, sem pedir de novo."
   ],
-  "por_que_atualizar": "O balconista deixa de digitar os dados do cliente: ele mesmo responde pelo celular enquanto a sessão acontece."
+  "por_que_atualizar": "Sem esta versão, o Avisar cliente pedia um e-mail que o cliente já tinha respondido pelo bot."
 }
