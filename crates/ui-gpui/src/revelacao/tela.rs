@@ -6201,11 +6201,17 @@ mod testes {
         assert_eq!(guarda.renomeados(), vec![(id, "Retrato claro".into())]);
     }
 
-    /// 🔑 **A coluna não rola; as listas, sim** (dono, 2026-09-29: *"precisa
-    /// aparecer os presets criados por mim"*). Com as vinte do sistema, doze
-    /// próprias e duas favoritas numa janela de 1280×720, os três grupos têm de
-    /// estar desenhados **dentro** da coluna e com altura de gente — e o
-    /// coração, clicado de verdade, leva a predefinição ao topo.
+    /// 🔑 **Uma lista só, que rola, com pastas** (dono, 2026-09-30: *"essa
+    /// listagem de preset tá ruim de usar e muito pouco intuitivo"*). Antes
+    /// eram três listas com teto próprio, e "Do sistema" mostrava duas das
+    /// dezoito sem dizer que havia mais.
+    ///
+    /// Com as vinte do sistema, doze próprias e duas favoritas numa janela de
+    /// 1280×720: a lista cabe na coluna, os grupos vêm na ordem Favoritas,
+    /// Minhas, Do sistema — **as do fotógrafo à vista sem rolar** (dono,
+    /// 2026-09-29: *"precisa aparecer os presets criados por mim"*) —, a pasta
+    /// fecha no clique e a busca a reabre. O coração, clicado de verdade, leva
+    /// a predefinição ao topo.
     #[gpui_kit::test]
     fn com_as_vinte_do_sistema_as_minhas_e_as_favoritas_continuam_a_vista(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
@@ -6240,28 +6246,69 @@ mod testes {
         let coluna = visual
             .debug_bounds("coluna-de-presets")
             .expect("a coluna é desenhada");
+        let lista = visual
+            .debug_bounds("lista-de-predefinicoes")
+            .expect("a lista é desenhada");
         assert!(
-            coluna.bottom() <= px(720.5),
-            "a coluna passou da janela: {coluna:?}"
+            coluna.bottom() <= px(720.5) && lista.bottom() <= coluna.bottom() + px(0.5),
+            "a lista passou da coluna: {lista:?} em {coluna:?}"
+        );
+        assert!(
+            lista.size.height >= px(180.),
+            "a lista ficou sem altura: {lista:?} em {coluna:?}"
         );
         let mut anterior: Option<gpui_kit::Bounds<Pixels>> = None;
-        for grupo in ["grupo-FAVORITAS", "grupo-DO SISTEMA", "grupo-MINHAS"] {
+        for grupo in ["grupo-FAVORITAS", "grupo-MINHAS", "grupo-DO SISTEMA"] {
             let b = visual
                 .debug_bounds(grupo)
                 .unwrap_or_else(|| panic!("{grupo} não foi desenhado"));
-            assert!(b.size.height >= px(59.5), "{grupo} esmagado: {b:?}");
-            assert!(
-                b.top() >= coluna.top() && b.bottom() <= coluna.bottom() + px(0.5),
-                "{grupo} fora da coluna: {b:?} em {coluna:?}"
-            );
             if let Some(a) = anterior {
                 assert!(a.bottom() <= b.top() + px(0.5), "{grupo} fora de ordem");
             }
             anterior = Some(b);
         }
+        let minhas = visual.debug_bounds("grupo-MINHAS").expect("as minhas");
+        assert!(
+            minhas.top() + px(60.) <= lista.bottom(),
+            "as minhas ficaram abaixo da dobra: {minhas:?} em {lista:?}"
+        );
 
-        // 💛 O coração, pelo clique: a primeira do sistema (a única linha
-        // inteira à vista nesta janela baixa) vai para o fim das favoritas.
+        // 📁 A pasta fecha no clique: sobra só o título.
+        let aberto = visual
+            .debug_bounds("grupo-MINHAS")
+            .expect("as minhas")
+            .size
+            .height;
+        let pasta = visual.debug_bounds("pasta-MINHAS").expect("a pasta");
+        visual.simulate_click(pasta.center(), gpui_kit::Modifiers::none());
+        visual.run_until_parked();
+        let fechado = visual
+            .debug_bounds("grupo-MINHAS")
+            .expect("as minhas")
+            .size
+            .height;
+        assert!(
+            fechado < px(30.) && fechado < aberto,
+            "a pasta não fechou: {aberto:?} → {fechado:?}"
+        );
+        janela
+            .update(cx, |tela, window, cx| {
+                assert!(tela.grupo_fechado(Grupo::Minhas, cx));
+                assert!(tela.predefinicoes.ordem.recolhido(Grupo::Minhas));
+                // A busca abre todas: o resultado não se esconde numa pasta.
+                tela.busca_de_presets
+                    .update(cx, |campo, cx| campo.trocar_valor("Minha", window, cx));
+                assert!(!tela.grupo_fechado(Grupo::Minhas, cx));
+                // Apagada a busca, volta fechada — e o sistema sobe à vista.
+                tela.busca_de_presets
+                    .update(cx, |campo, cx| campo.trocar_valor("", window, cx));
+                assert!(tela.grupo_fechado(Grupo::Minhas, cx));
+            })
+            .expect("a janela deve estar aberta");
+        visual.run_until_parked();
+
+        // 💛 O coração, pelo clique: a primeira do sistema vai para o fim das
+        // favoritas.
         let coracao = visual
             .debug_bounds("favorita-sistema:pb-classico")
             .expect("o coração da linha");
@@ -6290,6 +6337,127 @@ mod testes {
                         .all(|p| p.name != "Preto e branco clássico"),
                     "a favorita sai do grupo de origem"
                 );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🖱️ **O botão direito abre o menu da linha, e não aplica.** O GPUI chama
+    /// o `on_click` também no botão direito: o primeiro menu aplicava a
+    /// predefinição ao abrir. O menu abre com o foco e lê a linha clicada.
+    #[gpui_kit::test]
+    fn o_botao_direito_abre_o_menu_da_linha_sem_aplicar(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let janela = com_presets(
+            cx,
+            previews,
+            Arc::new(GravadorDeMentira::default()),
+            use_cases::presets::presets_de_sistema(),
+        );
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx)
+            })
+            .expect("a janela deve estar aberta");
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_resize(gpui_kit::size(px(1280.), px(800.)));
+        visual.run_until_parked();
+
+        let coracao = visual
+            .debug_bounds("favorita-sistema:pb-classico")
+            .expect("a linha do P&B");
+        // No meio da linha, à esquerda do coração: em cima do nome.
+        let ponto = gpui_kit::point(coracao.left() - px(80.), coracao.center().y);
+        visual.simulate_mouse_down(
+            ponto,
+            gpui_kit::MouseButton::Right,
+            gpui_kit::Modifiers::none(),
+        );
+        visual.simulate_mouse_up(
+            ponto,
+            gpui_kit::MouseButton::Right,
+            gpui_kit::Modifiers::none(),
+        );
+        visual.run_until_parked();
+        let pb = janela
+            .update(cx, |tela, _window, _cx| {
+                tela.presets
+                    .iter()
+                    .find(|p| p.name == "Preto e branco clássico")
+                    .cloned()
+                    .expect("o P&B")
+            })
+            .expect("a janela deve estar aberta");
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert!(!tela.em_uso(&pb), "o botão direito aplicou a predefinição");
+            })
+            .expect("a janela deve estar aberta");
+
+        // O menu abriu, tem o foco e leu a linha clicada.
+        janela
+            .update(cx, |tela, window, _cx| {
+                assert!(
+                    window
+                        .context_stack()
+                        .iter()
+                        .any(|c| c.contains("PopupMenu")),
+                    "o menu não abriu: {:?}",
+                    window.context_stack()
+                );
+                assert!(
+                    tela.predefinicoes.alvo_do_menu.is_none(),
+                    "o menu não leu a linha do botão direito"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// ✔️ **A que está na foto fica marcada** — e a marca sai quando um
+    /// controle que ela define muda.
+    #[gpui_kit::test]
+    fn a_predefinicao_na_foto_fica_marcada(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let janela = com_presets(
+            cx,
+            previews,
+            Arc::new(GravadorDeMentira::default()),
+            use_cases::presets::presets_de_sistema(),
+        );
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+                let sepia = tela
+                    .presets
+                    .iter()
+                    .find(|p| p.name == "Sépia à moda antiga")
+                    .cloned()
+                    .expect("a sépia do sistema");
+                let pb = tela
+                    .presets
+                    .iter()
+                    .find(|p| p.name == "Preto e branco clássico")
+                    .cloned()
+                    .expect("o P&B do sistema");
+                assert!(!tela.em_uso(&sepia), "a foto crua não tem predefinição");
+                tela.aplicar_preset(&sepia, window, cx);
+                assert!(tela.em_uso(&sepia), "aplicada, fica marcada");
+                assert!(!tela.em_uso(&pb), "só a que está na foto");
+                tela.aplicar_preset(&pb, window, cx);
+                assert!(
+                    tela.em_uso(&pb) && !tela.em_uso(&sepia),
+                    "a marca muda de linha"
+                );
+                // O P&B recomeça do neutro: qualquer controle mexido depois
+                // faz a foto deixar de ser "o P&B".
+                assert!(super::super::presets::substitui(&pb));
+                tela.ajustes.exposure += 0.3;
+                assert!(!tela.em_uso(&pb), "mexer num controle tira a marca");
             })
             .expect("a janela deve estar aberta");
     }

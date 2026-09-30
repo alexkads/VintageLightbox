@@ -45,6 +45,15 @@ pub enum Grupo {
 }
 
 impl Grupo {
+    /// O nome com que o grupo recolhido fica guardado.
+    pub fn chave(self) -> &'static str {
+        match self {
+            Grupo::Favoritas => "favoritas",
+            Grupo::Sistema => "sistema",
+            Grupo::Minhas => "minhas",
+        }
+    }
+
     /// O grupo de uma predefinição.
     pub fn de(preset: &Preset) -> Self {
         if preset.is_system {
@@ -152,6 +161,10 @@ pub struct Ordem {
     /// As chaves com o coração aceso, na ordem em que aparecem no topo.
     #[serde(default)]
     pub favoritas: Vec<String>,
+    /// 📁 Os grupos fechados na coluna — a pasta recolhida do Lightroom
+    /// (dono, 2026-09-30: *"essa listagem de preset tá ruim de usar"*).
+    #[serde(default)]
+    pub recolhidos: Vec<String>,
 }
 
 impl Ordem {
@@ -176,6 +189,19 @@ impl Ordem {
 
     pub fn eh_favorita(&self, chave: &str) -> bool {
         self.favoritas.iter().any(|c| c == chave)
+    }
+
+    pub fn recolhido(&self, grupo: Grupo) -> bool {
+        self.recolhidos.iter().any(|c| c == grupo.chave())
+    }
+
+    /// Abre ou fecha a pasta de um grupo.
+    pub fn alternar_recolhido(&mut self, grupo: Grupo) {
+        if self.recolhido(grupo) {
+            self.recolhidos.retain(|c| c != grupo.chave());
+        } else {
+            self.recolhidos.push(grupo.chave().to_string());
+        }
     }
 
     /// Liga ou desliga o coração: entra no fim das favoritas, ou sai delas.
@@ -218,7 +244,7 @@ pub fn gravar(ordem: &Ordem) {
 }
 
 pub fn gravar_em(caminho: &Path, ordem: &Ordem) {
-    if ordem.sistema.is_empty() && ordem.minhas.is_empty() && ordem.favoritas.is_empty() {
+    if *ordem == Ordem::default() {
         let _ = std::fs::remove_file(caminho);
         return;
     }

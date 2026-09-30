@@ -594,6 +594,8 @@ mod mac {
             "mover" => &[5],
             "clicar" => &[1, 2],
             "duplo" => &[1, 2, 1, 2],
+            // O botão direito: `NSEventTypeRightMouseDown` e `…Up`.
+            "direito" => &[3, 4],
             outro => return Err(format!("mouse_real: tipo desconhecido '{outro}'")),
         };
         for (i, t) in tipos.iter().enumerate() {
@@ -608,7 +610,7 @@ mod mac {
                 context: std::ptr::null_mut::<AnyObject>(),
                 eventNumber: 0isize,
                 clickCount: cliques,
-                pressure: if *t == 2 || *t == 5 { 0.0f32 } else { 1.0f32 }
+                pressure: if *t == 2 || *t == 4 || *t == 5 { 0.0f32 } else { 1.0f32 }
             ];
             // 🔑 O hover não passa pela fila: a janela normal do GPUI desliga
             // `acceptsMouseMovedEvents` e ouve a área de rastreamento, que só
