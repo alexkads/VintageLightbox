@@ -2232,6 +2232,14 @@ impl Revelacao {
             if let Some(aberta) = self.aberta.as_mut() {
                 aberta.revelada = Some(pronta);
             }
+            // 🚨 **O pedido que ainda está na GPU ficou para trás deste.** Sem
+            // isto o resultado dele chega depois e pinta por cima: passar o
+            // ponteiro por uma predefinição e sair (a volta vem do cache)
+            // deixava a foto com o preset — na hora, ou no próximo zoom, que
+            // religa a colheita e acha o atrasado no canal.
+            if let Some(em_voo) = self.aguardando {
+                self.descartar_ate = self.descartar_ate.max(em_voo);
+            }
             // Nada mais a esperar: um `aguardando` pendurado aqui deixaria o
             // laço de colheita perguntando por um pedido que não existe.
             self.aguardando = None;
@@ -4628,6 +4636,58 @@ mod testes {
                     "a revelação é outra: o cache não pode responder por ela"
                 );
                 assert!(tela.aberta.as_ref().unwrap().desenhada.is_none());
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **O resultado atrasado da prévia não pinta por cima.**
+    ///
+    /// Passar o ponteiro por uma predefinição manda um pedido à GPU; sair da
+    /// linha volta à revelação que já está no cache, na hora. O pedido da
+    /// prévia continuava no ar, e quando chegava pintava o preset na foto — e
+    /// ele ficava ali (dono, 30/set/2026: *"só de passar pelo preset o efeito é
+    /// aplicado"*, sobretudo arrastando o zoom, que religa a colheita).
+    #[gpui_kit::test]
+    fn resultado_atrasado_da_previa_nao_pinta_por_cima(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let janela = janela(cx, previews);
+        let com_parametros = PhotoViewModel {
+            edit_exposure: Some(1.5),
+            ..foto("retrato.jpg")
+        };
+        let preset = Preset::system(
+            "Sépia à moda antiga",
+            PresetAdjustments::vazia().com("saturation", -1.0),
+        );
+
+        janela
+            .update(cx, |tela, window, cx| {
+                let chave = cache::Chave::nova(
+                    &com_parametros.id,
+                    (8, 8),
+                    &persistencia::da_foto(&com_parametros),
+                    &transformacao::corte(&persistencia::para_crop_settings(
+                        &persistencia::corte_da_foto(&com_parametros),
+                    )),
+                    &Default::default(),
+                );
+                tela.reveladas.guardar(chave, &foto_uniforme(200));
+                tela.abrir(com_parametros.clone(), window, cx);
+                assert!(tela.aguardando.is_none(), "a foto sai do cache");
+
+                tela.prever(Some(&preset), cx);
+                let em_voo = tela.aguardando.expect("a prévia vai à GPU");
+
+                tela.prever(None, cx);
+                assert!(tela.aguardando.is_none(), "a volta sai do cache");
+                assert!(
+                    tela.descartar_ate >= em_voo,
+                    "o resultado da prévia, quando chegar, não pode ir ao palco"
+                );
             })
             .expect("a janela deve estar aberta");
     }
