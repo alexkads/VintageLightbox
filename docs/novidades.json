@@ -1,13 +1,10 @@
 {
-  "versao": "0.1.54",
-  "titulo": "As predefinições da Revelação cabem em tela pequena.",
+  "versao": "0.1.55",
+  "titulo": "O Navegador da Revelação recolhe.",
   "importante": false,
   "novidades": [
-    "A lista de predefinições rola inteira, com barra, e o navegador e a busca ficam parados no topo. Antes, numa tela baixa, \"Do sistema\" mostrava só duas.",
-    "Cada grupo (Favoritas, Minhas, Do sistema) abre e fecha no título, e o app lembra como você deixou. Buscar abre todos.",
-    "As suas predefinições vêm antes das do sistema.",
-    "A predefinição que está na foto fica marcada com uma barra âmbar.",
-    "O botão direito numa predefinição abre um menu: aplicar, favoritar, renomear e apagar."
+    "Clique no título \"Navegador\" para recolher o painel do zoom: fica só a linha com o nível, e a lista de predefinições ganha o espaço. Outro clique abre de novo.",
+    "O app lembra se você deixou o Navegador aberto ou recolhido. O zoom continua pelo palco e pelos atalhos."
   ],
-  "por_que_atualizar": "Deixa a lista de predefinições fácil de usar em notebook e tela pequena."
+  "por_que_atualizar": "Mais predefinições à vista, principalmente em notebook e tela pequena."
 }
