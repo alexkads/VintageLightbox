@@ -797,24 +797,37 @@ impl Cliente {
         // da sessão): nem o `I` desta janela, que é do rodapé, nem o cadastro
         // concluído — outra pessoa da mesma sessão ainda pode querer ler.
         let convite = self.convite.as_ref()?;
+        // 📐 Cada texto vai **na largura do cartão** (`w_full`), e não na dele:
+        // numa coluna centralizada o GPUI dá ao texto a largura do conteúdo, e
+        // a frase não quebrava — vazava pelos dois lados do cartão (dono,
+        // 30/set/2026, com a foto da tela do cliente).
         let andamento = (convite.estado != EstadoDoBot::Aguardando).then(|| {
             div()
+                .w_full()
                 .flex()
-                .items_center()
+                .justify_center()
+                .items_start()
                 .gap(px(6.))
                 .child(
                     gpui_kit::component::Icon::new(crate::recursos::Icone::CircleCheck)
                         .size(px(14.))
-                        .text_color(gpui_kit::rgb(0x34d399)),
+                        .text_color(gpui_kit::rgb(0x34d399))
+                        .flex_none()
+                        .mt(px(1.)),
                 )
-                .child(div().text_xs().text_color(gpui_kit::rgb(0xd4d4d4)).child(
-                    match &convite.quem {
-                        Some(quem) => format!("{quem} — conversa iniciada"),
-                        None => "Conversa iniciada".to_string(),
-                    },
-                ))
+                .child(
+                    div()
+                        .min_w_0()
+                        .text_xs()
+                        .text_color(gpui_kit::rgb(0xd4d4d4))
+                        .child(match &convite.quem {
+                            Some(quem) => format!("{quem} — conversa iniciada"),
+                            None => "Conversa iniciada".to_string(),
+                        }),
+                )
         });
         let corpo = div()
+            .w_full()
             .flex()
             .flex_col()
             .items_center()
@@ -831,6 +844,8 @@ impl Cliente {
             )
             .child(
                 div()
+                    .w_full()
+                    .text_center()
                     .text_sm()
                     .text_color(gpui_kit::rgb(0xf5f5f5))
                     .child("Aponte a câmera do celular para receber suas fotos"),

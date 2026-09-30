@@ -47,6 +47,7 @@ use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::collapsible::Collapsible;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
@@ -5376,58 +5377,50 @@ impl Detalhe {
                         cx.listener(|_tela, _ev, _window, cx| cx.emit(Pedido::TelaDoCliente)),
                     ),
             )
-            // 📸 O interruptor do QR do bot — sempre à vista, aceso quando
-            // ligado. É o mesmo que a tecla `I` (dono, 30/set/2026).
-            // 📸 Os comandos do bot da sessão (dono, 30/set/2026: *"comandos
-            // diretos para o atendente saber o que está fazendo"*): o QR na
-            // tela do cliente (tecla `I`), o painel do atendente e o Novo QR.
-            // Os dois primeiros são interruptores independentes.
-            .child(
-                estilo::botao_contorno_pequeno("sessao-qr-do-cliente", cx)
-                    .when(self.bot.ligado, |b| b.bg(acento))
-                    .child(Icon::new(Icone::MonitorSmartphone).size(px(14.)))
+            // 📸 O bot da sessão num botão só, com os três comandos no menu
+            // (dono, 30/set/2026: primeiro *"comandos diretos para o atendente
+            // saber o que está fazendo"*, depois *"ficou com muito botão"*). O
+            // estado que importa — o QR na tela do cliente — fica escrito no
+            // botão; o menu marca os dois interruptores, que são independentes.
+            .child({
+                let esta = cx.entity().downgrade();
+                let (ligado, painel, trocando) =
+                    (self.bot.ligado, self.bot.painel_aberto, self.bot.trocando);
+                estilo::botao_contorno_pequeno("sessao-bot", cx)
+                    .when(ligado, |b| b.bg(acento))
+                    .child(Icon::new(Icone::Bot).size(px(14.)))
                     // O estado por escrito: o QR mora na outra tela, e a cor
                     // sozinha não diz ao atendente o que está lá.
-                    .child(if self.bot.ligado {
-                        "QR do cliente: ligado"
-                    } else {
-                        "QR do cliente: desligado"
+                    .child(if ligado { "Bot · QR ligado" } else { "Bot · QR desligado" })
+                    .child(Icon::new(Icone::ChevronDown).size(px(12.)))
+                    .dropdown_menu(move |menu, _window, _cx| {
+                        let (a, b, c) = (esta.clone(), esta.clone(), esta.clone());
+                        menu.item(
+                            PopupMenuItem::new("QR na tela do cliente  (I)")
+                                .checked(ligado)
+                                .on_click(move |_, _, cx| {
+                                    a.update(cx, |tela, cx| tela.alternar_o_qr(cx)).ok();
+                                }),
+                        )
+                        .item(
+                            PopupMenuItem::new("Painel do bot")
+                                .checked(painel)
+                                .on_click(move |_, _, cx| {
+                                    b.update(cx, |tela, cx| tela.alternar_o_painel_do_bot(cx))
+                                        .ok();
+                                }),
+                        )
+                        .separator()
+                        .item(
+                            PopupMenuItem::new("Novo QR para a próxima pessoa")
+                                .icon(Icon::new(Icone::RefreshCw))
+                                .disabled(trocando)
+                                .on_click(move |_, _, cx| {
+                                    c.update(cx, |tela, cx| tela.novo_qr(cx)).ok();
+                                }),
+                        )
                     })
-                    .tooltip(if self.bot.ligado {
-                        "O QR está na tela do cliente — clique para tirar (tecla I)"
-                    } else {
-                        "O QR não está na tela do cliente — clique para mostrar (tecla I)"
-                    })
-                    .on_click(cx.listener(|tela, _ev, _window, cx| tela.alternar_o_qr(cx))),
-            )
-            .child(
-                estilo::botao_contorno_pequeno("sessao-painel-do-bot", cx)
-                    .when(self.bot.painel_aberto, |b| b.bg(acento))
-                    .child(Icon::new(Icone::Bot).size(px(14.)))
-                    .child(if self.bot.painel_aberto {
-                        "Painel do bot: aberto"
-                    } else {
-                        "Painel do bot: fechado"
-                    })
-                    .tooltip(if self.bot.painel_aberto {
-                        "Fechar o painel do bot (o QR do cliente continua como está)"
-                    } else {
-                        "Abrir o painel do bot: quem chegou pelo QR e em que pergunta está"
-                    })
-                    .on_click(cx.listener(|tela, _ev, _window, cx| {
-                        tela.alternar_o_painel_do_bot(cx)
-                    })),
-            )
-            .child(estilo::desligado(
-                estilo::botao_contorno_pequeno("sessao-novo-qr", cx)
-                    .child(Icon::new(Icone::RefreshCw).size(px(14.)))
-                    .child("Novo QR")
-                    .tooltip(
-                        "Trocar o código para a próxima pessoa desta sessão — quem já começou a conversa continua",
-                    )
-                    .on_click(cx.listener(|tela, _ev, _window, cx| tela.novo_qr(cx))),
-                self.bot.trocando,
-            ))
+            })
             // 🖨️ O que se faz **com as marcadas**: a negociação do balcão (o
             // "Negociação…" do site) e a folha de impressão, que só o desktop tem.
             .when(marcadas > 0, |barra| {
