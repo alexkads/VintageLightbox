@@ -1,10 +1,10 @@
 {
-  "versao": "0.1.52",
-  "titulo": "O bot da sessão num botão só, e o QR do cliente sem texto vazando.",
+  "versao": "0.1.53",
+  "titulo": "O QR volta ao painel do bot — e você liga e desliga.",
   "importante": false,
   "novidades": [
-    "Os três botões do bot viraram um: \"Bot · QR ligado\". Ele abre um menu com \"QR na tela do cliente\" (tecla I), \"Painel do bot\" e \"Novo QR para a próxima pessoa\".",
-    "Na tela do cliente, o texto embaixo do QR agora fica dentro do cartão: a frase quebra em duas linhas e o \"conversa iniciada\" não é mais cortado."
+    "O painel do bot mostra o QR de novo. O botão de QR no título dele (ou \"QR no painel\", no menu do Bot) tira e põe, e a escolha vale para as próximas sessões.",
+    "Tirar o QR do painel não mexe no QR da tela do cliente."
   ],
-  "por_que_atualizar": "Sem esta versão, o texto do QR saía para fora do cartão na tela do cliente."
+  "por_que_atualizar": "Traz de volta o QR no painel do bot, agora com o seu interruptor."
 }
