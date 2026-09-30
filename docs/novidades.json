@@ -1,14 +1,9 @@
 {
-  "versao": "0.1.46",
-  "titulo": "A versão nova chega com o app aberto, sem precisar sair dele.",
+  "versao": "0.1.47",
+  "titulo": "Passar o mouse por uma predefinição não deixa mais o efeito na foto.",
   "importante": false,
   "novidades": [
-    "Quando sai uma versão nova, o app confia no aviso do servidor e começa a atualizar sozinho. Antes, às vezes o aviso chegava antes de a versão estar disponível na internet, e ela só aparecia na próxima vez que o app fosse aberto.",
-    "O app também procura versão nova a cada hora, caso algum aviso se perca.",
-    "Cada procura de versão fica registrada no painel Computadores do site: o que disparou, o que foi encontrado e o que o app fez.",
-    "Na Revelação, a barra de zoom embaixo da foto pode mudar de lugar: arraste pela alça na ponta esquerda e deixe onde não atrapalha. Duplo clique na alça a devolve ao canto.",
-    "Cmd + e Cmd − aumentam e diminuem a letra do app inteiro, e Cmd 0 volta ao tamanho padrão. O tamanho escolhido fica guardado. Na Revelação, essas teclas continuam dando zoom na foto.",
-    "Esta atualização talvez ainda peça para reabrir o app uma última vez; a partir dela, não precisa mais."
+    "Na Revelação, às vezes o efeito de uma predefinição ficava na foto só de passar o mouse por cima dela, principalmente ao arrastar a barra de zoom. Agora, ao tirar o mouse, a foto volta exatamente como estava."
   ],
-  "por_que_atualizar": "As próximas versões chegam sozinhas, sem fechar o app, e qualquer problema fica rastreado."
+  "por_que_atualizar": "A foto na tela sempre mostra o que foi aplicado de verdade."
 }
