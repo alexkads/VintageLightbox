@@ -7,6 +7,7 @@
     "O app também procura versão nova a cada hora, caso algum aviso se perca.",
     "Cada procura de versão fica registrada no painel Computadores do site: o que disparou, o que foi encontrado e o que o app fez.",
     "Na Revelação, a barra de zoom embaixo da foto pode mudar de lugar: arraste pela alça na ponta esquerda e deixe onde não atrapalha. Duplo clique na alça a devolve ao canto.",
+    "Cmd + e Cmd − aumentam e diminuem a letra do app inteiro, e Cmd 0 volta ao tamanho padrão. O tamanho escolhido fica guardado. Na Revelação, essas teclas continuam dando zoom na foto.",
     "Esta atualização talvez ainda peça para reabrir o app uma última vez; a partir dela, não precisa mais."
   ],
   "por_que_atualizar": "As próximas versões chegam sozinhas, sem fechar o app, e qualquer problema fica rastreado."
