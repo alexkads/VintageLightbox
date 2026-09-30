@@ -49,6 +49,8 @@ open = { version = "5", features = ["shellexecute-on-windows"] }
 # `corte_da_entidade`), que é a única parte que conhece o `domain`.
 revelacao-core = { path = "../revelacao-core" }
 foto-codec = { path = "../foto-codec" }
+# A reserva da LibRaw (o DNG com perdas do Lightroom) e o XMP de dentro do RAW.
+raw-codec = { path = "../raw-codec" }
 # A varredura do cartão formatado (`recuperacao.rs`): o motor sem dispositivo.
 recuperacao-core = { path = "../recuperacao-core" }
 # O cache de prévias (`cache/preview_manager.rs`).

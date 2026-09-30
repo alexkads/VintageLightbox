@@ -765,6 +765,9 @@ pub struct Aplicativo {
     /// marca. A releitura pode chegar antes da gravação, e sem isto a passada
     /// de subida via a foto sem a marca e a punha de volta na fila (C21).
     rejeitadas_agora: std::collections::HashSet<String>,
+    /// As que entraram com a revelação do Lightroom e ainda não apareceram numa
+    /// leitura do catálogo — ver `revelar_as_que_vieram_reveladas`.
+    reveladas_fora: Vec<String>,
     /// Quem cataloga o bruto que volta da nuvem e quem marca a cópia como
     /// rejeitada — ver `app::resgate`.
     importador: Arc<dyn crate::importacao::explorador::Importador>,
@@ -1385,6 +1388,7 @@ impl Aplicativo {
             parametros_no_site_das_que_subiram: std::collections::HashMap::new(),
             recem_subidas: std::collections::HashSet::new(),
             rejeitadas_agora: std::collections::HashSet::new(),
+            reveladas_fora: Vec::new(),
             importador: portas.importador.clone(),
             marcador: portas.marcador.clone(),
             _resgate: None,
@@ -1881,6 +1885,7 @@ impl Aplicativo {
                     };
                     let _t = crate::regua::trecho("raiz: aplicar a leitura do catálogo");
                     raiz.com_o_espelho_do_gravador(&mut fotos);
+                    raiz.revelar_as_que_vieram_reveladas(&fotos, cx);
                     // 🔑 **A tela da sessão recebe as locais deste ensaio.**
                     // Sem isto a foto importada ficaria gravada e invisível —
                     // o mesmo desfecho de não ter importado. Antes das do
@@ -4323,6 +4328,40 @@ impl Aplicativo {
             cx,
         );
         cx.notify();
+    }
+
+    /// A foto que entrou com a revelação do Lightroom ganha a miniatura revelada.
+    ///
+    /// 🚨 **Sem isto a importação parecia não ter trazido a revelação.** Os
+    /// PARÂMETROS entram no catálogo com a foto, mas a grade desenha a
+    /// miniatura revelada do cache — e ela só nascia quando alguém abria a foto
+    /// na Revelação. A grade mostrava o bruto, e quem importou o DNG revelado
+    /// concluía que o trabalho do Lightroom tinha ficado para trás.
+    ///
+    /// ⚠️ A que ainda não está na leitura (a releitura saiu antes de a foto ser
+    /// gravada) espera a próxima.
+    fn revelar_as_que_vieram_reveladas(
+        &mut self,
+        fotos: &[PhotoViewModel],
+        cx: &mut Context<Self>,
+    ) {
+        self.reveladas_fora.extend(self.importador.reveladas_fora());
+        if self.reveladas_fora.is_empty() {
+            return;
+        }
+        let pendentes = std::mem::take(&mut self.reveladas_fora);
+        for id in pendentes {
+            match fotos.iter().find(|f| f.id == id) {
+                Some(foto) => {
+                    let (ajustes, corte) = (
+                        persistencia::da_foto(foto),
+                        persistencia::corte_da_foto(foto),
+                    );
+                    self.pedir_a_previa_dos_parametros(&id, ajustes, corte, cx);
+                }
+                None => self.reveladas_fora.push(id),
+            }
+        }
     }
 
     /// Pede a prévia local desta revelação — a do "Sincronizar" e a do "Zerar".

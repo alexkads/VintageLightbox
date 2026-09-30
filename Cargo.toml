@@ -10,6 +10,10 @@ members = [
     # download do cliente converte WebP em JPEG no navegador dele, e o
     # `revelacao-core` traz o `wgpu` a reboque.
     "crates/foto-codec",
+    # 📷 O RAW da câmera e o DNG do Lightroom (2026-09-30): Rust puro, para abrir
+    # os dois também no navegador — e o DNG com perdas, que a LibRaw do
+    # `rsraw-sys` recusa. Usa o rawler vendorizado em `vendor/rawler`.
+    "crates/raw-codec",
     # O mesmo codificador compilado para o navegador do **cliente** — sem GPU,
     # só para converter o WebP guardado no JPEG que ele leva ao laboratório.
     "crates/conversao-web",
@@ -50,6 +54,9 @@ members = [
     "crates/recuperacao-core",
     "crates/ui-gpui",
 ]
+# O rawler vendorizado é dependência, não membro: sem isto os testes, benches e
+# lints dele entrariam no workspace.
+exclude = ["vendor/rawler"]
 
 [workspace.package]
 version = "0.1.47"

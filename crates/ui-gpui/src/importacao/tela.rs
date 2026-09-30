@@ -114,13 +114,18 @@ pub struct Importacao {
     _colheita: Option<Task<()>>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Progresso {
     pub total: usize,
     pub feitos: usize,
     pub falhas: usize,
     pub pulados: usize,
     pub terminou: bool,
+    /// Quantas entraram com a revelação do Lightroom (o XMP do RAW).
+    pub com_revelacao_de_fora: usize,
+    /// O que o Lightroom fez e este motor não tem, e em quantas fotos — o que
+    /// apareceu em mais fotos primeiro.
+    pub fora_da_revelacao: Vec<(String, usize)>,
 }
 
 impl Importacao {
@@ -351,10 +356,7 @@ impl Importacao {
 
         self.progresso = Some(Progresso {
             total: arquivos.len(),
-            feitos: 0,
-            falhas: 0,
-            pulados: 0,
-            terminou: false,
+            ..Default::default()
         });
 
         self.freios = Freios::default();
@@ -504,7 +506,24 @@ impl Importacao {
 
         match andamento {
             Andamento::Comecou { total } => progresso.total = total,
-            Andamento::Feito { .. } => progresso.feitos += 1,
+            Andamento::Feito {
+                revelacao_de_fora, ..
+            } => {
+                progresso.feitos += 1;
+                if let Some(ignorados) = revelacao_de_fora {
+                    progresso.com_revelacao_de_fora += 1;
+                    for rotulo in ignorados {
+                        match progresso
+                            .fora_da_revelacao
+                            .iter_mut()
+                            .find(|(r, _)| *r == rotulo)
+                        {
+                            Some((_, quantas)) => *quantas += 1,
+                            None => progresso.fora_da_revelacao.push((rotulo, 1)),
+                        }
+                    }
+                }
+            }
             Andamento::Pulado { .. } => progresso.pulados += 1,
             Andamento::Falhou { caminho, erro } => {
                 progresso.falhas += 1;
@@ -522,6 +541,13 @@ impl Importacao {
                 progresso.falhas = falhas;
                 progresso.pulados = pulados;
                 progresso.terminou = true;
+                // 🔑 **O que o Lightroom fez e não entrou fica dito**, e não
+                // escondido atrás de "importadas": quem revelou com remoção de
+                // névoa e vê a foto sem ela procuraria defeito no próprio olho.
+                // Só se nenhuma falha já estiver avisando — a falha vale mais.
+                if self.estado.aviso.is_none() {
+                    self.estado.aviso = aviso_da_revelacao_de_fora(progresso);
+                }
             }
         }
 
@@ -1214,10 +1240,16 @@ impl Render for Importacao {
 /// "12 importadas · 0 falharam" — indistinguível de um lote de 12 fotos que
 /// correu inteiro.
 pub fn frase_do_lote(progresso: &Progresso, pausada: bool, cancelada: bool) -> String {
-    let contagem = format!(
+    let mut contagem = format!(
         "{} importadas · {} falharam · {} puladas",
         progresso.feitos, progresso.falhas, progresso.pulados
     );
+    if progresso.com_revelacao_de_fora > 0 {
+        contagem.push_str(&format!(
+            " · {} com a revelação do Lightroom",
+            progresso.com_revelacao_de_fora
+        ));
+    }
     match (progresso.terminou, cancelada, pausada) {
         (true, true, _) => format!("cancelada · {contagem}"),
         (true, false, _) => contagem,
@@ -1225,6 +1257,27 @@ pub fn frase_do_lote(progresso: &Progresso, pausada: bool, cancelada: bool) -> S
         (false, false, true) => format!("pausada em {} de {}", progresso.feitos, progresso.total),
         (false, false, false) => format!("importando {} de {}…", progresso.feitos, progresso.total),
     }
+}
+
+/// O aviso do que a revelação do Lightroom trouxe e este motor não tem.
+pub fn aviso_da_revelacao_de_fora(progresso: &Progresso) -> Option<String> {
+    if progresso.fora_da_revelacao.is_empty() {
+        return None;
+    }
+    let mut itens = progresso.fora_da_revelacao.clone();
+    itens.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let lista = itens
+        .iter()
+        .map(|(rotulo, n)| {
+            if *n == 1 {
+                format!("{rotulo} (1 foto)")
+            } else {
+                format!("{rotulo} ({n} fotos)")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(format!("Revelação do Lightroom — ficou de fora: {lista}"))
 }
 
 /// Bytes no formato que a tela mostra.
@@ -2152,9 +2205,7 @@ mod testes {
         let correndo = Progresso {
             total: 2000,
             feitos: 12,
-            falhas: 0,
-            pulados: 0,
-            terminou: false,
+            ..Default::default()
         };
         assert_eq!(
             frase_do_lote(&correndo, false, false),
@@ -2183,6 +2234,32 @@ mod testes {
             "cancelada · 12 importadas · 0 falharam · 0 puladas",
             "um lote interrompido no arquivo 12 não pode se despedir igual a um de 12 fotos"
         );
+    }
+
+    /// A revelação do Lightroom aparece na contagem, e o que ficou de fora vira
+    /// aviso — o que apareceu em mais fotos primeiro.
+    #[test]
+    fn a_revelacao_do_lightroom_e_contada_e_o_que_ficou_de_fora_avisado() {
+        let acabou = Progresso {
+            total: 3,
+            feitos: 3,
+            terminou: true,
+            com_revelacao_de_fora: 2,
+            fora_da_revelacao: vec![
+                ("remoção de névoa".into(), 1),
+                ("aspereza do grão".into(), 2),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            frase_do_lote(&acabou, false, false),
+            "3 importadas · 0 falharam · 0 puladas · 2 com a revelação do Lightroom"
+        );
+        assert_eq!(
+            aviso_da_revelacao_de_fora(&acabou).as_deref(),
+            Some("Revelação do Lightroom — ficou de fora: aspereza do grão (2 fotos), remoção de névoa (1 foto)")
+        );
+        assert_eq!(aviso_da_revelacao_de_fora(&Progresso::default()), None);
     }
 
     /// 🚨 O clique tem de chegar em quem obedece.

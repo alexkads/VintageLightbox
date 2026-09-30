@@ -192,6 +192,9 @@ pub enum ImportProgressViewModel {
     Completed {
         photo_id: String,
         path: String,
+        /// A revelação do Lightroom que entrou com a foto: `Some(o que ficou
+        /// de fora)`; `None` quando o arquivo não trazia revelação.
+        revelacao_do_lightroom: Option<Vec<String>>,
     },
     Failed {
         path: String,

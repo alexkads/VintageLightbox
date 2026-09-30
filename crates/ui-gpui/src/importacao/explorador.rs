@@ -391,6 +391,13 @@ pub trait Importador: Send + Sync + 'static {
         freios: Freios,
         canal: Sender<Andamento>,
     );
+
+    /// As fotos que entraram com a revelação do Lightroom desde a última
+    /// pergunta — para o app pedir a miniatura revelada delas. Quem pergunta
+    /// esvazia a lista.
+    fn reveladas_fora(&self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// Os dois freios do lote, que a tela levanta e o importador obedece.
@@ -443,6 +450,9 @@ pub enum Andamento {
     Feito {
         indice: usize,
         caminho: String,
+        /// A revelação do Lightroom que veio com a foto: `Some(o que ficou de
+        /// fora)`; `None` quando o arquivo não trazia revelação.
+        revelacao_de_fora: Option<Vec<String>>,
     },
     Pulado {
         caminho: String,
@@ -461,11 +471,17 @@ pub enum Andamento {
 pub struct ImportadorDoDisco {
     importacao: Arc<ImportController>,
     tokio: tokio::runtime::Handle,
+    /// Ver [`Importador::reveladas_fora`].
+    reveladas_fora: Arc<std::sync::Mutex<Vec<String>>>,
 }
 
 impl ImportadorDoDisco {
     pub fn novo(importacao: Arc<ImportController>, tokio: tokio::runtime::Handle) -> Self {
-        Self { importacao, tokio }
+        Self {
+            importacao,
+            tokio,
+            reveladas_fora: Arc::default(),
+        }
     }
 }
 
@@ -478,6 +494,7 @@ impl Importador for ImportadorDoDisco {
         canal: Sender<Andamento>,
     ) {
         let importacao = self.importacao.clone();
+        let reveladas_fora = self.reveladas_fora.clone();
 
         self.tokio.spawn(async move {
             let (progresso, mut recebe) = tokio::sync::mpsc::unbounded_channel();
@@ -489,10 +506,22 @@ impl Importador for ImportadorDoDisco {
                 while let Some(evento) = recebe.recv().await {
                     let andamento = match evento {
                         Vm::Starting { total } => Andamento::Comecou { total },
-                        Vm::Completed { path, .. } => Andamento::Feito {
-                            indice: 0,
-                            caminho: path,
-                        },
+                        Vm::Completed {
+                            photo_id,
+                            path,
+                            revelacao_do_lightroom,
+                        } => {
+                            if revelacao_do_lightroom.is_some() {
+                                if let Ok(mut lista) = reveladas_fora.lock() {
+                                    lista.push(photo_id);
+                                }
+                            }
+                            Andamento::Feito {
+                                indice: 0,
+                                caminho: path,
+                                revelacao_de_fora: revelacao_do_lightroom,
+                            }
+                        }
                         Vm::DuplicateSkipped { path, .. } => Andamento::Pulado { caminho: path },
                         Vm::Failed { path, error } => Andamento::Falhou {
                             caminho: path,
@@ -522,6 +551,12 @@ impl Importador for ImportadorDoDisco {
                 .await;
             let _ = repassar.await;
         });
+    }
+    fn reveladas_fora(&self) -> Vec<String> {
+        self.reveladas_fora
+            .lock()
+            .map(|mut lista| std::mem::take(&mut *lista))
+            .unwrap_or_default()
     }
 }
 
@@ -756,7 +791,14 @@ pub mod mentira {
 
             self.contar(&canal, Andamento::Comecou { total });
             for (indice, caminho) in arquivos.into_iter().enumerate() {
-                self.contar(&canal, Andamento::Feito { indice, caminho });
+                self.contar(
+                    &canal,
+                    Andamento::Feito {
+                        indice,
+                        caminho,
+                        revelacao_de_fora: None,
+                    },
+                );
             }
             self.contar(
                 &canal,

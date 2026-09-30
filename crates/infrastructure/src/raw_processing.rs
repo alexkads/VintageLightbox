@@ -86,7 +86,7 @@ pub fn is_raw_file(path: &str) -> bool {
 /// 4. Retorna DynamicImage::ImageRgb8
 pub fn load_raw_as_dynamic_image(path: &str) -> Result<image::DynamicImage, String> {
     let file_data = std::fs::read(path).map_err(|e| format!("Failed to read RAW file: {}", e))?;
-    decodificar_raw(&file_data, Some(path))
+    decodificar_raw(&file_data)
 }
 
 /// O mesmo que [`load_raw_as_dynamic_image`], a partir dos bytes do arquivo.
@@ -94,13 +94,11 @@ pub fn load_raw_as_dynamic_image(path: &str) -> Result<image::DynamicImage, Stri
 /// É o caminho de quem tem os bytes em mãos — o arquivo que o operador soltou
 /// na janela — e não um caminho no disco.
 ///
-/// ⚠️ Sem caminho não há a reserva do DNG com perdas, que precisa da LibRaw do
-/// sistema abrindo o arquivo pelo nome.
 pub fn load_raw_from_bytes(file_data: &[u8]) -> Result<image::DynamicImage, String> {
-    decodificar_raw(file_data, None)
+    decodificar_raw(file_data)
 }
 
-fn decodificar_raw(file_data: &[u8], path: Option<&str>) -> Result<image::DynamicImage, String> {
+fn decodificar_raw(file_data: &[u8]) -> Result<image::DynamicImage, String> {
     use rsraw::{RawImage, BIT_DEPTH_8};
 
     // 🔑 Quando falha, quem responde é `dng::explicar_falha`: o erro cru da
@@ -110,22 +108,20 @@ fn decodificar_raw(file_data: &[u8], path: Option<&str>) -> Result<image::Dynami
     let mut raw = match RawImage::open(file_data) {
         Ok(raw) => raw,
         Err(erro) => {
-            // 🔑 **A reserva entra só aqui, e só para o DNG com perdas.** A
-            // LibRaw embutida foi compilada sem libjpeg; a do sistema, quando
-            // instalada, tem — e abre o arquivo. Usá-la para todo RAW mudaria a
-            // cor de tudo que já abre, porque são duas invocações diferentes com
-            // padrões diferentes de revelação.
-            if let Some(path) = path {
-                if crate::dng::tem_compressao_com_perdas(file_data) {
-                    if let Ok(imagem) = crate::dng::decodificar_com_a_libraw_do_sistema(path) {
-                        return Ok(imagem);
-                    }
+            // 🔑 **A reserva entra só aqui, onde a alternativa é não abrir.**
+            // O `raw-codec` (rawler) abre o que a LibRaw embutida recusa — o
+            // DNG com perdas do Lightroom, que ela foi compilada sem libjpeg
+            // para ler. Usá-lo para todo RAW mudaria a cor de tudo que já abre,
+            // porque são dois reveladores com padrões diferentes.
+            match raw_codec::decodificar(file_data) {
+                Ok(imagem) => return Ok(image::DynamicImage::ImageRgb8(imagem)),
+                Err(erro_da_reserva) => {
+                    return Err(crate::dng::explicar_falha(
+                        file_data,
+                        &format!("LibRaw failed to open: {erro:?}; reserva: {erro_da_reserva}"),
+                    ))
                 }
             }
-            return Err(crate::dng::explicar_falha(
-                file_data,
-                &format!("LibRaw failed to open: {:?}", erro),
-            ));
         }
     };
 
@@ -170,6 +166,13 @@ pub fn extract_embedded_preview(path: &str, min_height: u32) -> Option<Vec<u8>> 
     use rsraw::{RawImage, ThumbFormat};
 
     let file_data = std::fs::read(path).ok()?;
+    // 🚨 **O DNG que sai do Lightroom traz a prévia já revelada**, e o XMP da
+    // mesma revelação ao lado. A miniatura do bruto sair dela seria mostrar a
+    // revelação como se fosse o bruto — e revelar de novo por cima. Nesse caso
+    // o chamador decodifica o sensor (contrato: a prévia embutida nunca é base).
+    if raw_codec::xmp(&file_data).is_some() {
+        return None;
+    }
     let mut raw = RawImage::open(&file_data).ok()?;
 
     let mut jpegs: Vec<_> = raw

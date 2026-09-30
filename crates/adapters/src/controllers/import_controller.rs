@@ -171,9 +171,13 @@ impl ImportController {
                             path: path.to_string(),
                         }
                     }
-                    ImportProgress::Completed { photo } => ImportProgressViewModel::Completed {
+                    ImportProgress::Completed {
+                        photo,
+                        revelacao_do_arquivo,
+                    } => ImportProgressViewModel::Completed {
                         photo_id: photo.id().to_string(),
                         path: photo.file_path().to_string(),
+                        revelacao_do_lightroom: revelacao_do_arquivo,
                     },
                     ImportProgress::Failed { path, error } => ImportProgressViewModel::Failed {
                         path: path.to_string(),

@@ -194,13 +194,20 @@ async fn main() {
         Arc::new(use_cases::CheckDuplicatesUseCase::new(
             repositorio_de_fotos.clone(),
         )),
-        Arc::new(use_cases::ImportWithOptionsUseCase::new(
-            repositorio_de_fotos.clone(),
-            extrator.clone(),
-            miniaturas,
-            cache_de_previews.clone(),
-            organizador,
-        )),
+        Arc::new(
+            use_cases::ImportWithOptionsUseCase::new(
+                repositorio_de_fotos.clone(),
+                extrator.clone(),
+                miniaturas,
+                cache_de_previews.clone(),
+                organizador,
+            )
+            // 🎞️ O DNG revelado no Lightroom (ou o NEF com `.xmp` ao lado) entra
+            // com a revelação nos parâmetros da foto.
+            .com_revelacao_do_arquivo(Arc::new(
+                infrastructure::revelacao_do_arquivo::LeitorDoLightroom,
+            )),
+        ),
         Arc::new(use_cases::GetImportSourcesUseCase::new(dispositivos)),
         Arc::new(use_cases::ScanSourceUseCase::new(Arc::new(
             infrastructure::SourceScannerImpl::new(),

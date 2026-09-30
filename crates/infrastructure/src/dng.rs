@@ -39,27 +39,22 @@
 //!    procurar defeito no próprio arquivo; a mensagem certa diz que o arquivo
 //!    está bom, o que falta no app, e o que dá para fazer hoje.
 //!
-//! ## ✅ E em 18/ago apareceu uma quarta saída, medida
+//! ## ✅ E em 18/ago apareceu uma quarta saída — e em 30/set, a definitiva
 //!
-//! A LibRaw **do sistema** já está instalada nesta máquina (Homebrew) e é
-//! compilada **com** libjpeg:
+//! Em 18/ago a reserva passou a ser a LibRaw **do sistema** (Homebrew, compilada
+//! com libjpeg), chamada pelo `dcraw_emu`. Abria — mas só na máquina de quem
+//! tinha o Homebrew, e o balcão não tem.
 //!
-//! ```text
-//! otool -L /opt/homebrew/opt/libraw/lib/libraw.dylib | grep jpeg
-//!     /opt/homebrew/opt/jpeg-turbo/lib/libjpeg.8.dylib
-//! ```
+//! Em 30/set/2026 ela saiu, trocada pelo `raw-codec` (rawler, Rust puro), que
+//! abre o arquivo em qualquer máquina e também no navegador. O que faltava para
+//! a saída 1 acima — a matriz de cor, o `AsShotNeutral` — o rawler já faz; o
+//! que ele não fazia era a `OpcodeList2`, e sem ela a foto saía **exatamente**
+//! a "cor plausível e errada" que este módulo temia: rosada. Ver
+//! `crates/raw-codec/src/opcodes.rs`.
 //!
-//! E ela abre o arquivo: `dcraw_emu -w -T -Z -` devolve 13 MB de TIFF pelo
-//! stdout, sem escrever nada na pasta de quem importa.
-//!
-//! 🔑 **Isso troca "vendorizar a LibRaw no repositório" por "usar a que já
-//! existe"** — e é o que [`decodificar_com_a_libraw_do_sistema`] faz, como
-//! **reserva**: só quando o `rsraw` recusa, e só para o caso com perdas.
-//!
-//! ⚠️ **A reserva não substitui o caminho normal, e é de propósito.** São duas
-//! invocações diferentes da LibRaw, com padrões diferentes de revelação: usá-la
-//! para todo RAW mudaria a cor de todos os arquivos que hoje abrem — em silêncio.
-//! Ela entra onde a alternativa é não abrir.
+//! ⚠️ **A reserva continua sendo reserva.** O `raw-codec` só entra quando a
+//! LibRaw recusa (`raw_processing::decodificar_raw`): usá-lo para todo RAW
+//! mudaria a cor de todos os arquivos que hoje abrem — em silêncio.
 
 /// A compressão com perdas do DNG 1.4, na tabela do TIFF.
 const LOSSY_JPEG: u16 = 34892;
@@ -174,96 +169,20 @@ pub fn tem_compressao_com_perdas(bytes: &[u8]) -> bool {
     compressoes.contains(&LOSSY_JPEG)
 }
 
-/// A explicação, quando um RAW não abre.
+/// A explicação, quando um RAW não abre — nem pela LibRaw, nem pela reserva.
 ///
 /// ⚠️ **Ela vale mais que a causa técnica.** `FileUnsupported` manda quem importa
-/// procurar defeito no próprio arquivo — e o arquivo está bom. A mensagem diz o
-/// que é, o que falta no app, e o que dá para fazer hoje.
+/// procurar defeito no próprio arquivo; quando o arquivo é um DNG com perdas, a
+/// mensagem diz o que ele é e o que dá para fazer.
 pub fn explicar_falha(bytes: &[u8], erro_original: &str) -> String {
     if tem_compressao_com_perdas(bytes) {
-        return "DNG com compressão *lossy* (DNG 1.4). O arquivo está íntegro — \
-                falta suporte no app: a LibRaw embutida aqui foi compilada sem \
-                libjpeg, que é o que esse formato exige. Por enquanto, importe o \
-                RAW original da câmera, ou converta este DNG sem compressão com \
-                perdas."
-            .to_string();
+        return format!(
+            "DNG com compressão *lossy* (DNG 1.4) que o app não conseguiu ler \
+             ({erro_original}). Importe o RAW original da câmera, ou exporte o \
+             DNG do Lightroom sem compressão com perdas."
+        );
     }
     erro_original.to_string()
-}
-
-/// Onde procurar a LibRaw do sistema.
-///
-/// ⚠️ **Caminhos conhecidos primeiro, e o `PATH` depois.** O Homebrew instala em
-/// `/opt/homebrew` (Apple Silicon) ou `/usr/local` (Intel), e um app aberto pelo
-/// Finder herda o `PATH` mínimo do `launchd` — não o do shell. Procurar só no
-/// `PATH` faria a reserva funcionar no terminal e não no app, que é a pior forma
-/// de uma funcionalidade existir.
-///
-/// 🚨 **E isto não tem teste que o prove.** Tentei quebrar de propósito, tirando
-/// os dois caminhos absolutos, e o teste continuou passando — porque nesta
-/// máquina o `dcraw_emu` **está** no `PATH` do shell, então a terceira entrada
-/// cobre. A afirmação sobre o Finder vem do comportamento conhecido do `launchd`,
-/// e não de medida feita aqui; está escrita assim para quem vier depois não
-/// confundir as duas coisas.
-const ONDE_PROCURAR: [&str; 3] = [
-    "/opt/homebrew/opt/libraw/bin/dcraw_emu",
-    "/usr/local/opt/libraw/bin/dcraw_emu",
-    "dcraw_emu",
-];
-
-fn caminho_do_decodificador() -> Option<std::path::PathBuf> {
-    for candidato in ONDE_PROCURAR {
-        let caminho = std::path::PathBuf::from(candidato);
-        if caminho.is_absolute() {
-            if caminho.exists() {
-                return Some(caminho);
-            }
-        } else if std::process::Command::new(&caminho)
-            .arg("-h")
-            .output()
-            .is_ok()
-        {
-            return Some(caminho);
-        }
-    }
-    None
-}
-
-/// Decodifica pela LibRaw **do sistema**, quando ela existe.
-///
-/// 🔑 **É reserva, e só para o que o caminho normal recusa.** Ver o topo do
-/// arquivo: são duas invocações diferentes da LibRaw, e usar esta para todo RAW
-/// mudaria a cor de todos os arquivos que já abrem.
-///
-/// ⚠️ **A saída vai para o stdout** (`-Z -`), e não para um arquivo ao lado do
-/// original. O `simple_dcraw` grava `<nome>.tiff` na pasta de origem — e escrever
-/// no cartão de alguém durante uma importação é o tipo de efeito que ninguém
-/// pede e que ninguém desfaz.
-pub fn decodificar_com_a_libraw_do_sistema(caminho: &str) -> Result<image::DynamicImage, String> {
-    let programa = caminho_do_decodificador()
-        .ok_or_else(|| "a LibRaw do sistema não está instalada".to_string())?;
-
-    let saida = std::process::Command::new(&programa)
-        // `-w` usa o balanço de branco da câmera, que é o que o caminho normal
-        // (`rsraw::process`) também faz — sem ele a foto sai esverdeada.
-        .args(["-w", "-T", "-Z", "-"])
-        .arg(caminho)
-        .output()
-        .map_err(|e| format!("não foi possível executar a LibRaw do sistema: {e}"))?;
-
-    if !saida.status.success() {
-        let erro = String::from_utf8_lossy(&saida.stderr);
-        return Err(format!(
-            "a LibRaw do sistema recusou o arquivo: {}",
-            erro.trim()
-        ));
-    }
-    if saida.stdout.is_empty() {
-        return Err("a LibRaw do sistema não devolveu imagem".to_string());
-    }
-
-    image::load_from_memory_with_format(&saida.stdout, image::ImageFormat::Tiff)
-        .map_err(|e| format!("o TIFF devolvido pela LibRaw do sistema não abriu: {e}"))
 }
 
 #[cfg(test)]
@@ -366,8 +285,8 @@ mod testes {
 
         assert!(texto.contains("lossy"));
         assert!(
-            texto.contains("íntegro"),
-            "quem importa precisa saber que o arquivo não é o problema"
+            texto.contains("FileUnsupported"),
+            "a causa técnica vai junto"
         );
         assert!(
             texto.contains("RAW original") || texto.contains("converta"),

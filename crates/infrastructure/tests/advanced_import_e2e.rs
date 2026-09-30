@@ -138,7 +138,7 @@ async fn test_advanced_import_e2e_workflow() {
                     path.as_ref().display()
                 );
             }
-            ImportProgress::Completed { photo } => {
+            ImportProgress::Completed { photo, .. } => {
                 println!("  ✓ Completed: {}", photo.id());
                 successful_paths.push(photo.file_path().clone());
             }

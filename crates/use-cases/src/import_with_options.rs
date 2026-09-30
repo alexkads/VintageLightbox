@@ -7,7 +7,10 @@ use crate::check_duplicates::CheckDuplicatesUseCase;
 use domain::{
     entities::Photo,
     repositories::PhotoRepository,
-    services::{FileOrganizer, MetadataExtractor, PreviewStorage, PreviewType, ThumbnailGenerator},
+    services::{
+        FileOrganizer, LeitorDaRevelacaoDoArquivo, MetadataExtractor, PreviewStorage, PreviewType,
+        ThumbnailGenerator,
+    },
     value_objects::{FilePath, ImportMode, ImportOptions},
     DomainError, DomainResult,
 };
@@ -27,6 +30,9 @@ pub enum ImportProgress {
     },
     Completed {
         photo: Photo,
+        /// A revelação do Lightroom que veio com o RAW e entrou nos parâmetros
+        /// da foto: `Some(o que ficou de fora)`; `None` quando não havia.
+        revelacao_do_arquivo: Option<Vec<String>>,
     },
     Failed {
         path: FilePath,
@@ -75,6 +81,10 @@ pub struct ImportWithOptionsUseCase {
     check_duplicates: Arc<CheckDuplicatesUseCase>,
     /// As vagas de decodificação, **do app inteiro** — ver [`vagas_de_decodificacao`].
     vagas: Arc<Semaphore>,
+    /// Quem traz a revelação do Lightroom que acompanha o RAW (o XMP de dentro
+    /// do DNG ou o `.xmp` ao lado). Opcional: sem ele a foto entra sem
+    /// revelação, como sempre entrou.
+    revelacao_do_arquivo: Option<Arc<dyn LeitorDaRevelacaoDoArquivo>>,
 }
 
 /// Quantas fotos o app decodifica ao mesmo tempo, somando todas as levas.
@@ -113,7 +123,14 @@ impl ImportWithOptionsUseCase {
             file_organizer,
             check_duplicates,
             vagas: Arc::new(Semaphore::new(vagas_de_decodificacao())),
+            revelacao_do_arquivo: None,
         }
+    }
+
+    /// Liga a leitura da revelação do Lightroom que vem com o RAW.
+    pub fn com_revelacao_do_arquivo(mut self, leitor: Arc<dyn LeitorDaRevelacaoDoArquivo>) -> Self {
+        self.revelacao_do_arquivo = Some(leitor);
+        self
     }
 
     /// Executa importação com opções configuráveis
@@ -189,6 +206,7 @@ impl ImportWithOptionsUseCase {
             let thumbnail_generator = self.thumbnail_generator.clone();
             let preview_storage = self.preview_storage.clone();
             let file_organizer = self.file_organizer.clone();
+            let revelacao_do_arquivo = self.revelacao_do_arquivo.clone();
 
             let successful = successful.clone();
             let failed = failed.clone();
@@ -264,13 +282,15 @@ impl ImportWithOptionsUseCase {
                     &*preview_storage,
                     &*file_organizer,
                     &*photo_repository,
+                    revelacao_do_arquivo.as_deref(),
                 )
                 .await
                 {
-                    Ok(photo) => {
+                    Ok((photo, revelacao_do_arquivo)) => {
                         successful.fetch_add(1, Ordering::Relaxed);
                         let _ = progress_sender.send(ImportProgress::Completed {
                             photo: photo.clone(),
+                            revelacao_do_arquivo,
                         });
                         imported_photos.lock().await.push(photo);
                     }
@@ -327,7 +347,8 @@ impl ImportWithOptionsUseCase {
         preview_storage: &dyn PreviewStorage,
         file_organizer: &dyn FileOrganizer,
         photo_repository: &dyn PhotoRepository,
-    ) -> DomainResult<Photo> {
+        revelacao_do_arquivo: Option<&dyn LeitorDaRevelacaoDoArquivo>,
+    ) -> DomainResult<(Photo, Option<Vec<String>>)> {
         // 1. Extrair metadados
         let metadata = metadata_extractor.extract(source)?;
 
@@ -373,6 +394,22 @@ impl ImportWithOptionsUseCase {
             photo.set_content_hash(hash);
         }
 
+        // 🎞️ A revelação do Lightroom que veio com o RAW vira os **parâmetros**
+        // da foto — o bruto continua o sensor, sem efeito. Lida da **origem**,
+        // que é onde o `.xmp` ao lado está; depois ele vai junto para o destino.
+        let revelacao = revelacao_do_arquivo.and_then(|leitor| {
+            let origem = std::path::Path::new(source.as_ref() as &std::path::Path);
+            let ignorados = leitor.aplicar(origem, &mut photo);
+            if options.mode != ImportMode::Add {
+                leitor.levar_xmp_junto(
+                    origem,
+                    dest_path.as_ref() as &std::path::Path,
+                    options.mode == ImportMode::Move,
+                );
+            }
+            ignorados
+        });
+
         // 4. Gerar thumbnails
         let thumbnail_300 = thumbnail_generator.generate(&dest_path, 300).await?;
         let preview_2560 = thumbnail_generator.generate(&dest_path, 2560).await?;
@@ -396,7 +433,7 @@ impl ImportWithOptionsUseCase {
             }
         }
 
-        Ok(photo)
+        Ok((photo, revelacao))
     }
 }
 

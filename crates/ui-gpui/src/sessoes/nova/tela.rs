@@ -54,6 +54,10 @@ use crate::sessoes::arquivos::SeletorDeFotos;
 use crate::sessoes::detalhe::{pasta_do_ensaio, Importacao};
 use crate::sessoes::origem_das_fotos::{EventoDaOrigem, OrigemDasFotos, PortasDaOrigem};
 
+/// A marca, em `parametros_aplicados`, da foto que entrou com a revelação do
+/// Lightroom: a padrão da sessão não passa por ela.
+const REVELADA_FORA: &str = "revelada-fora";
+
 /// Um canal com as duas pontas guardadas juntas.
 type Canal<T> = (Sender<T>, Receiver<T>);
 
@@ -1073,7 +1077,7 @@ impl NovaSessao {
     }
 
     /// Aplica o preset e o corte padrão às fotos do rascunho que ainda não os
-    /// têm. **Parte sempre do neutro**: no rascunho ninguém revelou nada.
+    /// têm — menos as que chegaram reveladas do Lightroom ([`REVELADA_FORA`]). **Parte sempre do neutro**: no rascunho ninguém revelou nada.
     fn aplicar_parametros(&mut self) {
         let f = &self.rascunho.formulario;
         let preset = self.preset_escolhido().map(|p| p.preset.clone());
@@ -1087,6 +1091,23 @@ impl NovaSessao {
         let sem_efeito = f.preset_id.is_none() && proporcao.is_none();
         let mut pediu = false;
         for foto in &self.fotos {
+            // 🎞️ **A revelação do Lightroom vence a padrão da sessão.** A foto
+            // que chega já revelada (o XMP do DNG, ou o `.xmp` ao lado do RAW)
+            // trouxe um trabalho feito foto a foto; a padrão é o ponto de
+            // partida de quem ainda não revelou. Aplicá-la por cima apagaria o
+            // Lightroom sem ninguém pedir. No rascunho ninguém revelou nada —
+            // então a foto que aparece aqui já revelada, antes de a padrão
+            // passar por ela, veio revelada de fora.
+            if self.parametros_aplicados.get(&foto.id).map(String::as_str) == Some(REVELADA_FORA) {
+                continue;
+            }
+            if !self.parametros_aplicados.contains_key(&foto.id)
+                && crate::revelacao::persistencia::ja_revelada(foto)
+            {
+                self.parametros_aplicados
+                    .insert(foto.id.clone(), REVELADA_FORA.to_string());
+                continue;
+            }
             let ja = self.parametros_aplicados.get(&foto.id) == Some(&chave);
             if !ja {
                 // Sem efeito também grava: é o que desfaz a revelação anterior.

@@ -17,6 +17,7 @@ pub mod file_system;
 /// que compila para wasm32.
 pub mod gpu_adjustments;
 pub mod image_exporter;
+pub mod lightroom;
 /// Abrir de pé — a regra mora no `foto-codec`, compartilhada com o site.
 pub use foto_codec::orientacao;
 pub mod paths;
@@ -26,6 +27,7 @@ pub mod raw_processing;
 /// Recuperar as fotos de um cartão formatado — o processo elevado do
 /// `ui-gpui --recuperar`.
 pub mod recuperacao;
+pub mod revelacao_do_arquivo;
 pub mod scan_directory;
 pub mod source_scanner;
 pub mod thumbnail_generator;

@@ -120,3 +120,6 @@ pub use file_organizer::FileOrganizer;
 
 pub mod source_scanner;
 pub use source_scanner::SourceScanner;
+
+pub mod revelacao_do_arquivo;
+pub use revelacao_do_arquivo::LeitorDaRevelacaoDoArquivo;
