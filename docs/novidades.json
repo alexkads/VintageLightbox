@@ -1,13 +1,11 @@
 {
-  "versao": "0.1.57",
-  "titulo": "A Revelação com os controles do Lightroom.",
-  "importante": true,
+  "versao": "0.1.58",
+  "titulo": "O painel Efeitos da Revelação no desenho do Lightroom.",
+  "importante": false,
   "novidades": [
-    "Básico com Textura, Claridade e Remover névoa, como no Lightroom. A Claridade agora é contraste local de verdade.",
-    "Vinheta pós-corte completa em Efeitos (estilo, intensidade, ponto médio, arredondamento, difusão e realces), aspereza do grão, as divisões da curva de tons, a luminância de cada faixa da Gradação de cores e o Detalhe inteiro (detalhe e máscara da nitidez, detalhe, contraste e suavidade do ruído).",
-    "A Gradação de cores usa a roda do Lightroom: o mesmo número dá a mesma cor que lá. Pretos, Sombras e Realces ficaram mais perto do Lightroom.",
-    "Importar do Lightroom traz os controles novos, o corte inclinado e a curva de tons dos .xmp, que antes sumia.",
-    "Nova pasta LRs nas predefinições, com as 28 do Lightroom do estúdio (as de vinheta somam, as outras recomeçam), e a Cinematográfico P&B em Do sistema."
+    "Efeitos em dois grupos, como no Lightroom: Vinheta de corte posterior (Estilo, Intensidade, Ponto médio, Arredondamento, Difusão e Realces) e Granulado (Intensidade, Tamanho e Aspereza).",
+    "Cada controle numa linha só: o nome, a barra e o valor. O Estilo da vinheta é escolhido numa lista: Prioridade de realces, Prioridade de cores ou Sobreposição de tinta.",
+    "O que não faz efeito fica apagado: os ajustes da vinheta com a Intensidade em 0, os Realces ao clarear ou na Sobreposição de tinta, e o Tamanho e a Aspereza com o grão em 0."
   ],
-  "por_que_atualizar": "Para revelar aqui o que foi revelado no Lightroom sem refazer à mão."
+  "por_que_atualizar": "Para fazer a vinheta e o grão como no Lightroom, sem procurar os controles."
 }
