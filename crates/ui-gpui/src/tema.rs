@@ -10,6 +10,23 @@
 //! operador escolhe **Claro, Escuro ou Sistema** no menu da conta, como no
 //! site.
 //!
+//! ## 🍎 Desde 2026-09-30, Claro, Escuro e Sistema são o macOS
+//!
+//! Dono: *"Quero o tema Claro do VintageLightBox seja um clone do MacOS,
+//! deixe simplesmente lindo!"* e, logo depois, *"O tema escuro também deixa
+//! com cara de MacOS"*. As cores do Claro e do Escuro deixaram de ser as do
+//! site: são as do Aqua e do Dark Aqua ([`paleta::MACOS_CLARO`],
+//! [`paleta::MACOS_ESCURO`]) — conteúdo branco ou `#1e1e1e`, barra lateral um
+//! degrau de cinza, os cinzas frios da Apple e um azul só no botão e no que
+//! acende. O slider é o do Mac (barra fina, punho branco de 18 com sombra), os
+//! controles do gpui-kit arredondam 6 e os menus 10, e a barra de título nativa
+//! segue o tema ([`aparencia_das_janelas`]) — antes, com o Mac no escuro e o
+//! tema Claro, ela ficava preta sobre a tela branca.
+//!
+//! O template (`template.toml`) continua dando a letra, os ícones e as medidas
+//! das telas; as paletas dele (as tabelas abaixo) ficam como a referência do
+//! site e são conferidas nos testes, mas nenhuma escolha as pinta mais.
+//!
 //! ## 🟩 Matrix e 🌆 Cyberpunk — os dois temas que não vêm do site
 //!
 //! Pedido do dono em 2026-09-26 (*"Eu preciso de dois temas, um Matrix e outro
@@ -153,9 +170,9 @@ mod paleta {
         pub preenchimento: u32,
         /// O punho do slider.
         pub punho: u32,
-        /// Barra fina e punho pequeno, como no Lightroom — ou as medidas do
-        /// `Slider` do gpui-kit.
-        pub slider_fino: bool,
+        /// As medidas da barra e do punho: as do `Slider` do gpui-kit, as do
+        /// Lightroom ou as do macOS.
+        pub slider: FormaDoSlider,
         /// O fundo do cabeçalho de cada painel sanfonado. `None`: nenhum.
         pub sanfona: Option<u32>,
         /// ✨ **O que está aceso**: o filtro escolhido, a foto marcada, o
@@ -174,6 +191,10 @@ mod paleta {
         pub celulas: Option<Celulas>,
         /// Cantos retos (o Lightroom quase não arredonda nada).
         pub cantos_retos: bool,
+        /// 🍎 Os cantos dos controles e dos menus do gpui-kit (`radius`,
+        /// `radius.lg`), quando o tema tem os seus — o macOS arredonda 6 no
+        /// botão e 10 no menu. `None`: os do template.
+        pub raio_do_kit: Option<(usize, usize)>,
         /// Painéis da coluna corridos, sem moldura, com o título à direita.
         pub paineis_corridos: bool,
         /// 🔥 **A família quente é a marca do tema**, e não o âmbar do site:
@@ -183,6 +204,18 @@ mod paleta {
         /// ou uma cor que o tema não tem (dono, 28/09: *"No tema Matrix
         /// existe cor âmbar?"*).
         pub quente_da_marca: bool,
+    }
+
+    /// 🎚️ O desenho do slider (`slider_da_casa`).
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum FormaDoSlider {
+        /// O do gpui-kit: barra de 6 px, punho de 16 com a borda na cor.
+        Kit,
+        /// O do Lightroom: barra de 4 px, punho de 11 com borda quase preta.
+        Fino,
+        /// 🍎 O do macOS: barra de 4 px e o punho branco de 18, redondo, com
+        /// um fio cinza em volta.
+        Mac,
     }
 
     /// 🎞️ As cores da grade em células.
@@ -248,7 +281,7 @@ mod paleta {
             trilho: None,
             preenchimento: AMBAR_400,
             punho: 0xffffff,
-            slider_fino: false,
+            slider: FormaDoSlider::Kit,
             sanfona: None,
             aceso: AMBAR_400,
             sobre_aceso: SOBRE_CLARO,
@@ -257,6 +290,7 @@ mod paleta {
             estrela: NOTA,
             celulas: None,
             cantos_retos: false,
+            raio_do_kit: None,
             paineis_corridos: false,
             quente_da_marca: false,
         }
@@ -292,7 +326,7 @@ mod paleta {
         trilho: None,
         preenchimento: 0x00ff41,
         punho: 0x8dffb0,
-        slider_fino: false,
+        slider: FormaDoSlider::Kit,
         sanfona: None,
         // 🟩 Tudo o que acende é o verde fósforo (ver `quente_da_marca`).
         aceso: 0x00ff41,
@@ -302,6 +336,7 @@ mod paleta {
         estrela: 0x00ff41,
         celulas: None,
         cantos_retos: false,
+        raio_do_kit: None,
         paineis_corridos: false,
         quente_da_marca: true,
     };
@@ -337,7 +372,7 @@ mod paleta {
         preenchimento: 0xfcee0a,
         // O punho no ciano do foco: as três cores do neon numa barra só.
         punho: 0x05d9e8,
-        slider_fino: false,
+        slider: FormaDoSlider::Kit,
         sanfona: None,
         // 🌆 Tudo o que acende é o amarelo neon da marca, e não um segundo
         // amarelo (o âmbar), com o texto azul-noite por cima.
@@ -348,6 +383,7 @@ mod paleta {
         estrela: 0xfcee0a,
         celulas: None,
         cantos_retos: false,
+        raio_do_kit: None,
         paineis_corridos: false,
         quente_da_marca: true,
     };
@@ -411,7 +447,7 @@ mod paleta {
         trilho: Some(0x1f1f1f),
         preenchimento: 0xa8a8a8,
         punho: 0xd0d0d0,
-        slider_fino: true,
+        slider: FormaDoSlider::Fino,
         sanfona: Some(0x333333),
         // O aceso do Lightroom: cinza-claro com letra escura.
         aceso: 0xcbcbcb,
@@ -429,6 +465,7 @@ mod paleta {
             foco: 0xb4b4b4,
         }),
         cantos_retos: true,
+        raio_do_kit: None,
         paineis_corridos: true,
         // A situação da foto continua âmbar, como as etiquetas do Lightroom.
         quente_da_marca: false,
@@ -470,7 +507,7 @@ mod paleta {
         trilho: None,
         preenchimento: 0x9e2a4a,
         punho: 0xffffff,
-        slider_fino: false,
+        slider: FormaDoSlider::Kit,
         sanfona: None,
         // O que acende é o âmbar dourado, com a letra vinho.
         aceso: 0xe8a33d,
@@ -481,8 +518,133 @@ mod paleta {
         estrela: 0xb8741a,
         celulas: None,
         cantos_retos: false,
+        raio_do_kit: None,
         paineis_corridos: false,
         // A situação da foto no âmbar do site: combina com o nome.
+        quente_da_marca: false,
+    };
+
+    /// 🍎 macOS claro (Aqua): o conteúdo branco, a barra lateral cinza, os
+    /// cinzas levemente frios da Apple e um azul só — o do botão padrão e da
+    /// seleção (dono, 30/09: *"Quero o tema Claro do VintageLightBox seja um
+    /// clone do MacOS"*).
+    ///
+    /// | Do macOS | Aqui | Campo |
+    /// |---|---|---|
+    /// | `labelColor` | `#1d1d1f` | `texto` |
+    /// | `secondaryLabelColor` | `#6a6a6f` | `texto_apagado` |
+    /// | `separatorColor` | `#e3e3e8` | `borda` |
+    /// | `systemGray3`, a moldura do campo | `#c7c7cc` | `campo` |
+    /// | barra lateral | `#ebebee` | `lateral` |
+    /// | o botão padrão e a seleção | `#0071e3` | `primaria`, `aceso` |
+    /// | `controlAccentColor` (o slider) | `#007aff` | `preenchimento` |
+    /// | `systemOrange` | `#ff9500` | `estrela` |
+    ///
+    /// ⚠️ O azul com letra é o `#0071e3` do botão da Apple, e não o
+    /// `#007aff` do sistema: branco sobre `#007aff` dá 4,0:1, abaixo do 4,5
+    /// que o app exige. O `#007aff` fica onde não há letra — o slider.
+    pub const MACOS_CLARO: Paleta = Paleta {
+        fundo: 0xffffff,
+        texto: 0x1d1d1f,
+        cartao: 0xffffff,
+        primaria: 0x0071e3,
+        // `bg-primary/80` sobre o fundo.
+        primaria_pairando: 0x338de9,
+        sobre_primaria: 0xffffff,
+        // O trilho do controle segmentado: o escolhido é branco por cima.
+        apagado: 0xececf0,
+        texto_apagado: 0x6a6a6f,
+        acento: 0xe8e8ed,
+        sobre_acento: 0x1d1d1f,
+        // O botão comum do macOS: cinza-claro, letra escura.
+        secundaria: 0xececf0,
+        sobre_secundaria: 0x1d1d1f,
+        // O `systemRed` de alto contraste: o vermelho de sempre não chega a
+        // 4,5 com letra branca.
+        destrutiva: 0xd70015,
+        borda: 0xe3e3e8,
+        campo: 0xc7c7cc,
+        // O anel de foco: o azul a meia força, como o halo do macOS.
+        anel: 0x66adff,
+        lateral: 0xebebee,
+        texto_lateral: 0x1d1d1f,
+        marca: 0x0071e3,
+        sobre_marca: 0xffffff,
+        // A linha escolhida da barra lateral: cinza, como no Finder.
+        acento_lateral: 0xdadadf,
+        borda_lateral: 0xd8d8dd,
+        poco: 0xf5f5f7,
+        rolagem: 0xc1c1c6,
+        trilho: Some(0xdcdce1),
+        preenchimento: 0x007aff,
+        punho: 0xffffff,
+        slider: FormaDoSlider::Mac,
+        sanfona: None,
+        aceso: 0x0071e3,
+        sobre_aceso: 0xffffff,
+        aceso_pairando: 0x0077ed,
+        aceso_ativo: 0x0064d1,
+        estrela: 0xff9500,
+        celulas: None,
+        cantos_retos: false,
+        raio_do_kit: Some((6, 10)),
+        paineis_corridos: false,
+        quente_da_marca: false,
+    };
+
+    /// 🍎 macOS escuro (Dark Aqua): o conteúdo `#1e1e1e`, a barra lateral e
+    /// os menus um degrau acima, os cinzas do sistema e o mesmo azul (dono,
+    /// 30/09: *"O tema escuro também deixa com cara de MacOS"*).
+    ///
+    /// | Do macOS | Aqui | Campo |
+    /// |---|---|---|
+    /// | `controlBackgroundColor` | `#1e1e1e` | `fundo` |
+    /// | menu, popover, o segmento escolhido | `#313134` | `cartao` |
+    /// | `secondaryLabelColor` | `#98989d` | `texto_apagado` |
+    /// | `systemGray5`, `systemGray4` | `#3a3a3c`, `#48484a` | `acento`, `campo` |
+    /// | `controlAccentColor` (o slider) | `#0a84ff` | `preenchimento` |
+    /// | `systemRed`, `systemOrange` | `#ff453a`, `#ff9f0a` | `destrutiva`, `estrela` |
+    pub const MACOS_ESCURO: Paleta = Paleta {
+        fundo: 0x1e1e1e,
+        texto: 0xececf1,
+        // Os menus e o segmento escolhido, um degrau acima do conteúdo.
+        cartao: 0x313134,
+        primaria: 0x0071e3,
+        // `bg-primary/80` sobre o fundo.
+        primaria_pairando: 0x0660bc,
+        sobre_primaria: 0xffffff,
+        apagado: 0x262628,
+        texto_apagado: 0x98989d,
+        acento: 0x3a3a3c,
+        sobre_acento: 0xf5f5f7,
+        secundaria: 0x3a3a3c,
+        sobre_secundaria: 0xececf1,
+        destrutiva: 0xff453a,
+        borda: 0x38383a,
+        campo: 0x48484a,
+        anel: 0x3d8eff,
+        lateral: 0x29292b,
+        texto_lateral: 0xececf1,
+        marca: 0x0071e3,
+        sobre_marca: 0xffffff,
+        acento_lateral: 0x3e3e41,
+        borda_lateral: 0x38383b,
+        poco: 0x161618,
+        rolagem: 0x5b5b5f,
+        trilho: Some(0x48484a),
+        preenchimento: 0x0a84ff,
+        punho: 0xececec,
+        slider: FormaDoSlider::Mac,
+        sanfona: None,
+        aceso: 0x0071e3,
+        sobre_aceso: 0xffffff,
+        aceso_pairando: 0x0a7cf0,
+        aceso_ativo: 0x0062c4,
+        estrela: 0xff9f0a,
+        celulas: None,
+        cantos_retos: false,
+        raio_do_kit: Some((6, 10)),
+        paineis_corridos: false,
         quente_da_marca: false,
     };
 
@@ -526,6 +688,7 @@ mod paleta {
     pub const SOBRE_ESCURO_NEUTRO: u32 = 0x1a1a1a;
 }
 
+pub use paleta::FormaDoSlider;
 use paleta::*;
 
 /// 🎨 O template deste binário — o `template.toml` que o `build.rs` leu (ou o
@@ -584,7 +747,7 @@ fn paletas_do_template() -> &'static (paleta::Paleta, paleta::Paleta) {
 
 /// Qual paleta está na tela: a de [`Escolha::paleta_escura`] no escuro, a de
 /// [`Escolha::paleta_clara`] no claro. Guardada como o índice de [`paletas`].
-static PALETA_AGORA: AtomicU8 = AtomicU8::new(1);
+static PALETA_AGORA: AtomicU8 = AtomicU8::new(7);
 
 /// Se a tela está no escuro agora. As cores sem `cx` ([`cores`]) leem daqui.
 ///
@@ -593,9 +756,9 @@ static PALETA_AGORA: AtomicU8 = AtomicU8::new(1);
 /// claro pintaria os selos e o texto âmbar na versão do escuro.
 static ESCURO_AGORA: AtomicBool = AtomicBool::new(true);
 
-/// As paletas, na ordem do índice de [`PALETA_AGORA`]: as duas do template e
-/// os dois temas fixos.
-fn paletas() -> [&'static paleta::Paleta; 6] {
+/// As paletas, na ordem do índice de [`PALETA_AGORA`]: as duas do template,
+/// os temas fixos e as duas do macOS (Claro, Escuro e Sistema).
+fn paletas() -> [&'static paleta::Paleta; 8] {
     let (claro, escuro) = paletas_do_template();
     [
         claro,
@@ -604,6 +767,8 @@ fn paletas() -> [&'static paleta::Paleta; 6] {
         &paleta::CYBERPUNK,
         &paleta::LIGHTROOM,
         &paleta::AMBAR_ROUGE,
+        &paleta::MACOS_CLARO,
+        &paleta::MACOS_ESCURO,
     ]
 }
 
@@ -664,7 +829,7 @@ impl Escolha {
             Self::Matrix => 2,
             Self::Cyberpunk => 3,
             Self::Lightroom => 4,
-            Self::Claro | Self::Escuro | Self::Sistema | Self::AmbarRouge => 1,
+            Self::Claro | Self::Escuro | Self::Sistema | Self::AmbarRouge => 7,
         }
     }
 
@@ -672,14 +837,14 @@ impl Escolha {
     fn paleta_clara(self) -> u8 {
         match self {
             Self::AmbarRouge => 5,
-            _ => 0,
+            _ => 6,
         }
     }
 
     fn nome_do_claro(self) -> &'static str {
         match self {
             Self::AmbarRouge => "Âmbar Rouge",
-            _ => "RecordarFotos Claro",
+            _ => "macOS Claro",
         }
     }
 
@@ -688,7 +853,7 @@ impl Escolha {
             Self::Matrix => "Matrix",
             Self::Cyberpunk => "Cyberpunk",
             Self::Lightroom => "Lightroom",
-            Self::Claro | Self::Escuro | Self::Sistema | Self::AmbarRouge => "RecordarFotos Escuro",
+            Self::Claro | Self::Escuro | Self::Sistema | Self::AmbarRouge => "macOS Escuro",
         }
     }
 }
@@ -736,6 +901,13 @@ pub fn guardar_escolha(arquivo: &Path, escolha: Escolha) {
 /// Chamar **depois** de `gpui_kit::init`, que é quem cria o `Theme`
 /// global.
 pub fn aplicar(escolha: Escolha, window: Option<&mut Window>, cx: &mut App) {
+    // 🍎 A barra de título nativa no mesmo modo da tela — antes de ler a
+    // aparência, porque o "Sistema" precisa da do sistema, e não da que um
+    // tema fixo deixou.
+    aparencia_das_janelas(match escolha {
+        Escolha::Sistema => None,
+        _ => Some(escolha.modo(WindowAppearance::Light).is_dark()),
+    });
     let aparencia = window
         .as_ref()
         .map(|w| w.appearance())
@@ -789,6 +961,51 @@ pub fn aplicar(escolha: Escolha, window: Option<&mut Window>, cx: &mut App) {
     Theme::change(modo, window, cx);
 }
 
+/// 🍎 **A barra de título do macOS segue o tema, e não o sistema.** Com o
+/// Mac no escuro e o tema Claro, a barra nativa ficava preta sobre a tela
+/// branca. `Some(escuro)` fixa o `NSApp.appearance` em Dark Aqua ou Aqua (vale
+/// para todas as janelas, a tela do cliente também); `None` devolve ao
+/// sistema. A troca chega ao `observe_window_appearance` da raiz, que só age
+/// no "Sistema" — e ali a aparência já é a do sistema.
+#[cfg(all(target_os = "macos", not(test)))]
+fn aparencia_das_janelas(escuro: Option<bool>) {
+    use objc2::msg_send;
+    use objc2::runtime::{AnyClass, AnyObject};
+
+    unsafe {
+        let Some(app_classe) = AnyClass::get(c"NSApplication") else {
+            return;
+        };
+        let app: *mut AnyObject = msg_send![app_classe, sharedApplication];
+        if app.is_null() {
+            return;
+        }
+        let aparencia: *mut AnyObject = match escuro {
+            None => std::ptr::null_mut(),
+            Some(escuro) => {
+                let (Some(texto), Some(classe)) =
+                    (AnyClass::get(c"NSString"), AnyClass::get(c"NSAppearance"))
+                else {
+                    return;
+                };
+                // O valor das constantes `NSAppearanceName…` é o próprio nome.
+                let nome = if escuro {
+                    c"NSAppearanceNameDarkAqua"
+                } else {
+                    c"NSAppearanceNameAqua"
+                };
+                let nome: *mut AnyObject = msg_send![texto, stringWithUTF8String: nome.as_ptr()];
+                msg_send![classe, appearanceNamed: nome]
+            }
+        };
+        let _: () = msg_send![app, setAppearance: aparencia];
+    }
+}
+
+/// Fora do macOS (e nos testes, sem `NSApplication`), a barra é a do sistema.
+#[cfg(not(all(target_os = "macos", not(test))))]
+fn aparencia_das_janelas(_escuro: Option<bool>) {}
+
 /// As cores que a tela pede pelo nome, e o tema do `gpui-component` não tem
 /// nome para. Seguem o modo da tela.
 pub mod cores {
@@ -810,15 +1027,15 @@ pub mod cores {
         cor(paleta_atual().poco)
     }
 
-    /// 🎚️ O slider do tema: (trilho, preenchimento, punho, fino).
-    pub fn slider() -> (Hsla, Hsla, Hsla, bool) {
+    /// 🎚️ O slider do tema: (trilho, preenchimento, punho, forma).
+    pub fn slider() -> (Hsla, Hsla, Hsla, paleta::FormaDoSlider) {
         let p = paleta_atual();
         let preenchimento = cor(p.preenchimento);
         let trilho = p
             .trilho
             .map(cor)
             .unwrap_or_else(|| preenchimento.opacity(0.2));
-        (trilho, preenchimento, cor(p.punho), p.slider_fino)
+        (trilho, preenchimento, cor(p.punho), p.slider)
     }
 
     /// O fundo do cabeçalho de um painel sanfonado, se o tema tiver um.
@@ -829,6 +1046,18 @@ pub mod cores {
     /// ✨ O que está aceso (seleção, filtro escolhido, botão ligado).
     pub fn aceso() -> Hsla {
         cor(paleta_atual().aceso)
+    }
+
+    /// ✨ O [`aceso`] numa borda: no claro, o âmbar-400 some contra o
+    /// branco e vira o 500 (`border-amber-500 dark:border-amber-400`); as
+    /// outras cores (o azul do macOS, o rouge…) passam como estão.
+    pub fn aceso_em_borda() -> Hsla {
+        let p = paleta_atual();
+        if !escuro() && p.aceso == paleta::AMBAR_400 {
+            cor(paleta::AMBAR_500)
+        } else {
+            cor(p.aceso)
+        }
     }
 
     /// O texto legível sobre o [`aceso`].
@@ -1105,6 +1334,8 @@ fn tema_da_paleta(
     // menus, cartões e diálogos.
     let (raio, raio_grande) = if p.cantos_retos {
         (2, 3)
+    } else if let Some(raios) = p.raio_do_kit {
+        raios
     } else {
         (
             m.canto(m.campo.canto).round() as usize,
@@ -1500,6 +1731,8 @@ mod testes {
             ("Cyberpunk", &paleta::CYBERPUNK),
             ("Lightroom", &paleta::LIGHTROOM),
             ("Âmbar Rouge", &paleta::AMBAR_ROUGE),
+            ("macOS Claro", &paleta::MACOS_CLARO),
+            ("macOS Escuro", &paleta::MACOS_ESCURO),
         ] {
             let config = tema_da_paleta(nome, ThemeMode::Dark, p, Some("Menlo".into()));
             assert_eq!(config.font_family.as_deref(), Some("Menlo"), "{nome}");
@@ -1561,7 +1794,7 @@ mod testes {
         );
         assert_eq!(
             paletas()[Escolha::Escuro.paleta_escura() as usize],
-            paletas()[1]
+            &paleta::MACOS_ESCURO
         );
         assert_eq!(
             paletas()[Escolha::Lightroom.paleta_escura() as usize],
@@ -1575,7 +1808,7 @@ mod testes {
     /// traz trilho, punho e sanfona próprios.
     #[test]
     fn o_slider_dos_temas_de_antes_e_o_de_sempre() {
-        // Os dois do site (Claro e Escuro): o âmbar do shadcn.
+        // As duas do template (a referência do site): o âmbar do shadcn.
         for (i, p) in paletas().iter().enumerate().take(2) {
             // O aceso, a estrela e a grade de sempre.
             assert_eq!(p.aceso, AMBAR_400, "paleta {i}");
@@ -1591,11 +1824,11 @@ mod testes {
             assert_eq!(p.trilho, None, "paleta {i}");
             assert_eq!(p.preenchimento, AMBAR_400, "paleta {i}");
             assert_eq!(p.punho, 0xffffff, "paleta {i}");
-            assert!(!p.slider_fino, "paleta {i}");
+            assert_eq!(p.slider, FormaDoSlider::Kit, "paleta {i}");
             assert_eq!(p.sanfona, None, "paleta {i}");
         }
         let lr = &paleta::LIGHTROOM;
-        assert!(lr.slider_fino);
+        assert_eq!(lr.slider, FormaDoSlider::Fino);
         assert!(lr.trilho.is_some() && lr.sanfona.is_some());
         // O punho claro precisa aparecer sobre o trilho, e o trilho sobre o
         // corpo da sanfona (a primeira versão, #1a1a1a sobre #1e1e1e, sumia).
@@ -1616,8 +1849,11 @@ mod testes {
             paletas()[escolha.paleta_clara() as usize],
             &paleta::AMBAR_ROUGE
         );
-        // Os outros continuam com a paleta clara do template.
-        assert_eq!(Escolha::Claro.paleta_clara(), 0);
+        // O Claro é o macOS.
+        assert_eq!(
+            paletas()[Escolha::Claro.paleta_clara() as usize],
+            &paleta::MACOS_CLARO
+        );
         let pasta = tempfile::tempdir().unwrap();
         let arquivo = pasta.path().join("tema.json");
         guardar_escolha(&arquivo, escolha);
@@ -1697,6 +1933,53 @@ mod testes {
         assert!(contraste(lr.lateral, lr.texto_lateral) >= 4.5);
         assert!(contraste(lr.fundo, lr.texto_apagado) >= 4.5);
         assert!(lr.cantos_retos && lr.paineis_corridos);
+    }
+
+    /// 🍎 **Claro, Escuro e Sistema são o macOS** (dono, 30/09): Aqua no
+    /// claro, Dark Aqua no escuro, um azul só no que acende e no botão, o
+    /// slider do Mac e os cantos dos controles em 6.
+    #[test]
+    fn claro_escuro_e_sistema_sao_o_macos() {
+        for escolha in [Escolha::Claro, Escolha::Escuro, Escolha::Sistema] {
+            assert_eq!(
+                paletas()[escolha.paleta_clara() as usize],
+                &paleta::MACOS_CLARO,
+                "{escolha:?}"
+            );
+            assert_eq!(
+                paletas()[escolha.paleta_escura() as usize],
+                &paleta::MACOS_ESCURO,
+                "{escolha:?}"
+            );
+        }
+        for (nome, p) in [
+            ("claro", &paleta::MACOS_CLARO),
+            ("escuro", &paleta::MACOS_ESCURO),
+        ] {
+            assert_eq!(p.aceso, p.primaria, "{nome}: um azul só");
+            assert!(contraste(p.aceso, p.sobre_aceso) >= 4.5, "{nome}: o aceso");
+            assert!(contraste(p.destrutiva, 0xffffff) >= 3.0, "{nome}: o perigo");
+            assert!(contraste(p.apagado, p.texto_apagado) >= 4.5, "{nome}");
+            assert!(contraste(p.secundaria, p.sobre_secundaria) >= 4.5, "{nome}");
+            assert!(
+                contraste(p.fundo, p.estrela) >= 2.0,
+                "{nome}: a estrela (objeto gráfico)"
+            );
+            assert_eq!(p.slider, FormaDoSlider::Mac, "{nome}");
+            assert!(p.trilho.is_some(), "{nome}: o trilho cinza do Mac");
+            assert!(!p.quente_da_marca && !p.cantos_retos && p.celulas.is_none());
+            let config = tema_da_paleta(nome, ThemeMode::Light, p, None);
+            assert_eq!(
+                (config.radius, config.radius_lg),
+                (Some(6), Some(10)),
+                "{nome}"
+            );
+        }
+        // Os temas fixos continuam com a paleta deles.
+        assert_eq!(
+            paletas()[Escolha::AmbarRouge.paleta_clara() as usize],
+            &paleta::AMBAR_ROUGE
+        );
     }
 
     #[test]

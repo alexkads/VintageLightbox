@@ -1063,12 +1063,9 @@ impl Revelacao {
         let texto_da_dica = SharedString::from(dica(foto, numero, escolhida, marcada, nao_salva));
 
         let tema = cx.theme();
-        // `border-amber-500 dark:border-amber-400`, e a marcada a 40%.
-        let cor_acesa = if tema.mode.is_dark() {
-            tema::cores::aceso()
-        } else {
-            tema::cores::atencao()
-        };
+        // `border-amber-500 dark:border-amber-400` (ou o aceso do tema), e a
+        // marcada a 40%.
+        let cor_acesa = tema::cores::aceso_em_borda();
         let (fundo, borda, apagado) = (tema.muted, tema.border, tema.muted_foreground);
 
         div()
