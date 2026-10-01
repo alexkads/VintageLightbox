@@ -66,7 +66,7 @@ vez de deixá-la sair limpa.
 | HSL / luminância (8 canais) | 8 | ✅ **desde 17/ago** |
 | Lente (distorção, vinheta, meio da vinheta) | 3 | ✅ **desde 17/ago** — a distorção reamostra; a vinheta sombreia por posição |
 | Curva de tons paramétrica (sombras, escuros, claros, altas luzes) | 4 | ✅ **desde 17/ago** — e o gráfico passou a incluí-las, com a conta do shader |
-| Tonalização (matiz e saturação das sombras e das altas luzes, balanço) | 5 | ✅ **desde 6/set** — o "Split Toning" do Lightroom, e o único caminho para sépia |
+| Correção de cores (as rodas de sombras, tons médios, realces e global, com luminância; mesclagem e equilíbrio) | 14 | ✅ **desde 6/set** como Tonalização (o "Split Toning" do Lightroom, e o único caminho para sépia); **com rodas desde 1/out** — ver abaixo |
 | Efeitos (grão: quantidade e tamanho) | 2 | ✅ **desde 6/set** — determinístico, monocromático, e some nas duas pontas |
 
 🔑 **Eram 23 na manhã de 17/ago, e foram dois defeitos em sequência, não um.** Primeiro o
@@ -127,6 +127,27 @@ Conferência no `_DSC0010-2.dng` do Estúdio Canela, contra a prévia do Lightro
 histograma ainda fica mais claro** (p90 181 × 163, p98 223 × 191):
 comprimir mais o Realces aqui exigiria derivada acima de 2,2 junto do branco, e composta com
 "Brancos" vira degrau (`o_tom_por_regiao_nunca_inverte_nem_da_degrau`).
+
+### A Correção de cores com rodas (1/out/2026, 0.1.60)
+
+*"Eu quero o nosso sistema de tonalização exatamente assim! Muito parecido com o Lightroom"* (dono,
+30/set, com o print do painel "Correção de cores"). O painel deixou de ser uma lista de sliders e
+virou o do Lightroom, no app (`revelacao/rodas.rs`, `tela/correcao_de_cores.rs`) e no site
+(`rodas.ts`, `roda-de-cor.tsx`), com a mesma conta:
+
+- **Ajustar**: 3 rodas (Tons médios em cima, Sombras e Realces embaixo), Sombras, Tons médios,
+  Realces e Global, com o ponto âmbar/cinza de cada faixa;
+- **a roda**: matiz 0° à direita, crescendo no anti-horário, e saturação é a distância ao centro; a
+  cor do disco é a da roda do Lightroom (`cor_da_roda_do_lightroom`), a mesma que o motor aplica. O
+  puck move matiz e saturação, a alça da borda só o matiz; **Shift** trava o matiz, **Cmd/Ctrl**
+  anda ¼, **duplo clique** zera a faixa;
+- **o olho** se segura, e não se liga: mostra a prévia sem aquela faixa (ou sem o painel) e solta
+  sozinho — nunca chega à gravação, à miniatura nem ao cache;
+- rótulos do Lightroom em português: **Realces**, **Mesclagem** e **Equilíbrio**. A chave do painel
+  continua `revelacao:Tonalização`.
+
+Conferido no app por roteiro: o arrasto esquentou as sombras (r−b de 31 para 72 numa região escura),
+o olho apertado devolveu exatamente 31, e o duplo clique, também 31.
 
 **Na importação**: Textura, Névoa, as divisões, a luminância da Gradação, o resto do Detalhe, a
 vinheta pós-corte (antes caía na de lente), a aspereza e o balanço relativo de foto que não é RAW
