@@ -562,11 +562,24 @@ fn as_do_lightroom_vem_na_pasta_lrs_e_so_as_vinhetas_somam() {
     for p in &lrs {
         assert!(p.is_system, "{}", p.name);
         assert_eq!(p.grupo.as_deref(), Some(GRUPO_LRS), "{}", p.name);
-        let so_vinheta = p.adjustments.campos().all(|c| c.starts_with("pcv_"));
-        assert_eq!(p.replaces, !so_vinheta, "{}: recomeça só quem não é vinheta", p.name);
+        // A versão de processo vai junto da vinheta: no processo 1 ela é a
+        // medida no Lightroom (`revelacao_core::lightroom`).
+        let so_vinheta = p
+            .adjustments
+            .campos()
+            .all(|c| c.starts_with("pcv_") || c == "processo");
+        assert_eq!(
+            p.replaces, !so_vinheta,
+            "{}: recomeça só quem não é vinheta",
+            p.name
+        );
     }
     let nomes: Vec<&str> = lrs.iter().map(|p| p.name.as_str()).collect();
-    for nome in ["Vinheta Borda", "Vinheta Nenhuma", "RecordarFotos P&B Cinematografico"] {
+    for nome in [
+        "Vinheta Borda",
+        "Vinheta Nenhuma",
+        "RecordarFotos P&B Cinematografico",
+    ] {
         assert!(nomes.contains(&nome), "{nome}");
     }
     // A "Vinheta Nenhuma" é justamente o zero: somada, tira a vinheta.

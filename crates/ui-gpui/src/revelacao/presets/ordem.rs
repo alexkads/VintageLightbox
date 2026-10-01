@@ -440,7 +440,11 @@ mod testes {
             .iter()
             .find(|p| p.name == "RecordarFotos P&B" && Grupo::de(p) == Grupo::Lrs)
             .expect("a do Lightroom");
-        assert_eq!(chave(lr), "sistema:lr-recordarfotos-p-b", "não é a do darktable");
+        assert_eq!(
+            chave(lr),
+            "sistema:lr-recordarfotos-p-b",
+            "não é a do darktable"
+        );
         // Toda do sistema tem id do site: um nome novo sem linha na tabela
         // guardaria a ordem pelo nome, e renomeá-la a perderia.
         // As da pasta "LRs" têm id pelo nome do arquivo (`id_do_lightroom`).

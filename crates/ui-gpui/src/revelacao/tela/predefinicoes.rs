@@ -819,10 +819,8 @@ impl Revelacao {
             minhas,
             lrs,
         } = self.grupos_da_coluna(cx);
-        let nenhuma = favoritas.is_empty()
-            && do_sistema.is_empty()
-            && minhas.is_empty()
-            && lrs.is_empty();
+        let nenhuma =
+            favoritas.is_empty() && do_sistema.is_empty() && minhas.is_empty() && lrs.is_empty();
         let buscando = !self.busca_de_presets.read(cx).value().trim().is_empty();
         let apagado = cx.theme().muted_foreground;
         let fraco = apagado.opacity(0.6);

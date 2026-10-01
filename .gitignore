@@ -60,3 +60,7 @@ vintage_lightbox.db
 
 # Estado local do wrangler (o antigo `make publicar` enviava ao R2 por ele)
 /.wrangler/
+
+# A checagem isolada do rust-analyzer (ver docs/REGUA-DO-LIGHTROOM.md)
+/target-checagem/
+/ferramentas/lightroom/medicao/perfis/target/

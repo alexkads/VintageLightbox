@@ -512,7 +512,7 @@ async fn revelar_e_salvar(
     //
     // 🖌️ **Menos com imagem editada** (C30): aí zerar a revelação ainda sobe a
     // edição — restaurar o bruto a apagaria da galeria.
-    if ajustes == Ajustes::default()
+    if ajustes.sem_efeito()
         && corte == CropSettings::default()
         && locais.vazia()
         && editada.is_none()

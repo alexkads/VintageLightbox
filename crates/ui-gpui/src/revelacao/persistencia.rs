@@ -469,6 +469,26 @@ pub fn da_foto(foto: &PhotoViewModel) -> Ajustes {
 
     com_os_campos!(ler);
 
+    // 🔑 **Foto nova nasce no processo do Lightroom** (dono, 2026-10-01:
+    // versão de processo). Nova é a que nunca foi revelada: sem revelação
+    // inteira e sem nenhuma das seis colunas de tom — o app antigo gravava o
+    // Básico inteiro de uma vez, então uma foto revelada antes sempre tem as
+    // seis. ⚠️ Não serve "nenhuma coluna": `edit_lens_vignette_midpoint` nasce
+    // com `DEFAULT 50` no banco.
+    let nunca_revelada = [
+        foto.edit_exposure,
+        foto.edit_contrast,
+        foto.edit_highlights,
+        foto.edit_shadows,
+        foto.edit_whites,
+        foto.edit_blacks,
+    ]
+    .iter()
+    .all(Option::is_none);
+    if nunca_revelada {
+        ajustes.processo = 1.0;
+    }
+
     ajustes
 }
 
@@ -719,7 +739,13 @@ pub fn chave_da_revelada(foto_id: &str) -> String {
 /// ⚠️ **Contra o neutro, e não contra zero.** Contraste e raio da nitidez têm
 /// neutro 1,0: comparar com zero acenderia o ponto em toda foto do acervo.
 pub fn ja_revelada(foto: &PhotoViewModel) -> bool {
-    da_foto(foto) != Ajustes::default()
+    // A versão de processo não é revelação: a foto nova nasce no processo 1
+    // (`da_foto`) e não pode acender o ponto por isso.
+    let ajustes = Ajustes {
+        processo: 0.0,
+        ..da_foto(foto)
+    };
+    ajustes != Ajustes::default()
         || corte_da_foto(foto) != Corte::default()
         || foto.locais.is_some()
 }
@@ -1156,7 +1182,14 @@ mod testes {
 
     #[test]
     fn foto_sem_edicao_nenhuma_da_o_neutro() {
-        assert_eq!(da_foto(&foto()), Ajustes::default());
+        // 🔑 O neutro, no processo do Lightroom: foto nova nasce no 1.
+        let ajustes = da_foto(&foto());
+        assert!(ajustes.sem_efeito());
+        assert_eq!(ajustes.processo, 1.0);
+        assert!(
+            !ja_revelada(&foto()),
+            "a versão de processo não acende o ponto"
+        );
     }
 
     #[test]
@@ -1171,6 +1204,10 @@ mod testes {
         let ajustes = da_foto(&salva);
         assert_eq!(ajustes.exposure, 1.5);
         assert_eq!(ajustes.contrast, 1.2);
+        assert_eq!(
+            ajustes.processo, 0.0,
+            "foto revelada antes fica na conta de antes"
+        );
         assert_eq!(ajustes.hsl_blue_lum, -40.0);
         assert_eq!(
             ajustes.saturation, 0.0,
@@ -1384,7 +1421,7 @@ mod testes {
     /// não ganharam coluna: vão na revelação inteira (`edit_parametros`, migration
     /// 023), como na foto do site. Esta lista só descreve o caminho das colunas,
     /// que é o de quem foi revelado antes da migration 023.
-    const SEM_COLUNA_NO_BANCO_LOCAL: [&str; 20] = [
+    const SEM_COLUNA_NO_BANCO_LOCAL: [&str; 21] = [
         "calib_",
         "split_midtone_",
         "split_global_",
@@ -1406,6 +1443,8 @@ mod testes {
         "nr_color_smoothness",
         "pcv_",
         "grain_roughness",
+        // A versão de processo (2026-10-01): também só em `edit_parametros`.
+        "processo",
         // `split_midtone_lum` e `split_global_lum` já caem nos de cima.
     ];
 

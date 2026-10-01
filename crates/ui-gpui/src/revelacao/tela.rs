@@ -1634,7 +1634,7 @@ impl Revelacao {
         // neutro o resultado é igual à origem, e segurá-la só atrasaria.
         // (A mesma pergunta de `sem_revelacao`, campo a campo: `aberta` segura
         // o empréstimo de `self`.)
-        let neutra = self.ajustes == Ajustes::default()
+        let neutra = self.ajustes.sem_efeito()
             && self.locais.para_o_motor().camadas.is_empty()
             && self.locais.retoques.is_empty();
         aberta.revelada = neutra.then_some(imagem);
@@ -2146,7 +2146,7 @@ impl Revelacao {
     /// A pergunta é da revelação inteira — olhar só os ajustes deixava a foto
     /// com Revelação local aparecer crua ao abrir (a GPU nem era chamada).
     fn sem_revelacao(&self) -> bool {
-        self.ajustes == Ajustes::default()
+        self.ajustes.sem_efeito()
             && self.locais.para_o_motor().camadas.is_empty()
             && self.locais.retoques.is_empty()
     }
@@ -2444,7 +2444,7 @@ impl Revelacao {
 
         let ajustes = persistencia::da_foto(&foto);
         let locais = self.locais_de(&foto);
-        if ajustes == Ajustes::default() && locais.vazia() {
+        if ajustes.sem_efeito() && locais.vazia() {
             return;
         }
         let corte = transformacao::corte(&persistencia::para_crop_settings(
@@ -3565,7 +3565,7 @@ fn pilula(id: &'static str, ligada: bool, desligada: bool, cx: &mut Context<Reve
 /// inteiro gravado) continuava contando como "a zerar", e o menu reenfileirava
 /// um restaurar-original à toa. No site os dois usam a mesma regra.
 pub(crate) fn tem_o_que_zerar(foto: &PhotoViewModel) -> bool {
-    persistencia::da_foto(foto) != Ajustes::default()
+    !persistencia::da_foto(foto).sem_efeito()
         || !corte::e_inteiro(&persistencia::para_crop_settings(
             &persistencia::corte_da_foto(foto),
         ))
@@ -7076,7 +7076,9 @@ mod testes {
         // 🔑 **Só o que saiu do neutro**, como no site. Iam os 15 inteiros — e
         // com isso a segunda predefinição aplicada apagava a primeira, porque
         // ela escrevia o neutro por cima do que já estava lá.
-        assert_eq!(salvos[0].adjustments.len(), 1);
+        // A versão de processo vai junto do que foi mexido (`dos_ajustes`).
+        assert_eq!(salvos[0].adjustments.len(), 2);
+        assert_eq!(salvos[0].adjustments.get("processo"), Some(1.0));
         assert_eq!(salvos[0].adjustments.get("contrast"), None);
     }
 
@@ -7862,7 +7864,9 @@ mod testes {
             })
             .expect("a janela deve estar aberta");
 
-        // Exposição +1 dobra o valor: o balde 100 esvazia e o 200 enche.
+        // Exposição +1 clareia: o balde 100 esvazia e um mais claro enche. A
+        // foto nova está no processo do Lightroom, onde +1 leva o 100 a ~150
+        // (a curva medida); no processo 0 ia a 200.
         arrastar(cx, &janela, 0, 1.0);
         cx.run_until_parked();
 
@@ -7870,9 +7874,9 @@ mod testes {
         for _ in 0..200 {
             let pronto = janela
                 .update(cx, |tela, _window, _cx| {
-                    tela.histograma
-                        .as_ref()
-                        .is_some_and(|h| h.vermelho[200] > 0)
+                    tela.histograma.as_ref().is_some_and(|h| {
+                        h.vermelho[100] == 0 && h.vermelho[130..].iter().any(|v| *v > 0)
+                    })
                 })
                 .expect("a janela deve estar aberta");
             if pronto {
@@ -8487,7 +8491,9 @@ mod testes {
             .pop()
             .expect("gravou a revelação local");
         let (_, ajustes, corte) = gravador.gravado().pop().expect("gravou a revelação");
-        assert_eq!(ajustes, Ajustes::default(), "os ajustes ficam");
+        // Os ajustes ficam: o neutro, no processo do Lightroom (foto nova).
+        assert!(ajustes.sem_efeito(), "os ajustes ficam");
+        assert_eq!(ajustes.processo, 1.0);
         assert_eq!(corte.largura, Some(0.8), "o corte fica");
 
         let mut reaberta = cortada;

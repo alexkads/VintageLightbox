@@ -335,7 +335,9 @@ pub fn grupo_do_ajuste(nome: &str) -> Option<Grupo> {
         Grupo::Painel(Painel::Detalhe)
     } else if com("lens_") {
         Grupo::Painel(Painel::Lente)
-    } else if com("calib_") {
+    } else if com("calib_") || nome == "processo" {
+        // A versão de processo mora em Calibração, onde o Lightroom a mostra.
+        // ⚠️ Sincronizar só o Básico não a leva junto.
         Grupo::Calibracao
     } else if com("split_") {
         Grupo::Painel(Painel::Tonalizacao)

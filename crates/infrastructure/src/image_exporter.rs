@@ -324,7 +324,7 @@ impl ImageExporter for ImageExporterImpl {
     fn parametros_para_o_site(&self, photo: &Photo) -> Option<serde_json::Value> {
         let ajustes = ajustes_da_entidade(photo);
         let corte = transformacao::corte_da_entidade(photo);
-        if ajustes == Ajustes::default() && corte == CropSettings::default() {
+        if ajustes.sem_efeito() && corte == CropSettings::default() {
             return None;
         }
         Some(crate::pos_venda::parametros::ajustes_em_json(
@@ -347,7 +347,7 @@ impl ImageExporter for ImageExporterImpl {
         // (sliders no neutro) sobe o arquivo mascarado; sem esta conferência ele
         // seria tratado como o próprio bruto, e o bruto de verdade não subiria.
         let corte = transformacao::corte_da_entidade(photo);
-        if ajustes_da_entidade(photo) == Ajustes::default()
+        if ajustes_da_entidade(photo).sem_efeito()
             && corte == CropSettings::default()
             && locais_da_entidade(photo)?.vazia()
         {

@@ -142,6 +142,12 @@ fn posicao_de(campo: &str) -> Option<usize> {
 /// completo guarda os 53 — inclusive os neutros — e aplicar devolve ao neutro o
 /// que ela não menciona. Não precisa de campo novo: guardar tudo já é isso.
 pub fn dos_ajustes(ajustes: &Ajustes, inteiro: bool) -> PresetAdjustments {
+    // 🔑 A versão de processo vai junto do que foi mexido — o preset guarda a
+    // conta em que foi feito, como no Lightroom —, mas sozinha não é ajuste: a
+    // foto nova nasce no processo 1, e "salvar sem ter mexido" não guarda nada.
+    if !inteiro && ajustes.sem_efeito() {
+        return PresetAdjustments::vazia();
+    }
     let neutro = Ajustes::default().como_vetor();
     let valores = ajustes.como_vetor();
 

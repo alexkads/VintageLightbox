@@ -329,7 +329,13 @@ impl Revelacao {
         }
         self.gravar_o_que_estiver_pendente();
 
-        self.ajustes = Ajustes::default();
+        // 🔑 Zerar põe a foto no processo atual, como o "Redefinir" do
+        // Lightroom: no neutro os dois processos dão a mesma foto, e o que o
+        // operador mexer daqui em diante já sai com a conta do Lightroom.
+        self.ajustes = Ajustes {
+            processo: 1.0,
+            ..Ajustes::default()
+        };
         self.corte = corte_inteiro();
         // 🔑 **A Revelação local vai junto**, como o "Redefinir" do Lightroom
         // — um passo só no histórico. A ilegível fica: ela nunca é

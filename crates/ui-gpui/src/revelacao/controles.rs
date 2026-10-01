@@ -408,7 +408,13 @@ impl Definicao {
     /// Se este controle está fora do neutro — a mesma comparação exata do site
     /// (`ajustes[c.campo] !== PADRAO[c.campo]`).
     pub fn alterado(&self, ajustes: &Ajustes) -> bool {
-        (self.ler)(ajustes) != self.neutro()
+        // A versão de processo não é ajuste (`Ajustes::sem_efeito`): a foto
+        // nova nasce no processo 1 e não acende o ponto da Calibração.
+        let sem_processo = Ajustes {
+            processo: 0.0,
+            ..*ajustes
+        };
+        (self.ler)(&sem_processo) != self.neutro()
     }
 
     /// O menor movimento que este controle aceita.
@@ -849,6 +855,11 @@ pub const CONTROLES: &[Definicao] = &[
     cem!(S::Lente, "Vinheta", lens_vignette_amount),
     cento!(S::Lente, "Meio da vinheta", lens_vignette_midpoint),
     // ------------------------------------------------------------ Calibração
+    // 🔑 A versão de processo, no lugar onde o Lightroom a mostra: ligado, a
+    // Exposição, o Contraste, Realces, Sombras, Brancos, Pretos e a vinheta usam
+    // as curvas medidas no Lightroom (`revelacao_core::lightroom`). Foto antiga
+    // abre desligado — e é por aqui que o operador a atualiza.
+    interruptor!(S::Calibracao, "Processo do Lightroom", processo),
     cem!(S::Calibracao, "Sombras — matiz", calib_shadow_tint).com_trilho(Trilho::VerdeMagenta),
     matiz!(S::Calibracao, "Vermelho — matiz", calib_red_hue).com_trilho(Trilho::Roda),
     cem!(S::Calibracao, "Vermelho — saturação", calib_red_sat)
@@ -1359,6 +1370,12 @@ pub const CONTROLES: &[Definicao] = &[
 /// têm slider. É a conta do cabeçalho do site
 /// (`NOMES_DOS_AJUSTES.filter(n => ajustes[n] !== PADRAO[n])`).
 pub fn quantos_fora_do_neutro(ajustes: &Ajustes) -> usize {
+    // A versão de processo não é ajuste (ver `Ajustes::sem_efeito`): a foto
+    // nova nasce no processo 1 e não pode abrir dizendo "1 ajuste".
+    let ajustes = Ajustes {
+        processo: 0.0,
+        ..*ajustes
+    };
     let neutro = Ajustes::default().como_vetor();
     ajustes
         .como_vetor()
@@ -1539,7 +1556,11 @@ mod passo_dos_controles {
             .iter()
             .filter(|d| d.discreto && d.opcoes.is_none())
             .collect();
-        assert_eq!(interruptores.len(), 8, "bw_ativo, 5 módulos e 2 da vinheta");
+        assert_eq!(
+            interruptores.len(),
+            9,
+            "bw_ativo, 5 módulos, 2 da vinheta e o processo do Lightroom"
+        );
         for d in interruptores {
             assert_eq!(
                 (d.minimo, d.maximo, d.passo()),

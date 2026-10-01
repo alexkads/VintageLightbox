@@ -197,6 +197,73 @@ branca deu Temperatura −7 / Colorir +1 e desarmou.
 criativos da Adobe são tabelas que não temos) e o "Automático" da Mistura de P&B. **No site** o motor e
 os presets já estão certos, mas o painel Básico ainda é o de antes.
 
+### A régua do Lightroom e o processo 1 (1/out/2026)
+
+📄 **O registro completo** — método, medidas, o que mudou, resultado e o que ficou aberto — está em
+[`docs/REGUA-DO-LIGHTROOM.md`](REGUA-DO-LIGHTROOM.md).
+
+*"Esse foi o objetivo de vir para essa máquina com Lightroom: você comparar todos os presets que
+temos. Pois não posso ter problemas tão grosseiros"* (dono, 1/out).
+
+Na máquina Windows com o Lightroom Classic 15.5, um plug-in (`ferramentas/lightroom/`, ver o README
+de lá) faz o Lightroom exportar sozinho a mesma foto de muitos jeitos. O comparador
+(`infrastructure/examples/comparar_com_o_lightroom.rs`) revela o mesmo original pelo caminho da
+exportação do app e mede a diferença. Duas réguas:
+
+- **as 28 predefinições do estúdio**, cada uma inteira, em 8 fotos (6 com original JPG, 2 NEF);
+- **fotos sintéticas** (rampa cinza e colorida, cinzas lisos, quadrantes): cada slider de tom de −100
+  a +100, a vinheta em ponto médio × difusão, arredondamento, estilo e força, e o balanço de branco.
+
+🚨 **O que a régua mostrou** (diferença média de 0 a 255 nas fotos JPG; abaixo de ~5 não se vê): a
+melhor predefinição, Vinheta Borda, dava 7, e a pior, RF Bem Velhão, dava 80. As causas, medidas na
+rampa e no cinza:
+
+| | o Lightroom | o motor (processo 0) |
+|---|---|---|
+| Contraste −100 | curva de 0 a 255; 64→89 | **cinza 128 em tudo** |
+| Contraste −57 | 0→0, 64→78, 255→255 | 0→73, 255→183 (a foto chapada) |
+| Exposição +1 | 128→181, com ombro até o branco | tudo acima de 128 estoura |
+| Exposição −1 | 255→255 | o branco vira 128 |
+| Pretos −100 | 64→5 | 64→52 |
+| Vinheta −61 | elipse inscrita, começa a ~40% do raio; canto 128→29 | só perto da borda; canto 82 |
+| Temperatura +30 (cinza) | 176 156 123 (sobe vermelho e verde) | 158 129 99 (troca vermelho por azul) |
+
+✅ **O processo 1** (`revelacao_core::lightroom`, campo `processo`): Exposição, Contraste, Realces,
+Sombras, Brancos, Pretos e a vinheta pós-corte leem **curvas medidas no Lightroom**. É uma textura de
+245 × 256 (binding 11), gerada por `examples/tabelas-do-lightroom.rs` a partir das exportações, sem
+nenhum arquivo da Adobe. A vinheta é `F(valor, quantidade × m(d))`: a máscara depende só do ponto
+médio e da difusão, e a mesma máscara serve para todo nível de cinza. Os estilos 1 e 2 são idênticos
+no Lightroom (até em cor), e o arredondamento negativo é uma caixa de faixa igual nos quatro lados,
+ajustada aos perfis com erro abaixo de 1,2 nível. É **versão de processo**, como o PV2012 (decisão do
+dono): foto revelada antes fica no 0; foto nova, o Redefinir e preset do Lightroom com tom ou vinheta
+ligam o 1. O interruptor está em Calibração ("Processo do Lightroom"). `Ajustes::sem_efeito()` não
+conta o processo, para o ponto âmbar, a exportação e o envio não acharem revelada toda foto nova.
+
+**Antes → depois**, por predefinição (média das fotos JPG já comparadas no processo 1):
+
+| melhorou | antes → depois | piorou | antes → depois |
+|---|---|---|---|
+| Vinheta Carregada | 22 → 3 | RF Old2 | 18 → 22 |
+| Predefinição sem título | 16 → 3 | RF Velho Oeste | 17 → 24 |
+| Vinheta Oval | 40 → 6 | RF Velho Oeste 2 | 17 → 26 |
+| RF ENVELHECIDO PADRÃO | 24 → 7 | Recordarfotos old | 17 → 31 |
+| RF P&B Perfurado | 20 → 8 | RF Vintage Quente | 23 → 32 |
+| RF P&B Cinematografico | 19 → 9 | RF Velho Oeste Criativo | 31 → 37 |
+| RF Colorido Quente | 33 → 13 | RF Sépia Antigo | 32 → 39 |
+| RF P&B Cinematografico II | 37 → 16 | RF P&B | 10 → 13 |
+| RF Colorido Envelhecido | 63 → 20 | RF P&B Movie 2 | 14 → 19 |
+| RF Bem Velhão | 80 → 34 | | |
+
+⚠️ **As 9 que pioraram estão abertas**, e o motivo ainda não foi achado. As suspeitas são Sombras e
+Realces (locais no Lightroom, medidos aqui numa rampa) e o balanço de branco, que a régua mediu e o
+motor ainda não segue. Também ficam de fora: os perfis criativos da Adobe (Modern 09, Vintage 10,
+B&W 01/10 são LUT 3D + tabela HSV, e embutir as tabelas da Adobe num projeto MIT é decisão do dono),
+as máscaras locais e a revelação do RAW (nas fotos NEF, todas passavam de 30 já no processo 0).
+
+⚠️ **O site** usa o mesmo motor (wasm), mas ainda não tem o processo 1: falta reconstruir o wasm
+(`scripts/construir-web.sh`), copiar o `nomes.json` (194 campos), o `presets-lr.json` e registrar o
+campo no `CONTRATO_DA_FOTO.md`.
+
 ### O que mais falta na Revelação, comparado ao Lightroom
 
 | | |

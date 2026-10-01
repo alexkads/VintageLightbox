@@ -111,7 +111,7 @@ impl Amostras {
         ajustes: Ajustes,
     ) -> Option<Arc<RenderImage>> {
         if self.pedidas.insert(chave.to_string()) {
-            if ajustes == Ajustes::default() {
+            if ajustes.sem_efeito() {
                 // "Nenhum" é a foto como veio: não precisa do motor.
                 let imagem =
                     image::RgbaImage::from_raw(base.largura, base.altura, (*base.pixels).clone())

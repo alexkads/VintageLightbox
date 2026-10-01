@@ -544,7 +544,10 @@ mod testes {
                 assert!(p.edicoes.excluir(&FotoDoEditor::da(&p.acervo[0])).unwrap());
                 tela.fonte_mudou("id-0", None, cx);
                 tela.redefinir_ajustes(window, cx);
-                assert_eq!(tela.ajustes(), Ajustes::default(), "a revelação zerou");
+                // Zerar põe no processo do Lightroom (`redefinir_ajustes`), que
+                // no neutro dá a mesma foto: o resto é o neutro.
+                assert!(tela.ajustes().sem_efeito(), "a revelação zerou");
+                assert_eq!(tela.ajustes().processo, 1.0);
                 // O que o motor recebe: a entrada é o bruto, e os parâmetros
                 // estão todos no neutro — o que sai dele é o próprio bruto.
                 assert!(tela.sem_revelacao(), "nenhum parâmetro da revelação");

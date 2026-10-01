@@ -415,7 +415,7 @@ fn trabalhar(
         Parametros::Pronta { corte } => (pedido.ajustes, *corte),
     };
 
-    let tem_ajustes = ajustes != Ajustes::default();
+    let tem_ajustes = !ajustes.sem_efeito();
     let tem_corte = corte != Corte::default()
         && !crate::revelacao::corte::e_inteiro(&para_crop_settings(&corte));
     if !tem_ajustes && !tem_corte {

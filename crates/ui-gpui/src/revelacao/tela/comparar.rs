@@ -270,7 +270,7 @@ impl Revelacao {
         let chave = cache::Chave::nova(&foto_id, (largura, altura), &ajustes, &corte, &locais)
             .da_fonte(revisao_da_fonte);
         let sem_gpu = self.processador.disponivel() == Some(false);
-        let pronta = if (ajustes == Ajustes::default() && locais.vazia()) || sem_gpu {
+        let pronta = if (ajustes.sem_efeito() && locais.vazia()) || sem_gpu {
             // Sem revelação não há o que revelar; sem GPU, a crua é o que há.
             image::RgbaImage::from_raw(largura, altura, pixels.to_vec())
                 .map(image::DynamicImage::ImageRgba8)

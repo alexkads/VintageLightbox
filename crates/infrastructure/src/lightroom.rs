@@ -612,6 +612,17 @@ pub fn traduzir(bruto: &PresetBruto) -> PresetTraduzido {
         }
     }
 
+    // 🔑 **O que vem do Lightroom é revelado com a conta do Lightroom** — o
+    // processo 1 (`revelacao_core::lightroom`). Só quando o preset mexe num
+    // campo cuja conta muda de um processo para o outro: um preset só de HSL
+    // aplicado numa foto antiga não tem por que mudar o contraste dela.
+    if CAMPOS_DO_PROCESSO
+        .iter()
+        .any(|campo| ajustes.get(campo).is_some())
+    {
+        ajustes = ajustes.com("processo", 1.0);
+    }
+
     ignorados.sort_unstable();
     PresetTraduzido {
         nome: bruto.nome.clone(),
@@ -619,6 +630,18 @@ pub fn traduzir(bruto: &PresetBruto) -> PresetTraduzido {
         ignorados,
     }
 }
+
+/// Os campos cuja conta é outra no processo 1 — as tabelas medidas no
+/// Lightroom.
+const CAMPOS_DO_PROCESSO: [&str; 7] = [
+    "exposure",
+    "contrast",
+    "highlights",
+    "shadows",
+    "whites",
+    "blacks",
+    "pcv_amount",
+];
 
 /// Quatro casas bastam para um slider, e encurtam o que vai ao banco.
 fn arredondar(v: f32) -> f32 {
@@ -1176,6 +1199,24 @@ mod testes {
         assert_eq!(traduzido.ajustes.get("saturation"), Some(-1.0));
         assert_eq!(traduzido.ajustes.get("vibrance"), Some(0.25));
         assert_eq!(traduzido.ajustes.get("clarity"), Some(0.25));
+    }
+
+    /// 🔑 **O preset de tom do Lightroom liga o processo 1**, e o de cor não:
+    /// quem aplica um preset só de HSL numa foto antiga não tem por que ver o
+    /// contraste dela mudar de conta.
+    #[test]
+    fn o_preset_de_tom_liga_o_processo_do_lightroom() {
+        for chave in [
+            "Contrast2012",
+            "Exposure2012",
+            "Blacks2012",
+            "PostCropVignetteAmount",
+        ] {
+            let traduzido = traduzir_chaves(&[(chave, n(-30.0))]);
+            assert_eq!(traduzido.ajustes.get("processo"), Some(1.0), "{chave}");
+        }
+        let so_cor = traduzir_chaves(&[("SaturationAdjustmentRed", n(-30.0))]);
+        assert_eq!(so_cor.ajustes.get("processo"), None);
     }
 
     /// 🔑 O HSL casa cor a cor, e o matiz vira **graus**.

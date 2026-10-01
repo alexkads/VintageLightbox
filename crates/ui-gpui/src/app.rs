@@ -2358,7 +2358,7 @@ impl Aplicativo {
             // guarda o corte intocado como ausente, e a revelação que sobe o
             // escreve inteiro: comparar os campos acusaria diferença em toda
             // foto com revelação, e o ensaio inteiro subiria duas vezes.
-            let agora = (ajustes != Ajustes::default() || enquadramento != CropSettings::default())
+            let agora = (!ajustes.sem_efeito() || enquadramento != CropSettings::default())
                 .then(|| crate::pos_venda::porta::ajustes_em_json(&ajustes, &enquadramento));
             let a_que_subiu =
                 subiu.and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok());
@@ -2464,7 +2464,7 @@ impl Aplicativo {
         let mut mudou = false;
         for (local, ajustes, corte) in na_revelacao {
             let enquadramento = persistencia::para_crop_settings(&corte);
-            let agora = (ajustes != Ajustes::default() || enquadramento != CropSettings::default())
+            let agora = (!ajustes.sem_efeito() || enquadramento != CropSettings::default())
                 .then(|| crate::pos_venda::porta::ajustes_em_json(&ajustes, &enquadramento));
             let Some((no_site, no_site_agora)) =
                 self.parametros_no_site_das_que_subiram.get_mut(&local)
@@ -4359,6 +4359,12 @@ impl Aplicativo {
             return;
         }
 
+        // O neutro no processo do Lightroom, como o "Zerar" da foto aberta
+        // (`redefinir_ajustes`): no neutro os dois processos dão a mesma foto.
+        let neutro = Ajustes {
+            processo: 1.0,
+            ..Ajustes::default()
+        };
         let mut gravadas: Vec<(String, Ajustes, persistencia::Corte)> = Vec::new();
         for alvo in &alvos {
             // 🔑 O enquadramento também volta ao inteiro, como no site ("Zerar
@@ -4375,13 +4381,12 @@ impl Aplicativo {
                 perspectiva: Some(Default::default()),
                 restringir: Some(true),
             };
-            self.gravador
-                .gravar(alvo.id.clone(), Ajustes::default(), corte);
-            gravadas.push((alvo.id.clone(), Ajustes::default(), corte));
+            self.gravador.gravar(alvo.id.clone(), neutro, corte);
+            gravadas.push((alvo.id.clone(), neutro, corte));
             if let Some(no_site) = alvo.pos_venda_foto_id.clone() {
                 self.enfileirar_para_subir(
                     no_site,
-                    Ajustes::default(),
+                    neutro,
                     persistencia::para_crop_settings(&corte),
                 );
             }
@@ -7578,13 +7583,13 @@ mod testes {
                     .iter()
                     .find(|f| f.pos_venda_foto_id.as_deref() == Some("remota-2"))
                     .expect("a outra está na tira");
-                assert_eq!(persistencia::da_foto(outra), Ajustes::default());
+                assert!(persistencia::da_foto(outra).sem_efeito());
                 let na_grade = app
                     .fotos_do_site
                     .iter()
                     .find(|f| f.pos_venda_foto_id.as_deref() == Some("remota-2"))
                     .expect("a outra está na grade");
-                assert_eq!(persistencia::da_foto(na_grade), Ajustes::default());
+                assert!(persistencia::da_foto(na_grade).sem_efeito());
                 assert!(app.detalhe.read(cx).nao_salvas().is_empty());
             })
             .expect("a janela deve estar aberta");

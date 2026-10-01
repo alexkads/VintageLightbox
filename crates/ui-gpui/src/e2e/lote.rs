@@ -799,10 +799,8 @@ fn zerar_as_marcadas_limpa_parametros_enquadramento_e_previas(cx: &mut TestAppCo
         .gravador
         .gravado()
         .into_iter()
-        .filter(|(_, ajustes, corte)| {
-            *ajustes == crate::revelacao::processador::Ajustes::default()
-                && corte.largura == Some(1.0)
-        })
+        // O neutro no processo do Lightroom: sem efeito, com `processo` 1.
+        .filter(|(_, ajustes, corte)| ajustes.sem_efeito() && corte.largura == Some(1.0))
         .map(|(id, _, _)| id)
         .collect();
     for id in ["site:a", "site:b", "site:d"] {

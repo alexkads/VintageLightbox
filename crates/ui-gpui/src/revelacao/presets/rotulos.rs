@@ -210,6 +210,7 @@ pub const ROTULOS: &[(&str, &str)] = &[
     ("pcv_roundness", "Vinheta — arredondamento"),
     ("pcv_feather", "Vinheta — difusão"),
     ("pcv_highlights", "Vinheta — realces"),
+    ("processo", "Processo do Lightroom"),
 ];
 
 #[cfg(test)]
