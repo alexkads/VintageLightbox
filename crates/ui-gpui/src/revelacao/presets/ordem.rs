@@ -42,6 +42,8 @@ pub enum Grupo {
     Favoritas,
     Sistema,
     Minhas,
+    /// 🎞️ As predefinições do Lightroom do estúdio (`presets_do_lightroom`).
+    Lrs,
 }
 
 impl Grupo {
@@ -51,15 +53,18 @@ impl Grupo {
             Grupo::Favoritas => "favoritas",
             Grupo::Sistema => "sistema",
             Grupo::Minhas => "minhas",
+            Grupo::Lrs => "lrs",
         }
     }
 
     /// O grupo de uma predefinição.
     pub fn de(preset: &Preset) -> Self {
-        if preset.is_system {
-            Grupo::Sistema
-        } else {
+        if !preset.is_system {
             Grupo::Minhas
+        } else if preset.grupo.as_deref() == Some(use_cases::presets::list_presets::GRUPO_LRS) {
+            Grupo::Lrs
+        } else {
+            Grupo::Sistema
         }
     }
 }
@@ -86,7 +91,40 @@ const IDS_DO_SISTEMA: &[(&str, &str)] = &[
     ("Vintage · Ektachrome anos 70", "vintage-ektachrome"),
     ("Vintage · Desbotado anos 70", "vintage-desbotado-70"),
     ("Nitidez para impressão", "para-impressao"),
+    ("Cinematográfico P&B", "cinematografico-pb"),
 ];
+
+/// O id do site de uma predefinição da pasta "LRs": `lr-` e o nome sem acento,
+/// em minúsculas, com hífen — o `idDoLightroom` de `presets-do-sistema.ts`.
+///
+/// 🔑 **Pelo nome do arquivo, e não pela tabela acima**: "RecordarFotos P&B"
+/// existe nas duas pastas (a do darktable no sistema, a do Lightroom nas LRs),
+/// e o nome sozinho as confundiria.
+pub fn id_do_lightroom(nome: &str) -> String {
+    let mut id = String::from("lr-");
+    let mut hifen = false;
+    for c in nome.chars().flat_map(char::to_lowercase) {
+        let c = match c {
+            'á' | 'à' | 'â' | 'ã' => 'a',
+            'é' | 'ê' => 'e',
+            'í' => 'i',
+            'ó' | 'ô' | 'õ' => 'o',
+            'ú' => 'u',
+            'ç' => 'c',
+            c => c,
+        };
+        if c.is_ascii_alphanumeric() {
+            if hifen && id.len() > 3 {
+                id.push('-');
+            }
+            hifen = false;
+            id.push(c);
+        } else {
+            hifen = true;
+        }
+    }
+    id
+}
 
 /// O id que o site dá a uma predefinição do sistema, pelo nome — `sepia` para
 /// "Sépia à moda antiga". É a **única** tabela do app: a Nova sessão também
@@ -103,6 +141,9 @@ pub fn id_do_site(nome: &str) -> Option<&'static str> {
 pub fn chave(preset: &Preset) -> String {
     if !preset.is_system {
         return preset.id.to_string();
+    }
+    if Grupo::de(preset) == Grupo::Lrs {
+        return format!("sistema:{}", id_do_lightroom(&preset.name));
     }
     let id = IDS_DO_SISTEMA
         .iter()
@@ -161,6 +202,8 @@ pub struct Ordem {
     pub sistema: Vec<String>,
     #[serde(default)]
     pub minhas: Vec<String>,
+    #[serde(default)]
+    pub lrs: Vec<String>,
     /// As chaves com o coração aceso, na ordem em que aparecem no topo.
     #[serde(default)]
     pub favoritas: Vec<String>,
@@ -177,6 +220,7 @@ impl Ordem {
             Grupo::Favoritas => &self.favoritas,
             Grupo::Sistema => &self.sistema,
             Grupo::Minhas => &self.minhas,
+            Grupo::Lrs => &self.lrs,
         }
     }
 
@@ -188,6 +232,7 @@ impl Ordem {
             Grupo::Favoritas => self.favoritas = ids,
             Grupo::Sistema => self.sistema = ids,
             Grupo::Minhas => self.minhas = ids,
+            Grupo::Lrs => self.lrs = ids,
         }
     }
 

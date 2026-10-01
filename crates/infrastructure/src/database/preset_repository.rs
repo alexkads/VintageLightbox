@@ -116,5 +116,6 @@ fn map_row_to_preset(row: &sqlx::sqlite::SqliteRow) -> DomainResult<Preset> {
         // passam por aqui. Guardar a marca de uma que ele salvou mudaria por
         // baixo o que ele já tinha — ver `Preset::replaces`.
         replaces: false,
+        grupo: None,
     })
 }

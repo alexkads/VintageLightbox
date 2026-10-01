@@ -417,7 +417,92 @@ pub fn presets_de_sistema() -> Vec<Preset> {
                 ("nr_luminance", 10.0),
             ],
         ),
+        // 🎬 **O DNG do Estúdio Canela** (dono, 2026-09-30: *"crie um preset
+        // padrão chamado de Cinematográfico P&B baseado nesse"*): a "P&B
+        // Cinematografico" do Lightroom com a "Vinheta Borda" (a moldura branca
+        // de cantos redondos) e a exposição daquele DNG, sem o corte. Os
+        // números são os que a importação tira do XMP dele.
+        monte(
+            "Cinematográfico P&B",
+            &[
+                ("exposure", 0.14),
+                ("highlights", -58.0),
+                ("shadows", 80.0),
+                ("blacks", 80.0),
+                ("texture", 12.0),
+                ("clarity", 0.35),
+                ("dehaze", 15.0),
+                ("saturation", -1.0),
+                ("curva_m0", 37.0),
+                ("curva_m1", 37.0),
+                ("curva_m2", 60.1752),
+                ("curva_m3", 92.646),
+                ("curva_m4", 125.1168),
+                ("curva_m5", 157.5876),
+                ("curva_m6", 190.0584),
+                ("curva_m7", 222.5292),
+                ("sharpen_amount", 25.3333),
+                ("sharpen_radius", 2.1),
+                ("sharpen_detail", 100.0),
+                ("sharpen_masking", 90.0),
+                ("nr_color", 25.0),
+                ("split_shadow_hue", 14.0),
+                ("split_shadow_sat", 32.0),
+                ("split_shadow_lum", -13.0),
+                ("split_midtone_hue", 44.0),
+                ("split_midtone_sat", 39.0),
+                ("split_highlight_hue", 59.0),
+                ("split_highlight_sat", 24.0),
+                ("split_global_hue", 221.0),
+                ("split_global_sat", 18.0),
+                ("pcv_style", 2.0),
+                ("pcv_amount", 100.0),
+                ("pcv_midpoint", 0.0),
+                ("pcv_roundness", -83.0),
+                ("pcv_feather", 35.0),
+            ],
+        ),
     ]
+    .into_iter()
+    .chain(presets_do_lightroom())
+    .collect()
+}
+
+/// O nome da pasta das predefinições do Lightroom do estúdio.
+pub const GRUPO_LRS: &str = "LRs";
+
+/// Uma predefinição do Lightroom, como `lightroom.json` a guarda.
+#[derive(serde::Deserialize)]
+struct DoLightroom {
+    nome: String,
+    recomeca: bool,
+    ajustes: std::collections::BTreeMap<String, f32>,
+}
+
+/// 🎞️ **As predefinições do Lightroom do estúdio, na pasta "LRs"** (dono,
+/// 2026-09-30: *"crie um grupo novo de presets chamado LRs com todos esses
+/// efeitos, sendo que alguns precisam resetar o anterior e não somar"*).
+///
+/// `lightroom.json` sai dos `.xmp` do estúdio pelo mesmo tradutor da
+/// importação (`infrastructure/examples/presets_do_lightroom.rs`), e o site lê
+/// o mesmo arquivo. **As de vinheta somam** — vão por cima do visual que já
+/// está na foto, como no Lightroom —; **as outras recomeçam do neutro**, porque
+/// são o visual inteiro.
+pub fn presets_do_lightroom() -> Vec<Preset> {
+    let lista: Vec<DoLightroom> = serde_json::from_str(include_str!("lightroom.json"))
+        .expect("lightroom.json é gerado pelo exemplo e vai junto no repositório");
+    lista
+        .into_iter()
+        .map(|p| {
+            let ajustes: PresetAdjustments = p.ajustes.into_iter().collect();
+            let preset = if p.recomeca {
+                Preset::system_replacing(&p.nome, ajustes)
+            } else {
+                Preset::system(&p.nome, ajustes)
+            };
+            preset.no_grupo(GRUPO_LRS)
+        })
+        .collect()
 }
 
 pub struct ListPresetsUseCase {

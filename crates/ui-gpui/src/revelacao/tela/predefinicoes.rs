@@ -594,6 +594,7 @@ impl Revelacao {
             Grupo::Favoritas => return self.predefinicoes.ordem.favoritas.clone(),
             Grupo::Sistema => coluna.sistema,
             Grupo::Minhas => coluna.minhas,
+            Grupo::Lrs => coluna.lrs,
         };
         lista.into_iter().map(ordem::chave).collect()
     }
@@ -814,8 +815,12 @@ impl Revelacao {
             favoritas,
             sistema: do_sistema,
             minhas,
+            lrs,
         } = self.grupos_da_coluna(cx);
-        let nenhuma = favoritas.is_empty() && do_sistema.is_empty() && minhas.is_empty();
+        let nenhuma = favoritas.is_empty()
+            && do_sistema.is_empty()
+            && minhas.is_empty()
+            && lrs.is_empty();
         let buscando = !self.busca_de_presets.read(cx).value().trim().is_empty();
         let apagado = cx.theme().muted_foreground;
         let fraco = apagado.opacity(0.6);
@@ -863,6 +868,9 @@ impl Revelacao {
                     cx,
                 ))
                 .child(self.grupo_de_presets(Grupo::Sistema, &do_sistema, None, cx))
+                .when(!lrs.is_empty(), |d| {
+                    d.child(self.grupo_de_presets(Grupo::Lrs, &lrs, None, cx))
+                })
                 .overflow_y_scrollbar();
             // O invólucro é a janela da rolagem: é ele que o teste mede.
             div()
@@ -1280,6 +1288,7 @@ impl Revelacao {
             Grupo::Favoritas => "FAVORITAS",
             Grupo::Sistema => "DO SISTEMA",
             Grupo::Minhas => "MINHAS",
+            Grupo::Lrs => "LRS",
         };
         let fechado = self.grupo_fechado(grupo, cx);
         // As favoritas não têm "ordem padrão": a lista guardada é a escolha.

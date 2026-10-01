@@ -85,8 +85,17 @@ pub fn presets_da_sessao(
         .iter()
         .filter(|p| p.is_system)
         .filter_map(|p| {
+            // 🎞️ As da pasta "LRs" têm id pelo nome do arquivo: "RecordarFotos
+            // P&B" existe nas duas pastas, e a tabela por nome daria a do
+            // darktable no lugar da do Lightroom.
+            use crate::revelacao::presets::ordem;
+            let id = if ordem::Grupo::de(p) == ordem::Grupo::Lrs {
+                format!("sistema:{}", ordem::id_do_lightroom(&p.name))
+            } else {
+                id_do_sistema(&p.name)?
+            };
             Some(PresetDaSessao {
-                id: id_do_sistema(&p.name)?,
+                id,
                 nome: p.name.clone(),
                 grupo: Grupo::Sistema,
                 preset: p.clone(),

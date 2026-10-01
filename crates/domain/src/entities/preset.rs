@@ -135,6 +135,11 @@ pub struct Preset {
     /// seria reescrever o que ele salvou.
     #[serde(default)]
     pub replaces: bool,
+    /// A pasta da coluna em que uma de sistema mora, quando não é a "Do
+    /// sistema" — `"LRs"`, as predefinições do Lightroom do estúdio (dono,
+    /// 2026-09-30). `None` nas do operador e nas do sistema de sempre.
+    #[serde(default)]
+    pub grupo: Option<String>,
 }
 
 impl Preset {
@@ -145,6 +150,7 @@ impl Preset {
             adjustments,
             is_system,
             replaces: false,
+            grupo: None,
         }
     }
 
@@ -158,6 +164,12 @@ impl Preset {
             replaces: true,
             ..Self::system(name, adjustments)
         }
+    }
+
+    /// A mesma predefinição, na pasta `grupo` da coluna.
+    pub fn no_grupo(mut self, grupo: &str) -> Self {
+        self.grupo = Some(grupo.to_string());
+        self
     }
 
     pub fn user(name: String, adjustments: PresetAdjustments) -> Self {

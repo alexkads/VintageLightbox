@@ -314,6 +314,8 @@ pub struct Coluna<'a> {
     pub favoritas: Vec<&'a Preset>,
     pub sistema: Vec<&'a Preset>,
     pub minhas: Vec<&'a Preset>,
+    /// 🎞️ As do Lightroom do estúdio, na pasta "LRs".
+    pub lrs: Vec<&'a Preset>,
 }
 
 /// A coluna como a tela a mostra.
@@ -332,6 +334,9 @@ pub struct Coluna<'a> {
 /// guardada.
 pub fn da_coluna<'a>(presets: &'a [Preset], busca: &str, guardada: &ordem::Ordem) -> Coluna<'a> {
     let (sistema, mut minhas) = separar(presets);
+    let (lrs, sistema): (Vec<&Preset>, Vec<&Preset>) = sistema
+        .into_iter()
+        .partition(|p| ordem::Grupo::de(p) == ordem::Grupo::Lrs);
     minhas.sort_by(|a, b| comparar_nomes(&a.name, &b.name));
     let alvo = busca.trim().to_lowercase();
     let filtrar = |lista: Vec<&'a Preset>| -> Vec<&'a Preset> {
@@ -362,6 +367,11 @@ pub fn da_coluna<'a>(presets: &'a [Preset], busca: &str, guardada: &ordem::Ordem
         minhas: filtrar(ordem::aplicar_ordem(
             fora_das_favoritas(minhas),
             guardada.do_grupo(ordem::Grupo::Minhas),
+            chave,
+        )),
+        lrs: filtrar(ordem::aplicar_ordem(
+            fora_das_favoritas(lrs),
+            guardada.do_grupo(ordem::Grupo::Lrs),
             chave,
         )),
     }
