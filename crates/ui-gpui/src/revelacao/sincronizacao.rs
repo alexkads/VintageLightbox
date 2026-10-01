@@ -109,6 +109,8 @@ impl Grupo {
     pub fn da_secao(secao: crate::revelacao::controles::Secao) -> Grupo {
         match secao {
             crate::revelacao::controles::Secao::CurvaPorPonto => Grupo::CurvaPorPonto,
+            // O "P&B" do Básico viaja com a Mistura, como no site.
+            crate::revelacao::controles::Secao::Tratamento => Grupo::PretoEBranco,
             outra => Grupo::do_painel(outra.painel()),
         }
     }

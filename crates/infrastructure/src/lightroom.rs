@@ -528,10 +528,14 @@ fn avaliar_entre_pontos(pontos: &[(f32, f32)], x: f32) -> f32 {
 
 /// Traduz um preset bruto.
 ///
-/// `ConvertToGrayscale` acende o mixer de preto e branco **e** leva a saturação
-/// a −1. Os dois: o mixer decide a luminância de cada faixa de matiz, e a
-/// dessaturação tira a cor. Só o segundo dava cinza chapado, sem a mistura por
-/// canal que separa um P&B de retrato de um P&B sem graça.
+/// `ConvertToGrayscale` acende o mixer de preto e branco — e **só** ele. O
+/// mixer decide a luminância de cada faixa de matiz e tira a cor; a Saturação,
+/// a Vibração e o HSL ficam com o valor do preset e não agem, como no
+/// Lightroom.
+///
+/// 🚨 **Até 2026-10-01 ele levava também a saturação a −1**, e o motor tira a
+/// saturação antes do mixer: a foto chegava cinza à Mistura de preto e branco,
+/// e os `GrayMixer*` de todo preset P&B não mudavam pixel nenhum.
 pub fn traduzir(bruto: &PresetBruto) -> PresetTraduzido {
     let neutro = Ajustes::default();
     let neutro = neutro.como_vetor();
@@ -568,7 +572,7 @@ pub fn traduzir(bruto: &PresetBruto) -> PresetTraduzido {
             continue;
         }
         if chave == "ConvertToGrayscale" && *valor == Valor::Booleano(true) {
-            ajustes = ajustes.com("bw_ativo", 1.0).com("saturation", -1.0);
+            ajustes = ajustes.com("bw_ativo", 1.0);
             continue;
         }
 
@@ -1238,7 +1242,11 @@ mod testes {
         assert_eq!(traduzido.ajustes.get("curva_m0"), Some(37.0));
         assert_eq!(traduzido.ajustes.get("curva_m1"), Some(37.0));
         assert_eq!(traduzido.ajustes.get("curva_m8"), Some(255.0));
-        assert_eq!(traduzido.ajustes.get("curva_r0"), None, "a neutra não entra");
+        assert_eq!(
+            traduzido.ajustes.get("curva_r0"),
+            None,
+            "a neutra não entra"
+        );
     }
 
     /// ✅ Os controles do Lightroom que o motor ganhou em 2026-09-30.
@@ -1271,9 +1279,9 @@ mod testes {
         assert!(traduzido.ignorados.is_empty(), "{:?}", traduzido.ignorados);
     }
 
-    /// 🚨 **Um preset P&B acende o mixer, e não só dessatura.** Só a
-    /// dessaturação dava cinza chapado, e os oito `GrayMixer*` do mesmo arquivo
-    /// não tinham onde agir.
+    /// 🚨 **Um preset P&B acende o mixer, e não mexe na saturação.** A
+    /// saturação −1 que vinha junto tirava a cor antes do mixer, e os oito
+    /// `GrayMixer*` do mesmo arquivo não tinham onde agir.
     #[test]
     fn o_preto_e_branco_acende_o_mixer_e_traz_a_mistura_por_canal() {
         let traduzido = traduzir_chaves(&[
@@ -1282,7 +1290,7 @@ mod testes {
             ("GrayMixerBlue", n(-60.0)),
         ]);
         assert_eq!(traduzido.ajustes.get("bw_ativo"), Some(1.0));
-        assert_eq!(traduzido.ajustes.get("saturation"), Some(-1.0));
+        assert_eq!(traduzido.ajustes.get("saturation"), None);
         assert_eq!(traduzido.ajustes.get("bw_red"), Some(40.0));
         assert_eq!(traduzido.ajustes.get("bw_blue"), Some(-60.0));
         assert!(

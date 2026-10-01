@@ -54,7 +54,12 @@ fn main() {
 
     let mut saida = Vec::new();
     for caminho in arquivos {
-        let nome = caminho.file_stem().unwrap().to_string_lossy().trim().to_string();
+        let nome = caminho
+            .file_stem()
+            .unwrap()
+            .to_string_lossy()
+            .trim()
+            .to_string();
         let texto = std::fs::read_to_string(&caminho).expect("ler o .xmp");
         let bruto = lightroom::ler_xmp(&texto, &nome).expect("é .xmp do Lightroom");
         let traduzido = lightroom::traduzir(&bruto);
@@ -71,10 +76,12 @@ fn main() {
             .collect();
         if so_vinheta {
             // Os campos da vinheta entram inteiros, neutros inclusive.
-            let numero = |k: &str| bruto.ajustes.get(k).and_then(|v| match v {
-                Valor::Numero(n) => Some(*n),
-                _ => None,
-            });
+            let numero = |k: &str| {
+                bruto.ajustes.get(k).and_then(|v| match v {
+                    Valor::Numero(n) => Some(*n),
+                    _ => None,
+                })
+            };
             let quantidade = numero("PostCropVignetteAmount").unwrap_or(0.0);
             ajustes.insert("pcv_amount".into(), quantidade);
             if quantidade != 0.0 {
@@ -98,9 +105,10 @@ fn main() {
         let look = Look::do_xmp(&texto);
         if let Some(look) = &look {
             let pb = look.nome.starts_with("B&W") || look.nome.contains("Monochrome");
+            // Só o P&B: a saturação fica a do preset, e o motor não a
+            // aplica com o P&B ligado (como o Lightroom).
             if pb {
                 ajustes.insert("bw_ativo".into(), 1.0);
-                ajustes.insert("saturation".into(), -1.0);
             }
             if !matches!(look.nome.as_str(), "Adobe Color" | "Adobe Monochrome") {
                 avisos.push(format!(
@@ -135,7 +143,11 @@ struct Look {
 
 impl Look {
     fn do_xmp(texto: &str) -> Option<Look> {
-        let bloco = texto.split("<crs:Look>").nth(1)?.split("</crs:Look>").next()?;
+        let bloco = texto
+            .split("<crs:Look>")
+            .nth(1)?
+            .split("</crs:Look>")
+            .next()?;
         let depois = bloco.split("crs:Name=\"").nth(1)?;
         let nome = depois.split('"').next()?.replace("&amp;", "&");
         Some(Look { nome })

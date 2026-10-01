@@ -575,7 +575,7 @@ impl Revelacao {
     // --------------------------------------------------------------- a conta
 
     /// O ponto da área (pontos) na foto inteira (0–1).
-    fn foto_do_ponto(&self, p: Ponto) -> Option<[f32; 2]> {
+    pub(super) fn foto_do_ponto(&self, p: Ponto) -> Option<[f32; 2]> {
         let (cena, vista) = self.vista()?;
         let (w, h) = self.tamanho_da_copia()?;
         let s = (p.x - vista.x) / (cena.janela.largura * vista.escala);

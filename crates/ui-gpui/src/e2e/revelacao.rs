@@ -43,12 +43,14 @@ fn andar_pela_tira_revelar_e_desfazer_um_gesto_por_vez(cx: &mut TestAppContext) 
         assert_eq!(tela.na_tira().len(), tira.len());
     });
 
-    // Dois gestos: exposição e contraste.
+    // Dois gestos: exposição e contraste. O contraste anda na escala do
+    // Lightroom (+30), e o motor guarda o multiplicador (1,3).
+    let contraste = 1.0 + 30.0 / 100.0;
     e.revelacao(cx, |tela, _w, cx| tela.arrastar_slider(0, 1.5, cx));
     e.esperar(cx);
     e.revelacao(cx, |tela, _w, cx| {
         assert_eq!(tela.ajustes().exposure, 1.5);
-        tela.arrastar_slider(1, 1.3, cx);
+        tela.arrastar_slider(1, 30.0, cx);
     });
     e.esperar(cx);
     let gravado = e.gravador.gravado();
@@ -64,7 +66,7 @@ fn andar_pela_tira_revelar_e_desfazer_um_gesto_por_vez(cx: &mut TestAppContext) 
     e.revelacao(cx, |tela, _w, cx| {
         assert_eq!(tela.ajustes().contrast, 1.0);
         assert_eq!(tela.ajustes().exposure, 1.5, "um passo por gesto");
-        assert_eq!(tela.valor_do_slider(1, cx), 1.0, "o slider voltou junto");
+        assert_eq!(tela.valor_do_slider(1, cx), 0.0, "o slider voltou junto");
     });
     e.teclar(cx, "ctrl-z");
     e.revelacao(cx, |tela, _w, _cx| {
@@ -75,7 +77,7 @@ fn andar_pela_tira_revelar_e_desfazer_um_gesto_por_vez(cx: &mut TestAppContext) 
     e.revelacao(cx, |tela, _w, _cx| assert_eq!(tela.ajustes().exposure, 1.5));
     e.teclar(cx, "ctrl-shift-z");
     e.revelacao(cx, |tela, _w, _cx| {
-        assert_eq!(tela.ajustes().contrast, 1.3);
+        assert_eq!(tela.ajustes().contrast, contraste);
         assert!(!tela.pode_refazer());
     });
     let ultimo = e
@@ -85,7 +87,7 @@ fn andar_pela_tira_revelar_e_desfazer_um_gesto_por_vez(cx: &mut TestAppContext) 
         .cloned()
         .expect("o refazer gravou");
     assert_eq!(
-        ultimo.1.contrast, 1.3,
+        ultimo.1.contrast, contraste,
         "o histórico vai para o banco também"
     );
 
@@ -99,7 +101,7 @@ fn andar_pela_tira_revelar_e_desfazer_um_gesto_por_vez(cx: &mut TestAppContext) 
             1.5,
             "sair e voltar traz a revelação"
         );
-        assert_eq!(tela.ajustes().contrast, 1.3);
+        assert_eq!(tela.ajustes().contrast, contraste);
         assert!(
             !tela.pode_desfazer(),
             "a foto reaberta começa um histórico novo"

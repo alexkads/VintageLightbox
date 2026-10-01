@@ -182,6 +182,8 @@ pub enum Icone {
     QrCode,
     // O Enquadrar.
     Ruler,
+    /// O conta-gotas do balanço de branco (painel Básico).
+    Pipette,
 }
 
 impl Icone {
@@ -300,6 +302,7 @@ impl Icone {
         Icone::Scan,
         Icone::QrCode,
         Icone::Ruler,
+        Icone::Pipette,
     ];
 
     fn arquivo(self) -> &'static str {
@@ -418,6 +421,7 @@ impl Icone {
             Icone::Scan => "scan",
             Icone::QrCode => "qr-code",
             Icone::Ruler => "ruler",
+            Icone::Pipette => "pipette",
         }
     }
 }

@@ -5,6 +5,8 @@
 //! da fase é **igualdade de pixel** com o app de egui.
 
 pub mod automatico;
+/// O balanço de branco do Básico: o conta-gotas e o "Automático".
+pub mod balanco;
 /// O cache de fotos reveladas (e a chave que diz quando ele serve).
 pub mod cache;
 pub mod controles;

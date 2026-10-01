@@ -526,6 +526,21 @@ impl Revelacao {
         if self.edicao.is_some() {
             return caixa;
         }
+        // 🎞️ **Com o conta-gotas do Básico armado, o clique é dele** — e só
+        // um: ele desarma ao escolher o ponto neutro.
+        if self.estado_do_painel.conta_gotas && self.navegacao.espaco.is_none() {
+            return caixa
+                .cursor(gpui_kit::CursorStyle::Crosshair)
+                .on_scroll_wheel(
+                    cx.listener(|tela, e: &ScrollWheelEvent, _w, cx| tela.ao_rolar(e, cx)),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|tela, e: &MouseDownEvent, window, cx| {
+                        tela.conta_gotas_apertar(e, window, cx)
+                    }),
+                );
+        }
         // 🔑 **Com uma ferramenta da Revelação local, o clique é dela.** A roda
         // continua sendo do zoom, e o Espaço segurado continua sendo a mão.
         if self.local.ferramenta.is_some() && self.navegacao.espaco.is_none() {

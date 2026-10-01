@@ -5,12 +5,16 @@
 //! painéis sanfonados da aba escolhida e o rodapé que diz de que tamanho é a
 //! cópia que a tela edita.
 //!
-//! ⚠️ **Por cima dela, fora da rolagem, ficam o histograma e a curva
-//! resultante**, que o site não tem. Eles são recolhíveis (dono, 2026-09-17:
-//! *"precisam ter como recolher e o espectograma invade o botão salvar na
-//! galeria"*) e têm altura natural: o bloco de altura fixa de antes tinha mais
-//! conteúdo que altura, e o que sobrava era desenhado por cima da barra do
-//! topo.
+//! ⚠️ **Por cima dela, fora da rolagem, fica o histograma**, que o site não
+//! tem. Ele é recolhível (dono, 2026-09-17: *"precisam ter como recolher e o
+//! espectograma invade o botão salvar na galeria"*) e tem altura natural: o
+//! bloco de altura fixa de antes tinha mais conteúdo que altura, e o que
+//! sobrava era desenhado por cima da barra do topo.
+//!
+//! 🗑️ **A "Curva resultante" saiu em 2026-10-01** (dono: *"Não precisamos
+//! mais desse painel"*): a Curva de tons do Lightroom já mostra a curva, com o
+//! histograma por trás. E o "Tom automático" que morava junto do histograma
+//! virou o "Automático" do alto do Básico, onde o Lightroom o põe.
 //!
 //! # O que fica lembrado entre sessões
 //!
@@ -32,14 +36,15 @@ use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{h_flex, ActiveTheme, Disableable, Icon, Sizable};
 use gpui_kit::{
     canvas, div, prelude::*, px, relative, AnyElement, Bounds, Context, Empty, MouseButton,
-    MouseUpEvent, PathBuilder, Pixels, SharedString, StyleRefinement, Window,
+    MouseUpEvent, Pixels, SharedString, StyleRefinement, Window,
 };
 
+mod basico;
 mod curva_de_tons;
 
 pub(crate) use curva_de_tons::ModoDaCurva;
 
-use super::{Aberta, Controle, PedidoDaRevelacao, Revelacao};
+use super::{Controle, PedidoDaRevelacao, Revelacao};
 use crate::recursos::Icone;
 use crate::revelacao::controles::{self, Painel, Secao};
 use crate::revelacao::curva::{self, Canal, PONTOS_DA_CURVA};
@@ -50,9 +55,8 @@ use crate::tema;
 
 /// A chave da aba escolhida — a do site.
 const CHAVE_DA_ABA_RGB: &str = "revelacao:aba-rgb";
-/// As dos dois gráficos, que só o desktop tem.
+/// A do histograma, que só o desktop tem.
 const CHAVE_DO_HISTOGRAMA: &str = "revelacao:histograma";
-const CHAVE_DA_CURVA_RESULTANTE: &str = "revelacao:curva-resultante";
 
 /// O lado do editor de curva, no `viewBox` do site (`editor-de-curva.tsx`).
 const LADO_DA_CURVA: f32 = 260.0;
@@ -101,6 +105,12 @@ pub(super) struct EstadoDoPainel {
     pub(super) arrasto_da_roda: Option<rodas::Arrasto>,
     /// O olho apertado: a prévia sai sem esta parte da Correção de cores.
     pub(super) ver_sem: Option<super::correcao_de_cores::VerSem>,
+    /// 🎞️ O conta-gotas do Básico armado: o próximo clique na foto escolhe o
+    /// ponto neutro. Não atravessa a troca de foto.
+    pub(super) conta_gotas: bool,
+    /// O par (temperatura, colorir) que o "Automático" do EB escolheu nesta
+    /// foto — para a lista dizer "Automático" enquanto ninguém mexer nele.
+    pub(super) balanco_automatico: Option<(f32, f32)>,
 }
 
 impl Default for EstadoDoPainel {
@@ -127,6 +137,8 @@ impl Default for EstadoDoPainel {
             areas_das_rodas: Rc::new(RefCell::new(HashMap::new())),
             arrasto_da_roda: None,
             ver_sem: None,
+            conta_gotas: false,
+            balanco_automatico: None,
         }
     }
 }
@@ -214,7 +226,12 @@ struct ArrastoDoNo;
 /// "Granulado"): pequeno, apagado e no meio, como no Lightroom. Do segundo em
 /// diante, uma linha de ponta a ponta o separa do grupo de cima.
 fn titulo_do_grupo(secao: Secao, separar: bool, cx: &gpui_kit::App) -> AnyElement {
-    let rotulo = secao.rotulo();
+    titulo(secao.rotulo(), separar, cx)
+}
+
+/// O mesmo título com um nome livre — o "Tom" e o "Presença" do Básico, que
+/// não são família de controle.
+fn titulo(rotulo: &'static str, separar: bool, cx: &gpui_kit::App) -> AnyElement {
     div()
         .debug_selector(move || format!("grupo-{rotulo}"))
         .flex()
@@ -455,7 +472,16 @@ impl Revelacao {
             };
             // A Revelação local vem logo abaixo do primeiro painel (o Básico;
             // no RGB, a Exposição), como no Lightroom — recolhida por padrão.
-            for (i, painel) in paineis.iter().enumerate() {
+            // 🎞️ **O P&B toma o lugar do HSL**, como no Lightroom: com a foto
+            // em preto e branco não há cor para o HSL mexer, e o que sobra é a
+            // Mistura de preto e branco. Desligado, o P&B some.
+            let pb = self.ajustes.bw_ativo != 0.0;
+            let paineis = paineis.iter().filter(|p| match p {
+                Painel::Hsl => !pb,
+                Painel::PretoEBranco => pb,
+                _ => true,
+            });
+            for (i, painel) in paineis.enumerate() {
                 corpo.push(self.painel_sanfonado(*painel, cx));
                 if i == 0 {
                     corpo.push(self.painel_local(cx));
@@ -772,6 +798,7 @@ impl Revelacao {
         let conteudo = aberto.then(|| {
             let mut dentro: Vec<AnyElement> = Vec::new();
             match painel {
+                Painel::Basico => dentro.extend(self.painel_basico(cx)),
                 Painel::CurvaDeTons => dentro.extend(self.painel_da_curva_de_tons(cx)),
                 Painel::Tonalizacao => dentro.push(self.correcao_de_cores(cx)),
                 Painel::Hsl => {
@@ -781,8 +808,9 @@ impl Revelacao {
                 }
                 _ => {
                     // 🎞️ Painel de mais de um grupo (o Efeitos do Lightroom):
-                    // cada um com o seu título.
-                    let com_titulos = painel.secoes().len() > 1;
+                    // cada um com o seu título. O P&B tem um grupo só, e o
+                    // título dele também ("Mistura de preto e branco").
+                    let com_titulos = painel.secoes().len() > 1 || painel == Painel::PretoEBranco;
                     for (n, secao) in painel.secoes().iter().enumerate() {
                         if com_titulos {
                             dentro.push(titulo_do_grupo(*secao, n > 0, cx));
@@ -844,10 +872,14 @@ impl Revelacao {
 
     /// Os sliders de uma família, na ordem da tabela.
     ///
-    /// 🎞️ O Efeitos já vem no desenho do Lightroom, uma linha por controle
-    /// ([`Self::linha_em_linha`]); os outros painéis ainda no de duas.
+    /// 🎞️ O Efeitos, o Básico e o P&B já vêm no desenho do Lightroom, uma
+    /// linha por controle ([`Self::linha_em_linha`]); os outros painéis ainda
+    /// no de duas.
     fn controles_da_secao(&self, secao: Secao, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let em_linha = secao.painel() == Painel::Efeitos;
+        let em_linha = matches!(
+            secao.painel(),
+            Painel::Efeitos | Painel::Basico | Painel::PretoEBranco
+        );
         self.controles
             .iter()
             .enumerate()
@@ -1078,38 +1110,20 @@ impl Revelacao {
             .into_any_element()
     }
 
-    /// O histograma e a curva resultante, recolhíveis — só o desktop os tem.
+    /// O histograma, recolhível — só o desktop o tem.
     ///
     /// ⚠️ **Altura natural, e não fixa.** O bloco de 200px de antes tinha
     /// 260px de conteúdo; o excesso era desenhado por cima da barra do topo.
     fn painel_dos_graficos(&self, cx: &mut Context<Self>) -> AnyElement {
-        let estado = &self.estado_do_painel;
-        // 🚨 **Nascem recolhidos.** Eles não existem no site, e abertos ocupavam
-        // mais de meia coluna: a Revelação abria sem **um** slider à vista, e o
-        // que o operador vê na web ao abrir é o painel Básico. Quem os quer
-        // abre uma vez — a escolha fica lembrada entre sessões.
-        let com_histograma = estado.aberto(CHAVE_DO_HISTOGRAMA, false);
-        let com_curva = estado.aberto(CHAVE_DA_CURVA_RESULTANTE, false);
-
-        let histograma = com_histograma.then(|| {
+        // 🚨 **Nasce recolhido.** Ele não existe no site, e aberto ocupava
+        // espaço que é do Básico. Quem o quer abre uma vez — a escolha fica
+        // lembrada entre sessões.
+        let aberto = self.estado_do_painel.aberto(CHAVE_DO_HISTOGRAMA, false);
+        let histograma = aberto.then(|| {
             div()
-                .flex()
-                .flex_col()
-                .gap(px(6.))
                 .px(px(12.))
                 .pb(px(8.))
                 .child(self.histograma(cx))
-                // O "Auto" mora aqui, junto da medida que ele usa: o
-                // Básico do site não tem esse botão, e ele ficou no
-                // lugar que só o desktop tem.
-                .child(self.botao_do_automatico(cx))
-                .into_any_element()
-        });
-        let curva = com_curva.then(|| {
-            div()
-                .px(px(12.))
-                .pb(px(8.))
-                .child(self.curva_de_tons(cx))
                 .into_any_element()
         });
 
@@ -1129,33 +1143,7 @@ impl Revelacao {
                 histograma,
                 cx,
             ))
-            .child(self.sanfona(
-                "Curva resultante",
-                CHAVE_DA_CURVA_RESULTANTE.to_string(),
-                false,
-                None,
-                false,
-                curva,
-                cx,
-            ))
             .into_any_element()
-    }
-
-    /// O botão do tom automático.
-    ///
-    /// **Desligado sem foto crua**: sem pixels no cache não há histograma.
-    fn botao_do_automatico(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let pronto = matches!(self.aberta.as_ref(), Some(Aberta { bruta: Some(_), .. }))
-            && self.pode_revelar();
-
-        Button::new("tom-automatico")
-            .label("Tom automático")
-            .xsmall()
-            .w_full()
-            .disabled(!pronto)
-            .on_click(cx.listener(|tela, _ev, window, cx| {
-                tela.tom_automatico(window, cx);
-            }))
     }
 
     /// O histograma, desenhado com `paint_quad` dentro de um `canvas`.
@@ -1200,55 +1188,6 @@ impl Revelacao {
                                 cor,
                             ));
                         }
-                    }
-                },
-            )
-            .size_full(),
-        )
-    }
-
-    /// A curva resultante: a diagonal pontilhada e a curva de agora, por cima.
-    fn curva_de_tons(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        const ALTURA: f32 = 120.0;
-
-        let pontos = curva::curva(&self.ajustes);
-        let fundo = cx.theme().background;
-        let borda = cx.theme().border;
-        let linha = cx.theme().primary;
-
-        div().h(px(ALTURA)).w_full().flex_none().child(
-            canvas(
-                |_bounds, _window, _cx| {},
-                move |bounds, _prepaint, window, _cx| {
-                    window.paint_quad(gpui_kit::fill(bounds, fundo));
-
-                    let x0 = f32::from(bounds.origin.x);
-                    let y0 = f32::from(bounds.origin.y);
-                    let largura = f32::from(bounds.size.width);
-                    let altura = f32::from(bounds.size.height);
-                    let ponto = |t: f32, v: f32| {
-                        gpui_kit::point(px(x0 + t * largura), px(y0 + (1.0 - v) * altura))
-                    };
-
-                    let mut diagonal = PathBuilder::stroke(px(1.)).dash_array(&[px(2.), px(3.)]);
-                    diagonal.move_to(ponto(0.0, 0.0));
-                    diagonal.line_to(ponto(1.0, 1.0));
-                    if let Ok(caminho) = diagonal.build() {
-                        window.paint_path(caminho, borda);
-                    }
-
-                    let mut traco = PathBuilder::stroke(px(1.5));
-                    let ultimo = (pontos.len() - 1) as f32;
-                    for (i, v) in pontos.iter().enumerate() {
-                        let p = ponto(i as f32 / ultimo, *v);
-                        if i == 0 {
-                            traco.move_to(p);
-                        } else {
-                            traco.line_to(p);
-                        }
-                    }
-                    if let Ok(caminho) = traco.build() {
-                        window.paint_path(caminho, linha);
                     }
                 },
             )

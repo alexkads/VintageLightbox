@@ -6185,6 +6185,14 @@ impl Aplicativo {
                 .update(cx, |tela, cx| tela.cancelar_corte(cx));
             return;
         }
+        // 🎞️ O conta-gotas do Básico armado: o `Esc` só o desarma.
+        if self.tela == Tela::Revelacao
+            && self
+                .revelacao
+                .update(cx, |tela, cx| tela.esc_do_conta_gotas(cx))
+        {
+            return;
+        }
         // Na Revelação local, o `Esc` larga primeiro o laço em curso, depois a
         // seleção, depois a ferramenta — e só então sai da Revelação.
         if self.tela == Tela::Revelacao && self.revelacao.update(cx, |tela, cx| tela.esc_local(cx))

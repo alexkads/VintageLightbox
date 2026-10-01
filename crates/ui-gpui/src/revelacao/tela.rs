@@ -1392,6 +1392,9 @@ impl Revelacao {
         // sai com tudo, e a miniatura da que sai também.
         self.estado_do_painel.ver_sem = None;
         self.estado_do_painel.arrasto_da_roda = None;
+        // O conta-gotas e o "Automático" do EB são desta foto.
+        self.estado_do_painel.conta_gotas = false;
+        self.estado_do_painel.balanco_automatico = None;
         // E a miniatura da que sai, para a grade não mostrar a foto sem efeito.
         self.guardar_a_revelada_no_cache();
 
@@ -6254,9 +6257,10 @@ mod testes {
                 tela.aplicar_preset(&preset, window, cx);
 
                 assert_eq!(tela.ajustes().temperature, 5.0);
+                // A barra mostra a escala do Lightroom: +5 no motor é +50.
                 assert_eq!(
                     tela.controles[2].estado.read(cx).value().start(),
-                    5.0,
+                    50.0,
                     "o terceiro controle é a temperatura — a barra tem de acompanhar"
                 );
                 assert!(tela.pode_desfazer(), "o preset é um passo de histórico");

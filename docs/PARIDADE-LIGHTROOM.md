@@ -165,6 +165,38 @@ B&W 01, B&W 10) — o preset só nomeia o perfil; a tabela de cor 3D está no ar
 não tem tabela —, e 5 usam **máscaras radiais** com mais que exposição. A lista de cada uma está no
 campo `avisos` do `lightroom.json`.
 
+### O Básico e o P&B do Lightroom (1/out/2026)
+
+*"Eu quero o painel Básico com essa configuração e falta ativar o P&B, pois isso é o maior problema
+dos presets LRs"* (dono, 1/out, com o print do Básico e do P&B do Lightroom em português).
+
+🚨 **O defeito dos presets P&B**: o tradutor transformava `ConvertToGrayscale` (e o perfil B&W) em
+`bw_ativo = 1` **e** `saturation = −1`. O motor tira a saturação antes da Mistura de preto e branco,
+então a foto chegava cinza ao mixer e os `GrayMixer*` dos 7 presets P&B da pasta LRs não mudavam
+pixel nenhum. Agora o P&B é só `bw_ativo`, e com ele ligado o motor **não aplica** Saturação,
+Vibração e HSL (guarda o valor, como o Lightroom). Corrigido no motor (desktop e wasm do site), nos
+dois tradutores (`lightroom.rs` e `lightroom.ts`) e nos dois JSON da pasta LRs. Teste que falha no
+motor antigo: `no_pb_o_mixer_age_e_a_cor_nao`.
+
+**O Básico no desktop** (`tela/painel/basico.rs`): **Automático** e **P&B** no alto; **Perfil** Cor /
+Monocromático (o mesmo interruptor); o **conta-gotas** e o **EB** (Como fotografado, Automático,
+Personalizado); Temperatura e **Colorir**; **Tom** (Exposição, Contraste; Realces, Sombras, Brancos,
+Pretos) e **Presença** (Textura, Claridade, **Desembaçar**; **Vibração**, Saturação — apagadas no P&B).
+Os números são os do Lightroom: Contraste, Temperatura, Colorir, Claridade, Vibração e Saturação de
+−100 a 100 (o campo do motor continua na escala dele). Com o P&B ligado o painel HSL dá lugar ao
+**P&B** (Mistura de preto e branco: Vermelho, Laranja, Amarelo, Verde, Azul-piscina, Azul, Púrpura,
+Magenta). O "Tom automático" saiu de junto do histograma, e a **"Curva resultante" saiu** (a Curva de
+tons já mostra a curva). O conta-gotas e o EB Automático resolvem ao contrário a conta da temperatura
+do shader (`revelacao/balanco.rs`); o Automático é "mundo cinza".
+
+Conferido no app por roteiro: o clique no P&B deixou a foto em preto e branco, trocou o HSL pelo P&B e
+apagou Vibração e Saturação; Laranja +100 clareou a pele de 155 para 184; o conta-gotas numa moldura
+branca deu Temperatura −7 / Colorir +1 e desarmou.
+
+⚠️ **Fora, de propósito**: o HDR (o motor não revela em faixa alta), o navegador de perfis (os
+criativos da Adobe são tabelas que não temos) e o "Automático" da Mistura de P&B. **No site** o motor e
+os presets já estão certos, mas o painel Básico ainda é o de antes.
+
 ### O que mais falta na Revelação, comparado ao Lightroom
 
 | | |

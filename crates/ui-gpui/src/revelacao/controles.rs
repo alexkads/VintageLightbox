@@ -41,6 +41,10 @@ use super::processador::Ajustes;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Secao {
     Basico,
+    /// 🎞️ O tratamento em P&B (`bw_ativo`): desenhado no alto do Básico,
+    /// como no Lightroom — o botão "P&B" e o Perfil —, e sincronizado com a
+    /// Mistura de preto e branco, como no site.
+    Tratamento,
     CurvaDeTons,
     /// Os três pinos da barra de divisão da Curva de tons. Não viram slider:
     /// quem os desenha é a barra (`tela/painel.rs`).
@@ -66,8 +70,9 @@ pub enum Secao {
 }
 
 impl Secao {
-    pub const TODAS: [Secao; 19] = [
+    pub const TODAS: [Secao; 20] = [
         Secao::Basico,
+        Secao::Tratamento,
         Secao::CurvaDeTons,
         Secao::RegioesDaCurva,
         Secao::CurvaPorPonto,
@@ -92,13 +97,15 @@ impl Secao {
     pub fn rotulo(&self) -> &'static str {
         match self {
             Secao::Basico => "Básico",
+            Secao::Tratamento => "Tratamento",
             Secao::CurvaDeTons => "Curva de tons",
             Secao::RegioesDaCurva => "Divisão das regiões",
             Secao::CurvaPorPonto => "Curva por ponto",
             Secao::HslCor => "HSL / cor",
             Secao::HslLuminancia => "HSL / luminância",
             Secao::HslMatiz => "HSL / matiz",
-            Secao::PretoEBranco => "Preto e branco",
+            // 🎞️ O título do grupo, como no Lightroom.
+            Secao::PretoEBranco => "Mistura de preto e branco",
             Secao::Detalhe => "Detalhe",
             Secao::Lente => "Lente",
             Secao::Calibracao => "Calibração",
@@ -116,7 +123,7 @@ impl Secao {
     /// Em que painel ela é desenhada.
     pub fn painel(&self) -> Painel {
         match self {
-            Secao::Basico => Painel::Basico,
+            Secao::Basico | Secao::Tratamento => Painel::Basico,
             Secao::CurvaDeTons | Secao::RegioesDaCurva | Secao::CurvaPorPonto => {
                 Painel::CurvaDeTons
             }
@@ -211,7 +218,8 @@ impl Painel {
             Painel::Basico => "Básico",
             Painel::CurvaDeTons => "Curva de tons",
             Painel::Hsl => "HSL",
-            Painel::PretoEBranco => "Preto e branco",
+            // 🎞️ O "P & B" do Lightroom, que toma o lugar do HSL.
+            Painel::PretoEBranco => "P&B",
             Painel::Detalhe => "Detalhe",
             Painel::Lente => "Lente",
             Painel::Calibracao => "Calibração",
@@ -232,6 +240,8 @@ impl Painel {
             // 🔑 A chave é a de antes de o painel virar "Correção de cores"
             // (2026-09-30): trocar o nome não pode fechar o painel de ninguém.
             Painel::Tonalizacao => "revelacao:Tonalização".to_string(),
+            // O mesmo para o "Preto e branco", que virou "P&B" em 2026-10-01.
+            Painel::PretoEBranco => "revelacao:Preto e branco".to_string(),
             outro => format!("revelacao:{}", outro.rotulo()),
         }
     }
@@ -245,7 +255,7 @@ impl Painel {
     /// por isso que ele tem abas.
     pub fn secoes(&self) -> &'static [Secao] {
         match self {
-            Painel::Basico => &[Secao::Basico],
+            Painel::Basico => &[Secao::Basico, Secao::Tratamento],
             // 🎞️ **Um painel só, como no Lightroom** (dono, 30/09): a
             // paramétrica, os pinos da divisão e a curva por ponto. No site
             // ainda são dois.
@@ -462,13 +472,6 @@ macro_rules! cem {
     };
 }
 
-/// A faixa −1..1 com duas casas — o `unitario` do site.
-macro_rules! unitario {
-    ($rotulo:literal, $campo:ident) => {
-        def!(Secao::Basico, $rotulo, $campo, -1.0, 1.0, 2, true)
-    };
-}
-
 /// Uma escolha de cor na roda inteira (0–360°) — o `matiz` do site.
 ///
 /// 🔑 **Não é o desvio do HSL.** Os oito matizes do HSL vão de −180 a 180
@@ -563,6 +566,31 @@ macro_rules! interruptor {
     };
 }
 
+/// Um controle do Básico na escala do Lightroom (−100..100, inteiro), sobre um
+/// campo que o motor guarda noutra escala: `ler` e `aplicar` fazem a conta.
+macro_rules! lightroom {
+    ($rotulo:literal, $campo:ident, $ler:expr, $aplicar:expr) => {
+        Definicao {
+            ler: $ler,
+            aplicar: $aplicar,
+            ..def!(S::Basico, $rotulo, $campo, -100.0, 100.0, 0, true)
+        }
+    };
+}
+
+/// Uma faixa da Mistura de preto e branco, com a cor da faixa no trilho.
+macro_rules! mistura {
+    ($rotulo:literal, $campo:ident, $faixa:expr) => {
+        cem!(S::PretoEBranco, $rotulo, $campo)
+            .com_trilho(Trilho::HslLuminancia(MATIZ_DA_FAIXA[$faixa]))
+    };
+}
+
+/// A foto não está em P&B — quando Vibração e Saturação agem.
+fn colorida(a: &Ajustes) -> bool {
+    a.bw_ativo == 0.0
+}
+
 /// As oito cores de uma família do HSL.
 macro_rules! hsl {
     ($secao:expr, $trilho:path, $min:expr, $max:expr, $r:ident, $o:ident, $y:ident, $g:ident, $a:ident, $b:ident, $p:ident, $m:ident) => {
@@ -644,22 +672,59 @@ use Secao as S;
 /// (`controles[0]` é a exposição).
 pub const CONTROLES: &[Definicao] = &[
     // ---------------------------------------------------------------- Básico
+    // 🎞️ **Os nomes e os números do painel Básico do Lightroom em português**
+    // (dono, 2026-10-01, com o print do painel). O campo do motor guarda a
+    // escala dele — contraste é multiplicador, temperatura vai a ±10 —, e a
+    // linha mostra a do Lightroom: um preset que diz "Contraste +7" aparece
+    // aqui "+7", e não "1,07". Quem desenha a ordem e os grupos (Tom,
+    // Presença) é `tela/painel/basico.rs`.
     def!(S::Basico, "Exposição", exposure, -5.0, 5.0, 2, true),
-    def!(S::Basico, "Contraste", contrast, 0.0, 2.0, 2, false),
-    def!(S::Basico, "Temperatura", temperature, -10.0, 10.0, 1, true)
-        .com_trilho(Trilho::Temperatura),
-    def!(S::Basico, "Matiz", tint, -10.0, 10.0, 1, true).com_trilho(Trilho::VerdeMagenta),
-    cem!(S::Basico, "Altas luzes", highlights),
+    lightroom!(
+        "Contraste",
+        contrast,
+        |a| (a.contrast - 1.0) * 100.0,
+        |a, v| a.contrast = 1.0 + v / 100.0
+    ),
+    lightroom!(
+        "Temperatura",
+        temperature,
+        |a| a.temperature * 10.0,
+        |a, v| a.temperature = v / 10.0
+    )
+    .com_trilho(Trilho::Temperatura),
+    lightroom!("Colorir", tint, |a| a.tint * 10.0, |a, v| a.tint = v / 10.0)
+        .com_trilho(Trilho::VerdeMagenta),
+    cem!(S::Basico, "Realces", highlights),
     cem!(S::Basico, "Sombras", shadows),
     cem!(S::Basico, "Brancos", whites),
     cem!(S::Basico, "Pretos", blacks),
     // 🚨 **Até 2026-09-30 a Claridade se chamava "Textura" aqui** (e era uma
     // saturação no shader). Agora são as três do Lightroom, na ordem dele.
     cem!(S::Basico, "Textura", texture),
-    unitario!("Claridade", clarity),
-    cem!(S::Basico, "Remover névoa", dehaze),
-    unitario!("Intensidade", vibrance).com_trilho(Trilho::Saturacao),
-    unitario!("Saturação", saturation).com_trilho(Trilho::Saturacao),
+    lightroom!("Claridade", clarity, |a| a.clarity * 100.0, |a, v| a
+        .clarity =
+        v / 100.0),
+    cem!(S::Basico, "Desembaçar", dehaze),
+    // No P&B elas guardam o valor e não agem (o shader as pula), e aparecem
+    // apagadas — como no Lightroom.
+    lightroom!("Vibração", vibrance, |a| a.vibrance * 100.0, |a, v| a
+        .vibrance =
+        v / 100.0)
+    .com_trilho(Trilho::Saturacao)
+    .ativo_quando(colorida),
+    lightroom!(
+        "Saturação",
+        saturation,
+        |a| a.saturation * 100.0,
+        |a, v| a.saturation = v / 100.0
+    )
+    .com_trilho(Trilho::Saturacao)
+    .ativo_quando(colorida),
+    // 🎞️ **O "P&B" do alto do Básico**, e o Perfil "Monocromático": no
+    // Lightroom o tratamento em preto e branco é do Básico, e o painel HSL
+    // vira a Mistura de preto e branco enquanto ele está ligado. Não vira
+    // slider: quem o desenha são o botão e a lista do Perfil.
+    interruptor!(S::Tratamento, "P&B", bw_ativo),
     // --------------------------------------------------------- Curva de tons
     cem!(S::CurvaDeTons, "Sombras", tone_curve_shadows),
     cem!(S::CurvaDeTons, "Escuros", tone_curve_darks),
@@ -745,17 +810,17 @@ pub const CONTROLES: &[Definicao] = &[
     HSL_MATIZ[6],
     HSL_MATIZ[7],
     // -------------------------------------------------------- Preto e branco
-    // 🔑 O `bw_ativo` é o interruptor, e os oito dormem sem ele — um preset de
-    // cor que traga `GrayMixer` dentro não dessatura a foto sozinho.
-    interruptor!(S::PretoEBranco, "Converter para P&B", bw_ativo),
-    cem!(S::PretoEBranco, "Vermelhos", bw_red),
-    cem!(S::PretoEBranco, "Laranjas", bw_orange),
-    cem!(S::PretoEBranco, "Amarelos", bw_yellow),
-    cem!(S::PretoEBranco, "Verdes", bw_green),
-    cem!(S::PretoEBranco, "Águas", bw_aqua),
-    cem!(S::PretoEBranco, "Azuis", bw_blue),
-    cem!(S::PretoEBranco, "Roxos", bw_purple),
-    cem!(S::PretoEBranco, "Magentas", bw_magenta),
+    // 🔑 Os oito dormem sem o `bw_ativo` (o "P&B" do Básico) — um preset de
+    // cor que traga `GrayMixer` dentro não dessatura a foto sozinho. Os nomes
+    // são os da Mistura de preto e branco do Lightroom em português.
+    mistura!("Vermelho", bw_red, 0),
+    mistura!("Laranja", bw_orange, 1),
+    mistura!("Amarelo", bw_yellow, 2),
+    mistura!("Verde", bw_green, 3),
+    mistura!("Azul-piscina", bw_aqua, 4),
+    mistura!("Azul", bw_blue, 5),
+    mistura!("Púrpura", bw_purple, 6),
+    mistura!("Magenta", bw_magenta, 7),
     // --------------------------------------------------------------- Detalhe
     // A ordem do Lightroom: Nitidez (quantidade, raio, detalhe, máscara) e
     // Redução de ruído (luminância, detalhe, contraste; cor, detalhe,
@@ -1390,17 +1455,26 @@ pub fn marca_da_aba(ajustes: &Ajustes, salvo: &Ajustes, rgb: bool) -> Option<Mar
 /// por um nome escrito à mão.
 #[cfg(test)]
 pub(crate) fn campo_do_controle(def: &Definicao) -> &'static str {
-    const BASE: f32 = 10_000.0;
-    let vetor: Vec<f32> = (0..Ajustes::NOMES.len()).map(|i| BASE + i as f32).collect();
-    let ajustes = Ajustes::de_vetor(&vetor).expect("o vetor tem o tamanho de `NOMES`");
-    let lido = (def.ler)(&ajustes);
-    let posicao = (lido - BASE) as usize;
+    // 🔑 **Pelo campo que muda a leitura**, e não pelo número lido: os do
+    // Básico mostram a escala do Lightroom (contraste +7 é o campo 1,07), e
+    // o número que eles devolvem não é o do campo.
+    let neutro = Ajustes::default().como_vetor();
+    let base = (def.ler)(&Ajustes::default());
+    let lidos: Vec<usize> = (0..Ajustes::NOMES.len())
+        .filter(|&i| {
+            let mut vetor = neutro.to_vec();
+            vetor[i] += 0.5;
+            let ajustes = Ajustes::de_vetor(&vetor).expect("o vetor tem o tamanho de `NOMES`");
+            (def.ler)(&ajustes) != base
+        })
+        .collect();
     assert!(
-        vetor.get(posicao) == Some(&lido),
-        "`{}` não lê campo nenhum do `Ajustes`",
-        def.rotulo
+        lidos.len() == 1,
+        "`{}` não lê campo nenhum do `Ajustes` (ou lê {})",
+        def.rotulo,
+        lidos.len()
     );
-    Ajustes::NOMES[posicao]
+    Ajustes::NOMES[lidos[0]]
 }
 
 #[cfg(test)]
@@ -1483,8 +1557,10 @@ mod passo_dos_controles {
         assert_eq!(exposicao.formatar(0.0), "0,00");
         assert_eq!(exposicao.formatar(1.5), "+1,50");
         assert_eq!(exposicao.formatar(-0.3), "-0,30");
+        // 🎞️ O contraste na escala do Lightroom: inteiro, com sinal.
         let contraste = &CONTROLES[1];
-        assert_eq!(contraste.formatar(1.3), "1,30");
+        assert_eq!(contraste.formatar(7.0), "+7");
+        assert_eq!(contraste.formatar(-12.0), "-12");
     }
 }
 
@@ -1530,9 +1606,10 @@ mod testes {
 
             for (j, outro) in CONTROLES.iter().enumerate() {
                 if i == j {
-                    assert_eq!(
-                        (def.ler)(&ajustes),
-                        marca,
+                    // Os do Básico convertem para a escala do motor e
+                    // voltam: o f32 erra na sétima casa.
+                    assert!(
+                        ((def.ler)(&ajustes) - marca).abs() < 1e-3,
                         "`{}` não lê de volta o que escreveu",
                         def.rotulo
                     );
@@ -1699,8 +1776,8 @@ mod trilho_dos_controles {
             def(Secao::Basico, "Temperatura").trilho,
             Trilho::Temperatura
         );
-        assert_eq!(def(Secao::Basico, "Matiz").trilho, Trilho::VerdeMagenta);
-        assert_eq!(def(Secao::Basico, "Intensidade").trilho, Trilho::Saturacao);
+        assert_eq!(def(Secao::Basico, "Colorir").trilho, Trilho::VerdeMagenta);
+        assert_eq!(def(Secao::Basico, "Vibração").trilho, Trilho::Saturacao);
         assert_eq!(def(Secao::Basico, "Saturação").trilho, Trilho::Saturacao);
     }
 
@@ -1760,7 +1837,7 @@ mod trilho_dos_controles {
         for rotulo in [
             "Exposição",
             "Contraste",
-            "Altas luzes",
+            "Realces",
             "Sombras",
             "Brancos",
             "Pretos",
@@ -1853,5 +1930,108 @@ mod efeitos_do_lightroom {
         };
         assert!(!acesos(&tinta, Secao::Vinheta).contains(&"Realces"));
         assert!(acesos(&tinta, Secao::Vinheta).contains(&"Difusão"));
+    }
+}
+
+/// 🎞️ O Básico e a Mistura de preto e branco do Lightroom em português.
+#[cfg(test)]
+mod basico_do_lightroom {
+    use super::*;
+
+    fn controle(secao: Secao, rotulo: &str) -> &'static Definicao {
+        CONTROLES
+            .iter()
+            .find(|d| d.secao == secao && d.rotulo == rotulo)
+            .unwrap_or_else(|| panic!("`{rotulo}` não existe"))
+    }
+
+    #[test]
+    fn os_nomes_sao_os_do_lightroom() {
+        let basico: Vec<_> = CONTROLES
+            .iter()
+            .filter(|d| d.secao == Secao::Basico)
+            .map(|d| d.rotulo)
+            .collect();
+        for rotulo in [
+            "Temperatura",
+            "Colorir",
+            "Exposição",
+            "Contraste",
+            "Realces",
+            "Sombras",
+            "Brancos",
+            "Pretos",
+            "Textura",
+            "Claridade",
+            "Desembaçar",
+            "Vibração",
+            "Saturação",
+        ] {
+            assert!(basico.contains(&rotulo), "o Básico não tem `{rotulo}`");
+        }
+        assert_eq!(
+            controle(Secao::Tratamento, "P&B").secao.painel(),
+            Painel::Basico
+        );
+        let mistura: Vec<_> = CONTROLES
+            .iter()
+            .filter(|d| d.secao == Secao::PretoEBranco)
+            .map(|d| d.rotulo)
+            .collect();
+        assert_eq!(
+            mistura,
+            [
+                "Vermelho",
+                "Laranja",
+                "Amarelo",
+                "Verde",
+                "Azul-piscina",
+                "Azul",
+                "Púrpura",
+                "Magenta"
+            ]
+        );
+    }
+
+    /// Os números do print do dono: Temperatura +8, Colorir −23, Contraste
+    /// +7, Vibração −14, Saturação +1 — na escala do Lightroom, sobre os
+    /// campos do motor.
+    #[test]
+    fn os_numeros_sao_os_do_lightroom() {
+        let mut a = Ajustes::default();
+        for (rotulo, valor) in [
+            ("Temperatura", 8.0),
+            ("Colorir", -23.0),
+            ("Contraste", 7.0),
+            ("Claridade", 25.0),
+            ("Vibração", -14.0),
+            ("Saturação", 1.0),
+        ] {
+            let d = controle(Secao::Basico, rotulo);
+            (d.aplicar)(&mut a, valor);
+            assert!(((d.ler)(&a) - valor).abs() < 1e-3, "`{rotulo}`");
+            assert_eq!(
+                d.formatar((d.ler)(&a)),
+                format!("{valor:+}").replace("+-", "-")
+            );
+        }
+        assert!((a.temperature - 0.8).abs() < 1e-6);
+        assert!((a.tint + 2.3).abs() < 1e-6);
+        assert!((a.contrast - 1.07).abs() < 1e-6);
+        assert!((a.clarity - 0.25).abs() < 1e-6);
+        assert!((a.vibrance + 0.14).abs() < 1e-6);
+        assert!((a.saturation - 0.01).abs() < 1e-6);
+    }
+
+    /// No P&B a Vibração e a Saturação ficam apagadas (o motor as pula).
+    #[test]
+    fn no_pb_vibracao_e_saturacao_se_apagam() {
+        let mut a = Ajustes::default();
+        assert!(controle(Secao::Basico, "Vibração").age(&a));
+        assert!(controle(Secao::Basico, "Saturação").age(&a));
+        a.bw_ativo = 1.0;
+        assert!(!controle(Secao::Basico, "Vibração").age(&a));
+        assert!(!controle(Secao::Basico, "Saturação").age(&a));
+        assert!(controle(Secao::Basico, "Exposição").age(&a));
     }
 }
