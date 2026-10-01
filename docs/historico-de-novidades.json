@@ -1,5 +1,16 @@
 [
   {
+    "versao": "0.1.63",
+    "data": "2026-10-01",
+    "titulo": "Nome comprido não passa mais da borda do painel do bot.",
+    "importante": false,
+    "novidades": [
+      "No painel \"Bot da sessão\", o nome do cliente corta com reticências quando é comprido, e o canal (WhatsApp) fica sempre inteiro dentro do painel. Passe o mouse no nome para lê-lo inteiro.",
+      "O botão para usar o nome como título da sessão agora diz só \"Usar como título\": o nome já está na linha de cima."
+    ],
+    "por_que_atualizar": "O painel do bot fica arrumado com qualquer nome de cliente."
+  },
+  {
     "versao": "0.1.62",
     "data": "2026-10-01",
     "titulo": "As Novidades da versão agora mostram o histórico de todas as versões.",
