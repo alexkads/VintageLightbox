@@ -30,7 +30,7 @@ use gpui_kit::{
 };
 
 use crate::revelacao::controles::Trilho;
-use crate::tema;
+use crate::tema::{self, FormaDoSlider};
 
 /// Um slider horizontal com o desenho do tema.
 #[derive(IntoElement)]
@@ -132,10 +132,15 @@ pub fn paradas(trilho: Trilho) -> Vec<Hsla> {
 
 impl RenderOnce for SliderDaCasa {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let (cor_do_trilho, preenchimento, punho, fino) = tema::cores::slider();
-        // As medidas do `Slider` do kit (`h_1p5`, `size_4`), ou as do
-        // Lightroom: barra de 4 px e punho de 11.
-        let (barra, lado) = if fino { (4., 11.) } else { (6., 16.) };
+        let (cor_do_trilho, preenchimento, punho, forma) = tema::cores::slider();
+        // As medidas do `Slider` do kit (`h_1p5`, `size_4`), as do Lightroom
+        // (barra de 4 px e punho de 11) ou as do macOS (barra de 4 e punho de
+        // 18).
+        let (barra, lado) = match forma {
+            FormaDoSlider::Kit => (6., 16.),
+            FormaDoSlider::Fino => (4., 11.),
+            FormaDoSlider::Mac => (4., 18.),
+        };
         let estado = self.estado.read(cx);
         let punho_em = estado.percentage().end.clamp(0., 1.);
         let origem = self
@@ -188,10 +193,11 @@ impl RenderOnce for SliderDaCasa {
             ));
         }
 
-        let borda_do_punho = if fino {
-            gpui_kit::rgb(0x111111).into()
-        } else {
-            preenchimento.opacity(0.5)
+        let borda_do_punho = match forma {
+            FormaDoSlider::Fino => gpui_kit::rgb(0x111111).into(),
+            // 🍎 O fio cinza em volta do punho branco do macOS.
+            FormaDoSlider::Mac => gpui_kit::black().opacity(0.14),
+            FormaDoSlider::Kit => preenchimento.opacity(0.5),
         };
         let anel = cx.theme().ring;
         let punho = SliderThumb::new(&self.estado)
@@ -205,6 +211,10 @@ impl RenderOnce for SliderDaCasa {
             .bg(esmaecer(punho))
             .border_1()
             .border_color(esmaecer(borda_do_punho))
+            // ⚠️ Uma sombra só, também no macOS: a `shadow_md` (duas, com
+            // desfoque) em cada punho da coluna levou a seta na tira de
+            // 10.000 de ~20 para 30–60 ms em debug (`estresse_a_tira_com_dez_mil_fotos`,
+            // 30/09), três de três contra a base.
             .shadow_sm()
             .when(!self.desligado, |p| p.hover(move |p| p.border_color(anel)));
 

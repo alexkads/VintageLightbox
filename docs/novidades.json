@@ -1,11 +1,12 @@
 {
-  "versao": "0.1.58",
-  "titulo": "O painel Efeitos da Revelação no desenho do Lightroom.",
+  "versao": "0.1.59",
+  "titulo": "Os temas Claro e Escuro agora têm a cara do macOS.",
   "importante": false,
   "novidades": [
-    "Efeitos em dois grupos, como no Lightroom: Vinheta de corte posterior (Estilo, Intensidade, Ponto médio, Arredondamento, Difusão e Realces) e Granulado (Intensidade, Tamanho e Aspereza).",
-    "Cada controle numa linha só: o nome, a barra e o valor. O Estilo da vinheta é escolhido numa lista: Prioridade de realces, Prioridade de cores ou Sobreposição de tinta.",
-    "O que não faz efeito fica apagado: os ajustes da vinheta com a Intensidade em 0, os Realces ao clarear ou na Sobreposição de tinta, e o Tamanho e a Aspereza com o grão em 0."
+    "Claro, Escuro e Sistema ganharam o visual do macOS: fundo branco (ou grafite no escuro), barra lateral em cinza, os cinzas da Apple e um azul só nos botões e no que está escolhido.",
+    "A barra de título da janela acompanha o tema: no Claro ela fica clara mesmo com o computador no modo escuro, e no Escuro fica escura.",
+    "Os controles deslizantes da Revelação têm o formato do Mac: barra fina e o botão branco redondo.",
+    "A foto escolhida na tira de baixo fica marcada na cor do tema."
   ],
-  "por_que_atualizar": "Para fazer a vinheta e o grão como no Lightroom, sem procurar os controles."
+  "por_que_atualizar": "O app fica com o visual do sistema, mais limpo e confortável no dia a dia."
 }
