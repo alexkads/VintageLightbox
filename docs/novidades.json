@@ -1,12 +1,10 @@
 {
-  "versao": "0.1.62",
-  "titulo": "As Novidades da versão agora mostram o histórico de todas as versões.",
+  "versao": "0.1.63",
+  "titulo": "Nome comprido não passa mais da borda do painel do bot.",
   "importante": false,
   "novidades": [
-    "O quadro \"Novidades da versão\" ganhou a lista de versões à esquerda, com a data de cada uma. Clique numa versão para ler o que ela trouxe.",
-    "Os botões \"Mais recente\" e \"Mais antiga\", embaixo, andam uma versão de cada vez.",
-    "A versão instalada vem marcada como \"Instalada\". Quando há atualização, as versões que ela traz aparecem como \"Nova\", inclusive as do meio, para quem pulou alguma.",
-    "Para abrir: clique na versão, no canto de baixo à esquerda, ou em \"Ver novidades\" quando aparecer uma atualização."
+    "No painel \"Bot da sessão\", o nome do cliente corta com reticências quando é comprido, e o canal (WhatsApp) fica sempre inteiro dentro do painel. Passe o mouse no nome para lê-lo inteiro.",
+    "O botão para usar o nome como título da sessão agora diz só \"Usar como título\": o nome já está na linha de cima."
   ],
-  "por_que_atualizar": "Dá para ver tudo o que mudou desde a versão que você tinha, e não só a última."
+  "por_que_atualizar": "O painel do bot fica arrumado com qualquer nome de cliente."
 }

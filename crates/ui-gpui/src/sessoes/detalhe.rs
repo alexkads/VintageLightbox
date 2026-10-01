@@ -4339,10 +4339,31 @@ impl Detalhe {
                                 gpui_kit::rgb(0xd97706)
                             }),
                         )
-                        .child(div().text_xs().child(quem_e(c)))
-                        .child(div().flex_1())
+                        // 🔑 O nome corta com reticências (o inteiro no
+                        // tooltip) e o canal não encolhe: nome comprido não
+                        // vaza do painel.
+                        .child({
+                            let quem = quem_e(c);
+                            div()
+                                .id(("painel-do-bot-cliente", i))
+                                .debug_selector(move || format!("painel-do-bot-cliente-{i}"))
+                                .flex_1()
+                                .min_w(px(0.))
+                                .truncate()
+                                .text_xs()
+                                .tooltip({
+                                    let quem = quem.clone();
+                                    move |window, cx| {
+                                        gpui_kit::component::tooltip::Tooltip::new(quem.clone())
+                                            .build(window, cx)
+                                    }
+                                })
+                                .child(quem)
+                        })
                         .child(
                             div()
+                                .debug_selector(move || format!("painel-do-bot-canal-{i}"))
+                                .flex_none()
                                 .text_xs()
                                 .text_color(fraco)
                                 .child(nome_do_canal(&c.canal)),
@@ -4360,7 +4381,9 @@ impl Detalhe {
                         div().pl(px(15.)).child(
                             crate::estilo::botao_fantasma(format!("qr-titulo-{i}"), cx)
                                 .xsmall()
-                                .label(format!("Usar \"{nome}\" como título"))
+                                // O nome já está na linha de cima: repeti-lo
+                                // aqui fazia o botão vazar do painel.
+                                .label("Usar como título")
                                 .on_click(cx.listener(move |tela, _, _, cx| {
                                     tela.usar_como_titulo(nome.clone(), cx)
                                 })),
@@ -4404,6 +4427,7 @@ impl Detalhe {
             gpui_kit::deferred(
                 div()
                     .id("painel-do-bot")
+                    .debug_selector(|| "painel-do-bot".into())
                     .occlude()
                     .absolute()
                     .right(px(direita))
@@ -9345,6 +9369,49 @@ mod testes {
             pedidos.lock().unwrap().last().unwrap(),
             "tela: RF-ABC234 Conversando"
         );
+    }
+
+    /// 📸 Nome comprido não vaza do painel do bot (dono, 01/10/2026: print
+    /// com "Lucicleide Ferreira da Silva" e o "WhatsApp" passando da borda).
+    /// O nome corta com reticências e o canal fica inteiro, dentro do painel.
+    #[gpui_kit::test]
+    fn o_nome_comprido_nao_vaza_do_painel_do_bot(cx: &mut TestAppContext) {
+        let publicador = publicador_com(vec![], false);
+        publicador.responder_json(
+            crate::sessoes::qr_do_bot::PEDIDO_DA_SITUACAO,
+            Ok(situacao_do_bot(serde_json::json!([{
+                "canal": "whatsapp", "nome": "Lucicleide",
+                "passo": "concluido", "nome_completo": "Lucicleide Ferreira da Silva Albuquerque",
+                "iniciado_em": "2026-09-30T12:00:00Z"
+            }]))),
+        );
+        let janela = janela_com(
+            cx,
+            publicador.clone(),
+            Arc::new(SeletorDeMentira::default()),
+        );
+        entrar(cx, &janela);
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        visual.run_until_parked();
+        let painel = visual
+            .debug_bounds("painel-do-bot")
+            .expect("o painel do bot não foi desenhado");
+        let nome = visual
+            .debug_bounds("painel-do-bot-cliente-0")
+            .expect("a linha do cliente não foi desenhada");
+        let canal = visual
+            .debug_bounds("painel-do-bot-canal-0")
+            .expect("o canal não foi desenhado");
+        let direita = painel.origin.x + painel.size.width;
+        assert!(
+            nome.origin.x + nome.size.width <= canal.origin.x,
+            "o nome invade o canal: {nome:?} × {canal:?}"
+        );
+        assert!(
+            canal.origin.x + canal.size.width <= direita,
+            "o canal vaza do painel: {canal:?} × {painel:?}"
+        );
+        assert!(canal.size.width > px(30.), "o canal encolheu: {canal:?}");
     }
 
     /// 📸 Os comandos do atendente são independentes: fechar o painel não
