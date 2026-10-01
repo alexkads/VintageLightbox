@@ -1,10 +1,13 @@
 {
-  "versao": "0.1.63",
-  "titulo": "Nome comprido não passa mais da borda do painel do bot.",
-  "importante": false,
+  "versao": "0.1.64",
+  "titulo": "O painel Básico ficou igual ao do Lightroom, e as predefinições P&B voltaram a funcionar.",
+  "importante": true,
   "novidades": [
-    "No painel \"Bot da sessão\", o nome do cliente corta com reticências quando é comprido, e o canal (WhatsApp) fica sempre inteiro dentro do painel. Passe o mouse no nome para lê-lo inteiro.",
-    "O botão para usar o nome como título da sessão agora diz só \"Usar como título\": o nome já está na linha de cima."
+    "As predefinições em preto e branco da pasta LRs (RecordarFotos P&B, Movie, Sépia, Bem Velhão…) agora aplicam a Mistura de preto e branco que trazem do Lightroom. Antes a foto ficava cinza, sem a mistura por cor.",
+    "No alto do Básico: \"Automático\" e \"P&B\". Ligado o P&B, o painel HSL dá lugar ao painel P&B, com a Mistura de preto e branco por cor, e a Vibração e a Saturação ficam apagadas, como no Lightroom.",
+    "\"Perfil\" escolhe entre Cor e Monocromático, e o conta-gotas ao lado do \"EB\" acerta o balanço de branco: clique nele e depois num ponto branco ou cinza da foto (Esc cancela). O EB também tem \"Como fotografado\" e \"Automático\".",
+    "Os controles têm os nomes e os números do Lightroom: Colorir, Realces, Desembaçar, Vibração; Contraste, Temperatura, Claridade e Saturação de −100 a +100. Os grupos Tom e Presença ficam como lá.",
+    "O quadro \"Curva resultante\" saiu: a Curva de tons já mostra a curva."
   ],
-  "por_que_atualizar": "O painel do bot fica arrumado com qualquer nome de cliente."
+  "por_que_atualizar": "As predefinições P&B do Lightroom saem como no Lightroom, e o Básico fica no lugar onde você já está acostumado."
 }
