@@ -28,10 +28,11 @@ use std::rc::Rc;
 use gpui_kit::component::accordion::Accordion;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::button::ButtonVariants as _;
+use gpui_kit::component::select::Select;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{h_flex, ActiveTheme, Disableable, Icon, Sizable};
 use gpui_kit::{
-    canvas, div, prelude::*, px, AnyElement, Bounds, Context, DragMoveEvent, Empty, Hsla,
+    canvas, div, prelude::*, px, relative, AnyElement, Bounds, Context, DragMoveEvent, Empty, Hsla,
     MouseButton, MouseDownEvent, MouseUpEvent, PathBuilder, Pixels, SharedString, StyleRefinement,
     Window,
 };
@@ -179,6 +180,30 @@ struct ArrastoDoNo;
 
 /// O ponto de um conjunto de controles — âmbar é "mudou e não salvou", cinza é
 /// "tem ajuste, já salvo" (`Marca` e o `<Marca>` do site).
+/// 🎞️ O título de um grupo dentro do painel ("Vinheta de corte posterior",
+/// "Granulado"): pequeno, apagado e no meio, como no Lightroom. Do segundo em
+/// diante, uma linha de ponta a ponta o separa do grupo de cima.
+fn titulo_do_grupo(secao: Secao, separar: bool, cx: &gpui_kit::App) -> AnyElement {
+    let rotulo = secao.rotulo();
+    div()
+        .debug_selector(move || format!("grupo-{rotulo}"))
+        .flex()
+        .justify_center()
+        .text_xs()
+        .text_color(cx.theme().muted_foreground)
+        .when(separar, |d| {
+            // O painel tem 12 px de respiro dos lados: a linha os atravessa.
+            d.mx(px(-12.))
+                .px(px(12.))
+                .mt(px(4.))
+                .pt(px(10.))
+                .border_t_1()
+                .border_color(cx.theme().border)
+        })
+        .child(rotulo)
+        .into_any_element()
+}
+
 fn ponto(marca: controles::Marca, cx: &gpui_kit::App) -> gpui_kit::Div {
     let cor = match marca {
         controles::Marca::NaoSalvo => tema::cores::quente(),
@@ -301,7 +326,7 @@ impl Revelacao {
     /// Um gesto discreto sobre os ajustes — o duplo clique num nó, o "Zerar"
     /// de um canal. O mesmo caminho de `devolver_ao_neutro`: fecha o pendente,
     /// muda, vira um passo e grava na hora. Sem mudança, não escreve nada.
-    fn gesto_discreto(
+    pub(super) fn gesto_discreto(
         &mut self,
         mudar: impl FnOnce(&mut Ajustes),
         window: &mut Window,
@@ -722,7 +747,13 @@ impl Revelacao {
                     dentro.extend(self.controles_da_secao(visivel, cx));
                 }
                 _ => {
-                    for secao in painel.secoes() {
+                    // 🎞️ Painel de mais de um grupo (o Efeitos do Lightroom):
+                    // cada um com o seu título.
+                    let com_titulos = painel.secoes().len() > 1;
+                    for (n, secao) in painel.secoes().iter().enumerate() {
+                        if com_titulos {
+                            dentro.push(titulo_do_grupo(*secao, n > 0, cx));
+                        }
                         dentro.extend(self.controles_da_secao(*secao, cx));
                     }
                 }
@@ -779,13 +810,127 @@ impl Revelacao {
     }
 
     /// Os sliders de uma família, na ordem da tabela.
+    ///
+    /// 🎞️ O Efeitos já vem no desenho do Lightroom, uma linha por controle
+    /// ([`Self::linha_em_linha`]); os outros painéis ainda no de duas.
     fn controles_da_secao(&self, secao: Secao, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let em_linha = secao.painel() == Painel::Efeitos;
         self.controles
             .iter()
             .enumerate()
             .filter(|(_, controle)| controle.definicao.secao == secao)
-            .map(|(i, controle)| self.linha_do_controle(i, controle, cx))
+            .map(|(i, controle)| {
+                if em_linha {
+                    self.linha_em_linha(i, controle, cx)
+                } else {
+                    self.linha_do_controle(i, controle, cx)
+                }
+            })
             .collect()
+    }
+
+    /// 🎞️ Um controle numa linha só, como no Lightroom: o rótulo encostado à
+    /// direita da sua coluna, a barra, e o valor na ponta.
+    ///
+    /// O duplo clique no rótulo e na barra volta ao neutro, como na
+    /// [`Self::linha_do_controle`]. O controle que não age agora
+    /// ([`controles::Definicao::age`]) fica apagado e não se move — como o
+    /// Tamanho do grão com a Intensidade em 0, no Lightroom.
+    ///
+    /// Na escolha entre nomes (o Estilo da vinheta) a barra vira a lista, e o
+    /// nome já é o valor.
+    fn linha_em_linha(
+        &self,
+        indice: usize,
+        controle: &Controle,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let definicao = controle.definicao;
+        let valor = (definicao.ler)(&self.ajustes);
+        let ligado = self.controles_ligados();
+        let age = definicao.age(&self.ajustes);
+        let cor = if !age {
+            cx.theme().muted_foreground.opacity(0.45)
+        } else if definicao.alterado(&self.ajustes) {
+            cx.theme().foreground
+        } else {
+            cx.theme().muted_foreground
+        };
+
+        let rotulo = div()
+            .id(SharedString::from(format!("rotulo-{indice}")))
+            .debug_selector(move || format!("rotulo-{indice}"))
+            .w(relative(0.36))
+            .flex_none()
+            .text_right()
+            .truncate()
+            .tooltip(|window, cx| {
+                gpui_kit::component::tooltip::Tooltip::new("Duplo clique volta ao neutro")
+                    .build(window, cx)
+            })
+            .text_color(cor)
+            .child(definicao.rotulo)
+            .on_click(
+                cx.listener(move |tela, evento: &gpui_kit::ClickEvent, window, cx| {
+                    if evento.click_count() >= 2 && tela.controles_ligados() {
+                        tela.devolver_ao_neutro(indice, window, cx);
+                    }
+                }),
+            );
+
+        let meio = match &controle.escolha {
+            Some(lista) => div()
+                .flex_1()
+                .min_w(px(0.))
+                .debug_selector(move || format!("escolha-{indice}"))
+                .child(crate::estilo::campo_pequeno(
+                    Select::new(lista).xsmall().disabled(!ligado),
+                ))
+                .into_any_element(),
+            None => div()
+                .flex_1()
+                .min_w(px(0.))
+                .debug_selector(move || format!("barra-{indice}"))
+                .when(ligado && age, |barra| {
+                    barra.capture_any_mouse_up(cx.listener(
+                        move |tela, evento: &MouseUpEvent, window, cx| {
+                            if evento.button == MouseButton::Left
+                                && evento.click_count >= 2
+                                && tela.controles_ligados()
+                            {
+                                tela.devolver_ao_neutro(indice, window, cx);
+                            }
+                        },
+                    ))
+                })
+                .child(
+                    crate::estilo::slider(&controle.estado)
+                        .trilho(definicao.trilho)
+                        .neutro(definicao.neutro())
+                        .disabled(!ligado || !age),
+                )
+                .into_any_element(),
+        };
+
+        // O valor na ponta, com largura fixa: as barras de um grupo começam e
+        // terminam no mesmo lugar, seja o número "0" ou "−100".
+        let numero = controle.escolha.is_none().then(|| {
+            div()
+                .w(px(30.))
+                .flex_none()
+                .text_right()
+                .text_color(if age { cor.opacity(0.95) } else { cor })
+                .child(SharedString::from(definicao.formatar(valor)))
+        });
+
+        h_flex()
+            .gap(px(8.))
+            .items_center()
+            .text_xs()
+            .child(rotulo)
+            .child(meio)
+            .children(numero)
+            .into_any_element()
     }
 
     /// Um controle: o rótulo, o valor e a barra.
