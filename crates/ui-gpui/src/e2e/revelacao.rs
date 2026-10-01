@@ -172,6 +172,109 @@ fn abas_de_espaco_e_curva_por_ponto(cx: &mut TestAppContext) {
     });
 }
 
+/// 🎬 **A Curva de tons do Lightroom, com o ponteiro de verdade**: arrastar
+/// para cima no gráfico sobe a região sob o ponteiro, o pino da barra leva o
+/// divisor junto, e o círculo vermelho troca para a curva por ponto.
+#[gpui_kit::test]
+fn a_curva_de_tons_responde_ao_ponteiro(cx: &mut TestAppContext) {
+    use crate::revelacao::tela::painel::ModoDaCurva;
+    use gpui_kit::{point, px, Modifiers, MouseButton, VisualTestContext};
+
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    e.revelar_a_do_site(cx, "b");
+    // O caixa flutuante fica por cima do canto da coluna: o F9 o minimiza.
+    e.teclar(cx, "f9");
+    e.revelacao(cx, |tela, _w, cx| {
+        tela.seguir_o_roteiro_do_painel("fechar Básico", cx);
+        tela.seguir_o_roteiro_do_painel("abrir Curva de tons", cx);
+        assert_eq!(tela.modo_da_curva(), ModoDaCurva::Parametrica);
+    });
+    e.esperar(cx);
+
+    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    visual.run_until_parked();
+    let grafico = visual
+        .debug_bounds("grafico-da-curva")
+        .expect("o gráfico da curva está na coluna");
+    assert!(
+        (f32::from(grafico.size.width) - f32::from(grafico.size.height)).abs() < 1.0,
+        "o gráfico é quadrado: {grafico:?}"
+    );
+
+    // Arrastar para cima a 62% da largura — a região dos claros.
+    let x = grafico.origin.x + grafico.size.width * 0.62;
+    let y = grafico.origin.y + grafico.size.height * 0.5;
+    let nada = Modifiers::none();
+    // ⚠️ No harness o primeiro evento de ponteiro da janela só a apresenta ao
+    // mouse: sem este movimento antes, o primeiro apertar se perde.
+    visual.simulate_mouse_move(point(x, y), None, nada);
+    visual.simulate_mouse_down(point(x, y), MouseButton::Left, nada);
+    for passo in 1..=6 {
+        visual.simulate_mouse_move(
+            point(x, y - px(10.0 * passo as f32)),
+            MouseButton::Left,
+            nada,
+        );
+    }
+    visual.simulate_mouse_up(point(x, y - px(60.)), MouseButton::Left, nada);
+    visual.run_until_parked();
+    let claros = e.revelacao(cx, |tela, _w, _cx| tela.ajustes().tone_curve_lights);
+    assert!(
+        claros > 0.0,
+        "o arrasto para cima não subiu os claros ({claros})"
+    );
+    let outros = e.revelacao(cx, |tela, _w, _cx| {
+        let a = tela.ajustes();
+        (
+            a.tone_curve_shadows,
+            a.tone_curve_darks,
+            a.tone_curve_highlights,
+        )
+    });
+    assert_eq!(outros, (0.0, 0.0, 0.0), "só a região sob o ponteiro");
+
+    // O pino dos médios, arrastado para a direita.
+    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    let barra = visual
+        .debug_bounds("barra-de-divisao")
+        .expect("a barra de divisão");
+    let margem = barra.size.width * (8.0 / 260.0);
+    let util = barra.size.width - margem * 2.0;
+    let meio = barra.origin.x + margem + util * 0.5;
+    let y = barra.origin.y + px(8.);
+    visual.simulate_mouse_down(point(meio, y), MouseButton::Left, nada);
+    for passo in 1..=5 {
+        visual.simulate_mouse_move(
+            point(meio + util * (0.02 * passo as f32), y),
+            MouseButton::Left,
+            nada,
+        );
+    }
+    visual.simulate_mouse_up(point(meio + util * 0.1, y), MouseButton::Left, nada);
+    visual.run_until_parked();
+    let medios = e.revelacao(cx, |tela, _w, _cx| tela.ajustes().tone_curve_split_midtones);
+    assert!(
+        (medios - 60.0).abs() <= 1.0,
+        "o pino dos médios devia ir a ~60, foi a {medios}"
+    );
+    e.esperar(cx);
+    let gravado = e.gravador.gravado();
+    let ultimo = gravado.last().expect("a curva foi gravada");
+    assert!(ultimo.1.tone_curve_lights > 0.0);
+    assert_eq!(ultimo.1.tone_curve_split_midtones, medios);
+
+    // O círculo vermelho troca para a curva por ponto do vermelho.
+    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    let vermelho = visual
+        .debug_bounds("canal-Vermelho")
+        .expect("o círculo vermelho");
+    visual.simulate_click(vermelho.center(), nada);
+    visual.run_until_parked();
+    e.revelacao(cx, |tela, _w, _cx| {
+        assert_eq!(tela.modo_da_curva(), ModoDaCurva::Ponto(Canal::Vermelho));
+    });
+}
+
 /// Um `.lrtemplate` como o Lightroom os grava — a estrutura é Lua.
 const LRTEMPLATE: &str = r#"s = {
 	id = "D728662A-4FF5-4327-A6AA-444291159768",

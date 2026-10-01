@@ -1,6 +1,6 @@
 //! Quais controles existem, em que painel, e o que cada um move.
 //!
-//! Uma tabela, e não 171 blocos de interface iguais. O `crates/ui` gastou 290
+//! Uma tabela, e não 193 blocos de interface iguais. O `crates/ui` gastou 290
 //! linhas para *um* slider (`components/advanced_slider.rs`) e depois repetiu o
 //! bloco 42 vezes espalhado por `dock_viewer.rs`; aqui o HSL inteiro — 24
 //! controles — são 24 linhas de dados.
@@ -23,7 +23,8 @@
 //! ⚠️ **Os 36 da curva por ponto estão na tabela, mas não viram slider.** Eles
 //! existem aqui para o invariante "um controle por campo" continuar valendo
 //! (`todo_ajuste_tem_um_controle`); quem os desenha é o editor de curva
-//! (`tela/painel.rs`), como no site.
+//! (`tela/painel.rs`), como no site. O mesmo vale para os três divisores da
+//! Curva de tons (`Secao::RegioesDaCurva`), que a barra de pinos desenha.
 //!
 //! 🚧 **Divergência D7 do contrato da foto**: numa foto do catálogo local os 118
 //! novos ainda não têm coluna (`persistencia::SEM_COLUNA_NO_BANCO_LOCAL`) e
@@ -41,6 +42,9 @@ use super::processador::Ajustes;
 pub enum Secao {
     Basico,
     CurvaDeTons,
+    /// Os três pinos da barra de divisão da Curva de tons. Não viram slider:
+    /// quem os desenha é a barra (`tela/painel.rs`).
+    RegioesDaCurva,
     CurvaPorPonto,
     HslCor,
     HslLuminancia,
@@ -62,9 +66,10 @@ pub enum Secao {
 }
 
 impl Secao {
-    pub const TODAS: [Secao; 18] = [
+    pub const TODAS: [Secao; 19] = [
         Secao::Basico,
         Secao::CurvaDeTons,
+        Secao::RegioesDaCurva,
         Secao::CurvaPorPonto,
         Secao::HslCor,
         Secao::HslLuminancia,
@@ -88,6 +93,7 @@ impl Secao {
         match self {
             Secao::Basico => "Básico",
             Secao::CurvaDeTons => "Curva de tons",
+            Secao::RegioesDaCurva => "Divisão das regiões",
             Secao::CurvaPorPonto => "Curva por ponto",
             Secao::HslCor => "HSL / cor",
             Secao::HslLuminancia => "HSL / luminância",
@@ -111,8 +117,9 @@ impl Secao {
     pub fn painel(&self) -> Painel {
         match self {
             Secao::Basico => Painel::Basico,
-            Secao::CurvaDeTons => Painel::CurvaDeTons,
-            Secao::CurvaPorPonto => Painel::CurvaPorPonto,
+            Secao::CurvaDeTons | Secao::RegioesDaCurva | Secao::CurvaPorPonto => {
+                Painel::CurvaDeTons
+            }
             Secao::HslCor | Secao::HslLuminancia | Secao::HslMatiz => Painel::Hsl,
             Secao::PretoEBranco => Painel::PretoEBranco,
             Secao::Detalhe => Painel::Detalhe,
@@ -137,7 +144,6 @@ impl Secao {
 pub enum Painel {
     Basico,
     CurvaDeTons,
-    CurvaPorPonto,
     Hsl,
     PretoEBranco,
     Detalhe,
@@ -154,10 +160,9 @@ pub enum Painel {
 
 impl Painel {
     /// Todos, na ordem da tabela: a aba sRGB e depois a RGB.
-    pub const TODOS: [Painel; 15] = [
+    pub const TODOS: [Painel; 14] = [
         Painel::Basico,
         Painel::CurvaDeTons,
-        Painel::CurvaPorPonto,
         Painel::Hsl,
         Painel::PretoEBranco,
         Painel::Detalhe,
@@ -177,10 +182,9 @@ impl Painel {
     /// 🔑 **A ordem é a do pipeline** (`paineis.tsx:159-181`): a curva por ponto
     /// logo depois da paramétrica, o mixer de P&B depois do HSL, a calibração
     /// antes da tonalização, e o virador e o grão por último.
-    pub const SRGB: [Painel; 10] = [
+    pub const SRGB: [Painel; 9] = [
         Painel::Basico,
         Painel::CurvaDeTons,
-        Painel::CurvaPorPonto,
         Painel::Hsl,
         Painel::PretoEBranco,
         Painel::Detalhe,
@@ -206,7 +210,6 @@ impl Painel {
         match self {
             Painel::Basico => "Básico",
             Painel::CurvaDeTons => "Curva de tons",
-            Painel::CurvaPorPonto => "Curva por ponto",
             Painel::Hsl => "HSL",
             Painel::PretoEBranco => "Preto e branco",
             Painel::Detalhe => "Detalhe",
@@ -226,7 +229,6 @@ impl Painel {
     /// (`revelacao:<título>`, e `revelacao:curva-por-ponto`).
     pub fn chave(&self) -> String {
         match self {
-            Painel::CurvaPorPonto => "revelacao:curva-por-ponto".to_string(),
             // 🔑 A chave é a de antes de o painel virar "Correção de cores"
             // (2026-09-30): trocar o nome não pode fechar o painel de ninguém.
             Painel::Tonalizacao => "revelacao:Tonalização".to_string(),
@@ -244,8 +246,14 @@ impl Painel {
     pub fn secoes(&self) -> &'static [Secao] {
         match self {
             Painel::Basico => &[Secao::Basico],
-            Painel::CurvaDeTons => &[Secao::CurvaDeTons],
-            Painel::CurvaPorPonto => &[Secao::CurvaPorPonto],
+            // 🎞️ **Um painel só, como no Lightroom** (dono, 30/09): a
+            // paramétrica, os pinos da divisão e a curva por ponto. No site
+            // ainda são dois.
+            Painel::CurvaDeTons => &[
+                Secao::CurvaDeTons,
+                Secao::RegioesDaCurva,
+                Secao::CurvaPorPonto,
+            ],
             Painel::Hsl => &[Secao::HslCor, Secao::HslLuminancia, Secao::HslMatiz],
             Painel::PretoEBranco => &[Secao::PretoEBranco],
             Painel::Detalhe => &[Secao::Detalhe],
@@ -629,7 +637,7 @@ const HSL_MATIZ: [Definicao; 8] = hsl!(
 
 use Secao as S;
 
-/// Os 171 controles, na ordem em que a coluna da direita os desenha: a aba
+/// Os 193 controles, na ordem em que a coluna da direita os desenha: a aba
 /// sRGB (a ordem de `paineis.tsx`) e depois a RGB.
 ///
 /// ⚠️ **O Básico é o primeiro**, e os testes da tela contam com isso
@@ -656,21 +664,22 @@ pub const CONTROLES: &[Definicao] = &[
     cem!(S::CurvaDeTons, "Sombras", tone_curve_shadows),
     cem!(S::CurvaDeTons, "Escuros", tone_curve_darks),
     cem!(S::CurvaDeTons, "Claros", tone_curve_lights),
-    cem!(S::CurvaDeTons, "Altas luzes", tone_curve_highlights),
-    // As três divisões entre as zonas (25/50/75 no Lightroom).
+    cem!(S::CurvaDeTons, "Realces", tone_curve_highlights),
+    // As três divisões entre as zonas (25/50/75 no Lightroom) — os pinos da
+    // barra embaixo do gráfico, e não sliders.
     cento!(
-        S::CurvaDeTons,
+        S::RegioesDaCurva,
         "Divisão das sombras",
         tone_curve_split_shadows
     ),
     cento!(
-        S::CurvaDeTons,
+        S::RegioesDaCurva,
         "Divisão dos meios-tons",
         tone_curve_split_midtones
     ),
     cento!(
-        S::CurvaDeTons,
-        "Divisão das altas luzes",
+        S::RegioesDaCurva,
+        "Divisão dos realces",
         tone_curve_split_highlights
     ),
     // ------------------------------------------------------- Curva por ponto
@@ -1650,11 +1659,10 @@ mod testes {
     fn as_chaves_sao_as_do_site() {
         assert_eq!(Painel::Basico.chave(), "revelacao:Básico");
         assert_eq!(Painel::Hsl.chave(), "revelacao:HSL");
-        assert_eq!(Painel::CurvaPorPonto.chave(), "revelacao:curva-por-ponto");
         assert_eq!(Painel::RgbExposicao.chave(), "revelacao:Exposição");
     }
 
-    /// 🚨 **O cabeçalho conta os 171**, e o neutro não conta nada — nem o
+    /// 🚨 **O cabeçalho conta os 193**, e o neutro não conta nada — nem o
     /// cinza do darktable, nem a identidade da curva.
     #[test]
     fn o_cabecalho_conta_todos_os_campos() {
@@ -1668,7 +1676,7 @@ mod testes {
         assert_eq!(quantos_fora_do_neutro(&ajustes), 3);
         assert!(aba_alterada(&ajustes, true));
         assert!(aba_alterada(&ajustes, false));
-        assert!(painel_alterado(&ajustes, Painel::CurvaPorPonto));
+        assert!(painel_alterado(&ajustes, Painel::CurvaDeTons));
         assert!(!painel_alterado(&ajustes, Painel::Hsl));
     }
 }

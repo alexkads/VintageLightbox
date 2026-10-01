@@ -92,7 +92,7 @@ pub enum Passo {
     /// `tecla_do_caixa 1` — uma tecla F do caixa flutuante. Só para abrir
     /// diálogo e fotografar: nenhum passo confirma nada.
     TeclaDoCaixa(u8),
-    /// `painel rgb` · `painel srgb` · `painel abrir Curva por ponto` ·
+    /// `painel rgb` · `painel srgb` · `painel abrir Curva de tons` ·
     /// `painel rolar 600` · `painel rolar fim` — a coluna de ajustes da
     /// Revelação aberta.
     Painel(String),

@@ -102,10 +102,20 @@ impl Grupo {
         Grupo::Enquadramento,
     ];
 
+    /// O grupo da caixa que leva os ajustes desta família.
+    ///
+    /// 🔑 A curva por ponto mora no painel da Curva de tons (como no
+    /// Lightroom), mas na caixa continua com grupo próprio, como no site.
+    pub fn da_secao(secao: crate::revelacao::controles::Secao) -> Grupo {
+        match secao {
+            crate::revelacao::controles::Secao::CurvaPorPonto => Grupo::CurvaPorPonto,
+            outra => Grupo::do_painel(outra.painel()),
+        }
+    }
+
     /// O grupo da caixa que leva os ajustes deste painel da coluna.
     pub fn do_painel(painel: Painel) -> Grupo {
         match painel {
-            Painel::CurvaPorPonto => Grupo::CurvaPorPonto,
             Painel::PretoEBranco => Grupo::PretoEBranco,
             Painel::Calibracao => Grupo::Calibracao,
             p if p.no_rgb() => Grupo::ControlesRgb,
@@ -142,7 +152,7 @@ impl Grupo {
                 | Painel::RgbVinhetagem
                 | Painel::RgbColorBalance,
             ) => Some("exposição, sombras e realces, monocromático, vinhetagem e color balance"),
-            Grupo::CurvaPorPonto | Grupo::Painel(Painel::CurvaPorPonto) => Some("os quatro canais"),
+            Grupo::CurvaPorPonto => Some("os quatro canais"),
             Grupo::Painel(Painel::Hsl) => Some("cor, luminância e matiz das oito faixas"),
             Grupo::PretoEBranco | Grupo::Painel(Painel::PretoEBranco) => {
                 Some("conversão e mixer por cor")
@@ -170,7 +180,7 @@ impl Grupo {
             ) => "controles-rgb",
             Grupo::Painel(Painel::Basico) => "basico",
             Grupo::Painel(Painel::CurvaDeTons) => "curva",
-            Grupo::CurvaPorPonto | Grupo::Painel(Painel::CurvaPorPonto) => "curva-por-ponto",
+            Grupo::CurvaPorPonto => "curva-por-ponto",
             Grupo::Painel(Painel::Hsl) => "hsl",
             Grupo::PretoEBranco | Grupo::Painel(Painel::PretoEBranco) => "preto-e-branco",
             Grupo::Painel(Painel::Detalhe) => "detalhe",
@@ -241,9 +251,7 @@ impl Escolha {
             ) => &mut self.controles_rgb,
             Grupo::Painel(Painel::Basico) => &mut self.basico,
             Grupo::Painel(Painel::CurvaDeTons) => &mut self.curva,
-            Grupo::CurvaPorPonto | Grupo::Painel(Painel::CurvaPorPonto) => {
-                &mut self.curva_por_ponto
-            }
+            Grupo::CurvaPorPonto => &mut self.curva_por_ponto,
             Grupo::Painel(Painel::Hsl) => &mut self.hsl,
             Grupo::PretoEBranco | Grupo::Painel(Painel::PretoEBranco) => &mut self.preto_e_branco,
             Grupo::Painel(Painel::Detalhe) => &mut self.detalhe,
@@ -498,7 +506,7 @@ mod testes {
             let nome = campo_do_controle(def);
             assert_eq!(
                 grupo_do_ajuste(nome),
-                Some(Grupo::do_painel(def.secao.painel())),
+                Some(Grupo::da_secao(def.secao)),
                 "`{}` ({nome}) mora em `{}`",
                 def.rotulo,
                 def.secao.painel().rotulo()

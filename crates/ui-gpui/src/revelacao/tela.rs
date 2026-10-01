@@ -73,7 +73,7 @@ mod descartar;
 /// "Editar Foto" e a troca da fonte quando uma edição é salva.
 mod edicao;
 /// A coluna da direita: cabeçalho, abas sRGB/RGB, painéis e gráficos.
-mod painel;
+pub(crate) mod painel;
 /// Os gestos de ponteiro para os cenários de ponta a ponta. Só testes.
 #[cfg(test)]
 mod para_e2e;

@@ -64,27 +64,181 @@ pub fn curva(ajustes: &Ajustes) -> [f32; PONTOS] {
         // entrada aqui faria o gráfico discordar da foto justamente quando os
         // dois grupos de controle estão em uso ao mesmo tempo — que é o caso
         // normal.
-        for (valor_do_slider, centro) in [
-            (ajustes.tone_curve_shadows, 0.125),
-            (ajustes.tone_curve_darks, 0.375),
-            (ajustes.tone_curve_lights, 0.625),
-            (ajustes.tone_curve_highlights, 0.875),
-        ] {
-            if valor_do_slider == 0.0 {
-                continue;
-            }
-            const MEIA_LARGURA: f32 = 0.25;
-            let distancia = (valor - centro).abs();
-            if distancia < MEIA_LARGURA {
-                let peso = 1.0 - (distancia / MEIA_LARGURA);
-                valor += valor * (valor_do_slider * 0.01 * peso);
-            }
-        }
+        valor = aplicar_regioes(valor, ajustes);
 
         *ponto = valor.clamp(0.0, 1.0);
     }
 
     saida
+}
+
+// ------------------------------------------------- as regiões da paramétrica
+
+/// As quatro regiões da curva paramétrica, na ordem do motor (do preto ao
+/// branco). A tela as desenha na ordem do Lightroom, de cima para baixo.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Regiao {
+    Sombras,
+    Escuros,
+    Claros,
+    Realces,
+}
+
+impl Regiao {
+    pub const TODAS: [Regiao; 4] = [
+        Regiao::Sombras,
+        Regiao::Escuros,
+        Regiao::Claros,
+        Regiao::Realces,
+    ];
+
+    pub fn rotulo(self) -> &'static str {
+        match self {
+            Regiao::Sombras => "Sombras",
+            Regiao::Escuros => "Escuros",
+            Regiao::Claros => "Claros",
+            Regiao::Realces => "Realces",
+        }
+    }
+
+    pub fn ler(self, a: &Ajustes) -> f32 {
+        match self {
+            Regiao::Sombras => a.tone_curve_shadows,
+            Regiao::Escuros => a.tone_curve_darks,
+            Regiao::Claros => a.tone_curve_lights,
+            Regiao::Realces => a.tone_curve_highlights,
+        }
+    }
+
+    pub fn definir(self, a: &mut Ajustes, valor: f32) {
+        let campo = match self {
+            Regiao::Sombras => &mut a.tone_curve_shadows,
+            Regiao::Escuros => &mut a.tone_curve_darks,
+            Regiao::Claros => &mut a.tone_curve_lights,
+            Regiao::Realces => &mut a.tone_curve_highlights,
+        };
+        *campo = valor;
+    }
+
+    fn indice(self) -> usize {
+        self as usize
+    }
+}
+
+/// Os três divisores (os pinos da barra), em 0–100.
+pub fn divisores(a: &Ajustes) -> [f32; 3] {
+    [
+        a.tone_curve_split_shadows,
+        a.tone_curve_split_midtones,
+        a.tone_curve_split_highlights,
+    ]
+}
+
+/// Escreve o divisor `i` (0 = sombras, 1 = médios, 2 = realces).
+pub fn definir_divisor(a: &mut Ajustes, i: usize, valor: f32) {
+    match i {
+        0 => a.tone_curve_split_shadows = valor,
+        1 => a.tone_curve_split_midtones = valor,
+        2 => a.tone_curve_split_highlights = valor,
+        _ => {}
+    }
+}
+
+/// Onde o pino `i` pode ir, dados os outros dois.
+///
+/// 🔑 **Os limites do Lightroom**: nenhum pino sai de 10–90, e dois vizinhos
+/// ficam a pelo menos [`FOLGA_DOS_DIVISORES`] um do outro. Pinos encostados
+/// dariam uma região de largura zero — uma zona que não pega pixel nenhum e um
+/// slider que deixa de fazer efeito sem aviso.
+pub fn limites_do_divisor(a: &Ajustes, i: usize) -> (f32, f32) {
+    let d = divisores(a);
+    let minimo = if i == 0 {
+        10.0
+    } else {
+        d[i - 1] + FOLGA_DOS_DIVISORES
+    };
+    let maximo = if i == 2 {
+        90.0
+    } else {
+        d[i + 1] - FOLGA_DOS_DIVISORES
+    };
+    (minimo, maximo.max(minimo))
+}
+
+/// A menor distância entre dois pinos vizinhos.
+pub const FOLGA_DOS_DIVISORES: f32 = 5.0;
+
+/// As cinco bordas das regiões, em 0–1 — **a conta do shader**
+/// (`corpo.wgsl`): cada divisão fica entre a anterior e 1, mesmo quando o
+/// JSON traz outra coisa.
+fn bordas(a: &Ajustes) -> [f32; 5] {
+    let d1 = (a.tone_curve_split_shadows * 0.01).clamp(0.0, 1.0);
+    let d2 = (a.tone_curve_split_midtones * 0.01).clamp(d1, 1.0);
+    let d3 = (a.tone_curve_split_highlights * 0.01).clamp(d2, 1.0);
+    [0.0, d1, d2, d3, 1.0]
+}
+
+/// O começo e a largura de uma região, em 0–1.
+fn faixa_da_regiao(a: &Ajustes, regiao: Regiao) -> (f32, f32) {
+    let bordas = bordas(a);
+    let i = regiao.indice();
+    (bordas[i], bordas[i + 1] - bordas[i])
+}
+
+/// Em que região cai um nível de 0–1 — a de cujo intervalo ele faz parte.
+/// É o que o arrasto no gráfico e o rótulo do canto usam.
+pub fn regiao_em(nivel: f32, a: &Ajustes) -> Regiao {
+    let b = bordas(a);
+    if nivel < b[1] {
+        Regiao::Sombras
+    } else if nivel < b[2] {
+        Regiao::Escuros
+    } else if nivel < b[3] {
+        Regiao::Claros
+    } else {
+        Regiao::Realces
+    }
+}
+
+/// As quatro zonas sobre um valor de 0–1: **a conta do shader, igual**
+/// (`corpo.wgsl`, "Tone Curve Parametric Zones") — cada zona pesa 1 no meio da
+/// sua faixa e cai a zero a uma largura dela de distância. Todas medem o mesmo
+/// valor de entrada e se aplicam em sequência, como lá.
+fn aplicar_regioes(entrada: f32, ajustes: &Ajustes) -> f32 {
+    let mut valor = entrada;
+    for regiao in Regiao::TODAS {
+        let valor_do_slider = regiao.ler(ajustes);
+        if valor_do_slider == 0.0 {
+            continue;
+        }
+        let (inicio, largura) = faixa_da_regiao(ajustes, regiao);
+        let distancia = (entrada - (inicio + largura * 0.5)).abs();
+        if distancia < largura {
+            let peso = 1.0 - (distancia / largura);
+            valor += valor * (valor_do_slider * 0.01 * peso);
+        }
+    }
+    valor
+}
+
+/// A curva só das quatro regiões — o traço do gráfico no modo paramétrico,
+/// como o do Lightroom, que não mistura o Básico.
+pub fn curva_parametrica(ajustes: &Ajustes) -> [f32; PONTOS] {
+    std::array::from_fn(|i| {
+        let entrada = i as f32 / (PONTOS - 1) as f32;
+        aplicar_regioes(entrada, ajustes).clamp(0.0, 1.0)
+    })
+}
+
+/// Até onde uma região alcança: a curva com o slider dela em −100 e em +100,
+/// e as outras como estão. É a faixa sombreada do gráfico.
+pub fn alcance_da_regiao(ajustes: &Ajustes, regiao: Regiao) -> ([f32; PONTOS], [f32; PONTOS]) {
+    let com = |valor: f32| {
+        let mut a = *ajustes;
+        regiao.definir(&mut a, valor);
+        curva_parametrica(&a)
+    };
+    (com(-100.0), com(100.0))
 }
 
 // ------------------------------------------------------- a curva por ponto
@@ -537,5 +691,101 @@ mod testes {
     #[test]
     fn sao_cento_e_um_pontos() {
         assert_eq!(curva(&Ajustes::default()).len(), 101);
+    }
+}
+
+#[cfg(test)]
+mod regioes {
+    use super::*;
+
+    /// 🚨 **No neutro dos divisores a conta é a de antes deles** — centros
+    /// 0,125/0,375/0,625/0,875 e meia-largura 0,25, escritos aqui à mão.
+    #[test]
+    fn no_neutro_dos_divisores_as_zonas_sao_as_de_antes() {
+        let ajustes = Ajustes {
+            tone_curve_shadows: 30.0,
+            tone_curve_darks: -20.0,
+            tone_curve_lights: 45.0,
+            tone_curve_highlights: -60.0,
+            ..Default::default()
+        };
+        let antiga = |entrada: f32| {
+            let mut valor = entrada;
+            for (slider, centro) in [(30.0, 0.125), (-20.0, 0.375), (45.0, 0.625), (-60.0, 0.875)] {
+                let distancia = (entrada - centro).abs();
+                if distancia < 0.25 {
+                    valor += valor * (slider * 0.01 * (1.0 - distancia / 0.25));
+                }
+            }
+            valor.clamp(0.0, 1.0)
+        };
+        let nova = curva_parametrica(&ajustes);
+        for (i, v) in nova.iter().enumerate() {
+            let entrada = i as f32 / (PONTOS - 1) as f32;
+            assert!(
+                (v - antiga(entrada)).abs() < 1e-6,
+                "ponto {i}: {v} × {}",
+                antiga(entrada)
+            );
+        }
+    }
+
+    /// Mover o divisor das sombras leva a zona junto.
+    #[test]
+    fn o_divisor_leva_a_zona_junto() {
+        let so_sombras = Ajustes {
+            tone_curve_shadows: 60.0,
+            ..Default::default()
+        };
+        let com_divisor = Ajustes {
+            tone_curve_split_shadows: 60.0,
+            tone_curve_split_midtones: 70.0,
+            tone_curve_split_highlights: 80.0,
+            ..so_sombras
+        };
+        // O ponto 55 está fora do alcance das sombras no neutro (até 0,375).
+        assert!((curva_parametrica(&so_sombras)[55] - 0.55).abs() < 1e-6);
+        assert!(curva_parametrica(&com_divisor)[55] > 0.55);
+    }
+
+    #[test]
+    fn cada_nivel_cai_na_regiao_do_seu_intervalo() {
+        let neutro = Ajustes::default();
+        assert_eq!(regiao_em(0.10, &neutro), Regiao::Sombras);
+        assert_eq!(regiao_em(0.30, &neutro), Regiao::Escuros);
+        assert_eq!(regiao_em(0.60, &neutro), Regiao::Claros);
+        assert_eq!(regiao_em(0.90, &neutro), Regiao::Realces);
+        let deslocado = Ajustes {
+            tone_curve_split_shadows: 40.0,
+            ..Default::default()
+        };
+        assert_eq!(regiao_em(0.30, &deslocado), Regiao::Sombras);
+    }
+
+    /// Os pinos ficam em 10–90 e a cinco um do outro.
+    #[test]
+    fn os_pinos_nao_se_cruzam() {
+        let neutro = Ajustes::default();
+        assert_eq!(limites_do_divisor(&neutro, 0), (10.0, 45.0));
+        assert_eq!(limites_do_divisor(&neutro, 1), (30.0, 70.0));
+        assert_eq!(limites_do_divisor(&neutro, 2), (55.0, 90.0));
+    }
+
+    /// A faixa do alcance envolve a curva de agora.
+    #[test]
+    fn o_alcance_envolve_a_curva() {
+        let ajustes = Ajustes {
+            tone_curve_lights: 20.0,
+            ..Default::default()
+        };
+        let (baixo, alto) = alcance_da_regiao(&ajustes, Regiao::Claros);
+        let agora = curva_parametrica(&ajustes);
+        for i in 0..PONTOS {
+            assert!(
+                baixo[i] <= agora[i] + 1e-6 && agora[i] <= alto[i] + 1e-6,
+                "ponto {i}"
+            );
+        }
+        assert!(alto[62] > agora[62] && baixo[62] < agora[62]);
     }
 }

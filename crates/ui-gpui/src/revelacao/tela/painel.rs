@@ -27,15 +27,17 @@ use std::rc::Rc;
 
 use gpui_kit::component::accordion::Accordion;
 use gpui_kit::component::button::Button;
-use gpui_kit::component::button::ButtonVariants as _;
 use gpui_kit::component::select::Select;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{h_flex, ActiveTheme, Disableable, Icon, Sizable};
 use gpui_kit::{
-    canvas, div, prelude::*, px, relative, AnyElement, Bounds, Context, DragMoveEvent, Empty, Hsla,
-    MouseButton, MouseDownEvent, MouseUpEvent, PathBuilder, Pixels, SharedString, StyleRefinement,
-    Window,
+    canvas, div, prelude::*, px, relative, AnyElement, Bounds, Context, Empty, MouseButton,
+    MouseUpEvent, PathBuilder, Pixels, SharedString, StyleRefinement, Window,
 };
+
+mod curva_de_tons;
+
+pub(crate) use curva_de_tons::ModoDaCurva;
 
 use super::{Aberta, Controle, PedidoDaRevelacao, Revelacao};
 use crate::recursos::Icone;
@@ -71,13 +73,23 @@ pub(super) struct EstadoDoPainel {
     /// Qual das três famílias do HSL está à mostra. Como no site, não é
     /// lembrada entre sessões (`useState(0)`), só entre fotos.
     pub(super) aba_hsl: Secao,
-    /// O canal da curva por ponto à mostra.
-    canal: Canal,
+    /// O que a Curva de tons mostra: a paramétrica ou um canal da curva por
+    /// ponto. Como a aba do HSL, não é lembrado entre sessões.
+    modo: ModoDaCurva,
+    /// A região sob o ponteiro (no gráfico ou num slider de região) — a faixa
+    /// sombreada e o rótulo do canto.
+    regiao_em_foco: Option<curva::Regiao>,
+    /// O arrasto vertical em curso no gráfico paramétrico.
+    arrasto_da_regiao: Option<curva_de_tons::ArrastoDeRegiao>,
+    /// O pino da barra de divisão que o ponteiro pegou.
+    pino_arrastado: Option<usize>,
     /// O nó que o ponteiro pegou no último clique.
     no_arrastado: Option<usize>,
-    /// Onde o editor de curva foi desenhado no último quadro — o clique chega
+    /// Onde o gráfico da curva foi desenhado no último quadro — o clique chega
     /// em coordenada de janela.
     area_da_curva: Rc<Cell<Bounds<Pixels>>>,
+    /// Onde a barra de divisão foi desenhada no último quadro.
+    area_da_barra: Rc<Cell<Bounds<Pixels>>>,
     /// A rolagem da coluna, para o roteiro de depuração.
     rolagem: gpui_kit::ScrollHandle,
     /// O que o "Ajustar" da Correção de cores mostra. Como a aba do HSL, não
@@ -103,9 +115,13 @@ impl Default for EstadoDoPainel {
             abertos,
             arquivo,
             aba_hsl: Secao::HslCor,
-            canal: Canal::Rgb,
+            modo: ModoDaCurva::Parametrica,
+            regiao_em_foco: None,
+            arrasto_da_regiao: None,
+            pino_arrastado: None,
             no_arrastado: None,
             area_da_curva: Rc::new(Cell::new(Bounds::default())),
+            area_da_barra: Rc::new(Cell::new(Bounds::default())),
             rolagem: gpui_kit::ScrollHandle::new(),
             vista_das_rodas: Vista::default(),
             areas_das_rodas: Rc::new(RefCell::new(HashMap::new())),
@@ -235,7 +251,7 @@ impl Revelacao {
         self.tem_pixels() && self.pode_revelar()
     }
 
-    /// Quantos campos do motor estão fora do neutro — **os 171**, como o
+    /// Quantos campos do motor estão fora do neutro — **os 193**, como o
     /// cabeçalho do site conta.
     pub(super) fn quantos_alterados(&self) -> usize {
         controles::quantos_fora_do_neutro(&self.ajustes)
@@ -281,7 +297,7 @@ impl Revelacao {
             && !c.flip_vertical())
     }
 
-    /// **Zerar tudo**: os 171 ao neutro **e** o enquadramento à foto inteira.
+    /// **Zerar tudo**: os 193 ao neutro **e** o enquadramento à foto inteira.
     ///
     /// 🚨 *"A função 'Zerar tudo' tem que ser tudo mesmo, inclusive corte e
     /// rotacionamento"* (dono, 2026-09-12, `editor.tsx:2106`). Até aqui o corte
@@ -366,7 +382,9 @@ impl Revelacao {
     /// O nó `i` do canal à mostra foi arrastado até `altura` (0–255): como
     /// os sliders, pede a GPU e deixa a espera fechar o gesto.
     fn mover_no_da_curva(&mut self, i: usize, altura: f32, cx: &mut Context<Self>) {
-        let canal = self.estado_do_painel.canal;
+        let ModoDaCurva::Ponto(canal) = self.estado_do_painel.modo else {
+            return;
+        };
         if canal.alturas(&self.ajustes)[i] == altura {
             return;
         }
@@ -754,7 +772,7 @@ impl Revelacao {
         let conteudo = aberto.then(|| {
             let mut dentro: Vec<AnyElement> = Vec::new();
             match painel {
-                Painel::CurvaPorPonto => dentro.push(self.editor_de_curva(cx)),
+                Painel::CurvaDeTons => dentro.extend(self.painel_da_curva_de_tons(cx)),
                 Painel::Tonalizacao => dentro.push(self.correcao_de_cores(cx)),
                 Painel::Hsl => {
                     let visivel = self.estado_do_painel.aba_hsl;
@@ -1060,215 +1078,6 @@ impl Revelacao {
             .into_any_element()
     }
 
-    /// A curva por ponto: quatro canais, nove alturas cada — o
-    /// `EditorDeCurva` do site.
-    ///
-    /// 🚨 **O traço é a conta do motor** ([`curva::avaliar_curva`], a tradução
-    /// de `curva_por_ponto` do `corpo.wgsl`), e não uma spline bonita.
-    ///
-    /// 🔑 **Sem arrasto no eixo x**: os nove x são fixos. Duplo clique num nó
-    /// devolve o nó à reta; "Zerar" devolve o canal inteiro.
-    fn editor_de_curva(&self, cx: &mut Context<Self>) -> AnyElement {
-        let estado = &self.estado_do_painel;
-        let canal = estado.canal;
-        let ligado = self.controles_ligados();
-        let alturas = canal.alturas(&self.ajustes);
-        let cor_do_canal = |c: Canal, cx: &Context<Self>| -> Hsla {
-            match c.cor() {
-                Some(hex) => gpui_kit::rgb(hex).into(),
-                None => cx.theme().foreground,
-            }
-        };
-        let cor = cor_do_canal(canal, cx);
-
-        let tela = cx.entity().downgrade();
-        let botoes = TabBar::new("canais-da-curva")
-            .segmented()
-            .xsmall()
-            .selected_index(Canal::TODOS.iter().position(|c| *c == canal).unwrap_or(0))
-            .children(Canal::TODOS.into_iter().map(|c| {
-                let escolhido = c == canal;
-                let usado = !curva::curva_eh_neutra(&c.alturas(&self.ajustes));
-                let rotulo = c.rotulo();
-                Tab::new()
-                    .label(rotulo)
-                    .debug_selector(move || format!("canal-{rotulo}"))
-                    .text_size(crate::tema::letra::em(11.))
-                    .when(escolhido, |t| t.text_color(cor_do_canal(c, cx)))
-                    // 🔑 O ponto avisa que **outro** canal tem curva: sem ele, um
-                    // preset que mexe só no azul parece não ter feito nada.
-                    .when(usado, |t| {
-                        t.suffix(div().text_size(crate::tema::letra::em(8.)).child("●"))
-                    })
-            }))
-            .on_click(move |i, _window, cx| {
-                let Some(c) = Canal::TODOS.get(*i).copied() else {
-                    return;
-                };
-                let _ = tela.update(cx, |tela, cx| {
-                    tela.estado_do_painel.canal = c;
-                    cx.notify();
-                });
-            });
-
-        let neutro = curva::curva_eh_neutra(&alturas);
-        let zerar = Button::new("zerar-canal")
-            .ghost()
-            .xsmall()
-            .px(px(6.))
-            .text_size(crate::tema::letra::em(11.))
-            .text_color(cx.theme().muted_foreground)
-            .tooltip("Devolve este canal à reta")
-            .disabled(!ligado || neutro)
-            .when(ligado && !neutro, |z| {
-                z.on_click(cx.listener(move |tela, _ev, window, cx| {
-                    let neutra = curva::curva_neutra();
-                    tela.gesto_discreto(
-                        |a| {
-                            for (i, v) in neutra.iter().enumerate() {
-                                canal.definir(a, i, *v);
-                            }
-                        },
-                        window,
-                        cx,
-                    );
-                }))
-            })
-            .child("Zerar");
-
-        // O desenho.
-        let area = estado.area_da_curva.clone();
-        let fundo = cx.theme().background;
-        let grade = cx.theme().border;
-        let desenho = canvas(
-            move |bounds, _window, _cx| {
-                area.set(bounds);
-            },
-            move |bounds, _prepaint, window, _cx| {
-                let escala = f32::from(bounds.size.width) / LADO_DA_CURVA;
-                let x0 = f32::from(bounds.origin.x);
-                let y0 = f32::from(bounds.origin.y);
-                let area_util = LADO_DA_CURVA - MARGEM_DA_CURVA * 2.0;
-                let para_x =
-                    |nivel: f32| x0 + (MARGEM_DA_CURVA + nivel / 255.0 * area_util) * escala;
-                let para_y = |nivel: f32| {
-                    y0 + (MARGEM_DA_CURVA + area_util - nivel / 255.0 * area_util) * escala
-                };
-                let ponto = |x: f32, y: f32| gpui_kit::point(px(x), px(y));
-
-                window.paint_quad(gpui_kit::fill(bounds, fundo).corner_radii(px(4.)));
-
-                // A grade dos quartos de tom, e a diagonal do neutro por baixo.
-                for f in [0.25, 0.5, 0.75] {
-                    let n = f * 255.0;
-                    for (a, b) in [
-                        ((para_x(n), para_y(0.0)), (para_x(n), para_y(255.0))),
-                        ((para_x(0.0), para_y(n)), (para_x(255.0), para_y(n))),
-                    ] {
-                        let mut linha = PathBuilder::stroke(px(0.5 * escala));
-                        linha.move_to(ponto(a.0, a.1));
-                        linha.line_to(ponto(b.0, b.1));
-                        if let Ok(caminho) = linha.build() {
-                            window.paint_path(caminho, grade);
-                        }
-                    }
-                }
-                let mut diagonal = PathBuilder::stroke(px(0.5 * escala))
-                    .dash_array(&[px(3.0 * escala), px(3.0 * escala)]);
-                diagonal.move_to(ponto(para_x(0.0), para_y(0.0)));
-                diagonal.line_to(ponto(para_x(255.0), para_y(255.0)));
-                if let Ok(caminho) = diagonal.build() {
-                    window.paint_path(caminho, grade);
-                }
-
-                // O traço, 65 amostras como no site.
-                let mut traco = PathBuilder::stroke(px(1.75 * escala));
-                for i in 0..=64 {
-                    let x = i as f32 / 64.0 * 255.0;
-                    let p = ponto(para_x(x), para_y(curva::avaliar_curva(&alturas, x)));
-                    if i == 0 {
-                        traco.move_to(p);
-                    } else {
-                        traco.line_to(p);
-                    }
-                }
-                if let Ok(caminho) = traco.build() {
-                    window.paint_path(caminho, cor);
-                }
-
-                // Os nove nós.
-                let raio = RAIO_DO_NO * escala;
-                for (i, altura) in alturas.iter().enumerate() {
-                    let cx_ = para_x(i as f32 * 255.0 / (PONTOS_DA_CURVA - 1) as f32);
-                    let cy_ = para_y(*altura);
-                    window.paint_quad(
-                        gpui_kit::fill(
-                            Bounds {
-                                origin: ponto(cx_ - raio, cy_ - raio),
-                                size: gpui_kit::size(px(raio * 2.0), px(raio * 2.0)),
-                            },
-                            cor,
-                        )
-                        .corner_radii(px(raio)),
-                    );
-                }
-            },
-        )
-        .size_full();
-
-        let area = estado.area_da_curva.clone();
-        let quadro = div()
-            .id("editor-de-curva")
-            .w_full()
-            .h(px(270.))
-            .when(!ligado, |q| q.opacity(0.4))
-            .child(desenho)
-            .when(ligado, |q| {
-                q.cursor_ns_resize()
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |tela, evento: &MouseDownEvent, window, cx| {
-                            let limites = area.get();
-                            let no = no_sob_o_ponteiro(limites, evento.position, &alturas);
-                            tela.estado_do_painel.no_arrastado = no;
-                            if let (Some(i), true) = (no, evento.click_count >= 2) {
-                                tela.devolver_no_a_reta(canal, i, window, cx);
-                            }
-                        }),
-                    )
-                    .on_drag(ArrastoDoNo, |_, _, _, cx| cx.new(|_| SemFantasma))
-                    .on_drag_move(cx.listener(
-                        move |tela, evento: &DragMoveEvent<ArrastoDoNo>, _window, cx| {
-                            let Some(i) = tela.estado_do_painel.no_arrastado else {
-                                return;
-                            };
-                            if !tela.controles_ligados() {
-                                return;
-                            }
-                            let limites = evento.bounds;
-                            let altura = altura_do_ponteiro(limites, evento.event.position);
-                            tela.mover_no_da_curva(i, altura, cx);
-                        },
-                    ))
-            });
-
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(8.))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap(px(8.))
-                    .child(botoes)
-                    .child(zerar),
-            )
-            .child(quadro)
-            .into_any_element()
-    }
-
     /// O histograma e a curva resultante, recolhíveis — só o desktop os tem.
     ///
     /// ⚠️ **Altura natural, e não fixa.** O bloco de 200px de antes tinha
@@ -1480,7 +1289,7 @@ impl Revelacao {
 
     /// O clique no botão de um canal da curva.
     pub(crate) fn escolher_canal_da_curva(&mut self, canal: Canal, cx: &mut Context<Self>) {
-        self.estado_do_painel.canal = canal;
+        self.estado_do_painel.modo = ModoDaCurva::Ponto(canal);
         cx.notify();
     }
 
@@ -1500,8 +1309,9 @@ impl Revelacao {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let canal = self.estado_do_painel.canal;
-        self.devolver_no_a_reta(canal, i, window, cx);
+        if let ModoDaCurva::Ponto(canal) = self.estado_do_painel.modo {
+            self.devolver_no_a_reta(canal, i, window, cx);
+        }
     }
 
     /// O clique no "Zerar tudo" do cabeçalho.
