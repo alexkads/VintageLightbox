@@ -224,10 +224,12 @@ impl Revelacao {
     /// reversível de graça. 🚨 **E é a mesma conta do clique**
     /// ([`presets::aplicado`]): a que substitui parte do neutro também aqui.
     pub(super) fn ajustes_na_tela(&self) -> Ajustes {
-        match &self.previa {
+        let ajustes = match &self.previa {
             Some(preset) => presets::aplicado(&self.ajustes, preset),
             None => self.ajustes,
-        }
+        };
+        // O olho da Correção de cores apertado: a prévia sem aquela faixa.
+        self.sem_o_que_o_olho_esconde(ajustes)
     }
 
     /// Mostra (ou tira) a prévia de uma predefinição.

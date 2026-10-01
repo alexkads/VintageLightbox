@@ -117,6 +117,7 @@ pub fn paradas(trilho: Trilho) -> Vec<Hsla> {
                 Hsla::from(gpui_kit::Rgba { r, g, b, a: 1. })
             })
             .collect(),
+        Trilho::Luminancia => vec![hsl(0., 0., 0.12), hsl(0., 0., 0.88)],
         Trilho::HslSaturacao(h) => vec![hsl(h, 0., 0.45), hsl(h, 0.85, 0.52)],
         Trilho::HslLuminancia(h) => {
             vec![hsl(h, 0.6, 0.15), hsl(h, 0.8, 0.5), hsl(h, 0.8, 0.85)]

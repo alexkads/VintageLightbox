@@ -207,7 +207,7 @@ impl Painel {
             Painel::Detalhe => "Detalhe",
             Painel::Lente => "Lente",
             Painel::Calibracao => "Calibração",
-            Painel::Tonalizacao => "Tonalização",
+            Painel::Tonalizacao => "Correção de cores",
             Painel::Efeitos => "Efeitos",
             Painel::RgbExposicao => "Exposição",
             Painel::RgbSombrasERealces => "Sombras e realces",
@@ -222,6 +222,9 @@ impl Painel {
     pub fn chave(&self) -> String {
         match self {
             Painel::CurvaPorPonto => "revelacao:curva-por-ponto".to_string(),
+            // 🔑 A chave é a de antes de o painel virar "Correção de cores"
+            // (2026-09-30): trocar o nome não pode fechar o painel de ninguém.
+            Painel::Tonalizacao => "revelacao:Tonalização".to_string(),
             outro => format!("revelacao:{}", outro.rotulo()),
         }
     }
@@ -322,6 +325,9 @@ pub enum Trilho {
     /// o Lightroom dá (`revelacao_core::ajustes::cor_da_roda_do_lightroom`),
     /// e não a do HSV.
     RodaDoLightroom,
+    /// Do escuro ao claro, em cinza — a luminância das rodas da Correção de
+    /// cores.
+    Luminancia,
     /// HSL · Cor: do cinza à cor da faixa.
     HslSaturacao(f32),
     /// HSL · Luminância: escuro → a cor → claro.
@@ -695,39 +701,53 @@ pub const CONTROLES: &[Definicao] = &[
         .com_trilho(Trilho::HslSaturacao(120.0)),
     matiz!(S::Calibracao, "Azul — matiz", calib_blue_hue).com_trilho(Trilho::Roda),
     cem!(S::Calibracao, "Azul — saturação", calib_blue_sat).com_trilho(Trilho::HslSaturacao(220.0)),
-    // ----------------------------------------------------------- Tonalização
-    // As três faixas e o global do Color Grading; a Mistura abre em 50.
+    // ------------------------------------------------------ Correção de cores
+    // As três faixas e o global do Color Grading; a Mesclagem abre em 50.
     // 🔑 Os matizes são os da roda do Lightroom desde 2026-09-30: o mesmo
     // número dá a mesma cor que lá (o trilho mostra qual).
-    matiz!(S::Tonalizacao, "Sombras — matiz", split_shadow_hue)
-        .com_trilho(Trilho::RodaDoLightroom),
+    //
+    // 🎡 **Na tela, matiz e saturação são as rodas** (`rodas.rs`), e não estas
+    // barras — elas só aparecem na vista de uma roda. Continuam aqui porque a
+    // contagem, o ponto âmbar, o duplo clique e a sincronização leem a tabela.
+    // Os rótulos são os do Lightroom em português: Realces, Equilíbrio e
+    // Mesclagem (dono, 2026-09-30, com o print do painel).
+    matiz!(S::Tonalizacao, "Sombras — matiz", split_shadow_hue).com_trilho(Trilho::RodaDoLightroom),
     cento!(S::Tonalizacao, "Sombras — saturação", split_shadow_sat),
-    cem!(S::Tonalizacao, "Sombras — luminância", split_shadow_lum),
+    cem!(S::Tonalizacao, "Sombras — luminância", split_shadow_lum).com_trilho(Trilho::Luminancia),
     matiz!(S::Tonalizacao, "Tons médios — matiz", split_midtone_hue)
         .com_trilho(Trilho::RodaDoLightroom),
     cento!(S::Tonalizacao, "Tons médios — saturação", split_midtone_sat),
-    cem!(S::Tonalizacao, "Tons médios — luminância", split_midtone_lum),
-    matiz!(S::Tonalizacao, "Altas luzes — matiz", split_highlight_hue)
-        .com_trilho(Trilho::RodaDoLightroom),
-    cento!(
+    cem!(
         S::Tonalizacao,
-        "Altas luzes — saturação",
-        split_highlight_sat
-    ),
-    cem!(S::Tonalizacao, "Altas luzes — luminância", split_highlight_lum),
-    matiz!(S::Tonalizacao, "Global — matiz", split_global_hue)
+        "Tons médios — luminância",
+        split_midtone_lum
+    )
+    .com_trilho(Trilho::Luminancia),
+    matiz!(S::Tonalizacao, "Realces — matiz", split_highlight_hue)
         .com_trilho(Trilho::RodaDoLightroom),
+    cento!(S::Tonalizacao, "Realces — saturação", split_highlight_sat),
+    cem!(S::Tonalizacao, "Realces — luminância", split_highlight_lum)
+        .com_trilho(Trilho::Luminancia),
+    matiz!(S::Tonalizacao, "Global — matiz", split_global_hue).com_trilho(Trilho::RodaDoLightroom),
     cento!(S::Tonalizacao, "Global — saturação", split_global_sat),
-    cem!(S::Tonalizacao, "Global — luminância", split_global_lum),
-    cem!(S::Tonalizacao, "Balanço", split_balance),
-    cento!(S::Tonalizacao, "Mistura", split_blending),
+    cem!(S::Tonalizacao, "Global — luminância", split_global_lum).com_trilho(Trilho::Luminancia),
+    cento!(S::Tonalizacao, "Mesclagem", split_blending),
+    cem!(S::Tonalizacao, "Equilíbrio", split_balance),
     // --------------------------------------------------------------- Efeitos
     // A vinheta pós-corte do Lightroom: estilo, quantidade, ponto médio,
     // arredondamento, difusão e realces.
     Definicao {
         discreto: true,
         opcoes: Some(&["Realces", "Cores", "Tinta"]),
-        ..def!(S::Efeitos, "Vinheta — estilo", pcv_style, 0.0, 2.0, 0, false)
+        ..def!(
+            S::Efeitos,
+            "Vinheta — estilo",
+            pcv_style,
+            0.0,
+            2.0,
+            0,
+            false
+        )
     },
     cem!(S::Efeitos, "Vinheta — quantidade", pcv_amount),
     cento!(S::Efeitos, "Vinheta — ponto médio", pcv_midpoint),

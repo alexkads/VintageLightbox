@@ -20,7 +20,7 @@
 //! quem opera o balcão, como a altura da tira: falhar ao ler ou gravar nunca
 //! interrompe nada.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -42,6 +42,7 @@ use crate::revelacao::controles::{self, Painel, Secao};
 use crate::revelacao::curva::{self, Canal, PONTOS_DA_CURVA};
 use crate::revelacao::persistencia::Corte;
 use crate::revelacao::processador::Ajustes;
+use crate::revelacao::rodas::{self, Faixa, Vista};
 use crate::tema;
 
 /// A chave da aba escolhida — a do site.
@@ -78,6 +79,15 @@ pub(super) struct EstadoDoPainel {
     area_da_curva: Rc<Cell<Bounds<Pixels>>>,
     /// A rolagem da coluna, para o roteiro de depuração.
     rolagem: gpui_kit::ScrollHandle,
+    /// O que o "Ajustar" da Correção de cores mostra. Como a aba do HSL, não
+    /// é lembrado entre sessões, só entre fotos.
+    pub(super) vista_das_rodas: Vista,
+    /// Onde cada roda foi desenhada no último quadro.
+    pub(super) areas_das_rodas: Rc<RefCell<HashMap<Faixa, Bounds<Pixels>>>>,
+    /// O arrasto em curso numa roda.
+    pub(super) arrasto_da_roda: Option<rodas::Arrasto>,
+    /// O olho apertado: a prévia sai sem esta parte da Correção de cores.
+    pub(super) ver_sem: Option<super::correcao_de_cores::VerSem>,
 }
 
 impl Default for EstadoDoPainel {
@@ -96,6 +106,10 @@ impl Default for EstadoDoPainel {
             no_arrastado: None,
             area_da_curva: Rc::new(Cell::new(Bounds::default())),
             rolagem: gpui_kit::ScrollHandle::new(),
+            vista_das_rodas: Vista::default(),
+            areas_das_rodas: Rc::new(RefCell::new(HashMap::new())),
+            arrasto_da_roda: None,
+            ver_sem: None,
         }
     }
 }
@@ -165,7 +179,7 @@ fn corte_inteiro() -> Corte {
 }
 
 /// A arte que acompanha o ponteiro no arrasto de um nó: nenhuma.
-struct SemFantasma;
+pub(super) struct SemFantasma;
 
 impl Render for SemFantasma {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
@@ -179,7 +193,7 @@ struct ArrastoDoNo;
 
 /// O ponto de um conjunto de controles — âmbar é "mudou e não salvou", cinza é
 /// "tem ajuste, já salvo" (`Marca` e o `<Marca>` do site).
-fn ponto(marca: controles::Marca, cx: &gpui_kit::App) -> gpui_kit::Div {
+pub(super) fn ponto(marca: controles::Marca, cx: &gpui_kit::App) -> gpui_kit::Div {
     let cor = match marca {
         controles::Marca::NaoSalvo => tema::cores::quente(),
         controles::Marca::Ajustado => cx.theme().muted_foreground.opacity(0.5),
@@ -192,7 +206,7 @@ impl Revelacao {
     /// `desabilitado={!pronto || !podeRevelar}` do site. Uma foto do site
     /// comprada (ou apagada) não se revela: o cliente pode já ter baixado o
     /// original (`Revelacao::pode_revelar`).
-    fn controles_ligados(&self) -> bool {
+    pub(super) fn controles_ligados(&self) -> bool {
         self.tem_pixels() && self.pode_revelar()
     }
 
@@ -210,7 +224,7 @@ impl Revelacao {
 
     /// A revelação com que a foto abriu — o que a galeria tem, e é contra ela
     /// que o ponto âmbar compara (o marco do site).
-    fn salvo(&self) -> Ajustes {
+    pub(super) fn salvo(&self) -> Ajustes {
         self.parametros_ao_abrir
             .as_ref()
             .map(|e| e.ajustes)
@@ -301,7 +315,7 @@ impl Revelacao {
     /// Um gesto discreto sobre os ajustes — o duplo clique num nó, o "Zerar"
     /// de um canal. O mesmo caminho de `devolver_ao_neutro`: fecha o pendente,
     /// muda, vira um passo e grava na hora. Sem mudança, não escreve nada.
-    fn gesto_discreto(
+    pub(super) fn gesto_discreto(
         &mut self,
         mudar: impl FnOnce(&mut Ajustes),
         window: &mut Window,
@@ -716,6 +730,7 @@ impl Revelacao {
             let mut dentro: Vec<AnyElement> = Vec::new();
             match painel {
                 Painel::CurvaPorPonto => dentro.push(self.editor_de_curva(cx)),
+                Painel::Tonalizacao => dentro.push(self.correcao_de_cores(cx)),
                 Painel::Hsl => {
                     let visivel = self.estado_do_painel.aba_hsl;
                     dentro.push(self.abas(painel.secoes(), visivel, cx));
@@ -805,10 +820,22 @@ impl Revelacao {
         controle: &Controle,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.linha_do_controle_rotulada(indice, controle, controle.definicao.rotulo, cx)
+    }
+
+    /// A mesma linha, com outro rótulo na tela — "Matiz" em vez de
+    /// "Sombras — matiz" dentro da vista de uma roda, onde a faixa já está
+    /// escrita em cima.
+    pub(super) fn linha_do_controle_rotulada(
+        &self,
+        indice: usize,
+        controle: &Controle,
+        rotulo: &'static str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let definicao = controle.definicao;
         let valor = (definicao.ler)(&self.ajustes);
         let alterado = definicao.alterado(&self.ajustes);
-        let ligado = self.controles_ligados();
 
         div()
             .flex()
@@ -834,7 +861,7 @@ impl Revelacao {
                             } else {
                                 cx.theme().muted_foreground
                             })
-                            .child(definicao.rotulo)
+                            .child(rotulo)
                             .on_click(cx.listener(
                                 move |tela, evento: &gpui_kit::ClickEvent, window, cx| {
                                     if evento.click_count() >= 2 && tela.controles_ligados() {
@@ -852,26 +879,38 @@ impl Revelacao {
                             .child(SharedString::from(definicao.formatar(valor))),
                     ),
             )
+            .child(self.barra_do_controle(indice, controle, cx))
+            .into_any_element()
+    }
+
+    /// Só a barra de um controle, sem rótulo nem valor — a luminância embaixo
+    /// de cada roda, como no Lightroom. O duplo clique volta ao neutro igual.
+    pub(super) fn barra_do_controle(
+        &self,
+        indice: usize,
+        controle: &Controle,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let definicao = controle.definicao;
+        let ligado = self.controles_ligados();
+        div()
+            .when(ligado, |barra| {
+                barra.capture_any_mouse_up(cx.listener(
+                    move |tela, evento: &MouseUpEvent, window, cx| {
+                        if evento.button == MouseButton::Left
+                            && evento.click_count >= 2
+                            && tela.controles_ligados()
+                        {
+                            tela.devolver_ao_neutro(indice, window, cx);
+                        }
+                    },
+                ))
+            })
             .child(
-                div()
-                    .when(ligado, |barra| {
-                        barra.capture_any_mouse_up(cx.listener(
-                            move |tela, evento: &MouseUpEvent, window, cx| {
-                                if evento.button == MouseButton::Left
-                                    && evento.click_count >= 2
-                                    && tela.controles_ligados()
-                                {
-                                    tela.devolver_ao_neutro(indice, window, cx);
-                                }
-                            },
-                        ))
-                    })
-                    .child(
-                        crate::estilo::slider(&controle.estado)
-                            .trilho(definicao.trilho)
-                            .neutro(definicao.neutro())
-                            .disabled(!ligado),
-                    ),
+                crate::estilo::slider(&controle.estado)
+                    .trilho(definicao.trilho)
+                    .neutro(definicao.neutro())
+                    .disabled(!ligado),
             )
             .into_any_element()
     }

@@ -19,6 +19,7 @@ pub mod persistencia;
 pub mod presets;
 pub mod processador;
 pub mod reposicao;
+pub mod rodas;
 pub mod sincronizacao;
 pub mod tela;
 /// O zoom da revelação (o `zoom.ts` do site).

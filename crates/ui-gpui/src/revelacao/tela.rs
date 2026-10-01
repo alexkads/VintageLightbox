@@ -53,6 +53,7 @@ use infrastructure::transformacao;
 
 /// O Enquadrar: retângulo, alças, transferidor e o painel dele.
 mod comparar;
+mod correcao_de_cores;
 mod enquadrar;
 /// A Revelação local: máscaras e retoques — ferramentas, gestos e painel.
 mod local;
@@ -1346,6 +1347,10 @@ impl Revelacao {
         // revelação de uma foto gravada na outra. É a mesma ordem do legado
         // ("Check if we need to save the CURRENT photo before switching").
         self.gravar_o_que_estiver_pendente();
+        // O olho apertado não atravessa a troca de foto: a prévia da próxima
+        // sai com tudo, e a miniatura da que sai também.
+        self.estado_do_painel.ver_sem = None;
+        self.estado_do_painel.arrasto_da_roda = None;
         // E a miniatura da que sai, para a grade não mostrar a foto sem efeito.
         self.guardar_a_revelada_no_cache();
 
@@ -3481,6 +3486,7 @@ mod testes {
     use super::*;
     use crate::biblioteca::miniaturas::Miniatura;
     use crate::campo::TrocarValor as _;
+    use crate::revelacao::rodas;
     use biblioteca_core::selecao::Modificadores;
 
     use gpui_kit::TestAppContext;
@@ -3743,6 +3749,141 @@ mod testes {
             de_volta.origin, barra.origin,
             "o duplo clique não a devolveu"
         );
+    }
+
+    /// 🎡 A roda da Correção de cores responde ao ponteiro como a do
+    /// Lightroom: o clique leva o puck (matiz e saturação), o duplo clique
+    /// zera a faixa, e o olho apertado muda **só a prévia** — os ajustes da
+    /// foto ficam (dono, 2026-09-30, com o print do painel).
+    ///
+    /// ⚠️ **Os eventos vão direto aos tratadores**, com as coordenadas que a
+    /// roda desenhou: no harness, o `simulate_event` não chega à coluna abaixo
+    /// dos painéis (nem o botão do "Ajustar" responde). O caminho do clique de
+    /// verdade é conferido no app, por roteiro.
+    #[gpui_kit::test]
+    fn a_roda_da_correcao_de_cores_move_a_faixa_e_o_olho_so_a_previa(cx: &mut TestAppContext) {
+        use gpui_kit::{Modifiers, MouseButton, MouseDownEvent};
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+                tela.seguir_o_roteiro_do_painel("fechar Básico", cx);
+                tela.seguir_o_roteiro_do_painel("abrir Correção de cores", cx);
+            })
+            .expect("a janela deve estar aberta");
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_resize(gpui_kit::size(px(1600.), px(1200.)));
+        visual.run_until_parked();
+
+        let roda = visual
+            .debug_bounds("roda-sombras")
+            .expect("a roda das sombras é desenhada na vista de três");
+        visual
+            .debug_bounds("olho-sombras")
+            .expect("o olho das sombras é desenhado");
+        let centro = roda.center();
+        let raio = rodas::raio_no_quadro(f32::from(roda.size.width));
+        let apertar = |visual: &mut gpui_kit::VisualTestContext, onde, cliques| {
+            janela
+                .update(visual, |tela, window, cx| {
+                    tela.apertar_a_roda(
+                        rodas::Faixa::Sombras,
+                        &MouseDownEvent {
+                            position: onde,
+                            button: MouseButton::Left,
+                            modifiers: Modifiers::none(),
+                            click_count: cliques,
+                            first_mouse: false,
+                        },
+                        window,
+                        cx,
+                    )
+                })
+                .expect("a janela deve estar aberta");
+        };
+
+        // Metade do raio, para cima: 90°, saturação 50.
+        apertar(
+            &mut visual,
+            centro + gpui_kit::point(px(0.), px(-raio / 2.)),
+            1,
+        );
+        let (matiz, sat, medios, realces) = janela
+            .update(cx, |tela, _, _| {
+                let a = &tela.ajustes;
+                (
+                    a.split_shadow_hue,
+                    a.split_shadow_sat,
+                    a.split_midtone_sat,
+                    a.split_highlight_sat,
+                )
+            })
+            .expect("a janela deve estar aberta");
+        assert!(
+            (matiz - 90.0).abs() <= 1.0 && (sat - 50.0).abs() <= 1.0,
+            "o puck não foi para debaixo do ponteiro: {matiz}° {sat}"
+        );
+        assert_eq!(
+            (medios, realces),
+            (0.0, 0.0),
+            "o clique vazou para outra roda"
+        );
+
+        // O olho apertado: a prévia sem as sombras, a foto com.
+        let (na_tela, na_foto) = janela
+            .update(cx, |tela, _, cx| {
+                tela.segurar_o_olho(
+                    Some(correcao_de_cores::VerSem::Faixa(rodas::Faixa::Sombras)),
+                    cx,
+                );
+                (
+                    tela.ajustes_na_tela().split_shadow_sat,
+                    tela.ajustes.split_shadow_sat,
+                )
+            })
+            .expect("a janela deve estar aberta");
+        assert_eq!(
+            na_tela, 0.0,
+            "o olho apertado não tirou as sombras da prévia"
+        );
+        assert!(
+            (na_foto - 50.0).abs() <= 1.0,
+            "o olho mexeu na foto: {na_foto}"
+        );
+        let na_tela = janela
+            .update(cx, |tela, _, cx| {
+                tela.segurar_o_olho(None, cx);
+                tela.ajustes_na_tela().split_shadow_sat
+            })
+            .expect("a janela deve estar aberta");
+        assert!(
+            (na_tela - 50.0).abs() <= 1.0,
+            "soltar o olho não devolveu a prévia"
+        );
+
+        // O duplo clique na roda zera matiz e saturação.
+        apertar(&mut visual, centro, 2);
+        let depois = janela
+            .update(cx, |tela, _, _| {
+                (tela.ajustes.split_shadow_hue, tela.ajustes.split_shadow_sat)
+            })
+            .expect("a janela deve estar aberta");
+        assert_eq!(depois, (0.0, 0.0), "o duplo clique não zerou a faixa");
+
+        // Fora do disco e da alça, o clique não pega nada.
+        apertar(
+            &mut visual,
+            centro + gpui_kit::point(px(raio * 3.), px(0.)),
+            1,
+        );
+        let fora = janela
+            .update(cx, |tela, _, _| tela.estado_do_painel.arrasto_da_roda)
+            .expect("a janela deve estar aberta");
+        assert_eq!(fora, None);
     }
 
     /// 🚨 **"Não tem preview no cache" era um beco sem saída.**
