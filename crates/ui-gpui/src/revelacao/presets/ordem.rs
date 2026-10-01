@@ -436,9 +436,15 @@ mod testes {
             assert!(chave(a).starts_with("sistema:"));
         }
         assert_eq!(chave(&primeira[1]), "sistema:sepia");
+        let lr = primeira
+            .iter()
+            .find(|p| p.name == "RecordarFotos P&B" && Grupo::de(p) == Grupo::Lrs)
+            .expect("a do Lightroom");
+        assert_eq!(chave(lr), "sistema:lr-recordarfotos-p-b", "não é a do darktable");
         // Toda do sistema tem id do site: um nome novo sem linha na tabela
         // guardaria a ordem pelo nome, e renomeá-la a perderia.
-        for preset in &primeira {
+        // As da pasta "LRs" têm id pelo nome do arquivo (`id_do_lightroom`).
+        for preset in primeira.iter().filter(|p| Grupo::de(p) == Grupo::Sistema) {
             assert!(
                 IDS_DO_SISTEMA.iter().any(|(nome, _)| *nome == preset.name),
                 "\"{}\" não tem id do site",

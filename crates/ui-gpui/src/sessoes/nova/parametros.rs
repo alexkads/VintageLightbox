@@ -180,7 +180,11 @@ mod testes {
 
     #[test]
     fn todo_preset_do_sistema_tem_chave_do_site() {
-        for preset in use_cases::presets::presets_de_sistema() {
+        // As da pasta "LRs" vão com `id_do_lightroom` (`presets_da_sessao`).
+        for preset in use_cases::presets::presets_de_sistema()
+            .into_iter()
+            .filter(|p| p.grupo.is_none())
+        {
             assert!(
                 id_do_sistema(&preset.name).is_some(),
                 "`{}` não tem chave em `ordem::IDS_DO_SISTEMA` — a sessão iria sem preset padrão",

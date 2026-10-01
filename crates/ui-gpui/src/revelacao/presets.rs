@@ -757,8 +757,13 @@ mod testes {
 
     #[test]
     fn as_do_sistema_sao_vinte_com_nomes_distintos() {
-        let lista = use_cases::presets::presets_de_sistema();
-        assert_eq!(lista.len(), 20);
+        // "Do sistema": as vinte e o Cinematográfico P&B. As 28 da pasta
+        // "LRs" repetem um nome ("RecordarFotos P&B"), e por isso ficam fora.
+        let lista: Vec<_> = use_cases::presets::presets_de_sistema()
+            .into_iter()
+            .filter(|p| p.grupo.is_none())
+            .collect();
+        assert_eq!(lista.len(), 21);
         let nomes: std::collections::HashSet<_> = lista.iter().map(|p| &p.name).collect();
         assert_eq!(nomes.len(), lista.len());
         assert!(lista.iter().all(|p| p.is_system));
@@ -770,8 +775,17 @@ mod testes {
     #[test]
     fn nenhuma_do_sistema_guarda_campo_no_neutro() {
         let neutro = Ajustes::default().como_vetor();
-        for preset in use_cases::presets::presets_de_sistema() {
+        // As de vinheta da pasta "LRs" somam e levam os campos da vinheta mesmo
+        // no neutro ("Vinheta Nenhuma" é a quantidade em zero); a curva por
+        // ponto vai inteira por canal.
+        for preset in use_cases::presets::presets_de_sistema()
+            .into_iter()
+            .filter(|p| p.replaces)
+        {
             for (campo, valor) in preset.adjustments.iter() {
+                if campo.starts_with("curva_") {
+                    continue;
+                }
                 let i = posicao_de(campo).expect("campo do motor");
                 assert_ne!(
                     valor, neutro[i],
