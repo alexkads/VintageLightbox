@@ -505,6 +505,13 @@ struct Aberta {
     /// O que o shader devolveu (ou a foto do cache, antes do primeiro resultado).
     /// É a foto **inteira**: o corte e o giro entram depois, na exibição.
     revelada: Option<image::DynamicImage>,
+    /// A imagem da galeria da foto do site, enquanto a cópia de trabalho não
+    /// chega. Vai ao palco **como veio**: o site a entrega já revelada e
+    /// enquadrada (C15), e passar o corte por cima dela a recortaria duas vezes.
+    ///
+    /// 🔑 Só aparece enquanto não há `revelada` — e fica até ela chegar, para a
+    /// foto não sumir entre o download e a resposta do motor.
+    espera: Option<image::DynamicImage>,
     /// O que está na tela: a revelada depois de espelhada, girada, endireitada e
     /// recortada.
     desenhada: Option<Arc<RenderImage>>,
@@ -1381,11 +1388,22 @@ impl Revelacao {
         // Preview primeiro, miniatura como queda. A miniatura fica borrada numa
         // tela inteira, e é de propósito: mostrar a foto em tamanho errado é
         // melhor do que mostrar retângulo vazio.
-        let bruta = trabalho.clone().or_else(|| {
+        let do_cache = || {
             self.previews
                 .get_preview(&foto.id)
                 .or_else(|| self.previews.get_thumbnail(&foto.id))
-        });
+        };
+        // 🚨 **Na foto do site, o que está em `foto.id` é a galeria, e não o
+        // bruto**: fica como `espera`, fora da `bruta` e da `revelada`. Nelas
+        // ela levaria o corte de novo na tela, seria o "antes" do `\` sem ser
+        // crua, e sairia no `guardar_a_revelada_no_cache` como se o motor a
+        // tivesse feito.
+        let espera = (do_site && trabalho.is_none()).then(do_cache).flatten();
+        let bruta = if do_site {
+            trabalho.clone()
+        } else {
+            trabalho.clone().or_else(do_cache)
+        };
 
         // 🔑 **Sem cópia de trabalho, a foto do site não tem origem** — e é a
         // ausência de origem que faz a raiz ir buscá-la (`tem_pixels`). Com ela,
@@ -1468,10 +1486,9 @@ impl Revelacao {
         // de resolução (`resolucao.rs`) e a tela do cliente (`cliente.rs`), que
         // só desenham o que saiu do motor.
         //
-        // ⚠️ **Só quando vai mesmo revelar.** Sem origem não há pedido, e a
-        // bruta é a espera legítima da foto do site enquanto a cópia de trabalho
-        // não chega; no neutro o resultado é a própria origem, e segurá-la seria
-        // tela preta por nada.
+        // ⚠️ **Só quando vai mesmo revelar.** Sem origem não há pedido (a foto
+        // do site mostra a `espera` até a cópia de trabalho chegar); no neutro
+        // o resultado é a própria origem, e segurá-la seria tela preta por nada.
         let vai_revelar = origem.is_some() && !self.sem_revelacao();
         self.aberta = Some(Aberta {
             foto,
@@ -1479,6 +1496,7 @@ impl Revelacao {
             origem,
             bruta: bruta.clone(),
             revelada: if vai_revelar { None } else { bruta },
+            espera,
             desenhada: None,
         });
         self.atualizar_exibicao();
@@ -1578,17 +1596,36 @@ impl Revelacao {
             && self.locais.para_o_motor().camadas.is_empty()
             && self.locais.retoques.is_empty();
         aberta.revelada = neutra.then_some(imagem);
-        aberta.desenhada = None;
+        // 🚨 **Mas o palco não esvazia** (dono, 30/09/2026: *"a foto é carregada
+        // e depois dá uma piscada"*). Apagar o que estava desenhado deixava a
+        // foto do site sumir entre o download e a resposta do motor; o que está
+        // na tela — a espera da galeria — fica até a revelada entrar, e entra
+        // cruzando.
         self.repondo = false;
 
         // 🔑 **A tira também guardou a ausência.** O `CacheDeMiniaturas` é um
         // LRU de resultados, e `Ausente` é um resultado: sem este esquecimento
         // a célula desta foto continuaria um retângulo preto ao lado da foto
         // que acabou de aparecer, até a rolagem despejá-la por acaso.
-        self.miniaturas_da_tira.esquecer(foto_id);
+        //
+        // ⚠️ **Só a ausência.** A célula que já tem imagem fica com ela: esquecê-
+        // la a punha em "sem prévia" até a releitura — a mesma piscada do palco,
+        // na tira. A revelada a substitui ao chegar
+        // (`atualizar_a_tira_com_o_revelado`).
+        if matches!(
+            self.miniaturas_da_tira.espiar(foto_id),
+            Some(crate::biblioteca::miniaturas::Miniatura::Ausente)
+        ) {
+            self.miniaturas_da_tira.esquecer(foto_id);
+        }
 
-        self.atualizar_exibicao();
-        self.pedir_revelacao(cx);
+        if neutra {
+            self.cruzar = true;
+            self.atualizar_exibicao();
+            self.pedir_revelacao(cx);
+        } else {
+            self.pedir_revelacao_cruzando(cx);
+        }
         cx.notify();
         true
     }
@@ -2102,6 +2139,12 @@ impl Revelacao {
             let _m = crate::desempenho::medir(crate::desempenho::Etapa::RecorteNaCpu);
             fonte.map(|imagem| transformacao::aplicar(imagem, &corte, recortar))
         };
+        // A espera da galeria, enquanto nada melhor chegou — e sem corte: ela
+        // já vem enquadrada. Com a revelada na mão, não serve mais.
+        if aberta.revelada.is_some() {
+            aberta.espera = None;
+        }
+        let exibida = exibida.or_else(|| aberta.espera.clone());
 
         // 🔑 O histograma mede **o que está na tela**, e não a foto crua: com os
         // sliders mexidos, o histograma do cru descreveria uma imagem que ninguém
@@ -4274,6 +4317,89 @@ mod testes {
 
                 assert!(tela.receber_pixels("site:remota-1", foto_cinza(), cx));
                 assert!(tela.tem_pixels(), "a cópia de trabalho é a origem");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 **A foto revelada em outro computador aparece uma vez só** (dono,
+    /// 30/09/2026: *"a foto é carregada e depois dá uma piscada"*).
+    ///
+    /// Enquanto a cópia de trabalho não chega, a espera é a imagem da galeria —
+    /// que já vem revelada **e enquadrada** do site (C15). Havia duas falhas
+    /// nesse caminho: o corte entrava de novo por cima dela, e a chegada da
+    /// cópia apagava o palco até o motor responder. Agora ela aparece como veio
+    /// e só sai quando a revelada entra no lugar.
+    #[gpui_kit::test]
+    fn a_foto_do_site_revelada_nao_pisca_quando_a_copia_chega(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let galeria =
+            DynamicImage::ImageRgba8(RgbaImage::from_pixel(16, 8, Rgba([100, 100, 100, 255])));
+        previews
+            .save_preview("site:remota-1", &galeria)
+            .expect("gravar a imagem da galeria");
+        previews
+            .save_thumbnail("site:remota-1", &galeria)
+            .expect("gravar a miniatura da galeria");
+
+        let janela = janela(cx, previews.clone());
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(
+                    PhotoViewModel {
+                        id: "site:remota-1".into(),
+                        name: "DSC_001.jpg".into(),
+                        pos_venda_foto_id: Some("remota-1".into()),
+                        edit_exposure: Some(1.5),
+                        edit_crop_x: Some(0.0),
+                        edit_crop_y: Some(0.0),
+                        edit_crop_width: Some(0.5),
+                        edit_crop_height: Some(1.0),
+                        ..Default::default()
+                    },
+                    window,
+                    cx,
+                );
+                let largura_na_tela = |tela: &Revelacao| {
+                    tela.aberta
+                        .as_ref()
+                        .unwrap()
+                        .desenhada
+                        .as_ref()
+                        .map(|imagem| imagem.size(0).width.0)
+                };
+
+                assert_eq!(
+                    largura_na_tela(tela),
+                    Some(16),
+                    "a imagem da galeria já vem enquadrada: cortar de novo a encolhe"
+                );
+                assert!(matches!(
+                    tela.miniaturas_da_tira.obter(&previews, "site:remota-1"),
+                    Miniatura::Pronta(_)
+                ));
+
+                let copia = DynamicImage::ImageRgba8(RgbaImage::from_pixel(
+                    32,
+                    16,
+                    Rgba([90, 90, 90, 255]),
+                ));
+                assert!(tela.receber_pixels("site:remota-1", copia, cx));
+                assert!(
+                    tela.aguardando.is_some(),
+                    "a revelação da cópia está a caminho"
+                );
+                assert_eq!(
+                    largura_na_tela(tela),
+                    Some(16),
+                    "a espera fica no palco até o motor responder — sem quadro vazio"
+                );
+                assert!(
+                    matches!(
+                        tela.miniaturas_da_tira.espiar("site:remota-1"),
+                        Some(Miniatura::Pronta(_))
+                    ),
+                    "e a célula da tira não volta a \"sem prévia\" no meio"
+                );
             })
             .expect("a janela deve estar aberta");
     }

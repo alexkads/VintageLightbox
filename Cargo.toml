@@ -62,7 +62,7 @@ members = [
 exclude = ["vendor/rawler"]
 
 [workspace.package]
-version = "0.1.55"
+version = "0.1.56"
 edition = "2021"
 authors = ["VintageLightbox Team"]
 license = "MIT"
