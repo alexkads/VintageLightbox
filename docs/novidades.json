@@ -1,12 +1,12 @@
 {
-  "versao": "0.1.61",
-  "titulo": "A Curva de tons da Revelação ficou como a do Lightroom.",
+  "versao": "0.1.62",
+  "titulo": "As Novidades da versão agora mostram o histórico de todas as versões.",
   "importante": false,
   "novidades": [
-    "A Curva de tons e a Curva por ponto viraram um painel só. Em \"Ajustes:\" ficam a curva das regiões (o primeiro ícone) e os círculos RGB, vermelho, verde e azul da curva por ponto.",
-    "O gráfico mostra o histograma da foto por trás. Arrastar para cima ou para baixo dentro dele mexe na região que está sob o mouse, e o canto mostra qual é (\"Claros: +12\").",
-    "As três divisões das regiões viraram pinos na barra embaixo do gráfico, como no Lightroom. Clique duplo num pino o devolve ao lugar.",
-    "Os controles estão na ordem do Lightroom: Realces, Claros, Escuros e Sombras."
+    "O quadro \"Novidades da versão\" ganhou a lista de versões à esquerda, com a data de cada uma. Clique numa versão para ler o que ela trouxe.",
+    "Os botões \"Mais recente\" e \"Mais antiga\", embaixo, andam uma versão de cada vez.",
+    "A versão instalada vem marcada como \"Instalada\". Quando há atualização, as versões que ela traz aparecem como \"Nova\", inclusive as do meio, para quem pulou alguma.",
+    "Para abrir: clique na versão, no canto de baixo à esquerda, ou em \"Ver novidades\" quando aparecer uma atualização."
   ],
-  "por_que_atualizar": "Quem já revela no Lightroom encontra a curva do mesmo jeito, num painel só."
+  "por_que_atualizar": "Dá para ver tudo o que mudou desde a versão que você tinha, e não só a última."
 }

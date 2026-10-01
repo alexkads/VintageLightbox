@@ -1,5 +1,18 @@
 [
   {
+    "versao": "0.1.62",
+    "data": "2026-10-01",
+    "titulo": "As Novidades da versão agora mostram o histórico de todas as versões.",
+    "importante": false,
+    "novidades": [
+      "O quadro \"Novidades da versão\" ganhou a lista de versões à esquerda, com a data de cada uma. Clique numa versão para ler o que ela trouxe.",
+      "Os botões \"Mais recente\" e \"Mais antiga\", embaixo, andam uma versão de cada vez.",
+      "A versão instalada vem marcada como \"Instalada\". Quando há atualização, as versões que ela traz aparecem como \"Nova\", inclusive as do meio, para quem pulou alguma.",
+      "Para abrir: clique na versão, no canto de baixo à esquerda, ou em \"Ver novidades\" quando aparecer uma atualização."
+    ],
+    "por_que_atualizar": "Dá para ver tudo o que mudou desde a versão que você tinha, e não só a última."
+  },
+  {
     "versao": "0.1.61",
     "data": "2026-10-01",
     "titulo": "A Curva de tons da Revelação ficou como a do Lightroom.",
