@@ -1,12 +1,13 @@
 {
-  "versao": "0.1.59",
-  "titulo": "Os temas Claro e Escuro agora têm a cara do macOS.",
+  "versao": "0.1.60",
+  "titulo": "A Correção de cores da Revelação com rodas, como no Lightroom — e os temas com a cara do macOS.",
   "importante": false,
   "novidades": [
+    "A Tonalização virou a Correção de cores do Lightroom: em Ajustar, escolha as 3 rodas ou uma faixa só (Sombras, Tons médios, Realces ou Global). O ponto embaixo de cada botão mostra a faixa que tem ajuste.",
+    "Em cada roda, arraste o ponto para escolher a cor e a força dela; a bolinha da borda gira só a cor. Shift prende a cor e muda só a força, Cmd move mais devagar para o ajuste fino, e o duplo clique zera a roda.",
+    "Embaixo de cada roda, a barra de Luminância clareia ou escurece aquela faixa, e o olho, segurado, mostra a foto sem ela. Mesclagem e Equilíbrio ficam no pé do painel, com os nomes do Lightroom.",
     "Claro, Escuro e Sistema ganharam o visual do macOS: fundo branco (ou grafite no escuro), barra lateral em cinza, os cinzas da Apple e um azul só nos botões e no que está escolhido.",
-    "A barra de título da janela acompanha o tema: no Claro ela fica clara mesmo com o computador no modo escuro, e no Escuro fica escura.",
-    "Os controles deslizantes da Revelação têm o formato do Mac: barra fina e o botão branco redondo.",
-    "A foto escolhida na tira de baixo fica marcada na cor do tema."
+    "A barra de título da janela acompanha o tema, os controles deslizantes da Revelação têm o formato do Mac e a foto escolhida na tira de baixo fica marcada na cor do tema."
   ],
-  "por_que_atualizar": "O app fica com o visual do sistema, mais limpo e confortável no dia a dia."
+  "por_que_atualizar": "Para tonalizar a foto como no Lightroom, mexendo na roda em vez de procurar números — e com o app no visual do sistema."
 }
