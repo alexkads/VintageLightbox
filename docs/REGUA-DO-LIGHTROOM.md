@@ -193,7 +193,9 @@ pixel nenhum.
 `crates/use-cases/src/presets/lightroom.json` foi regerado: 27 das 28 ganharam `"processo": 1`. A
 "Vinheta Nenhuma" só zera a vinheta.
 
-## 5. Resultado
+## 5. Resultado da primeira rodada
+
+> ⚠️ Superado pela segunda rodada (seção 8), que corrigiu Exposição, Realces, Sombras e o balanço.
 
 Diferença média para o Lightroom, por predefinição, antes (processo 0) e depois (processo 1), nas 6
 fotos com original JPG e nas 2 RAW (NEF). Ordenado pelo resultado em JPG.
@@ -277,3 +279,101 @@ Os passos, nesta ordem:
    ```bash
    cargo run --release -p infrastructure --example comparar_com_o_lightroom -- <original> <exportado> <saída>
    ```
+
+## 8. A segunda rodada: um controle por vez, e o CLI em lote
+
+*"Teste somente o controle de exposição nos dois programas"*, *"continue comparando os controles"*,
+*"o importante é aprimorar o CLI para pegar todos os casos"* — dono, 1/out, à noite.
+
+### O CLI em lote (`infrastructure/examples/comparar_em_lote.rs`)
+
+O comparador de um caso abria um processo, a GPU e o original de 24 MP **por caso**. O lote abre o
+motor uma vez, decodifica cada original uma vez e revela já no tamanho da exportação: são **818 casos,
+nos dois processos, em cerca de 5 minutos**, com os mesmos números do comparador (±0,2).
+
+```bash
+cargo run --release -p infrastructure --example comparar_em_lote -- \
+    saida.csv --reguas "<pasta Comparar Presets>" --processos 0,1 --base saida-anterior.csv
+```
+
+A saída tem uma linha por caso e um **resumo**: cada caso agrupado nas fotos, separando JPG de RAW, com
+o processo 0, o processo 1 e o que piorou primeiro. Com `--base`, mostra também quanto cada caso mudou
+desde a rodada anterior. É o que se roda depois de mexer no motor.
+
+### Réguas novas no plug-in (`casos=`)
+
+| | o quê |
+|---|---|
+| `exposicao` | Exposição de −5 a +5 (o alcance inteiro do slider) |
+| `controles` | cada controle do Básico de −100 a +100 numa foto real (com Temperatura e Matiz) |
+| `balanco` | Temperatura e Matiz de −100 a +100, de 10 em 10 (rampa e quadrantes) |
+| `componentes` | cada predefinição do estúdio **decomposta**: só o Básico, só o balanço, só a curva, só o P&B, só o HSL, só a tonalização, só a vinheta, só o detalhe |
+
+### O que mudou no motor (processo 1)
+
+- **Exposição até ±5.** A tabela parava em ±2, e dali em diante o slider não fazia nada (o
+  "comportamento esquisito"). A Exposição sozinha, nas fotos JPG, deu de 1 a 14 em todo o alcance,
+  contra 10 a 48 da conta antiga.
+- **Realces e Sombras locais.** A curva da rampa age sobre a base (a luminância menos o detalhe medido
+  contra a guia larga), com **metade da força**. Na rampa o Lightroom aplica o efeito inteiro; numa foto
+  real, cerca de 1/3. O valor 0,5 foi varrido: 0,35 / 0,5 / 1,0 dão 6,3 / 6,6 / 9,0 nas fotos e
+  7,1 / 5,5 / 3,3 na rampa.
+- **O balanço de branco**, antes da Exposição, como no Lightroom: uma curva por canal para cada valor
+  (o ganho cai para o branco). Temperatura ±100 vai de 35–53 para 8–12; Matiz ±100, de 27–30 para 6–15.
+  Um preset do Lightroom que mexe no balanço também liga o processo 1.
+
+A tabela passou a ter 395 linhas: Exposição 41, os cinco sliders 21 cada, vinheta 42 + 81, balanço 126.
+
+### Resultado
+
+Por componente das predefinições (3 fotos JPG), processo 0 → 1: **Básico 24,6 → 10,4**, **vinheta
+13,7 → 5,4**, **balanço 13,7 → 8,0**. Curva (4,8), P&B (5,1), HSL (6,3), detalhe (6,0) e tonalização
+(7,9) já estavam perto do piso.
+
+Por predefinição (média de 0 a 255; abaixo de ~5 não se vê):
+
+| predefinição | JPG antes | JPG agora | RAW antes | RAW agora |
+|---|---|---|---|---|
+| Vinheta Carregada | 19,4 | **3,6** | 22,3 | 13,5 |
+| Predefinição sem título | 14,5 | **4,0** | 18,2 | 14,0 |
+| Vinheta Nenhuma | 4,8 | **4,8** | 17,3 | 17,3 |
+| RF Sépia | 10,2 | **5,6** | 12,9 | 14,5 |
+| Vinheta Borda | 8,3 | **6,6** | 19,7 | 16,6 |
+| RF ENVELHECIDO PADRÃO | 20,1 | **6,9** | 20,8 | 14,0 |
+| Vinheta Oval | 46,5 | **7,5** | 72,7 | 17,1 |
+| RF P&B Movie 2 | 16,0 | **8,2** | 21,2 | 12,8 |
+| RF P&B Movie | 16,7 | **8,4** | 14,9 | 14,8 |
+| Vinheta Tingida | 14,2 | **9,0** | 24,8 | 16,0 |
+| RF P&B Cinematografico | 17,9 | **9,1** | 21,2 | 18,8 |
+| RF P&B Perfurado | 19,2 | **10,8** | 19,4 | 12,6 |
+| RF Colorido Quente | 32,8 | **10,9** | 40,7 | 23,3 |
+| RF Colorido Envelhecido | 55,0 | **11,3** | 53,6 | 19,0 |
+| RF P&B | 11,1 | **13,1** ✗ | 17,3 | 14,6 |
+| Colorido envelhacido | 37,8 | **13,8** | 49,1 | 21,0 |
+| RF Velho Oeste | 17,0 | **15,5** | 19,4 | 29,7 ✗ |
+| RF Old2 | 21,3 | **15,7** | 22,6 | 32,4 ✗ |
+| RF Velho Oeste Color | 25,4 | **15,7** | 35,8 | 27,5 |
+| RF Colorido Chocolate | 24,7 | **16,3** | 35,1 | 27,7 |
+| RF Velho Oeste 2 | 18,0 | **16,3** | 35,6 | 33,0 |
+| RF P&B Cinematografico II | 34,9 | **16,7** | 27,5 | 25,3 |
+| RF Velho Oeste Hollyword | 28,5 | **17,5** | 36,6 | 29,3 |
+| RF old | 18,7 | **18,2** | 40,8 | 40,8 |
+| RF Vintage Quente | 20,6 | **19,2** | 17,4 | 27,3 ✗ |
+| RF Sépia Antigo | 25,3 | **21,3** | 16,9 | 15,0 |
+| RF Velho Oeste Criativo | 26,8 | **27,4** | 28,6 | 50,4 ✗ |
+| RF Bem Velhão | 78,1 | **29,3** | 105,1 | 46,1 |
+
+**Média das 28 nas fotos JPG: 24,4 → 13,0. Nas RAW: 31,0 → 23,0.** Nas fotos JPG, só o RF P&B ainda
+piora (11,1 → 13,1).
+
+### O que continua aberto
+
+1. **A base do RAW.** Nas fotos NEF, mesmo a "Vinheta Nenhuma" dá 17: o motor parte de outra imagem
+   que o Lightroom (o perfil de câmera Adobe Color). As piores nas RAW (Velho Oeste Criativo,
+   Vintage Quente, Old2, Velho Oeste) pioram por isso, e não pelo preset.
+2. **O desvio de cor da base nas fotos JPG**: o neutro do Lightroom é um pouco mais quente que o JPEG
+   da câmera (−10 a −15 no "quente" em todos os casos). Esse piso é de ~4–5.
+3. **Remover névoa negativo** (−100: 21) e **Vibração negativa** (−100: 22) seguem fora; também os
+   perfis criativos e as máscaras locais (RF Bem Velhão: 29).
+4. ⚠️ **O conta-gotas e o EB Automático** do Básico (`revelacao/balanco.rs`) resolvem ao contrário a
+   conta **antiga** da temperatura. No processo 1 eles dão números aproximados.

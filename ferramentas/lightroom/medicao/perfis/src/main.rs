@@ -18,6 +18,8 @@
 //! | `analise-tom <csv>` | por canal, pela luminância ou "RGB Tone" — qual prevê o Lightroom |
 //! | `cantos-csv <saída> <pasta>…` | o canto de cada quadrante (a vinheta inteira) |
 //! | `arredondamento <csv> <tabelas.bin>` | ajusta a forma da vinheta no arredondamento negativo |
+//! | `balanco <pasta>` | o ganho por canal do balanço em cada nível de cinza (os quadrantes) |
+//! | `analise-balanco <csv>` | o balanço do Lightroom é por canal? (a rampa colorida) |
 //!
 //! 🔑 As tabelas da Adobe são **lidas** dos arquivos do Lightroom instalado,
 //! na hora; nenhuma delas é copiada para cá.
@@ -742,6 +744,94 @@ fn main() {
             println!("{} linhas", linhas.len() - 1);
         }
         "analise-tom" => analise_tom(&args[1]),
+        // analise-balanco <csv da rampa>: as curvas de cada canal saem da faixa
+        // cinza; prevendo as faixas coloridas canal a canal, quanto erra?
+        "analise-balanco" => {
+            let m = ler_rampa(&args[1]);
+            let neutro = m.iter().find(|(k, _)| k.contains("neutro")).map(|(_, v)| v.clone()).unwrap();
+            println!("{:28} {:>9} {:>9}", "caso", "sem mudar", "por canal");
+            for (nome, faixas) in &m {
+                if nome.contains("neutro") {
+                    continue;
+                }
+                // curva do canal c: entrada = neutro cinza no degrau i (canal c), saída = caso cinza (canal c)
+                let curva = |c: usize, x: f64| {
+                    let pts: Vec<(f64, f64)> = (0..256).map(|i| (neutro[0][i][c], faixas[0][i][c])).collect();
+                    let j = pts.iter().position(|(a, _)| *a >= x).unwrap_or(255);
+                    if j == 0 {
+                        return pts[0].1;
+                    }
+                    let ((x0, y0), (x1, y1)) = (pts[j - 1], pts[j]);
+                    if (x1 - x0).abs() < 1e-6 { y1 } else { y0 + (y1 - y0) * (x - x0) / (x1 - x0) }
+                };
+                let (mut e0, mut e1, mut n) = (0.0, 0.0, 0.0);
+                for f in 1..4 {
+                    for i in 8..248 {
+                        for c in 0..3 {
+                            let ent = neutro[f][i][c];
+                            let sai = faixas[f][i][c];
+                            e0 += (ent - sai).abs();
+                            e1 += (curva(c, ent) - sai).abs();
+                            n += 1.0;
+                        }
+                    }
+                }
+                println!("{nome:28} {:9.2} {:9.2}", e0 / n, e1 / n);
+            }
+        }
+        // balanco <pasta da régua de balanço>: o ganho em luz linear de cada
+        // canal, por nível de cinza, para cada caso — se o balanço do Lightroom
+        // é um ganho por canal, a coluna é constante ao longo dos níveis.
+        "balanco" => {
+            let raiz = std::path::Path::new(&args[1]);
+            let niveis = [
+                ("wb-quad-a", [0.0, 16.0, 32.0, 48.0]),
+                ("wb-quad-b", [64.0, 96.0, 128.0, 160.0]),
+                ("wb-quad-c", [192.0, 224.0, 240.0, 255.0]),
+            ];
+            // o centro de cada quadrante
+            let centros = |img: &image::RgbImage| {
+                let (w, h) = (img.width(), img.height());
+                [(w / 4, h / 4), (3 * w / 4, h / 4), (w / 4, 3 * h / 4), (3 * w / 4, 3 * h / 4)].map(|(cx, cy)| {
+                    let mut s = [0.0f64; 3];
+                    for y in cy - 4..cy + 4 {
+                        for x in cx - 4..cx + 4 {
+                            let p = img.get_pixel(x, y);
+                            for c in 0..3 {
+                                s[c] += p[c] as f64 / 64.0;
+                            }
+                        }
+                    }
+                    s
+                })
+            };
+            let lin = |v: f64| srgb_para_linear((v / 255.0) as f32) as f64;
+            let casos: Vec<String> = std::fs::read_dir(raiz.join("wb-quad-b"))
+                .unwrap()
+                .filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .filter(|n| n.ends_with(".jpg") && !n.contains("neutro"))
+                .collect();
+            let mut casos = casos;
+            casos.sort();
+            for caso in casos {
+                let mut linha = format!("{:<22}", caso.trim_end_matches(".jpg").split_once('-').unwrap().1);
+                for (pasta, nivel) in &niveis {
+                    let dir = raiz.join(pasta);
+                    let neutro = std::fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).find(|e| e.file_name().to_string_lossy().contains("neutro")).unwrap().path();
+                    let n = centros(&image::open(&neutro).unwrap().to_rgb8());
+                    let c = centros(&image::open(dir.join(&caso)).unwrap().to_rgb8());
+                    for q in 0..4 {
+                        if nivel[q] < 30.0 || nivel[q] > 245.0 {
+                            continue;
+                        }
+                        let g: Vec<String> = (0..3).map(|k| format!("{:.2}", lin(c[q][k]) / lin(n[q][k]).max(1e-4))).collect();
+                        let _ = std::fmt::Write::write_fmt(&mut linha, format_args!(" {:>3}:{}", nivel[q] as i32, g.join("/")));
+                    }
+                }
+                println!("{linha}");
+            }
+        }
         "arredondamento" => ajustar_arredondamento(&args[1], &args[2]),
         // cantos-csv <saída.csv> <pasta>…: caso,foto,quadrante,R,G,B — o
         // canto de cada quadrante, onde a vinheta age por inteiro.

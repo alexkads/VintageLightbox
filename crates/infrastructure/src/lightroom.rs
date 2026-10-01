@@ -633,7 +633,7 @@ pub fn traduzir(bruto: &PresetBruto) -> PresetTraduzido {
 
 /// Os campos cuja conta é outra no processo 1 — as tabelas medidas no
 /// Lightroom.
-const CAMPOS_DO_PROCESSO: [&str; 7] = [
+const CAMPOS_DO_PROCESSO: [&str; 9] = [
     "exposure",
     "contrast",
     "highlights",
@@ -641,6 +641,8 @@ const CAMPOS_DO_PROCESSO: [&str; 7] = [
     "whites",
     "blacks",
     "pcv_amount",
+    "temperature",
+    "tint",
 ];
 
 /// Quatro casas bastam para um slider, e encurtam o que vai ao banco.

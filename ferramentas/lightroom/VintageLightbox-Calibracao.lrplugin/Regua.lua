@@ -251,7 +251,120 @@ local function casos_de_forca_fina()
 	return casos
 end
 
+-- Só a Exposição, de −5 a +5 — o alcance inteiro do slider (a régua de tom
+-- parava em ±2, e o processo 1 travava a foto dali em diante).
+local function casos_de_exposicao()
+	local casos = { { nome = "00-neutro", ajustes = {} } }
+	for _, ev in ipairs { -5, -4, -3, -2.5, -2, -1.5, -1, -0.5, -0.25, 0.25, 0.5, 1, 1.5, 2, 2.5, 3, 4, 5 } do
+		table.insert(casos, { nome = string.format("exposicao%+.2f", ev), ajustes = { Exposure2012 = ev } })
+	end
+	return casos
+end
+
+-- Cada controle do Básico (menos a Exposição, que tem régua própria) sozinho,
+-- de −100 a +100, numa foto de verdade. O balanço vai como "Personalizado",
+-- com a chave do SDK e a incremental (só a incremental é ignorada).
+local function casos_de_controles()
+	local casos = { { nome = "00-neutro", ajustes = {} } }
+	local valores = { -100, -50, -25, 25, 50, 100 }
+	for _, chave in ipairs {
+		"Contrast2012", "Highlights2012", "Shadows2012", "Whites2012", "Blacks2012",
+		"Texture", "Clarity2012", "Dehaze", "Vibrance", "Saturation",
+	} do
+		for _, v in ipairs(valores) do
+			table.insert(casos, { nome = string.format("%s%+04d", chave, v), ajustes = { [chave] = v } })
+		end
+	end
+	for _, chave in ipairs { "Temperature", "Tint" } do
+		for _, v in ipairs(valores) do
+			table.insert(casos, {
+				nome = string.format("%s%+04d", chave, v),
+				ajustes = { WhiteBalance = "Custom", [chave] = v, ["Incremental" .. chave] = v },
+			})
+		end
+	end
+	return casos
+end
+
+-- O balanço de branco de −100 a +100, de 10 em 10, Temperatura e Matiz cada
+-- um sozinho — nas fotos de quadrantes, 12 níveis de cinza por caso.
+local function casos_de_balanco()
+	local casos = { { nome = "00-neutro", ajustes = {} } }
+	for _, chave in ipairs { "Temperature", "Tint" } do
+		for v = -100, 100, 10 do
+			if v ~= 0 then
+				table.insert(casos, {
+					nome = string.format("%s%+04d", chave, v),
+					ajustes = { WhiteBalance = "Custom", [chave] = v, ["Incremental" .. chave] = v },
+				})
+			end
+		end
+	end
+	return casos
+end
+
+-- Os componentes de cada predefinição do estúdio: as chaves dela de cada
+-- painel, sozinhas. É o que separa "o preset diverge" de "a curva do preset
+-- diverge".
+local COMPONENTES = {
+	{ "basico", { "Exposure2012", "Contrast2012", "Highlights2012", "Shadows2012", "Whites2012", "Blacks2012",
+		"Clarity2012", "Texture", "Dehaze", "Vibrance", "Saturation" } },
+	{ "balanco", { "WhiteBalance", "Temperature", "Tint", "IncrementalTemperature", "IncrementalTint" } },
+	{ "curva", { "ToneCurve", "Parametric" } },
+	{ "pb", { "ConvertToGrayscale", "GrayMixer" } },
+	{ "hsl", { "HueAdjustment", "SaturationAdjustment", "LuminanceAdjustment" } },
+	{ "tonalizacao", { "SplitToning", "ColorGrade" } },
+	{ "vinheta", { "PostCropVignette" } },
+	{ "detalhe", { "Sharpen", "Sharpness", "LuminanceSmoothing", "LuminanceNoise", "ColorNoiseReduction", "Grain" } },
+}
+
+local function comeca_com_algum(chave, prefixos)
+	for _, p in ipairs(prefixos) do
+		if chave:sub(1, #p) == p then
+			return true
+		end
+	end
+	return false
+end
+
+local function casos_de_componentes(por_nome)
+	local casos = { { nome = "00-neutro", ajustes = {} } }
+	for _, nome in ipairs(do_estudio(por_nome)) do
+		local ok, todos = LrTasks.pcall(function()
+			return por_nome[nome]:getSetting()
+		end)
+		if ok and todos then
+			for _, comp in ipairs(COMPONENTES) do
+				local parte = {}
+				for chave, valor in pairs(todos) do
+					if comeca_com_algum(chave, comp[2]) then
+						parte[chave] = valor
+					end
+				end
+				if next(parte) then
+					table.insert(casos, {
+						nome = string.format("comp-%s-%s", comp[1], nome),
+						ajustes = parte,
+					})
+				end
+			end
+		end
+	end
+	return casos
+end
+
 function Regua.casos(completa, por_nome, tipo)
+	if tipo == "componentes" then
+		return casos_de_componentes(por_nome)
+	end
+	if tipo == "balanco" then
+		return casos_de_balanco()
+	end
+	if tipo == "exposicao" then
+		return casos_de_exposicao()
+	elseif tipo == "controles" then
+		return casos_de_controles()
+	end
 	if tipo == "tom" then
 		return casos_de_tom()
 	elseif tipo == "vinheta-forca-fina" then

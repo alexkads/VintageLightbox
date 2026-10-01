@@ -44,6 +44,10 @@ trabalho dele.
 | `vinheta-forca-fina` | a vinheta de −100 a +100 nos 3 estilos | 4 fotos de quadrantes: 12 cinzas e 4 cores |
 | `vinheta` | a varredura grossa da vinheta e o balanço de branco | cinza 128 liso |
 | `sliders` | só os sliders | a rampa cinza |
+| `exposicao` | Exposição de −5 a +5 | a rampa e fotos reais |
+| `controles` | cada controle do Básico (e Temperatura/Matiz) de −100 a +100 | fotos reais |
+| `balanco` | Temperatura e Matiz de −100 a +100, de 10 em 10 | a rampa e os quadrantes |
+| `componentes` | cada predefinição do estúdio decomposta por painel (Básico, balanço, curva, P&B, HSL, tonalização, vinheta, detalhe) | fotos reais |
 
 ## Os roteiros e a ferramenta de medição (`medicao/`)
 
@@ -70,7 +74,22 @@ O gerador lê `regua-tom/rampa-cor`, `regua-forca2/quad-{a,b,c}` e `regua-grade/
 `crates/revelacao-core/src/tabelas_lightroom.bin`. São medidas de fotos sintéticas, sem nenhum arquivo
 da Adobe.
 
-## Medir o motor contra o Lightroom
+## Medir tudo de uma vez (o CLI em lote)
+
+```bash
+cargo run --release -p infrastructure --example comparar_em_lote -- \
+    saida.csv --reguas "<pasta Comparar Presets>" --processos 0,1 [--base saida-anterior.csv]
+```
+
+Ele acha toda régua debaixo da pasta e roda cada caso nos dois processos: 818 casos em cerca de 5
+minutos. Grava `saida.csv` (uma linha por caso) e `saida.resumo.csv`, e mostra no terminal o que
+piorou primeiro. Com `--base`, mostra também quanto cada caso mudou desde a rodada anterior. Opções:
+- `--regua <pasta>`, repetível, para uma régua só;
+- `--filtro a,b` (pedaços do nome do caso);
+- `--forcar campo=valor;…`, para varrer um ajuste;
+- `--imagens <pasta>`, para gravar o lado a lado.
+
+## Medir um caso só, pela exportação do app
 
 ```bash
 cargo run --release -p infrastructure --example comparar_com_o_lightroom -- \
