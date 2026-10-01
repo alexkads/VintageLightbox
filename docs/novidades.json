@@ -1,11 +1,13 @@
 {
-  "versao": "0.1.56",
-  "titulo": "A foto da nuvem não pisca mais ao abrir na Revelação.",
-  "importante": false,
+  "versao": "0.1.57",
+  "titulo": "A Revelação com os controles do Lightroom.",
+  "importante": true,
   "novidades": [
-    "Ao abrir na Revelação uma foto de sessão revelada em outro computador, ela aparece uma vez só: a foto fica na tela enquanto o app termina de carregar, sem sumir no meio.",
-    "A foto que estava cortada aparece já com o enquadramento certo desde o primeiro instante, sem recortar duas vezes.",
-    "A miniatura dessa foto na tira também não volta mais para \"sem prévia\" por um instante."
+    "Básico com Textura, Claridade e Remover névoa, como no Lightroom. A Claridade agora é contraste local de verdade.",
+    "Vinheta pós-corte completa em Efeitos (estilo, intensidade, ponto médio, arredondamento, difusão e realces), aspereza do grão, as divisões da curva de tons, a luminância de cada faixa da Gradação de cores e o Detalhe inteiro (detalhe e máscara da nitidez, detalhe, contraste e suavidade do ruído).",
+    "A Gradação de cores usa a roda do Lightroom: o mesmo número dá a mesma cor que lá. Pretos, Sombras e Realces ficaram mais perto do Lightroom.",
+    "Importar do Lightroom traz os controles novos, o corte inclinado e a curva de tons dos .xmp, que antes sumia.",
+    "Nova pasta LRs nas predefinições, com as 28 do Lightroom do estúdio (as de vinheta somam, as outras recomeçam), e a Cinematográfico P&B em Do sistema."
   ],
-  "por_que_atualizar": "Abrir sessões vindas da nuvem fica estável, sem a piscada."
+  "por_que_atualizar": "Para revelar aqui o que foi revelado no Lightroom sem refazer à mão."
 }

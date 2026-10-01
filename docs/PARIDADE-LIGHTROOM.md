@@ -117,12 +117,14 @@ são frações do lado, então a tela (2560 px) e o JPEG (6000 px) dão a mesma 
   0,4 × saturação**, e a L* fica. Antes misturava a cor pura do matiz HSV, e o mesmo número do
   Lightroom dava outra cor (o amarelo 59 virava verde, o vermelho 14 virava roxo). Os dois números
   saíram da prévia que o Lightroom grava dentro do DNG: as três faixas batem em ~2 unidades de a*/b*.
-- **Pretos** levantava o preto três vezes mais que o Lightroom (`/3` → `/9`), e **Realces negativo**
-  escurecia o meio-tom com a força do alto (`n²(1−n)` → `1,2·n³(1−n)`, que poupa a mediana).
+- **Pretos** levantava o preto três vezes mais que o Lightroom (`/3` → `/9`); **Realces negativo**
+  escurecia o meio-tom com a força do alto (`n²(1−n)` → `1,2·n³(1−n)`, que poupa a mediana); e
+  **Sombras positivo** se estendia até as altas luzes (`n(1−n)²` → `1,4·n(1−n)³`, que fica embaixo).
 
 Conferência no `_DSC0010-2.dng` do Estúdio Canela, contra a prévia do Lightroom: corte e giro de
-0,8° batem, a moldura branca bate no perfil, as sombras (p2–p25) batem a 2 níveis, o contraste local
-bate a 3 % nas três escalas. ⚠️ **O alto do histograma ainda fica mais claro** (p98 ~205 contra 191):
+0,8° batem, a moldura branca bate no perfil, as sombras (p2–p25) batem a 2 níveis, a mediana a 6
+(85 × 91), a cor das três faixas a ~2 unidades de a*/b*, o contraste local a 3–7 %. ⚠️ **O alto do
+histograma ainda fica mais claro** (p90 181 × 163, p98 223 × 191):
 comprimir mais o Realces aqui exigiria derivada acima de 2,2 junto do branco, e composta com
 "Brancos" vira degrau (`o_tom_por_regiao_nunca_inverte_nem_da_degrau`).
 
