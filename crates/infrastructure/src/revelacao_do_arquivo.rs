@@ -26,10 +26,13 @@
 //! orientação depois). Aqui o retângulo é girado para a foto de pé, que é o
 //! referencial do enquadramento deste motor.
 //!
-//! ⚠️ **Corte inclinado fica de fora, e avisado.** O retângulo do Lightroom com
-//! `CropAngle` é medido na foto já girada; aplicar o retângulo sem o giro daria
-//! outro enquadramento, e aplicar o giro com um sinal não conferido daria um
-//! torto. O aviso é melhor que qualquer dos dois.
+//! ✅ **Corte inclinado entra desde 30/set/2026.** O `CropAngle` gira o
+//! retângulo do Lightroom em torno do centro dele; aqui o endireitamento gira
+//! em torno do centro da foto, com o retângulo no espaço já endireitado. Os dois
+//! diferem só no deslocamento do centro do recorte pela rotação — para os
+//! poucos graus de um nivelamento, um ou dois pixels numa foto de 6000. O
+//! sentido foi conferido contra a prévia que o Lightroom grava no próprio DNG
+//! (`_DSC0010-2.dng` do Estúdio Canela, 0,8°).
 
 use std::path::{Path, PathBuf};
 
@@ -170,6 +173,9 @@ fn numero(bruto: &PresetBruto, chave: &str) -> Option<f32> {
     }
 }
 
+/// O `CropAngle` do Lightroom no sentido do endireitamento daqui.
+const SENTIDO_DO_ANGULO: f32 = -1.0;
+
 /// O corte do Lightroom no referencial da foto de pé.
 ///
 /// `Ok(None)` é "sem corte"; `Err` é o corte que existe e não entra, com o
@@ -189,9 +195,7 @@ fn corte_do_xmp(
     ) else {
         return Ok(None);
     };
-    if numero(bruto, "CropAngle").is_some_and(|a| a.abs() > 0.01) {
-        return Err("corte inclinado (refaça o enquadramento aqui)".into());
-    }
+    let angulo = numero(bruto, "CropAngle").unwrap_or(0.0);
     let Some(orientacao) = orientacao else {
         return Err("corte (orientação do arquivo desconhecida)".into());
     };
@@ -235,16 +239,22 @@ fn corte_do_xmp(
         .map(|c| c.1)
         .fold(f32::MIN, f32::max)
         .clamp(0.0, 1.0);
-    if max_x - min_x >= 0.999 && max_y - min_y >= 0.999 {
+    if max_x - min_x >= 0.999 && max_y - min_y >= 0.999 && angulo.abs() < 0.01 {
         return Ok(None);
     }
+    // Espelhar inverte o sentido do giro; girar de 90° não.
+    let angulo = if matches!(orientacao, 2 | 4 | 5 | 7) {
+        -angulo
+    } else {
+        angulo
+    } * SENTIDO_DO_ANGULO;
     Ok(Some(CropSettings::new(
         min_x,
         min_y,
         max_x - min_x,
         max_y - min_y,
         0,
-        0.0,
+        angulo,
         false,
         false,
     )))
@@ -387,8 +397,10 @@ mod testes {
         assert_eq!(r.ajustes.split_shadow_sat, 35.0);
         assert_eq!(r.ajustes.grain_amount, 34.0);
         assert_eq!(r.corte, CropSettings::default(), "HasCrop=False: sem corte");
-        // O balanço é o da câmera: não é aviso. A aspereza do grão é.
-        assert_eq!(r.ignorados, vec!["aspereza do grão".to_string()]);
+        // O balanço é o da câmera: não é aviso. A aspereza do grão é
+        // controle desde 2026-09-30.
+        assert!(r.ignorados.is_empty(), "{:?}", r.ignorados);
+        assert_eq!(r.ajustes.grain_roughness, 55.0);
     }
 
     #[test]
@@ -436,14 +448,22 @@ mod testes {
         assert!((r.corte.crop_height() - 0.9).abs() < 1e-6);
     }
 
+    /// ✅ O corte inclinado entra (2026-09-30), com o sentido conferido contra
+    /// a prévia do Lightroom: o `CropAngle` dele é o endireitamento daqui com
+    /// o sinal trocado. Espelhado, troca de novo.
     #[test]
-    fn corte_inclinado_fica_de_fora_e_avisado() {
+    fn corte_inclinado_entra_com_o_angulo() {
         let texto = com(
             r#"crs:HasCrop="True" crs:CropLeft="0.1" crs:CropTop="0.1" crs:CropRight="0.9" crs:CropBottom="0.9" crs:CropAngle="2.5" crs:Exposure2012="1""#,
         );
         let r = de_xmp(&texto, "a.NEF", Some(1), Origem::Embutida).unwrap();
-        assert_eq!(r.corte, CropSettings::default());
-        assert!(r.ignorados.iter().any(|i| i.contains("inclinado")));
+        assert!((r.corte.crop_x() - 0.1).abs() < 1e-6);
+        assert!((r.corte.crop_width() - 0.8).abs() < 1e-6);
+        assert_eq!(r.corte.angle(), -2.5);
+        assert!(r.ignorados.is_empty(), "{:?}", r.ignorados);
+
+        let espelhada = de_xmp(&texto, "a.NEF", Some(2), Origem::Embutida).unwrap();
+        assert_eq!(espelhada.corte.angle(), 2.5);
     }
 
     #[test]

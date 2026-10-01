@@ -118,7 +118,7 @@ fn direto(campo: &'static str, minimo: f32, maximo: f32) -> Conversao {
     }
 }
 
-/// -100..100 do Lightroom para -1..1 daqui (textura, intensidade, saturação).
+/// -100..100 do Lightroom para -1..1 daqui (claridade, intensidade, saturação).
 fn por_cem(campo: &'static str) -> Conversao {
     Conversao {
         campo,
@@ -203,11 +203,32 @@ fn conversao(chave: &str) -> Option<Conversao> {
         "Clarity2012" | "Clarity" => por_cem("clarity"),
         "Vibrance" => por_cem("vibrance"),
         "Saturation" => por_cem("saturation"),
+        // ✅ Desde 2026-09-30 o motor tem os dois, na escala do Lightroom.
+        "Texture" => direto("texture", -100.0, 100.0),
+        "Dehaze" => direto("dehaze", -100.0, 100.0),
+        // O balanço de uma foto que não é RAW (JPEG, TIFF, o DNG que veio de
+        // um JPEG) é relativo, de −100 a 100 — o `Temperature` em Kelvin é o
+        // do RAW, e esse continua de fora. Aqui a faixa é −10 a 10.
+        "IncrementalTemperature" => Conversao {
+            campo: "temperature",
+            minimo: -10.0,
+            maximo: 10.0,
+            converter: |v| v / 10.0,
+        },
+        "IncrementalTint" => Conversao {
+            campo: "tint",
+            minimo: -10.0,
+            maximo: 10.0,
+            converter: |v| v / 10.0,
+        },
         // ------------------------------------------------- Curva paramétrica
         "ParametricShadows" => direto("tone_curve_shadows", -100.0, 100.0),
         "ParametricDarks" => direto("tone_curve_darks", -100.0, 100.0),
         "ParametricLights" => direto("tone_curve_lights", -100.0, 100.0),
         "ParametricHighlights" => direto("tone_curve_highlights", -100.0, 100.0),
+        "ParametricShadowSplit" => direto("tone_curve_split_shadows", 0.0, 100.0),
+        "ParametricMidtoneSplit" => direto("tone_curve_split_midtones", 0.0, 100.0),
+        "ParametricHighlightSplit" => direto("tone_curve_split_highlights", 0.0, 100.0),
         // ----------------------------------------------------------- Detalhe
         "LuminanceSmoothing" => direto("nr_luminance", 0.0, 100.0),
         "ColorNoiseReduction" => direto("nr_color", 0.0, 100.0),
@@ -219,11 +240,33 @@ fn conversao(chave: &str) -> Option<Conversao> {
             converter: |v| v * 100.0 / 150.0,
         },
         "SharpenRadius" => direto("sharpen_radius", 0.5, 3.0),
+        "SharpenDetail" => direto("sharpen_detail", 0.0, 100.0),
+        "SharpenEdgeMasking" => direto("sharpen_masking", 0.0, 100.0),
+        "LuminanceNoiseReductionDetail" => direto("nr_luminance_detail", 0.0, 100.0),
+        "LuminanceNoiseReductionContrast" => direto("nr_luminance_contrast", 0.0, 100.0),
+        "ColorNoiseReductionDetail" => direto("nr_color_detail", 0.0, 100.0),
+        "ColorNoiseReductionSmoothness" => direto("nr_color_smoothness", 0.0, 100.0),
         // ------------------------------------------------------------- Lente
-        // A vinheta **pós-corte** é a que o preset usa como efeito; a de lente
-        // (`VignetteAmount`) é correção óptica e some quando há corte.
-        "PostCropVignetteAmount" => direto("lens_vignette_amount", -100.0, 100.0),
-        "PostCropVignetteMidpoint" => direto("lens_vignette_midpoint", 0.0, 100.0),
+        // A vinheta de lente é a correção óptica (`VignetteAmount`).
+        "VignetteAmount" => direto("lens_vignette_amount", -100.0, 100.0),
+        "VignetteMidpoint" => direto("lens_vignette_midpoint", 0.0, 100.0),
+        // -------------------------------------------- Vinheta pós-corte
+        // 🔑 **Até 2026-09-30 ela caía na de lente**, sem estilo, forma nem
+        // difusão — e uma moldura branca de cantos retos virava um canto
+        // clareado redondo. Agora tem campos próprios, os seis do Lightroom.
+        "PostCropVignetteAmount" => direto("pcv_amount", -100.0, 100.0),
+        "PostCropVignetteMidpoint" => direto("pcv_midpoint", 0.0, 100.0),
+        "PostCropVignetteRoundness" => direto("pcv_roundness", -100.0, 100.0),
+        "PostCropVignetteFeather" => direto("pcv_feather", 0.0, 100.0),
+        "PostCropVignetteHighlightContrast" => direto("pcv_highlights", 0.0, 100.0),
+        // O XMP numera os estilos de 1 a 3 (prioridade de realces, de cores,
+        // sobreposição de tinta); aqui são 0 a 2.
+        "PostCropVignetteStyle" => Conversao {
+            campo: "pcv_style",
+            minimo: 0.0,
+            maximo: 2.0,
+            converter: |v| (v - 1.0).round(),
+        },
         "LensManualDistortionAmount" => direto("lens_distortion", -100.0, 100.0),
         // ------------------------------------------------------- Tonalização
         // 🔑 As escalas batem, e é por sorte: matiz em graus na roda inteira e
@@ -248,6 +291,10 @@ fn conversao(chave: &str) -> Option<Conversao> {
         // 🔑 A mistura da Adobe já vem em 0–100 e o neutro dela é 50, igual ao
         // daqui.
         "ColorGradeBlending" => direto("split_blending", 0.0, 100.0),
+        "ColorGradeShadowLum" => direto("split_shadow_lum", -100.0, 100.0),
+        "ColorGradeMidtoneLum" => direto("split_midtone_lum", -100.0, 100.0),
+        "ColorGradeHighlightLum" => direto("split_highlight_lum", -100.0, 100.0),
+        "ColorGradeGlobalLum" => direto("split_global_lum", -100.0, 100.0),
         // -------------------------------------------- Calibração de câmera
         // 🚨 **A base da maioria dos presets de filme.** As escalas batem: matiz
         // e saturação de −100 a 100 nos dois lados. O que muda é o significado
@@ -263,6 +310,8 @@ fn conversao(chave: &str) -> Option<Conversao> {
         // -------------------------------------------------------------- Grão
         "GrainAmount" => direto("grain_amount", 0.0, 100.0),
         "GrainSize" => direto("grain_size", 0.0, 100.0),
+        // A "Aspereza" da tela do Lightroom chama-se `GrainFrequency` no XMP.
+        "GrainFrequency" => direto("grain_roughness", 0.0, 100.0),
         _ => return None,
     })
 }
@@ -292,24 +341,14 @@ fn campo_do_motor(nome: &str) -> &'static str {
 /// "ColorGrade" saíram daqui quando o motor ganhou tonalização e grão; o que
 /// ficou tem de ser específico o bastante para não engolir a chave que hoje é
 /// traduzida — `GrainAmount` começa com "Grain".
+///
+/// ✅ **Em 2026-09-30 saíram daqui a textura, a remoção de névoa, a aspereza do
+/// grão, o detalhe e a máscara da nitidez, o detalhe, o contraste e a suavidade
+/// do ruído e a forma, a difusão, o estilo e os realces da vinheta** — o motor
+/// ganhou os controles.
 const SEM_EQUIVALENTE: &[(&str, &str)] = &[
-    ("GrainFrequency", "aspereza do grão"),
-    ("Dehaze", "remoção de névoa"),
-    ("Texture", "textura (LR moderno)"),
     ("Defringe", "correção de franjas"),
     ("ChromaticAberration", "aberração cromática"),
-    ("SharpenDetail", "detalhe da nitidez"),
-    ("SharpenEdgeMasking", "máscara de bordas"),
-    ("LuminanceNoiseReduction", "detalhe do ruído"),
-    ("ColorNoiseReductionDetail", "detalhe do ruído de cor"),
-    ("ColorNoiseReductionSmoothness", "suavidade do ruído de cor"),
-    ("PostCropVignetteRoundness", "forma da vinheta"),
-    ("PostCropVignetteFeather", "suavidade da vinheta"),
-    ("PostCropVignetteStyle", "estilo da vinheta"),
-    (
-        "PostCropVignetteHighlightContrast",
-        "vinheta nas altas luzes",
-    ),
     ("Temperature", "temperatura (depende do balanço da foto)"),
     ("Tint", "matiz do balanço de branco"),
 ];
@@ -533,6 +572,11 @@ pub fn traduzir(bruto: &PresetBruto) -> PresetTraduzido {
             continue;
         }
 
+        // O secundário de um recurso desligado não entra: a difusão de uma
+        // vinheta de quantidade zero não é ajuste de ninguém.
+        if sem_efeito_no_lightroom(chave, valor, bruto) {
+            continue;
+        }
         if let Some(conversao) = conversao(chave) {
             let Some(bruto) = valor.numero() else {
                 continue;
@@ -551,7 +595,7 @@ pub fn traduzir(bruto: &PresetBruto) -> PresetTraduzido {
             continue;
         }
 
-        if !valor.mexe_na_imagem() || sem_efeito_no_lightroom(chave, valor, bruto) {
+        if !valor.mexe_na_imagem() {
             continue;
         }
         if let Some((_, rotulo)) = SEM_EQUIVALENTE
@@ -784,8 +828,17 @@ pub fn ler_xmp(texto: &str, nome_do_arquivo: &str) -> Option<PresetBruto> {
     for (chave, valor) in atributos_crs(texto) {
         ajustes.insert(chave, valor_cru(&valor));
     }
+    // 🚨 **A curva vem como `<rdf:Seq>` de `<rdf:li>x, y</rdf:li>`**, e até
+    // 2026-09-30 ela entrava aqui como um texto só: o tradutor procura uma
+    // tabela, não achava, e a curva de todo `.xmp` — predefinição ou o DNG do
+    // Lightroom — sumia sem aviso. Só a do `.lrtemplate` chegava.
     for (chave, valor) in elementos_crs(texto) {
-        ajustes.insert(chave, valor_cru(valor.trim()));
+        let itens = itens_rdf(&valor);
+        if itens.is_empty() {
+            ajustes.insert(chave, valor_cru(valor.trim()));
+        } else {
+            ajustes.insert(chave, Valor::Tabela(itens));
+        }
     }
 
     let nome = nome_do_xmp(texto).unwrap_or_else(|| sem_extensao(nome_do_arquivo));
@@ -854,6 +907,23 @@ fn nome_do_xmp(texto: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// O conteúdo de cada `<rdf:li …>…</rdf:li>`, em ordem.
+fn itens_rdf(texto: &str) -> Vec<String> {
+    let mut itens = Vec::new();
+    let mut resto = texto;
+    while let Some(abre) = resto.find("<rdf:li") {
+        let depois = &resto[abre..];
+        let (Some(fim_da_tag), Some(fecha)) = (depois.find('>'), depois.find("</rdf:li>")) else {
+            break;
+        };
+        if fim_da_tag < fecha {
+            itens.push(depois[fim_da_tag + 1..fecha].trim().to_string());
+        }
+        resto = &depois[fecha + "</rdf:li>".len()..];
+    }
+    itens
 }
 
 /// O conteúdo do primeiro `<rdf:li …>…</rdf:li>`.
@@ -1131,17 +1201,74 @@ mod testes {
         assert_eq!(traduzido.ajustes.get("sharpen_radius"), Some(1.4));
     }
 
-    /// ⚠️ A vinheta que o preset usa como efeito é a **pós-corte**; a de lente
-    /// é correção óptica e some quando há corte.
+    /// ✅ As duas vinhetas, cada uma no seu lugar (2026-09-30): a pós-corte
+    /// com os seis controles do painel Efeitos, a de lente na Lente. O estilo
+    /// do XMP vai de 1 a 3, e o daqui de 0 a 2.
     #[test]
-    fn a_vinheta_e_a_pos_corte() {
+    fn a_vinheta_pos_corte_e_a_de_lente_sao_duas() {
         let traduzido = traduzir_chaves(&[
-            ("PostCropVignetteAmount", n(-40.0)),
+            ("PostCropVignetteAmount", n(100.0)),
+            ("PostCropVignetteStyle", n(3.0)),
+            ("PostCropVignetteRoundness", n(-83.0)),
+            ("PostCropVignetteFeather", n(35.0)),
+            ("PostCropVignetteMidpoint", n(0.0)),
             ("VignetteAmount", n(-40.0)),
         ]);
 
+        assert_eq!(traduzido.ajustes.get("pcv_amount"), Some(100.0));
+        assert_eq!(traduzido.ajustes.get("pcv_style"), Some(2.0));
+        assert_eq!(traduzido.ajustes.get("pcv_roundness"), Some(-83.0));
+        assert_eq!(traduzido.ajustes.get("pcv_feather"), Some(35.0));
+        assert_eq!(traduzido.ajustes.get("pcv_midpoint"), Some(0.0));
         assert_eq!(traduzido.ajustes.get("lens_vignette_amount"), Some(-40.0));
-        assert_eq!(traduzido.ajustes.len(), 1);
+        assert!(traduzido.ignorados.is_empty(), "{:?}", traduzido.ignorados);
+    }
+
+    /// 🚨 **A curva do `.xmp` é um `<rdf:Seq>`** — e até 2026-09-30 ela
+    /// entrava como texto e sumia sem aviso. É a do DNG do Estúdio Canela.
+    #[test]
+    fn a_curva_do_xmp_em_rdf_seq_chega() {
+        let texto = r#"<x:xmpmeta><rdf:Description crs:Exposure2012="0">
+            <crs:ToneCurvePV2012><rdf:Seq><rdf:li>41, 37</rdf:li>
+            <rdf:li>255, 255</rdf:li></rdf:Seq></crs:ToneCurvePV2012>
+            <crs:ToneCurvePV2012Red><rdf:Seq><rdf:li>0, 0</rdf:li>
+            <rdf:li>255, 255</rdf:li></rdf:Seq></crs:ToneCurvePV2012Red>
+            </rdf:Description></x:xmpmeta>"#;
+        let traduzido = traduzir(&ler_xmp(texto, "f.xmp").unwrap());
+        assert_eq!(traduzido.ajustes.get("curva_m0"), Some(37.0));
+        assert_eq!(traduzido.ajustes.get("curva_m1"), Some(37.0));
+        assert_eq!(traduzido.ajustes.get("curva_m8"), Some(255.0));
+        assert_eq!(traduzido.ajustes.get("curva_r0"), None, "a neutra não entra");
+    }
+
+    /// ✅ Os controles do Lightroom que o motor ganhou em 2026-09-30.
+    #[test]
+    fn textura_nevoa_detalhe_e_luminancia_da_gradacao_chegam() {
+        let traduzido = traduzir_chaves(&[
+            ("Texture", n(12.0)),
+            ("Dehaze", n(15.0)),
+            ("ColorGradeShadowLum", n(-13.0)),
+            ("ParametricShadowSplit", n(30.0)),
+            ("Sharpness", n(38.0)),
+            ("SharpenDetail", n(100.0)),
+            ("SharpenEdgeMasking", n(90.0)),
+            ("GrainAmount", n(20.0)),
+            ("GrainFrequency", n(70.0)),
+            ("IncrementalTemperature", n(30.0)),
+        ]);
+        for (campo, valor) in [
+            ("texture", 12.0),
+            ("dehaze", 15.0),
+            ("split_shadow_lum", -13.0),
+            ("tone_curve_split_shadows", 30.0),
+            ("sharpen_detail", 100.0),
+            ("sharpen_masking", 90.0),
+            ("grain_roughness", 70.0),
+            ("temperature", 3.0),
+        ] {
+            assert_eq!(traduzido.ajustes.get(campo), Some(valor), "{campo}");
+        }
+        assert!(traduzido.ignorados.is_empty(), "{:?}", traduzido.ignorados);
     }
 
     /// 🚨 **Um preset P&B acende o mixer, e não só dessatura.** Só a
@@ -1343,17 +1470,19 @@ mod testes {
             // também não a aplica.
             ("GrainAmount", n(20.0)),
             ("GrainFrequency", n(40.0)),
-            ("Dehaze", n(10.0)),
-            ("DehazeExtra", n(3.0)),
+            ("DefringePurpleAmount", n(3.0)),
+            ("DefringeGreenAmount", n(3.0)),
+            ("ChromaticAberrationR", n(3.0)),
             ("RedHue", n(5.0)),
             ("Contrast2012", n(20.0)),
         ]);
 
-        // ✅ Curva por ponto, tons médios e calibração não são mais "ignorados":
-        // agem. E o mesmo rótulo não se repete por duas chaves da família.
+        // ✅ Curva por ponto, tons médios, calibração e aspereza não são mais
+        // "ignorados": agem. E o mesmo rótulo não se repete por duas chaves da
+        // família.
         assert_eq!(
             traduzido.ignorados,
-            vec!["aspereza do grão", "remoção de névoa"]
+            vec!["aberração cromática", "correção de franjas"]
         );
     }
 
@@ -1515,14 +1644,12 @@ mod testes {
             crs:PostCropVignetteRoundness="+11" crs:PostCropVignetteStyle="1"
             crs:GrainAmount="34" crs:GrainFrequency="55"/></x:xmpmeta>"#;
         let traduzido = traduzir(&ler_xmp(texto, "f.dng").unwrap());
-        assert_eq!(
-            traduzido.ignorados,
-            [
-                "aspereza do grão",
-                "forma da vinheta",
-                "suavidade da vinheta"
-            ]
-        );
+        assert!(traduzido.ignorados.is_empty(), "{:?}", traduzido.ignorados);
+        assert_eq!(traduzido.ajustes.get("pcv_roundness"), Some(11.0));
+        assert_eq!(traduzido.ajustes.get("grain_roughness"), Some(55.0));
+        // Os padrões não viram ajuste: detalhe 25 e estilo 1 são o neutro.
+        assert_eq!(traduzido.ajustes.get("sharpen_detail"), None);
+        assert_eq!(traduzido.ajustes.get("pcv_style"), None);
 
         let sem_vinheta = texto.replace(
             r#"crs:PostCropVignetteAmount="+100""#,
@@ -1530,8 +1657,8 @@ mod testes {
         );
         let traduzido = traduzir(&ler_xmp(&sem_vinheta, "f.dng").unwrap());
         assert_eq!(
-            traduzido.ignorados,
-            ["aspereza do grão"],
+            traduzido.ajustes.get("pcv_roundness"),
+            None,
             "vinheta desligada não tem forma"
         );
     }
