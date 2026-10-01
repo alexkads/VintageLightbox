@@ -387,7 +387,7 @@ impl Revelacao {
                     cx_ + ax * raio * rodas::RAIO_DA_ALCA,
                     cy_ + ay * raio * rodas::RAIO_DA_ALCA,
                 );
-                let [r, g, b] = revelacao_core::ajustes::cor_da_roda_do_lightroom(matiz);
+                let [r, g, b] = rodas::cor_do_disco(matiz, 1.0);
                 let cor_plena = Hsla::from(gpui_kit::Rgba { r, g, b, a: 1.0 });
                 window.paint_quad(
                     gpui_kit::fill(circulo(ax, ay, 4.5), cor_plena)
