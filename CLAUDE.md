@@ -292,9 +292,11 @@ tocar em versão, `atualizacao/`, `chave-publica.txt` ou `enderecos-de-atualizac
 faixa com as novidades, e o "Atualizar" roda o instalador, que baixa o `main` e recompila
 (`atualizacao/compilar.rs`). O binário novo só entra depois de provar que abre.
 
-**Lançar** é um commit com **dois arquivos** — `Cargo.toml` (`[workspace.package] version`) e
-`docs/novidades.json`, com o texto para o operador — e o `make producao` do e-commerce levar o
-`dev` ao `main`. Um teste (`novidades::…`) prende os dois. O roteiro é a skill
+**Lançar** é um commit com **três arquivos** — `Cargo.toml` (`[workspace.package] version`),
+`docs/novidades.json`, com o texto para o operador, e a mesma entrada (com `"data"`) no topo de
+`docs/historico-de-novidades.json`, que o diálogo "Novidades da versão" usa para navegar pelas
+versões anteriores — e o `make producao` do e-commerce levar o `dev` ao `main`. Os testes
+`novidades::…` prendem os três. O roteiro é a skill
 `lancar-o-app-desktop`, no repositório do e-commerce.
 
 🚨 **Produção só sai do `main`, e só com o `main` dos três projetos em dia** (dono, 24/set/2026):

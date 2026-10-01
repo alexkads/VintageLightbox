@@ -29,7 +29,8 @@
 use std::sync::Arc;
 
 use gpui_kit::component::button::{Button, ButtonVariants};
-use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Sizable};
+use gpui_kit::component::list::ListItem;
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Disableable, Sizable};
 use gpui_kit::{div, prelude::*, px, AnyElement, FontWeight, MouseButton, SharedString, Window};
 
 use super::novidades;
@@ -54,6 +55,14 @@ pub struct Estado {
     /// O diálogo das novidades **desta** versão (clique na versão do rodapé)
     /// está aberto.
     pub desta_versao_aberta: bool,
+    /// 📚 O histórico do `main`, quando já chegou — é dele que vêm as versões
+    /// entre a aberta e a anunciada, que o binário não conhece.
+    pub historico_do_main: Vec<novidades::Novidades>,
+    /// A busca do histórico do `main` está no ar.
+    pub buscando_historico: bool,
+    /// A versão que o operador escolheu na lista do diálogo. `None` é a de
+    /// partida: a anunciada, ou a aberta (rodapé).
+    pub em_vista: Option<String>,
     /// O operador pediu "Verificar atualizações" e a resposta não chegou.
     pub verificando: bool,
     /// A versão cuja faixa já foi contada ao servidor como `exibida` — a
@@ -114,6 +123,71 @@ impl Estado {
             .as_ref()
             .and_then(|v| v.novidades.as_ref())
             .is_some_and(|n| !n.novidades.is_empty())
+    }
+
+    /// 📚 As versões que o diálogo lista, da mais nova para a mais antiga.
+    ///
+    /// A da versão aberta é o histórico do próprio binário; a da versão nova
+    /// junta a anunciada, o histórico do `main` (as do meio) e o do binário.
+    pub fn linha_do_tempo(&self) -> Vec<novidades::Novidades> {
+        let desta = novidades::desta_versao()
+            .into_iter()
+            .chain(novidades::historico_desta_versao().iter().cloned());
+        if self.desta_versao_aberta {
+            return novidades::juntar(desta);
+        }
+        let anunciada = self.versao.as_ref().map(|v| {
+            v.novidades.clone().unwrap_or_else(|| {
+                novidades::Novidades::do_anuncio(
+                    v.versao.clone(),
+                    v.notas.clone().unwrap_or_default(),
+                    false,
+                )
+            })
+        });
+        novidades::juntar(
+            anunciada
+                .into_iter()
+                .chain(self.historico_do_main.iter().cloned())
+                .chain(desta),
+        )
+    }
+
+    /// Onde a lista está: a versão escolhida ou, sem escolha, a de partida.
+    pub fn indice_em_vista(&self, linha: &[novidades::Novidades]) -> usize {
+        let partida = if self.desta_versao_aberta {
+            Some(env!("CARGO_PKG_VERSION"))
+        } else {
+            self.versao.as_ref().map(|v| v.versao.as_str())
+        };
+        self.em_vista
+            .as_deref()
+            .or(partida)
+            .and_then(|procurada| {
+                linha.iter().position(|n| {
+                    novidades::comparar(&n.versao, procurada) == std::cmp::Ordering::Equal
+                })
+            })
+            .unwrap_or(0)
+    }
+
+    /// O clique numa versão da lista (ou em "Mais recente"/"Mais antiga").
+    pub fn ver_versao(&mut self, indice: usize) {
+        if let Some(n) = self.linha_do_tempo().get(indice) {
+            self.em_vista = Some(n.versao.clone());
+        }
+    }
+
+    /// Vale buscar o histórico do `main`: há versão anunciada que ele ainda
+    /// não traz, e nenhuma busca no ar.
+    pub fn precisa_do_historico(&self) -> bool {
+        !self.buscando_historico
+            && self.versao.as_ref().is_some_and(|v| {
+                !self
+                    .historico_do_main
+                    .iter()
+                    .any(|n| novidades::comparar(&n.versao, &v.versao) == std::cmp::Ordering::Equal)
+            })
     }
 
     /// O que a faixa mostra agora — `None` quando não há nada a dizer.
@@ -192,6 +266,9 @@ pub enum Pedido {
     VerEstaVersao,
     /// Fecha o diálogo das novidades, seja de qual versão for.
     FecharNovidades,
+    /// 📚 Mostra no diálogo a versão desta posição da
+    /// [`Estado::linha_do_tempo`].
+    VerVersao(usize),
     /// "Tentar de novo", depois de a compilação falhar.
     TentarDeNovo,
     CopiarComando,
@@ -336,78 +413,141 @@ pub fn desenhar(estado: &Estado, cx: &gpui_kit::App, agir: Agir) -> Option<AnyEl
     )
 }
 
-/// O diálogo "Novidades da versão X": o que mudou, por que atualizar e como.
-pub fn desenhar_novidades(estado: &Estado, cx: &gpui_kit::App, agir: Agir) -> Option<AnyElement> {
-    if estado.desta_versao_aberta {
-        return desenhar_desta_versao(cx, agir);
-    }
-    if !estado.novidades_abertas {
+/// O diálogo "Novidades da versão X": a lista das versões à esquerda e, à
+/// direita, o que a escolhida mudou — e, se for mais nova que a aberta, como
+/// atualizar.
+///
+/// 📚 Abre na versão anunciada (ou na aberta, pelo rodapé), e a lista desce
+/// por todo o histórico (dono, 01/out/2026: *"pra gente conseguir navegar
+/// pelo histórico de novidades anteriores"*).
+pub fn desenhar_novidades(
+    estado: &Estado,
+    rolagem: &gpui_kit::ScrollHandle,
+    cx: &gpui_kit::App,
+    agir: Agir,
+) -> Option<AnyElement> {
+    if !estado.desta_versao_aberta && (!estado.novidades_abertas || estado.versao.is_none()) {
         return None;
     }
-    let versao = estado.versao.as_ref()?;
+    let linha = estado.linha_do_tempo();
+    let em_vista = estado.indice_em_vista(&linha);
+    let n = linha.get(em_vista)?;
+    let instalada = env!("CARGO_PKG_VERSION");
+    let nova = novidades::mais_nova(&n.versao, instalada);
     let tema = cx.theme();
     let (apagado, borda, aviso) = (tema.muted_foreground, tema.border, tema.warning);
-    let como = novidades::como_atualizar(versao.jeito);
 
     let mut corpo = v_flex().gap(px(12.));
-    if let Some(n) = &versao.novidades {
-        corpo = corpo.child(o_que_mudou(n, "Por que atualizar", aviso));
+    if let Some(data) = n.data.as_deref().and_then(data_por_extenso) {
+        corpo = corpo.child(
+            div()
+                .text_xs()
+                .text_color(apagado)
+                .child(format!("Lançada em {data}")),
+        );
     }
-    corpo = corpo.child(secao("Como atualizar")).child(
-        v_flex().gap(px(4.)).children(
-            como.passos
-                .iter()
-                .enumerate()
-                .map(|(i, passo)| div().text_sm().child(format!("{}. {passo}", i + 1))),
-        ),
-    );
-    if let Some(comando) = como.comando {
-        corpo = corpo
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(apagado)
-                    .child("Se a atualização pelo app falhar, feche o app e rode no Terminal:"),
-            )
-            .child(
-                div()
-                    .p(px(8.))
-                    .rounded(crate::tema::canto(6.))
-                    .border_1()
-                    .border_color(borda)
-                    .text_xs()
-                    .font_family("monospace")
-                    .child(comando),
-            );
-    }
-    if como.baixar.is_some() {
-        corpo =
-            corpo.child(div().text_xs().text_color(apagado).child(
+    let por_que = if nova {
+        "Por que atualizar"
+    } else {
+        "Por que ela importa"
+    };
+    corpo = corpo.child(o_que_mudou(n, por_que, aviso));
+
+    let como = estado
+        .versao
+        .as_ref()
+        .filter(|_| estado.novidades_abertas && nova)
+        .map(|v| novidades::como_atualizar(v.jeito));
+    if let Some(como) = &como {
+        corpo = corpo.child(secao("Como atualizar")).child(
+            v_flex().gap(px(4.)).children(
+                como.passos
+                    .iter()
+                    .enumerate()
+                    .map(|(i, passo)| div().text_sm().child(format!("{}. {passo}", i + 1))),
+            ),
+        );
+        if let Some(comando) = como.comando {
+            corpo = corpo
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(apagado)
+                        .child("Se a atualização pelo app falhar, feche o app e rode no Terminal:"),
+                )
+                .child(
+                    div()
+                        .p(px(8.))
+                        .rounded(crate::tema::canto(6.))
+                        .border_1()
+                        .border_color(borda)
+                        .text_xs()
+                        .font_family("monospace")
+                        .child(comando),
+                );
+        }
+        if como.baixar.is_some() {
+            corpo = corpo.child(div().text_xs().text_color(apagado).child(
                 "Se a atualização pelo app falhar, feche o app e rode o instalador baixado.",
             ));
+        }
     }
 
-    let mut rodape = h_flex().justify_end().gap(px(6.));
-    if como.comando.is_some() {
-        rodape = rodape.child(botao(
-            "novidades-copiar",
-            "Copiar comando",
-            false,
-            Pedido::CopiarComando,
-            &agir,
-        ));
+    // ← e → andam uma versão; nas pontas o botão apaga.
+    let mut navegar = h_flex().gap(px(4.));
+    for (id, rotulo, alvo) in [
+        (
+            "novidades-mais-recente",
+            "Mais recente",
+            em_vista.checked_sub(1),
+        ),
+        (
+            "novidades-mais-antiga",
+            "Mais antiga",
+            Some(em_vista + 1).filter(|i| *i < linha.len()),
+        ),
+    ] {
+        let agir = agir.clone();
+        navegar = navegar.child(
+            Button::new(id)
+                .label(rotulo)
+                .xsmall()
+                .ghost()
+                .disabled(alvo.is_none())
+                .on_click(move |_ev, w, cx| {
+                    if let Some(i) = alvo {
+                        agir(Pedido::VerVersao(i), w, cx)
+                    }
+                }),
+        );
     }
-    if como.baixar.is_some() {
-        rodape = rodape.child(botao(
-            "novidades-baixar",
-            "Baixar o instalador",
-            false,
-            Pedido::BaixarInstalador,
-            &agir,
-        ));
+
+    let mut acoes = h_flex().gap(px(6.));
+    if let Some(como) = &como {
+        if como.comando.is_some() {
+            acoes = acoes.child(botao(
+                "novidades-copiar",
+                "Copiar comando",
+                false,
+                Pedido::CopiarComando,
+                &agir,
+            ));
+        }
+        if como.baixar.is_some() {
+            acoes = acoes.child(botao(
+                "novidades-baixar",
+                "Baixar o instalador",
+                false,
+                Pedido::BaixarInstalador,
+                &agir,
+            ));
+        }
     }
-    if matches!(estado.visivel(), Some(Aviso::Disponivel { .. })) && !estado.instalando {
-        rodape = rodape.child(botao(
+    if estado.novidades_abertas
+        && matches!(estado.visivel(), Some(Aviso::Disponivel { .. }))
+        && !estado.instalando
+    {
+        acoes = acoes.child(botao(
             "novidades-atualizar",
             "Atualizar",
             true,
@@ -415,16 +555,28 @@ pub fn desenhar_novidades(estado: &Estado, cx: &gpui_kit::App, agir: Agir) -> Op
             &agir,
         ));
     }
-    rodape = rodape.child(botao(
+    acoes = acoes.child(botao(
         "novidades-fechar",
         "Fechar",
         false,
         Pedido::FecharNovidades,
         &agir,
     ));
+    let rodape = h_flex()
+        .justify_between()
+        .gap(px(6.))
+        .child(navegar)
+        .child(acoes);
+
+    let anunciada = estado
+        .novidades_abertas
+        .then(|| estado.versao.as_ref().map(|v| v.versao.clone()))
+        .flatten();
+    let versoes = lista_de_versoes(&linha, em_vista, anunciada.as_deref(), rolagem, cx, &agir);
 
     Some(moldura(
-        format!("Novidades da versão {}", versao.versao),
+        format!("Novidades da versão {}", n.versao),
+        versoes,
         corpo.into_any_element(),
         rodape,
         cx,
@@ -432,25 +584,111 @@ pub fn desenhar_novidades(estado: &Estado, cx: &gpui_kit::App, agir: Agir) -> Op
     ))
 }
 
-/// O diálogo da versão **aberta** — o que ela trouxe, sem "como atualizar":
-/// não há nada a instalar.
-fn desenhar_desta_versao(cx: &gpui_kit::App, agir: Agir) -> Option<AnyElement> {
-    let n = novidades::desta_versao()?;
-    let corpo = o_que_mudou(&n, "Por que ela importa", cx.theme().warning);
-    let rodape = h_flex().justify_end().child(botao(
-        "novidades-fechar",
-        "Fechar",
-        false,
-        Pedido::FecharNovidades,
-        &agir,
-    ));
-    Some(moldura(
-        format!("Novidades da versão {}", n.versao),
-        corpo,
-        rodape,
-        cx,
-        agir,
-    ))
+/// A coluna das versões: número, data e o selo da instalada e das novas.
+fn lista_de_versoes(
+    linha: &[novidades::Novidades],
+    em_vista: usize,
+    anunciada: Option<&str>,
+    rolagem: &gpui_kit::ScrollHandle,
+    cx: &gpui_kit::App,
+    agir: &Agir,
+) -> AnyElement {
+    let instalada = env!("CARGO_PKG_VERSION");
+    v_flex()
+        .id("novidades-versoes")
+        .debug_selector(|| "novidades-versoes".into())
+        .w(px(220.))
+        .flex_none()
+        .overflow_y_scroll()
+        .track_scroll(rolagem)
+        .gap(px(2.))
+        .pr(px(8.))
+        .children(linha.iter().enumerate().map(|(i, n)| {
+            let agir = agir.clone();
+            let selo: Option<(&'static str, bool)> = if n.versao == instalada {
+                Some(("Instalada", false))
+            } else if anunciada.is_some() && novidades::mais_nova(&n.versao, instalada) {
+                Some(("Nova", true))
+            } else {
+                None
+            };
+            let data = n.data.as_deref().and_then(data_curta);
+            // O selo vai na linha do número, e não no `suffix` do `ListItem`:
+            // ali a coluna estreita o cortava ("Insta").
+            let selo = selo.map(|(rotulo, nova)| {
+                if nova {
+                    crate::estilo::selo_colorido(crate::tema::cores::selo_esmeralda())
+                } else {
+                    crate::estilo::selo_contorno(cx)
+                }
+                .child(rotulo)
+            });
+            ListItem::new(("novidades-versao", i))
+                .debug_selector(move || format!("novidades-versao-{i}"))
+                .selected(i == em_vista)
+                .rounded(crate::tema::canto(6.))
+                .px(px(8.))
+                .py(px(4.))
+                .child(
+                    v_flex()
+                        .child(
+                            h_flex()
+                                .gap(px(6.))
+                                .items_center()
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .font_weight(FontWeight::MEDIUM)
+                                        .child(format!("Versão {}", n.versao)),
+                                )
+                                .children(selo),
+                        )
+                        .when_some(data, |c, data| {
+                            c.child(div().text_xs().opacity(0.7).child(data))
+                        }),
+                )
+                .on_click(move |_ev, w, cx| agir(Pedido::VerVersao(i), w, cx))
+        }))
+        .into_any_element()
+}
+
+const MESES: [&str; 12] = [
+    "janeiro",
+    "fevereiro",
+    "março",
+    "abril",
+    "maio",
+    "junho",
+    "julho",
+    "agosto",
+    "setembro",
+    "outubro",
+    "novembro",
+    "dezembro",
+];
+
+fn dia_mes_ano(data: &str) -> Option<(u32, usize, u32)> {
+    let mut partes = data.split('-').map(|p| p.parse::<u32>().ok());
+    let (ano, mes, dia) = (partes.next()??, partes.next()??, partes.next()??);
+    ((1..=12).contains(&mes) && (1..=31).contains(&dia)).then_some((dia, mes as usize - 1, ano))
+}
+
+/// `2026-10-01` → `1 de outubro de 2026`.
+fn data_por_extenso(data: &str) -> Option<String> {
+    let (dia, mes, ano) = dia_mes_ano(data)?;
+    Some(format!("{dia} de {} de {ano}", MESES[mes]))
+}
+
+/// `2026-10-01` → `1 de out. de 2026`.
+fn data_curta(data: &str) -> Option<String> {
+    let (dia, mes, ano) = dia_mes_ano(data)?;
+    let mes = MESES[mes];
+    let curto = if mes.chars().count() <= 5 {
+        mes.to_string()
+    } else {
+        format!("{}.", mes.chars().take(3).collect::<String>())
+    };
+    Some(format!("{dia} de {curto} de {ano}"))
 }
 
 fn secao(titulo: &'static str) -> gpui_kit::Div {
@@ -482,29 +720,38 @@ fn o_que_mudou(
             )
         })
         .child(div().text_sm().child(n.titulo.clone()))
-        .child(secao("O que mudou"))
-        .child(
-            v_flex()
-                .gap(px(4.))
-                .children(n.novidades.iter().map(|item| {
-                    h_flex()
-                        .items_start()
-                        .gap(px(6.))
-                        .text_sm()
-                        .child("•")
-                        // `min_w(0)`: sem ele o item não quebra a linha e
-                        // passa da borda do diálogo.
-                        .child(div().flex_1().min_w(px(0.)).child(item.clone()))
-                })),
-        )
-        .child(secao(por_que))
-        .child(div().text_sm().child(n.por_que_atualizar.clone()))
+        // A versão que só o anúncio do servidor trouxe não tem a lista.
+        .when(!n.novidades.is_empty(), |corpo| {
+            corpo
+                .child(secao("O que mudou"))
+                .child(
+                    v_flex()
+                        .gap(px(4.))
+                        .children(n.novidades.iter().map(|item| {
+                            h_flex()
+                                .items_start()
+                                .gap(px(6.))
+                                .text_sm()
+                                .child("•")
+                                // `min_w(0)`: sem ele o item não quebra a linha e
+                                // passa da borda do diálogo.
+                                .child(div().flex_1().min_w(px(0.)).child(item.clone()))
+                        })),
+                )
+        })
+        .when(!n.por_que_atualizar.trim().is_empty(), |corpo| {
+            corpo
+                .child(secao(por_que))
+                .child(div().text_sm().child(n.por_que_atualizar.clone()))
+        })
         .into_any_element()
 }
 
-/// O véu escuro e o cartão do diálogo. Clicar fora fecha.
+/// O véu escuro e o cartão do diálogo: a lista das versões e o texto, cada
+/// um rolando por si. Clicar fora fecha.
 fn moldura(
     titulo: String,
+    versoes: AnyElement,
     corpo: AnyElement,
     rodape: gpui_kit::Div,
     cx: &gpui_kit::App,
@@ -529,9 +776,10 @@ fn moldura(
             v_flex()
                 .id("novidades-da-versao")
                 .debug_selector(|| "novidades-da-versao".into())
-                .w(px(520.))
-                .max_h(px(620.))
-                .overflow_y_scroll()
+                .w(px(780.))
+                .h(px(620.))
+                .max_w(gpui_kit::relative(0.94))
+                .max_h(gpui_kit::relative(0.9))
                 .p(px(16.))
                 .gap(px(16.))
                 .rounded(crate::tema::canto(12.))
@@ -542,12 +790,38 @@ fn moldura(
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(
                     div()
+                        .flex_none()
                         .text_lg()
                         .font_weight(FontWeight::SEMIBOLD)
                         .child(titulo),
                 )
-                .child(corpo)
-                .child(rodape),
+                .child(
+                    h_flex()
+                        .flex_1()
+                        .min_h(px(0.))
+                        .items_start()
+                        .gap(px(16.))
+                        .child(
+                            div()
+                                .h_full()
+                                .flex()
+                                .border_r_1()
+                                .border_color(borda)
+                                .child(versoes),
+                        )
+                        .child(
+                            div()
+                                .id("novidades-texto")
+                                .debug_selector(|| "novidades-texto".into())
+                                .h_full()
+                                .flex_1()
+                                .min_w(px(0.))
+                                .overflow_y_scroll()
+                                .pr(px(8.))
+                                .child(corpo),
+                        ),
+                )
+                .child(rodape.flex_none()),
         )
         .into_any_element()
 }
@@ -577,6 +851,7 @@ mod testes {
                 jeito: JeitoDeAtualizar::Compilar,
                 novidades: Some(Novidades {
                     versao: versao.into(),
+                    data: None,
                     titulo: "Chatbot e Agendamentos".into(),
                     importante,
                     novidades: vec!["o chatbot".into()],

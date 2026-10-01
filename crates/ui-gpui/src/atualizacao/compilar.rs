@@ -497,6 +497,7 @@ mod testes {
     fn main(versao: &str) -> Option<Novidades> {
         Some(Novidades {
             versao: versao.into(),
+            data: None,
             titulo: "Chatbot e Agendamentos".into(),
             importante: true,
             novidades: vec!["o chatbot".into()],

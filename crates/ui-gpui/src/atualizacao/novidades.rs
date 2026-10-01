@@ -30,6 +30,19 @@
 //! 🔑 **O `novidades.json` anda com o `Cargo.toml`.** Um teste prende a versão
 //! dele à `CARGO_PKG_VERSION`: subir a versão sem escrever as novidades (ou o
 //! contrário) não passa. É o mesmo commit de "Versão 0.1.N".
+//!
+//! ## 📚 O histórico
+//!
+//! O `novidades.json` só fala da última versão. O diálogo das novidades
+//! navega por todas (dono, 01/out/2026: *"pra gente conseguir navegar pelo
+//! histórico de novidades anteriores"*), e elas moram no
+//! [`ARQUIVO_DO_HISTORICO`]: uma lista, da mais nova para a mais antiga, que
+//! **começa pela mesma entrada do `novidades.json`** — o teste
+//! `o_historico_comeca_pelas_novidades_desta_versao` prende os dois. Lançar é
+//! acrescentar a entrada nova no topo dele também.
+//!
+//! O app traz o histórico do próprio commit e, quando há versão nova, busca o
+//! do `main`: é dele que vêm as versões entre a instalada e a anunciada.
 
 use serde::Deserialize;
 
@@ -55,6 +68,9 @@ pub const ENDERECOS: [&str; 2] = [
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct Novidades {
     pub versao: String,
+    /// O dia do lançamento (`2026-10-01`) — só o histórico o tem.
+    #[serde(default)]
+    pub data: Option<String>,
     /// Uma linha: o que o operador vai notar primeiro.
     pub titulo: String,
     /// Atualização que não deve esperar — a faixa fica em destaque.
@@ -70,9 +86,66 @@ pub struct Novidades {
 /// do que avisar em branco.
 pub fn ler(texto: &str) -> Option<Novidades> {
     let novidades: Novidades = serde_json::from_str(texto).ok()?;
-    let valido =
-        versao_em_numeros(&novidades.versao).is_some() && !novidades.titulo.trim().is_empty();
-    valido.then_some(novidades)
+    valida(&novidades).then_some(novidades)
+}
+
+fn valida(novidades: &Novidades) -> bool {
+    versao_em_numeros(&novidades.versao).is_some() && !novidades.titulo.trim().is_empty()
+}
+
+/// 📚 O arquivo com todas as versões, da mais nova para a mais antiga.
+pub const ARQUIVO_DO_HISTORICO: &str = "docs/historico-de-novidades.json";
+
+/// Onde o app busca o histórico do `main` — os mesmos lugares de
+/// [`ENDERECOS`], e com a mesma regra: **só se acrescenta**.
+pub const ENDERECOS_DO_HISTORICO: [&str; 2] = [
+    "https://raw.githubusercontent.com/alexkads/VintageLightbox/main/docs/historico-de-novidades.json",
+    "https://alexkads.github.io/VintageLightbox/historico-de-novidades.json",
+];
+
+/// Lê o histórico. Uma entrada torta fica de fora sem levar as outras junto.
+pub fn ler_historico(texto: &str) -> Vec<Novidades> {
+    let itens: Vec<serde_json::Value> = serde_json::from_str(texto).unwrap_or_default();
+    juntar(
+        itens
+            .into_iter()
+            .filter_map(|item| serde_json::from_value::<Novidades>(item).ok())
+            .filter(valida),
+    )
+}
+
+/// O histórico **até esta versão**, gravado no binário na compilação — lido
+/// uma vez só.
+pub fn historico_desta_versao() -> &'static [Novidades] {
+    static HISTORICO: std::sync::OnceLock<Vec<Novidades>> = std::sync::OnceLock::new();
+    HISTORICO
+        .get_or_init(|| ler_historico(include_str!("../../../../docs/historico-de-novidades.json")))
+}
+
+/// Junta versões de vários lugares: uma por número, da mais nova para a mais
+/// antiga. Repetida, fica a que tem a lista — a do anúncio do servidor vem
+/// sem ela.
+pub fn juntar(itens: impl IntoIterator<Item = Novidades>) -> Vec<Novidades> {
+    let mut todas: Vec<Novidades> = Vec::new();
+    for n in itens {
+        match todas
+            .iter_mut()
+            .find(|t| comparar(&t.versao, &n.versao) == std::cmp::Ordering::Equal)
+        {
+            Some(t) => {
+                if t.novidades.is_empty() && !n.novidades.is_empty() {
+                    let data = t.data.take();
+                    *t = n;
+                    t.data = t.data.take().or(data);
+                } else if t.data.is_none() {
+                    t.data = n.data;
+                }
+            }
+            None => todas.push(n),
+        }
+    }
+    todas.sort_by(|a, b| comparar(&b.versao, &a.versao));
+    todas
 }
 
 /// As novidades **desta** versão, gravadas no binário na compilação.
@@ -97,14 +170,22 @@ pub fn versao_em_numeros(versao: &str) -> Option<Vec<u64>> {
 /// A `candidata` é maior que a `atual`? `0.1.13 > 0.1.9` (número a número,
 /// e não como texto). Ilegível nunca é "mais nova".
 pub fn mais_nova(candidata: &str, atual: &str) -> bool {
-    match (versao_em_numeros(candidata), versao_em_numeros(atual)) {
-        (Some(mut c), Some(mut a)) => {
-            let tamanho = c.len().max(a.len());
-            c.resize(tamanho, 0);
+    versao_em_numeros(candidata).is_some()
+        && versao_em_numeros(atual).is_some()
+        && comparar(candidata, atual) == std::cmp::Ordering::Greater
+}
+
+/// Ordena duas versões número a número (`0.1` é `0.1.0`). Ilegível fica
+/// abaixo de tudo.
+pub fn comparar(a: &str, b: &str) -> std::cmp::Ordering {
+    match (versao_em_numeros(a), versao_em_numeros(b)) {
+        (Some(mut a), Some(mut b)) => {
+            let tamanho = a.len().max(b.len());
             a.resize(tamanho, 0);
-            c > a
+            b.resize(tamanho, 0);
+            a.cmp(&b)
         }
-        _ => false,
+        (a, b) => a.is_some().cmp(&b.is_some()),
     }
 }
 
@@ -139,6 +220,7 @@ impl Novidades {
     pub fn do_anuncio(versao: String, titulo: String, importante: bool) -> Self {
         Self {
             versao,
+            data: None,
             titulo,
             importante,
             novidades: Vec::new(),
@@ -240,6 +322,32 @@ pub fn buscar_com_rastro() -> (Option<Novidades>, Vec<String>) {
         }
     }
     (None, rastro)
+}
+
+/// 📚 Busca o histórico do `main` nos [`ENDERECOS_DO_HISTORICO`], em ordem.
+/// Vazio quando nenhum respondeu. **Bloqueia**, como [`buscar`].
+pub fn buscar_historico() -> Vec<Novidades> {
+    let Ok(cliente) = cargo_packager_updater::reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+    else {
+        return Vec::new();
+    };
+    for endereco in ENDERECOS_DO_HISTORICO {
+        let historico = cliente
+            .get(endereco)
+            .send()
+            .ok()
+            .filter(|r| r.status().is_success())
+            .and_then(|r| r.text().ok())
+            .map(|texto| ler_historico(&texto))
+            .unwrap_or_default();
+        if !historico.is_empty() {
+            return historico;
+        }
+        eprintln!("[novidades] o histórico não veio de {endereco}");
+    }
+    Vec::new()
 }
 
 /// O que o operador faz para atualizar, neste sistema.
@@ -448,10 +556,102 @@ mod testes {
         assert!(!n.por_que_atualizar.trim().is_empty());
     }
 
+    /// 🔑 **O histórico começa pelo `novidades.json`**, e desce sem repetir
+    /// versão: quem lança acrescenta a entrada nova no topo dos dois.
+    #[test]
+    fn o_historico_comeca_pelas_novidades_desta_versao() {
+        let atual = desta_versao().expect("docs/novidades.json legível");
+        let texto = include_str!("../../../../docs/historico-de-novidades.json");
+        let cru: Vec<serde_json::Value> = serde_json::from_str(texto).expect("histórico legível");
+        let historico = historico_desta_versao();
+        assert_eq!(
+            cru.len(),
+            historico.len(),
+            "nenhuma entrada torta ou repetida"
+        );
+        let topo = &historico[0];
+        assert_eq!(
+            (
+                &topo.versao,
+                &topo.titulo,
+                topo.importante,
+                &topo.novidades,
+                &topo.por_que_atualizar
+            ),
+            (
+                &atual.versao,
+                &atual.titulo,
+                atual.importante,
+                &atual.novidades,
+                &atual.por_que_atualizar
+            ),
+            "a primeira entrada de docs/historico-de-novidades.json é a de docs/novidades.json"
+        );
+        for (n, antes) in historico.iter().zip(cru.iter()) {
+            assert_eq!(
+                antes["versao"].as_str(),
+                Some(n.versao.as_str()),
+                "da mais nova para a mais antiga"
+            );
+            assert!(!n.novidades.is_empty(), "{} sem item", n.versao);
+            let data = n.data.as_deref().unwrap_or_default();
+            assert!(
+                data.len() == 10 && data.starts_with("20"),
+                "{}: data no formato 2026-10-01, e não {data:?}",
+                n.versao
+            );
+        }
+    }
+
+    #[test]
+    fn juntar_fica_com_a_versao_que_tem_a_lista() {
+        let com_lista = |v: &str, data: Option<&str>| {
+            let mut n = Novidades::do_anuncio(v.into(), "do arquivo".into(), false);
+            n.novidades = vec!["item".into()];
+            n.data = data.map(Into::into);
+            n
+        };
+        let anuncio = Novidades::do_anuncio("0.1.62".into(), "do anúncio".into(), true);
+        let juntas = juntar([
+            anuncio,
+            com_lista("0.1.9", Some("2026-09-20")),
+            com_lista("0.1.62", None),
+            com_lista("0.1.10", Some("2026-09-21")),
+            com_lista("0.1.9", None),
+        ]);
+        let versoes: Vec<&str> = juntas.iter().map(|n| n.versao.as_str()).collect();
+        assert_eq!(
+            versoes,
+            ["0.1.62", "0.1.10", "0.1.9"],
+            "uma por número, 10 > 9"
+        );
+        assert_eq!(
+            juntas[0].titulo, "do arquivo",
+            "a do anúncio não tem a lista"
+        );
+        assert_eq!(juntas[2].data.as_deref(), Some("2026-09-20"));
+        assert!(ler_historico("lixo").is_empty());
+        assert_eq!(
+            ler_historico(
+                r#"[{"versao":"x","titulo":"t","novidades":[],"por_que_atualizar":""},
+                {"versao":"0.1.2","titulo":"t","novidades":["a"],"por_que_atualizar":"p"}]"#
+            )
+            .len(),
+            1,
+            "a entrada torta fica de fora sozinha"
+        );
+    }
+
     /// Os endereços são https e terminam no arquivo — e o `raw` do `main` vem
     /// primeiro, porque vale no instante do `make mains`.
     #[test]
     fn os_enderecos_das_novidades() {
+        for e in ENDERECOS_DO_HISTORICO {
+            assert!(
+                e.starts_with("https://") && e.ends_with("/historico-de-novidades.json"),
+                "{e}"
+            );
+        }
         for e in ENDERECOS {
             assert!(
                 e.starts_with("https://") && e.ends_with("/novidades.json"),

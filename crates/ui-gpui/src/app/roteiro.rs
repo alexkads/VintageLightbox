@@ -486,6 +486,20 @@ impl Aplicativo {
             // Desenrolados pelo laço do roteiro.
             Passo::Varrer { .. } | Passo::Rolar { .. } => {}
             Passo::Aviso { erro, texto } => self.avisar_em_toast(texto.clone(), *erro, cx),
+            Passo::Novidades(acao) => {
+                use crate::atualizacao::faixa::Pedido;
+                let mut partes = acao.split_whitespace();
+                let pedido = match (partes.next(), partes.next().and_then(|n| n.parse().ok())) {
+                    (Some("desta"), _) => Some(Pedido::VerEstaVersao),
+                    (Some("ver"), Some(indice)) => Some(Pedido::VerVersao(indice)),
+                    (Some("fechar"), _) => Some(Pedido::FecharNovidades),
+                    _ => None,
+                };
+                match pedido {
+                    Some(pedido) => self.atender(pedido, cx),
+                    None => eprintln!("[roteiro] novidades: não entendi '{acao}'"),
+                }
+            }
             Passo::Desempenho(acao) => {
                 let painel = self.desempenho.clone();
                 match acao.as_str() {

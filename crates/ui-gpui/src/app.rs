@@ -943,6 +943,9 @@ pub struct Aplicativo {
     atualizacao: faixa::Estado,
     /// O canal por onde o resultado da procura e o da instalação voltam.
     avisos_de_versao: (Sender<Aviso>, Receiver<Aviso>),
+    /// A rolagem da lista de versões do diálogo das novidades: "Mais antiga"
+    /// leva a lista junto quando a escolhida sai da vista.
+    rolagem_das_novidades: gpui_kit::ScrollHandle,
     /// 🚨 A `Task` que espera o aviso chegar. **Descartá-la a cancela**, e o
     /// sintoma seria a faixa nunca aparecer — versão nova publicada, ninguém
     /// sabendo.
@@ -1446,6 +1449,7 @@ impl Aplicativo {
             atualizador: portas.atualizador,
             atualizacao: faixa::Estado::default(),
             avisos_de_versao,
+            rolagem_das_novidades: gpui_kit::ScrollHandle::new(),
             _atualizacao: Some(atualizacao),
             _anuncios_do_servidor: anuncios_do_servidor,
         }
@@ -1692,11 +1696,23 @@ impl Aplicativo {
                     self.atualizacao.aviso = None;
                 }
             }
-            PedidoDeAtualizacao::VerNovidades => self.atualizacao.novidades_abertas = true,
-            PedidoDeAtualizacao::VerEstaVersao => self.atualizacao.desta_versao_aberta = true,
+            PedidoDeAtualizacao::VerNovidades => {
+                self.atualizacao.novidades_abertas = true;
+                self.atualizacao.em_vista = None;
+                self.buscar_historico_de_novidades(cx);
+            }
+            PedidoDeAtualizacao::VerEstaVersao => {
+                self.atualizacao.desta_versao_aberta = true;
+                self.atualizacao.em_vista = None;
+            }
             PedidoDeAtualizacao::FecharNovidades => {
                 self.atualizacao.novidades_abertas = false;
                 self.atualizacao.desta_versao_aberta = false;
+                self.atualizacao.em_vista = None;
+            }
+            PedidoDeAtualizacao::VerVersao(indice) => {
+                self.atualizacao.ver_versao(indice);
+                self.rolagem_das_novidades.scroll_to_item(indice);
             }
             PedidoDeAtualizacao::CopiarComando => {
                 cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(
@@ -1782,6 +1798,32 @@ impl Aplicativo {
         )
     }
 
+    /// 📚 Busca o histórico de novidades do `main` fora da thread da tela: o
+    /// binário só conhece as versões até a dele, e as do meio entre a aberta
+    /// e a anunciada vêm de lá. Enquanto não chega, o diálogo mostra o que
+    /// tem.
+    fn buscar_historico_de_novidades(&mut self, cx: &mut Context<Self>) {
+        if !self.atualizacao.precisa_do_historico() {
+            return;
+        }
+        self.atualizacao.buscando_historico = true;
+        let atualizador = self.atualizador.clone();
+        cx.spawn(async move |raiz, cx| {
+            let historico = cx
+                .background_executor()
+                .spawn(async move { atualizador.historico() })
+                .await;
+            let _ = raiz.update(cx, |app, cx| {
+                app.atualizacao.buscando_historico = false;
+                if !historico.is_empty() {
+                    app.atualizacao.historico_do_main = historico;
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     /// O diálogo "Novidades da versão X", quando pedido.
     fn novidades_da_versao(&self, cx: &mut Context<Self>) -> Option<gpui_kit::AnyElement> {
         let agir = cx.listener(|este, pedido: &PedidoDeAtualizacao, _window, cx| {
@@ -1789,6 +1831,7 @@ impl Aplicativo {
         });
         faixa::desenhar_novidades(
             &self.atualizacao,
+            &self.rolagem_das_novidades,
             cx,
             Arc::new(move |pedido, window, app| agir(&pedido, window, app)),
         )
@@ -10005,6 +10048,7 @@ mod testes {
                 "0.1.13",
                 Some(Novidades {
                     versao: "0.1.13".into(),
+                    data: None,
                     titulo: "Chatbot e Agendamentos".into(),
                     importante: true,
                     novidades: vec!["o chatbot".into()],
@@ -10029,6 +10073,105 @@ mod testes {
                 .advance_clock(std::time::Duration::from_millis(250));
             cx.run_until_parked();
         }
+    }
+
+    /// 📚 **O diálogo navega pelo histórico**: abre na versão anunciada, lista
+    /// as do meio (que vêm do histórico do `main`) e a aberta, e o clique numa
+    /// versão da lista troca o que ele mostra.
+    #[gpui_kit::test]
+    fn o_dialogo_das_novidades_navega_pelo_historico(cx: &mut TestAppContext) {
+        use crate::atualizacao::novidades::Novidades;
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_kit::init);
+        let versao = |v: &str, item: &str| Novidades {
+            versao: v.into(),
+            data: Some("2030-01-02".into()),
+            titulo: format!("A {v}"),
+            importante: false,
+            novidades: vec![item.into()],
+            por_que_atualizar: "porque sim".into(),
+        };
+        let atualizador = Arc::new(AtualizadorDeMentira::default());
+        *atualizador.resposta.lock().unwrap() = Some(Aviso::Disponivel {
+            versao: crate::atualizacao::compilar::aviso_de_compilar(
+                "9.0.1",
+                Some(versao("9.0.1", "a anunciada")),
+            ),
+            automatico: false,
+        });
+        *atualizador.historico_do_main.lock().unwrap() =
+            vec![versao("9.0.1", "a anunciada"), versao("9.0.0", "a do meio")];
+        let portas = Portas {
+            atualizador: atualizador.clone(),
+            ..portas()
+        };
+        let janela = cx.add_window(|window, cx| {
+            Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas, window, cx)
+        });
+        deixar_o_relogio_andar(cx);
+        janela
+            .update(cx, |app, _window, cx| {
+                app.atender(PedidoDeAtualizacao::VerNovidades, cx)
+            })
+            .unwrap();
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        visual.run_until_parked();
+        assert_eq!(*atualizador.historicos.lock().unwrap(), 1);
+        janela
+            .update(&mut visual, |app, _window, _cx| {
+                let linha = app.atualizacao.linha_do_tempo();
+                let versoes: Vec<&str> = linha.iter().map(|n| n.versao.as_str()).collect();
+                assert_eq!(
+                    versoes[..3],
+                    ["9.0.1", "9.0.0", env!("CARGO_PKG_VERSION")],
+                    "a anunciada, a do meio e a aberta"
+                );
+                assert!(versoes.len() > 3, "e o histórico do binário: {versoes:?}");
+                assert_eq!(
+                    app.atualizacao.indice_em_vista(&linha),
+                    0,
+                    "abre na anunciada"
+                );
+            })
+            .unwrap();
+
+        visual
+            .debug_bounds("novidades-versoes")
+            .expect("a lista das versões está na tela");
+        let do_meio = visual
+            .debug_bounds("novidades-versao-1")
+            .expect("a versão do meio está na lista");
+        // O primeiro evento de ponteiro da janela se perde no harness.
+        visual.simulate_mouse_move(do_meio.center(), None, gpui_kit::Modifiers::default());
+        visual.simulate_click(do_meio.center(), gpui_kit::Modifiers::default());
+        janela
+            .update(&mut visual, |app, _window, _cx| {
+                assert_eq!(app.atualizacao.em_vista.as_deref(), Some("9.0.0"));
+            })
+            .unwrap();
+
+        // Fechar e abrir de novo volta à anunciada, sem buscar outra vez.
+        janela
+            .update(&mut visual, |app, _window, cx| {
+                app.atender(PedidoDeAtualizacao::FecharNovidades, cx);
+                app.atender(PedidoDeAtualizacao::VerNovidades, cx);
+                assert_eq!(app.atualizacao.em_vista, None);
+            })
+            .unwrap();
+        visual.run_until_parked();
+        assert_eq!(*atualizador.historicos.lock().unwrap(), 1);
+
+        // Pelo rodapé, a lista é a do binário e abre na versão aberta.
+        janela
+            .update(&mut visual, |app, _window, cx| {
+                app.atender(PedidoDeAtualizacao::FecharNovidades, cx);
+                app.atender(PedidoDeAtualizacao::VerEstaVersao, cx);
+                let linha = app.atualizacao.linha_do_tempo();
+                let em_vista = app.atualizacao.indice_em_vista(&linha);
+                assert_eq!(linha[em_vista].versao, env!("CARGO_PKG_VERSION"));
+                assert!(linha.iter().all(|n| n.versao != "9.0.0"));
+            })
+            .unwrap();
     }
 
     /// 🔑 **Tudo automático**: a versão do `main` começa a compilar sem clique,

@@ -149,6 +149,13 @@ pub trait Atualizador: Send + Sync + 'static {
     /// Roda o instalador, que compila o `main` nesta máquina. As etapas
     /// chegam como [`Aviso::Progresso`]; o fim, como `Instalada` ou `Falhou`.
     fn compilar(&self, versao: String, canal: Sender<Aviso>);
+
+    /// 📚 O histórico de novidades do `main` — as versões entre a instalada e
+    /// a anunciada. Vazio quando não deu para buscar. **Bloqueia**: chamar
+    /// fora da thread da interface.
+    fn historico(&self) -> Vec<super::novidades::Novidades> {
+        Vec::new()
+    }
 }
 
 pub use real::AtualizadorDaWeb;
@@ -388,6 +395,10 @@ mod real {
                 });
             });
         }
+
+        fn historico(&self) -> Vec<super::super::novidades::Novidades> {
+            super::super::novidades::buscar_historico()
+        }
     }
 
     impl AtualizadorDaWeb {
@@ -468,6 +479,10 @@ pub mod mentira {
         pub compilacoes: Mutex<Vec<String>>,
         /// O que `compilar` envia, em ordem (etapas e o fim).
         pub andamento_da_compilacao: Mutex<Vec<Aviso>>,
+        /// O que `historico` devolve.
+        pub historico_do_main: Mutex<Vec<crate::atualizacao::novidades::Novidades>>,
+        /// Quantas vezes o histórico foi buscado.
+        pub historicos: Mutex<usize>,
     }
 
     impl AtualizadorDeMentira {
@@ -525,6 +540,11 @@ pub mod mentira {
             if let Some(aviso) = self.desfecho.lock().expect("o desfecho").clone() {
                 let _ = canal.send(aviso);
             }
+        }
+
+        fn historico(&self) -> Vec<crate::atualizacao::novidades::Novidades> {
+            *self.historicos.lock().expect("os históricos") += 1;
+            self.historico_do_main.lock().expect("o histórico").clone()
         }
 
         fn compilar(&self, versao: String, canal: Sender<Aviso>) {

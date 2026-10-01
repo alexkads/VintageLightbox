@@ -1,0 +1,647 @@
+[
+  {
+    "versao": "0.1.61",
+    "data": "2026-10-01",
+    "titulo": "A Curva de tons da Revelação ficou como a do Lightroom.",
+    "importante": false,
+    "novidades": [
+      "A Curva de tons e a Curva por ponto viraram um painel só. Em \"Ajustes:\" ficam a curva das regiões (o primeiro ícone) e os círculos RGB, vermelho, verde e azul da curva por ponto.",
+      "O gráfico mostra o histograma da foto por trás. Arrastar para cima ou para baixo dentro dele mexe na região que está sob o mouse, e o canto mostra qual é (\"Claros: +12\").",
+      "As três divisões das regiões viraram pinos na barra embaixo do gráfico, como no Lightroom. Clique duplo num pino o devolve ao lugar.",
+      "Os controles estão na ordem do Lightroom: Realces, Claros, Escuros e Sombras."
+    ],
+    "por_que_atualizar": "Quem já revela no Lightroom encontra a curva do mesmo jeito, num painel só."
+  },
+  {
+    "versao": "0.1.60",
+    "data": "2026-10-01",
+    "titulo": "A Correção de cores da Revelação com rodas, como no Lightroom — e os temas com a cara do macOS.",
+    "importante": false,
+    "novidades": [
+      "A Tonalização virou a Correção de cores do Lightroom: em Ajustar, escolha as 3 rodas ou uma faixa só (Sombras, Tons médios, Realces ou Global). O ponto embaixo de cada botão mostra a faixa que tem ajuste.",
+      "Em cada roda, arraste o ponto para escolher a cor e a força dela; a bolinha da borda gira só a cor. Shift prende a cor e muda só a força, Cmd move mais devagar para o ajuste fino, e o duplo clique zera a roda.",
+      "Embaixo de cada roda, a barra de Luminância clareia ou escurece aquela faixa, e o olho, segurado, mostra a foto sem ela. Mesclagem e Equilíbrio ficam no pé do painel, com os nomes do Lightroom.",
+      "Claro, Escuro e Sistema ganharam o visual do macOS: fundo branco (ou grafite no escuro), barra lateral em cinza, os cinzas da Apple e um azul só nos botões e no que está escolhido.",
+      "A barra de título da janela acompanha o tema, os controles deslizantes da Revelação têm o formato do Mac e a foto escolhida na tira de baixo fica marcada na cor do tema."
+    ],
+    "por_que_atualizar": "Para tonalizar a foto como no Lightroom, mexendo na roda em vez de procurar números — e com o app no visual do sistema."
+  },
+  {
+    "versao": "0.1.59",
+    "data": "2026-10-01",
+    "titulo": "Os temas Claro e Escuro agora têm a cara do macOS.",
+    "importante": false,
+    "novidades": [
+      "Claro, Escuro e Sistema ganharam o visual do macOS: fundo branco (ou grafite no escuro), barra lateral em cinza, os cinzas da Apple e um azul só nos botões e no que está escolhido.",
+      "A barra de título da janela acompanha o tema: no Claro ela fica clara mesmo com o computador no modo escuro, e no Escuro fica escura.",
+      "Os controles deslizantes da Revelação têm o formato do Mac: barra fina e o botão branco redondo.",
+      "A foto escolhida na tira de baixo fica marcada na cor do tema."
+    ],
+    "por_que_atualizar": "O app fica com o visual do sistema, mais limpo e confortável no dia a dia."
+  },
+  {
+    "versao": "0.1.58",
+    "data": "2026-10-01",
+    "titulo": "O painel Efeitos da Revelação no desenho do Lightroom.",
+    "importante": false,
+    "novidades": [
+      "Efeitos em dois grupos, como no Lightroom: Vinheta de corte posterior (Estilo, Intensidade, Ponto médio, Arredondamento, Difusão e Realces) e Granulado (Intensidade, Tamanho e Aspereza).",
+      "Cada controle numa linha só: o nome, a barra e o valor. O Estilo da vinheta é escolhido numa lista: Prioridade de realces, Prioridade de cores ou Sobreposição de tinta.",
+      "O que não faz efeito fica apagado: os ajustes da vinheta com a Intensidade em 0, os Realces ao clarear ou na Sobreposição de tinta, e o Tamanho e a Aspereza com o grão em 0."
+    ],
+    "por_que_atualizar": "Para fazer a vinheta e o grão como no Lightroom, sem procurar os controles."
+  },
+  {
+    "versao": "0.1.57",
+    "data": "2026-10-01",
+    "titulo": "A Revelação com os controles do Lightroom.",
+    "importante": true,
+    "novidades": [
+      "Básico com Textura, Claridade e Remover névoa, como no Lightroom. A Claridade agora é contraste local de verdade.",
+      "Vinheta pós-corte completa em Efeitos (estilo, intensidade, ponto médio, arredondamento, difusão e realces), aspereza do grão, as divisões da curva de tons, a luminância de cada faixa da Gradação de cores e o Detalhe inteiro (detalhe e máscara da nitidez, detalhe, contraste e suavidade do ruído).",
+      "A Gradação de cores usa a roda do Lightroom: o mesmo número dá a mesma cor que lá. Pretos, Sombras e Realces ficaram mais perto do Lightroom.",
+      "Importar do Lightroom traz os controles novos, o corte inclinado e a curva de tons dos .xmp, que antes sumia.",
+      "Nova pasta LRs nas predefinições, com as 28 do Lightroom do estúdio (as de vinheta somam, as outras recomeçam), e a Cinematográfico P&B em Do sistema."
+    ],
+    "por_que_atualizar": "Para revelar aqui o que foi revelado no Lightroom sem refazer à mão."
+  },
+  {
+    "versao": "0.1.56",
+    "data": "2026-09-30",
+    "titulo": "A foto da nuvem não pisca mais ao abrir na Revelação.",
+    "importante": false,
+    "novidades": [
+      "Ao abrir na Revelação uma foto de sessão revelada em outro computador, ela aparece uma vez só: a foto fica na tela enquanto o app termina de carregar, sem sumir no meio.",
+      "A foto que estava cortada aparece já com o enquadramento certo desde o primeiro instante, sem recortar duas vezes.",
+      "A miniatura dessa foto na tira também não volta mais para \"sem prévia\" por um instante."
+    ],
+    "por_que_atualizar": "Abrir sessões vindas da nuvem fica estável, sem a piscada."
+  },
+  {
+    "versao": "0.1.55",
+    "data": "2026-09-30",
+    "titulo": "O Navegador da Revelação recolhe.",
+    "importante": false,
+    "novidades": [
+      "Clique no título \"Navegador\" para recolher o painel do zoom: fica só a linha com o nível, e a lista de predefinições ganha o espaço. Outro clique abre de novo.",
+      "O app lembra se você deixou o Navegador aberto ou recolhido. O zoom continua pelo palco e pelos atalhos."
+    ],
+    "por_que_atualizar": "Mais predefinições à vista, principalmente em notebook e tela pequena."
+  },
+  {
+    "versao": "0.1.54",
+    "data": "2026-09-30",
+    "titulo": "As predefinições da Revelação cabem em tela pequena.",
+    "importante": false,
+    "novidades": [
+      "A lista de predefinições rola inteira, com barra, e o navegador e a busca ficam parados no topo. Antes, numa tela baixa, \"Do sistema\" mostrava só duas.",
+      "Cada grupo (Favoritas, Minhas, Do sistema) abre e fecha no título, e o app lembra como você deixou. Buscar abre todos.",
+      "As suas predefinições vêm antes das do sistema.",
+      "A predefinição que está na foto fica marcada com uma barra âmbar.",
+      "O botão direito numa predefinição abre um menu: aplicar, favoritar, renomear e apagar."
+    ],
+    "por_que_atualizar": "Deixa a lista de predefinições fácil de usar em notebook e tela pequena."
+  },
+  {
+    "versao": "0.1.53",
+    "data": "2026-09-30",
+    "titulo": "O QR volta ao painel do bot — e você liga e desliga.",
+    "importante": false,
+    "novidades": [
+      "O painel do bot mostra o QR de novo. O botão de QR no título dele (ou \"QR no painel\", no menu do Bot) tira e põe, e a escolha vale para as próximas sessões.",
+      "Tirar o QR do painel não mexe no QR da tela do cliente."
+    ],
+    "por_que_atualizar": "Traz de volta o QR no painel do bot, agora com o seu interruptor."
+  },
+  {
+    "versao": "0.1.52",
+    "data": "2026-09-30",
+    "titulo": "O bot da sessão num botão só, e o QR do cliente sem texto vazando.",
+    "importante": false,
+    "novidades": [
+      "Os três botões do bot viraram um: \"Bot · QR ligado\". Ele abre um menu com \"QR na tela do cliente\" (tecla I), \"Painel do bot\" e \"Novo QR para a próxima pessoa\".",
+      "Na tela do cliente, o texto embaixo do QR agora fica dentro do cartão: a frase quebra em duas linhas e o \"conversa iniciada\" não é mais cortado."
+    ],
+    "por_que_atualizar": "Sem esta versão, o texto do QR saía para fora do cartão na tela do cliente."
+  },
+  {
+    "versao": "0.1.51",
+    "data": "2026-09-30",
+    "titulo": "Comandos diretos para o bot da sessão: o QR é do cliente, e o painel fica onde você puser.",
+    "importante": false,
+    "novidades": [
+      "A barra da sessão ganhou três botões, com o estado escrito: \"QR do cliente\" (a tecla I faz o mesmo), \"Painel do bot\" e \"Novo QR\". Cada um faz uma coisa só.",
+      "O QR aparece só na tela do cliente, e sempre que ela abre. Só você o desliga, e fechar o painel do bot não mexe nele.",
+      "O painel do bot mostra quem chegou e em que pergunta está, sem QR. Ele fica por cima do caixa, arrasta pelo título e guarda o lugar.",
+      "\"Novo QR\" troca o código para a próxima pessoa da mesma sessão; quem já começou a conversa continua.",
+      "Quem escreve \"sair\" no meio do cadastro aparece como \"parou no meio\", e não mais como cadastro concluído.",
+      "No celular do cliente, o bot agora responde com botões em todos os canais, e sempre oferece sair ou continuar o cadastro."
+    ],
+    "por_que_atualizar": "Sem esta versão, o QR podia sumir da tela do cliente sem você perceber, e quem desistia do cadastro aparecia como concluído."
+  },
+  {
+    "versao": "0.1.50",
+    "data": "2026-09-30",
+    "titulo": "O que o cliente responde no bot aparece na sessão na hora.",
+    "importante": false,
+    "novidades": [
+      "Quando o cliente responde o e-mail (ou o telefone) pelo bot, a sessão aberta se atualiza sozinha: o \"sem e-mail\" some e o Avisar cliente já manda para o e-mail que ele deu, sem pedir de novo."
+    ],
+    "por_que_atualizar": "Sem esta versão, o Avisar cliente pedia um e-mail que o cliente já tinha respondido pelo bot."
+  },
+  {
+    "versao": "0.1.49",
+    "data": "2026-09-30",
+    "titulo": "O QR do bot na sessão: o cliente se cadastra pelo celular, e a tela avisa quando ele chegou.",
+    "importante": false,
+    "novidades": [
+      "Durante a sessão, um QR aparece no canto de baixo à direita. O cliente lê com a câmera e escolhe WhatsApp, Instagram, Telegram, Messenger ou o chat do site; o bot pergunta nome, telefone, e-mail e como conheceu, e grava na sessão.",
+      "O cartão do QR avisa na hora quem começou a conversa e em que pergunta está; quando o cadastro termina, o nome completo vira título com um clique.",
+      "A tecla I esconde e mostra o QR, aqui e na tela do cliente.",
+      "A tela do cliente mostra o mesmo QR, grande, e troca por \"Conversa iniciada\" depois da primeira resposta.",
+      "Avisar cliente sai também pelo WhatsApp quando a conversa das últimas 24 horas está aberta, e diz por onde o aviso foi e o que ficou de fora.",
+      "Depois, o cliente escreve \"minhas fotos\" no bot e recebe o link da sessão de novo."
+    ],
+    "por_que_atualizar": "O balconista deixa de digitar os dados do cliente: ele mesmo responde pelo celular enquanto a sessão acontece."
+  },
+  {
+    "versao": "0.1.48",
+    "data": "2026-09-30",
+    "titulo": "O RAW da câmera e o DNG do Lightroom entram com a revelação feita no Lightroom.",
+    "importante": false,
+    "novidades": [
+      "O DNG exportado pelo Lightroom abre em qualquer computador do balcão, inclusive o DNG com compressão com perdas, que antes dava erro ao importar.",
+      "A revelação feita no Lightroom vem junto: ao importar um DNG revelado, ou um NEF/CR2 com o arquivo .xmp ao lado, a foto já entra com exposição, contraste, cores, tonalização, grão e o corte do Lightroom nos controles da Revelação.",
+      "O rodapé da importação conta quantas fotos vieram com a revelação do Lightroom e avisa o que ele fez e este app ainda não tem (por exemplo, remoção de névoa).",
+      "Na nova sessão, a predefinição padrão não passa por cima das fotos que já vieram reveladas do Lightroom.",
+      "A sessão aceita também ORF, RW2, PEF, SRW e NRW."
+    ],
+    "por_que_atualizar": "Quem revela no Lightroom não precisa refazer a revelação foto a foto: ela chega aos controles na importação."
+  },
+  {
+    "versao": "0.1.47",
+    "data": "2026-09-30",
+    "titulo": "Passar o mouse por uma predefinição não deixa mais o efeito na foto.",
+    "importante": false,
+    "novidades": [
+      "Na Revelação, às vezes o efeito de uma predefinição ficava na foto só de passar o mouse por cima dela, principalmente ao arrastar a barra de zoom. Agora, ao tirar o mouse, a foto volta exatamente como estava."
+    ],
+    "por_que_atualizar": "A foto na tela sempre mostra o que foi aplicado de verdade."
+  },
+  {
+    "versao": "0.1.46",
+    "data": "2026-09-29",
+    "titulo": "A versão nova chega com o app aberto, sem precisar sair dele.",
+    "importante": false,
+    "novidades": [
+      "Quando sai uma versão nova, o app confia no aviso do servidor e começa a atualizar sozinho. Antes, às vezes o aviso chegava antes de a versão estar disponível na internet, e ela só aparecia na próxima vez que o app fosse aberto.",
+      "O app também procura versão nova a cada hora, caso algum aviso se perca.",
+      "Cada procura de versão fica registrada no painel Computadores do site: o que disparou, o que foi encontrado e o que o app fez.",
+      "Na Revelação, a barra de zoom embaixo da foto pode mudar de lugar: arraste pela alça na ponta esquerda e deixe onde não atrapalha. Duplo clique na alça a devolve ao canto.",
+      "Cmd + e Cmd − aumentam e diminuem a letra do app inteiro, e Cmd 0 volta ao tamanho padrão. O tamanho escolhido fica guardado. Na Revelação, essas teclas continuam dando zoom na foto.",
+      "Esta atualização talvez ainda peça para reabrir o app uma última vez; a partir dela, não precisa mais."
+    ],
+    "por_que_atualizar": "As próximas versões chegam sozinhas, sem fechar o app, e qualquer problema fica rastreado."
+  },
+  {
+    "versao": "0.1.45",
+    "data": "2026-09-29",
+    "titulo": "Doze predefinições Vintage, favoritas com um coração, e \"Recuperar cartão\" no menu lateral.",
+    "importante": false,
+    "novidades": [
+      "Na coluna de predefinições da Revelação, o grupo \"Vintage ·\" traz doze visuais prontos: Foto envelhecida, Polaroid antiga, Anos passados, Processo cruzado, Cianótipo, Cinza antigo, Bleach bypass, Positivo direto, Kodachrome, Portra 400, Ektachrome anos 70 e Desbotado anos 70. Cada uma começa do zero: aplicar troca o tratamento que estava na foto, em vez de somar a ele.",
+      "Passe o mouse numa predefinição e clique no coração: ela vai para o grupo \"Favoritas\", no topo. Arraste pela alça para pôr as favoritas na ordem que quiser; outro clique no coração tira. Elas também vêm primeiro na escolha do preset padrão da Nova sessão.",
+      "Só as listas rolam: o navegador e a busca ficam parados, e as suas predefinições (\"Minhas\") aparecem sempre, sem precisar descer a coluna inteira.",
+      "A recuperação de fotos ganhou lugar próprio no menu lateral: \"Recuperar cartão\". Escolha o cartão e uma pasta no computador, digite a senha do computador e acompanhe a busca. Serve para fotos apagadas por engano e para cartão formatado sem querer.",
+      "No fim, \"Importar\" leva você às sessões: abra a do cliente e, em Importar fotos › Do cartão ou pasta…, as fotos recuperadas são a primeira opção. Os JPEG da Nikon voltam inteiros e uma vez só.",
+      "Até terminar a recuperação, não grave nada no cartão e não tire fotos com ele: cada foto nova apaga o que ainda dá para salvar."
+    ],
+    "por_que_atualizar": "Doze visuais de época a um clique, as suas preferidas sempre no topo, e a recuperação do cartão à mão na hora do susto."
+  },
+  {
+    "versao": "0.1.44",
+    "data": "2026-09-29",
+    "titulo": "Formatou o cartão sem querer? A Importação agora recupera as fotos que ainda estão nele.",
+    "importante": false,
+    "novidades": [
+      "Na Importação, o botão \"Recuperar cartão formatado…\" busca as fotos de um cartão formatado antes de importar. Escolha o cartão e uma pasta no computador, digite a senha do computador e acompanhe a busca; no fim, \"Importar\" abre as fotos achadas.",
+      "Até terminar, não grave nada no cartão e não tire fotos com ele: cada foto nova apaga o que ainda dá para salvar.",
+      "Fotos CR3 (Canon) passam a aparecer na grade da Importação.",
+      "Na Biblioteca, a grade ganhou as cores do Lightroom: a foto marcada fica um tom mais clara e a foto em foco quase branca."
+    ],
+    "por_que_atualizar": "Um cartão formatado sem querer não perde mais a sessão."
+  },
+  {
+    "versao": "0.1.43",
+    "data": "2026-09-28",
+    "titulo": "No Enquadrar, a proporção já vem travada na da foto: a sessão importada em 4:3 abre em 4:3, e puxar uma alça não tira mais a foto do papel sem querer.",
+    "importante": false,
+    "novidades": [
+      "Ao abrir o Enquadrar, a proporção já aparece escolhida: a que a sessão pediu na importação (4:3, 3:2…), a que você escolheu antes naquela foto, ou a da câmera numa foto sem corte. Para recortar solto, clique em \"Livre\".",
+      "Com a proporção travada, girar a foto 90° vira a trava junto (4:3 passa a 3:4): o retângulo fica em pé e o próximo arrasto não o deita de novo.",
+      "Na sessão, a seta que mostra e esconde a tira de fotos fica abaixo da tira, na beirada de baixo da janela, como no Lightroom."
+    ],
+    "por_que_atualizar": "A foto não sai mais da proporção do papel por um arrasto sem querer no Enquadrar."
+  },
+  {
+    "versao": "0.1.42",
+    "data": "2026-09-28",
+    "titulo": "Tema novo, Âmbar Rouge: claro, rosa-pó e vinho, com a seleção em âmbar dourado. E o Matrix e o Cyberpunk ficaram com uma cor só.",
+    "importante": false,
+    "novidades": [
+      "No menu da conta, em Tema, há o \"Âmbar Rouge\": fundo rosa-pó, letra vinho, botões em rouge e o que está escolhido em âmbar dourado. É o único tema fixo claro.",
+      "No tema Matrix não há mais âmbar: o que está escolhido, as estrelas, os sliders e os avisos (levada, editada, não salva) são todos verde fósforo.",
+      "No tema Cyberpunk, tudo o que acende usa o mesmo amarelo neon da marca, e não mais um segundo amarelo.",
+      "Os trilhos coloridos da Revelação (Temperatura, Matiz, HSL) continuam em todos os temas: eles mostram a cor que o ajuste põe na foto."
+    ],
+    "por_que_atualizar": "Cada tema fala uma cor só, e quem prefere um visual claro e delicado tem o Âmbar Rouge."
+  },
+  {
+    "versao": "0.1.41",
+    "data": "2026-09-28",
+    "titulo": "As barras da sessão e da Revelação ficaram do mesmo tamanho, e cabem inteiras em telas menores.",
+    "importante": false,
+    "novidades": [
+      "Os botões, fichas e seletores das três barras de cima da sessão ficaram menores, na mesma medida da barra da Revelação: em telas de notebook a barra de cima não corta mais o \"Copiar link\" nem esconde o \"Avisar cliente\".",
+      "O botão \"levadas · à venda · compradas\" virou só o ícone de informação: passe o mouse para ver os números, ou clique para abrir os detalhes como antes.",
+      "Na Revelação, \"Antes\", \"Enquadrar\" e \"Tela do cliente\" agora são botões iguais a \"Descartar\" e \"Baixar JPEG\": mesma borda, mesma altura, mesma letra. Ligados, acendem na cor do tema."
+    ],
+    "por_que_atualizar": "Tudo cabe na tela sem cortar botão, e as duas telas do dia a dia falam a mesma língua visual."
+  },
+  {
+    "versao": "0.1.40",
+    "data": "2026-09-28",
+    "titulo": "Na sessão, o botão das contagens ficou pequeno: só o ícone, com os números na dica.",
+    "importante": false,
+    "novidades": [
+      "O botão \"levadas · à venda · compradas\" do alto da sessão virou só o ícone de informação: passe o mouse para ver os números, ou clique para abrir os detalhes como antes."
+    ],
+    "por_que_atualizar": "Sobra espaço na barra de cima da sessão para os botões que se usam o dia todo."
+  },
+  {
+    "versao": "0.1.39",
+    "data": "2026-09-28",
+    "titulo": "O tema Lightroom ficou ainda mais parecido com o Lightroom: seleção em cinza, estrelas brancas e a grade em células.",
+    "importante": false,
+    "novidades": [
+      "No tema Lightroom, o que está escolhido (o filtro, a foto marcada, o botão ligado, o zoom) acende em cinza-claro, e não mais em âmbar.",
+      "As estrelas da nota ficam brancas, como no Lightroom.",
+      "Na sessão, cada foto fica numa célula cinza, e a foto em foco fica mais clara, como na Biblioteca do Lightroom.",
+      "Botões, fichas e painéis têm cantos retos, e os painéis da Revelação viram faixas corridas com o título à direita.",
+      "\"Levada\", \"editada\" e \"não salva\" continuam em âmbar: são a situação da foto e precisam chamar atenção em qualquer tema."
+    ],
+    "por_que_atualizar": "Quem vem do Lightroom encontra o mesmo desenho: o que está escolhido, a nota e a grade se leem do mesmo jeito."
+  },
+  {
+    "versao": "0.1.38",
+    "data": "2026-09-28",
+    "titulo": "Tema novo, Lightroom: cinzas de estúdio e sliders coloridos que mostram para onde cada ajuste leva a foto.",
+    "importante": false,
+    "novidades": [
+      "No menu da conta, em Tema, há o \"Lightroom\": painéis em cinzas, a foto sobre um fundo cinza médio e a cor só onde ela diz algo.",
+      "Na Revelação, em todos os temas, a Temperatura vai do azul ao amarelo, o Matiz do verde ao magenta, e cada cor do HSL aparece na própria barra.",
+      "Os sliders de tom (Exposição, Sombras, Brancos…) pintam a partir do zero: no neutro a barra fica vazia, e dá para ver de relance o que foi mexido.",
+      "Na sessão, com duas ou mais fotos marcadas, o painel do lote segue o desenho do painel da foto: estrelas com \"tirar\", levadas e à venda em destaque, faixa, negociação e preço num lugar só.",
+      "Puxando a tira da sessão para cima, a foto cresce junto e usa a prévia maior, sem sair borrada."
+    ],
+    "por_que_atualizar": "O Lightroom é o tema que o fotógrafo já conhece, e as barras coloridas deixam cada ajuste mais fácil de ler em qualquer tema."
+  },
+  {
+    "versao": "0.1.37",
+    "data": "2026-09-28",
+    "titulo": "Na sessão, a tira de baixo mostra a foto do tamanho da tira, como no site.",
+    "importante": false,
+    "novidades": [
+      "Puxando a tira da sessão para cima, a foto cresce junto e ocupa a altura inteira da tira; antes ficava pequena no meio, com sobra em volta.",
+      "Com a tira alta, ela usa a prévia maior da foto, para a imagem não sair borrada."
+    ],
+    "por_que_atualizar": "A tira grande serve para ver a foto de perto, do mesmo jeito que no site."
+  },
+  {
+    "versao": "0.1.36",
+    "data": "2026-09-28",
+    "titulo": "O painel da foto na sessão fica igual ao do site: quem ela é, a nota e as ações em cima, e faixa, negociação e preço num lugar só.",
+    "importante": false,
+    "novidades": [
+      "Na sessão, o painel da foto em foco virou um cartão em três partes: o nome, o estado e onde ela está (na nuvem, aqui ou subindo); a nota, com as estrelas clicáveis e um \"tirar\"; e os botões grandes \"Marcar como levada\" e \"Revelar\" (ou \"Revelar de novo\").",
+      "\"Faixa, negociação e preço\" mostra tamanho e downloads, a faixa, a negociação numa etiqueta âmbar (\"Desconto · R$ 20,00\") que abre o diálogo ao clicar, o preço de venda com \"Fixado em…; a faixa cobraria…\" e o \"Voltar à faixa\", e o Apagar no fim.",
+      "Com duas ou mais fotos marcadas, aparece só o painel do lote, como no site.",
+      "Sem valor fixado, o painel diz que o cliente paga o preço da faixa: no pós-venda não existe o desconto de quem compra antes do ensaio."
+    ],
+    "por_que_atualizar": "O operador acha cada botão no mesmo lugar do site, e o preço que o painel mostra é o que o cliente paga na galeria."
+  },
+  {
+    "versao": "0.1.35",
+    "data": "2026-09-28",
+    "titulo": "O app inteiro passa a usar as peças do gpui-kit: menu lateral, menus, abas, painéis e o Caixa que se ajusta à janela.",
+    "importante": false,
+    "novidades": [
+      "O Caixa ajusta as três colunas ao tamanho da janela: a lista de sessões e o movimento se puxam pela borda e somem pelas setas, e o cupom nunca fica espremido — o total e o Finalizar pagamento aparecem sempre inteiros.",
+      "O menu lateral, o menu da conta, o menu do zoom, o \"Mais ações\" do chatbot e o estúdio do Caixa são os componentes padrão, com o mesmo jeito em todas as telas; o selo de mensagens novas do chatbot continua à vista com o menu recolhido.",
+      "Na Revelação, as abas (sRGB/RGB, HSL, canais da curva) e os painéis que abrem e fecham seguem o padrão do site; na galeria, \"Faixa, negociação e preço\" e \"Atalhos\" também.",
+      "Erros como \"a lista de sessões não carregou\" aparecem como aviso passageiro no canto, em vez de uma faixa fixa ocupando a tela.",
+      "Campos, listas de escolha e botões lado a lado têm a mesma altura em todas as telas."
+    ],
+    "por_que_atualizar": "O balcão fica com uma tela só, coerente, e o Caixa funciona bem mesmo em monitores pequenos."
+  },
+  {
+    "versao": "0.1.34",
+    "data": "2026-09-28",
+    "titulo": "Os avisos do app passam a ser os do site, e o erro do servidor vira uma frase que dá para entender.",
+    "importante": false,
+    "novidades": [
+      "Quando o site recusa ou não responde, o aviso diz o que aconteceu (sem internet, sem permissão, o site teve um problema) em vez de mostrar o código do servidor.",
+      "Os avisos aparecem no alto e no meio, em verde quando deu certo e em vermelho quando falhou, e somem sozinhos em alguns segundos.",
+      "Na galeria da sessão, uma nota ou negociação recusada vira aviso passageiro em vez da faixa vermelha fixa sobre as fotos; a importação dá um aviso só no fim do lote, com quantos arquivos não entraram.",
+      "No \"Baixar como\" da Revelação, o aviso das fotos sem revelação salva vai para o canto de baixo e não cobre mais os botões do alto."
+    ],
+    "por_que_atualizar": "Quando algo falhar no balcão, o operador entende o motivo e sabe se basta tentar de novo."
+  },
+  {
+    "versao": "0.1.33",
+    "data": "2026-09-28",
+    "titulo": "O visual do app passa a vir de um template, com os cantos arredondados iguais aos do site.",
+    "importante": false,
+    "novidades": [
+      "Botões, campos, cartões e janelas de diálogo ganham os mesmos cantos do site recordarfotos.com.br. As cores continuam as mesmas, e os temas Matrix e Cyberpunk continuam no menu da conta.",
+      "O visual inteiro do app (cores, cantos, fonte e ícones) agora sai de um template, e pode ser trocado de uma vez para todos os balcões.",
+      "Na lista de sessões, o diálogo dos Gráficos mostrava dois X no canto; agora mostra um só."
+    ],
+    "por_que_atualizar": "O app fica com a mesma cara do site, e as próximas mudanças de visual chegam a todos os balcões juntas."
+  },
+  {
+    "versao": "0.1.32",
+    "data": "2026-09-28",
+    "titulo": "Por dentro: o banco do balcão e o site passam a chamar a revelação pelos parâmetros.",
+    "importante": false,
+    "novidades": [
+      "Nada muda na tela: é uma arrumação por dentro. O que o app guarda de cada foto revelada agora se chama \"parâmetros da revelação\", no balcão e no site.",
+      "As fotos, as revelações e as edições que já existem continuam iguais; a troca de nome é feita sozinha na primeira abertura."
+    ],
+    "por_que_atualizar": "Deixa o balcão com os mesmos nomes do site, para as próximas melhorias da Revelação e da Edição."
+  },
+  {
+    "versao": "0.1.31",
+    "data": "2026-09-28",
+    "titulo": "Revelação e Edição: o selo EDITADA mostra as fotos com edição, e \"Excluir a edição\" devolve a foto ao arquivo bruto.",
+    "importante": false,
+    "novidades": [
+      "As fotos com edição (o que foi pintado em \"Editar Foto\") ganham um selo: EDITADA no alto da Revelação, um lápis no canto da miniatura da tira e \"· editada\" embaixo da foto na grade da sessão.",
+      "Botão direito na foto da tira → \"Excluir a edição\": o que foi pintado sai e a foto volta ao arquivo bruto. A revelação (ajustes, corte e máscaras) continua. O app pergunta antes, porque não tem volta.",
+      "Os nomes ficaram como no Lightroom e no Photoshop: Revelação são os ajustes; Edição são as camadas pintadas. Por isso o menu agora diz \"Descartar a revelação\", a barra diz \"revelações não salvas\" e a nova sessão diz \"Fotos e revelação\".",
+      "Sem edição e sem revelação, o que aparece é o arquivo bruto, como entrou na importação."
+    ],
+    "por_que_atualizar": "Fica claro, de longe, quais fotos têm edição — e dá para voltar ao arquivo bruto sem perder a revelação."
+  },
+  {
+    "versao": "0.1.30",
+    "data": "2026-09-27",
+    "titulo": "As medições do botão Desempenho agora vão para o servidor: as de todos os balcões ficam juntas para comparar.",
+    "importante": false,
+    "novidades": [
+      "Salvar no banco guarda a medição neste computador e também no servidor. Sem internet, ela fica guardada e sobe sozinha na próxima vez que a janela Desempenho abrir.",
+      "As medições que você já tinha salvado neste computador sobem ao servidor na primeira vez que abrir a janela Desempenho depois de atualizar.",
+      "As abas Sessões e Comparar mostram as medições de todos os computadores, e Comparar põe Windows, Linux e Mac lado a lado na mesma operação."
+    ],
+    "por_que_atualizar": "Sem exportar arquivo: basta medir e salvar em cada balcão para compararmos onde a tela fica lenta."
+  },
+  {
+    "versao": "0.1.29",
+    "data": "2026-09-27",
+    "titulo": "Desempenho mais certeiro: o diagnóstico aponta a etapa que realmente segura a tela e registra o enquadramento da foto.",
+    "importante": false,
+    "novidades": [
+      "O diagnóstico da janela Desempenho separa o desenho da tela das etapas da foto que acontecem junto com ele: quando o recorte da foto trava a tela, é o recorte que aparece como culpado.",
+      "Cada medição passa a registrar como a foto estava enquadrada (sem corte, recorte reto, endireitada, perspectiva ou Enquadrar aberto), porque isso muda muito o custo de cada ajuste.",
+      "Computador de mesa sem bateria não recebe mais o aviso de que está na bateria."
+    ],
+    "por_que_atualizar": "Para a próxima medição dizer com precisão onde a lentidão está, antes da correção que vem a seguir."
+  },
+  {
+    "versao": "0.1.28",
+    "data": "2026-09-27",
+    "titulo": "Editor de fotos: pinte e apague sobre a foto numa janela própria, e a Revelação passa a usar a foto editada.",
+    "importante": false,
+    "novidades": [
+      "Na Revelação, clique com o botão direito numa foto da tira e escolha \"Editar Foto\": abre uma janela só para aquela foto — a clicada, mesmo com várias marcadas. A seleção e as setas da Revelação continuam como estavam.",
+      "Na janela do editor: Pincel (B) e Borracha (E), com tamanho ([ e ]), dureza, opacidade e cor. A pintura fica numa camada por cima da foto, que dá para esconder (H) e deixar mais transparente; a foto de baixo nunca muda.",
+      "Desfazer (Cmd/Ctrl+Z) e refazer (Cmd/Ctrl+Shift+Z), e o aviso \"Alterações não salvas\" enquanto houver o que salvar. Fechar com alterações pergunta se quer salvar.",
+      "Salvar (Cmd/Ctrl+S) atualiza a Revelação na hora: os ajustes, o corte e as máscaras continuam, agora aplicados sobre a foto editada. O JPEG, a impressão e o \"Salvar na galeria\" saem com a edição.",
+      "Reabrir o editor da mesma foto traz a pintura e o desfazer como estavam, mesmo depois de fechar o app."
+    ],
+    "por_que_atualizar": "Tirar um fio, cobrir uma mancha ou pintar um detalhe agora se faz no próprio balcão, sem outro programa — e a foto editada segue pela revelação e pela entrega como qualquer outra."
+  },
+  {
+    "versao": "0.1.27",
+    "data": "2026-09-27",
+    "titulo": "Perspectiva guiada no Enquadrar: trace sobre a foto o que devia estar reto, e as paredes, portas e janelas ficam em pé.",
+    "importante": false,
+    "novidades": [
+      "No Enquadrar, o botão Guias liga a perspectiva guiada. Arraste sobre a foto ao longo de algo que devia estar reto (um batente, a quina da parede, o rodapé): o traço em pé vira guia Vertical, o deitado vira Horizontal. Com duas guias a foto se corrige ao soltar; cabem quatro.",
+      "As pontas das guias se arrastam para acertar; clique numa guia e tecle Delete para apagá-la, ou use o × no painel. O rótulo Vertical/Horizontal no painel troca o eixo.",
+      "Os controles Vertical e Horizontal fazem o ajuste fino por cima das guias, e Redefinir perspectiva volta a foto ao que era.",
+      "Restringir ao conteúdo (ligado) mantém o recorte dentro da foto, sem cantos vazios, também ao endireitar e ao arrastar as alças. Desligado, os cantos vazios saem brancos no arquivo.",
+      "A correção vale em tudo: tela do cliente, JPEG, impressão, envio ao site e sincronização (no grupo Enquadramento). Desfazer e refazer funcionam gesto a gesto, e girar ou espelhar depois mantém a foto corrigida."
+    ],
+    "por_que_atualizar": "Fotos de ambiente tiradas de baixo ou de lado saem com as paredes e as portas tortas; agora elas se endireitam no próprio balcão, sem outro programa."
+  },
+  {
+    "versao": "0.1.26",
+    "data": "2026-09-27",
+    "titulo": "Novo botão Desempenho no rodapé: mede a fluidez da tela e mostra onde o tempo está indo, para acharmos a lentidão.",
+    "importante": false,
+    "novidades": [
+      "No rodapé, o botão Desempenho abre uma janela própria, que pode ir para o outro monitor. Aperte Iniciar, repita o que está lento (rolar a galeria, trocar de foto, arrastar um ajuste, pintar uma máscara) e aperte Parar.",
+      "A janela mostra quantos quadros por segundo a tela fez, quais engasgaram e em que etapa o tempo foi gasto, e dá o diagnóstico numa frase.",
+      "Salvar no banco guarda a medição neste computador; Copiar relatório leva o texto completo, com o computador, a placa de vídeo e o driver, para você mandar ao suporte.",
+      "Na Revelação local, um botão no fim da barra de ferramentas sai de uma vez da ferramenta, da máscara e do retoque escolhidos (o mesmo que o Esc)."
+    ],
+    "por_que_atualizar": "Com a medição de cada balcão (principalmente os de Windows) dá para saber se a lentidão é do programa ou do computador, e corrigir no lugar certo."
+  },
+  {
+    "versao": "0.1.25",
+    "data": "2026-09-27",
+    "titulo": "O carimbo e o pincel acompanham o zoom: aproximou, o círculo já cobre só o detalhe — como no Lightroom.",
+    "importante": false,
+    "novidades": [
+      "O círculo do carimbo, do band-aid e do pincel fica do mesmo tamanho na tela em qualquer zoom. Aproximar para tirar uma sarda já deixa a ferramenta fina, sem mexer no Tamanho.",
+      "O Tamanho agora mostra quantos pixels da foto o círculo cobre, e o número diminui conforme você aproxima.",
+      "O retoque feito com zoom continua do tamanho do detalhe quando a foto volta a caber na tela. Os retoques e máscaras que já existiam não mudam."
+    ],
+    "por_que_atualizar": "Retoque miúdo sem ficar descendo o Tamanho a cada zoom: o círculo que aparece antes do clique é o que a foto recebe."
+  },
+  {
+    "versao": "0.1.24",
+    "data": "2026-09-27",
+    "titulo": "Dá para descartar a edição que não foi salva: a foto volta a ficar como está na galeria. E a galeria mostra quais fotos têm edição por salvar.",
+    "importante": true,
+    "novidades": [
+      "Na Revelação, o botão Descartar (ao lado de Baixar JPEG) desfaz a edição não salva: \"Descartar esta foto\" (o ⌘Z traz de volta) ou \"Descartar todas\", que pergunta antes.",
+      "O botão direito na tira tem \"Descartar a edição\" para a foto clicada ou as marcadas.",
+      "Na galeria da sessão, a foto com edição por salvar mostra \"não salva\" no rodapé, e a barra conta \"N edições não salvas\" — o clique marca todas elas.",
+      "No painel da foto, o aviso \"Edição feita aqui — ainda não salva na galeria\" vem com o botão para descartá-la.",
+      "As colunas da Revelação e da galeria se ajustam puxando a borda, recolhem pelas setas das beiradas e com Tab / ⇧Tab, como no Lightroom.",
+      "O carimbo do retoque fica pequeno como uma sarda, para acertar detalhes miúdos.",
+      "O aviso de um gesto que não pode ser feito aparece no canto, como os outros avisos."
+    ],
+    "por_que_atualizar": "Quem entra numa foto só para testar uma ferramenta sai dela sem deixar o \"Salvar\" aceso — e ninguém fecha a sessão com edição esquecida."
+  },
+  {
+    "versao": "0.1.23",
+    "data": "2026-09-27",
+    "titulo": "Os atalhos da tira não se perdem mais, e a tira da Revelação dá nota, P e X como a galeria. O Enquadrar ganhou o Auto, que endireita a foto sozinho.",
+    "importante": true,
+    "novidades": [
+      "Depois de clicar no caixa, as setas, a nota e o P voltam a funcionar assim que se clica na tira ou na galeria — não é mais preciso fechar e reabrir a guia.",
+      "Na Revelação, as teclas 1 a 5, 0, P e X valem na tira como na galeria: na foto aberta ou em todas as marcadas, e a estrela da miniatura muda na hora.",
+      "Enquadrar: o botão Auto endireita a foto pelas linhas retas dela, e a régua (⌘ + arrastar) deixa reta a linha que você traçar.",
+      "A cortesia ou o desconto aparecem na grade já no primeiro Salvar, sem precisar salvar de novo.",
+      "O rodapé da janela mostra os envios (\"Subindo N fotos\", \"Tudo no site\"), quantas fotos o recorte tem, quantas estão selecionadas e a versão — clique nela para ver as novidades.",
+      "Clicar em \"N envios recusados\" abre a lista com o motivo de cada um.",
+      "A pílula do acerto mostra o ícone do aperto de mão também no Linux.",
+      "No Windows, a Revelação e a tela do cliente ficaram bem mais rápidas."
+    ],
+    "por_que_atualizar": "Quem classifica pela tira não perde mais os atalhos no meio da sessão, e endireitar a foto passa a ser um clique."
+  },
+  {
+    "versao": "0.1.22",
+    "data": "2026-09-27",
+    "titulo": "Chegou a Revelação local: máscaras e retoque (carimbo, band-aid e Content-Aware), com zoom de pinça até o pixel. E importar do cartão ficou rápido e nítido.",
+    "importante": true,
+    "novidades": [
+      "Revelação local: pincel, gradiente linear e radial e laço para clarear ou escurecer só uma parte da foto.",
+      "Retoque: carimbo, band-aid e Content-Aware tiram manchas, fios e objetos — a origem é escolhida sozinha e dá para arrastar depois.",
+      "Zoom novo na foto: Encaixar, Preencher, 1:1, lista de níveis, régua contínua e um navegador flutuante. A pinça do trackpad amplia até 6400%, com os pixels nítidos para retocar de perto.",
+      "Ao abrir o cartão da câmera, as miniaturas aparecem em poucos segundos e nítidas — antes demoravam e vinham borradas.",
+      "O ensaio sobe para o site uma vez só: o envio termina bem mais rápido, e o contador \"Subindo\" desce foto a foto.",
+      "Depois de trocar o efeito de todas as fotos (Sincronizar) e salvar, a galeria já mostra o efeito novo, sem voltar ao antigo enquanto o envio termina.",
+      "A foto que acabou de subir abre na Revelação na hora, sem esperar baixar do site.",
+      "Rejeitar (X) uma foto enquanto o salvar ainda envia não mostra mais \"envio recusado\".",
+      "Na Revelação, a bolinha âmbar agora quer dizer \"mudou e ainda não foi salvo\"; o ajuste que já está salvo aparece com uma bolinha cinza."
+    ],
+    "por_que_atualizar": "Dá para tirar a mancha, o fio ou o reflexo com o cliente na frente, sem abrir outro programa — e quem importa do cartão ganha minutos por sessão."
+  },
+  {
+    "versao": "0.1.21",
+    "data": "2026-09-27",
+    "titulo": "Os pretos do efeito RecordarFotos P&B voltam a ser pretos nos Macs antigos.",
+    "importante": true,
+    "novidades": [
+      "Em Macs com placa de vídeo Intel (como o MacBook Pro 2014 com Big Sur), o efeito RecordarFotos P&B deixava roxos alguns pretos da foto. Agora o preto sai preto, igual aos Macs novos."
+    ],
+    "por_que_atualizar": "Quem usa o P&B num Mac com vídeo Intel estava entregando fotos com manchas roxas nos pretos."
+  },
+  {
+    "versao": "0.1.20",
+    "data": "2026-09-26",
+    "titulo": "O app passa a avisar o estúdio: versão nova chega na hora, e os erros vão para o dono.",
+    "importante": true,
+    "novidades": [
+      "Versão nova aparece sem precisar fechar e abrir o app: o site avisa o computador assim que ela sai.",
+      "Quando o app encontra um erro ou fecha sozinho, ele guarda o que aconteceu e manda ao estúdio assim que houver internet, para o problema ser corrigido sem depender de alguém lembrar de contar.",
+      "O estúdio passa a ver quais computadores já atualizaram e quais ainda estão na versão anterior.",
+      "Importar de novo as mesmas fotos na mesma sessão não duplica mais as fotos; em outra sessão, elas entram normalmente.",
+      "Na lista de sessões, o cartão do caixa mostra o líquido, as vendas, os estornos e as sessões por fechar; um clique abre as formas de pagamento, com os mesmos nomes do site. Forma em que saiu mais do que entrou (estorno) aparece em vermelho.",
+      "Botão \"Gráficos\" na lista de sessões: abre, numa janela à parte, o caixa e o pós-venda dos últimos 30 dias, a divisão por forma de pagamento e a entrada por dia — a lista continua com espaço para a tabela.",
+      "A busca de sessões responde enquanto se digita e, com texto, procura em todas as datas; telefone com +55 acha o número salvo sem DDI."
+    ],
+    "por_que_atualizar": "É esta versão que deixa o estúdio acompanhar os computadores e corrigir problemas sem esperar alguém relatar."
+  },
+  {
+    "versao": "0.1.19",
+    "data": "2026-09-26",
+    "titulo": "O app passa a avisar o estúdio: versão nova chega na hora, e os erros vão para o dono.",
+    "importante": true,
+    "novidades": [
+      "Versão nova aparece sem precisar fechar e abrir o app: o site avisa o computador assim que ela sai.",
+      "Quando o app encontra um erro ou fecha sozinho, ele guarda o que aconteceu e manda ao estúdio assim que houver internet, para o problema ser corrigido sem depender de alguém lembrar de contar.",
+      "O estúdio passa a ver quais computadores já atualizaram e quais ainda estão na versão anterior.",
+      "Importar de novo as mesmas fotos na mesma sessão não duplica mais as fotos; em outra sessão, elas entram normalmente.",
+      "Na lista de sessões, o cartão do caixa mostra o líquido, as vendas, os estornos e as sessões por fechar; um clique abre as formas de pagamento, com os mesmos nomes do site.",
+      "Gráficos do caixa e do pós-venda dos últimos 30 dias, e a divisão por forma de pagamento.",
+      "A busca de sessões responde enquanto se digita e, com texto, procura em todas as datas; telefone com +55 acha o número salvo sem DDI."
+    ],
+    "por_que_atualizar": "É esta versão que deixa o estúdio acompanhar os computadores e corrigir problemas sem esperar alguém relatar."
+  },
+  {
+    "versao": "0.1.18",
+    "data": "2026-09-26",
+    "titulo": "Importar muitas fotos grandes com o cliente olhando: todas chegam à sessão.",
+    "importante": true,
+    "novidades": [
+      "Criar a sessão com as fotos ainda copiando não deixa mais as últimas para trás: todas passam para a sessão, mesmo as que terminam no exato momento de criar.",
+      "Dar nota e sinalizar enquanto a cópia anda não tira mais a foto da sessão, e a cópia não apaga mais a nota nem o corte do preset que a foto acabou de receber.",
+      "Fotos soltas numa sessão enquanto outra cópia está andando entram na fila e são importadas em seguida, em vez de sumirem.",
+      "O aviso de \"fotos de um rascunho antigo\" não aparece mais para as fotos que ainda estão a caminho da sessão criada — o botão Apagar dele podia apagar essas fotos.",
+      "Várias importações ao mesmo tempo usam bem menos memória: o computador não fica sem fôlego com o cliente na segunda tela."
+    ],
+    "por_que_atualizar": "Com fotos grandes e o balcão trabalhando durante a cópia, parte das fotos podia não aparecer na sessão. Esta versão corrige isso."
+  },
+  {
+    "versao": "0.1.17",
+    "data": "2026-09-26",
+    "titulo": "Janelas, botões e gaveta com o visual do site: tudo no mesmo padrão, no meio da tela.",
+    "importante": false,
+    "novidades": [
+      "Todas as janelas de pergunta e de formulário (negociação, caixa, dados do cliente, apagar, importar, exportar, nova sessão, agenda, chatbot) ficam no meio da tela e têm o mesmo desenho do site. O Esc fecha, e as perguntas de apagar ou descartar trazem os botões numa faixa embaixo.",
+      "O atendimento abre como gaveta pela direita, e os detalhes da galeria abrem num balão preso ao botão, como no site.",
+      "Botões, selos e avisos passam a ter o tamanho e as cores do site.",
+      "As buscas de agendamento, voucher, compra e parceiro ficam mais largas, e a lista rola sem esconder o campo de busca."
+    ],
+    "por_que_atualizar": "O app fica igual ao site em todas as janelas: quem aprendeu num sabe usar o outro."
+  },
+  {
+    "versao": "0.1.16",
+    "data": "2026-09-26",
+    "titulo": "Dois temas novos, Matrix e Cyberpunk, e o diálogo de negociação igual ao do site, na galeria e no caixa.",
+    "importante": false,
+    "novidades": [
+      "Temas Matrix e Cyberpunk no menu da conta, ao lado de Claro, Escuro e Sistema. O Matrix é verde sobre preto, com letra de terminal; o Cyberpunk é neon amarelo, rosa e ciano sobre azul-noite. A escolha fica guardada na máquina.",
+      "Negociação: o cartão escolhido ganha a borda do site, e \"Remover negociação\" pergunta numa janela por cima do formulário; o Esc fecha só a pergunta. Vale na galeria e no caixa.",
+      "No caixa, o site parceiro da negociação virou uma lista, como no site."
+    ],
+    "por_que_atualizar": "A negociação no atendimento fica igual à do site e para de atrapalhar, e cada balcão pode escolher o visual que prefere."
+  },
+  {
+    "versao": "0.1.15",
+    "data": "2026-09-26",
+    "titulo": "Vários itens do cupom de uma vez no caixa, a lixeira com volta na lista de sessões, e os detalhes e o atendimento da sessão iguais aos do site.",
+    "importante": false,
+    "novidades": [
+      "Caixa: marque vários itens do cupom com a caixinha, com Ctrl/⌘ ou com Shift, e dê cortesia ou desconto a todos de uma vez. O N negocia os marcados, Shift+seta estende a marcação e o Esc desmarca.",
+      "Lista de sessões: a aba \"Excluídas\" com o \"Restaurar\", e a lixeira para quem é administrador, com as mesmas travas do site.",
+      "Sessão: os detalhes da galeria e a gaveta do atendimento no mesmo desenho do site, com o último aviso ao cliente, a retenção e as três buscas (agendamento, voucher e compra antecipada).",
+      "O menu da conta mostra a sua foto do perfil.",
+      "Depois de fechar qualquer diálogo, o teclado volta para onde estava: as teclas não param mais de responder.",
+      "A base de desenho do app foi atualizada. Se algum botão, campo ou menu se comportar diferente do costume, avise."
+    ],
+    "por_que_atualizar": "Acertar a negociação de várias fotos do mesmo cliente vira um gesto só, e uma sessão excluída por engano volta com um clique."
+  },
+  {
+    "versao": "0.1.14",
+    "data": "2026-09-26",
+    "titulo": "Negociação do balcão igual à do site, e o Comparar na revelação: duas fotos lado a lado, também na tela do cliente.",
+    "importante": false,
+    "novidades": [
+      "Negociação: o \"Negociação…\" da sessão abre o mesmo diálogo do site — Cortesia, Desconto, Já paga em outro site e Outro, com o site parceiro numa lista, o cupom e o preço da faixa ao lado. A foto que já tem acerto abre preenchida, com \"Remover negociação\".",
+      "Na grade da sessão, a foto com acerto mostra uma etiqueta amarela no pé, como no site: \"🤝 LançadorDeOfertas · cupom AHEB82\".",
+      "Comparar (Shift+C) na revelação: duas fotos lado a lado, na tela e na tela do cliente. As teclas 0 a 5, P e X classificam a foto escolhida.",
+      "A triagem não trava mais enquanto a importação e o envio para a nuvem estão andando.",
+      "As setas da revelação voltam a andar depois de abrir o menu da tira, e o Backup de arquivos foi para o menu da conta."
+    ],
+    "por_que_atualizar": "Quem chega com cupom de site parceiro é registrado em dois cliques, do mesmo jeito que no site, e a grade mostra na hora quais fotos já foram acertadas. E o Comparar ajuda o cliente a escolher entre duas fotos parecidas sem trocar de tela."
+  },
+  {
+    "versao": "0.1.13",
+    "data": "2026-09-25",
+    "titulo": "O Chatbot e os Agendamentos agora estão no app, com aviso de mensagem nova e de agendamento novo em qualquer tela.",
+    "importante": true,
+    "novidades": [
+      "Chatbot: as conversas do WhatsApp, Instagram, Messenger, Telegram e do chat do site numa lista só, como no painel do site. Dá para assumir a conversa, responder, usar as respostas rápidas e cuidar das urgências sem sair do app.",
+      "Agendamentos: a agenda do estúdio com mês, semana, dia, agenda, ano e estação, os agendamentos de hoje, e em cada um Reagendar, Registrar atendimento, Excluir e Descancelar.",
+      "Aviso na hora: mensagem nova de cliente e agendamento novo ou cancelado aparecem mesmo com você na triagem ou no caixa. Com o app atrás de outra janela ou na bandeja, vem um aviso do sistema.",
+      "Atualização automática: daqui em diante o app avisa sozinho quando há versão nova, mostra o que mudou e se atualiza em segundo plano, sem precisar rodar o instalador à mão."
+    ],
+    "por_que_atualizar": "Cliente que escreve no WhatsApp ou pede atendente no site e não recebe resposta desiste. Com esta versão o balcão fica sabendo na hora, sem abrir o navegador. E ela traz a atualização automática: as próximas versões chegam sozinhas, e se alguma não der certo, a versão que você usa continua funcionando."
+  }
+]
