@@ -205,7 +205,7 @@ pub const ROTULOS: &[(&str, &str)] = &[
     ("grain_size", "Tamanho do grão"),
     ("grain_roughness", "Aspereza do grão"),
     ("pcv_style", "Vinheta — estilo"),
-    ("pcv_amount", "Vinheta — quantidade"),
+    ("pcv_amount", "Vinheta — intensidade"),
     ("pcv_midpoint", "Vinheta — ponto médio"),
     ("pcv_roundness", "Vinheta — arredondamento"),
     ("pcv_feather", "Vinheta — difusão"),

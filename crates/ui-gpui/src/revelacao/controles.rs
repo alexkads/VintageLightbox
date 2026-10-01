@@ -50,7 +50,10 @@ pub enum Secao {
     Lente,
     Calibracao,
     Tonalizacao,
-    Efeitos,
+    /// A vinheta pós-corte do Lightroom — o primeiro grupo do painel Efeitos.
+    Vinheta,
+    /// O grão — o segundo grupo do painel Efeitos.
+    Grao,
     RgbExposicao,
     RgbSombrasERealces,
     RgbMonocromatico,
@@ -59,7 +62,7 @@ pub enum Secao {
 }
 
 impl Secao {
-    pub const TODAS: [Secao; 17] = [
+    pub const TODAS: [Secao; 18] = [
         Secao::Basico,
         Secao::CurvaDeTons,
         Secao::CurvaPorPonto,
@@ -71,7 +74,8 @@ impl Secao {
         Secao::Lente,
         Secao::Calibracao,
         Secao::Tonalizacao,
-        Secao::Efeitos,
+        Secao::Vinheta,
+        Secao::Grao,
         Secao::RgbExposicao,
         Secao::RgbSombrasERealces,
         Secao::RgbMonocromatico,
@@ -93,7 +97,8 @@ impl Secao {
             Secao::Lente => "Lente",
             Secao::Calibracao => "Calibração",
             Secao::Tonalizacao => "Tonalização",
-            Secao::Efeitos => "Efeitos",
+            Secao::Vinheta => "Vinheta de corte posterior",
+            Secao::Grao => "Granulado",
             Secao::RgbExposicao => "RGB / Exposição",
             Secao::RgbSombrasERealces => "RGB / Sombras e realces",
             Secao::RgbMonocromatico => "RGB / Monocromático",
@@ -114,7 +119,7 @@ impl Secao {
             Secao::Lente => Painel::Lente,
             Secao::Calibracao => Painel::Calibracao,
             Secao::Tonalizacao => Painel::Tonalizacao,
-            Secao::Efeitos => Painel::Efeitos,
+            Secao::Vinheta | Secao::Grao => Painel::Efeitos,
             Secao::RgbExposicao => Painel::RgbExposicao,
             Secao::RgbSombrasERealces => Painel::RgbSombrasERealces,
             Secao::RgbMonocromatico => Painel::RgbMonocromatico,
@@ -247,7 +252,8 @@ impl Painel {
             Painel::Lente => &[Secao::Lente],
             Painel::Calibracao => &[Secao::Calibracao],
             Painel::Tonalizacao => &[Secao::Tonalizacao],
-            Painel::Efeitos => &[Secao::Efeitos],
+            // 🎞️ Os dois grupos do Lightroom, cada um com o seu título.
+            Painel::Efeitos => &[Secao::Vinheta, Secao::Grao],
             Painel::RgbExposicao => &[Secao::RgbExposicao],
             Painel::RgbSombrasERealces => &[Secao::RgbSombrasERealces],
             Painel::RgbMonocromatico => &[Secao::RgbMonocromatico],
@@ -297,8 +303,14 @@ pub struct Definicao {
     /// 🎨 O desenho da barra — ver [`Trilho`].
     pub trilho: Trilho,
     /// Os nomes de cada posição, num controle discreto que é escolha e não
-    /// número — o Estilo da vinheta pós-corte. O valor mostra o nome.
+    /// número — o Estilo da vinheta pós-corte. O valor mostra o nome, e na
+    /// tela a linha é uma lista (`Select`), e não uma barra.
     pub opcoes: Option<&'static [&'static str]>,
+    /// 🎞️ **Quando o controle age** — fora disso ele aparece apagado, como no
+    /// Lightroom: o Tamanho do grão com a Intensidade em 0 não muda pixel
+    /// nenhum, e uma barra acesa que não faz nada parece defeito. `None` é
+    /// sempre.
+    pub ativo: Option<fn(&Ajustes) -> bool>,
 }
 
 /// 🎨 **O que a barra de um controle desenha** — o trilho colorido do
@@ -341,6 +353,18 @@ impl Definicao {
     pub const fn com_trilho(mut self, trilho: Trilho) -> Self {
         self.trilho = trilho;
         self
+    }
+
+    /// Esta definição só acesa quando `quando` diz — `const` para caber na
+    /// tabela.
+    pub const fn ativo_quando(mut self, quando: fn(&Ajustes) -> bool) -> Self {
+        self.ativo = Some(quando);
+        self
+    }
+
+    /// Se o controle age com estes ajustes — ver [`Definicao::ativo`].
+    pub fn age(&self, ajustes: &Ajustes) -> bool {
+        self.ativo.is_none_or(|quando| quando(ajustes))
     }
 }
 
@@ -418,6 +442,7 @@ macro_rules! def {
             ler: |a| a.$campo,
             trilho: Trilho::Liso,
             opcoes: None,
+            ativo: None,
         }
     };
 }
@@ -472,6 +497,52 @@ macro_rules! faixa {
             ($minimo as f32) < 0.0
         )
     };
+}
+
+/// Uma escolha entre nomes: discreta, de 0 a `n − 1`, e desenhada como lista.
+macro_rules! escolha {
+    ($secao:expr, $rotulo:literal, $campo:ident, $opcoes:expr) => {
+        Definicao {
+            discreto: true,
+            opcoes: Some($opcoes),
+            ..def!(
+                $secao,
+                $rotulo,
+                $campo,
+                0.0,
+                ($opcoes.len() - 1) as f32,
+                0,
+                false
+            )
+        }
+    };
+}
+
+/// Os estilos da vinheta pós-corte, na ordem do `pcv_style` do motor.
+///
+/// ⚠️ **O Lightroom em português diz "Destacar prioridade"** no primeiro — é
+/// *Highlight Priority* traduzido errado. Aqui é o que ele faz: poupa os
+/// realces.
+pub const ESTILOS_DA_VINHETA: &[&str] = &[
+    "Prioridade de realces",
+    "Prioridade de cores",
+    "Sobreposição de tinta",
+];
+
+/// A vinheta age com alguma intensidade.
+fn vinheta_ligada(a: &Ajustes) -> bool {
+    a.pcv_amount != 0.0
+}
+
+/// Os Realces da vinheta só existem escurecendo, e não na Sobreposição de
+/// tinta — é o que o shader faz, e o que o Lightroom apaga.
+fn realces_da_vinheta(a: &Ajustes) -> bool {
+    a.pcv_amount < 0.0 && a.pcv_style.round() != 2.0
+}
+
+/// O grão age com alguma intensidade.
+fn grao_ligado(a: &Ajustes) -> bool {
+    a.grain_amount != 0.0
 }
 
 /// Um liga/desliga: o módulo só age com ele em 1.
@@ -587,9 +658,21 @@ pub const CONTROLES: &[Definicao] = &[
     cem!(S::CurvaDeTons, "Claros", tone_curve_lights),
     cem!(S::CurvaDeTons, "Altas luzes", tone_curve_highlights),
     // As três divisões entre as zonas (25/50/75 no Lightroom).
-    cento!(S::CurvaDeTons, "Divisão das sombras", tone_curve_split_shadows),
-    cento!(S::CurvaDeTons, "Divisão dos meios-tons", tone_curve_split_midtones),
-    cento!(S::CurvaDeTons, "Divisão das altas luzes", tone_curve_split_highlights),
+    cento!(
+        S::CurvaDeTons,
+        "Divisão das sombras",
+        tone_curve_split_shadows
+    ),
+    cento!(
+        S::CurvaDeTons,
+        "Divisão dos meios-tons",
+        tone_curve_split_midtones
+    ),
+    cento!(
+        S::CurvaDeTons,
+        "Divisão das altas luzes",
+        tone_curve_split_highlights
+    ),
     // ------------------------------------------------------- Curva por ponto
     ponto!("RGB — ponto 1", curva_m0),
     ponto!("RGB — ponto 2", curva_m1),
@@ -734,29 +817,17 @@ pub const CONTROLES: &[Definicao] = &[
     cento!(S::Tonalizacao, "Mesclagem", split_blending),
     cem!(S::Tonalizacao, "Equilíbrio", split_balance),
     // --------------------------------------------------------------- Efeitos
-    // A vinheta pós-corte do Lightroom: estilo, quantidade, ponto médio,
-    // arredondamento, difusão e realces.
-    Definicao {
-        discreto: true,
-        opcoes: Some(&["Realces", "Cores", "Tinta"]),
-        ..def!(
-            S::Efeitos,
-            "Vinheta — estilo",
-            pcv_style,
-            0.0,
-            2.0,
-            0,
-            false
-        )
-    },
-    cem!(S::Efeitos, "Vinheta — quantidade", pcv_amount),
-    cento!(S::Efeitos, "Vinheta — ponto médio", pcv_midpoint),
-    cem!(S::Efeitos, "Vinheta — arredondamento", pcv_roundness),
-    cento!(S::Efeitos, "Vinheta — difusão", pcv_feather),
-    cento!(S::Efeitos, "Vinheta — realces", pcv_highlights),
-    cento!(S::Efeitos, "Grão", grain_amount),
-    cento!(S::Efeitos, "Tamanho do grão", grain_size),
-    cento!(S::Efeitos, "Aspereza do grão", grain_roughness),
+    // 🎞️ Os dois grupos do Lightroom, com os nomes dele: o título do grupo
+    // diz de quem é a Intensidade.
+    escolha!(S::Vinheta, "Estilo", pcv_style, ESTILOS_DA_VINHETA),
+    cem!(S::Vinheta, "Intensidade", pcv_amount),
+    cento!(S::Vinheta, "Ponto médio", pcv_midpoint).ativo_quando(vinheta_ligada),
+    cem!(S::Vinheta, "Arredondamento", pcv_roundness).ativo_quando(vinheta_ligada),
+    cento!(S::Vinheta, "Difusão", pcv_feather).ativo_quando(vinheta_ligada),
+    cento!(S::Vinheta, "Realces", pcv_highlights).ativo_quando(realces_da_vinheta),
+    cento!(S::Grao, "Intensidade", grain_amount),
+    cento!(S::Grao, "Tamanho", grain_size).ativo_quando(grao_ligado),
+    cento!(S::Grao, "Aspereza", grain_roughness).ativo_quando(grao_ligado),
     // ============================================================ aba RGB
     // ------------------------------------------------------------- Exposição
     interruptor!(S::RgbExposicao, "Ligar", dt_exposure_ativo),
@@ -1664,11 +1735,15 @@ mod trilho_dos_controles {
     fn o_estilo_da_vinheta_mostra_o_nome() {
         let estilo = CONTROLES
             .iter()
-            .find(|d| d.rotulo == "Vinheta — estilo")
+            .find(|d| d.secao == Secao::Vinheta && d.rotulo == "Estilo")
             .expect("o controle existe");
         assert_eq!(estilo.passo(), 1.0);
-        assert_eq!(estilo.formatar(0.0), "Realces");
-        assert_eq!(estilo.formatar(2.0), "Tinta");
+        assert_eq!(
+            (estilo.minimo, estilo.maximo, estilo.neutro()),
+            (0.0, 2.0, 0.0)
+        );
+        assert_eq!(estilo.formatar(0.0), "Prioridade de realces");
+        assert_eq!(estilo.formatar(2.0), "Sobreposição de tinta");
     }
 
     /// O resto é liso: a cor só entra onde ela diz algo.
@@ -1692,5 +1767,83 @@ mod trilho_dos_controles {
             .iter()
             .filter(|d| d.discreto)
             .all(|d| d.trilho == Trilho::Liso));
+    }
+}
+
+/// 🎞️ O painel Efeitos do Lightroom: dois grupos, e o que não age fica apagado.
+#[cfg(test)]
+mod efeitos_do_lightroom {
+    use super::*;
+
+    fn rotulos(secao: Secao) -> Vec<&'static str> {
+        CONTROLES
+            .iter()
+            .filter(|d| d.secao == secao)
+            .map(|d| d.rotulo)
+            .collect()
+    }
+
+    fn controle(secao: Secao, rotulo: &str) -> &'static Definicao {
+        CONTROLES
+            .iter()
+            .find(|d| d.secao == secao && d.rotulo == rotulo)
+            .unwrap_or_else(|| panic!("`{rotulo}` não existe"))
+    }
+
+    #[test]
+    fn a_vinheta_e_o_granulado_na_ordem_do_lightroom() {
+        assert_eq!(Painel::Efeitos.secoes(), &[Secao::Vinheta, Secao::Grao]);
+        assert_eq!(
+            rotulos(Secao::Vinheta),
+            [
+                "Estilo",
+                "Intensidade",
+                "Ponto médio",
+                "Arredondamento",
+                "Difusão",
+                "Realces"
+            ]
+        );
+        assert_eq!(rotulos(Secao::Grao), ["Intensidade", "Tamanho", "Aspereza"]);
+        let estilo = controle(Secao::Vinheta, "Estilo");
+        assert_eq!(estilo.opcoes.map(<[_]>::len), Some(3));
+    }
+
+    /// O que acende com a intensidade da vinheta em 0, −37 (escurecendo) e +20
+    /// (clareando), e no estilo Sobreposição de tinta.
+    #[test]
+    fn o_que_nao_age_fica_apagado() {
+        let acesos = |a: &Ajustes, secao: Secao| -> Vec<&'static str> {
+            CONTROLES
+                .iter()
+                .filter(|d| d.secao == secao && d.age(a))
+                .map(|d| d.rotulo)
+                .collect()
+        };
+
+        let neutro = Ajustes::default();
+        assert_eq!(acesos(&neutro, Secao::Vinheta), ["Estilo", "Intensidade"]);
+        assert_eq!(acesos(&neutro, Secao::Grao), ["Intensidade"]);
+
+        let escura = Ajustes {
+            pcv_amount: -37.0,
+            grain_amount: 25.0,
+            ..neutro
+        };
+        assert_eq!(acesos(&escura, Secao::Vinheta).len(), 6);
+        assert_eq!(acesos(&escura, Secao::Grao).len(), 3);
+
+        let clara = Ajustes {
+            pcv_amount: 20.0,
+            ..neutro
+        };
+        assert!(!acesos(&clara, Secao::Vinheta).contains(&"Realces"));
+
+        let tinta = Ajustes {
+            pcv_style: 2.0,
+            ..escura
+        };
+        assert!(!acesos(&tinta, Secao::Vinheta).contains(&"Realces"));
+        assert!(acesos(&tinta, Secao::Vinheta).contains(&"Difusão"));
     }
 }

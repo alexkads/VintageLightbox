@@ -21,6 +21,7 @@ use domain::services::PreviewType;
 use domain::value_objects::CropSettings;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::input::{InputEvent, InputState};
+use gpui_kit::component::select::{SelectEvent, SelectState};
 use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme, Disableable, Selectable, Sizable, WindowExt};
@@ -467,6 +468,9 @@ pub struct Revelacao {
 struct Controle {
     definicao: &'static Definicao,
     estado: Entity<SliderState>,
+    /// 🎞️ A lista, no controle que é escolha entre nomes (o Estilo da vinheta
+    /// pós-corte): é ela que se desenha, e não a barra.
+    escolha: Option<Entity<SelectState<Vec<&'static str>>>>,
 }
 
 /// Um pedido no motor, e o que fazer com o que voltar dele.
@@ -574,7 +578,37 @@ impl Revelacao {
                 },
             ));
 
-            controles.push(Controle { definicao, estado });
+            let escolha = definicao.opcoes.map(|opcoes| {
+                let lista = cx.new(|cx| SelectState::new(opcoes.to_vec(), None, window, cx));
+                let neutro = opcoes[definicao.neutro() as usize];
+                lista.update(cx, |l, cx| l.set_selected_value(&neutro, window, cx));
+                // A escolha é um gesto inteiro, como um clique: entra no
+                // histórico e grava na hora.
+                assinaturas.push(cx.subscribe_in(
+                    &lista,
+                    window,
+                    move |tela: &mut Self,
+                          _lista,
+                          evento: &SelectEvent<Vec<&'static str>>,
+                          window,
+                          cx| {
+                        let SelectEvent::Confirm(Some(nome)) = evento else {
+                            return;
+                        };
+                        let Some(i) = opcoes.iter().position(|o| o == nome) else {
+                            return;
+                        };
+                        tela.gesto_discreto(|a| (definicao.aplicar)(a, i as f32), window, cx);
+                    },
+                ));
+                lista
+            });
+
+            controles.push(Controle {
+                definicao,
+                estado,
+                escolha,
+            });
         }
 
         // A busca de predefinições. A tela não lê o campo a cada quadro: ela é
@@ -2029,6 +2063,16 @@ impl Revelacao {
             controle
                 .estado
                 .update(cx, |estado, cx| estado.set_value(valor, window, cx));
+            // A lista também: preset, desfazer e troca de foto mudam o Estilo
+            // sem passar por ela. `set_selected_value` não emite `Confirm`.
+            if let (Some(lista), Some(opcoes)) = (&controle.escolha, controle.definicao.opcoes) {
+                let nome = opcoes[(valor.round().max(0.0) as usize).min(opcoes.len() - 1)];
+                lista.update(cx, |l, cx| {
+                    if l.selected_value() != Some(&nome) {
+                        l.set_selected_value(&nome, window, cx);
+                    }
+                });
+            }
         }
     }
 
@@ -3690,6 +3734,91 @@ mod testes {
                 );
             })
             .expect("a janela deve estar aberta");
+    }
+
+    /// 🎞️ O Efeitos no desenho do Lightroom (dono, 2026-09-30, com o print
+    /// do painel dele): os dois grupos com título, o rótulo na mesma linha da
+    /// barra, e o Estilo numa lista que entra no histórico como um clique.
+    #[gpui_kit::test]
+    fn o_efeitos_tem_os_grupos_e_o_estilo_do_lightroom(cx: &mut TestAppContext) {
+        use super::super::controles::Secao;
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-efeitos.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("efeitos.jpg"), window, cx);
+                tela.seguir_o_roteiro_do_painel("abrir Efeitos", cx);
+            })
+            .expect("a janela deve estar aberta");
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_resize(gpui_kit::size(px(1920.), px(1080.)));
+        visual.run_until_parked();
+        janela
+            .update(cx, |tela, _, cx| {
+                tela.seguir_o_roteiro_do_painel("rolar fim", cx)
+            })
+            .expect("a janela deve estar aberta");
+        visual.run_until_parked();
+
+        let indice = |secao: Secao, rotulo: &str| {
+            CONTROLES
+                .iter()
+                .position(|d| d.secao == secao && d.rotulo == rotulo)
+                .expect("o controle existe")
+        };
+        // O `debug_bounds` quer `&'static str`, e o índice só se sabe aqui.
+        let nome = |texto: String| -> &'static str { texto.leak() };
+        let vinheta = visual
+            .debug_bounds("grupo-Vinheta de corte posterior")
+            .expect("o título da vinheta é desenhado");
+        let grao = visual
+            .debug_bounds("grupo-Granulado")
+            .expect("o título do granulado é desenhado");
+        assert!(grao.origin.y > vinheta.origin.y, "o Granulado vem depois");
+
+        // Rótulo e barra na mesma linha, o rótulo à esquerda.
+        let i = indice(Secao::Vinheta, "Intensidade");
+        let rotulo = visual
+            .debug_bounds(nome(format!("rotulo-{i}")))
+            .expect("o rótulo é desenhado");
+        let barra = visual
+            .debug_bounds(nome(format!("barra-{i}")))
+            .expect("a barra é desenhada");
+        assert!(rotulo.right() <= barra.left(), "{rotulo:?} {barra:?}");
+        assert!(
+            rotulo.top() < barra.bottom() && barra.top() < rotulo.bottom(),
+            "rótulo e barra na mesma linha: {rotulo:?} {barra:?}"
+        );
+
+        // O Estilo é lista: escolher grava, desfazer devolve — e a lista
+        // acompanha o desfazer.
+        let estilo = indice(Secao::Vinheta, "Estilo");
+        assert!(visual
+            .debug_bounds(nome(format!("escolha-{estilo}")))
+            .is_some());
+        let lista = janela
+            .update(cx, |tela, _, _| tela.controles[estilo].escolha.clone())
+            .expect("a janela deve estar aberta")
+            .expect("o Estilo tem lista");
+        lista.update(cx, |_, cx| {
+            cx.emit(SelectEvent::Confirm(Some("Sobreposição de tinta")))
+        });
+        visual.run_until_parked();
+        janela
+            .update(cx, |tela, window, cx| {
+                assert_eq!(tela.ajustes.pcv_style, 2.0);
+                assert!(tela.pode_desfazer(), "a escolha é um passo do histórico");
+                tela.desfazer(window, cx);
+                assert_eq!(tela.ajustes.pcv_style, 0.0);
+            })
+            .expect("a janela deve estar aberta");
+        assert_eq!(
+            lista.read_with(cx, |l, _| l.selected_value().copied()),
+            Some("Prioridade de realces")
+        );
     }
 
     /// A barra de zoom anda pela alça (dono, 2026-09-29: *"a barra de zoom
