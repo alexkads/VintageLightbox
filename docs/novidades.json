@@ -1,10 +1,11 @@
 {
-  "versao": "0.1.55",
-  "titulo": "O Navegador da Revelação recolhe.",
+  "versao": "0.1.56",
+  "titulo": "A foto da nuvem não pisca mais ao abrir na Revelação.",
   "importante": false,
   "novidades": [
-    "Clique no título \"Navegador\" para recolher o painel do zoom: fica só a linha com o nível, e a lista de predefinições ganha o espaço. Outro clique abre de novo.",
-    "O app lembra se você deixou o Navegador aberto ou recolhido. O zoom continua pelo palco e pelos atalhos."
+    "Ao abrir na Revelação uma foto de sessão revelada em outro computador, ela aparece uma vez só: a foto fica na tela enquanto o app termina de carregar, sem sumir no meio.",
+    "A foto que estava cortada aparece já com o enquadramento certo desde o primeiro instante, sem recortar duas vezes.",
+    "A miniatura dessa foto na tira também não volta mais para \"sem prévia\" por um instante."
   ],
-  "por_que_atualizar": "Mais predefinições à vista, principalmente em notebook e tela pequena."
+  "por_que_atualizar": "Abrir sessões vindas da nuvem fica estável, sem a piscada."
 }

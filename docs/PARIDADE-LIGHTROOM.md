@@ -55,7 +55,7 @@ vez de deixá-la sair limpa.
 
 ---
 
-## Revelação — ✅ **os 53 controles movem a foto**
+## Revelação — ✅ **os 53 controles movem a foto** (193 parâmetros desde 30/set — ver abaixo)
 
 | Seção | Controles | Estado |
 |---|--:|---|
@@ -89,6 +89,58 @@ deixou de ignorar `SplitToning*` e `Grain*` — **342 de 400 presets comerciais 
 clarear cinza (pixel neutro cai na faixa do vermelho com peso 1.0, e o slider viraria brilho global);
 o matiz não é escalado, porque a faixa -180..180 já é em graus; e a leitura bilinear da distorção tem
 de ser **exata no inteiro**, senão o neutro passa a mover pixel.
+
+### ✅ Os controles do Lightroom que faltavam — desde 30/set/2026 (193 parâmetros)
+
+Pedido do dono com um DNG revelado no Lightroom que não se reproduzia aqui (*"na revelação sRGB
+preciso dos mesmos controles do Lightroom"*). Entraram **22 campos, no fim do `Ajustes`**, cada um com
+o neutro que deixa a revelação gravada igual bit a bit:
+
+| Painel | O que entrou |
+|---|---|
+| Básico | **Textura** e **Remover névoa**; a "Textura" de antes era a Claridade, e virou **Claridade** |
+| Curva de tons | as três **divisões** (25/50/75) |
+| Detalhe | **Detalhe** e **Máscara** da nitidez; **Detalhe** e **Contraste** do ruído de luminância; **Detalhe** e **Suavidade** do ruído de cor — na ordem do Lightroom |
+| Tonalização | a **luminância** das três faixas e do global |
+| Efeitos | a **vinheta pós-corte** inteira (estilo, quantidade, ponto médio, arredondamento, difusão, realces) e a **aspereza** do grão |
+
+🔑 **Claridade, Textura e Remover névoa leem a "guia"** (`revelacao-core/src/guia.rs`): a foto
+reduzida a 1024 px, com a luminância desfocada larga (1,2 % do lado maior) e média (0,25 %) e o canal
+escuro de He et al., calculada uma vez por foto na CPU — e só quando um dos três está em uso. Os raios
+são frações do lado, então a tela (2560 px) e o JPEG (6000 px) dão a mesma Claridade.
+
+🚨 **Três contas mudaram de propósito, e mudam fotos já reveladas que as usam:**
+
+- **Claridade** era uma saturação (escalava a distância de cada canal à média) e numa foto P&B não
+  fazia nada; agora é contraste local.
+- **Gradação de cores**: cada roda soma a cor em CIELab, com **matiz = valor + 28°** e **croma =
+  0,4 × saturação**, e a L* fica. Antes misturava a cor pura do matiz HSV, e o mesmo número do
+  Lightroom dava outra cor (o amarelo 59 virava verde, o vermelho 14 virava roxo). Os dois números
+  saíram da prévia que o Lightroom grava dentro do DNG: as três faixas batem em ~2 unidades de a*/b*.
+- **Pretos** levantava o preto três vezes mais que o Lightroom (`/3` → `/9`), e **Realces negativo**
+  escurecia o meio-tom com a força do alto (`n²(1−n)` → `1,2·n³(1−n)`, que poupa a mediana).
+
+Conferência no `_DSC0010-2.dng` do Estúdio Canela, contra a prévia do Lightroom: corte e giro de
+0,8° batem, a moldura branca bate no perfil, as sombras (p2–p25) batem a 2 níveis, o contraste local
+bate a 3 % nas três escalas. ⚠️ **O alto do histograma ainda fica mais claro** (p98 ~205 contra 191):
+comprimir mais o Realces aqui exigiria derivada acima de 2,2 junto do branco, e composta com
+"Brancos" vira degrau (`o_tom_por_regiao_nunca_inverte_nem_da_degrau`).
+
+**Na importação**: Textura, Névoa, as divisões, a luminância da Gradação, o resto do Detalhe, a
+vinheta pós-corte (antes caía na de lente), a aspereza e o balanço relativo de foto que não é RAW
+(`IncrementalTemperature`/`Tint`) passam a entrar; o **corte inclinado** (`CropAngle`, com o sinal
+trocado — conferido na prévia) também. E a **curva por ponto de todo `.xmp`** voltou: o `<rdf:Seq>` era
+lido como texto, e a curva de predefinição e de DNG sumia sem aviso — só a do `.lrtemplate` chegava.
+
+**Pasta "LRs"** nas predefinições (desktop e site): as 28 do Lightroom do estúdio, geradas dos `.xmp`
+pelo mesmo tradutor (`infrastructure/examples/presets_do_lightroom.rs` → `use-cases/src/presets/lightroom.json`,
+copiado para o site como `presets-lr.json`). As de vinheta somam; as outras recomeçam do neutro. E
+**"Cinematográfico P&B"** em "Do sistema": a "P&B Cinematografico" com a "Vinheta Borda" do DNG.
+
+⚠️ **O que ainda difere nessas 28**: 9 usam **perfis criativos da Adobe** (Vintage 10, Modern 09,
+B&W 01, B&W 10) — o preset só nomeia o perfil; a tabela de cor 3D está no arquivo da Adobe, e o motor
+não tem tabela —, e 5 usam **máscaras radiais** com mais que exposição. A lista de cada uma está no
+campo `avisos` do `lightroom.json`.
 
 ### O que mais falta na Revelação, comparado ao Lightroom
 

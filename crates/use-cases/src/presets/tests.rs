@@ -109,11 +109,11 @@ async fn test_list_presets_returns_system_and_user() {
     // nomes em inglês do app antigo; agora são os do site — com o estilo do
     // estúdio no darktable desde 17/set/2026 e os doze "Vintage ·" desde
     // 28/set/2026 —, e o que a lista devolve tem de trazer os dois grupos.
-    assert_eq!(presets.len(), 21);
+    assert_eq!(presets.len(), presets_de_sistema().len() + 1);
 
     let system_names: Vec<_> = presets
         .iter()
-        .filter(|p| p.is_system)
+        .filter(|p| p.is_system && p.grupo.is_none())
         .map(|p| p.name.as_str())
         .collect();
     assert_eq!(
@@ -139,6 +139,7 @@ async fn test_list_presets_returns_system_and_user() {
             "Vintage · Ektachrome anos 70",
             "Vintage · Desbotado anos 70",
             "Nitidez para impressão",
+            "Cinematográfico P&B",
         ]
     );
 
@@ -218,10 +219,24 @@ fn faixa_do_slider(campo: &str) -> (f32, f32) {
         | "sharpen_amount"
         | "lens_vignette_midpoint"
         | "grain_amount"
-        | "grain_size" => (0.0, 100.0),
+        | "grain_size"
+        | "grain_roughness"
+        | "sharpen_detail"
+        | "sharpen_masking"
+        | "nr_luminance_detail"
+        | "nr_luminance_contrast"
+        | "nr_color_detail"
+        | "nr_color_smoothness"
+        | "pcv_midpoint"
+        | "pcv_feather"
+        | "pcv_highlights"
+        | "split_blending" => (0.0, 100.0),
+        campo if campo.starts_with("tone_curve_split_") => (0.0, 100.0),
+        "pcv_style" => (0.0, 2.0),
         // A roda de cor inteira: estes **escolhem** a cor que entra.
-        "split_shadow_hue" | "split_highlight_hue" => (0.0, 360.0),
-        "split_shadow_sat" | "split_highlight_sat" => (0.0, 100.0),
+        campo if campo.starts_with("split_") && campo.ends_with("_hue") => (0.0, 360.0),
+        campo if campo.starts_with("split_") && campo.ends_with("_sat") => (0.0, 100.0),
+        campo if campo.starts_with("calib_") && campo.ends_with("_hue") => (-100.0, 100.0),
         // A curva por ponto guarda a altura de cada um dos nove pontos, em
         // níveis de 0 a 255 — a faixa do `CURVA_POR_PONTO` do site.
         campo if campo.starts_with("curva_") => (0.0, 255.0),
@@ -291,8 +306,11 @@ fn cada_preset_de_sistema_move_alguma_coisa() {
 /// procurar no app a predefinição que ele usou no navegador.
 #[test]
 fn os_vinte_do_sistema_sao_os_do_site() {
+    // A pasta "Do sistema"; as "LRs" vêm de `lightroom.json`, o mesmo arquivo
+    // nos dois lados.
     let nomes: Vec<String> = presets_de_sistema()
         .into_iter()
+        .filter(|preset| preset.grupo.is_none())
         .map(|preset| preset.name)
         .collect();
 
@@ -319,6 +337,7 @@ fn os_vinte_do_sistema_sao_os_do_site() {
             "Vintage · Ektachrome anos 70",
             "Vintage · Desbotado anos 70",
             "Nitidez para impressão",
+            "Cinematográfico P&B",
         ]
     );
 }
@@ -329,12 +348,13 @@ fn os_vinte_do_sistema_sao_os_do_site() {
 fn cada_uma_escreve_a_mesma_quantidade_de_campos_do_site() {
     let quantos: Vec<usize> = presets_de_sistema()
         .into_iter()
+        .filter(|preset| preset.grupo.is_none())
         .map(|preset| preset.adjustments.len())
         .collect();
 
     assert_eq!(
         quantos,
-        vec![5, 8, 9, 6, 7, 7, 24, 13, 13, 10, 12, 7, 11, 6, 10, 16, 17, 13, 13, 4]
+        vec![5, 8, 9, 6, 7, 7, 24, 13, 13, 10, 12, 7, 11, 6, 10, 16, 17, 13, 13, 4, 35]
     );
 }
 
@@ -530,4 +550,35 @@ async fn renomear_propaga_o_erro_do_banco() {
         uso.execute(&id, "Novo".to_string()).await,
         Err(DomainError::InfrastructureError(_))
     ));
+}
+
+/// 🎞️ A pasta "LRs": as 28 do Lightroom do estúdio, as de vinheta somando e as
+/// de visual recomeçando do neutro.
+#[test]
+fn as_do_lightroom_vem_na_pasta_lrs_e_so_as_vinhetas_somam() {
+    use crate::presets::list_presets::{presets_de_sistema, presets_do_lightroom, GRUPO_LRS};
+    let lrs = presets_do_lightroom();
+    assert_eq!(lrs.len(), 28);
+    for p in &lrs {
+        assert!(p.is_system, "{}", p.name);
+        assert_eq!(p.grupo.as_deref(), Some(GRUPO_LRS), "{}", p.name);
+        let so_vinheta = p.adjustments.campos().all(|c| c.starts_with("pcv_"));
+        assert_eq!(p.replaces, !so_vinheta, "{}: recomeça só quem não é vinheta", p.name);
+    }
+    let nomes: Vec<&str> = lrs.iter().map(|p| p.name.as_str()).collect();
+    for nome in ["Vinheta Borda", "Vinheta Nenhuma", "RecordarFotos P&B Cinematografico"] {
+        assert!(nomes.contains(&nome), "{nome}");
+    }
+    // A "Vinheta Nenhuma" é justamente o zero: somada, tira a vinheta.
+    let nenhuma = lrs.iter().find(|p| p.name == "Vinheta Nenhuma").unwrap();
+    assert_eq!(nenhuma.adjustments.get("pcv_amount"), Some(0.0));
+    assert!(!nenhuma.replaces);
+
+    let todas = presets_de_sistema();
+    let cine = todas
+        .iter()
+        .find(|p| p.name == "Cinematográfico P&B")
+        .expect("o padrão do DNG do Estúdio Canela");
+    assert!(cine.replaces && cine.grupo.is_none());
+    assert_eq!(cine.adjustments.get("pcv_style"), Some(2.0));
 }

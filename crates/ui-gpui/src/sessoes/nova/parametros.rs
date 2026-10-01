@@ -85,8 +85,17 @@ pub fn presets_da_sessao(
         .iter()
         .filter(|p| p.is_system)
         .filter_map(|p| {
+            // 🎞️ As da pasta "LRs" têm id pelo nome do arquivo: "RecordarFotos
+            // P&B" existe nas duas pastas, e a tabela por nome daria a do
+            // darktable no lugar da do Lightroom.
+            use crate::revelacao::presets::ordem;
+            let id = if ordem::Grupo::de(p) == ordem::Grupo::Lrs {
+                format!("sistema:{}", ordem::id_do_lightroom(&p.name))
+            } else {
+                id_do_sistema(&p.name)?
+            };
             Some(PresetDaSessao {
-                id: id_do_sistema(&p.name)?,
+                id,
                 nome: p.name.clone(),
                 grupo: Grupo::Sistema,
                 preset: p.clone(),
@@ -171,7 +180,11 @@ mod testes {
 
     #[test]
     fn todo_preset_do_sistema_tem_chave_do_site() {
-        for preset in use_cases::presets::presets_de_sistema() {
+        // As da pasta "LRs" vão com `id_do_lightroom` (`presets_da_sessao`).
+        for preset in use_cases::presets::presets_de_sistema()
+            .into_iter()
+            .filter(|p| p.grupo.is_none())
+        {
             assert!(
                 id_do_sistema(&preset.name).is_some(),
                 "`{}` não tem chave em `ordem::IDS_DO_SISTEMA` — a sessão iria sem preset padrão",
