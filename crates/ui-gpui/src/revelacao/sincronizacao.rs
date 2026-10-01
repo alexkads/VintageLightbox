@@ -151,7 +151,7 @@ impl Grupo {
             Grupo::Painel(Painel::Lente) => Some("distorção e vinheta"),
             Grupo::Calibracao | Grupo::Painel(Painel::Calibracao) => Some("os primários da câmera"),
             Grupo::Painel(Painel::Tonalizacao) => Some("a cor das sombras e a das altas luzes"),
-            Grupo::Painel(Painel::Efeitos) => Some("grão"),
+            Grupo::Painel(Painel::Efeitos) => Some("vinheta pós-corte e grão"),
             Grupo::Enquadramento => Some("giro, espelho, endireitar, perspectiva e recorte"),
             Grupo::Painel(Painel::Basico) | Grupo::Painel(Painel::CurvaDeTons) => None,
         }
@@ -295,7 +295,9 @@ impl Escolha {
 /// que nenhum grupo reconhece devolve `None` e não viaja — e
 /// `cada_ajuste_viaja_em_um_grupo` falha antes de isso chegar a uma sessão.
 pub fn grupo_do_ajuste(nome: &str) -> Option<Grupo> {
-    const BASICO: [&str; 11] = [
+    const BASICO: [&str; 13] = [
+        "texture",
+        "dehaze",
         "exposure",
         "contrast",
         "temperature",
@@ -327,7 +329,7 @@ pub fn grupo_do_ajuste(nome: &str) -> Option<Grupo> {
         Grupo::Calibracao
     } else if com("split_") {
         Grupo::Painel(Painel::Tonalizacao)
-    } else if com("grain_") {
+    } else if com("grain_") || com("pcv_") {
         Grupo::Painel(Painel::Efeitos)
     } else if com("dt_") {
         Grupo::ControlesRgb

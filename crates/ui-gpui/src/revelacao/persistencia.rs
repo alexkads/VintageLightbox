@@ -1384,7 +1384,7 @@ mod testes {
     /// não ganharam coluna: vão na revelação inteira (`edit_parametros`, migration
     /// 023), como na foto do site. Esta lista só descreve o caminho das colunas,
     /// que é o de quem foi revelado antes da migration 023.
-    const SEM_COLUNA_NO_BANCO_LOCAL: [&str; 7] = [
+    const SEM_COLUNA_NO_BANCO_LOCAL: [&str; 20] = [
         "calib_",
         "split_midtone_",
         "split_global_",
@@ -1392,6 +1392,21 @@ mod testes {
         "bw_",
         "curva_",
         "dt_",
+        // Os controles do Lightroom de 2026-09-30: só em `edit_parametros`.
+        "texture",
+        "dehaze",
+        "tone_curve_split_",
+        "split_shadow_lum",
+        "split_highlight_lum",
+        "sharpen_detail",
+        "sharpen_masking",
+        "nr_luminance_detail",
+        "nr_luminance_contrast",
+        "nr_color_detail",
+        "nr_color_smoothness",
+        "pcv_",
+        "grain_roughness",
+        // `split_midtone_lum` e `split_global_lum` já caem nos de cima.
     ];
 
     /// 🚨 A revelação do site tem os módulos novos (`dt_*`), que as colunas

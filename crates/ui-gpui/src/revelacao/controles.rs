@@ -5,7 +5,12 @@
 //! bloco 42 vezes espalhado por `dock_viewer.rs`; aqui o HSL inteiro — 24
 //! controles — são 24 linhas de dados.
 //!
-//! ## ✅ Desde 2026-09-17 são os 171 do motor, um por campo
+//! ## ✅ Desde 2026-09-30 são os 193 do motor, um por campo
+//!
+//! Os 22 do fim são os controles do Lightroom que faltavam (Textura, Remover
+//! névoa, vinheta pós-corte, o resto do Detalhe…).
+//!
+//! ## Desde 2026-09-17 eram os 171 do motor
 //!
 //! A tabela é o porte de `revelacao/ajustes.ts` do site, grupo a grupo, com os
 //! mesmos rótulos, faixas e casas: Básico, Curva de tons, Curva por ponto, HSL,
@@ -288,6 +293,9 @@ pub struct Definicao {
     pub ler: fn(&Ajustes) -> f32,
     /// 🎨 O desenho da barra — ver [`Trilho`].
     pub trilho: Trilho,
+    /// Os nomes de cada posição, num controle discreto que é escolha e não
+    /// número — o Estilo da vinheta pós-corte. O valor mostra o nome.
+    pub opcoes: Option<&'static [&'static str]>,
 }
 
 /// 🎨 **O que a barra de um controle desenha** — o trilho colorido do
@@ -308,8 +316,12 @@ pub enum Trilho {
     VerdeMagenta,
     /// Do cinza à roda de cores (Intensidade, Saturação).
     Saturacao,
-    /// A roda inteira, 0–360° (os matizes da Tonalização).
+    /// A roda inteira, 0–360° (os matizes da Calibração).
     Roda,
+    /// A roda da Gradação de cores do Lightroom: o mesmo número dá a cor que
+    /// o Lightroom dá (`revelacao_core::ajustes::cor_da_roda_do_lightroom`),
+    /// e não a do HSV.
+    RodaDoLightroom,
     /// HSL · Cor: do cinza à cor da faixa.
     HslSaturacao(f32),
     /// HSL · Luminância: escuro → a cor → claro.
@@ -372,6 +384,10 @@ impl Definicao {
     /// O valor como o site o escreve (`formatarValor`): vírgula decimal, e o
     /// `+` só no positivo — o neutro sai `0,00`, e não `+0,00`.
     pub fn formatar(&self, valor: f32) -> String {
+        if let Some(opcoes) = self.opcoes {
+            let i = (valor.round().max(0.0) as usize).min(opcoes.len() - 1);
+            return opcoes[i].to_string();
+        }
         let texto = format!("{:.*}", self.casas, valor).replace('.', ",");
         if self.com_sinal && valor > 0.0 {
             format!("+{texto}")
@@ -395,6 +411,7 @@ macro_rules! def {
             aplicar: |a, v| a.$campo = v,
             ler: |a| a.$campo,
             trilho: Trilho::Liso,
+            opcoes: None,
         }
     };
 }
@@ -551,7 +568,11 @@ pub const CONTROLES: &[Definicao] = &[
     cem!(S::Basico, "Sombras", shadows),
     cem!(S::Basico, "Brancos", whites),
     cem!(S::Basico, "Pretos", blacks),
-    unitario!("Textura", clarity),
+    // 🚨 **Até 2026-09-30 a Claridade se chamava "Textura" aqui** (e era uma
+    // saturação no shader). Agora são as três do Lightroom, na ordem dele.
+    cem!(S::Basico, "Textura", texture),
+    unitario!("Claridade", clarity),
+    cem!(S::Basico, "Remover névoa", dehaze),
     unitario!("Intensidade", vibrance).com_trilho(Trilho::Saturacao),
     unitario!("Saturação", saturation).com_trilho(Trilho::Saturacao),
     // --------------------------------------------------------- Curva de tons
@@ -559,6 +580,10 @@ pub const CONTROLES: &[Definicao] = &[
     cem!(S::CurvaDeTons, "Escuros", tone_curve_darks),
     cem!(S::CurvaDeTons, "Claros", tone_curve_lights),
     cem!(S::CurvaDeTons, "Altas luzes", tone_curve_highlights),
+    // As três divisões entre as zonas (25/50/75 no Lightroom).
+    cento!(S::CurvaDeTons, "Divisão das sombras", tone_curve_split_shadows),
+    cento!(S::CurvaDeTons, "Divisão dos meios-tons", tone_curve_split_midtones),
+    cento!(S::CurvaDeTons, "Divisão das altas luzes", tone_curve_split_highlights),
     // ------------------------------------------------------- Curva por ponto
     ponto!("RGB — ponto 1", curva_m0),
     ponto!("RGB — ponto 2", curva_m1),
@@ -634,8 +659,9 @@ pub const CONTROLES: &[Definicao] = &[
     cem!(S::PretoEBranco, "Roxos", bw_purple),
     cem!(S::PretoEBranco, "Magentas", bw_magenta),
     // --------------------------------------------------------------- Detalhe
-    cento!(S::Detalhe, "Ruído (luminância)", nr_luminance),
-    cento!(S::Detalhe, "Ruído (cor)", nr_color),
+    // A ordem do Lightroom: Nitidez (quantidade, raio, detalhe, máscara) e
+    // Redução de ruído (luminância, detalhe, contraste; cor, detalhe,
+    // suavidade).
     cento!(S::Detalhe, "Nitidez", sharpen_amount),
     // Começa em 0,5: raio zero seria não ter pixel de vizinhança.
     def!(
@@ -647,6 +673,14 @@ pub const CONTROLES: &[Definicao] = &[
         1,
         false
     ),
+    cento!(S::Detalhe, "Detalhe da nitidez", sharpen_detail),
+    cento!(S::Detalhe, "Máscara da nitidez", sharpen_masking),
+    cento!(S::Detalhe, "Ruído (luminância)", nr_luminance),
+    cento!(S::Detalhe, "Detalhe da luminância", nr_luminance_detail),
+    cento!(S::Detalhe, "Contraste da luminância", nr_luminance_contrast),
+    cento!(S::Detalhe, "Ruído (cor)", nr_color),
+    cento!(S::Detalhe, "Detalhe da cor", nr_color_detail),
+    cento!(S::Detalhe, "Suavidade da cor", nr_color_smoothness),
     // ----------------------------------------------------------------- Lente
     cem!(S::Lente, "Distorção", lens_distortion),
     cem!(S::Lente, "Vinheta", lens_vignette_amount),
@@ -663,23 +697,46 @@ pub const CONTROLES: &[Definicao] = &[
     cem!(S::Calibracao, "Azul — saturação", calib_blue_sat).com_trilho(Trilho::HslSaturacao(220.0)),
     // ----------------------------------------------------------- Tonalização
     // As três faixas e o global do Color Grading; a Mistura abre em 50.
-    matiz!(S::Tonalizacao, "Sombras — matiz", split_shadow_hue).com_trilho(Trilho::Roda),
+    // 🔑 Os matizes são os da roda do Lightroom desde 2026-09-30: o mesmo
+    // número dá a mesma cor que lá (o trilho mostra qual).
+    matiz!(S::Tonalizacao, "Sombras — matiz", split_shadow_hue)
+        .com_trilho(Trilho::RodaDoLightroom),
     cento!(S::Tonalizacao, "Sombras — saturação", split_shadow_sat),
-    matiz!(S::Tonalizacao, "Tons médios — matiz", split_midtone_hue).com_trilho(Trilho::Roda),
+    cem!(S::Tonalizacao, "Sombras — luminância", split_shadow_lum),
+    matiz!(S::Tonalizacao, "Tons médios — matiz", split_midtone_hue)
+        .com_trilho(Trilho::RodaDoLightroom),
     cento!(S::Tonalizacao, "Tons médios — saturação", split_midtone_sat),
-    matiz!(S::Tonalizacao, "Altas luzes — matiz", split_highlight_hue).com_trilho(Trilho::Roda),
+    cem!(S::Tonalizacao, "Tons médios — luminância", split_midtone_lum),
+    matiz!(S::Tonalizacao, "Altas luzes — matiz", split_highlight_hue)
+        .com_trilho(Trilho::RodaDoLightroom),
     cento!(
         S::Tonalizacao,
         "Altas luzes — saturação",
         split_highlight_sat
     ),
-    matiz!(S::Tonalizacao, "Global — matiz", split_global_hue).com_trilho(Trilho::Roda),
+    cem!(S::Tonalizacao, "Altas luzes — luminância", split_highlight_lum),
+    matiz!(S::Tonalizacao, "Global — matiz", split_global_hue)
+        .com_trilho(Trilho::RodaDoLightroom),
     cento!(S::Tonalizacao, "Global — saturação", split_global_sat),
+    cem!(S::Tonalizacao, "Global — luminância", split_global_lum),
     cem!(S::Tonalizacao, "Balanço", split_balance),
     cento!(S::Tonalizacao, "Mistura", split_blending),
     // --------------------------------------------------------------- Efeitos
+    // A vinheta pós-corte do Lightroom: estilo, quantidade, ponto médio,
+    // arredondamento, difusão e realces.
+    Definicao {
+        discreto: true,
+        opcoes: Some(&["Realces", "Cores", "Tinta"]),
+        ..def!(S::Efeitos, "Vinheta — estilo", pcv_style, 0.0, 2.0, 0, false)
+    },
+    cem!(S::Efeitos, "Vinheta — quantidade", pcv_amount),
+    cento!(S::Efeitos, "Vinheta — ponto médio", pcv_midpoint),
+    cem!(S::Efeitos, "Vinheta — arredondamento", pcv_roundness),
+    cento!(S::Efeitos, "Vinheta — difusão", pcv_feather),
+    cento!(S::Efeitos, "Vinheta — realces", pcv_highlights),
     cento!(S::Efeitos, "Grão", grain_amount),
     cento!(S::Efeitos, "Tamanho do grão", grain_size),
+    cento!(S::Efeitos, "Aspereza do grão", grain_roughness),
     // ============================================================ aba RGB
     // ------------------------------------------------------------- Exposição
     interruptor!(S::RgbExposicao, "Ligar", dt_exposure_ativo),
@@ -1302,7 +1359,12 @@ mod passo_dos_controles {
     /// `0,37`, que o motor lê como desligado sem ninguém saber.
     #[test]
     fn o_interruptor_so_tem_dois_estados() {
-        let interruptores: Vec<_> = CONTROLES.iter().filter(|d| d.discreto).collect();
+        // O Estilo da vinheta pós-corte também é discreto, mas é escolha de
+        // três, com nome em cada posição — não é interruptor.
+        let interruptores: Vec<_> = CONTROLES
+            .iter()
+            .filter(|d| d.discreto && d.opcoes.is_none())
+            .collect();
         assert_eq!(interruptores.len(), 8, "bw_ativo, 5 módulos e 2 da vinheta");
         for d in interruptores {
             assert_eq!(
@@ -1560,15 +1622,33 @@ mod trilho_dos_controles {
         }
     }
 
-    /// Todo controle que **escolhe** um matiz (0–360°) mostra a roda inteira.
+    /// Todo controle que **escolhe** um matiz (0–360°) mostra a roda inteira —
+    /// a do Lightroom na Tonalização, que é a que o motor usa ali.
     #[test]
     fn quem_escolhe_matiz_mostra_a_roda() {
         for d in CONTROLES
             .iter()
             .filter(|d| d.minimo == 0.0 && d.maximo == 360.0)
         {
-            assert_eq!(d.trilho, Trilho::Roda, "`{}`", d.rotulo);
+            let esperado = if d.secao == Secao::Tonalizacao {
+                Trilho::RodaDoLightroom
+            } else {
+                Trilho::Roda
+            };
+            assert_eq!(d.trilho, esperado, "`{}`", d.rotulo);
         }
+    }
+
+    /// O Estilo da vinheta mostra o nome, e não o número.
+    #[test]
+    fn o_estilo_da_vinheta_mostra_o_nome() {
+        let estilo = CONTROLES
+            .iter()
+            .find(|d| d.rotulo == "Vinheta — estilo")
+            .expect("o controle existe");
+        assert_eq!(estilo.passo(), 1.0);
+        assert_eq!(estilo.formatar(0.0), "Realces");
+        assert_eq!(estilo.formatar(2.0), "Tinta");
     }
 
     /// O resto é liso: a cor só entra onde ela diz algo.

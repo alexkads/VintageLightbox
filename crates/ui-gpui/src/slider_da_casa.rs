@@ -111,6 +111,12 @@ pub fn paradas(trilho: Trilho) -> Vec<Hsla> {
             hsl(280., 0.7, 0.55),
         ],
         Trilho::Roda => (0..=6).map(|i| hsl(i as f32 * 60., 0.8, 0.52)).collect(),
+        Trilho::RodaDoLightroom => (0..=12)
+            .map(|i| {
+                let [r, g, b] = revelacao_core::ajustes::cor_da_roda_do_lightroom(i as f32 * 30.);
+                Hsla::from(gpui_kit::Rgba { r, g, b, a: 1. })
+            })
+            .collect(),
         Trilho::HslSaturacao(h) => vec![hsl(h, 0., 0.45), hsl(h, 0.85, 0.52)],
         Trilho::HslLuminancia(h) => {
             vec![hsl(h, 0.6, 0.15), hsl(h, 0.8, 0.5), hsl(h, 0.8, 0.85)]

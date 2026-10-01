@@ -852,7 +852,7 @@ mod testes {
         );
         assert_eq!(
             resumir(&sistema("Retrato suave").adjustments),
-            "Contraste, Altas luzes, Sombras, Textura e mais 5"
+            "Contraste, Altas luzes, Sombras, Claridade e mais 5"
         );
         assert_eq!(
             resumir(&sistema("RecordarFotos P&B").adjustments),
@@ -910,7 +910,7 @@ mod testes {
         );
         assert_eq!(
             dica_do_nome(&sistema("Nitidez para impressão")),
-            "Nitidez para impressão — Textura, Ruído (luminância), Nitidez, Raio da nitidez"
+            "Nitidez para impressão — Claridade, Ruído (luminância), Nitidez, Raio da nitidez"
         );
     }
 
