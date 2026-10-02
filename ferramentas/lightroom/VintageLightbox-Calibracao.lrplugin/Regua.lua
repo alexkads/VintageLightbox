@@ -353,7 +353,39 @@ local function casos_de_componentes(por_nome)
 	return casos
 end
 
+-- Vibração e Saturação de −100 a +100, de 10 em 10 — na carta de cores
+-- (24 matizes × 6 saturações × 3 brilhos), para tabelar quanto croma cada cor
+-- perde ou ganha.
+local function casos_de_cor()
+	local casos = { { nome = "00-neutro", ajustes = {} } }
+	for _, chave in ipairs { "Vibrance", "Saturation" } do
+		for v = -100, 100, 10 do
+			if v ~= 0 then
+				table.insert(casos, { nome = string.format("%s%+04d", chave, v), ajustes = { [chave] = v } })
+			end
+		end
+	end
+	return casos
+end
+
+-- Remover névoa de −100 a +100, de 25 em 25: o Lightroom decide a névoa por
+-- foto (o mesmo −100 leva o preto a 110 numa e a 49 noutra), então a régua é
+-- de muitas fotos e poucos valores.
+local function casos_de_nevoa()
+	local casos = { { nome = "00-neutro", ajustes = {} } }
+	for _, v in ipairs { -100, -75, -50, -25, 25, 50, 75, 100 } do
+		table.insert(casos, { nome = string.format("Dehaze%+04d", v), ajustes = { Dehaze = v } })
+	end
+	return casos
+end
+
 function Regua.casos(completa, por_nome, tipo)
+	if tipo == "cor" then
+		return casos_de_cor()
+	end
+	if tipo == "nevoa" then
+		return casos_de_nevoa()
+	end
 	if tipo == "componentes" then
 		return casos_de_componentes(por_nome)
 	end

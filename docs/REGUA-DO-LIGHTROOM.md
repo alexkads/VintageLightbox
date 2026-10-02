@@ -377,3 +377,97 @@ piora (11,1 → 13,1).
    perfis criativos e as máscaras locais (RF Bem Velhão: 29).
 4. ⚠️ **O conta-gotas e o EB Automático** do Básico (`revelacao/balanco.rs`) resolvem ao contrário a
    conta **antiga** da temperatura. No processo 1 eles dão números aproximados.
+
+## 9. A terceira rodada: Vibração, Saturação, Remover névoa — e o Adobe RGB
+
+*"Remover névoa e Vibração"*, *"deixa o CLI com mais recursos de comparação através de alguma crate
+auxiliar"* — dono, 1/out, à noite.
+
+### O CLI mede como o olho (`palette`)
+
+O `comparar_em_lote` ganhou, por caso, o **ΔE2000** médio e o percentil 95 (abaixo de ~2 não se nota),
+o **ΔL\*** (nossa − Lightroom), a **razão de croma** (nossa ÷ Lightroom: 1 = a mesma saturação) e o
+**SSIM** da luminância (a estrutura — o que Remover névoa, Claridade e Textura mexem). A diferença
+média 0–255 continua, porque é a das rodadas anteriores. A `palette` é só dependência de
+desenvolvimento do `infrastructure`.
+
+### Réguas novas
+
+| `casos=` | o quê | numa foto |
+|---|---|---|
+| `cor` | Vibração e Saturação de −100 a +100, de 10 em 10 | a carta de cores: 24 matizes × 6 saturações × 3 brilhos |
+| `nevoa` | Remover névoa de −100 a +100, de 25 em 25 | 6 fotos reais (o Lightroom decide a névoa por foto) |
+
+### Vibração e Saturação (processo 1)
+
+A conta antiga da Vibração (`1 + v·2`, só nas cores apagadas) **invertia a cor** no negativo: a −100 o
+laranja passava do cinza e virava azulado (croma 3,5× o do Lightroom). A Saturação antiga misturava
+com a luma, e escurecia o que perdia cor.
+
+No processo 1 as duas viram tabela, medida na carta: para cada valor e cada matiz × saturação de
+entrada, o **fator de croma** em Lab e o **ΔL\*** que vem junto (o Lightroom não guarda o L\* — a
+Vibração −100 escurece a pele ~3). O motor interpola entre valores, matizes de 15° e as seis
+saturações da carta. A tabela passou a 479 linhas.
+
+| caso | carta, ΔE antes → depois | fotos, ΔE antes → depois |
+|---|---|---|
+| Vibração −100 | 22,6 → **2,5** | 15,6 → **2,3** |
+| Vibração −50 | 11,1 → **1,6** | 9,3 → **2,8** |
+| Vibração +100 | 8,3 → **2,4** | 7,3 → **3,2** |
+| Saturação −100 | 5,6 → **0,3** | 2,2 → **1,1** |
+| Saturação +100 | 4,7 → **2,0** | 4,0 → 4,4 (é o piso de cor das fotos, abaixo) |
+
+### Remover névoa (processo 1)
+
+A régua `nevoa` mostrou que o Lightroom **decide a névoa por foto**: o mesmo −100 leva o preto a 110
+numa e a 49 noutra; o branco fica quase onde estava. Varrendo a força do motor contra cada valor
+(6 fotos, lidas em Adobe RGB): **0,75 no positivo** (+100: ΔE 4,1) e **0,6 no negativo** (−100:
+8,3 → 7,9; −50: 4,5 → 4,2).
+
+A forma do negativo ainda difere: o Lightroom mira uma névoa mais clara que a nossa luz do céu e poupa
+o preto profundo (é por profundidade, pelo canal escuro). Com o escuro certo, o nosso claro sai ~20
+abaixo. Um modelo que poupava o claro pelo valor do canal foi testado e ficou pior (−100: 9,4). O
+estúdio só usa de −12 a −17, onde o erro é ~2,6.
+
+### 🚨 O achado maior: as fotos da câmera são Adobe RGB
+
+O piso de ~3 ΔE em toda foto real (e o "neutro mais quente" do item 2 acima) **não é do motor**. Todo
+JPEG da câmera do estúdio traz no EXIF o índice de interoperabilidade **`R03`** — a marca DCF de
+**Adobe RGB (1998)** que as Nikon gravam — e nenhum perfil ICC. O Lightroom obedece; o
+`base_neutra.rs` lê **como sRGB** ("ICC ignorado"), e os navegadores também ignoram o `R03`. Nas
+réguas sintéticas (rampas, carta, quadrantes), que são sRGB, as tabelas batem quase exato.
+
+| régua `nevoa`, neutro | ΔE2000 | croma | "quente" |
+|---|---|---|---|
+| lido como sRGB (o app hoje) | 3,08 | 0,81 | −9,6 |
+| lido como Adobe RGB | **1,27** | **1,00** | **0,0** |
+
+Isto **não foi mudado no app**: é decisão do dono, porque toca o contrato da base neutra (C28, o
+mesmo no site) e mudaria a aparência de toda foto já revelada (a versão de processo protege os
+parâmetros, não a leitura do arquivo). No CLI, é a opção **`--adobe`**, e é com ela que se mede o
+motor daqui em diante.
+
+### Resultado (1968 casos, as 28 predefinições nas fotos JPG)
+
+ΔE2000 médio — abaixo de ~2 não se nota:
+
+| | processo 0 | processo 1 | processo 1, lido em Adobe RGB |
+|---|---|---|---|
+| média das 28 | 10,97 | **6,80** | **6,35** |
+| Vinheta Nenhuma (o piso) | 3,1 | 3,1 | **1,3** |
+| Vinheta Carregada | 7,7 | 2,6 | **1,4** |
+| RF Colorido Quente | 22,0 | 7,6 | 7,1 |
+| RF Bem Velhão | 27,1 | 12,1 | 11,9 |
+| RF Sépia Antigo | 17,3 | 15,8 | 14,9 |
+
+O Adobe RGB resolve as predefinições leves; nas pesadas o que falta é outra coisa — o perfil criativo
+(seção 3) e as máscaras locais. Contra a segunda rodada, o que mudou foi quase só melhora: Vibração
+−100 21,9 → 4,1 (0–255), RF Vintage Quente RAW 27,3 → 22,2. Pioraram pouco as predefinições com
+névoa −12 (Chocolate e Velho Oeste Color, +1,0 e +1,4 em 0–255).
+
+### Fica aberto
+
+1. **Ler o JPEG `R03` como Adobe RGB** no app e no site — decisão do dono (acima).
+2. **A forma do Remover névoa negativo** (por profundidade, mirando uma névoa mais clara).
+3. O CLI gasta ~1 h numa rodada inteira (1968 casos × 2 processos, uma thread); memória ok (um
+   original por vez).

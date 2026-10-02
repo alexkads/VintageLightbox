@@ -75,3 +75,6 @@ mockall.workspace = true
 # Um servidor HTTP de verdade para o cliente do pós-venda: o que se prova ali é
 # o multipart e o cabeçalho — coisas que nenhum mock do `reqwest` alcança.
 wiremock = "0.6"
+# Só para a comparação com o Lightroom (`examples/comparar_em_lote.rs`): Lab e
+# a diferença de cor que o olho percebe (CIEDE2000), em vez de RGB cru.
+palette = "0.7"

@@ -30,6 +30,14 @@ Em até 5 s ele vira `pedido-em-andamento.txt`, e depois `pedido-feito.txt`. As 
 catálogo, na coleção **"Régua VintageLightbox"**. Por isso use **cópias** dos originais, numa pasta só
 da régua. O andamento vai para `<saida>\registro.txt`.
 
+⚠️ **O pedido vai em UTF-8 sem BOM.** O `Set-Content -Encoding UTF8` do PowerShell 5.1 põe o BOM, a
+primeira linha (`saida=`) deixa de ser reconhecida e o pedido some calado: vira
+`pedido-em-andamento.txt` e nada mais acontece, nem o `registro.txt`. Grave com
+`[IO.File]::WriteAllText(caminho, texto, (New-Object Text.UTF8Encoding $false))`.
+
+⚠️ **O `Regua.lua` é carregado quando o Lightroom abre.** Um tipo de caso novo só existe depois de
+reiniciar o Lightroom; antes disso, o pedido com ele cai no caso vazio (as 28 predefinições).
+
 🚨 Enquanto a régua roda, ninguém clica em outra foto no Lightroom. Antes de cada caso a régua confere
 a foto ativa e para se ela mudou, porque redefinir a revelação de uma foto do operador apagaria o
 trabalho dele.
@@ -48,6 +56,8 @@ trabalho dele.
 | `controles` | cada controle do Básico (e Temperatura/Matiz) de −100 a +100 | fotos reais |
 | `balanco` | Temperatura e Matiz de −100 a +100, de 10 em 10 | a rampa e os quadrantes |
 | `componentes` | cada predefinição do estúdio decomposta por painel (Básico, balanço, curva, P&B, HSL, tonalização, vinheta, detalhe) | fotos reais |
+| `cor` | Vibração e Saturação de −100 a +100, de 10 em 10 | `carta-cor.jpg`: 24 matizes × 6 saturações × 3 brilhos |
+| `nevoa` | Remover névoa de −100 a +100, de 25 em 25 — o Lightroom decide a névoa por foto, então são muitas fotos | fotos reais |
 
 ## Os roteiros e a ferramenta de medição (`medicao/`)
 
@@ -70,7 +80,8 @@ e imagens intermediárias em `$env:VLB_RASCUNHO` (ou `%TEMP%\regua-vintagelightb
 cargo run --release -p revelacao-core --example tabelas-do-lightroom -- "<pasta Comparar Presets>"
 ```
 
-O gerador lê `regua-tom/rampa-cor`, `regua-forca2/quad-{a,b,c}` e `regua-grade/cinza-128`, e grava
+O gerador lê `regua-tom/rampa-cor`, `regua-exposicao`, `regua-forca2/quad-{a,b,c}`,
+`regua-grade/cinza-128`, `regua-balanco-rampa` e `regua-cor/carta-cor`, e grava
 `crates/revelacao-core/src/tabelas_lightroom.bin`. São medidas de fotos sintéticas, sem nenhum arquivo
 da Adobe.
 
@@ -81,13 +92,18 @@ cargo run --release -p infrastructure --example comparar_em_lote -- \
     saida.csv --reguas "<pasta Comparar Presets>" --processos 0,1 [--base saida-anterior.csv]
 ```
 
-Ele acha toda régua debaixo da pasta e roda cada caso nos dois processos: 818 casos em cerca de 5
-minutos. Grava `saida.csv` (uma linha por caso) e `saida.resumo.csv`, e mostra no terminal o que
+Ele acha toda régua debaixo da pasta e roda cada caso nos dois processos. Grava `saida.csv` (uma linha por caso) e `saida.resumo.csv`, e mostra no terminal o que
 piorou primeiro. Com `--base`, mostra também quanto cada caso mudou desde a rodada anterior. Opções:
 - `--regua <pasta>`, repetível, para uma régua só;
 - `--filtro a,b` (pedaços do nome do caso);
 - `--forcar campo=valor;…`, para varrer um ajuste;
-- `--imagens <pasta>`, para gravar o lado a lado.
+- `--imagens <pasta>`, para gravar o lado a lado (o Lightroom à esquerda — não é a nossa imagem sozinha);
+- `--lista <csv>` (`rotulo,original,exportado,forcar`), para varrer muitos valores numa passada só;
+- `--adobe`, para ler os JPEG `R03` da câmera como Adobe RGB, como o Lightroom (ver
+  `docs/REGUA-DO-LIGHTROOM.md`, seção 9). **Meça o motor com ela.**
+
+Por caso, além da diferença 0–255 por faixa de tom, sai o ΔE2000 (médio e p95), o ΔL\*, a razão de
+croma e o SSIM (crate `palette`). Com as réguas de hoje são 1968 casos e cerca de 1 h.
 
 ## Medir um caso só, pela exportação do app
 

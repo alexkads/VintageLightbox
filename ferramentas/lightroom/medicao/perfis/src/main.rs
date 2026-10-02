@@ -20,6 +20,9 @@
 //! | `arredondamento <csv> <tabelas.bin>` | ajusta a forma da vinheta no arredondamento negativo |
 //! | `balanco <pasta>` | o ganho por canal do balanço em cada nível de cinza (os quadrantes) |
 //! | `analise-balanco <csv>` | o balanço do Lightroom é por canal? (a rampa colorida) |
+//! | `carta <pasta> <caso>` | a carta de cores: croma e ΔL* de cada matiz × saturação (Vibração, Saturação) |
+//! | `mapa <antes> <depois>…` | a curva que um ajuste aplicou, canal a canal e no canal escuro (Remover névoa) |
+//! | `adobe <entrada> <saída>` | lê a foto como Adobe RGB (1998) e grava em sRGB (os JPEG `R03` das Nikon) |
 //!
 //! 🔑 As tabelas da Adobe são **lidas** dos arquivos do Lightroom instalado,
 //! na hora; nenhuma delas é copiada para cá.
@@ -693,6 +696,52 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args[0].as_str() {
         "dump" => args[1..].iter().for_each(|c| dump(c)),
+        // adobe <entrada> <saída>: lê a foto como Adobe RGB (1998) e grava em sRGB.
+        "adobe" => {
+            let mut img = image::open(&args[1]).unwrap().to_rgb8();
+            let g = 563.0f32 / 256.0;
+            for p in img.pixels_mut() {
+                let [r, gg, b] = p.0.map(|v| (v as f32 / 255.0).powf(g));
+                let s = [
+                    1.398_283 * r - 0.398_283 * gg,
+                    gg,
+                    -0.042_938 * gg + 1.042_938 * b,
+                ];
+                p.0 = s.map(|v| (linear_para_srgb(v.clamp(0.0, 1.0)) * 255.0).round() as u8);
+            }
+            img.save(&args[2]).unwrap();
+        }
+        // mapa <antes.jpg> <depois.jpg>...: para cada valor de canal antes (16
+        // faixas), a média do depois — a curva que um ajuste aplicou, canal a
+        // canal; com a faixa do canal escuro (mín. RGB) entre parênteses.
+        "mapa" => {
+            let a = image::open(&args[1]).unwrap().to_rgb8();
+            let cab: String = (0..16).map(|i| format!("{:5}", i * 16 + 8)).collect();
+            println!("{:24}{cab}", "entrada");
+            for d in &args[2..] {
+                let b = image::open(d).unwrap().to_rgb8();
+                let (mut s, mut n) = ([0.0f64; 16], [0.0f64; 16]);
+                let (mut se, mut ne) = ([0.0f64; 16], [0.0f64; 16]);
+                for (pa, pb) in a.pixels().zip(b.pixels()) {
+                    for c in 0..3 {
+                        s[pa[c] as usize / 16] += pb[c] as f64;
+                        n[pa[c] as usize / 16] += 1.0;
+                    }
+                    let ea = pa.0.iter().min().unwrap();
+                    let eb = pb.0.iter().min().unwrap();
+                    se[*ea as usize / 16] += *eb as f64;
+                    ne[*ea as usize / 16] += 1.0;
+                }
+                let linha = |s: &[f64; 16], n: &[f64; 16]| -> String {
+                    (0..16)
+                        .map(|i| if n[i] > 200.0 { format!("{:5.0}", s[i] / n[i]) } else { "    -".into() })
+                        .collect()
+                };
+                let nome = std::path::Path::new(d).file_stem().unwrap().to_string_lossy().to_string();
+                println!("{nome:24}{}", linha(&s, &n));
+                println!("{:24}{}", "  (escuro)", linha(&se, &ne));
+            }
+        }
         "aplicar" => aplicar(&args[1], &args[2], &args[3], args[4].parse().unwrap()),
         "medir" => medir(&args[1], &args[2]),
         // curva <lightroom> <nosso>: a saída nos degraus 0, 16, 32 … 255.
@@ -744,6 +793,69 @@ fn main() {
             println!("{} linhas", linhas.len() - 1);
         }
         "analise-tom" => analise_tom(&args[1]),
+        // carta <pasta da régua de cor> <caso>: para cada saturação de entrada
+        // (linhas) e grupo de matizes (colunas), a razão de croma Lab
+        // saída ÷ entrada — e o ΔL médio.
+        "carta" => {
+            let pasta = std::path::Path::new(&args[1]);
+            let achar = |pedaco: &str| {
+                std::fs::read_dir(pasta).unwrap().filter_map(|e| e.ok()).map(|e| e.path())
+                    .find(|p| p.file_name().unwrap().to_string_lossy().contains(pedaco)).unwrap()
+            };
+            let neutro = image::open(achar("neutro")).unwrap().to_rgb8();
+            let caso = image::open(achar(&args[2])).unwrap().to_rgb8();
+            let (w, h) = (neutro.width() as f64, neutro.height() as f64);
+            let (pw, ph) = (w / 24.0, h / 18.0);
+            let lab = |img: &image::RgbImage, i: usize, j: usize| {
+                let (cx, cy) = (((i as f64 + 0.5) * pw) as u32, ((j as f64 + 0.5) * ph) as u32);
+                let mut s = [0.0f64; 3];
+                for y in cy - 8..cy + 8 {
+                    for x in cx - 8..cx + 8 {
+                        let p = img.get_pixel(x, y);
+                        for c in 0..3 {
+                            s[c] += p[c] as f64 / 256.0;
+                        }
+                    }
+                }
+                // sRGB → linear → XYZ (D65) → Lab
+                let l = s.map(|v| srgb_para_linear((v / 255.0) as f32) as f64);
+                let x = (0.4124 * l[0] + 0.3576 * l[1] + 0.1805 * l[2]) / 0.95047;
+                let y = 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2];
+                let z = (0.0193 * l[0] + 0.1192 * l[1] + 0.9505 * l[2]) / 1.08883;
+                let f = |t: f64| if t > 0.008856 { t.cbrt() } else { 7.787 * t + 16.0 / 116.0 };
+                let (fx, fy, fz) = (f(x), f(y), f(z));
+                (116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz))
+            };
+            let sats = [0.1, 0.25, 0.4, 0.55, 0.75, 1.0];
+            // grupos de matiz (HSV de entrada): vermelhos, laranjas/pele, amarelos, verdes, cianos, azuis, magentas
+            let grupos = [("verm", 0..2), ("laranja", 2..4), ("amarelo", 4..6), ("verde", 6..10), ("ciano", 10..14), ("azul", 14..18), ("magenta", 18..24)];
+            print!("{:>6}", "sat");
+            for (g, _) in &grupos {
+                print!("{g:>9}");
+            }
+            println!("{:>8}", "ΔL");
+            for (si, sat) in sats.iter().enumerate() {
+                print!("{sat:>6.2}");
+                let mut dl = 0.0;
+                let mut n = 0.0;
+                for (_, faixa) in &grupos {
+                    let (mut cin, mut cout) = (0.0, 0.0);
+                    for i in faixa.clone() {
+                        for v in 0..3 {
+                            let j = v * 6 + si;
+                            let a = lab(&neutro, i, j);
+                            let b = lab(&caso, i, j);
+                            cin += a.1.hypot(a.2);
+                            cout += b.1.hypot(b.2);
+                            dl += b.0 - a.0;
+                            n += 1.0;
+                        }
+                    }
+                    print!("{:>9.2}", cout / cin.max(1e-6));
+                }
+                println!("{:>8.2}", dl / n);
+            }
+        }
         // analise-balanco <csv da rampa>: as curvas de cada canal saem da faixa
         // cinza; prevendo as faixas coloridas canal a canal, quanto erra?
         "analise-balanco" => {

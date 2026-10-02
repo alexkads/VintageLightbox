@@ -35,6 +35,11 @@
 //!   `VLB_FORCAR` do comparador. `--filtro` fica só com os casos cujo nome
 //!   contém um dos pedaços.
 //! - `--imagens <pasta>`: grava o lado a lado (Lightroom à esquerda) de cada caso.
+//! - `--adobe`: lê como Adobe RGB (1998) o JPEG que diz sê-lo sem ICC (o índice
+//!   DCF `R03` das Nikon do estúdio), como o Lightroom faz. O app ainda lê como
+//!   sRGB (`base_neutra.rs`); sem isso, toda foto da câmera parte de um neutro
+//!   ~3 ΔE longe do Lightroom (croma 0,81, mais fria), e esse piso esconde o
+//!   erro do controle que se quer medir.
 //!
 //! A saída tem, por caso, a diferença média (0–255) e, em cada faixa de tom do
 //! Lightroom, quanto a nossa está mais clara, mais quente (R−B) e mais verde.
@@ -189,7 +194,135 @@ const FAIXAS: [(&str, f64, f64); 5] = [
     ("brancos", 224.0, 256.0),
 ];
 
+/// O JPEG diz que é Adobe RGB (1998) sem ICC: o índice de interoperabilidade
+/// DCF `R03`, que as Nikon gravam no modo Adobe RGB. O Lightroom obedece.
+fn e_adobe_rgb(caminho: &Path) -> bool {
+    let Ok(arquivo) = fs::File::open(caminho) else {
+        return false;
+    };
+    let Ok(exif) = exif::Reader::new().read_from_container(&mut std::io::BufReader::new(arquivo))
+    else {
+        return false;
+    };
+    exif.get_field(exif::Tag::InteroperabilityIndex, exif::In::PRIMARY)
+        .is_some_and(|c| c.display_value().to_string().contains("R03"))
+}
+
+/// Lê os valores como Adobe RGB (1998) e devolve em sRGB (as duas em D65:
+/// a matriz é só a dos primários; fora da gama, corta).
+fn de_adobe_rgb(base: DynamicImage) -> DynamicImage {
+    let mut img = base.to_rgb8();
+    let gama = 563.0f32 / 256.0;
+    let tabela: Vec<f32> = (0..256).map(|v| (v as f32 / 255.0).powf(gama)).collect();
+    let codificar = |v: f32| {
+        let v = v.clamp(0.0, 1.0);
+        let s = if v <= 0.003_130_8 {
+            v * 12.92
+        } else {
+            1.055 * v.powf(1.0 / 2.4) - 0.055
+        };
+        (s * 255.0).round() as u8
+    };
+    for p in img.pixels_mut() {
+        let [r, g, b] = p.0.map(|v| tabela[v as usize]);
+        p.0 = [
+            codificar(1.398_283 * r - 0.398_283 * g),
+            codificar(g),
+            codificar(-0.042_938 * g + 1.042_938 * b),
+        ];
+    }
+    DynamicImage::ImageRgb8(img)
+}
+
 /// `geral` e, por faixa, `luma,quente,verde` — vazio onde a faixa não tem pixel.
+/// As medidas que o olho entende, em Lab (`palette`): `ΔE2000` médio e o
+/// percentil 95 (abaixo de ~2 não se nota), `ΔL*` (nossa − Lightroom, só a
+/// luminosidade), a razão de croma (nossa ÷ Lightroom: 1 = a mesma saturação,
+/// menos = mais lavada) e o SSIM da luminância (1 = a mesma estrutura — é o
+/// que Remover névoa, Claridade e Textura mexem).
+///
+/// Um pixel em cada quatro (passo 2 nos dois eixos): a média não muda, e a
+/// conta do CIEDE2000 é a parte cara.
+fn perceptual(nosso: &RgbImage, lr: &RgbImage) -> (f64, f64, f64, f64, f64) {
+    use palette::{color_difference::Ciede2000, IntoColor, Lab, Srgb};
+    let lab = |p: &image::Rgb<u8>| -> Lab {
+        Srgb::new(p[0], p[1], p[2])
+            .into_format::<f32>()
+            .into_linear()
+            .into_color()
+    };
+    let (mut des, mut dl, mut c_nosso, mut c_lr) = (Vec::new(), 0.0, 0.0, 0.0);
+    for y in (0..lr.height()).step_by(2) {
+        for x in (0..lr.width()).step_by(2) {
+            let (a, b) = (lab(nosso.get_pixel(x, y)), lab(lr.get_pixel(x, y)));
+            des.push(a.difference(b) as f64);
+            dl += (a.l - b.l) as f64;
+            c_nosso += (a.a.hypot(a.b)) as f64;
+            c_lr += (b.a.hypot(b.b)) as f64;
+        }
+    }
+    let n = des.len() as f64;
+    let media = des.iter().sum::<f64>() / n;
+    des.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let p95 = des[((n * 0.95) as usize).min(des.len() - 1)];
+    (
+        media,
+        p95,
+        dl / n,
+        c_nosso / c_lr.max(1e-6),
+        ssim(nosso, lr),
+    )
+}
+
+/// O SSIM da luminância, em janelas 8×8 de passo 4, numa redução a 512 px.
+fn ssim(nosso: &RgbImage, lr: &RgbImage) -> f64 {
+    let lado = 512u32.min(lr.width());
+    let alto = (lado * lr.height() / lr.width()).max(8);
+    let cinza = |i: &RgbImage| -> Vec<f64> {
+        image::imageops::resize(i, lado, alto, FilterType::Triangle)
+            .pixels()
+            .map(luma)
+            .collect()
+    };
+    let (a, b) = (cinza(nosso), cinza(lr));
+    let (w, h) = (lado as usize, alto as usize);
+    let (c1, c2) = ((0.01f64 * 255.0).powi(2), (0.03f64 * 255.0).powi(2));
+    let (mut soma, mut n) = (0.0, 0.0);
+    for y0 in (0..h.saturating_sub(8)).step_by(4) {
+        for x0 in (0..w.saturating_sub(8)).step_by(4) {
+            let (mut ma, mut mb) = (0.0, 0.0);
+            for y in y0..y0 + 8 {
+                for x in x0..x0 + 8 {
+                    ma += a[y * w + x];
+                    mb += b[y * w + x];
+                }
+            }
+            ma /= 64.0;
+            mb /= 64.0;
+            let (mut va, mut vb, mut cov) = (0.0, 0.0, 0.0);
+            for y in y0..y0 + 8 {
+                for x in x0..x0 + 8 {
+                    let (da, db) = (a[y * w + x] - ma, b[y * w + x] - mb);
+                    va += da * da;
+                    vb += db * db;
+                    cov += da * db;
+                }
+            }
+            va /= 63.0;
+            vb /= 63.0;
+            cov /= 63.0;
+            soma += ((2.0 * ma * mb + c1) * (2.0 * cov + c2))
+                / ((ma * ma + mb * mb + c1) * (va + vb + c2));
+            n += 1.0;
+        }
+    }
+    if n > 0.0 {
+        soma / n
+    } else {
+        1.0
+    }
+}
+
 fn medir(nosso: &RgbImage, lr: &RgbImage) -> String {
     let mut soma = 0.0;
     for (a, b) in nosso.pixels().zip(lr.pixels()) {
@@ -274,6 +407,7 @@ fn main() {
     };
     let forcar_todos = valor("--forcar").map(|f| pares(&f)).unwrap_or_default();
     let imagens = valor("--imagens").map(PathBuf::from);
+    let adobe = args.iter().any(|a| a == "--adobe");
     if let Some(p) = &imagens {
         fs::create_dir_all(p).unwrap();
     }
@@ -293,6 +427,7 @@ fn main() {
     for (f, _, _) in FAIXAS {
         let _ = write!(cabecalho, ",{f}_luma,{f}_quente,{f}_verde");
     }
+    cabecalho.push_str(",de2000,de2000_p95,dl,croma,ssim");
     let mut linhas = vec![cabecalho];
     let mut resultados: Vec<Resultado> = Vec::new();
     // Os originais decodificados, e as reduções deles por tamanho.
@@ -303,9 +438,22 @@ fn main() {
         let bytes_lr = fs::read(&caso.exportado).expect("ler o exportado");
         let lr = image::load_from_memory(&bytes_lr).unwrap().to_rgb8();
         let (ajustes, corte) = revelacao(&bytes_lr, &caso.original);
+        // Um original por vez: os casos vêm agrupados por foto, e guardar
+        // todos (24 MP cada, e os RAW) esgotava a memória numa rodada inteira.
+        if !decodificados.contains_key(&caso.original) {
+            decodificados.clear();
+            reduzidos.clear();
+        }
         let original = decodificados
             .entry(caso.original.clone())
-            .or_insert_with(|| base_neutra::base_neutra(&caso.original).expect("abrir o original"));
+            .or_insert_with(|| {
+                let base = base_neutra::base_neutra(&caso.original).expect("abrir o original");
+                if adobe && e_adobe_rgb(&caso.original) {
+                    de_adobe_rgb(base)
+                } else {
+                    base
+                }
+            });
         let (w, h) = (original.width() as f32, original.height() as f32);
         // A escala que deixa o recorte no tamanho do exportado.
         let recorte = (
@@ -348,14 +496,16 @@ fn main() {
             };
             let medida = medir(&nosso, &lr);
             let geral: f64 = medida.split(',').next().unwrap().parse().unwrap();
+            let (de, de95, dl, croma, ssim) = perceptual(&nosso, &lr);
             resultados.push(Resultado {
                 caso: caso_sem_foto(&caso.rotulo),
                 tipo: tipo(&caso.original),
                 processo: processo.unwrap_or(-1.0),
                 geral,
+                de,
             });
             linhas.push(format!(
-                "{},{},{},{}",
+                "{},{},{},{},{de:.2},{de95:.2},{dl:.2},{croma:.3},{ssim:.4}",
                 caso.rotulo.replace(',', ";"),
                 tipo(&caso.original),
                 processo.map(|p| p.to_string()).unwrap_or_default(),
@@ -398,6 +548,7 @@ struct Resultado {
     tipo: &'static str,
     processo: f32,
     geral: f64,
+    de: f64,
 }
 
 /// `JPG` ou `RAW`, pela extensão do original: no RAW a base já difere.
@@ -424,8 +575,10 @@ fn caso_sem_foto(rotulo: &str) -> String {
 /// primeiro. Com `base`, quanto cada caso mudou desde aquela rodada.
 fn resumir(resultados: &[Resultado], saida: &Path, base: Option<&Path>) {
     use std::collections::BTreeMap;
-    // (caso, tipo) → processo → (soma, n)
-    let mut grupos: BTreeMap<(String, &str), BTreeMap<String, (f64, f64)>> = BTreeMap::new();
+    /// Por processo: (soma do geral, soma do ΔE, n).
+    type Somas = BTreeMap<String, (f64, f64, f64)>;
+    // (caso, tipo) → processo → somas
+    let mut grupos: BTreeMap<(String, &str), Somas> = BTreeMap::new();
     for r in resultados {
         let p = if r.processo < 0.0 {
             "-".to_string()
@@ -436,18 +589,21 @@ fn resumir(resultados: &[Resultado], saida: &Path, base: Option<&Path>) {
             .entry((r.caso.clone(), r.tipo))
             .or_default()
             .entry(p)
-            .or_insert((0.0, 0.0));
+            .or_insert((0.0, 0.0, 0.0));
         e.0 += r.geral;
-        e.1 += 1.0;
+        e.1 += r.de;
+        e.2 += 1.0;
     }
-    let media = |m: &BTreeMap<String, (f64, f64)>, p: &str| m.get(p).map(|(s, n)| s / n);
+    let media = |m: &BTreeMap<String, (f64, f64, f64)>, p: &str| m.get(p).map(|(s, _, n)| s / n);
+    let media_de = |m: &BTreeMap<String, (f64, f64, f64)>, p: &str| m.get(p).map(|(_, d, n)| d / n);
     // A rodada anterior: (caso, tipo, processo) → média.
     let anterior: HashMap<(String, String, String), f64> = base
         .map(|b| ler_resumo(&b.with_extension("resumo.csv")))
         .unwrap_or_default();
 
     let mut linhas: Vec<(f64, String)> = Vec::new();
-    let mut csv = vec!["caso,tipo,processo0,processo1,diferenca,base_processo1,mudou".to_string()];
+    let mut csv =
+        vec!["caso,tipo,processo0,processo1,diferenca,base_processo1,mudou,de0,de1".to_string()];
     let (mut melhorou, mut piorou) = (0, 0);
     for ((caso, tipo), m) in &grupos {
         let p0 = media(m, "0");
@@ -470,25 +626,31 @@ fn resumir(resultados: &[Resultado], saida: &Path, base: Option<&Path>) {
             (Some(a), Some(b)) => Some(b - a),
             _ => None,
         };
+        let de0 = media_de(m, "0");
+        let de1 = media_de(m, "1").or_else(|| media_de(m, "-"));
         let f = |v: Option<f64>| v.map(|x| format!("{x:.1}")).unwrap_or_default();
         csv.push(format!(
-            "{},{tipo},{},{},{},{},{}",
+            "{},{tipo},{},{},{},{},{},{},{}",
             caso.replace(',', ";"),
             f(p0),
             f(p1),
             f(dif),
             f(antes),
-            f(mudou)
+            f(mudou),
+            f(de0),
+            f(de1)
         ));
         linhas.push((
             dif.unwrap_or(0.0),
             format!(
-                "{:<58} {tipo}  {:>6}  {:>6}  {:>6}  {:>6}",
+                "{:<58} {tipo}  {:>6}  {:>6}  {:>6}  {:>6}  {:>6}  {:>6}",
                 caso.chars().take(58).collect::<String>(),
                 f(p0),
                 f(p1),
                 f(dif),
-                f(mudou)
+                f(mudou),
+                f(de0),
+                f(de1)
             ),
         ));
     }
@@ -496,8 +658,8 @@ fn resumir(resultados: &[Resultado], saida: &Path, base: Option<&Path>) {
     fs::write(&arquivo, csv.join("\n") + "\n").unwrap();
     linhas.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
     println!(
-        "\n{:<58} tipo  {:>6}  {:>6}  {:>6}  {:>6}",
-        "caso (o que piorou primeiro)", "proc0", "proc1", "1−0", "mudou"
+        "\n{:<58} tipo  {:>6}  {:>6}  {:>6}  {:>6}  {:>6}  {:>6}",
+        "caso (o que piorou primeiro)", "proc0", "proc1", "1−0", "mudou", "ΔE 0", "ΔE 1"
     );
     for (_, l) in &linhas {
         println!("{l}");
