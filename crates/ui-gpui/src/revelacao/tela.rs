@@ -3739,6 +3739,32 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
+    /// A coluna diz o espaço da foto: a aba **Adobe RGB**, e nenhuma sRGB ou
+    /// RGB (dono, 2/out/2026).
+    #[gpui_kit::test]
+    fn a_coluna_tem_so_a_aba_adobe_rgb(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-espaco.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let janela = janela(cx, previews);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("espaco.jpg"), window, cx);
+            })
+            .expect("a janela deve estar aberta");
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_resize(gpui_kit::size(px(1920.), px(1080.)));
+        visual.run_until_parked();
+
+        assert!(
+            visual.debug_bounds("aba-espaco-Adobe RGB").is_some(),
+            "a aba Adobe RGB é desenhada"
+        );
+        assert!(visual.debug_bounds("aba-espaco-sRGB").is_none());
+        assert!(visual.debug_bounds("aba-espaco-RGB").is_none());
+    }
+
     /// 🎞️ O Efeitos no desenho do Lightroom (dono, 2026-09-30, com o print
     /// do painel dele): os dois grupos com título, o rótulo na mesma linha da
     /// barra, e o Estilo numa lista que entra no histórico como um clique.

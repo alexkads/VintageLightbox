@@ -153,12 +153,14 @@ impl Painel {
         Painel::Efeitos,
     ];
 
-    /// A aba sRGB — os controles de sempre, sobre a foto com gama.
+    /// A aba Adobe RGB — os controles do Lightroom, sobre a foto lida no
+    /// espaço que a câmera gravou (dono, 2/out/2026: a aba sRGB vira Adobe RGB,
+    /// e o sRGB sai da tela).
     ///
     /// 🔑 **A ordem é a do pipeline** (`paineis.tsx:159-181`): a curva por ponto
     /// logo depois da paramétrica, o mixer de P&B depois do HSL, a calibração
     /// antes da tonalização, e o virador e o grão por último.
-    pub const SRGB: [Painel; 9] = [
+    pub const ADOBE_RGB: [Painel; 9] = [
         Painel::Basico,
         Painel::CurvaDeTons,
         Painel::Hsl,
@@ -1197,7 +1199,7 @@ mod testes {
     fn as_chaves_sao_as_do_site() {
         assert_eq!(Painel::Basico.chave(), "revelacao:Básico");
         assert_eq!(Painel::Hsl.chave(), "revelacao:HSL");
-        assert_eq!(Painel::SRGB.to_vec(), Painel::TODOS.to_vec());
+        assert_eq!(Painel::ADOBE_RGB.to_vec(), Painel::TODOS.to_vec());
     }
 
     /// 🚨 **O cabeçalho conta todos os campos**, e o neutro não conta nada — nem

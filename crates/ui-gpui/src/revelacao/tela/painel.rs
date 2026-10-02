@@ -245,6 +245,33 @@ fn titulo(rotulo: &'static str, separar: bool, cx: &gpui_kit::App) -> AnyElement
         .into_any_element()
 }
 
+/// A aba do espaço em que a foto é revelada: **Adobe RGB**, e só ela.
+///
+/// 🔑 **Dono, 2/out/2026: a aba sRGB vira Adobe RGB, e o sRGB sai da tela.**
+/// Até a 0.1.64 eram duas, sRGB e RGB (os módulos do darktable); o darktable
+/// saiu do motor, e a foto passou a ser lida no espaço que a câmera grava
+/// (`foto_codec::espaco_de_cor`). A aba fica, sozinha, para dizer isso.
+fn aba_de_espaco() -> AnyElement {
+    TabBar::new("abas-de-espaco")
+        .segmented()
+        .xsmall()
+        .w_full()
+        .selected_index(0)
+        .child(
+            Tab::new()
+                .label("Adobe RGB")
+                .flex_1()
+                .debug_selector(|| "aba-espaco-Adobe RGB".to_string())
+                .tooltip(|window, cx| {
+                    gpui_kit::component::tooltip::Tooltip::new(
+                        "Os controles do Lightroom, sobre a foto no espaço que a câmera gravou",
+                    )
+                    .build(window, cx)
+                }),
+        )
+        .into_any_element()
+}
+
 pub(super) fn ponto(marca: controles::Marca, cx: &gpui_kit::App) -> gpui_kit::Div {
     let cor = match marca {
         controles::Marca::NaoSalvo => tema::cores::quente(),
@@ -462,7 +489,8 @@ impl Revelacao {
         let mut corpo: Vec<AnyElement> = Vec::new();
         if !enquadrando {
             corpo.push(self.cabecalho_dos_ajustes(cx));
-            let paineis: &[Painel] = &Painel::SRGB;
+            corpo.push(aba_de_espaco());
+            let paineis: &[Painel] = &Painel::ADOBE_RGB;
             // A Revelação local vem logo abaixo do primeiro painel (o Básico),
             // como no Lightroom — recolhida por padrão.
             // 🎞️ **O P&B toma o lugar do HSL**, como no Lightroom: com a foto
