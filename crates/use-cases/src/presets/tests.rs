@@ -354,9 +354,9 @@ fn cada_uma_escreve_a_mesma_quantidade_de_campos_do_site() {
 
     assert_eq!(
         quantos,
-        // O RecordarFotos P&B (7º) tem 33 desde 2/out/2026: os controles do
+        // O RecordarFotos P&B (7º) tem 37 desde 2/out/2026: os controles do
         // Lightroom no lugar dos 24 campos `dt_*` do darktable.
-        vec![5, 8, 9, 6, 7, 7, 33, 13, 13, 10, 12, 7, 11, 6, 10, 16, 17, 13, 13, 4, 35]
+        vec![5, 8, 9, 6, 7, 7, 37, 13, 13, 10, 12, 7, 11, 6, 10, 16, 17, 13, 13, 4, 35]
     );
 }
 

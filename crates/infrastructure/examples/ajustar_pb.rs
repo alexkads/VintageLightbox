@@ -37,11 +37,17 @@ const LADO: u32 = 768;
 const PASSO_DA_AMOSTRA: u32 = 3;
 
 /// (campo, início, mínimo, máximo, passo inicial).
-const CONTROLES: [(&str, f32, f32, f32, f32); 33] = [
+const CONTROLES: [(&str, f32, f32, f32, f32); 37] = [
     // A vinheta da Lente vem antes da viragem: a borda clareada ganha o sépia,
     // como no darktable. A pós-corte vem depois e clareia para o branco neutro.
     ("lens_vignette_amount", 0.0, -100.0, 100.0, 8.0),
     ("lens_vignette_midpoint", 50.0, 0.0, 100.0, 8.0),
+    // As rodas dos tons médios e global do Color Grading: a viragem medida do
+    // Lightroom é mais fraca nos realces que o creme do darktable.
+    ("split_midtone_hue", 50.0, 0.0, 360.0, 10.0),
+    ("split_midtone_sat", 0.0, 0.0, 100.0, 4.0),
+    ("split_global_hue", 50.0, 0.0, 360.0, 10.0),
+    ("split_global_sat", 0.0, 0.0, 100.0, 4.0),
     ("texture", 0.0, -100.0, 100.0, 8.0),
     ("pcv_highlights", 0.0, 0.0, 100.0, 8.0),
     ("exposure", 0.16, -1.5, 1.5, 0.1),

@@ -10,8 +10,11 @@ use std::sync::Arc;
 /// motor (campos `dt_*`), lendo a foto como sRGB. O dono decidiu um motor só e a
 /// leitura em Adobe RGB, e o estilo foi refeito com os controles do Lightroom:
 /// `examples/ajustar_pb.rs` procurou estes valores contra o `darktable-cli`
-/// 5.6.1 com o mesmo `.dtstyle`, em 6 fotos da câmera — ΔE2000 1,6 a 2,0 (as
-/// duas fora do ajuste: 1,74 e 1,87; abaixo de 2 o olho não separa). A borda
+/// 5.6.1 com o mesmo `.dtstyle`, em 6 fotos da câmera — ΔE2000 médio 2,17 em
+/// resolução cheia (2,0 a 2,3; abaixo de ~2 o olho não separa), já sobre a
+/// Divisão de tons medida no Lightroom. A viragem do Lightroom é mais fraca
+/// nos realces que o creme do darktable: as rodas dos tons médios e global do
+/// Color Grading completam. A borda
 /// creme da vinheta vem de a viragem ser aplicada depois dela no processo 1
 /// (`corpo.wgsl`, `viragem`), como no Lightroom e no darktable. As fotos guardadas com os `dt_*` antigos migram para estes valores
 /// na leitura ([`migrar_do_darktable`]).
@@ -19,36 +22,40 @@ pub const RECORDARFOTOS_PB: &[(&str, f32)] = &[
     ("bw_ativo", 1.0),
     ("processo", 1.0),
     ("exposure", 0.29),
-    ("contrast", 1.05),
-    ("highlights", -2.25),
+    ("contrast", 1.07),
+    ("highlights", 1.5),
     ("shadows", 100.0),
-    ("whites", -28.25),
-    ("blacks", 19.25),
-    ("clarity", 0.11),
-    ("texture", -6.0),
-    ("dehaze", -10.5),
-    ("tone_curve_shadows", 23.13),
-    ("tone_curve_darks", -5.88),
-    ("tone_curve_lights", -6.75),
-    ("tone_curve_highlights", -1.13),
-    ("bw_red", 1.72),
-    ("bw_orange", -0.63),
-    ("bw_yellow", 3.75),
-    ("bw_green", 26.25),
-    ("bw_aqua", 46.25),
-    ("bw_blue", 15.0),
+    ("whites", -28.5),
+    ("blacks", 18.12),
+    ("clarity", 0.16),
+    ("texture", -5.0),
+    ("dehaze", -15.0),
+    ("tone_curve_shadows", 19.88),
+    ("tone_curve_darks", -6.62),
+    ("tone_curve_lights", -7.75),
+    ("tone_curve_highlights", -3.62),
+    ("bw_red", 1.41),
+    ("bw_orange", -1.25),
+    ("bw_yellow", 4.06),
+    ("bw_green", 27.5),
+    ("bw_aqua", 48.75),
+    ("bw_blue", 12.5),
     ("bw_magenta", -2.5),
-    ("split_shadow_hue", 51.41),
-    ("split_shadow_sat", 36.5),
-    ("split_highlight_hue", 50.63),
-    ("split_highlight_sat", 70.5),
-    ("split_balance", -84.69),
-    ("lens_vignette_amount", 98.0),
-    ("lens_vignette_midpoint", 82.5),
-    ("pcv_amount", 43.75),
-    ("pcv_midpoint", 28.0),
-    ("pcv_feather", 30.0),
-    ("pcv_roundness", -62.19),
+    ("split_shadow_hue", 45.78),
+    ("split_shadow_sat", 21.5),
+    ("split_highlight_hue", 52.5),
+    ("split_highlight_sat", 100.0),
+    ("split_balance", -57.81),
+    ("split_midtone_hue", 40.0),
+    ("split_midtone_sat", 20.75),
+    ("split_global_hue", 54.38),
+    ("split_global_sat", 4.5),
+    ("lens_vignette_amount", 96.0),
+    ("lens_vignette_midpoint", 83.25),
+    ("pcv_amount", 44.12),
+    ("pcv_midpoint", 28.62),
+    ("pcv_feather", 30.25),
+    ("pcv_roundness", -62.03),
 ];
 
 /// A receita guardada (nome → valor) de uma foto revelada com o RecordarFotos

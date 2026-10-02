@@ -56,8 +56,75 @@ use std::{
     sync::Arc,
 };
 
+#[path = "comum/legenda.rs"]
+mod legenda;
 #[path = "comum/medidas.rs"]
 mod medidas;
+
+/// Os 16 níveis medidos da faixa cinza da `rampa-cor.jpg` (8, 24, …, 248).
+const NIVEIS_DA_RAMPA: usize = 16;
+
+/// O Lab médio de 16 níveis da faixa cinza de cima da `rampa-cor.jpg` (4
+/// faixas × 256 degraus; a mesma leitura do `tabelas-do-lightroom`).
+fn cor_da_rampa(img: &RgbImage) -> Vec<palette::Lab> {
+    let (w, h) = (img.width() as f64, img.height() as f64);
+    let (y0, y1) = ((0.3 * h / 4.0) as u32, (0.7 * h / 4.0) as u32);
+    (0..NIVEIS_DA_RAMPA)
+        .map(|k| {
+            let i = (k * 16 + 8) as f64;
+            let x0 = ((i + 0.3) * w / 256.0) as u32;
+            let x1 = (((i + 0.7) * w / 256.0) as u32).max(x0 + 1);
+            let (mut l, mut a, mut b, mut n) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let c = medidas::lab(img.get_pixel(x, y));
+                    (l, a, b, n) = (l + c.l, a + c.a, b + c.b, n + 1.0);
+                }
+            }
+            palette::Lab::new(l / n, a / n, b / n)
+        })
+        .collect()
+}
+
+/// Por caso da rampa: o croma que cada lado pôs nas sombras (8–72), nos
+/// médios (88–152) e nos realces (168–248), a razão nossa ÷ Lightroom e a
+/// diferença de matiz (graus, pesada pelo croma do Lightroom).
+fn resumir_a_rampa(cores: &[(String, Vec<palette::Lab>, Vec<palette::Lab>)]) {
+    let croma = |c: &palette::Lab| (c.a.hypot(c.b)) as f64;
+    let matiz = |c: &palette::Lab| (c.b.atan2(c.a) as f64).to_degrees();
+    let faixas = [(0usize, 5usize), (5, 10), (10, NIVEIS_DA_RAMPA)];
+    println!(
+        "\n{:44} {:>23} {:>23} {:>7}",
+        "caso (rampa)", "croma LR  sombra/meio/realce", "croma app", "Δmatiz"
+    );
+    for (rotulo, lr, nosso) in cores {
+        let media = |v: &[palette::Lab], (i, j): (usize, usize)| {
+            v[i..j].iter().map(croma).sum::<f64>() / (j - i) as f64
+        };
+        let (mut soma, mut peso) = (0.0, 0.0);
+        for (a, b) in nosso.iter().zip(lr) {
+            let mut d = matiz(a) - matiz(b);
+            if d > 180.0 {
+                d -= 360.0
+            } else if d < -180.0 {
+                d += 360.0
+            }
+            soma += d * croma(b);
+            peso += croma(b);
+        }
+        let curto = rotulo.rsplit('/').next().unwrap_or(rotulo);
+        println!(
+            "{curto:44} {:>7.1} {:>7.1} {:>7.1} {:>7.1} {:>7.1} {:>7.1} {:>+7.1}",
+            media(lr, faixas[0]),
+            media(lr, faixas[1]),
+            media(lr, faixas[2]),
+            media(nosso, faixas[0]),
+            media(nosso, faixas[1]),
+            media(nosso, faixas[2]),
+            if peso > 0.0 { soma / peso } else { 0.0 }
+        );
+    }
+}
 
 use domain::value_objects::CropSettings;
 use image::{imageops::FilterType, DynamicImage, RgbImage};
@@ -343,6 +410,11 @@ fn main() {
     };
     let forcar_todos = valor("--forcar").map(|f| pares(&f)).unwrap_or_default();
     let imagens = valor("--imagens").map(PathBuf::from);
+    // `--rampa`: os casos feitos na `rampa-cor.jpg` (a faixa cinza de cima)
+    // ganham, no fim, a cor que cada lado pôs em cada nível — é a régua da
+    // viragem (`casos=viragem`).
+    let rampa = args.iter().any(|a| a == "--rampa");
+    let mut cores_da_rampa: Vec<(String, Vec<palette::Lab>, Vec<palette::Lab>)> = Vec::new();
     if let Some(p) = &imagens {
         fs::create_dir_all(p).unwrap();
     }
@@ -439,22 +511,22 @@ fn main() {
                 processo.map(|p| p.to_string()).unwrap_or_default(),
                 medida
             ));
+            if rampa {
+                cores_da_rampa.push((rotulo_p.clone(), cor_da_rampa(&lr), cor_da_rampa(&nosso)));
+            }
             if let Some(pasta) = &imagens {
                 let lado = 1200u32.min(lr.width());
                 let alto = lado * lr.height() / lr.width();
-                let mut par = RgbImage::new(lado * 2, alto);
-                image::imageops::replace(
-                    &mut par,
-                    &image::imageops::resize(&lr, lado, alto, FilterType::Triangle),
-                    0,
-                    0,
-                );
-                image::imageops::replace(
-                    &mut par,
-                    &image::imageops::resize(&nosso, lado, alto, FilterType::Triangle),
-                    lado as i64,
-                    0,
-                );
+                let par = legenda::lado_a_lado(&[
+                    (
+                        "LIGHTROOM",
+                        &image::imageops::resize(&lr, lado, alto, FilterType::Triangle),
+                    ),
+                    (
+                        "APP",
+                        &image::imageops::resize(&nosso, lado, alto, FilterType::Triangle),
+                    ),
+                ]);
                 let arquivo = rotulo_p.replace(['/', '\\', ' ', ':'], "_");
                 par.save(pasta.join(format!("{arquivo}.jpg"))).unwrap();
             }
@@ -464,6 +536,9 @@ fn main() {
         fs::write(&saida, linhas.join("\n") + "\n").unwrap();
     }
     println!("{} linhas em {}", linhas.len() - 1, saida.display());
+    if rampa {
+        resumir_a_rampa(&cores_da_rampa);
+    }
     resumir(
         &resultados,
         &saida,

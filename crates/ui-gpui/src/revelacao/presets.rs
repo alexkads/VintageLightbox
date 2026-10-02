@@ -837,7 +837,7 @@ mod testes {
         );
         assert_eq!(
             resumir(&sistema("RecordarFotos P&B").adjustments),
-            "Exposição, Contraste, Altas luzes, Sombras e mais 29"
+            "Exposição, Contraste, Altas luzes, Sombras e mais 33"
         );
     }
 

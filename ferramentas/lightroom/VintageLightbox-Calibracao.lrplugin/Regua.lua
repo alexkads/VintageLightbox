@@ -413,7 +413,46 @@ local function casos_de_vinheta_viragem()
 	}
 end
 
+-- A Divisão de tons sozinha, na rampa (a faixa cinza): quanto de cor cada
+-- matiz e saturação põe em cada nível, nas sombras e nos realces, e o
+-- Equilíbrio. É a régua da viragem do processo 1.
+local function casos_de_viragem()
+	local casos = { { nome = "00-neutro", ajustes = {} } }
+	for _, s in ipairs { 10, 25, 50, 75, 100 } do
+		table.insert(casos, { nome = string.format("sombra-h045-s%03d", s),
+			ajustes = { SplitToningShadowHue = 45, SplitToningShadowSaturation = s } })
+		table.insert(casos, { nome = string.format("realce-h045-s%03d", s),
+			ajustes = { SplitToningHighlightHue = 45, SplitToningHighlightSaturation = s } })
+	end
+	for h = 0, 330, 30 do
+		table.insert(casos, { nome = string.format("sombra-h%03d-s050", h),
+			ajustes = { SplitToningShadowHue = h, SplitToningShadowSaturation = 50 } })
+		table.insert(casos, { nome = string.format("realce-h%03d-s050", h),
+			ajustes = { SplitToningHighlightHue = h, SplitToningHighlightSaturation = 50 } })
+	end
+	-- O Equilíbrio com cada região sozinha: quanto ele desloca e amplia a
+	-- máscara das sombras e a dos realces.
+	for _, e in ipairs { -100, -75, -50, -25, 25, 50, 75, 100 } do
+		table.insert(casos, { nome = string.format("sombra-equilibrio%+04d", e),
+			ajustes = { SplitToningShadowHue = 45, SplitToningShadowSaturation = 50, SplitToningBalance = e } })
+		table.insert(casos, { nome = string.format("realce-equilibrio%+04d", e),
+			ajustes = { SplitToningHighlightHue = 45, SplitToningHighlightSaturation = 50, SplitToningBalance = e } })
+	end
+	for _, e in ipairs { -100, -50, 50, 100 } do
+		table.insert(casos, { nome = string.format("equilibrio%+04d", e),
+			ajustes = {
+				SplitToningShadowHue = 45, SplitToningShadowSaturation = 50,
+				SplitToningHighlightHue = 45, SplitToningHighlightSaturation = 50,
+				SplitToningBalance = e,
+			} })
+	end
+	return casos
+end
+
 function Regua.casos(completa, por_nome, tipo)
+	if tipo == "viragem" then
+		return casos_de_viragem()
+	end
 	if tipo == "vinheta-viragem" then
 		return casos_de_vinheta_viragem()
 	end

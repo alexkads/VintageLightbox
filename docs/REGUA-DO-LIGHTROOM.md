@@ -532,6 +532,7 @@ para ajustar, 2 só para validar):
 | 1 | controles do Lightroom, vinheta pós-corte | 2,93 / 3,24 |
 | 2 | + vinheta da Lente, difusão ≥ 30 (sem anel duro) | 2,56 / 2,85 |
 | 3 | **a viragem depois das vinhetas no processo 1** | **1,74 / 1,87** |
+| 4 | a Divisão de tons medida no Lightroom (seção 14) + as rodas dos tons médios e global | 2,04 / 1,99 (média 2,17 em resolução cheia) |
 
 **O achado da rodada 3** — o dono, olhando: *"é como se no darktable a vinheta fosse uma camada dentro
 do efeito e não por cima dele"*. A régua `vinheta-viragem` no Lightroom confirmou: numa foto P&B com
@@ -563,6 +564,7 @@ RecordarFotos P&B.
 | Médias que saem 0 | `Measure-Object` com bloco no PowerShell 5.1 | o resumo sai do próprio CLI de Rust |
 | `darktable-cli --style` não acha o estilo | o estilo tem de estar no banco do darktable | um XMP de histórico gerado do `.dtstyle` como 2º argumento |
 | Compilação falha com "espaço insuficiente" | cache incremental de debug | `CARGO_INCREMENTAL=0`; apagar `target*/debug/incremental` |
+| Acentos viram `Ã¡`, `Ã§` depois de uma troca de texto | `Get-Content` do PowerShell 5.1 lê UTF-8 sem BOM como ANSI, e `Set-Content` regrava | trocar texto com `sed`/`perl` ou com o editor; se já corrompeu, `perl -MEncode` (cp1252 → UTF-8) desfaz |
 | `[motor] DX12 … X3017` no começo de todo CLI (até 2/out) | o FXC do DX12 não compilava o `darktable.wgsl` (`float3[2]`) | sumiu com o darktable: o motor abre em DX12, e compilar leva ~2 s — testes que esperam a GPU precisam de folga |
 
 ## 13. O darktable saiu do motor (2/out)
@@ -590,3 +592,28 @@ Com o RecordarFotos P&B refeito (seção 11), o caminho do darktable deixou de t
 mesmos valores, sem a aba RGB e sem o importador, e a leitura do Adobe RGB (`foto_codec::espaco_de_cor`
 exposto pelo `revelacao-web`). Até lá, **nenhuma versão do app sai**: o site manda os ajustes por
 posição, e um wasm antigo com o app novo trocaria os campos de lugar.
+
+## 14. A Divisão de tons medida no Lightroom (2/out)
+
+Régua `casos=viragem` na faixa cinza da `rampa-cor.jpg`: cada região sozinha (sombras, realces) em 12
+matizes com saturação 50, 5 saturações no matiz 45°, o Equilíbrio de −100 a +100 com cada região
+sozinha e com as duas juntas. Medida pelo `comparar_em_lote --rampa`, que imprime, por caso, o croma
+que cada lado pôs nas sombras, nos médios e nos realces, e a diferença de matiz.
+
+**O que a roda de antes errava:**
+
+- pintava os realces quase 2× mais que o Lightroom (saturação 50: croma 16 contra 9) e os meios-tons
+  2× mais (9 contra 4) — a transição entre as regiões era larga demais;
+- dava o mesmo croma em todo matiz, e o Lightroom vai de 11 a 23 conforme o matiz; o matiz errava até
+  ±17°;
+- o **Equilíbrio** não fazia nada com as duas regiões na mesma cor: a roda repartia uma cor só entre
+  elas. No Lightroom as duas **se somam** e o Equilíbrio desloca e amplia cada uma — com as duas em
+  45°/50, o −100 leva os meios-tons de croma 19 a 42.
+
+**No processo 1** (`corpo.wgsl`, `lr_viragem`), sombras e realces viram tabela: o Δa*/Δb* de cada
+nível por região e matiz (`LINHA_VIRAGEM`), o fator de cada saturação (`LINHA_VIRAGEM_SATURACAO`) e o
+ganho de cada nível com o Equilíbrio (`LINHA_VIRAGEM_EQUILIBRIO`). Os tons médios e o global do Color
+Grading, a Luminância e a Mistura seguem a conta de antes. Resultado: croma dentro de ~1 do Lightroom
+nos 12 matizes, matiz em ±1°, Equilíbrio −100 nos médios 38 contra 42.
+
+O RecordarFotos P&B usa a viragem: os valores dele foram reajustados com a tabela nova (seção 11).
