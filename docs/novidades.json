@@ -1,10 +1,10 @@
 {
-  "versao": "0.1.66",
-  "titulo": "A pasta LRs ficou com 26 predefinições.",
+  "versao": "0.1.67",
+  "titulo": "O preço do lote agora mostra que foi aplicado.",
   "importante": false,
   "novidades": [
-    "Saíram da pasta LRs a \"Predefinição sem título\" e a \"RecordarFotos Bem Velhão\". Foto já revelada com uma delas continua como está.",
-    "Uma sessão que tinha uma delas como revelação padrão passa a receber as fotos novas só com o corte. O site recebeu a mesma mudança."
+    "Com várias fotos selecionadas, o \"Aplicar\" do preço de venda online fica em \"Aplicando…\" até o site confirmar, e então aparece o aviso \"Preço de venda de R$ 100,00 aplicado em 2 fotos\". O \"Voltar à faixa\" também avisa.",
+    "Depois de aplicar, o campo esvazia e o cartão mostra o valor que ficou: \"As 2 fixadas em R$ 100,00\". Antes ele só contava as fixadas, e parecia que nada tinha acontecido."
   ],
-  "por_que_atualizar": "A lista de predefinições do app fica igual à do site, sem as duas que saíram."
+  "por_que_atualizar": "O preço que você aplica nas fotos do pós-venda aparece na hora, sem dúvida se foi gravado."
 }
