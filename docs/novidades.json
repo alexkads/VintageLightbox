@@ -1,13 +1,14 @@
 {
-  "versao": "0.1.64",
-  "titulo": "O painel Básico ficou igual ao do Lightroom, e as predefinições P&B voltaram a funcionar.",
+  "versao": "0.1.65",
+  "titulo": "As fotos da câmera com as cores certas, e as predefinições do Lightroom saindo como no Lightroom.",
   "importante": true,
   "novidades": [
-    "As predefinições em preto e branco da pasta LRs (RecordarFotos P&B, Movie, Sépia, Bem Velhão…) agora aplicam a Mistura de preto e branco que trazem do Lightroom. Antes a foto ficava cinza, sem a mistura por cor.",
-    "No alto do Básico: \"Automático\" e \"P&B\". Ligado o P&B, o painel HSL dá lugar ao painel P&B, com a Mistura de preto e branco por cor, e a Vibração e a Saturação ficam apagadas, como no Lightroom.",
-    "\"Perfil\" escolhe entre Cor e Monocromático, e o conta-gotas ao lado do \"EB\" acerta o balanço de branco: clique nele e depois num ponto branco ou cinza da foto (Esc cancela). O EB também tem \"Como fotografado\" e \"Automático\".",
-    "Os controles têm os nomes e os números do Lightroom: Colorir, Realces, Desembaçar, Vibração; Contraste, Temperatura, Claridade e Saturação de −100 a +100. Os grupos Tom e Presença ficam como lá.",
-    "O quadro \"Curva resultante\" saiu: a Curva de tons já mostra a curva."
+    "As fotos da câmera agora abrem com as cores que a câmera gravou (Adobe RGB). Antes saíam um pouco mais apagadas e mais frias do que no Lightroom; agora o neutro fica praticamente igual ao dele. A coluna de ajustes mostra isso na aba \"Adobe RGB\".",
+    "As predefinições da pasta LRs saem muito mais parecidas com o Lightroom: Exposição, Contraste, Realces, Sombras, Brancos, Pretos, Temperatura, Matiz, Vibração, Saturação, Remover névoa, a Divisão de tons e a vinheta foram medidos no próprio Lightroom, um por um. Vale para fotos novas; foto já revelada continua como estava, e o interruptor \"Processo do Lightroom\", na Calibração, a passa para a conta nova.",
+    "A RecordarFotos P&B foi refeita com os controles de sempre e continua com o mesmo visual: o mesmo cinza quente e a mesma borda clara cor de creme. Foto já revelada com ela abre com a versão nova sozinha.",
+    "A borda clara da vinheta agora pega a cor da viragem (sépia, creme), como no Lightroom, em vez de ficar cinza.",
+    "Saíram a aba RGB e a importação de estilos do darktable, e a aba sRGB virou \"Adobe RGB\": tudo fica nos controles do Lightroom. As predefinições suas que vieram do darktable viram a RecordarFotos P&B.",
+    "O site recebeu a mesma atualização: a foto revelada no app e no site sai igual."
   ],
-  "por_que_atualizar": "As predefinições P&B do Lightroom saem como no Lightroom, e o Básico fica no lugar onde você já está acostumado."
+  "por_que_atualizar": "As cores das fotos da câmera e as predefinições ficam iguais às do Lightroom, e a RecordarFotos P&B continua com o visual que você já vende."
 }
