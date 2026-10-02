@@ -28,7 +28,7 @@ impl Revelacao {
     }
 
     /// O índice do primeiro controle que obedece a `filtro` — para achar um
-    /// slider da aba RGB sem escrever a posição na tabela.
+    /// slider de um painel sem escrever a posição na tabela.
     pub(crate) fn controle_onde(&self, filtro: impl Fn(&Definicao) -> bool) -> Option<usize> {
         self.controles.iter().position(|c| filtro(c.definicao))
     }

@@ -1,5 +1,10 @@
-//! A tela de importar predefinições do Lightroom e do darktable: o seletor de
-//! arquivos, o relatório do que ficou de fora e a porta de [`darktable`].
+//! A tela de importar predefinições do Lightroom: o seletor de arquivos e o
+//! relatório do que ficou de fora.
+//!
+//! 🗑️ **Os estilos do darktable (`.dtstyle` e o `.xmp` dele) não entram mais**
+//! (2/out/2026): o motor não tem os módulos do darktable, e o RecordarFotos P&B
+//! foi refeito com os controles do Lightroom. Um arquivo do darktable vai para
+//! "ilegíveis" no relatório, em vez de virar uma predefinição vazia.
 //!
 //! A leitura e a tradução do Lightroom moram em `infrastructure::lightroom`
 //! desde 30/set/2026, porque a importação de fotos também as usa (o XMP de
@@ -7,9 +12,6 @@
 //! `revelacao::lightroom::traduzir` chama igual.
 
 pub use infrastructure::lightroom::*;
-
-/// Os estilos do darktable (`darktable.ts`).
-pub mod darktable;
 
 /// Um arquivo que o fotógrafo escolheu, já lido do disco.
 ///
@@ -51,11 +53,8 @@ impl EscolhaDePresets for EscolhaNativa {
     fn escolher(&self, canal: std::sync::mpsc::Sender<Vec<Arquivo>>) {
         self.tokio.spawn(async move {
             let escolhidos = rfd::AsyncFileDialog::new()
-                .set_title("Importar do Lightroom ou do darktable")
-                .add_filter(
-                    "Predefinições do Lightroom e estilos do darktable",
-                    &["lrtemplate", "xmp", "dtstyle"],
-                )
+                .set_title("Importar do Lightroom")
+                .add_filter("Predefinições do Lightroom", &["lrtemplate", "xmp"])
                 .pick_files()
                 .await
                 .unwrap_or_default();
@@ -128,11 +127,13 @@ pub fn preparar(arquivos: &[Arquivo], ja_existem: &[String]) -> (Vec<PresetTradu
             relatorio.ilegiveis.push(arquivo.nome.clone());
             continue;
         };
-        // 🔑 **O darktable vem primeiro, e decidido pelo conteúdo**: o `.xmp`
+        // 🔑 **O do darktable fica de fora, decidido pelo conteúdo**: o `.xmp`
         // dele e o do Lightroom têm a mesma extensão, e o leitor do Lightroom
         // leria o do darktable como um preset sem ajuste nenhum.
-        let traduzido = if darktable::eh_do_darktable(texto, &arquivo.nome) {
-            darktable::ler(texto, &arquivo.nome)
+        let do_darktable =
+            texto.contains("<darktable_style") || texto.contains("darktable:history");
+        let traduzido = if do_darktable {
+            None
         } else {
             ler_arquivo(texto, &arquivo.nome).map(|bruto| traduzir(&bruto))
         };

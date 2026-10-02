@@ -1,8 +1,8 @@
 //! A coluna da direita da Revelação — o porte de `revelacao/paineis.tsx`.
 //!
 //! De cima para baixo, como no site: o aviso de foto comprada, o cabeçalho
-//! ("N ajustes fora do neutro" e "Zerar tudo"), as abas **sRGB** e **RGB**, os
-//! painéis sanfonados da aba escolhida e o rodapé que diz de que tamanho é a
+//! ("N ajustes fora do neutro" e "Zerar tudo"), os painéis sanfonados e o
+//! rodapé que diz de que tamanho é a
 //! cópia que a tela edita.
 //!
 //! ⚠️ **Por cima dela, fora da rolagem, fica o histograma**, que o site não
@@ -18,9 +18,8 @@
 //!
 //! # O que fica lembrado entre sessões
 //!
-//! Qual painel está aberto, qual aba (sRGB ou RGB) e se os gráficos estão à
-//! mostra — com as chaves do site (`revelacao:<título>`,
-//! `revelacao:aba-rgb`), num arquivo ao lado do catálogo. É preferência de
+//! Qual painel está aberto e se os gráficos estão à mostra — com as chaves do
+//! site (`revelacao:<título>`), num arquivo ao lado do catálogo. É preferência de
 //! quem opera o balcão, como a altura da tira: falhar ao ler ou gravar nunca
 //! interrompe nada.
 
@@ -54,7 +53,6 @@ use crate::revelacao::rodas::{self, Faixa, Vista};
 use crate::tema;
 
 /// A chave da aba escolhida — a do site.
-const CHAVE_DA_ABA_RGB: &str = "revelacao:aba-rgb";
 /// A do histograma, que só o desktop tem.
 const CHAVE_DO_HISTOGRAMA: &str = "revelacao:histograma";
 
@@ -183,10 +181,6 @@ impl EstadoDoPainel {
         if !self.aberto(chave, false) {
             self.definir(chave, true);
         }
-    }
-
-    fn no_rgb(&self) -> bool {
-        self.aberto(CHAVE_DA_ABA_RGB, false)
     }
 }
 
@@ -434,8 +428,6 @@ impl Revelacao {
     pub fn seguir_o_roteiro_do_painel(&mut self, pedido: &str, cx: &mut Context<Self>) {
         let (comando, resto) = pedido.split_once(' ').unwrap_or((pedido, ""));
         match comando {
-            "rgb" => self.estado_do_painel.definir(CHAVE_DA_ABA_RGB, true),
-            "srgb" => self.estado_do_painel.definir(CHAVE_DA_ABA_RGB, false),
             "abrir" | "fechar" => match Painel::TODOS.into_iter().find(|p| p.rotulo() == resto) {
                 Some(painel) => self
                     .estado_do_painel
@@ -470,14 +462,9 @@ impl Revelacao {
         let mut corpo: Vec<AnyElement> = Vec::new();
         if !enquadrando {
             corpo.push(self.cabecalho_dos_ajustes(cx));
-            corpo.push(self.abas_de_espaco(cx));
-            let paineis: &[Painel] = if self.estado_do_painel.no_rgb() {
-                &Painel::RGB
-            } else {
-                &Painel::SRGB
-            };
-            // A Revelação local vem logo abaixo do primeiro painel (o Básico;
-            // no RGB, a Exposição), como no Lightroom — recolhida por padrão.
+            let paineis: &[Painel] = &Painel::SRGB;
+            // A Revelação local vem logo abaixo do primeiro painel (o Básico),
+            // como no Lightroom — recolhida por padrão.
             // 🎞️ **O P&B toma o lugar do HSL**, como no Lightroom: com a foto
             // em preto e branco não há cor para o HSL mexer, e o que sobra é a
             // Mistura de preto e branco. Desligado, o P&B some.
@@ -658,51 +645,6 @@ impl Revelacao {
                     .tooltip(dica)
                     .on_click(cx.listener(|tela, _ev, window, cx| tela.zerar_tudo(window, cx))),
             )
-            .into_any_element()
-    }
-
-    /// As duas abas, pelo espaço em que os controles agem (dono, 2026-09-12).
-    ///
-    /// O ponto âmbar diz em qual aba há ajuste, para um estilo aplicado não
-    /// ficar escondido na outra.
-    fn abas_de_espaco(&self, cx: &mut Context<Self>) -> AnyElement {
-        let no_rgb = self.estado_do_painel.no_rgb();
-        let aba = |rgb: bool, rotulo: &'static str, dica: &'static str, cx: &mut Context<Self>| {
-            let marca = controles::marca_da_aba(&self.ajustes, &self.salvo(), rgb);
-            Tab::new()
-                .label(rotulo)
-                .flex_1()
-                .debug_selector(move || format!("aba-espaco-{rotulo}"))
-                .tooltip(move |window, cx| {
-                    gpui_kit::component::tooltip::Tooltip::new(dica).build(window, cx)
-                })
-                .when_some(marca, |a, m| a.suffix(ponto(m, cx)))
-        };
-        let tela = cx.entity().downgrade();
-        TabBar::new("abas-de-espaco")
-            .segmented()
-            .xsmall()
-            .w_full()
-            .selected_index(if no_rgb { 1 } else { 0 })
-            .child(aba(
-                false,
-                "sRGB",
-                "Os controles de sempre, sobre a foto com gama — o Lightroom",
-                cx,
-            ))
-            .child(aba(
-                true,
-                "RGB",
-                "Os módulos em RGB linear, fiéis aos estilos do darktable — rodam antes dos sRGB",
-                cx,
-            ))
-            .on_click(move |i, _window, cx| {
-                let rgb = *i == 1;
-                let _ = tela.update(cx, |tela, cx| {
-                    tela.estado_do_painel.definir(CHAVE_DA_ABA_RGB, rgb);
-                    cx.notify();
-                });
-            })
             .into_any_element()
     }
 
@@ -1206,32 +1148,6 @@ impl Revelacao {
 /// os mesmos caminhos dos cliques, sem precisar achar o nó na tela.
 #[cfg(test)]
 impl Revelacao {
-    /// O clique numa aba de espaço: sRGB (`false`) ou RGB (`true`).
-    pub(crate) fn escolher_aba_rgb(&mut self, rgb: bool, cx: &mut Context<Self>) {
-        self.estado_do_painel.definir(CHAVE_DA_ABA_RGB, rgb);
-        cx.notify();
-    }
-
-    pub(crate) fn na_aba_rgb(&self) -> bool {
-        self.estado_do_painel.no_rgb()
-    }
-
-    /// O ponto âmbar ("mudou e não salvou") de cada aba: `(sRGB, RGB)`.
-    pub(crate) fn abas_alteradas(&self) -> (bool, bool) {
-        let (srgb, rgb) = self.marcas_das_abas();
-        let ambar = |m: Option<controles::Marca>| m == Some(controles::Marca::NaoSalvo);
-        (ambar(srgb), ambar(rgb))
-    }
-
-    /// O ponto de cada aba, com o que ele diz: `(sRGB, RGB)`.
-    pub(crate) fn marcas_das_abas(&self) -> (Option<controles::Marca>, Option<controles::Marca>) {
-        let salvo = self.salvo();
-        (
-            controles::marca_da_aba(&self.ajustes, &salvo, false),
-            controles::marca_da_aba(&self.ajustes, &salvo, true),
-        )
-    }
-
     /// O clique no botão de um canal da curva.
     pub(crate) fn escolher_canal_da_curva(&mut self, canal: Canal, cx: &mut Context<Self>) {
         self.estado_do_painel.modo = ModoDaCurva::Ponto(canal);
@@ -1406,9 +1322,6 @@ mod testes {
     #[test]
     fn a_lembranca_dos_testes_nao_toca_o_disco() {
         let mut estado = EstadoDoPainel::default();
-        assert!(!estado.no_rgb());
-        estado.definir(CHAVE_DA_ABA_RGB, true);
-        assert!(estado.no_rgb());
         assert!(estado.arquivo.is_none());
         assert!(estado.aberto("revelacao:Básico", true));
         estado.definir("revelacao:Básico", false);

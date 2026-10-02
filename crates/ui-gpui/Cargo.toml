@@ -74,11 +74,6 @@ anyhow = "1.0"
 # trocou o `egui_file` por ele. Janela do sistema, e não do framework: é o que
 # evita disputa de camada com o modal (a razão está registrada no STATUS).
 rfd = "0.17.2"
-# Os estilos do darktable guardam os parâmetros de cada módulo em zlib
-# (`gz` + base64), e importar um `.dtstyle` é abri-los
-# (`revelacao/lightroom/darktable.rs`). É o mesmo `miniz_oxide` que o `png` já
-# traz para a árvore — nenhuma dependência nova no lockfile, só uma aresta.
-miniz_oxide = "0.8"
 
 # A folha de impressão vira PDF. 🔑 O leiaute já é calculado em milímetros
 # (`impressao/pagina.rs`), que é a unidade nativa do PDF — gerar é colocar cada

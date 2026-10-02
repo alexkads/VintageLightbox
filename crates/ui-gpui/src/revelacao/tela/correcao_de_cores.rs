@@ -71,7 +71,7 @@ impl Revelacao {
     /// O índice de um controle da Correção de cores pelo rótulo.
     ///
     /// ⚠️ **Só na seção dela**: "Sombras — matiz" também é a tinta das sombras
-    /// da Calibração, e "Realces — matiz" é do Color balance da aba RGB.
+    /// da Calibração, e "Realces — matiz" era do Color balance do darktable (saiu em 2/out/2026).
     fn indice_do_controle(&self, rotulo: &str) -> Option<usize> {
         self.controles.iter().position(|c| {
             c.definicao.secao == controles::Secao::Tonalizacao && c.definicao.rotulo == rotulo

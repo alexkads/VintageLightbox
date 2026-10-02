@@ -52,10 +52,15 @@ pub fn locais_da_entidade(
 /// novos (divergência D7 do contrato da foto). Campo ausente ou que não é
 /// número finito fica no neutro, como no `de_json` da tela.
 pub fn ajustes_da_entidade(foto: &domain::entities::Photo) -> Ajustes {
-    if let Some(parametros) = foto
+    if let Some(mut parametros) = foto
         .parametros()
         .and_then(|r| serde_json::from_str::<serde_json::Value>(r).ok())
     {
+        // A foto revelada com o RecordarFotos P&B do darktable (campos `dt_*`,
+        // que saíram do motor em 2/out/2026) sai com o de hoje.
+        if let Some(receita) = parametros.as_object_mut() {
+            use_cases::presets::migrar_do_darktable(receita);
+        }
         let mut vetor = Ajustes::default().como_vetor();
         for (posicao, nome) in Ajustes::NOMES.iter().enumerate() {
             if let Some(valor) = parametros
@@ -268,7 +273,7 @@ mod testes {
         let esperado = Ajustes {
             exposure: 0.75,
             bw_ativo: 1.0,
-            dt_cb_shadows_h: 71.5,
+            pcv_amount: -30.0,
             ..Default::default()
         };
         let mut foto = domain::entities::Photo::new(
@@ -283,5 +288,23 @@ mod testes {
         // Revelação ilegível cai nas colunas, e não no vazio.
         foto.definir_parametros(Some("não é json".into()));
         assert_eq!(ajustes_da_entidade(&foto), Ajustes::default());
+    }
+
+    /// A foto vendida com o RecordarFotos P&B do darktable (os `dt_*` de antes
+    /// de 2/out/2026) exporta P&B, com o RecordarFotos P&B de hoje — e não
+    /// colorida, que é o que sairia ignorando os nomes que o motor não tem.
+    #[test]
+    fn a_foto_do_pb_do_darktable_exporta_com_o_de_hoje() {
+        let mut foto = domain::entities::Photo::new(
+            domain::value_objects::FilePath::new("/fotos/DSC_0002.jpg").expect("caminho"),
+        );
+        foto.definir_parametros(Some(
+            r#"{"dt_monochrome_ativo": 1.0, "dt_shadhi_shadows": 65.38, "dt_vignette_ativo": 1.0}"#
+                .into(),
+        ));
+        let ajustes = ajustes_da_entidade(&foto);
+        assert_eq!(ajustes.bw_ativo, 1.0, "saiu colorida");
+        assert_eq!(ajustes.processo, 1.0);
+        assert!(ajustes.pcv_amount > 0.0, "sem a vinheta branca");
     }
 }

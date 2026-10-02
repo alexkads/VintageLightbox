@@ -98,7 +98,7 @@ const IDS_DO_SISTEMA: &[(&str, &str)] = &[
 /// em minúsculas, com hífen — o `idDoLightroom` de `presets-do-sistema.ts`.
 ///
 /// 🔑 **Pelo nome do arquivo, e não pela tabela acima**: "RecordarFotos P&B"
-/// existe nas duas pastas (a do darktable no sistema, a do Lightroom nas LRs),
+/// existe nas duas pastas (a refeita do darktable no sistema, a do Lightroom nas LRs),
 /// e o nome sozinho as confundiria.
 pub fn id_do_lightroom(nome: &str) -> String {
     let mut id = String::from("lr-");

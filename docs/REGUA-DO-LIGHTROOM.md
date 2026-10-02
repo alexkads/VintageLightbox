@@ -130,7 +130,7 @@ B&W 01) **sobrescrevem** os do operador (o Contraste −57). ⚠️ **Aberto.**
 Corrigir a conta muda a aparência de toda foto já revelada, no app e no site, porque o motor é o mesmo.
 O dono escolheu **versão de processo**, como o PV2012 do Lightroom:
 
-- **o campo `processo`** fica no fim do `Ajustes` (194 campos). O neutro é **0**: revelação gravada
+- **o campo `processo`** fica no fim do `Ajustes` (194 campos então; 133 desde 2/out, sem os `dt_*`). O neutro é **0**: revelação gravada
   antes não tem a chave, e o `serde(default)` a deixa na conta antiga;
 - **o processo 1 é ligado por:**
   - foto **nova**, sem revelação inteira e sem nenhuma das seis colunas de tom (`persistencia::da_foto`);
@@ -254,10 +254,10 @@ abaixo).
 6. **O leitor de XMP** misturando os sliders do `<crs:Look>` com os do operador.
 7. **O site:**
    - reconstruir o wasm (`scripts/construir-web.sh`);
-   - copiar o `nomes.json` (194 campos) e o `presets-lr.json`;
+   - copiar o `nomes.json` (133 campos desde 2/out) e o `presets-lr.json`;
    - registrar `processo` no `CONTRATO_DA_FOTO.md`;
    - fazer a foto nova nascer no processo 1 também lá.
-8. **Nesta máquina (Windows, AMD Vega 11):** o DX12 recusa o shader (`X3017`, um array constante). O
+8. **Nesta máquina (Windows, AMD Vega 11):** até 2/out o DX12 recusava o shader (`X3017`, um array constante do `darktable.wgsl`, que saiu — seção 13). O
    motor cai para outro backend, mas os testes do pipeline de fragmento falham aqui. Há uma tarefa
    aberta para isso. O teste `as_constantes_do_wgsl_estao_em_dia` falha por CRLF
    (`core.autocrlf=true`).
@@ -563,4 +563,30 @@ RecordarFotos P&B.
 | Médias que saem 0 | `Measure-Object` com bloco no PowerShell 5.1 | o resumo sai do próprio CLI de Rust |
 | `darktable-cli --style` não acha o estilo | o estilo tem de estar no banco do darktable | um XMP de histórico gerado do `.dtstyle` como 2º argumento |
 | Compilação falha com "espaço insuficiente" | cache incremental de debug | `CARGO_INCREMENTAL=0`; apagar `target*/debug/incremental` |
-| `[motor] DX12 … X3017` no começo de todo CLI | defeito antigo do FXC nesta máquina | o motor cai para outro backend; os números valem |
+| `[motor] DX12 … X3017` no começo de todo CLI (até 2/out) | o FXC do DX12 não compilava o `darktable.wgsl` (`float3[2]`) | sumiu com o darktable: o motor abre em DX12, e compilar leva ~2 s — testes que esperam a GPU precisam de folga |
+
+## 13. O darktable saiu do motor (2/out)
+
+Com o RecordarFotos P&B refeito (seção 11), o caminho do darktable deixou de ter uso:
+
+- **Motor:** os 61 campos `dt_*` saíram do `Ajustes` (194 → 133; o `uniform` de 784 para 544 bytes),
+  com `darktable.rs`, `darktable.wgsl`, as grades bilaterais (ligações 3, 4 e 5) e os exemplos
+  `darktable-*`. 🚨 Foi a única vez que um bloco saiu do **meio** da ordem posicional: tudo depois dele
+  andou 61 posições, e o shader, o wasm e o `nomes.json` do site têm de mudar juntos. O banco não sente
+  — guarda por nome. `definir_escala_do_original`, `definir_relogio` e `grades_pendentes` ficam como
+  no-ops até o site deixar de chamá-los.
+- **App:** a aba RGB, o grupo "Controles RGB" da sincronização e a importação de `.dtstyle`/xmp do
+  darktable (um arquivo do darktable agora vai para "ilegíveis" no relatório).
+- **Fotos e predefinições antigas:** `use_cases::presets::migrar_do_darktable` leva a receita com o
+  monocromático do darktable ligado para o RecordarFotos P&B de hoje — na leitura da tela
+  (`persistencia::de_json`), na exportação (`ajustes_da_entidade`) e nas predefinições do operador
+  (`ListPresetsUseCase`, que também as marca para recomeçar do neutro). Sem isso, a foto vendida
+  reabriria colorida e deixaria de contar como revelada.
+- **Ferramentas que ficam:** o `comparar_pb_darktable` e o `ajustar_pb` usam o `darktable-cli` só como
+  **referência** externa — o motor não tem mais nada dele.
+
+**Falta o site** (`../recordarfotos-e-commerce`, `dev`): o wasm novo com 133 nomes, a mesma migração
+(SQL para `pos_venda_fotos.ajustes`, a linha do tempo e `revelacao_presets`), o RecordarFotos P&B com os
+mesmos valores, sem a aba RGB e sem o importador, e a leitura do Adobe RGB (`foto_codec::espaco_de_cor`
+exposto pelo `revelacao-web`). Até lá, **nenhuma versão do app sai**: o site manda os ajustes por
+posição, e um wasm antigo com o app novo trocaria os campos de lugar.

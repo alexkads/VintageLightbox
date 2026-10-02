@@ -6,7 +6,7 @@
 //! | passar o mouse numa linha | mostra na foto — partindo do neutro quando ela substitui |
 //! | clicar no nome | aplica: um passo de histórico, gravado na hora |
 //! | `+` | abre o formulário embutido: Enter salva, Esc cancela |
-//! | ícone de envio | importa `.lrtemplate`, `.xmp` (Lightroom e darktable) e `.dtstyle` |
+//! | ícone de envio | importa `.lrtemplate` e `.xmp` do Lightroom |
 //! | lápis / lixeira (ao passar o mouse) | renomeia no lugar (Enter/Esc/✓/✕) · apaga depois de perguntar |
 //! | arrastar a linha | reordena dentro do grupo; ↑ ↓ com a alça focada; "ordem padrão" desfaz |
 //!
@@ -361,7 +361,7 @@ impl Revelacao {
 
     // ------------------------------------------------------ importar
 
-    /// Abre o seletor do sistema para importar do Lightroom ou do darktable.
+    /// Abre o seletor do sistema para importar do Lightroom.
     ///
     /// 🚨 **O laço de colheita sobe antes da resposta**, e não depois: o seletor
     /// é uma janela do sistema e pode voltar a qualquer momento.
@@ -863,7 +863,7 @@ impl Revelacao {
                     Grupo::Minhas,
                     &minhas,
                     sem_minhas.then_some(
-                        "Ajuste uma foto e use o + para guardar, ou importe do Lightroom ou do darktable pelo ícone ao lado.",
+                        "Ajuste uma foto e use o + para guardar, ou importe do Lightroom pelo ícone ao lado.",
                     ),
                     cx,
                 ))
@@ -1070,7 +1070,7 @@ impl Revelacao {
                     "importar-do-lightroom",
                     Icone::Upload,
                     14.,
-                    "Importar do Lightroom ou do darktable (.lrtemplate, .xmp, .dtstyle)",
+                    "Importar do Lightroom (.lrtemplate, .xmp)",
                     travada,
                     cx,
                 )

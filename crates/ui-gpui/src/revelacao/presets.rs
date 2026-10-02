@@ -165,33 +165,13 @@ pub fn quantos_campos(preset: &Preset) -> usize {
     preset.adjustments.len()
 }
 
-/// A predefinição liga algum módulo do darktable?
-///
-/// 🚨 **Um estilo do darktable só é fiel partindo do neutro** (dono,
-/// 2026-09-12: *"a importação de .dtstyle deveria resetar todo o efeito para
-/// ficar fiel"*). O estilo foi medido contra o darktable sobre a foto crua;
-/// somado a um contraste ou a uma tonalização que já estivessem na foto, ele
-/// vira uma terceira imagem.
-///
-/// 🔑 **Decidido pelo conteúdo, e não por uma coluna** — o `ehEstiloDoDarktable`
-/// do site (`presets.ts`). O banco não guarda `replaces` para as do operador, e
-/// todo estilo lido de um `.dtstyle` ou `.xmp` do darktable liga pelo menos um
-/// `dt_*_ativo`. Vale também para os já importados, sem migration.
-pub fn eh_estilo_do_darktable(ajustes: &PresetAdjustments) -> bool {
-    ajustes.iter().any(|(campo, valor)| {
-        campo.len() > "dt__ativo".len()
-            && campo.starts_with("dt_")
-            && campo.ends_with("_ativo")
-            && valor != 0.0
-    })
-}
-
 /// Esta predefinição recomeça do neutro em vez de somar?
 ///
-/// As do sistema trazem a marca no código (`Preset::replaces`); as do operador,
-/// pelo conteúdo ([`eh_estilo_do_darktable`]).
+/// A marca é a do preset (`Preset::replaces`): as do sistema a trazem no código.
+/// (As do operador importadas de um `.dtstyle` também recomeçavam do neutro;
+/// desde 2/out/2026 elas migram para o RecordarFotos P&B, que já recomeça.)
 pub fn substitui(preset: &Preset) -> bool {
-    preset.replaces || eh_estilo_do_darktable(&preset.adjustments)
+    preset.replaces
 }
 
 /// Os ajustes com a predefinição aplicada.
@@ -712,35 +692,6 @@ mod testes {
             .into_iter()
             .find(|p| p.name == nome)
             .unwrap_or_else(|| panic!("\"{nome}\" sumiu da lista do sistema"))
-    }
-
-    /// 🚨 **O estilo do darktable recomeça do neutro** (dono, 2026-09-12), e a
-    /// do Lightroom soma — `presets.test.ts`. Um interruptor em zero não é
-    /// estilo nenhum.
-    #[test]
-    fn a_importada_do_darktable_substitui_e_a_do_lightroom_soma() {
-        let do_darktable = Preset::user(
-            "dt".into(),
-            PresetAdjustments::vazia()
-                .com("dt_exposure_ativo", 1.0)
-                .com("dt_exposure_exposure", 0.163),
-        );
-        let do_lightroom = Preset::user(
-            "lr".into(),
-            PresetAdjustments::vazia()
-                .com("contrast", 1.2)
-                .com("split_shadow_hue", 35.0),
-        );
-        let desligado = Preset::user(
-            "desligado".into(),
-            PresetAdjustments::vazia()
-                .com("dt_cb_ativo", 0.0)
-                .com("exposure", 0.2),
-        );
-
-        assert!(substitui(&do_darktable));
-        assert!(!substitui(&do_lightroom));
-        assert!(!substitui(&desligado));
     }
 
     /// 🚨 **A prévia e o clique dão a mesma foto.** "Preto e branco" sobre uma

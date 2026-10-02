@@ -7870,8 +7870,9 @@ mod testes {
         arrastar(cx, &janela, 0, 1.0);
         cx.run_until_parked();
 
-        // O resultado vem da GPU por um laço assíncrono; espera ele chegar.
-        for _ in 0..200 {
+        // O resultado vem da GPU por um laço assíncrono; espera ele chegar —
+        // até 20 s: compilar o shader no DX12 leva ~2 s nesta máquina.
+        for _ in 0..2000 {
             let pronto = janela
                 .update(cx, |tela, _window, _cx| {
                     tela.histograma.as_ref().is_some_and(|h| {
@@ -7890,7 +7891,19 @@ mod testes {
             cx.executor().advance_clock(INTERVALO_DE_COLHEITA * 2);
             cx.run_until_parked();
         }
-        panic!("o histograma não acompanhou o ajuste");
+        let baldes = janela
+            .update(cx, |tela, _window, _cx| {
+                tela.histograma.as_ref().map(|h| {
+                    h.vermelho
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, v)| **v > 0)
+                        .map(|(i, v)| (i, *v))
+                        .collect::<Vec<_>>()
+                })
+            })
+            .expect("a janela deve estar aberta");
+        panic!("o histograma não acompanhou o ajuste: {baldes:?}");
     }
 
     /// Sem foto não há histograma — e não há divisão por zero em lugar nenhum.
@@ -8064,14 +8077,13 @@ mod testes {
 
     /// 🚨 **A foto que chega revelada não acende âmbar** (dono, 2026-09-27).
     ///
-    /// O caso visto: uma foto com o RecordarFotos P&B — que mexe nos módulos
-    /// RGB do darktable — aberta sem ninguém tocar. O ponto âmbar comparava com
-    /// o neutro e acendia na aba RGB e em cada seção do estilo, com o "Salvar na
+    /// O caso visto: uma foto com o RecordarFotos P&B aberta sem ninguém tocar.
+    /// O ponto âmbar comparava com o neutro e acendia em cada seção do estilo, com o "Salvar na
     /// galeria e sair" apagado ao lado. Agora âmbar é "mudou desde que abriu"; o
     /// que já estava salvo leva o ponto cinza (`Marca::Ajustado`).
     #[gpui_kit::test]
     fn os_parametros_salvos_leva_o_ponto_cinza_e_so_o_gesto_acende_ambar(cx: &mut TestAppContext) {
-        use crate::revelacao::controles::Marca;
+        use crate::revelacao::controles::{marca_do_painel, Marca, Painel};
         let (previews, _dir) = previews_descartaveis();
         previews
             .save_preview("id-pb.jpg", &foto_cinza())
@@ -8081,8 +8093,7 @@ mod testes {
         persistencia::na_foto(
             &mut revelada,
             Ajustes {
-                dt_exposure_ativo: 1.0,
-                dt_exposure_exposure: 0.163,
+                pcv_amount: 30.0,
                 ..Default::default()
             },
             Default::default(),
@@ -8091,24 +8102,29 @@ mod testes {
         janela
             .update(cx, |tela, window, cx| {
                 tela.abrir(revelada, window, cx);
+                let marca =
+                    |tela: &Revelacao, p| marca_do_painel(&tela.ajustes(), &tela.salvo(), p);
                 assert_eq!(
-                    tela.marcas_das_abas(),
-                    (None, Some(Marca::Ajustado)),
-                    "o estilo salvo aparece na aba RGB, em cinza"
+                    marca(tela, Painel::Efeitos),
+                    Some(Marca::Ajustado),
+                    "a vinheta salva aparece em Efeitos, em cinza"
                 );
-                assert_eq!(tela.abas_alteradas(), (false, false), "nenhum âmbar");
+                assert_eq!(marca(tela, Painel::Basico), None, "nenhum âmbar");
                 assert!(!tela.aberta_a_salvar(), "e o botão de salvar concorda");
 
-                let rgb = tela
-                    .controle_onde(|d| d.secao.painel().no_rgb() && !d.discreto)
-                    .expect("um slider contínuo da aba RGB");
-                tela.arrastar_slider(rgb, 0.5, cx);
+                let efeito = tela
+                    .controle_onde(|d| d.secao.painel() == Painel::Efeitos && !d.discreto)
+                    .expect("um slider contínuo de Efeitos");
+                tela.arrastar_slider(efeito, 0.5, cx);
             })
             .expect("a janela deve estar aberta");
 
         janela
             .update(cx, |tela, _window, _cx| {
-                assert_eq!(tela.marcas_das_abas().1, Some(Marca::NaoSalvo));
+                assert_eq!(
+                    marca_do_painel(&tela.ajustes(), &tela.salvo(), Painel::Efeitos),
+                    Some(Marca::NaoSalvo)
+                );
                 assert!(tela.aberta_a_salvar(), "mexeu: âmbar e o botão aceso");
             })
             .expect("a janela deve estar aberta");

@@ -62,7 +62,7 @@ impl Faixa {
     ///
     /// ⚠️ **Sempre junto com `Secao::Tonalizacao`**: "Sombras — matiz" também
     /// é a tinta das sombras da Calibração, e "Realces — matiz" é do Color
-    /// balance da aba RGB.
+    /// balance do darktable (que saiu em 2/out/2026).
     pub fn rotulo_do_matiz(&self) -> &'static str {
         match self {
             Faixa::Sombras => "Sombras — matiz",

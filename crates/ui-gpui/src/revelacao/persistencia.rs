@@ -633,6 +633,18 @@ pub fn para_crop_settings(corte: &Corte) -> CropSettings {
 /// revelada da galeria como se fosse o bruto, com os 53 sliders parados no
 /// meio. Sincronizar a partir dela mandava o neutro às outras.
 pub fn de_json(json: &serde_json::Value) -> (Ajustes, Corte) {
+    // A foto revelada com o RecordarFotos P&B do darktable (os `dt_*`, que
+    // saíram do motor em 2/out/2026) abre com o de hoje — e não colorida.
+    let migrado;
+    let json = match json.as_object() {
+        Some(receita) if receita.keys().any(|k| k.starts_with("dt_")) => {
+            let mut receita = receita.clone();
+            use_cases::presets::migrar_do_darktable(&mut receita);
+            migrado = serde_json::Value::Object(receita);
+            &migrado
+        }
+        _ => json,
+    };
     let numero = |chave: &str| {
         json.get(chave)
             .and_then(serde_json::Value::as_f64)
@@ -1398,7 +1410,7 @@ mod testes {
             calib_red_hue: 12.0,
             bw_ativo: 1.0,
             curva_m4: 140.0,
-            dt_cb_shadows_h: 71.5,
+            pcv_amount: -25.0,
             ..Ajustes::default()
         };
         let parametros = crate::pos_venda::porta::ajustes_em_json(
@@ -1417,18 +1429,17 @@ mod testes {
     /// Os ajustes que **não têm coluna** em `photos`, por prefixo.
     ///
     /// São os 118 que o motor ganhou depois dos 53 — calibração, preto e
-    /// branco, curva por ponto, a tonalização completa e os Controles RGB. Eles
+    /// branco, curva por ponto, a tonalização completa. Eles
     /// não ganharam coluna: vão na revelação inteira (`edit_parametros`, migration
     /// 023), como na foto do site. Esta lista só descreve o caminho das colunas,
     /// que é o de quem foi revelado antes da migration 023.
-    const SEM_COLUNA_NO_BANCO_LOCAL: [&str; 21] = [
+    const SEM_COLUNA_NO_BANCO_LOCAL: [&str; 20] = [
         "calib_",
         "split_midtone_",
         "split_global_",
         "split_blending",
         "bw_",
         "curva_",
-        "dt_",
         // Os controles do Lightroom de 2026-09-30: só em `edit_parametros`.
         "texture",
         "dehaze",
@@ -1448,14 +1459,15 @@ mod testes {
         // `split_midtone_lum` e `split_global_lum` já caem nos de cima.
     ];
 
-    /// 🚨 A revelação do site tem os módulos novos (`dt_*`), que as colunas
-    /// `edit_*` não têm: eles precisam atravessar a grade e voltar inteiros.
+    /// 🚨 A revelação do site tem os módulos novos (a vinheta pós-corte, o
+    /// mixer P&B), que as colunas `edit_*` não têm: eles precisam atravessar a
+    /// grade e voltar inteiros.
     #[test]
     fn os_modulos_novos_da_foto_do_site_nao_se_perdem() {
         let json = serde_json::json!({
             "exposure": 0.25,
-            "dt_cb_ativo": 1,
-            "dt_cb_shadows_h": 71.5,
+            "bw_ativo": 1,
+            "pcv_amount": -25.0,
             "corte_largura": 0.89
         });
         let (ajustes, corte) = de_json(&json);
@@ -1465,14 +1477,31 @@ mod testes {
         };
         na_foto(&mut foto, ajustes, corte);
         let lidos = da_foto(&foto);
-        assert_eq!(lidos.dt_cb_ativo, 1.0);
-        assert_eq!(lidos.dt_cb_shadows_h, 71.5);
+        assert_eq!(lidos.bw_ativo, 1.0);
+        assert_eq!(lidos.pcv_amount, -25.0);
         assert_eq!(lidos.exposure, 0.25);
         assert_eq!(corte_da_foto(&foto).largura, Some(0.89));
 
         // A foto do disco também leva os módulos novos (divergência D7).
         let mut local = PhotoViewModel::default();
         na_foto(&mut local, ajustes, corte);
-        assert_eq!(da_foto(&local).dt_cb_shadows_h, 71.5);
+        assert_eq!(da_foto(&local).pcv_amount, -25.0);
+    }
+
+    /// 🚨 A foto vendida com o RecordarFotos P&B do darktable (os `dt_*` de
+    /// antes de 2/out/2026) abre P&B, com o RecordarFotos P&B de hoje — e conta
+    /// como revelada. Sem a migração, ela abria colorida, no neutro.
+    #[test]
+    fn a_foto_do_pb_do_darktable_abre_com_o_de_hoje() {
+        let json = serde_json::json!({
+            "dt_monochrome_ativo": 1.0,
+            "dt_shadhi_shadows": 65.38,
+            "corte_largura": 0.9
+        });
+        let (ajustes, corte) = de_json(&json);
+        assert_eq!(ajustes.bw_ativo, 1.0, "abriu colorida");
+        assert_eq!(ajustes.processo, 1.0);
+        assert!(ajustes.pcv_amount > 0.0, "sem a vinheta branca");
+        assert_eq!(corte.largura, Some(0.9), "o corte da foto fica");
     }
 }

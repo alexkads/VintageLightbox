@@ -360,6 +360,43 @@ fn cada_uma_escreve_a_mesma_quantidade_de_campos_do_site() {
     );
 }
 
+/// A predefinição do operador importada de um `.dtstyle` (só campos `dt_*`)
+/// vira o RecordarFotos P&B de hoje, e recomeça do neutro — em vez de virar
+/// uma predefinição vazia que não faz nada.
+#[tokio::test]
+async fn a_predefinicao_importada_do_darktable_vira_o_recordarfotos_pb() {
+    let mut mock_repo = MockPresetRepo::new();
+    let do_darktable = Preset::user(
+        "PB Gramado".to_string(),
+        PresetAdjustments::vazia()
+            .com("dt_monochrome_ativo", 1.0)
+            .com("dt_shadhi_shadows", 65.38),
+    );
+    let do_lightroom = Preset::user(
+        "Minha".to_string(),
+        PresetAdjustments::vazia().com("exposure", 0.5),
+    );
+    mock_repo
+        .expect_find_all()
+        .times(1)
+        .returning(move || Ok(vec![do_darktable.clone(), do_lightroom.clone()]));
+
+    let presets = ListPresetsUseCase::new(Arc::new(mock_repo))
+        .execute()
+        .await
+        .expect("lista");
+    let pb = presets
+        .iter()
+        .find(|p| p.name == "PB Gramado")
+        .expect("a do operador");
+    assert!(pb.replaces, "um visual inteiro recomeça do neutro");
+    assert!(pb.adjustments.campos().all(|c| !c.starts_with("dt_")));
+    assert_eq!(pb.adjustments.get("bw_ativo"), Some(1.0));
+    let minha = presets.iter().find(|p| p.name == "Minha").expect("a outra");
+    assert!(!minha.replaces, "a do Lightroom continua somando");
+    assert_eq!(minha.adjustments.get("exposure"), Some(0.5));
+}
+
 /// A foto guardada com o RecordarFotos P&B do darktable reabre P&B, com os
 /// valores de hoje — e uma foto sem ele só perde os `dt_*` que não fazem nada.
 #[test]

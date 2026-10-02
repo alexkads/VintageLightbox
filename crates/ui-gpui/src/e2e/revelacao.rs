@@ -109,37 +109,12 @@ fn andar_pela_tira_revelar_e_desfazer_um_gesto_por_vez(cx: &mut TestAppContext) 
     });
 }
 
-/// 🎬 **As abas sRGB e RGB, e a curva por ponto.**
+/// 🎬 **A curva por ponto.** (As abas sRGB e RGB saíram em 2/out/2026, com
+/// os módulos do darktable.)
 #[gpui_kit::test]
-fn abas_de_espaco_e_curva_por_ponto(cx: &mut TestAppContext) {
+fn curva_por_ponto(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
     e.revelar_a_do_site(cx, "b");
-
-    e.revelacao(cx, |tela, _w, cx| {
-        assert!(!tela.na_aba_rgb(), "abre na sRGB");
-        assert_eq!(tela.abas_alteradas(), (false, false));
-        tela.arrastar_slider(0, 0.8, cx);
-    });
-    // 🔑 O `Change` do slider chega à tela quando o gesto termina — como o
-    // arrasto de verdade, que é um evento e não uma chamada.
-    e.revelacao(cx, |tela, _w, cx| {
-        assert_eq!(
-            tela.abas_alteradas(),
-            (true, false),
-            "o ponto âmbar da sRGB"
-        );
-        tela.escolher_aba_rgb(true, cx);
-        assert!(tela.na_aba_rgb());
-        let rgb = tela
-            .controle_onde(|d| d.secao.painel().no_rgb() && !d.discreto)
-            .expect("um slider contínuo da aba RGB");
-        tela.arrastar_slider(rgb, 0.5, cx);
-    });
-    e.revelacao(cx, |tela, _w, cx| {
-        assert_eq!(tela.abas_alteradas(), (true, true), "o ponto âmbar da RGB");
-        tela.escolher_aba_rgb(false, cx);
-        assert!(!tela.na_aba_rgb());
-    });
     e.esperar(cx);
 
     // A curva do vermelho: arrastar um nó, e o duplo clique o devolve à reta.
@@ -311,8 +286,11 @@ fn predefinicoes_prever_aplicar_criar_renomear_reordenar_importar_e_apagar(
                 },
                 Arquivo {
                     nome: "RecordarFotos P&B.dtstyle".into(),
+                    // Um estilo do darktable: desde 2/out/2026 vai para os
+                    // ilegíveis, e não vira predefinição.
                     texto: Some(
-                        include_str!("../revelacao/lightroom/recordarfotos-pb.dtstyle").into(),
+                        "<darktable_style version=\"1.0\"><info><name>RecordarFotos P&amp;B</name></info><style></style></darktable_style>"
+                            .into(),
                     ),
                 },
             ],
@@ -396,24 +374,24 @@ fn predefinicoes_prever_aplicar_criar_renomear_reordenar_importar_e_apagar(
         );
     });
 
-    // 📂 Importar do Lightroom e do darktable, pelo seletor do sistema.
+    // 📂 Importar do Lightroom pelo seletor do sistema; o do darktable não entra.
     e.revelacao(cx, |tela, _w, cx| tela.importar_do_lightroom(cx));
     e.esperar(cx);
     e.revelacao(cx, |tela, _w, cx| {
-        assert_eq!(tela.relatorio_da_importacao(), Some((2, 2)));
+        assert_eq!(tela.relatorio_da_importacao(), Some((2, 1)));
         let minhas = tela.coluna_de_predefinicoes(cx).1;
         assert!(
             minhas.contains(&"Cross Process-Cyan".to_string()),
             "{minhas:?}"
         );
         assert!(
-            minhas.contains(&"RecordarFotos P&B".to_string()),
+            !minhas.contains(&"RecordarFotos P&B".to_string()),
             "{minhas:?}"
         );
         tela.fechar_relatorio(cx);
         assert_eq!(tela.relatorio_da_importacao(), None);
     });
-    assert_eq!(e.guarda.salvos().len(), 3);
+    assert_eq!(e.guarda.salvos().len(), 2);
 
     // 🗑️ Apagar pergunta; "Cancelar" não apaga, Enter apaga.
     e.revelacao(cx, |tela, window, cx| {

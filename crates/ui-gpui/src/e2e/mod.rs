@@ -333,7 +333,7 @@ fn site_de_mentira(ajustar: impl FnOnce(&mut PublicadorDeMentira)) -> Arc<Public
 pub(super) struct Cenario {
     /// As predefinições que o app carregou ao abrir.
     pub presets: Vec<Preset>,
-    /// O que o seletor de `.lrtemplate`/`.dtstyle` devolve.
+    /// O que o seletor de `.lrtemplate`/`.xmp` devolve.
     pub arquivos_de_predefinicao: Vec<Arquivo>,
     /// Mexe no site antes de ele atender.
     pub site: Box<dyn FnOnce(&mut PublicadorDeMentira)>,

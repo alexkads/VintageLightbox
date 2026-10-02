@@ -14,9 +14,9 @@
 //!
 //! A tabela é o porte de `revelacao/ajustes.ts` do site, grupo a grupo, com os
 //! mesmos rótulos, faixas e casas: Básico, Curva de tons, Curva por ponto, HSL,
-//! Preto e branco, Detalhe, Lente, Calibração, Tonalização e Efeitos na aba
-//! **sRGB**, e os cinco módulos em RGB linear (Exposição, Sombras e realces,
-//! Monocromático, Vinhetagem e Color balance) na aba **RGB**. Até aqui eram 53,
+//! Preto e branco, Detalhe, Lente, Calibração, Tonalização e Efeitos — os do
+//! Lightroom. (A aba **RGB**, com os módulos do darktable, saiu em 2/out/2026:
+//! um motor só, e o RecordarFotos P&B refeito com estes.) Até aqui eram 53,
 //! e os outros 118 só chegavam por preset, pela revelação do site ou por
 //! sincronização — sem como vê-los nem desfazê-los um a um.
 //!
@@ -62,15 +62,10 @@ pub enum Secao {
     Vinheta,
     /// O grão — o segundo grupo do painel Efeitos.
     Grao,
-    RgbExposicao,
-    RgbSombrasERealces,
-    RgbMonocromatico,
-    RgbVinhetagem,
-    RgbColorBalance,
 }
 
 impl Secao {
-    pub const TODAS: [Secao; 20] = [
+    pub const TODAS: [Secao; 15] = [
         Secao::Basico,
         Secao::Tratamento,
         Secao::CurvaDeTons,
@@ -86,11 +81,6 @@ impl Secao {
         Secao::Tonalizacao,
         Secao::Vinheta,
         Secao::Grao,
-        Secao::RgbExposicao,
-        Secao::RgbSombrasERealces,
-        Secao::RgbMonocromatico,
-        Secao::RgbVinhetagem,
-        Secao::RgbColorBalance,
     ];
 
     /// O nome inteiro, para diagnóstico de teste e para o `id` da aba.
@@ -112,11 +102,6 @@ impl Secao {
             Secao::Tonalizacao => "Tonalização",
             Secao::Vinheta => "Vinheta de corte posterior",
             Secao::Grao => "Granulado",
-            Secao::RgbExposicao => "RGB / Exposição",
-            Secao::RgbSombrasERealces => "RGB / Sombras e realces",
-            Secao::RgbMonocromatico => "RGB / Monocromático",
-            Secao::RgbVinhetagem => "RGB / Vinhetagem",
-            Secao::RgbColorBalance => "RGB / Color balance",
         }
     }
 
@@ -134,19 +119,13 @@ impl Secao {
             Secao::Calibracao => Painel::Calibracao,
             Secao::Tonalizacao => Painel::Tonalizacao,
             Secao::Vinheta | Secao::Grao => Painel::Efeitos,
-            Secao::RgbExposicao => Painel::RgbExposicao,
-            Secao::RgbSombrasERealces => Painel::RgbSombrasERealces,
-            Secao::RgbMonocromatico => Painel::RgbMonocromatico,
-            Secao::RgbVinhetagem => Painel::RgbVinhetagem,
-            Secao::RgbColorBalance => Painel::RgbColorBalance,
         }
     }
 }
 
 /// Um painel sanfonado da coluna da direita.
 ///
-/// 🔑 **São os do site** (`revelacao/paineis.tsx`), nas duas abas: dez na sRGB e
-/// cinco na RGB, cada aba na ordem em que o shader aplica.
+/// 🔑 **São os do site** (`revelacao/paineis.tsx`), na ordem em que o shader aplica.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Painel {
     Basico,
@@ -158,16 +137,11 @@ pub enum Painel {
     Calibracao,
     Tonalizacao,
     Efeitos,
-    RgbExposicao,
-    RgbSombrasERealces,
-    RgbMonocromatico,
-    RgbVinhetagem,
-    RgbColorBalance,
 }
 
 impl Painel {
-    /// Todos, na ordem da tabela: a aba sRGB e depois a RGB.
-    pub const TODOS: [Painel; 14] = [
+    /// Todos, na ordem da tabela.
+    pub const TODOS: [Painel; 9] = [
         Painel::Basico,
         Painel::CurvaDeTons,
         Painel::Hsl,
@@ -177,11 +151,6 @@ impl Painel {
         Painel::Calibracao,
         Painel::Tonalizacao,
         Painel::Efeitos,
-        Painel::RgbExposicao,
-        Painel::RgbSombrasERealces,
-        Painel::RgbMonocromatico,
-        Painel::RgbVinhetagem,
-        Painel::RgbColorBalance,
     ];
 
     /// A aba sRGB — os controles de sempre, sobre a foto com gama.
@@ -201,18 +170,6 @@ impl Painel {
         Painel::Efeitos,
     ];
 
-    /// A aba RGB — os módulos em RGB linear, na ordem do pipeline do darktable.
-    ///
-    /// ⚠️ **Na tela eles não levam o nome "darktable"** (dono, 2026-09-12:
-    /// *"esse nome darktable suja os controles"*).
-    pub const RGB: [Painel; 5] = [
-        Painel::RgbExposicao,
-        Painel::RgbSombrasERealces,
-        Painel::RgbMonocromatico,
-        Painel::RgbVinhetagem,
-        Painel::RgbColorBalance,
-    ];
-
     pub fn rotulo(&self) -> &'static str {
         match self {
             Painel::Basico => "Básico",
@@ -225,11 +182,6 @@ impl Painel {
             Painel::Calibracao => "Calibração",
             Painel::Tonalizacao => "Correção de cores",
             Painel::Efeitos => "Efeitos",
-            Painel::RgbExposicao => "Exposição",
-            Painel::RgbSombrasERealces => "Sombras e realces",
-            Painel::RgbMonocromatico => "Monocromático",
-            Painel::RgbVinhetagem => "Vinhetagem",
-            Painel::RgbColorBalance => "Color balance",
         }
     }
 
@@ -244,11 +196,6 @@ impl Painel {
             Painel::PretoEBranco => "revelacao:Preto e branco".to_string(),
             outro => format!("revelacao:{}", outro.rotulo()),
         }
-    }
-
-    /// Se ele mora na aba RGB.
-    pub fn no_rgb(&self) -> bool {
-        Painel::RGB.contains(self)
     }
 
     /// As famílias que ele desenha. Uma só, menos o HSL — que tem as três, e é
@@ -272,11 +219,6 @@ impl Painel {
             Painel::Tonalizacao => &[Secao::Tonalizacao],
             // 🎞️ Os dois grupos do Lightroom, cada um com o seu título.
             Painel::Efeitos => &[Secao::Vinheta, Secao::Grao],
-            Painel::RgbExposicao => &[Secao::RgbExposicao],
-            Painel::RgbSombrasERealces => &[Secao::RgbSombrasERealces],
-            Painel::RgbMonocromatico => &[Secao::RgbMonocromatico],
-            Painel::RgbVinhetagem => &[Secao::RgbVinhetagem],
-            Painel::RgbColorBalance => &[Secao::RgbColorBalance],
         }
     }
 
@@ -313,7 +255,7 @@ pub struct Definicao {
     /// contraste `1,30` não é "mais 1,30", é um multiplicador.
     pub com_sinal: bool,
     /// Se o controle só aceita inteiros — os interruptores (`bw_ativo`, os
-    /// "Ligar" da aba RGB). Com o passo fino dos outros, um interruptor
+    /// "Ligar" da Calibração). Com o passo fino dos outros, um interruptor
     /// pararia em `0,37`, que o motor lê como desligado sem ninguém saber.
     pub discreto: bool,
     pub aplicar: fn(&mut Ajustes, f32),
@@ -399,7 +341,7 @@ impl Definicao {
     ///
     /// 🔑 Vem de [`Ajustes::default`], e **não** de um número escrito aqui. Os
     /// neutros não são todos zero (contraste, raio de nitidez, mistura, a curva
-    /// por ponto e metade da aba RGB), e ter dois lugares dizendo qual é o
+    /// por ponto), e ter dois lugares dizendo qual é o
     /// neutro é ter um deles errado mais cedo ou mais tarde.
     pub fn neutro(&self) -> f32 {
         (self.ler)(&Ajustes::default())
@@ -493,26 +435,6 @@ macro_rules! matiz {
 macro_rules! cento {
     ($secao:expr, $rotulo:literal, $campo:ident) => {
         def!($secao, $rotulo, $campo, 0.0, 100.0, 0, false)
-    };
-}
-
-/// Uma faixa do darktable — o `faixa` do site: sinal quando a faixa desce
-/// abaixo de zero.
-///
-/// 🚨 **As faixas são as `$MIN`/`$MAX` do darktable 5.6.1, e não as do slider
-/// dele.** Um estilo gravado com exposição +5 não cabe em −3..+4; um valor fora
-/// da faixa encostaria no limite sem erro nenhum.
-macro_rules! faixa {
-    ($secao:expr, $rotulo:literal, $campo:ident, $minimo:expr, $maximo:expr, $casas:expr) => {
-        def!(
-            $secao,
-            $rotulo,
-            $campo,
-            $minimo,
-            $maximo,
-            $casas,
-            ($minimo as f32) < 0.0
-        )
     };
 }
 
@@ -671,8 +593,8 @@ const HSL_MATIZ: [Definicao; 8] = hsl!(
 
 use Secao as S;
 
-/// Os 193 controles, na ordem em que a coluna da direita os desenha: a aba
-/// sRGB (a ordem de `paineis.tsx`) e depois a RGB.
+/// Os controles, na ordem em que a coluna da direita os desenha (a de
+/// `paineis.tsx`).
 ///
 /// ⚠️ **O Básico é o primeiro**, e os testes da tela contam com isso
 /// (`controles[0]` é a exposição).
@@ -913,457 +835,6 @@ pub const CONTROLES: &[Definicao] = &[
     cento!(S::Grao, "Intensidade", grain_amount),
     cento!(S::Grao, "Tamanho", grain_size).ativo_quando(grao_ligado),
     cento!(S::Grao, "Aspereza", grain_roughness).ativo_quando(grao_ligado),
-    // ============================================================ aba RGB
-    // ------------------------------------------------------------- Exposição
-    interruptor!(S::RgbExposicao, "Ligar", dt_exposure_ativo),
-    faixa!(
-        S::RgbExposicao,
-        "Exposição (EV)",
-        dt_exposure_exposure,
-        -18.0,
-        18.0,
-        3
-    ),
-    faixa!(
-        S::RgbExposicao,
-        "Correção do nível de preto",
-        dt_exposure_black,
-        -1.0,
-        1.0,
-        4
-    ),
-    // ----------------------------------------------------- Sombras e realces
-    interruptor!(S::RgbSombrasERealces, "Ligar", dt_shadhi_ativo),
-    faixa!(
-        S::RgbSombrasERealces,
-        "Sombras",
-        dt_shadhi_shadows,
-        -100.0,
-        100.0,
-        2
-    ),
-    faixa!(
-        S::RgbSombrasERealces,
-        "Realces",
-        dt_shadhi_highlights,
-        -100.0,
-        100.0,
-        2
-    ),
-    faixa!(
-        S::RgbSombrasERealces,
-        "Ajuste do ponto branco",
-        dt_shadhi_whitepoint,
-        -10.0,
-        10.0,
-        2
-    ),
-    faixa!(
-        S::RgbSombrasERealces,
-        "Raio (px da foto original)",
-        dt_shadhi_radius,
-        0.1,
-        500.0,
-        1
-    ),
-    faixa!(
-        S::RgbSombrasERealces,
-        "Compressão",
-        dt_shadhi_compress,
-        0.0,
-        100.0,
-        2
-    ),
-    faixa!(
-        S::RgbSombrasERealces,
-        "Cor das sombras",
-        dt_shadhi_shadows_ccorrect,
-        0.0,
-        100.0,
-        2
-    ),
-    faixa!(
-        S::RgbSombrasERealces,
-        "Cor dos realces",
-        dt_shadhi_highlights_ccorrect,
-        0.0,
-        100.0,
-        2
-    ),
-    faixa!(
-        S::RgbSombrasERealces,
-        "Limites (flags UNBOUND)",
-        dt_shadhi_flags,
-        0.0,
-        255.0,
-        0
-    ),
-    // --------------------------------------------------------- Monocromático
-    interruptor!(S::RgbMonocromatico, "Ligar", dt_monochrome_ativo),
-    faixa!(
-        S::RgbMonocromatico,
-        "Filtro — a (verde ↔ magenta)",
-        dt_monochrome_a,
-        -128.0,
-        128.0,
-        2
-    ),
-    faixa!(
-        S::RgbMonocromatico,
-        "Filtro — b (azul ↔ amarelo)",
-        dt_monochrome_b,
-        -128.0,
-        128.0,
-        2
-    ),
-    faixa!(
-        S::RgbMonocromatico,
-        "Largura do filtro",
-        dt_monochrome_size,
-        0.1,
-        10.0,
-        2
-    ),
-    faixa!(
-        S::RgbMonocromatico,
-        "Preservar realces",
-        dt_monochrome_highlights,
-        0.0,
-        1.0,
-        3
-    ),
-    // ------------------------------------------------------------ Vinhetagem
-    interruptor!(S::RgbVinhetagem, "Ligar", dt_vignette_ativo),
-    faixa!(
-        S::RgbVinhetagem,
-        "Início da queda (%)",
-        dt_vignette_scale,
-        0.0,
-        200.0,
-        2
-    ),
-    faixa!(
-        S::RgbVinhetagem,
-        "Raio da queda (%)",
-        dt_vignette_falloff_scale,
-        0.0,
-        200.0,
-        2
-    ),
-    faixa!(
-        S::RgbVinhetagem,
-        "Brilho",
-        dt_vignette_brightness,
-        -1.0,
-        1.0,
-        3
-    ),
-    faixa!(
-        S::RgbVinhetagem,
-        "Saturação",
-        dt_vignette_saturation,
-        -1.0,
-        1.0,
-        3
-    ),
-    faixa!(
-        S::RgbVinhetagem,
-        "Centro — horizontal",
-        dt_vignette_center_x,
-        -1.0,
-        1.0,
-        3
-    ),
-    faixa!(
-        S::RgbVinhetagem,
-        "Centro — vertical",
-        dt_vignette_center_y,
-        -1.0,
-        1.0,
-        3
-    ),
-    interruptor!(
-        S::RgbVinhetagem,
-        "Proporção automática",
-        dt_vignette_autoratio
-    ),
-    faixa!(
-        S::RgbVinhetagem,
-        "Proporção largura/altura",
-        dt_vignette_whratio,
-        0.0,
-        2.0,
-        3
-    ),
-    faixa!(S::RgbVinhetagem, "Forma", dt_vignette_shape, 0.0, 5.0, 3),
-    interruptor!(
-        S::RgbVinhetagem,
-        "Sem recorte de valores",
-        dt_vignette_unbound
-    ),
-    // --------------------------------------------------------- Color balance
-    // ⚠️ Croma, saturação e brilho são frações, como o darktable grava.
-    interruptor!(S::RgbColorBalance, "Ligar", dt_cb_ativo),
-    faixa!(
-        S::RgbColorBalance,
-        "Sombras — luminância",
-        dt_cb_shadows_y,
-        -1.0,
-        1.0,
-        4
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Sombras — croma",
-        dt_cb_shadows_c,
-        0.0,
-        1.0,
-        4
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Sombras — matiz",
-        dt_cb_shadows_h,
-        0.0,
-        360.0,
-        2
-    )
-    .com_trilho(Trilho::Roda),
-    faixa!(
-        S::RgbColorBalance,
-        "Meios-tons — luminância",
-        dt_cb_midtones_y,
-        -1.0,
-        1.0,
-        4
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Meios-tons — croma",
-        dt_cb_midtones_c,
-        0.0,
-        1.0,
-        4
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Meios-tons — matiz",
-        dt_cb_midtones_h,
-        0.0,
-        360.0,
-        2
-    )
-    .com_trilho(Trilho::Roda),
-    faixa!(
-        S::RgbColorBalance,
-        "Realces — luminância",
-        dt_cb_highlights_y,
-        -1.0,
-        1.0,
-        4
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Realces — croma",
-        dt_cb_highlights_c,
-        0.0,
-        1.0,
-        4
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Realces — matiz",
-        dt_cb_highlights_h,
-        0.0,
-        360.0,
-        2
-    )
-    .com_trilho(Trilho::Roda),
-    faixa!(
-        S::RgbColorBalance,
-        "Global — luminância",
-        dt_cb_global_y,
-        -1.0,
-        1.0,
-        4
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Global — croma",
-        dt_cb_global_c,
-        0.0,
-        1.0,
-        4
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Global — matiz",
-        dt_cb_global_h,
-        0.0,
-        360.0,
-        2
-    )
-    .com_trilho(Trilho::Roda),
-    faixa!(
-        S::RgbColorBalance,
-        "Deslocamento de matiz",
-        dt_cb_hue_angle,
-        -180.0,
-        180.0,
-        2
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Vibração global",
-        dt_cb_vibrance,
-        -1.0,
-        1.0,
-        4
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Contraste",
-        dt_cb_contrast,
-        -1.0,
-        1.0,
-        4
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Croma — global",
-        dt_cb_chroma_global,
-        -1.0,
-        1.0,
-        4
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Croma — sombras",
-        dt_cb_chroma_shadows,
-        -1.0,
-        1.0,
-        4
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Croma — meios-tons",
-        dt_cb_chroma_midtones,
-        -1.0,
-        1.0,
-        4
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Croma — realces",
-        dt_cb_chroma_highlights,
-        -1.0,
-        1.0,
-        4
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Saturação — global",
-        dt_cb_saturation_global,
-        -1.0,
-        1.0,
-        4
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Saturação — sombras",
-        dt_cb_saturation_shadows,
-        -1.0,
-        1.0,
-        4
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Saturação — meios-tons",
-        dt_cb_saturation_midtones,
-        -1.0,
-        1.0,
-        4
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Saturação — realces",
-        dt_cb_saturation_highlights,
-        -1.0,
-        1.0,
-        4
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Brilho — global",
-        dt_cb_brilliance_global,
-        -1.0,
-        1.0,
-        4
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Brilho — sombras",
-        dt_cb_brilliance_shadows,
-        -1.0,
-        1.0,
-        4
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Brilho — meios-tons",
-        dt_cb_brilliance_midtones,
-        -1.0,
-        1.0,
-        4
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Brilho — realces",
-        dt_cb_brilliance_highlights,
-        -1.0,
-        1.0,
-        4
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Máscara — queda das sombras",
-        dt_cb_shadows_weight,
-        0.0,
-        3.0,
-        3
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Máscara — queda dos realces",
-        dt_cb_highlights_weight,
-        0.0,
-        3.0,
-        3
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Máscara — fulcro branco (EV)",
-        dt_cb_white_fulcrum,
-        -16.0,
-        16.0,
-        3
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Máscara — fulcro cinza",
-        dt_cb_mask_grey_fulcrum,
-        0.0,
-        1.0,
-        4
-    ),
-    faixa!(
-        S::RgbColorBalance,
-        "Fulcro cinza do contraste",
-        dt_cb_grey_fulcrum,
-        0.0,
-        1.0,
-        4
-    ),
 ];
 
 /// Quantos campos do motor estão fora do neutro — **todos**, e não só os que
@@ -1399,12 +870,6 @@ pub fn painel_alterado(ajustes: &Ajustes, painel: Painel) -> bool {
         .secoes()
         .iter()
         .any(|secao| secao_alterada(ajustes, *secao))
-}
-
-/// Se a aba (RGB ou sRGB) tem algum ajuste — o ponto âmbar da aba.
-pub fn aba_alterada(ajustes: &Ajustes, rgb: bool) -> bool {
-    let paineis: &[Painel] = if rgb { &Painel::RGB } else { &Painel::SRGB };
-    paineis.iter().any(|p| painel_alterado(ajustes, *p))
 }
 
 /// O que o ponto de um conjunto de controles diz — o `marcaDosCampos` do site.
@@ -1451,18 +916,6 @@ pub fn marca_do_painel(ajustes: &Ajustes, salvo: &Ajustes, painel: Painel) -> Op
         CONTROLES
             .iter()
             .filter(|d| painel.secoes().contains(&d.secao)),
-        ajustes,
-        salvo,
-    )
-}
-
-/// O ponto da aba (RGB ou sRGB).
-pub fn marca_da_aba(ajustes: &Ajustes, salvo: &Ajustes, rgb: bool) -> Option<Marca> {
-    let paineis: &[Painel] = if rgb { &Painel::RGB } else { &Painel::SRGB };
-    marca_dos(
-        CONTROLES
-            .iter()
-            .filter(|d| paineis.iter().any(|p| p.secoes().contains(&d.secao))),
         ajustes,
         salvo,
     )
@@ -1558,8 +1011,8 @@ mod passo_dos_controles {
             .collect();
         assert_eq!(
             interruptores.len(),
-            9,
-            "bw_ativo, 5 módulos, 2 da vinheta e o processo do Lightroom"
+            2,
+            "bw_ativo e o processo do Lightroom (os 7 do darktable saíram em 2/out/2026)"
         );
         for d in interruptores {
             assert_eq!(
@@ -1710,19 +1163,6 @@ mod testes {
         }
     }
 
-    /// As duas abas somam todos os painéis, sem repetir nenhum.
-    #[test]
-    fn as_duas_abas_cobrem_todos_os_paineis() {
-        let juntas: Vec<Painel> = Painel::SRGB.into_iter().chain(Painel::RGB).collect();
-        assert_eq!(juntas, Painel::TODOS.to_vec());
-        for p in Painel::RGB {
-            assert!(p.no_rgb());
-        }
-        for p in Painel::SRGB {
-            assert!(!p.no_rgb());
-        }
-    }
-
     /// 🚨 **A ordem dos painéis é a ordem da tabela**, e é a do site.
     #[test]
     fn os_paineis_seguem_a_ordem_da_tabela() {
@@ -1757,23 +1197,21 @@ mod testes {
     fn as_chaves_sao_as_do_site() {
         assert_eq!(Painel::Basico.chave(), "revelacao:Básico");
         assert_eq!(Painel::Hsl.chave(), "revelacao:HSL");
-        assert_eq!(Painel::RgbExposicao.chave(), "revelacao:Exposição");
+        assert_eq!(Painel::SRGB.to_vec(), Painel::TODOS.to_vec());
     }
 
-    /// 🚨 **O cabeçalho conta os 193**, e o neutro não conta nada — nem o
-    /// cinza do darktable, nem a identidade da curva.
+    /// 🚨 **O cabeçalho conta todos os campos**, e o neutro não conta nada — nem
+    /// a identidade da curva.
     #[test]
     fn o_cabecalho_conta_todos_os_campos() {
         assert_eq!(quantos_fora_do_neutro(&Ajustes::default()), 0);
         let ajustes = Ajustes {
             exposure: 1.0,
-            dt_cb_ativo: 1.0,
+            pcv_amount: -20.0,
             curva_b3: 10.0,
             ..Ajustes::default()
         };
         assert_eq!(quantos_fora_do_neutro(&ajustes), 3);
-        assert!(aba_alterada(&ajustes, true));
-        assert!(aba_alterada(&ajustes, false));
         assert!(painel_alterado(&ajustes, Painel::CurvaDeTons));
         assert!(!painel_alterado(&ajustes, Painel::Hsl));
     }

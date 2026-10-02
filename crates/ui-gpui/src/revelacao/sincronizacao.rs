@@ -66,19 +66,18 @@ pub fn so(aberta: usize) -> BTreeSet<usize> {
 ///
 /// ⚠️ **Desde 2026-09-17 a coluna tem painel próprio para a curva por ponto,
 /// o P&B, a calibração e os cinco módulos RGB**, mas a caixa continua com os
-/// doze grupos do site: `Grupo::Painel` de um desses é sinônimo do grupo
+/// onze grupos do site: `Grupo::Painel` de um desses é sinônimo do grupo
 /// dedicado, e `TODOS` só usa o dedicado.
 ///
-/// 🚨 **Não são só os sete painéis da coluna.** O site sincroniza doze grupos
+/// 🚨 **Não são só os sete painéis da coluna.** O site sincroniza onze grupos
 /// (`GRUPOS_DA_SINCRONIZACAO`, em `revelacao/sincronizacao.ts`): os sete painéis,
-/// os Controles RGB, a curva por ponto, o preto e branco, a calibração e o
+/// a curva por ponto, o preto e branco, a calibração e o
 /// enquadramento. Até 2026-09-13 esta lista tinha só os painéis, e o mapa por
 /// nome mandava ao Básico todo ajuste que não reconhecia — 113 dos 171, entre
 /// eles o estilo inteiro dos Controles RGB. Sincronizar só o Básico levava o
 /// estilo junto; desmarcar o Básico o deixava para trás.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Grupo {
-    ControlesRgb,
     Painel(Painel),
     CurvaPorPonto,
     PretoEBranco,
@@ -87,8 +86,7 @@ pub enum Grupo {
 }
 
 impl Grupo {
-    pub const TODOS: [Grupo; 12] = [
-        Grupo::ControlesRgb,
+    pub const TODOS: [Grupo; 11] = [
         Grupo::Painel(Painel::Basico),
         Grupo::Painel(Painel::CurvaDeTons),
         Grupo::CurvaPorPonto,
@@ -120,21 +118,12 @@ impl Grupo {
         match painel {
             Painel::PretoEBranco => Grupo::PretoEBranco,
             Painel::Calibracao => Grupo::Calibracao,
-            p if p.no_rgb() => Grupo::ControlesRgb,
             p => Grupo::Painel(p),
         }
     }
 
     pub fn rotulo(self) -> &'static str {
         match self {
-            Grupo::ControlesRgb
-            | Grupo::Painel(
-                Painel::RgbExposicao
-                | Painel::RgbSombrasERealces
-                | Painel::RgbMonocromatico
-                | Painel::RgbVinhetagem
-                | Painel::RgbColorBalance,
-            ) => "Controles RGB",
             Grupo::Painel(painel) => painel.rotulo(),
             Grupo::CurvaPorPonto => "Curva por ponto",
             Grupo::PretoEBranco => "Preto e branco",
@@ -146,14 +135,6 @@ impl Grupo {
     /// O que ele descreve, em uma linha — some quando for óbvio.
     pub fn detalhe(self) -> Option<&'static str> {
         match self {
-            Grupo::ControlesRgb
-            | Grupo::Painel(
-                Painel::RgbExposicao
-                | Painel::RgbSombrasERealces
-                | Painel::RgbMonocromatico
-                | Painel::RgbVinhetagem
-                | Painel::RgbColorBalance,
-            ) => Some("exposição, sombras e realces, monocromático, vinhetagem e color balance"),
             Grupo::CurvaPorPonto => Some("os quatro canais"),
             Grupo::Painel(Painel::Hsl) => Some("cor, luminância e matiz das oito faixas"),
             Grupo::PretoEBranco | Grupo::Painel(Painel::PretoEBranco) => {
@@ -172,14 +153,6 @@ impl Grupo {
     /// Um id estável para o elemento da caixa.
     pub fn chave(self) -> &'static str {
         match self {
-            Grupo::ControlesRgb
-            | Grupo::Painel(
-                Painel::RgbExposicao
-                | Painel::RgbSombrasERealces
-                | Painel::RgbMonocromatico
-                | Painel::RgbVinhetagem
-                | Painel::RgbColorBalance,
-            ) => "controles-rgb",
             Grupo::Painel(Painel::Basico) => "basico",
             Grupo::Painel(Painel::CurvaDeTons) => "curva",
             Grupo::CurvaPorPonto => "curva-por-ponto",
@@ -205,7 +178,6 @@ impl Grupo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Escolha {
-    pub controles_rgb: bool,
     pub basico: bool,
     pub curva: bool,
     pub curva_por_ponto: bool,
@@ -224,7 +196,6 @@ impl Default for Escolha {
     /// gravada antes de um grupo existir abre com ele **marcado**, como o site.
     fn default() -> Self {
         Self {
-            controles_rgb: true,
             basico: true,
             curva: true,
             curva_por_ponto: true,
@@ -243,14 +214,6 @@ impl Default for Escolha {
 impl Escolha {
     fn campo(&mut self, grupo: Grupo) -> &mut bool {
         match grupo {
-            Grupo::ControlesRgb
-            | Grupo::Painel(
-                Painel::RgbExposicao
-                | Painel::RgbSombrasERealces
-                | Painel::RgbMonocromatico
-                | Painel::RgbVinhetagem
-                | Painel::RgbColorBalance,
-            ) => &mut self.controles_rgb,
             Grupo::Painel(Painel::Basico) => &mut self.basico,
             Grupo::Painel(Painel::CurvaDeTons) => &mut self.curva,
             Grupo::CurvaPorPonto => &mut self.curva_por_ponto,
@@ -343,8 +306,6 @@ pub fn grupo_do_ajuste(nome: &str) -> Option<Grupo> {
         Grupo::Painel(Painel::Tonalizacao)
     } else if com("grain_") || com("pcv_") {
         Grupo::Painel(Painel::Efeitos)
-    } else if com("dt_") {
-        Grupo::ControlesRgb
     } else {
         return None;
     };
@@ -492,10 +453,6 @@ mod testes {
                 grupo.rotulo()
             );
         }
-        // O estilo dos Controles RGB viaja inteiro, e em grupo próprio.
-        for nome in Ajustes::NOMES.iter().filter(|n| n.starts_with("dt_")) {
-            assert_eq!(grupo_do_ajuste(nome), Some(Grupo::ControlesRgb), "`{nome}`");
-        }
     }
 
     /// 🔑 **O grupo de um ajuste é o painel onde o slider dele mora.**
@@ -525,8 +482,7 @@ mod testes {
     fn o_estilo_e_a_calibracao_viajam_nos_proprios_grupos() {
         let origem = Ajustes {
             exposure: 1.5,
-            dt_vignette_ativo: 1.0,
-            dt_vignette_brightness: 0.9,
+            pcv_amount: 40.0,
             calib_red_hue: 20.0,
             bw_ativo: 1.0,
             curva_m4: 150.0,
@@ -539,10 +495,7 @@ mod testes {
         so_basico.basico = true;
         let final_ = mesclar(destino, origem, &so_basico);
         assert_eq!(final_.exposure, 1.5, "o Básico viaja");
-        assert_eq!(
-            final_.dt_vignette_ativo, 0.0,
-            "o estilo não anda com o Básico"
-        );
+        assert_eq!(final_.pcv_amount, 0.0, "a vinheta não anda com o Básico");
         assert_eq!(
             final_.calib_red_hue, 0.0,
             "a calibração não anda com o Básico"
@@ -562,8 +515,7 @@ mod testes {
             final_.exposure, 0.0,
             "o Básico desmarcado fica o do destino"
         );
-        assert_eq!(final_.dt_vignette_ativo, 1.0, "o estilo viaja sem o Básico");
-        assert_eq!(final_.dt_vignette_brightness, 0.9);
+        assert_eq!(final_.pcv_amount, 40.0, "a vinheta viaja sem o Básico");
         assert_eq!(final_.calib_red_hue, 20.0);
         assert_eq!(final_.bw_ativo, 1.0);
         assert_eq!(final_.curva_m4, 150.0);
@@ -626,8 +578,6 @@ mod testes {
         assert!(!lida.basico);
         assert!(lida.curva && !lida.enquadramento);
         // E os grupos que vieram depois nascem marcados, como no site.
-        assert!(
-            lida.controles_rgb && lida.curva_por_ponto && lida.preto_e_branco && lida.calibracao
-        );
+        assert!(lida.curva_por_ponto && lida.preto_e_branco && lida.calibracao);
     }
 }

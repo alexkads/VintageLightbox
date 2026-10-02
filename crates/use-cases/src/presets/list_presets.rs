@@ -547,6 +547,25 @@ impl ListPresetsUseCase {
     /// depois, na ordem do repositório.
     pub async fn execute(&self) -> DomainResult<Vec<Preset>> {
         let mut user_presets = self.preset_repository.find_all().await?;
+        // Uma predefinição importada de um `.dtstyle` antes de 2/out/2026 só
+        // tem campos `dt_*`: a do P&B vira o RecordarFotos P&B de hoje, e as
+        // outras perdem só o que o motor não tem mais.
+        for preset in &mut user_presets {
+            if preset.adjustments.campos().any(|c| c.starts_with("dt_")) {
+                let mut receita: serde_json::Map<String, serde_json::Value> = preset
+                    .adjustments
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), serde_json::json!(v)))
+                    .collect();
+                migrar_do_darktable(&mut receita);
+                preset.adjustments = receita
+                    .iter()
+                    .filter_map(|(k, v)| Some((k.as_str(), v.as_f64()? as f32)))
+                    .collect();
+                // Um estilo do darktable é um visual inteiro: recomeça do neutro.
+                preset.replaces = true;
+            }
+        }
 
         let mut all_presets = presets_de_sistema();
         all_presets.append(&mut user_presets);

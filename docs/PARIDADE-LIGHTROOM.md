@@ -261,7 +261,7 @@ B&W 01/10 são LUT 3D + tabela HSV, e embutir as tabelas da Adobe num projeto MI
 as máscaras locais e a revelação do RAW (nas fotos NEF, todas passavam de 30 já no processo 0).
 
 ⚠️ **O site** usa o mesmo motor (wasm), mas ainda não tem o processo 1: falta reconstruir o wasm
-(`scripts/construir-web.sh`), copiar o `nomes.json` (194 campos), o `presets-lr.json` e registrar o
+(`scripts/construir-web.sh`), copiar o `nomes.json` (133 campos desde 2/out/2026, sem os `dt_*`), o `presets-lr.json` e registrar o
 campo no `CONTRATO_DA_FOTO.md`.
 
 ### O que mais falta na Revelação, comparado ao Lightroom
