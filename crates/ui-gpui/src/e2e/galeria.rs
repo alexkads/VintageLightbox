@@ -149,6 +149,98 @@ fn faixa_e_preco_em_lote_pela_grade_e_filmstrip(cx: &mut TestAppContext) {
     assert_eq!(e.site.tiradas(), ["a", "d"], "a comprada fica de fora");
 }
 
+/// 💬 **O "Aplicar" do lote diz que aplicou** (dono, 02/10/2026: *"Não estou
+/// conseguindo aplicar preços para pós venda… acho que falta feedback
+/// visual"*).
+///
+/// O `PATCH` já saía certo, mas com as duas fotos já fixadas o cartão dizia
+/// "2 com valor fixado" antes e depois, e o campo seguia com o número: nada na
+/// tela mudava. Agora o botão espera o site (e não manda de novo), a resposta
+/// vira aviso, o campo esvazia e o resumo mostra o valor.
+#[gpui_kit::test]
+fn o_preco_do_lote_mostra_que_foi_aplicado(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(
+        cx,
+        Cenario {
+            site: Box::new(|site| {
+                // 🐢 O `PATCH` só volta quando o teste soltar.
+                site.negociacao_demorada = true;
+                let mut fotos = site.fotos_da_sessao.lock().unwrap();
+                for foto in fotos.iter_mut() {
+                    foto.nota = Some(5);
+                }
+                // O caso da tela do dono: as duas já fixadas.
+                fotos[0].preco_de_venda = Some("25.00".into());
+                fotos[2].preco_de_venda = Some("30.00".into());
+            }),
+            ..Default::default()
+        },
+    );
+    let visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    visual.simulate_resize(gpui_kit::size(gpui_kit::px(1600.), gpui_kit::px(1400.)));
+    clicar(&e, cx, "sessao-tile-a");
+    let aditivo = Modifiers {
+        #[cfg(target_os = "macos")]
+        platform: true,
+        #[cfg(not(target_os = "macos"))]
+        control: true,
+        ..Modifiers::none()
+    };
+    clicar_com(&e, cx, "tira-d", aditivo);
+    e.detalhe(cx, |tela, _, _| {
+        assert_eq!(tela.marcadas(), ["a", "d"]);
+        assert_eq!(
+            tela.resumo_do_preco_do_lote(),
+            "2 com valor fixado, em valores diferentes;"
+        );
+    });
+
+    clicar(&e, cx, "lote-preco");
+    e.teclar(cx, "1 0 0");
+    clicar(&e, cx, "lote-preco-aplicar");
+    e.esperar(cx);
+    assert_eq!(e.site.negociadas().len(), 2, "o preço saiu para as duas");
+
+    // ⏳ No ar: o botão espera, e o segundo clique não manda outra leva.
+    e.detalhe(cx, |tela, _, _| assert!(tela.aplicando_preco_do_lote()));
+    clicar(&e, cx, "lote-preco-aplicar");
+    e.esperar(cx);
+    assert_eq!(e.site.negociadas().len(), 2, "Aplicando… não reenvia");
+
+    // A primeira resposta ainda não é o fim do lote.
+    e.site.responder_uma();
+    e.esperar(cx);
+    e.detalhe(cx, |tela, _, _| assert!(tela.aplicando_preco_do_lote()));
+
+    e.site.responder();
+    e.esperar(cx);
+    e.detalhe(cx, |tela, _, cx| {
+        assert!(!tela.aplicando_preco_do_lote());
+        assert_eq!(
+            tela.ultimo_aviso(),
+            Some("Preço de venda de R$ 100,00 aplicado em 2 fotos.")
+        );
+        assert_eq!(tela.preco_do_lote_digitado(cx).as_deref(), Some(""));
+        assert_eq!(tela.resumo_do_preco_do_lote(), "As 2 fixadas em R$ 100,00;");
+    });
+
+    // "Voltar à faixa" também responde.
+    clicar(&e, cx, "lote-preco-voltar-faixa");
+    e.esperar(cx);
+    e.site.responder();
+    e.esperar(cx);
+    e.detalhe(cx, |tela, _, _| {
+        assert_eq!(
+            tela.ultimo_aviso(),
+            Some("2 fotos de volta ao preço da faixa.")
+        );
+        assert_eq!(
+            tela.resumo_do_preco_do_lote(),
+            "Sem valor fixado: vale o preço da faixa."
+        );
+    });
+}
+
 /// 🚨 **A revelação padrão da sessão vale para quem chega depois.**
 ///
 /// A predefinição e a proporção escolhidas na etapa 2 do assistente ficam **na

@@ -647,6 +647,9 @@ pub struct Detalhe {
     campos_do_painel: Option<CamposDoPainel>,
     /// Controles da seleção compartilhada pela grade e pela tira.
     campos_do_lote: Option<CamposDoLote>,
+    /// O "Aplicar" (ou "Voltar à faixa") do lote que ainda espera o site —
+    /// ver [`PrecoDoLoteNoAr`].
+    preco_do_lote_no_ar: Option<PrecoDoLoteNoAr>,
     /// A gaveta do atendimento está aberta?
     atendimento_aberto: bool,
     /// A gaveta — o `atendimento-da-sessao.tsx` do site. Ver
@@ -865,6 +868,39 @@ struct CamposDoLote {
     _assinaturas: Vec<gpui_kit::Subscription>,
 }
 
+/// 💬 **O preço do lote que foi ao site e ainda não voltou** (dono, 02/10/2026:
+/// *"Não estou conseguindo aplicar preços para pós venda… acho que falta
+/// feedback visual"*).
+///
+/// O `PATCH` saía certo, mas o cartão do lote não mudava: com as fotos já
+/// fixadas, "2 com valor fixado" era a mesma frase antes e depois, e o campo
+/// guardava o número digitado. Agora o "Aplicar" fica em "Aplicando…" enquanto
+/// isto existe, e a última resposta vira um aviso de sucesso — só das que o
+/// site aceitou; a recusa já tem o seu.
+struct PrecoDoLoteNoAr {
+    /// `None` = "Voltar à faixa".
+    centavos: Option<i64>,
+    /// Os ids no site que ainda esperam resposta.
+    faltam: std::collections::HashSet<String>,
+    total: usize,
+    recusadas: usize,
+}
+
+impl PrecoDoLoteNoAr {
+    fn frase_de_sucesso(&self) -> Option<String> {
+        let aceitas = self.total - self.recusadas;
+        let fotos = if aceitas == 1 { "foto" } else { "fotos" };
+        match (aceitas, self.centavos) {
+            (0, _) => None,
+            (_, Some(centavos)) => Some(format!(
+                "Preço de venda de {} aplicado em {aceitas} {fotos}.",
+                dinheiro::formatar(centavos)
+            )),
+            (_, None) => Some(format!("{aceitas} {fotos} de volta ao preço da faixa.")),
+        }
+    }
+}
+
 fn campo_preenchido(
     valor: &str,
     dica: &'static str,
@@ -918,6 +954,7 @@ impl Detalhe {
             docas: None,
             largura_da_coluna: super::paineis::LARGURA_ABERTA + crate::docas::LARGURA_DA_SETA,
             campos_do_lote: None,
+            preco_do_lote_no_ar: None,
             tira_desenhada: (0, 0),
             tira_a_seguir: None,
             altura_da_tira: altura_da_tira::guardada("sessao"),
@@ -1059,6 +1096,8 @@ impl Detalhe {
         self.atendimento_aberto = false;
         self.atendimento_gravando.clear();
         self.atendimento.update(cx, |gaveta, cx| gaveta.largar(cx));
+        // O preço do lote da anterior: o aviso dele não é desta sessão.
+        self.preco_do_lote_no_ar = None;
         self.importacao = None;
         // A fila era da sessão que ficou para trás: não entra nesta.
         self.fila_de_levas.clear();
@@ -1150,6 +1189,20 @@ impl Detalhe {
         } else {
             Pedido::Avisar(texto)
         });
+    }
+
+    /// 🧪 O preço do lote ainda espera o site?
+    #[cfg(test)]
+    pub(crate) fn aplicando_preco_do_lote(&self) -> bool {
+        self.preco_do_lote_no_ar.is_some()
+    }
+
+    /// 🧪 O que está digitado no preço do lote (`None` sem lote).
+    #[cfg(test)]
+    pub(crate) fn preco_do_lote_digitado(&self, cx: &gpui_kit::App) -> Option<String> {
+        self.campos_do_lote
+            .as_ref()
+            .map(|c| c.preco.read(cx).value().to_string())
     }
 
     /// 🧪 O último aviso de gesto pedido à raiz.
@@ -2013,13 +2066,16 @@ impl Detalhe {
     /// ⚠️ **A comprada e a apagada ficam de fora**, e quem decide é o core
     /// (`Foto::editavel`): a comprada tem cobrança atrás dela, e a apagada não
     /// tem arquivo.
+    ///
+    /// Devolve os ids que foram (ou esperam a vez de ir) ao site — quem
+    /// acompanha a resposta, como o preço do lote, conta por eles.
     fn mudar_as_marcadas(
         &mut self,
         mudanca: domain::services::pos_venda::MudancaDaFoto,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Vec<String> {
         let Some(sessao) = self.sessao.clone() else {
-            return;
+            return Vec::new();
         };
         let alvos: Vec<String> = self
             .selecao
@@ -2127,16 +2183,17 @@ impl Detalhe {
         // A foto com um `PATCH` no ar guarda este na fila dela; as outras vão
         // agora.
         if alvos.is_empty() {
-            return;
+            return alvos;
         }
 
         self.erro = None;
         self.pintar_a_mao_no_site();
-        for id in alvos {
-            self.despachar_mudanca(sessao.clone(), id, mudanca.clone());
+        for id in &alvos {
+            self.despachar_mudanca(sessao.clone(), id.clone(), mudanca.clone());
         }
         self.acompanhar(cx);
         cx.notify();
+        alvos
     }
 
     /// Manda a mudança desta foto ao site — ou, se ela já tem uma no ar,
@@ -3302,6 +3359,8 @@ impl Detalhe {
                 }
                 Recado::Negociou { foto_id, erro } => {
                     self.no_ar.remove(&foto_id);
+                    let segue = self.na_vez.contains_key(&foto_id);
+                    self.preco_do_lote_respondeu(&foto_id, erro.is_some(), segue, cx);
                     if let Some(erro) = erro {
                         // A recusa desfaz a marca da mão: a releitura abaixo
                         // traz o que o site tem, e é isso que a grade mostra.
@@ -7158,13 +7217,82 @@ impl Detalhe {
     }
 
     fn mudar_preco_do_lote(&mut self, preco: Option<String>, cx: &mut Context<Self>) {
-        self.mudar_as_marcadas(
+        let centavos = preco.as_deref().and_then(dinheiro::ler_campo);
+        let alvos = self.mudar_as_marcadas(
             domain::services::pos_venda::MudancaDaFoto {
                 preco_de_venda: Some(preco),
                 ..Default::default()
             },
             cx,
         );
+        self.preco_do_lote_no_ar = (!alvos.is_empty()).then(|| PrecoDoLoteNoAr {
+            centavos,
+            total: alvos.len(),
+            faltam: alvos.into_iter().collect(),
+            recusadas: 0,
+        });
+        cx.notify();
+    }
+
+    /// A frase sob o preço do lote: **o valor**, e não só quantas — depois do
+    /// "Aplicar" é ela que diz o que o cliente vai pagar.
+    pub(crate) fn resumo_do_preco_do_lote(&self) -> String {
+        let no_site: Vec<_> = self
+            .selecao
+            .marcadas()
+            .filter_map(|p| self.acervo.visivel(p))
+            .filter(|f| f.editavel() && !self.ids_locais.contains(&f.id))
+            .collect();
+        let fixados: Vec<i64> = no_site.iter().filter_map(|f| f.preco_de_venda).collect();
+        let um_valor = fixados
+            .iter()
+            .all(|v| Some(v) == fixados.first())
+            .then(|| fixados.first().copied())
+            .flatten();
+        match (fixados.len(), um_valor) {
+            (0, _) => "Sem valor fixado: vale o preço da faixa.".to_string(),
+            (n, Some(centavos)) if n > 1 && n == no_site.len() => {
+                format!("As {n} fixadas em {};", dinheiro::formatar(centavos))
+            }
+            (1, Some(centavos)) => format!("1 fixada em {};", dinheiro::formatar(centavos)),
+            (n, Some(centavos)) => format!("{n} fixadas em {};", dinheiro::formatar(centavos)),
+            (n, None) => format!("{n} com valor fixado, em valores diferentes;"),
+        }
+    }
+
+    /// A resposta do site para uma foto do preço do lote. Com a última, o
+    /// aviso — e o campo limpo, porque o valor agora está no resumo do cartão.
+    ///
+    /// `segue` = a foto tem outra mudança na vez dela (fundida com esta): a
+    /// resposta que chegou é da anterior, e esta ainda não voltou.
+    fn preco_do_lote_respondeu(
+        &mut self,
+        foto_id: &str,
+        recusada: bool,
+        segue: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(no_ar) = self.preco_do_lote_no_ar.as_mut() else {
+            return;
+        };
+        if segue || !no_ar.faltam.remove(foto_id) {
+            return;
+        }
+        no_ar.recusadas += usize::from(recusada);
+        if !no_ar.faltam.is_empty() {
+            return;
+        }
+        let Some(no_ar) = self.preco_do_lote_no_ar.take() else {
+            return;
+        };
+        if let Some(frase) = no_ar.frase_de_sucesso() {
+            self.avisar_sucesso(frase, cx);
+        }
+        if no_ar.recusadas == 0 {
+            // Os campos se refazem no próximo quadro, com o preço vazio.
+            self.campos_do_lote = None;
+        }
+        cx.notify();
     }
 
     /// A faixa da foto em foco. Id vazio = devolver ao padrão da galeria.
@@ -7506,6 +7634,7 @@ impl Detalhe {
                     }
                 },
             );
+        let aplicando = self.preco_do_lote_no_ar.is_some();
         let total = campos.ids.len();
         let podem = editaveis + aguardando;
         let nota_do_lote = self
@@ -7759,8 +7888,9 @@ impl Detalhe {
                                 .child(
                                     crate::estilo::botao_contorno("lote-preco-aplicar", cx)
                                         .debug_selector(|| "lote-preco-aplicar".into())
-                                        .label("Aplicar")
-                                        .disabled(sem_site)
+                                        .label(if aplicando { "Aplicando…" } else { "Aplicar" })
+                                        .loading(aplicando)
+                                        .disabled(sem_site || aplicando)
                                         .on_click(cx.listener(|tela, _, _, cx| {
                                             tela.aplicar_preco_do_lote(cx)
                                         })),
@@ -7773,11 +7903,11 @@ impl Detalhe {
                                 .items_center()
                                 .gap_x(px(4.))
                                 .text_color(apagado)
-                                .child(if fixadas > 0 {
-                                    format!("{fixadas} com valor fixado;")
-                                } else {
-                                    "Sem valor fixado: vale o preço da faixa.".to_string()
-                                })
+                                .child(
+                                    div()
+                                        .debug_selector(|| "lote-preco-resumo".into())
+                                        .child(self.resumo_do_preco_do_lote()),
+                                )
                                 .when(fixadas > 0, |frase| {
                                     frase.child(
                                         crate::estilo::botao_raso("lote-preco-voltar-faixa")
