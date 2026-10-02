@@ -413,6 +413,39 @@ local function casos_de_vinheta_viragem()
 	}
 end
 
+-- A ordem da vinheta e da Luminância do Color Grading: a vinheta branca +100
+-- do RF Bem Velhão, sozinha e com a Luminância negativa dos realces e dos
+-- médios. Se o canto clareado continua claro, o Lightroom aplica a Luminância
+-- antes da vinheta (o que o motor faz desde 2/out); se escurece de volta,
+-- depois. Na foto cinza lisa e numa foto de verdade.
+local function casos_de_vinheta_luminancia()
+	local branca = {
+		PostCropVignetteAmount = 100, PostCropVignetteStyle = 1,
+		PostCropVignetteMidpoint = 0, PostCropVignetteFeather = 35,
+		PostCropVignetteRoundness = 0, PostCropVignetteHighlightContrast = 0,
+	}
+	local function com(base, extra)
+		local t = {}
+		for k, v in pairs(base) do
+			t[k] = v
+		end
+		for k, v in pairs(extra) do
+			t[k] = v
+		end
+		return t
+	end
+	return {
+		{ nome = "00-neutro", ajustes = {} },
+		{ nome = "01-vinheta", ajustes = com(branca, {}) },
+		{ nome = "02-realces-38", ajustes = { ColorGradeHighlightLum = -38 } },
+		{ nome = "03-vinheta-realces-38", ajustes = com(branca, { ColorGradeHighlightLum = -38 }) },
+		{ nome = "04-medios-50", ajustes = { ColorGradeMidtoneLum = -50 } },
+		{ nome = "05-vinheta-medios-50", ajustes = com(branca, { ColorGradeMidtoneLum = -50 }) },
+		{ nome = "06-global-50", ajustes = { ColorGradeGlobalLum = -50 } },
+		{ nome = "07-vinheta-global-50", ajustes = com(branca, { ColorGradeGlobalLum = -50 }) },
+	}
+end
+
 -- A Divisão de tons sozinha, na rampa (a faixa cinza): quanto de cor cada
 -- matiz e saturação põe em cada nível, nas sombras e nos realces, e o
 -- Equilíbrio. É a régua da viragem do processo 1.
@@ -455,6 +488,9 @@ function Regua.casos(completa, por_nome, tipo)
 	end
 	if tipo == "vinheta-viragem" then
 		return casos_de_vinheta_viragem()
+	end
+	if tipo == "vinheta-luminancia" then
+		return casos_de_vinheta_luminancia()
 	end
 	if tipo == "cor" then
 		return casos_de_cor()

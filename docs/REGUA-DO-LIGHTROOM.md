@@ -641,23 +641,35 @@ A rodada completa (`tudo-5`, 930 casos, contra a `tudo-4a`, que já lia Adobe RG
 
 Média das 28 nas fotos JPG: ΔE 6,35 → **6,90**.
 
-**A hipótese mais forte** (a conferir primeiro): o Bem Velhão tem vinheta pós-corte **+100** e, no Color
-Grading, **Luminância dos médios −50 e dos realces −38** e a **roda global 40**. Ao mover a viragem
-para depois das vinhetas (seção 11), moveu-se a função `viragem` **inteira** — e a Luminância
-negativa passou a escurecer a borda branca. A régua `vinheta-viragem` só provou que a **cor das
-sombras e dos realces** fica dentro da vinheta; a Luminância e a roda global podem ter de continuar
-**antes** dela. Os Velho Oeste têm vinheta negativa com divisão de tons forte e Equilíbrio
-(−45): conferir também a tabela do Equilíbrio (medida só no matiz 45°, saturação 50).
+**A causa, e a correção que está no `dev`** (2/out, à noite, no Mac): o Bem Velhão tem vinheta
+pós-corte **+100** e, no Color Grading, **Luminância dos médios −50 e dos realces −38**. Ao mover a
+viragem para depois das vinhetas (seção 11), moveu-se a função `viragem` **inteira** — e a Luminância
+negativa passou a escurecer a borda que a vinheta branca clareou. O teste
+`no_processo_1_a_luminancia_da_viragem_nao_apaga_a_vinheta_branca` mede isso no cinza 150: com o
+shader da `tudo-5` o canto saía **158 em vez de 255** (exatamente os −38 %). A régua `vinheta-viragem`
+só provou que a **cor** das sombras e dos realces fica dentro da vinheta; nada disse da Luminância.
 
-**Como conferir:** a régua `componentes` separa o painel (`comp-tonalizacao-…`, `comp-vinheta-…`):
+A `viragem` virou `luminancia_da_viragem` + `cor_da_viragem` (`corpo.wgsl`). No processo 1 a
+Luminância voltou para antes das vinhetas — a posição da `tudo-4a`, que dava 29 — e só a cor ficou
+depois. O processo 0 não muda (a `viragem` chama as duas em sequência, com a luz de entrada). O
+RecordarFotos P&B não usa Luminância: o ΔE 2,17 contra o darktable não muda.
+
+**Falta medir no Windows** (as réguas e o Lightroom só estão lá):
+
+1. A régua nova `casos=vinheta-luminancia` no plug-in: a vinheta +100 sozinha e com a Luminância de
+   realces −38, médios −50 e global −50, no cinza liso e numa foto. Se o canto do caso
+   `03-vinheta-realces-38` sair tão claro quanto o do `01-vinheta`, o Lightroom aplica a Luminância
+   antes da vinheta, como o motor agora; se escurecer, a ordem é a outra e a tabela muda.
+2. A rodada completa (`tudo-6`) contra a `tudo-5` e a `tudo-4a`: o Bem Velhão tem de voltar a ~29
+   (JPG) e ~46 (RAW). Se ficar acima, separar o painel com a régua `componentes`:
 
 ```bash
 cargo run --release -p infrastructure --example comparar_em_lote -- saida.csv \
     --regua "<Comparar Presets>/regua-componentes" --processos 1 --filtro Bem_Velh --imagens <pasta>
 ```
 
-E uma régua curta no plug-in com vinheta +100 e Luminância de médios/realces negativa, para saber
-em que ordem o Lightroom aplica as duas.
+Os Velho Oeste (~17 → ~19) têm vinheta negativa com divisão de tons forte e Equilíbrio (−45): se
+não voltarem, conferir a tabela do Equilíbrio (medida só no matiz 45°, saturação 50).
 
 ### O lançamento 0.1.65 — o texto está pronto, e não foi commitado
 
@@ -705,7 +717,7 @@ e o `wasm-opt` (o `scripts/construir-web.sh` usa os três). Instalar pede a auto
 | `comparar_pb_darktable` | o RecordarFotos P&B contra o `darktable-cli` (gera as referências sozinho) |
 | `ajustar_pb` | acha os valores do RecordarFotos P&B (descida coordenada, ~7 min) |
 | `tabelas-do-lightroom` | regera `tabelas_lightroom.bin` das réguas (547 linhas) |
-| plug-in `VintageLightbox-Calibracao.lrplugin` | gera as réguas no Lightroom (`casos=` … `viragem`, `vinheta-viragem`, `nevoa`, `cor` …) |
+| plug-in `VintageLightbox-Calibracao.lrplugin` | gera as réguas no Lightroom (`casos=` … `viragem`, `vinheta-viragem`, `vinheta-luminancia`, `nevoa`, `cor` …) |
 
 As réguas estão em `C:\Users\alexk\OneDrive\Pictures\Comparar Presets\`. As armadilhas, na seção 12.
 

@@ -58,6 +58,7 @@ trabalho dele.
 | `componentes` | cada predefinição do estúdio decomposta por painel (Básico, balanço, curva, P&B, HSL, tonalização, vinheta, detalhe) | fotos reais |
 | `cor` | Vibração e Saturação de −100 a +100, de 10 em 10 | `carta-cor.jpg`: 24 matizes × 6 saturações × 3 brilhos |
 | `nevoa` | Remover névoa de −100 a +100, de 25 em 25 — o Lightroom decide a névoa por foto, então são muitas fotos | fotos reais |
+| `vinheta-luminancia` | a vinheta branca +100 sozinha e com a Luminância negativa do Color Grading (realces −38, médios −50, global −50): a ordem das duas | cinza liso e uma foto real |
 
 ## Os roteiros e a ferramenta de medição (`medicao/`)
 
