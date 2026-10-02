@@ -617,3 +617,102 @@ Grading, a Luminância e a Mistura seguem a conta de antes. Resultado: croma den
 nos 12 matizes, matiz em ±1°, Equilíbrio −100 nos médios 38 contra 42.
 
 O RecordarFotos P&B usa a viragem: os valores dele foram reajustados com a tabela nova (seção 11).
+
+## 15. Onde estamos — 2/out/2026, fim do dia (ler isto primeiro para continuar)
+
+### O que está no `dev` (nada foi lançado; o `main` e os balcões estão na 0.1.64)
+
+| commit | o quê |
+|---|---|
+| `777b36c` | leitura da foto pelo espaço que ela declara (Adobe RGB nas fotos da câmera) — seção 10 |
+| `6073ec5` | RecordarFotos P&B com os controles do Lightroom; a viragem depois da vinheta no processo 1 — seção 11 |
+| `2cccd47` | o darktable sai do motor (133 campos), a aba RGB e o importador saem, as fotos e predefinições antigas migram — seção 13 |
+| `8463e46` | a Divisão de tons medida no Lightroom; RecordarFotos P&B reajustado (ΔE 2,17 contra o darktable) — seção 14 |
+
+### 🚨 O que segura o lançamento: uma regressão nos LRs
+
+A rodada completa (`tudo-5`, 930 casos, contra a `tudo-4a`, que já lia Adobe RGB) achou:
+
+| predefinição | antes | depois |
+|---|---|---|
+| RecordarFotos Bem Velhão — JPG | 29,1 | **58,7** |
+| RecordarFotos Bem Velhão — RAW | 46,1 | **82,4** |
+| Velho Oeste Color, Chocolate, Hollyword, Velho Oeste 2 — JPG | ~17 | ~19 |
+
+Média das 28 nas fotos JPG: ΔE 6,35 → **6,90**.
+
+**A hipótese mais forte** (a conferir primeiro): o Bem Velhão tem vinheta pós-corte **+100** e, no Color
+Grading, **Luminância dos médios −50 e dos realces −38** e a **roda global 40**. Ao mover a viragem
+para depois das vinhetas (seção 11), moveu-se a função `viragem` **inteira** — e a Luminância
+negativa passou a escurecer a borda branca. A régua `vinheta-viragem` só provou que a **cor das
+sombras e dos realces** fica dentro da vinheta; a Luminância e a roda global podem ter de continuar
+**antes** dela. Os Velho Oeste têm vinheta negativa com divisão de tons forte e Equilíbrio
+(−45): conferir também a tabela do Equilíbrio (medida só no matiz 45°, saturação 50).
+
+**Como conferir:** a régua `componentes` separa o painel (`comp-tonalizacao-…`, `comp-vinheta-…`):
+
+```bash
+cargo run --release -p infrastructure --example comparar_em_lote -- saida.csv \
+    --regua "<Comparar Presets>/regua-componentes" --processos 1 --filtro Bem_Velh --imagens <pasta>
+```
+
+E uma régua curta no plug-in com vinheta +100 e Luminância de médios/realces negativa, para saber
+em que ordem o Lightroom aplica as duas.
+
+### O lançamento 0.1.65 — o texto está pronto, e não foi commitado
+
+Quando a regressão estiver resolvida: subir `[workspace.package] version` para `0.1.65`, pôr o texto
+abaixo no `docs/novidades.json` e a mesma entrada, com `"data"`, no topo do
+`docs/historico-de-novidades.json`; `cargo test -p ui-gpui --lib novidades`; commit `Versão 0.1.65: …`;
+e `make producao` no e-commerce (skill `lancar-o-app-desktop`). Ajustar a última linha se o site já
+tiver sido atualizado.
+
+```json
+{
+  "versao": "0.1.65",
+  "titulo": "As fotos da câmera com as cores certas, e as predefinições do Lightroom saindo como no Lightroom.",
+  "importante": true,
+  "novidades": [
+    "As fotos da câmera agora abrem com as cores que a câmera gravou (Adobe RGB). Antes saíam um pouco mais apagadas e mais frias do que no Lightroom; agora o neutro fica praticamente igual ao dele.",
+    "As predefinições da pasta LRs saem muito mais parecidas com o Lightroom: Exposição, Contraste, Realces, Sombras, Brancos, Pretos, Temperatura, Matiz, Vibração, Saturação, Remover névoa, a Divisão de tons e a vinheta foram medidos no próprio Lightroom, um por um. Vale para fotos novas; foto já revelada continua como estava.",
+    "A RecordarFotos P&B foi refeita com os controles de sempre e continua com o mesmo visual: o mesmo cinza quente e a mesma borda clara cor de creme. Foto já revelada com ela abre com a versão nova sozinha.",
+    "A borda clara da vinheta agora pega a cor da viragem (sépia, creme), como no Lightroom, em vez de ficar cinza.",
+    "Saiu a aba RGB da coluna de ajustes e a importação de estilos do darktable: tudo fica nos controles do Lightroom. As predefinições suas que vieram do darktable viram a RecordarFotos P&B.",
+    "Enquanto o site não recebe a mesma atualização, uma foto revelada no app e no site pode sair com uma pequena diferença de cor."
+  ],
+  "por_que_atualizar": "As cores das fotos da câmera e as predefinições ficam iguais às do Lightroom, e a RecordarFotos P&B continua com o visual que você já vende."
+
+}
+```
+
+### O site (`../recordarfotos-e-commerce`, `dev`) — não começou
+
+O clone está em `C:\Projects\recordarfotos-e-commerce`, na `dev`. O plano inteiro está na seção 13
+(e o mapa do que mudar, com linhas, ficou registrado na sessão de 2/out): wasm com 133 nomes, o
+RecordarFotos P&B com os mesmos valores do app, a mesma migração dos `dt_*` (SQL nova para
+`pos_venda_fotos.ajustes`, a linha do tempo e `revelacao_presets`), sem a aba RGB e sem o importador,
+e a leitura do Adobe RGB exposta pelo `revelacao-web` e chamada depois do `getImageData`
+(`revelacao/imagem.ts`, o worker das amostras, `importacao/comprimir.ts`).
+
+⚠️ **Esta máquina não tem como gerar o wasm**: falta o alvo `wasm32-unknown-unknown`, o `wasm-pack`
+e o `wasm-opt` (o `scripts/construir-web.sh` usa os três). Instalar pede a autorização do dono.
+
+### As ferramentas (todas em Rust; ver `ferramentas/lightroom/README.md`)
+
+| CLI | para quê |
+|---|---|
+| `comparar_em_lote` | toda régua contra o Lightroom (ΔE2000, faixas de tom, `--rampa`, `--imagens` com legenda, `--base`) |
+| `comparar_pb_darktable` | o RecordarFotos P&B contra o `darktable-cli` (gera as referências sozinho) |
+| `ajustar_pb` | acha os valores do RecordarFotos P&B (descida coordenada, ~7 min) |
+| `tabelas-do-lightroom` | regera `tabelas_lightroom.bin` das réguas (547 linhas) |
+| plug-in `VintageLightbox-Calibracao.lrplugin` | gera as réguas no Lightroom (`casos=` … `viragem`, `vinheta-viragem`, `nevoa`, `cor` …) |
+
+As réguas estão em `C:\Users\alexk\OneDrive\Pictures\Comparar Presets\`. As armadilhas, na seção 12.
+
+### Ainda aberto, fora do lançamento
+
+1. A forma do Remover névoa negativo (seção 9).
+2. A base do RAW (o perfil Adobe Color), e os perfis criativos da Adobe.
+3. O conta-gotas e o EB Automático ainda resolvem a conta antiga da temperatura.
+4. Os tons médios e o global do Color Grading ainda usam a roda de antes (só sombras e realces foram
+   medidos).

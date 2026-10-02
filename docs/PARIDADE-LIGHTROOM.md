@@ -202,6 +202,11 @@ os presets já estão certos, mas o painel Básico ainda é o de antes.
 📄 **O registro completo** — método, medidas, o que mudou, resultado e o que ficou aberto — está em
 [`docs/REGUA-DO-LIGHTROOM.md`](REGUA-DO-LIGHTROOM.md).
 
+🚩 **Para continuar, comece pela seção 15 de lá** ("Onde estamos", 2/out/2026): o que está no `dev`
+(Adobe RGB, o darktable fora do motor, o RecordarFotos P&B refeito, a viragem medida), a regressão
+no RecordarFotos Bem Velhão que segura a 0.1.65 (o texto do lançamento está pronto lá), e o site,
+que ainda não recebeu nada disso.
+
 *"Esse foi o objetivo de vir para essa máquina com Lightroom: você comparar todos os presets que
 temos. Pois não posso ter problemas tão grosseiros"* (dono, 1/out).
 
