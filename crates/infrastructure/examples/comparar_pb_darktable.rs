@@ -1,147 +1,192 @@
-//! O `RecordarFotos P&B` do nosso motor contra o do `darktable-cli` 5.6.1, numa
-//! foto da câmera, lendo o arquivo das duas formas: como sRGB (o que o app fez
-//! até 2/out/2026) e pelo espaço que ele declara (o `R03` das Nikon: Adobe RGB).
+//! O **RecordarFotos P&B** do app contra o do darktable — a régua do estilo das
+//! fotos vendidas (estúdios de Canela e Gramado).
 //!
 //! ```text
-//! darktable-cli foto.jpg dt.jpg --style "RecordarFotos P&B" --core --configdir <pasta>
 //! cargo run --release -p infrastructure --example comparar_pb_darktable -- \
-//!     <foto.jpg> <dt.jpg> [<pasta para as nossas>]
+//!     --estilo "<RecordarFotos P&B.dtstyle>" --originais <pasta> --saida <pasta> \
+//!     [--darktable-cli <exe>] [--preset <valores.json>] foto1 foto2 …
 //! ```
 //!
-//! 🔑 O `.dtstyle` do estúdio traz o próprio `colorin` com o perfil de entrada
-//! **sRGB** fixo (`type = 1`): o darktable, com esse estilo, ignora o `R03`. A
-//! pergunta que este exemplo responde é qual das duas leituras bate com ele.
+//! Para cada `foto` (o nome sem extensão em `--originais`):
+//! 1. revela a referência no `darktable-cli` com o `.dtstyle`, se
+//!    `<saida>/<foto>-dt.jpg` ainda não existe (`comum/darktable_cli.rs`);
+//! 2. revela no motor do app, com a leitura do app (Adobe RGB nas fotos da
+//!    câmera) e o RecordarFotos P&B do sistema (`use_cases::presets::
+//!    RECORDARFOTOS_PB`) — ou os valores de `--preset`, um JSON do `ajustar_pb`;
+//! 3. imprime ΔE2000, p95, ΔL* e a diferença de luma por faixa de tom;
+//! 4. grava `<saida>/<foto>-darktable-x-app.jpg`, com legenda em cada lado.
+//!
+//! Abaixo de ΔE ~2 o olho não separa. Histórico e armadilhas:
+//! `docs/REGUA-DO-LIGHTROOM.md`, seções 10–12.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use image::{metadata::Orientation, DynamicImage, ImageDecoder, ImageReader, RgbImage};
+use image::RgbImage;
 use infrastructure::gpu_adjustments::{Ajustes, Motor, ParametrosLocais};
 
+#[path = "comum/darktable_cli.rs"]
+mod darktable_cli;
+#[path = "comum/legenda.rs"]
+mod legenda;
 #[path = "comum/medidas.rs"]
 mod medidas;
 
-/// Os números do `docs/RecordarFotos P&B.dtstyle`, como na predefinição do
-/// sistema (`use-cases/src/presets/list_presets.rs`).
-fn estilo() -> Ajustes {
-    Ajustes {
-        dt_exposure_ativo: 1.0,
-        dt_exposure_black: -0.001_900_002_4,
-        dt_exposure_exposure: 0.162_999_87,
-        dt_shadhi_ativo: 1.0,
-        dt_shadhi_shadows: 65.380_005,
-        dt_shadhi_highlights: -20.509_995,
-        dt_monochrome_ativo: 1.0,
-        dt_vignette_ativo: 1.0,
-        dt_vignette_scale: 87.819_99,
-        dt_vignette_falloff_scale: 45.51,
-        dt_vignette_brightness: 0.999_999_9,
-        dt_vignette_saturation: 0.146_999_96,
-        dt_vignette_autoratio: 1.0,
-        dt_vignette_shape: 0.479_999_96,
-        dt_cb_ativo: 1.0,
-        dt_cb_shadows_c: 0.174_699_98,
-        dt_cb_shadows_h: 71.539_99,
-        dt_cb_midtones_h: 73.849_99,
-        dt_cb_highlights_y: 0.0449,
-        dt_cb_highlights_c: 0.083_299_994,
-        dt_cb_highlights_h: 71.539_99,
-        dt_cb_saturation_highlights: 0.160_300_02,
-        dt_cb_saturation_midtones: 0.134_599_92,
-        dt_cb_brilliance_midtones: 0.147_400_02,
-        ..Default::default()
+/// Os campos `{nome: valor}` sobre o neutro.
+fn ajustes_de(campos: impl IntoIterator<Item = (String, f32)>) -> Ajustes {
+    let mut v = Ajustes::default().como_vetor();
+    for (campo, valor) in campos {
+        let i = Ajustes::NOMES
+            .iter()
+            .position(|n| *n == campo)
+            .unwrap_or_else(|| panic!("`{campo}` não é campo do motor"));
+        v[i] = valor;
     }
+    Ajustes::de_vetor(&v).unwrap()
 }
 
-/// De pé, sem olhar o espaço de cor — a leitura antiga.
-fn como_srgb(caminho: &Path) -> DynamicImage {
-    let mut d = ImageReader::open(caminho)
-        .unwrap()
-        .with_guessed_format()
-        .unwrap()
-        .into_decoder()
-        .unwrap();
-    let o = d.orientation().unwrap_or(Orientation::NoTransforms);
-    let mut foto = DynamicImage::from_decoder(d).unwrap();
-    foto.apply_orientation(o);
-    foto
+fn do_json(caminho: &str) -> Ajustes {
+    let json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(caminho).expect("ler o json")).unwrap();
+    ajustes_de(
+        json.as_object()
+            .expect("um objeto")
+            .iter()
+            .map(|(k, v)| (k.clone(), v.as_f64().unwrap() as f32)),
+    )
 }
 
-/// ΔE2000 médio e p95, ΔL* médio (nossa − darktable) e a diferença média de
-/// luma por faixa de tom do darktable (0–255).
-fn medir(nosso: &RgbImage, dt: &RgbImage) -> String {
-    let m = medidas::comparar(nosso, dt, 2);
+fn reduzir(img: &RgbImage, lado: u32) -> RgbImage {
+    let k = lado as f32 / img.width().max(img.height()) as f32;
+    image::imageops::resize(
+        img,
+        (img.width() as f32 * k).round() as u32,
+        (img.height() as f32 * k).round() as u32,
+        image::imageops::FilterType::Triangle,
+    )
+}
+
+/// A diferença média de luma (nosso − darktable) em 5 faixas de tom do
+/// darktable, de 0 a 255.
+fn faixas(nosso: &RgbImage, dt: &RgbImage) -> String {
     let luma = |p: &image::Rgb<u8>| 0.299 * p[0] as f64 + 0.587 * p[1] as f64 + 0.114 * p[2] as f64;
-    let mut faixas = [(0.0f64, 0.0f64); 5];
+    let mut f = [(0.0f64, 0.0f64); 5];
     for y in (0..dt.height()).step_by(2) {
         for x in (0..dt.width()).step_by(2) {
             let (a, b) = (nosso.get_pixel(x, y), dt.get_pixel(x, y));
-            let f = ((luma(b) / 51.2) as usize).min(4);
-            faixas[f].0 += luma(a) - luma(b);
-            faixas[f].1 += 1.0;
+            let i = ((luma(b) / 51.2) as usize).min(4);
+            f[i].0 += luma(a) - luma(b);
+            f[i].1 += 1.0;
         }
     }
-    let por_faixa: Vec<String> = faixas
-        .iter()
+    f.iter()
         .map(|(s, n)| {
             if *n > 0.0 {
-                format!("{:+6.1}", s / n)
+                format!("{:+5.1}", s / n)
             } else {
-                "     -".into()
+                "    -".into()
             }
         })
-        .collect();
-    format!(
-        "ΔE {:5.2}  p95 {:5.2}  ΔL* {:+5.2}  luma por faixa (pretos→brancos) {}",
-        m.media,
-        m.p95,
-        m.dl,
-        por_faixa.join(" ")
-    )
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn original(pasta: &Path, nome: &str) -> PathBuf {
+    ["JPG", "jpg", "jpeg", "JPEG"]
+        .iter()
+        .map(|e| pasta.join(format!("{nome}.{e}")))
+        .find(|p| p.exists())
+        .unwrap_or_else(|| panic!("{nome}: original não achado em {}", pasta.display()))
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let [foto, dt, ..] = args.as_slice() else {
-        panic!("uso: <foto.jpg> <dt.jpg> [<pasta>]");
+    let valor = |chave: &str| {
+        args.windows(2)
+            .find(|w| w[0] == chave)
+            .map(|w| w[1].clone())
     };
-    let dt = image::open(dt)
-        .expect("abrir a saída do darktable")
-        .to_rgb8();
+    let estilo = PathBuf::from(valor("--estilo").expect("--estilo <.dtstyle>"));
+    let originais = PathBuf::from(valor("--originais").expect("--originais <pasta>"));
+    let saida = PathBuf::from(valor("--saida").expect("--saida <pasta>"));
+    let cli = valor("--darktable-cli")
+        .map(PathBuf::from)
+        .unwrap_or_else(darktable_cli::achar);
+    let (rotulo_app, ajustes) = match valor("--preset") {
+        Some(json) => ("APP - valores de teste".to_string(), do_json(&json)),
+        None => (
+            "APP - RecordarFotos P&B".to_string(),
+            ajustes_de(
+                use_cases::presets::RECORDARFOTOS_PB
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), *v)),
+            ),
+        ),
+    };
+    let com_valor = [
+        "--estilo",
+        "--originais",
+        "--saida",
+        "--darktable-cli",
+        "--preset",
+    ];
+    let fotos: Vec<&String> = args
+        .iter()
+        .enumerate()
+        .filter(|(i, a)| {
+            !a.starts_with("--") && (*i == 0 || !com_valor.contains(&args[i - 1].as_str()))
+        })
+        .map(|(_, a)| a)
+        .collect();
+    std::fs::create_dir_all(&saida).unwrap();
 
     let mut motor = Motor::abrir().expect("sem GPU");
     motor
         .definir_locais(&ParametrosLocais::default())
         .expect("locais vazios");
-    let leituras = [
-        ("como sRGB (antes)", como_srgb(Path::new(foto))),
-        (
-            "pelo espaço declarado",
-            infrastructure::orientacao::abrir_de_pe(foto).expect("abrir a foto"),
-        ),
-    ];
-    for (rotulo, base) in leituras {
+    println!(
+        "{:34} {:>6} {:>6} {:>6}   luma por faixa, pretos → brancos",
+        "foto", "ΔE", "p95", "ΔL*"
+    );
+    let mut soma = (0.0, 0);
+    for foto in fotos {
+        let arquivo = original(&originais, foto);
+        let dt_jpg = saida.join(format!("{foto}-dt.jpg"));
+        if !darktable_cli::revelar(&cli, &estilo, &arquivo, &dt_jpg, &saida.join("darktable")) {
+            continue;
+        }
+        let dt = image::open(&dt_jpg)
+            .expect("abrir a saída do darktable")
+            .to_rgb8();
+        let base = infrastructure::orientacao::abrir_de_pe(&arquivo).expect("abrir a foto");
         let rgba = base.to_rgba8();
         let (w, h) = rgba.dimensions();
         let nosso = motor
-            .revelar(&std::sync::Arc::new(rgba.into_raw()), w, h, &estilo())
+            .revelar(&Arc::new(rgba.into_raw()), w, h, &ajustes)
             .expect("o motor não revelou")
             .to_rgb8();
-        assert_eq!(nosso.dimensions(), dt.dimensions(), "tamanhos diferentes");
-        println!("{rotulo:24} {}", medir(&nosso, &dt));
-        if let Some(pasta) = args.get(2) {
-            let nome = Path::new(foto)
-                .file_stem()
-                .unwrap()
-                .to_string_lossy()
-                .to_string();
-            let sufixo = if rotulo.starts_with("como") {
-                "srgb"
-            } else {
-                "declarado"
-            };
-            nosso
-                .save(Path::new(pasta).join(format!("{nome}-{sufixo}.png")))
-                .unwrap();
-        }
+        assert_eq!(nosso.dimensions(), dt.dimensions(), "{foto}: tamanhos");
+        let m = medidas::comparar(&nosso, &dt, 2);
+        println!(
+            "{foto:34} {:6.2} {:6.2} {:+6.2}   {}",
+            m.media,
+            m.p95,
+            m.dl,
+            faixas(&nosso, &dt)
+        );
+        soma = (soma.0 + m.media, soma.1 + 1);
+        let lado = legenda::lado_a_lado(&[
+            ("DARKTABLE (como foi vendido)", &reduzir(&dt, 1000)),
+            (&rotulo_app, &reduzir(&nosso, 1000)),
+        ]);
+        lado.save(saida.join(format!("{foto}-darktable-x-app.jpg")))
+            .unwrap();
+    }
+    if soma.1 > 0 {
+        println!(
+            "média: ΔE {:.2} em {} foto(s)",
+            soma.0 / soma.1 as f64,
+            soma.1
+        );
     }
 }

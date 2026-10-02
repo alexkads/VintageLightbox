@@ -4,6 +4,73 @@ use domain::repositories::PresetRepository;
 use domain::DomainResult;
 use std::sync::Arc;
 
+/// O **RecordarFotos P&B** — o estilo das fotos vendidas.
+///
+/// 🚨 Até 2/out/2026 ele era o `.dtstyle` do darktable, com módulos próprios no
+/// motor (campos `dt_*`), lendo a foto como sRGB. O dono decidiu um motor só e a
+/// leitura em Adobe RGB, e o estilo foi refeito com os controles do Lightroom:
+/// `examples/ajustar_pb.rs` procurou estes valores contra o `darktable-cli`
+/// 5.6.1 com o mesmo `.dtstyle`, em 6 fotos da câmera — ΔE2000 1,6 a 2,0 (as
+/// duas fora do ajuste: 1,74 e 1,87; abaixo de 2 o olho não separa). A borda
+/// creme da vinheta vem de a viragem ser aplicada depois dela no processo 1
+/// (`corpo.wgsl`, `viragem`), como no Lightroom e no darktable. As fotos guardadas com os `dt_*` antigos migram para estes valores
+/// na leitura ([`migrar_do_darktable`]).
+pub const RECORDARFOTOS_PB: &[(&str, f32)] = &[
+    ("bw_ativo", 1.0),
+    ("processo", 1.0),
+    ("exposure", 0.29),
+    ("contrast", 1.05),
+    ("highlights", -2.25),
+    ("shadows", 100.0),
+    ("whites", -28.25),
+    ("blacks", 19.25),
+    ("clarity", 0.11),
+    ("texture", -6.0),
+    ("dehaze", -10.5),
+    ("tone_curve_shadows", 23.13),
+    ("tone_curve_darks", -5.88),
+    ("tone_curve_lights", -6.75),
+    ("tone_curve_highlights", -1.13),
+    ("bw_red", 1.72),
+    ("bw_orange", -0.63),
+    ("bw_yellow", 3.75),
+    ("bw_green", 26.25),
+    ("bw_aqua", 46.25),
+    ("bw_blue", 15.0),
+    ("bw_magenta", -2.5),
+    ("split_shadow_hue", 51.41),
+    ("split_shadow_sat", 36.5),
+    ("split_highlight_hue", 50.63),
+    ("split_highlight_sat", 70.5),
+    ("split_balance", -84.69),
+    ("lens_vignette_amount", 98.0),
+    ("lens_vignette_midpoint", 82.5),
+    ("pcv_amount", 43.75),
+    ("pcv_midpoint", 28.0),
+    ("pcv_feather", 30.0),
+    ("pcv_roundness", -62.19),
+];
+
+/// A receita guardada (nome → valor) de uma foto revelada com o RecordarFotos
+/// P&B do darktable vira a do RecordarFotos P&B de hoje.
+///
+/// Os campos `dt_*` saíram do motor em 2/out/2026, e todo leitor ignora nome
+/// que não conhece: sem isto, a foto vendida reabriria colorida e deixaria de
+/// contar como revelada. Quem tem o monocromático do darktable ligado recebe os
+/// valores de [`RECORDARFOTOS_PB`] por cima dos seus; os `dt_*` saem sempre.
+pub fn migrar_do_darktable(receita: &mut serde_json::Map<String, serde_json::Value>) {
+    let era_pb = receita
+        .get("dt_monochrome_ativo")
+        .and_then(|v| v.as_f64())
+        .is_some_and(|v| v >= 0.5);
+    receita.retain(|nome, _| !nome.starts_with("dt_"));
+    if era_pb {
+        for (nome, valor) in RECORDARFOTOS_PB {
+            receita.insert((*nome).to_string(), serde_json::json!(valor));
+        }
+    }
+}
+
 /// Os presets que existem antes de alguém salvar o primeiro.
 ///
 /// Eles não moram na tabela `presets`: são construídos aqui a cada listagem, e a
@@ -147,47 +214,9 @@ pub fn presets_de_sistema() -> Vec<Preset> {
                 ("saturation", -0.1),
             ],
         ),
-        // 🎞️ **O estilo do estúdio no darktable, e não uma imitação dele** — a
-        // oitava do site (`presets-do-sistema.ts`, `recordarfotos-pb`), com os
-        // mesmos números. São os do `docs/RecordarFotos P&B.dtstyle`,
-        // decodificados do binário de cada módulo e escritos na menor forma
-        // decimal que volta ao mesmo `f32`; os campos no neutro do darktable
-        // ficam de fora, como em qualquer predefinição.
-        //
-        // ⚠️ A exposição (+0,163 EV) é ponto de partida: nas fotos que o estúdio
-        // exportou ela foi corrigida por foto. É o que o operador ajusta depois.
-        //
-        // Importar o mesmo `.dtstyle` pela coluna tem de dar exatamente estes
-        // campos — `ui-gpui/src/revelacao/lightroom/darktable.rs` confere.
-        monte(
-            "RecordarFotos P&B",
-            &[
-                ("dt_exposure_ativo", 1.0),
-                ("dt_exposure_black", -0.0019000024),
-                ("dt_exposure_exposure", 0.16299987),
-                ("dt_shadhi_ativo", 1.0),
-                ("dt_shadhi_shadows", 65.380005),
-                ("dt_shadhi_highlights", -20.509995),
-                ("dt_monochrome_ativo", 1.0),
-                ("dt_vignette_ativo", 1.0),
-                ("dt_vignette_scale", 87.81999),
-                ("dt_vignette_falloff_scale", 45.51),
-                ("dt_vignette_brightness", 0.9999999),
-                ("dt_vignette_saturation", 0.14699996),
-                ("dt_vignette_autoratio", 1.0),
-                ("dt_vignette_shape", 0.47999996),
-                ("dt_cb_ativo", 1.0),
-                ("dt_cb_shadows_c", 0.17469998),
-                ("dt_cb_shadows_h", 71.53999),
-                ("dt_cb_midtones_h", 73.84999),
-                ("dt_cb_highlights_y", 0.0449),
-                ("dt_cb_highlights_c", 0.083299994),
-                ("dt_cb_highlights_h", 71.53999),
-                ("dt_cb_saturation_highlights", 0.16030002),
-                ("dt_cb_saturation_midtones", 0.13459992),
-                ("dt_cb_brilliance_midtones", 0.14740002),
-            ],
-        ),
+        // 🎞️ **O estilo das fotos vendidas, refeito com os controles do
+        // Lightroom** (dono, 2/out/2026): os valores em [`RECORDARFOTOS_PB`].
+        monte("RecordarFotos P&B", RECORDARFOTOS_PB),
         // 🎞️ **Os doze "Vintage ·"** (dono, 2026-09-28) — os mesmos do site
         // (`presets-do-sistema.ts`), campo a campo e na mesma ordem: os
         // clássicos do próprio Lightroom (Aged Photo, Old Polaroid, Yesteryear,

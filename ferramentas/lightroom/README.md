@@ -107,6 +107,29 @@ isso antes do app, saiu.
 Por caso, além da diferença 0–255 por faixa de tom, sai o ΔE2000 (médio e p95), o ΔL\*, a razão de
 croma e o SSIM (crate `palette`). Com as réguas de hoje são 1968 casos e cerca de 1 h.
 
+## O RecordarFotos P&B contra o darktable
+
+O estilo das fotos vendidas (Canela e Gramado) veio do darktable e foi refeito com os controles do
+Lightroom (`docs/REGUA-DO-LIGHTROOM.md`, seção 11). A régua dele é o `darktable-cli` 5.6.1 com o mesmo
+`.dtstyle`:
+
+```bash
+# Tudo de uma vez: revela as referências que faltam no darktable-cli, revela no app com o
+# RecordarFotos P&B do sistema, mede e grava o lado a lado com legenda (~80 s para 6 fotos).
+cargo run --release -p infrastructure --example comparar_pb_darktable -- \
+    --estilo "RecordarFotos P&B.dtstyle" --originais <pasta> --saida <pasta> \
+    [--preset valores.json] foto1 foto2 …
+
+# Achar os valores de novo (depois de mexer no motor): descida coordenada contra as referências
+# que o comparar_pb_darktable deixou em <saída> (`<foto>-dt.jpg`). ~7 min.
+VLB_INICIO=<json anterior> cargo run --release -p infrastructure --example ajustar_pb -- \
+    <originais> <saída> <novo.json> foto1 foto2 … @validacao1 @validacao2
+# VLB_SO_MEDIR=1: só mede um json e grava o lado a lado e o mapa do erro.
+```
+
+O `darktable-cli --style` não acha estilo fora do banco do darktable: o CLI gera um XMP de histórico
+do `.dtstyle` (`examples/comum/darktable_cli.rs`) e usa um `--configdir` próprio.
+
 ## Medir um caso só, pela exportação do app
 
 ```bash

@@ -748,7 +748,11 @@ mod testes {
             .expect("a predefinição do estúdio");
 
         assert_eq!(lido.nome, "RecordarFotos P&B");
-        assert_eq!(lido.ajustes, do_sistema.adjustments);
+        // Desde 2/out/2026 a predefinição do sistema é o mesmo estilo refeito
+        // com os controles do Lightroom (`use_cases::presets::RECORDARFOTOS_PB`);
+        // o `.dtstyle` ainda lê os módulos do darktable, até o importador sair.
+        assert_eq!(lido.ajustes.len(), 24);
+        assert_ne!(lido.ajustes, do_sistema.adjustments);
         // basecurve e rgbcurve estão no estilo, mas desligados: o darktable não
         // os aplica, e o relatório não tem o que acusar.
         assert!(lido.ignorados.is_empty(), "{:?}", lido.ignorados);

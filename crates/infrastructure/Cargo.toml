@@ -78,3 +78,8 @@ wiremock = "0.6"
 # Só para a comparação com o Lightroom (`examples/comparar_em_lote.rs`): Lab e
 # a diferença de cor que o olho percebe (CIEDE2000), em vez de RGB cru.
 palette = "0.7"
+# Os CLIs de comparação (`examples/comum/`): a legenda nas imagens lado a lado
+# e o `.dtstyle` lido como XML para o `darktable-cli`. As duas já estavam no
+# `Cargo.lock` (vêm pelo gpui/usvg).
+ab_glyph = "0.2"
+roxmltree = "0.21"

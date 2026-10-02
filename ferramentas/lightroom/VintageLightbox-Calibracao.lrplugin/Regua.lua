@@ -379,7 +379,44 @@ local function casos_de_nevoa()
 	return casos
 end
 
+-- A ordem da vinheta e da viragem: numa foto em P&B, a vinheta branca
+-- (pós-corte e de lente) sozinha e com uma viragem sépia. Se a borda clareada
+-- sai sépia, o Lightroom vira depois da vinheta.
+local function casos_de_vinheta_viragem()
+	local pb = { ConvertToGrayscale = true }
+	local sepia = {
+		SplitToningShadowHue = 45, SplitToningShadowSaturation = 40,
+		SplitToningHighlightHue = 45, SplitToningHighlightSaturation = 40,
+	}
+	local pos = {
+		PostCropVignetteAmount = 60, PostCropVignetteStyle = 1,
+		PostCropVignetteMidpoint = 30, PostCropVignetteFeather = 50,
+	}
+	local lente = { VignetteAmount = 60, VignetteMidpoint = 30 }
+	local function junta(...)
+		local t = {}
+		for _, parte in ipairs { ... } do
+			for k, v in pairs(parte) do
+				t[k] = v
+			end
+		end
+		return t
+	end
+	return {
+		{ nome = "00-neutro", ajustes = {} },
+		{ nome = "01-pb", ajustes = junta(pb) },
+		{ nome = "02-pb-sepia", ajustes = junta(pb, sepia) },
+		{ nome = "03-pb-pos", ajustes = junta(pb, pos) },
+		{ nome = "04-pb-sepia-pos", ajustes = junta(pb, sepia, pos) },
+		{ nome = "05-pb-lente", ajustes = junta(pb, lente) },
+		{ nome = "06-pb-sepia-lente", ajustes = junta(pb, sepia, lente) },
+	}
+end
+
 function Regua.casos(completa, por_nome, tipo)
+	if tipo == "vinheta-viragem" then
+		return casos_de_vinheta_viragem()
+	end
 	if tipo == "cor" then
 		return casos_de_cor()
 	end

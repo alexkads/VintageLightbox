@@ -354,8 +354,36 @@ fn cada_uma_escreve_a_mesma_quantidade_de_campos_do_site() {
 
     assert_eq!(
         quantos,
-        vec![5, 8, 9, 6, 7, 7, 24, 13, 13, 10, 12, 7, 11, 6, 10, 16, 17, 13, 13, 4, 35]
+        // O RecordarFotos P&B (7º) tem 33 desde 2/out/2026: os controles do
+        // Lightroom no lugar dos 24 campos `dt_*` do darktable.
+        vec![5, 8, 9, 6, 7, 7, 33, 13, 13, 10, 12, 7, 11, 6, 10, 16, 17, 13, 13, 4, 35]
     );
+}
+
+/// A foto guardada com o RecordarFotos P&B do darktable reabre P&B, com os
+/// valores de hoje — e uma foto sem ele só perde os `dt_*` que não fazem nada.
+#[test]
+fn a_receita_do_darktable_vira_o_recordarfotos_pb_de_hoje() {
+    use crate::presets::{migrar_do_darktable, RECORDARFOTOS_PB};
+    let mut antiga = serde_json::json!({
+        "dt_monochrome_ativo": 1.0,
+        "dt_shadhi_shadows": 65.38,
+        "exposure": 0.4,
+        "corte_ativo": 1.0,
+    });
+    let receita = antiga.as_object_mut().unwrap();
+    migrar_do_darktable(receita);
+    assert!(receita.keys().all(|k| !k.starts_with("dt_")));
+    for (nome, valor) in RECORDARFOTOS_PB {
+        assert_eq!(receita[*nome].as_f64().unwrap() as f32, *valor, "{nome}");
+    }
+    assert_eq!(receita["corte_ativo"], 1.0, "o corte da foto fica");
+
+    let mut colorida = serde_json::json!({ "dt_vignette_ativo": 1.0, "exposure": 0.4 });
+    let receita = colorida.as_object_mut().unwrap();
+    migrar_do_darktable(receita);
+    assert_eq!(receita.len(), 1);
+    assert_eq!(receita["exposure"], 0.4);
 }
 
 // ============================================

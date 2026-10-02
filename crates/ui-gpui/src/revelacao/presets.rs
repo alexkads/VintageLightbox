@@ -886,7 +886,7 @@ mod testes {
         );
         assert_eq!(
             resumir(&sistema("RecordarFotos P&B").adjustments),
-            "Ligar, Exposição (EV), Correção do nível de preto, Ligar e mais 20"
+            "Exposição, Contraste, Altas luzes, Sombras e mais 29"
         );
     }
 

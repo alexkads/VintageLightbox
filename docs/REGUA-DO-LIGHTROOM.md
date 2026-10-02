@@ -511,3 +511,56 @@ que o vendido. **Ele vai ser refeito com os controles do motor** sobre a leitura
 ⚠️ **O site ainda lê sRGB**: o navegador ignora o `R03`, e o `createImageBitmap` não diz o espaço do
 arquivo. Até o site ler o EXIF (o `foto_codec::espaco_de_cor` já compila para wasm), a mesma foto sai
 diferente nos dois.
+
+## 11. O RecordarFotos P&B refeito com os controles do Lightroom (2/out)
+
+**Por que importa.** O RecordarFotos P&B foi o jeito de manter a usuária do estúdio de Canela, que
+revelava no darktable com esse estilo; o estúdio agora tem também os LRs do Lightroom. Os dois têm de
+ficar satisfeitos: os LRs como no Lightroom, o RecordarFotos P&B como no darktable. Em Gramado o
+estilo também é o mais usado.
+
+**A decisão** (dono, 2/out): uma leitura só (Adobe RGB, seção 10) e **um motor só** — os 61 campos
+`dt_*` e os módulos do darktable saem, e o estilo é refeito com os controles do Lightroom.
+
+**Como se chegou aos valores** — `examples/ajustar_pb.rs`, descida coordenada sobre 33 controles
+(tom, curva paramétrica, mixer P&B, divisão de tons, as duas vinhetas, névoa, claridade, textura),
+minimizando o ΔE2000 contra o `darktable-cli` 5.6.1 com o mesmo `.dtstyle`, em 6 fotos da câmera (4
+para ajustar, 2 só para validar):
+
+| rodada | o que mudou | validação (ΔE2000) |
+|---|---|---|
+| 1 | controles do Lightroom, vinheta pós-corte | 2,93 / 3,24 |
+| 2 | + vinheta da Lente, difusão ≥ 30 (sem anel duro) | 2,56 / 2,85 |
+| 3 | **a viragem depois das vinhetas no processo 1** | **1,74 / 1,87** |
+
+**O achado da rodada 3** — o dono, olhando: *"é como se no darktable a vinheta fosse uma camada dentro
+do efeito e não por cima dele"*. A régua `vinheta-viragem` no Lightroom confirmou: numa foto P&B com
+viragem sépia, a borda que a vinheta branca clareia **continua sépia**. No nosso shader a viragem vinha
+antes das vinhetas, e a vinheta levava a borda ao branco neutro (−11 a −16 de "quente" nos realces).
+No processo 1 a viragem agora vem depois das duas vinhetas (`corpo.wgsl`, `fn viragem`); no processo 0
+a ordem é a de antes. Testado e descartado: aplicar a curva da vinheta só na luminância, mantendo a
+cor pela razão — satura a borda (ΔE 5 → 9,7).
+
+**Os valores** estão em `use_cases::presets::RECORDARFOTOS_PB`. As fotos guardadas com os `dt_*`
+antigos migram para eles na leitura (`migrar_do_darktable`).
+
+**Ainda aberto:** a nossa viragem sai ~18 mais quente que a do Lightroom (mesma régua, caso "só
+sépia") — afeta os LRs de sépia e vintage. Calibrar contra o Lightroom e, depois, reajustar o
+RecordarFotos P&B.
+
+## 12. Armadilhas — o que já custou tempo, e o que resolve
+
+| sintoma | causa | o que resolve |
+|---|---|---|
+| Toda foto real a ~3 ΔE do Lightroom, mais apagada e mais fria, mas as sintéticas batem | JPEG da câmera em Adobe RGB (`R03`), lido como sRGB | `foto_codec::espaco_de_cor` (seção 10) |
+| O P&B do darktable batia com o app lendo sRGB e não com Adobe | o `colorin` do `.dtstyle` fixa sRGB | ver o `colorin` de todo estilo antes de medir |
+| Borda da vinheta cinza onde o original é creme | ordem: viragem antes da vinheta | régua `vinheta-viragem`; `fn viragem` (seção 11) |
+| O pedido ao plug-in vira `pedido-em-andamento.txt` e nada acontece | BOM no `pedido.txt` (PowerShell 5.1) | gravar UTF-8 sem BOM (`ferramentas/lightroom/README.md`) |
+| Tipo de caso novo do plug-in roda as 28 predefinições | `Regua.lua` só é lido quando o Lightroom abre | reiniciar o Lightroom depois de mudar o `.lua` |
+| O "nosso" do `--imagens` mede metade do Lightroom | `--imagens` grava o lado a lado, Lightroom à esquerda | medir pelos CLIs, não pelas imagens |
+| Rodada inteira de 1 h; ajuste de mais de 1 h | ΔE2000 numa thread | `examples/comum/medidas.rs` (todos os núcleos): ajuste em ~7 min |
+| A rodada inteira morre por memória | todo original decodificado guardado | um original por vez no `comparar_em_lote` |
+| Médias que saem 0 | `Measure-Object` com bloco no PowerShell 5.1 | o resumo sai do próprio CLI de Rust |
+| `darktable-cli --style` não acha o estilo | o estilo tem de estar no banco do darktable | um XMP de histórico gerado do `.dtstyle` como 2º argumento |
+| Compilação falha com "espaço insuficiente" | cache incremental de debug | `CARGO_INCREMENTAL=0`; apagar `target*/debug/incremental` |
+| `[motor] DX12 … X3017` no começo de todo CLI | defeito antigo do FXC nesta máquina | o motor cai para outro backend; os números valem |
