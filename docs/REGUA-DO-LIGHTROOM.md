@@ -648,8 +648,8 @@ ficam como estão — o arquivo guardado já não diz o espaço.
 
 ### ⚠️ O que falta: medir no Windows a ordem da Luminância e da vinheta
 
-✂️ **Depois do lançamento, o RF Bem Velhão saiu da pasta LRs** (dono, 2/out, junto com a
-"Predefinição sem título"; ficaram 26, no app e no site). Era ele que pedia esta medição: a rodada
+✂️ **Na 0.1.66 o RF Bem Velhão saiu da pasta LRs** (dono, 2/out, junto com a "Predefinição sem
+título"; ficaram 26, no app e no site, os dois em produção). Era ele que pedia esta medição: a rodada
 `tudo-5` o achou de ΔE 29 → 59 (JPG) e 46 → 82 (RAW), porque a Luminância negativa dos realces (−38)
 escurecia a borda que a vinheta +100 clareou — no cinza 150 o canto saía 158 em vez de 255
 (`no_processo_1_a_luminancia_da_viragem_nao_apaga_a_vinheta_branca`). A correção (`9d03280`) pôs a
