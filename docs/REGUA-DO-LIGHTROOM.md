@@ -618,9 +618,9 @@ nos 12 matizes, matiz em ±1°, Equilíbrio −100 nos médios 38 contra 42.
 
 O RecordarFotos P&B usa a viragem: os valores dele foram reajustados com a tabela nova (seção 11).
 
-## 15. Onde estamos — 2/out/2026, fim do dia (ler isto primeiro para continuar)
+## 15. Onde estamos — 2/out/2026, à noite (ler isto primeiro para continuar)
 
-### O que está no `dev` (nada foi lançado; o `main` e os balcões estão na 0.1.64)
+### ✅ Lançado: 0.1.65 no `main`, o site e o servidor em produção
 
 | commit | o quê |
 |---|---|
@@ -628,86 +628,39 @@ O RecordarFotos P&B usa a viragem: os valores dele foram reajustados com a tabel
 | `6073ec5` | RecordarFotos P&B com os controles do Lightroom; a viragem depois da vinheta no processo 1 — seção 11 |
 | `2cccd47` | o darktable sai do motor (133 campos), a aba RGB e o importador saem, as fotos e predefinições antigas migram — seção 13 |
 | `8463e46` | a Divisão de tons medida no Lightroom; RecordarFotos P&B reajustado (ΔE 2,17 contra o darktable) — seção 14 |
+| `9d03280` | a regressão do Bem Velhão: a Luminância do Color Grading volta para antes das vinhetas, só a cor fica depois |
+| `6e0b7a9` | a aba sRGB vira "Adobe RGB" (dono, 2/out); sRGB e RGB fora da tela, no app e no site |
+| `a95329e` | o `revelacao-web` expõe o espaço do arquivo e a conversão do RGBA, para o site |
+| `ad9fa02` | **Versão 0.1.65** |
 
-### 🚨 O que segura o lançamento: uma regressão nos LRs
+No e-commerce (`f2e7a2a6`, `0a7a4ca6`, `eaffd99f`): os quatro wasm com 133 nomes, a versão de processo
+(foto nova no 1, revelada antes no 0, como o app), a migração dos `dt_*` na leitura (`migrarDoDarktable`,
+sem SQL: tudo passa pelo `completar`), o RecordarFotos P&B e as LRs do app, sem o importador do
+darktable, e o Adobe RGB na importação (o arquivo comprimido perde o EXIF: é lá ou nunca), no editor e
+no servidor (`espaco_de_cor.rs`, cópia de trabalho `trabalho.v3`). Fotos importadas no site antes disso
+ficam como estão — o arquivo guardado já não diz o espaço.
 
-A rodada completa (`tudo-5`, 930 casos, contra a `tudo-4a`, que já lia Adobe RGB) achou:
+### ⚠️ O que falta: medir a correção do Bem Velhão no Windows
 
-| predefinição | antes | depois |
-|---|---|---|
-| RecordarFotos Bem Velhão — JPG | 29,1 | **58,7** |
-| RecordarFotos Bem Velhão — RAW | 46,1 | **82,4** |
-| Velho Oeste Color, Chocolate, Hollyword, Velho Oeste 2 — JPG | ~17 | ~19 |
+A rodada `tudo-5` achou o RF Bem Velhão de ΔE 29 → 59 (JPG) e 46 → 82 (RAW). A causa: a Luminância
+negativa dos realces (−38) escurecia a borda que a vinheta +100 clareou — no cinza 150 o canto saía 158
+em vez de 255 (`no_processo_1_a_luminancia_da_viragem_nao_apaga_a_vinheta_branca`). A correção
+(`9d03280`) põe a Luminância de volta onde estava na `tudo-4a`, e saiu na 0.1.65 sem a régua do
+Lightroom, que só existe no Windows:
 
-Média das 28 nas fotos JPG: ΔE 6,35 → **6,90**.
-
-**A causa, e a correção que está no `dev`** (2/out, à noite, no Mac): o Bem Velhão tem vinheta
-pós-corte **+100** e, no Color Grading, **Luminância dos médios −50 e dos realces −38**. Ao mover a
-viragem para depois das vinhetas (seção 11), moveu-se a função `viragem` **inteira** — e a Luminância
-negativa passou a escurecer a borda que a vinheta branca clareou. O teste
-`no_processo_1_a_luminancia_da_viragem_nao_apaga_a_vinheta_branca` mede isso no cinza 150: com o
-shader da `tudo-5` o canto saía **158 em vez de 255** (exatamente os −38 %). A régua `vinheta-viragem`
-só provou que a **cor** das sombras e dos realces fica dentro da vinheta; nada disse da Luminância.
-
-A `viragem` virou `luminancia_da_viragem` + `cor_da_viragem` (`corpo.wgsl`). No processo 1 a
-Luminância voltou para antes das vinhetas — a posição da `tudo-4a`, que dava 29 — e só a cor ficou
-depois. O processo 0 não muda (a `viragem` chama as duas em sequência, com a luz de entrada). O
-RecordarFotos P&B não usa Luminância: o ΔE 2,17 contra o darktable não muda.
-
-**Falta medir no Windows** (as réguas e o Lightroom só estão lá):
-
-1. A régua nova `casos=vinheta-luminancia` no plug-in: a vinheta +100 sozinha e com a Luminância de
-   realces −38, médios −50 e global −50, no cinza liso e numa foto. Se o canto do caso
-   `03-vinheta-realces-38` sair tão claro quanto o do `01-vinheta`, o Lightroom aplica a Luminância
-   antes da vinheta, como o motor agora; se escurecer, a ordem é a outra e a tabela muda.
-2. A rodada completa (`tudo-6`) contra a `tudo-5` e a `tudo-4a`: o Bem Velhão tem de voltar a ~29
-   (JPG) e ~46 (RAW). Se ficar acima, separar o painel com a régua `componentes`:
+1. `casos=vinheta-luminancia` no plug-in: se o canto do `03-vinheta-realces-38` sair tão claro quanto o
+   do `01-vinheta`, o Lightroom aplica a Luminância antes da vinheta, como o motor; se escurecer, a ordem
+   é a outra.
+2. A rodada `tudo-6` contra a `tudo-5` e a `tudo-4a`: o Bem Velhão tem de voltar a ~29 / ~46. Se ficar
+   acima, a régua `componentes`:
 
 ```bash
 cargo run --release -p infrastructure --example comparar_em_lote -- saida.csv \
     --regua "<Comparar Presets>/regua-componentes" --processos 1 --filtro Bem_Velh --imagens <pasta>
 ```
 
-Os Velho Oeste (~17 → ~19) têm vinheta negativa com divisão de tons forte e Equilíbrio (−45): se
-não voltarem, conferir a tabela do Equilíbrio (medida só no matiz 45°, saturação 50).
-
-### O lançamento 0.1.65 — o texto está pronto, e não foi commitado
-
-Quando a regressão estiver resolvida: subir `[workspace.package] version` para `0.1.65`, pôr o texto
-abaixo no `docs/novidades.json` e a mesma entrada, com `"data"`, no topo do
-`docs/historico-de-novidades.json`; `cargo test -p ui-gpui --lib novidades`; commit `Versão 0.1.65: …`;
-e `make producao` no e-commerce (skill `lancar-o-app-desktop`). Ajustar a última linha se o site já
-tiver sido atualizado.
-
-```json
-{
-  "versao": "0.1.65",
-  "titulo": "As fotos da câmera com as cores certas, e as predefinições do Lightroom saindo como no Lightroom.",
-  "importante": true,
-  "novidades": [
-    "As fotos da câmera agora abrem com as cores que a câmera gravou (Adobe RGB). Antes saíam um pouco mais apagadas e mais frias do que no Lightroom; agora o neutro fica praticamente igual ao dele.",
-    "As predefinições da pasta LRs saem muito mais parecidas com o Lightroom: Exposição, Contraste, Realces, Sombras, Brancos, Pretos, Temperatura, Matiz, Vibração, Saturação, Remover névoa, a Divisão de tons e a vinheta foram medidos no próprio Lightroom, um por um. Vale para fotos novas; foto já revelada continua como estava.",
-    "A RecordarFotos P&B foi refeita com os controles de sempre e continua com o mesmo visual: o mesmo cinza quente e a mesma borda clara cor de creme. Foto já revelada com ela abre com a versão nova sozinha.",
-    "A borda clara da vinheta agora pega a cor da viragem (sépia, creme), como no Lightroom, em vez de ficar cinza.",
-    "Saiu a aba RGB da coluna de ajustes e a importação de estilos do darktable: tudo fica nos controles do Lightroom. As predefinições suas que vieram do darktable viram a RecordarFotos P&B.",
-    "Enquanto o site não recebe a mesma atualização, uma foto revelada no app e no site pode sair com uma pequena diferença de cor."
-  ],
-  "por_que_atualizar": "As cores das fotos da câmera e as predefinições ficam iguais às do Lightroom, e a RecordarFotos P&B continua com o visual que você já vende."
-
-}
-```
-
-### O site (`../recordarfotos-e-commerce`, `dev`) — não começou
-
-O clone está em `C:\Projects\recordarfotos-e-commerce`, na `dev`. O plano inteiro está na seção 13
-(e o mapa do que mudar, com linhas, ficou registrado na sessão de 2/out): wasm com 133 nomes, o
-RecordarFotos P&B com os mesmos valores do app, a mesma migração dos `dt_*` (SQL nova para
-`pos_venda_fotos.ajustes`, a linha do tempo e `revelacao_presets`), sem a aba RGB e sem o importador,
-e a leitura do Adobe RGB exposta pelo `revelacao-web` e chamada depois do `getImageData`
-(`revelacao/imagem.ts`, o worker das amostras, `importacao/comprimir.ts`).
-
-⚠️ **Esta máquina não tem como gerar o wasm**: falta o alvo `wasm32-unknown-unknown`, o `wasm-pack`
-e o `wasm-opt` (o `scripts/construir-web.sh` usa os três). Instalar pede a autorização do dono.
+Os Velho Oeste (~17 → ~19) têm vinheta negativa com divisão de tons forte e Equilíbrio (−45): se não
+voltarem, conferir a tabela do Equilíbrio (medida só no matiz 45°, saturação 50).
 
 ### As ferramentas (todas em Rust; ver `ferramentas/lightroom/README.md`)
 
