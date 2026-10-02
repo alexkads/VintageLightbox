@@ -35,11 +35,10 @@
 //!   `VLB_FORCAR` do comparador. `--filtro` fica só com os casos cujo nome
 //!   contém um dos pedaços.
 //! - `--imagens <pasta>`: grava o lado a lado (Lightroom à esquerda) de cada caso.
-//! - `--adobe`: lê como Adobe RGB (1998) o JPEG que diz sê-lo sem ICC (o índice
-//!   DCF `R03` das Nikon do estúdio), como o Lightroom faz. O app ainda lê como
-//!   sRGB (`base_neutra.rs`); sem isso, toda foto da câmera parte de um neutro
-//!   ~3 ΔE longe do Lightroom (croma 0,81, mais fria), e esse piso esconde o
-//!   erro do controle que se quer medir.
+//!
+//! O original abre pela base neutra do app, que já lê o espaço de cor do
+//! arquivo (`foto_codec::espaco_de_cor`: as fotos da câmera são Adobe RGB). Até
+//! 2/out/2026 havia uma opção `--adobe` para isso; hoje ela converteria duas vezes.
 //!
 //! A saída tem, por caso, a diferença média (0–255) e, em cada faixa de tom do
 //! Lightroom, quanto a nossa está mais clara, mais quente (R−B) e mais verde.
@@ -56,6 +55,9 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
+
+#[path = "comum/medidas.rs"]
+mod medidas;
 
 use domain::value_objects::CropSettings;
 use image::{imageops::FilterType, DynamicImage, RgbImage};
@@ -194,46 +196,6 @@ const FAIXAS: [(&str, f64, f64); 5] = [
     ("brancos", 224.0, 256.0),
 ];
 
-/// O JPEG diz que é Adobe RGB (1998) sem ICC: o índice de interoperabilidade
-/// DCF `R03`, que as Nikon gravam no modo Adobe RGB. O Lightroom obedece.
-fn e_adobe_rgb(caminho: &Path) -> bool {
-    let Ok(arquivo) = fs::File::open(caminho) else {
-        return false;
-    };
-    let Ok(exif) = exif::Reader::new().read_from_container(&mut std::io::BufReader::new(arquivo))
-    else {
-        return false;
-    };
-    exif.get_field(exif::Tag::InteroperabilityIndex, exif::In::PRIMARY)
-        .is_some_and(|c| c.display_value().to_string().contains("R03"))
-}
-
-/// Lê os valores como Adobe RGB (1998) e devolve em sRGB (as duas em D65:
-/// a matriz é só a dos primários; fora da gama, corta).
-fn de_adobe_rgb(base: DynamicImage) -> DynamicImage {
-    let mut img = base.to_rgb8();
-    let gama = 563.0f32 / 256.0;
-    let tabela: Vec<f32> = (0..256).map(|v| (v as f32 / 255.0).powf(gama)).collect();
-    let codificar = |v: f32| {
-        let v = v.clamp(0.0, 1.0);
-        let s = if v <= 0.003_130_8 {
-            v * 12.92
-        } else {
-            1.055 * v.powf(1.0 / 2.4) - 0.055
-        };
-        (s * 255.0).round() as u8
-    };
-    for p in img.pixels_mut() {
-        let [r, g, b] = p.0.map(|v| tabela[v as usize]);
-        p.0 = [
-            codificar(1.398_283 * r - 0.398_283 * g),
-            codificar(g),
-            codificar(-0.042_938 * g + 1.042_938 * b),
-        ];
-    }
-    DynamicImage::ImageRgb8(img)
-}
-
 /// `geral` e, por faixa, `luma,quente,verde` — vazio onde a faixa não tem pixel.
 /// As medidas que o olho entende, em Lab (`palette`): `ΔE2000` médio e o
 /// percentil 95 (abaixo de ~2 não se nota), `ΔL*` (nossa − Lightroom, só a
@@ -244,34 +206,8 @@ fn de_adobe_rgb(base: DynamicImage) -> DynamicImage {
 /// Um pixel em cada quatro (passo 2 nos dois eixos): a média não muda, e a
 /// conta do CIEDE2000 é a parte cara.
 fn perceptual(nosso: &RgbImage, lr: &RgbImage) -> (f64, f64, f64, f64, f64) {
-    use palette::{color_difference::Ciede2000, IntoColor, Lab, Srgb};
-    let lab = |p: &image::Rgb<u8>| -> Lab {
-        Srgb::new(p[0], p[1], p[2])
-            .into_format::<f32>()
-            .into_linear()
-            .into_color()
-    };
-    let (mut des, mut dl, mut c_nosso, mut c_lr) = (Vec::new(), 0.0, 0.0, 0.0);
-    for y in (0..lr.height()).step_by(2) {
-        for x in (0..lr.width()).step_by(2) {
-            let (a, b) = (lab(nosso.get_pixel(x, y)), lab(lr.get_pixel(x, y)));
-            des.push(a.difference(b) as f64);
-            dl += (a.l - b.l) as f64;
-            c_nosso += (a.a.hypot(a.b)) as f64;
-            c_lr += (b.a.hypot(b.b)) as f64;
-        }
-    }
-    let n = des.len() as f64;
-    let media = des.iter().sum::<f64>() / n;
-    des.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let p95 = des[((n * 0.95) as usize).min(des.len() - 1)];
-    (
-        media,
-        p95,
-        dl / n,
-        c_nosso / c_lr.max(1e-6),
-        ssim(nosso, lr),
-    )
+    let m = medidas::comparar(nosso, lr, 2);
+    (m.media, m.p95, m.dl, m.croma, ssim(nosso, lr))
 }
 
 /// O SSIM da luminância, em janelas 8×8 de passo 4, numa redução a 512 px.
@@ -407,7 +343,6 @@ fn main() {
     };
     let forcar_todos = valor("--forcar").map(|f| pares(&f)).unwrap_or_default();
     let imagens = valor("--imagens").map(PathBuf::from);
-    let adobe = args.iter().any(|a| a == "--adobe");
     if let Some(p) = &imagens {
         fs::create_dir_all(p).unwrap();
     }
@@ -446,14 +381,7 @@ fn main() {
         }
         let original = decodificados
             .entry(caso.original.clone())
-            .or_insert_with(|| {
-                let base = base_neutra::base_neutra(&caso.original).expect("abrir o original");
-                if adobe && e_adobe_rgb(&caso.original) {
-                    de_adobe_rgb(base)
-                } else {
-                    base
-                }
-            });
+            .or_insert_with(|| base_neutra::base_neutra(&caso.original).expect("abrir o original"));
         let (w, h) = (original.width() as f32, original.height() as f32);
         // A escala que deixa o recorte no tamanho do exportado.
         let recorte = (

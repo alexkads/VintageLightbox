@@ -98,9 +98,11 @@ piorou primeiro. Com `--base`, mostra também quanto cada caso mudou desde a rod
 - `--filtro a,b` (pedaços do nome do caso);
 - `--forcar campo=valor;…`, para varrer um ajuste;
 - `--imagens <pasta>`, para gravar o lado a lado (o Lightroom à esquerda — não é a nossa imagem sozinha);
-- `--lista <csv>` (`rotulo,original,exportado,forcar`), para varrer muitos valores numa passada só;
-- `--adobe`, para ler os JPEG `R03` da câmera como Adobe RGB, como o Lightroom (ver
-  `docs/REGUA-DO-LIGHTROOM.md`, seção 9). **Meça o motor com ela.**
+- `--lista <csv>` (`rotulo,original,exportado,forcar`), para varrer muitos valores numa passada só.
+
+O original abre pela base neutra do app, que lê o espaço de cor do arquivo (os JPEG `R03` da câmera
+em Adobe RGB, como o Lightroom — `docs/REGUA-DO-LIGHTROOM.md`, seção 10). A opção `--adobe`, que fazia
+isso antes do app, saiu.
 
 Por caso, além da diferença 0–255 por faixa de tom, sai o ΔE2000 (médio e p95), o ΔL\*, a razão de
 croma e o SSIM (crate `palette`). Com as réguas de hoje são 1968 casos e cerca de 1 h.

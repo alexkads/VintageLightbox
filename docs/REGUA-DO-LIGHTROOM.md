@@ -467,7 +467,47 @@ névoa −12 (Chocolate e Velho Oeste Color, +1,0 e +1,4 em 0–255).
 
 ### Fica aberto
 
-1. **Ler o JPEG `R03` como Adobe RGB** no app e no site — decisão do dono (acima).
+1. **Ler o JPEG `R03` como Adobe RGB** no app e no site — feito no app na seção 10.
 2. **A forma do Remover névoa negativo** (por profundidade, mirando uma névoa mais clara).
 3. O CLI gasta ~1 h numa rodada inteira (1968 casos × 2 processos, uma thread); memória ok (um
    original por vez).
+
+## 10. Uma leitura só: o espaço que o arquivo declara (2/out)
+
+*"Vamos usar o Adobe RGB como padrão […] não teremos sRGB e RGB como tá hoje, o custo de manter os
+dois complica as medições"* — dono, 2/out.
+
+**O que mudou.** A decodificação (`foto_codec::orientacao`, que já aplicava a orientação) passou a
+ler o espaço de cor que o arquivo declara e converter para sRGB (`foto_codec::espaco_de_cor`):
+
+| o arquivo diz | lido como |
+|---|---|
+| ICC com "Adobe RGB" / "Display P3" na descrição | Adobe RGB / Display P3 |
+| outro ICC | sRGB (sem gerenciador de cor completo, chutar seria pior) |
+| sem ICC, EXIF `InteropIndex = R03` (as Nikon do estúdio) | Adobe RGB |
+| nada | sRGB |
+
+Por ali passam a base da Revelação, as miniaturas, o zoom 1:1, o backup e os dois wasm do site quando
+eles mesmos decodificam. No neutro das 6 fotos da régua `nevoa`, o app agora fica a **ΔE2000 1,22–1,29**
+do Lightroom (era 3,08) e com o mesmo croma (0,995–1,006; era 0,81). A opção `--adobe` do CLI saiu:
+converteria duas vezes.
+
+### 🚨 O RecordarFotos P&B — o estilo das fotos vendidas
+
+O estilo veio do darktable, e o `.dtstyle` traz o próprio `colorin` com o perfil de entrada **sRGB
+fixo** (`type = 1`; trabalho em Rec.2020 linear): **o darktable lê essas fotos como sRGB**, ignorando o
+`R03`. Medido contra o `darktable-cli` 5.6.1 (`examples/comparar_pb_darktable.rs`, 3 fotos):
+
+| foto | motor lendo sRGB | motor lendo Adobe RGB |
+|---|---|---|
+| DSC0010 | ΔE **0,72** · pretos +0,3 | ΔE 1,35 · pretos **−7,4** |
+| DSC0011-2 | ΔE **0,65** · pretos +0,3 | ΔE 0,95 · pretos **−6,0** |
+| DSC0018-4 | ΔE **0,74** · pretos +0,3 | ΔE 1,38 · pretos **−7,8** |
+
+Com a leitura nova, o P&B atual (os módulos do darktable) sai com os pretos 6 a 8 níveis mais escuros
+que o vendido. **Ele vai ser refeito com os controles do motor** sobre a leitura nova, ajustado contra o
+`darktable-cli` — é o passo seguinte. Até lá, não se lança versão.
+
+⚠️ **O site ainda lê sRGB**: o navegador ignora o `R03`, e o `createImageBitmap` não diz o espaço do
+arquivo. Até o site ler o EXIF (o `foto_codec::espaco_de_cor` já compila para wasm), a mesma foto sai
+diferente nos dois.

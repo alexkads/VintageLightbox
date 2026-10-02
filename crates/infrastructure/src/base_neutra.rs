@@ -11,7 +11,16 @@
 //! | Origem | Decodificação | Cor | Bits | Dimensões |
 //! |---|---|---|---|---|
 //! | RAW (`raw_processing::is_raw_file`) | LibRaw, parâmetros de saída padrão (sRGB, curva BT.709 0,45/4,5, luz do dia da câmera, clareamento automático) | sRGB | 8 | a imagem processada inteira, já de pé (a LibRaw aplica o `flip`) |
-//! | JPEG/WebP/PNG, e os bytes do bruto do site | `image` + etiqueta EXIF (`orientacao`) | tratados como sRGB (ICC ignorado) | 8 | as do arquivo, de pé |
+//! | JPEG/WebP/PNG, e os bytes do bruto do site | `image` + etiquetas EXIF e ICC (`orientacao`) | **o espaço que o arquivo declara**, convertido para sRGB (`foto_codec::espaco_de_cor`) — Adobe RGB nas fotos da câmera | 8 | as do arquivo, de pé |
+//!
+//! 🚨 **Até 2/out/2026 o JPEG era lido como sRGB, com etiqueta ou sem.** As
+//! câmeras do estúdio gravam Adobe RGB (o `R03` do EXIF), e toda foto saía
+//! mais apagada e mais fria que no Lightroom (ΔE2000 3,08 no neutro; lida
+//! certo, 1,27). O dono decidiu uma leitura só, a do arquivo
+//! (`docs/REGUA-DO-LIGHTROOM.md`, seção 10). ⚠️ O `RecordarFotos P&B` vinha do
+//! darktable lendo sRGB (o `colorin` do `.dtstyle` fixa sRGB): sobre a leitura
+//! certa, os pretos dele descem 6 a 8 níveis até ele ser refeito com os
+//! controles do motor.
 
 use std::path::Path;
 
