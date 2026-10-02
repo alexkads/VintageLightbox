@@ -1,5 +1,16 @@
 [
   {
+    "versao": "0.1.66",
+    "data": "2026-10-02",
+    "titulo": "A pasta LRs ficou com 26 predefinições.",
+    "importante": false,
+    "novidades": [
+      "Saíram da pasta LRs a \"Predefinição sem título\" e a \"RecordarFotos Bem Velhão\". Foto já revelada com uma delas continua como está.",
+      "Uma sessão que tinha uma delas como revelação padrão passa a receber as fotos novas só com o corte. O site recebeu a mesma mudança."
+    ],
+    "por_que_atualizar": "A lista de predefinições do app fica igual à do site, sem as duas que saíram."
+  },
+  {
     "versao": "0.1.65",
     "data": "2026-10-02",
     "titulo": "As fotos da câmera com as cores certas, e as predefinições do Lightroom saindo como no Lightroom.",
