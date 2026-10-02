@@ -714,7 +714,7 @@ mod testes {
 
     #[test]
     fn as_do_sistema_sao_vinte_com_nomes_distintos() {
-        // "Do sistema": as vinte e o Cinematográfico P&B. As 28 da pasta
+        // "Do sistema": as vinte e o Cinematográfico P&B. As 26 da pasta
         // "LRs" repetem um nome ("RecordarFotos P&B"), e por isso ficam fora.
         let lista: Vec<_> = use_cases::presets::presets_de_sistema()
             .into_iter()

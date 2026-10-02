@@ -75,11 +75,15 @@ local function predefinicoes()
 end
 
 -- As do estúdio, inteiras: é a régua de "faz o mesmo que o Lightroom".
+-- O "RecordarFotos Bem Velhão" e a "Predefinição sem título" saíram da pasta
+-- LRs (dono, 2/out/2026): mesmo instaladas no Lightroom, ficam fora da régua.
+local FORA_DAS_LRS = { ["RecordarFotos Bem Velhão"] = true }
+
 local function do_estudio(por_nome)
 	local nomes = {}
 	for nome in pairs(por_nome) do
-		if nome:find("^RecordarFotos") or nome:find("^Recordarfotos") or nome:find("^Vinheta")
-			or nome == "Colorido envelhacido" or nome == "Predefinição sem título" then
+		if (nome:find("^RecordarFotos") or nome:find("^Recordarfotos") or nome:find("^Vinheta")
+			or nome == "Colorido envelhacido") and not FORA_DAS_LRS[nome] then
 			table.insert(nomes, nome)
 		end
 	end
@@ -414,7 +418,7 @@ local function casos_de_vinheta_viragem()
 end
 
 -- A ordem da vinheta e da Luminância do Color Grading: a vinheta branca +100
--- do RF Bem Velhão, sozinha e com a Luminância negativa dos realces e dos
+-- (a do antigo RF Bem Velhão), sozinha e com a Luminância negativa dos realces e dos
 -- médios. Se o canto clareado continua claro, o Lightroom aplica a Luminância
 -- antes da vinheta (o que o motor faz desde 2/out); se escurece de volta,
 -- depois. Na foto cinza lisa e numa foto de verdade.

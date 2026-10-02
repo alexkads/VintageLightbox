@@ -36,7 +36,7 @@ primeira linha (`saida=`) deixa de ser reconhecida e o pedido some calado: vira
 `[IO.File]::WriteAllText(caminho, texto, (New-Object Text.UTF8Encoding $false))`.
 
 ⚠️ **O `Regua.lua` é carregado quando o Lightroom abre.** Um tipo de caso novo só existe depois de
-reiniciar o Lightroom; antes disso, o pedido com ele cai no caso vazio (as 28 predefinições).
+reiniciar o Lightroom; antes disso, o pedido com ele cai no caso vazio (as 26 predefinições).
 
 🚨 Enquanto a régua roda, ninguém clica em outra foto no Lightroom. Antes de cada caso a régua confere
 a foto ativa e para se ela mudou, porque redefinir a revelação de uma foto do operador apagaria o
@@ -46,7 +46,7 @@ trabalho dele.
 
 | | o quê | numa foto |
 |---|---|---|
-| *(vazio)* | o neutro e as 28 predefinições do estúdio; na 1ª foto, também os 4 perfis criativos e os sliders | fotos de verdade |
+| *(vazio)* | o neutro e as 26 predefinições do estúdio; na 1ª foto, também os 4 perfis criativos e os sliders | fotos de verdade |
 | `tom` | Exposição de −2 a +2 EV, e Contraste, Realces, Sombras, Brancos e Pretos de −100 a +100, de 10 em 10 | `rampa-cor.jpg`: 4 faixas (cinza e 3 cores) × 256 degraus |
 | `vinheta-grade` | a vinheta −61 em ponto médio × difusão (9 × 9), o arredondamento e as 10 combinações do estúdio | cinza 128 liso |
 | `vinheta-forca-fina` | a vinheta de −100 a +100 nos 3 estilos | 4 fotos de quadrantes: 12 cinzas e 4 cores |

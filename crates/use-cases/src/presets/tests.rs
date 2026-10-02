@@ -617,13 +617,14 @@ async fn renomear_propaga_o_erro_do_banco() {
     ));
 }
 
-/// 🎞️ A pasta "LRs": as 28 do Lightroom do estúdio, as de vinheta somando e as
-/// de visual recomeçando do neutro.
+/// 🎞️ A pasta "LRs": as 26 do Lightroom do estúdio, as de vinheta somando e as
+/// de visual recomeçando do neutro. A "Predefinição sem título" e a
+/// "RecordarFotos Bem Velhão" saíram (dono, 2/out/2026).
 #[test]
 fn as_do_lightroom_vem_na_pasta_lrs_e_so_as_vinhetas_somam() {
     use crate::presets::list_presets::{presets_de_sistema, presets_do_lightroom, GRUPO_LRS};
     let lrs = presets_do_lightroom();
-    assert_eq!(lrs.len(), 28);
+    assert_eq!(lrs.len(), 26);
     for p in &lrs {
         assert!(p.is_system, "{}", p.name);
         assert_eq!(p.grupo.as_deref(), Some(GRUPO_LRS), "{}", p.name);
@@ -646,6 +647,9 @@ fn as_do_lightroom_vem_na_pasta_lrs_e_so_as_vinhetas_somam() {
         "RecordarFotos P&B Cinematografico",
     ] {
         assert!(nomes.contains(&nome), "{nome}");
+    }
+    for fora in ["Predefinição sem título", "RecordarFotos Bem Velhão"] {
+        assert!(!nomes.contains(&fora), "{fora} saiu das LRs");
     }
     // A "Vinheta Nenhuma" é justamente o zero: somada, tira a vinheta.
     let nenhuma = lrs.iter().find(|p| p.name == "Vinheta Nenhuma").unwrap();

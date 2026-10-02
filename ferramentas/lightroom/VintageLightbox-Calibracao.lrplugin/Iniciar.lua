@@ -1,7 +1,7 @@
 --[[
 O pedido automático: com o plug-in carregado, ele olha a cada poucos segundos
 por um `pedido.txt` na pasta do próprio plug-in e, se achar, roda a régua sem
-ninguém clicar em nada. É o que permite medir as 28 predefinições do estúdio
+ninguém clicar em nada. É o que permite medir as 26 predefinições do estúdio
 em várias fotos a partir de um roteiro.
 
 O pedido, uma chave por linha:

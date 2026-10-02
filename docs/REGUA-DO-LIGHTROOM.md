@@ -8,6 +8,10 @@ Este documento registra o trabalho de 1/out/2026, feito na máquina Windows com 
 VintageLightbox a mesma coisa que no Lightroom? O resultado foi uma régua de medição, um diagnóstico
 dos defeitos e uma primeira correção no motor, o **processo 1**.
 
+> ✂️ **2/out/2026: a "Predefinição sem título" e a "RecordarFotos Bem Velhão" saíram da pasta LRs**
+> (dono), que ficou com **26**, no app e no site. As medidas abaixo ficam como foram feitas, com as 28;
+> o que estava aberto por causa delas foi revisto nas seções 6, 8 e 15.
+
 ## 1. A pergunta e a resposta curta
 
 **Não faziam.** Nenhuma predefinição ficava igual. Nas fotos com original JPG, a diferença média para
@@ -248,7 +252,8 @@ abaixo).
    Lightroom do que hoje.
 2. **O balanço de branco:** medido e não corrigido. Precisa de uma carta de cores.
 3. **Os perfis criativos da Adobe:** decisão do dono sobre embutir as tabelas.
-4. **As máscaras locais** das predefinições (o Bem Velhão tem 6).
+4. **As máscaras locais** das predefinições: 4 das 26, com 1 a 3 cada (o Bem Velhão, que tinha 6, saiu
+   em 2/out).
 5. **A revelação do RAW:** nas fotos NEF, todos os presets passam de 30 já no neutro. A base do motor
    para RAW não é a do Lightroom (o perfil de câmera Adobe Color).
 6. **O leitor de XMP** misturando os sliders do `<crs:Look>` com os do operador.
@@ -374,7 +379,8 @@ piora (11,1 → 13,1).
 2. **O desvio de cor da base nas fotos JPG**: o neutro do Lightroom é um pouco mais quente que o JPEG
    da câmera (−10 a −15 no "quente" em todos os casos). Esse piso é de ~4–5.
 3. **Remover névoa negativo** (−100: 21) e **Vibração negativa** (−100: 22) seguem fora; também os
-   perfis criativos e as máscaras locais (RF Bem Velhão: 29).
+   perfis criativos e as máscaras locais (o pior caso era o RF Bem Velhão, 29, que saiu das LRs em
+   2/out).
 4. ⚠️ **O conta-gotas e o EB Automático** do Básico (`revelacao/balanco.rs`) resolvem ao contrário a
    conta **antiga** da temperatura. No processo 1 eles dão números aproximados.
 
@@ -557,7 +563,7 @@ RecordarFotos P&B.
 | O P&B do darktable batia com o app lendo sRGB e não com Adobe | o `colorin` do `.dtstyle` fixa sRGB | ver o `colorin` de todo estilo antes de medir |
 | Borda da vinheta cinza onde o original é creme | ordem: viragem antes da vinheta | régua `vinheta-viragem`; `fn viragem` (seção 11) |
 | O pedido ao plug-in vira `pedido-em-andamento.txt` e nada acontece | BOM no `pedido.txt` (PowerShell 5.1) | gravar UTF-8 sem BOM (`ferramentas/lightroom/README.md`) |
-| Tipo de caso novo do plug-in roda as 28 predefinições | `Regua.lua` só é lido quando o Lightroom abre | reiniciar o Lightroom depois de mudar o `.lua` |
+| Tipo de caso novo do plug-in roda as predefinições do estúdio | `Regua.lua` só é lido quando o Lightroom abre | reiniciar o Lightroom depois de mudar o `.lua` |
 | O "nosso" do `--imagens` mede metade do Lightroom | `--imagens` grava o lado a lado, Lightroom à esquerda | medir pelos CLIs, não pelas imagens |
 | Rodada inteira de 1 h; ajuste de mais de 1 h | ΔE2000 numa thread | `examples/comum/medidas.rs` (todos os núcleos): ajuste em ~7 min |
 | A rodada inteira morre por memória | todo original decodificado guardado | um original por vez no `comparar_em_lote` |
@@ -640,27 +646,28 @@ darktable, e o Adobe RGB na importação (o arquivo comprimido perde o EXIF: é 
 no servidor (`espaco_de_cor.rs`, cópia de trabalho `trabalho.v3`). Fotos importadas no site antes disso
 ficam como estão — o arquivo guardado já não diz o espaço.
 
-### ⚠️ O que falta: medir a correção do Bem Velhão no Windows
+### ⚠️ O que falta: medir no Windows a ordem da Luminância e da vinheta
 
-A rodada `tudo-5` achou o RF Bem Velhão de ΔE 29 → 59 (JPG) e 46 → 82 (RAW). A causa: a Luminância
-negativa dos realces (−38) escurecia a borda que a vinheta +100 clareou — no cinza 150 o canto saía 158
-em vez de 255 (`no_processo_1_a_luminancia_da_viragem_nao_apaga_a_vinheta_branca`). A correção
-(`9d03280`) põe a Luminância de volta onde estava na `tudo-4a`, e saiu na 0.1.65 sem a régua do
-Lightroom, que só existe no Windows:
+✂️ **Depois do lançamento, o RF Bem Velhão saiu da pasta LRs** (dono, 2/out, junto com a
+"Predefinição sem título"; ficaram 26, no app e no site). Era ele que pedia esta medição: a rodada
+`tudo-5` o achou de ΔE 29 → 59 (JPG) e 46 → 82 (RAW), porque a Luminância negativa dos realces (−38)
+escurecia a borda que a vinheta +100 clareou — no cinza 150 o canto saía 158 em vez de 255
+(`no_processo_1_a_luminancia_da_viragem_nao_apaga_a_vinheta_branca`). A correção (`9d03280`) pôs a
+Luminância de volta onde estava na `tudo-4a` e saiu na 0.1.65 sem a régua do Lightroom, que só existe
+no Windows. Sem o Bem Velhão a ordem continua valendo para qualquer foto com vinheta e Luminância no
+Color Grading, e falta confirmá-la:
 
 1. `casos=vinheta-luminancia` no plug-in: se o canto do `03-vinheta-realces-38` sair tão claro quanto o
    do `01-vinheta`, o Lightroom aplica a Luminância antes da vinheta, como o motor; se escurecer, a ordem
    é a outra.
-2. A rodada `tudo-6` contra a `tudo-5` e a `tudo-4a`: o Bem Velhão tem de voltar a ~29 / ~46. Se ficar
-   acima, a régua `componentes`:
+2. A rodada `tudo-6` (as 26) contra a `tudo-5` e a `tudo-4a`: nenhuma pode piorar. Os Velho Oeste
+   (~17 → ~19) têm vinheta negativa com divisão de tons forte e Equilíbrio (−45); se não voltarem, a
+   régua `componentes` deles, e conferir a tabela do Equilíbrio (medida só no matiz 45°, saturação 50):
 
 ```bash
 cargo run --release -p infrastructure --example comparar_em_lote -- saida.csv \
-    --regua "<Comparar Presets>/regua-componentes" --processos 1 --filtro Bem_Velh --imagens <pasta>
+    --regua "<Comparar Presets>/regua-componentes" --processos 1 --filtro Velho_Oeste --imagens <pasta>
 ```
-
-Os Velho Oeste (~17 → ~19) têm vinheta negativa com divisão de tons forte e Equilíbrio (−45): se não
-voltarem, conferir a tabela do Equilíbrio (medida só no matiz 45°, saturação 50).
 
 ### As ferramentas (todas em Rust; ver `ferramentas/lightroom/README.md`)
 

@@ -155,14 +155,16 @@ vinheta pós-corte (antes caía na de lente), a aspereza e o balanço relativo d
 trocado — conferido na prévia) também. E a **curva por ponto de todo `.xmp`** voltou: o `<rdf:Seq>` era
 lido como texto, e a curva de predefinição e de DNG sumia sem aviso — só a do `.lrtemplate` chegava.
 
-**Pasta "LRs"** nas predefinições (desktop e site): as 28 do Lightroom do estúdio, geradas dos `.xmp`
+**Pasta "LRs"** nas predefinições (desktop e site): as 26 do Lightroom do estúdio, geradas dos `.xmp`
 pelo mesmo tradutor (`infrastructure/examples/presets_do_lightroom.rs` → `use-cases/src/presets/lightroom.json`,
 copiado para o site como `presets-lr.json`). As de vinheta somam; as outras recomeçam do neutro. E
 **"Cinematográfico P&B"** em "Do sistema": a "P&B Cinematografico" com a "Vinheta Borda" do DNG.
+Eram 28: a "Predefinição sem título" e a "RecordarFotos Bem Velhão" saíram em 2/out/2026 (dono) — tiradas
+dos dois JSON; quem regerar dos `.xmp` deixa os dois arquivos fora da pasta.
 
-⚠️ **O que ainda difere nessas 28**: 9 usam **perfis criativos da Adobe** (Vintage 10, Modern 09,
+⚠️ **O que ainda difere nessas 26**: 9 usam **perfis criativos da Adobe** (Vintage 10, Modern 09,
 B&W 01, B&W 10) — o preset só nomeia o perfil; a tabela de cor 3D está no arquivo da Adobe, e o motor
-não tem tabela —, e 5 usam **máscaras radiais** com mais que exposição. A lista de cada uma está no
+não tem tabela —, e 4 usam **máscaras radiais** com mais que exposição. A lista de cada uma está no
 campo `avisos` do `lightroom.json`.
 
 ### O Básico e o P&B do Lightroom (1/out/2026)
@@ -203,9 +205,9 @@ os presets já estão certos, mas o painel Básico ainda é o de antes.
 [`docs/REGUA-DO-LIGHTROOM.md`](REGUA-DO-LIGHTROOM.md).
 
 🚩 **Para continuar, comece pela seção 15 de lá** ("Onde estamos", 2/out/2026): o que está no `dev`
-(Adobe RGB, o darktable fora do motor, o RecordarFotos P&B refeito, a viragem medida), a regressão
-no RecordarFotos Bem Velhão que segura a 0.1.65 (o texto do lançamento está pronto lá), e o site,
-que ainda não recebeu nada disso.
+(Adobe RGB, o darktable fora do motor, o RecordarFotos P&B refeito, a viragem medida), a 0.1.65 e o
+site no ar, e o que falta medir no Windows — a ordem da Luminância e da vinheta, que veio do
+RecordarFotos Bem Velhão, já fora das LRs.
 
 *"Esse foi o objetivo de vir para essa máquina com Lightroom: você comparar todos os presets que
 temos. Pois não posso ter problemas tão grosseiros"* (dono, 1/out).
@@ -258,6 +260,9 @@ conta o processo, para o ponto âmbar, a exportação e o envio não acharem rev
 | RF P&B Cinematografico II | 37 → 16 | RF P&B | 10 → 13 |
 | RF Colorido Envelhecido | 63 → 20 | RF P&B Movie 2 | 14 → 19 |
 | RF Bem Velhão | 80 → 34 | | |
+
+✂️ A "Predefinição sem título" e o "RF Bem Velhão" saíram das LRs em 2/out; ficam na tabela como
+registro.
 
 ⚠️ **As 9 que pioraram estão abertas**, e o motivo ainda não foi achado. As suspeitas são Sombras e
 Realces (locais no Lightroom, medidos aqui numa rampa) e o balanço de branco, que a régua mediu e o
