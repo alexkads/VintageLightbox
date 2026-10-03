@@ -1,11 +1,11 @@
 {
-  "versao": "0.1.71",
-  "titulo": "A predefinição sua passa a guardar os ajustes da foto.",
+  "versao": "0.1.72",
+  "titulo": "As vinhetas das predefinições desligam a vinheta do darktable.",
   "importante": false,
   "novidades": [
-    "Na Revelação, o botão direito numa predefinição sua tem \"Atualizar com os ajustes atuais\", como no Lightroom: ela passa a guardar os ajustes que estão na foto agora.",
-    "Ela continua com o mesmo nome, no mesmo lugar da lista e nas favoritas. Quem foi salva com \"Zerar os outros ajustes ao aplicar\" continua assim.",
-    "Nas predefinições do sistema e nas LRs o item aparece desligado: elas vêm prontas com o app e não mudam."
+    "Na Revelação, as predefinições de vinheta da pasta LRs (Vinheta Nenhuma, Borda, Carregada, Oval e Tingida) agora desligam a \"Vinheta do darktable\": fica só a vinheta que você escolheu.",
+    "Antes, \"Vinheta Nenhuma\" sobre o RecordarFotos P&B deixava a borda clara do darktable na foto.",
+    "O resto da foto continua como estava, e os números da vinheta do darktable ficam guardados: é só religar a chave em Efeitos."
   ],
-  "por_que_atualizar": "Para acertar uma predefinição sua sem salvar outra com outro nome e apagar a antiga."
+  "por_que_atualizar": "Para tirar ou trocar a vinheta com um clique, sem precisar desligar a do darktable à mão."
 }

@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.72",
+    "data": "2026-10-03",
+    "titulo": "As vinhetas das predefinições desligam a vinheta do darktable.",
+    "importante": false,
+    "novidades": [
+      "Na Revelação, as predefinições de vinheta da pasta LRs (Vinheta Nenhuma, Borda, Carregada, Oval e Tingida) agora desligam a \"Vinheta do darktable\": fica só a vinheta que você escolheu.",
+      "Antes, \"Vinheta Nenhuma\" sobre o RecordarFotos P&B deixava a borda clara do darktable na foto.",
+      "O resto da foto continua como estava, e os números da vinheta do darktable ficam guardados: é só religar a chave em Efeitos."
+    ],
+    "por_que_atualizar": "Para tirar ou trocar a vinheta com um clique, sem precisar desligar a do darktable à mão."
+  },
+  {
     "versao": "0.1.71",
     "data": "2026-10-02",
     "titulo": "A predefinição sua passa a guardar os ajustes da foto.",
