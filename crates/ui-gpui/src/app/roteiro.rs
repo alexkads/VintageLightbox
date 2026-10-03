@@ -528,6 +528,20 @@ impl Aplicativo {
             // Desenrolados pelo laço do roteiro.
             Passo::Varrer { .. } | Passo::Rolar { .. } => {}
             Passo::Aviso { erro, texto } => self.avisar_em_toast(texto.clone(), *erro, cx),
+            Passo::Som {
+                ouvir,
+                evento,
+                detalhe,
+            } => {
+                if *ouvir {
+                    if let Some(sons) = cx.try_global::<crate::sons::Sons>() {
+                        sons.ouvir(*evento);
+                    }
+                } else {
+                    crate::sons::soar(*evento, evento.rotulo(), detalhe, cx);
+                }
+            }
+            Passo::Configuracoes => self.abrir_configuracoes(window, cx),
             Passo::Novidades(acao) => {
                 use crate::atualizacao::faixa::Pedido;
                 let mut partes = acao.split_whitespace();

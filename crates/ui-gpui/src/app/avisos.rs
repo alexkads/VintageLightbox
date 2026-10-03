@@ -51,6 +51,14 @@ impl Aplicativo {
                 if na_tela {
                     return;
                 }
+                // 🔊 O som segue a regra do toast: com a conversa aberta na
+                // frente, o operador já está lendo.
+                crate::sons::soar(
+                    crate::sons::Evento::MensagemNoChatbot,
+                    &titulo,
+                    corpo.as_deref().unwrap_or_default(),
+                    cx,
+                );
                 let (ligados, cliques) = {
                     let chatbot = self.chatbot.read(cx);
                     (chatbot.avisos_ligados(), chatbot.canal_dos_cliques())
@@ -78,7 +86,9 @@ impl Aplicativo {
                 titulo,
                 corpo,
                 aviso,
+                som,
             } => {
+                crate::sons::soar(som, &titulo, corpo.as_deref().unwrap_or_default(), cx);
                 let (ligados, cliques) = {
                     let agenda = self.agenda.read(cx);
                     (agenda.avisos_ligados(), agenda.canal_dos_cliques())

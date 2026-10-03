@@ -1,4 +1,5 @@
-//! Configurações: o que o cache tem dentro, e como esvaziá-lo.
+//! Configurações: os avisos sonoros (`crate::sons::tela`) e o cache — o que
+//! ele tem dentro, e como esvaziá-lo. Uma aba para cada.
 //!
 //! É o `settings_dialog.rs` do legado, sem a seção de leiaute — ela existe lá
 //! para desfazer um arranjo de painéis que este app não tem
@@ -14,8 +15,11 @@
 use std::sync::Arc;
 
 use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{ActiveTheme, Disableable, Sizable};
-use gpui_kit::{div, prelude::*, px, App, Context, SharedString, Window};
+use gpui_kit::{div, prelude::*, px, App, Context, Entity, SharedString, Window};
+
+use crate::sons::tela::AvisosSonoros;
 use infrastructure::cache::preview_manager::{CacheStats, PreviewManager};
 
 /// Tamanho em bytes, do jeito que se lê.
@@ -52,6 +56,11 @@ pub struct Configuracoes {
     estatisticas: Option<CacheStats>,
     /// O que a última limpeza fez, para a tela poder dizer.
     ultima_limpeza: Option<SharedString>,
+    /// A aba aberta: 0 é "Avisos sonoros", 1 é "Cache".
+    aba: usize,
+    /// A aba dos sons, criada na primeira abertura — os campos dela pedem a
+    /// janela, que o `nova` não tem.
+    sons: Option<Entity<AvisosSonoros>>,
 }
 
 impl Configuracoes {
@@ -60,7 +69,20 @@ impl Configuracoes {
             previews,
             estatisticas: None,
             ultima_limpeza: None,
+            aba: 0,
+            sons: None,
         }
+    }
+
+    /// Cria a aba dos sons, se ainda não existe. Chamado ao abrir.
+    pub fn preparar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.sons.is_none() {
+            self.sons = Some(cx.new(|cx| AvisosSonoros::nova(window, cx)));
+        }
+    }
+
+    pub fn aba(&self) -> usize {
+        self.aba
     }
 
     /// Relê o cache. Chamado ao abrir e depois de limpar.
@@ -119,6 +141,45 @@ impl Configuracoes {
 
 impl Render for Configuracoes {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let tela = cx.entity().downgrade();
+        let abas = TabBar::new("abas-das-configuracoes")
+            .segmented()
+            .small()
+            .selected_index(self.aba)
+            .on_click(move |indice, _, cx| {
+                let indice = *indice;
+                let _ = tela.update(cx, |tela, cx| {
+                    tela.aba = indice;
+                    cx.notify();
+                });
+            })
+            .child(
+                Tab::new()
+                    .debug_selector(|| "aba-avisos-sonoros".into())
+                    .label("Avisos sonoros"),
+            )
+            .child(
+                Tab::new()
+                    .debug_selector(|| "aba-cache".into())
+                    .label("Cache"),
+            );
+        let miolo = match (self.aba, &self.sons) {
+            (0, Some(sons)) => sons.clone().into_any_element(),
+            (0, None) => div().into_any_element(),
+            _ => self.cache(cx).into_any_element(),
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(14.))
+            .size_full()
+            .child(div().flex().child(abas))
+            .child(miolo)
+    }
+}
+
+impl Configuracoes {
+    fn cache(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let estatisticas = self.estatisticas.clone();
         // ⚠️ Os botões **desligam quando não há o que limpar**, como no legado.
         // Um "Limpar miniaturas" aceso sobre um cache vazio responde com "0

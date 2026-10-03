@@ -528,6 +528,8 @@ fn abrir_o_balcao_no_catalogo(
     portas.atualizador =
         Arc::new(crate::atualizacao::porta::mentira::AtualizadorDeMentira::default());
     portas.avisador = Arc::new(crate::tempo_real::aviso::mentira::AvisadorDeMentira::default());
+    // O alto-falante: a rodada não toca sino nem fala no Mac de quem a roda.
+    portas.sons = crate::sons::PortasDoSom::de_mentira().0;
 
     let crate::montagem::Montagem {
         fotos,

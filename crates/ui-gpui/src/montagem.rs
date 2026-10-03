@@ -307,6 +307,14 @@ pub async fn montar(ambiente: Ambiente) -> Montagem {
     // toast no Windows, Central de Notificações no macOS.
     let avisador: Arc<dyn crate::tempo_real::Avisador> =
         Arc::new(crate::tempo_real::AvisoDoSistema::default());
+    // 🔊 O alto-falante dos avisos sonoros: o `rodio` para o som e o programa
+    // de voz do sistema para a fala, numa thread com fila.
+    let sons = crate::sons::PortasDoSom {
+        alto_falante: Arc::new(crate::sons::porta::AltoFalanteDoSistema::novo()),
+        escolha: Arc::new(crate::sons::porta::EscolhaNativa::nova(
+            tokio::runtime::Handle::current(),
+        )),
+    };
 
     // 🔑 *"Tinha que ter opção sem arrastar e soltar"* (dono, 2026-09-19): a
     // janela do sistema para escolher pasta ou arquivos do backup.
@@ -450,6 +458,7 @@ pub async fn montar(ambiente: Ambiente) -> Montagem {
             escolha_do_backup,
             escuta,
             avisador,
+            sons,
         },
     }
 }

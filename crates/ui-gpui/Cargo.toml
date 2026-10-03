@@ -125,6 +125,12 @@ tray-icon = { version = "0.24", default-features = false, features = ["gtk"] }
 # GNOME existe **sem** a extensão da bandeja, que é o que o balcão Fedora não
 # tem. O `zbus` 5 que ele traz é o que o `ashpd` do `rfd` já traz.
 notify-rust = "4.18"
+# 🔊 Os avisos sonoros (`sons/`): o som de fábrica (sintetizado) e o som próprio
+# do operador (WAV, MP3, OGG, FLAC). Sem `recording`, `mp4` nem `dither`. No
+# Linux ele traz o `alsa-sys`, e o instalador já exige o `alsa` de
+# desenvolvimento (`scripts/instalar-vintagelightbox-gpui.cmd`). A voz não
+# entra aqui: é o programa do sistema (`sons/voz.rs`).
+rodio = { version = "0.22", default-features = false, features = ["playback", "wav", "mp3", "vorbis", "flac"] }
 # 📦 O zip de "baixar a pasta compactada" (`/dashboard/backup`).
 #
 # `default-features = false`: sem deflate, sem bzip2, sem zstd. JPEG, WebP e RAW

@@ -151,7 +151,7 @@ fn preparar_o_site(e: &Estudio) {
 }
 
 /// Entra na conta — o chatbot passa a escutar, mas continua escondido.
-fn entrar(cx: &mut TestAppContext) -> Estudio {
+pub(super) fn entrar(cx: &mut TestAppContext) -> Estudio {
     let e = abrir_o_app(cx, Cenario::default());
     preparar_o_site(&e);
     e.entrar_na_conta(cx);
@@ -159,7 +159,7 @@ fn entrar(cx: &mut TestAppContext) -> Estudio {
 }
 
 /// Entra e abre o chatbot **pelo menu lateral**, como o operador.
-fn abrir_o_chatbot(cx: &mut TestAppContext) -> Estudio {
+pub(super) fn abrir_o_chatbot(cx: &mut TestAppContext) -> Estudio {
     let e = entrar(cx);
     clicar(&e, cx, "menu-Chatbot");
     e.esperar(cx);
@@ -270,7 +270,7 @@ fn evento(fonte: &'static str, dados: Value) -> Sinal {
     Sinal::Evento { fonte, dados }
 }
 
-fn mensagem_da_ana(previa: &str) -> Sinal {
+pub(super) fn mensagem_da_ana(previa: &str) -> Sinal {
     evento(
         "wa",
         json!({"tipo": "mensagem_recebida", "contato": ANA, "nome": "Ana", "previa": previa, "em": ha(0)}),

@@ -220,6 +220,16 @@ pub enum Passo {
     /// conferir na tela o que o operador vê (o erro passa pela tradução do
     /// `erro_da_api`).
     Aviso { erro: bool, texto: String },
+    /// `som falha [detalhe…]` — o aviso sonoro de um evento (as chaves do
+    /// `sons.json`), pelas mesmas regras de quando ele acontece de verdade.
+    /// `som ouvir falha` é o "Ouvir" das Configurações.
+    Som {
+        ouvir: bool,
+        evento: crate::sons::Evento,
+        detalhe: String,
+    },
+    /// `configuracoes` — abre as Configurações.
+    Configuracoes,
     /// `fim` — fecha o app.
     Fim,
 }
@@ -350,6 +360,20 @@ pub fn ler_roteiro(texto: &str) -> Result<Vec<Passo>, String> {
                 erro: argumentos.first() == Some(&"erro"),
                 texto: argumentos.get(1..).unwrap_or_default().join(" "),
             },
+            "som" => {
+                let ouvir = argumentos.first() == Some(&"ouvir");
+                let resto = &argumentos[usize::from(ouvir)..];
+                let chave = resto.first().copied().unwrap_or_default();
+                let evento = crate::sons::Evento::da_chave(chave).ok_or_else(|| {
+                    format!("linha {}: evento de som desconhecido: '{chave}'", i + 1)
+                })?;
+                Passo::Som {
+                    ouvir,
+                    evento,
+                    detalhe: resto.get(1..).unwrap_or_default().join(" "),
+                }
+            }
+            "configuracoes" => Passo::Configuracoes,
             "fim" => Passo::Fim,
             outro => return Err(format!("linha {}: passo desconhecido: '{outro}'", i + 1)),
         };

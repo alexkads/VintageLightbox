@@ -156,6 +156,7 @@ fn abrir_o_estudio(cx: &mut TestAppContext, fotos: Vec<PhotoViewModel>) -> Estud
                     avisador: Arc::new(
                         crate::tempo_real::aviso::mentira::AvisadorDeMentira::default(),
                     ),
+                    sons: crate::sons::PortasDoSom::de_mentira().0,
                     escolha_do_backup: Arc::new(
                         crate::backup::escolha::mentira::EscolhaDeMentira::default(),
                     ),
@@ -737,6 +738,7 @@ fn nada_acontece_fora_de_uma_sessao(cx: &mut TestAppContext) {
                     avisador: Arc::new(
                         crate::tempo_real::aviso::mentira::AvisadorDeMentira::default(),
                     ),
+                    sons: crate::sons::PortasDoSom::de_mentira().0,
                     escolha_do_backup: Arc::new(
                         crate::backup::escolha::mentira::EscolhaDeMentira::default(),
                     ),

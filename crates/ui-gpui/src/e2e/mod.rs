@@ -72,6 +72,7 @@ mod revelacao;
 mod revelacao_local;
 mod segundo_plano;
 mod sessoes;
+mod sons;
 mod zoom;
 
 use std::sync::Arc;
@@ -385,6 +386,8 @@ pub(super) struct Estudio {
     pub escuta: Arc<crate::tempo_real::porta::mentira::EscutaDeMentira>,
     /// 🔔 Os avisos do sistema que o app deu, e o clique neles.
     pub avisador: Arc<crate::tempo_real::aviso::mentira::AvisadorDeMentira>,
+    /// 🔊 O que o alto-falante tocou e falou.
+    pub sons: Arc<crate::sons::porta::mentira::AltoFalanteDeMentira>,
     _dir: TempDir,
 }
 
@@ -470,6 +473,7 @@ pub(super) fn abrir_o_app(cx: &mut TestAppContext, cenario: Cenario) -> Estudio 
 
     let escuta = Arc::new(crate::tempo_real::porta::mentira::EscutaDeMentira::default());
     let avisador = Arc::new(crate::tempo_real::aviso::mentira::AvisadorDeMentira::default());
+    let (portas_do_som, sons) = crate::sons::PortasDoSom::de_mentira();
     let portas = Portas {
         gravador: gravador.clone(),
         acervo: acervo.clone(),
@@ -493,6 +497,7 @@ pub(super) fn abrir_o_app(cx: &mut TestAppContext, cenario: Cenario) -> Estudio 
         escolha_do_backup: Arc::new(crate::backup::escolha::mentira::EscolhaDeMentira::default()),
         escuta: escuta.clone(),
         avisador: avisador.clone(),
+        sons: portas_do_som,
     };
 
     let mut guardado = None;
@@ -533,6 +538,7 @@ pub(super) fn abrir_o_app(cx: &mut TestAppContext, cenario: Cenario) -> Estudio 
         previews,
         escuta,
         avisador,
+        sons,
         _dir: dir,
     };
     estudio.esperar(cx);

@@ -74,6 +74,7 @@ pub mod segundo_plano;
 pub mod selos;
 pub mod sessoes;
 pub mod slider_da_casa;
+pub mod sons;
 pub mod telemetria;
 pub mod tema;
 pub mod tempo_real;

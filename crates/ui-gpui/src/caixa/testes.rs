@@ -37,7 +37,6 @@ struct PublicadorDoCaixa {
     caixa_falha: bool,
 }
 
-
 /// O corpo de uma gravação do caixa sem a chave de idempotência — que tem de
 /// vir, e não vazia: é ela que impede a resposta perdida de gravar duas vezes.
 fn sem_a_chave(corpo: &Option<serde_json::Value>) -> Option<serde_json::Value> {

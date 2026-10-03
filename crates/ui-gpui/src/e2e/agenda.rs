@@ -25,7 +25,7 @@ fn hoje() -> NaiveDate {
 }
 
 /// `hh:mm` de hoje (mais `dias`) no estúdio, em UTC.
-fn as_(dias: i64, hora: u32, minuto: u32) -> DateTime<Utc> {
+pub(super) fn as_(dias: i64, hora: u32, minuto: u32) -> DateTime<Utc> {
     let dia = hoje() + Duration::days(dias);
     fuso_do_estudio()
         .from_local_datetime(&dia.and_hms_opt(hora, minuto, 0).unwrap())
@@ -91,7 +91,7 @@ fn preparar_o_site(e: &Estudio) {
     s.responder_json("restaurado", Ok(json!({"id": "e2", "status": "CONFIRMED"})));
 }
 
-fn entrar(cx: &mut TestAppContext) -> Estudio {
+pub(super) fn entrar(cx: &mut TestAppContext) -> Estudio {
     let e = abrir_o_app(cx, Cenario::default());
     preparar_o_site(&e);
     e.entrar_na_conta(cx);
@@ -480,7 +480,7 @@ fn o_esc_volta_um_passo(cx: &mut TestAppContext) {
 
 // ── O tempo real ───────────────────────────────────────────────────────────
 
-fn criado(id: &str, quando: DateTime<Utc>, estudio: Option<&str>) -> Sinal {
+pub(super) fn criado(id: &str, quando: DateTime<Utc>, estudio: Option<&str>) -> Sinal {
     Sinal::Evento {
         fonte: "agenda",
         dados: json!({

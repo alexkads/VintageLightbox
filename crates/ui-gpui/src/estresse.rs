@@ -599,6 +599,7 @@ fn portas_com(
         ),
         escuta: Arc::new(crate::tempo_real::porta::mentira::EscutaDeMentira::default()),
         avisador: Arc::new(crate::tempo_real::aviso::mentira::AvisadorDeMentira::default()),
+        sons: crate::sons::PortasDoSom::de_mentira().0,
         escolha_do_backup: Arc::new(crate::backup::escolha::mentira::EscolhaDeMentira::default()),
     }
 }

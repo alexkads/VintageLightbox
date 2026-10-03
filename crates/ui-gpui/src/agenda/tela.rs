@@ -39,6 +39,8 @@ pub enum PedidoDaAgenda {
         titulo: String,
         corpo: Option<String>,
         aviso: Aviso,
+        /// O tipo do aviso sonoro: novo ou cancelado.
+        som: crate::sons::Evento,
     },
     Toast {
         texto: String,
@@ -343,6 +345,11 @@ impl Agenda {
                                 },
                                 titulo,
                                 corpo,
+                                som: if evento.tipo == "ensaio_cancelado" {
+                                    crate::sons::Evento::AgendamentoCancelado
+                                } else {
+                                    crate::sons::Evento::NovoAgendamento
+                                },
                             });
                         }
                         let (de, ate) = modelo::periodo_visivel(self.visao, self.dia);

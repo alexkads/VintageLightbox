@@ -1044,13 +1044,14 @@ impl Caixa {
         duracao: Duration,
         cx: &mut Context<Self>,
     ) {
+        let texto = texto.into();
+        // 🔊 O recado vermelho do caixa é uma falha que pede o operador.
+        if tipo == TipoDeRecado::Erro {
+            crate::sons::soar(crate::sons::Evento::Falha, "Falha", &texto, cx);
+        }
         let id = self.proximo_recado;
         self.proximo_recado += 1;
-        self.recados.push(RecadoNaTela {
-            id,
-            texto: texto.into(),
-            tipo,
-        });
+        self.recados.push(RecadoNaTela { id, texto, tipo });
         cx.spawn(async move |esta, cx| {
             cx.background_executor().timer(duracao).await;
             let _ = esta.update(cx, |tela, cx| {

@@ -1442,7 +1442,10 @@ fn cores(p: &paleta::Paleta) -> Vec<(&'static str, u32)> {
         ("slider.background", p.preenchimento),
         ("slider.thumb.background", p.punho),
         ("progress.bar.background", p.primaria),
-        ("switch.background", p.primaria),
+        // 🔑 `switch.background` é o trilho **desligado** (o ligado é a
+        // `primary`): o `bg-input` do Switch do shadcn. Com a primária aqui,
+        // desligado e ligado eram o mesmo azul e só a bolinha mudava de lado.
+        ("switch.background", p.campo),
         ("switch.thumb.background", p.fundo),
         ("skeleton.background", p.apagado),
         ("scrollbar.background", p.fundo),

@@ -145,6 +145,8 @@ pub struct Portas {
     /// 🔔 O aviso do sistema operacional, para o operador com a janela atrás
     /// de outra ou na bandeja.
     pub avisador: Arc<dyn crate::tempo_real::Avisador>,
+    /// 🔊 O alto-falante (som e voz) e a escolha de arquivo de som.
+    pub sons: crate::sons::PortasDoSom,
 }
 
 actions!(
@@ -999,6 +1001,12 @@ impl Aplicativo {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        // 🔊 Os avisos sonoros moram num `Global`: quem avisa (o caixa, a
+        // agenda, esta raiz) chama `sons::soar` sem precisar de porta própria.
+        cx.set_global(crate::sons::Sons::novo(
+            portas.sons.clone(),
+            crate::sons::preferencias::arquivo(),
+        ));
         // 🔑 **A procura por versão nova começa aqui, na abertura**, e não no
         // primeiro clique em nada. É o único momento em que o operador não está
         // no meio de coisa nenhuma — depois disso ele está triando, e a hora de
@@ -1361,6 +1369,14 @@ impl Aplicativo {
             |raiz, _, pedido: &PedidoDaExportacao, window, cx| match pedido {
                 PedidoDaExportacao::Fechar => raiz.fechar_exportacao(window, cx),
                 PedidoDaExportacao::Terminou { texto, falhou } => {
+                    // 🔊 Exportar leva minutos: o fim avisa com som, com o
+                    // modal aberto ou não. A falha é o som de falha.
+                    let evento = if *falhou {
+                        crate::sons::Evento::Falha
+                    } else {
+                        crate::sons::Evento::ExportacaoConcluida
+                    };
+                    crate::sons::soar(evento, "Exportação", texto, cx);
                     if !raiz.exportando {
                         let tipo = if *falhou {
                             crate::estilo::Toast::Erro
@@ -1550,6 +1566,16 @@ impl Aplicativo {
                     while let Ok(aviso) = raiz.avisos_de_versao.1.try_recv() {
                         chegou = true;
                         raiz.contar_ao_servidor(&aviso);
+                        // 🔊 A compilação é sozinha; o que pede o operador é
+                        // a versão pronta, esperando ele reabrir o app.
+                        if let Aviso::Instalada(versao) = &aviso {
+                            crate::sons::soar(
+                                crate::sons::Evento::NovaVersao,
+                                "Nova versão",
+                                versao,
+                                cx,
+                            );
+                        }
                         // 🔑 **Tudo automático**: a versão que compila começa
                         // sozinha, sem clique.
                         if raiz.atualizacao.receber(aviso) {
@@ -2927,6 +2953,7 @@ impl Aplicativo {
             // 📸 O cliente chegou pelo bot: o toast e, com o app escondido, o
             // aviso do sistema — quem está no caixa precisa saber.
             DetalhePedido::ClienteNoBot(texto) => {
+                crate::sons::soar(crate::sons::Evento::ClienteNoQr, texto, "", cx);
                 self.avisar_em_toast(texto.to_string(), false, cx);
                 if !window.is_window_active() {
                     let (cliques, _) = std::sync::mpsc::channel();
@@ -3214,6 +3241,12 @@ impl Aplicativo {
     #[cfg(test)]
     pub(crate) fn avisos_dados_para_teste(&self) -> Vec<(String, bool)> {
         self.avisos_dados.clone()
+    }
+
+    /// 🧪 O modal das Configurações, para ler a aba aberta.
+    #[cfg(test)]
+    pub(crate) fn configuracoes_para_teste(&self) -> Entity<Configuracoes> {
+        self.configuracoes.clone()
     }
 
     /// 🧪 As mensagens do chatbot e da agenda que viraram toast no canto de
@@ -4144,14 +4177,18 @@ impl Aplicativo {
         // envios com a frase do site, que é onde o operador a encontra depois.
         // Um toast a mais diria a mesma coisa num lugar que some.
         if !falha && total > 0 {
-            self.avisar_onde_esta_olhando(
-                if total == 1 {
-                    "revelação salva na galeria".into()
-                } else {
-                    format!("{total} revelações salvas na galeria")
-                },
+            let texto = if total == 1 {
+                "revelação salva na galeria".to_string()
+            } else {
+                format!("{total} revelações salvas na galeria")
+            };
+            crate::sons::soar(
+                crate::sons::Evento::RevelacoesSalvas,
+                "Fotos salvas",
+                &texto,
                 cx,
             );
+            self.avisar_onde_esta_olhando(texto, cx);
         }
     }
 
@@ -5093,7 +5130,10 @@ impl Aplicativo {
     /// faria o "Limpar tudo" prometer um espaço que não é o que vai sair.
     pub fn abrir_configuracoes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.configurando = true;
-        self.configuracoes.update(cx, |tela, cx| tela.atualizar(cx));
+        self.configuracoes.update(cx, |tela, cx| {
+            tela.preparar(window, cx);
+            tela.atualizar(cx);
+        });
         window.focus(&self.foco, cx);
         cx.notify();
     }
@@ -5953,6 +5993,10 @@ impl Aplicativo {
         } else {
             texto
         };
+        // 🔊 Todo toast vermelho da raiz é uma falha que pede o operador.
+        if erro {
+            crate::sons::soar(crate::sons::Evento::Falha, "Falha", &texto, cx);
+        }
         #[cfg(test)]
         self.avisos_dados.push((texto.clone(), erro));
         self.proximo_toast = self.proximo_toast.wrapping_add(1);
@@ -6416,10 +6460,17 @@ impl Aplicativo {
             ))
             .child(self.configuracoes.clone())
             .into_any_element();
+        // A aba dos sons tem uma linha por aviso, com três campos e o "Ouvir";
+        // a do cache é uma coluna só.
+        let largura = if self.configuracoes.read(cx).aba() == 0 {
+            920.
+        } else {
+            520.
+        };
         crate::dialogo::desenhar_conteudo(
             Some(miolo),
             None,
-            crate::dialogo::Jeito::alerta(520.),
+            crate::dialogo::Jeito::alerta(largura),
             |este, window, cx| este.fechar_configuracoes(window, cx),
             window,
             cx,
@@ -7186,6 +7237,7 @@ mod testes {
             ),
             escuta: Arc::new(crate::tempo_real::porta::mentira::EscutaDeMentira::default()),
             avisador: Arc::new(crate::tempo_real::aviso::mentira::AvisadorDeMentira::default()),
+            sons: crate::sons::PortasDoSom::de_mentira().0,
             // O padrão de mentira não devolve imagem nenhuma: quem quiser
             // afirmar sobre a reposição troca esta porta por
             // `RepositorDeMentira::que_devolve`.
@@ -9496,6 +9548,48 @@ mod testes {
         assert_eq!(gravado.len(), 1, "a foto que saiu tinha de ser gravada");
         assert_eq!(gravado[0].0, "id-DSC_001.NEF");
         assert_eq!(gravado[0].1.exposure, 1.2);
+    }
+
+    /// 🔊 Todo toast vermelho da raiz toca o som de falha, e o detalhe dele é a
+    /// frase traduzida — é o que a voz leria.
+    #[gpui_kit::test]
+    fn o_toast_vermelho_toca_o_som_de_falha(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_kit::init);
+        let (sons, alto_falante) = crate::sons::PortasDoSom::de_mentira();
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| {
+                Aplicativo::ja_dentro(
+                    acervo(),
+                    previews,
+                    Vec::new(),
+                    Portas { sons, ..portas() },
+                    window,
+                    cx,
+                )
+            }
+        });
+        janela
+            .update(cx, |app, _window, cx| {
+                cx.global_mut::<crate::sons::Sons>().mudar(|p| {
+                    p.escolha_mut(crate::sons::Evento::Falha).modo = crate::sons::Modo::SomEVoz;
+                });
+                app.avisar_em_toast("deu certo".into(), false, cx);
+                app.avisar_falha("o caixa está fechado".into(), cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        let pedidos = alto_falante.pedidos();
+        assert_eq!(pedidos.len(), 1, "o toast verde não toca");
+        assert_eq!(
+            pedidos[0].som,
+            Some(crate::sons::Som::Embutido(crate::sons::Embutido::Alerta))
+        );
+        assert_eq!(
+            pedidos[0].fala.as_ref().map(|f| f.texto.as_str()),
+            Some("Atenção: o caixa está fechado")
+        );
     }
 
     /// 🚨 Abrir as Configurações **relê o cache**.
