@@ -416,7 +416,8 @@ impl Aplicativo {
                     if raiz.foto_para_o_cliente(cx).is_none() {
                         return false;
                     }
-                    raiz.alternar_cliente(cx);
+                    // O monitor da última vez, sem perguntar — ver `reabrir_cliente`.
+                    raiz.reabrir_cliente(cx);
                     eprintln!("🔁 [Retomada] a tela do cliente voltou");
                     true
                 }) else {

@@ -57,9 +57,15 @@ members = [
     "crates/recuperacao-core",
     "crates/ui-gpui",
 ]
-# O rawler vendorizado é dependência, não membro: sem isto os testes, benches e
-# lints dele entrariam no workspace.
-exclude = ["vendor/rawler"]
+# Os crates vendorizados são dependência, não membro: sem isto os testes, benches
+# e lints deles entrariam no workspace.
+exclude = ["vendor/rawler", "vendor/gpui-pre-linux"]
+
+# 🖥️ O Wayland do GPUI ignorava o `display_id` de uma janela comum, e a Tela do
+# cliente nascia no monitor que o GNOME quisesse (2026-10-03). O patch é de
+# poucas linhas: ver vendor/gpui-pre-linux/MUDANCAS.md.
+[patch.crates-io]
+gpui-pre-linux = { path = "vendor/gpui-pre-linux" }
 
 [workspace.package]
 version = "0.1.86"

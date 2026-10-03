@@ -20,6 +20,8 @@ mod canto_dos_envios;
 mod editor;
 mod favoritas;
 mod guias;
+/// 🖥️ Em qual monitor a tela do cliente abre, quando há mais de um.
+mod monitor_do_cliente;
 mod painel;
 pub mod resgate;
 mod resolucao_cheia;
@@ -57,8 +59,8 @@ use crate::biblioteca::tela::Biblioteca;
 use crate::caixa::tela::{Caixa, PedidoDoCaixa};
 use crate::chatbot::{Chatbot, PedidoDoChatbot};
 use crate::cliente::{
-    area_da_janela, estado_ao_abrir, monitor_do_cliente, monitor_lembrado, Cliente, Estado,
-    Lembranca, ParaRevelar,
+    ao_nascer, area_da_janela, estado_ao_abrir, monitor_lembrado, Cliente, Estado, Lembranca,
+    ParaRevelar,
 };
 use crate::configuracoes::Configuracoes;
 use crate::entrada::{Entrada, Entrou};
@@ -269,6 +271,7 @@ const SEM_CAMPO_DE_TEXTO: &str = "Aplicativo && !Input";
 
 pub fn init(cx: &mut gpui_kit::App) {
     crate::editor::init(cx);
+    monitor_do_cliente::init(cx);
     cx.bind_keys([
         gpui_kit::KeyBinding::new("f11", AlternarTelaCheiaDoApp, Some(CONTEXTO)),
         gpui_kit::KeyBinding::new("ctrl-cmd-f", AlternarTelaCheiaDoApp, Some(CONTEXTO)),
@@ -847,6 +850,11 @@ pub struct Aplicativo {
     /// O aviso de sair com envio no ar, onde o sistema não tem bandeja
     /// (`app/segundo_plano.rs`).
     saida: Option<segundo_plano::Saida>,
+    /// A pergunta "em qual monitor?", aberta pelo botão da tela do cliente
+    /// quando há mais de um (`app/monitor_do_cliente.rs`).
+    escolha_de_monitor: Modal<()>,
+    /// O foco da pergunta: é por ele que `Enter`, `Esc` e `1`–`4` chegam.
+    foco_da_escolha: gpui_kit::FocusHandle,
     /// A segunda tela, quando aberta. É uma **janela**, e não uma tela desta —
     /// as duas existem ao mesmo tempo, em monitores diferentes.
     cliente: Option<gpui_kit::WindowHandle<Cliente>>,
@@ -1506,6 +1514,8 @@ impl Aplicativo {
             configuracoes: cx.new(|_| Configuracoes::nova(previews_das_configuracoes)),
             configurando: false,
             saida: None,
+            escolha_de_monitor: Modal::default(),
+            foco_da_escolha: cx.focus_handle(),
             cliente: None,
             convite_no_cliente: None,
             convite_entregue: None,
@@ -4675,22 +4685,69 @@ impl Aplicativo {
             return;
         }
 
-        let arquivo = caminho_do_modo_do_cliente();
-        let lembranca = Lembranca::ler(&arquivo);
+        // 🔑 **Com mais de um monitor, quem diz onde é o operador** (dono,
+        // 03/out/2026). No GNOME o app não posiciona janela, e a tela nascia
+        // no monitor do operador — arrastada à mão a cada cliente. A pergunta
+        // vem com o monitor da última vez marcado: `Enter` confirma.
+        let telas = cx.displays();
+        match telas.as_slice() {
+            [] => {}
+            [unica] => {
+                let unica = unica.id();
+                self.abrir_cliente_em(unica, None, cx);
+            }
+            _ => {
+                self.escolha_de_monitor.abrir_sem_janela(());
+                cx.notify();
+            }
+        }
+    }
+
+    /// A retomada: o monitor da última vez, **sem perguntar**, se ele ainda
+    /// estiver plugado. Quem reabre o app com a tela do cliente aberta quer
+    /// tudo como estava, e não uma pergunta antes da primeira foto.
+    pub(crate) fn reabrir_cliente(&mut self, cx: &mut Context<Self>) {
+        // Já aberta: o `alternar_cliente` do fim a fecharia.
+        if self.cliente.is_some() {
+            return;
+        }
+        let lembrado = Lembranca::ler(&caminho_do_modo_do_cliente()).monitor;
         let telas: Vec<(gpui_kit::DisplayId, Option<String>)> = cx
             .displays()
             .iter()
             .map(|tela| (tela.id(), tela.uuid().ok().map(|uuid| uuid.to_string())))
             .collect();
-        let ids: Vec<gpui_kit::DisplayId> = telas.iter().map(|(id, _)| *id).collect();
-        let principal = cx.primary_display().map(|tela| tela.id());
-        // 🔑 **O monitor de onde ela saiu da última vez**, se ainda estiver
-        // plugado (dono, 22/set/2026). Sem ele, a regra do legado.
-        let Some(escolhida) = monitor_lembrado(&telas, lembranca.monitor.as_deref())
-            .or_else(|| monitor_do_cliente(&ids, principal))
-        else {
+        match monitor_lembrado(&telas, lembrado.as_deref()) {
+            Some(id) if telas.len() > 1 => self.abrir_cliente_em(id, None, cx),
+            _ => self.alternar_cliente(cx),
+        }
+    }
+
+    /// Abre a segunda tela **neste monitor**.
+    ///
+    /// `do_app` é o monitor da janela principal, quando quem chama sabe (a
+    /// escolha o lê da janela). 🚨 No Wayland o GPUI não tem monitor principal
+    /// (`primary_display()` é `None`): sem o `do_app`, todo monitor pareceria
+    /// "próprio", inclusive o do operador.
+    pub(crate) fn abrir_cliente_em(
+        &mut self,
+        escolhida: gpui_kit::DisplayId,
+        do_app: Option<gpui_kit::DisplayId>,
+        cx: &mut Context<Self>,
+    ) {
+        self.escolha_de_monitor.fechar_depois(cx);
+        // A escolha fica na tela enquanto o operador pensa: a sessão pode ter
+        // fechado, ou a tela ter sido aberta por outro caminho, nesse meio-tempo.
+        if !self.pode_trabalhar()
+            || self.cliente.is_some()
+            || self.foto_para_o_cliente(cx).is_none()
+        {
+            cx.notify();
             return;
-        };
+        }
+        let arquivo = caminho_do_modo_do_cliente();
+        let lembranca = Lembranca::ler(&arquivo);
+        let principal = do_app.or_else(|| cx.primary_display().map(|tela| tela.id()));
 
         // 🔑 **Uma janela só, sempre com barra, e a tela cheia é um estado
         // dela** — o desenho do darktable (dono, 22/set/2026). Até aqui havia
@@ -4714,12 +4771,15 @@ impl Aplicativo {
                     cx,
                 )
             });
-        let estado = estado_ao_abrir(
+        let pedido = estado_ao_abrir(
             lembranca.estado,
             monitor_proprio,
             cfg!(target_os = "macos"),
             !monitor_proprio,
         );
+        // 🚨 No Wayland só a tela cheia cai no monitor pedido — ver `ao_nascer`.
+        let (estado, restaurar) =
+            ao_nascer(pedido, monitor_proprio, cx.compositor_name() == "Wayland");
 
         let opcoes = gpui_kit::WindowOptions {
             app_id: Some(crate::menu::APP_ID.into()),
@@ -4747,7 +4807,7 @@ impl Aplicativo {
         };
 
         match cx.open_window(opcoes, |window, cx| {
-            cx.new(|cx| Cliente::novo(Some(arquivo), window, cx))
+            cx.new(|cx| Cliente::novo(Some(arquivo), window, cx).restaurar_depois(restaurar))
         }) {
             Ok(janela) => {
                 if let Ok(entidade) = janela.update(cx, |_cliente, _window, cx| cx.entity()) {
@@ -6669,6 +6729,11 @@ impl Render for Aplicativo {
         let aviso_de_saida = self
             .saida
             .and_then(|saida| self.aviso_de_saida(saida, window, cx));
+        let escolha_de_monitor = if self.escolha_de_monitor.esta_aberto() {
+            self.escolha_de_monitor(window, cx)
+        } else {
+            None
+        };
         let modal_de_configuracoes = self
             .configurando
             .then(|| self.modal_de_configuracoes(window, cx))
@@ -6924,6 +6989,7 @@ impl Render for Aplicativo {
             })
             .children(aviso_de_apagar)
             .children(aviso_de_saida)
+            .children(escolha_de_monitor)
             .when(false, |raiz| raiz)
             .children(modal_de_configuracoes)
             .children(self.menu_da_conta(window))
@@ -9710,6 +9776,89 @@ mod testes {
                 assert!(!app.cliente_aberto(), "e o mesmo botão fecha");
             })
             .expect("a janela deve estar aberta");
+    }
+
+    /// 🖥️ A pergunta "em qual monitor?" (dono, 03/out/2026): `Esc` desiste sem
+    /// abrir e **sem sair da Revelação**, um número que não é monitor não faz
+    /// nada, e `Enter` abre no destacado.
+    ///
+    /// A plataforma de teste tem um monitor só, e com um só o botão nem
+    /// pergunta: a pergunta é aberta à mão, como o botão a abriria com dois.
+    #[gpui_kit::test]
+    fn a_escolha_do_monitor_responde_ao_teclado(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-DSC_001.NEF", &foto_vermelha())
+            .expect("gravar preview");
+        cx.update(gpui_kit::init);
+        cx.update(init);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
+        });
+        let perguntar = |cx: &mut TestAppContext| {
+            janela
+                .update(cx, |app, _window, cx| {
+                    app.biblioteca
+                        .update(cx, |tela, cx| tela.selecionar(Some(0), cx));
+                    app.escolha_de_monitor.abrir_sem_janela(());
+                    cx.notify();
+                })
+                .expect("a janela deve estar aberta");
+        };
+        let estado = |cx: &mut TestAppContext| {
+            janela
+                .update(cx, |app, _window, _cx| {
+                    (
+                        app.escolha_de_monitor.esta_aberto(),
+                        app.cliente_aberto(),
+                        app.tela(),
+                    )
+                })
+                .expect("a janela deve estar aberta")
+        };
+
+        // 🔑 Na Revelação, onde o `Esc` da raiz volta para a sessão: se ele
+        // vazasse da pergunta, a tela mudaria.
+        janela
+            .update(cx, |app, window, cx| {
+                app.biblioteca
+                    .update(cx, |tela, cx| tela.selecionar(Some(0), cx));
+                app.revelar(window, cx);
+            })
+            .expect("a janela deve estar aberta");
+        perguntar(cx);
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        visual.run_until_parked();
+        let tela = estado(cx).2;
+        assert_eq!(
+            tela,
+            Tela::Revelacao,
+            "é na Revelação que um Esc vazado se veria"
+        );
+        visual.simulate_keystrokes("escape");
+        assert_eq!(
+            estado(cx),
+            (false, false, tela),
+            "o Esc fecha a pergunta, não abre nada e não sai da Revelação"
+        );
+
+        perguntar(cx);
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        visual.run_until_parked();
+        visual.simulate_keystrokes("2");
+        assert_eq!(
+            estado(cx),
+            (true, false, tela),
+            "não há um segundo monitor: a pergunta continua"
+        );
+        visual.simulate_keystrokes("enter");
+        assert_eq!(
+            estado(cx),
+            (false, true, tela),
+            "o Enter abre no monitor destacado"
+        );
     }
 
     /// 🚨 **A janela do cliente fechada por fora tem de apagar o botão** (dono,

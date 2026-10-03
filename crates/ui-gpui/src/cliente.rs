@@ -362,6 +362,88 @@ pub fn monitor_lembrado<T: Copy>(
         .map(|(id, _)| *id)
 }
 
+/// Um monitor como a escolha da tela do cliente o mostra.
+///
+/// Genérico pelo mesmo motivo de [`monitor_do_cliente`]: o `DisplayId` não se
+/// constrói fora do GPUI.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Monitor<T> {
+    pub id: T,
+    /// O `uuid` do sistema — o que a [`Lembranca`] guarda.
+    pub uuid: Option<String>,
+    pub limites: Bounds<Pixels>,
+}
+
+/// Os monitores da esquerda para a direita (e, na mesma coluna, de cima para
+/// baixo): "Monitor 1" é o da esquerda, como o operador os vê na mesa.
+///
+/// 🚨 **A ordem do GPUI não serve**: no Wayland a lista sai de um `HashMap`, e o
+/// "Monitor 1" de uma abertura seria o "Monitor 2" da seguinte.
+pub fn em_ordem<T>(mut todos: Vec<Monitor<T>>) -> Vec<Monitor<T>> {
+    todos.sort_by(|a, b| {
+        let lugar = |m: &Monitor<T>| (f32::from(m.limites.origin.x), f32::from(m.limites.origin.y));
+        lugar(a)
+            .partial_cmp(&lugar(b))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    todos
+}
+
+/// O monitor que já vem marcado na escolha: o da última vez, se ainda estiver
+/// plugado; senão o primeiro que não é o do app.
+///
+/// 🔑 **"O do app", e não o principal**: no Wayland o GPUI não sabe qual é o
+/// principal (`primary_display()` é `None`), e quem chama passa o monitor onde
+/// a janela principal está.
+pub fn monitor_sugerido<T: Copy + PartialEq>(
+    todos: &[Monitor<T>],
+    lembrado: Option<&str>,
+    do_app: Option<T>,
+) -> Option<T> {
+    let pares: Vec<(T, Option<String>)> = todos.iter().map(|m| (m.id, m.uuid.clone())).collect();
+    let ids: Vec<T> = todos.iter().map(|m| m.id).collect();
+    monitor_lembrado(&pares, lembrado).or_else(|| monitor_do_cliente(&ids, do_app))
+}
+
+/// O texto do botão: `Monitor 2 · 3840 × 2160 · onde está o app`.
+///
+/// O tamanho é o que o sistema informa — em pontos, e não em pixels do
+/// dispositivo: um 4K em escala 2 aparece como 1920 × 1080, que é o mesmo
+/// número que as configurações de tela do sistema mostram.
+pub fn rotulo<T: PartialEq>(numero: usize, monitor: &Monitor<T>, do_app: Option<T>) -> String {
+    let tamanho = monitor.limites.size;
+    let mut texto = format!(
+        "Monitor {numero} · {} × {}",
+        f32::from(tamanho.width).round() as i32,
+        f32::from(tamanho.height).round() as i32,
+    );
+    if do_app.as_ref() == Some(&monitor.id) {
+        texto.push_str(" · onde está o app");
+    }
+    texto
+}
+
+/// Com que estado a janela nasce, e o que ela vira no primeiro quadro.
+///
+/// 🚨 **No Wayland só a tela cheia escolhe monitor** (Fedora/GNOME, 03/out/2026).
+/// O xdg-shell não deixa o app posicionar janela: `display_id` e a origem dos
+/// limites são ignorados, e a janela nascia onde o compositor queria. O único
+/// pedido de lugar que o GNOME atende é `set_fullscreen(monitor)` — o patch em
+/// `vendor/gpui-pre-linux` o liga ao `display_id`. Então, com monitor próprio, a
+/// janela nasce em tela cheia lá e, se o pedido era janela ou maximizada, vira
+/// isso no primeiro quadro: o compositor a mantém no monitor onde ela está.
+pub fn ao_nascer(
+    pedido: Estado,
+    monitor_proprio: bool,
+    sem_posicao: bool,
+) -> (Estado, Option<Estado>) {
+    if sem_posicao && monitor_proprio && pedido != Estado::TelaCheia {
+        (Estado::TelaCheia, Some(pedido))
+    } else {
+        (pedido, None)
+    }
+}
+
 /// Onde a janela arrastável nasce: onde estava, se ainda couber.
 ///
 /// - **Sem lembrança**, é a prévia centrada de [`area_do_cliente`].
@@ -457,6 +539,9 @@ pub struct Cliente {
     /// conferem.
     arquivo: Option<std::path::PathBuf>,
     _limites: Option<gpui_kit::Subscription>,
+    /// O estado que ela vira quando a tela cheia de nascença chegar — ver
+    /// [`ao_nascer`]. `None` fora do Wayland, e depois do primeiro quadro.
+    restaurar: Option<Estado>,
 }
 
 impl Cliente {
@@ -496,7 +581,32 @@ impl Cliente {
             foco,
             arquivo,
             _limites: limites,
+            restaurar: None,
         }
+    }
+
+    /// Ela nasce em tela cheia só para cair no monitor certo, e vira `estado`
+    /// assim que o sistema confirmar. Ver [`ao_nascer`].
+    pub fn restaurar_depois(mut self, estado: Option<Estado>) -> Self {
+        self.restaurar = estado;
+        self
+    }
+
+    /// 🔑 **Espera o sistema confirmar a tela cheia**, e não o primeiro
+    /// `render`: no Wayland ela chega no `configure` do compositor, depois de
+    /// a janela existir. Desfazer antes seria pedir "sair" de um estado que o
+    /// compositor ainda não aplicou — e ele aplicaria o "entrar" por último.
+    fn restaurar_se_ja_nasceu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.restaurar.is_none() || !window.is_fullscreen() {
+            return;
+        }
+        let estado = self.restaurar.take();
+        window.defer(cx, move |window, _cx| {
+            window.toggle_fullscreen();
+            if estado == Some(Estado::Maximizada) {
+                window.zoom_window();
+            }
+        });
     }
 
     /// Grava o monitor onde ela está, o estado e, em janela, a posição e o
@@ -1051,6 +1161,7 @@ impl Cliente {
 impl Render for Cliente {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _t = crate::regua::trecho("tela do cliente: render");
+        self.restaurar_se_ja_nasceu(window, cx);
         self.lado_do_monitor = window.display(cx).map(|monitor| {
             let tamanho = monitor.bounds().size;
             let lado = f32::from(tamanho.width).max(f32::from(tamanho.height));
@@ -1541,6 +1652,84 @@ mod testes {
     #[test]
     fn sem_monitor_nao_ha_onde_abrir() {
         assert_eq!(monitor_do_cliente::<u32>(&[], None), None);
+    }
+
+    fn monitor(id: u32, uuid: &str, x: f32, largura: f32, altura: f32) -> Monitor<u32> {
+        Monitor {
+            id,
+            uuid: Some(uuid.into()),
+            limites: Bounds {
+                origin: point(px(x), px(0.)),
+                size: size(px(largura), px(altura)),
+            },
+        }
+    }
+
+    /// "Monitor 1" é o da esquerda, venha a lista na ordem que vier — inclusive
+    /// o monitor à esquerda do principal, de origem negativa.
+    #[test]
+    fn os_monitores_vao_da_esquerda_para_a_direita() {
+        let ordem = em_ordem(vec![
+            monitor(7, "hdmi", 1920., 3840., 2160.),
+            monitor(3, "dp", -1280., 1280., 1024.),
+            monitor(5, "edp", 0., 1920., 1080.),
+        ]);
+        let ids: Vec<u32> = ordem.iter().map(|m| m.id).collect();
+        assert_eq!(ids, [3, 5, 7]);
+    }
+
+    /// O da última vez vem marcado, se ainda estiver plugado — mesmo que seja o
+    /// monitor do app.
+    #[test]
+    fn a_escolha_vem_marcada_no_monitor_da_ultima_vez() {
+        let todos = [
+            monitor(1, "edp", 0., 1920., 1080.),
+            monitor(2, "hdmi", 1920., 3840., 2160.),
+        ];
+        assert_eq!(monitor_sugerido(&todos, Some("hdmi"), Some(1)), Some(2));
+        assert_eq!(monitor_sugerido(&todos, Some("edp"), Some(1)), Some(1));
+    }
+
+    /// Sem lembrança (ou com o lembrado desplugado), o primeiro que não é o do
+    /// app. 🚨 No Wayland não há principal: sem o "do app", a regra antiga caía
+    /// no primeiro da lista, que podia ser o próprio monitor do operador.
+    #[test]
+    fn sem_lembranca_vem_marcado_o_monitor_que_nao_e_o_do_app() {
+        let todos = [
+            monitor(1, "edp", 0., 1920., 1080.),
+            monitor(2, "hdmi", 1920., 3840., 2160.),
+        ];
+        assert_eq!(monitor_sugerido(&todos, None, Some(1)), Some(2));
+        assert_eq!(
+            monitor_sugerido(&todos, Some("dp-tirado"), Some(2)),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn o_botao_diz_o_tamanho_e_onde_esta_o_app() {
+        let tela = monitor(2, "hdmi", 1920., 3840., 2160.);
+        assert_eq!(rotulo(2, &tela, Some(1)), "Monitor 2 · 3840 × 2160");
+        assert_eq!(
+            rotulo(2, &tela, Some(2)),
+            "Monitor 2 · 3840 × 2160 · onde está o app"
+        );
+    }
+
+    /// No Wayland, com monitor próprio, ela nasce em tela cheia — o único jeito
+    /// de cair no monitor escolhido — e volta ao pedido depois. Fora do
+    /// Wayland, ou dividindo o monitor com o app, nasce como foi pedida.
+    #[test]
+    fn no_wayland_ela_nasce_em_tela_cheia_no_monitor_e_volta_ao_pedido() {
+        use Estado::*;
+        assert_eq!(ao_nascer(Janela, true, true), (TelaCheia, Some(Janela)));
+        assert_eq!(
+            ao_nascer(Maximizada, true, true),
+            (TelaCheia, Some(Maximizada))
+        );
+        assert_eq!(ao_nascer(TelaCheia, true, true), (TelaCheia, None));
+        assert_eq!(ao_nascer(Janela, false, true), (Janela, None));
+        assert_eq!(ao_nascer(Janela, true, false), (Janela, None));
     }
 
     /// Uma tela de 2560x1440 com origem em (1920, 0): o segundo monitor à
