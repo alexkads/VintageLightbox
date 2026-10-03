@@ -17,6 +17,23 @@
 //! | 6 | confere e fecha o caixa | o esperado de cada forma, sem diferença |
 //! | 7 | manda o link; o cliente compra no pós-venda | o preço cheio, o pedido e as fotos liberadas |
 //!
+//! 🧭 **Os quatro caminhos** (dono, 03/out/2026: *"feliz, triste, tortuoso e
+//! tenebroso… esse sistema não pode haver falhas que interrompam o pagamento
+//! do cliente"*):
+//!
+//! | Módulo | O que prova |
+//! |---|---|
+//! | este (`o_ciclo_de_vida_da_sessao`) | o caminho feliz, todo pela tela: clique, tecla e digitação |
+//! | [`triste`] | o erro do operador ou do cliente é recusado com clareza e corrigido |
+//! | [`operacional`] | o tortuoso: a rede piscando, lenta ou sumindo na subida, na classificação, na revelação; o app fechando no meio; o cliente pagando online a foto do balcão |
+//! | [`tenebroso`] | a API grava e a resposta se perde na venda, sangria, estorno, abertura e fechamento; o token vencido no pagamento |
+//!
+//! 🌩️ As falhas saem do **proxy de falhas** do `servidor-do-ciclo`
+//! (`backend/crates/e2e-tests/src/bin/servidor-do-ciclo/proxy_de_falhas.rs`): o
+//! app fala com a API por ele, e o teste programa `cair`, `status`, `atrasar` e
+//! `engolir` (a API grava, a resposta se perde) por [`Falhas`]. Cada cenário tem
+//! o próprio estúdio, produto, caixa e catálogo ([`preparar`]).
+//!
 //! 🔑 **Rode pelo `make e2e-ciclo`.** Ele sobe o servidor, passa o endereço em
 //! `VLB_E2E_CICLO` e um catálogo novo em `VLB_CATALOG`. Rodado à mão sem eles, o
 //! cenário **falha** em vez de passar vazio — e nunca abre o catálogo de

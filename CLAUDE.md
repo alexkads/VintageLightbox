@@ -155,8 +155,13 @@ atualização do próprio app. No Windows ele só fazia `cargo check`, sem ligar
   montagem do balcão (`crates/ui-gpui/src/montagem.rs`, a mesma do `main.rs`), contra o
   `servidor-do-ciclo` do e-commerce — Postgres e Redis descartáveis — e percorre criação da
   sessão, seleção com o cliente, revelação, venda no caixa, estorno, fechamento e pós-venda
-  (`e2e::ciclo_de_vida`). O `make producao` do e-commerce o roda (`--origin-dev`) antes de subir
-  o app ou o backend; vermelho, nada sobe. Precisa do Docker de pé.
+  (`e2e::ciclo_de_vida`), nos **quatro caminhos**: o feliz todo pela tela (clique e tecla, nunca
+  método por dentro), o triste (erros do operador e do cliente), o tortuoso (a rede piscando,
+  lenta ou sumindo; o app fechando no meio; o cliente pagando online a foto do balcão) e o
+  tenebroso (a API grava e a resposta se perde — nenhum gesto do caixa grava duas vezes). As
+  falhas vêm do proxy de falhas do `servidor-do-ciclo`. O `make producao` do e-commerce o roda
+  (`--origin-dev`) antes de subir o app ou o backend; vermelho, nada sobe. Precisa do Docker.
+  🚨 **Rodada verde não basta: leia o log inteiro** — o aviso de foco perdido passou verde uma vez.
 - **Uma versão que não compila num balcão não quebra nada**: o instalador compila numa pasta à parte,
   confere o app novo (`--versao`) e só então troca, guardando o anterior. O custo é o balcão ficar
   uma versão atrás até a correção, que sai numa versão nova e maior.
