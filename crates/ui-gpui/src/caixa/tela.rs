@@ -1198,7 +1198,6 @@ impl Render for Caixa {
             .bg(fundo)
             .text_color(texto)
             .text_sm()
-            .child(self.cabecalho(window, cx))
             .child(
                 // `flex` sem `items_center`: as colunas esticam até o rodapé.
                 div()
@@ -1335,7 +1334,9 @@ impl Caixa {
             )
     }
 
-    fn cabecalho(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
+    /// O assunto do caixa na faixa do cabeçalho do app: título, estúdio e
+    /// operador, o selo de aberto ou fechado e as teclas F6, F7, F8 e F1.
+    pub(crate) fn no_cabecalho(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let apagado = cx.theme().muted_foreground;
         let (descricao, situacao, cor) = match &self.vista {
             None if self.sessao.is_none() => (
@@ -1411,9 +1412,9 @@ impl Caixa {
                     })),
             );
 
-        estilo::cabecalho_da_pagina(
+        estilo::assunto_do_cabecalho(
             "Caixa",
-            Some(div().child(descricao).into_any_element()),
+            Some(descricao.into()),
             Some(selo.into_any_element()),
             Some(acoes.into_any_element()),
             cx,

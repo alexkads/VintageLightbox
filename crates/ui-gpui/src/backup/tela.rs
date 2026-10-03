@@ -1009,20 +1009,6 @@ impl Render for Backup {
             .on_key_down(cx.listener(|tela, evento: &KeyDownEvent, window, cx| {
                 tela.tecla(evento, window, cx);
             }))
-            .child(estilo::cabecalho_da_pagina(
-                "Backup de arquivos",
-                Some(
-                    div()
-                        .child(
-                            "Arraste pastas e arquivos para guardá-los no Cloudflare R2, \
-                             com a mesma árvore que têm aqui.",
-                        )
-                        .into_any_element(),
-                ),
-                None,
-                Some(self.acoes(cx).into_any_element()),
-                cx,
-            ))
             .child(self.barra(cx))
             .child(self.lona(andamento, cx))
             .child(self.lista(apagado, cx))
@@ -1031,6 +1017,21 @@ impl Render for Backup {
 }
 
 impl Backup {
+    /// O assunto do backup na faixa do cabeçalho do app.
+    pub(crate) fn no_cabecalho(&self, cx: &mut Context<Self>) -> gpui_kit::Div {
+        estilo::assunto_do_cabecalho(
+            "Backup de arquivos",
+            Some(
+                "Arraste pastas e arquivos para guardá-los no Cloudflare R2, \
+                 com a mesma árvore que têm aqui."
+                    .into(),
+            ),
+            None,
+            Some(self.acoes(cx).into_any_element()),
+            cx,
+        )
+    }
+
     fn acoes(&self, cx: &mut Context<Self>) -> impl IntoElement {
         // Enquanto a fila corre, escolher mais arquivos seria trocar a fila que
         // está na tela por outra — e a primeira sumiria sem dizer o que subiu.

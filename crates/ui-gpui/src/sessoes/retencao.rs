@@ -297,27 +297,6 @@ impl Render for Retencao {
         let tema = cx.theme();
         let (apagado, texto) = (tema.muted_foreground, tema.foreground);
 
-        let voltar = estilo::botao_contorno("retencao-voltar", cx)
-            .child(Icon::new(Icone::ArrowLeft).size(px(16.)))
-            .child("Sessões fotográficas")
-            .on_click(cx.listener(|_, _, _, cx| cx.emit(PedidoDaRetencao::Voltar)));
-
-        let cabecalho = estilo::cabecalho_da_pagina(
-            "Retenção do pós-venda",
-            Some(
-                div()
-                    .child(
-                        "Por quanto tempo as fotos ficam guardadas, quando o cliente é avisado, \
-                         e o que acontece com quem não leu o aviso. Armazenamento custa por foto \
-                         guardada — e o cliente que não voltou em três meses não vai voltar.",
-                    )
-                    .into_any_element(),
-            ),
-            None,
-            Some(voltar.into_any_element()),
-            cx,
-        );
-
         let corpo = match self.estado {
             Estado::Carregando => div()
                 .text_sm()
@@ -342,8 +321,33 @@ impl Render for Retencao {
             .p(px(24.))
             .gap(px(24.))
             .text_color(texto)
-            .child(cabecalho)
+            .child(div().max_w(px(672.)).text_sm().text_color(apagado).child(
+                "Armazenamento custa por foto guardada — e o cliente que não voltou \
+                         em três meses não vai voltar.",
+            ))
             .child(corpo)
+    }
+}
+
+impl Retencao {
+    /// O assunto da retenção na faixa do cabeçalho do app, com a volta às
+    /// sessões à direita.
+    pub(crate) fn no_cabecalho(&self, cx: &mut Context<Self>) -> gpui_kit::Div {
+        let voltar = estilo::botao_contorno("retencao-voltar", cx)
+            .child(Icon::new(Icone::ArrowLeft).size(px(16.)))
+            .child("Sessões fotográficas")
+            .on_click(cx.listener(|_, _, _, cx| cx.emit(PedidoDaRetencao::Voltar)));
+        estilo::assunto_do_cabecalho(
+            "Retenção do pós-venda",
+            Some(
+                "Por quanto tempo as fotos ficam guardadas, quando o cliente é avisado \
+                 e o que acontece com quem não leu o aviso."
+                    .into(),
+            ),
+            None,
+            Some(voltar.into_any_element()),
+            cx,
+        )
     }
 }
 

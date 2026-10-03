@@ -766,7 +766,7 @@ impl Aplicativo {
 
     fn assunto_do_cabecalho(
         &self,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let tema = cx.theme();
@@ -865,6 +865,34 @@ impl Aplicativo {
                             .truncate()
                             .child("Fotos apagadas ou de um cartão formatado sem querer."),
                     )
+                    .into_any_element(),
+            ),
+            // 🔑 **As telas com estado próprio montam o assunto delas**, e a
+            // faixa só o recebe — desenhado no corpo, ele descia e deixava a
+            // faixa vazia (03/10/2026).
+            Tela::Caixa if !self.caixa.read(cx).flutuante() => Some(
+                self.caixa
+                    .update(cx, |tela, cx| tela.no_cabecalho(window, cx))
+                    .into_any_element(),
+            ),
+            Tela::Chatbot => Some(
+                self.chatbot
+                    .update(cx, |tela, cx| tela.no_cabecalho(cx))
+                    .into_any_element(),
+            ),
+            Tela::Agenda => Some(
+                self.agenda
+                    .update(cx, |tela, cx| tela.no_cabecalho(cx))
+                    .into_any_element(),
+            ),
+            Tela::Backup => Some(
+                self.backup
+                    .update(cx, |tela, cx| tela.no_cabecalho(cx))
+                    .into_any_element(),
+            ),
+            Tela::Retencao => Some(
+                self.retencao
+                    .update(cx, |tela, cx| tela.no_cabecalho(cx))
                     .into_any_element(),
             ),
             _ => None,

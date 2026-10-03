@@ -107,7 +107,6 @@ impl Render for Agenda {
                     .overflow_y_scroll()
                     .p(px(16.))
                     .gap(px(16.))
-                    .child(self.cabecalho(cx))
                     .child(self.indicadores(cx))
                     .child(
                         h_flex()
@@ -130,7 +129,9 @@ impl Render for Agenda {
 }
 
 impl Agenda {
-    fn cabecalho(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// O assunto da agenda na faixa do cabeçalho do app: o título, a conexão
+    /// em tempo real e o seletor de estúdio.
+    pub(crate) fn no_cabecalho(&self, cx: &mut Context<Self>) -> gpui_kit::Div {
         let tema = cx.theme();
         let (apagado, popover, borda, acento) = (
             tema.muted_foreground,
@@ -169,25 +170,34 @@ impl Agenda {
             })
             .collect();
 
-        h_flex()
-            .relative()
+        // 🪟 A lista dos estúdios sai da faixa de 56 px: `deferred` a tira do
+        // recorte do cabeçalho, e o `anchored` a prende pelo canto de cima à
+        // direita, 40 px abaixo do topo do botão.
+        let lista = self.escolhendo_estudio.then(|| {
+            div()
+                .absolute()
+                .top(px(40.))
+                .right_0()
+                .child(gpui_kit::deferred(
+                    gpui_kit::anchored()
+                        .anchor(gpui_kit::Anchor::TopRight)
+                        .child(
+                            v_flex()
+                                .w(px(240.))
+                                .p(px(4.))
+                                .rounded(crate::tema::canto(8.))
+                                .border_1()
+                                .border_color(borda)
+                                .bg(popover)
+                                .shadow_lg()
+                                .occlude()
+                                .children(opcoes),
+                        ),
+                ))
+        });
+        let acoes = h_flex()
             .gap(px(12.))
             .items_center()
-            .child(
-                v_flex()
-                    .flex_1()
-                    .child(
-                        div()
-                            .text_lg()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child("Agendamentos"),
-                    )
-                    .child(
-                        div()
-                            .text_color(apagado)
-                            .child("Agenda do estúdio — reservas do site e do WhatsApp."),
-                    ),
-            )
             .child(
                 h_flex()
                     .gap(px(6.))
@@ -198,32 +208,30 @@ impl Agenda {
                     .child(self.conexao.rotulo()),
             )
             .child(
-                marcado(
-                    estilo::botao_contorno("agenda-seletor", cx),
-                    "agenda-seletor",
-                )
-                .child(Icon::new(Icone::MapPin).size(px(16.)))
-                .child(self.nome_do_estudio_escolhido())
-                .child(Icon::new(Icone::ChevronDown).size(px(14.)))
-                .on_click(cx.listener(|tela, _, _, cx| tela.alternar_seletor_de_estudio(cx))),
-            )
-            .when(self.escolhendo_estudio, |d| {
-                d.child(
-                    v_flex()
-                        .absolute()
-                        .top(px(44.))
-                        .right_0()
-                        .w(px(240.))
-                        .p(px(4.))
-                        .rounded(crate::tema::canto(8.))
-                        .border_1()
-                        .border_color(borda)
-                        .bg(popover)
-                        .shadow_lg()
-                        .occlude()
-                        .children(opcoes),
-                )
-            })
+                div()
+                    .relative()
+                    .child(
+                        marcado(
+                            estilo::botao_contorno("agenda-seletor", cx),
+                            "agenda-seletor",
+                        )
+                        .child(Icon::new(Icone::MapPin).size(px(16.)))
+                        .child(self.nome_do_estudio_escolhido())
+                        .child(Icon::new(Icone::ChevronDown).size(px(14.)))
+                        .on_click(
+                            cx.listener(|tela, _, _, cx| tela.alternar_seletor_de_estudio(cx)),
+                        ),
+                    )
+                    .children(lista),
+            );
+
+        estilo::assunto_do_cabecalho(
+            "Agendamentos",
+            Some("Agenda do estúdio — reservas do site e do WhatsApp.".into()),
+            None,
+            Some(acoes.into_any_element()),
+            cx,
+        )
     }
 
     fn indicadores(&self, cx: &mut Context<Self>) -> impl IntoElement {

@@ -19,7 +19,7 @@
 //! | `SidebarTrigger` | [`botao_do_menu`] |
 //! | `Badge variant="outline"` | [`selo_contorno`] |
 //! | `<kbd>` das teclas F do caixa | [`tecla`] |
-//! | `CabecalhoDaPagina` | [`cabecalho_da_pagina`] |
+//! | `CabecalhoDaPagina` no `NoCabecalho` | [`assunto_do_cabecalho`] |
 //! | `Alert` | [`aviso`] |
 //! | `Dialog` (véu, caixa, cabeçalho, opção, rodapé) | [`veu_do_dialogo`], [`caixa_do_dialogo`], [`cabecalho_do_dialogo`], [`opcao_do_dialogo`], [`rodape_do_dialogo`] |
 
@@ -244,41 +244,56 @@ pub fn tecla(texto: impl Into<SharedString>) -> Div {
         .child(texto.into())
 }
 
-/// O cabeçalho de uma página do painel: título grande, descrição, selos e
-/// ações à direita.
-pub fn cabecalho_da_pagina(
+/// O assunto de uma tela na faixa de 56 px do cabeçalho do app (o
+/// `NoCabecalho` do site): título, descrição numa linha só, selos e as ações
+/// encostadas à direita. As telas o devolvem a [`crate::app::Aplicativo`], que
+/// o põe ao lado do botão do menu — 🚨 desenhado dentro da tela, ele descia
+/// para o corpo e deixava a faixa vazia (queixa do dono, 03/10/2026, no
+/// Caixa, no Chatbot e nos Agendamentos).
+pub fn assunto_do_cabecalho(
     titulo: impl Into<SharedString>,
-    descricao: Option<AnyElement>,
+    descricao: Option<SharedString>,
     depois: Option<AnyElement>,
     acoes: Option<AnyElement>,
     cx: &App,
 ) -> Div {
     let apagado = cx.theme().muted_foreground;
+    let titulo: SharedString = titulo.into();
     h_flex()
-        .w_full()
-        .items_start()
-        .gap(px(16.))
+        .flex_1()
+        .min_w(px(0.))
+        .gap(px(8.))
         .child(
-            v_flex()
-                .flex_1()
-                .min_w(px(0.))
-                .gap(px(4.))
-                .child(
-                    div()
-                        .text_2xl()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .when_some(fontes::dos_titulos(), |d, f| d.font_family(f))
-                        .child(titulo.into()),
-                )
-                .when_some(descricao, |d, descricao| {
-                    d.child(div().text_sm().text_color(apagado).child(descricao))
-                })
-                .when_some(depois, |d, depois| {
-                    d.child(h_flex().pt(px(4.)).gap(px(8.)).child(depois))
-                }),
+            div()
+                .debug_selector(|| "cabecalho-titulo".into())
+                .flex_none()
+                .mr(px(8.))
+                .text_sm()
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(titulo),
         )
+        .when_some(descricao, |d, descricao| {
+            d.child(
+                div()
+                    .min_w(px(0.))
+                    .text_xs()
+                    .text_color(apagado)
+                    .truncate()
+                    .child(descricao),
+            )
+        })
+        .when_some(depois, |d, depois| {
+            d.child(h_flex().flex_none().gap(px(8.)).child(depois))
+        })
         .when_some(acoes, |d, acoes| {
-            d.child(h_flex().flex_none().gap(px(8.)).child(acoes))
+            d.child(
+                h_flex()
+                    .debug_selector(|| "cabecalho-acoes".into())
+                    .ml_auto()
+                    .flex_none()
+                    .gap(px(8.))
+                    .child(acoes),
+            )
         })
 }
 

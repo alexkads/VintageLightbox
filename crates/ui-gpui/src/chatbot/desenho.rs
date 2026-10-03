@@ -138,7 +138,6 @@ impl Render for Chatbot {
             .bg(fundo)
             .text_color(texto)
             .text_sm()
-            .child(self.cabecalho(cx))
             .child(
                 h_flex()
                     .flex_1()
@@ -158,7 +157,9 @@ impl Render for Chatbot {
 impl Chatbot {
     // ── Cabeçalho ──────────────────────────────────────────────────────────
 
-    fn cabecalho(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// O assunto do chatbot na faixa do cabeçalho do app: o título, o resumo
+    /// da lista, a conexão em tempo real, as urgências e o sino.
+    pub(crate) fn no_cabecalho(&self, cx: &mut Context<Self>) -> gpui_kit::Div {
         let tema = cx.theme();
         let apagado = tema.muted_foreground;
         let conexao = self.conexao();
@@ -171,29 +172,9 @@ impl Chatbot {
         let total = self.urgencias.len();
         let ligados = self.avisos_ligados();
 
-        h_flex()
-            .h(px(48.))
-            .flex_none()
+        let acoes = h_flex()
             .gap(px(12.))
             .items_center()
-            .child(
-                v_flex()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .child(
-                        div()
-                            .text_lg()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child("Chatbot"),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(apagado)
-                            .truncate()
-                            .child(self.linha_de_resumo()),
-                    ),
-            )
             .child(
                 h_flex()
                     .id("chatbot-indicador")
@@ -237,7 +218,15 @@ impl Chatbot {
                         "Ligar notificações do sistema"
                     })
                     .on_click(cx.listener(|tela, _, _, cx| tela.alternar_avisos(cx))),
-            )
+            );
+
+        estilo::assunto_do_cabecalho(
+            "Chatbot",
+            Some(self.linha_de_resumo()),
+            None,
+            Some(acoes.into_any_element()),
+            cx,
+        )
     }
 
     // ── A coluna da lista ──────────────────────────────────────────────────

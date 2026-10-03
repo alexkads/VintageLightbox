@@ -56,6 +56,7 @@
 
 mod agenda;
 mod atendimento;
+mod cabecalho;
 mod caixa;
 mod carga;
 mod chatbot;
