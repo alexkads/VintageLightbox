@@ -1202,6 +1202,7 @@ mod testes {
             faixas: Vec::new(),
             avisos: Vec::new(),
             resumos,
+            conflitos: Vec::new(),
         }
     }
 

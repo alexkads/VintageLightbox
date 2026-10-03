@@ -158,7 +158,8 @@ atualização do próprio app. No Windows ele só fazia `cargo check`, sem ligar
   (`e2e::ciclo_de_vida`), nos **quatro caminhos**: o feliz todo pela tela (clique e tecla, nunca
   método por dentro), o triste (erros do operador e do cliente), o tortuoso (a rede piscando,
   lenta ou sumindo; o app fechando no meio; o cliente pagando online a foto do balcão) e o
-  tenebroso (a API grava e a resposta se perde — nenhum gesto do caixa grava duas vezes). As
+  tenebroso (a API grava e a resposta se perde — nenhum gesto do caixa grava duas vezes; o PIX
+  pago depois da reserva vencer, para foto já vendida no balcão, vira "a estornar"). As
   falhas vêm do proxy de falhas do `servidor-do-ciclo`. O `make producao` do e-commerce o roda
   (`--origin-dev`) antes de subir o app ou o backend; vermelho, nada sobe. Precisa do Docker.
   🚨 **Rodada verde não basta: leia o log inteiro** — o aviso de foco perdido passou verde uma vez.

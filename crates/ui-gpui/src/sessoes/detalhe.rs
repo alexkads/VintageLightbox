@@ -4191,6 +4191,43 @@ impl Detalhe {
             .unwrap_or("")
     }
 
+    /// O botão "a estornar" do cabeçalho: `(rótulo, dica, pedidos)`, ou `None`
+    /// quando não há pagamento em conflito na sessão.
+    pub(crate) fn conflitos_de_pagamento(&self) -> Option<(String, String, String)> {
+        let conflitos = &self.aberta.as_ref()?.conflitos;
+        if conflitos.is_empty() {
+            return None;
+        }
+        let rotulo = match conflitos.len() {
+            1 => "1 pagamento a estornar".to_string(),
+            n => format!("{n} pagamentos a estornar"),
+        };
+        let linhas: Vec<String> = conflitos
+            .iter()
+            .map(|c| {
+                let valor = c
+                    .valor
+                    .as_deref()
+                    .and_then(|v| dinheiro::ler_campo(&v.replace('.', ",")))
+                    .map(|c| format!(" · {}", dinheiro::formatar(c)))
+                    .unwrap_or_default();
+                format!(
+                    "{}{valor} · {} · pedido {}",
+                    c.arquivo,
+                    c.motivo_por_extenso(),
+                    c.pedido_id
+                )
+            })
+            .collect();
+        let dica = format!(
+            "O cliente pagou pelo site foto que já não estava à venda. Estorne no Mercado Pago:\n{}",
+            linhas.join("\n")
+        );
+        let mut pedidos: Vec<&str> = conflitos.iter().map(|c| c.pedido_id.as_str()).collect();
+        pedidos.dedup();
+        Some((rotulo, dica, pedidos.join("\n")))
+    }
+
     fn avisar_sucesso(&mut self, texto: impl Into<SharedString>, cx: &mut Context<Self>) {
         let texto: SharedString = texto.into();
         #[cfg(test)]
@@ -5077,6 +5114,30 @@ impl Detalhe {
                 cabecalho.child(selo(cores::selo_esmeralda(), "já abriu"))
             })
             .child(div().flex_1())
+            // 💳 **Pagamento a estornar** (2026-10-03): o cliente pagou pelo
+            // site uma foto que já não estava à venda. Vermelho e na barra,
+            // como o selo do painel do site; a dica conta cada um, e o clique
+            // copia o(s) pedido(s) para colar na busca do Mercado Pago. Quem
+            // marca "Já estornei" é o painel do site — aqui só se avisa.
+            .when_some(self.conflitos_de_pagamento(), |cabecalho, (rotulo, dica, pedidos)| {
+                cabecalho.child(
+                    estilo::botao_perigo("sessao-conflitos", cx)
+                        .small()
+                        .flex_none()
+                        .child(Icon::new(Icone::TriangleAlert).size(px(14.)))
+                        .child(rotulo)
+                        .tooltip(dica)
+                        .on_click(cx.listener(move |tela, _ev, _window, cx| {
+                            cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(
+                                pedidos.clone(),
+                            ));
+                            tela.avisar_sucesso(
+                                "Pedido copiado: estorne no Mercado Pago e marque \"Já estornei\" no painel do site.",
+                                cx,
+                            );
+                        })),
+                )
+            })
             .child(
                 // 🪟 **O `Popover` do gpui-kit**, como o do site: embaixo do
                 // botão e alinhado à direita dele (`align="end"`), fechando no

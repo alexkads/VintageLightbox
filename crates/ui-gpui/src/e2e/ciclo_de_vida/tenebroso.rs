@@ -270,3 +270,115 @@ fn o_token_vencido_no_pagamento_renova_e_vende_uma_vez(cx: &mut TestAppContext) 
     assert_eq!(vendas_da_galeria(&c, &galeria).len(), 1, "uma venda só");
     c.b.ato_limpo(cx, "o token vencido no pagamento");
 }
+
+/// 🌑 **O PIX pago depois da reserva vencer, para a foto que o balcão já
+/// vendeu.** O cliente põe a foto no pedido e só paga horas depois; nesse meio
+/// tempo a reserva de 30 minutos venceu, o operador levou a foto e a vendeu no
+/// caixa. O pagamento online chega: a foto continua do balcão (não pode ser
+/// vendida duas vezes), e a sessão aberta mostra, sozinha, o botão vermelho
+/// "a estornar" com o pedido. Quando o painel do site marca "Já estornei", o
+/// botão some — sem ninguém reabrir a sessão.
+#[gpui_kit::test]
+#[ignore = "precisa da API de teste: rode `make e2e-ciclo`"]
+fn o_pix_pago_depois_da_reserva_vencer_vira_estorno_e_a_foto_fica_no_balcao(
+    cx: &mut TestAppContext,
+) {
+    let c = preparar(cx, "tenebroso-pix-atrasado", 2);
+    let (galeria, fotos) = criar_a_sessao(cx, &c, "PIX atrasado", "cliente-pix-atrasado@e2e.test");
+    let disputada = fotos[0].clone();
+    let cliente = o_cliente_entra_pelo_link(cx, &c);
+    let (status, pedido) = cliente.post(
+        &format!("/meus-ensaios/{galeria}/comprar"),
+        json!({ "fotos": [disputada] }),
+    );
+    assert_eq!(status, 201, "o cliente põe a foto no pedido: {pedido}");
+    let pedido_id = pedido["order_id"].as_str().expect("o pedido").to_string();
+
+    // ⏳ Duas horas sem pagar: a reserva venceu.
+    let anonimo = Http::novo(c.tokio.clone(), &c.servidor.api_direta, None);
+    let (status, _) = anonimo.post(
+        &format!("{}/{pedido_id}", c.servidor.vencer_reserva),
+        json!({}),
+    );
+    assert_eq!(status, 200, "a reserva vence");
+
+    // O balcão leva e vende a foto: nada mais a segura.
+    levar(cx, &c, &galeria, &fotos[..1]);
+    abrir_o_caixa(cx, &c, &galeria, "0,00");
+    escolher_as_pessoas(cx, &c);
+    c.b.ate(cx, "o cupom cobra a foto pelo cheio", |b, cx| {
+        b.caixa(cx, |caixa, _w, _cx| caixa.cupom_para_teste().1 == 4000)
+    });
+    pagar_em_pix(cx, &c);
+    c.b.ate_na_api(cx, "a venda do balcão foi gravada", || {
+        let n = vendas_da_galeria(&c, &galeria).len();
+        (n == 1).then_some(()).ok_or(format!("{n} vendas"))
+    });
+
+    // 💳 O PIX do site é aprovado agora.
+    aprovar_o_pedido(&c, &pedido_id);
+    let no_site = foto_no_painel(&c.site, &galeria, &disputada).expect("a foto");
+    assert_eq!(
+        no_site["estado"], "levada_no_balcao",
+        "a foto vendida no balcão não vira do pedido online: {no_site}"
+    );
+    let aberta = c.site.get(&format!("/pos-venda/galerias/{galeria}"));
+    let conflitos = aberta["conflitos_de_pagamento"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(conflitos.len(), 1, "o pedido fica em conflito: {aberta}");
+    assert_eq!(conflitos[0]["pedido_id"], pedido_id.as_str());
+    assert_eq!(conflitos[0]["motivo"], "vendida_no_balcao");
+    assert_eq!(centavos(&conflitos[0]["valor"]), 4000, "o valor a estornar");
+    let conflito_id = conflitos[0]["id"].as_str().expect("o id").to_string();
+
+    // A sessão aberta no balcão fica sabendo sozinha (o `galeria_mudou`).
+    c.b.ate(cx, "o botão \"a estornar\" aparece na sessão", |b, cx| {
+        b.detalhe(cx, |tela, _w, _cx| {
+            tela.conflitos_de_pagamento()
+                .is_some_and(|(rotulo, dica, pedidos)| {
+                    rotulo == "1 pagamento a estornar"
+                        && dica.contains("vendida no caixa do balcão")
+                        && dica.contains("R$ 40,00")
+                        && pedidos == pedido_id
+                })
+        })
+    });
+    c.b.detalhe(cx, |tela, _w, _cx| {
+        assert_eq!(
+            tela.como_esta(&disputada).map(|f| f.0),
+            Some(Estado::LevadaNoBalcao),
+            "no balcão a foto continua levada"
+        )
+    });
+    c.b.clicar(cx, "sessao-conflitos");
+    c.b.ate(cx, "o clique copia o pedido", |b, cx| {
+        b.app(cx, |app, _w, _cx| {
+            app.avisos_dados_para_teste()
+                .iter()
+                .any(|(texto, erro)| !*erro && texto.contains("Pedido copiado"))
+        })
+    });
+    assert_eq!(
+        cx.read_from_clipboard().and_then(|c| c.text()).as_deref(),
+        Some(pedido_id.as_str()),
+        "o pedido vai para a área de transferência"
+    );
+    c.b.ato_limpo(cx, "o aviso do pagamento a estornar");
+
+    // ✅ Estornado no Mercado Pago, o painel do site marca "Já estornei".
+    let (status, resolvido) = c.site.post(
+        &format!("/pos-venda/conflitos-de-pagamento/{conflito_id}/resolver"),
+        json!({}),
+    );
+    assert_eq!(status, 200, "o painel resolve: {resolvido}");
+    c.b.ate(cx, "o botão some da sessão aberta", |b, cx| {
+        b.detalhe(cx, |tela, _w, _cx| tela.conflitos_de_pagamento().is_none())
+    });
+    assert_eq!(
+        vendas_da_galeria(&c, &galeria).len(),
+        1,
+        "a venda do balcão continua uma só"
+    );
+}

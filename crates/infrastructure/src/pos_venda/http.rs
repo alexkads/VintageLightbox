@@ -27,10 +27,11 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use domain::services::pos_venda::{
-    AvisoDaGaleria, CofreDeSessao, ContagemDeFotos, EntregaNoCanal, EstadoDaFotoNoSite, Estudio,
-    FaixaDaGaleria, FotoDaGaleria, FotoEnviada, FotoParaEnviar, Galeria, GaleriaAberta,
-    GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto, MudancaDaGaleria, NovaGaleria, PagoNoCaixa,
-    PosVendaApi, Produto, ResumoSimples, ResumosDoAtendimento, Sessao, TotaisDaGaleria,
+    AvisoDaGaleria, CofreDeSessao, ConflitoDePagamento, ContagemDeFotos, EntregaNoCanal,
+    EstadoDaFotoNoSite, Estudio, FaixaDaGaleria, FotoDaGaleria, FotoEnviada, FotoParaEnviar,
+    Galeria, GaleriaAberta, GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto, MudancaDaGaleria,
+    NovaGaleria, PagoNoCaixa, PosVendaApi, Produto, ResumoSimples, ResumosDoAtendimento, Sessao,
+    TotaisDaGaleria,
 };
 use domain::{DomainError, DomainResult};
 use serde::Deserialize;
@@ -790,6 +791,21 @@ impl PosVendaApi for PosVendaApiHttp {
                     lido_em: a.lido_em.map(|q| q.timestamp()),
                 })
                 .collect(),
+            conflitos: aberta
+                .conflitos_de_pagamento
+                .into_iter()
+                .map(|c| ConflitoDePagamento {
+                    pedido_id: c.pedido_id,
+                    foto_id: c.foto_id,
+                    arquivo: c.arquivo,
+                    motivo: c.motivo,
+                    valor: c.valor.and_then(|v| match v {
+                        serde_json::Value::String(s) => Some(s),
+                        serde_json::Value::Null => None,
+                        outro => Some(outro.to_string()),
+                    }),
+                })
+                .collect(),
             resumos: ResumosDoAtendimento {
                 agendamento: aberta.agendamento.map(|a| ResumoSimples {
                     titulo: a.nome.unwrap_or_else(|| "Agendamento".into()),
@@ -1430,6 +1446,20 @@ struct GaleriaAbertaDaApi {
     pedido: Option<PedidoDaApi>,
     #[serde(default)]
     parceiro: Option<ParceiroDaApi>,
+    /// 💳 Os pagamentos a estornar. Ausente na API anterior a 2026-10-03.
+    #[serde(default)]
+    conflitos_de_pagamento: Vec<ConflitoDaApi>,
+}
+
+/// Um pagamento a estornar, como `GET /pos-venda/galerias/{id}` o devolve.
+#[derive(Deserialize)]
+struct ConflitoDaApi {
+    pedido_id: String,
+    foto_id: String,
+    arquivo: String,
+    motivo: String,
+    #[serde(default)]
+    valor: Option<serde_json::Value>,
 }
 
 /// Uma faixa em uso, como `GET /pos-venda/galerias/{id}` a devolve.

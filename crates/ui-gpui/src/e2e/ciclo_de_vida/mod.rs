@@ -26,7 +26,7 @@
 //! | este (`o_ciclo_de_vida_da_sessao`) | o caminho feliz, todo pela tela: clique, tecla e digitação |
 //! | [`triste`] | o erro do operador ou do cliente é recusado com clareza e corrigido |
 //! | [`operacional`] | o tortuoso: a rede piscando, lenta ou sumindo na subida, na classificação, na revelação; o app fechando no meio; o cliente pagando online a foto do balcão |
-//! | [`tenebroso`] | a API grava e a resposta se perde na venda, sangria, estorno, abertura e fechamento; o token vencido no pagamento |
+//! | [`tenebroso`] | a API grava e a resposta se perde na venda, sangria, estorno, abertura e fechamento; o token vencido no pagamento; o PIX pago depois da reserva vencer, para a foto já vendida no balcão (vira "a estornar") |
 //!
 //! 🌩️ As falhas saem do **proxy de falhas** do `servidor-do-ciclo`
 //! (`backend/crates/e2e-tests/src/bin/servidor-do-ciclo/proxy_de_falhas.rs`): o
@@ -77,6 +77,8 @@ struct Servidor {
     /// A porta de controle do proxy de falhas.
     controle: String,
     aprovar: String,
+    /// `POST {vencer_reserva}/{pedido}`: a reserva do pedido "venceu" (2 h).
+    vencer_reserva: String,
     sessao: Sessao,
     funcionario: String,
     nome_do_funcionario: String,
@@ -104,6 +106,7 @@ fn ler_o_servidor() -> Servidor {
         api_direta: texto_de(&v, "api_direta"),
         controle: texto_de(&v, "controle"),
         aprovar: texto_de(&v, "aprovar"),
+        vencer_reserva: texto_de(&v, "vencer_reserva"),
         sessao: Sessao {
             access_token: texto_de(s, "access_token"),
             refresh_token: texto_de(s, "refresh_token"),

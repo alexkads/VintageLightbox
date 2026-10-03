@@ -440,6 +440,39 @@ pub struct GaleriaAberta {
     /// isso. O resumo pode faltar (a API no meio de um deploy, o voucher
     /// apagado), e aí a gaveta diz "associado" — a mesma regra do site.
     pub resumos: ResumosDoAtendimento,
+    /// 💳 Os pagamentos online a estornar no Mercado Pago (2026-10-03): o
+    /// cliente pagou pelo site uma foto que, quando o pagamento chegou, já não
+    /// estava à venda (a reserva de 30 min venceu e o balcão a vendeu). Só os
+    /// em aberto; quem marca "Já estornei" é o painel do site.
+    pub conflitos: Vec<ConflitoDePagamento>,
+}
+
+/// Um pagamento online a estornar — ver [`GaleriaAberta::conflitos`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConflitoDePagamento {
+    /// O pedido a estornar no Mercado Pago.
+    pub pedido_id: String,
+    pub foto_id: String,
+    pub arquivo: String,
+    /// `vendida_no_balcao`, `levada_no_balcao`, `comprada_em_outro_pedido`,
+    /// `apagada` ou `rejeitada`.
+    pub motivo: String,
+    /// O que o pedido cobrou pela foto, decimal em texto (`"40.00"`).
+    pub valor: Option<String>,
+}
+
+impl ConflitoDePagamento {
+    /// O motivo em português, para a tela.
+    pub fn motivo_por_extenso(&self) -> &str {
+        match self.motivo.as_str() {
+            "vendida_no_balcao" => "vendida no caixa do balcão",
+            "levada_no_balcao" => "levada no balcão",
+            "comprada_em_outro_pedido" => "já comprada em outro pedido",
+            "apagada" => "apagada da sessão",
+            "rejeitada" => "rejeitada",
+            outro => outro,
+        }
+    }
 }
 
 /// Uma faixa de preço em uso na galeria.

@@ -1733,6 +1733,7 @@ pub mod mentira {
                 faixas: Vec::new(),
                 avisos: self.avisos_da_sessao.lock().expect("os avisos").clone(),
                 resumos: Default::default(),
+                conflitos: Vec::new(),
             }));
             if self
                 .galeria_demorada
