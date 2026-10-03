@@ -780,16 +780,18 @@ impl Revelacao {
             "soltar" => self.soltar_preset(cx),
             "fechar" => self.fechar_relatorio(cx),
             // 🧪 Aplica a N-ésima predefinição do sistema à foto aberta (0 é a
-            // primeira) — o clique na linha da coluna.
+            // primeira) — o clique na linha da coluna. Com um nome em vez do
+            // número (`predefinicoes aplicar RecordarFotos P&B`), a desse nome:
+            // a ordem da coluna muda com as favoritas.
             "aplicar" => {
-                let n: usize = argumento.parse().unwrap_or(0);
-                if let Some(preset) = self
-                    .grupos_da_coluna(cx)
-                    .sistema
-                    .get(n)
-                    .map(|p| (*p).clone())
-                {
-                    self.aplicar_preset(&preset, window, cx);
+                let sistema = self.grupos_da_coluna(cx).sistema;
+                let escolhida = match argumento.parse::<usize>() {
+                    Ok(n) => sistema.get(n),
+                    Err(_) => sistema.iter().find(|p| p.name == argumento),
+                };
+                match escolhida.map(|p| (*p).clone()) {
+                    Some(preset) => self.aplicar_preset(&preset, window, cx),
+                    None => eprintln!("[roteiro] predefinicoes: não achei '{argumento}'"),
                 }
             }
             "responder" => self.responder_pergunta(argumento == "sim", window, cx),

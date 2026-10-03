@@ -150,6 +150,44 @@ pub const ROTULOS: &[(&str, &str)] = &[
     ("pcv_feather", "Vinheta — difusão"),
     ("pcv_highlights", "Vinheta — realces"),
     ("processo", "Processo do Lightroom"),
+    ("darktable_vignette_ativo", "Vinheta do darktable"),
+    (
+        "darktable_vignette_scale",
+        "Vinheta do darktable — início do decaimento",
+    ),
+    (
+        "darktable_vignette_falloff_scale",
+        "Vinheta do darktable — raio do decaimento",
+    ),
+    (
+        "darktable_vignette_brightness",
+        "Vinheta do darktable — brilho",
+    ),
+    (
+        "darktable_vignette_saturation",
+        "Vinheta do darktable — saturação",
+    ),
+    (
+        "darktable_vignette_center_x",
+        "Vinheta do darktable — centro horizontal",
+    ),
+    (
+        "darktable_vignette_center_y",
+        "Vinheta do darktable — centro vertical",
+    ),
+    (
+        "darktable_vignette_autoratio",
+        "Vinheta do darktable — proporção automática",
+    ),
+    (
+        "darktable_vignette_whratio",
+        "Vinheta do darktable — largura/altura",
+    ),
+    ("darktable_vignette_shape", "Vinheta do darktable — forma"),
+    (
+        "darktable_vignette_dithering",
+        "Vinheta do darktable — matização",
+    ),
 ];
 
 #[cfg(test)]

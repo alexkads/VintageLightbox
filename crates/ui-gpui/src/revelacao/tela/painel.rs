@@ -31,6 +31,7 @@ use std::rc::Rc;
 use gpui_kit::component::accordion::Accordion;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::select::Select;
+use gpui_kit::component::switch::Switch;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{h_flex, ActiveTheme, Disableable, Icon, Sizable};
 use gpui_kit::{
@@ -243,6 +244,26 @@ fn titulo(rotulo: &'static str, separar: bool, cx: &gpui_kit::App) -> AnyElement
         })
         .child(rotulo)
         .into_any_element()
+}
+
+/// O subtítulo dentro de um grupo — o "posição / forma" do módulo de
+/// vinheta do darktable: menor que o título e sem a linha, porque o módulo é
+/// o mesmo.
+fn subtitulo(rotulo: &'static str, cx: &gpui_kit::App) -> AnyElement {
+    div()
+        .debug_selector(move || format!("grupo-{rotulo}"))
+        .mt(px(4.))
+        .text_xs()
+        .text_color(cx.theme().muted_foreground.opacity(0.8))
+        .child(rotulo)
+        .into_any_element()
+}
+
+/// O "Ligar" de um módulo: o interruptor que vira a chave do título.
+fn e_a_chave_do_modulo(controle: &Controle) -> bool {
+    controle.definicao.discreto
+        && controle.escolha.is_none()
+        && controle.definicao.rotulo == "Ligar"
 }
 
 /// A aba do espaço em que a foto é revelada: **Adobe RGB**, e só ela.
@@ -797,8 +818,18 @@ impl Revelacao {
                     // título dele também ("Mistura de preto e branco").
                     let com_titulos = painel.secoes().len() > 1 || painel == Painel::PretoEBranco;
                     for (n, secao) in painel.secoes().iter().enumerate() {
-                        if com_titulos {
-                            dentro.push(titulo_do_grupo(*secao, n > 0, cx));
+                        match secao {
+                            // 🎞️ O módulo do darktable: a chave de ligar no
+                            // título, e o "posição / forma" como subtítulo,
+                            // sem linha — é o mesmo módulo.
+                            Secao::VinhetaDarktable => {
+                                dentro.push(self.titulo_da_vinheta_do_darktable(n > 0, cx))
+                            }
+                            Secao::VinhetaDarktableForma => {
+                                dentro.push(subtitulo(secao.rotulo(), cx))
+                            }
+                            _ if com_titulos => dentro.push(titulo_do_grupo(*secao, n > 0, cx)),
+                            _ => {}
                         }
                         dentro.extend(self.controles_da_secao(*secao, cx));
                     }
@@ -861,6 +892,10 @@ impl Revelacao {
     /// linha por controle ([`Self::linha_em_linha`]); os outros painéis ainda
     /// no de duas.
     fn controles_da_secao(&self, secao: Secao, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let darktable = matches!(
+            secao,
+            Secao::VinhetaDarktable | Secao::VinhetaDarktableForma
+        );
         let em_linha = matches!(
             secao.painel(),
             Painel::Efeitos | Painel::Basico | Painel::PretoEBranco
@@ -869,8 +904,12 @@ impl Revelacao {
             .iter()
             .enumerate()
             .filter(|(_, controle)| controle.definicao.secao == secao)
+            // A chave de ligar mora no título do grupo.
+            .filter(|(_, controle)| !(darktable && e_a_chave_do_modulo(controle)))
             .map(|(i, controle)| {
-                if em_linha {
+                if darktable {
+                    self.linha_do_darktable(i, controle, cx)
+                } else if em_linha {
                     self.linha_em_linha(i, controle, cx)
                 } else {
                     self.linha_do_controle(i, controle, cx)
@@ -980,6 +1019,185 @@ impl Revelacao {
             .child(rotulo)
             .child(meio)
             .children(numero)
+            .into_any_element()
+    }
+
+    /// 🎞️ O título da vinheta do darktable, com a chave de ligar à direita —
+    /// o botão do módulo no darktable. Desligada, os controles ficam apagados
+    /// e a foto não muda.
+    fn titulo_da_vinheta_do_darktable(&self, separar: bool, cx: &mut Context<Self>) -> AnyElement {
+        let indice = self
+            .controles
+            .iter()
+            .position(|c| c.definicao.secao == Secao::VinhetaDarktable && e_a_chave_do_modulo(c))
+            .expect("a vinheta do darktable tem a chave de ligar");
+        let ligada = self.ajustes.vinheta_do_darktable_ligada();
+        let rotulo = Secao::VinhetaDarktable.rotulo();
+        h_flex()
+            .debug_selector(move || format!("grupo-{rotulo}"))
+            .items_center()
+            .text_xs()
+            .when(separar, |d| {
+                d.mx(px(-12.))
+                    .px(px(12.))
+                    .mt(px(4.))
+                    .pt(px(10.))
+                    .border_t_1()
+                    .border_color(cx.theme().border)
+            })
+            // O mesmo espaço dos dois lados deixa o nome no meio, como os
+            // outros títulos.
+            .child(div().flex_1())
+            .child(
+                div()
+                    .flex_none()
+                    .text_color(if ligada {
+                        cx.theme().foreground
+                    } else {
+                        cx.theme().muted_foreground
+                    })
+                    .child(rotulo),
+            )
+            .child(h_flex().flex_1().justify_end().child(self.chave(
+                indice,
+                "chave-da-vinheta-do-darktable",
+                cx,
+            )))
+            .into_any_element()
+    }
+
+    /// A chave (o `Switch` do kit) de um interruptor: virar é um gesto
+    /// inteiro, que entra no histórico e grava na hora.
+    fn chave(&self, indice: usize, id: &'static str, cx: &mut Context<Self>) -> AnyElement {
+        let controle = &self.controles[indice];
+        let definicao = controle.definicao;
+        let ligada = (definicao.ler)(&self.ajustes) >= 0.5;
+        let tela = cx.entity().downgrade();
+        div()
+            .debug_selector(move || format!("chave-{indice}"))
+            .child(
+                Switch::new(id)
+                    .small()
+                    .checked(ligada)
+                    .accessibility_label(definicao.rotulo)
+                    .disabled(!self.controles_ligados() || !definicao.age(&self.ajustes))
+                    .on_change(move |ligar, window, cx| {
+                        let valor = if *ligar { 1.0 } else { 0.0 };
+                        let _ = tela.update(cx, |tela, cx| {
+                            tela.gesto_discreto(|a| (definicao.aplicar)(a, valor), window, cx);
+                        });
+                    }),
+            )
+            .into_any_element()
+    }
+
+    /// 🎞️ Um controle da vinheta do darktable, no desenho do darktable: o
+    /// nome à esquerda e o valor à direita, com a barra embaixo — os nomes
+    /// dele ("Início do decaimento") não cabem na coluna do Lightroom. A
+    /// chave e a lista ficam na mesma linha do nome. Desligado, apagado.
+    fn linha_do_darktable(
+        &self,
+        indice: usize,
+        controle: &Controle,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let definicao = controle.definicao;
+        let valor = (definicao.ler)(&self.ajustes);
+        let ligado = self.controles_ligados();
+        let age = definicao.age(&self.ajustes);
+        let cor = if !age {
+            cx.theme().muted_foreground.opacity(0.45)
+        } else if definicao.alterado(&self.ajustes) {
+            cx.theme().foreground
+        } else {
+            cx.theme().muted_foreground
+        };
+        let rotulo = div()
+            .id(SharedString::from(format!("rotulo-{indice}")))
+            .debug_selector(move || format!("rotulo-{indice}"))
+            .min_w(px(0.))
+            .truncate()
+            .text_color(cor)
+            .tooltip(|window, cx| {
+                gpui_kit::component::tooltip::Tooltip::new("Duplo clique volta ao neutro")
+                    .build(window, cx)
+            })
+            .child(definicao.rotulo)
+            .on_click(
+                cx.listener(move |tela, evento: &gpui_kit::ClickEvent, window, cx| {
+                    if evento.click_count() >= 2 && tela.controles_ligados() {
+                        tela.devolver_ao_neutro(indice, window, cx);
+                    }
+                }),
+            );
+
+        // A chave e a lista: uma linha só, o nome e o controle.
+        let ao_lado = if definicao.discreto && controle.escolha.is_none() {
+            Some(self.chave(indice, "chave-da-proporcao-automatica", cx))
+        } else {
+            controle.escolha.as_ref().map(|lista| {
+                div()
+                    .w(relative(0.55))
+                    .flex_none()
+                    .debug_selector(move || format!("escolha-{indice}"))
+                    .child(crate::estilo::campo_pequeno(
+                        Select::new(lista).xsmall().disabled(!ligado || !age),
+                    ))
+                    .into_any_element()
+            })
+        };
+        if let Some(controle_ao_lado) = ao_lado {
+            return h_flex()
+                .min_h(px(24.))
+                .justify_between()
+                .items_center()
+                .gap(px(8.))
+                .text_xs()
+                .child(rotulo)
+                .child(controle_ao_lado)
+                .into_any_element();
+        }
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(2.))
+            .text_xs()
+            .child(
+                h_flex()
+                    .justify_between()
+                    .items_baseline()
+                    .gap(px(8.))
+                    .child(rotulo)
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_color(cor)
+                            .child(SharedString::from(definicao.formatar(valor))),
+                    ),
+            )
+            .child(
+                div()
+                    .debug_selector(move || format!("barra-{indice}"))
+                    .when(ligado && age, |barra| {
+                        barra.capture_any_mouse_up(cx.listener(
+                            move |tela, evento: &MouseUpEvent, window, cx| {
+                                if evento.button == MouseButton::Left
+                                    && evento.click_count >= 2
+                                    && tela.controles_ligados()
+                                {
+                                    tela.devolver_ao_neutro(indice, window, cx);
+                                }
+                            },
+                        ))
+                    })
+                    .child(
+                        crate::estilo::slider(&controle.estado)
+                            .trilho(definicao.trilho)
+                            .neutro(definicao.neutro())
+                            .disabled(!ligado || !age),
+                    ),
+            )
             .into_any_element()
     }
 

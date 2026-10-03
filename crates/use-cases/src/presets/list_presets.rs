@@ -14,10 +14,17 @@ use std::sync::Arc;
 /// resolução cheia (2,0 a 2,3; abaixo de ~2 o olho não separa), já sobre a
 /// Divisão de tons medida no Lightroom. A viragem do Lightroom é mais fraca
 /// nos realces que o creme do darktable: as rodas dos tons médios e global do
-/// Color Grading completam. A borda
-/// creme da vinheta vem de a viragem ser aplicada depois dela no processo 1
-/// (`corpo.wgsl`, `viragem`), como no Lightroom e no darktable. As fotos guardadas com os `dt_*` antigos migram para estes valores
-/// na leitura ([`migrar_do_darktable`]).
+/// Color Grading completam. As fotos guardadas com os `dt_*` antigos migram
+/// para estes valores na leitura ([`migrar_do_darktable`]).
+///
+/// 🎞️ **A vinheta é a do darktable, com os números do `.dtstyle`** (dono,
+/// 2/out/2026: as do Lightroom não a imitavam). Até então ela era aproximada
+/// com a da Lente (+96, meio 83,25) e a pós-corte (+44,12, ponto médio 28,62,
+/// difusão 30,25, arredondamento −62,03); agora é o `vignette` do estilo,
+/// campo a campo: início do decaimento 87,82, raio 45,51, brilho 0,99999,
+/// saturação 0,147, proporção automática e forma 0,48 (centro, largura/altura
+/// e matização ficam no neutro, que é o do estilo).
+/// A borda creme vem de a cor da viragem vir depois dela (`corpo.wgsl`).
 pub const RECORDARFOTOS_PB: &[(&str, f32)] = &[
     ("bw_ativo", 1.0),
     ("processo", 1.0),
@@ -50,12 +57,28 @@ pub const RECORDARFOTOS_PB: &[(&str, f32)] = &[
     ("split_midtone_sat", 20.75),
     ("split_global_hue", 54.38),
     ("split_global_sat", 4.5),
-    ("lens_vignette_amount", 96.0),
-    ("lens_vignette_midpoint", 83.25),
-    ("pcv_amount", 44.12),
-    ("pcv_midpoint", 28.62),
-    ("pcv_feather", 30.25),
-    ("pcv_roundness", -62.03),
+    ("darktable_vignette_ativo", 1.0),
+    ("darktable_vignette_scale", 87.82),
+    ("darktable_vignette_falloff_scale", 45.51),
+    ("darktable_vignette_brightness", 0.99999),
+    ("darktable_vignette_saturation", 0.147),
+    ("darktable_vignette_autoratio", 1.0),
+    ("darktable_vignette_shape", 0.48),
+];
+
+/// Os `dt_vignette_*` da receita antiga: os mesmos campos do `vignette.c`, com
+/// outro prefixo. O `unbound` não volta (é sempre ligado).
+const VINHETA_ANTIGA: &[&str] = &[
+    "ativo",
+    "scale",
+    "falloff_scale",
+    "brightness",
+    "saturation",
+    "center_x",
+    "center_y",
+    "autoratio",
+    "whratio",
+    "shape",
 ];
 
 /// A receita guardada (nome → valor) de uma foto revelada com o RecordarFotos
@@ -65,15 +88,41 @@ pub const RECORDARFOTOS_PB: &[(&str, f32)] = &[
 /// que não conhece: sem isto, a foto vendida reabriria colorida e deixaria de
 /// contar como revelada. Quem tem o monocromático do darktable ligado recebe os
 /// valores de [`RECORDARFOTOS_PB`] por cima dos seus; os `dt_*` saem sempre.
+///
+/// 🎞️ **A vinheta do darktable voltou** (2/out/2026): quem tinha o `vignette`
+/// ligado leva os próprios `dt_vignette_*` para os `darktable_vignette_*` —
+/// por cima do P&B de hoje, que é a mesma vinheta quando a foto não a mexeu.
+/// O campo que não estava gravado volta como o neutro (o padrão do darktable).
 pub fn migrar_do_darktable(receita: &mut serde_json::Map<String, serde_json::Value>) {
-    let era_pb = receita
-        .get("dt_monochrome_ativo")
-        .and_then(|v| v.as_f64())
-        .is_some_and(|v| v >= 0.5);
+    let numero = |receita: &serde_json::Map<String, serde_json::Value>, nome: &str| {
+        receita
+            .get(nome)
+            .and_then(|v| v.as_f64())
+            .filter(|v| v.is_finite())
+    };
+    let era_pb = numero(receita, "dt_monochrome_ativo").is_some_and(|v| v >= 0.5);
+    let tinha_vinheta = numero(receita, "dt_vignette_ativo").is_some_and(|v| v >= 0.5);
+    let vinheta: Vec<(String, f64)> = VINHETA_ANTIGA
+        .iter()
+        .filter_map(|campo| {
+            numero(receita, &format!("dt_vignette_{campo}"))
+                .map(|valor| (format!("darktable_vignette_{campo}"), valor))
+        })
+        .collect();
     receita.retain(|nome, _| !nome.starts_with("dt_"));
     if era_pb {
         for (nome, valor) in RECORDARFOTOS_PB {
             receita.insert((*nome).to_string(), serde_json::json!(valor));
+        }
+    }
+    if tinha_vinheta {
+        // Por cima do P&B: a vinheta é a que a foto tinha, campo a campo, e o
+        // que não estava gravado volta ao neutro — o padrão do darktable.
+        for campo in VINHETA_ANTIGA {
+            receita.remove(&format!("darktable_vignette_{campo}"));
+        }
+        for (nome, valor) in vinheta {
+            receita.insert(nome, serde_json::json!(valor));
         }
     }
 }

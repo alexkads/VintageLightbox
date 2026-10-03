@@ -305,6 +305,9 @@ mod testes {
         let ajustes = ajustes_da_entidade(&foto);
         assert_eq!(ajustes.bw_ativo, 1.0, "saiu colorida");
         assert_eq!(ajustes.processo, 1.0);
-        assert!(ajustes.pcv_amount > 0.0, "sem a vinheta branca");
+        assert!(
+            ajustes.vinheta_do_darktable_ligada(),
+            "sem a vinheta do darktable"
+        );
     }
 }

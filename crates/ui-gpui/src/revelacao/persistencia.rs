@@ -1433,7 +1433,7 @@ mod testes {
     /// não ganharam coluna: vão na revelação inteira (`edit_parametros`, migration
     /// 023), como na foto do site. Esta lista só descreve o caminho das colunas,
     /// que é o de quem foi revelado antes da migration 023.
-    const SEM_COLUNA_NO_BANCO_LOCAL: [&str; 20] = [
+    const SEM_COLUNA_NO_BANCO_LOCAL: [&str; 21] = [
         "calib_",
         "split_midtone_",
         "split_global_",
@@ -1456,6 +1456,8 @@ mod testes {
         "grain_roughness",
         // A versão de processo (2026-10-01): também só em `edit_parametros`.
         "processo",
+        // A vinheta do darktable (2026-10-02): também só em `edit_parametros`.
+        "darktable_vignette_",
         // `split_midtone_lum` e `split_global_lum` já caem nos de cima.
     ];
 
@@ -1501,7 +1503,10 @@ mod testes {
         let (ajustes, corte) = de_json(&json);
         assert_eq!(ajustes.bw_ativo, 1.0, "abriu colorida");
         assert_eq!(ajustes.processo, 1.0);
-        assert!(ajustes.pcv_amount > 0.0, "sem a vinheta branca");
+        assert!(
+            ajustes.vinheta_do_darktable_ligada(),
+            "sem a vinheta do darktable"
+        );
         assert_eq!(corte.largura, Some(0.9), "o corte da foto fica");
     }
 }

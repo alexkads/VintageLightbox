@@ -3810,6 +3810,13 @@ mod testes {
             .debug_bounds("grupo-Granulado")
             .expect("o título do granulado é desenhado");
         assert!(grao.origin.y > vinheta.origin.y, "o Granulado vem depois");
+        let darktable = visual
+            .debug_bounds("grupo-Vinheta do darktable")
+            .expect("o título da vinheta do darktable é desenhado");
+        assert!(
+            vinheta.origin.y < darktable.origin.y && darktable.origin.y < grao.origin.y,
+            "a vinheta do darktable fica entre a pós-corte e o Granulado"
+        );
 
         // Rótulo e barra na mesma linha, o rótulo à esquerda.
         let i = indice(Secao::Vinheta, "Intensidade");

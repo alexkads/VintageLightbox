@@ -144,7 +144,9 @@ impl Grupo {
             Grupo::Painel(Painel::Lente) => Some("distorção e vinheta"),
             Grupo::Calibracao | Grupo::Painel(Painel::Calibracao) => Some("os primários da câmera"),
             Grupo::Painel(Painel::Tonalizacao) => Some("a cor das sombras e a das altas luzes"),
-            Grupo::Painel(Painel::Efeitos) => Some("vinheta pós-corte e grão"),
+            Grupo::Painel(Painel::Efeitos) => {
+                Some("as vinhetas pós-corte e do darktable, e o grão")
+            }
             Grupo::Enquadramento => Some("giro, espelho, endireitar, perspectiva e recorte"),
             Grupo::Painel(Painel::Basico) | Grupo::Painel(Painel::CurvaDeTons) => None,
         }
@@ -304,7 +306,7 @@ pub fn grupo_do_ajuste(nome: &str) -> Option<Grupo> {
         Grupo::Calibracao
     } else if com("split_") {
         Grupo::Painel(Painel::Tonalizacao)
-    } else if com("grain_") || com("pcv_") {
+    } else if com("grain_") || com("pcv_") || com("darktable_vignette_") {
         Grupo::Painel(Painel::Efeitos)
     } else {
         return None;

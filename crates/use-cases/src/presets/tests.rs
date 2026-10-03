@@ -233,6 +233,17 @@ fn faixa_do_slider(campo: &str) -> (f32, f32) {
         | "split_blending" => (0.0, 100.0),
         campo if campo.starts_with("tone_curve_split_") => (0.0, 100.0),
         "pcv_style" => (0.0, 2.0),
+        // A vinheta do darktable: escala e decaimento em % do raio, o centro
+        // e as proporções nas faixas do módulo.
+        "darktable_vignette_scale" | "darktable_vignette_falloff_scale" => (0.0, 200.0),
+        "darktable_vignette_brightness"
+        | "darktable_vignette_saturation"
+        | "darktable_vignette_center_x"
+        | "darktable_vignette_center_y" => (-1.0, 1.0),
+        "darktable_vignette_ativo" | "darktable_vignette_autoratio" => (0.0, 1.0),
+        "darktable_vignette_dithering" => (0.0, 2.0),
+        "darktable_vignette_whratio" => (0.0, 2.0),
+        "darktable_vignette_shape" => (0.0, 5.0),
         // A roda de cor inteira: estes **escolhem** a cor que entra.
         campo if campo.starts_with("split_") && campo.ends_with("_hue") => (0.0, 360.0),
         campo if campo.starts_with("split_") && campo.ends_with("_sat") => (0.0, 100.0),
@@ -354,9 +365,10 @@ fn cada_uma_escreve_a_mesma_quantidade_de_campos_do_site() {
 
     assert_eq!(
         quantos,
-        // O RecordarFotos P&B (7º) tem 37 desde 2/out/2026: os controles do
-        // Lightroom no lugar dos 24 campos `dt_*` do darktable.
-        vec![5, 8, 9, 6, 7, 7, 37, 13, 13, 10, 12, 7, 11, 6, 10, 16, 17, 13, 13, 4, 35]
+        // O RecordarFotos P&B (7º) tem 38 desde 2/out/2026: os controles do
+        // Lightroom no lugar dos 24 campos `dt_*` do darktable, com os sete da
+        // vinheta do darktable fora do neutro no lugar das seis da aproximação.
+        vec![5, 8, 9, 6, 7, 7, 38, 13, 13, 10, 12, 7, 11, 6, 10, 16, 17, 13, 13, 4, 35]
     );
 }
 
@@ -416,11 +428,43 @@ fn a_receita_do_darktable_vira_o_recordarfotos_pb_de_hoje() {
     }
     assert_eq!(receita["corte_ativo"], 1.0, "o corte da foto fica");
 
-    let mut colorida = serde_json::json!({ "dt_vignette_ativo": 1.0, "exposure": 0.4 });
+    // A vinheta do darktable da foto vai para a de hoje — a do P&B, quando ela
+    // não a mexeu, ou a dela.
+    assert_eq!(receita["darktable_vignette_ativo"], 1.0);
+    assert_eq!(
+        receita["darktable_vignette_brightness"].as_f64().unwrap() as f32,
+        0.99999
+    );
+    assert!(
+        !receita.contains_key("lens_vignette_amount"),
+        "a aproximação saiu"
+    );
+
+    let mut colorida = serde_json::json!({
+        "dt_vignette_ativo": 1.0,
+        "dt_vignette_brightness": -0.25,
+        "dt_vignette_shape": 2.0,
+        "dt_vignette_unbound": 1.0,
+        "exposure": 0.4,
+    });
     let receita = colorida.as_object_mut().unwrap();
     migrar_do_darktable(receita);
-    assert_eq!(receita.len(), 1);
+    assert!(receita.keys().all(|k| !k.starts_with("dt_")));
     assert_eq!(receita["exposure"], 0.4);
+    assert_eq!(receita["darktable_vignette_ativo"], 1.0);
+    assert_eq!(receita["darktable_vignette_brightness"], -0.25);
+    assert_eq!(receita["darktable_vignette_shape"], 2.0);
+    // O que não estava gravado fica no neutro, o padrão do darktable.
+    assert_eq!(receita.len(), 1 + 3);
+
+    let mut desligada =
+        serde_json::json!({ "dt_vignette_ativo": 0.0, "dt_vignette_brightness": 1.0 });
+    let receita = desligada.as_object_mut().unwrap();
+    migrar_do_darktable(receita);
+    assert!(
+        receita.is_empty(),
+        "vinheta desligada não volta: {receita:?}"
+    );
 }
 
 // ============================================

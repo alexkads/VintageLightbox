@@ -60,12 +60,18 @@ pub enum Secao {
     Tonalizacao,
     /// A vinheta pós-corte do Lightroom — o primeiro grupo do painel Efeitos.
     Vinheta,
-    /// O grão — o segundo grupo do painel Efeitos.
+    /// 🎞️ A vinheta do darktable (o `vignette` do `RecordarFotos P&B`) — o
+    /// segundo grupo do painel Efeitos, na ordem do shader. O liga/desliga é
+    /// a chave do título, como o botão do módulo no darktable.
+    VinhetaDarktable,
+    /// A segunda metade do módulo, com o subtítulo dele: "posição / forma".
+    VinhetaDarktableForma,
+    /// O grão — o último grupo do painel Efeitos.
     Grao,
 }
 
 impl Secao {
-    pub const TODAS: [Secao; 15] = [
+    pub const TODAS: [Secao; 17] = [
         Secao::Basico,
         Secao::Tratamento,
         Secao::CurvaDeTons,
@@ -80,6 +86,8 @@ impl Secao {
         Secao::Calibracao,
         Secao::Tonalizacao,
         Secao::Vinheta,
+        Secao::VinhetaDarktable,
+        Secao::VinhetaDarktableForma,
         Secao::Grao,
     ];
 
@@ -101,6 +109,8 @@ impl Secao {
             Secao::Calibracao => "Calibração",
             Secao::Tonalizacao => "Tonalização",
             Secao::Vinheta => "Vinheta de corte posterior",
+            Secao::VinhetaDarktable => "Vinheta do darktable",
+            Secao::VinhetaDarktableForma => "Posição / forma",
             Secao::Grao => "Granulado",
         }
     }
@@ -118,7 +128,10 @@ impl Secao {
             Secao::Lente => Painel::Lente,
             Secao::Calibracao => Painel::Calibracao,
             Secao::Tonalizacao => Painel::Tonalizacao,
-            Secao::Vinheta | Secao::Grao => Painel::Efeitos,
+            Secao::Vinheta
+            | Secao::VinhetaDarktable
+            | Secao::VinhetaDarktableForma
+            | Secao::Grao => Painel::Efeitos,
         }
     }
 }
@@ -219,8 +232,14 @@ impl Painel {
             Painel::Lente => &[Secao::Lente],
             Painel::Calibracao => &[Secao::Calibracao],
             Painel::Tonalizacao => &[Secao::Tonalizacao],
-            // 🎞️ Os dois grupos do Lightroom, cada um com o seu título.
-            Painel::Efeitos => &[Secao::Vinheta, Secao::Grao],
+            // 🎞️ Os dois grupos do Lightroom, cada um com o seu título, e a
+            // vinheta do darktable entre eles — a ordem do shader.
+            Painel::Efeitos => &[
+                Secao::Vinheta,
+                Secao::VinhetaDarktable,
+                Secao::VinhetaDarktableForma,
+                Secao::Grao,
+            ],
         }
     }
 
@@ -479,6 +498,21 @@ fn vinheta_ligada(a: &Ajustes) -> bool {
 /// tinta — é o que o shader faz, e o que o Lightroom apaga.
 fn realces_da_vinheta(a: &Ajustes) -> bool {
     a.pcv_amount < 0.0 && a.pcv_style.round() != 2.0
+}
+
+/// Os nomes da matização do `vignette.c` (`dt_iop_dither_t`), na ordem do
+/// `darktable_vignette_dithering`, como o darktable em português os diz.
+pub const MATIZACAO_DO_DARKTABLE: &[&str] = &["Desligada", "Saída de 8 bits", "Saída de 16 bits"];
+
+/// A vinheta do darktable está ligada — a chave do título do grupo.
+fn vinheta_do_darktable_ligada(a: &Ajustes) -> bool {
+    a.vinheta_do_darktable_ligada()
+}
+
+/// A relação largura/altura só vale com a proporção automática desligada —
+/// ligada, a forma segue o quadro.
+fn proporcao_manual(a: &Ajustes) -> bool {
+    a.vinheta_do_darktable_ligada() && a.darktable_vignette_autoratio < 0.5
 }
 
 /// O grão age com alguma intensidade.
@@ -834,6 +868,103 @@ pub const CONTROLES: &[Definicao] = &[
     cem!(S::Vinheta, "Arredondamento", pcv_roundness).ativo_quando(vinheta_ligada),
     cento!(S::Vinheta, "Difusão", pcv_feather).ativo_quando(vinheta_ligada),
     cento!(S::Vinheta, "Realces", pcv_highlights).ativo_quando(realces_da_vinheta),
+    // 🎞️ A vinheta do darktable — o `gui_init` de `src/iop/vignette.c`: os
+    // mesmos controles, na mesma ordem, com as faixas, as casas e os nomes
+    // do darktable em português. "Ligar" é a chave do título do grupo.
+    interruptor!(S::VinhetaDarktable, "Ligar", darktable_vignette_ativo),
+    def!(
+        S::VinhetaDarktable,
+        "Início do decaimento",
+        darktable_vignette_scale,
+        0.0,
+        200.0,
+        2,
+        false
+    )
+    .ativo_quando(vinheta_do_darktable_ligada),
+    def!(
+        S::VinhetaDarktable,
+        "Raio do decaimento",
+        darktable_vignette_falloff_scale,
+        0.0,
+        200.0,
+        2,
+        false
+    )
+    .ativo_quando(vinheta_do_darktable_ligada),
+    def!(
+        S::VinhetaDarktable,
+        "Brilho",
+        darktable_vignette_brightness,
+        -1.0,
+        1.0,
+        3,
+        true
+    )
+    .ativo_quando(vinheta_do_darktable_ligada),
+    def!(
+        S::VinhetaDarktable,
+        "Saturação",
+        darktable_vignette_saturation,
+        -1.0,
+        1.0,
+        3,
+        true
+    )
+    .ativo_quando(vinheta_do_darktable_ligada),
+    def!(
+        S::VinhetaDarktableForma,
+        "Centro horizontal",
+        darktable_vignette_center_x,
+        -1.0,
+        1.0,
+        3,
+        true
+    )
+    .ativo_quando(vinheta_do_darktable_ligada),
+    def!(
+        S::VinhetaDarktableForma,
+        "Centro vertical",
+        darktable_vignette_center_y,
+        -1.0,
+        1.0,
+        3,
+        true
+    )
+    .ativo_quando(vinheta_do_darktable_ligada),
+    def!(
+        S::VinhetaDarktableForma,
+        "Forma",
+        darktable_vignette_shape,
+        0.0,
+        5.0,
+        2,
+        false
+    )
+    .ativo_quando(vinheta_do_darktable_ligada),
+    interruptor!(
+        S::VinhetaDarktableForma,
+        "Proporção automática",
+        darktable_vignette_autoratio
+    )
+    .ativo_quando(vinheta_do_darktable_ligada),
+    def!(
+        S::VinhetaDarktableForma,
+        "Largura/altura",
+        darktable_vignette_whratio,
+        0.0,
+        2.0,
+        3,
+        false
+    )
+    .ativo_quando(proporcao_manual),
+    escolha!(
+        S::VinhetaDarktableForma,
+        "Matização",
+        darktable_vignette_dithering,
+        MATIZACAO_DO_DARKTABLE
+    )
+    .ativo_quando(vinheta_do_darktable_ligada),
     cento!(S::Grao, "Intensidade", grain_amount),
     cento!(S::Grao, "Tamanho", grain_size).ativo_quando(grao_ligado),
     cento!(S::Grao, "Aspereza", grain_roughness).ativo_quando(grao_ligado),
@@ -1013,8 +1144,9 @@ mod passo_dos_controles {
             .collect();
         assert_eq!(
             interruptores.len(),
-            2,
-            "bw_ativo e o processo do Lightroom (os 7 do darktable saíram em 2/out/2026)"
+            4,
+            "bw_ativo, o processo do Lightroom e as duas chaves da vinheta do darktable \
+             (os 7 do estágio darktable saíram em 2/out/2026)"
         );
         for d in interruptores {
             assert_eq!(
@@ -1338,7 +1470,37 @@ mod efeitos_do_lightroom {
 
     #[test]
     fn a_vinheta_e_o_granulado_na_ordem_do_lightroom() {
-        assert_eq!(Painel::Efeitos.secoes(), &[Secao::Vinheta, Secao::Grao]);
+        assert_eq!(
+            Painel::Efeitos.secoes(),
+            &[
+                Secao::Vinheta,
+                Secao::VinhetaDarktable,
+                Secao::VinhetaDarktableForma,
+                Secao::Grao
+            ]
+        );
+        // O `gui_init` do `vignette.c`, na ordem dele.
+        assert_eq!(
+            rotulos(Secao::VinhetaDarktable),
+            [
+                "Ligar",
+                "Início do decaimento",
+                "Raio do decaimento",
+                "Brilho",
+                "Saturação"
+            ]
+        );
+        assert_eq!(
+            rotulos(Secao::VinhetaDarktableForma),
+            [
+                "Centro horizontal",
+                "Centro vertical",
+                "Forma",
+                "Proporção automática",
+                "Largura/altura",
+                "Matização"
+            ]
+        );
         assert_eq!(
             rotulos(Secao::Vinheta),
             [
@@ -1369,6 +1531,19 @@ mod efeitos_do_lightroom {
 
         let neutro = Ajustes::default();
         assert_eq!(acesos(&neutro, Secao::Vinheta), ["Estilo", "Intensidade"]);
+        assert_eq!(acesos(&neutro, Secao::VinhetaDarktable), ["Ligar"]);
+        assert!(acesos(&neutro, Secao::VinhetaDarktableForma).is_empty());
+        let darktable = Ajustes {
+            darktable_vignette_ativo: 1.0,
+            ..neutro
+        };
+        assert_eq!(acesos(&darktable, Secao::VinhetaDarktable).len(), 5);
+        assert_eq!(acesos(&darktable, Secao::VinhetaDarktableForma).len(), 6);
+        let automatica = Ajustes {
+            darktable_vignette_autoratio: 1.0,
+            ..darktable
+        };
+        assert!(!acesos(&automatica, Secao::VinhetaDarktableForma).contains(&"Largura/altura"));
         assert_eq!(acesos(&neutro, Secao::Grao), ["Intensidade"]);
 
         let escura = Ajustes {
