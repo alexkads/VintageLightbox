@@ -701,7 +701,15 @@ mod testes {
         let ligada = menor_de_cinco(&um_quadro);
         let encerrada = parar().expect("a captura existia");
         eprintln!("custo por quadro: desligada {desligada:?}, ligada {ligada:?}");
-        assert_eq!(encerrada.coletor.quadros().len(), (bloco * 5) as usize);
+        // 🧵 A captura é global: os testes de janela que rodam em paralelo
+        // desenham quadros na mesma conta enquanto este mede (03/out/2026:
+        // 20029 em vez de 20000). Os deste teste estão todos lá.
+        assert!(
+            encerrada.coletor.quadros().len() >= (bloco * 5) as usize,
+            "faltaram quadros: {} < {}",
+            encerrada.coletor.quadros().len(),
+            bloco * 5
+        );
         assert!(desligada < Duration::from_micros(2), "{desligada:?}");
         assert!(ligada < Duration::from_micros(80), "{ligada:?}");
     }
