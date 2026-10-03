@@ -18,9 +18,11 @@ pub enum GestoDoFim {
     Link,
     Avisar,
 }
-use domain::value_objects::CropSettings;
+use domain::value_objects::{CropSettings, ExportOptions};
 use infrastructure::gpu_adjustments::Ajustes;
 use infrastructure::ImageExporterImpl;
+
+use crate::exportacao::porta::RevelaDoSite;
 
 /// O que volta pelo canal.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -451,6 +453,63 @@ pub struct PublicadorDaApi {
     editada_de: EditadaDoSite,
 }
 
+/// A foto do site revelada em resolução cheia, com as decisões de uma
+/// exportação — o "Baixar JPEG" e a exportação da sessão pelo mesmo caminho.
+///
+/// 🔑 **Um caminho só para os dois gestos.** A exportação em lote nasceu
+/// chamando o catálogo, e a foto do site morria em "Photo ID inválido"; o
+/// "Baixar JPEG" já sabia revelar a foto do site. Duas cópias da mesma regra
+/// divergiriam na primeira mudança (a imagem editada, C32, é o exemplo).
+#[derive(Clone)]
+pub struct RevelacaoDoSite {
+    controlador: Arc<PosVendaController>,
+    exportador: Arc<ImageExporterImpl>,
+    locais_de: LocaisDoSite,
+    editada_de: EditadaDoSite,
+}
+
+impl crate::exportacao::porta::RevelaDoSite for RevelacaoDoSite {
+    fn revelar(
+        &self,
+        sessao: Sessao,
+        foto_no_site: String,
+        ajustes: Ajustes,
+        corte: CropSettings,
+        original_local: Option<std::path::PathBuf>,
+        opcoes: ExportOptions,
+    ) -> crate::exportacao::porta::Pronta {
+        let controlador = self.controlador.clone();
+        let exportador = self.exportador.clone();
+        let locais = locais_lidos(&self.locais_de, &foto_no_site);
+        let editada = (self.editada_de)(&foto_no_site);
+        Box::pin(async move {
+            let locais = locais
+                .map_err(|e| format!("a Revelação local desta foto não pôde ser lida: {e}"))?;
+            // 🖌️ A imagem editada vem antes de tudo (C32); depois o bruto que
+            // está neste disco, e só então o download.
+            let original = match (editada, original_local) {
+                (Some(arquivo), _) => tokio::fs::read(&arquivo)
+                    .await
+                    .map_err(|e| format!("a imagem editada não abriu: {e}"))?,
+                (None, Some(arquivo)) => match tokio::fs::read(&arquivo).await {
+                    Ok(bytes) => bytes,
+                    // A cópia daqui sumiu (cartão fora, pasta movida): o site
+                    // ainda tem o bruto.
+                    Err(_) => controlador.original(&sessao, &foto_no_site).await?,
+                },
+                (None, None) => controlador.original(&sessao, &foto_no_site).await?,
+            };
+            tokio::task::spawn_blocking(move || {
+                exportador
+                    .renderizar_bytes_com_opcoes(&original, &ajustes, &corte, &locais, &opcoes)
+            })
+            .await
+            .map_err(|e| format!("a revelação não terminou: {e}"))?
+            .map_err(|e| e.to_string())
+        })
+    }
+}
+
 /// De onde a porta tira a imagem editada de uma foto do site.
 pub type EditadaDoSite = Arc<dyn Fn(&str) -> Option<std::path::PathBuf> + Send + Sync>;
 
@@ -469,6 +528,17 @@ impl PublicadorDaApi {
             tokio,
             locais_de: Arc::new(|_| None),
             editada_de: Arc::new(|_| None),
+        }
+    }
+
+    /// O revelador da foto do site, com as mesmas peças desta porta — é o que a
+    /// exportação recebe no `main`.
+    pub fn revelacao_do_site(&self) -> RevelacaoDoSite {
+        RevelacaoDoSite {
+            controlador: self.controlador.clone(),
+            exportador: self.exportador.clone(),
+            locais_de: self.locais_de.clone(),
+            editada_de: self.editada_de.clone(),
         }
     }
 
@@ -702,27 +772,15 @@ impl Publicador for PublicadorDaApi {
         corte: CropSettings,
         canal: Sender<Recado>,
     ) {
-        let controlador = self.controlador.clone();
-        let exportador = self.exportador.clone();
-        let locais = locais_lidos(&self.locais_de, &foto_no_site);
-        let editada = (self.editada_de)(&foto_no_site);
+        let revelado = self.revelacao_do_site().revelar(
+            sessao,
+            foto_no_site.clone(),
+            ajustes,
+            corte,
+            None,
+            ExportOptions::default().with_quality(QUALIDADE),
+        );
         self.tokio.spawn(async move {
-            let revelado = async {
-                let locais = locais
-                    .map_err(|e| format!("a Revelação local desta foto não pôde ser lida: {e}"))?;
-                let original = match editada {
-                    Some(arquivo) => tokio::fs::read(&arquivo)
-                        .await
-                        .map_err(|e| format!("a imagem editada não abriu: {e}"))?,
-                    None => controlador.original(&sessao, &foto_no_site).await?,
-                };
-                tokio::task::spawn_blocking(move || {
-                    exportador.renderizar_bytes(&original, &ajustes, &corte, &locais, QUALIDADE)
-                })
-                .await
-                .map_err(|e| format!("a revelação não terminou: {e}"))?
-                .map_err(|e| e.to_string())
-            };
             let recado = match revelado.await {
                 Ok(bytes) => Recado::JpegRevelado {
                     foto_no_site,

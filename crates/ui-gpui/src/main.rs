@@ -276,21 +276,6 @@ async fn main() {
         biblioteca.clone(),
         tokio::runtime::Handle::current(),
     ));
-    // 🚨 **A montagem que nunca existiu.** `ExportPhotoUseCase`,
-    // `ExportController` e `ImageExporterImpl` estavam escritos e testados desde
-    // antes da migração, e este `Arc::new` nunca foi escrito: o app não tinha
-    // caminho nenhum até um arquivo no disco. Camada pronta não é funcionalidade
-    // entregue — a pergunta é sempre "que clique chega até aqui?".
-    let exportador: Arc<dyn Exportador> = Arc::new(ExportadorDoBanco::novo(
-        Arc::new(adapters::controllers::ExportController::new(Arc::new(
-            use_cases::ExportPhotoUseCase::new(
-                repositorio_de_fotos.clone(),
-                Arc::new(exportador_de_fotos()),
-            ),
-        ))),
-        tokio::runtime::Handle::current(),
-    ));
-
     // 📸 O pós-venda do site — o vão que o projeto existe para fechar. O mesmo
     // exportador da exportação, em memória: o que sobe é o que a tela mostra,
     // e o site gera a prévia marcada a partir dele.
@@ -330,43 +315,63 @@ async fn main() {
             tokio::runtime::Handle::current(),
         ),
     ));
-    let publicador: Arc<dyn Publicador> = Arc::new(
-        PublicadorDaApi::novo(
-            Arc::new({
-                let api = api_do_site.clone();
-                adapters::controllers::PosVendaController::new(
-                    api.clone(),
-                    Arc::new(use_cases::pos_venda::PublicarNoPosVendaUseCase::new(
-                        repositorio_de_fotos.clone(),
-                        Arc::new(exportador_de_fotos()),
-                        // O mesmo gerador das miniaturas prepara o que sobe: ele já
-                        // abre RAW, TIFF e HEIC, e já reduz para um lado máximo.
-                        Arc::new(infrastructure::ThumbnailGeneratorImpl::new()),
-                        api,
-                    )),
-                )
-            }),
-            // 🔑 O mesmo exportador da exportação e da impressão: é ele que revela
-            // o original quando o editor salva na galeria, e a foto do cliente não
-            // pode depender de qual dos caminhos a produziu.
-            Arc::new(exportador_de_fotos()),
-            tokio::runtime::Handle::current(),
-        )
-        // A revelação local das fotos do site sobe e revela junto: a porta a lê do
-        // mesmo depósito que a tela grava.
-        .com_locais({
-            let gravador = gravador.clone();
-            Arc::new(move |foto_no_site: &str| gravador.locais_do_site(foto_no_site))
-        })
-        // 🖌️ E a imagem editada, quando houver: é ela que se revela (C32).
-        .com_editadas({
-            use ui_gpui::editor::porta::Edicoes;
-            let edicoes = edicoes.clone();
-            Arc::new(move |foto_no_site: &str| {
-                edicoes.versao_de("", Some(foto_no_site)).map(|v| v.arquivo)
-            })
+    let publicador_da_api = PublicadorDaApi::novo(
+        Arc::new({
+            let api = api_do_site.clone();
+            adapters::controllers::PosVendaController::new(
+                api.clone(),
+                Arc::new(use_cases::pos_venda::PublicarNoPosVendaUseCase::new(
+                    repositorio_de_fotos.clone(),
+                    Arc::new(exportador_de_fotos()),
+                    // O mesmo gerador das miniaturas prepara o que sobe: ele já
+                    // abre RAW, TIFF e HEIC, e já reduz para um lado máximo.
+                    Arc::new(infrastructure::ThumbnailGeneratorImpl::new()),
+                    api,
+                )),
+            )
         }),
-    );
+        // 🔑 O mesmo exportador da exportação e da impressão: é ele que revela
+        // o original quando o editor salva na galeria, e a foto do cliente não
+        // pode depender de qual dos caminhos a produziu.
+        Arc::new(exportador_de_fotos()),
+        tokio::runtime::Handle::current(),
+    )
+    // A revelação local das fotos do site sobe e revela junto: a porta a lê do
+    // mesmo depósito que a tela grava.
+    .com_locais({
+        let gravador = gravador.clone();
+        Arc::new(move |foto_no_site: &str| gravador.locais_do_site(foto_no_site))
+    })
+    // 🖌️ E a imagem editada, quando houver: é ela que se revela (C32).
+    .com_editadas({
+        use ui_gpui::editor::porta::Edicoes;
+        let edicoes = edicoes.clone();
+        Arc::new(move |foto_no_site: &str| {
+            edicoes.versao_de("", Some(foto_no_site)).map(|v| v.arquivo)
+        })
+    });
+    // 🚨 **A montagem que nunca existiu.** `ExportPhotoUseCase`,
+    // `ExportController` e `ImageExporterImpl` estavam escritos e testados desde
+    // antes da migração, e este `Arc::new` nunca foi escrito: o app não tinha
+    // caminho nenhum até um arquivo no disco. Camada pronta não é funcionalidade
+    // entregue — a pergunta é sempre "que clique chega até aqui?".
+    //
+    // 📸 E a foto da sessão, que só existe no site, sai pela **mesma**
+    // revelação do "Baixar JPEG" (`RevelacaoDoSite`) — sem ela, exportar uma
+    // sessão dava "Photo ID inválido" em todas (03/10/2026).
+    let exportador: Arc<dyn Exportador> = Arc::new(ExportadorDoBanco::novo(
+        Arc::new(ui_gpui::exportacao::porta::CatalogoDoBanco(Arc::new(
+            adapters::controllers::ExportController::new(Arc::new(
+                use_cases::ExportPhotoUseCase::new(
+                    repositorio_de_fotos.clone(),
+                    Arc::new(exportador_de_fotos()),
+                ),
+            )),
+        ))),
+        Arc::new(publicador_da_api.revelacao_do_site()),
+        tokio::runtime::Handle::current(),
+    ));
+    let publicador: Arc<dyn Publicador> = Arc::new(publicador_da_api);
 
     // 📦 O acervo de arquivos de `/dashboard/backup`: lista pastas, pede a URL
     // assinada e sobe o arquivo direto no R2. Mesmo cliente, mesmo token.

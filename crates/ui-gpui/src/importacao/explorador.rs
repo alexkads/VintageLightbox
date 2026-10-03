@@ -151,6 +151,13 @@ pub trait SeletorDePasta: Send + Sync + 'static {
     /// O mesmo, para a pasta de destino. Responde `DestinoEscolhido` ou
     /// `SemEscolha`.
     fn escolher_destino(&self, canal: Sender<Recado>, cx: &mut gpui_kit::App);
+
+    /// Um **arquivo**, e não uma pasta — a marca d'água da exportação.
+    /// Responde `ArquivoEscolhido` ou `SemEscolha`.
+    ///
+    /// 🚨 A marca d'água usava `escolher`, que só deixa apontar pasta: o
+    /// logotipo nunca podia ser escolhido, e a "Prévia da galeria" nunca saía.
+    fn escolher_arquivo(&self, canal: Sender<Recado>, cx: &mut gpui_kit::App);
 }
 
 /// O seletor do sistema, pelo diálogo do próprio GPUI.
@@ -202,9 +209,19 @@ impl SeletorNativo {
         como: fn(String) -> Recado,
         cx: &mut gpui_kit::App,
     ) {
+        Self::pedir_caminho(rotulo, false, canal, como, cx);
+    }
+
+    fn pedir_caminho(
+        rotulo: &'static str,
+        arquivo: bool,
+        canal: Sender<Recado>,
+        como: fn(String) -> Recado,
+        cx: &mut gpui_kit::App,
+    ) {
         let escolha = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
-            files: false,
-            directories: true,
+            files: arquivo,
+            directories: !arquivo,
             multiple: false,
             prompt: Some(rotulo.into()),
         });
@@ -237,6 +254,10 @@ impl SeletorDePasta for SeletorNativo {
 
     fn escolher_destino(&self, canal: Sender<Recado>, cx: &mut gpui_kit::App) {
         Self::pedir("Escolher o destino", canal, Recado::DestinoEscolhido, cx);
+    }
+
+    fn escolher_arquivo(&self, canal: Sender<Recado>, cx: &mut gpui_kit::App) {
+        Self::pedir_caminho("Escolher", true, canal, Recado::ArquivoEscolhido, cx);
     }
 }
 
@@ -680,6 +701,14 @@ pub mod mentira {
         fn escolher_destino(&self, canal: Sender<Recado>, _cx: &mut gpui_kit::App) {
             let recado = match self.escolha.lock().expect("a escolha").clone() {
                 Some(caminho) => Recado::DestinoEscolhido(caminho),
+                None => Recado::SemEscolha,
+            };
+            let _ = canal.send(recado);
+        }
+
+        fn escolher_arquivo(&self, canal: Sender<Recado>, _cx: &mut gpui_kit::App) {
+            let recado = match self.escolha.lock().expect("a escolha").clone() {
+                Some(caminho) => Recado::ArquivoEscolhido(caminho),
                 None => Recado::SemEscolha,
             };
             let _ = canal.send(recado);

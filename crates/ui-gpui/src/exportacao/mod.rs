@@ -13,4 +13,5 @@
 
 pub mod destino;
 pub mod porta;
+pub mod preferencias;
 pub mod tela;

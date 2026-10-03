@@ -106,6 +106,11 @@ pub fn botao_secundario_pequeno(id: impl Into<SharedString>, _cx: &App) -> Butto
     botao_pequeno(id).secondary()
 }
 
+/// [`botao_fantasma`] no tamanho pequeno — o "Trocar…" dentro de uma caixa.
+pub fn botao_fantasma_pequeno(id: impl Into<SharedString>, _cx: &App) -> Button {
+    botao_pequeno(id).ghost()
+}
+
 /// Um campo (`Select`, `Input`) na altura do botão pequeno, para ficar
 /// alinhado a ele numa barra densa.
 pub fn campo_pequeno<E: Styled>(elemento: E) -> E {

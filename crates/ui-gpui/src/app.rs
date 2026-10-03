@@ -63,7 +63,7 @@ use crate::cliente::{
 use crate::configuracoes::Configuracoes;
 use crate::entrada::{Entrada, Entrou};
 use crate::exportacao::porta::Exportador;
-use crate::exportacao::tela::Exportacao;
+use crate::exportacao::tela::{Exportacao, PedidoDaExportacao};
 use crate::importacao::explorador::{Explorador, GeradorDeMiniaturas, Importador, SeletorDePasta};
 use crate::importacao::tela::{Importacao, Importou};
 use crate::impressao::tela::Impressao;
@@ -527,6 +527,7 @@ pub struct Aplicativo {
     importando: bool,
     /// O modal de exportação — o único caminho do app até um arquivo no disco.
     exportacao: Entity<Exportacao>,
+    _pedido_da_exportacao: gpui_kit::Subscription,
     exportando: bool,
     /// O modal do pós-venda — o único caminho do app até o site.
     /// O balcão: o que o cliente acertou ao levar a foto na hora.
@@ -1349,6 +1350,29 @@ impl Aplicativo {
             raiz.reler_o_acervo(cx);
         });
 
+        let exportacao =
+            cx.new(|cx| Exportacao::nova(portas.exportador, seletor_para_exportar, cx));
+        // "Cancelar"/"Concluir" fecham o modal; o fim do lote com o modal já
+        // fechado vira toast — fechar não cancela, e o resultado não pode sumir.
+        let pedido_da_exportacao = cx.subscribe_in(
+            &exportacao,
+            window,
+            |raiz, _, pedido: &PedidoDaExportacao, window, cx| match pedido {
+                PedidoDaExportacao::Fechar => raiz.fechar_exportacao(window, cx),
+                PedidoDaExportacao::Terminou { texto, falhou } => {
+                    if !raiz.exportando {
+                        let tipo = if *falhou {
+                            crate::estilo::Toast::Erro
+                        } else {
+                            crate::estilo::Toast::Sucesso
+                        };
+                        let nota = crate::estilo::toast(texto.clone(), tipo, cx);
+                        crate::estilo::mostrar_toast(nota, window, cx);
+                    }
+                }
+            },
+        );
+
         Self {
             biblioteca,
             revelacao,
@@ -1363,7 +1387,8 @@ impl Aplicativo {
             }),
             importacao,
             importando: false,
-            exportacao: cx.new(|_| Exportacao::nova(portas.exportador, seletor_para_exportar)),
+            exportacao,
+            _pedido_da_exportacao: pedido_da_exportacao,
             exportando: false,
             entrada,
             sessao: None,
@@ -4283,10 +4308,7 @@ impl Aplicativo {
             PedidoDaRevelacao::BaixarComo => {
                 let fotos = self.revelacao.update(cx, |tela, _cx| tela.levar_a_baixar());
                 if self.pode_trabalhar() && !fotos.is_empty() {
-                    self.exportacao
-                        .update(cx, |tela, cx| tela.abrir_para(fotos, cx));
-                    self.exportando = true;
-                    cx.notify();
+                    self.abrir_a_exportacao(fotos, cx);
                 }
             }
             // 📸 Passo 11 a cada troca de foto, e não só na abertura: se o
@@ -5231,8 +5253,27 @@ impl Aplicativo {
             selecionadas
         };
 
+        self.abrir_a_exportacao(fotos, cx);
+    }
+
+    /// Abre o modal de exportação para estas fotos, com o que a porta precisa
+    /// para a foto do site: a conta e o bruto que estiver neste disco.
+    fn abrir_a_exportacao(&mut self, fotos: Vec<PhotoViewModel>, cx: &mut Context<Self>) {
+        let sessao = self.sessao().cloned();
+        let copias: std::collections::HashMap<String, std::path::PathBuf> = {
+            let biblioteca = self.biblioteca.read(cx);
+            fotos
+                .iter()
+                .filter(|f| persistencia::so_existe_no_site(f))
+                .filter_map(|f| {
+                    let no_site = f.pos_venda_foto_id.clone()?;
+                    let caminho = biblioteca.caminho_local_do_site(&no_site)?;
+                    Some((no_site, caminho))
+                })
+                .collect()
+        };
         self.exportacao
-            .update(cx, |tela, cx| tela.abrir_para(fotos, cx));
+            .update(cx, |tela, cx| tela.abrir_para(fotos, sessao, copias, cx));
         self.exportando = true;
         cx.notify();
     }
@@ -5277,10 +5318,7 @@ impl Aplicativo {
             _ => {
                 self.revelacao
                     .update(cx, |tela, _| tela.gravar_o_que_estiver_pendente());
-                self.exportacao
-                    .update(cx, |tela, cx| tela.abrir_para(vec![foto], cx));
-                self.exportando = true;
-                cx.notify();
+                self.abrir_a_exportacao(vec![foto], cx);
             }
         }
     }
@@ -6449,19 +6487,23 @@ impl Aplicativo {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        let titulo = self.exportacao.read(cx).titulo();
         let miolo = v_flex()
             .gap(px(16.))
             .child(crate::dialogo::cabecalho_com_x(
                 "fechar-exportacao",
-                "Exportar fotos",
+                titulo,
                 cx.listener(|este, _, window, cx| este.fechar_exportacao(window, cx)),
                 cx,
             ))
             .child(self.exportacao.clone())
             .into_any_element();
+        // O rodapé do `AlertDialogFooter`: os botões são da exportação, que
+        // sabe em que momento o lote está.
+        let rodape = self.exportacao.update(cx, |tela, cx| tela.rodape(cx));
         crate::dialogo::desenhar_conteudo(
             Some(miolo),
-            None,
+            Some(rodape),
             crate::dialogo::Jeito::alerta(448.),
             |este, window, cx| este.fechar_exportacao(window, cx),
             window,
@@ -11197,23 +11239,21 @@ mod testes {
             .update(cx, |app, _window, cx| {
                 app.exportar(cx);
                 assert!(app.exportando());
-                app.exportacao.update(cx, |tela, cx| {
+                app.exportacao.update(cx, |tela, _cx| {
                     assert_eq!(
                         tela.quantas(),
                         2,
                         "sem seleção múltipla, exporta o que a grade está mostrando"
                     );
-                    // Sem pasta escolhida não sai nada: gravar em algum lugar
-                    // padrão espalharia arquivo onde ninguém foi procurar.
-                    tela.exportar(cx);
+                    // 🔄 Sem pasta escolhida o destino é a Downloads, **à vista**
+                    // no "Salvar em" — como o "Baixar" do site (03/10/2026).
+                    assert_eq!(
+                        tela.pasta(),
+                        Some(&crate::exportacao::preferencias::pasta_dos_downloads())
+                    );
                 });
             })
             .expect("a janela deve estar aberta");
-
-        assert!(
-            exportador.pedidos().is_empty(),
-            "exportar sem pasta escolhida não pode gravar nada"
-        );
 
         let pasta = tempfile::tempdir().expect("pasta de saída");
         janela
@@ -11244,7 +11284,7 @@ mod testes {
                     let p = tela.progresso().expect("o lote começou");
                     assert!(p.terminou);
                     assert_eq!((p.feitas, p.falhas), (2, 0));
-                    assert_eq!(tela.resumo(), "2 exportadas");
+                    assert_eq!(tela.resumo(), "2 fotos exportadas");
                 });
             })
             .expect("a janela deve estar aberta");
@@ -12197,7 +12237,7 @@ mod testes {
                     tela.escolher_pasta_para_teste(pasta.path().to_path_buf(), cx);
                     tela.escolher_modo(Modo::Previa, cx);
                     assert!(
-                        tela.opcoes().is_none(),
+                        tela.opcoes(cx).is_none(),
                         "sem marca escolhida não pode haver opções válidas"
                     );
                     tela.exportar(cx);
@@ -12337,7 +12377,7 @@ mod testes {
                         (1, 1),
                         "a segunda saiu mesmo com a primeira falhando"
                     );
-                    assert_eq!(tela.resumo(), "1 exportadas · 1 falharam");
+                    assert_eq!(tela.resumo(), "1 foto exportada · 1 falhou");
                 });
             })
             .expect("a janela deve estar aberta");

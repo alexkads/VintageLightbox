@@ -1199,18 +1199,102 @@ fn exportar_pelo_botao_da_barra(cx: &mut TestAppContext) {
         let destino = pasta.path().to_path_buf();
         modal.update(cx, |tela, cx| {
             tela.escolher_pasta_para_teste(destino, cx);
-            tela.exportar(cx);
         });
     });
+    // 📐 O diálogo de verdade: a caixa "Salvar em" cabe na largura dele (a
+    // mesma do rodapé), e o rodapé fica embaixo do conteúdo.
+    {
+        let mut visual = super::chatbot::quadro_novo(&e, cx);
+        let destino = visual
+            .debug_bounds("exportacao-destino")
+            .expect("o \"Salvar em\" não está desenhado");
+        let rodape = visual
+            .debug_bounds("exportacao-rodape")
+            .expect("o rodapé do diálogo não está desenhado");
+        assert!(
+            destino.left() >= rodape.left() && destino.right() <= rodape.right(),
+            "o \"Salvar em\" vaza do diálogo: {destino:?} × {rodape:?}"
+        );
+        assert!(
+            destino.bottom() <= rodape.top(),
+            "o rodapé cobre o conteúdo"
+        );
+    }
+    // 🔑 Pelo botão do rodapé do diálogo, e não pelo método: é ele que o
+    // operador aperta. O lote fica segurado para a tela ser vista **durante**.
+    *e.exportador.segurar.lock().unwrap() = true;
+    clicar(&e, cx, "exportacao-exportar");
+    e.esperar(cx);
+    {
+        let mut visual = super::chatbot::quadro_novo(&e, cx);
+        assert!(
+            visual.debug_bounds("exportacao-progresso").is_some(),
+            "a barra de progresso não está no diálogo durante o lote"
+        );
+        assert!(
+            visual.debug_bounds("exportacao-parar").is_some(),
+            "sem o Parar durante o lote"
+        );
+    }
+    e.exportador.soltar();
     e.esperar(cx);
     let pedidos = e.exportador.pedidos();
     assert_eq!(pedidos.len(), 1, "um lote");
     assert!(pedidos[0]
         .iter()
         .all(|s| s.destino.starts_with(pasta.path())));
-    e.app(cx, |app, window, cx| {
-        app.fechar_exportacao(window, cx);
-        assert!(!app.exportando());
+    // 🚨 O print de 02/10: a foto da sessão ia ao catálogo e voltava "Photo ID
+    // inválido". Ela vai pelo site, com a conta junto e o nome da câmera.
+    // A que tem arquivo neste disco continua pelo catálogo.
+    use crate::exportacao::porta::Origem;
+    for saida in &pedidos[0] {
+        let do_catalogo = saida
+            .destino
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("DSC_");
+        match &saida.origem {
+            Origem::Catalogo { id } => assert!(do_catalogo, "{id} foi ao catálogo"),
+            Origem::Site { foto_no_site, .. } => {
+                assert!(!do_catalogo, "{foto_no_site} tinha arquivo aqui")
+            }
+        }
+    }
+    assert!(
+        pedidos[0]
+            .iter()
+            .any(|s| matches!(s.origem, Origem::Site { .. })),
+        "nenhuma foto do site no lote"
+    );
+    assert!(
+        e.exportador.sessoes.lock().unwrap()[0].is_some(),
+        "o lote da sessão saiu sem a conta do site"
+    );
+    assert!(pedidos[0].iter().all(|s| !s
+        .destino
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .starts_with("foto")));
+    e.app(cx, |app, _w, cx| {
+        let p = app.exportacao_para_teste().read(cx).progresso().unwrap();
+        assert!(p.terminou, "o lote de mentira responde na hora");
+    });
+    {
+        let mut visual = super::chatbot::quadro_novo(&e, cx);
+        assert!(
+            visual.debug_bounds("exportacao-mostrar").is_some(),
+            "sem o \"Mostrar na pasta\" no fim do lote"
+        );
+        assert!(
+            visual.debug_bounds("exportacao-falhas").is_none(),
+            "lista de falhas num lote sem falha"
+        );
+    }
+    clicar(&e, cx, "exportacao-concluir");
+    e.app(cx, |app, _window, _cx| {
+        assert!(!app.exportando(), "Concluir fecha o modal");
     });
 }
 

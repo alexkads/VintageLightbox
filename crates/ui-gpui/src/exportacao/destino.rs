@@ -45,7 +45,11 @@ impl Destinos {
 
         let mut nome = format!("{base}.{extensao}");
         let mut n = 2;
-        while !self.tomados.insert(nome.to_lowercase()) {
+        // 🚨 **O disco também conta, e não só o lote.** Reexportar para a mesma
+        // pasta gravava por cima da entrega anterior sem perguntar — o
+        // "Choose a new name" do Lightroom é o que vale aqui: o arquivo que já
+        // está lá nunca é tocado.
+        while !self.tomados.insert(nome.to_lowercase()) || self.pasta.join(&nome).exists() {
             // `-2`, `-3`… é a convenção do próprio Lightroom para colisão dentro
             // de um lote.
             nome = format!("{base}-{n}.{extensao}");
@@ -145,6 +149,33 @@ mod testes {
         assert_eq!(
             destinos.para(r"C:\Fotos\2024\DSC_1.NEF", "jpg"),
             Path::new("/saida/DSC_1.jpg")
+        );
+    }
+
+    /// 🚨 Reexportar para a mesma pasta não grava por cima do que já está lá.
+    #[test]
+    fn o_arquivo_que_ja_esta_na_pasta_nao_e_sobrescrito() {
+        let pasta = tempfile::tempdir().unwrap();
+        std::fs::write(pasta.path().join("DSC_1.jpg"), b"entrega de ontem").unwrap();
+        let mut destinos = Destinos::na_pasta(pasta.path());
+        assert_eq!(
+            destinos.para("/cartao/DSC_1.NEF", "jpg"),
+            pasta.path().join("DSC_1-2.jpg")
+        );
+        assert_eq!(
+            destinos.para("/outro/DSC_1.NEF", "jpg"),
+            pasta.path().join("DSC_1-3.jpg")
+        );
+    }
+
+    /// A foto do site não tem caminho: o nome é o do arquivo da câmera que a
+    /// tela manda (`PhotoViewModel::name`), e não `foto`.
+    #[test]
+    fn o_nome_da_foto_do_site_e_o_da_camera() {
+        let mut destinos = Destinos::na_pasta("/saida");
+        assert_eq!(
+            destinos.para("IMG_4021.CR3", "png"),
+            Path::new("/saida/IMG_4021.png")
         );
     }
 

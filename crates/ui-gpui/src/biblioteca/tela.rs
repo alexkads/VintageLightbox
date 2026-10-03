@@ -825,6 +825,15 @@ impl Biblioteca {
     /// e o preview dela é a imagem **da galeria** — revelada e com marca. Achar
     /// essa linha levaria a galeria para o lugar do bruto (visto no e2e
     /// `download_no_ar_nao_segura_a_janela`).
+    /// O arquivo **neste disco** da foto que está no site como `no_site` — o
+    /// bruto que a exportação usa no lugar do download.
+    pub fn caminho_local_do_site(&self, no_site: &str) -> Option<std::path::PathBuf> {
+        self.fotos
+            .iter()
+            .find(|f| f.pos_venda_foto_id.as_deref() == Some(no_site) && e_copia_local(f))
+            .map(|f| std::path::PathBuf::from(&f.path))
+    }
+
     pub fn id_local_do_site(&self, no_site: &str) -> Option<String> {
         self.fotos
             .iter()
