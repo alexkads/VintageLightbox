@@ -1,12 +1,11 @@
 {
-  "versao": "0.1.74",
-  "titulo": "Exporte as predefinições: uma, um grupo ou todas, como no Lightroom.",
+  "versao": "0.1.75",
+  "titulo": "O menu lateral ficou arrumado.",
   "importante": false,
   "novidades": [
-    "Na Revelação, o botão direito numa predefinição tem \"Exportar…\": ela vira um arquivo .rfpreset, que você pode levar para outro balcão ou guardar de backup.",
-    "O botão direito no nome de um grupo (Minhas, Do sistema, LRs, Favoritas) tem \"Exportar o grupo…\", que grava todas as do grupo num .zip.",
-    "O ícone de baixar, ao lado do de importar, exporta todas as predefinições num .zip, com uma pasta por grupo.",
-    "O ícone de importar agora também abre os .rfpreset e os .zip (inclusive os .zip de predefinições do Lightroom). As que já existem com o mesmo nome são puladas."
+    "A conta no pé do menu lateral ocupa a largura toda, como a marca no alto e as seções no meio.",
+    "O menu da conta abre ao lado do menu lateral, alinhado ao botão da conta, sem cobrir a borda dele.",
+    "No menu da conta, os ícones têm o tamanho certo e o ✓ do tema escolhido fica na borda direita."
   ],
-  "por_que_atualizar": "Para passar as suas predefinições de um balcão para outro, ou guardar uma cópia delas, sem refazer nada."
+  "por_que_atualizar": "Para o menu lateral e o menu da conta ficarem alinhados e no tamanho padrão."
 }
