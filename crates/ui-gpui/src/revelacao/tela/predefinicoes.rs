@@ -1872,6 +1872,7 @@ impl Revelacao {
         ));
         let para_prever = preset.clone();
         let para_aplicar = preset.clone();
+        let chave_do_clique = chave.clone();
         let id = preset.id;
 
         let mut linha = div()
@@ -1896,11 +1897,18 @@ impl Revelacao {
                     .rounded(crate::tema::canto(1.))
                     .bg(cores::aceso())
             }))
-            .on_hover(cx.listener(move |tela, sobre: &bool, _window, cx| {
-                if *sobre && !tela.predefinicoes_travadas() {
-                    tela.prever(Some(&para_prever), cx);
-                } else if !*sobre {
-                    tela.prever(None, cx);
+            .on_hover(cx.listener({
+                let chave = chave.clone();
+                move |tela, sobre: &bool, _window, cx| {
+                    let suspensa = tela.previa_suspensa.as_deref() == Some(chave.as_str());
+                    if *sobre && !tela.predefinicoes_travadas() && !suspensa {
+                        tela.prever(Some(&para_prever), cx);
+                    } else if !*sobre {
+                        if suspensa {
+                            tela.previa_suspensa = None;
+                        }
+                        tela.prever(None, cx);
+                    }
                 }
             }))
             .children(alvo.map(|depois| {
@@ -2014,6 +2022,11 @@ impl Revelacao {
             .child(
                 div()
                     .id(SharedString::from(format!("aplicar-{id}")))
+                    // O e2e do ciclo de vida clica no nome, como o operador.
+                    .debug_selector({
+                        let nome = nome.clone();
+                        move || format!("predefinicao-{nome}")
+                    })
                     .flex_1()
                     .min_w(px(0.))
                     .truncate()
@@ -2038,6 +2051,7 @@ impl Revelacao {
                                 // resultado seria o preset por cima dele mesmo.
                                 tela.prever(None, cx);
                                 tela.aplicar_preset(&para_aplicar, window, cx);
+                                tela.previa_suspensa = Some(chave_do_clique.clone());
                             },
                         ))
                     }),

@@ -5500,7 +5500,11 @@ impl Aplicativo {
         //
         // ⚠️ **O envio continua contado** (`Natureza::Envio`): ele aparece em
         // "Subindo N", e fechar a janela com envio pendente só a esconde (G9).
-        self.sair_da_revelacao(cx);
+        // 🪟 E sai como o "Voltar": com o foco na tela da sessão. Só sair deixava
+        // o foco no botão "Salvar na galeria", que some com a Revelação — e as
+        // teclas da grade dependiam da rede da raiz (achado pelo e2e do ciclo
+        // de vida, 03/out/2026).
+        self.voltar_para_biblioteca(window, cx);
         self.avisar_onde_esta_olhando(
             match quantas {
                 // 🚨 Todas já subiam com esta revelação: dizer "0 fotos na fila"

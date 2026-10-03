@@ -2017,8 +2017,11 @@ impl Caixa {
                         faixa: m.shift,
                     }
                 };
+                let seletor = format!("caixa-linha-{}", i.foto_id);
                 let linha = v_flex()
                     .id(SharedString::from(format!("caixa-linha-{}", i.foto_id)))
+                    // O e2e do ciclo de vida clica na linha, como o operador.
+                    .debug_selector(move || seletor)
                     .group(grupo.clone())
                     .relative()
                     .pl(px(36.))

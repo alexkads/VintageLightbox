@@ -370,6 +370,12 @@ pub struct Revelacao {
     /// passar pelo histórico — é o gesto do Lightroom, e o do site
     /// (`editor.tsx`: `previa ? {...ajustes, ...previa} : ajustes`).
     previa: Option<Preset>,
+    /// 🖱️ A predefinição que acabou de ser aplicada pelo clique, com o ponteiro
+    /// ainda em cima: a prévia dela fica suspensa até o ponteiro sair da linha.
+    /// Sem isto a prévia voltava a ligar por cima da foto já revelada, e cada
+    /// slider mexido depois sumia da tela e da tela do cliente (achado pelo e2e
+    /// do ciclo de vida, 03/out/2026).
+    previa_suspensa: Option<String>,
     /// Se a próxima predefinição salva guarda os 53 (e não só o que saiu do
     /// neutro) — a caixa "Zerar os outros ajustes ao aplicar" do site.
     preset_inteiro: bool,
@@ -766,6 +772,7 @@ impl Revelacao {
             relatorio: None,
             renome_do_preset,
             previa: None,
+            previa_suspensa: None,
             preset_inteiro: false,
             aguardando: None,
             reveladas: CacheDeReveladas::default(),

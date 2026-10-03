@@ -87,18 +87,6 @@ impl Caixa {
         self.fechar_dialogo(window, cx);
     }
 
-    /// Um campo do diálogo aberto (`fundo`, `valor`, `motivo`, a chave da forma
-    /// no fechamento…), escrito como o operador escreveria.
-    pub(crate) fn preencher_no_dialogo(
-        &mut self,
-        campo: &str,
-        texto: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.preencher(campo, texto, window, cx);
-    }
-
     /// As vendas da sessão, como o diálogo F7 as lista: número, total, o que
     /// já foi estornado e as fotos que continuam vendidas.
     pub(crate) fn vendas_da_sessao_para_teste(&self) -> Vec<(i64, i64, i64, Vec<String>)> {
@@ -114,34 +102,6 @@ impl Caixa {
             .unwrap_or_default()
     }
 
-    /// O botão "Estornar" da venda `numero` na lista do F7, e então só as
-    /// `fotos` marcadas — o valor acompanha a seleção, como na tela.
-    pub(crate) fn estornar_da_lista(
-        &mut self,
-        numero: i64,
-        fotos: &[&str],
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let venda = self
-            .vista
-            .as_ref()
-            .and_then(|v| v.sessao.as_ref())
-            .and_then(|s| s.vendas.iter().find(|v| v.numero == numero))
-            .cloned()
-            .unwrap_or_else(|| panic!("a venda #{numero} não está na lista do F7"));
-        let fora: Vec<String> = venda
-            .itens
-            .iter()
-            .filter(|i| !i.estornada && !fotos.contains(&i.foto_id.as_str()))
-            .map(|i| i.foto_id.clone())
-            .collect();
-        self.abrir_estorno(venda, window, cx);
-        for foto in fora {
-            self.alternar_foto_do_estorno(foto, window, cx);
-        }
-    }
-
     /// A contagem cega foi conferida e o "Fechar" está à vista.
     pub(crate) fn contagem_conferida(&self) -> bool {
         self.fechamento_conferido()
@@ -150,5 +110,14 @@ impl Caixa {
     /// O diálogo de fechamento já mostra o caixa fechado (o resumo final).
     pub(crate) fn caixa_fechado_no_dialogo(&self) -> bool {
         self.fechamento_concluido()
+    }
+
+    /// Fotógrafo, atendente e auxiliar gravados pelo diálogo F3.
+    pub(crate) fn pessoas_para_teste(&self) -> [Option<String>; 3] {
+        [
+            self.pessoas.fotografo.clone(),
+            self.pessoas.atendente.clone(),
+            self.pessoas.auxiliar.clone(),
+        ]
     }
 }

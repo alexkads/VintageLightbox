@@ -60,8 +60,17 @@ fn m() -> &'static Medidas {
 /// respiro do site vão por cima, porque o estilo do botão vale depois do
 /// tamanho. (Comparado lado a lado com as fotos de antes: o médio deixava
 /// todo rótulo maior que o do site.)
+/// 🧪 **Todo botão da casa é achável pelo id** (`debug_selector`): o e2e do ciclo
+/// de vida clica onde o dedo clica, e um botão sem seletor só podia ser
+/// acionado por dentro — que não prova o clique (03/out/2026).
+fn com_seletor(id: impl Into<SharedString>) -> Button {
+    let id: SharedString = id.into();
+    let seletor = id.to_string();
+    Button::new(id).debug_selector(move || seletor)
+}
+
 fn botao(id: impl Into<SharedString>) -> Button {
-    Button::new(id.into())
+    com_seletor(id)
         .small()
         .h(em(m().botao.altura))
         .px(em(m().botao.lados))
@@ -85,10 +94,7 @@ pub fn botao_contorno(id: impl Into<SharedString>, _cx: &App) -> Button {
 /// template.
 fn botao_pequeno(id: impl Into<SharedString>) -> Button {
     let c = m().botao_pequeno;
-    Button::new(id.into())
-        .xsmall()
-        .h(em(c.altura))
-        .px(em(c.lados))
+    com_seletor(id).xsmall().h(em(c.altura)).px(em(c.lados))
 }
 
 /// [`botao_contorno`] no tamanho pequeno.
@@ -172,7 +178,7 @@ pub fn botao_icone_pequeno(id: impl Into<SharedString>, icone: Icone) -> Button 
 /// `Button variant="ghost" size="icon"`: quadrado de `lado` px, só o ícone.
 /// É o X dos diálogos, as setas e os "voltar" dos cabeçalhos.
 pub fn botao_icone(id: impl Into<SharedString>, icone: Icone, lado: f32, icone_px: f32) -> Button {
-    Button::new(id.into())
+    com_seletor(id)
         .ghost()
         .small()
         .size(px(lado))
@@ -184,7 +190,7 @@ pub fn botao_icone(id: impl Into<SharedString>, icone: Icone, lado: f32, icone_p
 /// fantasma do kit em 20 px e `text-xs`, sem a altura de 32 do botão do site.
 /// Cor e fundo próprios vão por cima, como no resto do kit.
 pub fn botao_raso(id: impl Into<SharedString>) -> Button {
-    Button::new(id.into())
+    com_seletor(id)
         .ghost()
         .xsmall()
         .h(px(20.))
@@ -606,7 +612,7 @@ fn linha_de_menu(
 /// Uma opção de um grupo de escolha (o `ToggleGroupItem` do site): o `Button`
 /// fantasma do kit, pequeno, **aceso quando escolhido** (`selected`).
 pub fn chip(id: impl Into<SharedString>, escolhido: bool) -> Button {
-    Button::new(id.into())
+    com_seletor(id)
         .ghost()
         .xsmall()
         .px(px(8.))
@@ -663,7 +669,7 @@ pub fn ficha(
 /// Um botão de ligar e desligar (o `Toggle` do site): contorno apagado, e o
 /// aceso do tema quando ligado (o âmbar do site, o cinza do Lightroom).
 pub fn alternador(id: impl Into<SharedString>, ligado: bool, cx: &App) -> Button {
-    Button::new(id.into())
+    com_seletor(id)
         .small()
         .rounded(crate::tema::canto(4.))
         .map(|b| {

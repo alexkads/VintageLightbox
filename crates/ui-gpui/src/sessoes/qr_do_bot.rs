@@ -100,6 +100,17 @@ pub fn evento_do_bot(dados: &serde_json::Value) -> bool {
     )
 }
 
+/// 💳 **O cliente pagou no pós-venda**: as fotos do pedido foram liberadas, e a
+/// sessão aberta no balcão tem de mostrá-las compradas — senão o operador
+/// segue oferecendo, no balcão, a foto que o cliente já pagou online.
+///
+/// Só este evento relê a galeria: os outros (`foto_mudou`, `foto_chegou`…)
+/// nascem quase sempre do próprio balcão, e reler a cada nota dada seria a
+/// grade piscando no meio da triagem.
+pub fn evento_de_fotos_pagas(dados: &serde_json::Value) -> bool {
+    dados.get("tipo").and_then(|t| t.as_str()) == Some("fotos_liberadas")
+}
+
 pub fn nome_do_canal(canal: &str) -> &'static str {
     match canal {
         "whatsapp" => "WhatsApp",

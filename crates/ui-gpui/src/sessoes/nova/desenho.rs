@@ -1188,9 +1188,16 @@ impl NovaSessao {
                         v_flex().flex_1().min_w(px(0.)).child(campo(
                             "Preço por foto",
                             true,
-                            crate::estilo::campo(Select::new(&self.escolha_do_produto))
-                                .placeholder("Escolha…")
-                                .w_full(),
+                            // `debug_selector` pelo mesmo motivo do título: o e2e
+                            // do ciclo de vida clica na lista onde o dedo clica.
+                            div()
+                                .w_full()
+                                .debug_selector(|| "nova-produto".into())
+                                .child(
+                                    crate::estilo::campo(Select::new(&self.escolha_do_produto))
+                                        .placeholder("Escolha…")
+                                        .w_full(),
+                                ),
                             self.erro_de(estado::FALTA_PRECO),
                             None,
                             cx,
@@ -1200,9 +1207,14 @@ impl NovaSessao {
                         v_flex().flex_1().min_w(px(0.)).child(campo(
                             "Estúdio",
                             true,
-                            crate::estilo::campo(Select::new(&self.escolha_do_estudio))
-                                .placeholder("Escolha…")
-                                .w_full(),
+                            div()
+                                .w_full()
+                                .debug_selector(|| "nova-estudio".into())
+                                .child(
+                                    crate::estilo::campo(Select::new(&self.escolha_do_estudio))
+                                        .placeholder("Escolha…")
+                                        .w_full(),
+                                ),
                             self.erro_de(estado::FALTA_ESTUDIO),
                             None,
                             cx,
@@ -1213,14 +1225,19 @@ impl NovaSessao {
                 h_flex()
                     .items_start()
                     .gap(px(16.))
-                    .child(v_flex().flex_1().min_w(px(0.)).child(campo(
-                        "E-mail do cliente",
-                        false,
-                        entrada(&self.email),
-                        self.erro_de(estado::EMAIL_INCOMPLETO),
-                        Some("Prefira o e-mail: é por ele que o link vai."),
-                        cx,
-                    )))
+                    .child(
+                        v_flex().flex_1().min_w(px(0.)).child(campo(
+                            "E-mail do cliente",
+                            false,
+                            div()
+                                .w_full()
+                                .debug_selector(|| "nova-email".into())
+                                .child(entrada(&self.email)),
+                            self.erro_de(estado::EMAIL_INCOMPLETO),
+                            Some("Prefira o e-mail: é por ele que o link vai."),
+                            cx,
+                        )),
+                    )
                     .child(v_flex().w(px(260.)).flex_none().child(campo(
                         "WhatsApp",
                         false,

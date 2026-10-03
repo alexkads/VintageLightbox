@@ -41,9 +41,8 @@ use serde_json::{json, Value};
 
 use crate::app::{Aplicativo, Tela};
 use crate::caixa::tela::Caixa;
-use crate::revelacao::tela::{PedidoDaRevelacao, Revelacao};
-use crate::sessoes::detalhe::{Detalhe, Pedido};
-use crate::sessoes::tela::NovaPedida;
+use crate::revelacao::tela::Revelacao;
+use crate::sessoes::detalhe::Detalhe;
 
 /// O prazo de cada espera: a rede, o disco e a GPU andam no relógio de verdade.
 const PRAZO: Duration = Duration::from_secs(90);
@@ -56,6 +55,7 @@ struct Servidor {
     estudio_id: String,
     produto_id: String,
     funcionario: String,
+    nome_do_funcionario: String,
 }
 
 fn ler_o_servidor() -> Servidor {
@@ -87,6 +87,7 @@ fn ler_o_servidor() -> Servidor {
         estudio_id: texto_de(&v, "estudio_id"),
         produto_id: texto_de(&v, "produto_id"),
         funcionario: texto_de(&v["funcionarios"][0], "id"),
+        nome_do_funcionario: texto_de(&v["funcionarios"][0], "nome"),
     }
 }
 
@@ -272,6 +273,85 @@ impl Balcao {
         );
     }
 
+    /// 🖱️ Clica no elemento marcado com `debug_selector`, onde o dedo clicaria.
+    /// Um quadro novo antes de medir: o `debug_bounds` é o do último desenho.
+    fn clicar(&self, cx: &mut TestAppContext, alvo: &str) {
+        let mut visual = gpui_kit::VisualTestContext::from_window(self.raiz.into(), cx);
+        visual.update(|window, _| window.refresh());
+        visual.run_until_parked();
+        let alvo: &'static str = Box::leak(alvo.to_string().into_boxed_str());
+        let onde = visual
+            .debug_bounds(alvo)
+            .unwrap_or_else(|| panic!("🖱️ {alvo} não está desenhado na tela"));
+        visual.simulate_click(onde.center(), gpui_kit::Modifiers::none());
+        visual.run_until_parked();
+        self.respirar(cx);
+    }
+
+    /// ⌨️ Digita no campo com o foco, como o sistema de entrada entrega o texto.
+    fn digitar(&self, cx: &mut TestAppContext, texto: &str) {
+        self.foco_vivo(cx, &format!("antes de digitar {texto:?}"));
+        let mut visual = gpui_kit::VisualTestContext::from_window(self.raiz.into(), cx);
+        visual.simulate_input(texto);
+        visual.run_until_parked();
+        self.respirar(cx);
+    }
+
+    /// 🔽 Uma lista de escolha (Select do kit), como o operador a usa: clica,
+    /// anda uma opção com a seta e confirma com Enter, até `escolhido` devolver
+    /// o valor certo. A lista reabre na opção já escolhida, então cada volta
+    /// anda uma casa; no fim da lista, volta subindo.
+    fn escolher_na_lista(
+        &self,
+        cx: &mut TestAppContext,
+        alvo: &str,
+        quer: &str,
+        mut escolhido: impl FnMut(&Self, &mut TestAppContext) -> String,
+    ) {
+        let mut antes = escolhido(self, cx);
+        for seta in ["down", "up"] {
+            for _ in 0..40 {
+                if antes == quer {
+                    return;
+                }
+                self.clicar(cx, alvo);
+                self.teclar(cx, seta);
+                self.teclar(cx, "enter");
+                self.respirar(cx);
+                let agora = escolhido(self, cx);
+                if agora == antes && !antes.is_empty() {
+                    break; // a ponta da lista
+                }
+                antes = agora;
+            }
+        }
+        assert_eq!(antes, quer, "🔽 a lista {alvo} não chegou à opção esperada");
+    }
+
+    /// ⬅️➡️ Anda pela grade da sessão com as setas até a foto `id` ficar em foco
+    /// — o operador não "foca" uma foto, ele anda até ela.
+    fn ir_na_grade(&self, cx: &mut TestAppContext, id: &str) {
+        for _ in 0..40 {
+            let (foco, ids) = self.detalhe(cx, |tela, _w, _cx| {
+                (tela.em_foco().map(|f| f.id.clone()), tela.ids_visiveis())
+            });
+            if foco.as_deref() == Some(id) {
+                return;
+            }
+            let alvo = ids
+                .iter()
+                .position(|i| i == id)
+                .unwrap_or_else(|| panic!("⬅️➡️ a foto {id} não está na grade: {ids:?}"));
+            let atual = foco.and_then(|f| ids.iter().position(|i| *i == f));
+            let seta = match atual {
+                Some(a) if a > alvo => "left",
+                _ => "right",
+            };
+            self.teclar(cx, seta);
+        }
+        panic!("⬅️➡️ as setas não chegaram à foto {id}");
+    }
+
     /// O relógio do teste anda (as colheitas das telas acordam a cada 100 ms)
     /// enquanto a rede, o disco e a GPU andam no relógio de verdade.
     fn respirar(&self, cx: &mut TestAppContext) {
@@ -339,7 +419,7 @@ impl Balcao {
 }
 
 /// Abre o app como o `main.rs` abre: a montagem de verdade, num catálogo novo.
-fn abrir_o_balcao(cx: &mut TestAppContext, servidor: &Servidor) -> Balcao {
+fn abrir_o_balcao(cx: &mut TestAppContext, servidor: &Servidor, cartao: &[String]) -> Balcao {
     // 🚨 Nunca o catálogo desta máquina: sem `VLB_CATALOG`, nada abre.
     let catalogo = std::env::var_os("VLB_CATALOG")
         .map(PathBuf::from)
@@ -380,7 +460,10 @@ fn abrir_o_balcao(cx: &mut TestAppContext, servidor: &Servidor) -> Balcao {
     let portas = &mut montagem.portas;
     portas.seletor = Arc::new(crate::importacao::explorador::mentira::SeletorDeMentira::default());
     portas.seletor_de_fotos =
-        Arc::new(crate::sessoes::arquivos::mentira::SeletorDeMentira::escolhe(&[] as &[&str]));
+        // A janela do sistema "escolhe" as fotos do cartão.
+        Arc::new(crate::sessoes::arquivos::mentira::SeletorDeMentira::escolhe(
+            &cartao.iter().map(String::as_str).collect::<Vec<_>>(),
+        ));
     portas.escolha_de_presets = Arc::new(
         crate::revelacao::lightroom::mentira::EscolhaDeMentira::com(Vec::new()),
     );
@@ -477,15 +560,15 @@ fn centavos(v: &Value) -> i64 {
 #[ignore = "precisa da API de teste: rode `make e2e-ciclo`"]
 fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
     let servidor = ler_o_servidor();
-    let b = abrir_o_balcao(cx, &servidor);
+    let cartao = tempfile::TempDir::new().expect("a pasta do cartão");
+    let arquivos = gravar_o_cartao(cartao.path());
+    let b = abrir_o_balcao(cx, &servidor, &arquivos);
     let tokio = b._tokio.handle().clone();
     let site = Http::novo(
         tokio.clone(),
         &servidor.api,
         Some(servidor.sessao.access_token.clone()),
     );
-    let cartao = tempfile::TempDir::new().expect("a pasta do cartão");
-    let arquivos = gravar_o_cartao(cartao.path());
     let titulo = format!(
         "Ciclo de vida {}",
         std::time::SystemTime::now()
@@ -503,30 +586,49 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
     b.ate(cx, "a conta entra", |b, cx| {
         b.app(cx, |app, _w, _cx| app.entrou())
     });
-    b.app(cx, |app, _w, cx| {
-        app.sessoes.update(cx, |_tela, cx| cx.emit(NovaPedida));
+    // A conta entra pela autorização no navegador do sistema — a única peça
+    // deste ato que não passa pela janela: a sessão vem pronta do servidor.
+    b.ate(cx, "a lista de sessões carrega", |b, cx| {
+        b.app(cx, |app, _w, _cx| app.tela() == Tela::Sessoes)
     });
+    b.clicar(cx, "sessoes-nova");
     b.ate(cx, "o assistente de nova sessão abre", |b, cx| {
         b.app(cx, |app, _w, _cx| app.tela() == Tela::NovaSessao)
     });
-    b.app(cx, |app, window, cx| {
-        app.nova_sessao.update(cx, |tela, cx| {
-            tela.importar_arquivos(arquivos.clone(), window, cx)
-        });
-    });
+    // 📷 "Escolher fotos": a janela do sistema devolve as 6 do cartão.
+    b.clicar(cx, "nova-escolher-fotos");
     b.ate(cx, "as 6 fotos do cartão entram no rascunho", |b, cx| {
         b.app(cx, |app, _w, cx| {
             app.nova_sessao.read(cx).quantas_fotos() == 6
         })
     });
-    b.app(cx, |app, window, cx| {
-        app.nova_sessao.update(cx, |tela, cx| {
-            tela.escolher_produto(&servidor.produto_id, window, cx);
-            tela.escolher_estudio(&servidor.estudio_id, window, cx);
-            tela.digitar(&titulo, email_do_cliente, "", window, cx);
-            tela.criar(window, cx);
-        });
+    b.clicar(cx, "nova-avancar");
+    b.ate(cx, "a etapa do cliente e do preço", |b, cx| {
+        b.app(cx, |app, _w, cx| app.nova_sessao.read(cx).etapa() == 3)
     });
+    b.clicar(cx, "nova-titulo");
+    b.digitar(cx, &titulo);
+    b.clicar(cx, "nova-email");
+    b.digitar(cx, email_do_cliente);
+    let formulario = |b: &Balcao, cx: &mut TestAppContext| {
+        b.app(cx, |app, _w, cx| {
+            app.nova_sessao.read(cx).rascunho_para_teste().formulario
+        })
+    };
+    b.escolher_na_lista(cx, "nova-produto", &servidor.produto_id, |b, cx| {
+        formulario(b, cx).produto_id
+    });
+    b.escolher_na_lista(cx, "nova-estudio", &servidor.estudio_id, |b, cx| {
+        formulario(b, cx).estudio_id
+    });
+    let f = formulario(&b, cx);
+    assert_eq!(
+        (f.titulo.as_str(), f.email.as_str()),
+        (titulo.as_str(), email_do_cliente),
+        "o que se digitou chegou ao formulário"
+    );
+    // Com tudo preenchido, o "Criar" do cabeçalho já vale na etapa 3.
+    b.clicar(cx, "nova-criar-cabecalho");
     b.ate(cx, "a sessão é criada e o app entra nela", |b, cx| {
         b.app(cx, |app, _w, cx| {
             app.tela() == Tela::Sessao && app.detalhe.read(cx).galeria_id().is_some()
@@ -577,16 +679,14 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
     b.ato_limpo(cx, "Ato 1 (criação)");
 
     // ── Ato 2: a seleção com o cliente ──────────────────────────────────────
-    b.detalhe(cx, |tela, _w, cx| {
-        tela.focar_foto(&fotos[0], cx);
-        cx.emit(Pedido::TelaDoCliente);
-    });
-    b.app(cx, |app, _w, _cx| {
-        assert!(app.cliente_aberto(), "a segunda tela abriu")
+    b.ir_na_grade(cx, &fotos[0]);
+    b.clicar(cx, "sessao-tela-do-cliente");
+    b.ate(cx, "a segunda tela abre pelo botão", |b, cx| {
+        b.app(cx, |app, _w, _cx| app.cliente_aberto())
     });
     let notas = [5u8, 4, 5, 3, 2, 1];
     for (foto, nota) in fotos.iter().zip(notas) {
-        b.detalhe(cx, |tela, _w, cx| tela.focar_foto(foto, cx));
+        b.ir_na_grade(cx, foto);
         b.ate(cx, "a tela do cliente acompanha a foto", |b, cx| {
             b.app(cx, |app, _w, _cx| {
                 app.parametros_no_cliente().map(|(id, _)| id) == Some(format!("site:{foto}"))
@@ -607,10 +707,10 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
 
     // As três primeiras ficam com o cliente (B); a última é rejeitada (X).
     for foto in &fotos[..3] {
-        b.detalhe(cx, |tela, _w, cx| tela.focar_foto(foto, cx));
+        b.ir_na_grade(cx, foto);
         b.teclar(cx, "b");
     }
-    b.detalhe(cx, |tela, _w, cx| tela.focar_foto(&fotos[5], cx));
+    b.ir_na_grade(cx, &fotos[5]);
     b.teclar(cx, "x");
     b.ate_na_api(
         cx,
@@ -629,15 +729,9 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
                 ))
         },
     );
-    let mut vez = 0;
+    // Sem releitura forçada: a grade tem de se atualizar sozinha.
     b.ate(cx, "a sessão conta 3 levadas e 2 à venda", |b, cx| {
-        vez += 1;
-        b.detalhe(cx, |tela, _w, cx| {
-            if vez % 15 == 0 {
-                tela.reler(cx);
-            }
-            tela.contagem() == (3, 2, 0)
-        })
+        b.detalhe(cx, |tela, _w, _cx| tela.contagem() == (3, 2, 0))
     });
 
     b.ato_limpo(cx, "Ato 2 (seleção)");
@@ -646,35 +740,61 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
     let revelada = fotos[0].clone();
     let (status, bruto_antes) = site.bytes(&format!("/pos-venda/fotos/{revelada}/original"));
     assert_eq!(status, 200, "o original da levada abre para o operador");
-    b.detalhe(cx, |tela, _w, cx| tela.revelar_todas(cx));
-    b.ate(cx, "a Revelação abre", |b, cx| {
+    b.ir_na_grade(cx, &revelada);
+    b.clicar(cx, "sessao-revelar");
+    b.ate(cx, "a Revelação abre pelo botão", |b, cx| {
         b.app(cx, |app, _w, _cx| app.tela() == Tela::Revelacao)
     });
     let alvo = format!("site:{revelada}");
-    b.revelacao(cx, |tela, window, cx| {
-        let posicao = tela
-            .acervo()
-            .iter()
-            .position(|f| f.id == alvo)
-            .unwrap_or_else(|| panic!("{alvo} não está na tira"));
-        tela.ir_para(posicao, window, cx);
-    });
+    // As setas andam pela tira até a foto.
+    for _ in 0..12 {
+        let (aberta, ids) = b.revelacao(cx, |tela, _w, _cx| {
+            (
+                tela.foto_aberta().map(|f| f.id.clone()),
+                tela.acervo()
+                    .iter()
+                    .map(|f| f.id.clone())
+                    .collect::<Vec<_>>(),
+            )
+        });
+        if aberta.as_deref() == Some(alvo.as_str()) {
+            break;
+        }
+        let de = aberta.and_then(|a| ids.iter().position(|i| *i == a));
+        let para = ids.iter().position(|i| *i == alvo).expect("a foto na tira");
+        b.teclar(
+            cx,
+            if de.is_some_and(|d| d > para) {
+                "left"
+            } else {
+                "right"
+            },
+        );
+    }
     b.ate(cx, "a cópia de trabalho chega do site", |b, cx| {
         b.revelacao(cx, |tela, _w, _cx| {
             tela.foto_aberta().map(|f| f.id.as_str()) == Some(alvo.as_str()) && tela.tem_pixels()
         })
     });
-    let predefinicao = b.revelacao(cx, |tela, window, cx| {
-        let (do_sistema, _minhas) = tela.coluna_de_predefinicoes(cx);
-        let nome = do_sistema
+    // A predefinição pelo clique no nome, na coluna.
+    let predefinicao = b.revelacao(cx, |tela, _w, cx| {
+        tela.coluna_de_predefinicoes(cx)
+            .0
             .first()
             .cloned()
-            .expect("há predefinições do sistema");
-        let preset = tela.predefinicao(&nome).expect("a predefinição pelo nome");
-        tela.aplicar_preset(&preset, window, cx);
-        tela.arrastar_slider(0, 0.6, cx);
-        nome
+            .expect("há predefinições do sistema")
     });
+    let antes_da_predefinicao = b.revelacao(cx, |tela, _w, _cx| tela.ajustes());
+    b.clicar(cx, &format!("predefinicao-{predefinicao}"));
+    let com_a_predefinicao = b.revelacao(cx, |tela, _w, _cx| tela.ajustes());
+    assert_ne!(
+        com_a_predefinicao, antes_da_predefinicao,
+        "o clique em {predefinicao} muda a foto"
+    );
+    // A exposição pelo próprio evento do slider (arrastar com o mouse no
+    // harness não é confiável; o caminho do evento é o mesmo do arrasto).
+    b.revelacao(cx, |tela, _w, cx| tela.arrastar_slider(0, 0.6, cx));
+
     let ajustes = b.revelacao(cx, |tela, _w, _cx| tela.ajustes());
     assert!(
         (ajustes.exposure - 0.6).abs() < 1e-3,
@@ -691,9 +811,7 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
             })
         },
     );
-    b.revelacao(cx, |_tela, _w, cx| {
-        cx.emit(PedidoDaRevelacao::SalvarNaGaleria)
-    });
+    b.clicar(cx, "revelacao-salvar-na-galeria");
     b.ate(cx, "o Salvar volta para a sessão", |b, cx| {
         b.app(cx, |app, _w, _cx| app.tela() == Tela::Sessao)
     });
@@ -731,11 +849,12 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
         )
     });
     b.teclar(cx, "f8");
-    b.caixa(cx, |c, window, cx| {
-        assert_eq!(c.dialogo_do_caixa(), Some("Abrir"), "F8 abre o caixa");
-        c.preencher_no_dialogo("fundo", "100,00", window, cx);
-        c.confirmar_dialogo(window, cx);
+    b.caixa(cx, |c, _w, _cx| {
+        assert_eq!(c.dialogo_do_caixa(), Some("Abrir"), "F8 abre o caixa")
     });
+    // O foco nasce no campo do fundo de troco: digita e Enter.
+    b.digitar(cx, "100,00");
+    b.teclar(cx, "enter");
     b.ate(
         cx,
         "o caixa do estúdio abre com R$ 100 de troco",
@@ -760,11 +879,11 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
         })
     });
     // A cortesia, pelo ajuste rápido do cupom: ↓ escolhe, E edita, C dá cortesia.
-    b.caixa(cx, |c, window, cx| {
-        assert!(c.tecla_no_cupom("down", false, window, cx));
-        assert!(c.tecla_no_cupom("e", false, window, cx));
-        assert!(c.tecla_no_cupom("c", false, window, cx));
-    });
+    // A cortesia: clica na linha da primeira levada no cupom, E abre o ajuste
+    // rápido, C dá cortesia.
+    b.clicar(cx, &format!("caixa-linha-{}", fotos[0]));
+    b.teclar(cx, "e");
+    b.teclar(cx, "c");
     let mut cortesia = String::new();
     b.ate_na_api(cx, "a cortesia fica gravada na foto", || {
         let com_cortesia: Vec<Value> = fotos_no_painel(&site, &galeria)
@@ -786,23 +905,44 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
 
     // F3: quem fotografou e quem atendeu; F4: PIX 30 + dinheiro 60, troco 10.
     b.teclar(cx, "f3");
-    b.caixa(cx, |c, window, cx| {
-        assert_eq!(c.dialogo_do_caixa(), Some("Pessoas"));
-        c.escolher_as_pessoas(&servidor.funcionario);
-        c.fechar_dialogo_do_caixa(window, cx);
+    b.caixa(cx, |c, _w, _cx| {
+        assert_eq!(c.dialogo_do_caixa(), Some("Pessoas"), "F3 abre as pessoas")
+    });
+    // Cada papel: clica na lista, busca pelo nome e Enter.
+    for papel in ["quem-fotografou", "quem-atendeu", "quem-auxiliou"] {
+        b.clicar(cx, &format!("caixa-campo-{papel}"));
+        b.digitar(cx, &servidor.nome_do_funcionario);
+        b.teclar(cx, "enter");
+    }
+    b.clicar(cx, "caixa-pessoas-confirmar");
+    b.ate(cx, "as três pessoas ficam gravadas", |b, cx| {
+        b.caixa(cx, |c, _w, _cx| {
+            c.pessoas_para_teste()
+                .iter()
+                .all(|p| p.as_deref() == Some(servidor.funcionario.as_str()))
+        })
     });
     b.teclar(cx, "f4");
-    b.caixa(cx, |c, window, cx| {
+    b.caixa(cx, |c, _w, _cx| {
         assert_eq!(
             c.dialogo_do_caixa(),
             Some("Pagamento"),
             "F4 abre o pagamento"
         );
-        c.lancar_pagamento(2, "30,00", window, cx);
-        c.lancar_pagamento(1, "60,00", window, cx);
-        assert_eq!(c.pagamentos_lancados(), 2);
-        c.confirmar_dialogo(window, cx);
     });
+    // 2 = PIX, o valor, Enter lança; 1 = dinheiro, o valor, Enter lança;
+    // Enter de novo conclui.
+    b.teclar(cx, "2");
+    b.digitar(cx, "30,00");
+    b.teclar(cx, "enter");
+
+    b.teclar(cx, "1");
+    b.digitar(cx, "60,00");
+    b.teclar(cx, "enter");
+    b.caixa(cx, |c, _w, _cx| {
+        assert_eq!(c.pagamentos_lancados(), 2, "PIX e dinheiro lançados")
+    });
+    b.teclar(cx, "enter");
     b.ate(cx, "a venda é registrada", |b, cx| {
         b.caixa(cx, |c, _w, _cx| c.ultima_venda_para_teste().is_some())
     });
@@ -849,13 +989,36 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
         })
     });
     b.teclar(cx, "f7");
-    b.caixa(cx, |c, window, cx| {
-        assert_eq!(c.dialogo_do_caixa(), Some("Vendas"), "F7 lista as vendas");
-        c.estornar_da_lista(numero, &[estornada.as_str()], window, cx);
-        assert_eq!(c.dialogo_do_caixa(), Some("Estorno"));
-        c.preencher_no_dialogo("motivo", "o cliente desistiu desta foto", window, cx);
-        c.confirmar_dialogo(window, cx);
+    b.caixa(cx, |c, _w, _cx| {
+        assert_eq!(c.dialogo_do_caixa(), Some("Vendas"), "F7 lista as vendas")
     });
+    // "Estornar" na venda; desmarca as outras fotos (o valor acompanha), o
+    // motivo, Enter.
+    let venda_id = venda["id"].as_str().expect("o id da venda").to_string();
+    b.clicar(cx, &format!("caixa-estornar-{venda_id}"));
+    b.caixa(cx, |c, _w, _cx| {
+        assert_eq!(
+            c.dialogo_do_caixa(),
+            Some("Estorno"),
+            "o botão abre o estorno"
+        )
+    });
+    let itens: Vec<String> = venda["itens"]
+        .as_array()
+        .map(|l| {
+            l.iter()
+                .filter_map(|i| i["foto_id"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    for (i, foto) in itens.iter().enumerate() {
+        if *foto != estornada {
+            b.clicar(cx, &format!("caixa-estorno-foto-{i}"));
+        }
+    }
+    b.clicar(cx, "caixa-campo-motivo");
+    b.digitar(cx, "o cliente desistiu desta foto");
+    b.teclar(cx, "enter");
     b.ate(cx, "a venda mostra o estorno", |b, cx| {
         b.caixa(cx, |c, _w, _cx| {
             c.vendas_da_sessao_para_teste()
@@ -871,12 +1034,14 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
     });
 
     b.teclar(cx, "f6");
-    b.caixa(cx, |c, window, cx| {
-        assert_eq!(c.dialogo_do_caixa(), Some("Movimento"), "F6 abre a sangria");
-        c.preencher_no_dialogo("valor", "20,00", window, cx);
-        c.preencher_no_dialogo("motivo", "depósito no banco", window, cx);
-        c.confirmar_dialogo(window, cx);
+    b.caixa(cx, |c, _w, _cx| {
+        assert_eq!(c.dialogo_do_caixa(), Some("Movimento"), "F6 abre a sangria")
     });
+    // O foco nasce no valor; o motivo pelo clique; Enter registra.
+    b.digitar(cx, "20,00");
+    b.clicar(cx, "caixa-campo-motivo");
+    b.digitar(cx, "depósito no banco");
+    b.teclar(cx, "enter");
     b.ate_na_api(cx, "a sangria entra no caixa", || {
         let caixa = site.get(&format!("/pos-venda/caixa/{caixa_id}"));
         let n = caixa["movimentos"].as_array().map_or(0, Vec::len);
@@ -894,20 +1059,23 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
         b.caixa(cx, |c, _w, _cx| c.dialogo_do_caixa().is_none())
     });
     b.teclar(cx, "f8");
-    b.caixa(cx, |c, window, cx| {
+    b.caixa(cx, |c, _w, _cx| {
         assert_eq!(
             c.dialogo_do_caixa(),
             Some("Fechamento"),
             "F8 com o caixa aberto fecha"
-        );
-        c.preencher_no_dialogo("dinheiro", "90,00", window, cx);
-        c.preencher_no_dialogo("pix", "30,00", window, cx);
-        c.confirmar_dialogo(window, cx);
+        )
     });
+    // A contagem cega: o foco nasce no dinheiro; o PIX pelo clique; Enter
+    // confere, e Enter de novo fecha.
+    b.digitar(cx, "90,00");
+    b.clicar(cx, "caixa-campo-pix");
+    b.digitar(cx, "30,00");
+    b.teclar(cx, "enter");
     b.ate(cx, "a contagem cega é conferida", |b, cx| {
         b.caixa(cx, |c, _w, _cx| c.contagem_conferida())
     });
-    b.caixa(cx, |c, window, cx| c.confirmar_dialogo(window, cx));
+    b.teclar(cx, "enter");
     b.ate(cx, "o caixa fecha", |b, cx| {
         b.caixa(cx, |c, _w, _cx| c.caixa_fechado_no_dialogo())
     });
@@ -929,7 +1097,7 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
         servidor.estudio_id
     ));
     assert!(agora.is_null(), "nenhum caixa aberto no estúdio: {agora}");
-    b.caixa(cx, |c, window, cx| c.fechar_dialogo_do_caixa(window, cx));
+    b.teclar(cx, "escape");
     b.ate(cx, "o app vê o caixa fechado", |b, cx| {
         b.caixa(cx, |c, _w, _cx| !c.caixa_do_estudio_aberto())
     });
@@ -937,7 +1105,7 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
     b.ato_limpo(cx, "Ato 6 (fechamento)");
 
     // ── Ato 7: o pós-venda ──────────────────────────────────────────────────
-    b.detalhe(cx, |tela, _w, cx| tela.pedir_o_link(cx));
+    b.clicar(cx, "sessao-link");
     b.ate(cx, "o link do cliente chega", |b, cx| {
         b.detalhe(cx, |tela, _w, _cx| tela.link().is_some())
     });
@@ -1013,16 +1181,12 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
     }
 
     // O app vê a compra: as duas viram compradas na sessão.
-    let mut vez = 0;
+    // 📡 Sem releitura forçada: o balcão fica sabendo da compra sozinho.
     b.ate(
         cx,
-        "a sessão mostra as compradas no pós-venda",
+        "a compra do cliente chega à sessão aberta no balcão",
         |b, cx| {
-            vez += 1;
-            b.detalhe(cx, |tela, _w, cx| {
-                if vez % 15 == 1 {
-                    tela.reler(cx);
-                }
+            b.detalhe(cx, |tela, _w, _cx| {
                 compradas
                     .iter()
                     .all(|id| tela.como_esta(id).map(|c| c.0) == Some(Estado::Comprada))

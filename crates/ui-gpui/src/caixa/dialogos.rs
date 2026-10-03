@@ -959,6 +959,12 @@ impl Caixa {
         escrever(&valor, falta, window, cx);
         let foco = valor.read(cx).focus_handle(cx);
         window.focus(&foco, cx);
+        // 🔑 **E selecionado**, como o `valorRef.select()` do site: o operador
+        // digita o valor desta forma por cima do que falta. Sem a seleção, o
+        // 2 do PIX seguido de "30,00" dava "80,0030,00" e "Valor inválido" —
+        // pagar em duas formas exigia apagar o campo à mão (achado pelo e2e do
+        // ciclo de vida, 03/out/2026).
+        valor.update(cx, |campo, cx| campo.select_all(window, cx));
         cx.notify();
     }
 
@@ -2677,6 +2683,7 @@ impl Caixa {
                 let estornada = item.estornada;
                 h_flex()
                     .id(SharedString::from(format!("caixa-estorno-foto-{i}")))
+                    .debug_selector(move || format!("caixa-estorno-foto-{i}"))
                     .gap(px(12.))
                     .px(px(12.))
                     .py(px(8.))
@@ -3141,6 +3148,9 @@ fn rodape() -> Div {
 
 /// `Label` em cima, campo embaixo.
 fn rotulado(rotulo: &str, campo: impl IntoElement) -> Div {
+    // 🧪 O campo é achável pelo rótulo (`caixa-campo-quem-fotografou`): o e2e do
+    // ciclo de vida clica onde o operador clica.
+    let seletor = format!("caixa-campo-{}", seletor_do_rotulo(rotulo));
     v_flex()
         .gap(px(6.))
         .child(
@@ -3149,7 +3159,20 @@ fn rotulado(rotulo: &str, campo: impl IntoElement) -> Div {
                 .font_weight(FontWeight::MEDIUM)
                 .child(rotulo.to_string()),
         )
-        .child(campo)
+        .child(div().debug_selector(move || seletor).child(campo))
+}
+
+/// O rótulo em minúsculas ASCII, com `-` no lugar do resto.
+fn seletor_do_rotulo(rotulo: &str) -> String {
+    let mut saida = String::new();
+    for c in rotulo.chars() {
+        if c.is_ascii_alphanumeric() {
+            saida.push(c.to_ascii_lowercase());
+        } else if !saida.ends_with('-') {
+            saida.push('-');
+        }
+    }
+    saida.trim_matches('-').to_string()
 }
 
 /// O `CampoDeValor` do site: rótulo, `R$` ao lado e o número em mono, grande.

@@ -4237,26 +4237,45 @@ impl Detalhe {
             vec![("galeria", super::qr_do_bot::caminho_dos_eventos(&id))],
             envia,
         ));
-        self.bot.vigia = Some(cx.spawn(async move |esta, cx| loop {
-            cx.background_executor()
-                .timer(Duration::from_millis(500))
-                .await;
-            let mut reler = false;
+        self.bot.vigia = Some(cx.spawn(async move |esta, cx| {
+            // A primeira abertura do fluxo coincide com a leitura da sessão; as
+            // seguintes são reconexões, e o que aconteceu no intervalo se perdeu.
+            let mut ja_abriu = false;
             loop {
-                match recebe.try_recv() {
-                    Ok(crate::tempo_real::Sinal::Evento { dados, .. }) => {
-                        reler |= super::qr_do_bot::evento_do_bot(&dados);
+                cx.background_executor()
+                    .timer(Duration::from_millis(500))
+                    .await;
+                let mut reler = false;
+                let mut reler_a_galeria = false;
+                loop {
+                    match recebe.try_recv() {
+                        Ok(crate::tempo_real::Sinal::Evento { dados, .. }) => {
+                            reler |= super::qr_do_bot::evento_do_bot(&dados);
+                            reler_a_galeria |= super::qr_do_bot::evento_de_fotos_pagas(&dados);
+                        }
+                        Ok(crate::tempo_real::Sinal::Pronto { .. }) => {
+                            reler = true;
+                            reler_a_galeria |= ja_abriu;
+                            ja_abriu = true;
+                        }
+                        Ok(crate::tempo_real::Sinal::Sincronizar { .. }) => {
+                            reler = true;
+                            reler_a_galeria = true;
+                        }
+                        Ok(crate::tempo_real::Sinal::Conexao { .. }) => {}
+                        Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                        // A guarda caiu (outra sessão, sair da conta): o laço acaba.
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => return,
                     }
-                    Ok(crate::tempo_real::Sinal::Pronto { .. })
-                    | Ok(crate::tempo_real::Sinal::Sincronizar { .. }) => reler = true,
-                    Ok(crate::tempo_real::Sinal::Conexao { .. }) => {}
-                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                    // A guarda caiu (outra sessão, sair da conta): o laço acaba.
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => return,
                 }
-            }
-            if reler && esta.update(cx, |tela, cx| tela.ler_o_bot(cx)).is_err() {
-                return;
+                if reler && esta.update(cx, |tela, cx| tela.ler_o_bot(cx)).is_err() {
+                    return;
+                }
+                // 💳 O pagamento do cliente no pós-venda (ou o que se perdeu numa
+                // queda do fluxo) chega à grade sem o operador sair da sessão.
+                if reler_a_galeria && esta.update(cx, |tela, cx| tela.reler(cx)).is_err() {
+                    return;
+                }
             }
         }));
     }
