@@ -23,6 +23,7 @@ mod guias;
 mod painel;
 pub mod resgate;
 mod resolucao_cheia;
+mod retomada;
 pub mod rodape;
 mod roteiro;
 /// O que a raiz conta à bandeja (`crate::segundo_plano`).
@@ -491,6 +492,26 @@ impl Tela {
             Tela::Recuperacao => "recuperacao",
         }
     }
+
+    /// A volta de [`Self::nome_para_desempenho`] — é o nome que o
+    /// `onde-estavamos.json` guarda (`app::retomada`).
+    pub fn do_nome(nome: &str) -> Option<Tela> {
+        Some(match nome {
+            "biblioteca" => Tela::Biblioteca,
+            "revelacao" => Tela::Revelacao,
+            "impressao" => Tela::Impressao,
+            "sessoes" => Tela::Sessoes,
+            "sessao" => Tela::Sessao,
+            "caixa" => Tela::Caixa,
+            "retencao" => Tela::Retencao,
+            "nova_sessao" => Tela::NovaSessao,
+            "backup" => Tela::Backup,
+            "chatbot" => Tela::Chatbot,
+            "agenda" => Tela::Agenda,
+            "recuperacao" => Tela::Recuperacao,
+            _ => return None,
+        })
+    }
 }
 
 pub struct Aplicativo {
@@ -598,6 +619,11 @@ pub struct Aplicativo {
     /// `sessao_aberta`; as outras guardam o nome e a fila do "Salvar".
     guias: guias::Guias,
     arquivo_das_guias: Option<std::path::PathBuf>,
+    /// 🔁 Onde o operador estava — volta depois de atualizar e de fechar
+    /// (`app/retomada.rs`).
+    retomada: retomada::Retomada,
+    /// 🔁 O fim do app grava onde se estava e espera as gravações no ar.
+    _ao_sair: gpui_kit::Subscription,
     /// O que a faixa das guias está fazendo agora: o alvo do botão direito,
     /// o nome sendo editado e a guia sendo arrastada.
     edicao_das_guias: guias::Edicao,
@@ -1075,6 +1101,9 @@ impl Aplicativo {
         // 🖥️ E a foto aberta na revelação.
         let cliente_na_revelacao = cx.observe(&revelacao, |raiz, _tela, cx| {
             raiz.atualizar_o_cliente(false, cx);
+            // 🔁 A seta e a tira trocam a foto sem a raiz redesenhar: é por
+            // aqui que a foto nova chega ao `onde-estavamos.json`.
+            raiz.lembrar_onde_estamos(cx);
         });
         let pedido_da_revelacao = cx.subscribe_in(
             &revelacao,
@@ -1288,6 +1317,15 @@ impl Aplicativo {
             raiz.seguir_o_sistema(window, cx);
         });
 
+        // 🔁 Fechar o app (menu, `⌘Q`, bandeja, aviso de saída, a janela
+        // principal) passa por aqui: o retrato ganha o motivo e o último gesto
+        // da Revelação vai ao banco antes de o processo acabar. O trabalho é
+        // síncrono dentro do callback — o GPUI só espera o futuro por 200 ms.
+        let ao_sair = cx.on_app_quit(|raiz, cx| {
+            raiz.preparar_para_sair(retomada::Motivo::Fechou, cx);
+            async {}
+        });
+
         // O roteiro de depuração começa depois de a raiz existir.
         cx.defer_in(window, |raiz, window, cx| raiz.ligar_o_roteiro(window, cx));
 
@@ -1380,6 +1418,8 @@ impl Aplicativo {
             sessao_aberta: None,
             guias: guias::Guias::default(),
             arquivo_das_guias: guias::arquivo(),
+            retomada: retomada::Retomada::nova(retomada::arquivo(), Some(window.window_handle())),
+            _ao_sair: ao_sair,
             edicao_das_guias: guias::Edicao::default(),
             fotos_do_site: Vec::new(),
             publicador: publicador_da_raiz,
@@ -1691,10 +1731,19 @@ impl Aplicativo {
                 self.atualizador.instalar(self.avisos_de_versao.0.clone());
                 self._atualizacao = Some(Self::esperar_aviso(cx));
             }
+            // 🔁 Os dois reabrir saem com `exit(0)`: onde se estava e o
+            // último gesto vão para o disco antes. Se voltarem (não acharam o
+            // app instalado), o app segue como estava.
             PedidoDeAtualizacao::Reabrir if jeito == Some(JeitoDeAtualizar::Compilar) => {
-                crate::atualizacao::compilar::reabrir_o_instalado()
+                self.preparar_para_sair(retomada::Motivo::Atualizou, cx);
+                crate::atualizacao::compilar::reabrir_o_instalado();
+                self.voltar_a_lembrar();
             }
-            PedidoDeAtualizacao::Reabrir => AtualizadorDaWeb::reabrir(),
+            PedidoDeAtualizacao::Reabrir => {
+                self.preparar_para_sair(retomada::Motivo::Atualizou, cx);
+                AtualizadorDaWeb::reabrir();
+                self.voltar_a_lembrar();
+            }
             PedidoDeAtualizacao::Dispensar => {
                 // 🔑 Guardar **a versão**, e não um booleano: dispensar a 0.2.0
                 // não pode calar a 0.3.0, que pode ser justamente a correção
@@ -5962,7 +6011,9 @@ impl Aplicativo {
             .update(cx, |tela, cx| tela.definir_sessao(sessao.clone(), cx));
         // 🔑 **Entrou: a primeira tela é a lista de sessões.** Na web é de
         // onde tudo parte, e abrir no catálogo global foi o que fez o app
-        // parecer "aberto e estranho" para quem vinha de lá.
+        // parecer "aberto e estranho" para quem vinha de lá. 🔁 Quando o
+        // `/auth/me` responde, a retomada leva para onde o operador estava ao
+        // fechar ou atualizar (`app/retomada.rs`).
         self.tela = Tela::Sessoes;
         // 📡 O fluxo do aviso de versão e o envio dos relatos guardados — a
         // conta é o que autoriza falar com o servidor (`telemetria`).
@@ -6494,6 +6545,8 @@ impl Render for Aplicativo {
         let faixa_das_guias = self.faixa_das_guias(window, cx);
         // 🔔 Os avisos da fila vão para a lista do kit (`avisar_em_toast`).
         self.entregar_os_avisos(window, cx);
+        // 🔁 A volta para onde se estava, e o retrato de agora no disco.
+        self.cuidar_da_retomada(window, cx);
         // Os modais da raiz são o `Dialog` do gpui-kit (`crate::dialogo`).
         let modal_de_importacao = self
             .importando
@@ -12431,5 +12484,266 @@ mod testes {
                 .advance_clock(std::time::Duration::from_millis(120));
             cx.run_until_parked();
         }
+    }
+
+    // ── 🔁 A retomada (`app/retomada.rs`) ─────────────────────────────────
+
+    const CONTA_DA_RETOMADA: &str = "balcao@recordarfotos.com.br";
+
+    /// Uma abertura do app com a conta dentro e a galeria "g1" de três fotos
+    /// no site, ainda na lista de sessões — o que o login deixa.
+    fn abertura_para_retomar(
+        cx: &mut TestAppContext,
+        arquivo: &std::path::Path,
+        gravador: Arc<GravadorDeMentira>,
+    ) -> (gpui_kit::WindowHandle<Aplicativo>, TempDir) {
+        let (previews, dir) = previews_descartaveis();
+        cx.update(gpui_kit::init);
+        cx.update(init);
+        let publicador = Arc::new(PublicadorDeMentira {
+            galerias: std::sync::Mutex::new(
+                ["g1", "g2"]
+                    .iter()
+                    .map(|id| domain::services::pos_venda::GaleriaDoPainel {
+                        id: (*id).into(),
+                        titulo: format!("Ensaio {id}"),
+                        produto_id: "p1".into(),
+                        criada_em_iso: "2026-10-03".into(),
+                        ..Default::default()
+                    })
+                    .collect(),
+            ),
+            fotos_da_sessao: std::sync::Mutex::new(
+                ["remota-1", "remota-2", "remota-3"]
+                    .iter()
+                    .map(|id| foto_do_site(id, None))
+                    .collect(),
+            ),
+            ..Default::default()
+        });
+        let arquivo = arquivo.to_path_buf();
+        let janela = cx.add_window(move |window, cx| {
+            let mut app = Aplicativo::ja_dentro(
+                Vec::new(),
+                previews,
+                Vec::new(),
+                Portas {
+                    publicador,
+                    gravador,
+                    ..portas()
+                },
+                window,
+                cx,
+            );
+            app.sessao_aberta = None;
+            app.tela = Tela::Sessoes;
+            app.retomada = retomada::Retomada::nova(Some(arquivo), Some(window.window_handle()));
+            app.conta = Some(Conta {
+                nome: None,
+                email: CONTA_DA_RETOMADA.into(),
+                papel: None,
+                avatar: None,
+            });
+            app.detalhe
+                .update(cx, |tela, _cx| tela.definir_sessao(sessao_de_teste()));
+            app
+        });
+        (janela, dir)
+    }
+
+    /// O `/auth/me` respondeu, e a janela desenhou: a retomada sai.
+    fn retomar(cx: &mut TestAppContext, janela: &gpui_kit::WindowHandle<Aplicativo>) {
+        janela
+            .update(cx, |app, window, cx| {
+                app.decidir_a_retomada(cx);
+                app.cuidar_da_retomada(window, cx);
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        colher_a_galeria(cx, janela);
+    }
+
+    fn colher_a_galeria(cx: &mut TestAppContext, janela: &gpui_kit::WindowHandle<Aplicativo>) {
+        for _ in 0..10 {
+            let _ = janela.update(cx, |app, _window, cx| {
+                app.detalhe.update(cx, |tela, cx| tela.colher(cx))
+            });
+            cx.run_until_parked();
+        }
+    }
+
+    fn arquivo_da_retomada() -> (TempDir, std::path::PathBuf) {
+        let dir = TempDir::new().expect("criar diretório temporário");
+        let arquivo = dir.path().join("onde-estavamos.json");
+        (dir, arquivo)
+    }
+
+    fn escrever_onde_estavamos(arquivo: &std::path::Path, json: serde_json::Value) {
+        std::fs::write(arquivo, json.to_string()).expect("gravar o arquivo da retomada");
+    }
+
+    /// 🔁 O operador revela a 2ª foto do ensaio e fecha o app: a próxima
+    /// abertura volta na Revelação, na mesma foto, com a guia à frente.
+    #[gpui_kit::test]
+    fn fechar_na_revelacao_e_abrir_volta_na_mesma_foto(cx: &mut TestAppContext) {
+        let (_pasta, arquivo) = arquivo_da_retomada();
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let (antes, _dir) = abertura_para_retomar(cx, &arquivo, gravador.clone());
+        retomar(cx, &antes);
+        antes
+            .update(cx, |app, _window, cx| app.entrar_na_sessao("g1".into(), cx))
+            .expect("a janela deve estar aberta");
+        colher_a_galeria(cx, &antes);
+        antes
+            .update(cx, |app, window, cx| {
+                let pedido = app
+                    .detalhe
+                    .read(cx)
+                    .pedido_de_revelar_para_teste("remota-2")
+                    .expect("a foto está na grade");
+                app.atender_a_sessao(&pedido, window, cx);
+                assert_eq!(app.tela, Tela::Revelacao);
+                app.cuidar_da_retomada(window, cx);
+                app.preparar_para_sair(retomada::Motivo::Fechou, cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        let gravado: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&arquivo).expect("o arquivo existe"))
+                .expect("JSON");
+        assert_eq!(gravado["tela"], "revelacao");
+        assert_eq!(gravado["sessao"], "g1");
+        assert_eq!(gravado["revelando"]["g1"], "remota-2");
+        assert_eq!(gravado["motivo"], "fechou");
+        assert_eq!(
+            gravador.esperas().len(),
+            1,
+            "sair espera as gravações no ar"
+        );
+
+        let (depois, _dir2) =
+            abertura_para_retomar(cx, &arquivo, Arc::new(GravadorDeMentira::default()));
+        retomar(cx, &depois);
+        depois
+            .update(cx, |app, _window, cx| {
+                assert_eq!(app.tela, Tela::Revelacao);
+                assert_eq!(app.sessao_aberta.as_deref(), Some("g1"));
+                let aberta = app.revelacao.read(cx).foto_aberta().cloned();
+                assert_eq!(
+                    aberta.map(|f| f.id).as_deref(),
+                    Some("site:remota-2"),
+                    "a Revelação volta na foto em que estava"
+                );
+                assert_eq!(
+                    app.revelacao.read(cx).acervo().len(),
+                    3,
+                    "com a tira inteira"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// A foto lembrada saiu da sessão (apagada, rejeitada): fica a grade.
+    #[gpui_kit::test]
+    fn a_foto_que_sumiu_deixa_a_grade_da_sessao(cx: &mut TestAppContext) {
+        let (_pasta, arquivo) = arquivo_da_retomada();
+        escrever_onde_estavamos(
+            &arquivo,
+            serde_json::json!({
+                "conta": CONTA_DA_RETOMADA, "versao": "0.1.77", "gravado_em": 0,
+                "motivo": "atualizou", "tela": "revelacao", "sessao": "g1",
+                "revelando": { "g1": "remota-9" }
+            }),
+        );
+        let (janela, _dir) =
+            abertura_para_retomar(cx, &arquivo, Arc::new(GravadorDeMentira::default()));
+        retomar(cx, &janela);
+        janela
+            .update(cx, |app, _window, _cx| {
+                assert_eq!(app.tela, Tela::Sessao);
+                assert_eq!(app.sessao_aberta.as_deref(), Some("g1"));
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// Quem já saiu da lista quando a conta chegou não é puxado de volta.
+    #[gpui_kit::test]
+    fn a_retomada_nao_puxa_quem_ja_comecou(cx: &mut TestAppContext) {
+        let (_pasta, arquivo) = arquivo_da_retomada();
+        escrever_onde_estavamos(
+            &arquivo,
+            serde_json::json!({
+                "conta": CONTA_DA_RETOMADA, "versao": "0.1.77", "gravado_em": 0,
+                "tela": "sessao", "sessao": "g1"
+            }),
+        );
+        let (janela, _dir) =
+            abertura_para_retomar(cx, &arquivo, Arc::new(GravadorDeMentira::default()));
+        janela
+            .update(cx, |app, window, cx| app.ir_para(Tela::Caixa, window, cx))
+            .expect("a janela deve estar aberta");
+        retomar(cx, &janela);
+        janela
+            .update(cx, |app, _window, _cx| {
+                assert_eq!(app.tela, Tela::Caixa);
+                assert_eq!(app.sessao_aberta, None);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// A guia de trás que estava na Revelação volta nela quando o operador
+    /// clica na guia — e a da frente volta na grade.
+    #[gpui_kit::test]
+    fn a_guia_de_tras_volta_na_revelacao_ao_ir_a_ela(cx: &mut TestAppContext) {
+        let (_pasta, arquivo) = arquivo_da_retomada();
+        escrever_onde_estavamos(
+            &arquivo,
+            serde_json::json!({
+                "conta": CONTA_DA_RETOMADA, "versao": "0.1.77", "gravado_em": 0,
+                "tela": "caixa", "revelando": { "g2": "remota-3" }, "menu_aberto": true
+            }),
+        );
+        let (janela, _dir) =
+            abertura_para_retomar(cx, &arquivo, Arc::new(GravadorDeMentira::default()));
+        retomar(cx, &janela);
+        janela
+            .update(cx, |app, window, cx| {
+                assert_eq!(app.tela, Tela::Caixa);
+                assert!(app.menu_aberto, "o menu lateral volta como estava");
+                app.ir_para_a_guia("g2".into(), window, cx);
+            })
+            .expect("a janela deve estar aberta");
+        colher_a_galeria(cx, &janela);
+        janela
+            .update(cx, |app, _window, cx| {
+                assert_eq!(app.tela, Tela::Revelacao);
+                let aberta = app.revelacao.read(cx).foto_aberta().map(|f| f.id.clone());
+                assert_eq!(aberta.as_deref(), Some("site:remota-3"));
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// O "Sair" da conta apaga onde ela estava.
+    #[gpui_kit::test]
+    fn sair_da_conta_esquece_onde_estavamos(cx: &mut TestAppContext) {
+        let (_pasta, arquivo) = arquivo_da_retomada();
+        escrever_onde_estavamos(
+            &arquivo,
+            serde_json::json!({
+                "conta": CONTA_DA_RETOMADA, "versao": "0.1.77", "gravado_em": 0,
+                "tela": "agenda"
+            }),
+        );
+        let (janela, _dir) =
+            abertura_para_retomar(cx, &arquivo, Arc::new(GravadorDeMentira::default()));
+        retomar(cx, &janela);
+        janela
+            .update(cx, |app, _window, cx| {
+                assert_eq!(app.tela, Tela::Agenda);
+                app.sair_da_conta(cx);
+                app.preparar_para_sair(retomada::Motivo::Fechou, cx);
+            })
+            .expect("a janela deve estar aberta");
+        assert!(!arquivo.exists(), "a próxima entrada começa na lista");
     }
 }

@@ -77,9 +77,12 @@ pub(super) type Pendente = (String, Ajustes, CropSettings);
 /// esperaria a galeria responder, e a guia voltaria mostrando a grade por um
 /// instante — o "fechou" que o dono não quer ver. A tira guardada abre na hora.
 ///
-/// ⚠️ Só vive enquanto o app está aberto: não vai para o
-/// `guias-das-sessoes.json`, porque abrir o app direto num editor de uma foto
-/// de ontem seria surpresa, e não continuidade.
+/// 🔁 A tira inteira só vive enquanto o app está aberto; **a foto** atravessa o
+/// fechar e a atualização, no `onde-estavamos.json` (`app/retomada.rs`). Até
+/// 03/out/2026 nem ela atravessava — "abrir o app direto num editor de uma foto
+/// de ontem seria surpresa" —, e o dono pediu o contrário: *"volte ao mesmo
+/// estado da aplicação, onde estávamos"*, como o Lightroom, que reabre no
+/// módulo e na foto em que ficou.
 #[derive(Debug, Clone)]
 pub(super) struct RevelacaoEstacionada {
     pub acervo: Vec<PhotoViewModel>,
@@ -336,6 +339,19 @@ impl Guias {
         self.reveladas.contains_key(id)
     }
 
+    /// A foto aberta em cada guia de trás que ficou na Revelação:
+    /// `(galeria, id da foto na tira)` — o que o `onde-estavamos.json` guarda.
+    pub(super) fn fotos_reveladas(&self) -> Vec<(String, String)> {
+        self.reveladas
+            .iter()
+            .filter_map(|(galeria, r)| {
+                r.acervo
+                    .get(r.posicao)
+                    .map(|foto| (galeria.clone(), foto.id.clone()))
+            })
+            .collect()
+    }
+
     pub fn posicao(&self, id: &str) -> Option<usize> {
         self.lista.iter().position(|g| g.id == id)
     }
@@ -490,9 +506,15 @@ impl Aplicativo {
         }
         self.estacionar_a_revelacao(cx);
         let revelada = self.guias.tirar_revelacao(&id);
+        // 🔁 A guia que estava na Revelação antes de o app fechar: a tira não
+        // atravessou o fechar, a foto sim — ela reabre quando a galeria chegar.
+        let lembrada = self.retomada.revelar_ao_voltar.remove(&id);
         self.entrar_na_sessao(id, cx);
         if let Some(revelada) = revelada {
             self.voltar_a_revelacao(revelada, window, cx);
+        } else if let Some(foto) = lembrada {
+            self.detalhe
+                .update(cx, |tela, cx| tela.revelar_ao_carregar(foto, cx));
         }
         window.focus(&self.foco, cx);
     }
@@ -515,6 +537,7 @@ impl Aplicativo {
             self.a_subir.clear();
         }
         let vizinha = self.guias.fechar(&id);
+        self.retomada.revelar_ao_voltar.remove(&id);
         if da_frente {
             match vizinha {
                 Some(proxima) => self.ir_para_a_guia(proxima, window, cx),
