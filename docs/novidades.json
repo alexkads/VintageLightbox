@@ -1,13 +1,15 @@
 {
-  "versao": "0.1.85",
-  "titulo": "Revelação local: o Esc, os gradientes e a Suavização se comportam como no Lightroom.",
+  "versao": "0.1.86",
+  "titulo": "Avisos com som e voz, do seu jeito, e um caixa que aguenta a rede instável.",
   "importante": false,
   "novidades": [
-    "O Esc no meio de uma pincelada desiste dela e deixa o pincel na mão; trocar de ferramenta no meio do arrasto também desiste, sem deixar o traço desenhado na foto.",
-    "Um clique sem arrastar com o gradiente linear ou o radial não cria mais uma máscara que ninguém pediu.",
-    "Com uma máscara de radial ou de laço escolhida, a Suavização muda essa máscara na hora, e o ⌘Z volta.",
-    "Segurar ⌥ no primeiro traço de uma máscara nova não a deixa mais vazia, e pintar numa máscara oculta volta a mostrá-la.",
-    "Entrar no Enquadrar larga a ferramenta da Revelação local: o círculo e as marcações não ficam mais por cima do corte."
+    "Avisos sonoros: mensagem de cliente no chatbot, cliente chegando pelo QR da sessão, agendamento novo ou cancelado e falhas tocam um som. Em Configurações → Avisos sonoros você liga ou desliga cada um, escolhe entre sete sons, ajusta o volume e pode usar um som seu (WAV, MP3, OGG ou FLAC).",
+    "Cada aviso também pode falar, com a voz do computador, o texto que você escrever: \"Novo agendamento: {detalhe}\" lê o nome do cliente e o horário. O botão Ouvir mostra como fica.",
+    "Os interruptores desligados aparecem cinza; antes ficavam azuis como os ligados.",
+    "Na sessão, o botão vermelho \"a estornar\" avisa quando um cliente pagou por PIX uma foto que o balcão já tinha vendido; o clique copia o pedido para procurar no Mercado Pago.",
+    "Com a rede piscando, fotos, revelações, notas e B tentam de novo sozinhos, em ordem, em vez de desistir em um segundo.",
+    "No caixa, venda, abertura, sangria, estorno e fechamento não gravam duas vezes quando a resposta do site se perde; Enter com o pagamento incompleto diz quanto falta, e o valor digitado depois de escolher a forma substitui o que estava no campo.",
+    "Clicar numa predefinição não desfaz mais os ajustes feitos depois dela, e \"Salvar na galeria\" volta à sessão com o teclado funcionando."
   ],
-  "por_que_atualizar": "Para as máscaras e os retoques fazerem só o que você pediu, sem sobras na foto."
+  "por_que_atualizar": "Para ouvir quando um cliente chama ou algo dá errado, e para o caixa e os envios aguentarem a rede instável."
 }
