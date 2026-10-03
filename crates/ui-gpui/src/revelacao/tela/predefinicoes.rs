@@ -345,7 +345,7 @@ impl Revelacao {
         self.gravar_o_que_estiver_pendente();
 
         self.ajustes = presets::aplicado(&self.ajustes, preset);
-        self.predefinicoes.aplicada = Some((ordem::chave(preset), self.ajustes.clone()));
+        self.predefinicoes.aplicada = Some((ordem::chave(preset), self.ajustes));
         self.espalhar_nos_sliders(window, cx);
         self.pedir_revelacao_cruzando(cx);
         self.historico

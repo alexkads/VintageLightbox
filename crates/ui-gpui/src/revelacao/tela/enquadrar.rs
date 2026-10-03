@@ -143,6 +143,10 @@ impl Revelacao {
         let proporcao = self.espaco().and_then(|espaco| {
             corte::proporcao_do_retangulo(corte::retangulo_de(&self.corte_atual(), espaco))
         });
+        // ✂️ **O Enquadrar larga a Revelação local** (achado na segunda
+        // rodada, 03/out/2026): a ferramenta seguia na mão, e o círculo, os
+        // alfinetes e os contornos ficavam por cima do retângulo do corte.
+        self.sair_da_revelacao_local(cx);
         self.edicao = Some(Edicao {
             proporcao,
             ..Edicao::default()

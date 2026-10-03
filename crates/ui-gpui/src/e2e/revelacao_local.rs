@@ -1062,3 +1062,309 @@ fn trocar_de_foto_larga_a_selecao(cx: &mut TestAppContext) {
     );
     assert!(camadas(&e, cx).is_empty(), "a outra foto não tem máscara");
 }
+
+// ---------------------------------------------------------------------------
+// 🧪 Segunda rodada (dono, 03/out/2026: *"teste ainda mais essa ferramenta"*):
+// os cantos — o meio do arrasto, o clique sem arrasto, a máscara oculta, a
+// troca de foto, o Enquadrar, a mão, os sliders sobre o que está escolhido.
+// ---------------------------------------------------------------------------
+
+/// Aperta em `de` e arrasta até `ate`, **sem soltar**.
+fn apertar_e_arrastar(e: &Estudio, cx: &mut TestAppContext, de: [f32; 2], ate: [f32; 2]) {
+    let (a, b) = (na_foto(e, cx, de), na_foto(e, cx, ate));
+    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    visual.simulate_mouse_move(a, None, Modifiers::default());
+    visual.simulate_mouse_down(a, MouseButton::Left, Modifiers::default());
+    visual.run_until_parked();
+    visual.simulate_mouse_move(b, Some(MouseButton::Left), Modifiers::default());
+    visual.run_until_parked();
+}
+
+fn soltar_em(e: &Estudio, cx: &mut TestAppContext, q: [f32; 2]) {
+    let p = na_foto(e, cx, q);
+    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    visual.simulate_mouse_up(p, MouseButton::Left, Modifiers::default());
+    visual.run_until_parked();
+}
+
+/// ⎋ **O Esc no meio do arrasto desiste do traço** — como no Lightroom. O
+/// gesto ficava pela metade: a ferramenta saía da mão e o traço provisório
+/// continuava na foto, sem ninguém para soltá-lo.
+#[gpui_kit::test]
+fn esc_no_meio_do_arrasto_desiste_do_traco(cx: &mut TestAppContext) {
+    let e = na_foto_a(cx);
+    e.teclar(cx, "k");
+    apertar_e_arrastar(&e, cx, [0.3, 0.4], [0.4, 0.4]);
+    assert!(e.revelacao(cx, |tela, _w, _cx| tela.gesto_local_em_curso()));
+    e.teclar(cx, "escape");
+    soltar_em(&e, cx, [0.4, 0.4]);
+    let v = vista(&e, cx);
+    assert!(
+        !e.revelacao(cx, |tela, _w, _cx| tela.gesto_local_em_curso()),
+        "o gesto não fica preso"
+    );
+    assert!(camadas(&e, cx).is_empty(), "o traço foi desistido");
+    assert_eq!(
+        v.ferramenta,
+        Some(Ferramenta::Pincel),
+        "o Esc gasto no traço não larga a ferramenta"
+    );
+    assert_eq!(tela_do_app(&e, cx), Tela::Revelacao);
+}
+
+/// ↩️ **O ⌘Z no meio do arrasto desiste do traço em curso** — e não desfaz o
+/// anterior por baixo dele.
+#[gpui_kit::test]
+fn desfazer_no_meio_do_arrasto_desiste_do_traco(cx: &mut TestAppContext) {
+    let e = na_foto_a(cx);
+    e.teclar(cx, "k");
+    arrastar(&e, cx, &[[0.3, 0.4], [0.4, 0.4]], Modifiers::default());
+    apertar_e_arrastar(&e, cx, [0.3, 0.6], [0.4, 0.6]);
+    e.teclar(cx, "cmd-z");
+    soltar_em(&e, cx, [0.4, 0.6]);
+    assert!(!e.revelacao(cx, |tela, _w, _cx| tela.gesto_local_em_curso()));
+    let c = camadas(&e, cx);
+    assert_eq!(c.len(), 1, "o traço de antes fica");
+    assert_eq!(c[0].componentes.len(), 1, "o do meio do ⌘Z não entra");
+}
+
+/// 👆 **Um clique sem arrastar com o linear ou o radial não cria máscara** —
+/// nascia uma máscara de borda dura (o linear de 0,1%) ou um ponto (o radial
+/// de 0,5%), que ninguém pediu. O pincel continua: um toque é uma pincelada.
+#[gpui_kit::test]
+fn clique_sem_arrasto_do_gradiente_nao_cria_mascara(cx: &mut TestAppContext) {
+    let e = na_foto_a(cx);
+    e.teclar(cx, "m");
+    clicar_na_foto(&e, cx, [0.5, 0.5], Modifiers::default());
+    assert!(camadas(&e, cx).is_empty(), "o clique do linear não cria");
+    e.teclar(cx, "shift-m");
+    clicar_na_foto(&e, cx, [0.5, 0.5], Modifiers::default());
+    assert!(camadas(&e, cx).is_empty(), "nem o do radial");
+    e.teclar(cx, "k");
+    clicar_na_foto(&e, cx, [0.5, 0.5], Modifiers::default());
+    assert_eq!(camadas(&e, cx).len(), 1, "o toque do pincel pinta");
+}
+
+/// ⌥ **O ⌥ no primeiro traço não cria uma máscara que só subtrai** — ela
+/// nascia vazia e não mostrava nada.
+#[gpui_kit::test]
+fn alt_no_primeiro_traco_cria_mascara_que_soma(cx: &mut TestAppContext) {
+    let e = na_foto_a(cx);
+    e.teclar(cx, "k");
+    arrastar(&e, cx, &[[0.3, 0.4], [0.4, 0.4]], alt());
+    let c = camadas(&e, cx);
+    assert_eq!(c.len(), 1);
+    assert_eq!(c[0].componentes[0].modo, Modo::Somar);
+    // Na máscara que já tem algo, o ⌥ subtrai.
+    arrastar(&e, cx, &[[0.35, 0.3], [0.35, 0.5]], alt());
+    assert_eq!(camadas(&e, cx)[0].componentes[1].modo, Modo::Subtrair);
+}
+
+/// 👁️ **Pintar na máscara oculta a mostra** — o traço ia para uma máscara
+/// invisível, e na foto nada acontecia.
+#[gpui_kit::test]
+fn pintar_na_mascara_oculta_a_mostra(cx: &mut TestAppContext) {
+    let e = na_foto_a(cx);
+    e.teclar(cx, "k");
+    arrastar(&e, cx, &[[0.3, 0.4], [0.4, 0.4]], Modifiers::default());
+    clicar_no_painel(&e, cx, "ver-0");
+    assert!(!camadas(&e, cx)[0].visivel);
+    assert_eq!(vista(&e, cx).mascara_sel, Some(0));
+    arrastar(&e, cx, &[[0.3, 0.6], [0.4, 0.6]], Modifiers::default());
+    let c = camadas(&e, cx);
+    assert_eq!(c[0].componentes.len(), 2);
+    assert!(c[0].visivel, "o traço novo mostra a máscara");
+}
+
+/// 💾 **A Revelação local fica na foto**: troca de foto e volta, e as
+/// máscaras e os retoques estão lá.
+#[gpui_kit::test]
+fn a_revelacao_local_fica_na_foto_ao_trocar_e_voltar(cx: &mut TestAppContext) {
+    let e = na_foto_a(cx);
+    e.teclar(cx, "k");
+    arrastar(&e, cx, &[[0.3, 0.4], [0.4, 0.4]], Modifiers::default());
+    e.teclar(cx, "s");
+    clicar_na_foto(&e, cx, [0.7, 0.6], Modifiers::default());
+    let (antes_c, antes_r) = (camadas(&e, cx), retoques(&e, cx));
+    let aqui = e.revelacao(cx, |tela, _w, _cx| tela.posicao());
+    e.revelacao(cx, |tela, window, cx| {
+        let outra = (aqui + 1) % tela.acervo().len();
+        tela.ir_para(outra, window, cx);
+    });
+    e.esperar(cx);
+    assert!(camadas(&e, cx).is_empty(), "a outra foto não tem máscara");
+    e.revelacao(cx, |tela, window, cx| tela.ir_para(aqui, window, cx));
+    e.esperar(cx);
+    assert_eq!(camadas(&e, cx), antes_c, "as máscaras voltam");
+    assert_eq!(retoques(&e, cx), antes_r, "e os retoques");
+}
+
+/// ✂️ **Entrar no Enquadrar larga a ferramenta local** — o círculo, os
+/// alfinetes e os contornos ficavam desenhados por cima do retângulo do corte.
+#[gpui_kit::test]
+fn o_enquadrar_larga_a_ferramenta_local(cx: &mut TestAppContext) {
+    let e = na_foto_a(cx);
+    e.teclar(cx, "s");
+    clicar_na_foto(&e, cx, [0.6, 0.6], Modifiers::default());
+    assert!(vista(&e, cx).marcas > 0);
+    e.teclar(cx, "r");
+    assert!(
+        e.revelacao(cx, |tela, _w, _cx| tela.cortando()),
+        "R abre o Enquadrar"
+    );
+    let v = vista(&e, cx);
+    assert_eq!(v.ferramenta, None, "a ferramenta sai da mão");
+    assert_eq!(v.selecionado, None);
+    assert!(
+        e.revelacao(cx, |tela, _w, cx| tela.marcacoes_locais_para_teste(cx)),
+        "nada da Revelação local por cima do corte"
+    );
+    e.teclar(cx, "s");
+    assert_eq!(
+        vista(&e, cx).ferramenta,
+        None,
+        "nem pela tecla, no Enquadrar"
+    );
+    assert_eq!(retoques(&e, cx).len(), 1, "o retoque fica");
+}
+
+/// ✋ **Espaço segurado é a mão, mesmo com a ferramenta na mão** — arrasta a
+/// foto ampliada e não pinta.
+#[gpui_kit::test]
+fn espaco_segurado_e_a_mao_com_a_ferramenta(cx: &mut TestAppContext) {
+    let e = na_foto_a(cx);
+    for _ in 0..3 {
+        e.revelacao(cx, |tela, _w, cx| tela.passo_de_zoom(1, cx));
+    }
+    e.teclar(cx, "k");
+    let meio_antes = na_foto(&e, cx, [0.5, 0.5]);
+    e.teclar(cx, "space");
+    arrastar(
+        &e,
+        cx,
+        &[[0.5, 0.5], [0.52, 0.5], [0.55, 0.5]],
+        Modifiers::default(),
+    );
+    e.soltar(cx, "space");
+    assert!(
+        camadas(&e, cx).is_empty(),
+        "com o Espaço, o arrasto não pinta"
+    );
+    let meio_depois = na_foto(&e, cx, [0.5, 0.5]);
+    assert!(
+        (meio_depois.x - meio_antes.x).abs() > gpui_kit::px(5.),
+        "a foto andou: {meio_antes:?} → {meio_depois:?}"
+    );
+    assert_eq!(vista(&e, cx).ferramenta, Some(Ferramenta::Pincel));
+    arrastar(&e, cx, &[[0.5, 0.5], [0.52, 0.5]], Modifiers::default());
+    assert_eq!(camadas(&e, cx).len(), 1, "soltou o Espaço, o pincel pinta");
+}
+
+/// 🎚️ **A Suavização muda o radial escolhido** — como no Lightroom: com a
+/// máscara de um radial escolhida e o radial na mão, o slider é dele, num
+/// passo só. Antes ele só valia para o próximo, e o radial na foto não mudava.
+#[gpui_kit::test]
+fn a_suavizacao_muda_o_radial_escolhido(cx: &mut TestAppContext) {
+    let e = na_foto_a(cx);
+    e.teclar(cx, "shift-m");
+    arrastar(&e, cx, &[[0.5, 0.5], [0.6, 0.6]], Modifiers::default());
+    let feather =
+        |e: &Estudio, cx: &mut TestAppContext| match &camadas(e, cx)[0].componentes[0].forma {
+            Forma::Radial(g) => g.feather,
+            outra => panic!("um radial, não {outra:?}"),
+        };
+    let antes = feather(&e, cx);
+    e.revelacao(cx, |tela, _w, cx| tela.soltar_o_slider_local(1, 0.9, cx));
+    assert!(
+        (feather(&e, cx) - 0.9).abs() < 1e-4,
+        "o radial escolhido muda"
+    );
+    e.teclar(cx, "cmd-z");
+    assert!((feather(&e, cx) - antes).abs() < 1e-4, "um ⌘Z volta");
+    // Escolher a máscara põe o trilho na suavização dela.
+    e.teclar(cx, "escape");
+    e.teclar(cx, "escape");
+    e.revelacao(cx, |tela, _w, cx| tela.soltar_o_slider_local(1, 0.1, cx));
+    clicar_no_painel(&e, cx, "mascara-0");
+    assert!(
+        (vista(&e, cx).trilho_da_suavizacao - antes).abs() < 1e-3,
+        "o trilho mostra a do radial escolhido"
+    );
+}
+
+/// 🎚️ **Opacidade e Tamanho mudam o retoque escolhido, num passo cada.**
+#[gpui_kit::test]
+fn opacidade_e_tamanho_mudam_o_retoque_escolhido(cx: &mut TestAppContext) {
+    let e = na_foto_a(cx);
+    e.teclar(cx, "s");
+    clicar_na_foto(&e, cx, [0.5, 0.5], Modifiers::default());
+    let raio = retoques(&e, cx)[0].traco().raio;
+    e.revelacao(cx, |tela, _w, cx| tela.soltar_o_slider_local(2, 0.4, cx));
+    assert!((retoques(&e, cx)[0].opacidade() - 0.4).abs() < 1e-4);
+    e.revelacao(cx, |tela, _w, cx| tela.soltar_o_slider_local(0, 0.8, cx));
+    assert!(
+        retoques(&e, cx)[0].traco().raio > raio,
+        "o Tamanho cresce o retoque"
+    );
+    e.teclar(cx, "cmd-z");
+    assert!((retoques(&e, cx)[0].traco().raio - raio).abs() < 1e-6);
+    e.teclar(cx, "cmd-z");
+    assert!((retoques(&e, cx)[0].opacidade() - 1.0).abs() < 1e-4);
+    assert_eq!(retoques(&e, cx).len(), 1, "os dois ⌘Z não levam o retoque");
+}
+
+/// 🩹 **Mover o retoque é um passo**: o ⌘Z o devolve ao lugar, e o seguinte
+/// tira o retoque.
+#[gpui_kit::test]
+fn mover_o_retoque_e_um_passo(cx: &mut TestAppContext) {
+    let e = na_foto_a(cx);
+    e.teclar(cx, "j");
+    clicar_na_foto(&e, cx, [0.4, 0.5], Modifiers::default());
+    arrastar(
+        &e,
+        cx,
+        &[[0.4, 0.5], [0.43, 0.5], [0.45, 0.52]],
+        Modifiers::default(),
+    );
+    let destino = |e: &Estudio, cx: &mut TestAppContext| {
+        retoques(e, cx)[0]
+            .carimbo()
+            .expect("band-aid")
+            .destino_inicial
+    };
+    assert!((destino(&e, cx)[0] - 0.45).abs() < 0.01);
+    e.teclar(cx, "cmd-z");
+    assert!((destino(&e, cx)[0] - 0.4).abs() < 0.01, "o ⌘Z o devolve");
+    e.teclar(cx, "cmd-z");
+    assert!(retoques(&e, cx).is_empty());
+}
+
+/// ✨ **O Content-Aware cerca também no poligonal.**
+#[gpui_kit::test]
+fn o_content_aware_cerca_no_poligonal(cx: &mut TestAppContext) {
+    let e = na_foto_a(cx);
+    e.teclar(cx, "shift-j");
+    clicar_no_painel(&e, cx, "local-area-1");
+    clicar_no_painel(&e, cx, "local-laco-1");
+    for q in [[0.6, 0.6], [0.7, 0.6], [0.7, 0.7], [0.6, 0.6]] {
+        clicar_na_foto(&e, cx, q, Modifiers::default());
+    }
+    assert!(matches!(
+        retoques(&e, cx).as_slice(),
+        [Retoque::Preencher(p)] if p.laco.len() == 3
+    ));
+}
+
+/// 🔀 **Trocar de ferramenta no meio do arrasto desiste do traço** — e o
+/// soltar depois não cria nada com a ferramenta nova.
+#[gpui_kit::test]
+fn trocar_de_ferramenta_no_meio_do_arrasto(cx: &mut TestAppContext) {
+    let e = na_foto_a(cx);
+    e.teclar(cx, "k");
+    apertar_e_arrastar(&e, cx, [0.3, 0.4], [0.4, 0.4]);
+    e.teclar(cx, "m");
+    soltar_em(&e, cx, [0.4, 0.4]);
+    assert!(!e.revelacao(cx, |tela, _w, _cx| tela.gesto_local_em_curso()));
+    assert!(camadas(&e, cx).is_empty(), "nem o traço nem um linear");
+    assert_eq!(vista(&e, cx).ferramenta, Some(Ferramenta::Linear));
+}

@@ -560,6 +560,7 @@ impl Revelacao {
                     .and_then(|i| parametros.camadas.get_mut(i))
                 {
                     camada.componentes.push(componente.clone());
+                    camada.visivel = true;
                 }
             }
             // O Content-Aware sintetiza no fim do gesto, e não a cada ponto.
@@ -732,7 +733,7 @@ impl Revelacao {
             self.estado_do_painel.abrir(CHAVE_DO_PAINEL_LOCAL);
         }
         self.local.poligono.clear();
-        self.local.gesto = None;
+        self.largar_o_gesto(cx);
         if ferramenta.de_mascara() {
             self.local.criando = self.local.mascara_sel.is_none();
             if self.local.criando {
@@ -760,10 +761,22 @@ impl Revelacao {
         self.local.subtrair = false;
         self.local.selecionado = None;
         self.local.origem = None;
-        self.local.gesto = None;
+        self.largar_o_gesto(cx);
         self.local.poligono.clear();
         self.estado_do_painel.abrir(CHAVE_DO_PAINEL_LOCAL);
         cx.notify();
+    }
+
+    /// Desiste do gesto em curso, se houver — e a foto deixa de mostrar o
+    /// provisório dele (achado na segunda rodada, 03/out/2026: trocar de
+    /// ferramenta no meio do arrasto apagava o gesto, mas o traço continuava
+    /// desenhado na foto sem existir). Devolve se havia gesto.
+    fn largar_o_gesto(&mut self, cx: &mut Context<Self>) -> bool {
+        let havia = self.local.gesto.take().is_some();
+        if havia {
+            self.pedir_revelacao(cx);
+        }
+        havia
     }
 
     /// Está com alguma ferramenta da Revelação local na mão?
@@ -888,6 +901,19 @@ impl Revelacao {
         cx.notify();
     }
 
+    /// 🧪 Um slider da ferramenta solto em `valor` (0 Tamanho, em posição do
+    /// trilho; 1 Suavização; 2 Opacidade/Fluxo) — o que o arrasto entrega.
+    #[cfg(test)]
+    pub fn soltar_o_slider_local(&mut self, qual: u8, valor: f32, cx: &mut Context<Self>) {
+        self.slider_local(qual, valor, true, cx);
+    }
+
+    /// 🧪 Se a Revelação local não desenha nada por cima do palco agora.
+    #[cfg(test)]
+    pub fn marcacoes_locais_para_teste(&self, cx: &mut Context<Self>) -> bool {
+        self.marcacoes_locais(cx).is_none()
+    }
+
     /// 🧪 O slider de Exposição da máscara escolhida, solto em `valor`.
     #[cfg(test)]
     pub fn soltar_a_exposicao_em(&mut self, valor: f32, cx: &mut Context<Self>) {
@@ -932,6 +958,13 @@ impl Revelacao {
     /// `Esc`: larga o laço em curso, depois a seleção, depois a ferramenta.
     /// Devolve se fez alguma coisa (senão o `Esc` segue para a raiz).
     pub fn esc_local(&mut self, cx: &mut Context<Self>) -> bool {
+        // ⎋ **No meio do arrasto, o Esc desiste do gesto** (achado na segunda
+        // rodada, 03/out/2026): o traço provisório ficava na foto, e o Esc
+        // seguinte tirava a ferramenta com o botão ainda apertado.
+        if self.largar_o_gesto(cx) {
+            cx.notify();
+            return true;
+        }
         if !self.local.poligono.is_empty() {
             self.local.poligono.clear();
         } else if self.local.selecionado.is_some() {
@@ -964,6 +997,8 @@ impl Revelacao {
     /// O botão de sair: tudo o que o `Esc` larga em vários toques, de uma vez
     /// — a foto volta ao que a Revelação global mostra.
     pub fn sair_da_revelacao_local(&mut self, cx: &mut Context<Self>) {
+        self.largar_o_gesto(cx);
+        self.local.cursor = None;
         self.local.poligono.clear();
         self.local.origem = None;
         self.local.selecionado = None;
@@ -1126,8 +1161,61 @@ impl Revelacao {
                     self.pedir_revelacao(cx);
                 }
             }
+        } else if qual == 1 {
+            // 🎚️ **Com a máscara de um radial ou de um laço escolhida, a
+            // Suavização é dele** — como no Lightroom (achado na segunda
+            // rodada, 03/out/2026: o slider só valia para o próximo, e o que
+            // estava na foto não mudava). Ao vivo, e um passo ao soltar.
+            if let Some((c, k)) = self.componente_da_suavizacao() {
+                let mut parametros = (*self.locais).clone();
+                match &mut parametros.camadas[c].componentes[k].forma {
+                    Forma::Radial(g) => g.feather = valor,
+                    Forma::Laco(l) => l.feather = valor * FEATHER_DO_LACO,
+                    _ => {}
+                }
+                if soltou {
+                    self.comprometer(parametros, cx);
+                } else {
+                    self.locais = Arc::new(parametros);
+                    self.pedir_revelacao(cx);
+                }
+            }
         }
         cx.notify();
+    }
+
+    /// O componente da máscara escolhida que a Suavização muda: o último do
+    /// tipo da ferramenta na mão, se ela é o radial ou o laço.
+    fn componente_da_suavizacao(&self) -> Option<(usize, usize)> {
+        let c = self.local.mascara_sel?;
+        let ferramenta = self.local.ferramenta?;
+        let camada = self.locais.camadas.get(c)?;
+        let k = camada.componentes.iter().rposition(|k| {
+            matches!(
+                (&k.forma, ferramenta),
+                (Forma::Radial(_), Ferramenta::Radial) | (Forma::Laco(_), Ferramenta::Laco)
+            )
+        })?;
+        Some((c, k))
+    }
+
+    /// O trilho da Suavização na do componente que ela muda, quando a máscara
+    /// escolhida tem um.
+    fn sincronizar_a_suavizacao_da_mascara(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((c, k)) = self.componente_da_suavizacao() else {
+            return;
+        };
+        let feather = match &self.locais.camadas[c].componentes[k].forma {
+            Forma::Radial(g) => g.feather,
+            Forma::Laco(l) => l.feather / FEATHER_DO_LACO,
+            _ => return,
+        }
+        .clamp(0.0, 1.0);
+        self.local.feather = feather;
+        self.local
+            .sliders
+            .feather
+            .update(cx, |s, cx| s.set_value(feather, window, cx));
     }
 
     /// O slider de exposição da máscara selecionada: ao vivo, e um passo ao
@@ -1181,6 +1269,7 @@ impl Revelacao {
                     .and_then(|c| c.componentes.last())
                     .map(|k| ferramenta_da_forma(&k.forma));
             }
+            self.sincronizar_a_suavizacao_da_mascara(window, cx);
         }
         cx.notify();
     }
@@ -1460,6 +1549,7 @@ impl Revelacao {
             self.local.mascara_sel = Some(i);
             self.local.criando = false;
             self.local.subtrair = false;
+            self.sincronizar_a_suavizacao_da_mascara(window, cx);
             self.estado_do_painel.abrir(CHAVE_DO_PAINEL_LOCAL);
             cx.notify();
             return true;
@@ -1570,8 +1660,10 @@ impl Revelacao {
         let nova = self.local.criando || self.local.mascara_sel.is_none();
         // ➖ O "Subtrair" é da máscara escolhida: a máscara nova começa
         // somando — nascer de um traço que subtrai não mostraria nada.
-        let subtrair = self.local.subtrair && !nova;
-        let modo = if subtrair != alt {
+        // ⌥ inverte o modo só na máscara que já tem alguma coisa: o primeiro
+        // traço de uma máscara nova sempre soma (achado na segunda rodada,
+        // 03/out/2026 — com ⌥ ela nascia vazia e não mostrava nada).
+        let modo = if !nova && self.local.subtrair != alt {
             Modo::Subtrair
         } else {
             Modo::Somar
@@ -1606,10 +1698,12 @@ impl Revelacao {
                 nova,
                 componente: Componente {
                     modo,
+                    // Nasce do tamanho de um pixel: só o arrasto lhe dá raio,
+                    // e o clique sem arrasto não vira máscara.
                     forma: Forma::Radial(GradienteRadial {
                         centro: q,
-                        raio_x: 0.005,
-                        raio_y: 0.005,
+                        raio_x: 0.0005,
+                        raio_y: 0.0005,
                         angulo: 0.0,
                         feather,
                         fora: false,
@@ -1898,6 +1992,14 @@ impl Revelacao {
                         return;
                     }
                 }
+                // 👆 **Clique sem arrasto de gradiente não é máscara** (achado
+                // na segunda rodada, 03/out/2026): nascia um linear de borda
+                // dura ou um radial do tamanho de um ponto, que ninguém pediu.
+                if self.gradiente_sem_arrasto(&componente.forma) {
+                    self.pedir_revelacao(cx);
+                    cx.notify();
+                    return;
+                }
                 // 🚨 **A camada escolhida pode ter sumido** (um ⌘Z que a
                 // desfez): o traço vira máscara nova em vez de se perder.
                 let existe = self
@@ -1923,6 +2025,9 @@ impl Revelacao {
                     .and_then(|i| parametros.camadas.get_mut(i))
                 {
                     c.componentes.push(componente);
+                    // 👁️ Pintar na máscara oculta a mostra: o traço ia para
+                    // uma máscara invisível, e na foto nada acontecia.
+                    c.visivel = true;
                 }
             }
             Gesto::Retoque(r) => {
@@ -1952,6 +2057,20 @@ impl Revelacao {
             }
         }
         self.comprometer(parametros, cx);
+    }
+
+    /// O linear ou o radial de um clique sem arrasto: menos de 4 pontos na
+    /// tela entre as pontas, ou de raio.
+    fn gradiente_sem_arrasto(&self, forma: &Forma) -> bool {
+        const MINIMO: f32 = 4.0;
+        match forma {
+            Forma::Linear(g) => match (self.ponto_da_foto(g.inicio), self.ponto_da_foto(g.fim)) {
+                (Some(a), Some(b)) => (a.x - b.x).hypot(a.y - b.y) < MINIMO,
+                _ => false,
+            },
+            Forma::Radial(g) => self.raio_na_tela(g.raio_x.max(g.raio_y)) < MINIMO,
+            _ => false,
+        }
     }
 
     fn laco_pronto(
@@ -1990,7 +2109,8 @@ impl Revelacao {
             };
             match self.local.mascara_sel.filter(|_| !self.local.criando) {
                 Some(i) if i < parametros.camadas.len() => {
-                    parametros.camadas[i].componentes.push(componente)
+                    parametros.camadas[i].componentes.push(componente);
+                    parametros.camadas[i].visivel = true;
                 }
                 _ => {
                     let nome = nome_livre(&parametros);
@@ -2402,6 +2522,9 @@ impl Revelacao {
     /// As marcações por cima da foto, e o arrasto que continua fora dela.
     pub(super) fn marcacoes_locais(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.local.ferramenta?;
+        if self.edicao.is_some() {
+            return None;
+        }
         let marcas = self.marcas();
         let arrastando = self.local.arrastando();
         let ouvinte = cx.entity();
