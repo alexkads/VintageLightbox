@@ -397,23 +397,27 @@ fn estresse_mil_eventos_de_slider_por_gesto(cx: &mut TestAppContext) {
         );
     }
 
-    // O histórico: um passo por gesto, com o teto de 20. Cada `Cmd+Z` e cada
-    // `Cmd+Shift+Z` também vai ao banco — são 19 + 19 gravações a mais.
+    // O histórico: um passo por gesto, com o teto. Cada `Cmd+Z` e cada
+    // `Cmd+Shift+Z` também vai ao banco — são N + N gravações a mais.
+    let teto = crate::revelacao::historico::TETO;
+    let voltas = (teto - 1).min(GESTOS);
     janela
         .update(cx, |tela, window, cx| {
             let mut desfeitos = 0;
             while tela.pode_desfazer() {
                 tela.desfazer(window, cx);
                 desfeitos += 1;
-                assert!(desfeitos <= 20, "o histórico passou do teto");
+                assert!(desfeitos <= teto, "o histórico passou do teto");
             }
-            assert_eq!(desfeitos, 19, "teto de 20: o mais antigo que sobrou");
-            assert_eq!(
-                tela.ajustes(),
-                estados[GESTOS - 20].ajustes,
-                "vinte passos para trás é o gesto que o teto guardou"
-            );
-            for _ in 0..19 {
+            assert_eq!(desfeitos, voltas, "o mais antigo que o teto guardou");
+            if voltas == teto - 1 {
+                assert_eq!(
+                    tela.ajustes(),
+                    estados[GESTOS - teto].ajustes,
+                    "o teto para trás é o gesto que ele guardou"
+                );
+            }
+            for _ in 0..voltas {
                 tela.refazer(window, cx);
             }
             assert_eq!(tela.ajustes(), estados[GESTOS - 1].ajustes);
@@ -430,7 +434,7 @@ fn estresse_mil_eventos_de_slider_por_gesto(cx: &mut TestAppContext) {
         .expect("a janela aberta");
     cx.run_until_parked();
     let gravado = gravador.gravado();
-    let depois_do_historico = GESTOS + 19 + 19;
+    let depois_do_historico = GESTOS + voltas + voltas;
     assert_eq!(gravado.len(), depois_do_historico + 1);
     let ultima = &gravado[depois_do_historico];
     assert_eq!(ultima.0, "id-00001", "a gravação é da foto que saiu");
@@ -978,7 +982,10 @@ fn estresse_o_enquadrar_arrastado_sem_parar(cx: &mut TestAppContext) {
                 desfeitos += 1;
                 valido(tela);
             }
-            assert!(desfeitos <= 19, "o histórico passou do teto: {desfeitos}");
+            assert!(
+                desfeitos < crate::revelacao::historico::TETO,
+                "o histórico passou do teto: {desfeitos}"
+            );
             tela.sair_do_corte(cx);
             assert!(!tela.cortando());
         })

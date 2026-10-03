@@ -1,18 +1,13 @@
 {
-  "versao": "0.1.80",
-  "titulo": "Exportar fotos funciona com as fotos da sessão, e o modal foi refeito.",
+  "versao": "0.1.82",
+  "titulo": "Painel Histórico na Revelação, como o do Lightroom.",
   "importante": true,
   "novidades": [
-    "Exportar as fotos de uma sessão dava \"Photo ID inválido\" em todas. Agora elas saem com os ajustes e o corte aplicados, com o nome do arquivo da câmera (e não mais foto, foto-2, foto-3…).",
-    "Barra de progresso com a foto em andamento, botão \"Parar\" e, no fim, \"Mostrar na pasta\" e \"Tentar de novo\" só para as que falharam — cada falha aparece na lista com o motivo.",
-    "Formatos JPEG, PNG, TIFF e WebP e a qualidade do JPEG, como no site. O destino aparece em \"Salvar em\" (a pasta Downloads, se você não escolher outra).",
-    "A marca d'água da \"Prévia da galeria\" agora se escolhe como arquivo (antes o seletor só deixava escolher pasta e a prévia nunca saía).",
-    "A pasta, o uso, o formato e a marca d'água ficam lembrados para a próxima vez, e um arquivo que já está na pasta nunca é sobrescrito: o novo ganha -2.",
-    "Na Revelação, máscaras e retoques ficaram mais fáceis de usar: o Esc larga a máscara antes de sair, o Delete apaga a escolhida, escolher na lista mostra a máscara na foto e a barra de ferramentas cabe inteira na coluna.",
-    "Revelação local: a barra de ferramentas cabe inteira na coluna estreita, e o botão de sair não fica mais cortado.",
-    "Revelação local: o Esc larga uma coisa de cada vez (o laço pela metade, o retoque, a ferramenta, a máscara escolhida) e só depois sai da Revelação; antes, com uma máscara escolhida, ele fechava a tela. Delete apaga a máscara ou o retoque escolhido, e o ⌘Z traz de volta.",
-    "Revelação local: escolher uma máscara na lista mostra o contorno e as alças dela na foto, o duplo clique na foto volta a entrar no retoque ou na máscara, e o controle de Exposição mostra sempre o valor da máscara escolhida.",
-    "Revelação local: o \"+\" de Máscaras virou botão, a lixeira não escolhe outro item, \"Subtrair\" não passa para a máscara seguinte e o círculo da ferramenta some quando o ponteiro sai da foto."
+    "Na coluna da esquerda da Revelação, abaixo das predefinições, o painel Histórico lista cada gesto feito na foto, do mais novo para o mais antigo, com o nome e o valor — \"Exposição +0,30 +0,50\", \"Endireitar +5,0 5,0°\", \"Predefinição: Kodak\", \"Adicionar máscara\".",
+    "Clicar numa linha volta a foto àquele ponto; os passos de depois continuam lá (esmaecidos) até você mexer de novo. Passar o mouse numa linha mostra aquele passo na foto sem mudar nada.",
+    "O histórico fica guardado com a foto: trocar de foto ou fechar o aplicativo não o apaga. Se a foto mudou fora da Revelação (colada na Biblioteca, sincronizada), aparece o passo \"Mudou fora da Revelação\".",
+    "O ✕ do painel limpa o histórico da foto, e clicar no título recolhe o painel. Agora cabem 100 passos por foto (antes eram 20).",
+    "Em telas baixas (720 pontos) com o Navegador aberto, o painel fica só no título; recolha o Navegador para ver as linhas."
   ],
-  "por_que_atualizar": "Para conseguir entregar as fotos da sessão em arquivo direto do aplicativo."
+  "por_que_atualizar": "Para voltar a qualquer ponto da revelação de uma foto, mesmo depois de fechar o aplicativo."
 }

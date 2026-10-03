@@ -297,6 +297,10 @@ impl Revelacao {
     /// reversível de graça. 🚨 **E é a mesma conta do clique**
     /// ([`presets::aplicado`]): a que substitui parte do neutro também aqui.
     pub(super) fn ajustes_na_tela(&self) -> Ajustes {
+        // 📜 O passo do histórico sob o ponteiro: a foto daquele passo.
+        if let Some(passo) = self.passo_em_previa() {
+            return self.sem_o_que_o_olho_esconde(passo.estado.ajustes);
+        }
         let ajustes = match &self.previa {
             Some(preset) => presets::aplicado(&self.ajustes, preset),
             None => self.ajustes,
@@ -310,10 +314,13 @@ impl Revelacao {
     /// Sem mudança não há o que redesenhar — pedir à GPU o mesmo quadro a cada
     /// movimento do ponteiro sobre a mesma linha seria trabalho por nada.
     pub fn prever(&mut self, preset: Option<&Preset>, cx: &mut Context<Self>) {
-        if self.previa.as_ref() == preset {
+        // `None` também tira a prévia de um passo do histórico: a coluna que
+        // some leva as duas.
+        if self.previa.as_ref() == preset && self.previa_do_passo.is_none() {
             return;
         }
         self.previa = preset.cloned();
+        self.previa_do_passo = None;
         self.pedir_revelacao(cx);
         cx.notify();
     }
@@ -341,7 +348,8 @@ impl Revelacao {
         self.predefinicoes.aplicada = Some((ordem::chave(preset), self.ajustes.clone()));
         self.espalhar_nos_sliders(window, cx);
         self.pedir_revelacao_cruzando(cx);
-        self.historico.registrar(self.estado());
+        self.historico
+            .registrar_como(self.estado(), format!("Predefinição: {}", preset.name));
         self.gravar();
         cx.notify();
     }

@@ -107,6 +107,18 @@ async fn main() {
         std::fs::create_dir_all(&catalogo).expect("Failed to create catalog directory");
     }
 
+    // 🔒 **Uma cópia só por catálogo** (`ui_gpui::copia_unica`), antes do
+    // banco: a segunda abertura acorda a janela da primeira e sai sem tocar no
+    // SQLite. Em desenvolvimento, `VLB_VARIAS_COPIAS=1` libera.
+    let mut trava = match ui_gpui::copia_unica::abrir(&catalogo) {
+        ui_gpui::copia_unica::Abertura::Dona(trava) => Some(trava),
+        ui_gpui::copia_unica::Abertura::SemTrava => None,
+        ui_gpui::copia_unica::Abertura::JaAberta => {
+            eprintln!("🔒 O VintageLightbox já está aberto: a janela dele vem para a frente.");
+            return;
+        }
+    };
+
     let db_path = AppPaths::main_db_path();
     let database_url = format!("sqlite:{}?mode=rwc", db_path.to_string_lossy());
 
@@ -267,7 +279,10 @@ async fn main() {
         || infrastructure::ImageExporterImpl::new().com_editadas(editada_da_foto.clone());
     let gravador: Arc<dyn Gravador> = Arc::new(
         GravadorDoBanco::novo(editor, tokio::runtime::Handle::current(), guardadas)
-            .com_locais_do_site(locais_do_site),
+            .com_locais_do_site(locais_do_site)
+            .com_historico(infrastructure::database::CatalogoDoHistorico::new(
+                pool.clone(),
+            )),
     );
     // 🚨 A releitura do catálogo, pelo mesmo `LibraryController` que leu a lista
     // acima. Sem ela a importação grava no banco e a grade continua com a lista
@@ -604,6 +619,10 @@ async fn main() {
                         // Minimizar leva à bandeja; fechar com envio na fila só
                         // esconde (G9) — `ui_gpui::segundo_plano`.
                         ui_gpui::segundo_plano::ligar(aplicativo.downgrade(), window, cx);
+                        // E a segunda cópia, quando abrirem de novo, também.
+                        if let Some(trava) = trava.take() {
+                            ui_gpui::copia_unica::ligar(trava, cx);
+                        }
                         // No Linux (Wayland e X11) e no macOS o GPUI ignora o
                         // `Maximized` da abertura e só o informa depois: quem
                         // maximiza é o app. No Wayland o pedido vai antes do

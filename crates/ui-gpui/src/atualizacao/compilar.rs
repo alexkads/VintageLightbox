@@ -464,15 +464,20 @@ pub fn reabrir_o_instalado() {
     };
     #[cfg(target_os = "macos")]
     if let Some(app) = binario.ancestors().nth(3) {
+        // `--reabertura`: o novo espera este largar a trava do catálogo
+        // (`copia_unica`) em vez de acordá-lo e sair.
         let _ = std::process::Command::new("open")
             .arg("-n")
             .arg(app)
+            .args(["--args", crate::copia_unica::ARG_REABERTURA])
             .spawn();
         std::process::exit(0);
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = std::process::Command::new(&binario).spawn();
+        let _ = std::process::Command::new(&binario)
+            .arg(crate::copia_unica::ARG_REABERTURA)
+            .spawn();
         std::process::exit(0);
     }
     #[allow(unreachable_code)]

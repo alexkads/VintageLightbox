@@ -199,6 +199,8 @@ pub fn deslocar(ids: &[String], id: &str, passo: i32) -> Vec<String> {
 
 /// A chave do Navegador entre os recolhidos — ao lado das dos grupos.
 const NAVEGADOR: &str = "navegador";
+/// A chave do painel Histórico, no pé da coluna.
+const HISTORICO: &str = "historico";
 
 /// As listas guardadas.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -289,6 +291,16 @@ impl Ordem {
 
     pub fn alternar_navegador(&mut self) {
         self.alternar_por_chave(NAVEGADOR);
+    }
+
+    /// 📜 O painel Histórico recolhido no pé da coluna — a mesma arrumação
+    /// deste computador que o Navegador.
+    pub fn historico_recolhido(&self) -> bool {
+        self.recolhido_por_chave(HISTORICO)
+    }
+
+    pub fn alternar_historico(&mut self) {
+        self.alternar_por_chave(HISTORICO);
     }
 
     fn recolhido_por_chave(&self, chave: &str) -> bool {

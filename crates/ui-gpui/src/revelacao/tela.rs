@@ -56,6 +56,8 @@ use infrastructure::transformacao;
 mod comparar;
 mod correcao_de_cores;
 mod enquadrar;
+/// 📜 O painel Histórico, no pé da coluna das predefinições.
+mod historico;
 /// A Revelação local: máscaras e retoques — ferramentas, gestos e painel.
 mod local;
 /// O zoom no palco e o Navegador.
@@ -253,10 +255,22 @@ pub struct Revelacao {
     /// texto**, como em todo editor: com o cursor esquecido na busca de
     /// predefinições, `[`, `]`, `K`… eram texto e não atalho.
     foco_do_palco: gpui_kit::FocusHandle,
-    /// Os passos de desfazer, **por foto**: trocar de foto começa um histórico
-    /// novo. Um `Cmd+Z` que atravessasse fotos aplicaria a revelação de uma na
-    /// outra — que é o mesmo defeito que a cópia da seleção já impede.
+    /// Os passos de desfazer, **por foto**: trocar de foto troca de histórico.
+    /// Um `Cmd+Z` que atravessasse fotos aplicaria a revelação de uma na
+    /// outra — que é o mesmo defeito que a cópia da seleção já impede. Cada
+    /// foto guarda o seu no catálogo (`tela/historico.rs`).
     historico: Historico,
+    /// 📜 A leitura do histórico gravado da foto aberta, em curso — a geração
+    /// que ela responde. Enquanto houver, **nada se grava**: o histórico curto
+    /// desta abertura passaria por cima do gravado antes de ele chegar.
+    historico_por_ler: Option<u64>,
+    /// Cresce a cada abertura de foto: a leitura que voltar com outra geração
+    /// é de uma foto que já saiu.
+    geracao_do_historico: u64,
+    _leitura_do_historico: Option<Task<()>>,
+    /// 📜 O passo do histórico sob o ponteiro: a foto o mostra sem mudar nada,
+    /// como a prévia de uma predefinição.
+    previa_do_passo: Option<usize>,
     /// Se há ajuste que ainda não foi gravado. Um `bool`, e não "a tarefa existe":
     /// a tarefa continua existindo depois de terminar, e trocar de foto gravaria
     /// de novo o que já estava no banco.
@@ -718,6 +732,10 @@ impl Revelacao {
             local,
             foco_do_palco: cx.focus_handle(),
             historico: Historico::novo(Estado::default()),
+            historico_por_ler: None,
+            geracao_do_historico: 0,
+            _leitura_do_historico: None,
+            previa_do_passo: None,
             pendente: false,
             gravadas: std::collections::HashSet::new(),
             bases: std::collections::HashMap::new(),
@@ -922,6 +940,7 @@ impl Revelacao {
                         locais: passo.locais,
                     }
                 });
+                self.gravar_o_historico();
             }
         } else if aberta {
             // Ninguém tinha mexido: a foto passa a abrir com a revelação nova.
@@ -931,7 +950,16 @@ impl Revelacao {
                 locais: self.locais.clone(),
             };
             self.parametros_ao_abrir = Some(estado.clone());
-            self.historico = Historico::novo(estado);
+            // 📜 Com passos de antes (o histórico gravado da foto), a revelação
+            // nova vira um passo — recomeçar apagaria o que a foto já passou.
+            // Sem eles, é a foto que abre assim.
+            if self.historico.passos().len() > 1 {
+                self.historico
+                    .registrar_como(estado, super::historico::DE_FORA);
+                self.gravar_o_historico();
+            } else {
+                self.historico = Historico::novo(estado);
+            }
         }
         if persistencia::mesmos_parametros(final_, meu) {
             return;
@@ -1495,7 +1523,10 @@ impl Revelacao {
         // da abertura, e é o que faz o **primeiro** `Cmd+Z` ter para onde voltar.
         // No legado não tem — lá o histórico começa depois da primeira mudança, e
         // a primeira coisa que se faz numa foto não tem volta.
+        // 📜 E o gravado da foto, quando chegar do disco, entra por baixo dele
+        // (`ler_o_historico_gravado`).
         self.historico = Historico::novo(self.estado());
+        self.previa_do_passo = None;
         self.esquecer_a_resolucao();
         self.parametros_ao_abrir = Some(self.estado());
         self.aguardando = None;
@@ -1544,6 +1575,8 @@ impl Revelacao {
             desenhada: None,
         });
         self.atualizar_exibicao();
+        // 📜 Depois de a foto ser a aberta: a leitura é pelo id dela.
+        self.ler_o_historico_gravado(cx);
 
         // `set_value` **não emite** `Change` (ao contrário do `InputState` da
         // busca), então mover os 42 sliders aqui não vira 42 pedidos à GPU. Um só
@@ -1923,6 +1956,9 @@ impl Revelacao {
         if let Some(foto) = acervo.iter_mut().find(|f| f.id == id) {
             persistencia::na_foto(foto, ajustes, corte);
         }
+        // 📜 O histórico vai junto: todo gesto, desfazer e clique no painel
+        // passa por aqui.
+        self.gravar_o_historico();
     }
 
     /// A revelação local vai ao banco **à parte** dos ajustes, e só quando mudou
@@ -1967,6 +2003,9 @@ impl Revelacao {
     /// A revelação local que a GPU revela agora — a da foto, mais o gesto que
     /// estiver em curso na Revelação local.
     pub(super) fn locais_na_tela(&self) -> Arc<ParametrosLocais> {
+        if let Some(passo) = self.passo_em_previa() {
+            return passo.estado.locais.clone();
+        }
         self.locais_com_o_gesto()
     }
 
@@ -2112,7 +2151,8 @@ impl Revelacao {
         self.ajustes.highlights = escolha.highlights;
         self.espalhar_nos_sliders(window, cx);
         self.pedir_revelacao(cx);
-        self.historico.registrar(self.estado());
+        self.historico
+            .registrar_como(self.estado(), "Tom automático");
         self.gravar();
         cx.notify();
     }
@@ -3131,8 +3171,9 @@ impl Revelacao {
                     Lado::Esquerda,
                     Lateral {
                         nome: "revelacao:predefinicoes",
-                        desenho: Rc::new(|tela: &mut Self, _window, cx| {
-                            let coluna = tela.coluna_dos_presets(cx).into_any_element();
+                        desenho: Rc::new(|tela: &mut Self, window, cx| {
+                            let altura = f32::from(window.viewport_size().height);
+                            let coluna = tela.coluna_dos_presets(altura, cx).into_any_element();
                             tela.calada_no_comparar(coluna, cx)
                         }),
                         limites: Limites {
@@ -3532,7 +3573,11 @@ impl Revelacao {
     /// 🔑 **A coluna não rola; só as listas** (dono, 2026-09-29): com as vinte
     /// do sistema ela descia inteira, e o navegador e a busca saíam de vista
     /// justamente quando se procura uma predefinição. Cada grupo rola a sua.
-    fn coluna_dos_presets(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn coluna_dos_presets(
+        &self,
+        altura_da_janela: f32,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         gpui_kit::component::v_flex()
             .id("coluna-de-presets")
             .debug_selector(|| "coluna-de-presets".into())
@@ -3545,6 +3590,9 @@ impl Revelacao {
             // O Navegador vem antes das predefinições, como no site.
             .child(div().flex_none().child(self.navegador(cx)))
             .child(self.presets(cx))
+            // 📜 O Histórico no pé, como no Lightroom: as predefinições ficam
+            // com o resto da altura.
+            .child(self.painel_do_historico(altura_da_janela, cx))
     }
 }
 
@@ -7044,8 +7092,11 @@ mod testes {
             coluna.bottom() <= px(720.5) && lista.bottom() <= coluna.bottom() + px(0.5),
             "a lista passou da coluna: {lista:?} em {coluna:?}"
         );
+        // 📜 Com o Histórico no pé (03/10/2026), 1280×720 com o Navegador
+        // aberto deixa à lista o piso dela (`PISO_DA_LISTA`): ~5 linhas, as
+        // Minhas à vista (conferido abaixo). Era 180 sem o Histórico.
         assert!(
-            lista.size.height >= px(180.),
+            lista.size.height >= px(115.),
             "a lista ficou sem altura: {lista:?} em {coluna:?}"
         );
         let mut anterior: Option<gpui_kit::Bounds<Pixels>> = None;
@@ -9443,5 +9494,338 @@ mod testes {
             })
             .expect("a janela deve estar aberta");
         let _ = gravador;
+    }
+
+    // ------------------------------------------------------------ 📜 Histórico
+
+    /// Abre a foto e deixa a leitura do histórico gravado chegar.
+    fn abrir_e_ler(
+        cx: &mut TestAppContext,
+        janela: &gpui_kit::WindowHandle<Revelacao>,
+        nome: &str,
+    ) {
+        janela
+            .update(cx, |tela, window, cx| tela.abrir(foto(nome), window, cx))
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+    }
+
+    fn nomes_do_historico(
+        cx: &mut TestAppContext,
+        janela: &gpui_kit::WindowHandle<Revelacao>,
+    ) -> Vec<String> {
+        janela
+            .update(cx, |tela, _, _| {
+                tela.passos_do_historico()
+                    .0
+                    .iter()
+                    .map(|p| p.rotulo.nome.clone())
+                    .collect()
+            })
+            .expect("a janela deve estar aberta")
+    }
+
+    fn desenhar_a_coluna(
+        cx: &mut TestAppContext,
+        janela: &gpui_kit::WindowHandle<Revelacao>,
+    ) -> gpui_kit::VisualTestContext {
+        let visual = gpui_kit::VisualTestContext::from_window((*janela).into(), cx);
+        visual.simulate_resize(gpui_kit::size(px(1440.), px(900.)));
+        visual.run_until_parked();
+        visual
+    }
+
+    /// 📜 Cada gesto vira uma linha com nome, variação e valor — e vai ao
+    /// catálogo.
+    #[gpui_kit::test]
+    fn cada_gesto_vira_uma_linha_do_historico(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let janela = com_gravador(cx, previews, gravador.clone());
+        abrir_e_ler(cx, &janela, "retrato.jpg");
+
+        arrastar(cx, &janela, 0, 0.3);
+        passar_a_espera(cx);
+        arrastar(cx, &janela, 1, 55.0);
+        passar_a_espera(cx);
+
+        assert_eq!(
+            nomes_do_historico(cx, &janela),
+            ["Início", "Exposição", "Contraste"]
+        );
+        janela
+            .update(cx, |tela, _, _| {
+                let (passos, atual) = tela.passos_do_historico();
+                assert_eq!(atual, 2);
+                assert_eq!(passos[1].rotulo.variacao.as_deref(), Some("+0,30"));
+                assert_eq!(passos[1].rotulo.valor.as_deref(), Some("+0,30"));
+                assert_eq!(passos[2].rotulo.variacao.as_deref(), Some("+55"));
+            })
+            .expect("a janela deve estar aberta");
+        let gravado = gravador
+            .historicos
+            .lock()
+            .unwrap()
+            .get("id-retrato.jpg")
+            .cloned()
+            .expect("o histórico foi ao catálogo");
+        assert!(gravado.contains("Contraste"), "{gravado}");
+    }
+
+    /// 📜 O clique numa linha antiga: a foto e o banco voltam àquele passo, e
+    /// os de depois **ficam** até o próximo gesto. Clicado de verdade.
+    #[gpui_kit::test]
+    fn clicar_numa_linha_volta_a_foto_e_guarda_os_de_depois(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let gravador = Arc::new(GravadorDeMentira::default());
+        let janela = com_gravador(cx, previews, gravador.clone());
+        abrir_e_ler(cx, &janela, "retrato.jpg");
+        arrastar(cx, &janela, 0, 0.3);
+        passar_a_espera(cx);
+        arrastar(cx, &janela, 0, 0.8);
+        passar_a_espera(cx);
+
+        let mut visual = desenhar_a_coluna(cx, &janela);
+        let linha = visual
+            .debug_bounds("historico-passo-1")
+            .expect("a linha do primeiro arrasto");
+        let coluna = visual.debug_bounds("coluna-de-presets").expect("a coluna");
+        assert!(
+            coluna.contains(&linha.center()),
+            "a linha ficou fora da coluna: {linha:?} em {coluna:?}"
+        );
+        // O primeiro evento de ponteiro da janela se perde no harness.
+        visual.simulate_mouse_move(linha.center(), None, gpui_kit::Modifiers::none());
+        visual.simulate_click(linha.center(), gpui_kit::Modifiers::none());
+        visual.run_until_parked();
+
+        janela
+            .update(cx, |tela, _, cx| {
+                assert_eq!(tela.ajustes().exposure, 0.3);
+                assert_eq!(
+                    tela.controles[0].estado.read(cx).value().start(),
+                    0.3,
+                    "o slider volta junto"
+                );
+                let (passos, atual) = tela.passos_do_historico();
+                assert_eq!((passos.len(), atual), (3, 1), "o 0,8 continua lá");
+                assert!(tela.pode_refazer());
+            })
+            .expect("a janela deve estar aberta");
+        assert_eq!(
+            gravador.gravado().last().map(|g| g.1.exposure),
+            Some(0.3),
+            "o clique chega ao banco"
+        );
+    }
+
+    /// 📜 Passar o mouse mostra o passo na foto sem mudar nada; sair devolve.
+    #[gpui_kit::test]
+    fn passar_o_mouse_numa_linha_mostra_o_passo(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let janela = com_gravador(cx, previews, Arc::new(GravadorDeMentira::default()));
+        abrir_e_ler(cx, &janela, "retrato.jpg");
+        arrastar(cx, &janela, 0, 0.6);
+        passar_a_espera(cx);
+
+        let mut visual = desenhar_a_coluna(cx, &janela);
+        let inicio = visual.debug_bounds("historico-passo-0").expect("o Início");
+        visual.simulate_mouse_move(inicio.center(), None, gpui_kit::Modifiers::none());
+        visual.simulate_mouse_move(inicio.center(), None, gpui_kit::Modifiers::none());
+        visual.run_until_parked();
+        janela
+            .update(cx, |tela, _, _| {
+                assert_eq!(
+                    tela.ajustes_na_tela().exposure,
+                    0.0,
+                    "a foto mostra o Início"
+                );
+                assert_eq!(tela.ajustes().exposure, 0.6, "e nada mudou");
+            })
+            .expect("a janela deve estar aberta");
+
+        let palco = gpui_kit::point(px(700.), px(300.));
+        visual.simulate_mouse_move(palco, None, gpui_kit::Modifiers::none());
+        visual.run_until_parked();
+        janela
+            .update(cx, |tela, _, _| {
+                assert_eq!(tela.ajustes_na_tela().exposure, 0.6, "sair devolve");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 📜 O ✕ deixa só a foto de agora.
+    #[gpui_kit::test]
+    fn o_x_limpa_o_historico(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let janela = com_gravador(cx, previews, Arc::new(GravadorDeMentira::default()));
+        abrir_e_ler(cx, &janela, "retrato.jpg");
+        arrastar(cx, &janela, 0, 0.6);
+        passar_a_espera(cx);
+
+        let mut visual = desenhar_a_coluna(cx, &janela);
+        let x = visual.debug_bounds("historico-limpar").expect("o ✕");
+        visual.simulate_mouse_move(x.center(), None, gpui_kit::Modifiers::none());
+        visual.simulate_click(x.center(), gpui_kit::Modifiers::none());
+        visual.run_until_parked();
+
+        assert_eq!(nomes_do_historico(cx, &janela), ["Início"]);
+        janela
+            .update(cx, |tela, _, _| {
+                assert_eq!(tela.ajustes().exposure, 0.6, "a foto fica como está");
+                assert!(!tela.pode_desfazer());
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 📜 O histórico fica com a foto: trocar de foto e voltar o traz de volta.
+    #[gpui_kit::test]
+    fn o_historico_volta_com_a_foto(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        for nome in ["id-a.jpg", "id-b.jpg"] {
+            previews
+                .save_preview(nome, &foto_cinza())
+                .expect("gravar preview");
+        }
+        let gravador_do_teste = Arc::new(GravadorDeMentira::default());
+        let janela = com_gravador(cx, previews, gravador_do_teste.clone());
+        abrir_e_ler(cx, &janela, "a.jpg");
+        arrastar(cx, &janela, 0, 0.4);
+        passar_a_espera(cx);
+
+        abrir_e_ler(cx, &janela, "b.jpg");
+        assert_eq!(
+            nomes_do_historico(cx, &janela),
+            ["Início"],
+            "a B tem o dela"
+        );
+
+        // A foto A volta com o que foi gravado nela — do jeito que o
+        // catálogo a devolve.
+        let mut a = foto("a.jpg");
+        let (_, ajustes, corte) = gravador_do_teste.gravado().last().cloned().expect("gravou");
+        persistencia::na_foto(&mut a, ajustes, corte);
+        janela
+            .update(cx, |tela, window, cx| tela.abrir(a, window, cx))
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+        assert_eq!(nomes_do_historico(cx, &janela), ["Início", "Exposição"]);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.desfazer(window, cx);
+                assert_eq!(tela.ajustes().exposure, 0.0, "o ⌘Z alcança o de antes");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🚨 A foto mudou fora da Revelação (colada na Biblioteca): o histórico
+    /// ganha o passo de fora, e o `⌘Z` volta ao que estava.
+    #[gpui_kit::test]
+    fn a_foto_mudada_por_fora_vira_um_passo(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        for nome in ["id-a.jpg", "id-b.jpg"] {
+            previews
+                .save_preview(nome, &foto_cinza())
+                .expect("gravar preview");
+        }
+        let gravador_do_teste = Arc::new(GravadorDeMentira::default());
+        let janela = com_gravador(cx, previews, gravador_do_teste.clone());
+        abrir_e_ler(cx, &janela, "a.jpg");
+        arrastar(cx, &janela, 0, 0.4);
+        passar_a_espera(cx);
+        abrir_e_ler(cx, &janela, "b.jpg");
+
+        // Colada na Biblioteca: a exposição mudou no catálogo.
+        let mut a = foto("a.jpg");
+        let (_, mut ajustes, corte) = gravador_do_teste.gravado().last().cloned().expect("gravou");
+        ajustes.exposure = 1.2;
+        persistencia::na_foto(&mut a, ajustes, corte);
+        janela
+            .update(cx, |tela, window, cx| tela.abrir(a, window, cx))
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        assert_eq!(
+            nomes_do_historico(cx, &janela),
+            ["Início", "Exposição", crate::revelacao::historico::DE_FORA]
+        );
+        janela
+            .update(cx, |tela, window, cx| {
+                assert_eq!(tela.ajustes().exposure, 1.2, "a foto abre como está");
+                tela.desfazer(window, cx);
+                assert_eq!(tela.ajustes().exposure, 0.4);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 📜 Com muitos passos numa tela 1280×720, o Histórico rola dentro de
+    /// um terço da coluna, e as predefinições continuam à vista.
+    #[gpui_kit::test]
+    fn com_muitos_passos_o_historico_rola_e_as_predefinicoes_ficam(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let janela = com_gravador(cx, previews, Arc::new(GravadorDeMentira::default()));
+        abrir_e_ler(cx, &janela, "retrato.jpg");
+        for i in 1..=30 {
+            arrastar(cx, &janela, 0, i as f32 / 10.0);
+            passar_a_espera(cx);
+        }
+
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_resize(gpui_kit::size(px(1280.), px(720.)));
+        visual.run_until_parked();
+
+        let coluna = visual.debug_bounds("coluna-de-presets").expect("a coluna");
+        let painel = visual.debug_bounds("historico").expect("o Histórico");
+        assert!(
+            painel.size.height <= px(40.),
+            "em 720 px, com o Navegador aberto, o Histórico é só o título: {painel:?} em {coluna:?}"
+        );
+        assert!(
+            painel.bottom() <= coluna.bottom() + px(0.5),
+            "o Histórico passou do pé da coluna: {painel:?} em {coluna:?}"
+        );
+        assert!(visual.debug_bounds("historico-passo-30").is_none());
+
+        // Recolher o Navegador devolve a altura: as linhas aparecem, o mais
+        // novo no topo, à vista.
+        janela
+            .update(cx, |tela, _, cx| tela.alternar_navegador(cx))
+            .expect("a janela deve estar aberta");
+        visual.run_until_parked();
+        let coluna = visual.debug_bounds("coluna-de-presets").expect("a coluna");
+        let painel = visual.debug_bounds("historico").expect("o Histórico");
+        let janela_do_historico = visual
+            .debug_bounds("janela-do-historico")
+            .expect("a lista do Histórico");
+        assert!(
+            janela_do_historico.size.height >= px(100.),
+            "o Navegador recolhido não deu linhas ao Histórico: {janela_do_historico:?}"
+        );
+        assert!(
+            painel.bottom() <= coluna.bottom() + px(0.5),
+            "o Histórico passou do pé da coluna: {painel:?} em {coluna:?}"
+        );
+        let novo = visual
+            .debug_bounds("historico-passo-30")
+            .expect("o mais novo");
+        assert!(
+            janela_do_historico.contains(&novo.center()),
+            "o mais novo não está à vista: {novo:?} em {janela_do_historico:?}"
+        );
     }
 }

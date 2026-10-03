@@ -1,5 +1,31 @@
 [
   {
+    "versao": "0.1.82",
+    "data": "2026-10-03",
+    "titulo": "Painel Histórico na Revelação, como o do Lightroom.",
+    "importante": true,
+    "novidades": [
+      "Na coluna da esquerda da Revelação, abaixo das predefinições, o painel Histórico lista cada gesto feito na foto, do mais novo para o mais antigo, com o nome e o valor — \"Exposição +0,30 +0,50\", \"Endireitar +5,0 5,0°\", \"Predefinição: Kodak\", \"Adicionar máscara\".",
+      "Clicar numa linha volta a foto àquele ponto; os passos de depois continuam lá (esmaecidos) até você mexer de novo. Passar o mouse numa linha mostra aquele passo na foto sem mudar nada.",
+      "O histórico fica guardado com a foto: trocar de foto ou fechar o aplicativo não o apaga. Se a foto mudou fora da Revelação (colada na Biblioteca, sincronizada), aparece o passo \"Mudou fora da Revelação\".",
+      "O ✕ do painel limpa o histórico da foto, e clicar no título recolhe o painel. Agora cabem 100 passos por foto (antes eram 20).",
+      "Em telas baixas (720 pontos) com o Navegador aberto, o painel fica só no título; recolha o Navegador para ver as linhas."
+    ],
+    "por_que_atualizar": "Para voltar a qualquer ponto da revelação de uma foto, mesmo depois de fechar o aplicativo."
+  },
+  {
+    "versao": "0.1.81",
+    "data": "2026-10-03",
+    "titulo": "O aplicativo abre uma vez só: abrir de novo traz a janela que já está aberta.",
+    "importante": true,
+    "novidades": [
+      "Abrir o VintageLightbox com ele já aberto (inclusive escondido na bandeja) não abre uma segunda cópia: a janela que já estava aberta vem para a frente.",
+      "Duas cópias abertas ao mesmo tempo gravavam no mesmo catálogo e podiam desfazer a revelação uma da outra, além de subir a mesma foto duas vezes.",
+      "Depois de atualizar, o aplicativo novo espera o antigo fechar antes de abrir."
+    ],
+    "por_que_atualizar": "Para não perder trabalho com duas cópias do aplicativo abertas sem querer."
+  },
+  {
     "versao": "0.1.80",
     "data": "2026-10-03",
     "titulo": "Exportar fotos funciona com as fotos da sessão, e o modal foi refeito.",

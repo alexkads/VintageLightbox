@@ -97,7 +97,8 @@ impl Revelacao {
             return;
         };
         self.gravar_o_que_estiver_pendente();
-        self.historico.registrar(estado.clone());
+        self.historico
+            .registrar_como(estado.clone(), "Descartar a revelação");
         self.aplicar_do_historico(estado, window, cx);
     }
 
@@ -230,7 +231,11 @@ impl Revelacao {
             corte,
             locais: locais.unwrap_or_else(|| self.locais.clone()),
         };
-        self.historico.registrar(estado.clone());
+        self.historico
+            .registrar_como(estado.clone(), "Descartar a revelação");
+        // Não grava a revelação (ver acima), mas o histórico vai: ele é só
+        // desta máquina.
+        self.gravar_o_historico();
         self.mostrar_o_estado(estado.clone(), window, cx);
         // O marco do botão de salvar passa a ser a galeria.
         self.parametros_ao_abrir = Some(estado);
