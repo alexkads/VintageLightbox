@@ -1,11 +1,11 @@
 {
-  "versao": "0.1.72",
-  "titulo": "As vinhetas das predefinições desligam a vinheta do darktable.",
+  "versao": "0.1.73",
+  "titulo": "Duplicar predefinição no botão direito.",
   "importante": false,
   "novidades": [
-    "Na Revelação, as predefinições de vinheta da pasta LRs (Vinheta Nenhuma, Borda, Carregada, Oval e Tingida) agora desligam a \"Vinheta do darktable\": fica só a vinheta que você escolheu.",
-    "Antes, \"Vinheta Nenhuma\" sobre o RecordarFotos P&B deixava a borda clara do darktable na foto.",
-    "O resto da foto continua como estava, e os números da vinheta do darktable ficam guardados: é só religar a chave em Efeitos."
+    "Na Revelação, o botão direito numa predefinição tem \"Duplicar\": a cópia entra em Minhas com \"(cópia)\" no nome.",
+    "Vale também para as do sistema e as LRs. A cópia é sua: dá para renomear, apagar e usar \"Atualizar com os ajustes atuais\".",
+    "A cópia faz na foto o mesmo que a original, inclusive as que recomeçam do neutro, como a Sépia e o P&B."
   ],
-  "por_que_atualizar": "Para tirar ou trocar a vinheta com um clique, sem precisar desligar a do darktable à mão."
+  "por_que_atualizar": "Para partir de uma predefinição pronta e ajustar do seu jeito sem perder a original."
 }
