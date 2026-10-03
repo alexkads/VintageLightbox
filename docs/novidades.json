@@ -1,11 +1,12 @@
 {
-  "versao": "0.1.73",
-  "titulo": "Duplicar predefinição no botão direito.",
+  "versao": "0.1.74",
+  "titulo": "Exporte as predefinições: uma, um grupo ou todas, como no Lightroom.",
   "importante": false,
   "novidades": [
-    "Na Revelação, o botão direito numa predefinição tem \"Duplicar\": a cópia entra em Minhas com \"(cópia)\" no nome.",
-    "Vale também para as do sistema e as LRs. A cópia é sua: dá para renomear, apagar e usar \"Atualizar com os ajustes atuais\".",
-    "A cópia faz na foto o mesmo que a original, inclusive as que recomeçam do neutro, como a Sépia e o P&B."
+    "Na Revelação, o botão direito numa predefinição tem \"Exportar…\": ela vira um arquivo .rfpreset, que você pode levar para outro balcão ou guardar de backup.",
+    "O botão direito no nome de um grupo (Minhas, Do sistema, LRs, Favoritas) tem \"Exportar o grupo…\", que grava todas as do grupo num .zip.",
+    "O ícone de baixar, ao lado do de importar, exporta todas as predefinições num .zip, com uma pasta por grupo.",
+    "O ícone de importar agora também abre os .rfpreset e os .zip (inclusive os .zip de predefinições do Lightroom). As que já existem com o mesmo nome são puladas."
   ],
-  "por_que_atualizar": "Para partir de uma predefinição pronta e ajustar do seu jeito sem perder a original."
+  "por_que_atualizar": "Para passar as suas predefinições de um balcão para outro, ou guardar uma cópia delas, sem refazer nada."
 }

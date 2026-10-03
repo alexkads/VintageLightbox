@@ -1,5 +1,18 @@
 [
   {
+    "versao": "0.1.74",
+    "data": "2026-10-03",
+    "titulo": "Exporte as predefinições: uma, um grupo ou todas, como no Lightroom.",
+    "importante": false,
+    "novidades": [
+      "Na Revelação, o botão direito numa predefinição tem \"Exportar…\": ela vira um arquivo .rfpreset, que você pode levar para outro balcão ou guardar de backup.",
+      "O botão direito no nome de um grupo (Minhas, Do sistema, LRs, Favoritas) tem \"Exportar o grupo…\", que grava todas as do grupo num .zip.",
+      "O ícone de baixar, ao lado do de importar, exporta todas as predefinições num .zip, com uma pasta por grupo.",
+      "O ícone de importar agora também abre os .rfpreset e os .zip (inclusive os .zip de predefinições do Lightroom). As que já existem com o mesmo nome são puladas."
+    ],
+    "por_que_atualizar": "Para passar as suas predefinições de um balcão para outro, ou guardar uma cópia delas, sem refazer nada."
+  },
+  {
     "versao": "0.1.73",
     "data": "2026-10-03",
     "titulo": "Duplicar predefinição no botão direito.",
