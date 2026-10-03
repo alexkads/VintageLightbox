@@ -55,6 +55,9 @@ pub enum TipoDeDialogo {
 }
 
 pub(super) struct FormAbrir {
+    /// 🔑 A chave de idempotência deste gesto: nasce com o diálogo e vai em
+    /// toda tentativa — a resposta perdida não grava duas vezes nem trava.
+    chave: String,
     fundo: Entity<InputState>,
     erro: Option<String>,
     enviando: bool,
@@ -124,6 +127,9 @@ pub(super) struct FormPagamento {
 }
 
 pub(super) struct FormMovimento {
+    /// 🔑 A chave de idempotência deste gesto: nasce com o diálogo e vai em
+    /// toda tentativa — a resposta perdida não grava duas vezes nem trava.
+    chave: String,
     tipo: TipoDeMovimento,
     valor: Entity<InputState>,
     motivo: Entity<InputState>,
@@ -132,6 +138,9 @@ pub(super) struct FormMovimento {
 }
 
 pub(super) struct FormEstorno {
+    /// 🔑 A chave de idempotência deste gesto: nasce com o diálogo e vai em
+    /// toda tentativa — a resposta perdida não grava duas vezes nem trava.
+    chave: String,
     venda: Venda,
     escolhidas: HashSet<String>,
     valor: Entity<InputState>,
@@ -147,6 +156,9 @@ pub(super) struct FormEstorno {
 }
 
 pub(super) struct FormFechamento {
+    /// 🔑 A chave de idempotência deste gesto: nasce com o diálogo e vai em
+    /// toda tentativa — a resposta perdida não grava duas vezes nem trava.
+    chave: String,
     campos: Vec<(FormaDePagamento, Entity<InputState>)>,
     observacao: Entity<InputState>,
     conferencia: Option<Conferencia>,
@@ -278,6 +290,7 @@ impl Caixa {
                 let foco = fundo.read(cx).focus_handle(cx);
                 (
                     Dialogo::Abrir(FormAbrir {
+                        chave: uuid::Uuid::new_v4().to_string(),
                         fundo,
                         erro: None,
                         enviando: false,
@@ -336,6 +349,7 @@ impl Caixa {
                 let foco = valor.read(cx).focus_handle(cx);
                 (
                     Dialogo::Movimento(FormMovimento {
+                        chave: uuid::Uuid::new_v4().to_string(),
                         tipo: TipoDeMovimento::Sangria,
                         valor,
                         motivo: campo(window, cx, ""),
@@ -353,6 +367,7 @@ impl Caixa {
                 let foco = campos[0].1.read(cx).focus_handle(cx);
                 (
                     Dialogo::Fechar(Box::new(FormFechamento {
+                        chave: uuid::Uuid::new_v4().to_string(),
                         campos,
                         observacao: campo(window, cx, ""),
                         conferencia: None,
@@ -824,12 +839,13 @@ impl Caixa {
         };
         form.erro = None;
         form.enviando = true;
+        let chave = form.chave.clone();
         self.em_curso.push(EmCurso::Abrir { fundo });
         self.gravar(
             "abrir",
             "POST",
             "/pos-venda/caixa".into(),
-            json!({ "estudio_id": estudio, "fundo_de_troco_centavos": fundo }),
+            json!({ "estudio_id": estudio, "fundo_de_troco_centavos": fundo, "chave": chave }),
             cx,
         );
         cx.notify();
@@ -1076,6 +1092,7 @@ impl Caixa {
         form.erro = None;
         form.enviando = true;
         let tipo = form.tipo;
+        let chave = form.chave.clone();
         self.em_curso.push(EmCurso::Movimento { tipo, valor });
         self.gravar(
             "movimento",
@@ -1086,6 +1103,7 @@ impl Caixa {
                 "tipo": tipo.chave(),
                 "valor_centavos": valor,
                 "motivo": motivo,
+                "chave": chave,
             }),
             cx,
         );
@@ -1113,6 +1131,7 @@ impl Caixa {
         let forma = venda.forma_principal();
         self.lembrar_foco(window, cx);
         self.dialogo = Some(Dialogo::Estorno(Box::new(FormEstorno {
+            chave: uuid::Uuid::new_v4().to_string(),
             venda,
             escolhidas,
             valor,
@@ -1193,6 +1212,8 @@ impl Caixa {
         );
         let venda = form.venda.clone();
         let des_sinalizar = form.des_sinalizar;
+        let mut corpo = dados::novo_estorno_json(&estorno);
+        corpo["chave"] = json!(form.chave.clone());
         self.em_curso.push(EmCurso::Estorno {
             venda_id: venda.id.clone(),
             numero: venda.numero,
@@ -1204,7 +1225,7 @@ impl Caixa {
             "estorno",
             "POST",
             format!("/pos-venda/caixa/vendas/{}/estornos", codificar(&venda.id)),
-            dados::novo_estorno_json(&estorno),
+            corpo,
             cx,
         );
         cx.notify();
@@ -1331,6 +1352,7 @@ impl Caixa {
             "estudio_id": estudio,
             "contado": dados::contado_json(&conferencia.contado),
             "observacao": (!observacao.is_empty()).then_some(observacao),
+            "chave": form.chave,
         });
         form.enviando = true;
         self.gravar(

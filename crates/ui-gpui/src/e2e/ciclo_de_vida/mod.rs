@@ -47,7 +47,7 @@ use crate::sessoes::detalhe::Detalhe;
 mod tenebroso;
 
 /// O prazo de cada espera: a rede, o disco e a GPU andam no relógio de verdade.
-const PRAZO: Duration = Duration::from_secs(90);
+const PRAZO: Duration = Duration::from_secs(25);
 
 /// O que o `servidor-do-ciclo` imprimiu.
 struct Servidor {
@@ -864,6 +864,132 @@ fn escolher_as_pessoas(cx: &mut TestAppContext, c: &Cena) {
                 .all(|p| p.as_deref() == Some(c.servidor.funcionario.as_str()))
         })
     });
+}
+
+/// 💳 F4, PIX no valor que falta (já preenchido), Enter lança, Enter conclui.
+/// Devolve o número da venda que o balcão mostrou.
+fn pagar_em_pix(cx: &mut TestAppContext, c: &Cena) -> i64 {
+    let b = &c.b;
+    b.teclar(cx, "f4");
+    b.caixa(cx, |caixa, _w, _cx| {
+        assert_eq!(
+            caixa.dialogo_do_caixa(),
+            Some("Pagamento"),
+            "F4 abre o pagamento"
+        )
+    });
+    b.teclar(cx, "2");
+    b.teclar(cx, "enter");
+    b.teclar(cx, "enter");
+    b.ate(cx, "a venda é registrada", |b, cx| {
+        b.caixa(cx, |caixa, _w, _cx| {
+            caixa.ultima_venda_para_teste().is_some()
+        })
+    });
+    b.caixa(cx, |caixa, _w, _cx| caixa.ultima_venda_para_teste())
+        .expect("o número da venda")
+}
+
+/// ↩️ F7 → "Estornar" na venda → só `foto` marcada → motivo → Enter.
+fn pedir_o_estorno(cx: &mut TestAppContext, c: &Cena, venda: &Value, foto: &str) {
+    let b = &c.b;
+    let numero = venda["numero"].as_i64().expect("o número da venda");
+    b.ate(cx, "a venda entra na lista da sessão (F7)", |b, cx| {
+        b.caixa(cx, |caixa, _w, _cx| {
+            caixa
+                .vendas_da_sessao_para_teste()
+                .iter()
+                .any(|(n, _, _, _)| *n == numero)
+        })
+    });
+    b.teclar(cx, "f7");
+    let venda_id = venda["id"].as_str().expect("o id da venda");
+    b.clicar(cx, &format!("caixa-estornar-{venda_id}"));
+    let itens: Vec<String> = venda["itens"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|i| i["foto_id"].as_str().map(str::to_string))
+        .collect();
+    for (i, outra) in itens.iter().enumerate() {
+        if outra != foto {
+            b.clicar(cx, &format!("caixa-estorno-foto-{i}"));
+        }
+    }
+    b.clicar(cx, "caixa-campo-motivo");
+    b.digitar(cx, "o cliente desistiu desta foto");
+    b.teclar(cx, "enter");
+}
+
+/// 💸 F6 → o valor (o foco nasce nele) → o motivo → Enter.
+fn pedir_a_sangria(cx: &mut TestAppContext, c: &Cena, valor: &str) {
+    let b = &c.b;
+    b.teclar(cx, "f6");
+    b.caixa(cx, |caixa, _w, _cx| {
+        assert_eq!(
+            caixa.dialogo_do_caixa(),
+            Some("Movimento"),
+            "F6 abre a sangria"
+        )
+    });
+    b.digitar(cx, valor);
+    b.clicar(cx, "caixa-campo-motivo");
+    b.digitar(cx, "depósito no banco");
+    b.teclar(cx, "enter");
+}
+
+/// 🔒 F8 com o caixa aberto → a contagem do dinheiro (o foco nasce nele) e do
+/// PIX → Enter confere → Enter fecha.
+fn pedir_o_fechamento(cx: &mut TestAppContext, c: &Cena, dinheiro: &str, pix: &str) {
+    let b = &c.b;
+    b.ate(cx, "os diálogos fecharam", |b, cx| {
+        b.caixa(cx, |caixa, _w, _cx| caixa.dialogo_do_caixa().is_none())
+    });
+    b.teclar(cx, "f8");
+    b.caixa(cx, |caixa, _w, _cx| {
+        assert_eq!(
+            caixa.dialogo_do_caixa(),
+            Some("Fechamento"),
+            "F8 com o caixa aberto fecha"
+        )
+    });
+    b.digitar(cx, dinheiro);
+    b.clicar(cx, "caixa-campo-pix");
+    b.digitar(cx, pix);
+    b.teclar(cx, "enter");
+    b.ate(cx, "a contagem cega é conferida", |b, cx| {
+        b.caixa(cx, |caixa, _w, _cx| caixa.contagem_conferida())
+    });
+    b.teclar(cx, "enter");
+}
+
+/// O caixa do estúdio do cenário, aberto ou o último fechado (`id`).
+fn caixa_por_id(c: &Cena, id: &str) -> Value {
+    c.site.get(&format!("/pos-venda/caixa/{id}"))
+}
+
+/// A sessão de pé, com `levadas` fotos levadas, o caixa aberto com `fundo` e as
+/// pessoas escolhidas — o ponto de partida dos caminhos do caixa.
+fn ate_o_caixa(
+    cx: &mut TestAppContext,
+    c: &Cena,
+    rotulo: &str,
+    levadas: usize,
+    fundo: &str,
+) -> (String, Vec<String>, String) {
+    let (galeria, fotos) = criar_a_sessao(
+        cx,
+        c,
+        rotulo,
+        &format!(
+            "cliente-{}@e2e.test",
+            rotulo.to_lowercase().replace(' ', "-")
+        ),
+    );
+    levar(cx, c, &galeria, &fotos[..levadas]);
+    let caixa = abrir_o_caixa(cx, c, &galeria, fundo);
+    escolher_as_pessoas(cx, c);
+    (galeria, fotos, caixa)
 }
 
 /// As vendas da galeria no caixa, como o painel as lê.

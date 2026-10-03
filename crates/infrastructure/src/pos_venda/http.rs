@@ -940,6 +940,23 @@ impl PosVendaApiHttp {
         Ok(renovada.access_token)
     }
 
+    /// Renova agora, sem olhar o relógio: o servidor acabou de recusar o acesso
+    /// que daqui parecia válido.
+    async fn renovar_ja(&self) -> DomainResult<()> {
+        let mut viva = self.viva.lock().await;
+        let Some(atual) = viva.clone() else {
+            return Err(DomainError::AcessoRecusado);
+        };
+        if !atual.renovavel(agora()) {
+            self.cofre.esquecer();
+            return Err(DomainError::AcessoRecusado);
+        }
+        let renovada = self.renovar(&atual.refresh_token).await?;
+        *viva = Some(renovada.clone());
+        self.cofre.guardar(&renovada);
+        Ok(())
+    }
+
     /// Troca o refresh token por um par novo. O papel é relido do banco pelo
     /// backend — quem foi rebaixado não continua operando por quinze dias.
     async fn renovar(&self, refresh_token: &str) -> DomainResult<Sessao> {
@@ -991,18 +1008,34 @@ impl PosVendaApiHttp {
         }
         let metodo = reqwest::Method::from_bytes(metodo.as_bytes())
             .map_err(|_| DomainError::InvalidOperation(format!("método recusado: {metodo}")))?;
-        let mut pedido = self.client.request(metodo, self.url(caminho));
-        // Sem sessão é rota pública (o envio por bilhete): o bilhete é a
-        // autorização, e mandar o token junto não acrescentaria nada.
-        if let Some(sessao) = sessao {
-            pedido = pedido.bearer_auth(self.token(sessao).await?);
-        }
-        if let Some(corpo) = corpo {
-            pedido = pedido
-                .header(reqwest::header::CONTENT_TYPE, corpo.tipo)
-                .body(corpo.bytes);
-        }
-        let resposta = pedido.send().await.map_err(rede)?;
+        // 🔁 **Um 401 com sessão renova e tenta de novo, uma vez.** O token
+        // vence pelo relógio daqui, mas o servidor pode recusá-lo antes (o
+        // acesso invalidado lá): sem isto, a venda falhava no meio do
+        // atendimento com "acesso recusado" e uma renovação que nunca vinha.
+        let mut renovou = false;
+        let resposta = loop {
+            let mut pedido = self.client.request(metodo.clone(), self.url(caminho));
+            // Sem sessão é rota pública (o envio por bilhete): o bilhete é a
+            // autorização, e mandar o token junto não acrescentaria nada.
+            if let Some(sessao) = sessao {
+                pedido = pedido.bearer_auth(self.token(sessao).await?);
+            }
+            if let Some(corpo) = &corpo {
+                pedido = pedido
+                    .header(reqwest::header::CONTENT_TYPE, corpo.tipo.clone())
+                    .body(corpo.bytes.clone());
+            }
+            let resposta = pedido.send().await.map_err(rede)?;
+            if resposta.status() == reqwest::StatusCode::UNAUTHORIZED
+                && sessao.is_some()
+                && !renovou
+            {
+                renovou = true;
+                self.renovar_ja().await?;
+                continue;
+            }
+            break resposta;
+        };
         let status = resposta.status().as_u16();
         let tipo = resposta
             .headers()
