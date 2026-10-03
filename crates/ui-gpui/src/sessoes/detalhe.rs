@@ -459,6 +459,9 @@ impl Importacao {
 
 impl EventEmitter<Pedido> for Detalhe {}
 
+/// 🔁 Quanto a sessão espera a foto lembrada aparecer na grade.
+const PRAZO_DA_FOTO_LEMBRADA: std::time::Duration = std::time::Duration::from_secs(30);
+
 pub struct Detalhe {
     publicador: Arc<dyn Publicador>,
     sessao: Option<Sessao>,
@@ -822,6 +825,9 @@ pub struct Detalhe {
     /// gesto) e os dados conferidos (para aplicar à sessão aberta). Fora do
     /// formulário de propósito — fechá-lo no meio não perde a resposta.
     gravando_dados: Option<(MotivoDoFormulario, DadosDoCliente)>,
+    /// 🔁 A foto em que a Revelação estava quando o app fechou, e desde quando
+    /// se espera por ela — ver [`Detalhe::revelar_ao_carregar`].
+    revelar_lembrada: Option<(String, std::time::Instant)>,
     carregando: bool,
     /// O que impede a tela de mostrar a sessão — um toast do kit, uma vez.
     /// Os gestos recusados vão por [`Detalhe::avisar`].
@@ -1094,6 +1100,7 @@ impl Detalhe {
             link: None,
             dados_do_cliente: Modal::default(),
             gravando_dados: None,
+            revelar_lembrada: None,
             carregando: false,
             erro: None,
             erro_visto: None,
@@ -1170,6 +1177,8 @@ impl Detalhe {
         self.importacao = None;
         // A fila era da sessão que ficou para trás: não entra nesta.
         self.fila_de_levas.clear();
+        // A foto lembrada era da sessão de antes.
+        self.revelar_lembrada = None;
         self.erro = None;
         self.carregando = true;
 
@@ -1303,6 +1312,9 @@ impl Detalhe {
 
     /// O clique numa foto da grade — as regras são as do core.
     pub fn clicar(&mut self, posicao: usize, modificadores: Modificadores, cx: &mut Context<Self>) {
+        // 🔁 O operador começou a trabalhar na grade: a Revelação lembrada
+        // não o arranca dela quando a galeria terminar de chegar.
+        self.revelar_lembrada = None;
         self.selecao.clicar(posicao, false, modificadores);
         cx.notify();
     }
@@ -2517,7 +2529,49 @@ impl Detalhe {
         self.locais = fotos;
         self.ids_locais = self.locais.iter().map(|f| f.id.clone()).collect();
         self.recompor_acervo();
+        self.revelar_o_lembrado(cx);
         cx.notify();
+    }
+
+    /// 🔁 Abre a Revelação nesta foto assim que ela estiver na grade — a volta
+    /// para onde o operador estava quando o app fechou (`app/retomada.rs`).
+    ///
+    /// 🔑 **Espera, e não pede.** As fotos do site chegam com a galeria e as
+    /// locais com a releitura do catálogo, em qualquer ordem: a cada uma que
+    /// chega a foto é procurada, e o pedido sai pelo mesmo caminho do clique
+    /// ([`Self::pedido_de_revelar`]). Desiste ao entrar noutra sessão, ao
+    /// primeiro clique na grade e depois de [`PRAZO_DA_FOTO_LEMBRADA`] — a foto
+    /// apagada ou rejeitada deixa a grade, que é o estado honesto.
+    pub fn revelar_ao_carregar(&mut self, foto: String, cx: &mut Context<Self>) {
+        self.revelar_lembrada = Some((foto, std::time::Instant::now()));
+        self.revelar_o_lembrado(cx);
+    }
+
+    /// A foto que ainda se espera para abrir na Revelação.
+    pub fn revelacao_a_retomar(&self) -> Option<&str> {
+        self.revelar_lembrada
+            .as_ref()
+            .filter(|(_, desde)| desde.elapsed() <= PRAZO_DA_FOTO_LEMBRADA)
+            .map(|(foto, _)| foto.as_str())
+    }
+
+    fn revelar_o_lembrado(&mut self, cx: &mut Context<Self>) {
+        let Some((foto, desde)) = self.revelar_lembrada.clone() else {
+            return;
+        };
+        if desde.elapsed() > PRAZO_DA_FOTO_LEMBRADA {
+            eprintln!("🔁 [Retomada] a foto {foto} não apareceu na sessão: fica a grade");
+            self.revelar_lembrada = None;
+            return;
+        }
+        let alvo = self.id_de_agora(&foto);
+        if let Some(pedido) = self.pedido_de_revelar(Some(&alvo)) {
+            eprintln!("🔁 [Retomada] a Revelação reabre na foto {alvo}");
+            self.revelar_lembrada = None;
+            // Em foco na grade também: é para ela que a volta da Revelação leva.
+            self.focar_foto(&alvo, cx);
+            cx.emit(pedido);
+        }
     }
 
     /// Monta o acervo da grade: **o que está no site, e o que só está no disco**.
@@ -3595,6 +3649,9 @@ impl Detalhe {
             }
         }
 
+        if mudou {
+            self.revelar_o_lembrado(cx);
+        }
         if abriu {
             self.pedir_miniaturas(cx);
         }
@@ -5709,6 +5766,12 @@ impl Detalhe {
     /// revelada; se todas foram compradas, a primeira mesmo — a tira mostra a
     /// comprada marcada e não revelável, como no site. Com um id, é a posição
     /// dele na lista; um id que não está nela (a apagada em foco) não abre nada.
+    /// 🧪 O pedido que o clique numa foto da grade faria.
+    #[cfg(test)]
+    pub(crate) fn pedido_de_revelar_para_teste(&self, foto: &str) -> Option<Pedido> {
+        self.pedido_de_revelar(Some(foto))
+    }
+
     fn pedido_de_revelar(&self, comecar_em: Option<&str>) -> Option<Pedido> {
         let fotos: Vec<FotoARevelar> = self
             .fotos_a_revelar()

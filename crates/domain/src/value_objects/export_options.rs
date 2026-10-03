@@ -75,11 +75,45 @@ impl Watermark {
     }
 }
 
+/// O formato do arquivo que sai — os quatro do "Baixar" do site
+/// (`exportar.ts`, `FORMATOS`).
+///
+/// 🔑 **Só o JPEG tem perda.** PNG, TIFF e WebP saem sem perda (o WebP do
+/// codificador do `image` é o sem perda), e por isso a qualidade só vale para o
+/// JPEG — a tela esconde o controle nos outros três.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FormatoDeSaida {
+    #[default]
+    Jpeg,
+    Png,
+    Tiff,
+    Webp,
+}
+
+impl FormatoDeSaida {
+    pub const TODOS: [FormatoDeSaida; 4] = [Self::Jpeg, Self::Png, Self::Tiff, Self::Webp];
+
+    /// A extensão do arquivo, sem ponto — a mesma do site.
+    pub fn extensao(self) -> &'static str {
+        match self {
+            Self::Jpeg => "jpg",
+            Self::Png => "png",
+            Self::Tiff => "tif",
+            Self::Webp => "webp",
+        }
+    }
+
+    pub fn sem_perda(self) -> bool {
+        !matches!(self, Self::Jpeg)
+    }
+}
+
 /// As decisões de uma exportação.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExportOptions {
     /// Qualidade JPEG, de 1 a 100.
     quality: u8,
+    formato: FormatoDeSaida,
     /// Limite do lado maior, em pixels. `None` mantém o tamanho original.
     longest_edge: Option<u32>,
     watermark: Option<Watermark>,
@@ -97,6 +131,7 @@ impl Default for ExportOptions {
     fn default() -> Self {
         Self {
             quality: 90,
+            formato: FormatoDeSaida::Jpeg,
             longest_edge: None,
             watermark: None,
         }
@@ -107,6 +142,9 @@ impl ExportOptions {
     pub fn quality(&self) -> u8 {
         self.quality
     }
+    pub fn formato(&self) -> FormatoDeSaida {
+        self.formato
+    }
     pub fn longest_edge(&self) -> Option<u32> {
         self.longest_edge
     }
@@ -116,6 +154,11 @@ impl ExportOptions {
 
     pub fn with_quality(mut self, quality: u8) -> Self {
         self.quality = quality.clamp(1, 100);
+        self
+    }
+
+    pub fn with_formato(mut self, formato: FormatoDeSaida) -> Self {
+        self.formato = formato;
         self
     }
 
@@ -145,8 +188,18 @@ mod tests {
     fn o_padrao_e_a_entrega_final() {
         let opcoes = ExportOptions::default();
         assert_eq!(opcoes.quality(), 90);
+        assert_eq!(opcoes.formato(), FormatoDeSaida::Jpeg);
         assert_eq!(opcoes.longest_edge(), None);
         assert!(opcoes.watermark().is_none());
+    }
+
+    /// As extensões são as do site, e só o JPEG tem perda.
+    #[test]
+    fn os_formatos_tem_a_extensao_do_site() {
+        let extensoes: Vec<_> = FormatoDeSaida::TODOS.iter().map(|f| f.extensao()).collect();
+        assert_eq!(extensoes, ["jpg", "png", "tif", "webp"]);
+        assert!(!FormatoDeSaida::Jpeg.sem_perda());
+        assert!(FormatoDeSaida::TODOS[1..].iter().all(|f| f.sem_perda()));
     }
 
     /// ⚠️ **Qualidade 0 não é uma qualidade.** O encoder JPEG a aceita e devolve

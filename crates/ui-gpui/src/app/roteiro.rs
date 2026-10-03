@@ -340,6 +340,48 @@ impl Aplicativo {
                 let gesto = gesto.clone();
                 self.seguir_o_roteiro_do_editor(&gesto, pasta, cx);
             }
+            Passo::Exportacao(gesto) => {
+                use crate::exportacao::tela::Modo;
+                use domain::value_objects::FormatoDeSaida;
+                let partes: Vec<&str> = gesto.splitn(2, ' ').collect();
+                match partes[..] {
+                    ["abrir"] => self.exportar(cx),
+                    ["pasta", pasta] => {
+                        let pasta = PathBuf::from(pasta);
+                        self.exportacao
+                            .update(cx, |tela, cx| tela.escolher_pasta_em(pasta, cx));
+                    }
+                    ["formato", qual] => {
+                        let formato = FormatoDeSaida::TODOS
+                            .into_iter()
+                            .find(|f| f.extensao() == qual)
+                            .unwrap_or_default();
+                        self.exportacao
+                            .update(cx, |tela, cx| tela.escolher_formato(formato, cx));
+                    }
+                    ["uso", qual] => {
+                        let modo = if qual == "previa" {
+                            Modo::Previa
+                        } else {
+                            Modo::Entrega
+                        };
+                        self.exportacao
+                            .update(cx, |tela, cx| tela.escolher_modo(modo, cx));
+                    }
+                    ["exportar"] => self.exportacao.update(cx, |tela, cx| tela.exportar(cx)),
+                    ["parar"] => self.exportacao.update(cx, |tela, cx| tela.parar(cx)),
+                    ["estado"] => {
+                        let tela = self.exportacao.read(cx);
+                        eprintln!(
+                            "[roteiro] exportacao: {} · {:?} · falhas {:?}",
+                            tela.resumo(),
+                            tela.progresso(),
+                            tela.falhas()
+                        );
+                    }
+                    _ => eprintln!("[roteiro] exportacao: gesto desconhecido {gesto}"),
+                }
+            }
             Passo::Predefinicoes(gesto) => {
                 let gesto = gesto.clone();
                 self.revelacao.update(cx, |tela, cx| {

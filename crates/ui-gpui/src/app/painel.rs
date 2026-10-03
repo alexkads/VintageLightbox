@@ -378,6 +378,8 @@ impl Aplicativo {
         // As guias são da conta que sai: a próxima não herda os clientes dela.
         self.guias.esvaziar();
         self.guardar_guias();
+        // 🔁 E onde ela estava também: a próxima entrada começa na lista.
+        self.esquecer_onde_estavamos();
         let (canal, _) = std::sync::mpsc::channel();
         self.publicador.sair(canal);
         crate::telemetria::conta_saiu();
@@ -474,6 +476,9 @@ impl Aplicativo {
                         // 🗂️ As guias da última abertura voltam, se forem
                         // desta conta — só agora se sabe quem entrou.
                         self.repor_guias();
+                        // 🔁 E a tela, a guia da frente e a foto em que ela
+                        // estava (`app/retomada.rs`).
+                        self.decidir_a_retomada(cx);
                     }
                     Err(erro) => crate::telemetria::avisar!("⚠️ [Conta] /auth/me: {erro}"),
                 }

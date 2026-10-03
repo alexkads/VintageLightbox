@@ -86,7 +86,8 @@ fn a_sessao_nasce_com_o_atendimento_e_as_fotos(cx: &mut TestAppContext) {
     let (w, h) = (corte.largura.unwrap() * 600., corte.altura.unwrap() * 400.);
     assert!((w - h).abs() < 1., "o corte 1:1 centralizado: {w}×{h}");
 
-    // Etapa 3: sem estúdio, "Avançar" segura e diz por quê.
+    // Etapa 3: sem preço por foto (nasce sem escolha) e sem estúdio,
+    // "Avançar" segura e diz por quê — um de cada vez.
     e.app(cx, |app, window, cx| {
         app.nova_sessao.update(cx, |tela, cx| {
             tela.ir(3, window, cx);
@@ -95,9 +96,15 @@ fn a_sessao_nasce_com_o_atendimento_e_as_fotos(cx: &mut TestAppContext) {
             assert_eq!(tela.etapa(), 3);
             assert_eq!(
                 tela.aviso_para_teste().as_deref(),
-                Some("Escolha o estúdio.")
+                Some("Escolha o preço por foto.")
             );
             tela.escolher_produto("p1", window, cx);
+            tela.avancar(window, cx);
+            assert_eq!(tela.etapa(), 3);
+            assert_eq!(
+                tela.aviso_para_teste().as_deref(),
+                Some("Escolha o estúdio.")
+            );
             tela.escolher_estudio("e1", window, cx);
             // Sem título avança: o título só segura o "Criar".
             tela.avancar(window, cx);

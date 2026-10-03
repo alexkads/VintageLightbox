@@ -385,6 +385,14 @@ impl Docas {
         area.dock_size(lado.doca()).map_or(0.0, f32::from)
     }
 
+    /// 🧪 A coluna deste lado com a largura que o arrasto da borda daria.
+    #[cfg(test)]
+    pub fn mudar_largura(&self, lado: Lado, largura: f32, window: &mut Window, cx: &mut App) {
+        self.area.update(cx, |area, cx| {
+            area.set_dock_size(lado.doca(), px(largura), window, cx)
+        });
+    }
+
     pub fn tira_aberta(&self) -> bool {
         self.arrumacao.borrow().tira_aberta.unwrap_or(true)
     }

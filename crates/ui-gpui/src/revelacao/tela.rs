@@ -69,6 +69,8 @@ mod predefinicoes;
 /// O bruto em resolução cheia quando o zoom passa da cópia.
 mod resolucao;
 pub use local::Ferramenta;
+#[cfg(test)]
+pub use local::VistaLocal;
 
 /// "Descartar": a foto volta ao que a galeria do site tem.
 mod descartar;
@@ -3062,6 +3064,7 @@ impl Render for Revelacao {
             self.sincronizar_sliders_da_perspectiva(window, cx);
             self.espalhar_nos_sliders(window, cx);
         }
+        self.acertar_o_trilho_da_exposicao(window, cx);
         self.acompanhar_a_resolucao(cx);
         if self.docas.is_none() {
             self.montar_as_docas(window, cx);

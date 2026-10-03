@@ -630,15 +630,14 @@ impl NovaSessao {
         self.reler_fotos();
     }
 
-    /// Preço da última sessão; estúdio, preset e corte lembrados nesta máquina.
+    /// Estúdio, preset e corte lembrados nesta máquina.
+    ///
+    /// 🎯 O preço por foto **nunca** vem sugerido: com o da última sessão já
+    /// escolhido, o balconista passava direto e a faixa saía errada. Vazio,
+    /// ele trava o "Avançar" até alguém escolher (dono, 2026-10-03).
     fn sugerir(&mut self) {
         let lembrado = lembranca::ler();
         let f = &mut self.rascunho.formulario;
-        if f.produto_id.is_empty() {
-            if let Some(ultima) = self.galerias.as_ref().and_then(|g| g.first()) {
-                f.produto_id = ultima.produto_id.clone();
-            }
-        }
         if f.estudio_id.is_empty() {
             if let Some(estudio) = lembrado
                 .estudio_id

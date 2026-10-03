@@ -105,6 +105,11 @@ pub enum Passo {
     /// importar <arquivo>` · `predefinicoes prever <n>` — a coluna das
     /// predefinições, para fotografar. Grava só no catálogo local.
     Predefinicoes(String),
+    /// `exportacao abrir` (o "Exportar" da sessão) · `exportacao pasta <dir>`
+    /// (sem o seletor nativo) · `exportacao formato png` · `exportacao uso
+    /// previa|entrega` · `exportacao exportar` · `exportacao parar` ·
+    /// `exportacao estado` (uma linha no stderr) — o modal de exportação.
+    Exportacao(String),
     /// `tira recorte classificadas` · `tira altura 200` · `tira marcar 2` ·
     /// `tira faixa 4` · `tira abrir 3` · `tira rolar 300` · `tira menu 2` — a
     /// tira da Revelação aberta (a posição é a da tira, contando de 0). O
@@ -286,6 +291,7 @@ pub fn ler_roteiro(texto: &str) -> Result<Vec<Passo>, String> {
             "painel" => Passo::Painel(argumentos.join(" ")),
             "revelacao" => Passo::Revelacao(argumentos.join(" ")),
             "predefinicoes" => Passo::Predefinicoes(argumentos.join(" ")),
+            "exportacao" => Passo::Exportacao(argumentos.join(" ")),
             "tira" => Passo::Tira(argumentos.join(" ")),
             "editor" => Passo::Editor(argumentos.join(" ")),
             "guias" => Passo::Guias(argumentos.join(" ")),

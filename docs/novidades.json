@@ -1,10 +1,18 @@
 {
-  "versao": "0.1.77",
-  "titulo": "As amostras dos presets agora usam uma foto colorida.",
-  "importante": false,
+  "versao": "0.1.80",
+  "titulo": "Exportar fotos funciona com as fotos da sessão, e o modal foi refeito.",
+  "importante": true,
   "novidades": [
-    "Na Nova sessão e no atendimento, enquanto ainda não há foto do ensaio, os cartões do \"Preset padrão\" mostram um casal colorido do estúdio no lugar da foto sépia.",
-    "Agora dá para ver a diferença entre \"Preto e branco\", \"Sépia\", \"RecordarFotos P&B\" e os outros presets antes de escolher."
+    "Exportar as fotos de uma sessão dava \"Photo ID inválido\" em todas. Agora elas saem com os ajustes e o corte aplicados, com o nome do arquivo da câmera (e não mais foto, foto-2, foto-3…).",
+    "Barra de progresso com a foto em andamento, botão \"Parar\" e, no fim, \"Mostrar na pasta\" e \"Tentar de novo\" só para as que falharam — cada falha aparece na lista com o motivo.",
+    "Formatos JPEG, PNG, TIFF e WebP e a qualidade do JPEG, como no site. O destino aparece em \"Salvar em\" (a pasta Downloads, se você não escolher outra).",
+    "A marca d'água da \"Prévia da galeria\" agora se escolhe como arquivo (antes o seletor só deixava escolher pasta e a prévia nunca saía).",
+    "A pasta, o uso, o formato e a marca d'água ficam lembrados para a próxima vez, e um arquivo que já está na pasta nunca é sobrescrito: o novo ganha -2.",
+    "Na Revelação, máscaras e retoques ficaram mais fáceis de usar: o Esc larga a máscara antes de sair, o Delete apaga a escolhida, escolher na lista mostra a máscara na foto e a barra de ferramentas cabe inteira na coluna.",
+    "Revelação local: a barra de ferramentas cabe inteira na coluna estreita, e o botão de sair não fica mais cortado.",
+    "Revelação local: o Esc larga uma coisa de cada vez (o laço pela metade, o retoque, a ferramenta, a máscara escolhida) e só depois sai da Revelação; antes, com uma máscara escolhida, ele fechava a tela. Delete apaga a máscara ou o retoque escolhido, e o ⌘Z traz de volta.",
+    "Revelação local: escolher uma máscara na lista mostra o contorno e as alças dela na foto, o duplo clique na foto volta a entrar no retoque ou na máscara, e o controle de Exposição mostra sempre o valor da máscara escolhida.",
+    "Revelação local: o \"+\" de Máscaras virou botão, a lixeira não escolhe outro item, \"Subtrair\" não passa para a máscara seguinte e o círculo da ferramenta some quando o ponteiro sai da foto."
   ],
-  "por_que_atualizar": "Para escolher o preset da sessão vendo de verdade o que cada um faz com a foto."
+  "por_que_atualizar": "Para conseguir entregar as fotos da sessão em arquivo direto do aplicativo."
 }

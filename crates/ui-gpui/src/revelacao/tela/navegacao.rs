@@ -419,17 +419,23 @@ impl Revelacao {
         };
         // 🔑 **Duplo clique num retoque ou numa máscara entra na edição**, e o
         // zoom volta a ser o de antes do primeiro clique do par.
+        //
+        // 🚨 **O zoom volta antes de procurar** (achado na auditoria de
+        // 03/out/2026): o primeiro clique do par já ampliou a foto, e procurar
+        // na vista ampliada errava o alvo — o duplo clique não entrava em nada.
+        // A procura é na vista que o operador via quando começou o par.
         if evento.click_count >= 2 && self.navegacao.espaco.is_none() {
             let p = self.ponto_na_area(evento.position);
-            let antes = self.navegacao.zoom_antes_do_clique;
+            let agora = self.navegacao.zoom;
+            if let Some(antes) = self.navegacao.zoom_antes_do_clique {
+                self.navegacao.zoom = antes;
+            }
             if self.editar_o_que_esta_em(p, window, cx) {
-                if let Some(antes) = antes {
-                    self.navegacao.zoom = antes;
-                }
                 self.navegacao.gesto = None;
                 cx.notify();
                 return;
             }
+            self.navegacao.zoom = agora;
         }
         let m = evento.modifiers;
         self.navegacao.gesto = Some(Gesto {
@@ -561,6 +567,7 @@ impl Revelacao {
                         tela.local_mover(e, cx);
                     }
                 }))
+                // O ponteiro que sai do palco é ouvido em `marcacoes_locais`.
                 // 🚨 **O soltar também é ouvido aqui** (achado no app real,
                 // 2026-09-26): o da janela só é registrado no quadro seguinte
                 // ao apertar, e um clique rápido — o toque do trackpad — soltava

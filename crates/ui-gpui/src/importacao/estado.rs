@@ -122,6 +122,8 @@ pub enum Recado {
     OrigemEscolhida(String),
     /// A pasta de destino que o seletor devolveu.
     DestinoEscolhido(String),
+    /// O arquivo que o seletor devolveu (a marca d'água da exportação).
+    ArquivoEscolhido(String),
     /// As miniaturas destes caminhos acabaram de ser gravadas no cache.
     MiniaturasProntas(Vec<String>),
     /// O seletor fechou sem escolha.
@@ -479,6 +481,9 @@ pub fn aplicar(estado: &mut Estado, recado: Recado) -> Option<Seguimento> {
         // 🔑 A tela é quem sabe o que fazer com isto (invalidar o cache dela); o
         // estado não guarda imagem nenhuma.
         Recado::MiniaturasProntas(_) => None,
+
+        // A importação nunca pede arquivo: é o seletor da marca d'água.
+        Recado::ArquivoEscolhido(_) => None,
 
         Recado::SemEscolha => None,
 

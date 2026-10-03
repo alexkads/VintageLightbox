@@ -15,9 +15,11 @@ use std::sync::Arc;
 
 use domain::entities::Photo;
 use domain::services::ImageExporter;
-use domain::value_objects::{ExportOptions, FilePath, Watermark, WatermarkPosition};
+use domain::value_objects::{
+    CropSettings, ExportOptions, FilePath, FormatoDeSaida, Watermark, WatermarkPosition,
+};
 use image::{DynamicImage, GenericImageView, RgbImage};
-use infrastructure::gpu_adjustments::{Ajustes, Motor};
+use infrastructure::gpu_adjustments::{Ajustes, Motor, ParametrosLocais};
 use infrastructure::image_exporter::ImageExporterImpl;
 use infrastructure::transformacao;
 
@@ -470,4 +472,90 @@ async fn a_perspectiva_guiada_sai_no_arquivo() {
         mudou > 200,
         "a correção não mudou o arquivo ({mudou} canais)"
     );
+}
+
+/// 🗂️ **Os quatro formatos do site saem de verdade**, e com o tamanho da foto.
+///
+/// O que se confere é o arquivo reaberto pelo próprio formato: um PNG gravado
+/// com bytes de JPEG dentro abriria por adivinhação em muito visualizador, e
+/// o laboratório que pede TIFF o recusaria.
+#[tokio::test]
+async fn os_quatro_formatos_saem_no_formato_pedido() {
+    let dir = tempfile::tempdir().unwrap();
+    let (foto, _) = foto_no_disco(&dir, "origem.png");
+
+    for formato in FormatoDeSaida::TODOS {
+        let destino = dir.path().join(format!("saida.{}", formato.extensao()));
+        let lida = exportar_com(
+            &foto,
+            &destino,
+            &ExportOptions::default().with_formato(formato),
+        )
+        .await;
+        assert_eq!(lida.dimensions(), (64, 64), "{formato:?}");
+
+        let bytes = std::fs::read(&destino).unwrap();
+        let esperado = match formato {
+            FormatoDeSaida::Jpeg => image::ImageFormat::Jpeg,
+            FormatoDeSaida::Png => image::ImageFormat::Png,
+            FormatoDeSaida::Tiff => image::ImageFormat::Tiff,
+            FormatoDeSaida::Webp => image::ImageFormat::WebP,
+        };
+        assert_eq!(
+            image::guess_format(&bytes).unwrap(),
+            esperado,
+            "o arquivo .{} tem outro formato dentro",
+            formato.extensao()
+        );
+    }
+}
+
+/// 📸 **A foto do site sai com as mesmas decisões da do catálogo.**
+///
+/// Ela não tem `Photo`: chega em bytes e é revelada por
+/// `renderizar_bytes_com_opcoes`. Sem tamanho e marca aqui, a "Prévia da
+/// galeria" de uma sessão sairia em tamanho cheio e limpa — a foto não
+/// comprada, legível.
+#[test]
+fn a_foto_em_bytes_sai_reduzida_e_marcada() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_, imagem) = foto_no_disco(&dir, "origem.png");
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    imagem
+        .write_to(&mut bytes, image::ImageFormat::Png)
+        .unwrap();
+    let marca = marca_no_disco(&dir);
+    let exportador = ImageExporterImpl::new();
+    let revelar = |opcoes: &ExportOptions| {
+        let saida = exportador
+            .renderizar_bytes_com_opcoes(
+                bytes.get_ref(),
+                &Ajustes::default(),
+                &CropSettings::default(),
+                &ParametrosLocais::default(),
+                opcoes,
+            )
+            .expect("revelar os bytes");
+        image::load_from_memory(&saida).expect("reabrir")
+    };
+
+    let reduzida = revelar(&ExportOptions::default().with_longest_edge(32));
+    assert_eq!(reduzida.dimensions(), (32, 32));
+
+    let limpa = revelar(&ExportOptions::default()).to_rgb8();
+    let marcada = revelar(&ExportOptions::default().with_watermark(Watermark::new(
+        FilePath::new(marca.to_str().unwrap()).unwrap(),
+        WatermarkPosition::Center,
+        0.5,
+        1.0,
+    )))
+    .to_rgb8();
+    assert_ne!(
+        limpa.get_pixel(32, 32),
+        marcada.get_pixel(32, 32),
+        "a marca não chegou à foto em bytes"
+    );
+
+    let png = revelar(&ExportOptions::default().with_formato(FormatoDeSaida::Png));
+    assert_eq!(png.dimensions(), (64, 64));
 }

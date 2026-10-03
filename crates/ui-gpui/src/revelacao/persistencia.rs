@@ -138,6 +138,17 @@ pub trait Gravador: Send + Sync + 'static {
     /// Grava o histórico da foto. Não bloqueia: vai numa tarefa, e a mais nova
     /// ganha mesmo que termine antes (ver `CatalogoDoHistorico::gravar`).
     fn gravar_historico(&self, _id: String, _json: String) {}
+
+    /// Espera as gravações que ainda estão no ar terminarem, até `prazo`.
+    ///
+    /// 🔑 **É o que o app chama antes de sair** (`app::retomada`). Cada gesto
+    /// vai ao banco numa tarefa do tokio, e o processo que acaba — o
+    /// `exit(0)` do "Reabrir agora" da atualização, ou o `cx.quit()` — leva as
+    /// tarefas junto: o último ajuste da Revelação sumia ao reabrir.
+    ///
+    /// O padrão não espera nada: quem não grava em segundo plano não tem o que
+    /// esperar.
+    fn esperar_as_gravacoes(&self, _prazo: std::time::Duration) {}
 }
 
 /// O gravador de verdade: entrega ao `EditorController`, numa tarefa do tokio.
@@ -169,6 +180,8 @@ pub struct GravadorDoBanco {
     /// que recomeça em 1: o catálogo recusa versão menor que a gravada, e um
     /// contador zerado a cada abertura do app nunca mais gravaria.
     versao_do_historico: std::sync::atomic::AtomicI64,
+    /// Quantas gravações estão no ar — ver [`Gravador::esperar_as_gravacoes`].
+    no_ar: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl GravadorDoBanco {
@@ -187,6 +200,7 @@ impl GravadorDoBanco {
             locais_do_site: std::sync::Mutex::default(),
             historico: None,
             versao_do_historico: std::sync::atomic::AtomicI64::new(0),
+            no_ar: Arc::default(),
         }
     }
 
@@ -211,6 +225,17 @@ impl GravadorDoBanco {
             })
             .unwrap_or(0);
         agora.max(anterior + 1)
+    }
+
+    /// Manda a gravação ao tokio, contada até terminar.
+    fn lancar(&self, gravacao: impl std::future::Future<Output = ()> + Send + 'static) {
+        use std::sync::atomic::Ordering;
+        let no_ar = self.no_ar.clone();
+        no_ar.fetch_add(1, Ordering::SeqCst);
+        self.tokio.spawn(async move {
+            gravacao.await;
+            no_ar.fetch_sub(1, Ordering::SeqCst);
+        });
     }
 
     /// Semeia a revelação local das fotos do site — o que a tabela tinha na
@@ -246,7 +271,7 @@ impl Gravador for GravadorDoBanco {
             if let Ok(mut deposito) = self.do_site.lock() {
                 deposito.insert(no_site.clone(), json.clone());
             }
-            self.tokio.spawn(async move {
+            self.lancar(async move {
                 if let Err(erro) = editor.guardar_revelacao_do_site(&no_site, &json).await {
                     crate::telemetria::avisar!(
                         "⚠️ [Revelação] a revelação de {nome} não foi guardada: {erro}"
@@ -266,7 +291,7 @@ impl Gravador for GravadorDoBanco {
         let parametros =
             crate::pos_venda::porta::ajustes_em_json(&ajustes, &para_crop_settings(&corte))
                 .to_string();
-        self.tokio.spawn(async move {
+        self.lancar(async move {
             let resultado = editor
                 .save_edits(
                     id,
@@ -359,7 +384,7 @@ impl Gravador for GravadorDoBanco {
             deposito.remove(&foto_no_site);
         }
         let editor = self.editor.clone();
-        self.tokio.spawn(async move {
+        self.lancar(async move {
             if let Err(erro) = editor.esquecer_revelacao_do_site(&foto_no_site).await {
                 // Sobrou linha no depósito de uma foto que já subiu. Não é
                 // perda: na próxima abertura ela volta como "revelação local" e
@@ -393,7 +418,9 @@ impl Gravador for GravadorDoBanco {
             return;
         };
         let versao = self.proxima_versao_do_historico();
-        self.tokio.spawn(async move {
+        // Por `lancar`: o app espera por ela antes de sair, como espera a
+        // revelação — senão o último passo sumia ao reabrir.
+        self.lancar(async move {
             if let Err(erro) = catalogo.gravar(&id, &json, versao).await {
                 crate::telemetria::avisar!("⚠️ [Histórico] o de {id} não foi gravado: {erro}");
             }
@@ -412,7 +439,7 @@ impl Gravador for GravadorDoBanco {
                     None => guardado.remove(&no_site),
                 };
             }
-            self.tokio.spawn(async move {
+            self.lancar(async move {
                 if let Err(erro) = editor
                     .guardar_locais_do_site(&no_site, locais.as_deref())
                     .await
@@ -424,7 +451,7 @@ impl Gravador for GravadorDoBanco {
             });
             return;
         }
-        self.tokio.spawn(async move {
+        self.lancar(async move {
             if let Err(erro) = editor.save_locais(&id, locais).await {
                 crate::telemetria::avisar!(
                     "⚠️ [Revelação local] a de {nome} não foi gravada: {erro}"
@@ -435,6 +462,20 @@ impl Gravador for GravadorDoBanco {
 
     fn locais_do_site(&self, foto_no_site: &str) -> Option<String> {
         self.locais_do_site.lock().ok()?.get(foto_no_site).cloned()
+    }
+
+    fn esperar_as_gravacoes(&self, prazo: std::time::Duration) {
+        use std::sync::atomic::Ordering;
+        let ate = std::time::Instant::now() + prazo;
+        while self.no_ar.load(Ordering::SeqCst) > 0 && std::time::Instant::now() < ate {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let sobraram = self.no_ar.load(Ordering::SeqCst);
+        if sobraram > 0 {
+            crate::telemetria::avisar!(
+                "⚠️ [Revelação] {sobraram} gravações ainda no ar ao sair, depois de {prazo:?}"
+            );
+        }
     }
 }
 
@@ -886,9 +927,17 @@ pub mod mentira {
         locais: Mutex<Vec<(String, Option<String>)>>,
         /// 📜 O histórico de cada foto, como se estivesse no catálogo.
         pub historicos: Mutex<std::collections::HashMap<String, String>>,
+        /// Quantas gravações já estavam feitas quando o app pediu para esperar
+        /// por elas, uma entrada por pedido — ver `esperar_as_gravacoes`.
+        esperas: Mutex<Vec<usize>>,
     }
 
     impl GravadorDeMentira {
+        /// Cada `esperar_as_gravacoes`, com quantas gravações já havia nele.
+        pub fn esperas(&self) -> Vec<usize> {
+            self.esperas.lock().expect("as esperas").clone()
+        }
+
         pub fn gravado(&self) -> Vec<(String, Ajustes, Corte)> {
             self.gravado
                 .lock()
@@ -916,6 +965,11 @@ pub mod mentira {
     }
 
     impl Gravador for GravadorDeMentira {
+        fn esperar_as_gravacoes(&self, _prazo: std::time::Duration) {
+            let feitas = self.gravado.lock().expect("o registro de gravações").len();
+            self.esperas.lock().expect("as esperas").push(feitas);
+        }
+
         fn gravar(&self, id: String, ajustes: Ajustes, corte: Corte) {
             // 🔑 **A foto do site cai no depósito, como no gravador de
             // verdade.** Sem isto o teste do "Sincronizar" veria uma gaveta
@@ -1589,10 +1643,9 @@ mod testes {
         let (ajustes, corte) = de_json(&json);
         assert_eq!(ajustes.bw_ativo, 1.0, "abriu colorida");
         assert_eq!(ajustes.processo, 1.0);
-        assert!(
-            ajustes.vinheta_do_darktable_ligada(),
-            "sem a vinheta do darktable"
-        );
+        // A vinheta do P&B de hoje é a pós-corte (3/out/2026), não a do darktable.
+        assert_eq!(ajustes.pcv_amount, 78.0, "sem a vinheta do P&B");
+        assert!(!ajustes.vinheta_do_darktable_ligada());
         assert_eq!(corte.largura, Some(0.9), "o corte da foto fica");
     }
 }

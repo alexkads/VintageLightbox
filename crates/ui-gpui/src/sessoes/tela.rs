@@ -943,21 +943,15 @@ impl Sessoes {
             .map(|g| g.id.clone())
     }
 
-    /// Abre o formulário de sessão nova, com o produto da última já escolhido.
+    /// Abre o formulário de sessão nova.
     ///
-    /// 🔑 **A sugestão é o produto da sessão mais recente**, como no site: um
-    /// estúdio cobra a mesma faixa a semana inteira, e a alternativa seria
-    /// escolher de novo a cada cliente.
+    /// 🎯 **O preço por foto nasce sem escolha**: sugerido, o balconista
+    /// esquecia de conferir e a faixa saía errada (dono, 2026-10-03).
     ///
     /// 🎯 **O estúdio sugerido é o último escolhido nesta máquina** — e só se
     /// ele ainda estiver entre os ativos; senão fica sem escolha, porque
     /// escolher é obrigatório (dono, 2026-09-13).
     pub fn comecar_nova(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let sugerido = self
-            .galerias
-            .first()
-            .map(|g| g.produto_id.clone())
-            .or_else(|| self.produtos.first().map(|p| p.id.clone()));
         let estudio = estudio_lembrado(&self.lembranca)
             .filter(|id| self.estudios.iter().any(|e| &e.id == id));
 
@@ -965,7 +959,7 @@ impl Sessoes {
             titulo: cx.new(|cx| InputState::new(window, cx).placeholder("Ensaio da Maria")),
             email: cx.new(|cx| InputState::new(window, cx).placeholder("cliente@exemplo.com")),
             whatsapp: cx.new(|cx| InputState::new(window, cx).placeholder("(47) 99999-8888")),
-            produto_id: sugerido,
+            produto_id: None,
             estudio_id: estudio,
             enviando: false,
         });
@@ -1068,7 +1062,7 @@ impl Sessoes {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // A faixa sugerida vem da sessão mais recente; sem nenhuma, do catálogo.
+        // A faixa nasce sem escolha; o teste escolhe a primeira.
         if let Some(nova) = self.nova.as_mut() {
             if nova.produto_id.is_none() {
                 nova.produto_id = Some("p1".into());
@@ -3769,11 +3763,7 @@ mod testes {
                 tela.estudios = vec![estudio()];
                 tela.comecar_nova(window, cx);
                 let nova = tela.nova.as_ref().expect("o formulário está aberto");
-                assert_eq!(
-                    nova.produto_id.as_deref(),
-                    Some("p1"),
-                    "a faixa vem sugerida"
-                );
+                assert_eq!(nova.produto_id, None, "a faixa nasce sem escolha");
                 assert_eq!(nova.estudio_id, None, "sem lembrança, o estúdio é escolha");
 
                 // Vazio: não sai.
@@ -3862,6 +3852,7 @@ mod testes {
                     estado.trocar_valor("Ensaio da Ana", window, cx)
                 });
                 tela.escolher_estudio("s1".into(), cx);
+                tela.escolher_faixa("p1".into(), cx);
                 tela.criar(cx);
             })
             .expect("a janela deve estar aberta");
@@ -4191,6 +4182,7 @@ mod testes {
                     estado.trocar_valor("ana@exemplo.com", window, cx)
                 });
                 tela.escolher_estudio("s1".into(), cx);
+                tela.escolher_faixa("p1".into(), cx);
                 tela.criar(cx);
             })
             .expect("a janela deve estar aberta");

@@ -19,7 +19,7 @@ pub use aspect_ratio::AspectRatio;
 pub use collection_id::CollectionId;
 pub use color_label::ColorLabel;
 pub use crop_settings::CropSettings;
-pub use export_options::{ExportOptions, Watermark, WatermarkPosition};
+pub use export_options::{ExportOptions, FormatoDeSaida, Watermark, WatermarkPosition};
 pub use file_path::FilePath;
 pub use flag::Flag;
 pub use import_options::{ImportMode, ImportOptions, OrganizationStrategy, RenamePattern};

@@ -93,6 +93,19 @@ impl Ferramenta {
         }
     }
 
+    /// O nome sem acento nem espaço, para os seletores de teste.
+    fn chave(self) -> &'static str {
+        match self {
+            Ferramenta::Pincel => "pincel",
+            Ferramenta::Linear => "linear",
+            Ferramenta::Radial => "radial",
+            Ferramenta::Laco => "laco",
+            Ferramenta::Carimbo => "carimbo",
+            Ferramenta::BandAid => "bandaid",
+            Ferramenta::Preencher => "preencher",
+        }
+    }
+
     fn atalho(self) -> &'static str {
         match self {
             Ferramenta::Pincel => "K",
@@ -210,6 +223,28 @@ pub(in crate::revelacao) struct Local {
     pub feather: f32,
     pub opacidade: f32,
     pub sliders: SlidersLocais,
+}
+
+/// 🧪 O retrato da Revelação local para a bateria de usabilidade.
+#[cfg(test)]
+#[derive(Debug, Clone)]
+pub struct VistaLocal {
+    pub ferramenta: Option<Ferramenta>,
+    pub mascara_sel: Option<usize>,
+    pub selecionado: Option<usize>,
+    pub criando: bool,
+    pub subtrair: bool,
+    pub poligono: usize,
+    pub com_cursor: bool,
+    pub marcacoes: bool,
+    pub tamanho: f32,
+    pub feather: f32,
+    pub opacidade: f32,
+    pub trilho_da_exposicao: f32,
+    pub trilho_da_suavizacao: f32,
+    pub trilho_da_opacidade: f32,
+    /// Quantos traços as marcações desenham sobre a foto agora.
+    pub marcas: usize,
 }
 
 pub(in crate::revelacao) struct SlidersLocais {
@@ -683,7 +718,9 @@ impl Revelacao {
     /// Escolhe a ferramenta (ou solta, se é a mesma). Máscara sem máscara
     /// selecionada cria uma nova no primeiro gesto.
     pub fn usar_ferramenta(&mut self, ferramenta: Ferramenta, cx: &mut Context<Self>) {
-        if self.edicao.is_some() {
+        // Foto travada: o botão já vem apagado, e a tecla não pode fazer o
+        // que o botão não faz — o círculo na mão prometeria um gesto morto.
+        if self.edicao.is_some() || self.revelacao_travada() {
             return;
         }
         if self.local.ferramenta == Some(ferramenta) {
@@ -698,6 +735,9 @@ impl Revelacao {
         self.local.gesto = None;
         if ferramenta.de_mascara() {
             self.local.criando = self.local.mascara_sel.is_none();
+            if self.local.criando {
+                self.local.subtrair = false;
+            }
             self.local.selecionado = None;
         } else {
             self.local.mascara_sel = None;
@@ -711,12 +751,18 @@ impl Revelacao {
 
     /// Cria uma máscara nova com esta ferramenta (o "+" do painel).
     pub fn nova_mascara_com(&mut self, ferramenta: Ferramenta, cx: &mut Context<Self>) {
+        if self.edicao.is_some() || self.revelacao_travada() {
+            return;
+        }
         self.local.ferramenta = Some(ferramenta);
         self.local.mascara_sel = None;
         self.local.criando = true;
         self.local.subtrair = false;
         self.local.selecionado = None;
+        self.local.origem = None;
+        self.local.gesto = None;
         self.local.poligono.clear();
+        self.estado_do_painel.abrir(CHAVE_DO_PAINEL_LOCAL);
         cx.notify();
     }
 
@@ -807,6 +853,75 @@ impl Revelacao {
         self.local.gesto.is_some()
     }
 
+    /// 🧪 O estado da Revelação local que a bateria de usabilidade confere.
+    #[cfg(test)]
+    pub fn vista_local(&self, cx: &gpui_kit::App) -> VistaLocal {
+        VistaLocal {
+            ferramenta: self.local.ferramenta,
+            mascara_sel: self.local.mascara_sel,
+            selecionado: self.local.selecionado,
+            criando: self.local.criando,
+            subtrair: self.local.subtrair,
+            poligono: self.local.poligono.len(),
+            com_cursor: self.local.cursor.is_some(),
+            marcacoes: self.local.marcacoes,
+            tamanho: self.local.tamanho,
+            feather: self.local.feather,
+            opacidade: self.local.opacidade,
+            trilho_da_exposicao: self.local.sliders.exposicao.read(cx).value().start(),
+            trilho_da_suavizacao: self.local.sliders.feather.read(cx).value().start(),
+            trilho_da_opacidade: self.local.sliders.opacidade.read(cx).value().start(),
+            marcas: self.marcas().len(),
+        }
+    }
+
+    /// 🧪 O tamanho da cópia em que a Revelação local mede (pixels).
+    #[cfg(test)]
+    pub fn tamanho_da_copia_local(&self) -> Option<(f32, f32)> {
+        self.tamanho_da_copia()
+    }
+
+    /// 🧪 Abre a sanfona da Revelação local, como o clique no título.
+    #[cfg(test)]
+    pub fn abrir_o_painel_local(&mut self, cx: &mut Context<Self>) {
+        self.estado_do_painel.abrir(CHAVE_DO_PAINEL_LOCAL);
+        cx.notify();
+    }
+
+    /// 🧪 O slider de Exposição da máscara escolhida, solto em `valor`.
+    #[cfg(test)]
+    pub fn soltar_a_exposicao_em(&mut self, valor: f32, cx: &mut Context<Self>) {
+        self.exposicao_da_mascara(valor, true, cx);
+    }
+
+    /// 🧪 A coluna dos ajustes na largura dada — a mais estreita é 280.
+    #[cfg(test)]
+    pub fn largura_da_coluna(&self, largura: f32, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(docas) = &self.docas {
+            docas.mudar_largura(crate::docas::Lado::Direita, largura, window, cx);
+        }
+    }
+
+    /// 🧪 A foto aberta com a revelação travada (comprada, ou já entregue).
+    #[cfg(test)]
+    pub fn travar_a_revelacao_local(&mut self, cx: &mut Context<Self>) {
+        if let Some(a) = self.aberta.as_mut() {
+            a.foto.revelacao_travada = true;
+        }
+        cx.notify();
+    }
+
+    /// 🧪 Um ponto da foto (0–1) em pixels da janela — onde o ponteiro
+    /// clica para acertá-lo.
+    #[cfg(test)]
+    pub fn na_janela_da_foto(&self, q: [f32; 2]) -> Option<gpui_kit::Point<gpui_kit::Pixels>> {
+        let p = self.ponto_da_foto(q)?;
+        Some(point(
+            self.palco.origin.x + px(p.x),
+            self.palco.origin.y + px(p.y),
+        ))
+    }
+
     /// Põe o cursor na busca de predefinições, como o clique do operador.
     #[cfg(test)]
     pub fn focar_a_busca(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -824,6 +939,12 @@ impl Revelacao {
         } else if self.local.ferramenta.is_some() {
             self.local.ferramenta = None;
             self.local.criando = false;
+        } else if self.local.mascara_sel.is_some() {
+            // 🚨 **A máscara escolhida é a última coisa a largar** (achado na
+            // auditoria de 03/out/2026): sem esta volta o `Esc` seguia para a
+            // raiz com a máscara ainda realçada e fechava a Revelação.
+            self.local.mascara_sel = None;
+            self.local.subtrair = false;
         } else {
             return false;
         }
@@ -849,7 +970,15 @@ impl Revelacao {
         self.local.mascara_sel = None;
         self.local.ferramenta = None;
         self.local.criando = false;
+        self.local.subtrair = false;
         cx.notify();
+    }
+
+    /// O ponteiro deixou o palco: o círculo da ferramenta não fica para trás.
+    pub(super) fn esquecer_o_cursor_local(&mut self, cx: &mut Context<Self>) {
+        if self.local.cursor.take().is_some() {
+            cx.notify();
+        }
     }
 
     pub fn alternar_marcacoes(&mut self, cx: &mut Context<Self>) {
@@ -909,6 +1038,49 @@ impl Revelacao {
         parametros.retoques.remove(i);
         self.comprometer(parametros, cx);
         true
+    }
+
+    /// `Delete` com uma máscara escolhida (e nenhum retoque): a máscara
+    /// sai, num passo que o ⌘Z desfaz — como no Lightroom. Devolve se apagou.
+    pub fn apagar_mascara_selecionada(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.edicao.is_some() || self.revelacao_travada() {
+            return false;
+        }
+        let Some(i) = self.local.mascara_sel else {
+            return false;
+        };
+        if i >= self.locais.camadas.len() {
+            return false;
+        }
+        self.mudar_mascara(i, cx, |_| true);
+        self.local.criando = self.local.ferramenta.is_some_and(Ferramenta::de_mascara);
+        self.local.subtrair = false;
+        true
+    }
+
+    /// 🎚️ O trilho da Exposição acompanha a máscara escolhida, por qualquer
+    /// caminho que ela tenha chegado — o traço que a criou, o duplo clique, a
+    /// lista, o ⌘Z. Antes só a lista o acertava: o número dizia +0,80 e o
+    /// trilho seguia no valor de outra máscara, e o arrasto saltava (achado na
+    /// auditoria de 03/out/2026). Roda a cada desenho, como os sliders do
+    /// corte; durante o arrasto do próprio slider os dois já são iguais.
+    pub(super) fn acertar_o_trilho_da_exposicao(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(ev) = self
+            .local
+            .mascara_sel
+            .and_then(|i| self.locais.camadas.get(i))
+            .map(|c| c.ajustes.exposicao_ev)
+        else {
+            return;
+        };
+        let trilho = &self.local.sliders.exposicao;
+        if (trilho.read(cx).value().start() - ev).abs() > 1e-4 {
+            trilho.update(cx, |s, cx| s.set_value(ev, window, cx));
+        }
     }
 
     fn slider_local(&mut self, qual: u8, valor: f32, soltou: bool, cx: &mut Context<Self>) {
@@ -986,6 +1158,9 @@ impl Revelacao {
             self.local.mascara_sel = Some(i);
             self.local.criando = false;
             self.local.selecionado = None;
+            self.local.subtrair = false;
+            self.local.origem = None;
+            self.local.poligono.clear();
             if let Some(c) = self.locais.camadas.get(i) {
                 let ev = c.ajustes.exposicao_ev;
                 self.local
@@ -993,8 +1168,18 @@ impl Revelacao {
                     .exposicao
                     .update(cx, |s, cx| s.set_value(ev, window, cx));
             }
+            // 👁️ **Escolhida, a máscara aparece na foto** (achado na
+            // auditoria de 03/out/2026): o contorno e as alças só se desenham
+            // com uma ferramenta de máscara na mão, e a lista a tirava — a
+            // máscara ficava realçada no painel e invisível na foto. Como no
+            // duplo clique, vem a ferramenta do último componente dela.
             if !self.local.ferramenta.is_some_and(Ferramenta::de_mascara) {
-                self.local.ferramenta = None;
+                self.local.ferramenta = self
+                    .locais
+                    .camadas
+                    .get(i)
+                    .and_then(|c| c.componentes.last())
+                    .map(|k| ferramenta_da_forma(&k.forma));
             }
         }
         cx.notify();
@@ -1012,7 +1197,10 @@ impl Revelacao {
         };
         if mudar(camada) {
             parametros.camadas.remove(i);
-            self.local.mascara_sel = None;
+            // A escolhida continua escolhida quando sai **outra** (achado na
+            // auditoria de 03/out/2026: a lixeira de qualquer máscara largava
+            // a escolhida) — e anda uma casa se a que saiu vinha antes dela.
+            self.local.mascara_sel = depois_de_tirar(self.local.mascara_sel, i);
         }
         self.comprometer(parametros, cx);
     }
@@ -1227,14 +1415,8 @@ impl Revelacao {
                     }
                 };
                 if acerta {
-                    let f = match &k.forma {
-                        Forma::Pincel(_) => Ferramenta::Pincel,
-                        Forma::Linear(_) => Ferramenta::Linear,
-                        Forma::Radial(_) => Ferramenta::Radial,
-                        Forma::Laco(_) => Ferramenta::Laco,
-                    };
                     let _ = p;
-                    return Some((i, f));
+                    return Some((i, ferramenta_da_forma(&k.forma)));
                 }
             }
         }
@@ -1277,6 +1459,7 @@ impl Revelacao {
             self.local.ferramenta = Some(f);
             self.local.mascara_sel = Some(i);
             self.local.criando = false;
+            self.local.subtrair = false;
             self.estado_do_painel.abrir(CHAVE_DO_PAINEL_LOCAL);
             cx.notify();
             return true;
@@ -1384,12 +1567,15 @@ impl Revelacao {
         }
         self.local.selecionado = None;
 
-        let modo = if self.local.subtrair != alt {
+        let nova = self.local.criando || self.local.mascara_sel.is_none();
+        // ➖ O "Subtrair" é da máscara escolhida: a máscara nova começa
+        // somando — nascer de um traço que subtrai não mostraria nada.
+        let subtrair = self.local.subtrair && !nova;
+        let modo = if subtrair != alt {
             Modo::Subtrair
         } else {
             Modo::Somar
         };
-        let nova = self.local.criando || self.local.mascara_sel.is_none();
         let raio = self.raio_da_ferramenta();
         let feather = self.local.feather;
         let opacidade = self.local.opacidade;
@@ -1730,6 +1916,7 @@ impl Revelacao {
                     });
                     self.local.mascara_sel = Some(parametros.camadas.len() - 1);
                     self.local.criando = false;
+                    self.local.subtrair = false;
                 } else if let Some(c) = self
                     .local
                     .mascara_sel
@@ -1787,7 +1974,12 @@ impl Revelacao {
                 laco: pontos,
             }));
         } else {
-            let modo = if self.local.subtrair {
+            let nova = self.local.criando
+                || self
+                    .local
+                    .mascara_sel
+                    .is_none_or(|i| i >= parametros.camadas.len());
+            let modo = if self.local.subtrair && !nova {
                 Modo::Subtrair
             } else {
                 Modo::Somar
@@ -1812,6 +2004,7 @@ impl Revelacao {
                     });
                     self.local.mascara_sel = Some(parametros.camadas.len() - 1);
                     self.local.criando = false;
+                    self.local.subtrair = false;
                 }
             }
         }
@@ -2223,6 +2416,19 @@ impl Revelacao {
                     for marca in &marcas {
                         pintar(marca, &em, window);
                     }
+                    // 🫥 **O ponteiro saiu da foto: o círculo sai junto**
+                    // (achado na auditoria de 03/out/2026 — ele ficava parado
+                    // onde o ponteiro deixou o palco). Pela janela, e não pelo
+                    // `on_hover`: este diz "fora" enquanto o botão está
+                    // apertado, e o círculo sumia no meio do clique.
+                    if !arrastando {
+                        let esta = ouvinte.clone();
+                        window.on_mouse_event(move |evento: &MouseMoveEvent, fase, _w, cx| {
+                            if fase.bubble() && !bounds.contains(&evento.position) {
+                                esta.update(cx, |tela, cx| tela.esquecer_o_cursor_local(cx));
+                            }
+                        });
+                    }
                     if arrastando {
                         window.on_mouse_event({
                             let esta = ouvinte.clone();
@@ -2264,17 +2470,23 @@ impl Revelacao {
                 .ghost()
                 .selected(ferramenta == Some(f))
                 .disabled(travada)
+                .debug_selector(move || format!("local-{}", f.chave()))
                 .tooltip(SharedString::from(format!("{} ({})", f.nome(), f.atalho())))
                 .on_click(cx.listener(move |tela, _e, _w, cx| tela.usar_ferramenta(f, cx)))
         };
 
+        // 📏 **A barra quebra a linha na coluna estreita** (print do dono,
+        // 03/out/2026: com 280 pontos o "Sair" saía cortado). As três ações
+        // andam juntas e, sem lugar, descem para a linha de baixo, à direita.
         let mut barra = div()
             .flex()
+            .flex_wrap()
             .items_center()
             .gap(px(2.))
             .p(px(3.))
             .rounded(crate::tema::canto(8.))
-            .bg(tema.muted);
+            .bg(tema.muted)
+            .debug_selector(|| "local-barra".into());
         for f in Ferramenta::MASCARA {
             barra = barra.child(botao_da_ferramenta(f, cx));
         }
@@ -2283,8 +2495,11 @@ impl Revelacao {
             barra = barra.child(botao_da_ferramenta(f, cx));
         }
         let ampliada = self.navegacao.zoom.nivel != crate::revelacao::zoom::Nivel::Encaixar;
-        barra = barra
-            .child(div().flex_1())
+        let acoes = div()
+            .flex()
+            .items_center()
+            .gap(px(2.))
+            .ml_auto()
             // O zoom da prévia: laço, carimbo e band-aid pedem a foto de perto.
             // A barra completa (níveis, slider, navegador) fica no palco.
             .child(
@@ -2292,6 +2507,7 @@ impl Revelacao {
                     .icon(Icon::new(Icone::ZoomIn).size(px(15.)))
                     .small()
                     .ghost()
+                    .debug_selector(|| "local-zoom".into())
                     .selected(ampliada)
                     .tooltip(
                         "Alternar zoom: encaixar ↔ último nível (Z · Espaço; pinça no trackpad)",
@@ -2322,6 +2538,7 @@ impl Revelacao {
                     .tooltip("Sair da Revelação local (Esc)")
                     .on_click(cx.listener(|tela, _e, _w, cx| tela.sair_da_revelacao_local(cx))),
             );
+        barra = barra.child(acoes);
 
         // 🔑 **Sanfona, como os outros painéis da coluna**: a mesma chave de
         // lembrança (`revelacao:<título>`) e o ponto dos outros: âmbar se a
@@ -2436,6 +2653,7 @@ impl Revelacao {
                 linha = linha.child(
                     div()
                         .id(SharedString::from(format!("{id}-{k}")))
+                        .debug_selector(move || format!("{id}-{k}"))
                         .flex()
                         .flex_1()
                         .justify_center()
@@ -2584,10 +2802,12 @@ impl Revelacao {
                     .icon(Icon::new(f.icone()).size(px(14.)))
                     .xsmall()
                     .ghost()
+                    .disabled(self.revelacao_travada())
                     .tooltip(SharedString::from(format!(
                         "Nova máscara com {}",
                         f.nome().to_lowercase()
                     )))
+                    .debug_selector(move || format!("nova-mascara-{}", f.chave()))
                     .on_click(cx.listener(move |tela, _e, _w, cx| tela.nova_mascara_com(f, cx))),
             );
         }
@@ -2610,7 +2830,24 @@ impl Revelacao {
                     .flex()
                     .items_center()
                     .gap(px(4.))
-                    .child(Icon::new(Icone::Plus).size(px(12.)))
+                    .child(
+                        Button::new("nova-mascara")
+                            .icon(Icon::new(Icone::Plus).size(px(13.)))
+                            .xsmall()
+                            .ghost()
+                            .disabled(self.revelacao_travada())
+                            .debug_selector(|| "nova-mascara".into())
+                            .tooltip("Nova máscara com a ferramenta de máscara na mão")
+                            .on_click(cx.listener(|tela, _e, _w, cx| {
+                                let f = tela
+                                    .local
+                                    .ferramenta
+                                    .filter(|f| f.de_mascara())
+                                    .unwrap_or(Ferramenta::Pincel);
+                                tela.nova_mascara_com(f, cx)
+                            })),
+                    )
+                    .child(div().w(px(1.)).h(px(14.)).mx(px(2.)).bg(tema.border))
                     .child(novas),
             );
         let mut lista = div().flex().flex_col().gap(px(3.)).child(cabecalho);
@@ -2619,7 +2856,7 @@ impl Revelacao {
                 div()
                     .text_xs()
                     .text_color(tema.muted_foreground)
-                    .child("Nenhuma máscara. Use + ou uma ferramenta de máscara."),
+                    .child("Nenhuma máscara. Use o + ou uma das formas ao lado."),
             );
         }
         for (i, camada) in self.locais.camadas.iter().enumerate() {
@@ -2633,6 +2870,7 @@ impl Revelacao {
             let linha =
                 div()
                     .id(SharedString::from(format!("mascara-{i}")))
+                    .debug_selector(move || format!("mascara-{i}"))
                     .flex()
                     .items_center()
                     .gap(px(6.))
@@ -2679,6 +2917,7 @@ impl Revelacao {
                     )
                     .child(
                         Button::new(SharedString::from(format!("ver-{i}")))
+                            .debug_selector(move || format!("ver-{i}"))
                             .icon(
                                 Icon::new(if camada.visivel {
                                     Icone::Eye
@@ -2702,6 +2941,7 @@ impl Revelacao {
                     )
                     .child(
                         Button::new(SharedString::from(format!("inverter-{i}")))
+                            .debug_selector(move || format!("inverter-{i}"))
                             .icon(Icon::new(Icone::Contrast).size(px(13.)))
                             .xsmall()
                             .ghost()
@@ -2719,6 +2959,7 @@ impl Revelacao {
                     )
                     .child(
                         Button::new(SharedString::from(format!("excluir-{i}")))
+                            .debug_selector(move || format!("excluir-{i}"))
                             .icon(Icon::new(Icone::Trash2).size(px(13.)))
                             .xsmall()
                             .ghost()
@@ -2762,6 +3003,7 @@ impl Revelacao {
                             ))))
                             .child(
                                 Button::new(SharedString::from(format!("tirar-{i}-{k}")))
+                                    .debug_selector(move || format!("tirar-{i}-{k}"))
                                     .icon(Icon::new(Icone::X).size(px(11.)))
                                     .xsmall()
                                     .ghost()
@@ -2850,6 +3092,7 @@ impl Revelacao {
             lista = lista.child(
                 div()
                     .id(SharedString::from(format!("retoque-{k}")))
+                    .debug_selector(move || format!("retoque-{k}"))
                     .flex()
                     .items_center()
                     .gap(px(6.))
@@ -2887,15 +3130,22 @@ impl Revelacao {
                     )
                     .child(
                         Button::new(SharedString::from(format!("apagar-retoque-{k}")))
+                            .debug_selector(move || format!("apagar-retoque-{k}"))
                             .icon(Icon::new(Icone::Trash2).size(px(13.)))
                             .xsmall()
                             .ghost()
                             .tooltip("Excluir retoque")
                             .on_click(cx.listener(move |tela, _e, _w, cx| {
+                                // 🚨 Dentro da linha: sem isto o clique
+                                // descia até ela, que escolhia o índice que
+                                // acabara de ser apagado (achado na auditoria
+                                // de 03/out/2026).
+                                cx.stop_propagation();
                                 let mut parametros = (*tela.locais).clone();
                                 if k < parametros.retoques.len() {
                                     parametros.retoques.remove(k);
-                                    tela.local.selecionado = None;
+                                    tela.local.selecionado =
+                                        depois_de_tirar(tela.local.selecionado, k);
                                     tela.comprometer(parametros, cx);
                                 }
                             })),
@@ -2903,6 +3153,26 @@ impl Revelacao {
             );
         }
         lista.into_any_element()
+    }
+}
+
+/// A seleção `sel` depois de tirar o item `tirado` da lista: some se era ele,
+/// anda uma casa se vinha depois.
+fn depois_de_tirar(sel: Option<usize>, tirado: usize) -> Option<usize> {
+    match sel {
+        Some(s) if s == tirado => None,
+        Some(s) if s > tirado => Some(s - 1),
+        outra => outra,
+    }
+}
+
+/// A ferramenta que desenha esta forma.
+fn ferramenta_da_forma(forma: &Forma) -> Ferramenta {
+    match forma {
+        Forma::Pincel(_) => Ferramenta::Pincel,
+        Forma::Linear(_) => Ferramenta::Linear,
+        Forma::Radial(_) => Ferramenta::Radial,
+        Forma::Laco(_) => Ferramenta::Laco,
     }
 }
 
@@ -3437,6 +3707,15 @@ mod testes {
             super::cortar_na_foto([-1.0, 2.0], [2.0, 2.0]).is_none(),
             "passa por fora"
         );
+    }
+
+    #[test]
+    fn tirar_um_item_mantem_a_selecao_dos_outros() {
+        use super::depois_de_tirar;
+        assert_eq!(depois_de_tirar(Some(2), 2), None, "o escolhido saiu");
+        assert_eq!(depois_de_tirar(Some(2), 0), Some(1), "anda uma casa");
+        assert_eq!(depois_de_tirar(Some(0), 3), Some(0), "o de depois não mexe");
+        assert_eq!(depois_de_tirar(None, 1), None);
     }
 
     #[test]

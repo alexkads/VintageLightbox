@@ -32,7 +32,9 @@
 use async_trait::async_trait;
 use domain::entities::Photo;
 use domain::services::ImageExporter;
-use domain::value_objects::{CropSettings, ExportOptions, FilePath, Watermark, WatermarkPosition};
+use domain::value_objects::{
+    CropSettings, ExportOptions, FilePath, FormatoDeSaida, Watermark, WatermarkPosition,
+};
 use domain::{DomainError, DomainResult};
 use image::DynamicImage;
 use std::path::Path;
@@ -134,12 +136,32 @@ impl ImageExporterImpl {
         // De pé: o bruto do site pode ser o arquivo da câmera, com a etiqueta.
         // A mesma base neutra do editor (C28); os bytes podem ser também os da
         // imagem editada, que o pós-venda manda no lugar do bruto (C32).
+        self.renderizar_bytes_com_opcoes(
+            bytes,
+            ajustes,
+            corte,
+            locais,
+            &ExportOptions::default().with_quality(qualidade),
+        )
+    }
+
+    /// [`Self::renderizar_bytes`] com as decisões da exportação — tamanho,
+    /// marca d'água e formato. É o que a exportação usa para a foto que só
+    /// existe no site: a mesma ordem de [`Self::renderizar`], para a foto do
+    /// site e a do catálogo saírem iguais pela mesma tela.
+    pub fn renderizar_bytes_com_opcoes(
+        &self,
+        bytes: &[u8],
+        ajustes: &Ajustes,
+        corte: &CropSettings,
+        locais: &ParametrosLocais,
+        options: &ExportOptions,
+    ) -> DomainResult<Vec<u8>> {
         let imagem = crate::base_neutra::base_neutra_de_bytes(bytes)
             .map_err(|e| DomainError::InfrastructureError(format!("o original não abriu: {e}")))?;
         let revelada = self.revelar(&imagem, ajustes, corte, locais)?;
-        let saida = transformacao::aplicar(&revelada, corte, true);
-        revelacao_core::jpeg::codificar(&saida, qualidade)
-            .map_err(|e| DomainError::InfrastructureError(format!("o JPEG não saiu: {e}")))
+        let saida = finalizar(transformacao::aplicar(&revelada, corte, true), options)?;
+        codificar(&saida, options)
     }
 
     /// Os 46 ajustes, no mesmo shader que desenha a Revelação.
@@ -289,22 +311,51 @@ impl ImageExporterImpl {
             &corte,
             &locais_da_entidade(photo)?,
         )?;
-        let mut saida = transformacao::aplicar(&revelada, &corte, true);
-
-        // ⚠️ Redimensionar **antes** da marca, e as duas coisas dependem disso:
-        // reduzir depois reamostraria a marca junto (ela sai borrada, e é o
-        // elemento mais fino da imagem), e o tamanho dela é uma fração do que se
-        // vai ver — não do que se revelou.
-        if let Some(lado_maior) = options.longest_edge() {
-            saida = redimensionar(saida, lado_maior);
-        }
-
-        if let Some(marca) = options.watermark() {
-            saida = aplicar_marca(&saida, marca)?;
-        }
-
-        Ok(saida)
+        finalizar(transformacao::aplicar(&revelada, &corte, true), options)
     }
+}
+
+/// O que vem depois da revelação e do enquadramento: tamanho e marca d'água.
+///
+/// ⚠️ Redimensionar **antes** da marca, e as duas coisas dependem disso:
+/// reduzir depois reamostraria a marca junto (ela sai borrada, e é o
+/// elemento mais fino da imagem), e o tamanho dela é uma fração do que se
+/// vai ver — não do que se revelou.
+fn finalizar(mut saida: DynamicImage, options: &ExportOptions) -> DomainResult<DynamicImage> {
+    if let Some(lado_maior) = options.longest_edge() {
+        saida = redimensionar(saida, lado_maior);
+    }
+    if let Some(marca) = options.watermark() {
+        saida = aplicar_marca(&saida, marca)?;
+    }
+    Ok(saida)
+}
+
+/// A imagem pronta, no formato pedido.
+///
+/// 🔑 **O JPEG continua saindo do `revelacao_core`**, o mesmo codificador do
+/// navegador e do pós-venda — dois codificadores dariam dois arquivos para a
+/// mesma foto. Os sem perda saem do `image`, em RGB de 8 bits: a foto revelada
+/// não tem transparência, e um canal alfa só dobraria o arquivo.
+pub fn codificar(imagem: &DynamicImage, options: &ExportOptions) -> DomainResult<Vec<u8>> {
+    let formato = match options.formato() {
+        FormatoDeSaida::Jpeg => {
+            return revelacao_core::jpeg::codificar(imagem, options.quality())
+                .map_err(|e| DomainError::InfrastructureError(format!("o JPEG não saiu: {e}")));
+        }
+        FormatoDeSaida::Png => image::ImageFormat::Png,
+        FormatoDeSaida::Tiff => image::ImageFormat::Tiff,
+        FormatoDeSaida::Webp => image::ImageFormat::WebP,
+    };
+    let rgb = DynamicImage::ImageRgb8(imagem.to_rgb8());
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    rgb.write_to(&mut bytes, formato).map_err(|e| {
+        DomainError::InfrastructureError(format!(
+            "o {} não saiu: {e}",
+            options.formato().extensao().to_uppercase()
+        ))
+    })?;
+    Ok(bytes.into_inner())
 }
 
 #[async_trait]
@@ -389,10 +440,12 @@ impl ImageExporter for ImageExporterImpl {
         // no disco, e não uma segunda codificação. Dois codificadores dariam dois
         // arquivos diferentes para a mesma foto, e a exportação deixaria de ser
         // a prova do que o site recebe.
-        let jpeg = self.renderizar_jpeg(photo, options).await?;
+        //
+        // O formato é o pedido na exportação; o JPEG sai do mesmo codificador.
+        let arquivo = codificar(&self.renderizar(photo, options)?, options)?;
 
         let output_path_str = output_path.as_str()?;
-        std::fs::write(Path::new(output_path_str), jpeg).map_err(|e| {
+        std::fs::write(Path::new(output_path_str), arquivo).map_err(|e| {
             DomainError::InfrastructureError(format!("Failed to create output file: {}", e))
         })?;
 
