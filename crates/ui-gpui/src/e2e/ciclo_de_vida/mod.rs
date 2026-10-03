@@ -1006,6 +1006,38 @@ fn ate_o_caixa(
     (galeria, fotos, caixa)
 }
 
+/// 🔗 "Copiar link" na sessão e o cliente entrando por ele: devolve o cliente
+/// com a sessão dele (o navegador do pós-venda).
+fn o_cliente_entra_pelo_link(cx: &mut TestAppContext, c: &Cena) -> Http {
+    c.b.clicar(cx, "sessao-link");
+    c.b.ate(cx, "o link do cliente chega", |b, cx| {
+        b.detalhe(cx, |tela, _w, _cx| tela.link().is_some())
+    });
+    let link =
+        c.b.detalhe(cx, |tela, _w, _cx| tela.link().map(|l| l.url.clone()))
+            .expect("o link");
+    let token = link
+        .split("token=")
+        .nth(1)
+        .expect("o link entra sem senha")
+        .to_string();
+    let anonimo = Http::novo(c.tokio.clone(), &c.servidor.api_direta, None);
+    let (status, entrada) = anonimo.post("/auth/fast-link/resgatar", json!({ "token": token }));
+    assert_eq!(status, 200, "o link abre a sessão do cliente: {entrada}");
+    Http::novo(
+        c.tokio.clone(),
+        &c.servidor.api_direta,
+        entrada["access_token"].as_str().map(str::to_string),
+    )
+}
+
+/// 💳 O pagamento online aprovado, como o webhook do Mercado Pago faria.
+fn aprovar_o_pedido(c: &Cena, pedido: &str) {
+    let anonimo = Http::novo(c.tokio.clone(), &c.servidor.api_direta, None);
+    let (status, _) = anonimo.post(&format!("{}/{pedido}", c.servidor.aprovar), json!({}));
+    assert_eq!(status, 200, "o pagamento é aprovado");
+}
+
 /// As vendas da galeria no caixa, como o painel as lê.
 fn vendas_da_galeria(c: &Cena, galeria: &str) -> Vec<Value> {
     c.site

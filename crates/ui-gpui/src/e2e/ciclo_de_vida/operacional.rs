@@ -160,3 +160,134 @@ fn a_rede_some_na_classificacao_e_o_balcao_avisa_sem_mentir(cx: &mut TestAppCont
         })
     });
 }
+
+/// 🌪️ **O cliente está pagando online a foto que o balcão quer levar.** Ele
+/// abre o link e põe a foto no pedido (sem pagar ainda); o operador aperta `B`
+/// nela. O balcão avisa e não a cobra — senão o cliente pagaria duas vezes — e,
+/// aprovado o pagamento online, a foto aparece comprada no balcão sozinha.
+#[gpui_kit::test]
+#[ignore = "precisa da API de teste: rode `make e2e-ciclo`"]
+fn o_cliente_pagando_online_a_foto_que_o_balcao_quer_levar(cx: &mut TestAppContext) {
+    let c = preparar(cx, "operacional-disputa", 2);
+    let (galeria, fotos) = criar_a_sessao(cx, &c, "Disputa da foto", "cliente-disputa@e2e.test");
+    let disputada = fotos[0].clone();
+    c.b.ir_na_grade(cx, &disputada);
+    c.b.teclar(cx, "5");
+    c.b.ate_na_api(cx, "a nota chega", || {
+        let f = foto_no_painel(&c.site, &galeria, &disputada).ok_or("sumiu")?;
+        (f["nota"] == 5).then_some(()).ok_or(format!("{f}"))
+    });
+    let cliente = o_cliente_entra_pelo_link(cx, &c);
+    let (status, pedido) = cliente.post(
+        &format!("/meus-ensaios/{galeria}/comprar"),
+        json!({ "fotos": [disputada] }),
+    );
+    assert_eq!(status, 201, "o cliente põe a foto no pedido: {pedido}");
+    let pedido_id = pedido["order_id"].as_str().expect("o pedido").to_string();
+
+    // O operador tenta levar a mesma foto: o balcão avisa e ela fica à venda.
+    c.b.ir_na_grade(cx, &disputada);
+    c.b.teclar(cx, "b");
+    c.b.ate(
+        cx,
+        "o balcão avisa que o cliente está pagando no site",
+        |b, cx| {
+            b.app(cx, |app, _w, _cx| {
+                app.avisos_dados_para_teste()
+                    .iter()
+                    .any(|(texto, erro)| *erro && texto.contains("pagando"))
+            })
+        },
+    );
+    let no_site = foto_no_painel(&c.site, &galeria, &disputada).expect("a foto");
+    assert_eq!(no_site["estado"], "disponivel", "não foi levada: {no_site}");
+    abrir_o_caixa(cx, &c, &galeria, "0,00");
+    c.b.ate(cx, "o cupom não a cobra", |b, cx| {
+        b.caixa(cx, |caixa, _w, _cx| caixa.cupom_para_teste().1 == 0)
+    });
+
+    // O pagamento online é aprovado: a foto é do pedido, e o balcão vê sozinho.
+    aprovar_o_pedido(&c, &pedido_id);
+    c.b.ate(cx, "o balcão mostra a foto comprada online", |b, cx| {
+        b.detalhe(cx, |tela, _w, _cx| {
+            tela.como_esta(&disputada).map(|f| f.0) == Some(Estado::Comprada)
+        })
+    });
+    assert!(
+        vendas_da_galeria(&c, &galeria).is_empty(),
+        "nada foi cobrado no balcão"
+    );
+}
+
+/// 🌪️ **Vender com as fotos ainda subindo devagar** (cada envio leva 3 s): o
+/// operador dá nota e leva enquanto elas sobem, abre o caixa, e o cupom cobra as
+/// três assim que chegam.
+#[gpui_kit::test]
+#[ignore = "precisa da API de teste: rode `make e2e-ciclo`"]
+fn vender_com_as_fotos_ainda_subindo(cx: &mut TestAppContext) {
+    let c = preparar(cx, "operacional-subindo", 3);
+    let quantas = 3;
+    let b = &c.b;
+    b.clicar(cx, "sessoes-nova");
+    b.ate(cx, "o assistente abre", |b, cx| {
+        b.app(cx, |app, _w, _cx| app.tela() == Tela::NovaSessao)
+    });
+    b.clicar(cx, "nova-escolher-fotos");
+    b.ate(cx, "as fotos entram no rascunho", |b, cx| {
+        b.app(cx, |app, _w, cx| {
+            app.nova_sessao.read(cx).quantas_fotos() == quantas
+        })
+    });
+    b.clicar(cx, "nova-avancar");
+    b.clicar(cx, "nova-titulo");
+    b.digitar(cx, "Vender subindo");
+    b.clicar(cx, "nova-email");
+    b.digitar(cx, "cliente-subindo@e2e.test");
+    let formulario = |b: &Balcao, cx: &mut TestAppContext| {
+        b.app(cx, |app, _w, cx| {
+            app.nova_sessao.read(cx).rascunho_para_teste().formulario
+        })
+    };
+    b.escolher_na_lista(cx, "nova-produto", &c.produto_id, |b, cx| {
+        formulario(b, cx).produto_id
+    });
+    b.escolher_na_lista(cx, "nova-estudio", &c.estudio_id, |b, cx| {
+        formulario(b, cx).estudio_id
+    });
+    c.falhas.programar(json!({
+        "metodo": "POST", "caminho": "/fotos", "modo": "atrasar", "ms": 3000, "vezes": 0
+    }));
+    b.clicar(cx, "nova-criar-cabecalho");
+    b.ate(cx, "a sessão é criada", |b, cx| {
+        b.app(cx, |app, _w, cx| {
+            app.tela() == Tela::Sessao && app.detalhe.read(cx).galeria_id().is_some()
+        })
+    });
+    let galeria = b
+        .detalhe(cx, |t, _w, _cx| t.galeria_id().map(str::to_string))
+        .expect("a galeria");
+    // As fotos ainda estão subindo: o operador anda pela grade e marca.
+    b.ate(cx, "as três aparecem na grade, subindo", |b, cx| {
+        b.detalhe(cx, |t, _w, _cx| t.ids_visiveis().len() == 3)
+    });
+    let na_grade = b.detalhe(cx, |t, _w, _cx| t.ids_visiveis());
+    for id in &na_grade {
+        b.ir_na_grade(cx, id);
+        b.teclar(cx, "5");
+        b.teclar(cx, "b");
+    }
+    abrir_o_caixa(cx, &c, &galeria, "0,00");
+    b.ate(cx, "o cupom cobra as três quando chegam", |b, cx| {
+        b.caixa(cx, |caixa, _w, _cx| caixa.cupom_para_teste().1 == 12000)
+    });
+    c.falhas.limpar();
+    escolher_as_pessoas(cx, &c);
+    pagar_em_pix(cx, &c);
+    let vendas = vendas_da_galeria(&c, &galeria);
+    assert_eq!(vendas.len(), 1);
+    assert_eq!(
+        vendas[0]["total_centavos"], 12000,
+        "as três levadas cobradas"
+    );
+    b.ato_limpo(cx, "vender com as fotos subindo");
+}
