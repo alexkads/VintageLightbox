@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.71",
+    "data": "2026-10-02",
+    "titulo": "A predefinição sua passa a guardar os ajustes da foto.",
+    "importante": false,
+    "novidades": [
+      "Na Revelação, o botão direito numa predefinição sua tem \"Atualizar com os ajustes atuais\", como no Lightroom: ela passa a guardar os ajustes que estão na foto agora.",
+      "Ela continua com o mesmo nome, no mesmo lugar da lista e nas favoritas. Quem foi salva com \"Zerar os outros ajustes ao aplicar\" continua assim.",
+      "Nas predefinições do sistema e nas LRs o item aparece desligado: elas vêm prontas com o app e não mudam."
+    ],
+    "por_que_atualizar": "Para acertar uma predefinição sua sem salvar outra com outro nome e apagar a antiga."
+  },
+  {
     "versao": "0.1.70",
     "data": "2026-10-02",
     "titulo": "A vinheta do darktable volta, com os controles dele.",

@@ -1,12 +1,11 @@
 {
-  "versao": "0.1.70",
-  "titulo": "A vinheta do darktable volta, com os controles dele.",
+  "versao": "0.1.71",
+  "titulo": "A predefinição sua passa a guardar os ajustes da foto.",
   "importante": false,
   "novidades": [
-    "Em Efeitos há o grupo \"Vinheta do darktable\": a chave no título liga o módulo, e os controles são os do darktable, na mesma ordem — início e raio do decaimento, brilho, saturação e, em \"Posição / forma\", centro, forma, proporção automática, largura/altura e matização.",
-    "A RecordarFotos P&B usa essa vinheta com os números do estilo original do darktable: a borda clara e creme volta a ser a das fotos vendidas.",
-    "A foto revelada antes com o estilo do darktable reabre com a vinheta que tinha.",
-    "Na Revelação, o \"Zerar tudo\" e a contagem do que está fora do neutro saíram do alto da coluna e ficam num rodapé fixo, embaixo dos painéis, como o \"Redefinir\" do Lightroom."
+    "Na Revelação, o botão direito numa predefinição sua tem \"Atualizar com os ajustes atuais\", como no Lightroom: ela passa a guardar os ajustes que estão na foto agora.",
+    "Ela continua com o mesmo nome, no mesmo lugar da lista e nas favoritas. Quem foi salva com \"Zerar os outros ajustes ao aplicar\" continua assim.",
+    "Nas predefinições do sistema e nas LRs o item aparece desligado: elas vêm prontas com o app e não mudam."
   ],
-  "por_que_atualizar": "A vinheta da RecordarFotos P&B não saía como no darktable; agora é a mesma conta."
+  "por_que_atualizar": "Para acertar uma predefinição sua sem salvar outra com outro nome e apagar a antiga."
 }
