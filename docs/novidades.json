@@ -1,13 +1,10 @@
 {
-  "versao": "0.1.82",
-  "titulo": "Painel Histórico na Revelação, como o do Lightroom.",
-  "importante": true,
+  "versao": "0.1.83",
+  "titulo": "As fotos já reveladas com o RecordarFotos P&B abrem com a vinheta certa.",
+  "importante": false,
   "novidades": [
-    "Na coluna da esquerda da Revelação, abaixo das predefinições, o painel Histórico lista cada gesto feito na foto, do mais novo para o mais antigo, com o nome e o valor — \"Exposição +0,30 +0,50\", \"Endireitar +5,0 5,0°\", \"Predefinição: Kodak\", \"Adicionar máscara\".",
-    "Clicar numa linha volta a foto àquele ponto; os passos de depois continuam lá (esmaecidos) até você mexer de novo. Passar o mouse numa linha mostra aquele passo na foto sem mudar nada.",
-    "O histórico fica guardado com a foto: trocar de foto ou fechar o aplicativo não o apaga. Se a foto mudou fora da Revelação (colada na Biblioteca, sincronizada), aparece o passo \"Mudou fora da Revelação\".",
-    "O ✕ do painel limpa o histórico da foto, e clicar no título recolhe o painel. Agora cabem 100 passos por foto (antes eram 20).",
-    "Em telas baixas (720 pontos) com o Navegador aberto, o painel fica só no título; recolha o Navegador para ver as linhas."
+    "Uma foto revelada antes com o \"RecordarFotos P&B\" agora abre com a borda creme oval do preset de hoje. Antes ela abria com a borda quase branca da versão anterior, e só voltava ao certo clicando no preset de novo.",
+    "O resto da foto (exposição, corte e tudo o que foi ajustado nela) continua como estava."
   ],
-  "por_que_atualizar": "Para voltar a qualquer ponto da revelação de uma foto, mesmo depois de fechar o aplicativo."
+  "por_que_atualizar": "Para revisitar as fotos já vendidas e vê-las com a vinheta certa, sem precisar aplicar o preset de novo."
 }
