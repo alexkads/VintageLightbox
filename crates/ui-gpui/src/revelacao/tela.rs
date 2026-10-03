@@ -5966,6 +5966,73 @@ mod testes {
         assert_eq!(salvos[0].id, id_inteira);
     }
 
+    /// 📄 "Duplicar": a cópia vai para "Minhas" com nome novo, e a do sistema
+    /// que substitui dá uma cópia que faz a mesma foto.
+    #[gpui_kit::test]
+    fn duplicar_preset_poe_a_copia_em_minhas_e_mantem_o_resultado(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        let guarda = Arc::new(GuardaDeMentira::default());
+        let sistema = use_cases::presets::presets_de_sistema();
+        let soma = sistema
+            .iter()
+            .find(|p| !p.replaces)
+            .cloned()
+            .expect("uma do sistema que soma");
+        let substitui = sistema
+            .iter()
+            .find(|p| p.replaces)
+            .cloned()
+            .expect("uma do sistema que substitui");
+
+        let janela = com_guarda(
+            cx,
+            previews,
+            Arc::new(GravadorDeMentira::default()),
+            guarda.clone(),
+            sistema.clone(),
+        );
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.duplicar_preset(soma.id, cx);
+                tela.duplicar_preset(soma.id, cx);
+                tela.duplicar_preset(substitui.id, cx);
+            })
+            .expect("a janela deve estar aberta");
+
+        let salvos = guarda.salvos();
+        assert_eq!(salvos.len(), 3);
+        assert!(
+            salvos.iter().all(|p| !p.is_system),
+            "as cópias são do operador"
+        );
+        assert_eq!(salvos[0].name, format!("{} (cópia)", soma.name));
+        assert_eq!(salvos[1].name, format!("{} (cópia 2)", soma.name));
+        assert_eq!(salvos[0].adjustments, soma.adjustments);
+        assert_ne!(salvos[0].id, soma.id, "outra linha");
+
+        // Por cima de uma foto já mexida, a cópia dá o mesmo que a original.
+        let mut mexida = Ajustes::default();
+        mexida.exposure = 0.8;
+        mexida.temperature = 12.0;
+        assert_eq!(
+            super::super::presets::aplicado(&mexida, &salvos[2]),
+            super::super::presets::aplicado(&mexida, &substitui),
+            "a cópia de \"{}\" também recomeça do neutro",
+            substitui.name
+        );
+
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert_eq!(tela.presets.len(), sistema.len() + 3, "entram na lista");
+                assert!(
+                    !tela.predefinicoes.ordem.recolhido(Grupo::Minhas),
+                    "Minhas fica aberta"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
     /// A importação do Lightroom, de ponta a ponta: escolher, traduzir, salvar.
     ///
     /// 🔑 **As novas entram na lista da tela na hora.** Elas já vão ao banco

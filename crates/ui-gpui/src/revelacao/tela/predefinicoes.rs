@@ -9,6 +9,7 @@
 //! | ícone de envio | importa `.lrtemplate` e `.xmp` do Lightroom |
 //! | lápis / lixeira (ao passar o mouse) | renomeia no lugar (Enter/Esc/✓/✕) · apaga depois de perguntar |
 //! | botão direito → "Atualizar com os ajustes atuais" | a do operador passa a guardar o que está na foto |
+//! | botão direito → "Duplicar" | uma cópia em "Minhas" — também das do sistema, que viram editáveis |
 //! | arrastar a linha | reordena dentro do grupo; ↑ ↓ com a alça focada; "ordem padrão" desfaz |
 //!
 //! 🔑 **Reordenar fica desligado durante a busca**, como no site: a lista
@@ -145,6 +146,19 @@ impl Default for Predefinicoes {
             janela: Rc::new(Cell::new(Size::default())),
         }
     }
+}
+
+/// O nome da cópia: "X (cópia)", e "X (cópia 2)" em diante quando já existe.
+fn nome_da_copia(nome: &str, presets: &[Preset]) -> String {
+    let existe = |candidato: &str| presets.iter().any(|p| p.name == candidato);
+    let primeiro = format!("{nome} (cópia)");
+    if !existe(&primeiro) {
+        return primeiro;
+    }
+    (2..)
+        .map(|n| format!("{nome} (cópia {n})"))
+        .find(|candidato| !existe(candidato))
+        .expect("a sequência não acaba")
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -526,6 +540,35 @@ impl Revelacao {
         cx.notify();
     }
 
+    /// Uma cópia em "Minhas", com " (cópia)" no nome — o caminho para mexer
+    /// numa do sistema, que não se renomeia nem se atualiza.
+    ///
+    /// 🚨 **A que substitui continua substituindo.** A do operador não guarda
+    /// a marca ([`Preset::replaces`] não tem coluna no banco), então a cópia
+    /// guarda os 53 já partindo do neutro — a "Zerar os outros ajustes ao
+    /// aplicar" do [`Self::salvar_preset`]. Sem isso, a cópia do RecordarFotos
+    /// P&B sobre uma sépia somaria e sairia âmbar.
+    pub fn duplicar_preset(&mut self, id: PresetId, cx: &mut Context<Self>) {
+        let Some(original) = self.presets.iter().find(|p| p.id == id) else {
+            return;
+        };
+        let ajustes = if presets::substitui(original) {
+            presets::dos_ajustes(&presets::aplicado(&Ajustes::default(), original), true)
+        } else {
+            original.adjustments.clone()
+        };
+        let nome = nome_da_copia(&original.name, &self.presets);
+        let copia = Preset::user(nome, ajustes);
+        self.guarda_de_presets.salvar(copia.clone());
+        self.avisar_na_coluna(format!("\"{}\" entrou em Minhas.", copia.name), false, cx);
+        self.presets.push(copia);
+        // A cópia escondida numa pasta fechada pareceria não ter saído.
+        if self.predefinicoes.ordem.recolhido(Grupo::Minhas) {
+            self.alternar_grupo(Grupo::Minhas, cx);
+        }
+        cx.notify();
+    }
+
     /// A pergunta do site antes de apagar.
     ///
     /// 🚨 **É o único gesto desta coluna que não se desfaz**: a predefinição
@@ -850,6 +893,18 @@ impl Revelacao {
                     .map(|p| p.id);
                 match id {
                     Some(id) => self.atualizar_preset(id, cx),
+                    None => eprintln!("[roteiro] predefinicoes: não achei '{argumento}'"),
+                }
+            }
+            // 🧪 O "Duplicar" da predefinição com esse nome.
+            "duplicar" => {
+                let id = self
+                    .presets
+                    .iter()
+                    .find(|p| p.name == argumento)
+                    .map(|p| p.id);
+                match id {
+                    Some(id) => self.duplicar_preset(id, cx),
                     None => eprintln!("[roteiro] predefinicoes: não achei '{argumento}'"),
                 }
             }
@@ -1747,7 +1802,7 @@ impl Revelacao {
                 return menu;
             };
             let (para_aplicar, para_atualizar) = (esta.clone(), esta.clone());
-            let para_favoritar = esta.clone();
+            let (para_duplicar, para_favoritar) = (esta.clone(), esta.clone());
             let (para_renomear, para_apagar) = (esta.clone(), esta.clone());
             let chave = ordem::chave(&preset);
             let id = preset.id;
@@ -1776,6 +1831,14 @@ impl Revelacao {
                                 tela.atualizar_preset(id, cx);
                             });
                         }),
+                )
+                // Não depende da foto: duplica mesmo com a coluna travada.
+                .item(
+                    PopupMenuItem::new("Duplicar").on_click(move |_ev, _window, cx| {
+                        let _ = para_duplicar.update(cx, |tela, cx| {
+                            tela.duplicar_preset(id, cx);
+                        });
+                    }),
                 )
                 .item(
                     PopupMenuItem::new(if favorita {
