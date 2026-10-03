@@ -278,10 +278,10 @@ campo no `CONTRATO_DA_FOTO.md`.
 
 | | |
 |---|---|
-| ⬜ **Ajustes locais** — pincel, gradiente, radial, máscaras | é o que separa "filtro" de "revelação" no Lightroom |
+| 🟡 **Ajustes locais** — pincel, gradiente, radial, máscaras (a **Revelação local**) | **desde 26/set** — máscaras de pincel, linear, radial e laço, com exposição por máscara; retoque com carimbo, band-aid e Content-Aware. **Bateria de usabilidade desde 3/out** (`e2e/revelacao_local.rs`, 26 testes de clique e tecla de verdade): a barra cabe na coluna de 280 pt, o `Esc` larga laço → retoque → ferramenta → máscara antes de sair da Revelação, `Delete` apaga o retoque ou a máscara escolhida, escolher a máscara na lista a mostra na foto, o trilho da Exposição acompanha a máscara (criar, duplo clique, lista, ⌘Z), "Subtrair" não vaza para a máscara nova, o círculo some fora da foto, foto travada não aceita ferramenta. **Falta**: a máscara só ajusta exposição (o Lightroom tem temperatura, contraste, realces etc.) e não há sobreposição colorida (`O`) |
+| ✅ **Remoção de manchas** | **desde 26/set** — carimbo, band-aid e Content-Aware na Revelação local (linha acima) |
 | ⬜ **Curva de tons por ponto** (a de arrastar) | a paramétrica existe; a de arrastar ponto, não |
 | ⬜ **Calibração de câmera / perfis** | |
-| ⬜ **Remoção de manchas** | há um `inpainting/` na infraestrutura, sem tela |
 | ✅ **Cópia de ajustes entre fotos** | **desde 17/ago** — `Cmd+Shift+C`/`Cmd+Shift+V`, da Biblioteca, valendo para a seleção inteira. Cada foto conserva o próprio enquadramento |
 | ✅ **Tom automático ("Auto")** | **desde 30/ago** — botão no topo do Básico: lê o histograma da foto crua e escolhe exposição e altas luzes. Mexe em dois ajustes, e não nos seis do Lightroom, porque "sombras" no shader multiplica **todo** pixel abaixo de 128 e enterraria o meio-tom |
 | ⬜ **Cópias virtuais e instantâneos** | |

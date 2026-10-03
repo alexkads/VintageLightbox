@@ -6071,8 +6071,10 @@ impl Aplicativo {
         if self.tela == Tela::Revelacao {
             // No Enquadrar, com uma guia de perspectiva selecionada, é dela.
             self.revelacao.update(cx, |tela, cx| {
-                if !tela.apagar_guia_selecionada(window, cx) {
-                    tela.apagar_retoque_selecionado(cx);
+                // Depois do retoque, a máscara escolhida (como no Lightroom).
+                if !tela.apagar_guia_selecionada(window, cx) && !tela.apagar_retoque_selecionado(cx)
+                {
+                    tela.apagar_mascara_selecionada(cx);
                 }
             });
             return;
