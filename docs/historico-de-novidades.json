@@ -1,5 +1,16 @@
 [
   {
+    "versao": "0.1.89",
+    "data": "2026-10-03",
+    "titulo": "O grid de sessões congela Galeria e Contato na rolagem, e a coluna Criada mostra data, hora e segundos.",
+    "importante": false,
+    "novidades": [
+      "No grid de Sessões fotográficas, Galeria e Contato ficam paradas à esquerda enquanto o resto rola na horizontal, e a linha acende inteira ao passar o mouse.",
+      "A coluna Criada passa a mostrar data, hora e segundos (03/10/2026 14:35:07), no horário de Brasília — no app e no site."
+    ],
+    "por_que_atualizar": "Para não perder de vista de quem é a sessão ao rolar o grid, e distinguir sessões criadas no mesmo dia."
+  },
+  {
     "versao": "0.1.88",
     "data": "2026-10-03",
     "titulo": "Configurações no menu da sua conta, e um botão para ouvir a voz dos avisos.",

@@ -1,7 +1,7 @@
 //! 📋 A lista de sessões, a sessão nova, a retenção e o caixa da rota.
 
 use biblioteca_core::sessoes::Situacao;
-use gpui_kit::TestAppContext;
+use gpui_kit::{TestAppContext, VisualTestContext};
 
 use super::{abrir_o_app, abrir_o_ensaio, Cenario, GALERIA};
 use crate::app::Tela;
@@ -531,4 +531,106 @@ fn a_guia_se_arrasta_se_renomeia_ganha_cor_e_fecha_as_outras(cx: &mut TestAppCon
         assert_eq!(app.sessao_aberta_para_teste(), Some(GALERIA));
         assert_eq!(app.detalhe.read(cx).galeria_id(), Some(GALERIA));
     });
+}
+
+/// 🧊 **Galeria e Contato congeladas** (dono, 03/out/2026): numa janela estreita
+/// o grid rola na horizontal, mas a metade da esquerda não sai do lugar — e as
+/// duas metades de cada sessão ficam na mesma altura, rolando juntas.
+#[gpui_kit::test]
+fn as_duas_primeiras_colunas_ficam_congeladas_na_rolagem_horizontal(cx: &mut TestAppContext) {
+    let e = abrir_o_app(cx, Cenario::default());
+    e.entrar_na_conta(cx);
+    // Estreita o bastante para a parte que rola não caber.
+    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    visual.simulate_resize(gpui_kit::size(gpui_kit::px(1000.), gpui_kit::px(800.)));
+    e.app(cx, |app, _window, cx| {
+        app.sessoes.update(cx, |tela, cx| {
+            tela.escolher_periodo_para_teste(None, cx);
+            // 🔎 Com a linha de filtros: as duas metades também se alinham ali.
+            tela.alternar_filtros(cx);
+        });
+    });
+    e.esperar(cx);
+    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    visual.update(|window, _| window.refresh());
+    visual.run_until_parked();
+
+    // Os campos mais altos (data, dois empilhados) cabem na linha de filtros,
+    // e o campo de texto da esquerda começa na mesma altura que os da direita.
+    let data = visual
+        .debug_bounds("filtro-Criada")
+        .expect("o filtro de data");
+    let galeria = visual
+        .debug_bounds("filtro-Galeria")
+        .expect("o filtro da galeria");
+    let levadas = visual
+        .debug_bounds("filtro-Levadas")
+        .expect("o filtro de levadas");
+    assert_eq!(
+        galeria.top(),
+        levadas.top(),
+        "filtros das duas metades alinhados"
+    );
+    assert!(
+        data.size.height <= gpui_kit::px(58.),
+        "a data cabe na linha: {data:?}"
+    );
+
+    // O seletor do GPUI é `&'static str`; o vazamento é só deste teste.
+    let seletor_esq: &'static str = Box::leak(format!("sessao-{GALERIA}").into_boxed_str());
+    let seletor_dir: &'static str = Box::leak(format!("sessao-dados-{GALERIA}").into_boxed_str());
+    let congelada = |visual: &mut VisualTestContext| {
+        visual
+            .debug_bounds(seletor_esq)
+            .expect("a metade congelada da sessão está desenhada")
+    };
+    let que_rola = |visual: &mut VisualTestContext| {
+        visual
+            .debug_bounds(seletor_dir)
+            .expect("a metade que rola da sessão está desenhada")
+    };
+
+    let (antes_esq, antes_dir) = (congelada(&mut visual), que_rola(&mut visual));
+    assert_eq!(
+        antes_esq.top(),
+        antes_dir.top(),
+        "as duas metades na mesma altura"
+    );
+    assert_eq!(
+        antes_esq.size.height, antes_dir.size.height,
+        "e com a mesma altura"
+    );
+    assert!(
+        antes_dir.left() >= antes_esq.right(),
+        "a metade que rola começa depois da congelada ({antes_esq:?} / {antes_dir:?})"
+    );
+
+    // 🖱️ A roda horizontal sobre a parte que rola.
+    // A linha é mais larga que a janela: o ponto tem de estar na parte visível.
+    let sobre = gpui_kit::point(antes_dir.left() + gpui_kit::px(100.), antes_dir.center().y);
+    visual.simulate_mouse_move(sobre, None, gpui_kit::Modifiers::default());
+    visual.simulate_event(gpui_kit::ScrollWheelEvent {
+        position: sobre,
+        delta: gpui_kit::ScrollDelta::Pixels(gpui_kit::point(
+            gpui_kit::px(-300.),
+            gpui_kit::px(0.),
+        )),
+        ..Default::default()
+    });
+    visual.run_until_parked();
+
+    let (depois_esq, depois_dir) = (congelada(&mut visual), que_rola(&mut visual));
+    assert!(
+        depois_dir.left() < antes_dir.left(),
+        "a parte que rola andou ({antes_dir:?} → {depois_dir:?})"
+    );
+    assert_eq!(
+        depois_esq, antes_esq,
+        "a metade congelada não sai do lugar na rolagem horizontal"
+    );
+    assert_eq!(
+        depois_esq.top(),
+        depois_dir.top(),
+        "e segue alinhada com a outra metade"
+    );
 }
