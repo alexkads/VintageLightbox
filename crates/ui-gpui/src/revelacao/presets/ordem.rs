@@ -5,11 +5,16 @@
 //! # Onde ela mora
 //!
 //! 🔑 **Neste computador, uma lista por grupo** — "Do sistema", "Minhas" e
-//! "Favoritas" —,
-//! num JSON ao lado do catálogo, como a escolha da sincronização. No site é o
-//! `localStorage` da máquina, pelo mesmo raciocínio: é arrumação de quem está no
-//! balcão, não dado da galeria. Dois operadores em máquinas diferentes põem no
-//! topo o que cada um usa.
+//! "LRs" —, num JSON ao lado do catálogo, como a escolha da sincronização. No
+//! site é o `localStorage` da máquina, pelo mesmo raciocínio: é arrumação de
+//! quem está no balcão, não dado da galeria.
+//!
+//! 💛 **As "Favoritas" são do perfil do usuário, na API** (dono, 2026-10-02:
+//! *"A favoritação de presets precisa gravar no banco de dados no perfil do
+//! usuário da API e não só localmente"*): `GET`/`PUT /revelacao/favoritas`,
+//! a mesma lista do site. O JSON daqui guarda a última que veio — a coluna abre
+//! com ela antes de a conta entrar, e a Nova sessão a lê sem rede — e quem fala
+//! com a API é a raiz (`app/favoritas.rs`).
 //!
 //! # O que a lista guardada é
 //!
@@ -212,6 +217,32 @@ pub struct Ordem {
     /// Navegador, se estiver recolhido.
     #[serde(default)]
     pub recolhidos: Vec<String>,
+    /// 💛 As favoritas desta máquina já estão no perfil da API. Antes disso,
+    /// a lista daqui sobe uma vez (a de quem favoritava antes de a API
+    /// guardar); depois, quem manda é a API — "tirei todas no site" não pode
+    /// trazer de volta a lista velha deste computador.
+    #[serde(default)]
+    pub favoritas_no_perfil: bool,
+}
+
+/// O que fazer com a lista de favoritas que veio do perfil.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FavoritasDoPerfil {
+    /// O perfil está vazio e esta máquina tem a lista de antes: ela sobe.
+    Subir(Vec<String>),
+    /// A do perfil vale, aqui e na tela.
+    Adotar(Vec<String>),
+}
+
+impl Ordem {
+    /// 💛 A lista do perfil contra a desta máquina — a migração de uma vez só.
+    pub fn favoritas_do_perfil(&self, do_perfil: Vec<String>) -> FavoritasDoPerfil {
+        if do_perfil.is_empty() && !self.favoritas.is_empty() && !self.favoritas_no_perfil {
+            FavoritasDoPerfil::Subir(self.favoritas.clone())
+        } else {
+            FavoritasDoPerfil::Adotar(do_perfil)
+        }
+    }
 }
 
 impl Ordem {
@@ -378,6 +409,33 @@ mod testes {
         ordem.alternar_favorita("c");
         assert_eq!(ordem.favoritas, lista(&["a"]));
         assert!(ordem.eh_favorita("a") && !ordem.eh_favorita("c"));
+    }
+
+    /// 💛 A lista de antes sobe uma vez; depois, o perfil manda — mesmo
+    /// vazio.
+    #[test]
+    fn a_lista_desta_maquina_sobe_uma_vez_e_depois_o_perfil_manda() {
+        let mut ordem = Ordem::default();
+        ordem.alternar_favorita("sistema:sepia");
+        assert_eq!(
+            ordem.favoritas_do_perfil(vec![]),
+            FavoritasDoPerfil::Subir(lista(&["sistema:sepia"]))
+        );
+        assert_eq!(
+            ordem.favoritas_do_perfil(lista(&["sistema:pb-classico"])),
+            FavoritasDoPerfil::Adotar(lista(&["sistema:pb-classico"])),
+            "o perfil com lista ganha da máquina"
+        );
+        ordem.favoritas_no_perfil = true;
+        assert_eq!(
+            ordem.favoritas_do_perfil(vec![]),
+            FavoritasDoPerfil::Adotar(vec![]),
+            "tirou todas em outro lugar: aqui também"
+        );
+        assert_eq!(
+            Ordem::default().favoritas_do_perfil(vec![]),
+            FavoritasDoPerfil::Adotar(vec![])
+        );
     }
 
     /// Um arquivo gravado antes do coração não tem `favoritas`: abre sem

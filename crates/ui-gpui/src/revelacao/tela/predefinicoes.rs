@@ -40,7 +40,7 @@ use gpui_kit::{
     Window,
 };
 
-use super::Revelacao;
+use super::{PedidoDaRevelacao, Revelacao};
 use crate::modal::Modal;
 use crate::recursos::Icone;
 use crate::revelacao::lightroom::{self, Arquivo};
@@ -601,10 +601,28 @@ impl Revelacao {
         lista.into_iter().map(ordem::chave).collect()
     }
 
-    /// 💛 O coração da linha: põe no fim das favoritas, ou tira delas.
+    /// 💛 O coração da linha: põe no fim das favoritas, ou tira delas — e a
+    /// raiz leva a lista ao perfil na API.
     pub fn alternar_favorita(&mut self, chave: &str, cx: &mut Context<Self>) {
         self.predefinicoes.ordem.alternar_favorita(chave);
         ordem::gravar(&self.predefinicoes.ordem);
+        cx.emit(PedidoDaRevelacao::GuardarFavoritas);
+        cx.notify();
+    }
+
+    /// 💛 As favoritas na ordem do topo — o que a raiz manda ao perfil.
+    pub fn favoritas(&self) -> Vec<String> {
+        self.predefinicoes.ordem.favoritas.clone()
+    }
+
+    /// 💛 A lista que veio do perfil (ou que acabou de subir para ele): a
+    /// coluna passa a mostrá-la, e o JSON daqui a guarda para a próxima
+    /// abertura.
+    pub fn receber_favoritas(&mut self, chaves: Vec<String>, cx: &mut Context<Self>) {
+        let ordem = &mut self.predefinicoes.ordem;
+        ordem.definir(Grupo::Favoritas, Some(chaves));
+        ordem.favoritas_no_perfil = true;
+        ordem::gravar(ordem);
         cx.notify();
     }
 
@@ -643,6 +661,9 @@ impl Revelacao {
     ) {
         self.predefinicoes.ordem.definir(grupo, ids);
         ordem::gravar(&self.predefinicoes.ordem);
+        if grupo == Grupo::Favoritas {
+            cx.emit(PedidoDaRevelacao::GuardarFavoritas);
+        }
         cx.notify();
     }
 

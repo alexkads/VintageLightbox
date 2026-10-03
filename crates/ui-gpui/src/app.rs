@@ -18,6 +18,7 @@ mod barra_do_pe;
 mod canto_dos_envios;
 /// 🖌️ A janela do editor em camadas, aberta pela tira da Revelação.
 mod editor;
+mod favoritas;
 mod guias;
 mod painel;
 pub mod resgate;
@@ -565,6 +566,12 @@ pub struct Aplicativo {
     _retrato: Option<gpui_kit::Task<()>>,
     recados_da_conta: (Sender<PosVendaRecado>, Receiver<PosVendaRecado>),
     _conta: Option<gpui_kit::Task<()>>,
+    /// 💛 As favoritas da Revelação no perfil da API (`app/favoritas.rs`).
+    recados_das_favoritas: (Sender<PosVendaRecado>, Receiver<PosVendaRecado>),
+    _favoritas: Option<gpui_kit::Task<()>>,
+    favoritas_a_caminho: usize,
+    /// O operador mexeu depois de a leitura sair: ela chega velha.
+    favoritas_mexidas: bool,
     /// Claro, Escuro ou Sistema, e onde a escolha fica lembrada.
     escolha_de_tema: tema::Escolha,
     arquivo_do_tema: std::path::PathBuf,
@@ -1356,6 +1363,10 @@ impl Aplicativo {
             _retrato: None,
             recados_da_conta: channel(),
             _conta: None,
+            recados_das_favoritas: channel(),
+            _favoritas: None,
+            favoritas_a_caminho: 0,
+            favoritas_mexidas: false,
             escolha_de_tema,
             arquivo_do_tema,
             _aparencia: aparencia,
@@ -4226,6 +4237,7 @@ impl Aplicativo {
             PedidoDaRevelacao::QueroOBruto => self.pedir_o_bruto(cx),
             PedidoDaRevelacao::EditarFoto => self.editar_a_foto_pedida(cx),
             PedidoDaRevelacao::ExcluirEdicao => self.excluir_a_edicao_pedida(cx),
+            PedidoDaRevelacao::GuardarFavoritas => self.guardar_favoritas(cx),
         }
     }
 
@@ -5938,6 +5950,7 @@ impl Aplicativo {
         crate::telemetria::conta_entrou(sessao.clone());
         self.sessao = Some(sessao);
         self.carregar_conta(cx);
+        self.carregar_favoritas(cx);
         cx.notify();
     }
 
@@ -10418,6 +10431,75 @@ mod testes {
                 assert!(!app.pode_trabalhar(), "logado e sem ensaio: só a lista");
             })
             .expect("a janela deve estar aberta");
+    }
+
+    /// 💛 As favoritas moram no perfil da API (dono, 2026-10-02): entrar na
+    /// conta as busca e a coluna da Revelação passa a mostrá-las; o coração
+    /// manda a lista inteira de volta, na ordem do topo.
+    #[gpui_kit::test]
+    fn as_favoritas_vem_do_perfil_e_o_coracao_grava_nele(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_kit::init);
+
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        publicador.responder_json(
+            "favoritas-lidas",
+            Ok(serde_json::json!({ "chaves": ["sistema:recordarfotos-pb", "sistema:sepia"] })),
+        );
+        publicador.responder_json(
+            "favoritas-gravadas",
+            Ok(serde_json::json!({
+                "chaves": ["sistema:recordarfotos-pb", "sistema:sepia", "sistema:pb-classico"]
+            })),
+        );
+        let janela = cx.add_window({
+            let publicador = publicador.clone();
+            |window, cx| {
+                Aplicativo::novo(
+                    acervo(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        publicador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        janela
+            .update(cx, |app, _window, cx| {
+                app.entrar_na_conta(sessao_de_teste(), cx);
+                app.colher_favoritas(cx);
+                assert_eq!(
+                    app.revelacao.read(cx).favoritas(),
+                    ["sistema:recordarfotos-pb", "sistema:sepia"],
+                    "a lista do perfil, na ordem dele"
+                );
+                app.revelacao.update(cx, |tela, cx| {
+                    tela.alternar_favorita("sistema:pb-classico", cx)
+                });
+            })
+            .expect("a janela deve estar aberta");
+        cx.run_until_parked();
+
+        let gravacoes: Vec<_> = publicador
+            .pedidos_json()
+            .into_iter()
+            .filter(|p| p.rotulo == "favoritas-gravadas")
+            .collect();
+        assert_eq!(gravacoes.len(), 1, "um coração, um PUT");
+        assert_eq!(gravacoes[0].metodo, "PUT");
+        assert_eq!(gravacoes[0].caminho, "/revelacao/favoritas");
+        assert_eq!(
+            gravacoes[0].corpo,
+            Some(serde_json::json!({
+                "chaves": ["sistema:recordarfotos-pb", "sistema:sepia", "sistema:pb-classico"]
+            })),
+            "a lista inteira, com a nova no fim"
+        );
     }
 
     /// 🔑 Entrar na porta desce a sessão para o pós-venda — ninguém entra duas

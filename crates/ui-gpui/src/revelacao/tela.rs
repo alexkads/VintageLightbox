@@ -2978,6 +2978,9 @@ pub enum PedidoDaRevelacao {
     /// "Excluir a edição" do menu da tira, já confirmado: a raiz apaga o
     /// projeto da foto de [`Revelacao::levar_a_excluir`] e a devolve ao bruto.
     ExcluirEdicao,
+    /// 💛 O coração ou o arrasto mudou as favoritas: a raiz grava
+    /// [`Revelacao::favoritas`] no perfil do usuário, na API.
+    GuardarFavoritas,
 }
 
 impl gpui_kit::EventEmitter<PedidoDaRevelacao> for Revelacao {}
