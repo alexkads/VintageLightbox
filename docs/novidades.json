@@ -1,12 +1,12 @@
 {
-  "versao": "0.1.69",
-  "titulo": "Dá para excluir foto à venda da sessão.",
+  "versao": "0.1.70",
+  "titulo": "A vinheta do darktable volta, com os controles dele.",
   "importante": false,
   "novidades": [
-    "Na sessão, a foto à venda pode ser excluída: uma só (\"Excluir\" no painel da foto ou a tecla ⌫) ou as marcadas (\"Excluir as N\" no painel do lote).",
-    "Para confirmar, digite CONFIRMAR EXCLUSÃO!, como na exclusão de sessão. A foto sai da galeria do cliente e deste computador, e não há como desfazer.",
-    "Foto levada no balcão ou comprada no pós-venda não se exclui. No lote, o aviso diz quantas ficaram de fora e por quê.",
-    "Corrigido: o antigo \"Apagar\" do painel falhava sempre com \"foto não está mais no catálogo\"."
+    "Em Efeitos há o grupo \"Vinheta do darktable\": a chave no título liga o módulo, e os controles são os do darktable, na mesma ordem — início e raio do decaimento, brilho, saturação e, em \"Posição / forma\", centro, forma, proporção automática, largura/altura e matização.",
+    "A RecordarFotos P&B usa essa vinheta com os números do estilo original do darktable: a borda clara e creme volta a ser a das fotos vendidas.",
+    "A foto revelada antes com o estilo do darktable reabre com a vinheta que tinha.",
+    "Na Revelação, o \"Zerar tudo\" e a contagem do que está fora do neutro saíram do alto da coluna e ficam num rodapé fixo, embaixo dos painéis, como o \"Redefinir\" do Lightroom."
   ],
-  "por_que_atualizar": "Foto que não vai ser vendida sai da galeria do cliente pelo próprio balcão, sem passar pelo site."
+  "por_que_atualizar": "A vinheta da RecordarFotos P&B não saía como no darktable; agora é a mesma conta."
 }
