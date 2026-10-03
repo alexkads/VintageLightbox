@@ -1,5 +1,16 @@
 [
   {
+    "versao": "0.1.75",
+    "data": "2026-10-03",
+    "titulo": "A lixeira das predefinições voltou a apagar.",
+    "importante": false,
+    "novidades": [
+      "Na Revelação, clicar na lixeira de uma predefinição sua e depois em \"Apagar\" agora apaga de verdade. Antes a pergunta fechava e a predefinição ficava na lista.",
+      "\"Apagar…\" no botão direito da predefinição também voltou a funcionar."
+    ],
+    "por_que_atualizar": "Para conseguir tirar da lista as predefinições que você não usa mais."
+  },
+  {
     "versao": "0.1.74",
     "data": "2026-10-03",
     "titulo": "Exporte as predefinições: uma, um grupo ou todas, como no Lightroom.",
