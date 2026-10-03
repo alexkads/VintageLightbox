@@ -1,11 +1,12 @@
 {
-  "versao": "0.1.68",
-  "titulo": "As predefinições favoritas ficam na sua conta.",
+  "versao": "0.1.69",
+  "titulo": "Dá para excluir foto à venda da sessão.",
   "importante": false,
   "novidades": [
-    "O coração das predefinições agora fica guardado na sua conta, e não só neste computador: as favoritas aparecem iguais no site e em qualquer balcão em que você entrar.",
-    "Na primeira vez que você entrar depois de atualizar, as favoritas que este computador já tinha sobem para a sua conta sozinhas.",
-    "Se não der para guardar (sem internet), aparece o aviso \"As favoritas não foram guardadas\"."
+    "Na sessão, a foto à venda pode ser excluída: uma só (\"Excluir\" no painel da foto ou a tecla ⌫) ou as marcadas (\"Excluir as N\" no painel do lote).",
+    "Para confirmar, digite CONFIRMAR EXCLUSÃO!, como na exclusão de sessão. A foto sai da galeria do cliente e deste computador, e não há como desfazer.",
+    "Foto levada no balcão ou comprada no pós-venda não se exclui. No lote, o aviso diz quantas ficaram de fora e por quê.",
+    "Corrigido: o antigo \"Apagar\" do painel falhava sempre com \"foto não está mais no catálogo\"."
   ],
-  "por_que_atualizar": "Trocar de máquina ou ir do site para o app não esvazia mais as suas favoritas."
+  "por_que_atualizar": "Foto que não vai ser vendida sai da galeria do cliente pelo próprio balcão, sem passar pelo site."
 }

@@ -1,5 +1,18 @@
 [
   {
+    "versao": "0.1.69",
+    "data": "2026-10-02",
+    "titulo": "Dá para excluir foto à venda da sessão.",
+    "importante": false,
+    "novidades": [
+      "Na sessão, a foto à venda pode ser excluída: uma só (\"Excluir\" no painel da foto ou a tecla ⌫) ou as marcadas (\"Excluir as N\" no painel do lote).",
+      "Para confirmar, digite CONFIRMAR EXCLUSÃO!, como na exclusão de sessão. A foto sai da galeria do cliente e deste computador, e não há como desfazer.",
+      "Foto levada no balcão ou comprada no pós-venda não se exclui. No lote, o aviso diz quantas ficaram de fora e por quê.",
+      "Corrigido: o antigo \"Apagar\" do painel falhava sempre com \"foto não está mais no catálogo\"."
+    ],
+    "por_que_atualizar": "Foto que não vai ser vendida sai da galeria do cliente pelo próprio balcão, sem passar pelo site."
+  },
+  {
     "versao": "0.1.68",
     "data": "2026-10-02",
     "titulo": "As predefinições favoritas ficam na sua conta.",
