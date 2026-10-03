@@ -130,6 +130,10 @@ pub enum Recado {
     /// 🔑 **Notifica, não descreve.** Quem escuta só precisa saber que o
     /// catálogo mudou, para reler — os números estão no banco.
     Sincronizou,
+    /// 🗑️ A exclusão terminou para uma foto: ela saiu do site e do catálogo
+    /// daqui. Relê **as duas** listas — o `Sincronizou` só relê o catálogo, e a
+    /// do site ficaria na grade até o tempo real avisar.
+    Excluiu,
     /// O `PATCH` de **uma** foto voltou — com a frase, se o site recusou.
     ///
     /// 🔑 **Por que não o `Sincronizou`**: ele não diz de quem é, e a tela da
@@ -339,6 +343,16 @@ pub trait Publicador: Send + Sync + 'static {
     /// Tira do site pelo id **de lá** — o último passo do resgate da foto que
     /// não tinha cópia aqui.
     fn remover_remoto(&self, sessao: Sessao, no_site: String, canal: Sender<Recado>);
+    /// 🗑️ Exclui a foto da sessão: do site (`no_site`, o id de lá) e deste
+    /// catálogo (`local`). O site primeiro; se ele recusar, nada muda aqui.
+    /// Volta como `Sincronizou` ou `Falhou`.
+    fn excluir_da_sessao(
+        &self,
+        sessao: Sessao,
+        no_site: Option<String>,
+        local: Option<String>,
+        canal: Sender<Recado>,
+    );
     /// O passo 6: o que o cliente acertou no balcão, gravado na foto do site.
     fn negociar(
         &self,
@@ -854,6 +868,26 @@ impl Publicador for PublicadorDaApi {
         });
     }
 
+    fn excluir_da_sessao(
+        &self,
+        sessao: Sessao,
+        no_site: Option<String>,
+        local: Option<String>,
+        canal: Sender<Recado>,
+    ) {
+        let controlador = self.controlador.clone();
+        self.tokio.spawn(async move {
+            let recado = match controlador
+                .excluir_da_sessao(&sessao, no_site.as_deref(), local.as_deref())
+                .await
+            {
+                Ok(()) => Recado::Excluiu,
+                Err(erro) => Recado::Falhou(format!("Não foi possível excluir a foto: {erro}")),
+            };
+            let _ = canal.send(recado);
+        });
+    }
+
     fn negociar(
         &self,
         sessao: Sessao,
@@ -1016,6 +1050,8 @@ pub mod mentira {
         pub parametros_do_catalogo: Mutex<Option<Box<dyn Fn(&str) -> Option<String> + Send>>>,
         /// As fotos tiradas do storage.
         pub tiradas: Mutex<Vec<String>>,
+        /// As cópias locais que a exclusão tirou do catálogo.
+        pub excluidas_daqui: Mutex<Vec<String>>,
         /// O que foi negociado, por foto.
         pub negociadas: Mutex<Vec<(String, MudancaDaFoto)>>,
         /// Os ids no site cujos pixels foram pedidos.
@@ -1139,6 +1175,10 @@ pub mod mentira {
 
         pub fn tiradas(&self) -> Vec<String> {
             self.tiradas.lock().expect("as tiradas").clone()
+        }
+
+        pub fn excluidas_daqui(&self) -> Vec<String> {
+            self.excluidas_daqui.lock().expect("as excluídas").clone()
         }
 
         pub fn negociadas(&self) -> Vec<(String, MudancaDaFoto)> {
@@ -1527,6 +1567,30 @@ pub mod mentira {
         fn remover_remoto(&self, _sessao: Sessao, no_site: String, canal: Sender<Recado>) {
             self.tiradas.lock().expect("as tiradas").push(no_site);
             let _ = canal.send(Recado::Sincronizou);
+        }
+
+        fn excluir_da_sessao(
+            &self,
+            _sessao: Sessao,
+            no_site: Option<String>,
+            local: Option<String>,
+            canal: Sender<Recado>,
+        ) {
+            // 🔑 Como o site de verdade: a foto sai, e a releitura não a traz.
+            if let Some(no_site) = no_site {
+                self.fotos_da_sessao
+                    .lock()
+                    .expect("as fotos")
+                    .retain(|f| f.id != no_site);
+                self.tiradas.lock().expect("as tiradas").push(no_site);
+            }
+            if let Some(local) = local {
+                self.excluidas_daqui
+                    .lock()
+                    .expect("as excluídas")
+                    .push(local);
+            }
+            let _ = canal.send(Recado::Excluiu);
         }
 
         fn enviar_arquivo(

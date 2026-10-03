@@ -176,6 +176,22 @@ impl PosVendaController {
         self.publicar.remover_remoto(sessao, no_site).await
     }
 
+    /// Exclui a foto da sessão: do site (`no_site`) e deste catálogo (`local`).
+    pub async fn excluir_da_sessao(
+        &self,
+        sessao: &Sessao,
+        no_site: Option<&str>,
+        local: Option<&str>,
+    ) -> Result<(), String> {
+        let local = local
+            .map(PhotoId::from_string)
+            .transpose()
+            .map_err(|e| e.to_string())?;
+        self.publicar
+            .excluir_da_sessao(sessao, no_site, local.as_ref())
+            .await
+    }
+
     /// Entra numa sessão: a galeria e as fotos que estão nela.
     pub async fn abrir_galeria(&self, sessao: &Sessao, id: &str) -> Result<GaleriaAberta, String> {
         self.api.abrir_galeria(sessao, id).await.map_err(frase)

@@ -196,6 +196,14 @@ impl Publicador for PublicadorDoCaixa {
     fn tirar_do_site(&self, _: Sessao, _: String, _: Sender<Recado>) {}
     fn rejeitar_tirando_da_nuvem(&self, _: Sessao, _: String, _: Sender<Recado>) {}
     fn remover_remoto(&self, _: Sessao, _: String, _: Sender<Recado>) {}
+    fn excluir_da_sessao(
+        &self,
+        _: Sessao,
+        _: Option<String>,
+        _: Option<String>,
+        _: Sender<Recado>,
+    ) {
+    }
     fn negociar(&self, _: Sessao, _: String, _: MudancaDaFoto, _: Sender<Recado>) {}
     fn enviar_arquivo(
         &self,

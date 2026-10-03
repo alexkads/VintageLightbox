@@ -107,6 +107,17 @@ impl Foto {
         self.estado != Estado::Comprada && !self.apagada
     }
 
+    /// 🗑️ **Só a foto à venda se exclui** (dono, 02/10/2026: *"Se a foto não
+    /// estiver como levada com compra no pós venda, preciso conseguir
+    /// excluí-la"*).
+    ///
+    /// É a régua da exclusão da sessão ([`crate::exclusao::bloqueio`]): foto
+    /// paga, no balcão ou no pós-venda, fica. A apagada pela retenção já não tem
+    /// arquivo — não há o que excluir.
+    pub fn pode_excluir(&self) -> bool {
+        self.estado == Estado::Disponivel && !self.apagada
+    }
+
     /// Houve conversa de balcão sobre esta foto (cortesia, desconto, já paga).
     pub fn tem_negociacao(&self) -> bool {
         self.preco_negociado.is_some()
@@ -493,6 +504,14 @@ mod testes {
         assert!(foto("b", Estado::LevadaNoBalcao, false).editavel());
         assert!(!foto("c", Estado::Comprada, false).editavel());
         assert!(!foto("d", Estado::Disponivel, true).editavel());
+    }
+
+    #[test]
+    fn so_a_foto_a_venda_se_exclui() {
+        assert!(foto("a", Estado::Disponivel, false).pode_excluir());
+        assert!(!foto("b", Estado::LevadaNoBalcao, false).pode_excluir());
+        assert!(!foto("c", Estado::Comprada, false).pode_excluir());
+        assert!(!foto("d", Estado::Disponivel, true).pode_excluir());
     }
 
     #[test]

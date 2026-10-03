@@ -267,6 +267,36 @@ impl PublicarNoPosVendaUseCase {
         }
     }
 
+    /// 🗑️ **Exclui a foto da sessão: do site e deste catálogo** (dono,
+    /// 02/10/2026: *"Se a foto não estiver como levada com compra no pós
+    /// venda, preciso conseguir excluí-la"*).
+    ///
+    /// `no_site` é o id dela lá (`None` = nunca subiu); `local`, o da cópia
+    /// neste catálogo (`None` = não há cópia aqui).
+    ///
+    /// 🚨 **A cópia daqui sai do catálogo, e não só perde o id remoto.** Sem o
+    /// id, a foto da sessão volta à esteira (C20) e sobe de novo segundos
+    /// depois — a exclusão se desfaria sozinha. O arquivo no disco fica, como no
+    /// "Remove from Catalog" da Biblioteca.
+    ///
+    /// 🔑 **O site primeiro.** Se ele recusar (a comprada, a do caixa), nada
+    /// muda aqui: a foto continua inteira dos dois lados. `404` é sucesso — ela
+    /// já não está lá.
+    pub async fn excluir_da_sessao(
+        &self,
+        sessao: &Sessao,
+        no_site: Option<&str>,
+        local: Option<&PhotoId>,
+    ) -> Result<(), String> {
+        if let Some(remoto) = no_site {
+            self.remover_remoto(sessao, remoto).await?;
+        }
+        if let Some(id) = local {
+            self.fotos.delete(id).await.map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
     /// `estado` manda quando vem preenchido.
     ///
     /// 🔑 **É a leva escolhida antes dos arquivos**, como na tela da sessão do
@@ -998,6 +1028,85 @@ mod tests {
             .rejeitar_tirando_da_nuvem(&sessao(), &id)
             .await
             .is_err());
+    }
+
+    /// 🗑️ **Excluir tira do site e do catálogo daqui** — e a cópia sai do
+    /// catálogo, em vez de só perder o id: sem o id ela voltaria à esteira.
+    #[tokio::test]
+    async fn excluir_tira_do_site_e_do_catalogo() {
+        let photo = foto("/ensaio/e.NEF", false);
+        let id = photo.id();
+        let mut repo = MockPhotoRepo::new();
+        let esperado = id;
+        repo.expect_delete()
+            .times(1)
+            .withf(move |apagada| *apagada == esperado)
+            .returning(|_| Ok(()));
+        repo.expect_update().times(0);
+        let api = Arc::new(ApiDeMentira::default());
+        let caso = PublicarNoPosVendaUseCase::new(
+            Arc::new(repo),
+            Arc::new(MockExportador::new()),
+            Arc::new(MockThumbnailGen::new()),
+            api.clone(),
+        );
+
+        caso.excluir_da_sessao(&sessao(), Some("remota-e"), Some(&id))
+            .await
+            .unwrap();
+        assert_eq!(*api.removidas.lock().unwrap(), ["remota-e"]);
+    }
+
+    /// 🚨 **O site recusou: a cópia daqui fica no catálogo.** Excluir pela
+    /// metade deixaria a foto no site e sem a cópia que a sustenta.
+    #[tokio::test]
+    async fn excluir_com_o_site_recusando_nao_mexe_no_catalogo() {
+        let photo = foto("/ensaio/g.NEF", false);
+        let id = photo.id();
+        let mut repo = MockPhotoRepo::new();
+        repo.expect_delete().times(0);
+        let api = Arc::new(ApiDeMentira {
+            recusa_remover: true,
+            ..Default::default()
+        });
+        let caso = PublicarNoPosVendaUseCase::new(
+            Arc::new(repo),
+            Arc::new(MockExportador::new()),
+            Arc::new(MockThumbnailGen::new()),
+            api,
+        );
+
+        assert!(caso
+            .excluir_da_sessao(&sessao(), Some("remota-g"), Some(&id))
+            .await
+            .is_err());
+    }
+
+    /// A que só existe aqui (a rejeitada que nunca subiu) sai sem ir à rede;
+    /// a que só existe no site (sem cópia aqui) sai sem tocar no catálogo.
+    #[tokio::test]
+    async fn excluir_so_de_um_lado_nao_toca_no_outro() {
+        let photo = foto("/ensaio/h.NEF", false);
+        let id = photo.id();
+        let mut repo = MockPhotoRepo::new();
+        repo.expect_delete().times(1).returning(|_| Ok(()));
+        let api = Arc::new(ApiDeMentira::default());
+        let caso = PublicarNoPosVendaUseCase::new(
+            Arc::new(repo),
+            Arc::new(MockExportador::new()),
+            Arc::new(MockThumbnailGen::new()),
+            api.clone(),
+        );
+
+        caso.excluir_da_sessao(&sessao(), None, Some(&id))
+            .await
+            .unwrap();
+        assert!(api.removidas.lock().unwrap().is_empty());
+
+        caso.excluir_da_sessao(&sessao(), Some("so-no-site"), None)
+            .await
+            .unwrap();
+        assert_eq!(*api.removidas.lock().unwrap(), ["so-no-site"]);
     }
 
     /// ⚠️ Tirar a nota de uma foto que nunca subiu não fala com o site.

@@ -142,9 +142,17 @@ fn faixa_e_preco_em_lote_pela_grade_e_filmstrip(cx: &mut TestAppContext) {
     e.app(cx, |app, _, _| assert!(app.no_balcao()));
 
     e.app(cx, |app, window, cx| app.fechar_balcao(window, cx));
-    clicar(&e, cx, "lote-apagar");
-    assert!(e.site.tiradas().is_empty(), "apagar exige confirmação");
-    clicar(&e, cx, "apagar-confirmar");
+    clicar(&e, cx, "lote-excluir");
+    clicar(&e, cx, "excluir-fotos-confirmar");
+    e.esperar(cx);
+    assert!(
+        e.site.tiradas().is_empty(),
+        "sem a frase, o botão do diálogo não exclui"
+    );
+    e.detalhe(cx, |tela, w, cx| {
+        tela.digitar_a_frase_de_excluir("CONFIRMAR EXCLUSÃO!", w, cx)
+    });
+    clicar(&e, cx, "excluir-fotos-confirmar");
     e.esperar(cx);
     assert_eq!(e.site.tiradas(), ["a", "d"], "a comprada fica de fora");
 }
@@ -1055,7 +1063,7 @@ fn todo_jeito_de_fechar_a_negociacao_devolve_as_teclas(cx: &mut TestAppContext) 
 #[gpui_kit::test]
 fn todo_dialogo_da_galeria_devolve_as_teclas(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
-    // O "Apagar do site" fica no fim da coluna do lote.
+    // O "Excluir" fica no fim da coluna do lote.
     VisualTestContext::from_window(e.raiz.into(), cx)
         .simulate_resize(gpui_kit::size(gpui_kit::px(1600.), gpui_kit::px(1100.)));
     let aditivo = Modifiers {
@@ -1081,7 +1089,7 @@ fn todo_dialogo_da_galeria_devolve_as_teclas(cx: &mut TestAppContext) {
             "sessao-cliente-fechar",
         ),
         ("importar", "detalhe-importar", "importar-cancelar"),
-        ("apagar do site", "lote-apagar", "apagar-cancelar"),
+        ("excluir", "lote-excluir", "excluir-fotos-cancelar"),
         ("exportar", "detalhe-exportar", "fechar-exportacao"),
     ];
     for (i, (nome, abre, fecha)) in dialogos.into_iter().enumerate() {

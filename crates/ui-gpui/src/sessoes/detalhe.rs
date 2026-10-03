@@ -36,6 +36,7 @@ use crate::modal::Modal;
 use biblioteca_core::acervo::{self, Acervo, Filtro};
 use biblioteca_core::dados_do_cliente::{self, DadosDoCliente};
 use biblioteca_core::dinheiro;
+use biblioteca_core::exclusao;
 use biblioteca_core::grade::{colunas_que_cabem, linhas_necessarias};
 use biblioteca_core::selecao::{Modificadores, Selecao};
 use domain::services::pos_venda::{
@@ -203,6 +204,74 @@ pub(crate) const FILTROS: [(&str, Filtro); 8] = [
 // da sessão na web e **ainda não existem na barra da Biblioteca** — é o próximo
 // passo, e o `biblioteca_core::acervo` já os calcula.
 
+/// 🗑️ Uma foto que a exclusão tira: o id dela no site e o da cópia neste
+/// catálogo — cada lado `None` quando ela não existe lá.
+///
+/// 🔑 A foto do site com cópia aqui chega só com `no_site`: quem acha a cópia
+/// é a raiz, que tem o catálogo (`id_local_do_site`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AlvoDaExclusao {
+    pub no_site: Option<String>,
+    pub local: Option<String>,
+}
+
+/// 🗑️ O "Excluir" aberto: as fotos que saem, as que ficam e a frase.
+struct ExclusaoDeFotos {
+    /// `(id na grade, arquivo)` das que saem, na ordem da grade.
+    fotos: Vec<(String, String)>,
+    ficam: Ficam,
+    frase: Entity<InputState>,
+    /// Quem tinha o foco ao abrir: o campo da frase some com o diálogo, e o
+    /// foco num elemento que ninguém desenha mata todos os atalhos.
+    devolver: Option<(gpui_kit::FocusHandle, gpui_kit::AnyWindowHandle)>,
+    _campo: gpui_kit::Subscription,
+}
+
+/// As pedidas que a exclusão deixa de fora, e por quê.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Ficam {
+    levadas: u32,
+    compradas: u32,
+    /// Só no disco e subindo agora: excluir no meio do envio deixaria a do
+    /// site nascer sem a cópia daqui.
+    subindo: u32,
+}
+
+impl Ficam {
+    /// "2 levada(s) no balcão, 1 comprada(s) no pós-venda e 1 ainda subindo".
+    fn frase(self) -> Option<String> {
+        let mut partes = Vec::new();
+        if self.levadas > 0 {
+            partes.push(format!("{} levada(s) no balcão", self.levadas));
+        }
+        if self.compradas > 0 {
+            partes.push(format!("{} comprada(s) no pós-venda", self.compradas));
+        }
+        if self.subindo > 0 {
+            partes.push(format!("{} ainda subindo", self.subindo));
+        }
+        let ultima = partes.pop()?;
+        Some(if partes.is_empty() {
+            ultima
+        } else {
+            format!("{} e {ultima}", partes.join(", "))
+        })
+    }
+
+    /// Por que **esta** foto não se exclui — quando foi pedida sozinha.
+    fn frase_de_uma(self) -> Option<&'static str> {
+        if self.levadas > 0 {
+            Some("Foto levada no balcão não se exclui: ela já foi paga.")
+        } else if self.compradas > 0 {
+            Some("Foto comprada no pós-venda não se exclui: o cliente pagou por ela.")
+        } else if self.subindo > 0 {
+            Some("A foto ainda está subindo: espere o envio terminar para excluí-la.")
+        } else {
+            None
+        }
+    }
+}
+
 /// O que a tela pede à raiz — ela não sabe trocar de tela nem abrir a Revelação.
 pub enum Pedido {
     /// Voltar para a lista de sessões (ou para o caixa, se veio de lá).
@@ -218,10 +287,10 @@ pub enum Pedido {
         fora: usize,
         abertura: Abertura,
     },
-    /// "Apagar": a foto sai do site, com os dois arquivos.
-    ApagarDoSite(String),
-    /// "Apagar" em lote, depois da confirmação de todas as fotos editáveis.
-    ApagarDoSiteEmLote(Vec<String>),
+    /// 🗑️ "Excluir", confirmado com a frase: cada foto sai do site (com os
+    /// arquivos dela) e do catálogo daqui. Só a à venda chega aqui
+    /// ([`acervo::Foto::pode_excluir`]).
+    ExcluirFotos(Vec<AlvoDaExclusao>),
     /// 🗑️ "Descartar a edição" (ids no site): a revelação feita aqui e não
     /// salva sai, e a foto fica como a galeria tem — quem sabe a revelação do
     /// site e a fila é a raiz (`descartar_as_edicoes`).
@@ -671,13 +740,14 @@ pub struct Detalhe {
     /// site. Ele se consulta uma vez por atendimento, e por isso não fica na
     /// faixa de cima: cada pixel ali é uma foto a menos na primeira olhada.
     detalhes_abertos: bool,
-    /// A foto cujo "Apagar" está sendo perguntado — `(id, nome do arquivo)`.
+    /// 🗑️ O "Excluir" aberto — a foto da vez ou as marcadas.
     ///
-    /// 🚨 **Um diálogo, como no site** (`useConfirmacao`): apagar tira a foto
-    /// **e os arquivos dela** do site, e não há como desfazer pela tela. O
-    /// balcão é tela de dedo rápido; a pergunta é o freio.
-    apagar_confirmando: Option<(String, String)>,
-    apagar_lote_confirmando: Option<Vec<(String, String)>>,
+    /// 🚨 **Digitar a frase, como na exclusão da sessão** (dono, 02/10/2026:
+    /// *"com mensagem de confirmação parecida com a exclusão de sessão"*). Aqui
+    /// pesa mais que lá: a sessão volta pela aba Excluídas, e a foto não volta
+    /// — o site apaga os arquivos dela. O balcão é tela de dedo rápido; a
+    /// frase é o freio.
+    excluindo: Option<ExclusaoDeFotos>,
     /// As fotos (id no site) com revelação feita aqui que a galeria ainda não
     /// recebeu — quem conta é a raiz (`recontar_o_que_falta_subir`).
     ///
@@ -1000,10 +1070,9 @@ impl Detalhe {
             faixa_e_precos_aberto: false,
             paineis: super::paineis::PaineisDaGaleria::default(),
             detalhes_abertos: false,
-            apagar_confirmando: None,
+            excluindo: None,
             nao_salvas: std::collections::BTreeSet::new(),
             descartar_confirmando: None,
-            apagar_lote_confirmando: None,
             importacao_aberta: false,
             origem: None,
             _assinaturas_da_origem: Vec::new(),
@@ -1533,19 +1602,38 @@ impl Detalhe {
         self.selecao.foco()
     }
 
-    /// 🧪 O "Apagar" do painel, sem o clique — o cenário e2e o usa para afirmar
-    /// **o que a pergunta diz** antes de confirmar.
+    /// 🧪 O "Excluir" do painel, sem o clique — o cenário e2e o usa para
+    /// afirmar **o que a pergunta diz** antes de confirmar.
     #[cfg(test)]
-    pub(crate) fn apagar_do_site_para_teste(&mut self, cx: &mut Context<Self>) {
-        self.apagar_do_site(cx);
+    pub(crate) fn excluir_a_da_vez_para_teste(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.excluir_a_da_vez(window, cx);
     }
 
-    /// 🧪 O arquivo citado na pergunta de apagar, se ela está aberta.
+    /// 🧪 Os arquivos que a pergunta de excluir cita, se ela está aberta.
     #[cfg(test)]
-    pub(crate) fn arquivo_na_pergunta_de_apagar(&self) -> Option<String> {
-        self.apagar_confirmando
+    pub(crate) fn arquivos_na_pergunta_de_excluir(&self) -> Option<Vec<String>> {
+        self.excluindo
             .as_ref()
-            .map(|(_, arquivo)| arquivo.clone())
+            .map(|aberta| aberta.fotos.iter().map(|(_, a)| a.clone()).collect())
+    }
+
+    /// 🧪 Digita na frase da exclusão aberta.
+    #[cfg(test)]
+    pub(crate) fn digitar_a_frase_de_excluir(
+        &mut self,
+        texto: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(aberta) = &self.excluindo {
+            aberta.frase.update(cx, |campo, cx| {
+                campo.trocar_valor(texto.to_string(), window, cx)
+            });
+        }
     }
 
     /// 🧪 A faixa da foto em foco, sem abrir o seletor.
@@ -4636,15 +4724,16 @@ impl Render for Detalhe {
                 cx,
             )
         };
-        // "Apagar" é o `useConfirmacao` do site: `AlertDialog`.
-        let dialogo_de_apagar = {
-            let quer = self.apagar_lote_confirmando.is_some() || self.apagar_confirmando.is_some();
+        // "Excluir" é o `AlertDialog` da exclusão da sessão: a frase, e um
+        // clique perdido fora não descarta o que foi digitado.
+        let dialogo_de_exclusao = {
+            let quer = self.excluindo.is_some();
             crate::dialogo::desenhar(
                 self,
                 quer,
-                crate::dialogo::Jeito::alerta(460.),
-                Self::dialogo_de_apagar,
-                |tela, _, cx| tela.cancelar_apagar(cx),
+                crate::dialogo::Jeito::alerta(512.),
+                Self::dialogo_de_exclusao,
+                |tela, _, cx| tela.cancelar_exclusao(cx),
                 window,
                 cx,
             )
@@ -4788,7 +4877,7 @@ impl Render for Detalhe {
             // modal dos dados do cliente). Eles vinham antes da grade na
             // árvore: a grade era pintada por cima do véu, que não escurecia
             // nada, e o caixa flutuante cobria o "Gravar".
-            .children(dialogo_de_apagar)
+            .children(dialogo_de_exclusao)
             .children(dialogo_de_descartar)
             .children(formulario_do_cliente)
             // 📸 O painel do bot, na posição que o atendente escolheu.
@@ -6483,56 +6572,164 @@ impl Detalhe {
         )
     }
 
-    /// "Apagar" no painel: pergunta primeiro, no diálogo.
+    /// "Excluir" no painel da foto em foco.
+    fn excluir_a_da_vez(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(id) = self.em_foco().map(|f| f.id.clone()) else {
+            return;
+        };
+        self.pedir_exclusao(vec![id], window, cx);
+    }
+
+    /// "Excluir as N" no painel do lote.
+    fn excluir_as_marcadas(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let ids = self.marcadas();
+        self.pedir_exclusao(ids, window, cx);
+    }
+
+    /// `Delete` na grade: as marcadas, ou a da vez quando nada está marcado.
+    pub fn excluir_pela_tecla(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let ids = self.marcadas();
+        if ids.is_empty() {
+            self.excluir_a_da_vez(window, cx);
+        } else {
+            self.pedir_exclusao(ids, window, cx);
+        }
+    }
+
+    /// 🗑️ Abre o "Excluir" com as que podem sair, e conta as que ficam.
     ///
-    /// 🚨 **A foto sai do site com os arquivos dela.** É o mesmo `DELETE` que
-    /// zerar a classificação usa (`tirar_do_site`), e o site recusa com `409` a
-    /// comprada — que aqui nem chega a oferecer o botão.
-    fn apagar_do_site(&mut self, cx: &mut Context<Self>) {
-        let Some(foto) = self.em_foco().cloned() else {
-            return;
-        };
-        if !foto.editavel() {
-            self.recado("Foto comprada não se apaga.".into(), cx);
+    /// **Não exclui nada ainda**: quem exclui é a frase, no diálogo. Nenhuma
+    /// pode sair → só o aviso, sem diálogo — um diálogo cujo botão nunca
+    /// acende faz quem clica achar que o sistema quebrou.
+    pub fn pedir_exclusao(
+        &mut self,
+        ids: Vec<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.excluindo.is_some() || ids.is_empty() {
             return;
         }
-        self.apagar_confirmando = Some((foto.id, foto.arquivo));
-        cx.notify();
-    }
-
-    fn apagar_marcadas_do_site(&mut self, cx: &mut Context<Self>) {
-        let fotos: Vec<_> = self
-            .selecao
-            .marcadas()
-            .filter_map(|p| self.acervo.visivel(p))
-            .filter(|f| f.editavel() && !self.ids_locais.contains(&f.id))
-            .map(|f| (f.id.clone(), f.arquivo.clone()))
-            .collect();
+        let mut fotos = Vec::new();
+        let mut ficam = Ficam::default();
+        for id in &ids {
+            let Some(foto) = self.acervo.todas().iter().find(|f| &f.id == id) else {
+                continue;
+            };
+            if !foto.pode_excluir() {
+                match foto.estado {
+                    acervo::Estado::LevadaNoBalcao => ficam.levadas += 1,
+                    acervo::Estado::Comprada => ficam.compradas += 1,
+                    // A apagada pela retenção: já não há arquivo a excluir.
+                    acervo::Estado::Disponivel => {}
+                }
+            } else if self.subindo_agora.contains(id) {
+                ficam.subindo += 1;
+            } else {
+                fotos.push((foto.id.clone(), foto.arquivo.clone()));
+            }
+        }
         if fotos.is_empty() {
-            self.recado(
-                "Aguarde o envio das fotos para apagá-las da galeria.".into(),
-                cx,
-            );
+            let texto = if ids.len() == 1 {
+                ficam.frase_de_uma().map(str::to_string)
+            } else {
+                ficam
+                    .frase()
+                    .map(|f| format!("Nenhuma das marcadas se exclui: {f}."))
+            };
+            if let Some(texto) = texto {
+                self.recado(texto, cx);
+            }
             return;
         }
-        self.apagar_lote_confirmando = Some(fotos);
+        let frase =
+            cx.new(|cx| InputState::new(window, cx).placeholder(exclusao::FRASE_DE_CONFIRMACAO));
+        let campo = cx.subscribe_in(
+            &frase,
+            window,
+            |tela, _, evento: &InputEvent, _window, cx| match evento {
+                InputEvent::PressEnter { .. } => tela.confirmar_exclusao(cx),
+                // O botão acende conforme a frase: a tela redesenha a cada letra.
+                InputEvent::Change => cx.notify(),
+                _ => {}
+            },
+        );
+        let devolver = window
+            .focused(cx)
+            .map(|foco| (foco, window.window_handle()));
+        // O foco vai direto ao campo: é a única coisa a fazer além de cancelar.
+        window.focus(&Focusable::focus_handle(frase.read(cx), cx), cx);
+        self.excluindo = Some(ExclusaoDeFotos {
+            fotos,
+            ficam,
+            frase,
+            devolver,
+            _campo: campo,
+        });
         cx.notify();
     }
 
-    /// O "Apagar a foto" do diálogo.
-    pub fn confirmar_apagar(&mut self, cx: &mut Context<Self>) {
-        if let Some(fotos) = self.apagar_lote_confirmando.take() {
-            cx.emit(Pedido::ApagarDoSiteEmLote(
-                fotos.into_iter().map(|(id, _)| id).collect(),
-            ));
-            cx.notify();
+    /// O id de cada lado da foto da grade: a local leva o do site se já subiu;
+    /// a do site leva só o dela — a cópia daqui a raiz é que acha.
+    fn alvo_da_exclusao(&self, id: &str) -> AlvoDaExclusao {
+        if self.ids_locais.contains(id) {
+            AlvoDaExclusao {
+                no_site: self.subiu_como.get(id).cloned(),
+                local: Some(id.to_string()),
+            }
+        } else {
+            AlvoDaExclusao {
+                no_site: Some(id.to_string()),
+                local: None,
+            }
+        }
+    }
+
+    /// "Excluir": manda à raiz as que saem, se a frase confere.
+    pub fn confirmar_exclusao(&mut self, cx: &mut Context<Self>) {
+        let confere = self
+            .excluindo
+            .as_ref()
+            .is_some_and(|aberta| exclusao::confere(&aberta.frase.read(cx).value()));
+        if !confere {
             return;
         }
-        let Some((id, _)) = self.apagar_confirmando.take() else {
+        let Some(aberta) = self.excluindo.take() else {
             return;
         };
-        cx.emit(Pedido::ApagarDoSite(id));
+        let alvos = aberta
+            .fotos
+            .iter()
+            .map(|(id, _)| self.alvo_da_exclusao(id))
+            .collect();
+        Self::devolver_o_foco(aberta.devolver, cx);
+        cx.emit(Pedido::ExcluirFotos(alvos));
         cx.notify();
+    }
+
+    /// "Cancelar" ou `Esc`: fecha, esquece a frase e devolve o foco.
+    ///
+    /// Reabrir com a frase já digitada deixaria o botão armado antes de alguém
+    /// ler quais fotos saem.
+    pub fn cancelar_exclusao(&mut self, cx: &mut Context<Self>) {
+        let Some(aberta) = self.excluindo.take() else {
+            return;
+        };
+        Self::devolver_o_foco(aberta.devolver, cx);
+        cx.notify();
+    }
+
+    fn devolver_o_foco(
+        devolver: Option<(gpui_kit::FocusHandle, gpui_kit::AnyWindowHandle)>,
+        cx: &mut Context<Self>,
+    ) {
+        // Depois, e não agora: pedir a janela de dentro da atualização dela
+        // falharia.
+        if let Some((foco, janela)) = devolver {
+            cx.defer(move |cx| {
+                let _ = janela.update(cx, |_, window, cx| window.focus(&foco, cx));
+            });
+        }
     }
 
     /// A raiz conta quais fotos têm revelação não salva.
@@ -6680,14 +6877,6 @@ impl Detalhe {
         )
     }
 
-    /// O "Cancelar" do diálogo.
-    pub fn cancelar_apagar(&mut self, cx: &mut Context<Self>) {
-        self.apagar_confirmando = None;
-        self.apagar_lote_confirmando = None;
-        cx.notify();
-    }
-
-    /// O diálogo de "Apagar esta foto?" — os mesmos textos do site.
     /// "Importar fotos": abre o modal do quadro, e não mais a janela do sistema
     /// direto (dono, 22/set/2026: *"precisa abrir um modal parecido com o de
     /// criação de sessão"*). O "Escolher fotos" do modal é que abre a janela.
@@ -6843,58 +7032,155 @@ impl Detalhe {
         )
     }
 
-    fn dialogo_de_apagar(
+    /// 🗑️ "Excluir" — o diálogo da exclusão da sessão, para fotos: o que
+    /// sai, o que fica e a frase.
+    ///
+    /// Como o `AlertDialog`, **não fecha com clique no véu**: fecha no
+    /// "Cancelar" e no `Esc`.
+    fn dialogo_de_exclusao(
         &mut self,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<gpui_kit::AnyElement> {
-        let (titulo, descricao, confirmar) = if let Some(fotos) = &self.apagar_lote_confirmando {
-            let n = fotos.len();
+        use crate::estilo;
+        use crate::recursos::Icone;
+        use gpui_kit::component::Icon;
+
+        /// Quantos nomes a lista mostra antes do "e mais N".
+        const NOMES: usize = 6;
+
+        let aberta = self.excluindo.as_ref()?;
+        let tema = cx.theme();
+        let apagado = tema.muted_foreground;
+        let pode = exclusao::confere(&aberta.frase.read(cx).value());
+        let n = aberta.fotos.len();
+        let (titulo, descricao, botao) = if n == 1 {
             (
-                format!("Apagar {n} foto(s)?"),
-                "Os arquivos vão junto — original, prévia e miniatura. O cliente deixa de ver estas fotos na galeria, e não há como desfazer pela tela.".to_string(),
-                format!("Apagar as {n}"),
+                "Excluir a foto".to_string(),
+                format!(
+                    "\u{201c}{}\u{201d} sai da galeria do cliente e deste computador: no site \
+                     vão o original, a prévia e a miniatura; aqui ela sai do catálogo, e o \
+                     arquivo no disco fica. Não há como desfazer.",
+                    aberta.fotos[0].1
+                ),
+                "Excluir a foto".to_string(),
             )
         } else {
-            let (_, arquivo) = self.apagar_confirmando.as_ref()?;
             (
-                "Apagar esta foto?".to_string(),
+                format!("Excluir {n} fotos"),
                 format!(
-                    "{arquivo} sai da galeria com os arquivos dela — original, prévia e miniatura. Não há como desfazer pela tela."
+                    "As {n} fotos saem da galeria do cliente e deste computador: no site vão o \
+                     original, a prévia e a miniatura de cada uma; aqui elas saem do catálogo, \
+                     e os arquivos no disco ficam. Não há como desfazer."
                 ),
-                "Apagar a foto".to_string(),
+                format!("Excluir as {n}"),
             )
         };
+
+        let nomes = (n > 1).then(|| {
+            let mut texto = aberta
+                .fotos
+                .iter()
+                .take(NOMES)
+                .map(|(_, arquivo)| arquivo.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            if n > NOMES {
+                texto.push_str(&format!(" e mais {}", n - NOMES));
+            }
+            div()
+                .debug_selector(|| "excluir-fotos-nomes".into())
+                .text_sm()
+                .text_color(apagado)
+                .child(texto)
+        });
+
+        let ficam = aberta.ficam.frase().map(|frase| {
+            let (fundo, borda, texto) = crate::tema::cores::selo_ambar();
+            div()
+                .debug_selector(|| "excluir-fotos-ficam".into())
+                .flex()
+                .items_start()
+                .gap(px(8.))
+                .p(px(12.))
+                .rounded(crate::tema::canto(8.))
+                .border_1()
+                .border_color(borda)
+                .bg(fundo)
+                .text_color(texto)
+                .text_sm()
+                .child(Icon::new(Icone::TriangleAlert).size(px(16.)))
+                .child(format!(
+                    "Ficam de fora: {frase}. Foto paga não se exclui, e a que está subindo \
+                     espera o envio terminar."
+                ))
+        });
+
+        let botao_excluir =
+            estilo::desligado(estilo::botao_perigo("excluir-fotos-confirmar", cx), !pode)
+                .debug_selector(|| "excluir-fotos-confirmar".into())
+                .child(botao)
+                .when(pode, |b| {
+                    b.on_click(cx.listener(|tela, _ev, _window, cx| tela.confirmar_exclusao(cx)))
+                });
+
         Some(
             gpui_kit::component::v_flex()
                 .gap(px(16.))
+                .id("dialogo-de-excluir-fotos")
                 .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
                     cx.stop_propagation()
                 })
-                .child(crate::estilo::cabecalho_do_dialogo(
+                .on_key_down(
+                    cx.listener(|tela, ev: &gpui_kit::KeyDownEvent, _window, cx| {
+                        if ev.keystroke.key == "escape" {
+                            cx.stop_propagation();
+                            tela.cancelar_exclusao(cx);
+                        }
+                    }),
+                )
+                .child(estilo::cabecalho_do_dialogo(
                     titulo,
                     SharedString::from(descricao),
-                    Some(crate::recursos::Icone::Trash2),
+                    Some(Icone::TriangleAlert),
                     cx,
                 ))
+                .children(nomes)
+                .children(ficam)
                 .child(
-                    crate::estilo::rodape_do_dialogo()
+                    gpui_kit::component::v_flex()
+                        .gap(px(6.))
                         .child(
-                            crate::estilo::botao_contorno("apagar-cancelar", cx)
-                                .debug_selector(|| "apagar-cancelar".into())
-                                .child("Cancelar")
-                                .on_click(
-                                    cx.listener(|tela, _ev, _w, cx| tela.cancelar_apagar(cx)),
+                            div()
+                                .flex()
+                                .flex_wrap()
+                                .items_center()
+                                .gap(px(4.))
+                                .text_sm()
+                                .font_weight(gpui_kit::FontWeight::MEDIUM)
+                                .child("Para confirmar, digite")
+                                .child(
+                                    div()
+                                        .px(px(4.))
+                                        .rounded(crate::tema::canto(4.))
+                                        .bg(tema.muted)
+                                        .font_family("monospace")
+                                        .child(exclusao::FRASE_DE_CONFIRMACAO),
                                 ),
                         )
+                        .child(estilo::campo(Input::new(&aberta.frase))),
+                )
+                .child(
+                    estilo::rodape_do_dialogo()
                         .child(
-                            crate::estilo::botao_perigo("apagar-confirmar", cx)
-                                .debug_selector(|| "apagar-confirmar".into())
-                                .child(confirmar)
+                            estilo::botao_contorno("excluir-fotos-cancelar", cx)
+                                .debug_selector(|| "excluir-fotos-cancelar".into())
+                                .child("Cancelar")
                                 .on_click(
-                                    cx.listener(|tela, _ev, _w, cx| tela.confirmar_apagar(cx)),
+                                    cx.listener(|tela, _ev, _w, cx| tela.cancelar_exclusao(cx)),
                                 ),
-                        ),
+                        )
+                        .child(botao_excluir),
                 )
                 .into_any_element(),
         )
@@ -7083,9 +7369,6 @@ impl Detalhe {
         {
             return;
         }
-        // Mudou a foto em foco: o "Apagar mesmo?" da anterior não vale mais.
-        self.apagar_confirmando = None;
-
         // 🚨 **A faixa **própria** da foto, e não a efetiva.** Marcar a efetiva
         // diria que a foto tem faixa fixada quando ela só está seguindo a
         // galeria — e o primeiro clique no seletor "fixaria" sem querer o que
@@ -7152,9 +7435,6 @@ impl Detalhe {
     /// seus ids, mas não perde o texto digitado quando só o foco muda.
     fn preparar_lote(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let ids = self.marcadas();
-        if self.campos_do_lote.as_ref().is_some_and(|c| c.ids != ids) {
-            self.apagar_lote_confirmando = None;
-        }
         if ids.len() < 2 {
             self.campos_do_lote = None;
             return;
@@ -7824,6 +8104,12 @@ impl Detalhe {
         // ── 4. O que o cliente paga ──────────────────────────────────────
         // Faixa, negociação e preço só falam com as que estão no site.
         let sem_site = editaveis == 0;
+        let excluiveis = self
+            .selecao
+            .marcadas()
+            .filter_map(|p| self.acervo.visivel(p))
+            .filter(|f| f.pode_excluir() && !self.subindo_agora.contains(&f.id))
+            .count();
         let rotulo = |texto: &'static str| div().text_xs().text_color(apagado).child(texto);
         let site =
             gpui_kit::component::v_flex()
@@ -7922,19 +8208,22 @@ impl Detalhe {
                                 }),
                         ),
                 )
+                // 🗑️ Conta as à venda, que são as que saem; o diálogo diz
+                // quais ficam e por quê. Sem nenhuma, o clique só avisa.
                 .child(
-                    crate::estilo::botao_fantasma("lote-apagar", cx)
-                        .debug_selector(|| "lote-apagar".into())
+                    crate::estilo::botao_fantasma("lote-excluir", cx)
+                        .debug_selector(|| "lote-excluir".into())
                         .w_full()
                         .text_color(tema.danger)
                         .icon(Icon::new(Icone::Trash2))
-                        .label(if sem_site {
-                            "Apagar".to_string()
-                        } else {
-                            format!("Apagar as {editaveis}")
+                        .label(match excluiveis {
+                            0 => "Excluir".to_string(),
+                            n if n == total => format!("Excluir as {n}"),
+                            n => format!("Excluir {n} de {total}"),
                         })
-                        .disabled(sem_site)
-                        .on_click(cx.listener(|tela, _, _, cx| tela.apagar_marcadas_do_site(cx))),
+                        .on_click(
+                            cx.listener(|tela, _, window, cx| tela.excluir_as_marcadas(window, cx)),
+                        ),
                 );
 
         crate::estilo::cartao(cx)
@@ -8409,16 +8698,18 @@ impl Detalhe {
                             .border_color(borda)
                             .child(dados)
                             .children(campos)
-                            .when(foto.editavel(), |conteudo| {
+                            // 🗑️ Só a à venda: a levada e a comprada já foram
+                            // pagas, e a regra é a da exclusão da sessão.
+                            .when(foto.pode_excluir(), |conteudo| {
                                 conteudo.child(
-                                    crate::estilo::botao_fantasma("painel-apagar", cx)
-                                        .debug_selector(|| "painel-apagar".into())
+                                    crate::estilo::botao_fantasma("painel-excluir", cx)
+                                        .debug_selector(|| "painel-excluir".into())
                                         .w_full()
                                         .text_color(cx.theme().danger)
                                         .icon(Icon::new(Icone::Trash2))
-                                        .label("Apagar")
-                                        .on_click(cx.listener(|tela, _ev, _window, cx| {
-                                            tela.apagar_do_site(cx)
+                                        .label("Excluir")
+                                        .on_click(cx.listener(|tela, _ev, window, cx| {
+                                            tela.excluir_a_da_vez(window, cx)
                                         })),
                                 )
                             }),
@@ -8561,6 +8852,8 @@ impl Detalhe {
                     .child("tira a nota ·")
                     .child(tecla("P", cx))
                     .child("levada no balcão ·")
+                    .child(tecla("⌫", cx))
+                    .child("exclui ·")
                     // ⌘ no Mac, Ctrl no resto — o `useTeclaDeAtalho` do site.
                     .child(tecla(MODIFICADOR, cx))
                     .child("ou")
@@ -11601,48 +11894,128 @@ mod testes {
         );
     }
 
-    /// 🗑️ **"Apagar" pergunta antes, e some com a foto do site.**
-    ///
-    /// O diálogo é o `useConfirmacao` do site: o balcão é tela de dedo rápido, e
-    /// o `DELETE` leva os arquivos junto.
+    /// 🗑️ **"Excluir" pede a frase, como a exclusão da sessão** (dono,
+    /// 02/10/2026), e só ela arma o botão.
     #[gpui_kit::test]
-    fn apagar_no_painel_pede_confirmacao_no_dialogo(cx: &mut TestAppContext) {
+    fn excluir_no_painel_exige_a_frase(cx: &mut TestAppContext) {
         let (janela, _) = janela(
             cx,
             vec![foto("f1", EstadoDaFotoNoSite::Disponivel, Some(4))],
         );
         entrar(cx, &janela);
 
-        let apagados = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-        let recebidos = apagados.clone();
+        let excluidas = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let recebidas = excluidas.clone();
         let raiz = cx.update(|cx| janela.root(cx).expect("a tela"));
         let _assinatura = cx.update(|cx| {
             cx.subscribe(&raiz, move |_, evento: &Pedido, _| {
-                if let Pedido::ApagarDoSite(id) = evento {
-                    recebidos.borrow_mut().push(id.clone());
+                if let Pedido::ExcluirFotos(alvos) = evento {
+                    recebidas.borrow_mut().extend(alvos.iter().cloned());
                 }
             })
         });
 
         janela
-            .update(cx, |tela, _window, cx| {
+            .update(cx, |tela, window, cx| {
                 tela.clicar(0, Modificadores::default(), cx);
-                tela.apagar_do_site(cx);
+                tela.excluir_a_da_vez(window, cx);
                 assert_eq!(
-                    tela.apagar_confirmando.as_ref().map(|(id, _)| id.as_str()),
-                    Some("f1"),
-                    "o clique abre o diálogo, e nada é apagado ainda"
+                    tela.arquivos_na_pergunta_de_excluir(),
+                    Some(vec!["f1.jpg".to_string()]),
+                    "o clique abre o diálogo, e nada sai ainda"
                 );
-                tela.confirmar_apagar(cx);
+                tela.confirmar_exclusao(cx);
                 assert!(
-                    tela.apagar_confirmando.is_none(),
-                    "confirmar fecha o diálogo"
+                    tela.excluindo.is_some(),
+                    "sem a frase, o diálogo segue aberto"
                 );
+                tela.digitar_a_frase_de_excluir("confirmar exclusão!", window, cx);
+                tela.confirmar_exclusao(cx);
+                assert!(tela.excluindo.is_some(), "a frase só vale inteira");
+                tela.digitar_a_frase_de_excluir(" CONFIRMAR EXCLUSÃO! ", window, cx);
+                tela.confirmar_exclusao(cx);
+                assert!(tela.excluindo.is_none(), "confirmar fecha o diálogo");
             })
             .expect("a janela deve estar aberta");
         cx.run_until_parked();
 
-        assert_eq!(apagados.borrow().as_slice(), ["f1"]);
+        assert_eq!(
+            excluidas.borrow().as_slice(),
+            [AlvoDaExclusao {
+                no_site: Some("f1".into()),
+                local: None
+            }]
+        );
+    }
+
+    /// 🗑️ **A levada e a comprada ficam** — a régua da exclusão da sessão. O
+    /// lote leva só as à venda, e o diálogo diz quantas ficam; pedida sozinha,
+    /// a paga nem abre o diálogo.
+    #[gpui_kit::test]
+    fn excluir_deixa_de_fora_a_levada_e_a_comprada(cx: &mut TestAppContext) {
+        let (janela, _) = janela(
+            cx,
+            vec![
+                foto("v1", EstadoDaFotoNoSite::Disponivel, Some(4)),
+                foto("l1", EstadoDaFotoNoSite::LevadaNoBalcao, Some(5)),
+                foto("c1", EstadoDaFotoNoSite::Comprada, Some(3)),
+                foto("v2", EstadoDaFotoNoSite::Disponivel, None),
+            ],
+        );
+        entrar(cx, &janela);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                // A levada sozinha: só o aviso.
+                tela.focar_foto("l1", cx);
+                tela.excluir_a_da_vez(window, cx);
+                assert!(tela.excluindo.is_none(), "a paga não abre o diálogo");
+                assert_eq!(
+                    tela.avisos_dados.last().map(|(t, _)| t.as_str()),
+                    Some("Foto levada no balcão não se exclui: ela já foi paga.")
+                );
+
+                tela.selecionar_tudo(cx);
+                tela.excluir_pela_tecla(window, cx);
+                assert_eq!(
+                    tela.arquivos_na_pergunta_de_excluir(),
+                    Some(vec!["v1.jpg".to_string(), "v2.jpg".to_string()]),
+                    "o lote leva só as à venda"
+                );
+                assert_eq!(
+                    tela.excluindo.as_ref().map(|a| a.ficam),
+                    Some(Ficam {
+                        levadas: 1,
+                        compradas: 1,
+                        subindo: 0
+                    })
+                );
+                tela.cancelar_exclusao(cx);
+                assert!(tela.excluindo.is_none(), "cancelar fecha sem excluir");
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    #[test]
+    fn a_frase_do_que_fica_junta_as_partes() {
+        let f = |levadas, compradas, subindo| {
+            Ficam {
+                levadas,
+                compradas,
+                subindo,
+            }
+            .frase()
+        };
+        assert_eq!(f(0, 0, 0), None);
+        assert_eq!(f(2, 0, 0).as_deref(), Some("2 levada(s) no balcão"));
+        assert_eq!(
+            f(2, 1, 0).as_deref(),
+            Some("2 levada(s) no balcão e 1 comprada(s) no pós-venda")
+        );
+        assert_eq!(
+            f(2, 1, 3).as_deref(),
+            Some("2 levada(s) no balcão, 1 comprada(s) no pós-venda e 3 ainda subindo")
+        );
     }
 
     /// 📋 **O atendimento entra na sessão, e o estúdio se troca no cabeçalho.**

@@ -2691,29 +2691,43 @@ impl Aplicativo {
             DetalhePedido::DescartarEdicao(ids) => {
                 self.descartar_as_edicoes(ids.clone(), window, cx);
             }
-            DetalhePedido::ApagarDoSite(id) => {
+            // 🗑️ "Excluir", confirmado com a frase: cada foto sai do site e
+            // do catálogo daqui.
+            //
+            // 🚨 **O id do site não serve ao catálogo.** O "Apagar" de antes
+            // mandava o id **de lá** a quem procura a foto pelo id **daqui**
+            // (`remover_do_site`), e o operador via "foto não está mais no
+            // catálogo" (dono, 02/10/2026). A cópia local de uma foto do site
+            // se acha pelo id remoto, aqui, onde o catálogo está.
+            //
+            // 🔑 **A cópia sai também da esteira**: a que ainda não subiu
+            // subiria segundos depois de excluída.
+            DetalhePedido::ExcluirFotos(alvos) => {
                 let Some(sessao) = self.sessao.clone() else {
                     return;
                 };
-                self.publicador
-                    .tirar_do_site(sessao, id.clone(), self.sincronias.0.clone());
-                self.esperar_o_site(PedidoDeFoto::TirarDoSite, 1, cx);
-            }
-            DetalhePedido::ApagarDoSiteEmLote(ids) => {
-                let Some(sessao) = self.sessao.clone() else {
-                    return;
-                };
-                if ids.is_empty() {
+                if alvos.is_empty() {
                     return;
                 }
-                for id in ids {
-                    self.publicador.tirar_do_site(
+                for alvo in alvos {
+                    let local = alvo.local.clone().or_else(|| {
+                        alvo.no_site
+                            .as_deref()
+                            .and_then(|no_site| self.biblioteca.read(cx).id_local_do_site(no_site))
+                    });
+                    if let Some(local) = &local {
+                        self.esteira.tirar_da_fila(local);
+                        self.subindo_sozinhas.remove(local);
+                        self.recem_subidas.remove(local);
+                    }
+                    self.publicador.excluir_da_sessao(
                         sessao.clone(),
-                        id.clone(),
+                        alvo.no_site.clone(),
+                        local,
                         self.sincronias.0.clone(),
                     );
                 }
-                self.esperar_o_site(PedidoDeFoto::TirarDoSite, ids.len(), cx);
+                self.esperar_o_site(PedidoDeFoto::TirarDoSite, alvos.len(), cx);
             }
             // 🚨 **A rejeição da foto que ainda não subiu mora no catálogo**
             // (C21): quem grava é a Biblioteca, e a marca é a mesma bandeira do
@@ -3589,6 +3603,11 @@ impl Aplicativo {
             match recado {
                 PosVendaRecado::Sincronizou => {
                     self.ultimo_envio = Some(chrono::Utc::now().timestamp());
+                    mudou = true
+                }
+                PosVendaRecado::Excluiu => {
+                    self.ultimo_envio = Some(chrono::Utc::now().timestamp());
+                    self.pedir_releitura_da_galeria(cx);
                     mudou = true
                 }
                 // 🔑 O mesmo desfecho do `Sincronizou`, com nome: o catálogo
@@ -6005,6 +6024,13 @@ impl Aplicativo {
                     tela.apagar_retoque_selecionado(cx);
                 }
             });
+            return;
+        }
+        // 🗑️ Na sessão, `Delete` é o "Excluir" do painel: a foto da vez ou as
+        // marcadas, com a frase no diálogo — nunca direto.
+        if self.tela == Tela::Sessao {
+            self.detalhe
+                .update(cx, |tela, cx| tela.excluir_pela_tecla(window, cx));
             return;
         }
         // ⚠️ Só na Biblioteca. Na Revelação a tecla apagaria a foto que está

@@ -193,29 +193,52 @@ fn classificar_sinalizar_e_o_painel_acompanham_a_foto(cx: &mut TestAppContext) {
         "a faixa da foto vai no PATCH"
     );
 
-    // 🗑️ Apagar pergunta antes — e o nome na pergunta é o da foto em foco.
-    e.detalhe(cx, |tela, _w, cx| {
+    // 🗑️ Excluir: a levada fica (o `P` acima a levou ao balcão) — só o aviso,
+    // sem diálogo.
+    e.detalhe(cx, |tela, w, cx| {
         tela.focar_foto("d", cx);
-        tela.apagar_do_site_para_teste(cx);
+        tela.excluir_a_da_vez_para_teste(w, cx);
         assert_eq!(
-            tela.arquivo_na_pergunta_de_apagar().as_deref(),
-            Some("d.jpg"),
+            tela.arquivos_na_pergunta_de_excluir(),
+            None,
+            "a levada não abre a pergunta"
+        );
+    });
+    // De volta à venda, ela se exclui — e a pergunta diz qual foto sai.
+    e.teclar(cx, "p");
+    e.esperar(cx);
+    e.detalhe(cx, |tela, w, cx| {
+        tela.excluir_a_da_vez_para_teste(w, cx);
+        assert_eq!(
+            tela.arquivos_na_pergunta_de_excluir(),
+            Some(vec!["d.jpg".to_string()]),
             "a pergunta diz qual foto sai"
         );
-        tela.cancelar_apagar(cx);
+        tela.cancelar_exclusao(cx);
     });
     e.esperar(cx);
     assert!(
         e.site.tiradas().is_empty(),
-        "cancelar não apaga foto nenhuma"
+        "cancelar não exclui foto nenhuma"
     );
 
-    e.detalhe(cx, |tela, _w, cx| {
-        tela.apagar_do_site_para_teste(cx);
-        tela.confirmar_apagar(cx);
+    e.detalhe(cx, |tela, w, cx| {
+        tela.excluir_a_da_vez_para_teste(w, cx);
+        tela.confirmar_exclusao(cx);
+        assert!(
+            tela.arquivos_na_pergunta_de_excluir().is_some(),
+            "sem a frase, nada sai"
+        );
+        tela.digitar_a_frase_de_excluir("CONFIRMAR EXCLUSÃO!", w, cx);
+        tela.confirmar_exclusao(cx);
     });
     e.esperar(cx);
-    assert_eq!(e.site.tiradas(), ["d"], "confirmar apaga a foto em foco");
+    assert_eq!(e.site.tiradas(), ["d"], "a frase exclui a foto em foco");
+    assert!(
+        !na_grade(&e, cx).contains(&"d".to_string()),
+        "e ela sai da grade: {:?}",
+        na_grade(&e, cx)
+    );
 }
 
 /// 🎞️ **A tira da revelação é o recorte da grade, na mesma ordem.**
