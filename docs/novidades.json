@@ -1,9 +1,13 @@
 {
-  "versao": "0.1.84",
-  "titulo": "Na lista de predefinições, a marca azul fica só na que você clicou.",
+  "versao": "0.1.85",
+  "titulo": "Revelação local: o Esc, os gradientes e a Suavização se comportam como no Lightroom.",
   "importante": false,
   "novidades": [
-    "Com duas predefinições de mesmos parâmetros (uma cópia, por exemplo), clicar numa marcava as duas com a barra azul. Agora só a clicada fica marcada; mexer num controle tira a marca, como antes."
+    "O Esc no meio de uma pincelada desiste dela e deixa o pincel na mão; trocar de ferramenta no meio do arrasto também desiste, sem deixar o traço desenhado na foto.",
+    "Um clique sem arrastar com o gradiente linear ou o radial não cria mais uma máscara que ninguém pediu.",
+    "Com uma máscara de radial ou de laço escolhida, a Suavização muda essa máscara na hora, e o ⌘Z volta.",
+    "Segurar ⌥ no primeiro traço de uma máscara nova não a deixa mais vazia, e pintar numa máscara oculta volta a mostrá-la.",
+    "Entrar no Enquadrar larga a ferramenta da Revelação local: o círculo e as marcações não ficam mais por cima do corte."
   ],
-  "por_que_atualizar": "Para saber qual predefinição está na foto."
+  "por_que_atualizar": "Para as máscaras e os retoques fazerem só o que você pediu, sem sobras na foto."
 }
