@@ -1,17 +1,5 @@
 [
   {
-    "versao": "0.1.70",
-    "data": "2026-10-02",
-    "titulo": "O Zerar tudo da Revelação foi para o rodapé.",
-    "importante": false,
-    "novidades": [
-      "Na Revelação, o \"Zerar tudo\" e a contagem do que está fora do neutro saíram do alto da coluna e ficam num rodapé fixo, embaixo dos painéis, como o \"Redefinir\" do Lightroom.",
-      "O botão ficou mais discreto, e a coluna começa direto na aba Adobe RGB e no Básico.",
-      "Com enquadramento ou Revelação local junto, a contagem fica curta (\"36 ajustes + enquadramento\") e não corta mais no meio."
-    ],
-    "por_que_atualizar": "A coluna de ajustes fica mais limpa, e o Zerar tudo continua sempre à mão."
-  },
-  {
     "versao": "0.1.69",
     "data": "2026-10-02",
     "titulo": "Dá para excluir foto à venda da sessão.",
