@@ -1,10 +1,11 @@
 {
-  "versao": "0.1.67",
-  "titulo": "O preço do lote agora mostra que foi aplicado.",
+  "versao": "0.1.68",
+  "titulo": "As predefinições favoritas ficam na sua conta.",
   "importante": false,
   "novidades": [
-    "Com várias fotos selecionadas, o \"Aplicar\" do preço de venda online fica em \"Aplicando…\" até o site confirmar, e então aparece o aviso \"Preço de venda de R$ 100,00 aplicado em 2 fotos\". O \"Voltar à faixa\" também avisa.",
-    "Depois de aplicar, o campo esvazia e o cartão mostra o valor que ficou: \"As 2 fixadas em R$ 100,00\". Antes ele só contava as fixadas, e parecia que nada tinha acontecido."
+    "O coração das predefinições agora fica guardado na sua conta, e não só neste computador: as favoritas aparecem iguais no site e em qualquer balcão em que você entrar.",
+    "Na primeira vez que você entrar depois de atualizar, as favoritas que este computador já tinha sobem para a sua conta sozinhas.",
+    "Se não der para guardar (sem internet), aparece o aviso \"As favoritas não foram guardadas\"."
   ],
-  "por_que_atualizar": "O preço que você aplica nas fotos do pós-venda aparece na hora, sem dúvida se foi gravado."
+  "por_que_atualizar": "Trocar de máquina ou ir do site para o app não esvazia mais as suas favoritas."
 }

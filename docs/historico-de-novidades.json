@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.68",
+    "data": "2026-10-02",
+    "titulo": "As predefinições favoritas ficam na sua conta.",
+    "importante": false,
+    "novidades": [
+      "O coração das predefinições agora fica guardado na sua conta, e não só neste computador: as favoritas aparecem iguais no site e em qualquer balcão em que você entrar.",
+      "Na primeira vez que você entrar depois de atualizar, as favoritas que este computador já tinha sobem para a sua conta sozinhas.",
+      "Se não der para guardar (sem internet), aparece o aviso \"As favoritas não foram guardadas\"."
+    ],
+    "por_que_atualizar": "Trocar de máquina ou ir do site para o app não esvazia mais as suas favoritas."
+  },
+  {
     "versao": "0.1.67",
     "data": "2026-10-02",
     "titulo": "O preço do lote agora mostra que foi aplicado.",
