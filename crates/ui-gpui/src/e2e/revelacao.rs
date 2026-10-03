@@ -102,9 +102,24 @@ fn andar_pela_tira_revelar_e_desfazer_um_gesto_por_vez(cx: &mut TestAppContext) 
             "sair e voltar traz a revelação"
         );
         assert_eq!(tela.ajustes().contrast, contraste);
+        // 📜 A foto reaberta traz o histórico dela, como no Lightroom — e a
+        // foto do site, que volta com o corte escrito por extenso, não ganha
+        // um "Mudou fora da Revelação" à toa.
         assert!(
-            !tela.pode_desfazer(),
-            "a foto reaberta começa um histórico novo"
+            tela.pode_desfazer(),
+            "a foto reaberta traz o histórico dela"
+        );
+        let nomes: Vec<_> = tela
+            .passos_do_historico()
+            .0
+            .iter()
+            .map(|p| p.rotulo.nome.clone())
+            .collect();
+        assert!(
+            !nomes
+                .iter()
+                .any(|n| n == crate::revelacao::historico::DE_FORA),
+            "nada mudou por fora: {nomes:?}"
         );
     });
 }

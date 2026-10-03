@@ -267,7 +267,10 @@ async fn main() {
         || infrastructure::ImageExporterImpl::new().com_editadas(editada_da_foto.clone());
     let gravador: Arc<dyn Gravador> = Arc::new(
         GravadorDoBanco::novo(editor, tokio::runtime::Handle::current(), guardadas)
-            .com_locais_do_site(locais_do_site),
+            .com_locais_do_site(locais_do_site)
+            .com_historico(infrastructure::database::CatalogoDoHistorico::new(
+                pool.clone(),
+            )),
     );
     // 🚨 A releitura do catálogo, pelo mesmo `LibraryController` que leu a lista
     // acima. Sem ela a importação grava no banco e a grade continua com a lista

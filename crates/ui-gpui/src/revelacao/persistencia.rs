@@ -125,6 +125,19 @@ pub trait Gravador: Send + Sync + 'static {
     fn locais_do_site(&self, _foto_no_site: &str) -> Option<String> {
         None
     }
+    /// 📜 O histórico da Revelação gravado para a foto (o JSON de
+    /// `historico.rs`), ou `None` quando não há.
+    ///
+    /// ⚠️ **Bloqueante** — vai ao disco. Só no executor de fundo, como o
+    /// `Edicoes::abrir`: quem pede é a abertura da foto, e o quadro não espera.
+    ///
+    /// O padrão não guarda nada: o histórico começa na abertura, como antes.
+    fn ler_historico(&self, _id: &str) -> Option<String> {
+        None
+    }
+    /// Grava o histórico da foto. Não bloqueia: vai numa tarefa, e a mais nova
+    /// ganha mesmo que termine antes (ver `CatalogoDoHistorico::gravar`).
+    fn gravar_historico(&self, _id: String, _json: String) {}
 }
 
 /// O gravador de verdade: entrega ao `EditorController`, numa tarefa do tokio.
@@ -149,6 +162,13 @@ pub struct GravadorDoBanco {
     /// A revelação local das fotos do site, em memória — espelho de
     /// `locais_do_site` (migration 024). Ver [`Gravador::locais_do_site`].
     locais_do_site: std::sync::Mutex<std::collections::HashMap<String, String>>,
+    /// 📜 Onde o histórico da Revelação mora — ver [`Gravador::ler_historico`].
+    historico: Option<infrastructure::database::CatalogoDoHistorico>,
+    /// A versão da próxima gravação do histórico: microssegundos desde 1970,
+    /// e no mínimo um a mais que a anterior. Pelo relógio, e não um contador
+    /// que recomeça em 1: o catálogo recusa versão menor que a gravada, e um
+    /// contador zerado a cada abertura do app nunca mais gravaria.
+    versao_do_historico: std::sync::atomic::AtomicI64,
 }
 
 impl GravadorDoBanco {
@@ -165,7 +185,32 @@ impl GravadorDoBanco {
             do_site: Arc::new(std::sync::Mutex::new(guardadas.into_iter().collect())),
             locais: std::sync::Mutex::default(),
             locais_do_site: std::sync::Mutex::default(),
+            historico: None,
+            versao_do_historico: std::sync::atomic::AtomicI64::new(0),
         }
+    }
+
+    /// Liga o catálogo do histórico da Revelação (migration 028).
+    pub fn com_historico(
+        mut self,
+        catalogo: infrastructure::database::CatalogoDoHistorico,
+    ) -> Self {
+        self.historico = Some(catalogo);
+        self
+    }
+
+    fn proxima_versao_do_historico(&self) -> i64 {
+        use std::sync::atomic::Ordering;
+        let agora = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_micros() as i64);
+        let anterior = self
+            .versao_do_historico
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |v| {
+                Some(agora.max(v + 1))
+            })
+            .unwrap_or(0);
+        agora.max(anterior + 1)
     }
 
     /// Semeia a revelação local das fotos do site — o que a tabela tinha na
@@ -329,6 +374,30 @@ impl Gravador for GravadorDoBanco {
 
     fn parametros_de(&self, id: &str) -> Option<Parametros> {
         self.locais.lock().ok()?.get(id).copied()
+    }
+
+    fn ler_historico(&self, id: &str) -> Option<String> {
+        let catalogo = self.historico.clone()?;
+        let id = id.to_string();
+        match self.tokio.block_on(async move { catalogo.ler(&id).await }) {
+            Ok(json) => json,
+            Err(erro) => {
+                crate::telemetria::avisar!("⚠️ [Histórico] não foi lido: {erro}");
+                None
+            }
+        }
+    }
+
+    fn gravar_historico(&self, id: String, json: String) {
+        let Some(catalogo) = self.historico.clone() else {
+            return;
+        };
+        let versao = self.proxima_versao_do_historico();
+        self.tokio.spawn(async move {
+            if let Err(erro) = catalogo.gravar(&id, &json, versao).await {
+                crate::telemetria::avisar!("⚠️ [Histórico] o de {id} não foi gravado: {erro}");
+            }
+        });
     }
 
     fn gravar_locais(&self, id: String, locais: Option<String>) {
@@ -815,6 +884,8 @@ pub mod mentira {
         pub no_catalogo: Mutex<Option<Box<dyn Fn(&str, Ajustes, Corte) + Send>>>,
         /// Cada gravação da revelação local, na ordem.
         locais: Mutex<Vec<(String, Option<String>)>>,
+        /// 📜 O histórico de cada foto, como se estivesse no catálogo.
+        pub historicos: Mutex<std::collections::HashMap<String, String>>,
     }
 
     impl GravadorDeMentira {
@@ -884,6 +955,21 @@ pub mod mentira {
                 .lock()
                 .expect("as gravações locais")
                 .push((id, locais));
+        }
+
+        fn ler_historico(&self, id: &str) -> Option<String> {
+            self.historicos
+                .lock()
+                .expect("os históricos")
+                .get(id)
+                .cloned()
+        }
+
+        fn gravar_historico(&self, id: String, json: String) {
+            self.historicos
+                .lock()
+                .expect("os históricos")
+                .insert(id, json);
         }
 
         fn locais_do_site(&self, foto_no_site: &str) -> Option<String> {

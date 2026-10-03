@@ -393,7 +393,8 @@ impl Revelacao {
         self.pedir_revelacao_cruzando(cx);
         // O corte não passa pela GPU: quem o mostra é a exibição.
         self.atualizar_exibicao();
-        self.historico.registrar(self.estado());
+        self.historico
+            .registrar_como(self.estado(), "Redefinir configurações");
         self.gravar();
         // 🚨 **A prévia local vai junto.** Ela é o que a grade e a tira mostram
         // enquanto a foto não sobe; deixá-la aqui faria o "Zerar tudo" mudar o

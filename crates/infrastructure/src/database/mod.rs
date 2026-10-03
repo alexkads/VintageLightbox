@@ -5,6 +5,7 @@
 pub mod collection_repository;
 pub mod desempenho;
 pub mod edicoes;
+pub mod historico_da_revelacao;
 pub mod photo_repository;
 pub mod preset_repository;
 pub mod revelacoes_do_site;
@@ -12,6 +13,7 @@ pub mod revelacoes_do_site;
 pub use collection_repository::CollectionRepositoryImpl;
 pub use desempenho::SqliteDesempenho;
 pub use edicoes::{CatalogoDeEdicoes, EdicaoRegistrada};
+pub use historico_da_revelacao::CatalogoDoHistorico;
 pub use photo_repository::PhotoRepositoryImpl;
 pub use preset_repository::SqlitePresetRepository;
 pub use revelacoes_do_site::SqliteRevelacoesDoSite;
