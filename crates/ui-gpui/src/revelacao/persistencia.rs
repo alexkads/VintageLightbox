@@ -744,10 +744,11 @@ pub fn para_crop_settings(corte: &Corte) -> CropSettings {
 /// meio. Sincronizar a partir dela mandava o neutro às outras.
 pub fn de_json(json: &serde_json::Value) -> (Ajustes, Corte) {
     // A foto revelada com o RecordarFotos P&B do darktable (os `dt_*`, que
-    // saíram do motor em 2/out/2026) abre com o de hoje — e não colorida.
+    // saíram do motor em 2/out/2026) abre com o de hoje — e não colorida —, e
+    // a da vinheta antiga do P&B (0.1.70 a 0.1.77) abre com a de hoje.
     let migrado;
     let json = match json.as_object() {
-        Some(receita) if receita.keys().any(|k| k.starts_with("dt_")) => {
+        Some(receita) if use_cases::presets::receita_a_migrar(receita) => {
             let mut receita = receita.clone();
             use_cases::presets::migrar_do_darktable(&mut receita);
             migrado = serde_json::Value::Object(receita);
@@ -1647,5 +1648,35 @@ mod testes {
         assert_eq!(ajustes.pcv_amount, 78.0, "sem a vinheta do P&B");
         assert!(!ajustes.vinheta_do_darktable_ligada());
         assert_eq!(corte.largura, Some(0.9), "o corte da foto fica");
+    }
+
+    /// 🔲 A foto revelada com o P&B de 2/out/2026 (0.1.70 a 0.1.77) guardou a
+    /// vinheta do darktable ligada, e reabria com a borda quase branca por cima
+    /// do que o preset é hoje (dono, 3/out/2026). Abre com a de hoje.
+    #[test]
+    fn a_foto_do_pb_de_ontem_abre_com_a_vinheta_de_hoje() {
+        let json = serde_json::json!({
+            "bw_ativo": 1.0,
+            "processo": 1.0,
+            "exposure": 0.29,
+            "darktable_vignette_ativo": 1.0,
+            "darktable_vignette_scale": 87.82,
+            "darktable_vignette_falloff_scale": 45.51,
+            "darktable_vignette_brightness": 0.99999,
+            "darktable_vignette_saturation": 0.147,
+            "darktable_vignette_autoratio": 1.0,
+            "darktable_vignette_shape": 0.48,
+            "pcv_amount": 0.0,
+            "corte_largura": 0.9
+        });
+        let (ajustes, corte) = de_json(&json);
+        assert!(
+            !ajustes.vinheta_do_darktable_ligada(),
+            "a borda branca voltou"
+        );
+        assert_eq!(ajustes.pcv_amount, 78.0);
+        assert_eq!(ajustes.pcv_style, 2.0);
+        assert_eq!(ajustes.exposure, 0.29);
+        assert_eq!(corte.largura, Some(0.9));
     }
 }
