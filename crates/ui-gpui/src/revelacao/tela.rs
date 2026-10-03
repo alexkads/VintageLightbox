@@ -7373,6 +7373,19 @@ mod testes {
                     tela.em_uso(&pb) && !tela.em_uso(&sepia),
                     "a marca muda de linha"
                 );
+                // Uma gêmea com os mesmos parâmetros também bate com a foto,
+                // mas a marca fica só na clicada.
+                let mut gemea = pb.clone();
+                gemea.id = domain::entities::PresetId::new();
+                gemea.name = "P&B da casa".into();
+                gemea.is_system = false;
+                assert!(!tela.em_uso(&gemea), "a gêmea não foi clicada");
+                tela.aplicar_preset(&gemea, window, cx);
+                assert!(
+                    tela.em_uso(&gemea) && !tela.em_uso(&pb),
+                    "uma marca só, na última clicada"
+                );
+                tela.aplicar_preset(&pb, window, cx);
                 // O P&B recomeça do neutro: qualquer controle mexido depois
                 // faz a foto deixar de ser "o P&B".
                 assert!(super::super::presets::substitui(&pb));

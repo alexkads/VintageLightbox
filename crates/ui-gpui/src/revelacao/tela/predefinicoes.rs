@@ -120,6 +120,10 @@ pub(super) struct Predefinicoes {
         std::sync::mpsc::Sender<Gravacao>,
         std::sync::mpsc::Receiver<Gravacao>,
     ),
+    /// A última predefinição clicada (chave da ordem) e a foto que ela deixou.
+    /// Duas com os mesmos parâmetros batem com a foto igual; enquanto nada
+    /// mudar, só a clicada leva a marca.
+    pub aplicada: Option<(String, Ajustes)>,
     /// A predefinição que espera o "Apagar" ou o "Cancelar".
     pub pergunta: Modal<(PresetId, String)>,
     foco_da_pergunta: Option<FocusHandle>,
@@ -152,6 +156,7 @@ impl Default for Predefinicoes {
             alvo_do_menu: None,
             exportando: None,
             exportacao: std::sync::mpsc::channel(),
+            aplicada: None,
             focos: RefCell::new(HashMap::new()),
             pergunta: Modal::default(),
             foco_da_pergunta: None,
@@ -333,6 +338,7 @@ impl Revelacao {
         self.gravar_o_que_estiver_pendente();
 
         self.ajustes = presets::aplicado(&self.ajustes, preset);
+        self.predefinicoes.aplicada = Some((ordem::chave(preset), self.ajustes.clone()));
         self.espalhar_nos_sliders(window, cx);
         self.pedir_revelacao_cruzando(cx);
         self.historico.registrar(self.estado());
@@ -944,8 +950,18 @@ impl Revelacao {
     /// ✔️ A predefinição é o que está na foto: aplicá-la de novo não mudaria
     /// nada. Mexeu num controle que ela define, a marca sai — a foto já não é
     /// "esta predefinição".
+    ///
+    /// Mais de uma pode bater (mesmos parâmetros, ou uma que só define parte
+    /// do que a outra define): logo depois do clique, a marca é só da clicada.
     pub(super) fn em_uso(&self, preset: &Preset) -> bool {
-        !preset.adjustments.is_empty() && presets::aplicado(&self.ajustes, preset) == self.ajustes
+        if preset.adjustments.is_empty() || presets::aplicado(&self.ajustes, preset) != self.ajustes
+        {
+            return false;
+        }
+        match &self.predefinicoes.aplicada {
+            Some((chave, foto)) if *foto == self.ajustes => *chave == ordem::chave(preset),
+            _ => true,
+        }
     }
 
     /// Se as linhas podem ser arrastadas agora.
