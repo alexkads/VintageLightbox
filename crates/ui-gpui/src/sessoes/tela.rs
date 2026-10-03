@@ -3249,6 +3249,11 @@ impl Sessoes {
             };
             div()
                 .id(SharedString::from(format!("sessao-{}", sessao.id)))
+                // O e2e do ciclo de vida abre a sessão pela linha, como o operador.
+                .debug_selector({
+                    let id = sessao.id.clone();
+                    move || format!("sessao-{id}")
+                })
                 .flex()
                 .items_center()
                 .flex_none()

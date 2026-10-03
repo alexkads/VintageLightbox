@@ -151,6 +151,17 @@ pub const TENTATIVAS: u8 = 3;
 /// segundos.
 pub const RECUO: Duration = Duration::from_millis(400);
 
+/// 🌪️ **A piscada da rede ganha mais fôlego** (03/out/2026). Três tentativas em
+/// pouco mais de um segundo não cobriam o Wi-Fi que some por alguns segundos:
+/// a foto ficava sem subir (o cliente não a via nem a comprava) e a revelação
+/// ficava "recusada" até alguém reenviar. Na falha **passageira** (sem resposta,
+/// ou 5xx) são até oito tentativas, com a espera dobrando a cada uma — cerca de
+/// 50 s de rede ruim. A recusa de regra (4xx) segue desistindo em três.
+pub const TENTATIVAS_NA_PISCADA: u8 = 8;
+
+/// O teto da espera entre duas tentativas na piscada.
+pub const RECUO_MAXIMO: Duration = Duration::from_secs(30);
+
 /// Um trabalho e quantas vezes ele já foi tentado.
 #[derive(Debug, Clone)]
 struct NaEsteira {
@@ -287,6 +298,17 @@ impl Esteira {
     /// como saber se a resposta é sequer desta esteira, e era assim até
     /// 18/set/2026 (`Recado::Falhou` levava só a frase).
     pub fn respondeu(&mut self, alvo: &str, falhou: bool) -> Desfecho {
+        self.respondeu_com(alvo, falhou, false)
+    }
+
+    /// [`Self::respondeu`] sabendo se a falha é **passageira** (a rede, um
+    /// 5xx): essa tenta até [`TENTATIVAS_NA_PISCADA`] vezes, com a espera
+    /// dobrando.
+    pub fn respondeu_falha(&mut self, alvo: &str, passageira: bool) -> Desfecho {
+        self.respondeu_com(alvo, true, passageira)
+    }
+
+    fn respondeu_com(&mut self, alvo: &str, falhou: bool, passageira: bool) -> Desfecho {
         let Some(mut item) = self.no_ar.remove(alvo) else {
             return Desfecho::NaoEraMeu;
         };
@@ -297,10 +319,20 @@ impl Esteira {
             return Desfecho::Feito;
         }
         item.tentativas += 1;
-        if item.tentativas < TENTATIVAS {
+        let limite = if passageira {
+            TENTATIVAS_NA_PISCADA
+        } else {
+            TENTATIVAS
+        };
+        if item.tentativas < limite {
+            let daqui_a = if passageira {
+                (RECUO * 2u32.pow(u32::from(item.tentativas) - 1)).min(RECUO_MAXIMO)
+            } else {
+                RECUO * u32::from(item.tentativas)
+            };
             let desfecho = Desfecho::VaiRepetir {
                 alvo: alvo.to_string(),
-                daqui_a: RECUO * u32::from(item.tentativas),
+                daqui_a,
                 tentativa: item.tentativas,
             };
             // 🔑 **No fim da fila, e não na frente**: a foto que falhou espera a
@@ -485,6 +517,37 @@ mod testes {
         let (canal, _recebe) = channel();
         esteira.despachar(publicador.as_ref(), &sessao(), &canal);
         assert_eq!(esteira.empurrar(revelacao(3.0)), Entrada::JaNoAr);
+    }
+
+    /// 🌪️ **A piscada da rede tem fôlego**: na falha passageira a foto tenta
+    /// até [`TENTATIVAS_NA_PISCADA`] vezes, com a espera dobrando (e com teto).
+    #[test]
+    fn a_falha_passageira_tenta_oito_vezes_com_a_espera_dobrando() {
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        let (canal, _recebe) = channel();
+        let mut esteira = Esteira::default();
+        esteira.empurrar(classificada("a"));
+        let mut esperas = Vec::new();
+        for _ in 1..TENTATIVAS_NA_PISCADA {
+            esteira.despachar(publicador.as_ref(), &sessao(), &canal);
+            match esteira.respondeu_falha("a", true) {
+                Desfecho::VaiRepetir { daqui_a, .. } => esperas.push(daqui_a),
+                outro => panic!("desistiu cedo: {outro:?}"),
+            }
+        }
+        assert_eq!(esperas[0], RECUO);
+        assert_eq!(esperas[1], RECUO * 2);
+        assert_eq!(esperas[2], RECUO * 4);
+        assert!(esperas.iter().all(|e| *e <= RECUO_MAXIMO));
+        esteira.despachar(publicador.as_ref(), &sessao(), &canal);
+        assert!(matches!(
+            esteira.respondeu_falha("a", true),
+            Desfecho::Desistiu { tentativas } if tentativas == TENTATIVAS_NA_PISCADA
+        ));
+        assert_eq!(
+            publicador.subidas().len(),
+            usize::from(TENTATIVAS_NA_PISCADA)
+        );
     }
 
     /// 🚨 **A foto que falha volta para a fila** — e só depois de

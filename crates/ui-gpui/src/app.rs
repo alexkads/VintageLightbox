@@ -3668,7 +3668,12 @@ impl Aplicativo {
                 PosVendaRecado::EnvioFalhou { alvo, .. } if self.tiradas_do_site.contains(alvo) => {
                     self.esteira.respondeu(alvo, false)
                 }
-                PosVendaRecado::EnvioFalhou { alvo, .. } => self.esteira.respondeu(alvo, true),
+                // 🌪️ A piscada da rede (sem resposta, 5xx) ganha mais fôlego
+                // que a recusa de regra — ver `envios::TENTATIVAS_NA_PISCADA`.
+                PosVendaRecado::EnvioFalhou { alvo, frase } => self.esteira.respondeu_falha(
+                    alvo,
+                    infrastructure::pos_venda::http::erro_passageiro(frase),
+                ),
                 _ => crate::envios::Desfecho::NaoEraMeu,
             };
             let vai_repetir = self.cuidar_da_repeticao(&desfecho, cx);

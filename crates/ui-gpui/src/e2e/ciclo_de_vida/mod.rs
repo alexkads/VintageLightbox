@@ -435,6 +435,18 @@ fn abrir_o_balcao(
     cartao: &[String],
     rotulo: &str,
 ) -> Balcao {
+    abrir_o_balcao_no_catalogo(cx, servidor, cartao, rotulo, true)
+}
+
+/// [`abrir_o_balcao`], ou a reabertura no catálogo que o cenário já usou
+/// (`novo = false`) — o app que fechou no meio do trabalho e voltou.
+fn abrir_o_balcao_no_catalogo(
+    cx: &mut TestAppContext,
+    servidor: &Servidor,
+    cartao: &[String],
+    rotulo: &str,
+    novo: bool,
+) -> Balcao {
     // 🚨 Nunca o catálogo desta máquina: sem `VLB_CATALOG`, nada abre. Cada
     // cenário tem o seu, dentro dele.
     let catalogo = std::env::var_os("VLB_CATALOG")
@@ -445,15 +457,21 @@ fn abrir_o_balcao(
         .join(rotulo);
     std::fs::create_dir_all(&catalogo).expect("a pasta do catálogo");
     assert!(
-        std::fs::read_dir(&catalogo)
-            .expect("ler o catálogo")
-            .next()
-            .is_none(),
+        !novo
+            || std::fs::read_dir(&catalogo)
+                .expect("ler o catálogo")
+                .next()
+                .is_none(),
         "🚨 o catálogo do cenário tem de nascer vazio: {}",
         catalogo.display()
     );
 
     cx.update(|cx| {
+        if !novo {
+            // A segunda abertura no mesmo processo: o kit e as teclas já
+            // estão de pé.
+            return;
+        }
         gpui_kit::init(cx);
         cx.set_reduce_motion(true);
         crate::tema::aplicar(crate::tema::Escolha::Claro, None, cx);
@@ -614,6 +632,8 @@ impl Falhas {
 /// nunca esbarra no de outro.
 struct Cena {
     b: Balcao,
+    rotulo: String,
+    arquivos: Vec<String>,
     site: Http,
     servidor: Servidor,
     tokio: tokio::runtime::Handle,
@@ -688,6 +708,8 @@ fn preparar(cx: &mut TestAppContext, rotulo: &str, fotos: u32) -> Cena {
     );
     Cena {
         b,
+        rotulo: rotulo.to_string(),
+        arquivos,
         site,
         servidor,
         tokio,
@@ -699,6 +721,35 @@ fn preparar(cx: &mut TestAppContext, rotulo: &str, fotos: u32) -> Cena {
             .to_string(),
         _cartao: cartao,
     }
+}
+
+/// 💥 **O app fecha de supetão** — a janela some e as tarefas dele morrem no
+/// meio do que faziam — e abre de novo no mesmo catálogo, com a mesma conta.
+fn fechar_de_supetao_e_reabrir(cx: &mut TestAppContext, c: &mut Cena) {
+    let raiz = c.b.raiz;
+    cx.update_window(raiz.into(), |_, window, _| window.remove_window())
+        .expect("a janela estava aberta");
+    cx.run_until_parked();
+    let nova = abrir_o_balcao_no_catalogo(cx, &c.servidor, &c.arquivos, &c.rotulo, false);
+    let velha = std::mem::replace(&mut c.b, nova);
+    // O tokio do app velho morre aqui: o que ele fazia, morre junto.
+    drop(velha);
+    c.tokio = c.b._tokio.handle().clone();
+    c.site = Http::novo(
+        c.tokio.clone(),
+        &c.servidor.api_direta,
+        Some(c.servidor.sessao.access_token.clone()),
+    );
+    c.falhas = Falhas {
+        http: Http::novo(c.tokio.clone(), &c.servidor.controle, None),
+        base: c.servidor.controle.clone(),
+    };
+    c.b.app(cx, |app, _w, cx| {
+        app.entrar_na_conta(c.servidor.sessao.clone(), cx)
+    });
+    c.b.ate(cx, "o app reabre e entra na conta", |b, cx| {
+        b.app(cx, |app, _w, _cx| app.entrou())
+    });
 }
 
 /// 🎬 Ato da criação: "Nova sessão" → "Escolher fotos" → título, e-mail, preço
@@ -722,6 +773,20 @@ fn criar_a_sessao_com(
     email: &str,
     antes_de_criar: &dyn Fn(),
 ) -> (String, Vec<String>) {
+    let galeria = iniciar_a_sessao(cx, c, titulo, email, antes_de_criar);
+    let fotos = conferir_a_sessao_criada(cx, c, &galeria, titulo, email);
+    (galeria, fotos)
+}
+
+/// O assistente até o "Criar", e o app dentro da sessão nova — sem esperar a
+/// subida das fotos. Devolve o id da galeria.
+fn iniciar_a_sessao(
+    cx: &mut TestAppContext,
+    c: &Cena,
+    titulo: &str,
+    email: &str,
+    antes_de_criar: &dyn Fn(),
+) -> String {
     let b = &c.b;
     let quantas = c._cartao.path().read_dir().map(|d| d.count()).unwrap_or(0);
     b.clicar(cx, "sessoes-nova");
@@ -772,10 +837,24 @@ fn criar_a_sessao_com(
         .detalhe(cx, |tela, _w, _cx| tela.galeria_id().map(str::to_string))
         .expect("a galeria criada");
 
+    galeria
+}
+
+/// A galeria na API (título, estúdio, produto, e-mail) e as fotos subidas, sem
+/// nenhuma a mais; devolve os ids delas pela ordem.
+fn conferir_a_sessao_criada(
+    cx: &mut TestAppContext,
+    c: &Cena,
+    galeria: &str,
+    titulo: &str,
+    email: &str,
+) -> Vec<String> {
+    let b = &c.b;
+    let quantas = c.arquivos.len();
     let lista = c.site.get("/pos-venda/galerias");
     let na_lista = lista
         .as_array()
-        .and_then(|l| l.iter().find(|g| g["id"] == galeria.as_str()))
+        .and_then(|l| l.iter().find(|g| g["id"] == galeria))
         .unwrap_or_else(|| panic!("a sessão nova não está na lista do painel: {lista}"));
     assert_eq!(na_lista["titulo"], titulo);
     let aberta = c.site.get(&format!("/pos-venda/galerias/{galeria}"));
@@ -784,12 +863,12 @@ fn criar_a_sessao_com(
     assert_eq!(aberta["galeria"]["email"], email);
 
     b.ate_na_api(cx, "as fotos sobem ao site", || {
-        let n = fotos_no_painel(&c.site, &galeria).len();
+        let n = fotos_no_painel(&c.site, galeria).len();
         (n == quantas)
             .then_some(())
             .ok_or(format!("{n} de {quantas}"))
     });
-    let no_painel = fotos_no_painel(&c.site, &galeria);
+    let no_painel = fotos_no_painel(&c.site, galeria);
     let fotos: Vec<String> = no_painel
         .iter()
         .map(|f| f["id"].as_str().expect("o id da foto").to_string())
@@ -806,7 +885,7 @@ fn criar_a_sessao_com(
         })
     });
     b.ato_limpo(cx, "a criação da sessão");
-    (galeria, fotos)
+    fotos
 }
 
 /// ⭐🛍️ Dá a nota e leva no balcão (`B`) cada foto, pelas setas e teclas.

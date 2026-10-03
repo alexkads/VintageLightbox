@@ -37,6 +37,21 @@ struct PublicadorDoCaixa {
     caixa_falha: bool,
 }
 
+
+/// O corpo de uma gravação do caixa sem a chave de idempotência — que tem de
+/// vir, e não vazia: é ela que impede a resposta perdida de gravar duas vezes.
+fn sem_a_chave(corpo: &Option<serde_json::Value>) -> Option<serde_json::Value> {
+    let mut corpo = corpo.clone()?;
+    let chave = corpo
+        .as_object_mut()
+        .and_then(|o| o.remove("chave"))
+        .unwrap_or_else(|| panic!("a gravação do caixa sem chave: {corpo}"));
+    assert!(
+        chave.as_str().is_some_and(|c| !c.is_empty()),
+        "a chave vem preenchida: {chave}"
+    );
+    Some(corpo)
+}
 fn venda_json(id: &str, numero: i64, fotos: &[&str], total: i64) -> Value {
     json!({
         "id": id, "numero": numero, "caixa_id": "cx", "galeria_id": "g1",
@@ -400,7 +415,7 @@ fn f8_com_o_caixa_fechado_abre_e_grava_o_fundo(cx: &mut TestAppContext) {
     assert_eq!(gravadas.len(), 1);
     assert_eq!(gravadas[0].caminho, "/pos-venda/caixa");
     assert_eq!(
-        gravadas[0].corpo,
+        sem_a_chave(&gravadas[0].corpo),
         Some(json!({ "estudio_id": "e1", "fundo_de_troco_centavos": 20000 }))
     );
     com(cx, &j, |t, _, _| {
@@ -498,7 +513,7 @@ fn a_sangria_confere_e_grava(cx: &mut TestAppContext) {
     });
     colher(cx, &j);
     assert_eq!(
-        publicador.gravacoes()[0].corpo,
+        sem_a_chave(&publicador.gravacoes()[0].corpo),
         Some(json!({
             "estudio_id": "e1", "tipo": "sangria", "valor_centavos": 3000, "motivo": "depósito"
         }))
@@ -529,7 +544,7 @@ fn o_estorno_devolve_e_des_sinaliza_foto_a_foto(cx: &mut TestAppContext) {
     assert_eq!(gravadas.len(), 2, "{gravadas:?}");
     assert_eq!(gravadas[0].caminho, "/pos-venda/caixa/vendas/v0/estornos");
     assert_eq!(
-        gravadas[0].corpo,
+        sem_a_chave(&gravadas[0].corpo),
         Some(json!({
             "fotos": ["c"], "valor_centavos": 2500, "motivo": "desistiu",
             "pagamentos": [{ "forma": "pix", "valor_centavos": 2500, "detalhe": null }]
@@ -586,7 +601,7 @@ fn o_fechamento_conta_as_cegas_confere_e_so_depois_fecha(cx: &mut TestAppContext
     assert_eq!(gravadas.len(), 2);
     assert_eq!(gravadas[1].caminho, "/pos-venda/caixa/fechar");
     assert_eq!(
-        gravadas[1].corpo,
+        sem_a_chave(&gravadas[1].corpo),
         Some(json!({ "estudio_id": "e1", "contado": { "dinheiro": 10000 }, "observacao": null }))
     );
     // O resultado fica na tela; outro Enter não grava de novo.

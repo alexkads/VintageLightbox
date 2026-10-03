@@ -8,7 +8,8 @@
 use super::*;
 
 /// 🌪️ **A subida das fotos com a rede oscilando**: duas respostas perdidas
-/// (a API gravou a foto) e duas quedas antes de chegar. No fim, as seis estão
+/// (a API gravou a foto) e seis quedas antes de chegar — mais do que as três
+/// tentativas antigas aguentavam. No fim, as seis estão
 /// no site — nenhuma perdida, nenhuma em dobro — e a fila do balcão esvazia.
 #[gpui_kit::test]
 #[ignore = "precisa da API de teste: rode `make e2e-ciclo`"]
@@ -24,7 +25,7 @@ fn a_rede_oscila_na_subida_e_nenhuma_foto_se_perde_nem_duplica(cx: &mut TestAppC
                 "metodo": "POST", "caminho": "/fotos", "modo": "engolir", "vezes": 2
             }));
             c.falhas.programar(json!({
-                "metodo": "POST", "caminho": "/fotos", "modo": "cair", "vezes": 2
+                "metodo": "POST", "caminho": "/fotos", "modo": "cair", "vezes": 6
             }));
         },
     );
@@ -290,4 +291,140 @@ fn vender_com_as_fotos_ainda_subindo(cx: &mut TestAppContext) {
         "as três levadas cobradas"
     );
     b.ato_limpo(cx, "vender com as fotos subindo");
+}
+
+/// 💥 **O app fecha de supetão no meio da subida.** A rede está caída, as fotos
+/// não sobem, o operador já deu nota e levou duas — marcas que só existem no
+/// disco —, e o app some. A rede volta, o app reabre no mesmo catálogo: as
+/// quatro sobem, nenhuma em dobro, e as duas marcas chegam ao site.
+#[gpui_kit::test]
+#[ignore = "precisa da API de teste: rode `make e2e-ciclo`"]
+fn o_app_fecha_no_meio_da_subida_e_ao_reabrir_nada_se_perde(cx: &mut TestAppContext) {
+    let mut c = preparar(cx, "operacional-reabrir", 4);
+    let galeria = iniciar_a_sessao(
+        cx,
+        &c,
+        "App fechado no meio",
+        "cliente-reabrir@e2e.test",
+        &|| {
+            c.falhas.programar(json!({
+                "metodo": "POST", "caminho": "/fotos", "modo": "cair", "vezes": 0
+            }));
+        },
+    );
+    c.b.ate(cx, "as quatro aparecem na grade, sem subir", |b, cx| {
+        b.detalhe(cx, |t, _w, _cx| t.ids_visiveis().len() == 4)
+    });
+    let marcadas: Vec<String> = c.b.detalhe(cx, |t, _w, _cx| t.ids_visiveis())[..2].to_vec();
+    for id in &marcadas {
+        c.b.ir_na_grade(cx, id);
+        c.b.teclar(cx, "5");
+        c.b.teclar(cx, "b");
+    }
+    assert!(
+        fotos_no_painel(&c.site, &galeria).is_empty(),
+        "nada subiu ainda"
+    );
+
+    fechar_de_supetao_e_reabrir(cx, &mut c);
+    c.falhas.limpar();
+    // A retomada leva de volta à sessão (0.1.79); se não levar, o operador a abre.
+    let voltou = {
+        let ate = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            c.b.respirar(cx);
+            if c.b.app(cx, |app, _w, _cx| app.tela() == Tela::Sessao) {
+                break true;
+            }
+            if std::time::Instant::now() > ate {
+                break false;
+            }
+        }
+    };
+    if !voltou {
+        // Depois de um fechamento brusco não há onde voltar: o operador abre a
+        // sessão pela linha da lista.
+        c.b.ate(cx, "a sessão aparece na lista", |b, cx| {
+            b.app(cx, |app, _w, _cx| app.tela() == Tela::Sessoes)
+        });
+        c.b.clicar(cx, &format!("sessao-{galeria}"));
+    }
+    let fotos = conferir_a_sessao_criada(
+        cx,
+        &c,
+        &galeria,
+        "App fechado no meio",
+        "cliente-reabrir@e2e.test",
+    );
+    assert_eq!(fotos.len(), 4);
+    c.b.ate_na_api(
+        cx,
+        "as duas marcas feitas antes de fechar chegam ao site",
+        || {
+            let levadas: Vec<(Option<i64>, String)> = fotos_no_painel(&c.site, &galeria)
+                .iter()
+                .filter(|f| f["estado"] == "levada_no_balcao")
+                .map(|f| {
+                    (
+                        f["nota"].as_i64(),
+                        f["arquivo"].as_str().unwrap_or("").to_string(),
+                    )
+                })
+                .collect();
+            (levadas.len() == 2 && levadas.iter().all(|(n, _)| *n == Some(5)))
+                .then_some(())
+                .ok_or(format!("{levadas:?}"))
+        },
+    );
+}
+
+/// 🌪️ **Salvar a revelação com a rede caindo**: o operador clica em "Salvar na
+/// galeria" e volta ao cliente; as cinco primeiras idas da revelação ao site
+/// caem (a política antiga desistia na terceira). Ela chega sozinha depois — sem o operador refazer — e o bruto fica.
+#[gpui_kit::test]
+#[ignore = "precisa da API de teste: rode `make e2e-ciclo`"]
+fn salvar_a_revelacao_com_a_rede_caindo_chega_depois(cx: &mut TestAppContext) {
+    let c = preparar(cx, "operacional-revelacao", 1);
+    let (galeria, fotos) = criar_a_sessao(
+        cx,
+        &c,
+        "Revelação com a rede caindo",
+        "cliente-revela@e2e.test",
+    );
+    let foto = fotos[0].clone();
+    let (_, bruto_antes) = c.site.bytes(&format!("/pos-venda/fotos/{foto}/original"));
+    c.b.ir_na_grade(cx, &foto);
+    c.b.clicar(cx, "sessao-revelar");
+    c.b.ate(cx, "a Revelação abre com a foto", |b, cx| {
+        b.revelacao(cx, |tela, _w, _cx| tela.tem_pixels())
+    });
+    let predefinicao = c.b.revelacao(cx, |tela, _w, cx| {
+        tela.coluna_de_predefinicoes(cx)
+            .0
+            .first()
+            .cloned()
+            .expect("há predefinições")
+    });
+    c.b.clicar(cx, &format!("predefinicao-{predefinicao}"));
+    c.b.revelacao(cx, |tela, _w, cx| tela.arrastar_slider(0, 0.6, cx));
+    c.falhas.programar(json!({
+        "metodo": "POST", "caminho": "/bilhete-de-revelacao", "modo": "cair", "vezes": 5
+    }));
+    c.b.clicar(cx, "revelacao-salvar-na-galeria");
+    c.b.ate(cx, "o Salvar devolve o operador à sessão", |b, cx| {
+        b.app(cx, |app, _w, _cx| app.tela() == Tela::Sessao)
+    });
+    c.b.ate_na_api(cx, "a revelação chega ao site depois das quedas", || {
+        let f = foto_no_painel(&c.site, &galeria, &foto).ok_or("sumiu")?;
+        let exposicao = f["ajustes"]["exposure"].as_f64().unwrap_or(f64::NAN);
+        (!f["revelada_em"].is_null() && (exposicao - 0.6).abs() < 1e-3)
+            .then_some(())
+            .ok_or(format!("ainda não: {}", f["ajustes"]))
+    });
+    c.b.ate(cx, "a fila de envios esvazia", |b, cx| {
+        b.app(cx, |app, _w, _cx| app.a_subir_para_teste().is_empty())
+    });
+    let (_, bruto_depois) = c.site.bytes(&format!("/pos-venda/fotos/{foto}/original"));
+    assert!(bruto_antes == bruto_depois, "o bruto nunca muda");
+    c.b.ato_limpo(cx, "a revelação com a rede caindo");
 }
