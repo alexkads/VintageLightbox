@@ -476,4 +476,23 @@ mod testes {
         assert!(imagem("capa-canela.jpeg").is_some());
         assert!(imagem("selo.png").is_some());
     }
+
+    /// 🎨 A foto das amostras de preset é colorida: numa sépia ou P&B, "Preto
+    /// e branco", "Sépia" e "RecordarFotos P&B" saem iguais (dono, 03/10/2026).
+    #[test]
+    fn a_foto_das_amostras_e_colorida() {
+        let bytes = imagem("amostra-casal.jpeg").expect("embutida");
+        let foto = image::load_from_memory(bytes).unwrap().to_rgb8();
+        let coloridos = foto
+            .pixels()
+            .filter(|p| {
+                let [r, g, b] = p.0.map(i32::from);
+                (r - g).abs().max((g - b).abs()).max((r - b).abs()) > 60
+            })
+            .count();
+        assert!(
+            coloridos * 20 > foto.pixels().len(),
+            "só {coloridos} pixels com cor"
+        );
+    }
 }

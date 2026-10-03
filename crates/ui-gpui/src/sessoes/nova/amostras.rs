@@ -2,8 +2,11 @@
 //! (`amostra-de-presets/` do site; dono, 2026-09-13: *"os presets deveriam ter
 //! uma amostra"*).
 //!
-//! A foto é a primeira do rascunho que tem prévia; sem nenhuma, a capa do
-//! estúdio que vem com o app. A revelação é do motor, numa thread só dela,
+//! A foto é a primeira do rascunho que tem prévia; sem nenhuma, o casal do
+//! estúdio que vem com o app (`imagens/amostra-casal.jpeg`). 🎨 **Colorida de
+//! propósito** (dono, 03/10/2026): a capa sépia que servia antes deixava
+//! "Preto e branco", "Sépia" e "RecordarFotos P&B" iguais — numa foto que já é
+//! sépia não há o que comparar. A revelação é do motor, numa thread só dela,
 //! em miniatura — o quadro do cartão recorta no centro, na proporção do corte
 //! escolhido, que é o mesmo retângulo que o corte centralizado grava.
 //!
@@ -42,7 +45,7 @@ type Respostas = (
 );
 
 pub struct Amostras {
-    /// De onde a base saiu (`None` = a capa embutida).
+    /// De onde a base saiu (`None` = a foto embutida).
     origem: Option<Option<String>>,
     base: Option<Arc<Base>>,
     prontas: HashMap<String, Arc<RenderImage>>,
@@ -75,7 +78,7 @@ impl Amostras {
             return;
         }
         let imagem = imagem().or_else(|| {
-            crate::recursos::imagem("capa-canela.jpeg")
+            crate::recursos::imagem("amostra-casal.jpeg")
                 .and_then(|bytes| image::load_from_memory(bytes).ok())
         });
         let Some(imagem) = imagem else {
