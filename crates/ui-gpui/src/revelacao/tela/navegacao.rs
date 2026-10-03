@@ -21,7 +21,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use gpui_kit::component::button::Button;
+use gpui_kit::component::button::ButtonVariants as _;
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Disableable, Icon, Sizable};
@@ -38,9 +38,8 @@ use crate::revelacao::zoom::{self, Cena, EstadoDoZoom, Medidas, Nivel, Ponto, Vi
 /// A caixa da miniatura do navegador: a coluna de 224 px menos o respiro.
 const LARGURA_DO_NAVEGADOR: f32 = 208.;
 const ALTURA_DO_NAVEGADOR: f32 = 156.;
-/// O slider da barra do palco e o navegador flutuante, nas medidas da prévia.
+/// O slider da barra do palco e o navegador flutuante, nas larguras da prévia.
 const LARGURA_DO_TRILHO: f32 = 110.;
-const ALTURA_DO_TRILHO: f32 = 20.;
 const LARGURA_DO_FLUTUANTE: f32 = 190.;
 
 /// A barra de zoom no lugar de sempre, e o mínimo que ela guarda da borda do
@@ -178,9 +177,8 @@ pub(super) struct Navegacao {
     /// O zoom de antes do último clique — o duplo clique que entra na edição
     /// devolve o que o primeiro clique do par mudou.
     pub zoom_antes_do_clique: Option<EstadoDoZoom>,
-    /// O slider da barra: onde está na janela, e se está sendo arrastado.
+    /// Onde o slider da barra está na janela — para o roteiro clicar nele.
     pub trilho: Bounds<Pixels>,
-    pub arrastando_trilho: bool,
     /// O navegador flutuante sobre a foto (o botão do mapa na barra).
     pub navegador_flutuante: bool,
     pub miniatura_flutuante: Bounds<Pixels>,
@@ -210,7 +208,6 @@ impl Default for Navegacao {
             ajuda: false,
             zoom_antes_do_clique: None,
             trilho: Bounds::default(),
-            arrastando_trilho: false,
             navegador_flutuante: false,
             miniatura_flutuante: Bounds::default(),
             arrastando_flutuante: false,
@@ -238,6 +235,23 @@ fn limitar_a_barra(
         x: p.x.clamp(FOLGA_DA_BARRA, max_x),
         y: p.y.clamp(FOLGA_DA_BARRA, max_y),
     }
+}
+
+/// A caixa que flutua sobre a foto — a barra de zoom e o navegador
+/// flutuante: o fundo, a borda e a letra do popover do tema.
+fn caixa_flutuante(caixa: Div, cx: &gpui_kit::App) -> Div {
+    let tema = cx.theme();
+    caixa
+        .absolute()
+        .p(px(3.))
+        .rounded(crate::tema::canto(9.))
+        .border_1()
+        .border_color(tema.border)
+        .bg(tema.popover.opacity(0.92))
+        .shadow_lg()
+        .text_color(tema.popover_foreground)
+        .cursor_default()
+        .occlude()
 }
 
 impl Revelacao {
@@ -949,71 +963,46 @@ impl Revelacao {
         let vista = self.vista();
         let desligado = vista.is_none();
         let nivel = self.navegacao.zoom.nivel;
-        let cor_acesa = crate::tema::cores::aceso();
-        let texto: gpui_kit::Hsla = gpui_kit::rgb(0xd4d4d4).into();
-        let (escala, t, no_minimo, no_maximo) = match vista {
+        let (no_minimo, no_maximo) = match vista {
             Some((c, v)) => (
-                v.escala,
-                zoom::slider_da_escala(v.escala, &c),
                 v.escala <= zoom::escala_minima(&c) * 1.0001,
                 v.escala >= zoom::escala_maxima(&c) * 0.9999,
             ),
-            None => (1., 0., true, true),
+            None => (true, true),
         };
         let valor: SharedString = match (nivel, vista) {
             (Nivel::Encaixar, _) | (_, None) => "Encaixar".into(),
-            (_, Some((c, _))) => zoom::porcentagem(zoom::razao_da_escala(escala, &c)).into(),
+            (_, Some((c, v))) => zoom::porcentagem(zoom::razao_da_escala(v.escala, &c)).into(),
         };
+        // 📏 Tudo na altura do botão pequeno do template, como as outras
+        // barras densas da Revelação.
+        let lado = crate::tema::medidas().botao_pequeno.altura;
+        let borda = cx.theme().border;
+        let apagado = cx.theme().muted_foreground;
 
         let separador = || {
             div()
                 .w(px(1.))
-                .h(px(18.))
-                .mx(px(3.))
-                .bg(gpui_kit::rgb(0x333333))
+                .self_stretch()
+                .my(px(4.))
+                .mx(px(2.))
+                .bg(borda)
         };
-        let pilula = |id: &'static str,
-                      alvo: Nivel,
-                      rotulo: &'static str,
-                      cx: &mut Context<Self>| {
-            let aceso = !desligado && nivel == alvo;
-            div()
-                .id(id)
-                .h(px(26.))
-                .px(px(8.))
-                .flex()
-                .items_center()
-                .rounded(crate::tema::canto(6.))
-                .text_size(crate::tema::letra::em(11.5))
-                .text_color(if aceso {
-                    cor_acesa
-                } else {
-                    gpui_kit::rgb(0x8f8f8f).into()
-                })
-                .when(aceso, |b| b.bg(cor_acesa.opacity(0.14)))
-                .when(!desligado, |b| {
-                    b.cursor_pointer()
-                        .hover(|s| s.bg(gpui_kit::rgb(0x2b2b2b)).text_color(texto))
-                        .on_click(
-                            cx.listener(move |tela, _, _, cx| tela.ir_para_nivel(alvo, None, cx)),
-                        )
-                })
-                .child(rotulo)
-        };
-        let icone = |id: &'static str, icone: Icone, apagado: bool, ligado: bool| {
-            div()
-                .id(id)
-                .size(px(26.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(crate::tema::canto(6.))
-                .text_color(if ligado { cor_acesa } else { texto })
-                .when(apagado, |b| b.opacity(0.35))
-                .when(!apagado, |b| {
-                    b.cursor_pointer().hover(|s| s.bg(gpui_kit::rgb(0x2b2b2b)))
-                })
-                .child(Icon::new(icone).size(px(14.)))
+        let pilula =
+            |id: &'static str, alvo: Nivel, rotulo: &'static str, cx: &mut Context<Self>| {
+                let aceso = !desligado && nivel == alvo;
+                crate::estilo::botao_fantasma_pequeno(id, cx)
+                    .debug_selector(move || id.into())
+                    .when(aceso, |b| b.custom(crate::tema::botao_aceso(cx)))
+                    .disabled(desligado)
+                    .child(rotulo)
+                    .on_click(cx.listener(move |tela, _, _, cx| tela.ir_para_nivel(alvo, None, cx)))
+            };
+        let icone = |id: &'static str, icone: Icone, dica: &'static str, apagado: bool| {
+            crate::estilo::botao_icone(id, icone, lado, 14.)
+                .debug_selector(move || id.into())
+                .disabled(apagado)
+                .tooltip(dica)
         };
 
         let barra = match self.posicao_da_barra() {
@@ -1022,20 +1011,10 @@ impl Revelacao {
                 .left(px(MARGEM_DA_BARRA))
                 .bottom(px(MARGEM_DA_BARRA)),
         };
-        barra
+        caixa_flutuante(barra, cx)
             .id("barra-de-zoom")
             .debug_selector(|| "barra-de-zoom".into())
-            .absolute()
-            .gap(px(2.))
-            .p(px(3.))
-            .rounded(crate::tema::canto(9.))
-            .border_1()
-            .border_color(gpui_kit::rgb(0x333333))
-            .bg(gpui_kit::rgba(0x161616e6))
-            .shadow_lg()
-            .text_color(texto)
-            .cursor_default()
-            .occlude()
+            .gap(px(crate::tema::medidas().botao_pequeno.vao))
             .when(desligado, |d| d.opacity(0.5))
             .child(self.alca_da_barra(cx))
             .child(pilula("zoom-encaixar", Nivel::Encaixar, "Encaixar", cx))
@@ -1043,31 +1022,48 @@ impl Revelacao {
             .child(pilula("zoom-1-1", Nivel::Razao(1.), "1:1", cx))
             .child(separador())
             .child(
-                icone("zoom-afastar", Icone::Minus, no_minimo, false).when(!no_minimo, |b| {
-                    b.on_click(cx.listener(|tela, _, _, cx| tela.passo_de_zoom(-1, cx)))
-                }),
+                icone("zoom-afastar", Icone::Minus, "Afastar (⌘−)", no_minimo)
+                    .on_click(cx.listener(|tela, _, _, cx| tela.passo_de_zoom(-1, cx))),
             )
             .child(self.nivel_com_menu(valor, desligado, cx))
             .child(
-                icone("zoom-aproximar", Icone::Plus, no_maximo, false).when(!no_maximo, |b| {
-                    b.on_click(cx.listener(|tela, _, _, cx| tela.passo_de_zoom(1, cx)))
-                }),
+                icone("zoom-aproximar", Icone::Plus, "Aproximar (⌘=)", no_maximo)
+                    .on_click(cx.listener(|tela, _, _, cx| tela.passo_de_zoom(1, cx))),
             )
-            .child(self.trilho_do_zoom(t, desligado, cx))
+            .child(
+                div()
+                    .id("zoom-trilho")
+                    .debug_selector(|| "zoom-trilho".into())
+                    .w(px(LARGURA_DO_TRILHO))
+                    .mx(px(6.))
+                    .relative()
+                    .child(crate::estilo::slider(&self.trilho_do_zoom).disabled(desligado))
+                    .child({
+                        let medidor = cx.entity();
+                        canvas(
+                            move |bounds, _, cx| {
+                                medidor.update(cx, |tela, _| {
+                                    if tela.navegacao.trilho != bounds {
+                                        tela.navegacao.trilho = bounds;
+                                    }
+                                });
+                            },
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .inset_0()
+                    }),
+            )
             .child(separador())
             .child(
-                icone(
-                    "zoom-navegador",
-                    Icone::Map,
-                    desligado,
-                    self.navegacao.navegador_flutuante,
-                )
-                .when(!desligado, |b| {
-                    b.on_click(cx.listener(|tela, _, _, cx| {
+                icone("zoom-navegador", Icone::Map, "Navegador", desligado)
+                    .when(self.navegacao.navegador_flutuante, |b| {
+                        b.custom(crate::tema::botao_aceso(cx))
+                    })
+                    .on_click(cx.listener(|tela, _, _, cx| {
                         tela.navegacao.navegador_flutuante = !tela.navegacao.navegador_flutuante;
                         cx.notify();
-                    }))
-                }),
+                    })),
             )
             // A barra inteira medida: o tamanho limita o arrasto, e a origem
             // é de onde ele parte.
@@ -1092,7 +1088,7 @@ impl Revelacao {
                         .gap(px(6.))
                         .px(px(6.))
                         .text_xs()
-                        .text_color(gpui_kit::rgba(0xffffffcc))
+                        .text_color(apagado)
                         .child(gpui_kit::component::spinner::Spinner::new().xsmall())
                         .child("resolução cheia…"),
                 )
@@ -1117,19 +1113,20 @@ impl Revelacao {
     fn alca_da_barra(&self, cx: &mut Context<Self>) -> AnyElement {
         let ouvinte = cx.entity();
         let arrastando = self.navegacao.arrasto_da_barra.is_some();
+        let (apagado, frente) = (cx.theme().muted_foreground, cx.theme().foreground);
         div()
             .id("zoom-alca")
             .debug_selector(|| "zoom-alca".into())
             .relative()
             .w(px(16.))
-            .h(px(26.))
+            .h(px(crate::tema::medidas().botao_pequeno.altura))
             .flex()
             .items_center()
             .justify_center()
             .rounded(crate::tema::canto(6.))
-            .text_color(gpui_kit::rgb(0x6f6f6f))
+            .text_color(apagado)
             .cursor_move()
-            .hover(|s| s.text_color(gpui_kit::rgb(0xd4d4d4)))
+            .hover(move |s| s.text_color(frente))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|tela, e: &MouseDownEvent, _, cx| {
@@ -1229,18 +1226,9 @@ impl Revelacao {
             ));
         }
         let tela = cx.entity().downgrade();
-        Button::new("zoom-rotulo")
+        crate::estilo::botao_contorno_pequeno("zoom-rotulo", cx)
             .debug_selector(|| "zoom-rotulo".into())
-            .xsmall()
-            .outline()
             .min_w(px(62.))
-            .h(px(26.))
-            .px(px(6.))
-            .rounded(crate::tema::canto(6.))
-            .border_color(gpui_kit::rgb(0x3a3a3a))
-            .bg(gpui_kit::transparent_black())
-            .text_size(crate::tema::letra::em(12.))
-            .text_color(gpui_kit::rgb(0xe6e6e6))
             .disabled(desligado)
             .child(valor)
             .dropdown_menu_with_anchor(gpui_kit::Anchor::BottomLeft, move |menu, window, cx| {
@@ -1283,119 +1271,37 @@ impl Revelacao {
             .into_any_element()
     }
 
-    /// O slider contínuo: o trilho é desenhado da vista de agora (nunca fica
-    /// para trás de uma pinça ou do `⌘=`), e o arrasto é ouvido na janela, para
-    /// não se perder quando o ponteiro sai dos 110 pontos dele.
-    fn trilho_do_zoom(&self, t: f32, desligado: bool, cx: &mut Context<Self>) -> AnyElement {
-        let cor_acesa = crate::tema::cores::aceso();
-        let medidor = cx.entity();
-        let ouvinte = cx.entity();
-        let arrastando = self.navegacao.arrastando_trilho;
-        let meio = (ALTURA_DO_TRILHO - 3.) / 2.;
-        div()
-            .id("zoom-trilho")
-            .relative()
-            .w(px(LARGURA_DO_TRILHO))
-            .h(px(ALTURA_DO_TRILHO))
-            .mx(px(6.))
-            .when(!desligado, |d| {
-                d.cursor_pointer().on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|tela, e: &MouseDownEvent, _, cx| {
-                        tela.navegacao.arrastando_trilho = true;
-                        tela.zoom_pelo_trilho(e.position, cx);
-                    }),
-                )
-            })
-            .child(
-                div()
-                    .absolute()
-                    .left_0()
-                    .top(px(meio))
-                    .w(px(LARGURA_DO_TRILHO))
-                    .h(px(3.))
-                    .rounded(crate::tema::canto(2.))
-                    .bg(gpui_kit::rgba(0xffffff2e)),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .left_0()
-                    .top(px(meio))
-                    .w(px(t * LARGURA_DO_TRILHO))
-                    .h(px(3.))
-                    .rounded(crate::tema::canto(2.))
-                    .bg(cor_acesa),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .left(px(t * LARGURA_DO_TRILHO - 6.))
-                    .top(px(ALTURA_DO_TRILHO / 2. - 6.))
-                    .size(px(12.))
-                    .rounded_full()
-                    .bg(cor_acesa)
-                    .border_2()
-                    .border_color(gpui_kit::rgb(0x161616)),
-            )
-            .child(
-                canvas(
-                    move |bounds, _, cx| {
-                        medidor.update(cx, |tela, _| {
-                            if tela.navegacao.trilho != bounds {
-                                tela.navegacao.trilho = bounds;
-                            }
-                        });
-                    },
-                    move |_, _, window, _| {
-                        if !arrastando {
-                            return;
-                        }
-                        window.on_mouse_event({
-                            let esta = ouvinte.clone();
-                            move |e: &MouseMoveEvent, fase, _, cx| {
-                                if fase.bubble() {
-                                    esta.update(cx, |tela, cx| {
-                                        tela.zoom_pelo_trilho(e.position, cx)
-                                    });
-                                }
-                            }
-                        });
-                        window.on_mouse_event({
-                            let esta = ouvinte.clone();
-                            move |_: &MouseUpEvent, fase, _, cx| {
-                                if fase.bubble() {
-                                    esta.update(cx, |tela, cx| {
-                                        tela.navegacao.arrastando_trilho = false;
-                                        cx.notify();
-                                    });
-                                }
-                            }
-                        });
-                    },
-                )
-                .absolute()
-                .inset_0(),
-            )
-            .into_any_element()
-    }
-
-    /// O ponteiro no trilho vira escala, em torno do centro de agora.
-    pub(super) fn zoom_pelo_trilho(&mut self, posicao: Point<Pixels>, cx: &mut Context<Self>) {
-        let trilho = self.navegacao.trilho;
+    /// O slider contínuo da barra: o `SliderState` do kit, de 0 a 1, com o
+    /// desenho do tema (`estilo::slider`). O arrasto vira escala em torno do
+    /// centro de agora.
+    pub(super) fn zoom_pelo_slider(&mut self, t: f32, cx: &mut Context<Self>) {
         let Some((cena, vista)) = self.vista() else {
             return;
         };
-        if f(trilho.size.width) < 1. {
-            return;
-        }
-        let t = f(posicao.x - trilho.origin.x) / f(trilho.size.width);
         let escala = zoom::escala_do_slider(t, &cena);
         self.navegacao.zoom = EstadoDoZoom {
             nivel: zoom::nivel_da_escala(escala, &cena),
             centro: vista.centro,
         };
         cx.notify();
+    }
+
+    /// O slider acompanha a vista de agora — nunca fica para trás de uma
+    /// pinça ou do `⌘=`. `set_value` não emite `Change`, e só escreve quando
+    /// muda: chamado em todo `render`.
+    pub(super) fn sincronizar_o_slider_do_zoom(
+        &self,
+        window: &mut gpui_kit::Window,
+        cx: &mut Context<Self>,
+    ) {
+        let t = self
+            .vista()
+            .map_or(0., |(c, v)| zoom::slider_da_escala(v.escala, &c));
+        let agora = self.trilho_do_zoom.read(cx).value().start();
+        if (agora - t).abs() > 1e-4 {
+            self.trilho_do_zoom
+                .update(cx, |estado, cx| estado.set_value(t, window, cx));
+        }
     }
 
     /// O navegador da prévia, flutuando no canto de cima à direita da foto:
@@ -1422,6 +1328,7 @@ impl Revelacao {
             .map(|(c, v)| zoom::porcentagem(zoom::razao_da_escala(v.escala, &c)))
             .unwrap_or_default();
         let medidor = cx.entity();
+        let apagado = cx.theme().muted_foreground;
         let sombra = gpui_kit::rgba(0x00000059);
         let fora = |x: f32, y: f32, lw: f32, lh: f32| {
             div()
@@ -1433,20 +1340,12 @@ impl Revelacao {
                 .bg(sombra)
         };
         Some(
-            v_flex()
+            caixa_flutuante(v_flex(), cx)
                 .id("navegador-flutuante")
-                .absolute()
-                .right(px(12.))
-                .top(px(12.))
+                .right(px(MARGEM_DA_BARRA))
+                .top(px(MARGEM_DA_BARRA))
                 .p(px(6.))
                 .gap(px(4.))
-                .rounded(crate::tema::canto(9.))
-                .border_1()
-                .border_color(gpui_kit::rgb(0x333333))
-                .bg(gpui_kit::rgba(0x161616e6))
-                .shadow_lg()
-                .cursor_default()
-                .occlude()
                 .child(
                     div()
                         .id("navegador-flutuante-foto")
@@ -1530,7 +1429,7 @@ impl Revelacao {
                         .justify_between()
                         .px(px(2.))
                         .text_size(crate::tema::letra::em(10.5))
-                        .text_color(gpui_kit::rgb(0x8f8f8f))
+                        .text_color(apagado)
                         .child("Navegador")
                         .child(pct),
                 )

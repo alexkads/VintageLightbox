@@ -332,6 +332,8 @@ pub struct Revelacao {
     /// Os dois sliders do ajuste fino da perspectiva (graus, nos eixos da tela).
     persp_vertical: Entity<SliderState>,
     persp_horizontal: Entity<SliderState>,
+    /// O slider contínuo da barra de zoom (0 a 1; ver `navegacao.rs`).
+    trilho_do_zoom: Entity<SliderState>,
     /// O tamanho do palco no último quadro, medido no `canvas`. Sem ele não dá
     /// para converter pixel de ponteiro em fração de foto.
     palco: Bounds<Pixels>,
@@ -716,6 +718,26 @@ impl Revelacao {
             ));
         }
 
+        // O slider da barra de zoom: a posição dele é a vista, sincronizada
+        // no `render`; o arrasto vira escala.
+        let trilho_do_zoom = cx.new(|_| {
+            SliderState::new()
+                .min(0.0)
+                .max(1.0)
+                .step(0.001)
+                .default_value(0.0)
+        });
+        assinaturas.push(cx.subscribe_in(
+            &trilho_do_zoom,
+            window,
+            |tela: &mut Self, _estado, evento: &SliderEvent, _window, cx| {
+                let SliderEvent::Change(valor) = evento else {
+                    return;
+                };
+                tela.zoom_pelo_slider(valor.start(), cx);
+            },
+        ));
+
         Self {
             previews,
             gravador,
@@ -761,6 +783,7 @@ impl Revelacao {
             angulo,
             persp_vertical,
             persp_horizontal,
+            trilho_do_zoom,
             palco: Bounds::default(),
             guarda_de_presets,
             nome_do_preset,
@@ -3061,6 +3084,7 @@ impl Render for Revelacao {
     /// ```
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.navegacao.dpr = window.scale_factor();
+        self.sincronizar_o_slider_do_zoom(window, cx);
         if self.exibicao_atrasada {
             self.atualizar_exibicao();
         }
