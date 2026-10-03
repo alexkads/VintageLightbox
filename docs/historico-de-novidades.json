@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.87",
+    "data": "2026-10-03",
+    "titulo": "Caixa, Chatbot e Agendamentos com o título na barra de cima, e a Tela do cliente no monitor que você escolher.",
+    "importante": false,
+    "novidades": [
+      "Caixa, Chatbot, Agendamentos, Backup de arquivos e Retenção mostram o título, a descrição e os botões na barra de cima, ao lado do botão do menu. Antes eles ficavam abaixo dela, que aparecia vazia, e a tela perdia espaço.",
+      "Com dois monitores ou mais, o botão da Tela do cliente pergunta em qual abrir: o da última vez vem destacado (Enter), e as teclas 1 a 4 escolhem da esquerda para a direita. No Linux (GNOME), ela agora abre no monitor escolhido, e não mais no do operador.",
+      "A barra de zoom da Revelação usa as cores e os tamanhos do tema escolhido."
+    ],
+    "por_que_atualizar": "Para as telas do caixa, do chatbot e da agenda ganharem espaço, e para a Tela do cliente abrir no monitor certo."
+  },
+  {
     "versao": "0.1.86",
     "data": "2026-10-03",
     "titulo": "Avisos com som e voz, do seu jeito, e um caixa que aguenta a rede instável.",

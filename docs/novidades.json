@@ -1,15 +1,11 @@
 {
-  "versao": "0.1.86",
-  "titulo": "Avisos com som e voz, do seu jeito, e um caixa que aguenta a rede instável.",
+  "versao": "0.1.87",
+  "titulo": "Caixa, Chatbot e Agendamentos com o título na barra de cima, e a Tela do cliente no monitor que você escolher.",
   "importante": false,
   "novidades": [
-    "Avisos sonoros: mensagem de cliente no chatbot, cliente chegando pelo QR da sessão, agendamento novo ou cancelado e falhas tocam um som. Em Configurações → Avisos sonoros você liga ou desliga cada um, escolhe entre sete sons, ajusta o volume e pode usar um som seu (WAV, MP3, OGG ou FLAC).",
-    "Cada aviso também pode falar, com a voz do computador, o texto que você escrever: \"Novo agendamento: {detalhe}\" lê o nome do cliente e o horário. O botão Ouvir mostra como fica.",
-    "Os interruptores desligados aparecem cinza; antes ficavam azuis como os ligados.",
-    "Na sessão, o botão vermelho \"a estornar\" avisa quando um cliente pagou por PIX uma foto que o balcão já tinha vendido; o clique copia o pedido para procurar no Mercado Pago.",
-    "Com a rede piscando, fotos, revelações, notas e B tentam de novo sozinhos, em ordem, em vez de desistir em um segundo.",
-    "No caixa, venda, abertura, sangria, estorno e fechamento não gravam duas vezes quando a resposta do site se perde; Enter com o pagamento incompleto diz quanto falta, e o valor digitado depois de escolher a forma substitui o que estava no campo.",
-    "Clicar numa predefinição não desfaz mais os ajustes feitos depois dela, e \"Salvar na galeria\" volta à sessão com o teclado funcionando."
+    "Caixa, Chatbot, Agendamentos, Backup de arquivos e Retenção mostram o título, a descrição e os botões na barra de cima, ao lado do botão do menu. Antes eles ficavam abaixo dela, que aparecia vazia, e a tela perdia espaço.",
+    "Com dois monitores ou mais, o botão da Tela do cliente pergunta em qual abrir: o da última vez vem destacado (Enter), e as teclas 1 a 4 escolhem da esquerda para a direita. No Linux (GNOME), ela agora abre no monitor escolhido, e não mais no do operador.",
+    "A barra de zoom da Revelação usa as cores e os tamanhos do tema escolhido."
   ],
-  "por_que_atualizar": "Para ouvir quando um cliente chama ou algo dá errado, e para o caixa e os envios aguentarem a rede instável."
+  "por_que_atualizar": "Para as telas do caixa, do chatbot e da agenda ganharem espaço, e para a Tela do cliente abrir no monitor certo."
 }
