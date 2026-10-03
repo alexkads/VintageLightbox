@@ -44,6 +44,9 @@ pub use preferencias::{Escolha, Preferencias};
 /// do sistema substituir o anterior em vez de empilhar.
 pub const INTERVALO_MINIMO: Duration = Duration::from_secs(2);
 
+/// A frase do "Ouvir" da voz.
+pub const EXEMPLO_DA_VOZ: &str = "Novo agendamento: Maria Souza, sábado às 14 horas.";
+
 /// O prefixo dos sons próprios na escolha: `meu:alerta.mp3`.
 const MEU: &str = "meu:";
 
@@ -336,6 +339,20 @@ impl Sons {
         });
     }
 
+    /// O "Ouvir" da voz: uma frase de exemplo com a voz, o ritmo e o volume
+    /// escolhidos — para decidir a voz antes de pô-la num aviso.
+    pub fn ouvir_voz(&self) {
+        self.portas.alto_falante.tocar(Pedido {
+            som: None,
+            fala: Some(Fala {
+                texto: EXEMPLO_DA_VOZ.into(),
+                voz: self.preferencias.voz.clone(),
+                ritmo: self.preferencias.ritmo,
+            }),
+            volume: self.preferencias.volume,
+        });
+    }
+
     /// Os sons próprios guardados, por nome de arquivo.
     pub fn meus_sons(&self) -> Vec<String> {
         let mut nomes: Vec<String> = std::fs::read_dir(&self.pasta)
@@ -606,6 +623,32 @@ mod testes {
         assert_eq!(
             alto_falante.pedidos()[0].som,
             Some(Som::Embutido(Embutido::Suave))
+        );
+    }
+
+    /// O "Ouvir" da voz fala a frase de exemplo com a voz e o ritmo
+    /// escolhidos, sem som antes — mesmo com a chave geral desligada.
+    #[test]
+    fn ouvir_a_voz_fala_o_exemplo_com_a_voz_escolhida() {
+        let (mut sons, alto_falante, _pasta) = sons();
+        sons.mudar(|p| {
+            p.ligados = false;
+            p.voz = Some("Flo".into());
+            p.ritmo = 0.8;
+            p.volume = 0.4;
+        });
+        sons.ouvir_voz();
+        assert_eq!(
+            alto_falante.pedidos(),
+            vec![Pedido {
+                som: None,
+                fala: Some(Fala {
+                    texto: EXEMPLO_DA_VOZ.into(),
+                    voz: Some("Flo".into()),
+                    ritmo: 0.8,
+                }),
+                volume: 0.4,
+            }]
         );
     }
 

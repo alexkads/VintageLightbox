@@ -112,3 +112,32 @@ fn as_configuracoes_desligam_um_aviso_pelo_clique(cx: &mut TestAppContext) {
         assert_eq!(app.configuracoes_para_teste().read(cx).aba(), 1)
     });
 }
+
+/// ⚙️ As Configurações se abrem pelo menu da conta, já nos avisos sonoros
+/// (dono, 03/out/2026: *"Deveria ficar aqui!"*); o "Espaço" do cabeçalho
+/// das sessões abre a mesma janela no cache.
+#[gpui_kit::test]
+fn as_configuracoes_se_abrem_pelo_menu_da_conta(cx: &mut TestAppContext) {
+    let e = super::abrir_o_app(cx, super::Cenario::default());
+    e.entrar_na_conta(cx);
+
+    e.app(cx, |app, window, cx| app.alternar_menu_da_conta(window, cx));
+    clicar(&e, cx, "conta-configuracoes");
+    e.app(cx, |app, _, cx| {
+        assert!(app.configurando());
+        assert!(!app.menu_da_conta_aberto(), "abrir fecha o menu");
+        assert_eq!(app.configuracoes_para_teste().read(cx).aba(), 0);
+    });
+    assert!(desenhado(&e, cx, "som-ligado-falha"));
+
+    e.app(cx, |app, window, cx| app.fechar_configuracoes(window, cx));
+    clicar(&e, cx, "cab-espaco");
+    e.app(cx, |app, _, cx| {
+        assert!(app.configurando());
+        assert_eq!(
+            app.configuracoes_para_teste().read(cx).aba(),
+            1,
+            "o Espaço abre no cache"
+        );
+    });
+}

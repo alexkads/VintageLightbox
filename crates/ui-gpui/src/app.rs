@@ -5189,9 +5189,24 @@ impl Aplicativo {
     /// outra o cache cresce a cada foto revelada, e mostrar o retrato de ontem
     /// faria o "Limpar tudo" prometer um espaço que não é o que vai sair.
     pub fn abrir_configuracoes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.abrir_configuracoes_na_aba(0, window, cx);
+    }
+
+    /// O "Espaço" do cabeçalho das sessões: a mesma janela, já no cache.
+    pub fn abrir_configuracoes_no_cache(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.abrir_configuracoes_na_aba(1, window, cx);
+    }
+
+    fn abrir_configuracoes_na_aba(
+        &mut self,
+        aba: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.configurando = true;
         self.configuracoes.update(cx, |tela, cx| {
             tela.preparar(window, cx);
+            tela.ir_para_a_aba(aba, cx);
             tela.atualizar(cx);
         });
         window.focus(&self.foco, cx);

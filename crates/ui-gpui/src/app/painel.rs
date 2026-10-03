@@ -801,6 +801,7 @@ impl Aplicativo {
                             .gap(px(8.))
                             .child(
                                 estilo::botao_contorno("cab-espaco", cx)
+                                    .debug_selector(|| "cab-espaco".into())
                                     .child(Icon::new(Icone::HardDrive).size(px(16.)))
                                     .child(div().font_weight(FontWeight::MEDIUM).child("Espaço"))
                                     .child(
@@ -809,7 +810,7 @@ impl Aplicativo {
                                             .child(self.espaco_nesta_maquina()),
                                     )
                                     .on_click(cx.listener(|raiz, _, window, cx| {
-                                        raiz.abrir_configuracoes(window, cx);
+                                        raiz.abrir_configuracoes_no_cache(window, cx);
                                     })),
                             )
                             .child(
@@ -1041,6 +1042,20 @@ impl Aplicativo {
                     )
                     .on_click(agir(|raiz, window, cx| {
                         raiz.ir_para(Tela::Backup, window, cx)
+                    })),
+                )
+                // ⚙️ As Configurações, abertas nos avisos sonoros (dono,
+                // 03/out/2026: *"Deveria ficar aqui!"*) — o "Espaço" do
+                // cabeçalho das sessões abre a mesma janela no cache.
+                .item(
+                    estilo::item_de_menu_com_icone(
+                        "conta-configuracoes",
+                        Icone::Settings,
+                        "Configurações",
+                        None,
+                    )
+                    .on_click(agir(|raiz, window, cx| {
+                        raiz.abrir_configuracoes(window, cx)
                     })),
                 )
                 // 🔄 A procura da abertura é silenciosa; esta responde

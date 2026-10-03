@@ -85,6 +85,12 @@ impl Configuracoes {
         self.aba
     }
 
+    /// 0 é "Avisos sonoros", 1 é "Cache".
+    pub fn ir_para_a_aba(&mut self, aba: usize, cx: &mut Context<Self>) {
+        self.aba = aba.min(1);
+        cx.notify();
+    }
+
     /// Relê o cache. Chamado ao abrir e depois de limpar.
     pub fn atualizar(&mut self, cx: &mut Context<Self>) {
         self.estatisticas = Some(self.previews.get_stats());

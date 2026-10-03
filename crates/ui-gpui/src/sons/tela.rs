@@ -131,6 +131,10 @@ impl AvisosSonoros {
             if let SliderEvent::Release(valor) = evento {
                 let ritmo = valor.start().clamp(0.5, 2.0);
                 mudar(cx, |p| p.ritmo = ritmo);
+                // Ao soltar, a voz fala no ritmo novo.
+                if let Some(sons) = cx.try_global::<Sons>() {
+                    sons.ouvir_voz();
+                }
             }
         }));
 
@@ -149,6 +153,10 @@ impl AvisosSonoros {
                 };
                 let voz = (!id.is_empty()).then(|| id.clone());
                 mudar(cx, |p| p.voz = voz);
+                // Escolher é ouvir, como nos sons.
+                if let Some(sons) = cx.try_global::<Sons>() {
+                    sons.ouvir_voz();
+                }
             },
         ));
 
@@ -480,6 +488,19 @@ impl Render for AvisosSonoros {
                     .child(div().w(px(300.)).child(crate::estilo::campo_pequeno(
                         Select::new(&self.voz).xsmall(),
                     )))
+                    // 🗣️ O exemplo da voz (dono, 03/out/2026: *"Tinha que ter um
+                    // botão pra gente ouvir o exemplo da voz"*).
+                    .child(
+                        div().debug_selector(|| "ouvir-voz".into()).child(
+                            crate::estilo::botao_contorno_pequeno("ouvir-voz", cx)
+                                .label("Ouvir")
+                                .on_click(|_, _, cx| {
+                                    if let Some(sons) = cx.try_global::<Sons>() {
+                                        sons.ouvir_voz();
+                                    }
+                                }),
+                        ),
+                    )
                     .child(div().flex_1())
                     .child(div().text_sm().text_color(muted).child("Ritmo da fala"))
                     .child(div().w(px(160.)).child(crate::estilo::slider(&self.ritmo)))
@@ -603,6 +624,20 @@ mod testes {
         assert!(!lidas.escolha(Evento::Falha).ligado);
         visual.update(|_, cx| crate::sons::soar(Evento::Falha, "", "", cx));
         assert!(bancada.alto_falante.pedidos().is_empty());
+    }
+
+    /// O "Ouvir" ao lado da voz fala o exemplo, sem som antes.
+    #[gpui_kit::test]
+    fn ouvir_a_voz_fala_o_exemplo(cx: &mut TestAppContext) {
+        let (_aba, mut visual, bancada) = montar(cx);
+        clicar(&mut visual, "ouvir-voz");
+        let pedidos = bancada.alto_falante.pedidos();
+        assert_eq!(pedidos.len(), 1);
+        assert_eq!(pedidos[0].som, None);
+        assert_eq!(
+            pedidos[0].fala.as_ref().map(|f| f.texto.as_str()),
+            Some(crate::sons::EXEMPLO_DA_VOZ)
+        );
     }
 
     #[gpui_kit::test]
