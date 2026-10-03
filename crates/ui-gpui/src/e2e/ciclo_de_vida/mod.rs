@@ -44,16 +44,21 @@ use crate::caixa::tela::Caixa;
 use crate::revelacao::tela::Revelacao;
 use crate::sessoes::detalhe::Detalhe;
 
+mod tenebroso;
+
 /// O prazo de cada espera: a rede, o disco e a GPU andam no relógio de verdade.
 const PRAZO: Duration = Duration::from_secs(90);
 
 /// O que o `servidor-do-ciclo` imprimiu.
 struct Servidor {
+    /// Onde o app fala: o proxy de falhas, na frente da API.
     api: String,
+    /// A API sem o proxy — é por ela que o teste confere o que foi gravado.
+    api_direta: String,
+    /// A porta de controle do proxy de falhas.
+    controle: String,
     aprovar: String,
     sessao: Sessao,
-    estudio_id: String,
-    produto_id: String,
     funcionario: String,
     nome_do_funcionario: String,
 }
@@ -77,6 +82,8 @@ fn ler_o_servidor() -> Servidor {
     let s = &v["sessao"];
     Servidor {
         api: texto_de(&v, "api"),
+        api_direta: texto_de(&v, "api_direta"),
+        controle: texto_de(&v, "controle"),
         aprovar: texto_de(&v, "aprovar"),
         sessao: Sessao {
             access_token: texto_de(s, "access_token"),
@@ -84,8 +91,6 @@ fn ler_o_servidor() -> Servidor {
             access_vence_em: s["access_vence_em"].as_i64().expect("access_vence_em"),
             refresh_vence_em: s["refresh_vence_em"].as_i64().expect("refresh_vence_em"),
         },
-        estudio_id: texto_de(&v, "estudio_id"),
-        produto_id: texto_de(&v, "produto_id"),
         funcionario: texto_de(&v["funcionarios"][0], "id"),
         nome_do_funcionario: texto_de(&v["funcionarios"][0], "nome"),
     }
@@ -143,6 +148,10 @@ impl Http {
 
     fn post(&self, caminho: &str, corpo: Value) -> (u16, Value) {
         self.json(self.pedido(reqwest::Method::POST, caminho).json(&corpo))
+    }
+
+    fn apagar(&self, caminho: &str) -> u16 {
+        self.json(self.pedido(reqwest::Method::DELETE, caminho)).0
     }
 
     fn bytes(&self, caminho: &str) -> (u16, Vec<u8>) {
@@ -419,13 +428,20 @@ impl Balcao {
 }
 
 /// Abre o app como o `main.rs` abre: a montagem de verdade, num catálogo novo.
-fn abrir_o_balcao(cx: &mut TestAppContext, servidor: &Servidor, cartao: &[String]) -> Balcao {
-    // 🚨 Nunca o catálogo desta máquina: sem `VLB_CATALOG`, nada abre.
+fn abrir_o_balcao(
+    cx: &mut TestAppContext,
+    servidor: &Servidor,
+    cartao: &[String],
+    rotulo: &str,
+) -> Balcao {
+    // 🚨 Nunca o catálogo desta máquina: sem `VLB_CATALOG`, nada abre. Cada
+    // cenário tem o seu, dentro dele.
     let catalogo = std::env::var_os("VLB_CATALOG")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
             panic!("🚨 VLB_CATALOG não está definido: o cenário não abre o catálogo de verdade")
-        });
+        })
+        .join(rotulo);
     std::fs::create_dir_all(&catalogo).expect("a pasta do catálogo");
     assert!(
         std::fs::read_dir(&catalogo)
@@ -504,9 +520,9 @@ fn abrir_o_balcao(cx: &mut TestAppContext, servidor: &Servidor, cartao: &[String
 
 /// Seis fotos "do cartão", cada uma com conteúdo próprio — a importação pula
 /// duplicata por hash.
-fn gravar_o_cartao(pasta: &Path) -> Vec<String> {
+fn gravar_o_cartao(pasta: &Path, quantas: u32) -> Vec<String> {
     std::fs::create_dir_all(pasta).expect("a pasta do cartão");
-    (1..=6)
+    (1..=quantas)
         .map(|n| {
             let mut imagem = image::RgbImage::new(1200, 800);
             for (x, y, pixel) in imagem.enumerate_pixels_mut() {
@@ -554,52 +570,156 @@ fn centavos(v: &Value) -> i64 {
     (n * 100.0).round() as i64
 }
 
-/// 🎬 **O ciclo de vida inteiro de uma sessão**, contra a API do
-/// `servidor-do-ciclo`. Ver o cabeçalho do módulo.
-#[gpui_kit::test]
-#[ignore = "precisa da API de teste: rode `make e2e-ciclo`"]
-fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
+/// 🌩️ O controle do proxy de falhas do `servidor-do-ciclo`.
+struct Falhas {
+    http: Http,
+    base: String,
+}
+
+impl Falhas {
+    /// Programa uma falha (`metodo`, `caminho`, `modo`, `status`, `ms`, `vezes`).
+    fn programar(&self, falha: Value) {
+        let (status, corpo) = self.http.post(&format!("{}/falhas", self.base), falha);
+        assert_eq!(status, 204, "o proxy não aceitou a falha: {corpo}");
+    }
+
+    /// Tira todas as falhas e zera o registro.
+    fn limpar(&self) {
+        assert_eq!(self.http.apagar(&format!("{}/falhas", self.base)), 204);
+    }
+
+    /// Cada pedido que passou pelo proxy: `metodo`, `caminho`, `feito`, `status`.
+    fn registro(&self) -> Vec<Value> {
+        self.http
+            .get(&format!("{}/falhas/registro", self.base))
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Quantas vezes o app pediu `metodo caminho` (o caminho contendo o trecho).
+    fn quantas_vezes(&self, metodo: &str, caminho: &str) -> usize {
+        self.registro()
+            .iter()
+            .filter(|p| {
+                p["metodo"] == metodo && p["caminho"].as_str().is_some_and(|c| c.contains(caminho))
+            })
+            .count()
+    }
+}
+
+/// 🎭 Um cenário montado: o balcão aberto e com a conta, a API para conferir, o
+/// proxy de falhas e **o estúdio e o produto só dele** — o caixa de um cenário
+/// nunca esbarra no de outro.
+struct Cena {
+    b: Balcao,
+    site: Http,
+    servidor: Servidor,
+    tokio: tokio::runtime::Handle,
+    falhas: Falhas,
+    estudio_id: String,
+    produto_id: String,
+    _cartao: tempfile::TempDir,
+}
+
+/// Monta o cenário `rotulo` com `fotos` no cartão e entra na conta.
+fn preparar(cx: &mut TestAppContext, rotulo: &str, fotos: u32) -> Cena {
     let servidor = ler_o_servidor();
     let cartao = tempfile::TempDir::new().expect("a pasta do cartão");
-    let arquivos = gravar_o_cartao(cartao.path());
-    let b = abrir_o_balcao(cx, &servidor, &arquivos);
+    let arquivos = gravar_o_cartao(cartao.path(), fotos);
+    let b = abrir_o_balcao(cx, &servidor, &arquivos, rotulo);
     let tokio = b._tokio.handle().clone();
     let site = Http::novo(
         tokio.clone(),
-        &servidor.api,
+        &servidor.api_direta,
         Some(servidor.sessao.access_token.clone()),
     );
-    let titulo = format!(
-        "Ciclo de vida {}",
+    let falhas = Falhas {
+        http: Http::novo(tokio.clone(), &servidor.controle, None),
+        base: servidor.controle.clone(),
+    };
+    falhas.limpar();
+
+    // O estúdio e o produto do cenário, antes de o app entrar na conta.
+    let marca = format!(
+        "{rotulo} {}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
+            .map(|d| d.as_micros())
             .unwrap_or(0)
     );
-    let email_do_cliente = "cliente-do-ciclo@e2e.test";
+    let (status, estudio) = site.post(
+        "/bookings/studios",
+        json!({
+            "name": format!("Estúdio {marca}"), "address": "Rua do Teste, 1", "city": "Gramado",
+            "businessHoursStart": "09:00", "businessHoursEnd": "18:00",
+            "lunchStart": "12:00", "lunchEnd": "13:00", "checkInParallel": 1,
+            "sessionDurationMinutes": 60, "intervalMinutes": 15,
+            "timezone": "America/Sao_Paulo", "allowsWalkIn": false
+        }),
+    );
+    assert!((200..300).contains(&status), "criar o estúdio: {estudio}");
+    let (status, produto) = site.post(
+        "/products",
+        json!({
+            "name": format!("Digital {marca}"),
+            // 🔑 O pós-venda e o balcão cobram o cheio (normal_price), nunca o da loja.
+            "price": 30.0, "normal_price": 40.0,
+            "category_name": "Pós-venda", "inactive": true
+        }),
+    );
+    assert!((200..300).contains(&status), "criar o produto: {produto}");
 
-    // ── Ato 1: a criação da sessão ──────────────────────────────────────────
     b.app(cx, |app, _w, cx| {
         assert!(!app.entrou(), "o app abre na porta");
+        // A conta entra pela autorização no navegador do sistema — a única
+        // peça que não passa pela janela: a sessão vem pronta do servidor.
         app.entrar_na_conta(servidor.sessao.clone(), cx);
     });
-    b.ate(cx, "a conta entra", |b, cx| {
-        b.app(cx, |app, _w, _cx| app.entrou())
-    });
-    // A conta entra pela autorização no navegador do sistema — a única peça
-    // deste ato que não passa pela janela: a sessão vem pronta do servidor.
-    b.ate(cx, "a lista de sessões carrega", |b, cx| {
-        b.app(cx, |app, _w, _cx| app.tela() == Tela::Sessoes)
-    });
+    b.ate(
+        cx,
+        "a conta entra e a lista de sessões carrega",
+        |b, cx| {
+            b.app(cx, |app, _w, _cx| {
+                app.entrou() && app.tela() == Tela::Sessoes
+            })
+        },
+    );
+    Cena {
+        b,
+        site,
+        servidor,
+        tokio,
+        falhas,
+        estudio_id: estudio["id"].as_str().expect("o id do estúdio").to_string(),
+        produto_id: produto["product"]["id"]
+            .as_str()
+            .expect("o id do produto")
+            .to_string(),
+        _cartao: cartao,
+    }
+}
+
+/// 🎬 Ato da criação: "Nova sessão" → "Escolher fotos" → título, e-mail, preço
+/// e estúdio pela tela → "Criar". Confere a galeria na API e devolve o id dela
+/// e os ids das fotos, pela ordem.
+fn criar_a_sessao(
+    cx: &mut TestAppContext,
+    c: &Cena,
+    titulo: &str,
+    email: &str,
+) -> (String, Vec<String>) {
+    let b = &c.b;
+    let quantas = c._cartao.path().read_dir().map(|d| d.count()).unwrap_or(0);
     b.clicar(cx, "sessoes-nova");
     b.ate(cx, "o assistente de nova sessão abre", |b, cx| {
         b.app(cx, |app, _w, _cx| app.tela() == Tela::NovaSessao)
     });
-    // 📷 "Escolher fotos": a janela do sistema devolve as 6 do cartão.
+    // 📷 "Escolher fotos": a janela do sistema devolve as do cartão.
     b.clicar(cx, "nova-escolher-fotos");
-    b.ate(cx, "as 6 fotos do cartão entram no rascunho", |b, cx| {
+    b.ate(cx, "as fotos do cartão entram no rascunho", |b, cx| {
         b.app(cx, |app, _w, cx| {
-            app.nova_sessao.read(cx).quantas_fotos() == 6
+            app.nova_sessao.read(cx).quantas_fotos() == quantas
         })
     });
     b.clicar(cx, "nova-avancar");
@@ -607,24 +727,24 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
         b.app(cx, |app, _w, cx| app.nova_sessao.read(cx).etapa() == 3)
     });
     b.clicar(cx, "nova-titulo");
-    b.digitar(cx, &titulo);
+    b.digitar(cx, titulo);
     b.clicar(cx, "nova-email");
-    b.digitar(cx, email_do_cliente);
+    b.digitar(cx, email);
     let formulario = |b: &Balcao, cx: &mut TestAppContext| {
         b.app(cx, |app, _w, cx| {
             app.nova_sessao.read(cx).rascunho_para_teste().formulario
         })
     };
-    b.escolher_na_lista(cx, "nova-produto", &servidor.produto_id, |b, cx| {
+    b.escolher_na_lista(cx, "nova-produto", &c.produto_id, |b, cx| {
         formulario(b, cx).produto_id
     });
-    b.escolher_na_lista(cx, "nova-estudio", &servidor.estudio_id, |b, cx| {
+    b.escolher_na_lista(cx, "nova-estudio", &c.estudio_id, |b, cx| {
         formulario(b, cx).estudio_id
     });
-    let f = formulario(&b, cx);
+    let f = formulario(b, cx);
     assert_eq!(
         (f.titulo.as_str(), f.email.as_str()),
-        (titulo.as_str(), email_do_cliente),
+        (titulo, email),
         "o que se digitou chegou ao formulário"
     );
     // Com tudo preenchido, o "Criar" do cabeçalho já vale na etapa 3.
@@ -638,45 +758,149 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
         .detalhe(cx, |tela, _w, _cx| tela.galeria_id().map(str::to_string))
         .expect("a galeria criada");
 
-    let lista = site.get("/pos-venda/galerias");
+    let lista = c.site.get("/pos-venda/galerias");
     let na_lista = lista
         .as_array()
         .and_then(|l| l.iter().find(|g| g["id"] == galeria.as_str()))
         .unwrap_or_else(|| panic!("a sessão nova não está na lista do painel: {lista}"));
-    assert_eq!(na_lista["titulo"], titulo.as_str());
-    let aberta = site.get(&format!("/pos-venda/galerias/{galeria}"));
-    assert_eq!(
-        aberta["galeria"]["estudio_id"],
-        servidor.estudio_id.as_str()
-    );
-    assert_eq!(
-        aberta["galeria"]["produto_id"],
-        servidor.produto_id.as_str()
-    );
-    assert_eq!(aberta["galeria"]["email"], email_do_cliente);
+    assert_eq!(na_lista["titulo"], titulo);
+    let aberta = c.site.get(&format!("/pos-venda/galerias/{galeria}"));
+    assert_eq!(aberta["galeria"]["estudio_id"], c.estudio_id.as_str());
+    assert_eq!(aberta["galeria"]["produto_id"], c.produto_id.as_str());
+    assert_eq!(aberta["galeria"]["email"], email);
 
-    b.ate_na_api(cx, "as 6 fotos sobem ao site", || {
-        let n = fotos_no_painel(&site, &galeria).len();
-        (n == 6).then_some(()).ok_or(format!("{n} de 6"))
+    b.ate_na_api(cx, "as fotos sobem ao site", || {
+        let n = fotos_no_painel(&c.site, &galeria).len();
+        (n == quantas)
+            .then_some(())
+            .ok_or(format!("{n} de {quantas}"))
     });
-    let fotos: Vec<String> = fotos_no_painel(&site, &galeria)
+    let no_painel = fotos_no_painel(&c.site, &galeria);
+    let fotos: Vec<String> = no_painel
         .iter()
         .map(|f| f["id"].as_str().expect("o id da foto").to_string())
         .collect();
-    let ordens: Vec<i64> = fotos_no_painel(&site, &galeria)
+    let mut ordens: Vec<i64> = no_painel
         .iter()
         .map(|f| f["ordem"].as_i64().unwrap_or(-1))
         .collect();
-    let mut sem_repetir = ordens.clone();
-    sem_repetir.dedup();
-    assert_eq!(sem_repetir.len(), 6, "cada foto na sua ordem: {ordens:?}");
-    b.ate(cx, "a grade da sessão mostra as 6 do site", |b, cx| {
+    ordens.dedup();
+    assert_eq!(ordens.len(), quantas, "cada foto na sua ordem: {ordens:?}");
+    b.ate(cx, "a grade da sessão mostra as fotos do site", |b, cx| {
         b.detalhe(cx, |tela, _w, _cx| {
             fotos.iter().all(|id| tela.como_esta(id).is_some())
         })
     });
+    b.ato_limpo(cx, "a criação da sessão");
+    (galeria, fotos)
+}
 
-    b.ato_limpo(cx, "Ato 1 (criação)");
+/// ⭐🛍️ Dá a nota e leva no balcão (`B`) cada foto, pelas setas e teclas.
+fn levar(cx: &mut TestAppContext, c: &Cena, galeria: &str, fotos: &[String]) {
+    for foto in fotos {
+        c.b.ir_na_grade(cx, foto);
+        c.b.teclar(cx, "5");
+        c.b.teclar(cx, "b");
+    }
+    c.b.ate_na_api(cx, "as fotos ficam levadas no balcão", || {
+        let levadas: Vec<String> = fotos_no_painel(&c.site, galeria)
+            .into_iter()
+            .filter(|f| f["estado"] == "levada_no_balcao")
+            .filter_map(|f| f["id"].as_str().map(str::to_string))
+            .collect();
+        fotos
+            .iter()
+            .all(|f| levadas.contains(f))
+            .then_some(())
+            .ok_or(format!("levadas: {levadas:?}"))
+    });
+}
+
+/// 🧾 F8 com o caixa fechado: o fundo de troco e Enter. Devolve o id do caixa.
+fn abrir_o_caixa(cx: &mut TestAppContext, c: &Cena, galeria: &str, fundo: &str) -> String {
+    let b = &c.b;
+    b.ate(cx, "o caixa flutuante lê a sessão", |b, cx| {
+        b.caixa(cx, |caixa, _w, _cx| {
+            caixa.sessao_escolhida() == Some(galeria) && !caixa.carregando()
+        })
+    });
+    b.teclar(cx, "f8");
+    b.caixa(cx, |caixa, _w, _cx| {
+        assert_eq!(caixa.dialogo_do_caixa(), Some("Abrir"), "F8 abre o caixa")
+    });
+    b.digitar(cx, fundo);
+    b.teclar(cx, "enter");
+    b.ate(cx, "o caixa do estúdio abre", |b, cx| {
+        b.caixa(cx, |caixa, _w, _cx| caixa.caixa_do_estudio_aberto())
+    });
+    let aberto = c
+        .site
+        .get(&format!("/pos-venda/caixa?estudio_id={}", c.estudio_id));
+    aberto["id"].as_str().expect("o id do caixa").to_string()
+}
+
+/// 👥 F3: cada papel pela busca do nome e Enter; "Confirmar".
+fn escolher_as_pessoas(cx: &mut TestAppContext, c: &Cena) {
+    let b = &c.b;
+    b.teclar(cx, "f3");
+    b.caixa(cx, |caixa, _w, _cx| {
+        assert_eq!(
+            caixa.dialogo_do_caixa(),
+            Some("Pessoas"),
+            "F3 abre as pessoas"
+        )
+    });
+    for papel in ["quem-fotografou", "quem-atendeu", "quem-auxiliou"] {
+        b.clicar(cx, &format!("caixa-campo-{papel}"));
+        b.digitar(cx, &c.servidor.nome_do_funcionario);
+        b.teclar(cx, "enter");
+    }
+    b.clicar(cx, "caixa-pessoas-confirmar");
+    b.ate(cx, "as três pessoas ficam gravadas", |b, cx| {
+        b.caixa(cx, |caixa, _w, _cx| {
+            caixa
+                .pessoas_para_teste()
+                .iter()
+                .all(|p| p.as_deref() == Some(c.servidor.funcionario.as_str()))
+        })
+    });
+}
+
+/// As vendas da galeria no caixa, como o painel as lê.
+fn vendas_da_galeria(c: &Cena, galeria: &str) -> Vec<Value> {
+    c.site
+        .get(&format!("/pos-venda/caixa/galerias/{galeria}/vendas"))
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// 🎬 **O ciclo de vida inteiro de uma sessão**, contra a API do
+/// `servidor-do-ciclo`. Ver o cabeçalho do módulo.
+#[gpui_kit::test]
+#[ignore = "precisa da API de teste: rode `make e2e-ciclo`"]
+fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
+    let c = preparar(cx, "feliz", 6);
+    let titulo = format!(
+        "Ciclo de vida {}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0)
+    );
+    let email_do_cliente = "cliente-do-ciclo@e2e.test";
+
+    // ── Ato 1: a criação da sessão ──────────────────────────────────────────
+    let (galeria, fotos) = criar_a_sessao(cx, &c, &titulo, email_do_cliente);
+    let Cena {
+        b,
+        site,
+        servidor,
+        tokio,
+        estudio_id,
+        _cartao,
+        ..
+    } = c;
 
     // ── Ato 2: a seleção com o cliente ──────────────────────────────────────
     b.ir_na_grade(cx, &fotos[0]);
@@ -860,10 +1084,7 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
         "o caixa do estúdio abre com R$ 100 de troco",
         |b, cx| b.caixa(cx, |c, _w, _cx| c.caixa_do_estudio_aberto()),
     );
-    let caixa_aberto = site.get(&format!(
-        "/pos-venda/caixa?estudio_id={}",
-        servidor.estudio_id
-    ));
+    let caixa_aberto = site.get(&format!("/pos-venda/caixa?estudio_id={}", estudio_id));
     assert_eq!(
         caixa_aberto["fundo_de_troco_centavos"], 10000,
         "{caixa_aberto}"
@@ -1092,10 +1313,7 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
     for (forma, diferenca) in fechado["diferenca"].as_object().into_iter().flatten() {
         assert_eq!(diferenca, 0, "sem sobra nem falta em {forma}: {fechado}");
     }
-    let agora = site.get(&format!(
-        "/pos-venda/caixa?estudio_id={}",
-        servidor.estudio_id
-    ));
+    let agora = site.get(&format!("/pos-venda/caixa?estudio_id={}", estudio_id));
     assert!(agora.is_null(), "nenhum caixa aberto no estúdio: {agora}");
     b.teclar(cx, "escape");
     b.ate(cx, "o app vê o caixa fechado", |b, cx| {
@@ -1117,12 +1335,12 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
         .nth(1)
         .unwrap_or_else(|| panic!("o link entra sem senha: {link}"))
         .to_string();
-    let anonimo = Http::novo(tokio.clone(), &servidor.api, None);
+    let anonimo = Http::novo(tokio.clone(), &servidor.api_direta, None);
     let (status, entrada) = anonimo.post("/auth/fast-link/resgatar", json!({ "token": token }));
     assert_eq!(status, 200, "o link abre a sessão do cliente: {entrada}");
     let cliente = Http::novo(
         tokio.clone(),
-        &servidor.api,
+        &servidor.api_direta,
         entrada["access_token"].as_str().map(str::to_string),
     );
     let do_cliente = cliente.get(&format!("/meus-ensaios/{galeria}"));

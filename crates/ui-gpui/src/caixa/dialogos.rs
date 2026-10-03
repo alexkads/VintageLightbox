@@ -109,6 +109,11 @@ pub(super) struct FormPessoas {
 }
 
 pub(super) struct FormPagamento {
+    /// 🔑 A chave de idempotência deste pagamento: nasce quando o diálogo abre
+    /// e vai em **toda** tentativa de concluir. Se a resposta da primeira se
+    /// perde na rede e o operador tenta de novo, o servidor devolve a venda
+    /// já gravada — nunca cobra duas vezes nem trava o balcão (03/out/2026).
+    chave: String,
     lancados: Vec<PagamentoLancado>,
     forma: Option<FormaDePagamento>,
     valor: Entity<InputState>,
@@ -315,6 +320,7 @@ impl Caixa {
             }
             TipoDeDialogo::Pagamento => (
                 Dialogo::Pagamento(FormPagamento {
+                    chave: uuid::Uuid::new_v4().to_string(),
                     lancados: Vec::new(),
                     forma: None,
                     valor: campo(window, cx, "0,00"),
@@ -1024,6 +1030,7 @@ impl Caixa {
             return;
         };
         form.enviando = true;
+        let chave = form.chave.clone();
         let venda = regras::montar_venda(
             &galeria,
             &cupom,
@@ -1036,13 +1043,9 @@ impl Caixa {
                 auxiliar_id: pessoas.auxiliar.unwrap_or_default(),
             },
         );
-        self.gravar(
-            "venda",
-            "POST",
-            "/pos-venda/caixa/vendas".into(),
-            dados::nova_venda_json(&venda),
-            cx,
-        );
+        let mut corpo = dados::nova_venda_json(&venda);
+        corpo["chave"] = json!(chave);
+        self.gravar("venda", "POST", "/pos-venda/caixa/vendas".into(), corpo, cx);
         cx.notify();
     }
 
