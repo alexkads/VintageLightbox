@@ -739,6 +739,19 @@ impl Caixa {
         matches!(self.dialogo.as_ref(), Some(Dialogo::Fechar(f)) if f.resultado.is_some())
     }
 
+    /// O erro que o diálogo aberto mostra no formulário — só os testes.
+    #[cfg(test)]
+    pub(super) fn erro_no_dialogo(&self) -> Option<String> {
+        match self.dialogo.as_ref()? {
+            Dialogo::Abrir(f) => f.erro.clone(),
+            Dialogo::Pagamento(f) => f.erro.clone(),
+            Dialogo::Movimento(f) => f.erro.clone(),
+            Dialogo::Estorno(f) => f.erro.clone(),
+            Dialogo::Fechar(f) => f.erro.clone(),
+            _ => None,
+        }
+    }
+
     /// Os pagamentos lançados no diálogo aberto — só os testes.
     #[cfg(test)]
     pub(super) fn lancados(&self) -> Vec<PagamentoLancado> {
@@ -1038,7 +1051,23 @@ impl Caixa {
             return;
         };
         let conta = regras::conta_do_pagamento(total, &form.lancados);
-        if !conta.pronto || form.enviando {
+        if form.enviando {
+            return;
+        }
+        // 😕 **O Enter de concluir não fica calado** (03/out/2026). Com o
+        // pagamento incompleto ele não fazia nada: o operador podia achar que a
+        // venda entrou e despachar o cliente com a conta aberta.
+        if !conta.pronto {
+            form.erro = Some(if conta.falta > 0 {
+                format!(
+                    "Falta {} para concluir a venda.",
+                    dinheiro::formatar(conta.falta)
+                )
+            } else {
+                "O que passa do total só pode ser em dinheiro: cartão e PIX não dão troco."
+                    .to_string()
+            });
+            cx.notify();
             return;
         }
         let Some(galeria) = galeria else {

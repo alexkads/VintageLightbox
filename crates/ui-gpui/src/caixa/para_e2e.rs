@@ -120,4 +120,9 @@ impl Caixa {
             self.pessoas.auxiliar.clone(),
         ]
     }
+
+    /// O erro que o diálogo aberto mostra no formulário.
+    pub(crate) fn erro_no_dialogo_para_teste(&self) -> Option<String> {
+        self.erro_no_dialogo()
+    }
 }

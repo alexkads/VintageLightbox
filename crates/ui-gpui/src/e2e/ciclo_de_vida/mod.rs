@@ -46,6 +46,7 @@ use crate::sessoes::detalhe::Detalhe;
 
 mod operacional;
 mod tenebroso;
+mod triste;
 
 /// O prazo de cada espera: a rede, o disco e a GPU andam no relógio de verdade.
 const PRAZO: Duration = Duration::from_secs(60);
@@ -1054,6 +1055,23 @@ fn pedir_o_fechamento(cx: &mut TestAppContext, c: &Cena, dinheiro: &str, pix: &s
         b.caixa(cx, |caixa, _w, _cx| caixa.contagem_conferida())
     });
     b.teclar(cx, "enter");
+}
+
+/// Como [`pedir_o_fechamento`], mas para depois de conferir — o operador vai
+/// ver a diferença antes de fechar.
+fn pedir_o_fechamento_sem_fechar(cx: &mut TestAppContext, c: &Cena, dinheiro: &str, pix: &str) {
+    let b = &c.b;
+    b.ate(cx, "os diálogos fecharam", |b, cx| {
+        b.caixa(cx, |caixa, _w, _cx| caixa.dialogo_do_caixa().is_none())
+    });
+    b.teclar(cx, "f8");
+    b.digitar(cx, dinheiro);
+    b.clicar(cx, "caixa-campo-pix");
+    b.digitar(cx, pix);
+    b.teclar(cx, "enter");
+    b.ate(cx, "a contagem cega é conferida", |b, cx| {
+        b.caixa(cx, |caixa, _w, _cx| caixa.contagem_conferida())
+    });
 }
 
 /// O caixa do estúdio do cenário, aberto ou o último fechado (`id`).
