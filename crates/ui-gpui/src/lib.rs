@@ -20,6 +20,8 @@ pub mod campo;
 pub mod chatbot;
 pub mod cliente;
 pub mod configuracoes;
+/// Uma cópia só do app por catálogo; a segunda acorda a primeira e sai.
+pub mod copia_unica;
 /// Fotografar a janela e seguir um roteiro, só em build de depuração.
 pub mod depuracao;
 // ⏱️ A ferramenta de medição do rodapé: quadros, etapas de CPU e GPU, máquina.

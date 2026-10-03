@@ -416,16 +416,21 @@ mod real {
                 // quem se abre é o **bundle**, três níveis acima, senão o app
                 // sobe sem ícone, sem menu e sem Info.plist.
                 if let Some(bundle) = caminho.ancestors().nth(3) {
+                    // `--reabertura`: o novo espera este largar a trava do
+                    // catálogo (`copia_unica`) em vez de acordá-lo e sair.
                     let _ = std::process::Command::new("open")
                         .arg("-n")
                         .arg(bundle)
+                        .args(["--args", crate::copia_unica::ARG_REABERTURA])
                         .spawn();
                     std::process::exit(0);
                 }
             }
             #[cfg(not(target_os = "macos"))]
             if let Some(caminho) = &caminho {
-                let _ = std::process::Command::new(caminho).spawn();
+                let _ = std::process::Command::new(caminho)
+                    .arg(crate::copia_unica::ARG_REABERTURA)
+                    .spawn();
                 std::process::exit(0);
             }
             let _ = caminho;
