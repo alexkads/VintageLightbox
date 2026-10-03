@@ -58,6 +58,9 @@ pub mod janela;
 pub mod menu;
 /// O contrato de toda sobreposição: abrir guarda o foco, fechar o devolve.
 pub mod modal;
+/// 🔩 O catálogo e as portas ligados como no balcão — o `main.rs` e o e2e do
+/// ciclo de vida montam o app pela mesma função.
+pub mod montagem;
 pub mod pos_venda;
 pub mod recuperacao;
 /// Os ícones do site e as imagens da capa, embutidos.

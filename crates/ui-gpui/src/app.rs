@@ -89,6 +89,7 @@ use crate::tema;
 /// eram `Arc<dyn …>` posicionais, todos do mesmo naipe — a ordem entre eles não é
 /// óbvia para ninguém, e trocar dois de lugar compila e falha em tempo de
 /// execução, no primeiro clique.
+#[derive(Clone)]
 pub struct Portas {
     pub gravador: Arc<dyn Gravador>,
     /// Quem sabe reler o catálogo depois que a importação o muda.
