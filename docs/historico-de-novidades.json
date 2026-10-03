@@ -1,5 +1,15 @@
 [
   {
+    "versao": "0.1.84",
+    "data": "2026-10-03",
+    "titulo": "Na lista de predefinições, a marca azul fica só na que você clicou.",
+    "importante": false,
+    "novidades": [
+      "Com duas predefinições de mesmos parâmetros (uma cópia, por exemplo), clicar numa marcava as duas com a barra azul. Agora só a clicada fica marcada; mexer num controle tira a marca, como antes."
+    ],
+    "por_que_atualizar": "Para saber qual predefinição está na foto."
+  },
+  {
     "versao": "0.1.83",
     "data": "2026-10-03",
     "titulo": "As fotos já reveladas com o RecordarFotos P&B abrem com a vinheta certa.",

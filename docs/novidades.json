@@ -1,10 +1,9 @@
 {
-  "versao": "0.1.83",
-  "titulo": "As fotos já reveladas com o RecordarFotos P&B abrem com a vinheta certa.",
+  "versao": "0.1.84",
+  "titulo": "Na lista de predefinições, a marca azul fica só na que você clicou.",
   "importante": false,
   "novidades": [
-    "Uma foto revelada antes com o \"RecordarFotos P&B\" agora abre com a borda creme oval do preset de hoje. Antes ela abria com a borda quase branca da versão anterior, e só voltava ao certo clicando no preset de novo.",
-    "O resto da foto (exposição, corte e tudo o que foi ajustado nela) continua como estava."
+    "Com duas predefinições de mesmos parâmetros (uma cópia, por exemplo), clicar numa marcava as duas com a barra azul. Agora só a clicada fica marcada; mexer num controle tira a marca, como antes."
   ],
-  "por_que_atualizar": "Para revisitar as fotos já vendidas e vê-las com a vinheta certa, sem precisar aplicar o preset de novo."
+  "por_que_atualizar": "Para saber qual predefinição está na foto."
 }
