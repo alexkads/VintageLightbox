@@ -19,9 +19,11 @@
 
 use gpui_kit::component::button::Button;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
-use gpui_kit::component::sidebar::{Sidebar, SidebarGroup, SidebarItem, SidebarMenuItem};
+use gpui_kit::component::sidebar::{
+    Sidebar, SidebarFooter, SidebarGroup, SidebarHeader, SidebarItem, SidebarMenuItem,
+};
 use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon, Selectable as _};
 use gpui_kit::{
     canvas, div, prelude::*, px, AnyElement, Context, DismissEvent, Entity, Focusable as _,
     FontWeight, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, SharedString,
@@ -118,11 +120,16 @@ struct ItemDoMenu {
 /// kit, com o nome para os testes (`menu-<título>`) e o selo do chatbot por
 /// cima — o item do kit, recolhido, só desenha o ícone, e o selo de mensagens
 /// novas tem de continuar à vista com o menu fechado.
+///
+/// 📏 A altura é a do item lateral do template (`h-8` no `nova`), e entre um
+/// item e outro vai o `gap-1` do `SidebarMenu` do site: o grupo do kit não
+/// separa os filhos, e os destaques encostavam um no outro.
 #[derive(Clone)]
 struct SecaoDoMenu {
     titulo: &'static str,
     selo: Option<(String, gpui_kit::Hsla)>,
     recolhida: bool,
+    primeira: bool,
     item: SidebarMenuItem,
 }
 
@@ -146,9 +153,13 @@ impl SidebarItem for SecaoDoMenu {
     ) -> impl IntoElement {
         let titulo = self.titulo;
         let recolhida = self.recolhida;
-        let tooltip_do_kit = self.item.collapsed(recolhida);
+        let tooltip_do_kit = self
+            .item
+            .min_h(px(crate::tema::medidas().item_lateral.altura))
+            .collapsed(recolhida);
         div()
             .relative()
+            .when(!self.primeira, |d| d.mt(px(4.)))
             .debug_selector(move || format!("menu-{titulo}"))
             .child(tooltip_do_kit.render(id, window, cx))
             .when_some(self.selo, |d, (texto, cor)| {
@@ -490,13 +501,15 @@ impl Aplicativo {
         let itens: Vec<SecaoDoMenu> = MENU
             .iter()
             .filter(|item| item.tela != Tela::Recuperacao || self.recuperacao.is_some())
-            .map(|item| {
+            .enumerate()
+            .map(|(posicao, item)| {
                 let destino = item.tela;
                 let raiz = cx.entity().downgrade();
                 SecaoDoMenu {
                     titulo: item.titulo,
                     selo: (item.tela == Tela::Chatbot).then(|| selo.clone()).flatten(),
                     recolhida: !aberto,
+                    primeira: posicao == 0,
                     item: SidebarMenuItem::new(item.titulo)
                         .icon(Icon::new(item.icone).size(px(16.)))
                         .active(item.tela == secao)
@@ -536,6 +549,9 @@ impl Aplicativo {
         Some((texto, cor))
     }
 
+    /// A marca no alto do menu: o `SidebarMenuButton size="lg"` do site, com
+    /// a largura toda do menu (o `SidebarHeader` do kit). Leva à lista de
+    /// sessões.
     fn marca(&self, cx: &mut Context<Self>) -> AnyElement {
         let tema = cx.theme();
         let quadrado = div()
@@ -550,40 +566,46 @@ impl Aplicativo {
             .child(Icon::new(Icone::Camera).size(px(16.)));
         let acento = tema.sidebar_accent;
         let apagado = tema.sidebar_foreground.opacity(0.7);
-        let base = h_flex()
-            .id("menu-marca")
-            .rounded(crate::tema::canto(8.))
-            .gap(px(8.))
-            .cursor_pointer()
-            .hover(|s| s.bg(acento))
-            .on_click(cx.listener(|raiz, _, window, cx| {
-                raiz.ir_para(Tela::Sessoes, window, cx);
-            }))
-            .child(quadrado);
+        let ir = cx.listener(|raiz, _, window, cx| raiz.ir_para(Tela::Sessoes, window, cx));
         if self.menu_aberto {
-            base.h(px(48.))
-                .p(px(8.))
+            div()
+                .id("menu-marca")
+                .debug_selector(|| "menu-marca".into())
+                .w_full()
+                .cursor_pointer()
+                .on_click(ir)
                 .child(
-                    v_flex()
-                        .min_w(px(0.))
-                        .child(
-                            div()
-                                .text_sm()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .truncate()
-                                .child("RecordarFotos"),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(apagado)
-                                .truncate()
-                                .child("Painel administrativo"),
-                        ),
+                    SidebarHeader::new().child(quadrado).child(
+                        v_flex()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .truncate()
+                                    .child("RecordarFotos"),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(apagado)
+                                    .truncate()
+                                    .child("Painel administrativo"),
+                            ),
+                    ),
                 )
                 .into_any_element()
         } else {
-            base.size(px(32.))
+            h_flex()
+                .id("menu-marca")
+                .debug_selector(|| "menu-marca".into())
+                .size(px(32.))
+                .rounded(crate::tema::canto(8.))
+                .cursor_pointer()
+                .hover(|s| s.bg(acento))
+                .on_click(ir)
+                .child(quadrado)
                 .tooltip(|window, cx| Tooltip::new("RecordarFotos — sessões").build(window, cx))
                 .into_any_element()
         }
@@ -607,6 +629,9 @@ impl Aplicativo {
             .items_center()
             .justify_center()
             .bg(tema.sidebar_accent)
+            // O contorno separa a inicial do pé aceso, que tem a mesma cor.
+            .border_1()
+            .border_color(tema.sidebar_border)
             .text_xs()
             .font_weight(FontWeight::SEMIBOLD)
             .child(
@@ -636,25 +661,33 @@ impl Aplicativo {
             .child(div().text_xs().text_color(apagado).truncate().child(email))
     }
 
+    /// A conta no pé do menu: o `NavUser` do site — retrato, nome, e-mail e
+    /// as setas, na largura toda do menu (o `SidebarFooter` do kit, aceso
+    /// enquanto o menu da conta está aberto). Recolhido, só o retrato.
     fn botao_da_conta(&self, cx: &mut Context<Self>) -> AnyElement {
         let tema = cx.theme();
         let acento = tema.sidebar_accent;
         let apagado = tema.sidebar_foreground.opacity(0.7);
         let aberto = self.menu_da_conta.is_some();
-        let base = h_flex()
-            .id("menu-conta")
-            .rounded(crate::tema::canto(8.))
-            .gap(px(8.))
-            .cursor_pointer()
-            .hover(|s| s.bg(acento))
-            .when(aberto, |d| d.bg(acento))
-            .on_click(cx.listener(|raiz, _, window, cx| raiz.alternar_menu_da_conta(window, cx)))
-            .child(self.retrato(cx));
+        let alternar = cx.listener(|raiz, _, window, cx| raiz.alternar_menu_da_conta(window, cx));
         if self.menu_aberto {
-            base.h(px(48.))
-                .p(px(8.))
-                .child(self.nome_e_email(apagado))
-                .child(Icon::new(Icone::ChevronsUpDown).size(px(16.)))
+            div()
+                .id("menu-conta")
+                .debug_selector(|| "menu-conta".into())
+                .w_full()
+                .cursor_pointer()
+                .on_click(alternar)
+                .child(
+                    SidebarFooter::new()
+                        .selected(aberto)
+                        .child(self.retrato(cx))
+                        .child(self.nome_e_email(apagado))
+                        .child(
+                            Icon::new(Icone::ChevronsUpDown)
+                                .size(px(16.))
+                                .text_color(apagado),
+                        ),
+                )
                 .into_any_element()
         } else {
             let nome = self
@@ -662,7 +695,16 @@ impl Aplicativo {
                 .as_ref()
                 .map(|c| c.exibido().to_string())
                 .unwrap_or_else(|| "Conta".into());
-            base.size(px(32.))
+            h_flex()
+                .id("menu-conta")
+                .debug_selector(|| "menu-conta".into())
+                .size(px(32.))
+                .rounded(crate::tema::canto(8.))
+                .cursor_pointer()
+                .hover(|s| s.bg(acento))
+                .when(aberto, |d| d.bg(acento))
+                .on_click(alternar)
+                .child(self.retrato(cx))
                 .tooltip(move |window, cx| Tooltip::new(nome.clone()).build(window, cx))
                 .into_any_element()
         }
@@ -862,8 +904,12 @@ impl Aplicativo {
         let antes = window.focused(cx);
         let menu = PopupMenu::build(window, cx, move |menu, _window, cx| {
             let tema = cx.theme();
-            let (apagado, fundo_do_retrato, perigo) =
-                (tema.muted_foreground, tema.sidebar_accent, tema.danger);
+            let (apagado, frente, fundo_do_retrato, perigo) = (
+                tema.muted_foreground,
+                tema.popover_foreground,
+                tema.sidebar_accent,
+                tema.danger,
+            );
             let agir = |f: fn(&mut Aplicativo, &mut Window, &mut Context<Aplicativo>)| {
                 let raiz = raiz.clone();
                 move |_: &gpui_kit::ClickEvent, window: &mut Window, cx: &mut gpui_kit::App| {
@@ -872,8 +918,7 @@ impl Aplicativo {
             };
             let tema_do_menu = |id: &'static str, icone: Icone, rotulo: &'static str, valor| {
                 let raiz = raiz.clone();
-                estilo::item_de_menu(id, rotulo, None)
-                    .icon(icone)
+                estilo::item_de_menu_com_icone(id, icone, rotulo, None)
                     .checked(escolha == valor)
                     .on_click(move |_, window, cx| {
                         let _ = raiz.update(cx, |raiz, cx| raiz.escolher_tema(valor, window, cx));
@@ -889,56 +934,64 @@ impl Aplicativo {
                 Some(antes) => menu.action_context(antes),
                 None => menu,
             };
-            menu.min_w(px(240.))
+            // `min-w-56` do `DropdownMenuContent` do site.
+            menu.min_w(px(224.))
                 .check_side(gpui_kit::component::Side::Right)
-                // A conta, no alto: o retrato, o nome e o e-mail.
-                .item(PopupMenuItem::element(move |_, _| {
-                    h_flex()
-                        .gap(px(8.))
-                        .py(px(2.))
-                        .child(match retrato.clone() {
-                            Some(retrato) => gpui_kit::img(retrato)
-                                .flex_none()
-                                .size(px(32.))
-                                .rounded(crate::tema::canto(8.))
-                                .object_fit(gpui_kit::ObjectFit::Cover)
-                                .into_any_element(),
-                            None => div()
-                                .flex_none()
-                                .size(px(32.))
-                                .rounded(crate::tema::canto(8.))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .bg(fundo_do_retrato)
-                                .text_xs()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .child(inicial.clone())
-                                .into_any_element(),
-                        })
-                        .child(
-                            v_flex()
-                                .min_w(px(0.))
-                                .child(
-                                    div()
-                                        .text_sm()
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .truncate()
-                                        .child(nome.clone()),
-                                )
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(apagado)
-                                        .truncate()
-                                        .child(email.clone()),
-                                ),
-                        )
-                }))
+                // A conta, no alto: o retrato, o nome e o e-mail. É o
+                // `DropdownMenuLabel` do site — não se clica nem se escolhe
+                // pelas setas (`disabled`), e o nome fica na cor do menu.
+                .item(
+                    PopupMenuItem::element(move |_, _| {
+                        h_flex()
+                            .w_full()
+                            .gap(px(8.))
+                            .py(px(4.))
+                            .child(match retrato.clone() {
+                                Some(retrato) => gpui_kit::img(retrato)
+                                    .flex_none()
+                                    .size(px(32.))
+                                    .rounded(crate::tema::canto(8.))
+                                    .object_fit(gpui_kit::ObjectFit::Cover)
+                                    .into_any_element(),
+                                None => div()
+                                    .flex_none()
+                                    .size(px(32.))
+                                    .rounded(crate::tema::canto(8.))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .bg(fundo_do_retrato)
+                                    .text_xs()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(inicial.clone())
+                                    .into_any_element(),
+                            })
+                            .child(
+                                v_flex()
+                                    .min_w(px(0.))
+                                    .flex_1()
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_color(frente)
+                                            .truncate()
+                                            .child(nome.clone()),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(apagado)
+                                            .truncate()
+                                            .child(email.clone()),
+                                    ),
+                            )
+                    })
+                    .disabled(true),
+                )
                 .separator()
                 .item(
-                    estilo::item_de_menu("conta-loja", "Ver a loja", None)
-                        .icon(Icone::Store)
+                    estilo::item_de_menu_com_icone("conta-loja", Icone::Store, "Ver a loja", None)
                         .on_click(move |_, _, cx| {
                             cx.open_url(&format!("{}/loja", site.trim_end_matches('/')));
                         }),
@@ -947,30 +1000,25 @@ impl Aplicativo {
                 // site, portado do `file-manager` do legado em 2026-09-18.
                 // Aqui, e não no menu lateral: é de uso de vez em quando.
                 .item(
-                    estilo::item_de_menu("conta-backup", "Backup de arquivos", None)
-                        .icon(Icone::FolderOpen)
-                        .on_click(agir(|raiz, window, cx| {
-                            raiz.ir_para(Tela::Backup, window, cx)
-                        })),
+                    estilo::item_de_menu_com_icone(
+                        "conta-backup",
+                        Icone::FolderOpen,
+                        "Backup de arquivos",
+                        None,
+                    )
+                    .on_click(agir(|raiz, window, cx| {
+                        raiz.ir_para(Tela::Backup, window, cx)
+                    })),
                 )
                 // 🔄 A procura da abertura é silenciosa; esta responde
                 // sempre, na faixa do rodapé — inclusive "está em dia".
                 .item(
-                    PopupMenuItem::element(move |_, _| {
-                        h_flex()
-                            .debug_selector(|| "conta-atualizacoes".into())
-                            .w_full()
-                            .gap(px(8.))
-                            .child("Verificar atualizações")
-                            .child(
-                                div()
-                                    .ml_auto()
-                                    .text_xs()
-                                    .text_color(apagado)
-                                    .child(concat!("v", env!("CARGO_PKG_VERSION"))),
-                            )
-                    })
-                    .icon(Icone::RefreshCw)
+                    estilo::item_de_menu_com_fim(
+                        "conta-atualizacoes",
+                        Icone::RefreshCw,
+                        "Verificar atualizações",
+                        concat!("v", env!("CARGO_PKG_VERSION")),
+                    )
                     .on_click(agir(|raiz, _, cx| raiz.verificar_atualizacoes(cx))),
                 )
                 .separator()
@@ -1019,9 +1067,13 @@ impl Aplicativo {
                 ))
                 .separator()
                 .item(
-                    estilo::item_de_menu("conta-sair", "Sair", Some(perigo))
-                        .icon(Icon::new(Icone::LogOut).text_color(perigo))
-                        .on_click(agir(|raiz, _, cx| raiz.sair_da_conta(cx))),
+                    estilo::item_de_menu_com_icone(
+                        "conta-sair",
+                        Icone::LogOut,
+                        "Sair",
+                        Some(perigo),
+                    )
+                    .on_click(agir(|raiz, _, cx| raiz.sair_da_conta(cx))),
                 )
         });
         window.focus(&menu.focus_handle(cx), cx);
@@ -1032,17 +1084,18 @@ impl Aplicativo {
         (menu, fechou)
     }
 
-    /// O menu da conta aberto, preso ao pé do menu lateral, logo acima do
-    /// rodapé — onde fica o botão da conta.
+    /// O menu da conta aberto ao lado do menu lateral, com o pé alinhado ao
+    /// do botão da conta — o `side="right" align="end" sideOffset={4}` do
+    /// site. O botão fica 12 px acima do rodapé (o `pb_3` do pé do kit).
     pub(super) fn menu_da_conta(&self, window: &Window) -> Option<impl IntoElement> {
         let (menu, _) = self.menu_da_conta.as_ref()?;
-        let pe = window.viewport_size().height - px(8. + super::rodape::ALTURA_DO_RODAPE);
+        let pe = window.viewport_size().height - px(12. + super::rodape::ALTURA_DO_RODAPE);
         Some(
             gpui_kit::deferred(
                 gpui_kit::anchored()
                     .position_mode(gpui_kit::AnchoredPositionMode::Window)
                     .anchor(gpui_kit::Anchor::BottomLeft)
-                    .position(gpui_kit::point(px(self.largura_do_menu() - 4.), pe))
+                    .position(gpui_kit::point(px(self.largura_do_menu() + 4.), pe))
                     .child(menu.clone()),
             )
             .with_priority(1),

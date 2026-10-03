@@ -1,6 +1,6 @@
 [
   {
-    "versao": "0.1.75",
+    "versao": "0.1.76",
     "data": "2026-10-03",
     "titulo": "A lixeira das predefinições voltou a apagar.",
     "importante": false,
@@ -9,6 +9,18 @@
       "\"Apagar…\" no botão direito da predefinição também voltou a funcionar."
     ],
     "por_que_atualizar": "Para conseguir tirar da lista as predefinições que você não usa mais."
+  },
+  {
+    "versao": "0.1.75",
+    "data": "2026-10-03",
+    "titulo": "O menu lateral ficou arrumado.",
+    "importante": false,
+    "novidades": [
+      "A conta no pé do menu lateral ocupa a largura toda, como a marca no alto e as seções no meio.",
+      "O menu da conta abre ao lado do menu lateral, alinhado ao botão da conta, sem cobrir a borda dele.",
+      "No menu da conta, os ícones têm o tamanho certo e o ✓ do tema escolhido fica na borda direita."
+    ],
+    "por_que_atualizar": "Para o menu lateral e o menu da conta ficarem alinhados e no tamanho padrão."
   },
   {
     "versao": "0.1.74",
