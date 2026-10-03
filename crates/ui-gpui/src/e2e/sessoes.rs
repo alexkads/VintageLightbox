@@ -77,6 +77,12 @@ fn abrir_sessao_nova_e_entrar_nela(cx: &mut TestAppContext) {
         app.sessoes.update(cx, |tela, cx| {
             tela.comecar_nova(window, cx);
             assert!(tela.abrindo_nova());
+            // Sem faixa escolhida não sai: o preço nasce vazio (dono, 2026-10-03).
+            tela.criar(cx);
+            assert!(
+                tela.erro_para_teste().is_some(),
+                "sem preço por foto não sai"
+            );
             tela.escolher_estudio("e1".into(), cx);
             // O e-mail pela metade não sai daqui.
             tela.preencher_para_teste("Aniversário da Bia", "bia@", window, cx);
@@ -99,7 +105,7 @@ fn abrir_sessao_nova_e_entrar_nela(cx: &mut TestAppContext) {
     assert_eq!(criadas[0].estudio_id.as_deref(), Some("e1"));
     assert_eq!(
         criadas[0].produto_id, "p1",
-        "a faixa sugerida é a da última"
+        "a faixa é a escolhida, nunca a da última"
     );
 
     e.app(cx, |app, _w, cx| {
