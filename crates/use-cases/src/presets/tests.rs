@@ -464,6 +464,123 @@ fn a_receita_do_darktable_vira_o_recordarfotos_pb_de_hoje() {
     );
 }
 
+/// 🔲 A foto revelada com o P&B de 2/out/2026 (0.1.70 a 0.1.77) guardou a
+/// vinheta do darktable ligada, a da borda quase branca, e reabria com ela.
+/// Na leitura ela vira a do P&B de hoje; o resto da foto fica (dono, 3/out).
+#[test]
+fn a_vinheta_antiga_do_pb_vira_a_de_hoje_na_leitura() {
+    use crate::presets::{migrar_do_darktable, receita_a_migrar, RECORDARFOTOS_PB};
+    let antiga = || {
+        let mut receita: serde_json::Map<String, serde_json::Value> = RECORDARFOTOS_PB
+            .iter()
+            .filter(|(nome, _)| !nome.starts_with("pcv_"))
+            .map(|(nome, valor)| (nome.to_string(), serde_json::json!(valor)))
+            .collect();
+        receita.insert("darktable_vignette_ativo".into(), serde_json::json!(1.0));
+        receita.insert(
+            "darktable_vignette_scale".into(),
+            serde_json::json!(87.82_f32),
+        );
+        receita.insert(
+            "darktable_vignette_brightness".into(),
+            serde_json::json!(0.99999_f32),
+        );
+        receita.insert(
+            "darktable_vignette_saturation".into(),
+            serde_json::json!(0.147_f32),
+        );
+        receita.insert(
+            "darktable_vignette_shape".into(),
+            serde_json::json!(0.48_f32),
+        );
+        receita.insert("exposure".into(), serde_json::json!(0.6));
+        receita.insert("corte_largura".into(), serde_json::json!(0.8));
+        receita
+    };
+
+    let mut receita = antiga();
+    assert!(receita_a_migrar(&receita));
+    migrar_do_darktable(&mut receita);
+    assert_eq!(receita["darktable_vignette_ativo"], 0.0, "uma vinheta só");
+    for (nome, valor) in RECORDARFOTOS_PB
+        .iter()
+        .filter(|(n, _)| n.starts_with("pcv_"))
+    {
+        assert_eq!(receita[*nome].as_f64().unwrap() as f32, *valor, "{nome}");
+    }
+    assert_eq!(receita["exposure"], 0.6, "o que o operador mexeu fica");
+    assert_eq!(receita["corte_largura"], 0.8, "o corte fica");
+    assert!(!receita_a_migrar(&receita), "migrada, não migra de novo");
+
+    // Quem mexeu na vinheta do darktable escolheu ela: fica como está.
+    let mut mexida = antiga();
+    mexida.insert(
+        "darktable_vignette_brightness".into(),
+        serde_json::json!(0.5),
+    );
+    assert!(!receita_a_migrar(&mexida));
+    migrar_do_darktable(&mut mexida);
+    assert_eq!(mexida["darktable_vignette_ativo"], 1.0);
+    assert!(!mexida.contains_key("pcv_amount"));
+
+    // A do darktable desligada não é a do P&B antigo.
+    let mut desligada = antiga();
+    desligada.insert("darktable_vignette_ativo".into(), serde_json::json!(0.0));
+    assert!(!receita_a_migrar(&desligada));
+}
+
+/// A foto do `.dtstyle` (os `dt_*`) com a vinheta dele, que tem os mesmos
+/// números, também sai com uma vinheta só — a do P&B de hoje.
+#[test]
+fn a_foto_do_dtstyle_com_a_vinheta_dele_sai_com_uma_vinheta_so() {
+    use crate::presets::migrar_do_darktable;
+    let mut antiga = serde_json::json!({
+        "dt_monochrome_ativo": 1.0,
+        "dt_vignette_ativo": 1.0,
+        "dt_vignette_scale": 87.82,
+        "dt_vignette_falloff_scale": 45.51,
+        "dt_vignette_brightness": 0.99999,
+        "dt_vignette_saturation": 0.147,
+        "dt_vignette_autoratio": 1.0,
+        "dt_vignette_shape": 0.48,
+    });
+    let receita = antiga.as_object_mut().unwrap();
+    migrar_do_darktable(receita);
+    assert_eq!(receita["darktable_vignette_ativo"], 0.0);
+    assert_eq!(receita["pcv_amount"], 78.0);
+    assert_eq!(receita["bw_ativo"], 1.0);
+}
+
+/// A predefinição "Minha" duplicada do P&B antigo troca a vinheta, e continua
+/// somando ou recomeçando como era.
+#[tokio::test]
+async fn a_minha_duplicada_do_pb_antigo_troca_a_vinheta() {
+    let mut mock_repo = MockPresetRepo::new();
+    mock_repo.expect_find_all().returning(|| {
+        let ajustes: PresetAdjustments = [
+            ("bw_ativo", 1.0),
+            ("darktable_vignette_ativo", 1.0),
+            ("darktable_vignette_scale", 87.82),
+            ("darktable_vignette_falloff_scale", 45.51),
+            ("darktable_vignette_brightness", 0.99999),
+            ("darktable_vignette_saturation", 0.147),
+            ("darktable_vignette_autoratio", 1.0),
+            ("darktable_vignette_shape", 0.48),
+        ]
+        .into_iter()
+        .collect();
+        Ok(vec![Preset::user("Meu P&B".to_string(), ajustes)])
+    });
+    let presets = ListPresetsUseCase::new(Arc::new(mock_repo))
+        .execute()
+        .await
+        .unwrap();
+    let meu = presets.iter().find(|p| p.name == "Meu P&B").unwrap();
+    assert_eq!(meu.adjustments.get("darktable_vignette_ativo"), Some(0.0));
+    assert_eq!(meu.adjustments.get("pcv_amount"), Some(78.0));
+    assert!(!meu.replaces, "não vira uma que recomeça");
+}
+
 // ============================================
 // DeletePresetUseCase Tests
 // ============================================

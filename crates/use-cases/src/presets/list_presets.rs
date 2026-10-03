@@ -95,6 +95,11 @@ const VINHETA_ANTIGA: &[&str] = &[
 /// ligado leva os próprios `dt_vignette_*` para os `darktable_vignette_*` —
 /// por cima do P&B de hoje, que é a mesma vinheta quando a foto não a mexeu.
 /// O campo que não estava gravado volta como o neutro (o padrão do darktable).
+///
+/// 🔲 **E a vinheta errada do P&B sai** (dono, 3/out/2026): a foto revelada
+/// entre a 0.1.70 e a 0.1.77 guardou a vinheta do darktable ligada com os
+/// números do `.dtstyle` — a borda quase branca —, e reabria com ela por cima
+/// do que o preset é hoje. Ver [`vinheta_antiga_do_pb`].
 pub fn migrar_do_darktable(receita: &mut serde_json::Map<String, serde_json::Value>) {
     let numero = |receita: &serde_json::Map<String, serde_json::Value>, nome: &str| {
         receita
@@ -127,6 +132,45 @@ pub fn migrar_do_darktable(receita: &mut serde_json::Map<String, serde_json::Val
             receita.insert(nome, serde_json::json!(valor));
         }
     }
+    if vinheta_antiga_do_pb(receita) {
+        // A vinheta da foto era a do P&B: vira a de hoje, e o resto fica.
+        receita.insert("darktable_vignette_ativo".into(), serde_json::json!(0.0));
+        for (nome, valor) in RECORDARFOTOS_PB {
+            if nome.starts_with("pcv_") {
+                receita.insert((*nome).to_string(), serde_json::json!(valor));
+            }
+        }
+    }
+}
+
+/// A vinheta que o RecordarFotos P&B gravava entre 2 e 3/out/2026 (0.1.70 a
+/// 0.1.77): a do darktable ligada, com os números do `.dtstyle`.
+///
+/// 🔑 **Só esses números, e todos eles.** Quem mexeu num deles escolheu a
+/// vinheta do darktable para aquela foto, e ela fica como está.
+const VINHETA_DO_PB_ANTIGO: &[(&str, f64)] = &[
+    ("darktable_vignette_scale", 87.82),
+    ("darktable_vignette_falloff_scale", 45.51),
+    ("darktable_vignette_brightness", 0.99999),
+    ("darktable_vignette_saturation", 0.147),
+    ("darktable_vignette_autoratio", 1.0),
+    ("darktable_vignette_shape", 0.48),
+];
+
+/// A receita tem a vinheta antiga do RecordarFotos P&B ligada — a que
+/// [`migrar_do_darktable`] troca pela de hoje.
+pub fn vinheta_antiga_do_pb(receita: &serde_json::Map<String, serde_json::Value>) -> bool {
+    let numero = |nome: &str| receita.get(nome).and_then(|v| v.as_f64());
+    numero("darktable_vignette_ativo").is_some_and(|v| v >= 0.5)
+        && VINHETA_DO_PB_ANTIGO
+            .iter()
+            .all(|(nome, antigo)| numero(nome).is_some_and(|v| (v - antigo).abs() < 1e-3))
+}
+
+/// A receita precisa de [`migrar_do_darktable`]: tem `dt_*` ou a vinheta
+/// antiga do P&B. Quem lê muitas fotos pergunta antes de clonar.
+pub fn receita_a_migrar(receita: &serde_json::Map<String, serde_json::Value>) -> bool {
+    receita.keys().any(|k| k.starts_with("dt_")) || vinheta_antiga_do_pb(receita)
 }
 
 /// Os presets que existem antes de alguém salvar o primeiro.
@@ -608,19 +652,24 @@ impl ListPresetsUseCase {
         let mut user_presets = self.preset_repository.find_all().await?;
         // Uma predefinição importada de um `.dtstyle` antes de 2/out/2026 só
         // tem campos `dt_*`: a do P&B vira o RecordarFotos P&B de hoje, e as
-        // outras perdem só o que o motor não tem mais.
+        // outras perdem só o que o motor não tem mais. A duplicada do P&B de
+        // 2/out/2026 troca a vinheta antiga pela de hoje.
         for preset in &mut user_presets {
-            if preset.adjustments.campos().any(|c| c.starts_with("dt_")) {
-                let mut receita: serde_json::Map<String, serde_json::Value> = preset
-                    .adjustments
-                    .iter()
-                    .map(|(k, v)| (k.to_string(), serde_json::json!(v)))
-                    .collect();
-                migrar_do_darktable(&mut receita);
-                preset.adjustments = receita
-                    .iter()
-                    .filter_map(|(k, v)| Some((k.as_str(), v.as_f64()? as f32)))
-                    .collect();
+            let mut receita: serde_json::Map<String, serde_json::Value> = preset
+                .adjustments
+                .iter()
+                .map(|(k, v)| (k.to_string(), serde_json::json!(v)))
+                .collect();
+            if !receita_a_migrar(&receita) {
+                continue;
+            }
+            let do_darktable = receita.keys().any(|k| k.starts_with("dt_"));
+            migrar_do_darktable(&mut receita);
+            preset.adjustments = receita
+                .iter()
+                .filter_map(|(k, v)| Some((k.as_str(), v.as_f64()? as f32)))
+                .collect();
+            if do_darktable {
                 // Um estilo do darktable é um visual inteiro: recomeça do neutro.
                 preset.replaces = true;
             }

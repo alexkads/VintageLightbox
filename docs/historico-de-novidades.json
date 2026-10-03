@@ -1,5 +1,16 @@
 [
   {
+    "versao": "0.1.83",
+    "data": "2026-10-03",
+    "titulo": "As fotos já reveladas com o RecordarFotos P&B abrem com a vinheta certa.",
+    "importante": false,
+    "novidades": [
+      "Uma foto revelada antes com o \"RecordarFotos P&B\" agora abre com a borda creme oval do preset de hoje. Antes ela abria com a borda quase branca da versão anterior, e só voltava ao certo clicando no preset de novo.",
+      "O resto da foto (exposição, corte e tudo o que foi ajustado nela) continua como estava."
+    ],
+    "por_que_atualizar": "Para revisitar as fotos já vendidas e vê-las com a vinheta certa, sem precisar aplicar o preset de novo."
+  },
+  {
     "versao": "0.1.82",
     "data": "2026-10-03",
     "titulo": "Painel Histórico na Revelação, como o do Lightroom.",
