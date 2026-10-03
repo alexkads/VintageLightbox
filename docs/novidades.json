@@ -1,11 +1,10 @@
 {
-  "versao": "0.1.87",
-  "titulo": "Caixa, Chatbot e Agendamentos com o título na barra de cima, e a Tela do cliente no monitor que você escolher.",
+  "versao": "0.1.88",
+  "titulo": "Configurações no menu da sua conta, e um botão para ouvir a voz dos avisos.",
   "importante": false,
   "novidades": [
-    "Caixa, Chatbot, Agendamentos, Backup de arquivos e Retenção mostram o título, a descrição e os botões na barra de cima, ao lado do botão do menu. Antes eles ficavam abaixo dela, que aparecia vazia, e a tela perdia espaço.",
-    "Com dois monitores ou mais, o botão da Tela do cliente pergunta em qual abrir: o da última vez vem destacado (Enter), e as teclas 1 a 4 escolhem da esquerda para a direita. No Linux (GNOME), ela agora abre no monitor escolhido, e não mais no do operador.",
-    "A barra de zoom da Revelação usa as cores e os tamanhos do tema escolhido."
+    "As Configurações (avisos sonoros e cache) agora ficam no menu da sua conta, no canto de baixo da barra lateral. O botão Espaço das sessões continua abrindo o cache.",
+    "Ao lado da voz, o botão Ouvir fala uma frase de exemplo com a voz, o ritmo e o volume escolhidos; trocar de voz ou mexer no ritmo também fala, para você decidir antes de usar."
   ],
-  "por_que_atualizar": "Para as telas do caixa, do chatbot e da agenda ganharem espaço, e para a Tela do cliente abrir no monitor certo."
+  "por_que_atualizar": "Para achar as Configurações onde se espera e escolher a voz ouvindo."
 }
