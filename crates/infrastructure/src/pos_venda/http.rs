@@ -234,7 +234,20 @@ struct BilheteDaApi {
 }
 
 fn rede(e: reqwest::Error) -> DomainError {
-    DomainError::InfrastructureError(format!("sem resposta do site: {e}"))
+    DomainError::InfrastructureError(format!("{SEM_RESPOSTA}: {e}"))
+}
+
+const SEM_RESPOSTA: &str = "sem resposta do site";
+
+/// 🌪️ **A falha passa sozinha?** A rede que não respondeu e o site que
+/// respondeu 5xx (o proxy caído, o servidor reiniciando) são piscadas: repetir
+/// um gesto idempotente daqui a pouco resolve. O 4xx é recusa de regra, e o
+/// 401 já foi renovado por baixo — esses não se repetem.
+///
+/// Lê a mensagem (a que o `DomainError` mostra, com ou sem o prefixo dele):
+/// é o que chega aos controllers, que devolvem o erro como texto.
+pub fn erro_passageiro(mensagem: &str) -> bool {
+    mensagem.contains(SEM_RESPOSTA) || mensagem.contains("o site respondeu 5")
 }
 
 /// Traduz uma resposta que não é 2xx. `401` no login é credencial; nas outras

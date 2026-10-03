@@ -451,7 +451,21 @@ pub struct PublicadorDaApi {
     /// 🖌️ A imagem editada vigente de uma foto do site, pelo id de lá
     /// (`docs/editor-em-camadas/02-CONTRATO.md`, C32).
     editada_de: EditadaDoSite,
+    /// 🌪️ Uma fila por foto para os gestos da classificação: a nota e o `B`
+    /// da mesma foto saem **em ordem**, mesmo quando a nota está repetindo
+    /// depois de uma piscada da rede — senão o `B` chegava antes e ouvia
+    /// "classifique a foto antes de marcar no balcão".
+    filas_por_foto: Arc<FilasPorFoto>,
 }
+
+type FilasPorFoto =
+    std::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>;
+
+/// Quantas vezes um gesto da classificação tenta, e a espera antes da
+/// primeira repetição (dobra a cada uma): 0,3 + 0,6 + 1,2 + 2,4 + 4,8 ≈ 9 s de
+/// rede piscando antes de o balcão desistir e avisar.
+const TENTATIVAS_DO_GESTO: u32 = 6;
+const PRIMEIRA_ESPERA_DO_GESTO: std::time::Duration = std::time::Duration::from_millis(300);
 
 /// A foto do site revelada em resolução cheia, com as decisões de uma
 /// exportação — o "Baixar JPEG" e a exportação da sessão pelo mesmo caminho.
@@ -528,6 +542,7 @@ impl PublicadorDaApi {
             tokio,
             locais_de: Arc::new(|_| None),
             editada_de: Arc::new(|_| None),
+            filas_por_foto: Arc::default(),
         }
     }
 
@@ -954,11 +969,33 @@ impl Publicador for PublicadorDaApi {
         canal: Sender<Recado>,
     ) {
         let controlador = self.controlador.clone();
+        let fila = self
+            .filas_por_foto
+            .lock()
+            .map(|mut filas| filas.entry(foto_id.clone()).or_default().clone())
+            .unwrap_or_default();
         self.tokio.spawn(async move {
-            let erro = controlador
-                .mudar_foto(&sessao, &foto_id, &mudanca)
-                .await
-                .err();
+            // A vez desta foto: o gesto anterior dela termina (ou desiste) antes.
+            let _vez = fila.lock().await;
+            // 🌪️ **Uma piscada da rede não apaga o gesto do operador.** A
+            // mudança é idempotente (grava "nota 5", "levada"), então repetir
+            // é seguro; só depois de ~9 s de falha o balcão desiste e avisa.
+            let mut espera = PRIMEIRA_ESPERA_DO_GESTO;
+            let mut tentativa = 1;
+            let erro = loop {
+                match controlador.mudar_foto(&sessao, &foto_id, &mudanca).await {
+                    Ok(()) => break None,
+                    Err(e)
+                        if tentativa < TENTATIVAS_DO_GESTO
+                            && infrastructure::pos_venda::http::erro_passageiro(&e) =>
+                    {
+                        tokio::time::sleep(espera).await;
+                        espera *= 2;
+                        tentativa += 1;
+                    }
+                    Err(e) => break Some(e),
+                }
+            };
             let recado = Recado::Negociou { foto_id, erro };
             let _ = canal.send(recado);
         });

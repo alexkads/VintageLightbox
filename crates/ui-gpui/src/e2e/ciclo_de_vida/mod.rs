@@ -44,10 +44,11 @@ use crate::caixa::tela::Caixa;
 use crate::revelacao::tela::Revelacao;
 use crate::sessoes::detalhe::Detalhe;
 
+mod operacional;
 mod tenebroso;
 
 /// O prazo de cada espera: a rede, o disco e a GPU andam no relógio de verdade.
-const PRAZO: Duration = Duration::from_secs(25);
+const PRAZO: Duration = Duration::from_secs(60);
 
 /// O que o `servidor-do-ciclo` imprimiu.
 struct Servidor {
@@ -709,6 +710,18 @@ fn criar_a_sessao(
     titulo: &str,
     email: &str,
 ) -> (String, Vec<String>) {
+    criar_a_sessao_com(cx, c, titulo, email, &|| {})
+}
+
+/// [`criar_a_sessao`], com `antes_de_criar` rodando logo antes do "Criar" —
+/// é ali que os caminhos tortuosos programam a falha da subida.
+fn criar_a_sessao_com(
+    cx: &mut TestAppContext,
+    c: &Cena,
+    titulo: &str,
+    email: &str,
+    antes_de_criar: &dyn Fn(),
+) -> (String, Vec<String>) {
     let b = &c.b;
     let quantas = c._cartao.path().read_dir().map(|d| d.count()).unwrap_or(0);
     b.clicar(cx, "sessoes-nova");
@@ -747,6 +760,7 @@ fn criar_a_sessao(
         (titulo, email),
         "o que se digitou chegou ao formulário"
     );
+    antes_de_criar();
     // Com tudo preenchido, o "Criar" do cabeçalho já vale na etapa 3.
     b.clicar(cx, "nova-criar-cabecalho");
     b.ate(cx, "a sessão é criada e o app entra nela", |b, cx| {
