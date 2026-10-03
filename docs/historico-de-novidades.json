@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.81",
+    "data": "2026-10-03",
+    "titulo": "O aplicativo abre uma vez só: abrir de novo traz a janela que já está aberta.",
+    "importante": true,
+    "novidades": [
+      "Abrir o VintageLightbox com ele já aberto (inclusive escondido na bandeja) não abre uma segunda cópia: a janela que já estava aberta vem para a frente.",
+      "Duas cópias abertas ao mesmo tempo gravavam no mesmo catálogo e podiam desfazer a revelação uma da outra, além de subir a mesma foto duas vezes.",
+      "Depois de atualizar, o aplicativo novo espera o antigo fechar antes de abrir."
+    ],
+    "por_que_atualizar": "Para não perder trabalho com duas cópias do aplicativo abertas sem querer."
+  },
+  {
     "versao": "0.1.80",
     "data": "2026-10-03",
     "titulo": "Exportar fotos funciona com as fotos da sessão, e o modal foi refeito.",
