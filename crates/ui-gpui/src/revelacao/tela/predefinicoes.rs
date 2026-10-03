@@ -1341,6 +1341,7 @@ impl Revelacao {
             )
             .child(
                 crate::estilo::botao_perigo("confirmar-apagar", cx)
+                    .debug_selector(|| "confirmar-apagar".into())
                     .child("Apagar")
                     .on_click(cx.listener(|tela, _ev, window, cx| {
                         tela.responder_pergunta(true, window, cx);
@@ -2348,6 +2349,10 @@ impl Revelacao {
                 false,
                 cx,
             ))
+            .debug_selector({
+                let nome = preset.name.clone();
+                move || format!("lixeira-{nome}")
+            })
             .when(!travada, |b| {
                 b.on_click(cx.listener(move |tela, _ev, window, cx| {
                     tela.pedir_para_apagar(id, window, cx);

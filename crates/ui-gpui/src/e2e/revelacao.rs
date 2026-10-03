@@ -571,3 +571,56 @@ fn a_tira_aceita_a_nota_o_p_e_o_x_da_galeria(cx: &mut TestAppContext) {
     );
     em_sintonia(cx);
 }
+
+/// 🗑️ **A lixeira da linha apaga com o mouse de verdade** (dono, 3/out/2026:
+/// *"A exclusão de preset não está funcionando"*). O teste acima chama o
+/// método da lixeira direto; este clica nela e no "Apagar" da pergunta.
+#[gpui_kit::test]
+fn a_lixeira_da_linha_apaga_com_o_clique(cx: &mut TestAppContext) {
+    use gpui_kit::{Modifiers, VisualTestContext};
+
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    e.revelar_a_do_site(cx, "a");
+    e.revelacao(cx, |tela, window, cx| {
+        tela.alternar_formulario_de_preset(window, cx);
+        tela.digitar_nome_da_predefinicao("Pôr do sol", window, cx);
+        tela.arrastar_slider(0, 0.7, cx);
+    });
+    e.revelacao(cx, |tela, window, cx| {
+        tela.salvar_preset(window, cx);
+        assert_eq!(tela.coluna_de_predefinicoes(cx).1, vec!["Pôr do sol"]);
+    });
+
+    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    visual.run_until_parked();
+    let lixeira = visual
+        .debug_bounds("lixeira-Pôr do sol")
+        .expect("a lixeira da linha é desenhada");
+    visual.simulate_mouse_move(lixeira.center(), None, Modifiers::none());
+    visual.simulate_click(lixeira.center(), Modifiers::none());
+    visual.run_until_parked();
+    e.revelacao(cx, |tela, _w, _cx| {
+        assert_eq!(
+            tela.nome_na_pergunta_de_apagar().as_deref(),
+            Some("Pôr do sol"),
+            "o clique na lixeira pergunta"
+        );
+    });
+
+    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    visual.run_until_parked();
+    let apagar = visual
+        .debug_bounds("confirmar-apagar")
+        .expect("o \"Apagar\" da pergunta é desenhado");
+    visual.simulate_mouse_move(apagar.center(), None, Modifiers::none());
+    visual.simulate_click(apagar.center(), Modifiers::none());
+    visual.run_until_parked();
+    e.revelacao(cx, |tela, _w, cx| {
+        assert!(tela.nome_na_pergunta_de_apagar().is_none());
+        assert!(
+            tela.coluna_de_predefinicoes(cx).1.is_empty(),
+            "o \"Apagar\" tira da lista"
+        );
+    });
+    assert_eq!(e.guarda.apagados().len(), 1, "e do banco");
+}

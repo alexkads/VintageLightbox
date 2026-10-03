@@ -95,6 +95,8 @@ impl Jeito {
 struct Altura {
     miolo: Option<Pixels>,
     rodape: Pixels,
+    /// Onde o rodapé ficou na janela — para o clique fora não pegá-lo.
+    area_do_rodape: Option<gpui_kit::Bounds<Pixels>>,
 }
 
 /// O respiro que o kit guarda nas bordas da janela (`spacing_tokens().lg`).
@@ -169,13 +171,13 @@ pub fn desenhar_conteudo<T: 'static>(
     ));
     let altura = window.use_keyed_state(chave, cx, |_, _| Altura::default());
     let medida = *altura.read(cx);
-    let medir = |altura: &gpui_kit::Entity<Altura>, qual: fn(&mut Altura, Pixels)| {
+    let medir = |altura: &gpui_kit::Entity<Altura>,
+                 qual: fn(&mut Altura, &[gpui_kit::Bounds<Pixels>])| {
         let altura = altura.clone();
         move |filhos: Vec<gpui_kit::Bounds<Pixels>>, _: &mut Window, cx: &mut gpui_kit::App| {
-            let alto = filhos.iter().map(|b| b.size.height).sum::<Pixels>();
             altura.update(cx, |altura, cx| {
                 let antes = *altura;
-                qual(altura, alto);
+                qual(altura, &filhos);
                 if *altura != antes {
                     cx.notify();
                 }
@@ -200,15 +202,28 @@ pub fn desenhar_conteudo<T: 'static>(
     // `o_veu_fecha_o_dialogo_e_a_caixa_nao` pegou). Por isso a caixa do kit
     // fica sem respiro, o respiro vai no invólucro do conteúdo — que passa a
     // ter o tamanho exato da caixa — e o clique fora dele pede o cancelar.
+    //
+    // 🚨 **O rodapé é irmão do miolo**, e não filho: sem descontar a área
+    // dele, apertar "Apagar" contava como clique fora e cancelava antes de o
+    // botão receber o clique (dono, 3/out/2026: a lixeira das predefinições
+    // não apagava).
+    let area_do_rodape = medida.area_do_rodape;
     let miolo = gpui_kit::div()
         .p(px(16.))
         .child(
             gpui_kit::div()
-                .on_children_prepainted(medir(&altura, |a, alto| a.miolo = Some(alto + px(32.))))
+                .on_children_prepainted(medir(&altura, |a, filhos| {
+                    a.miolo = Some(altura_somada(filhos) + px(32.))
+                }))
                 .child(conteudo),
         )
         .when(jeito.veu, |miolo| {
-            miolo.on_mouse_down_out(move |_, window, cx| pedir_cancelar(window, cx))
+            miolo.on_mouse_down_out(move |evento, window, cx| {
+                if area_do_rodape.is_some_and(|area| area.contains(&evento.position)) {
+                    return;
+                }
+                pedir_cancelar(window, cx)
+            })
         });
     Some(
         Dialog::new(cx)
@@ -234,12 +249,19 @@ pub fn desenhar_conteudo<T: 'static>(
                 dialogo.footer(
                     gpui_kit::div()
                         .w_full()
-                        .on_children_prepainted(medir(&altura, |a, alto| a.rodape = alto))
+                        .on_children_prepainted(medir(&altura, |a, filhos| {
+                            a.rodape = altura_somada(filhos);
+                            a.area_do_rodape = filhos.iter().copied().reduce(|a, b| a.union(&b));
+                        }))
                         .child(rodape),
                 )
             })
             .into_any_element(),
     )
+}
+
+fn altura_somada(filhos: &[gpui_kit::Bounds<Pixels>]) -> Pixels {
+    filhos.iter().map(|b| b.size.height).sum()
 }
 
 /// O miolo do `useConfirmacao` do site: `AlertDialogTitle` (`text-base
