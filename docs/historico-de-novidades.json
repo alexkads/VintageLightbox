@@ -1,5 +1,18 @@
 [
   {
+    "versao": "0.1.79",
+    "data": "2026-10-03",
+    "titulo": "Ao atualizar ou reabrir, o app volta onde você estava.",
+    "importante": false,
+    "novidades": [
+      "Depois de atualizar, o app reabre na mesma sessão, na mesma tela e na mesma foto da Revelação em que você estava. Se a tela do cliente estava aberta, ela volta junto.",
+      "O mesmo vale quando você fecha o app: na próxima abertura ele volta na sessão, na tela e na foto em que você parou. A tela do cliente não volta sozinha nesse caso, porque o próximo cliente pode ser outro.",
+      "As outras guias que estavam na Revelação voltam nela quando você clica na guia.",
+      "O último ajuste feito na Revelação é gravado antes de o app fechar ou reiniciar para atualizar."
+    ],
+    "por_que_atualizar": "Para não perder o lugar no meio do atendimento quando o app atualiza ou é fechado."
+  },
+  {
     "versao": "0.1.78",
     "data": "2026-10-03",
     "titulo": "O RecordarFotos P&B ganhou a vinheta certa.",
