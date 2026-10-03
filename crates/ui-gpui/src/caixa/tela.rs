@@ -360,6 +360,10 @@ pub struct Caixa {
     pub(super) des_sinalizacao: Option<DesSinalizacao>,
     /// Um campo a receber o foco no próximo quadro.
     pub(super) foco_pendente: Option<gpui_kit::Entity<InputState>>,
+    /// O foco vai para o próprio diálogo no próximo desenho — quando o
+    /// formulário dá lugar a um resumo sem campos (o caixa fechado) e o campo
+    /// que tinha o foco some.
+    pub(super) foco_no_dialogo: bool,
     /// A rota inteira, ou o painel flutuante da galeria.
     pub(super) modo: Modo,
     /// Uma mudança de faixa ou de negociação em várias fotos, no ar.
@@ -467,6 +471,7 @@ impl Caixa {
             em_curso: Vec::new(),
             des_sinalizacao: None,
             foco_pendente: None,
+            foco_no_dialogo: false,
             modo,
             lote: None,
             leituras_soltas: 0,

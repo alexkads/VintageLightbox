@@ -22,6 +22,10 @@
 //! cenário **falha** em vez de passar vazio — e nunca abre o catálogo de
 //! verdade desta máquina.
 //!
+//! 🪟 Cada tecla e cada ato também exigem **o foco vivo** e **nenhum erro na
+//! tela** (`Balcao::ato_limpo`): o caixa fechado derrubava o foco no campo da
+//! Observação, e o cenário passava verde (03/out/2026).
+//!
 //! O que fica de mentira é só o que é janela do sistema (seletores de arquivo)
 //! ou rede de terceiros (a atualização, o aviso do sistema).
 
@@ -207,10 +211,65 @@ impl Balcao {
     }
 
     /// Teclas de verdade, na janela principal.
+    ///
+    /// 🚨 Antes, confere que a tecla tem para onde ir ([`Self::foco_vivo`]) —
+    /// a mesma régua do `teclar` dos outros cenários.
     fn teclar(&self, cx: &mut TestAppContext, teclas: &str) {
+        self.foco_vivo(cx, &format!("antes da tecla {teclas}"));
         let mut visual = gpui_kit::VisualTestContext::from_window(self.raiz.into(), cx);
         visual.simulate_keystrokes(teclas);
         cx.run_until_parked();
+    }
+
+    /// 🪟 **O foco está vivo**: há um elemento focado, desenhado, e a rede da
+    /// raiz nunca precisou apanhar um foco caído (`Aplicativo::foco_perdido`).
+    /// Cada queda é uma sobreposição que fechou sem devolver o foco — o
+    /// operador perde as teclas até clicar de novo.
+    fn foco_vivo(&self, cx: &mut TestAppContext, onde: &str) {
+        let visual = gpui_kit::VisualTestContext::from_window(self.raiz.into(), cx);
+        visual.run_until_parked();
+        self.app(cx, |app, window, cx| {
+            assert_eq!(
+                app.focos_perdidos,
+                0,
+                "🪟 {onde}: o foco caiu num elemento que sumiu (tela {:?}) — uma \
+                 sobreposição fechou sem devolver o foco",
+                app.tela()
+            );
+            use gpui_kit::component::WindowExt as _;
+            let sobreposicao = window.has_active_dialog(cx) || window.has_active_sheet(cx);
+            assert!(
+                sobreposicao || app.foco_da_raiz().contains_focused(window, cx),
+                "🪟 {onde}: nada desenhado tem o foco — as teclas não chegam a ninguém"
+            );
+        });
+    }
+
+    /// 🧾 **O ato terminou limpo**: o foco vivo, nenhum aviso de erro na tela,
+    /// nenhuma recusa do servidor e a faixa de erro da sessão vazia. Um ato que
+    /// chega ao fim com a API certa e um erro pintado na tela não passou.
+    fn ato_limpo(&self, cx: &mut TestAppContext, ato: &str) {
+        self.foco_vivo(cx, ato);
+        let (erros, recusas, faixa) = self.app(cx, |app, _w, cx| {
+            (
+                app.avisos_dados_para_teste()
+                    .into_iter()
+                    .filter(|(_, erro)| *erro)
+                    .map(|(texto, _)| texto)
+                    .collect::<Vec<_>>(),
+                app.recusas_para_teste().to_vec(),
+                app.detalhe.read(cx).erro().map(|e| e.to_string()),
+            )
+        });
+        assert!(erros.is_empty(), "🧾 {ato}: a tela avisou erro: {erros:?}");
+        assert!(
+            recusas.is_empty(),
+            "🧾 {ato}: o servidor recusou: {recusas:?}"
+        );
+        assert!(
+            faixa.is_none(),
+            "🧾 {ato}: a faixa de erro da sessão: {faixa:?}"
+        );
     }
 
     /// O relógio do teste anda (as colheitas das telas acordam a cada 100 ms)
@@ -232,6 +291,7 @@ impl Balcao {
         loop {
             self.respirar(cx);
             if pronto(self, cx) {
+                self.foco_vivo(cx, o_que);
                 return;
             }
             if Instant::now() > fim {
@@ -514,6 +574,8 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
         })
     });
 
+    b.ato_limpo(cx, "Ato 1 (criação)");
+
     // ── Ato 2: a seleção com o cliente ──────────────────────────────────────
     b.detalhe(cx, |tela, _w, cx| {
         tela.focar_foto(&fotos[0], cx);
@@ -577,6 +639,8 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
             tela.contagem() == (3, 2, 0)
         })
     });
+
+    b.ato_limpo(cx, "Ato 2 (seleção)");
 
     // ── Ato 3: a revelação ──────────────────────────────────────────────────
     let revelada = fotos[0].clone();
@@ -651,6 +715,8 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
         bruto_antes == bruto_depois,
         "o bruto nunca muda: o editor reabre o mesmo original depois de revelar"
     );
+
+    b.ato_limpo(cx, "Ato 3 (revelação)");
 
     // ── Ato 4: o pagamento no caixa ─────────────────────────────────────────
     b.ate(cx, "o caixa flutuante lê a sessão", |b, cx| {
@@ -767,6 +833,8 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
     levadas.sort();
     assert_eq!(vendidas, levadas, "as três saem vendidas, a cortesia junto");
 
+    b.ato_limpo(cx, "Ato 4 (caixa)");
+
     // ── Ato 5: o estorno e a sangria ────────────────────────────────────────
     let estornada = fotos[..3]
         .iter()
@@ -817,6 +885,8 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
             .ok_or(format!("{n} movimentos: {caixa}"))
     });
 
+    b.ato_limpo(cx, "Ato 5 (estorno)");
+
     // ── Ato 6: o fechamento ─────────────────────────────────────────────────
     // Dinheiro: 100 de fundo + 60 recebidos − 10 de troco − 40 estornados − 20
     // de sangria = 90. PIX: 30.
@@ -863,6 +933,8 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
     b.ate(cx, "o app vê o caixa fechado", |b, cx| {
         b.caixa(cx, |c, _w, _cx| !c.caixa_do_estudio_aberto())
     });
+
+    b.ato_limpo(cx, "Ato 6 (fechamento)");
 
     // ── Ato 7: o pós-venda ──────────────────────────────────────────────────
     b.detalhe(cx, |tela, _w, cx| tela.pedir_o_link(cx));
@@ -964,4 +1036,5 @@ fn o_ciclo_de_vida_da_sessao(cx: &mut TestAppContext) {
             "a estornada segue à venda"
         );
     });
+    b.ato_limpo(cx, "Ato 7 (pós-venda)");
 }

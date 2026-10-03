@@ -1552,7 +1552,15 @@ impl Caixa {
                     if let Some(Dialogo::Fechar(form)) = self.dialogo.as_mut() {
                         form.enviando = false;
                         match dados::ler_caixa(valor) {
-                            Ok(caixa) => form.resultado = Some(caixa),
+                            Ok(caixa) => {
+                                form.resultado = Some(caixa);
+                                // 🪟 O resumo não tem campo: a Observação, que
+                                // tinha o foco, some — e sem isto o foco caía
+                                // na rede da raiz (achado pelo e2e do ciclo de
+                                // vida, 03/out/2026). O diálogo segura o
+                                // foco, e Enter e Esc continuam valendo.
+                                self.foco_no_dialogo = true;
+                            }
                             Err(_) => {
                                 self.fechar_dialogo_depois(cx);
                                 self.avisar("Caixa fechado.", TipoDeRecado::Sucesso, cx);
@@ -1636,6 +1644,9 @@ impl Caixa {
         if let Some(foco) = self.foco_pendente.take() {
             let foco = foco.read(cx).focus_handle(cx);
             window.focus(&foco, cx);
+        }
+        if std::mem::take(&mut self.foco_no_dialogo) {
+            window.focus(&self.foco_do_dialogo, cx);
         }
         let dialogo = self.dialogo.as_ref()?;
         let contexto = dialogo.contexto();
