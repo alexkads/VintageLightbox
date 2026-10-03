@@ -108,7 +108,7 @@ if [ "$ORIGIN_DEV" = 1 ]; then
     ECOMMERCE="$TMP/ecommerce"
 fi
 BACKEND="$ECOMMERCE/backend"
-[ -f "$BACKEND/crates/e2e-tests/src/bin/servidor-do-ciclo.rs" ] ||
+[ -f "$BACKEND/crates/e2e-tests/src/bin/servidor-do-ciclo/main.rs" ] ||
     falhar "o servidor do ciclo não está em $BACKEND"
 
 echo "🔨 compilando o servidor do ciclo (e-commerce)…"
