@@ -247,14 +247,16 @@ fn titulo(rotulo: &'static str, separar: bool, cx: &gpui_kit::App) -> AnyElement
 }
 
 /// O subtítulo dentro de um grupo — o "posição / forma" do módulo de
-/// vinheta do darktable: menor que o título e sem a linha, porque o módulo é
-/// o mesmo.
+/// vinheta do darktable: no meio como os títulos, mais apagado e sem a
+/// linha, porque o módulo é o mesmo.
 fn subtitulo(rotulo: &'static str, cx: &gpui_kit::App) -> AnyElement {
     div()
         .debug_selector(move || format!("grupo-{rotulo}"))
-        .mt(px(4.))
+        .flex()
+        .justify_center()
+        .mt(px(6.))
         .text_xs()
-        .text_color(cx.theme().muted_foreground.opacity(0.8))
+        .text_color(cx.theme().muted_foreground.opacity(0.75))
         .child(rotulo)
         .into_any_element()
 }
@@ -1023,15 +1025,15 @@ impl Revelacao {
     }
 
     /// 🎞️ O título da vinheta do darktable, com a chave de ligar à direita —
-    /// o botão do módulo no darktable. Desligada, os controles ficam apagados
-    /// e a foto não muda.
+    /// o botão do módulo no darktable. O nome tem a cor dos outros títulos;
+    /// quem diz se está ligada é a chave. Desligada, os controles ficam
+    /// apagados e a foto não muda.
     fn titulo_da_vinheta_do_darktable(&self, separar: bool, cx: &mut Context<Self>) -> AnyElement {
         let indice = self
             .controles
             .iter()
             .position(|c| c.definicao.secao == Secao::VinhetaDarktable && e_a_chave_do_modulo(c))
             .expect("a vinheta do darktable tem a chave de ligar");
-        let ligada = self.ajustes.vinheta_do_darktable_ligada();
         let rotulo = Secao::VinhetaDarktable.rotulo();
         h_flex()
             .debug_selector(move || format!("grupo-{rotulo}"))
@@ -1051,11 +1053,7 @@ impl Revelacao {
             .child(
                 div()
                     .flex_none()
-                    .text_color(if ligada {
-                        cx.theme().foreground
-                    } else {
-                        cx.theme().muted_foreground
-                    })
+                    .text_color(cx.theme().muted_foreground)
                     .child(rotulo),
             )
             .child(h_flex().flex_1().justify_end().child(self.chave(
