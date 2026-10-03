@@ -1,12 +1,14 @@
 {
-  "versao": "0.1.79",
-  "titulo": "Ao atualizar ou reabrir, o app volta onde você estava.",
-  "importante": false,
+  "versao": "0.1.80",
+  "titulo": "Exportar fotos funciona com as fotos da sessão, e o modal foi refeito.",
+  "importante": true,
   "novidades": [
-    "Depois de atualizar, o app reabre na mesma sessão, na mesma tela e na mesma foto da Revelação em que você estava. Se a tela do cliente estava aberta, ela volta junto.",
-    "O mesmo vale quando você fecha o app: na próxima abertura ele volta na sessão, na tela e na foto em que você parou. A tela do cliente não volta sozinha nesse caso, porque o próximo cliente pode ser outro.",
-    "As outras guias que estavam na Revelação voltam nela quando você clica na guia.",
-    "O último ajuste feito na Revelação é gravado antes de o app fechar ou reiniciar para atualizar."
+    "Exportar as fotos de uma sessão dava \"Photo ID inválido\" em todas. Agora elas saem com os ajustes e o corte aplicados, com o nome do arquivo da câmera (e não mais foto, foto-2, foto-3…).",
+    "Barra de progresso com a foto em andamento, botão \"Parar\" e, no fim, \"Mostrar na pasta\" e \"Tentar de novo\" só para as que falharam — cada falha aparece na lista com o motivo.",
+    "Formatos JPEG, PNG, TIFF e WebP e a qualidade do JPEG, como no site. O destino aparece em \"Salvar em\" (a pasta Downloads, se você não escolher outra).",
+    "A marca d'água da \"Prévia da galeria\" agora se escolhe como arquivo (antes o seletor só deixava escolher pasta e a prévia nunca saía).",
+    "A pasta, o uso, o formato e a marca d'água ficam lembrados para a próxima vez, e um arquivo que já está na pasta nunca é sobrescrito: o novo ganha -2.",
+    "Na Revelação, máscaras e retoques ficaram mais fáceis de usar: o Esc larga a máscara antes de sair, o Delete apaga a escolhida, escolher na lista mostra a máscara na foto e a barra de ferramentas cabe inteira na coluna."
   ],
-  "por_que_atualizar": "Para não perder o lugar no meio do atendimento quando o app atualiza ou é fechado."
+  "por_que_atualizar": "Para conseguir entregar as fotos da sessão em arquivo direto do aplicativo."
 }
