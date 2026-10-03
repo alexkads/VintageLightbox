@@ -1,5 +1,16 @@
 [
   {
+    "versao": "0.1.77",
+    "data": "2026-10-03",
+    "titulo": "As amostras dos presets agora usam uma foto colorida.",
+    "importante": false,
+    "novidades": [
+      "Na Nova sessão e no atendimento, enquanto ainda não há foto do ensaio, os cartões do \"Preset padrão\" mostram um casal colorido do estúdio no lugar da foto sépia.",
+      "Agora dá para ver a diferença entre \"Preto e branco\", \"Sépia\", \"RecordarFotos P&B\" e os outros presets antes de escolher."
+    ],
+    "por_que_atualizar": "Para escolher o preset da sessão vendo de verdade o que cada um faz com a foto."
+  },
+  {
     "versao": "0.1.76",
     "data": "2026-10-03",
     "titulo": "A lixeira das predefinições voltou a apagar.",
