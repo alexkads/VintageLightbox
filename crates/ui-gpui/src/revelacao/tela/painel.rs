@@ -29,7 +29,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use gpui_kit::component::accordion::Accordion;
-use gpui_kit::component::button::Button;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::select::Select;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{h_flex, ActiveTheme, Disableable, Icon, Sizable};
@@ -488,7 +488,6 @@ impl Revelacao {
         let aviso = self.aviso_de_comprada(cx);
         let mut corpo: Vec<AnyElement> = Vec::new();
         if !enquadrando {
-            corpo.push(self.cabecalho_dos_ajustes(cx));
             corpo.push(aba_de_espaco());
             let paineis: &[Painel] = &Painel::ADOBE_RGB;
             // A Revelação local vem logo abaixo do primeiro painel (o Básico),
@@ -511,6 +510,7 @@ impl Revelacao {
         }
         let rodape = self.rodape(cx);
         let graficos = self.painel_dos_graficos(cx);
+        let zerar = (!enquadrando).then(|| self.rodape_dos_ajustes(cx));
 
         div()
             .flex()
@@ -558,6 +558,7 @@ impl Revelacao {
                     .children(corpo)
                     .children(rodape),
             )
+            .children(zerar)
     }
 
     /// "Esta foto foi **comprada**…" — o aviso do site, no alto da coluna.
@@ -622,9 +623,11 @@ impl Revelacao {
 
     /// Quantos ajustes estão fora do neutro, e o botão que devolve todos.
     ///
-    /// 🔑 **Fora dos painéis sanfonados, e no topo** — é o desenho do site.
-    /// Zerar tudo é o gesto de "recomeçar" e não pertence a nenhuma seção.
-    fn cabecalho_dos_ajustes(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// 🔑 **No rodapé da coluna, fixo, como o "Redefinir" do Lightroom**
+    /// (dono, 2/out/2026: no topo poluía). Fora da rolagem e fora dos painéis
+    /// sanfonados — Zerar tudo é o gesto de "recomeçar" e não pertence a
+    /// nenhuma seção. O mesmo desenho do site.
+    fn rodape_dos_ajustes(&self, cx: &mut Context<Self>) -> AnyElement {
         let alterados = self.quantos_alterados();
         let enquadrada = self.aberta.is_some() && self.enquadrada();
         let locais = self.aberta.is_some() && self.tem_revelacao_local();
@@ -648,26 +651,32 @@ impl Revelacao {
 
         div()
             .flex()
+            .flex_none()
             .items_center()
             .justify_between()
             .gap(px(8.))
-            .text_xs()
+            .px(px(12.))
+            .py(px(6.))
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .text_size(crate::tema::letra::em(11.))
             .child(
                 div()
                     .flex_1()
                     .min_w(px(0.))
+                    .truncate()
                     .text_color(cx.theme().muted_foreground)
                     .child(SharedString::from(texto)),
             )
             .child(
                 Button::new("zerar-tudo")
-                    .icon(Icon::new(Icone::RotateCcw).size(px(14.)))
+                    .icon(Icon::new(Icone::RotateCcw).size(px(12.)))
                     .label(if quantas_fotos > 1 {
                         SharedString::from(format!("Zerar {quantas_fotos} fotos"))
                     } else {
                         SharedString::from("Zerar tudo")
                     })
-                    .outline()
+                    .ghost()
                     .xsmall()
                     .disabled(quantas_fotos == 0)
                     .tooltip(dica)
@@ -1254,6 +1263,9 @@ fn altura_do_ponteiro(limites: Bounds<Pixels>, ponteiro: gpui_kit::Point<Pixels>
 
 /// O que está fora do neutro, em uma linha: os ajustes, o enquadramento e a
 /// Revelação local.
+///
+/// Com mais de uma parte o "fora do neutro" cai: o rodapé é estreito, e
+/// "36 ajustes + enquadramento fora do n…" cortava justo o que dizia.
 fn texto_do_cabecalho(alterados: usize, enquadrada: bool, locais: bool) -> String {
     let mut partes = Vec::new();
     if alterados > 0 {
@@ -1271,7 +1283,8 @@ fn texto_do_cabecalho(alterados: usize, enquadrada: bool, locais: bool) -> Strin
     match partes.as_slice() {
         [] => "Nenhum ajuste fora do neutro".to_string(),
         [so] if alterados == 0 => format!("Só {} fora do neutro", com_artigo(so)),
-        _ => format!("{} fora do neutro", partes.join(" + ")),
+        [so] => format!("{so} fora do neutro"),
+        _ => partes.join(" + "),
     }
 }
 
@@ -1290,14 +1303,9 @@ mod testes {
         assert_eq!(t(0, false, false), "Nenhum ajuste fora do neutro");
         assert_eq!(t(0, true, false), "Só o enquadramento fora do neutro");
         assert_eq!(t(0, false, true), "Só a Revelação local fora do neutro");
-        assert_eq!(
-            t(2, true, false),
-            "2 ajustes + enquadramento fora do neutro"
-        );
-        assert_eq!(
-            t(1, false, true),
-            "1 ajuste + Revelação local fora do neutro"
-        );
+        assert_eq!(t(36, false, false), "36 ajustes fora do neutro");
+        assert_eq!(t(2, true, false), "2 ajustes + enquadramento");
+        assert_eq!(t(1, false, true), "1 ajuste + Revelação local");
     }
 
     use super::*;
