@@ -343,6 +343,12 @@ impl Revelacao {
                             tela.ir_para_no_historico(i, window, cx);
                         }))
                 })
+                // O nome que não cabe na coluna ("Predefinição: RecordarFotos
+                // P&B") aparece inteiro na dica.
+                .when(passo.rotulo.nome.chars().count() > 22, |l| {
+                    let nome = SharedString::from(passo.rotulo.nome.clone());
+                    l.tooltip(move |window, cx| Tooltip::new(nome.clone()).build(window, cx))
+                })
                 .child(
                     div()
                         .flex_1()

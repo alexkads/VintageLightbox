@@ -374,9 +374,17 @@ impl Historico {
         for passo in &recente.passos[1..] {
             historico.empilhar(passo.estado.clone(), passo.rotulo.clone());
         }
-        // O que estava desfeito nesta abertura continua desfeito.
-        let desfeitos = recente.passos.len() - 1 - recente.atual;
-        historico.atual = historico.passos.len() - 1 - desfeitos.min(historico.passos.len() - 1);
+        // 🚨 **Sem gesto desta abertura, o atual é o gravado.** A conta abaixo
+        // levava o atual ao fim mesmo assim: a foto reaberta com passos
+        // desfeitos aparecia marcada no último, e o gesto seguinte se
+        // comparava com ele — "Endireitar" virou "Enquadrar" (visto no app,
+        // 03/10/2026).
+        if recente.passos.len() > 1 {
+            // O que estava desfeito nesta abertura continua desfeito.
+            let desfeitos = recente.passos.len() - 1 - recente.atual;
+            historico.atual =
+                historico.passos.len() - 1 - desfeitos.min(historico.passos.len() - 1);
+        }
         Ok(historico)
     }
 }
@@ -572,42 +580,47 @@ fn com_sinal(valor: f32, casas: usize) -> String {
 }
 
 fn rotulo_do_corte(antes: &Corte, depois: &Corte) -> Rotulo {
-    let enquadrou = antes.x != depois.x
-        || antes.y != depois.y
-        || antes.largura != depois.largura
-        || antes.altura != depois.altura;
-    let endireitou = antes.angulo != depois.angulo;
-    let girou = antes.rotacao != depois.rotacao;
-    let espelhou = antes.espelho_h != depois.espelho_h || antes.espelho_v != depois.espelho_v;
-    let perspectiva = antes.perspectiva != depois.perspectiva;
-    let restringiu = antes.restringir != depois.restringir;
+    // O retângulo por extenso: `None` é a foto inteira. Girar escreve os
+    // quatro (`corte_de`), e "nada" → "a foto inteira" não é cortar.
+    let retangulo = |c: &Corte| {
+        (
+            c.x.unwrap_or(0.0),
+            c.y.unwrap_or(0.0),
+            c.largura.unwrap_or(1.0),
+            c.altura.unwrap_or(1.0),
+        )
+    };
+    let enquadrou = retangulo(antes) != retangulo(depois);
+    let endireitou = antes.angulo.unwrap_or(0.0) != depois.angulo.unwrap_or(0.0);
+    let girou = antes.rotacao.unwrap_or(0) != depois.rotacao.unwrap_or(0);
+    let espelhou = antes.espelho_h.unwrap_or(false) != depois.espelho_h.unwrap_or(false)
+        || antes.espelho_v.unwrap_or(false) != depois.espelho_v.unwrap_or(false);
+    let perspectiva =
+        antes.perspectiva.unwrap_or_default() != depois.perspectiva.unwrap_or_default();
+    let restringiu = antes.restringir.unwrap_or(true) != depois.restringir.unwrap_or(true);
 
-    let quantos = [
-        enquadrou,
-        endireitou,
-        girou,
-        espelhou,
-        perspectiva,
-        restringiu,
-    ]
-    .iter()
-    .filter(|m| **m)
-    .count();
-    // Endireitar mexe no retângulo junto (ele encolhe para caber): o ângulo é
-    // o gesto, o retângulo é consequência.
-    if endireitou && !girou && !espelhou && !perspectiva && !restringiu {
-        let graus = depois.angulo.unwrap_or(0.0);
-        return Rotulo {
-            nome: "Endireitar".into(),
-            variacao: Some(com_sinal(graus - antes.angulo.unwrap_or(0.0), 1)),
-            valor: Some(format!("{}°", format!("{graus:.1}").replace('.', ","))),
-        };
-    }
-    if quantos != 1 {
-        return Rotulo::so("Enquadrar");
-    }
-    if restringiu {
-        return Rotulo {
+    // 🔑 **O gesto manda no nome; o retângulo é consequência.** Girar troca
+    // largura e altura, endireitar encolhe o retângulo para caber: contá-los
+    // como um segundo gesto dava "Enquadrar" a um simples `]` (visto no app,
+    // 03/10/2026).
+    let gestos = [
+        (girou, "Girar"),
+        (espelhou, "Espelhar"),
+        (perspectiva, "Perspectiva"),
+        (restringiu, "Restringir ao conteúdo"),
+        (endireitou, "Endireitar"),
+    ];
+    let feitos: Vec<&str> = gestos.iter().filter(|(f, _)| *f).map(|(_, n)| *n).collect();
+    match feitos.as_slice() {
+        ["Endireitar"] => {
+            let graus = depois.angulo.unwrap_or(0.0);
+            Rotulo {
+                nome: "Endireitar".into(),
+                variacao: Some(com_sinal(graus - antes.angulo.unwrap_or(0.0), 1)),
+                valor: Some(format!("{}°", format!("{graus:.1}").replace('.', ","))),
+            }
+        }
+        ["Restringir ao conteúdo"] => Rotulo {
             nome: "Restringir ao conteúdo".into(),
             variacao: None,
             valor: Some(
@@ -618,17 +631,11 @@ fn rotulo_do_corte(antes: &Corte, depois: &Corte) -> Rotulo {
                 }
                 .into(),
             ),
-        };
+        },
+        [um] => Rotulo::so(*um),
+        [] if enquadrou => Rotulo::so("Cortar"),
+        _ => Rotulo::so("Enquadrar"),
     }
-    Rotulo::so(if enquadrou {
-        "Cortar"
-    } else if girou {
-        "Girar"
-    } else if espelhou {
-        "Espelhar"
-    } else {
-        "Perspectiva"
-    })
 }
 
 fn rotulo_dos_locais(antes: &ParametrosLocais, depois: &ParametrosLocais) -> Rotulo {
@@ -996,14 +1003,34 @@ mod testes {
         assert_eq!(rotulo.nome, "Endireitar");
         assert_eq!(rotulo.valor.as_deref(), Some("2,5°"));
 
+        // Girar troca largura e altura e escreve o retângulo inteiro: o nome
+        // continua sendo o giro (visto no app, 03/10/2026).
         let girada = Estado {
             corte: Corte {
+                x: Some(0.1),
+                y: Some(0.0),
+                largura: Some(0.8),
+                altura: Some(1.0),
                 rotacao: Some(1),
                 ..Corte::default()
             },
             ..Estado::default()
         };
         assert_eq!(rotular(&Estado::default(), &girada).nome, "Girar");
+
+        // "Nada" → "a foto inteira escrita" não é corte nenhum.
+        let inteira = Estado {
+            corte: Corte {
+                x: Some(0.0),
+                y: Some(0.0),
+                largura: Some(1.0),
+                altura: Some(1.0),
+                rotacao: Some(0),
+                ..Corte::default()
+            },
+            ..Estado::default()
+        };
+        assert_eq!(rotular(&Estado::default(), &inteira).nome, "Enquadrar");
     }
 
     #[test]
@@ -1242,6 +1269,26 @@ mod testes {
         eprintln!("⏱️ JSON de {TETO} passos: {cada:?}, {tamanho} bytes");
         assert!(cada < std::time::Duration::from_millis(16), "{cada:?}");
         assert!(tamanho < 64 * 1024, "{tamanho} bytes");
+    }
+
+    /// 🚨 Reabrir a foto com um passo desfeito: o atual continua o gravado,
+    /// e o próximo gesto parte dele (visto no app, 03/10/2026).
+    #[test]
+    fn reabrir_com_passo_desfeito_mantem_o_atual() {
+        let mut gravado = Historico::novo(Estado::default());
+        gravado.registrar(com_exposicao(0.5));
+        gravado.registrar(cortada(0.5));
+        gravado.desfazer();
+
+        let agora = Historico::novo(com_exposicao(0.5));
+        let mut junto = Historico::retomar_sob(&gravado.em_json(), &agora).expect("legível");
+
+        assert_eq!(junto.atual(), 1, "a foto está no passo da exposição");
+        assert!(junto.pode_refazer(), "o corte desfeito continua lá");
+        let mut endireitada = com_exposicao(0.5);
+        endireitada.corte.angulo = Some(5.0);
+        junto.registrar(endireitada);
+        assert_eq!(nomes(&junto), [INICIO, "Exposição", "Endireitar"]);
     }
 
     #[test]
