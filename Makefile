@@ -47,7 +47,7 @@ else
 endif
 
 .DEFAULT_GOAL := ajuda
-.PHONY: ajuda sistema testar carga perfil e2e cobertura lint fmt rodar rodar-local medir icones \
+.PHONY: ajuda sistema testar carga perfil e2e e2e-ciclo cobertura lint fmt rodar rodar-local medir icones \
         web biblioteca faxina
 
 # 🚨 **A ajuda tem duas implementacoes, e nao e frescura.** No Windows o `make`
@@ -90,6 +90,15 @@ carga: ## Teste de carga da triagem durante importacao e envio ao R2 (ate 5 min)
 # O `--offline` impede o proprio cargo de procurar a internet.
 e2e: ## Testes ponta a ponta sem rede nenhuma: nada chega a producao (ate 10 min)
 	timeout 10m unshare -rn sh -c 'ip link set lo up && exec nice -n 10 cargo test --offline -j 6 -p ui-gpui --lib -- --test-threads=4 e2e::'
+
+# 🎬 O ciclo de vida da sessao CONTRA A API DE VERDADE (dono, 03/out/2026: *"a
+# garantia que tudo vai funcionar a cada versao lancada"*): a janela do app, com
+# a montagem do balcao, contra o `servidor-do-ciclo` do e-commerce — Postgres e
+# Redis descartaveis pelo testcontainers, nada sai da maquina. Precisa do Docker
+# e do `../recordarfotos-e-commerce`. O `make producao` de la roda este mesmo
+# script (`--origin-dev`) antes de subir o app ou o backend.
+e2e-ciclo: ## Ciclo de vida da sessao (criar, selecionar, revelar, caixa, estorno, fechar, pos-venda) contra a API de teste
+	./scripts/e2e-ciclo-de-vida.sh
 
 # A cobertura dos e2e (cargo-llvm-cov), tambem sem rede. Usa o llvm-cov e o
 # llvm-profdata do sistema: o Rust do Fedora compila com o LLVM do sistema, e

@@ -150,6 +150,13 @@ uma hora cada), enquanto o Mac e o Fedora do dono já tinham compilado e instala
 atualização do próprio app. No Windows ele só fazia `cargo check`, sem ligar o binário.
 
 - **A rede é a bateria local antes de subir**: `make testar` e `make lint` no `dev`.
+- 🎬 **E o ciclo de vida da sessão, contra a API de verdade** (dono, 03/out/2026: *"a garantia
+  que tudo vai funcionar a cada versão lançada"*): `make e2e-ciclo` roda a janela do app, com a
+  montagem do balcão (`crates/ui-gpui/src/montagem.rs`, a mesma do `main.rs`), contra o
+  `servidor-do-ciclo` do e-commerce — Postgres e Redis descartáveis — e percorre criação da
+  sessão, seleção com o cliente, revelação, venda no caixa, estorno, fechamento e pós-venda
+  (`e2e::ciclo_de_vida`). O `make producao` do e-commerce o roda (`--origin-dev`) antes de subir
+  o app ou o backend; vermelho, nada sobe. Precisa do Docker de pé.
 - **Uma versão que não compila num balcão não quebra nada**: o instalador compila numa pasta à parte,
   confere o app novo (`--versao`) e só então troca, guardando o anterior. O custo é o balcão ficar
   uma versão atrás até a correção, que sai numa versão nova e maior.

@@ -52,12 +52,14 @@
 //! | [`zoom`] | as teclas do zoom, a folha de atalhos e o bruto em resolução cheia |
 //! | [`lote`] | sincronizar, zerar, a comprada, "Baixar JPEG" e "Salvar na galeria" |
 //! | [`segundo_plano`] | minimizar, fechar com envio pendente e sair quando a fila esvazia |
+//! | [`ciclo_de_vida`] | 🎬 **o dia inteiro de uma sessão contra a API de verdade** (`make e2e-ciclo`): criação, seleção, revelação, caixa, estorno, fechamento e pós-venda |
 
 mod agenda;
 mod atendimento;
 mod caixa;
 mod carga;
 mod chatbot;
+mod ciclo_de_vida;
 mod cliente;
 mod conta;
 mod enquadrar;

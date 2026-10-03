@@ -704,6 +704,20 @@ impl Caixa {
         self.dialogo.as_ref().map(Dialogo::contexto)
     }
 
+    /// A contagem foi conferida: o diálogo mostra o esperado ao lado do
+    /// contado e espera o "Fechar" — só os testes.
+    #[cfg(test)]
+    pub(super) fn fechamento_conferido(&self) -> bool {
+        matches!(self.dialogo.as_ref(), Some(Dialogo::Fechar(f)) if f.conferencia.is_some())
+    }
+
+    /// O fechamento terminou: o diálogo mostra o resumo do caixa fechado — só
+    /// os testes.
+    #[cfg(test)]
+    pub(super) fn fechamento_concluido(&self) -> bool {
+        matches!(self.dialogo.as_ref(), Some(Dialogo::Fechar(f)) if f.resultado.is_some())
+    }
+
     /// Os pagamentos lançados no diálogo aberto — só os testes.
     #[cfg(test)]
     pub(super) fn lancados(&self) -> Vec<PagamentoLancado> {
