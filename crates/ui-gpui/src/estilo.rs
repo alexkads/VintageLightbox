@@ -526,17 +526,75 @@ pub fn cartao(cx: &App) -> Div {
 /// com `debug_selector`, para os testes o acharem e clicarem como antes (o
 /// item do kit não tem nome próprio). O clique no rótulo sobe até o item, que
 /// fecha o menu e chama o `on_click`.
+///
+/// 📏 O rótulo ocupa a linha inteira: o ✓ de `check_side(Side::Right)` vem
+/// depois dele, e com o rótulo do tamanho do texto o ✓ ficava colado na
+/// palavra em vez de na borda do menu.
 pub fn item_de_menu(
     id: &'static str,
     rotulo: impl Into<SharedString>,
     cor: Option<Hsla>,
 ) -> gpui_kit::component::menu::PopupMenuItem {
-    let rotulo: SharedString = rotulo.into();
-    gpui_kit::component::menu::PopupMenuItem::element(move |_, _| {
-        div()
+    linha_de_menu(id, None, rotulo.into(), cor, None)
+}
+
+/// O item com ícone do `DropdownMenuItem` do site: o ícone de 16 px
+/// (`[&_svg]:size-4`) e o vão do template entre ele e o rótulo. O
+/// `.icon(..)` do kit desenha o ícone em 12 px, colado no texto.
+pub fn item_de_menu_com_icone(
+    id: &'static str,
+    icone: Icone,
+    rotulo: impl Into<SharedString>,
+    cor: Option<Hsla>,
+) -> gpui_kit::component::menu::PopupMenuItem {
+    linha_de_menu(id, Some(icone), rotulo.into(), cor, None)
+}
+
+/// O item com ícone e um texto apagado no fim (o `DropdownMenuShortcut`):
+/// a versão ao lado de "Verificar atualizações".
+pub fn item_de_menu_com_fim(
+    id: &'static str,
+    icone: Icone,
+    rotulo: impl Into<SharedString>,
+    fim: impl Into<SharedString>,
+) -> gpui_kit::component::menu::PopupMenuItem {
+    linha_de_menu(id, Some(icone), rotulo.into(), None, Some(fim.into()))
+}
+
+fn linha_de_menu(
+    id: &'static str,
+    icone: Option<Icone>,
+    rotulo: SharedString,
+    cor: Option<Hsla>,
+    fim: Option<SharedString>,
+) -> gpui_kit::component::menu::PopupMenuItem {
+    gpui_kit::component::menu::PopupMenuItem::element(move |_, cx| {
+        let apagado = cx.theme().muted_foreground;
+        let item = m().item_de_menu;
+        h_flex()
             .debug_selector(move || id.into())
+            .flex_1()
+            .min_w(px(0.))
+            .min_h(px(item.altura))
+            .gap(px(item.vao))
             .when_some(cor, |d, cor| d.text_color(cor))
-            .child(rotulo.clone())
+            .when_some(icone, |d, icone| {
+                d.child(
+                    Icon::new(icone)
+                        .size(px(16.))
+                        .when(cor.is_none(), |i| i.text_color(apagado)),
+                )
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .truncate()
+                    .child(rotulo.clone()),
+            )
+            .when_some(fim.clone(), |d, fim| {
+                d.child(div().flex_none().text_xs().text_color(apagado).child(fim))
+            })
     })
 }
 
