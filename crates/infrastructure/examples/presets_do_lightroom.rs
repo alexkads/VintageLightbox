@@ -84,6 +84,9 @@ fn main() {
             };
             let quantidade = numero("PostCropVignetteAmount").unwrap_or(0.0);
             ajustes.insert("pcv_amount".into(), quantidade);
+            // Uma vinheta por vez (dono, 3/out/2026): a do preset desliga a
+            // do darktable, senão "Vinheta Nenhuma" deixava a borda dela.
+            ajustes.insert("darktable_vignette_ativo".into(), 0.0);
             if quantidade != 0.0 {
                 for (chave, campo, neutro) in [
                     ("PostCropVignetteMidpoint", "pcv_midpoint", 50.0),

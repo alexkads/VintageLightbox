@@ -673,11 +673,20 @@ fn as_do_lightroom_vem_na_pasta_lrs_e_so_as_vinhetas_somam() {
         assert!(p.is_system, "{}", p.name);
         assert_eq!(p.grupo.as_deref(), Some(GRUPO_LRS), "{}", p.name);
         // A versão de processo vai junto da vinheta: no processo 1 ela é a
-        // medida no Lightroom (`revelacao_core::lightroom`).
+        // medida no Lightroom (`revelacao_core::lightroom`). E a vinheta do
+        // darktable desliga: uma vinheta por vez.
         let so_vinheta = p
             .adjustments
             .campos()
-            .all(|c| c.starts_with("pcv_") || c == "processo");
+            .all(|c| c.starts_with("pcv_") || c == "processo" || c == "darktable_vignette_ativo");
+        if so_vinheta {
+            assert_eq!(
+                p.adjustments.get("darktable_vignette_ativo"),
+                Some(0.0),
+                "{} deixa a vinheta do darktable ligada",
+                p.name
+            );
+        }
         assert_eq!(
             p.replaces, !so_vinheta,
             "{}: recomeça só quem não é vinheta",

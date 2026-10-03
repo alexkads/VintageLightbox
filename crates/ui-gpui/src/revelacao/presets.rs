@@ -710,6 +710,30 @@ mod testes {
         assert_eq!(nitida.sharpen_amount, 55.0);
     }
 
+    /// 🔲 **Uma vinheta por vez** (dono, 2026-10-03): "Vinheta Nenhuma" sobre o
+    /// RecordarFotos P&B deixava a borda clara da vinheta do darktable. As da
+    /// pasta "LRs" a desligam e guardam os números dela, e o resto da foto fica.
+    #[test]
+    fn as_vinhetas_das_lrs_desligam_a_do_darktable() {
+        let pb = aplicado(&Ajustes::default(), &sistema("RecordarFotos P&B"));
+        assert_eq!(pb.darktable_vignette_ativo, 1.0);
+        for nome in [
+            "Vinheta Nenhuma",
+            "Vinheta Borda",
+            "Vinheta Carregada",
+            "Vinheta Oval",
+            "Vinheta Tingida",
+        ] {
+            let depois = aplicado(&pb, &sistema(nome));
+            assert_eq!(depois.darktable_vignette_ativo, 0.0, "{nome}");
+            assert_eq!(
+                depois.darktable_vignette_brightness, pb.darktable_vignette_brightness,
+                "{nome} não mexe nos números da do darktable"
+            );
+            assert_eq!(depois.bw_ativo, pb.bw_ativo, "{nome} soma");
+        }
+    }
+
     // ------------------------------------ presets-do-sistema.test.ts
 
     #[test]

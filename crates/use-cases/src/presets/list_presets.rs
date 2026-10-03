@@ -571,8 +571,9 @@ struct DoLightroom {
 /// `lightroom.json` sai dos `.xmp` do estúdio pelo mesmo tradutor da
 /// importação (`infrastructure/examples/presets_do_lightroom.rs`), e o site lê
 /// o mesmo arquivo. **As de vinheta somam** — vão por cima do visual que já
-/// está na foto, como no Lightroom —; **as outras recomeçam do neutro**, porque
-/// são o visual inteiro.
+/// está na foto, como no Lightroom —, mas desligam a vinheta do darktable: uma
+/// vinheta por vez (dono, 3/out/2026). **As outras recomeçam do neutro**,
+/// porque são o visual inteiro.
 pub fn presets_do_lightroom() -> Vec<Preset> {
     let lista: Vec<DoLightroom> = serde_json::from_str(include_str!("lightroom.json"))
         .expect("lightroom.json é gerado pelo exemplo e vai junto no repositório");

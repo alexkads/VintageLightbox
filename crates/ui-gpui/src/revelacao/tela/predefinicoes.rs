@@ -821,14 +821,22 @@ impl Revelacao {
             // 🧪 Aplica a N-ésima predefinição do sistema à foto aberta (0 é a
             // primeira) — o clique na linha da coluna. Com um nome em vez do
             // número (`predefinicoes aplicar RecordarFotos P&B`), a desse nome:
-            // a ordem da coluna muda com as favoritas.
+            // a ordem da coluna muda com as favoritas. O nome procura também nas
+            // pastas, como a "LRs" (`predefinicoes aplicar Vinheta Nenhuma`).
             "aplicar" => {
                 let sistema = self.grupos_da_coluna(cx).sistema;
                 let escolhida = match argumento.parse::<usize>() {
                     Ok(n) => sistema.get(n),
                     Err(_) => sistema.iter().find(|p| p.name == argumento),
-                };
-                match escolhida.map(|p| (*p).clone()) {
+                }
+                .map(|p| (*p).clone())
+                .or_else(|| {
+                    self.presets
+                        .iter()
+                        .find(|p| p.is_system && p.name == argumento)
+                        .cloned()
+                });
+                match escolhida {
                     Some(preset) => self.aplicar_preset(&preset, window, cx),
                     None => eprintln!("[roteiro] predefinicoes: não achei '{argumento}'"),
                 }

@@ -724,6 +724,7 @@
   },
   {
     "ajustes": {
+      "darktable_vignette_ativo": 0.0,
       "pcv_amount": 100.0,
       "pcv_feather": 35.0,
       "pcv_highlights": 0.0,
@@ -738,6 +739,7 @@
   },
   {
     "ajustes": {
+      "darktable_vignette_ativo": 0.0,
       "pcv_amount": -61.0,
       "pcv_feather": 50.0,
       "pcv_highlights": 0.0,
@@ -752,6 +754,7 @@
   },
   {
     "ajustes": {
+      "darktable_vignette_ativo": 0.0,
       "pcv_amount": 0.0
     },
     "avisos": [],
@@ -760,6 +763,7 @@
   },
   {
     "ajustes": {
+      "darktable_vignette_ativo": 0.0,
       "pcv_amount": 100.0,
       "pcv_feather": 24.0,
       "pcv_highlights": 0.0,
@@ -774,6 +778,7 @@
   },
   {
     "ajustes": {
+      "darktable_vignette_ativo": 0.0,
       "pcv_amount": 78.0,
       "pcv_feather": 48.0,
       "pcv_highlights": 0.0,
