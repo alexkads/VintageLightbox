@@ -1,10 +1,10 @@
 {
-  "versao": "0.1.77",
-  "titulo": "As amostras dos presets agora usam uma foto colorida.",
+  "versao": "0.1.78",
+  "titulo": "O RecordarFotos P&B ganhou a vinheta certa.",
   "importante": false,
   "novidades": [
-    "Na Nova sessão e no atendimento, enquanto ainda não há foto do ensaio, os cartões do \"Preset padrão\" mostram um casal colorido do estúdio no lugar da foto sépia.",
-    "Agora dá para ver a diferença entre \"Preto e branco\", \"Sépia\", \"RecordarFotos P&B\" e os outros presets antes de escolher."
+    "O preset \"RecordarFotos P&B\" agora tem a borda clara cor de creme, oval e suave. Antes os cantos da foto ficavam com faixas quase brancas.",
+    "Os números do preset são os que o estúdio aprovou, campo a campo, e são os mesmos no aplicativo e no site."
   ],
-  "por_que_atualizar": "Para escolher o preset da sessão vendo de verdade o que cada um faz com a foto."
+  "por_que_atualizar": "Para que as fotos reveladas com o RecordarFotos P&B saiam com a borda certa."
 }
