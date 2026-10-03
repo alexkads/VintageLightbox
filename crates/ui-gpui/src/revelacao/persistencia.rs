@@ -1503,10 +1503,9 @@ mod testes {
         let (ajustes, corte) = de_json(&json);
         assert_eq!(ajustes.bw_ativo, 1.0, "abriu colorida");
         assert_eq!(ajustes.processo, 1.0);
-        assert!(
-            ajustes.vinheta_do_darktable_ligada(),
-            "sem a vinheta do darktable"
-        );
+        // A vinheta do P&B de hoje é a pós-corte (3/out/2026), não a do darktable.
+        assert_eq!(ajustes.pcv_amount, 78.0, "sem a vinheta do P&B");
+        assert!(!ajustes.vinheta_do_darktable_ligada());
         assert_eq!(corte.largura, Some(0.9), "o corte da foto fica");
     }
 }

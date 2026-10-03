@@ -365,10 +365,10 @@ fn cada_uma_escreve_a_mesma_quantidade_de_campos_do_site() {
 
     assert_eq!(
         quantos,
-        // O RecordarFotos P&B (7º) tem 38 desde 2/out/2026: os controles do
-        // Lightroom no lugar dos 24 campos `dt_*` do darktable, com os sete da
-        // vinheta do darktable fora do neutro no lugar das seis da aproximação.
-        vec![5, 8, 9, 6, 7, 7, 38, 13, 13, 10, 12, 7, 11, 6, 10, 16, 17, 13, 13, 4, 35]
+        // O RecordarFotos P&B (7º) tem 42 desde 3/out/2026: os do arquivo que o
+        // dono exportou — a vinheta do darktable desligada (seis números
+        // guardados) e as cinco da pós-corte.
+        vec![5, 8, 9, 6, 7, 7, 42, 13, 13, 10, 12, 7, 11, 6, 10, 16, 17, 13, 13, 4, 35]
     );
 }
 
@@ -428,13 +428,10 @@ fn a_receita_do_darktable_vira_o_recordarfotos_pb_de_hoje() {
     }
     assert_eq!(receita["corte_ativo"], 1.0, "o corte da foto fica");
 
-    // A vinheta do darktable da foto vai para a de hoje — a do P&B, quando ela
-    // não a mexeu, ou a dela.
-    assert_eq!(receita["darktable_vignette_ativo"], 1.0);
-    assert_eq!(
-        receita["darktable_vignette_brightness"].as_f64().unwrap() as f32,
-        0.99999
-    );
+    // A vinheta do P&B de hoje é a pós-corte do arquivo do dono (3/out/2026);
+    // a do darktable não liga.
+    assert_eq!(receita["pcv_amount"], 78.0);
+    assert!(!receita.contains_key("darktable_vignette_ativo"));
     assert!(
         !receita.contains_key("lens_vignette_amount"),
         "a aproximação saiu"

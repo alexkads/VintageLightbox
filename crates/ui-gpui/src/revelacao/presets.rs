@@ -717,8 +717,12 @@ mod testes {
     /// pasta "LRs" a desligam e guardam os números dela, e o resto da foto fica.
     #[test]
     fn as_vinhetas_das_lrs_desligam_a_do_darktable() {
-        let pb = aplicado(&Ajustes::default(), &sistema("RecordarFotos P&B"));
-        assert_eq!(pb.darktable_vignette_ativo, 1.0);
+        let mut pb = aplicado(&Ajustes::default(), &sistema("RecordarFotos P&B"));
+        // Desde 3/out/2026 o P&B traz a pós-corte, e a do darktable desligada;
+        // aqui o operador a liga à mão.
+        assert_eq!(pb.darktable_vignette_ativo, 0.0);
+        assert_eq!(pb.pcv_amount, 78.0);
+        pb.darktable_vignette_ativo = 1.0;
         for nome in [
             "Vinheta Nenhuma",
             "Vinheta Borda",
@@ -863,7 +867,7 @@ mod testes {
         );
         assert_eq!(
             resumir(&sistema("RecordarFotos P&B").adjustments),
-            "Exposição, Contraste, Altas luzes, Sombras e mais 34"
+            "Exposição, Contraste, Altas luzes, Sombras e mais 38"
         );
     }
 
