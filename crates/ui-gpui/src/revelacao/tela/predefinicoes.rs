@@ -8,6 +8,7 @@
 //! | `+` | abre o formulário embutido: Enter salva, Esc cancela |
 //! | ícone de envio | importa `.lrtemplate` e `.xmp` do Lightroom |
 //! | lápis / lixeira (ao passar o mouse) | renomeia no lugar (Enter/Esc/✓/✕) · apaga depois de perguntar |
+//! | botão direito → "Atualizar com os ajustes atuais" | a do operador passa a guardar o que está na foto |
 //! | arrastar a linha | reordena dentro do grupo; ↑ ↓ com a alça focada; "ordem padrão" desfaz |
 //!
 //! 🔑 **Reordenar fica desligado durante a busca**, como no site: a lista
@@ -487,6 +488,44 @@ impl Revelacao {
         cx.notify();
     }
 
+    /// Grava numa predefinição do operador os ajustes que estão na foto — o
+    /// "Atualizar com as configurações atuais" do Lightroom.
+    ///
+    /// 🔑 **A mesma linha, e no mesmo modo em que nasceu**: o id, o nome e o
+    /// lugar na lista e nas favoritas ficam; a que guardava os 53 (a caixa
+    /// "Zerar os outros ajustes ao aplicar") continua inteira, e a outra guarda
+    /// só o que saiu do neutro — a regra do [`Self::salvar_preset`]. As do
+    /// sistema nascem no código e não têm linha no banco: não se atualizam.
+    pub fn atualizar_preset(&mut self, id: PresetId, cx: &mut Context<Self>) {
+        let ajustes = self.ajustes;
+        let Some(preset) = self
+            .presets
+            .iter_mut()
+            .find(|preset| preset.id == id && !preset.is_system)
+        else {
+            return;
+        };
+        let inteiro = preset.adjustments.len() == Ajustes::NOMES.len();
+        let novos = presets::dos_ajustes(&ajustes, inteiro);
+        if novos.is_empty() {
+            self.avisar_na_coluna(
+                "Não há nenhum ajuste fora do neutro para guardar.",
+                true,
+                cx,
+            );
+            return;
+        }
+        preset.adjustments = novos;
+        let nome = preset.name.clone();
+        self.guarda_de_presets.salvar(preset.clone());
+        self.avisar_na_coluna(
+            format!("\"{nome}\" agora guarda os ajustes desta foto."),
+            false,
+            cx,
+        );
+        cx.notify();
+    }
+
     /// A pergunta do site antes de apagar.
     ///
     /// 🚨 **É o único gesto desta coluna que não se desfaz**: a predefinição
@@ -791,6 +830,18 @@ impl Revelacao {
                 };
                 match escolhida.map(|p| (*p).clone()) {
                     Some(preset) => self.aplicar_preset(&preset, window, cx),
+                    None => eprintln!("[roteiro] predefinicoes: não achei '{argumento}'"),
+                }
+            }
+            // 🧪 O "Atualizar com os ajustes atuais" da do operador com esse nome.
+            "atualizar" => {
+                let id = self
+                    .presets
+                    .iter()
+                    .find(|p| !p.is_system && p.name == argumento)
+                    .map(|p| p.id);
+                match id {
+                    Some(id) => self.atualizar_preset(id, cx),
                     None => eprintln!("[roteiro] predefinicoes: não achei '{argumento}'"),
                 }
             }
@@ -1687,7 +1738,8 @@ impl Revelacao {
             else {
                 return menu;
             };
-            let (para_aplicar, para_favoritar) = (esta.clone(), esta.clone());
+            let (para_aplicar, para_atualizar) = (esta.clone(), esta.clone());
+            let para_favoritar = esta.clone();
             let (para_renomear, para_apagar) = (esta.clone(), esta.clone());
             let chave = ordem::chave(&preset);
             let id = preset.id;
@@ -1702,6 +1754,18 @@ impl Revelacao {
                             let _ = para_aplicar.update(cx, |tela, cx| {
                                 tela.prever(None, cx);
                                 tela.aplicar_preset(&preset, window, cx);
+                            });
+                        }),
+                )
+                // As do sistema nascem no código: à vista, mas desligada, como
+                // no Lightroom — some, e o operador procuraria onde ela foi.
+                .item(
+                    PopupMenuItem::new("Atualizar com os ajustes atuais")
+                        .disabled(travada || sistema)
+                        .on_click(move |_ev, _window, cx| {
+                            let _ = para_atualizar.update(cx, |tela, cx| {
+                                tela.prever(None, cx);
+                                tela.atualizar_preset(id, cx);
                             });
                         }),
                 )

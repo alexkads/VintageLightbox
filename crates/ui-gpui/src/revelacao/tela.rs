@@ -5852,6 +5852,120 @@ mod testes {
         assert_eq!(guarda.apagados(), vec![id]);
     }
 
+    /// 🔄 **"Atualizar com os ajustes atuais" grava a foto na mesma linha** —
+    /// o mesmo id na lista e no banco, só o que saiu do neutro, e a marca de
+    /// "na foto" acende. Nas do sistema não mexe: elas não têm linha no banco.
+    #[gpui_kit::test]
+    fn atualizar_preset_grava_os_ajustes_atuais_no_mesmo_id(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let guarda = Arc::new(GuardaDeMentira::default());
+        let minha = Preset::user(
+            "Meu visual".into(),
+            PresetAdjustments::vazia().com("temperature", 5.0),
+        );
+        let id = minha.id;
+        let sepia = use_cases::presets::presets_de_sistema()
+            .into_iter()
+            .find(|p| p.name == "Sépia à moda antiga")
+            .expect("a sépia do sistema");
+        let sepia_id = sepia.id;
+
+        let janela = com_guarda(
+            cx,
+            previews,
+            Arc::new(GravadorDeMentira::default()),
+            guarda.clone(),
+            vec![sepia.clone(), minha.clone()],
+        );
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+                tela.aplicar_preset(&minha, window, cx);
+                tela.ajustes.exposure += 0.5;
+
+                tela.atualizar_preset(id, cx);
+                let atual = tela.presets.iter().find(|p| p.id == id).cloned();
+                let atual = atual.expect("a minha continua na lista");
+                assert_eq!(atual.name, "Meu visual", "o nome fica");
+                assert_eq!(atual.adjustments.get("temperature"), Some(5.0));
+                assert_eq!(atual.adjustments.get("exposure"), Some(0.5));
+                assert_eq!(
+                    atual.adjustments.get("saturation"),
+                    None,
+                    "o neutro não vai"
+                );
+                assert!(tela.em_uso(&atual), "a foto agora é ela");
+
+                tela.atualizar_preset(sepia_id, cx);
+                let intacta = tela.presets.iter().find(|p| p.id == sepia_id);
+                assert_eq!(
+                    intacta.map(|p| &p.adjustments),
+                    Some(&sepia.adjustments),
+                    "a do sistema não muda"
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        let salvos = guarda.salvos();
+        assert_eq!(salvos.len(), 1, "só a do operador vai ao banco");
+        assert_eq!(salvos[0].id, id, "a mesma linha, e não uma cópia");
+        assert_eq!(salvos[0].adjustments.get("exposure"), Some(0.5));
+    }
+
+    /// 🔄 A que nasceu inteira (os 53, "Zerar os outros ajustes ao aplicar")
+    /// continua inteira; a que soma, com a foto no neutro, não grava vazia.
+    #[gpui_kit::test]
+    fn atualizar_preset_mantem_o_modo_e_nao_grava_vazia(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+
+        let guarda = Arc::new(GuardaDeMentira::default());
+        let inteira = Preset::user(
+            "Visual completo".into(),
+            super::super::presets::dos_ajustes(&Ajustes::default(), true),
+        );
+        let total = inteira.adjustments.len();
+        let que_soma = Preset::user(
+            "Só a cor".into(),
+            PresetAdjustments::vazia().com("saturation", -1.0),
+        );
+        let (id_inteira, id_soma) = (inteira.id, que_soma.id);
+
+        let janela = com_guarda(
+            cx,
+            previews,
+            Arc::new(GravadorDeMentira::default()),
+            guarda.clone(),
+            vec![inteira, que_soma],
+        );
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+                tela.atualizar_preset(id_soma, cx);
+                tela.ajustes.exposure = 0.7;
+                tela.atualizar_preset(id_inteira, cx);
+                let atual = tela.presets.iter().find(|p| p.id == id_inteira);
+                assert_eq!(
+                    atual.map(|p| p.adjustments.len()),
+                    Some(total),
+                    "continua com os 53"
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        let salvos = guarda.salvos();
+        assert_eq!(salvos.len(), 1, "a que soma, no neutro, não grava");
+        assert_eq!(salvos[0].id, id_inteira);
+    }
+
     /// A importação do Lightroom, de ponta a ponta: escolher, traduzir, salvar.
     ///
     /// 🔑 **As novas entram na lista da tela na hora.** Elas já vão ao banco
