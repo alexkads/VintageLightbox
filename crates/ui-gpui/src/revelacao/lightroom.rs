@@ -1,6 +1,11 @@
 //! A tela de importar predefinições do Lightroom: o seletor de arquivos e o
 //! relatório do que ficou de fora.
 //!
+//! 📦 **Também lê o que este app exporta** (3/out/2026): o `.rfpreset` e o
+//! `.zip` de predefinições — o formato mora em
+//! [`super::presets::arquivo`]. E é a mesma porta que pergunta onde gravar a
+//! exportação ([`EscolhaDePresets::gravar`]).
+//!
 //! 🗑️ **Os estilos do darktable (`.dtstyle` e o `.xmp` dele) não entram mais**
 //! (2/out/2026): o motor não tem os módulos do darktable, e o RecordarFotos P&B
 //! foi refeito com os controles do Lightroom. Um arquivo do darktable vai para
@@ -12,6 +17,8 @@
 //! `revelacao::lightroom::traduzir` chama igual.
 
 pub use infrastructure::lightroom::*;
+
+use super::presets::arquivo;
 
 /// Um arquivo que o fotógrafo escolheu, já lido do disco.
 ///
@@ -36,7 +43,16 @@ pub struct Arquivo {
 /// esperando arquivos que nunca vêm, com o botão desligado até fechar o app.
 pub trait EscolhaDePresets: Send + Sync + 'static {
     fn escolher(&self, canal: std::sync::mpsc::Sender<Vec<Arquivo>>);
+
+    /// Pergunta onde gravar `conteudo`, sugerindo `nome`, e grava.
+    ///
+    /// Responde sempre: `Ok(Some(caminho))` gravou, `Ok(None)` é desistência,
+    /// `Err` diz por que o disco recusou.
+    fn gravar(&self, nome: String, conteudo: Vec<u8>, canal: std::sync::mpsc::Sender<Gravacao>);
 }
+
+/// O que a exportação respondeu — ver [`EscolhaDePresets::gravar`].
+pub type Gravacao = Result<Option<std::path::PathBuf>, String>;
 
 /// O seletor do sistema, via `rfd` — a mesma escolha da importação de fotos.
 pub struct EscolhaNativa {
@@ -53,30 +69,58 @@ impl EscolhaDePresets for EscolhaNativa {
     fn escolher(&self, canal: std::sync::mpsc::Sender<Vec<Arquivo>>) {
         self.tokio.spawn(async move {
             let escolhidos = rfd::AsyncFileDialog::new()
-                .set_title("Importar do Lightroom")
-                .add_filter("Predefinições do Lightroom", &["lrtemplate", "xmp"])
+                .set_title("Importar predefinições")
+                .add_filter(
+                    "Predefinições (.rfpreset, .zip, Lightroom)",
+                    &[arquivo::EXTENSAO, "zip", "xmp", "lrtemplate"],
+                )
                 .pick_files()
                 .await
                 .unwrap_or_default();
 
-            let mut arquivos = Vec::with_capacity(escolhidos.len());
-            for escolhido in escolhidos {
-                let caminho = escolhido.path().to_path_buf();
-                let nome = caminho
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| caminho.to_string_lossy().to_string());
-                // ⚠️ **`read_to_string` recusa o que não é UTF-8**, e é o que se
-                // quer: os dois formatos são texto, e um binário lido como
-                // preset entraria como "sem nenhum ajuste" em vez de "não deu
-                // para ler".
-                arquivos.push(Arquivo {
-                    nome,
-                    texto: tokio::fs::read_to_string(&caminho).await.ok(),
-                });
-            }
+            // O `.zip` vira o que tem dentro; o resto, um arquivo cada.
+            let arquivos = tokio::task::spawn_blocking(move || {
+                escolhidos
+                    .iter()
+                    .flat_map(|escolhido| arquivo::ler_do_disco(escolhido.path()))
+                    .collect::<Vec<_>>()
+            })
+            .await
+            .unwrap_or_default();
 
             let _ = canal.send(arquivos);
+        });
+    }
+
+    fn gravar(&self, nome: String, conteudo: Vec<u8>, canal: std::sync::mpsc::Sender<Gravacao>) {
+        self.tokio.spawn(async move {
+            let pacote = nome.to_lowercase().ends_with(".zip");
+            let (rotulo, extensao) = if pacote {
+                ("Pacote de predefinições (.zip)", "zip")
+            } else {
+                ("Predefinição (.rfpreset)", arquivo::EXTENSAO)
+            };
+            let destino = rfd::AsyncFileDialog::new()
+                .set_title(if pacote {
+                    "Exportar predefinições"
+                } else {
+                    "Exportar predefinição"
+                })
+                .set_file_name(&nome)
+                .add_filter(rotulo, &[extensao])
+                .save_file()
+                .await;
+            let resposta = match destino {
+                None => Ok(None),
+                Some(destino) => {
+                    let caminho = destino.path().to_path_buf();
+                    tokio::fs::write(&caminho, conteudo)
+                        .await
+                        .map(|()| Some(caminho))
+                        .map_err(|erro| erro.to_string())
+                }
+            };
+            let _ = canal.send(resposta);
         });
     }
 }
@@ -127,6 +171,23 @@ pub fn preparar(arquivos: &[Arquivo], ja_existem: &[String]) -> (Vec<PresetTradu
             relatorio.ilegiveis.push(arquivo.nome.clone());
             continue;
         };
+        // 📦 O que este app exporta vem primeiro, pelo conteúdo: os números já
+        // são os do motor, e não passam pela tradução do Lightroom.
+        if let Some(nossa) = arquivo::ArquivoDePredefinicao::ler(texto) {
+            let (ajustes, ignorados) = nossa.para_guardar();
+            contar_e_guardar(
+                PresetTraduzido {
+                    nome: nossa.nome,
+                    ajustes,
+                    ignorados,
+                },
+                &mut contagem,
+                &mut nomes,
+                &mut criar,
+                &mut relatorio,
+            );
+            continue;
+        }
         // 🔑 **O do darktable fica de fora, decidido pelo conteúdo**: o `.xmp`
         // dele e o do Lightroom têm a mesma extensão, e o leitor do Lightroom
         // leria o do darktable como um preset sem ajuste nenhum.
@@ -141,25 +202,13 @@ pub fn preparar(arquivos: &[Arquivo], ja_existem: &[String]) -> (Vec<PresetTradu
             relatorio.ilegiveis.push(arquivo.nome.clone());
             continue;
         };
-
-        for rotulo in &traduzido.ignorados {
-            match contagem.iter_mut().find(|(r, _)| r == rotulo) {
-                Some((_, quantos)) => *quantos += 1,
-                None => contagem.push((rotulo.clone(), 1)),
-            }
-        }
-
-        if traduzido.ajustes.is_empty() {
-            relatorio.sem_ajuste.push(traduzido.nome);
-            continue;
-        }
-        if nomes.iter().any(|nome| nome == &traduzido.nome) {
-            relatorio.repetidas += 1;
-            continue;
-        }
-
-        nomes.push(traduzido.nome.clone());
-        criar.push(traduzido);
+        contar_e_guardar(
+            traduzido,
+            &mut contagem,
+            &mut nomes,
+            &mut criar,
+            &mut relatorio,
+        );
     }
 
     relatorio.criadas = criar.len();
@@ -169,6 +218,34 @@ pub fn preparar(arquivos: &[Arquivo], ja_existem: &[String]) -> (Vec<PresetTradu
         .ignorados
         .sort_by_key(|(_, quantos)| std::cmp::Reverse(*quantos));
     (criar, relatorio)
+}
+
+/// Conta o que ficou de fora e decide: criar, pular a repetida ou a vazia.
+fn contar_e_guardar(
+    traduzido: PresetTraduzido,
+    contagem: &mut Vec<(String, usize)>,
+    nomes: &mut Vec<String>,
+    criar: &mut Vec<PresetTraduzido>,
+    relatorio: &mut Relatorio,
+) {
+    for rotulo in &traduzido.ignorados {
+        match contagem.iter_mut().find(|(r, _)| r == rotulo) {
+            Some((_, quantos)) => *quantos += 1,
+            None => contagem.push((rotulo.clone(), 1)),
+        }
+    }
+
+    if traduzido.ajustes.is_empty() {
+        relatorio.sem_ajuste.push(traduzido.nome);
+        return;
+    }
+    if nomes.iter().any(|nome| nome == &traduzido.nome) {
+        relatorio.repetidas += 1;
+        return;
+    }
+
+    nomes.push(traduzido.nome.clone());
+    criar.push(traduzido);
 }
 
 /// Uma linha por vez, para a tela desenhar o resultado.
@@ -231,17 +308,22 @@ impl Relatorio {
 pub mod mentira {
     use std::sync::Mutex;
 
-    use super::{Arquivo, EscolhaDePresets};
+    use super::{Arquivo, EscolhaDePresets, Gravacao};
 
     #[derive(Default)]
     pub struct EscolhaDeMentira {
         resposta: Mutex<Vec<Arquivo>>,
+        /// O que a exportação mandou gravar: o nome sugerido e os bytes.
+        pub gravados: Mutex<Vec<(String, Vec<u8>)>>,
+        /// A exportação "desiste", como quem fecha a janela do sistema.
+        pub desistir: std::sync::atomic::AtomicBool,
     }
 
     impl EscolhaDeMentira {
         pub fn com(arquivos: Vec<Arquivo>) -> Self {
             Self {
                 resposta: Mutex::new(arquivos),
+                ..Default::default()
             }
         }
     }
@@ -250,6 +332,24 @@ pub mod mentira {
         fn escolher(&self, canal: std::sync::mpsc::Sender<Vec<Arquivo>>) {
             let resposta = self.resposta.lock().expect("a resposta do seletor").clone();
             let _ = canal.send(resposta);
+        }
+
+        fn gravar(
+            &self,
+            nome: String,
+            conteudo: Vec<u8>,
+            canal: std::sync::mpsc::Sender<Gravacao>,
+        ) {
+            if self.desistir.load(std::sync::atomic::Ordering::SeqCst) {
+                let _ = canal.send(Ok(None));
+                return;
+            }
+            let caminho = std::path::PathBuf::from("/exportadas").join(&nome);
+            self.gravados
+                .lock()
+                .expect("os gravados")
+                .push((nome, conteudo));
+            let _ = canal.send(Ok(Some(caminho)));
         }
     }
 }

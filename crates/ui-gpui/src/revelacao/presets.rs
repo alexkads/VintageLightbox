@@ -27,6 +27,8 @@ use domain::entities::{Preset, PresetId};
 
 use super::processador::Ajustes;
 
+/// O `.rfpreset` e o pacote `.zip` — exportar e importar, como no Lightroom.
+pub mod arquivo;
 /// A ordem escolhida por quem opera (`ordem-dos-presets.ts`).
 pub mod ordem;
 /// O rótulo de cada ajuste, para o resumo.

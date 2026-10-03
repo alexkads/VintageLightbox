@@ -10,6 +10,9 @@
 //! | lápis / lixeira (ao passar o mouse) | renomeia no lugar (Enter/Esc/✓/✕) · apaga depois de perguntar |
 //! | botão direito → "Atualizar com os ajustes atuais" | a do operador passa a guardar o que está na foto |
 //! | botão direito → "Duplicar" | uma cópia em "Minhas" — também das do sistema, que viram editáveis |
+//! | botão direito → "Exportar…" | grava a predefinição num `.rfpreset` |
+//! | botão direito na pasta → "Exportar o grupo…" | grava o grupo num `.zip` |
+//! | ícone de baixar · botão direito → "Exportar todas…" | todas num `.zip`, uma pasta por grupo |
 //! | arrastar a linha | reordena dentro do grupo; ↑ ↓ com a alça focada; "ordem padrão" desfaz |
 //!
 //! 🔑 **Reordenar fica desligado durante a busca**, como no site: a lista
@@ -45,7 +48,8 @@ use gpui_kit::{
 use super::{PedidoDaRevelacao, Revelacao};
 use crate::modal::Modal;
 use crate::recursos::Icone;
-use crate::revelacao::lightroom::{self, Arquivo};
+use crate::revelacao::lightroom::{self, Arquivo, Gravacao};
+use crate::revelacao::presets::arquivo::{self as rfpreset, ArquivoDePredefinicao, ItemDoPacote};
 use crate::revelacao::presets::{self, ordem, ordem::Grupo};
 use crate::revelacao::processador::Ajustes;
 use crate::tema::cores;
@@ -106,8 +110,16 @@ pub(super) struct Predefinicoes {
     /// O foco da alça de cada linha, pela chave da ordem. `RefCell` porque as
     /// alças nascem no desenho, que só tem `&self`.
     focos: RefCell<HashMap<String, FocusHandle>>,
-    /// A linha do último botão direito — o menu da lista a lê e esvazia.
-    pub alvo_do_menu: Option<PresetId>,
+    /// A linha (ou a pasta) do último botão direito — o menu da lista a lê e
+    /// esvazia.
+    pub alvo_do_menu: Option<AlvoDoMenu>,
+    /// A exportação esperando a janela do sistema: o que dizer quando ela
+    /// gravar. `Some` também desliga um segundo "Exportar" no meio.
+    pub exportando: Option<String>,
+    exportacao: (
+        std::sync::mpsc::Sender<Gravacao>,
+        std::sync::mpsc::Receiver<Gravacao>,
+    ),
     /// A predefinição que espera o "Apagar" ou o "Cancelar".
     pub pergunta: Modal<(PresetId, String)>,
     foco_da_pergunta: Option<FocusHandle>,
@@ -138,6 +150,8 @@ impl Default for Predefinicoes {
             ordem: ordem::ler(),
             arrasto: None,
             alvo_do_menu: None,
+            exportando: None,
+            exportacao: std::sync::mpsc::channel(),
             focos: RefCell::new(HashMap::new()),
             pergunta: Modal::default(),
             foco_da_pergunta: None,
@@ -159,6 +173,45 @@ fn nome_da_copia(nome: &str, presets: &[Preset]) -> String {
         .map(|n| format!("{nome} (cópia {n})"))
         .find(|candidato| !existe(candidato))
         .expect("a sequência não acaba")
+}
+
+/// Onde foi o botão direito.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum AlvoDoMenu {
+    Preset(PresetId),
+    /// O título de uma pasta.
+    Grupo(Grupo),
+}
+
+/// O que exportar — os três gestos do pedido do dono.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Exportacao {
+    /// Uma, num `.rfpreset`.
+    Uma(PresetId),
+    /// Um grupo da coluna, num `.zip`.
+    Grupo(Grupo),
+    /// Todas, num `.zip` com uma pasta por grupo.
+    Todas,
+}
+
+/// O nome do grupo como a pasta do pacote e o campo `grupo` do arquivo o
+/// escrevem — o da coluna, sem as maiúsculas do título.
+pub fn rotulo_do_grupo(grupo: Grupo) -> &'static str {
+    match grupo {
+        Grupo::Favoritas => "Favoritas",
+        Grupo::Sistema => "Do sistema",
+        Grupo::Minhas => "Minhas",
+        Grupo::Lrs => "LRs",
+    }
+}
+
+/// O arquivo pronto para gravar: o nome sugerido, os bytes e quantas
+/// predefinições vão nele.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Exportada {
+    pub nome: String,
+    pub conteudo: Vec<u8>,
+    pub quantas: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -447,6 +500,172 @@ impl Revelacao {
     pub fn fechar_relatorio(&mut self, cx: &mut Context<Self>) {
         self.relatorio = None;
         cx.notify();
+    }
+
+    // ------------------------------------------------------ exportar
+
+    /// O arquivo de uma exportação, montado sem tocar em disco.
+    ///
+    /// `Ok(None)` quando não há o que exportar (grupo vazio, predefinição que
+    /// sumiu). 🔑 **A coluna inteira, sem a busca**: quem exporta "LRs" com
+    /// "vinheta" digitado quer o grupo, e não as cinco que a busca mostra.
+    pub fn arquivo_da_exportacao(&self, alvo: Exportacao) -> Result<Option<Exportada>, String> {
+        let erro = |e: std::io::Error| format!("não deu para montar o pacote: {e}");
+        match alvo {
+            Exportacao::Uma(id) => {
+                let Some(preset) = self.presets.iter().find(|p| p.id == id) else {
+                    return Ok(None);
+                };
+                let grupo = rotulo_do_grupo(Grupo::de(preset));
+                Ok(Some(Exportada {
+                    nome: rfpreset::nome_de_arquivo(&preset.name, rfpreset::EXTENSAO),
+                    conteudo: ArquivoDePredefinicao::do_preset(preset, grupo)
+                        .texto()
+                        .into_bytes(),
+                    quantas: 1,
+                }))
+            }
+            Exportacao::Grupo(grupo) => {
+                let coluna = presets::da_coluna(&self.presets, "", &self.predefinicoes.ordem);
+                let lista = match grupo {
+                    Grupo::Favoritas => coluna.favoritas,
+                    Grupo::Sistema => coluna.sistema,
+                    Grupo::Minhas => coluna.minhas,
+                    Grupo::Lrs => coluna.lrs,
+                };
+                if lista.is_empty() {
+                    return Ok(None);
+                }
+                let itens: Vec<ItemDoPacote<'_>> = lista
+                    .iter()
+                    .map(|preset| ItemDoPacote {
+                        preset,
+                        grupo: rotulo_do_grupo(Grupo::de(preset)),
+                        pasta: None,
+                    })
+                    .collect();
+                Ok(Some(Exportada {
+                    nome: rfpreset::nome_de_arquivo(rotulo_do_grupo(grupo), "zip"),
+                    conteudo: rfpreset::pacote(&itens).map_err(erro)?,
+                    quantas: itens.len(),
+                }))
+            }
+            Exportacao::Todas => {
+                // As favoritas voltam ao grupo de origem: no pacote, cada
+                // predefinição aparece uma vez só, na pasta dela.
+                let ordem = ordem::Ordem {
+                    favoritas: Vec::new(),
+                    ..self.predefinicoes.ordem.clone()
+                };
+                let coluna = presets::da_coluna(&self.presets, "", &ordem);
+                let itens: Vec<ItemDoPacote<'_>> = [
+                    (Grupo::Minhas, coluna.minhas),
+                    (Grupo::Sistema, coluna.sistema),
+                    (Grupo::Lrs, coluna.lrs),
+                ]
+                .into_iter()
+                .flat_map(|(grupo, lista)| {
+                    let rotulo = rotulo_do_grupo(grupo);
+                    lista.into_iter().map(move |preset| ItemDoPacote {
+                        preset,
+                        grupo: rotulo,
+                        pasta: Some(rotulo),
+                    })
+                })
+                .collect();
+                if itens.is_empty() {
+                    return Ok(None);
+                }
+                Ok(Some(Exportada {
+                    nome: "Predefinições.zip".into(),
+                    conteudo: rfpreset::pacote(&itens).map_err(erro)?,
+                    quantas: itens.len(),
+                }))
+            }
+        }
+    }
+
+    /// Exporta: monta o arquivo e pergunta ao sistema onde gravar — o
+    /// "Exportar…" do Lightroom.
+    pub fn exportar_predefinicoes(&mut self, alvo: Exportacao, cx: &mut Context<Self>) {
+        if self.predefinicoes.exportando.is_some() {
+            return;
+        }
+        let exportada = match self.arquivo_da_exportacao(alvo) {
+            Ok(Some(exportada)) => exportada,
+            Ok(None) => {
+                self.avisar_na_coluna("Não há predefinição para exportar aqui.", true, cx);
+                return;
+            }
+            Err(erro) => {
+                self.avisar_na_coluna(format!("A exportação falhou: {erro}"), true, cx);
+                return;
+            }
+        };
+        let feito = match alvo {
+            Exportacao::Uma(id) => {
+                let nome = self
+                    .presets
+                    .iter()
+                    .find(|p| p.id == id)
+                    .map(|p| p.name.as_str());
+                format!("\"{}\" exportada", nome.unwrap_or_default())
+            }
+            Exportacao::Grupo(grupo) => format!(
+                "{} de \"{}\" exportada{}",
+                quantas_predefinicoes(exportada.quantas),
+                rotulo_do_grupo(grupo),
+                if exportada.quantas == 1 { "" } else { "s" },
+            ),
+            Exportacao::Todas => format!(
+                "{} exportada{}",
+                quantas_predefinicoes(exportada.quantas),
+                if exportada.quantas == 1 { "" } else { "s" },
+            ),
+        };
+        self.predefinicoes.exportando = Some(feito);
+        self.escolha_de_presets.gravar(
+            exportada.nome,
+            exportada.conteudo,
+            self.predefinicoes.exportacao.0.clone(),
+        );
+        // A mesma espera da importação: do outro lado há uma janela do
+        // sistema, que volta quando a pessoa escolher.
+        cx.spawn(async move |tela, cx| loop {
+            cx.background_executor()
+                .timer(Duration::from_millis(120))
+                .await;
+            let continua = tela
+                .update(cx, |tela, cx| tela.colher_exportacao(cx))
+                .unwrap_or(false);
+            if !continua {
+                break;
+            }
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Lê a resposta da janela de gravar. Devolve se vale continuar acordando.
+    fn colher_exportacao(&mut self, cx: &mut Context<Self>) -> bool {
+        let Ok(resposta) = self.predefinicoes.exportacao.1.try_recv() else {
+            return self.predefinicoes.exportando.is_some();
+        };
+        let feito = self.predefinicoes.exportando.take().unwrap_or_default();
+        match resposta {
+            // Desistir da janela não é resultado — o mesmo do importar.
+            Ok(None) => {}
+            Ok(Some(caminho)) => {
+                let arquivo = caminho
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                self.avisar_na_coluna(format!("{feito} em {arquivo}."), false, cx);
+            }
+            Err(erro) => self.avisar_na_coluna(format!("Não deu para gravar: {erro}"), true, cx),
+        }
+        cx.notify();
+        false
     }
 
     // ---------------------------------------------- renomear e apagar
@@ -873,12 +1092,7 @@ impl Revelacao {
                     Err(_) => sistema.iter().find(|p| p.name == argumento),
                 }
                 .map(|p| (*p).clone())
-                .or_else(|| {
-                    self.presets
-                        .iter()
-                        .find(|p| p.is_system && p.name == argumento)
-                        .cloned()
-                });
+                .or_else(|| self.presets.iter().find(|p| p.name == argumento).cloned());
                 match escolhida {
                     Some(preset) => self.aplicar_preset(&preset, window, cx),
                     None => eprintln!("[roteiro] predefinicoes: não achei '{argumento}'"),
@@ -922,15 +1136,41 @@ impl Revelacao {
                     self.alternar_favorita(&chave, cx);
                 }
             }
+            // O `.zip` entra como no seletor: o que tem dentro.
             "importar" => {
-                let caminho = std::path::Path::new(argumento);
-                let arquivo = Arquivo {
-                    nome: caminho
-                        .file_name()
-                        .map_or(argumento.to_string(), |n| n.to_string_lossy().to_string()),
-                    texto: std::fs::read_to_string(caminho).ok(),
+                let arquivos = rfpreset::ler_do_disco(std::path::Path::new(argumento));
+                self.importar(arquivos, cx);
+            }
+            // 📦 `exportar <destino> todas|grupo:<lrs|sistema|minhas|favoritas>|uma:<nome>`
+            // grava direto no destino, sem a janela do sistema.
+            "exportar" => {
+                let (destino, alvo) = argumento.split_once(' ').unwrap_or((argumento, "todas"));
+                let alvo = match alvo.split_once(':') {
+                    Some(("uma", nome)) => self
+                        .presets
+                        .iter()
+                        .find(|p| p.name == nome)
+                        .map(|p| Exportacao::Uma(p.id)),
+                    Some(("grupo", grupo)) => {
+                        [Grupo::Favoritas, Grupo::Sistema, Grupo::Minhas, Grupo::Lrs]
+                            .into_iter()
+                            .find(|g| g.chave() == grupo)
+                            .map(Exportacao::Grupo)
+                    }
+                    _ => Some(Exportacao::Todas),
                 };
-                self.importar(vec![arquivo], cx);
+                match alvo.map(|alvo| self.arquivo_da_exportacao(alvo)) {
+                    Some(Ok(Some(exportada))) => {
+                        match std::fs::write(destino, &exportada.conteudo) {
+                            Ok(()) => eprintln!(
+                                "[roteiro] predefinicoes: {} em {destino}",
+                                exportada.quantas
+                            ),
+                            Err(erro) => eprintln!("[roteiro] predefinicoes: {erro}"),
+                        }
+                    }
+                    outro => eprintln!("[roteiro] predefinicoes: nada a exportar ({outro:?})"),
+                }
             }
             "prever" => {
                 let indice: usize = argumento.parse().unwrap_or(0);
@@ -1174,6 +1414,7 @@ impl Revelacao {
     fn barra_das_predefinicoes(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let desligada = self.predefinicoes_desligadas();
         let travada = self.predefinicoes_travadas();
+        let exportando = self.predefinicoes.exportando.is_some();
         let tema = cx.theme();
         h_flex()
             .items_center()
@@ -1207,13 +1448,30 @@ impl Revelacao {
                     "importar-do-lightroom",
                     Icone::Upload,
                     14.,
-                    "Importar do Lightroom (.lrtemplate, .xmp)",
+                    "Importar predefinições (.rfpreset, .zip, e .xmp e .lrtemplate do Lightroom)",
                     travada,
                     cx,
                 )
                 .when(!travada, |b| {
                     b.on_click(cx.listener(|tela, _ev, _window, cx| {
                         tela.importar_do_lightroom(cx);
+                    }))
+                }),
+            )
+            // 📦 Exportar não muda a foto nem a lista: fica ligado mesmo com a
+            // coluna travada. Uma ou um grupo, pelo botão direito.
+            .child(
+                icone_de_botao(
+                    "exportar-predefinicoes",
+                    Icone::Download,
+                    14.,
+                    "Exportar todas as predefinições (.zip) — uma ou um grupo, pelo botão direito",
+                    exportando,
+                    cx,
+                )
+                .when(!exportando, |b| {
+                    b.on_click(cx.listener(|tela, _ev, _window, cx| {
+                        tela.exportar_predefinicoes(Exportacao::Todas, cx);
                     }))
                 }),
             )
@@ -1474,6 +1732,13 @@ impl Revelacao {
                     if ev.standard_click() {
                         tela.alternar_grupo(grupo, cx);
                     }
+                }),
+            )
+            // O botão direito na pasta: o "Exportar grupo…" do Lightroom.
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |tela, _ev, _window, _cx| {
+                    tela.predefinicoes.alvo_do_menu = Some(AlvoDoMenu::Grupo(grupo));
                 }),
             );
 
@@ -1760,7 +2025,7 @@ impl Revelacao {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(move |tela, _ev, _window, _cx| {
-                    tela.predefinicoes.alvo_do_menu = Some(id);
+                    tela.predefinicoes.alvo_do_menu = Some(AlvoDoMenu::Preset(id));
                 }),
             )
             .into_any_element()
@@ -1789,9 +2054,35 @@ impl Revelacao {
                 Some(antes) => menu.action_context(antes),
                 None => menu,
             };
+            let Ok((alvo, exportando)) = esta.update(cx, |tela, _cx| {
+                (
+                    tela.predefinicoes.alvo_do_menu.take(),
+                    tela.predefinicoes.exportando.is_some(),
+                )
+            }) else {
+                return menu;
+            };
+            let id = match alvo {
+                Some(AlvoDoMenu::Preset(id)) => id,
+                Some(AlvoDoMenu::Grupo(grupo)) => {
+                    return Self::menu_do_grupo(menu, grupo, exportando, esta.clone(), cx)
+                }
+                // 📦 No vão da lista, o gesto que vale para a coluna inteira.
+                None => {
+                    let para_exportar = esta.clone();
+                    return menu.item(
+                        PopupMenuItem::new("Exportar todas as predefinições…")
+                            .disabled(exportando)
+                            .on_click(move |_ev, _window, cx| {
+                                let _ = para_exportar.update(cx, |tela, cx| {
+                                    tela.exportar_predefinicoes(Exportacao::Todas, cx);
+                                });
+                            }),
+                    );
+                }
+            };
             let Some((preset, favorita, travada)) = esta
                 .update(cx, |tela, _cx| {
-                    let id = tela.predefinicoes.alvo_do_menu.take()?;
                     let preset = tela.presets.iter().find(|p| p.id == id)?.clone();
                     let favorita = tela.predefinicoes.ordem.eh_favorita(&ordem::chave(&preset));
                     Some((preset, favorita, tela.predefinicoes_travadas()))
@@ -1803,6 +2094,8 @@ impl Revelacao {
             };
             let (para_aplicar, para_atualizar) = (esta.clone(), esta.clone());
             let (para_duplicar, para_favoritar) = (esta.clone(), esta.clone());
+            let (para_exportar, para_exportar_o_grupo) = (esta.clone(), esta.clone());
+            let origem = Grupo::de(&preset);
             let (para_renomear, para_apagar) = (esta.clone(), esta.clone());
             let chave = ordem::chave(&preset);
             let id = preset.id;
@@ -1851,6 +2144,30 @@ impl Revelacao {
                             tela.alternar_favorita(&chave, cx);
                         });
                     }),
+                )
+                // 📦 Exportar vale para todas, inclusive as do sistema: é o
+                // jeito de levar uma delas para outro balcão.
+                .separator()
+                .item(
+                    PopupMenuItem::new("Exportar…")
+                        .disabled(exportando)
+                        .on_click(move |_ev, _window, cx| {
+                            let _ = para_exportar.update(cx, |tela, cx| {
+                                tela.exportar_predefinicoes(Exportacao::Uma(id), cx);
+                            });
+                        }),
+                )
+                .item(
+                    PopupMenuItem::new(format!(
+                        "Exportar o grupo \"{}\"…",
+                        rotulo_do_grupo(origem)
+                    ))
+                    .disabled(exportando)
+                    .on_click(move |_ev, _window, cx| {
+                        let _ = para_exportar_o_grupo.update(cx, |tela, cx| {
+                            tela.exportar_predefinicoes(Exportacao::Grupo(origem), cx);
+                        });
+                    }),
                 );
             // As do sistema não têm linha no banco: nem renomear nem apagar.
             if sistema {
@@ -1872,6 +2189,64 @@ impl Revelacao {
                     },
                 ))
         }
+    }
+
+    /// O menu do botão direito numa pasta — o "Exportar grupo…" do Lightroom.
+    fn menu_do_grupo(
+        menu: gpui_kit::component::menu::PopupMenu,
+        grupo: Grupo,
+        exportando: bool,
+        esta: gpui_kit::WeakEntity<Self>,
+        cx: &mut App,
+    ) -> gpui_kit::component::menu::PopupMenu {
+        let (quantas, fechado) = esta
+            .update(cx, |tela, cx| {
+                let coluna = presets::da_coluna(&tela.presets, "", &tela.predefinicoes.ordem);
+                let quantas = match grupo {
+                    Grupo::Favoritas => coluna.favoritas.len(),
+                    Grupo::Sistema => coluna.sistema.len(),
+                    Grupo::Minhas => coluna.minhas.len(),
+                    Grupo::Lrs => coluna.lrs.len(),
+                };
+                (quantas, tela.grupo_fechado(grupo, cx))
+            })
+            .unwrap_or((0, false));
+        let (para_exportar, para_todas, para_abrir) = (esta.clone(), esta.clone(), esta);
+        menu.label(format!(
+            "{} · {}",
+            rotulo_do_grupo(grupo),
+            quantas_predefinicoes(quantas)
+        ))
+        .separator()
+        .item(
+            PopupMenuItem::new("Exportar o grupo…")
+                .disabled(exportando || quantas == 0)
+                .on_click(move |_ev, _window, cx| {
+                    let _ = para_exportar.update(cx, |tela, cx| {
+                        tela.exportar_predefinicoes(Exportacao::Grupo(grupo), cx);
+                    });
+                }),
+        )
+        .item(
+            PopupMenuItem::new("Exportar todas as predefinições…")
+                .disabled(exportando)
+                .on_click(move |_ev, _window, cx| {
+                    let _ = para_todas.update(cx, |tela, cx| {
+                        tela.exportar_predefinicoes(Exportacao::Todas, cx);
+                    });
+                }),
+        )
+        .separator()
+        .item(
+            PopupMenuItem::new(if fechado {
+                "Abrir o grupo"
+            } else {
+                "Fechar o grupo"
+            })
+            .on_click(move |_ev, _window, cx| {
+                let _ = para_abrir.update(cx, |tela, cx| tela.alternar_grupo(grupo, cx));
+            }),
+        )
     }
 
     /// 💛 O coração da linha — o `Heart` do site: aceso fica sempre à vista;
@@ -2074,4 +2449,13 @@ fn botao_pequeno(
         .text_size(crate::tema::letra::em(12.))
         .child(rotulo)
         .disabled(desligado)
+}
+
+/// "1 predefinição", "26 predefinições".
+fn quantas_predefinicoes(n: usize) -> String {
+    if n == 1 {
+        "1 predefinição".into()
+    } else {
+        format!("{n} predefinições")
+    }
 }

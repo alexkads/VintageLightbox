@@ -6012,9 +6012,11 @@ mod testes {
         assert_ne!(salvos[0].id, soma.id, "outra linha");
 
         // Por cima de uma foto já mexida, a cópia dá o mesmo que a original.
-        let mut mexida = Ajustes::default();
-        mexida.exposure = 0.8;
-        mexida.temperature = 12.0;
+        let mexida = Ajustes {
+            exposure: 0.8,
+            temperature: 12.0,
+            ..Ajustes::default()
+        };
         assert_eq!(
             super::super::presets::aplicado(&mexida, &salvos[2]),
             super::super::presets::aplicado(&mexida, &substitui),
@@ -6110,6 +6112,175 @@ mod testes {
         let salvos = guarda.salvos();
         assert_eq!(salvos.len(), 1);
         assert_eq!(salvos[0].name, "Sépia do Estúdio");
+    }
+
+    /// 📦 **Exportar uma, um grupo e todas — e importar de volta** (dono,
+    /// 3/out/2026: *"exportar os presets individualmente, grupos de presets ou
+    /// todos… similar ao Lightroom"*). Uma vai num `.rfpreset`; grupo e todas,
+    /// num `.zip`. O pacote de todas, importado num balcão sem as do
+    /// operador, recria só elas: as do sistema já estão lá com o mesmo nome.
+    #[gpui_kit::test]
+    fn exportar_uma_um_grupo_e_todas_e_importar_de_volta(cx: &mut TestAppContext) {
+        use super::predefinicoes::Exportacao;
+        use crate::revelacao::presets::arquivo::{abrir_pacote, ArquivoDePredefinicao};
+
+        let (previews, _dir) = previews_descartaveis();
+        let escolha = Arc::new(EscolhaDeMentira::default());
+        let minha = Preset::user(
+            "Meu visual".into(),
+            PresetAdjustments::vazia().com("exposure", 0.4),
+        );
+        let outra = Preset::user(
+            "Céu / mar".into(),
+            PresetAdjustments::vazia().com("temperature", -2.0),
+        );
+        let do_sistema = use_cases::presets::presets_de_sistema();
+        let mut todas = do_sistema.clone();
+        todas.extend([minha.clone(), outra.clone()]);
+        let total = todas.len();
+        let lrs = do_sistema.iter().filter(|p| p.grupo.is_some()).count();
+
+        let janela = com_escolha(
+            cx,
+            previews,
+            Arc::new(GravadorDeMentira::default()),
+            Arc::new(GuardaDeMentira::default()),
+            escolha.clone(),
+            todas,
+        );
+
+        for alvo in [
+            Exportacao::Uma(minha.id),
+            Exportacao::Grupo(Grupo::Lrs),
+            Exportacao::Todas,
+        ] {
+            janela
+                .update(cx, |tela, _window, cx| {
+                    tela.exportar_predefinicoes(alvo, cx)
+                })
+                .expect("a janela deve estar aberta");
+            cx.executor().advance_clock(Duration::from_millis(200));
+            cx.run_until_parked();
+        }
+
+        let gravados = escolha.gravados.lock().expect("os gravados").clone();
+        let nomes: Vec<&str> = gravados.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(
+            nomes,
+            ["Meu visual.rfpreset", "LRs.zip", "Predefinições.zip"]
+        );
+
+        let uma = ArquivoDePredefinicao::ler(std::str::from_utf8(&gravados[0].1).expect("texto"))
+            .expect("é um .rfpreset");
+        assert_eq!(uma.nome, "Meu visual");
+        assert_eq!(uma.grupo.as_deref(), Some("Minhas"));
+        assert_eq!(uma.ajustes.get("exposure"), Some(&0.4));
+
+        let do_grupo = abrir_pacote(&gravados[1].1).expect("zip");
+        assert_eq!(do_grupo.len(), lrs, "só as da pasta LRs");
+        let de_todas = abrir_pacote(&gravados[2].1).expect("zip");
+        assert_eq!(de_todas.len(), total, "todas, cada uma uma vez");
+
+        janela
+            .update(cx, |tela, _window, _cx| {
+                let avisos: Vec<&str> = tela
+                    .predefinicoes
+                    .avisos
+                    .iter()
+                    .map(|a| a.texto.as_str())
+                    .collect();
+                assert_eq!(
+                    avisos,
+                    [
+                        "\"Meu visual\" exportada em Meu visual.rfpreset.".to_string(),
+                        format!("{lrs} predefinições de \"LRs\" exportadas em LRs.zip."),
+                        format!("{total} predefinições exportadas em Predefinições.zip."),
+                    ]
+                );
+                assert!(tela.predefinicoes.exportando.is_none());
+            })
+            .expect("a janela deve estar aberta");
+
+        // A volta: outro balcão, só com as do sistema.
+        let (previews, _dir2) = previews_descartaveis();
+        let guarda = Arc::new(GuardaDeMentira::default());
+        let outro_balcao = com_escolha(
+            cx,
+            previews,
+            Arc::new(GravadorDeMentira::default()),
+            guarda.clone(),
+            Arc::new(EscolhaDeMentira::com(de_todas)),
+            do_sistema.clone(),
+        );
+        outro_balcao
+            .update(cx, |tela, _window, cx| tela.importar_do_lightroom(cx))
+            .expect("a janela deve estar aberta");
+        cx.executor().advance_clock(Duration::from_millis(200));
+        cx.run_until_parked();
+        outro_balcao
+            .update(cx, |tela, _window, _cx| {
+                let relatorio = tela.relatorio.as_ref().expect("houve importação");
+                assert_eq!(relatorio.criadas, 2, "{relatorio:?}");
+                assert_eq!(relatorio.repetidas, do_sistema.len());
+                assert!(relatorio.ilegiveis.is_empty() && relatorio.ignorados.is_empty());
+            })
+            .expect("a janela deve estar aberta");
+        let mut salvos: Vec<(String, PresetAdjustments)> = guarda
+            .salvos()
+            .into_iter()
+            .map(|p| (p.name, p.adjustments))
+            .collect();
+        salvos.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            salvos,
+            [
+                (outra.name, outra.adjustments),
+                (minha.name, minha.adjustments)
+            ]
+        );
+    }
+
+    /// Fechar a janela de gravar não é resultado: nem aviso, nem botão preso.
+    #[gpui_kit::test]
+    fn desistir_da_exportacao_nao_avisa_nem_trava(cx: &mut TestAppContext) {
+        use super::predefinicoes::Exportacao;
+
+        let (previews, _dir) = previews_descartaveis();
+        let escolha = Arc::new(EscolhaDeMentira::default());
+        escolha
+            .desistir
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let janela = com_escolha(
+            cx,
+            previews,
+            Arc::new(GravadorDeMentira::default()),
+            Arc::new(GuardaDeMentira::default()),
+            escolha,
+            use_cases::presets::presets_de_sistema(),
+        );
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.exportar_predefinicoes(Exportacao::Grupo(Grupo::Sistema), cx);
+                assert!(
+                    tela.predefinicoes.exportando.is_some(),
+                    "esperando a janela"
+                );
+                // Grupo vazio: avisa e não abre janela nenhuma.
+                tela.predefinicoes.exportando = None;
+                tela.exportar_predefinicoes(Exportacao::Grupo(Grupo::Minhas), cx);
+                assert!(tela.predefinicoes.exportando.is_none());
+                assert_eq!(tela.predefinicoes.avisos.len(), 1);
+                tela.predefinicoes.avisos.clear();
+            })
+            .expect("a janela deve estar aberta");
+        cx.executor().advance_clock(Duration::from_millis(200));
+        cx.run_until_parked();
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert!(tela.predefinicoes.exportando.is_none());
+                assert!(tela.predefinicoes.avisos.is_empty());
+            })
+            .expect("a janela deve estar aberta");
     }
 
     /// ⚠️ **Nome repetido é pulado, e não sobrescrito.**
@@ -7016,6 +7187,75 @@ mod testes {
         visual.run_until_parked();
         assert!(visual.debug_bounds("navegador-miniatura").is_some());
         assert_eq!(altura_da_lista(&mut visual), aberta);
+    }
+
+    /// 📦 **O botão direito na pasta abre o menu do grupo** — o "Exportar
+    /// grupo…" do Lightroom —, e não abre nem fecha a pasta.
+    #[gpui_kit::test]
+    fn o_botao_direito_na_pasta_abre_o_menu_do_grupo(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let janela = com_presets(
+            cx,
+            previews,
+            Arc::new(GravadorDeMentira::default()),
+            use_cases::presets::presets_de_sistema(),
+        );
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx)
+            })
+            .expect("a janela deve estar aberta");
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_resize(gpui_kit::size(px(1280.), px(800.)));
+        visual.run_until_parked();
+
+        let fechada_antes = janela
+            .update(cx, |tela, _window, cx| {
+                tela.grupo_fechado(Grupo::Sistema, cx)
+            })
+            .expect("a janela deve estar aberta");
+        let pasta = visual
+            .debug_bounds("pasta-DO SISTEMA")
+            .expect("o título da pasta");
+        let ponto = pasta.center();
+        // O primeiro evento de ponteiro da janela se perde no harness.
+        visual.simulate_mouse_move(ponto, None, gpui_kit::Modifiers::none());
+        visual.simulate_mouse_down(
+            ponto,
+            gpui_kit::MouseButton::Right,
+            gpui_kit::Modifiers::none(),
+        );
+        visual.simulate_mouse_up(
+            ponto,
+            gpui_kit::MouseButton::Right,
+            gpui_kit::Modifiers::none(),
+        );
+        visual.run_until_parked();
+
+        janela
+            .update(cx, |tela, window, cx| {
+                assert!(
+                    window
+                        .context_stack()
+                        .iter()
+                        .any(|c| c.contains("PopupMenu")),
+                    "o menu não abriu: {:?}",
+                    window.context_stack()
+                );
+                assert!(
+                    tela.predefinicoes.alvo_do_menu.is_none(),
+                    "o menu não leu a pasta do botão direito"
+                );
+                assert_eq!(
+                    tela.grupo_fechado(Grupo::Sistema, cx),
+                    fechada_antes,
+                    "o botão direito abriu ou fechou a pasta"
+                );
+            })
+            .expect("a janela deve estar aberta");
     }
 
     /// 🖱️ **O botão direito abre o menu da linha, e não aplica.** O GPUI chama
