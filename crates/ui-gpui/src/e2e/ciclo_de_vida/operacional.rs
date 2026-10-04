@@ -344,10 +344,14 @@ fn o_app_fecha_no_meio_da_subida_e_ao_reabrir_nada_se_perde(cx: &mut TestAppCont
     if !voltou {
         // Depois de um fechamento brusco não há onde voltar: o operador abre a
         // sessão pela linha da lista.
+        // 🚨 A linha, e não só a tela: a lista chega da API depois de a tela
+        // abrir, e o clique cedo demais achava a lista vazia (04/out/2026, na
+        // rodada do `make producao` com a máquina compilando do zero).
+        let linha = format!("sessao-{galeria}");
         c.b.ate(cx, "a sessão aparece na lista", |b, cx| {
-            b.app(cx, |app, _w, _cx| app.tela() == Tela::Sessoes)
+            b.app(cx, |app, _w, _cx| app.tela() == Tela::Sessoes) && b.desenhado(cx, &linha)
         });
-        c.b.clicar(cx, &format!("sessao-{galeria}"));
+        c.b.clicar(cx, &linha);
     }
     let fotos = conferir_a_sessao_criada(
         cx,

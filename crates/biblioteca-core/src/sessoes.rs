@@ -24,6 +24,7 @@
 //! comparação é aritmética; o agrupamento do gráfico lê a data ISO como texto e
 //! conta os dias com o algoritmo civil, que cabe em dez linhas.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 /// O que a lista diz de cada sessão, num olhar.
@@ -262,15 +263,57 @@ impl FaixaDeDatas {
     }
 }
 
-/// O dia de uma data ISO — `2026-09-18T12:00:00Z` vira `2026-09-18`.
+/// O fuso do estúdio, em minutos: Brasília, sem horário de verão desde 2019.
+/// O mesmo do app (`sessoes::tela::hoje_no_estudio`, `caixa::dados`).
+const FUSO_DO_ESTUDIO: i64 = -3 * 60;
+
+/// O dia **no estúdio** de uma data ISO — `2026-10-04T01:15:44Z` vira
+/// `2026-10-03`, porque às 01:15 de UTC ainda são 22:15 em Brasília.
 ///
-/// ⚠️ **Corta, não converte.** A API devolve a criação em UTC; o balcão é
-/// GMT-3, e uma sessão criada às 21h de lá é do dia seguinte aqui. Isso é a
-/// divergência que o site também tem (`criadaEmISO` sai de `paraDataISO`, que
-/// usa o fuso) — e é por isso que este corte existe num lugar só, com nome: o
-/// dia que sobe do corte é o que a coluna "Criada" já mostra.
-pub(crate) fn dia_da_criacao(iso: &str) -> &str {
-    iso.split('T').next().unwrap_or(iso)
+/// 🚨 **Até 04/out/2026 cortava o texto no `T`, sem converter** — e a lista
+/// abre em "hoje" no fuso do estúdio. Das 21h à meia-noite, toda sessão criada
+/// sumia do dia em que foi criada: o e2e do ciclo de vida a procurou na lista
+/// às 22h e não achou (`operacional::o_app_fecha_no_meio_da_subida…`). A
+/// coluna "Criada" já mostrava o horário de Brasília desde a 0.1.89; agora o
+/// filtro, a coluna e os gráficos falam do mesmo dia.
+///
+/// O fuso escrito no texto vale (`Z`, `+00:00`, `-03:00`); sem fuso, é UTC,
+/// que é como a API devolve. Só a data, sem hora, fica como está.
+pub(crate) fn dia_da_criacao(iso: &str) -> Cow<'_, str> {
+    let Some((dia, hora)) = iso.split_once('T') else {
+        return Cow::Borrowed(iso);
+    };
+    let Some(minutos) = minutos_em_utc(hora) else {
+        return Cow::Borrowed(dia);
+    };
+    let mudanca = (minutos + FUSO_DO_ESTUDIO).div_euclid(24 * 60);
+    match (mudanca, dia_civil(dia)) {
+        (0, _) | (_, None) => Cow::Borrowed(dia),
+        (mudanca, Some(d)) => Cow::Owned(data_do_dia(d + mudanca)),
+    }
+}
+
+/// `HH:MM[:SS[.fff]][Z|±HH:MM]` → minutos desde a meia-noite, em UTC (pode
+/// sair do dia: `00:30+03:00` dá −150).
+fn minutos_em_utc(hora: &str) -> Option<i64> {
+    let h: i64 = hora.get(..2)?.parse().ok()?;
+    let m: i64 = hora.get(3..5)?.parse().ok()?;
+    let resto = hora.get(5..)?;
+    let fuso = match resto.find(['+', '-']) {
+        Some(pos) => {
+            let sinal = if resto[pos..].starts_with('-') { -1 } else { 1 };
+            let o = &resto[pos + 1..];
+            let oh: i64 = o.get(..2)?.parse().ok()?;
+            let om: i64 = o
+                .get(3..5)
+                .or_else(|| o.get(2..4))
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
+            sinal * (oh * 60 + om)
+        }
+        None => 0,
+    };
+    Some(h * 60 + m - fuso)
 }
 
 /// Minúsculas e sem acento: "Joao" acha "João" e vice-versa.
@@ -353,7 +396,7 @@ pub fn filtrar<'a>(
                 && criterio
                     .periodo
                     .as_ref()
-                    .is_some_and(|p| !p.contem(dia_da_criacao(&sessao.criada_em_iso)))
+                    .is_some_and(|p| !p.contem(&dia_da_criacao(&sessao.criada_em_iso)))
             {
                 return false;
             }
@@ -697,7 +740,7 @@ pub fn ultimos_dias(sessoes: &[&SessaoFotografica], fim: &str, dias: i64) -> Vec
         })
         .collect();
     for sessao in sessoes {
-        let Some(d) = dia_civil(dia_da_criacao(&sessao.criada_em_iso)) else {
+        let Some(d) = dia_civil(&dia_da_criacao(&sessao.criada_em_iso)) else {
             continue;
         };
         if d < primeiro || d > ultimo {
@@ -1227,6 +1270,37 @@ mod testes_do_periodo {
 
         // Sem período, o arquivo inteiro.
         assert_eq!(filtrar(&sessoes, &Criterio::default(), 0).len(), 3);
+    }
+
+    /// 🚨 A sessão criada às 22h de Brasília é de **hoje** na lista que abre em
+    /// hoje — em UTC ela já é do dia seguinte (04/out/2026: o e2e a criou às
+    /// 22h e não a achou na lista).
+    #[test]
+    fn a_sessao_criada_a_noite_e_do_dia_do_estudio() {
+        let sessoes = vec![sessao("noite", "2026-10-04T01:15:44.123Z")];
+        let hoje = Criterio {
+            periodo: Some(FaixaDeDatas::no_dia("2026-10-03")),
+            ..Default::default()
+        };
+        assert_eq!(filtrar(&sessoes, &hoje, 0).len(), 1);
+    }
+
+    /// O dia no fuso do estúdio, nas viradas de dia, mês e ano, e com o fuso
+    /// que vier escrito no texto.
+    #[test]
+    fn o_dia_da_criacao_e_o_do_estudio() {
+        let dia = |iso: &str| dia_da_criacao(iso).into_owned();
+        assert_eq!(dia("2026-10-04T01:15:44Z"), "2026-10-03");
+        assert_eq!(dia("2026-10-04T02:59:59Z"), "2026-10-03");
+        assert_eq!(dia("2026-10-04T03:00:00Z"), "2026-10-04");
+        assert_eq!(dia("2026-03-01T02:00:00.5Z"), "2026-02-28");
+        assert_eq!(dia("2024-03-01T02:00:00Z"), "2024-02-29", "bissexto");
+        assert_eq!(dia("2026-01-01T00:30:00+00:00"), "2025-12-31");
+        assert_eq!(dia("2026-10-03T22:00:00-03:00"), "2026-10-03");
+        assert_eq!(dia("2026-10-04T00:30:00+03:00"), "2026-10-03");
+        assert_eq!(dia("2026-10-03T12:00:00"), "2026-10-03", "sem fuso é UTC");
+        assert_eq!(dia("2026-10-03"), "2026-10-03", "só a data fica");
+        assert_eq!(dia("2026-10-03Tlixo"), "2026-10-03");
     }
 
     /// A faixa invertida é a mesma faixa — quem clicou no fim antes quis isso.

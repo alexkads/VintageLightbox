@@ -1391,7 +1391,17 @@ impl From<GaleriaDoPainelDaApi> for GaleriaDoPainel {
             // 🔑 Reduzida ao dia **aqui**, e não na tela: o eixo do gráfico é
             // por dia, e guardar a hora daria duas galerias do mesmo dia em
             // degraus diferentes assim que alguém esquecesse de cortar.
-            criada_em_iso: g.criada_em.format("%Y-%m-%d").to_string(),
+            //
+            // 🚨 **O dia do estúdio, e não o de UTC** (04/out/2026). A lista
+            // abre em "hoje" no fuso de Brasília; cortada em UTC, a sessão
+            // criada depois das 21h era de amanhã e sumia da lista do dia em
+            // que foi criada — o e2e do ciclo de vida a procurou às 22h e não
+            // achou.
+            criada_em_iso: g
+                .criada_em
+                .with_timezone(&chrono::FixedOffset::west_opt(3 * 3600).expect("fuso do estúdio"))
+                .format("%Y-%m-%d")
+                .to_string(),
             criada_por: g.criada_por,
             expira_em: g.expira_em.map(|quando| quando.timestamp()),
             fotos: ContagemDeFotos {
@@ -1956,6 +1966,20 @@ mod tests {
 
         // A data chega reduzida ao dia — é o carimbo do eixo do gráfico.
         assert_eq!(galerias[0].criada_em_iso, "2026-09-06");
+
+        // 🚨 Ao dia **do estúdio**: às 01:15 de UTC ainda são 22:15 do dia
+        // anterior em Brasília, e é nesse dia que a lista de "hoje" a procura.
+        let a_noite: GaleriaDoPainel = serde_json::from_value::<GaleriaDoPainelDaApi>(json!({
+            "id": "g3",
+            "titulo": "Noite",
+            "email": null,
+            "whatsapp": null,
+            "produto_id": "p1",
+            "criada_em": "2026-10-04T01:15:44Z"
+        }))
+        .expect("galeria da API")
+        .into();
+        assert_eq!(a_noite.criada_em_iso, "2026-10-03");
         assert_eq!(galerias[0].fotos.levadas_no_balcao, 4);
         assert_eq!(galerias[0].fotos.disponiveis, 8);
         assert_eq!(

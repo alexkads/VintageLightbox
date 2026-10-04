@@ -164,7 +164,7 @@ pub fn ler_dia(texto: &str) -> Option<String> {
 enum Valor<'a> {
     Texto(String),
     Numero(f64),
-    Dia(&'a str),
+    Dia(std::borrow::Cow<'a, str>),
     Situacao(Situacao),
 }
 
@@ -217,6 +217,7 @@ pub fn passa(
         }
         (FiltroDeColuna::Data { de, ate }, Valor::Dia(dia)) => {
             // `YYYY-MM-DD` comparado como texto é comparado como data.
+            let dia: &str = &dia;
             de.as_deref().is_none_or(|de| dia >= de) && ate.as_deref().is_none_or(|ate| dia <= ate)
         }
         (FiltroDeColuna::Situacao(querida), Valor::Situacao(s)) => *querida == s,

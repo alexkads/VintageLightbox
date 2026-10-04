@@ -1,10 +1,11 @@
 {
   "versao": "0.1.90",
-  "titulo": "No Linux (GNOME), a tela do cliente abre de verdade no monitor escolhido.",
+  "titulo": "A tela do cliente abre no monitor escolhido no GNOME, e a sessão criada à noite aparece em Hoje.",
   "importante": false,
   "novidades": [
+    "Sessões criadas depois das 21h agora aparecem na lista de hoje. Antes, entre 21h e meia-noite, a sessão recém-criada sumia do filtro Hoje e só aparecia no dia seguinte.",
     "No Fedora com GNOME, escolher o monitor da tela do cliente passou a valer: ela abre em tela cheia no monitor escolhido. Escolhendo o monitor onde está o app, ela abre em janela ali mesmo.",
     "No GNOME, sair da tela cheia com F devolve a janela ao monitor principal — quem decide é o próprio GNOME. Para voltar ao monitor do cliente, feche e abra de novo a tela do cliente."
   ],
-  "por_que_atualizar": "Para não precisar arrastar a tela do cliente até o outro monitor a cada atendimento."
+  "por_que_atualizar": "Para não arrastar a tela do cliente até o outro monitor a cada atendimento, e achar na lista a sessão que acabou de criar à noite."
 }

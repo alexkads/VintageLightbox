@@ -304,6 +304,17 @@ impl Balcao {
         );
     }
 
+    /// 👀 O elemento marcado com `debug_selector` está desenhado agora — para
+    /// esperar com [`Self::ate`] o que chega da API antes de [`Self::clicar`],
+    /// que não espera.
+    fn desenhado(&self, cx: &mut TestAppContext, alvo: &str) -> bool {
+        let mut visual = gpui_kit::VisualTestContext::from_window(self.raiz.into(), cx);
+        visual.update(|window, _| window.refresh());
+        visual.run_until_parked();
+        let alvo: &'static str = Box::leak(alvo.to_string().into_boxed_str());
+        visual.debug_bounds(alvo).is_some()
+    }
+
     /// 🖱️ Clica no elemento marcado com `debug_selector`, onde o dedo clicaria.
     /// Um quadro novo antes de medir: o `debug_bounds` é o do último desenho.
     fn clicar(&self, cx: &mut TestAppContext, alvo: &str) {
