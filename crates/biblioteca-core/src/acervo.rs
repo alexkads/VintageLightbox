@@ -118,6 +118,15 @@ impl Foto {
         self.estado == Estado::Disponivel && !self.apagada
     }
 
+    /// 🤝 **Só a levada se negocia** — dono, 04/10/2026: *"Eu não posso
+    /// negociar sem a foto estar selecionada [P] ou levadas"*. A sinalizada
+    /// com P **é** a levada no balcão; a negociação é o acerto do que o balcão
+    /// levou, e a foto à venda não tem acerto nenhum. O servidor recusa do
+    /// mesmo jeito, e o `negociavel` da grade do site é a mesma régua.
+    pub fn negociavel(&self) -> bool {
+        self.estado == Estado::LevadaNoBalcao && !self.apagada
+    }
+
     /// Houve conversa de balcão sobre esta foto (cortesia, desconto, já paga).
     pub fn tem_negociacao(&self) -> bool {
         self.preco_negociado.is_some()
@@ -504,6 +513,16 @@ mod testes {
         assert!(foto("b", Estado::LevadaNoBalcao, false).editavel());
         assert!(!foto("c", Estado::Comprada, false).editavel());
         assert!(!foto("d", Estado::Disponivel, true).editavel());
+    }
+
+    /// 🤝 Dono, 04/10/2026: *"Eu não posso negociar sem a foto estar
+    /// selecionada [P] ou levadas"*.
+    #[test]
+    fn so_a_levada_se_negocia() {
+        assert!(foto("a", Estado::LevadaNoBalcao, false).negociavel());
+        assert!(!foto("b", Estado::Disponivel, false).negociavel());
+        assert!(!foto("c", Estado::Comprada, false).negociavel());
+        assert!(!foto("d", Estado::LevadaNoBalcao, true).negociavel());
     }
 
     #[test]

@@ -128,6 +128,10 @@ fn base_do_nome(arquivo: &str) -> String {
 /// quem classifica, longa o bastante para não parecer um pisca.
 const DURACAO_DA_TROCA: Duration = Duration::from_millis(280);
 
+/// 🤝 O recado da negociação pedida sobre foto à venda (dono, 04/10/2026).
+const SO_A_LEVADA_SE_NEGOCIA: &str =
+    "Só a foto levada se negocia: sinalize com P antes de negociar.";
+
 /// O respiro entre as células da grade, nas duas direções.
 const VAO_DA_GRADE: f32 = 8.0;
 /// O respiro entre as miniaturas da tira.
@@ -7386,16 +7390,32 @@ impl Detalhe {
     ///
     /// `uma` é o botão do painel ("Negociação desta foto", já preenchida com o
     /// que está gravado); sem ele é o lote ("Negociação de N fotos", vazio).
-    /// Entra só a que está no site e ainda se pode mudar — nem só no disco, nem
-    /// comprada, nem apagada —, como o `editaveis` da grade do site.
-    pub fn pedir_negociacao(&self, ids: Vec<String>, uma: bool, cx: &mut Context<Self>) {
-        let fotos: Vec<&FotoDaGaleria> = ids
+    /// Entra só a que está no site e foi levada — nem só no disco, nem à
+    /// venda, nem comprada, nem apagada —, como o `negociaveis` da grade do
+    /// site (`acervo::Foto::negociavel`).
+    pub fn pedir_negociacao(&mut self, ids: Vec<String>, uma: bool, cx: &mut Context<Self>) {
+        let no_site: Vec<&FotoDaGaleria> = ids
             .iter()
             .filter(|id| !self.ids_locais.contains(*id))
             .filter_map(|id| self.do_site(id))
-            .filter(|f| para_o_core(f).editavel())
+            .collect();
+        // 🤝 A à venda fica de fora, e a tela diz por quê: o operador marcou,
+        // e o diálogo sem ela não pode parecer um esquecimento.
+        let a_venda = no_site
+            .iter()
+            .filter(|f| {
+                let foto = para_o_core(f);
+                foto.editavel() && !foto.negociavel()
+            })
+            .count();
+        let fotos: Vec<&FotoDaGaleria> = no_site
+            .into_iter()
+            .filter(|f| para_o_core(f).negociavel())
             .collect();
         if fotos.is_empty() {
+            if a_venda > 0 {
+                self.avisar_do_gesto(SO_A_LEVADA_SE_NEGOCIA, false, cx);
+            }
             return;
         }
         let abertura = match fotos.as_slice() {
@@ -7426,6 +7446,16 @@ impl Detalhe {
             }
         };
         let alvos: Vec<String> = fotos.iter().map(|f| f.id.clone()).collect();
+        if a_venda > 0 {
+            self.avisar_do_gesto(
+                format!(
+                    "{a_venda} foto(s) à venda ficaram de fora da negociação: só a levada se \
+                     negocia — sinalize com P antes."
+                ),
+                false,
+                cx,
+            );
+        }
         cx.emit(Pedido::Negociar {
             // O aviso de "fora" é o de quem ainda não subiu; a comprada e a
             // apagada saem caladas, como na grade do site.
@@ -8645,7 +8675,7 @@ impl Detalhe {
                         foto.observacao.as_deref(),
                     );
                     let (fundo, contorno, texto) = cores::selo_ambar();
-                    let editavel = foto.editavel();
+                    let editavel = foto.negociavel();
                     // Numa linha própria, para a etiqueta ter o tamanho do texto
                     // (o `inline-flex` do site), e não a largura da coluna.
                     Some(
@@ -8691,24 +8721,42 @@ impl Detalhe {
                 } else {
                     // Numa linha própria: solto na coluna, o botão estica e o kit
                     // centraliza o rótulo; o convite do site fica à esquerda.
-                    foto.editavel().then(|| {
-                        div()
-                            .flex()
-                            .child(
-                                crate::estilo::botao_raso("painel-negociar")
-                                    .debug_selector(|| "painel-negociar".into())
-                                    .icon(Icon::new(Icone::Handshake))
-                                    .label("Negociação…")
-                                    .text_color(apagado)
-                                    .px(px(0.))
-                                    .on_click(cx.listener(|tela, _ev, _window, cx| {
-                                        if let Some(foto) = tela.em_foco().cloned() {
-                                            tela.pedir_negociacao(vec![foto.id], true, cx);
-                                        }
-                                    })),
-                            )
-                            .into_any_element()
-                    })
+                    // A à venda ganha o porquê no lugar do botão (dono, 04/10).
+                    if foto.editavel() && !foto.negociavel() {
+                        Some(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(4.))
+                                .text_xs()
+                                .text_color(apagado)
+                                .debug_selector(|| "painel-negociar-so-levada".into())
+                                .child(Icon::new(Icone::Handshake).size(px(12.)))
+                                .child("Negociação: sinalize com")
+                                .child(tecla("P", cx))
+                                .child("antes")
+                                .into_any_element(),
+                        )
+                    } else {
+                        foto.negociavel().then(|| {
+                            div()
+                                .flex()
+                                .child(
+                                    crate::estilo::botao_raso("painel-negociar")
+                                        .debug_selector(|| "painel-negociar".into())
+                                        .icon(Icon::new(Icone::Handshake))
+                                        .label("Negociação…")
+                                        .text_color(apagado)
+                                        .px(px(0.))
+                                        .on_click(cx.listener(|tela, _ev, _window, cx| {
+                                            if let Some(foto) = tela.em_foco().cloned() {
+                                                tela.pedir_negociacao(vec![foto.id], true, cx);
+                                            }
+                                        })),
+                                )
+                                .into_any_element()
+                        })
+                    }
                 };
 
             // 🧾 Faixa e preço de venda online — o que o cliente vê e paga na

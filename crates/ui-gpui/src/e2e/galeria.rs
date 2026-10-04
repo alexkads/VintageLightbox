@@ -138,10 +138,17 @@ fn faixa_e_preco_em_lote_pela_grade_e_filmstrip(cx: &mut TestAppContext) {
         .iter()
         .all(|(_, m)| m.estado == Some(EstadoNoBalcao::Disponivel)));
 
+    // 🤝 Postas à venda, já não se negociam (dono, 04/10/2026): o balcão
+    // não abre, e o recado diz o que fazer.
     clicar(&e, cx, "lote-negociar");
-    e.app(cx, |app, _, _| assert!(app.no_balcao()));
+    e.app(cx, |app, _, _| assert!(!app.no_balcao()));
+    e.detalhe(cx, |tela, _w, _cx| {
+        assert_eq!(
+            tela.ultimo_aviso(),
+            Some("Só a foto levada se negocia: sinalize com P antes de negociar.")
+        );
+    });
 
-    e.app(cx, |app, window, cx| app.fechar_balcao(window, cx));
     clicar(&e, cx, "lote-excluir");
     clicar(&e, cx, "excluir-fotos-confirmar");
     e.esperar(cx);
@@ -957,6 +964,48 @@ fn o_acerto_da_foto_volta_preenchido(cx: &mut TestAppContext) {
     });
 }
 
+/// 🤝 **A foto à venda não abre a negociação** — dono, 04/10/2026: *"Eu não
+/// posso negociar sem a foto estar selecionada [P] ou levadas"*. Nada abre,
+/// nada vai ao site, e o recado diz o que fazer.
+#[gpui_kit::test]
+fn a_foto_a_venda_nao_se_negocia(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+
+    e.detalhe(cx, |tela, _w, cx| {
+        tela.pedir_negociacao(vec!["d".into()], true, cx);
+        assert_eq!(
+            tela.ultimo_aviso(),
+            Some("Só a foto levada se negocia: sinalize com P antes de negociar.")
+        );
+    });
+    e.esperar(cx);
+    e.app(cx, |app, _w, _cx| {
+        assert!(!app.no_balcao(), "o diálogo não abriu");
+    });
+    assert!(e.site.negociadas().is_empty(), "nada foi ao site");
+}
+
+/// 🤝 **No painel, a à venda mostra o porquê no lugar do botão**, e a levada
+/// mostra o "Negociação…" (dono, 04/10/2026).
+#[gpui_kit::test]
+fn o_painel_so_oferece_a_negociacao_na_levada(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    let desenhado = |cx: &mut TestAppContext, alvo| super::chatbot::desenhado(&e, cx, alvo);
+
+    e.detalhe(cx, |tela, _w, cx| tela.focar_foto("d", cx));
+    // A sanfona "Faixa, negociação e preço" nasce fechada.
+    clicar(&e, cx, "painel-sanfona");
+    assert!(
+        desenhado(cx, "painel-negociar-so-levada"),
+        "a à venda diz o porquê"
+    );
+    assert!(!desenhado(cx, "painel-negociar"), "e não oferece o botão");
+
+    e.detalhe(cx, |tela, _w, cx| tela.focar_foto("a", cx));
+    assert!(desenhado(cx, "painel-negociar"), "a levada se negocia");
+    assert!(!desenhado(cx, "painel-negociar-so-levada"));
+}
+
 /// 🎯 **O diálogo fica no meio da janela, como no site** (`top-1/2
 /// -translate-y-1/2`). O `Dialog` do gpui-kit o punha a um décimo do topo;
 /// `crate::dialogo` mede a caixa e acerta o `margin_top`.
@@ -1116,19 +1165,28 @@ fn todo_dialogo_da_galeria_devolve_as_teclas(cx: &mut TestAppContext) {
 
 /// 🎬 **Negociar e imprimir as marcadas**: os botões da barra levam a seleção
 /// da grade ao diálogo do balcão — pelo id do site, direto — e à folha.
+///
+/// 🤝 **A à venda fica de fora da negociação, e a tela diz** (dono,
+/// 04/10/2026: *"Eu não posso negociar sem a foto estar selecionada [P] ou
+/// levadas"*); a folha leva as três.
 #[gpui_kit::test]
 fn negociar_e_imprimir_as_marcadas(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());
 
     e.detalhe(cx, |tela, _w, cx| {
-        tela.marcar_ids(&["a".into(), "d".into()], cx);
+        tela.marcar_ids(&["a".into(), "b".into(), "d".into()], cx);
         let marcadas = tela.marcadas();
         tela.pedir_negociacao(marcadas, false, cx);
+        let aviso = tela.ultimo_aviso().unwrap_or_default();
+        assert!(
+            aviso.starts_with("1 foto(s) à venda ficaram de fora"),
+            "a à venda saiu com recado: {aviso:?}"
+        );
     });
     e.app(cx, |app, _w, cx| {
         assert!(app.no_balcao(), "o balcão abriu");
         let balcao = app.balcao.read(cx);
-        assert_eq!(balcao.negociaveis(), ["a".to_string(), "d".to_string()]);
+        assert_eq!(balcao.negociaveis(), ["a".to_string(), "b".to_string()]);
         assert_eq!(balcao.titulo(), "Negociação de 2 fotos");
         app.balcao.update(cx, |tela, cx| tela.registrar(cx));
     });
@@ -1139,8 +1197,8 @@ fn negociar_e_imprimir_as_marcadas(cx: &mut TestAppContext) {
             .iter()
             .map(|(id, _)| id.as_str())
             .collect::<Vec<_>>(),
-        vec!["a", "d"],
-        "o acerto foi para as duas marcadas"
+        vec!["a", "b"],
+        "o acerto foi para as duas levadas"
     );
     assert!(negociadas
         .iter()
@@ -1161,7 +1219,7 @@ fn negociar_e_imprimir_as_marcadas(cx: &mut TestAppContext) {
     e.app(cx, |app, _w, cx| {
         assert_eq!(app.tela(), Tela::Impressao);
         let folha = app.impressao_para_teste();
-        assert_eq!(folha.read(cx).escolhidas(), 2);
+        assert_eq!(folha.read(cx).escolhidas(), 3);
         folha.update(cx, |tela, cx| tela.imprimir(cx));
     });
     e.esperar(cx);
@@ -1169,7 +1227,11 @@ fn negociar_e_imprimir_as_marcadas(cx: &mut TestAppContext) {
     assert_eq!(pedidos.len(), 1);
     assert_eq!(
         pedidos[0].0,
-        vec!["site:a".to_string(), "site:d".to_string()]
+        vec![
+            "site:a".to_string(),
+            "site:b".to_string(),
+            "site:d".to_string()
+        ]
     );
     assert_eq!(pedidos[0].2, Destino::Impressora);
 
