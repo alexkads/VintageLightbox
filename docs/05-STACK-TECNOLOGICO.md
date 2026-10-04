@@ -48,10 +48,11 @@ Este documento detalha todas as tecnologias, bibliotecas e ferramentas utilizada
 - ✅ **Ecossistema**: Crates.io com bibliotecas de qualidade
 - ✅ **Tooling**: Cargo, rustfmt, clippy - ferramentas de primeira classe
 
-**Versão Mínima**: Rust 1.98+ (ou latest stable)
+**Versão Mínima**: Rust 1.99+ (ou latest stable)
 
 > Subiu de 1.75 para 1.98 em 2026-08-30, junto com o toolchain de
-> desenvolvimento. O número diz o que é construído e testado, não um piso
+> desenvolvimento, e para 1.99 em 2026-10-04 (o toolchain padrão das
+> máquinas de desenvolvimento passou a ser o `1.99.0`). O número diz o que é construído e testado, não um piso
 > medido: o workspace não declara `rust-version`, então nada no CI ou no
 > `cargo` reprova quem usar uma versão anterior — vai descobrir na falha de
 > compilação. O código já usa API que 1.75 não tem (`slice::as_chunks`).
@@ -1053,7 +1054,7 @@ opt-level = 1  # Faster dev builds
 - MSVC toolchain
 
 **Ambos**:
-- Rust 1.98+
+- Rust 1.99+
 - 8GB RAM mínimo
 - 10GB espaço em disco
 

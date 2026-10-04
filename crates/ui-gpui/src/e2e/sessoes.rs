@@ -541,7 +541,7 @@ fn as_duas_primeiras_colunas_ficam_congeladas_na_rolagem_horizontal(cx: &mut Tes
     let e = abrir_o_app(cx, Cenario::default());
     e.entrar_na_conta(cx);
     // Estreita o bastante para a parte que rola não caber.
-    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    let visual = VisualTestContext::from_window(e.raiz.into(), cx);
     visual.simulate_resize(gpui_kit::size(gpui_kit::px(1000.), gpui_kit::px(800.)));
     e.app(cx, |app, _window, cx| {
         app.sessoes.update(cx, |tela, cx| {

@@ -218,13 +218,22 @@ impl GravadorDoBanco {
         let agora = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_micros() as i64);
-        let anterior = self
-            .versao_do_historico
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |v| {
-                Some(agora.max(v + 1))
-            })
-            .unwrap_or(0);
-        agora.max(anterior + 1)
+        // ⚠️ `compare_exchange_weak` à mão, e não `fetch_update`: o Rust 1.99 o
+        // deprecou em favor de `try_update`, que não existe na 1.98 — e os
+        // balcões compilam com o Rust que tiverem (piso 1.89 no instalador).
+        let mut atual = self.versao_do_historico.load(Ordering::SeqCst);
+        loop {
+            let nova = agora.max(atual + 1);
+            match self.versao_do_historico.compare_exchange_weak(
+                atual,
+                nova,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => return nova,
+                Err(visto) => atual = visto,
+            }
+        }
     }
 
     /// Manda a gravação ao tokio, contada até terminar.
