@@ -1,11 +1,11 @@
 {
-  "versao": "0.1.90",
-  "titulo": "A tela do cliente abre no monitor escolhido no GNOME, e a sessão criada à noite aparece em Hoje.",
+  "versao": "0.1.91",
+  "titulo": "O Chatbot e a tela Recuperar cartão foram refeitos com os componentes do aplicativo.",
   "importante": false,
   "novidades": [
-    "Sessões criadas depois das 21h agora aparecem na lista de hoje. Antes, entre 21h e meia-noite, a sessão recém-criada sumia do filtro Hoje e só aparecia no dia seguinte.",
-    "No Fedora com GNOME, escolher o monitor da tela do cliente passou a valer: ela abre em tela cheia no monitor escolhido. Escolhendo o monitor onde está o app, ela abre em janela ali mesmo.",
-    "No GNOME, sair da tela cheia com F devolve a janela ao monitor principal — quem decide é o próprio GNOME. Para voltar ao monitor do cliente, feche e abra de novo a tela do cliente."
+    "No Chatbot, avatares, balões de mensagem, separador de dia, abas de canal e de status, lista de conversas e telas vazias ganharam o visual padrão do aplicativo. O ícone do canal agora aparece no canto do avatar.",
+    "Nas abas de canal, o número só aparece quando há conversas naquele canal, e as abas que não cabem na largura ficam num menu ao lado.",
+    "Recuperar cartão agora é feito em três passos — o cartão, onde guardar e recuperar — com a lista de cartões em cartões clicáveis e a barra de andamento sempre à vista."
   ],
-  "por_que_atualizar": "Para não arrastar a tela do cliente até o outro monitor a cada atendimento, e achar na lista a sessão que acabou de criar à noite."
+  "por_que_atualizar": "Para o Chatbot ficar com o mesmo visual do resto do aplicativo e a recuperação do cartão ficar mais clara de seguir."
 }
