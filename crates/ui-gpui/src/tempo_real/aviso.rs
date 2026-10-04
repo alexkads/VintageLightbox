@@ -88,6 +88,8 @@ impl Avisador for AvisoDoSistema {
             // O `show` do macOS espera o sistema responder: fora da thread da
             // interface.
             std::thread::spawn(move || {
+                #[cfg(target_os = "macos")]
+                apresentar_o_app();
                 if let Err(erro) = notificacao.show() {
                     crate::telemetria::avisar!(
                         "⚠️ [Aviso] o sistema recusou a notificação: {erro}"
@@ -96,6 +98,21 @@ impl Avisador for AvisoDoSistema {
             });
         }
     }
+}
+
+/// Diz ao `mac-notification-sys` de qual app é o aviso, antes do primeiro.
+///
+/// 🚨 **Sem isto o macOS pergunta "Where is use_default?".** Sem app definido,
+/// a primeira notificação roda o AppleScript `get id of application
+/// "use_default"`, e o sistema abre o "Choose Application" — uma janela por
+/// aviso que chegue enquanto ela está aberta (04/10). Definido aqui, o
+/// AppleScript nunca roda. Fora do `.app` (o `cargo run`) o identificador não
+/// está registrado e o crate recusa, mas a recusa também conta como definido:
+/// o aviso sai em nome do Finder, sem pergunta.
+#[cfg(target_os = "macos")]
+fn apresentar_o_app() {
+    // O mesmo `IDENTIFICADOR` do Info.plist que o instalador escreve.
+    let _ = notify_rust::set_application("br.com.recordarfotos.vintagelightbox");
 }
 
 /// O avisador de mentira: guarda o que foi avisado, e o canal do clique para o
