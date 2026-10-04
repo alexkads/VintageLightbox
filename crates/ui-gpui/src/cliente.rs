@@ -423,24 +423,24 @@ pub fn rotulo<T: PartialEq>(numero: usize, monitor: &Monitor<T>, do_app: Option<
     texto
 }
 
-/// Com que estado a janela nasce, e o que ela vira no primeiro quadro.
+/// Com que estado a janela nasce.
 ///
-/// 🚨 **No Wayland só a tela cheia escolhe monitor** (Fedora/GNOME, 03/out/2026).
-/// O xdg-shell não deixa o app posicionar janela: `display_id` e a origem dos
-/// limites são ignorados, e a janela nascia onde o compositor queria. O único
-/// pedido de lugar que o GNOME atende é `set_fullscreen(monitor)` — o patch em
-/// `vendor/gpui-pre-linux` o liga ao `display_id`. Então, com monitor próprio, a
-/// janela nasce em tela cheia lá e, se o pedido era janela ou maximizada, vira
-/// isso no primeiro quadro: o compositor a mantém no monitor onde ela está.
-pub fn ao_nascer(
-    pedido: Estado,
-    monitor_proprio: bool,
-    sem_posicao: bool,
-) -> (Estado, Option<Estado>) {
-    if sem_posicao && monitor_proprio && pedido != Estado::TelaCheia {
-        (Estado::TelaCheia, Some(pedido))
+/// 🚨 **No Wayland, com monitor próprio, é sempre tela cheia** (Fedora/GNOME,
+/// 03/out/2026). O xdg-shell não deixa o app posicionar janela: `display_id` e
+/// a origem dos limites são ignorados. O único pedido de lugar que o GNOME
+/// atende é `set_fullscreen(monitor)` — o patch em `vendor/gpui-pre-linux` o
+/// liga ao `display_id`.
+///
+/// ⚠️ **E ela não volta sozinha à janela.** A primeira versão nascia em tela
+/// cheia e desfazia no primeiro quadro, para respeitar a lembrança: no Mutter
+/// (medido com dois monitores virtuais) sair da tela cheia **devolve a janela
+/// ao monitor principal**, maximizando antes ou depois. Era o defeito que o
+/// dono viu: escolhia o monitor 2 e ela aparecia no do app.
+pub fn ao_nascer(pedido: Estado, monitor_proprio: bool, sem_posicao: bool) -> Estado {
+    if sem_posicao && monitor_proprio {
+        Estado::TelaCheia
     } else {
-        (pedido, None)
+        pedido
     }
 }
 
@@ -539,9 +539,6 @@ pub struct Cliente {
     /// conferem.
     arquivo: Option<std::path::PathBuf>,
     _limites: Option<gpui_kit::Subscription>,
-    /// O estado que ela vira quando a tela cheia de nascença chegar — ver
-    /// [`ao_nascer`]. `None` fora do Wayland, e depois do primeiro quadro.
-    restaurar: Option<Estado>,
 }
 
 impl Cliente {
@@ -581,32 +578,7 @@ impl Cliente {
             foco,
             arquivo,
             _limites: limites,
-            restaurar: None,
         }
-    }
-
-    /// Ela nasce em tela cheia só para cair no monitor certo, e vira `estado`
-    /// assim que o sistema confirmar. Ver [`ao_nascer`].
-    pub fn restaurar_depois(mut self, estado: Option<Estado>) -> Self {
-        self.restaurar = estado;
-        self
-    }
-
-    /// 🔑 **Espera o sistema confirmar a tela cheia**, e não o primeiro
-    /// `render`: no Wayland ela chega no `configure` do compositor, depois de
-    /// a janela existir. Desfazer antes seria pedir "sair" de um estado que o
-    /// compositor ainda não aplicou — e ele aplicaria o "entrar" por último.
-    fn restaurar_se_ja_nasceu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.restaurar.is_none() || !window.is_fullscreen() {
-            return;
-        }
-        let estado = self.restaurar.take();
-        window.defer(cx, move |window, _cx| {
-            window.toggle_fullscreen();
-            if estado == Some(Estado::Maximizada) {
-                window.zoom_window();
-            }
-        });
     }
 
     /// Grava o monitor onde ela está, o estado e, em janela, a posição e o
@@ -1161,7 +1133,6 @@ impl Cliente {
 impl Render for Cliente {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _t = crate::regua::trecho("tela do cliente: render");
-        self.restaurar_se_ja_nasceu(window, cx);
         self.lado_do_monitor = window.display(cx).map(|monitor| {
             let tamanho = monitor.bounds().size;
             let lado = f32::from(tamanho.width).max(f32::from(tamanho.height));
@@ -1716,20 +1687,18 @@ mod testes {
         );
     }
 
-    /// No Wayland, com monitor próprio, ela nasce em tela cheia — o único jeito
-    /// de cair no monitor escolhido — e volta ao pedido depois. Fora do
-    /// Wayland, ou dividindo o monitor com o app, nasce como foi pedida.
+    /// No Wayland, com monitor próprio, ela nasce **e fica** em tela cheia — o
+    /// único estado que cai no monitor escolhido; sair dela devolve a janela
+    /// ao monitor principal. Fora do Wayland, ou dividindo o monitor com o
+    /// app, nasce como foi pedida.
     #[test]
-    fn no_wayland_ela_nasce_em_tela_cheia_no_monitor_e_volta_ao_pedido() {
+    fn no_wayland_com_monitor_proprio_ela_fica_em_tela_cheia() {
         use Estado::*;
-        assert_eq!(ao_nascer(Janela, true, true), (TelaCheia, Some(Janela)));
-        assert_eq!(
-            ao_nascer(Maximizada, true, true),
-            (TelaCheia, Some(Maximizada))
-        );
-        assert_eq!(ao_nascer(TelaCheia, true, true), (TelaCheia, None));
-        assert_eq!(ao_nascer(Janela, false, true), (Janela, None));
-        assert_eq!(ao_nascer(Janela, true, false), (Janela, None));
+        assert_eq!(ao_nascer(Janela, true, true), TelaCheia);
+        assert_eq!(ao_nascer(Maximizada, true, true), TelaCheia);
+        assert_eq!(ao_nascer(TelaCheia, true, true), TelaCheia);
+        assert_eq!(ao_nascer(Janela, false, true), Janela);
+        assert_eq!(ao_nascer(Janela, true, false), Janela);
     }
 
     /// Uma tela de 2560x1440 com origem em (1920, 0): o segundo monitor à

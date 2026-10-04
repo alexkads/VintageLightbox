@@ -4778,8 +4778,7 @@ impl Aplicativo {
             !monitor_proprio,
         );
         // 🚨 No Wayland só a tela cheia cai no monitor pedido — ver `ao_nascer`.
-        let (estado, restaurar) =
-            ao_nascer(pedido, monitor_proprio, cx.compositor_name() == "Wayland");
+        let estado = ao_nascer(pedido, monitor_proprio, cx.compositor_name() == "Wayland");
 
         let opcoes = gpui_kit::WindowOptions {
             app_id: Some(crate::menu::APP_ID.into()),
@@ -4807,7 +4806,7 @@ impl Aplicativo {
         };
 
         match cx.open_window(opcoes, |window, cx| {
-            cx.new(|cx| Cliente::novo(Some(arquivo), window, cx).restaurar_depois(restaurar))
+            cx.new(|cx| Cliente::novo(Some(arquivo), window, cx))
         }) {
             Ok(janela) => {
                 if let Ok(entidade) = janela.update(cx, |_cliente, _window, cx| cx.entity()) {

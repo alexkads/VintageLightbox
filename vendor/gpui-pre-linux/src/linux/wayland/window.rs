@@ -659,7 +659,13 @@ impl WaylandWindowState {
 
     pub fn primary_output_scale(&mut self) -> i32 {
         let mut scale = 1;
-        let mut current_output = self.display.take();
+        // VintageLightbox: an output the surface already left is not a candidate.
+        // Upstream kept it, and after moving to another monitor `display` still
+        // named the old one.
+        let mut current_output = self
+            .display
+            .take()
+            .filter(|(id, _)| self.outputs.contains_key(id));
         for (id, output) in self.outputs.iter() {
             if let Some((_, output_data)) = &current_output {
                 if output.scale > output_data.scale {
@@ -1384,6 +1390,7 @@ impl WaylandWindowStatePtr {
         outputs: HashMap<ObjectId, Output>,
     ) {
         let mut state = self.state.borrow_mut();
+        let display_before = state.display.as_ref().map(|(id, _)| id.clone());
 
         match event {
             wl_surface::Event::Enter { output } => {
@@ -1406,6 +1413,7 @@ impl WaylandWindowStatePtr {
                 } else {
                     drop(state);
                 }
+                self.notify_if_display_changed(display_before);
                 self.request_redraw();
             }
             wl_surface::Event::Leave { output } => {
@@ -1422,6 +1430,7 @@ impl WaylandWindowStatePtr {
                 } else {
                     drop(state);
                 }
+                self.notify_if_display_changed(display_before);
                 self.request_redraw();
             }
             wl_surface::Event::PreferredBufferScale { factor } => {
@@ -1511,6 +1520,29 @@ impl WaylandWindowStatePtr {
 
     pub fn resize(&self, size: Size<Pixels>) {
         self.set_size_and_scale(Some(size), None);
+    }
+
+    /// VintageLightbox: gpui caches the window's display and refreshes it only in the
+    /// resize callback. On Wayland the output is known after `wl_surface.enter`, which
+    /// usually comes after the last resize, so `Window::display` stayed `None` for good.
+    /// Run the resize callback when the output changes, so gpui reads it again.
+    fn notify_if_display_changed(&self, before: Option<ObjectId>) {
+        let (now, size, scale) = {
+            let state = self.state.borrow();
+            (
+                state.display.as_ref().map(|(id, _)| id.clone()),
+                state.bounds.size,
+                state.scale,
+            )
+        };
+        if now == before {
+            return;
+        }
+        let callback = self.callbacks.borrow_mut().resize.take();
+        if let Some(mut fun) = callback {
+            fun(size, scale);
+            self.callbacks.borrow_mut().resize = Some(fun);
+        }
     }
 
     pub fn rescale(&self, scale: f32) {
