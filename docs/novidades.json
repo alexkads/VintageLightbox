@@ -1,10 +1,10 @@
 {
-  "versao": "0.1.89",
-  "titulo": "O grid de sessões congela Galeria e Contato na rolagem, e a coluna Criada mostra data, hora e segundos.",
+  "versao": "0.1.90",
+  "titulo": "No Linux (GNOME), a tela do cliente abre de verdade no monitor escolhido.",
   "importante": false,
   "novidades": [
-    "No grid de Sessões fotográficas, Galeria e Contato ficam paradas à esquerda enquanto o resto rola na horizontal, e a linha acende inteira ao passar o mouse.",
-    "A coluna Criada passa a mostrar data, hora e segundos (03/10/2026 14:35:07), no horário de Brasília — no app e no site."
+    "No Fedora com GNOME, escolher o monitor da tela do cliente passou a valer: ela abre em tela cheia no monitor escolhido. Escolhendo o monitor onde está o app, ela abre em janela ali mesmo.",
+    "No GNOME, sair da tela cheia com F devolve a janela ao monitor principal — quem decide é o próprio GNOME. Para voltar ao monitor do cliente, feche e abra de novo a tela do cliente."
   ],
-  "por_que_atualizar": "Para não perder de vista de quem é a sessão ao rolar o grid, e distinguir sessões criadas no mesmo dia."
+  "por_que_atualizar": "Para não precisar arrastar a tela do cliente até o outro monitor a cada atendimento."
 }
