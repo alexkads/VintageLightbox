@@ -1,5 +1,15 @@
 [
   {
+    "versao": "0.1.92",
+    "data": "2026-10-04",
+    "titulo": "O aplicativo não abre mais a janela \"Where is use_default?\" no Mac.",
+    "importante": false,
+    "novidades": [
+      "No Mac, o primeiro aviso do sistema (mensagem nova, por exemplo) abria a janela \"Choose Application — Where is use_default?\", uma para cada aviso que chegasse enquanto ela estivesse aberta. Agora o aviso sai direto, sem pergunta."
+    ],
+    "por_que_atualizar": "Para os avisos do sistema aparecerem sem abrir aquela janela de escolher aplicativo."
+  },
+  {
     "versao": "0.1.91",
     "data": "2026-10-04",
     "titulo": "O Chatbot e a tela Recuperar cartão foram refeitos com os componentes do aplicativo.",
