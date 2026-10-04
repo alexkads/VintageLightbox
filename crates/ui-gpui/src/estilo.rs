@@ -226,6 +226,18 @@ pub fn selo_colorido(cores: (Hsla, Hsla, Hsla)) -> Tag {
         .font_weight(FontWeight::MEDIUM)
 }
 
+/// O selo de alerta cheio (vermelho do tema, texto claro): a `Tag::danger` do
+/// gpui-kit nas medidas dos outros selos ("3 sem resposta").
+pub fn selo_perigo() -> Tag {
+    Tag::danger()
+        .rounded(crate::tema::canto(6.))
+        .flex_none()
+        .h(px(m().selo.altura))
+        .px(px(6.))
+        .py(px(0.))
+        .font_weight(FontWeight::MEDIUM)
+}
+
 /// 🔑 **A tecla continua desenhada aqui, e não é o `Kbd` do gpui-kit.** O
 /// `Kbd` impõe a cor dele (`muted_foreground` sobre o fundo) — e a tecla do
 /// site herda a do botão em que está: no "Abrir caixa F8" escuro, o "F8" é
@@ -411,6 +423,42 @@ pub fn aviso(texto: impl Into<SharedString>, perigo: bool, cx: &App) -> Alert {
         .px(px(16.))
         .py(px(12.))
         .rounded(crate::tema::no_tema(px(m().canto(Canto::LG))))
+}
+
+/// O aviso de atenção (âmbar): o `Alert::warning` do gpui-kit, com o mesmo
+/// respiro e canto de [`aviso`]. `titulo` é opcional.
+pub fn aviso_de_atencao(
+    id: impl Into<SharedString>,
+    titulo: Option<&'static str>,
+    texto: impl Into<SharedString>,
+) -> Alert {
+    let id: SharedString = id.into();
+    let texto: SharedString = texto.into();
+    Alert::warning(id, texto)
+        .when_some(titulo, |a, titulo| a.title(titulo))
+        .small()
+        .px(px(16.))
+        .py(px(12.))
+        .rounded(crate::tema::no_tema(px(m().canto(Canto::LG))))
+}
+
+/// O número de um passo (a bolinha "1", "2", "3"): a `Tag` do gpui-kit em
+/// círculo na altura do selo do template — cheia com ✓ quando o passo está
+/// feito, só contorno com o número quando ainda falta.
+pub fn selo_do_passo(numero: usize, feito: bool) -> Tag {
+    let lado = m().selo.altura + 8.;
+    let tag = if feito {
+        Tag::primary().child(Icon::new(Icone::Check).size(px(14.)))
+    } else {
+        Tag::secondary().outline().child(numero.to_string())
+    };
+    tag.rounded_full()
+        .flex_none()
+        .size(px(lado))
+        .px(px(0.))
+        .py(px(0.))
+        .justify_center()
+        .font_weight(FontWeight::SEMIBOLD)
 }
 
 /// O véu do `Dialog` do site, e a caixa dele — as duas peças de um diálogo.

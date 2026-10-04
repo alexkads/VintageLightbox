@@ -6,9 +6,20 @@
 //! excluir histórico).
 
 use crate::campo::TrocarValor as _;
+use gpui_kit::component::avatar::Avatar;
+use gpui_kit::component::badge::Badge;
+use gpui_kit::component::bubble::{Bubble, BubbleContent, BubbleVariant};
+use gpui_kit::component::empty::{
+    Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyMediaVariant, EmptyTitle,
+};
 use gpui_kit::component::input::{Input, Textarea};
+use gpui_kit::component::list::ListItem;
+use gpui_kit::component::marker::{Marker, MarkerContent, MarkerVariant};
 use gpui_kit::component::menu::DropdownMenu as _;
-use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
+use gpui_kit::component::message::{Message, MessageAlignment, MessageContent, MessageFooter};
+use gpui_kit::component::tab::{Tab, TabBar};
+use gpui_kit::component::tag::Tag;
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon, Sizable as _};
 use gpui_kit::{
     div, prelude::*, px, rgb, AnyElement, Context, FontWeight, Hsla, SharedString, Window,
 };
@@ -56,9 +67,10 @@ fn vermelho() -> Hsla {
     rgb(0xef4444).into()
 }
 
-/// O avatar: a cor diz o canal (no WhatsApp, o volume sem resposta) e o anel
+/// O avatar: o `Avatar` do gpui-kit com as iniciais; o crachá do canto traz o
+/// ícone do canal na cor dele (no WhatsApp, a do volume sem resposta) e o anel
 /// âmbar diz que alguém assumiu.
-fn avatar(conversa: &Conversa, lado: f32, redondo: bool) -> impl IntoElement {
+fn avatar(conversa: &Conversa, lado: f32) -> impl IntoElement {
     let cor = if conversa.chave.canal == Canal::WhatsApp {
         match conversa.prioridade() {
             modelo::Prioridade::Alta => vermelho(),
@@ -68,20 +80,33 @@ fn avatar(conversa: &Conversa, lado: f32, redondo: bool) -> impl IntoElement {
     } else {
         cor_do_canal(conversa.chave.canal)
     };
-    div()
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .size(px(lado))
-        .rounded(if redondo { px(lado / 2.) } else { px(8.) })
-        .bg(cor)
-        .text_color(gpui_kit::white())
-        .font_weight(FontWeight::SEMIBOLD)
-        .when(conversa.atendimento_humano, |d| {
-            d.border_2().border_color(ambar())
-        })
-        .child(modelo::inicial(&conversa.nome))
+    div().flex_none().child(
+        Badge::new()
+            .icon(Icon::new(icone_do_canal(conversa.chave.canal)).size(px(10.)))
+            .color(cor)
+            .child(
+                Avatar::new()
+                    .name(conversa.nome.clone())
+                    .with_size(gpui_kit::component::Size::Size(px(lado)))
+                    .when(conversa.atendimento_humano, |a| {
+                        a.border_2().border_color(ambar())
+                    }),
+            ),
+    )
+}
+
+/// O estado vazio: o `Empty` do gpui-kit, com o ícone no quadro do kit, o
+/// título (quando há) e a frase que explica.
+fn vazio(icone: Icone, titulo: Option<&'static str>, texto: &'static str) -> Empty {
+    let mut cabecalho = EmptyHeader::new().media(
+        EmptyMedia::new()
+            .with_variant(EmptyMediaVariant::Icon)
+            .child(Icon::new(icone).size(px(20.))),
+    );
+    if let Some(titulo) = titulo {
+        cabecalho = cabecalho.title(EmptyTitle::new().child(titulo));
+    }
+    Empty::new().header(cabecalho.description(EmptyDescription::new().child(texto)))
 }
 
 /// Marca o botão para o teste clicar onde o dedo clica (`debug_selector`).
@@ -198,12 +223,13 @@ impl Chatbot {
                     "Urgentes"
                 })
                 .child(
-                    div()
-                        .px(px(6.))
-                        .rounded_full()
-                        .bg(gpui_kit::white().opacity(0.25))
-                        .text_xs()
-                        .child(total.to_string()),
+                    Tag::custom(
+                        gpui_kit::white().opacity(0.25),
+                        gpui_kit::white(),
+                        gpui_kit::transparent_black(),
+                    )
+                    .rounded_full()
+                    .child(total.to_string()),
                 )
                 .on_click(cx.listener(|tela, _, window, cx| tela.abrir_urgencias(window, cx))),
             )
@@ -241,31 +267,11 @@ impl Chatbot {
         let aberta = self.aberta.clone();
         let busca_escrita = !self.busca.read(cx).value().is_empty();
 
-        let aba = |id: &'static str,
-                   filtro: FiltroDeCanal,
-                   rotulo: &'static str,
-                   n: usize,
-                   cx: &mut Context<Self>| {
-            let ativa = self.canal == filtro;
-            let botao = marcado(
-                if ativa {
-                    estilo::botao_primario(id, cx)
-                } else {
-                    estilo::botao_fantasma(id, cx)
-                },
-                id,
-            );
-            botao
-                .h(px(26.))
-                .px(px(8.))
-                .text_xs()
-                .gap(px(4.))
-                .child(rotulo)
-                .child(div().opacity(0.7).child(n.to_string()))
-                .on_click(cx.listener(move |tela, _, _, cx| tela.escolher_canal(filtro, cx)))
-        };
-
-        let mut abas = vec![aba("aba-todas", FiltroDeCanal::Todas, "Todas", total, cx)];
+        // 🗂️ Canal e status são `TabBar` do gpui-kit (uma escolha só): o canal
+        // em pílulas, com a contagem ao lado do nome; o status, segmentado.
+        let tela = cx.entity().downgrade();
+        let mut canais: Vec<(&'static str, FiltroDeCanal, &'static str, usize)> =
+            vec![("aba-todas", FiltroDeCanal::Todas, "Todas", total)];
         for (canal, n) in contagem {
             let id = match canal {
                 Canal::WhatsApp => "aba-whatsapp",
@@ -274,58 +280,77 @@ impl Chatbot {
                 Canal::Telegram => "aba-telegram",
                 Canal::Web => "aba-site",
             };
-            abas.push(aba(id, FiltroDeCanal::So(canal), canal.rotulo(), n, cx));
+            canais.push((id, FiltroDeCanal::So(canal), canal.rotulo(), n));
         }
+        let filtros: Vec<FiltroDeCanal> = canais.iter().map(|c| c.1).collect();
+        let escolhido = filtros.iter().position(|f| *f == self.canal).unwrap_or(0);
+        let abas = TabBar::new("chatbot-canais")
+            .pill()
+            .xsmall()
+            .menu(true)
+            .selected_index(escolhido)
+            .children(canais.into_iter().map(|(id, _, rotulo, n)| {
+                Tab::new()
+                    .label(rotulo)
+                    .when(n > 0, |t| t.suffix(div().opacity(0.7).child(n.to_string())))
+                    .debug_selector(move || id.to_string())
+            }))
+            .on_click({
+                let tela = tela.clone();
+                move |i, _, cx| {
+                    let Some(filtro) = filtros.get(*i).copied() else {
+                        return;
+                    };
+                    let _ = tela.update(cx, |tela, cx| tela.escolher_canal(filtro, cx));
+                }
+            });
 
-        let pilulas: Vec<_> = Status::TODOS
-            .into_iter()
-            .map(|status| {
-                let ativa = self.status == status;
+        let situacoes = Status::TODOS;
+        let status_escolhido = situacoes
+            .iter()
+            .position(|s| *s == self.status)
+            .unwrap_or(0);
+        let pilulas = TabBar::new("chatbot-status")
+            .segmented()
+            .xsmall()
+            .w_full()
+            .selected_index(status_escolhido)
+            .children(situacoes.into_iter().map(|status| {
                 let id = match status {
                     Status::Todas => "status-todas",
                     Status::Bot => "status-bot",
                     Status::Humano => "status-humano",
                     Status::NaoLidas => "status-nao-lidas",
                 };
-                let botao = marcado(
-                    if ativa {
-                        estilo::botao_primario(id, cx)
-                    } else {
-                        estilo::botao_contorno(id, cx)
-                    },
-                    id,
-                );
-                botao
-                    .h(px(24.))
-                    .px(px(8.))
-                    .text_xs()
-                    .child(status.rotulo())
-                    .on_click(cx.listener(move |tela, _, _, cx| tela.escolher_status(status, cx)))
-            })
-            .collect();
+                Tab::new()
+                    .label(status.rotulo())
+                    .flex_1()
+                    .debug_selector(move || id.to_string())
+            }))
+            .on_click(move |i, _, cx| {
+                let Some(status) = situacoes.get(*i).copied() else {
+                    return;
+                };
+                let _ = tela.update(cx, |tela, cx| tela.escolher_status(status, cx));
+            });
 
         let paginas = self.paginas();
         let paginado = self.canal != FiltroDeCanal::So(Canal::Instagram)
             && self.pagina_do_whatsapp.total > super::pedidos::POR_PAGINA as i64;
 
         let corpo: AnyElement = if lista.is_empty() {
-            v_flex()
-                .flex_1()
-                .items_center()
-                .justify_center()
-                .gap(px(8.))
-                .p(px(24.))
-                .text_center()
-                .text_color(apagado)
-                .child(Icon::new(Icone::Inbox).size(px(32.)))
-                .child(if !self.carregou && !self.falhou_a_carga {
+            vazio(
+                Icone::Inbox,
+                None,
+                if !self.carregou && !self.falhou_a_carga {
                     "Carregando…"
                 } else if self.falhou_a_carga {
                     "Não foi possível carregar as conversas. Tente de novo; se continuar, a API pode estar fora do ar."
                 } else {
                     "Nenhuma conversa bate com esses filtros. As dos cinco canais aparecem aqui juntas, da mais recente para a mais antiga."
-                })
-                .into_any_element()
+                },
+            )
+            .into_any_element()
         } else {
             v_flex()
                 .id("chatbot-lista")
@@ -387,8 +412,8 @@ impl Chatbot {
                                 )
                             }),
                     )
-                    .child(h_flex().flex_wrap().gap(px(2.)).children(abas))
-                    .child(h_flex().flex_wrap().gap(px(4.)).children(pilulas)),
+                    .child(abas)
+                    .child(pilulas),
             )
             .child(corpo)
             .child(
@@ -417,10 +442,9 @@ impl Chatbot {
                                 .gap(px(4.))
                                 .child(estilo::desligado(
                                     marcado(
-                                        estilo::botao_contorno("chatbot-anterior", cx),
+                                        estilo::botao_contorno_pequeno("chatbot-anterior", cx),
                                         "chatbot-anterior",
                                     )
-                                    .h(px(26.))
                                     .child("Anterior")
                                     .on_click(
                                         cx.listener(|tela, _, _, cx| tela.mudar_pagina(-1, cx)),
@@ -429,10 +453,9 @@ impl Chatbot {
                                 ))
                                 .child(estilo::desligado(
                                     marcado(
-                                        estilo::botao_contorno("chatbot-proxima", cx),
+                                        estilo::botao_contorno_pequeno("chatbot-proxima", cx),
                                         "chatbot-proxima",
                                     )
-                                    .h(px(26.))
                                     .child("Próxima")
                                     .on_click(
                                         cx.listener(|tela, _, _, cx| tela.mudar_pagina(1, cx)),
@@ -453,9 +476,10 @@ impl Chatbot {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let tema = cx.theme();
-        let (apagado, acento, borda) = (tema.muted_foreground, tema.accent, tema.border);
+        let (apagado, borda) = (tema.muted_foreground, tema.border);
         let agora = chrono::Utc::now();
         let chave = conversa.chave.clone();
+        let tela = cx.entity().downgrade();
         let mut selos: Vec<AnyElement> = Vec::new();
         if conversa.atendimento_humano {
             selos.push(
@@ -494,12 +518,7 @@ impl Chatbot {
         }
         if conversa.sem_resposta > 0 {
             selos.push(
-                div()
-                    .px(px(6.))
-                    .rounded(crate::tema::canto(6.))
-                    .bg(vermelho())
-                    .text_color(gpui_kit::white())
-                    .text_xs()
+                estilo::selo_perigo()
                     .child(format!("{} sem resposta", conversa.sem_resposta))
                     .into_any_element(),
             );
@@ -508,125 +527,116 @@ impl Chatbot {
             selos.push(selo("só automáticas", cx).into_any_element());
         }
 
-        h_flex()
-            .id(("chatbot-conversa", i))
+        // 📋 A linha é um `ListItem` do gpui-kit (selecionada, hover e clique do
+        // kit); dentro dele, o avatar e o texto lado a lado.
+        ListItem::new(("chatbot-conversa", i))
             .debug_selector(move || format!("chatbot-conversa-{i}"))
-            .relative()
+            .selected(selecionada)
             .w_full()
-            .items_start()
-            .gap(px(12.))
             .p(px(12.))
             .border_b_1()
             .border_color(borda)
-            .cursor_pointer()
-            .when(selecionada, |d| d.bg(acento))
-            .when(!selecionada, |d| {
-                d.hover(move |s| s.bg(acento.opacity(0.5)))
+            .text_sm()
+            .on_click(move |_, _, cx| {
+                let _ = tela.update(cx, |tela, cx| tela.abrir(chave.clone(), cx));
             })
-            .when(nova, |d| {
-                d.child(
-                    div()
-                        .absolute()
-                        .left_0()
-                        .top_0()
-                        .bottom_0()
-                        .w(px(4.))
-                        .bg(verde()),
-                )
-            })
-            .child(avatar(&conversa, 40., false))
             .child(
-                v_flex()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .gap(px(2.))
+                h_flex()
+                    .w_full()
+                    .items_start()
+                    .gap(px(12.))
+                    .when(nova, |d| {
+                        d.child(
+                            div()
+                                .absolute()
+                                .left_0()
+                                .top_0()
+                                .bottom_0()
+                                .w(px(4.))
+                                .bg(verde()),
+                        )
+                    })
+                    .child(avatar(&conversa, 40.))
                     .child(
-                        h_flex()
-                            .justify_between()
-                            .gap(px(8.))
+                        v_flex()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .gap(px(2.))
                             .child(
                                 h_flex()
-                                    .min_w(px(0.))
-                                    .gap(px(6.))
-                                    .items_center()
-                                    .when(nova, |d| {
-                                        d.child(
-                                            div()
-                                                .size(px(8.))
-                                                .flex_none()
-                                                .rounded_full()
-                                                .bg(verde()),
-                                        )
-                                    })
+                                    .justify_between()
+                                    .gap(px(8.))
                                     .child(
-                                        Icon::new(icone_do_canal(conversa.chave.canal))
-                                            .size(px(14.))
-                                            .text_color(apagado),
+                                        h_flex()
+                                            .min_w(px(0.))
+                                            .gap(px(6.))
+                                            .items_center()
+                                            .when(nova, |d| {
+                                                d.child(
+                                                    div()
+                                                        .size(px(8.))
+                                                        .flex_none()
+                                                        .rounded_full()
+                                                        .bg(verde()),
+                                                )
+                                            })
+                                            .child(
+                                                Icon::new(icone_do_canal(conversa.chave.canal))
+                                                    .size(px(14.))
+                                                    .text_color(apagado),
+                                            )
+                                            .child(
+                                                div()
+                                                    .truncate()
+                                                    .font_weight(FontWeight::MEDIUM)
+                                                    .child(conversa.nome.clone()),
+                                            ),
                                     )
                                     .child(
-                                        div()
-                                            .truncate()
-                                            .font_weight(FontWeight::MEDIUM)
-                                            .child(conversa.nome.clone()),
+                                        div().flex_none().text_xs().text_color(apagado).child(
+                                            conversa
+                                                .quando
+                                                .map(|q| modelo::carimbo(q, agora))
+                                                .unwrap_or_default(),
+                                        ),
                                     ),
                             )
                             .child(
-                                div().flex_none().text_xs().text_color(apagado).child(
-                                    conversa
-                                        .quando
-                                        .map(|q| modelo::carimbo(q, agora))
-                                        .unwrap_or_default(),
-                                ),
+                                div()
+                                    .truncate()
+                                    .text_color(apagado)
+                                    .child(conversa.previa.clone().unwrap_or_else(|| "—".into())),
+                            )
+                            .child(
+                                h_flex()
+                                    .flex_wrap()
+                                    .gap(px(6.))
+                                    .items_center()
+                                    .children(selos)
+                                    .when_some(conversa.mensagens, |d, n| {
+                                        d.child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(apagado)
+                                                .child(format!("{n} mensagens")),
+                                        )
+                                    }),
                             ),
-                    )
-                    .child(
-                        div()
-                            .truncate()
-                            .text_color(apagado)
-                            .child(conversa.previa.clone().unwrap_or_else(|| "—".into())),
-                    )
-                    .child(
-                        h_flex()
-                            .flex_wrap()
-                            .gap(px(6.))
-                            .items_center()
-                            .children(selos)
-                            .when_some(conversa.mensagens, |d, n| {
-                                d.child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(apagado)
-                                        .child(format!("{n} mensagens")),
-                                )
-                            }),
                     ),
             )
-            .on_click(cx.listener(move |tela, _, _, cx| tela.abrir(chave.clone(), cx)))
     }
 
     // ── A coluna da conversa ───────────────────────────────────────────────
 
     fn coluna_da_conversa(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let Some(conversa) = self.conversa_aberta() else {
-            let apagado = cx.theme().muted_foreground;
-            return v_flex()
-                .flex_1()
-                .h_full()
-                .items_center()
-                .justify_center()
-                .gap(px(12.))
-                .p(px(32.))
-                .text_center()
-                .child(Icon::new(Icone::MessageSquare).size(px(40.)).text_color(apagado))
-                .child(
-                    div()
-                        .font_weight(FontWeight::MEDIUM)
-                        .child("Nenhuma conversa aberta"),
-                )
-                .child(div().text_color(apagado).child(
-                    "Escolha um contato à esquerda — WhatsApp, Instagram, Messenger, Telegram e o site, no mesmo lugar.",
-                ))
-                .into_any_element();
+            return vazio(
+                Icone::MessageSquare,
+                Some("Nenhuma conversa aberta"),
+                "Escolha um contato à esquerda — WhatsApp, Instagram, Messenger, Telegram e o site, no mesmo lugar.",
+            )
+            .h_full()
+            .into_any_element();
         };
         v_flex()
             .flex_1()
@@ -663,7 +673,7 @@ impl Chatbot {
             .items_center()
             .border_b_1()
             .border_color(borda)
-            .child(avatar(conversa, 36., true))
+            .child(avatar(conversa, 36.))
             .child(
                 v_flex()
                     .flex_1()
@@ -796,12 +806,7 @@ impl Chatbot {
     ) -> impl IntoElement {
         let _ = window;
         let tema = cx.theme();
-        let (apagado, muted, borda, fundo) = (
-            tema.muted_foreground,
-            tema.muted,
-            tema.border,
-            tema.background,
-        );
+        let (apagado, muted, fundo) = (tema.muted_foreground, tema.muted, tema.background);
         let (mensagens, escondidas) = self.mensagens_da_aberta();
         let pendentes = self.pendentes_da_aberta();
         let assinatura = (conversa.chave.clone(), mensagens.len(), pendentes.len());
@@ -830,11 +835,8 @@ impl Chatbot {
         }
         if mensagens.is_empty() && pendentes.is_empty() && !self.carregando_historico {
             linhas.push(
-                div()
-                    .py(px(48.))
-                    .text_center()
-                    .text_color(apagado)
-                    .child("Nenhuma mensagem para mostrar.")
+                vazio(Icone::MessageSquare, None, "Nenhuma mensagem para mostrar.")
+                    .py(px(24.))
                     .into_any_element(),
             );
         }
@@ -843,25 +845,17 @@ impl Chatbot {
             if let Some(quando) = mensagem.quando {
                 if modelo::mudou_o_dia(quando, anterior.and_then(|a| a.quando)) {
                     linhas.push(
-                        h_flex()
-                            .justify_center()
-                            .mt(px(12.))
-                            .child(
-                                div()
-                                    .px(px(12.))
-                                    .rounded_full()
-                                    .border_1()
-                                    .border_color(borda)
-                                    .bg(fundo)
-                                    .text_xs()
-                                    .text_color(apagado)
-                                    .child(modelo::rotulo_do_dia(quando, agora)),
+                        Marker::new()
+                            .with_variant(MarkerVariant::Separator)
+                            .content(
+                                MarkerContent::new().text(modelo::rotulo_do_dia(quando, agora)),
                             )
+                            .mt(px(12.))
                             .into_any_element(),
                     );
                 }
             }
-            linhas.push(balao(mensagem, canal, cx).into_any_element());
+            linhas.push(balao(mensagem, canal).into_any_element());
             anterior = Some(mensagem);
         }
         for pendente in pendentes {
@@ -905,57 +899,55 @@ impl Chatbot {
 
     fn painel_de_respostas(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let tema = cx.theme();
-        let (fundo, borda, apagado, acento) = (
-            tema.background,
-            tema.border,
-            tema.muted_foreground,
-            tema.accent,
-        );
+        let (fundo, borda, apagado) = (tema.background, tema.border, tema.muted_foreground);
+        let tela = cx.entity().downgrade();
         let itens: Vec<AnyElement> = if self.respostas.is_empty() {
-            vec![div()
-                .text_color(apagado)
-                .child("Nenhuma resposta cadastrada.")
-                .into_any_element()]
+            vec![vazio(Icone::Zap, None, "Nenhuma resposta cadastrada.").into_any_element()]
         } else {
             self.respostas
                 .iter()
                 .enumerate()
                 .map(|(i, resposta)| {
                     let r = resposta.clone();
-                    v_flex()
-                        .id(("chatbot-resposta", i))
+                    let tela = tela.clone();
+                    ListItem::new(("chatbot-resposta", i))
                         .debug_selector(move || format!("chatbot-resposta-{i}"))
                         .w_full()
                         .p(px(8.))
                         .rounded(crate::tema::canto(6.))
                         .border_1()
                         .border_color(borda)
-                        .cursor_pointer()
-                        .hover(move |s| s.bg(acento))
+                        .text_sm()
                         .child(
-                            h_flex()
-                                .justify_between()
-                                .gap(px(8.))
+                            v_flex()
+                                .w_full()
                                 .child(
-                                    div()
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .child(resposta.titulo.clone()),
+                                    h_flex()
+                                        .justify_between()
+                                        .gap(px(8.))
+                                        .child(
+                                            div()
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .child(resposta.titulo.clone()),
+                                        )
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(apagado)
+                                                .child(format!("{} usos", resposta.usos)),
+                                        ),
                                 )
                                 .child(
                                     div()
+                                        .truncate()
                                         .text_xs()
                                         .text_color(apagado)
-                                        .child(format!("{} usos", resposta.usos)),
+                                        .child(resposta.mensagem.clone()),
                                 ),
                         )
-                        .child(
-                            div()
-                                .truncate()
-                                .text_xs()
-                                .text_color(apagado)
-                                .child(resposta.mensagem.clone()),
-                        )
-                        .on_click(cx.listener(move |tela, _, _, cx| tela.enviar_resposta(&r, cx)))
+                        .on_click(move |_, _, cx| {
+                            let _ = tela.update(cx, |tela, cx| tela.enviar_resposta(&r, cx));
+                        })
                         .into_any_element()
                 })
                 .collect()
@@ -992,85 +984,77 @@ impl Chatbot {
         let perigo = cx.theme().danger;
         let id = pendente.id;
         let falhou = pendente.erro.is_some();
-        h_flex().justify_end().child(
-            v_flex()
-                .max_w(px(480.))
-                .px(px(12.))
-                .py(px(6.))
-                .rounded(crate::tema::canto(10.))
-                .bg(cor_do_canal(canal).opacity(0.15))
-                .when(falhou, |d| d.border_1().border_color(perigo))
-                .child(div().child(pendente.texto.clone()))
-                .child(
+        let balao = Bubble::new()
+            .with_variant(if falhou {
+                BubbleVariant::Destructive
+            } else {
+                BubbleVariant::Tinted
+            })
+            .content(
+                BubbleContent::new().when(!falhou, |c| c.bg(cor_do_canal(canal).opacity(0.15))),
+            )
+            .child(pendente.texto.clone())
+            .when_some(pendente.erro.clone(), |d, erro| {
+                d.child(
                     h_flex()
-                        .justify_end()
-                        .gap(px(4.))
-                        .text_xs()
-                        .text_color(if falhou {
-                            perigo
-                        } else {
-                            cx.theme().muted_foreground
-                        })
-                        .child(if falhou { "não enviada" } else { "enviando" }),
-                )
-                .when_some(pendente.erro.clone(), |d, erro| {
-                    d.child(
-                        h_flex()
-                            .mt(px(6.))
-                            .pt(px(6.))
-                            .gap(px(8.))
-                            .justify_between()
-                            .border_t_1()
-                            .border_color(perigo.opacity(0.3))
-                            .child(
-                                div()
-                                    .truncate()
-                                    .text_xs()
-                                    .text_color(perigo)
-                                    .child(crate::erro_da_api::legivel(&erro)),
-                            )
-                            .child(
-                                h_flex()
-                                    .gap(px(4.))
-                                    .child(
-                                        marcado(
-                                            estilo::botao_contorno(
-                                                format!("chatbot-tentar-{}", id),
-                                                cx,
-                                            ),
+                        .mt(px(6.))
+                        .pt(px(6.))
+                        .gap(px(8.))
+                        .justify_between()
+                        .border_t_1()
+                        .border_color(perigo.opacity(0.3))
+                        .child(
+                            div()
+                                .truncate()
+                                .text_xs()
+                                .text_color(perigo)
+                                .child(crate::erro_da_api::legivel(&erro)),
+                        )
+                        .child(
+                            h_flex()
+                                .gap(px(4.))
+                                .child(
+                                    marcado(
+                                        estilo::botao_contorno_pequeno(
                                             format!("chatbot-tentar-{}", id),
-                                        )
-                                        .h(px(24.))
-                                        .text_xs()
-                                        .child(Icon::new(Icone::RotateCw).size(px(12.)))
-                                        .child("Tentar de novo")
-                                        .on_click(
-                                            cx.listener(move |tela, _, _, cx| {
-                                                tela.reenviar(id, cx)
-                                            }),
+                                            cx,
                                         ),
+                                        format!("chatbot-tentar-{}", id),
                                     )
-                                    .child(
-                                        marcado(
-                                            estilo::botao_fantasma(
-                                                format!("chatbot-descartar-{}", id),
-                                                cx,
-                                            ),
-                                            format!("chatbot-descartar-{}", id),
-                                        )
-                                        .h(px(24.))
-                                        .text_xs()
-                                        .child("Descartar")
-                                        .on_click(
-                                            cx.listener(move |tela, _, _, cx| {
-                                                tela.descartar(id, cx)
-                                            }),
-                                        ),
+                                    .child(Icon::new(Icone::RotateCw).size(px(12.)))
+                                    .child("Tentar de novo")
+                                    .on_click(
+                                        cx.listener(move |tela, _, _, cx| tela.reenviar(id, cx)),
                                     ),
-                            ),
-                    )
-                }),
-        )
+                                )
+                                .child(
+                                    marcado(
+                                        estilo::botao_fantasma_pequeno(
+                                            format!("chatbot-descartar-{}", id),
+                                            cx,
+                                        ),
+                                        format!("chatbot-descartar-{}", id),
+                                    )
+                                    .child("Descartar")
+                                    .on_click(
+                                        cx.listener(move |tela, _, _, cx| tela.descartar(id, cx)),
+                                    ),
+                                ),
+                        ),
+                )
+            });
+        Message::new()
+            .alignment(MessageAlignment::End)
+            .content(MessageContent::new().bubble(balao))
+            .footer(
+                MessageFooter::new()
+                    .text_color(if falhou {
+                        perigo
+                    } else {
+                        cx.theme().muted_foreground
+                    })
+                    .child(if falhou { "não enviada" } else { "enviando" }),
+            )
     }
 
     fn rodape(&self, conversa: &Conversa, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1252,8 +1236,7 @@ impl Chatbot {
     }
 
     fn dialogo_de_urgencias(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let tema = cx.theme();
-        let (apagado, borda) = (tema.muted_foreground, tema.border);
+        let borda = cx.theme().border;
         let linhas: Vec<AnyElement> = self
             .urgencias
             .iter()
@@ -1284,12 +1267,7 @@ impl Chatbot {
                         vermelho().opacity(0.5)
                     })
                     .when(self.urgencias.is_empty(), |d| {
-                        d.child(
-                            div()
-                                .p(px(16.))
-                                .text_color(apagado)
-                                .child("Nenhuma urgência no momento."),
-                        )
+                        d.child(vazio(Icone::Inbox, None, "Nenhuma urgência no momento."))
                     })
                     .children(linhas),
             )
@@ -1467,30 +1445,37 @@ impl Chatbot {
 
 /// Um balão do histórico: do cliente à esquerda, do estúdio à direita, com a
 /// hora e — no WhatsApp — o selo de automática.
-fn balao(mensagem: &Mensagem, canal: Canal, cx: &mut Context<Chatbot>) -> impl IntoElement {
-    let tema = cx.theme();
-    let (fundo, apagado, borda) = (tema.background, tema.muted_foreground, tema.border);
+fn balao(mensagem: &Mensagem, canal: Canal) -> impl IntoElement {
     let hora = mensagem.quando.map(modelo::hora).unwrap_or_default();
     let automacao = mensagem.rotulo_da_automacao();
-    h_flex().when(mensagem.saida, |d| d.justify_end()).child(
-        v_flex()
-            .max_w(px(480.))
-            .px(px(12.))
-            .py(px(6.))
-            .rounded(crate::tema::canto(10.))
-            .when(mensagem.saida, |d| d.bg(cor_do_canal(canal).opacity(0.15)))
-            .when(!mensagem.saida, |d| {
-                d.bg(fundo).border_1().border_color(borda)
-            })
-            .child(div().child(mensagem.texto.clone()))
-            .child(
-                h_flex()
-                    .justify_end()
-                    .gap(px(6.))
-                    .text_xs()
-                    .text_color(apagado)
-                    .when_some(automacao, |d, rotulo| d.child(div().italic().child(rotulo)))
-                    .child(hora),
+    let saida = mensagem.saida;
+    // 💬 A `Message` do gpui-kit: o `Bubble` com o texto e, no rodapé da
+    // mensagem, a hora (e o selo de automática). O do estúdio vai à direita,
+    // tingido com a cor do canal; o do cliente, à esquerda, de contorno.
+    Message::new()
+        .alignment(if saida {
+            MessageAlignment::End
+        } else {
+            MessageAlignment::Start
+        })
+        .content(
+            MessageContent::new().bubble(
+                Bubble::new()
+                    .with_variant(if saida {
+                        BubbleVariant::Tinted
+                    } else {
+                        BubbleVariant::Outline
+                    })
+                    .content(
+                        BubbleContent::new()
+                            .when(saida, |c| c.bg(cor_do_canal(canal).opacity(0.15))),
+                    )
+                    .child(mensagem.texto.clone()),
             ),
-    )
+        )
+        .footer(
+            MessageFooter::new()
+                .when_some(automacao, |f, rotulo| f.child(div().italic().child(rotulo)))
+                .child(hora),
+        )
 }
