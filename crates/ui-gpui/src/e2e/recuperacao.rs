@@ -70,6 +70,11 @@ fn o_menu_lateral_leva_do_cartao_formatado_a_sessao_do_cliente(cx: &mut TestAppC
         )]
     );
 
+    assert!(
+        desenhado(&e, cx, "recuperacao-andamento-bloco"),
+        "a barra de andamento fica na tela"
+    );
+
     clicar(&e, cx, "recuperacao-importar");
     e.esperar(cx);
     e.app(cx, |app, _w, cx| {

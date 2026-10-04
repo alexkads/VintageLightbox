@@ -9,9 +9,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::estilo;
+use crate::recursos::Icone;
+use gpui_kit::component::group_box::{GroupBox, GroupBoxVariants as _};
 use gpui_kit::component::progress::Progress;
-use gpui_kit::component::{ActiveTheme, Disableable, Selectable};
-use gpui_kit::{div, prelude::*, px, Context, EventEmitter, SharedString, Task, Window};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Disableable, Icon};
+use gpui_kit::{
+    div, prelude::*, px, AnyElement, App, Context, Div, EventEmitter, FontWeight, SharedString,
+    Task, Window,
+};
 
 use super::estado::{aplicar, frase, Estado, Fase, Recado};
 use super::porta::Recuperador;
@@ -144,81 +149,198 @@ impl Recuperacao {
 
     fn lista_de_cartoes(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let travado = self.estado.recuperando();
-        let apagado = cx.theme().muted_foreground;
-        let mut lista = div().flex().flex_col().gap(px(4.));
+        let tema = cx.theme();
+        let (apagado, borda, primaria, destaque) = (
+            tema.muted_foreground,
+            tema.border,
+            tema.primary,
+            tema.accent,
+        );
+        let mut lista = v_flex().gap(px(8.));
         if !self.estado.listou {
-            lista = lista.child(
-                div()
-                    .text_xs()
-                    .text_color(apagado)
-                    .child("Procurando cartões…"),
-            );
+            lista = lista.child(vazio("Procurando cartões…", apagado));
         } else if self.estado.cartoes.is_empty() {
-            lista = lista.child(div().text_xs().text_color(apagado).child(
+            lista = lista.child(vazio(
                 "Nenhum cartão plugado. Coloque o cartão no leitor e clique em Procurar de novo.",
+                apagado,
             ));
         }
         for (i, cartao) in self.estado.cartoes.iter().enumerate() {
             let escolhido = self.estado.escolhido == Some(i);
-            let rotulo = format!(
-                "{} · {} · {}",
-                cartao.nome,
+            let id = SharedString::from(format!("cartao-{i}"));
+            let detalhe = format!(
+                "{} · {}",
                 tamanho_legivel(cartao.tamanho),
                 cartao.dispositivo
             );
-            let id = SharedString::from(format!("cartao-{i}"));
-            let botao = if escolhido {
-                estilo::botao_primario(id.clone(), cx)
-            } else {
-                estilo::botao_contorno(id.clone(), cx)
-            };
             lista = lista.child(
-                botao
+                h_flex()
+                    .id(id.clone())
                     .debug_selector(move || id.to_string())
-                    .label(SharedString::from(rotulo))
-                    .selected(escolhido)
-                    .disabled(travado)
-                    .on_click(cx.listener(move |tela, _ev, _window, cx| {
-                        tela.estado.escolher_cartao(i);
-                        cx.notify();
-                    })),
+                    .gap(px(12.))
+                    .px(px(12.))
+                    .py(px(10.))
+                    .rounded(crate::tema::canto(8.))
+                    .border_1()
+                    .border_color(if escolhido { primaria } else { borda })
+                    .when(escolhido, |l| l.bg(primaria.opacity(0.08)))
+                    .when(!travado, |l| {
+                        l.cursor_pointer()
+                            .hover(move |h| h.bg(destaque))
+                            .on_click(cx.listener(move |tela, _ev, _window, cx| {
+                                tela.estado.escolher_cartao(i);
+                                cx.notify();
+                            }))
+                    })
+                    .when(travado && !escolhido, |l| l.opacity(0.5))
+                    .child(
+                        Icon::new(Icone::HardDrive)
+                            .size(px(20.))
+                            .text_color(if escolhido { primaria } else { apagado }),
+                    )
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .truncate()
+                                    .child(SharedString::from(cartao.nome.clone())),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(apagado)
+                                    .truncate()
+                                    .child(SharedString::from(detalhe)),
+                            ),
+                    )
+                    .when(escolhido, |l| {
+                        l.child(Icon::new(Icone::Check).size(px(16.)).text_color(primaria))
+                    }),
             );
         }
-        lista.child(
-            div().child(
-                estilo::botao_fantasma("procurar-cartoes", cx)
-                    .debug_selector(|| "procurar-cartoes".into())
-                    .label("Procurar de novo")
-                    .disabled(travado)
-                    .on_click(cx.listener(|tela, _ev, _window, cx| tela.listar(cx))),
-            ),
-        )
+        lista
+    }
+
+    /// Um dos três passos: número (ou ✓ quando feito), título, o que fazer e,
+    /// à direita, a ação do passo — num `GroupBox` do kit.
+    #[allow(clippy::too_many_arguments)]
+    fn passo(
+        &self,
+        numero: usize,
+        feito: bool,
+        titulo: &'static str,
+        descricao: &'static str,
+        acao: Option<AnyElement>,
+        corpo: impl IntoElement,
+        cx: &App,
+    ) -> impl IntoElement {
+        let apagado = cx.theme().muted_foreground;
+        let cabecalho = h_flex()
+            .gap(px(12.))
+            .child(estilo::selo_do_passo(numero, feito))
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(titulo),
+                    )
+                    .child(div().text_xs().text_color(apagado).child(descricao)),
+            )
+            .children(acao);
+        GroupBox::new()
+            .outline()
+            .child(v_flex().gap(px(12.)).child(cabecalho).child(corpo))
     }
 
     fn andamento(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-        let texto = frase(&self.estado.fase);
+        let mut texto = frase(&self.estado.fase);
         if texto.is_empty() {
             return None;
         }
-        let valor = match self.estado.fase {
-            Fase::Recuperando { lidos, total, .. } if total > 0 => {
-                (lidos as f32 / total as f32 * 100.0).min(100.0)
-            }
-            Fase::Terminou { .. } => 100.0,
-            _ => 0.0,
+        // A porcentagem e as fotos já têm lugar próprio no bloco.
+        if matches!(self.estado.fase, Fase::Recuperando { lidos, parando: false, .. } if lidos > 0)
+        {
+            texto = "Lendo o cartão…".into();
+        }
+        let (lidos, total, achadas) = match self.estado.fase {
+            Fase::Recuperando {
+                lidos,
+                total,
+                achadas,
+                ..
+            } => (lidos, total, achadas),
+            Fase::Terminou { achadas, .. } => (1, 1, achadas),
+            Fase::Escolhendo => (0, 0, 0),
         };
+        let valor = if total > 0 {
+            (lidos as f64 / total as f64 * 100.0).min(100.0) as f32
+        } else {
+            0.0
+        };
+        let tema = cx.theme();
+        let (apagado, primaria) = (tema.muted_foreground, tema.primary);
+        let lidos_texto = match self.estado.fase {
+            Fase::Terminou { .. } => "Cartão lido por inteiro".to_string(),
+            _ if total > 0 => format!(
+                "{} de {} lidos",
+                tamanho_legivel(lidos),
+                tamanho_legivel(total)
+            ),
+            _ => String::new(),
+        };
+        let fotos_texto = format!(
+            "{achadas} {} {}",
+            if achadas == 1 { "foto" } else { "fotos" },
+            if achadas == 1 { "achada" } else { "achadas" }
+        );
         Some(
             div()
-                .flex()
-                .flex_col()
-                .gap(px(6.))
+                .debug_selector(|| "recuperacao-andamento-bloco".into())
                 .child(
-                    Progress::new("recuperacao-andamento")
-                        .h(px(6.))
-                        .value(valor)
-                        .color(cx.theme().primary),
-                )
-                .child(div().text_sm().child(SharedString::from(texto))),
+                    GroupBox::new().outline().child(
+                        v_flex()
+                            .gap(px(8.))
+                            .child(
+                                h_flex()
+                                    .gap(px(8.))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w(px(0.))
+                                            .text_sm()
+                                            .child(SharedString::from(texto)),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_none()
+                                            .text_sm()
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .child(SharedString::from(format!("{valor:.0}%"))),
+                                    ),
+                            )
+                            .child(
+                                Progress::new("recuperacao-andamento")
+                                    .value(valor)
+                                    .color(primaria),
+                            )
+                            .child(
+                                h_flex()
+                                    .gap(px(8.))
+                                    .text_xs()
+                                    .text_color(apagado)
+                                    .child(div().flex_1().child(SharedString::from(lidos_texto)))
+                                    .child(SharedString::from(fotos_texto)),
+                            ),
+                    ),
+                ),
         )
     }
 
@@ -282,74 +404,118 @@ impl Recuperacao {
 
 impl Render for Recuperacao {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let apagado = cx.theme().muted_foreground;
+        let tema = cx.theme();
+        let apagado = tema.muted_foreground;
+        let travado = self.estado.recuperando();
+        let tem_destino = self.estado.destino.is_some();
         let destino: SharedString = self
             .estado
             .destino
             .clone()
             .unwrap_or_else(|| "Nenhuma pasta escolhida".into())
             .into();
-        let travado = self.estado.recuperando();
 
-        div()
+        let procurar = estilo::botao_contorno_pequeno("procurar-cartoes", cx)
+            .debug_selector(|| "procurar-cartoes".into())
+            .child(Icon::new(Icone::RefreshCw).size(px(14.)))
+            .child("Procurar de novo")
+            .disabled(travado)
+            .on_click(cx.listener(|tela, _ev, _window, cx| tela.listar(cx)))
+            .into_any_element();
+
+        let pasta = GroupBox::new().outline().child(
+            h_flex()
+                .gap(px(8.))
+                .child(
+                    Icon::new(Icone::FolderInput)
+                        .size(px(18.))
+                        .text_color(if tem_destino { tema.primary } else { apagado }),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .text_sm()
+                        .truncate()
+                        .when(!tem_destino, |d| d.text_color(apagado))
+                        .child(destino),
+                ),
+        );
+        let escolher = estilo::botao_contorno_pequeno("recuperacao-destino", cx)
+            .debug_selector(|| "recuperacao-destino".into())
+            .label("Escolher pasta…")
+            .disabled(travado)
+            .on_click(cx.listener(|tela, _ev, _window, cx| {
+                tela.escolher_destino(cx);
+            }))
+            .into_any_element();
+
+        let cartoes = self.lista_de_cartoes(cx);
+        let andamento = self.andamento(cx);
+        let botoes = self.botoes(cx);
+        let aviso = self.estado.aviso.clone();
+        let pronto = matches!(self.estado.fase, Fase::Terminou { .. });
+        let passo_tres = v_flex()
+            .gap(px(12.))
+            .when(matches!(self.estado.fase, Fase::Escolhendo), |c| {
+                c.child(div().text_xs().text_color(apagado).child(
+                    "O sistema vai pedir a senha de administrador: ler o cartão setor por \
+                     setor exige isso. Fotos que ficaram em pedaços no cartão não voltam; \
+                     as que voltam, voltam inteiras.",
+                ))
+            })
+            .when_some(aviso, |c, aviso| {
+                c.child(estilo::aviso_de_atencao("recuperacao-aviso", None, aviso))
+            })
+            .children(andamento)
+            .child(botoes);
+
+        v_flex()
             .id("recuperacao")
-            .flex()
-            .flex_col()
             .flex_1()
             .min_h(px(0.))
             .overflow_y_scroll()
             .gap(px(12.))
             .py(px(8.))
-            .child(div().text_xs().text_color(cx.theme().warning).child(
-                "🚨 Não tire fotos nem grave nada neste cartão até terminar: cada \
-                         arquivo novo pode apagar de vez uma foto que ainda dá para salvar.",
+            .child(estilo::aviso_de_atencao(
+                "recuperacao-nao-use",
+                Some("Não use o cartão até terminar"),
+                "Não tire fotos nem grave nada nele: cada arquivo novo pode apagar de vez \
+                 uma foto que ainda dá para salvar.",
             ))
-            .child(div().text_sm().child("1. O cartão"))
-            .child(self.lista_de_cartoes(cx))
-            .child(
-                div()
-                    .text_sm()
-                    .child("2. Onde guardar as fotos recuperadas"),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.))
-                    .child(
-                        estilo::botao_contorno("recuperacao-destino", cx)
-                            .debug_selector(|| "recuperacao-destino".into())
-                            .label("Escolher pasta…")
-                            .disabled(travado)
-                            .on_click(cx.listener(|tela, _ev, _window, cx| {
-                                tela.escolher_destino(cx);
-                            })),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .text_xs()
-                            .truncate()
-                            .text_color(apagado)
-                            .child(destino),
-                    ),
-            )
-            .child(div().text_xs().text_color(apagado).child(
-                "3. Recuperar. O sistema vai pedir a senha de administrador: ler o \
-                         cartão setor por setor exige isso. Fotos que ficaram em pedaços no \
-                         cartão não voltam; as que voltam, voltam inteiras.",
+            .child(self.passo(
+                1,
+                self.estado.escolhido.is_some(),
+                "O cartão",
+                "Qual cartão ou disco você quer recuperar.",
+                Some(procurar),
+                cartoes,
+                cx,
             ))
-            .when_some(self.estado.aviso.clone(), |tela, aviso| {
-                tela.child(
-                    div()
-                        .text_xs()
-                        .text_color(cx.theme().warning)
-                        .child(SharedString::from(aviso)),
-                )
-            })
-            .children(self.andamento(cx))
-            .child(self.botoes(cx))
+            .child(self.passo(
+                2,
+                tem_destino,
+                "Onde guardar",
+                "A pasta que vai receber as fotos recuperadas.",
+                Some(escolher),
+                pasta,
+                cx,
+            ))
+            .child(self.passo(
+                3,
+                pronto,
+                "Recuperar",
+                "Varre o cartão atrás das fotos que ainda estão lá.",
+                None,
+                passo_tres,
+                cx,
+            ))
     }
+}
+
+/// Texto de lista vazia ou ainda carregando.
+fn vazio(texto: &'static str, cor: gpui_kit::Hsla) -> Div {
+    div().py(px(4.)).text_xs().text_color(cor).child(texto)
 }
 
 fn tamanho_legivel(bytes: u64) -> String {
