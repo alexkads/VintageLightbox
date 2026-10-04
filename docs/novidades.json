@@ -1,9 +1,10 @@
 {
-  "versao": "0.1.92",
-  "titulo": "O aplicativo não abre mais a janela \"Where is use_default?\" no Mac.",
+  "versao": "0.1.93",
+  "titulo": "A negociação agora é só para as fotos levadas (sinalizadas com P).",
   "importante": false,
   "novidades": [
-    "No Mac, o primeiro aviso do sistema (mensagem nova, por exemplo) abria a janela \"Choose Application — Where is use_default?\", uma para cada aviso que chegasse enquanto ela estivesse aberta. Agora o aviso sai direto, sem pergunta."
+    "O botão Negociação… só aparece nas fotos levadas no balcão. Numa foto à venda, o painel mostra \"Negociação: sinalize com P antes\" no lugar do botão.",
+    "Ao negociar várias fotos marcadas, só as levadas entram; as que estão à venda ficam de fora e um aviso diz quantas. O site faz o mesmo e recusa negociação em foto à venda."
   ],
-  "por_que_atualizar": "Para os avisos do sistema aparecerem sem abrir aquela janela de escolher aplicativo."
+  "por_que_atualizar": "Para não registrar cortesia ou desconto numa foto que o cliente não levou."
 }

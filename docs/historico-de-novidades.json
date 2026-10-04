@@ -1,5 +1,16 @@
 [
   {
+    "versao": "0.1.93",
+    "data": "2026-10-04",
+    "titulo": "A negociação agora é só para as fotos levadas (sinalizadas com P).",
+    "importante": false,
+    "novidades": [
+      "O botão Negociação… só aparece nas fotos levadas no balcão. Numa foto à venda, o painel mostra \"Negociação: sinalize com P antes\" no lugar do botão.",
+      "Ao negociar várias fotos marcadas, só as levadas entram; as que estão à venda ficam de fora e um aviso diz quantas. O site faz o mesmo e recusa negociação em foto à venda."
+    ],
+    "por_que_atualizar": "Para não registrar cortesia ou desconto numa foto que o cliente não levou."
+  },
+  {
     "versao": "0.1.92",
     "data": "2026-10-04",
     "titulo": "O aplicativo não abre mais a janela \"Where is use_default?\" no Mac.",
