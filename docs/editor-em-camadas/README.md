@@ -37,6 +37,7 @@ Sem projeto editável, o fluxo é o de sempre: a Revelação parte do bruto.
 | [03-GRAVACAO-E-CATALOGO.md](03-GRAVACAO-E-CATALOGO.md) | O formato do projeto, os tiles, a gravação atômica, a recuperação e a tabela do catálogo |
 | [04-PLANO-ETAPA-1.md](04-PLANO-ETAPA-1.md) | O que a etapa 1 entrega, arquivo por arquivo, os testes e as medidas |
 | [05-ETAPA-2.md](05-ETAPA-2.md) | Várias camadas, os 16 modos de mesclagem, o formato 2 do projeto, zoom, mão e lupa |
+| [08-ETAPA-5.md](08-ETAPA-5.md) | Transformação livre (⌘T), mover a seleção, camada via cópia e via recorte |
 | [07-ETAPA-4.md](07-ETAPA-4.md) | Carimbo (S), conta-gotas (I), mover (V) e o seletor de cor |
 | [06-ETAPA-3.md](06-ETAPA-3.md) | Seleção (retângulo, elipse, laço), apagar e preencher, mesclar para baixo, miniaturas, formato 3 e a emenda dos ladrilhos |
 
@@ -64,9 +65,14 @@ Seleção retangular, elíptica e laço (⇧ soma, ⌥ tira, ⌘A ⌘D ⇧⌘I),
 Carimbo alinhado (S, ⌥ + clique na origem) copiando da camada escolhida para baixo, conta-gotas (I), mover a
 camada (V) e o seletor de cor do kit. Detalhes em [07-ETAPA-4.md](07-ETAPA-4.md).
 
+## Etapa 5 (0.1.97) — entregue
+
+Transformação livre (⌘T: mover, escalar, girar; Enter e Esc), o Mover com seleção e camada via cópia e via
+recorte (⌘J, ⇧⌘J). Detalhes em [08-ETAPA-5.md](08-ETAPA-5.md).
+
 ## Depois
 
-Mover só o que está selecionado, mudança de geometria (girar/redimensionar) e levar o projeto ao site
+Mudança de geometria (girar/redimensionar) e levar o projeto ao site
 (divergência D23, ver o contrato).
 
 ## Onde mora o código
