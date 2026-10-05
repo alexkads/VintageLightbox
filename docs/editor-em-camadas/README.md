@@ -36,6 +36,7 @@ Sem projeto editável, o fluxo é o de sempre: a Revelação parte do bruto.
 | [02-CONTRATO.md](02-CONTRATO.md) | O contrato entre o editor e a Revelação: artefatos, cláusulas C28–C34, cor, bits, dimensões, a interface em código |
 | [03-GRAVACAO-E-CATALOGO.md](03-GRAVACAO-E-CATALOGO.md) | O formato do projeto, os tiles, a gravação atômica, a recuperação e a tabela do catálogo |
 | [04-PLANO-ETAPA-1.md](04-PLANO-ETAPA-1.md) | O que a etapa 1 entrega, arquivo por arquivo, os testes e as medidas |
+| [05-ETAPA-2.md](05-ETAPA-2.md) | Várias camadas, os 16 modos de mesclagem, o formato 2 do projeto, zoom, mão e lupa |
 
 ## Etapa 1 — o que entra
 
@@ -46,10 +47,15 @@ Sem projeto editável, o fluxo é o de sempre: a Revelação parte do bruto.
 - Desfazer / refazer, indicador de alterações pendentes, salvar, fechar, reabrir com tudo intacto.
 - Ao salvar, a Revelação passa a usar a imagem editada, mantendo sliders, corte e máscaras.
 
+## Etapa 2 (0.1.94) — entregue
+
+Várias camadas (nova, duplicar, excluir, mover, renomear), os 16 modos de mesclagem do Photoshop, zoom e
+mão com os gestos da Revelação, e a lupa em resolução cheia. Detalhes em [05-ETAPA-2.md](05-ETAPA-2.md).
+
 ## Depois
 
-Várias camadas, modos de mesclagem, seleções, zoom e pan no editor, ferramentas avançadas, mudança de
-geometria (girar/redimensionar) e levar o projeto ao site (divergência D23, ver o contrato).
+Seleções, mesclar camadas, ferramentas avançadas, mudança de geometria (girar/redimensionar) e levar o
+projeto ao site (divergência D23, ver o contrato).
 
 ## Onde mora o código
 
@@ -95,5 +101,6 @@ cargo run --release -p ui-gpui --bin editor -- foto.NEF --catalogo /tmp/edicoes
   histórico.
 - Roteiro automático (`VLB_ROTEIRO` + `VLB_FOTOS`), começando quando a foto abre: `esperar ms`,
   `mouse apertar|arrastar|soltar fx fy` (fração da foto, evento real do AppKit), `tecla <keyCode> [cmd…]`,
-  `foto <nome>`, `estado`, `fim`. No app inteiro os mesmos passos valem com o prefixo `editor`, depois de
+  `foto <nome>`, `estado`, `fim`, e os da etapa 2: `camada …`, `zoom …`, `espaco segurar|soltar`
+  (lista em [05-ETAPA-2.md](05-ETAPA-2.md)). No app inteiro os mesmos passos valem com o prefixo `editor`, depois de
   `tira editar N`.
