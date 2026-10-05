@@ -115,6 +115,8 @@ pub struct Medidas {
     pub ultimo_salvamento: Option<Duration>,
     /// A última lupa: do pedido à chegada.
     pub ultima_lupa: Option<Duration>,
+    /// A última borda da seleção montada (o letreiro).
+    pub ultima_borda: Option<Duration>,
 }
 
 /// Um segmento da borda da seleção, em pixels da foto: `(x0, y0, x1, y1)`.
@@ -1003,7 +1005,7 @@ impl EditorDeFoto {
             return;
         };
         let lupa = s.lupa().map(|l| (l.regiao(), l.fator()));
-        let chave = (s.versao(), lupa);
+        let chave = (s.versao_da_selecao(), lupa);
         if self.bordas.as_ref().is_some_and(|(c, _)| *c == chave) {
             return;
         }
@@ -1011,7 +1013,10 @@ impl EditorDeFoto {
             Retangulo::inteiro(selecao.largura(), selecao.altura()),
             s.vista().fator(),
         ));
-        self.bordas = Some((chave, Arc::new(selecao.bordas(&regiao, passo))));
+        let inicio = Instant::now();
+        let bordas = Arc::new(selecao.bordas(&regiao, passo));
+        self.medidas.ultima_borda = Some(inicio.elapsed());
+        self.bordas = Some((chave, bordas));
     }
 
     /// As miniaturas do painel, refeitas quando a sessão mudou e não há traço
