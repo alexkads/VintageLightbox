@@ -62,6 +62,8 @@ pub enum Icone {
     // As camadas do editor sobem e descem na pilha.
     ArrowUp,
     ArrowDown,
+    // A ferramenta Mover do editor (V).
+    Move,
     Building2,
     Calculator,
     Camera,
@@ -196,6 +198,7 @@ impl Icone {
         Icone::ArrowRight,
         Icone::ArrowUp,
         Icone::ArrowDown,
+        Icone::Move,
         Icone::Building2,
         Icone::Calculator,
         Icone::Camera,
@@ -318,6 +321,7 @@ impl Icone {
             Icone::ArrowRight => "arrow-right",
             Icone::ArrowUp => "arrow-up",
             Icone::ArrowDown => "arrow-down",
+            Icone::Move => "move",
             Icone::Building2 => "building-2",
             Icone::Calculator => "calculator",
             Icone::Camera => "camera",

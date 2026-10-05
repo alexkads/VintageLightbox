@@ -1054,4 +1054,117 @@ mod testes {
             "na última não há o que mesclar"
         );
     }
+
+    fn ponto_do_palco(
+        ve: &mut VisualTestContext,
+        f: (f32, f32),
+    ) -> gpui_kit::Point<gpui_kit::Pixels> {
+        let palco = ve.debug_bounds("palco-do-editor").unwrap();
+        palco.origin + gpui_kit::point(palco.size.width * f.0, palco.size.height * f.1)
+    }
+
+    /// 🖃 O carimbo: S, ⌥ + clique na origem, e o traço copia a foto deslocada
+    /// numa camada vazia.
+    #[gpui_kit::test]
+    fn o_carimbo_copia_da_origem_escolhida_com_alt(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        ve.simulate_keystrokes("cmd-shift-n s");
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.ferramenta()),
+            Some(editor_core::Ferramenta::Carimbo)
+        );
+        // Sem origem: avisa e não pinta.
+        editor.update(&mut ve, |ed, cx| {
+            ed.tracar_para_teste((30., 30.), (34., 30.), cx)
+        });
+        assert!(
+            editor.read_with(&ve, |ed, _| ed.sessao().unwrap().documento().camadas[1]
+                .pixels
+                .vazia())
+        );
+
+        let origem = ponto_do_palco(&mut ve, (0.25, 0.5));
+        let alt = gpui_kit::Modifiers {
+            alt: true,
+            ..Default::default()
+        };
+        ve.simulate_mouse_down(origem, gpui_kit::MouseButton::Left, alt);
+        ve.simulate_mouse_up(origem, gpui_kit::MouseButton::Left, alt);
+        ve.run_until_parked();
+        let o = editor
+            .read_with(&ve, |ed, _| ed.sessao().unwrap().origem())
+            .expect("a origem");
+        assert!(
+            (o.0 - 16.0).abs() < 1.0,
+            "um quarto da largura de 64: {o:?}"
+        );
+
+        editor.update(&mut ve, |ed, cx| {
+            ed.tracar_para_teste((48., 24.), (48., 24.), cx)
+        });
+        let (camada, base) = editor.read_with(&ve, |ed, _| {
+            let s = ed.sessao().unwrap();
+            (
+                s.documento().camadas[1].pixels.pixel(48, 24),
+                s.base().get_pixel(o.0 as u32, o.1 as u32).0,
+            )
+        });
+        assert_eq!([camada[0], camada[1], camada[2]], base, "copiou a origem");
+        assert!(
+            editor.read_with(&ve, |ed, _| ed.sessao().unwrap().documento().camadas[0]
+                .pixels
+                .vazia())
+        );
+    }
+
+    /// 💧 I e um clique: a cor da foto vai para o pincel.
+    #[gpui_kit::test]
+    fn o_conta_gotas_pega_a_cor_da_foto(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        ve.simulate_keystrokes("i");
+        ve.run_until_parked();
+        let p = ponto_do_palco(&mut ve, (0.5, 0.5));
+        ve.simulate_click(p, gpui_kit::Modifiers::none());
+        ve.run_until_parked();
+        let (cor, esperada) = editor.read_with(&ve, |ed, _| {
+            let s = ed.sessao().unwrap();
+            (s.pincel.cor, s.base().get_pixel(32, 24).0)
+        });
+        for i in 0..3 {
+            assert!(
+                (cor[i] as i32 - esperada[i] as i32).abs() <= 4,
+                "{cor:?} × {esperada:?}"
+            );
+        }
+    }
+
+    /// ✥ V e arrastar: a camada anda, e um ⌘Z a devolve.
+    #[gpui_kit::test]
+    fn o_mover_arrasta_a_camada_e_se_desfaz(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        editor.update(&mut ve, |ed, cx| {
+            ed.tracar_para_teste((10., 10.), (10., 10.), cx)
+        });
+        ve.simulate_keystrokes("v");
+        ve.run_until_parked();
+        arrastar_no_palco(&mut ve, (0.2, 0.2), (0.45, 0.2));
+        let (antes, depois) = editor.read_with(&ve, |ed, _| {
+            let c = &ed.sessao().unwrap().documento().camadas[0].pixels;
+            (c.pixel(10, 10)[3], c.pixel(26, 10)[3])
+        });
+        assert_eq!(antes, 0, "saiu de lá");
+        assert!(depois > 0, "andou 16 px (um quarto de 64)");
+        ve.simulate_keystrokes("cmd-z");
+        ve.run_until_parked();
+        assert!(
+            editor.read_with(&ve, |ed, _| ed.sessao().unwrap().documento().camadas[0]
+                .pixels
+                .pixel(10, 10)[3])
+                > 0
+        );
+    }
 }

@@ -41,6 +41,7 @@ use editor_core::{
     VersaoEditada,
 };
 use gpui_kit::component::button::ButtonVariants as _;
+use gpui_kit::component::color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::slider::{SliderEvent, SliderState};
@@ -59,7 +60,8 @@ use super::{
     DescerCamada, DesfazerNoEditor, Desmarcar, DuplicarCamada, Encaixar, FecharEditor,
     InverterSelecao, MesclarParaBaixo, NovaCamada, PincelMaior, PincelMenor, PreencherSelecao,
     RefazerNoEditor, SalvarNoEditor, SegurarAMao, SelecaoEliptica, SelecaoLaco, SelecaoRetangular,
-    SelecionarTudo, SubirCamada, UmPorUm, UsarBorracha, UsarPincel, CONTEXTO,
+    SelecionarTudo, SubirCamada, UmPorUm, UsarBorracha, UsarCarimbo, UsarContaGotas, UsarMover,
+    UsarPincel, CONTEXTO,
 };
 use crate::campo::TrocarValor as _;
 use crate::recursos::Icone;
@@ -124,6 +126,27 @@ type Segmento = (u32, u32, u32, u32);
 
 /// De que versão da sessão e de que lupa (região, fator) a borda é.
 type ChaveDasBordas = (u64, Option<(Retangulo, u32)>);
+
+/// As ferramentas que não pintam nem selecionam.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Auxiliar {
+    /// I — a cor da foto vira a cor do pincel.
+    ContaGotas,
+    /// V — arrasta o conteúdo da camada escolhida.
+    Mover,
+}
+
+/// `[r, g, b]` → a cor do kit.
+fn hsla_de(cor: [u8; 3]) -> gpui_kit::Hsla {
+    gpui_kit::rgb((cor[0] as u32) << 16 | (cor[1] as u32) << 8 | cor[2] as u32).into()
+}
+
+/// A cor do kit → `[r, g, b]`.
+fn rgb_de(cor: gpui_kit::Hsla) -> [u8; 3] {
+    let c = cor.to_rgb();
+    let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    [q(c.r), q(c.g), q(c.b)]
+}
 
 /// As ferramentas de seleção (M, ⇧M, L).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -245,6 +268,14 @@ pub struct EditorDeFoto {
     /// A miniatura de cada camada e a versão da sessão em que foi feita.
     miniaturas: Vec<Arc<RenderImage>>,
     versao_das_miniaturas: Option<u64>,
+    auxiliar: Option<Auxiliar>,
+    /// O conta-gotas com o botão apertado: arrastar continua pegando.
+    pegando_cor: bool,
+    /// O Mover: onde o arrasto começou, em pixels da foto.
+    arrasto_do_mover: Option<(f32, f32)>,
+    seletor_de_cor: Entity<ColorPickerState>,
+    /// A cor que o seletor mostra — para só mexer nele quando mudar.
+    cor_mostrada: Option<[u8; 3]>,
 }
 
 fn slider(
@@ -294,6 +325,8 @@ impl EditorDeFoto {
             .map(|m| Opcao::nova(m.chave(), m.nome()))
             .collect();
         let modo = cx.new(|cx| SelectState::new(opcoes, None, window, cx));
+        let seletor_de_cor =
+            cx.new(|cx| ColorPickerState::new(window, cx).default_value(hsla_de(pincel.cor)));
 
         let mut assinaturas = Vec::new();
         for (estado, qual) in [(&tamanho, 0u8), (&dureza, 1), (&opacidade, 2)] {
@@ -332,6 +365,21 @@ impl EditorDeFoto {
                     ed.mudar_modo(modo, cx);
                 }
                 window.focus(&ed.foco, cx);
+            },
+        ));
+
+        assinaturas.push(cx.subscribe_in(
+            &seletor_de_cor,
+            window,
+            |ed: &mut Self, _e, evento: &ColorPickerEvent, _w, cx| {
+                if let ColorPickerEvent::Change(Some(cor)) = evento {
+                    let cor = rgb_de(*cor);
+                    ed.cor_mostrada = Some(cor);
+                    if let Some(s) = ed.sessao_mut() {
+                        s.pincel.cor = cor;
+                    }
+                    cx.notify();
+                }
             },
         ));
 
@@ -384,6 +432,11 @@ impl EditorDeFoto {
             bordas: None,
             miniaturas: Vec::new(),
             versao_das_miniaturas: None,
+            auxiliar: None,
+            pegando_cor: false,
+            arrasto_do_mover: None,
+            seletor_de_cor,
+            cor_mostrada: None,
         };
         editor.carregar(carregar_base, cx);
         editor
@@ -750,6 +803,91 @@ impl EditorDeFoto {
         cx.notify();
     }
 
+    /// O botão esquerdo desceu no palco, com os modificadores: decide qual
+    /// ferramenta recebe o gesto.
+    ///
+    /// - conta-gotas (I), ou ⌥ com o pincel: pega a cor;
+    /// - Mover (V): começa a arrastar a camada;
+    /// - ⌥ com o carimbo: escolhe a origem;
+    /// - seleção: começa a forma;
+    /// - o resto: o traço.
+    pub fn apertar_com(
+        &mut self,
+        ponto: Point<Pixels>,
+        modificadores: gpui_kit::Modifiers,
+        cx: &mut Context<Self>,
+    ) {
+        let ferramenta = self.ferramenta();
+        if self.selecionando.is_some() {
+            self.comecar_selecao(ponto, modificadores, cx);
+            return;
+        }
+        match self.auxiliar {
+            Some(Auxiliar::ContaGotas) => {
+                self.pegando_cor = true;
+                self.pegar_cor(ponto, cx);
+                return;
+            }
+            Some(Auxiliar::Mover) => {
+                self.comecar_a_mover(ponto, cx);
+                return;
+            }
+            None => {}
+        }
+        if modificadores.alt {
+            match ferramenta {
+                Some(Ferramenta::Carimbo) => {
+                    if let (Some((x, y)), Some(s)) = (self.na_foto(ponto), self.sessao_mut()) {
+                        s.definir_origem(x, y);
+                    }
+                    self.aviso = None;
+                    cx.notify();
+                    return;
+                }
+                Some(Ferramenta::Pincel) => {
+                    self.pegando_cor = true;
+                    self.pegar_cor(ponto, cx);
+                    return;
+                }
+                _ => {}
+            }
+        }
+        self.apertar(ponto, cx);
+    }
+
+    /// O conta-gotas: a cor da foto (como ela aparece) no ponto.
+    pub fn pegar_cor(&mut self, ponto: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some((x, y)) = self.na_foto(ponto) else {
+            return;
+        };
+        if let Some(s) = self.sessao_mut() {
+            if let Some(cor) = s.cor_em(x, y) {
+                s.pincel.cor = cor;
+            }
+        }
+        cx.notify();
+    }
+
+    fn comecar_a_mover(&mut self, ponto: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some(p) = self.na_foto_sem_limite(ponto) else {
+            return;
+        };
+        let Some(s) = self.sessao_mut() else {
+            return;
+        };
+        if s.comecar_a_mover() {
+            self.arrasto_do_mover = Some(p);
+            self.aviso = None;
+        } else {
+            let nome = s.camada_ativa().nome.clone();
+            self.aviso = Some((
+                format!("{nome} está escondida — mostre a camada (H) para movê-la").into(),
+                true,
+            ));
+        }
+        cx.notify();
+    }
+
     /// O ponteiro desceu na foto.
     pub fn apertar(&mut self, ponto: Point<Pixels>, cx: &mut Context<Self>) {
         if self.selecionando.is_some() {
@@ -765,6 +903,11 @@ impl EditorDeFoto {
         };
         if s.apertar(x, y) {
             self.pintando = true;
+        } else if s.pincel.ferramenta == Ferramenta::Carimbo && s.origem().is_none() {
+            self.aviso = Some((
+                "⌥ + clique na foto para escolher de onde o carimbo copia".into(),
+                true,
+            ));
         } else {
             let nome = s.camada_ativa().nome.clone();
             self.aviso = Some((
@@ -779,6 +922,25 @@ impl EditorDeFoto {
     /// O ponteiro andou — pinta se estiver apertado; sempre move o círculo.
     pub fn mover(&mut self, ponto: Point<Pixels>, cx: &mut Context<Self>) {
         self.ponteiro = Some(ponto);
+        if self.pegando_cor {
+            self.pegar_cor(ponto, cx);
+            return;
+        }
+        if let Some(inicio) = self.arrasto_do_mover {
+            if let Some(p) = self.na_foto_sem_limite(ponto) {
+                let (dx, dy) = (
+                    (p.0 - inicio.0).round() as i64,
+                    (p.1 - inicio.1).round() as i64,
+                );
+                let comeco = Instant::now();
+                if let Some(s) = self.sessao_mut() {
+                    s.mover_por(dx, dy);
+                }
+                self.medidas.ultimo_gesto = Some(comeco.elapsed());
+            }
+            cx.notify();
+            return;
+        }
         if self.gesto_de_selecao.is_some() {
             let escala = self.vista_do_zoom().map_or(1.0, |(_, v)| v.escala);
             let no_ponto = self.na_foto_sem_limite(ponto);
@@ -821,6 +983,14 @@ impl EditorDeFoto {
         if self.mao.take().is_some() {
             cx.notify();
         }
+        self.pegando_cor = false;
+        if self.arrasto_do_mover.take().is_some() {
+            if let Some(s) = self.sessao_mut() {
+                s.terminar_de_mover();
+            }
+            cx.notify();
+            return;
+        }
         if let Some(gesto) = self.gesto_de_selecao.take() {
             let forma = gesto.forma();
             if let Some(s) = self.sessao_mut() {
@@ -855,11 +1025,24 @@ impl EditorDeFoto {
 
     pub fn usar_selecao(&mut self, tipo: TipoDeSelecao, cx: &mut Context<Self>) {
         self.selecionando = Some(tipo);
+        self.auxiliar = None;
         cx.notify();
+    }
+
+    /// O conta-gotas (I) ou o Mover (V) na mão.
+    pub fn usar_auxiliar(&mut self, auxiliar: Auxiliar, cx: &mut Context<Self>) {
+        self.auxiliar = Some(auxiliar);
+        self.selecionando = None;
+        cx.notify();
+    }
+
+    pub fn auxiliar(&self) -> Option<Auxiliar> {
+        self.auxiliar
     }
 
     pub fn usar(&mut self, ferramenta: Ferramenta, cx: &mut Context<Self>) {
         self.selecionando = None;
+        self.auxiliar = None;
         if let Some(s) = self.sessao_mut() {
             s.pincel.ferramenta = ferramenta;
         }
@@ -867,7 +1050,9 @@ impl EditorDeFoto {
     }
 
     pub fn escolher_cor(&mut self, cor: [u8; 3], cx: &mut Context<Self>) {
-        let com_o_pincel = self.selecionando.is_none();
+        let com_o_pincel = self.selecionando.is_none()
+            && self.auxiliar.is_none()
+            && self.ferramenta() != Some(Ferramenta::Carimbo);
         if let Some(s) = self.sessao_mut() {
             s.pincel.cor = cor;
             if com_o_pincel {
@@ -1276,7 +1461,18 @@ impl EditorDeFoto {
                 };
                 let x = f(area.origin.x) + f(area.size.width) * numero(2);
                 let y = f(area.origin.y) + f(area.size.height) * numero(3);
-                let r = crate::depuracao::mouse_nativo(window, tipo, x, y, 0);
+                let mods = partes
+                    .iter()
+                    .skip(4)
+                    .map(|n| match *n {
+                        "shift" => 1 << 17,
+                        "ctrl" => 1 << 18,
+                        "alt" => 1 << 19,
+                        "cmd" => 1 << 20,
+                        _ => 0,
+                    })
+                    .fold(0, |a, b| a | b);
+                let r = crate::depuracao::mouse_nativo(window, tipo, x, y, mods);
                 eprintln!("[roteiro] editor mouse {tipo} ({x:.0}, {y:.0}): {r:?}");
             }
             "tecla" => {
@@ -1419,6 +1615,14 @@ impl EditorDeFoto {
                     self.na_sessao(cx, |s| s.selecionar(&forma, operacao));
                 }
             }
+            "ferramenta" => match partes.get(1).copied().unwrap_or_default() {
+                "pincel" => self.usar(Ferramenta::Pincel, cx),
+                "borracha" => self.usar(Ferramenta::Borracha, cx),
+                "carimbo" => self.usar(Ferramenta::Carimbo, cx),
+                "conta-gotas" => self.usar_auxiliar(Auxiliar::ContaGotas, cx),
+                "mover" => self.usar_auxiliar(Auxiliar::Mover, cx),
+                outra => eprintln!("[roteiro] editor ferramenta {outra}?"),
+            },
             "espaco" => match partes.get(1).copied() {
                 Some("segurar") => self.espaco_apertado(cx),
                 _ => self.espaco_solto(cx),
@@ -1590,7 +1794,10 @@ impl EditorDeFoto {
         let fator_da_tela = window.scale_factor().max(1.0);
         let medidor = cx.entity();
         let ouvinte = cx.entity();
-        let pintando = self.pintando || self.gesto_de_selecao.is_some();
+        let pintando = self.pintando
+            || self.gesto_de_selecao.is_some()
+            || self.pegando_cor
+            || self.arrasto_do_mover.is_some();
         let com_a_mao = self.mao.is_some();
         let medida = canvas(
             move |bounds, window, cx| {
@@ -1688,7 +1895,31 @@ impl EditorDeFoto {
                         self.area_na_janela().is_some_and(|a| a.contains(p))
                             && self.palco.contains(p)
                     });
-                    let com_pincel = self.selecionando.is_none();
+                    let com_pincel = self.selecionando.is_none() && self.auxiliar.is_none();
+                    // A mira do carimbo: de onde ele copia para o ponteiro.
+                    if let (Some(ponteiro), Some(Ferramenta::Carimbo), true) =
+                        (dentro, self.ferramenta(), com_pincel)
+                    {
+                        let mira = self
+                            .na_foto_sem_limite(ponteiro)
+                            .and_then(|(x, y)| sessao.mira_do_carimbo(x, y));
+                        if let Some((mx, my)) = mira {
+                            let (cx_, cy_) = (v.x + mx * v.escala, v.y + my * v.escala);
+                            for (l, a) in [(14.0, 1.5), (1.5, 14.0)] {
+                                palco = palco.child(
+                                    div()
+                                        .absolute()
+                                        .left(px(cx_ - l / 2.0))
+                                        .top(px(cy_ - a / 2.0))
+                                        .w(px(l))
+                                        .h(px(a))
+                                        .bg(gpui_kit::white().opacity(0.9))
+                                        .border_1()
+                                        .border_color(gpui_kit::black().opacity(0.6)),
+                                );
+                            }
+                        }
+                    }
                     if let (Some(ponteiro), None, true) = (dentro, self.espaco, com_pincel) {
                         let raio = sessao.pincel.raio * v.escala;
                         let centro = ponteiro - self.palco.origin;
@@ -1722,7 +1953,7 @@ impl EditorDeFoto {
                             } else if ed.selecionando.is_some() {
                                 ed.comecar_selecao(evento.position, evento.modifiers, cx);
                             } else {
-                                ed.apertar(evento.position, cx);
+                                ed.apertar_com(evento.position, evento.modifiers, cx);
                             }
                         }),
                     )
@@ -1876,8 +2107,11 @@ impl EditorDeFoto {
 
     fn painel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let tema = cx.theme().clone();
-        let ferramenta = self.ferramenta().filter(|_| self.selecionando.is_none());
+        let ferramenta = self
+            .ferramenta()
+            .filter(|_| self.selecionando.is_none() && self.auxiliar.is_none());
         let selecionando = self.selecionando;
+        let auxiliar = self.auxiliar;
         let cor_atual = self.sessao().map(|s| s.pincel.cor);
         let rotulo = |texto: &'static str| {
             div()
@@ -1959,6 +2193,41 @@ impl EditorDeFoto {
                             .on_click(cx.listener(|ed, _, _, cx| ed.desmarcar(cx))),
                     ),
             )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.))
+                    .child({
+                        let botao = crate::estilo::botao_icone_padrao("editor-carimbo", Icone::Stamp)
+                            .debug_selector(|| "editor-carimbo".into())
+                            .tooltip("Carimbo (S) — ⌥ + clique escolhe de onde copiar")
+                            .on_click(cx.listener(|ed, _, _, cx| ed.usar(Ferramenta::Carimbo, cx)));
+                        if ferramenta == Some(Ferramenta::Carimbo) {
+                            botao.primary()
+                        } else {
+                            botao
+                        }
+                    })
+                    .children(
+                        [
+                            (Auxiliar::ContaGotas, Icone::Pipette, "editor-conta-gotas", "Conta-gotas (I) — a cor da foto vai para o pincel; com o pincel, ⌥ + clique"),
+                            (Auxiliar::Mover, Icone::Move, "editor-mover", "Mover (V) — arrasta o conteúdo da camada escolhida"),
+                        ]
+                        .into_iter()
+                        .map(|(qual, icone, id, dica)| {
+                            let botao = crate::estilo::botao_icone_padrao(id, icone)
+                                .debug_selector(move || id.into())
+                                .tooltip(dica)
+                                .on_click(cx.listener(move |ed, _, _, cx| ed.usar_auxiliar(qual, cx)));
+                            if auxiliar == Some(qual) {
+                                botao.primary()
+                            } else {
+                                botao
+                            }
+                        }),
+                    ),
+            )
             .child(rotulo("Tamanho  [  ]"))
             .child(div().h(px(20.)).child(crate::estilo::slider(&self.tamanho)))
             .child(rotulo("Dureza"))
@@ -1969,7 +2238,18 @@ impl EditorDeFoto {
                     .h(px(20.))
                     .child(crate::estilo::slider(&self.opacidade)),
             )
-            .child(rotulo("Cor"))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(rotulo("Cor"))
+                    .child(
+                        div()
+                            .debug_selector(|| "editor-seletor-de-cor".into())
+                            .child(ColorPicker::new(&self.seletor_de_cor).label("Outra cor")),
+                    ),
+            )
             .child(
                 div()
                     .flex()
@@ -2575,6 +2855,14 @@ impl Render for EditorDeFoto {
             self.opacidade_da_camada
                 .update(cx, |s, cx| s.set_value(opacidade, window, cx));
         }
+        // O seletor de cor acompanha a cor do pincel (amostras, conta-gotas).
+        let cor = self.sessao().map(|s| s.pincel.cor);
+        if cor.is_some() && cor != self.cor_mostrada {
+            self.cor_mostrada = cor;
+            let hsla = hsla_de(cor.unwrap_or_default());
+            self.seletor_de_cor
+                .update(cx, |s, cx| s.set_value(hsla, window, cx));
+        }
         let modo = self.sessao().map(|s| s.camada_ativa().modo);
         if modo.is_some() && modo != self.modo_mostrado {
             self.modo_mostrado = modo;
@@ -2647,6 +2935,13 @@ impl Render for EditorDeFoto {
             }))
             .on_action(
                 cx.listener(|ed, _: &SelecaoLaco, _, cx| ed.usar_selecao(TipoDeSelecao::Laco, cx)),
+            )
+            .on_action(cx.listener(|ed, _: &UsarCarimbo, _, cx| ed.usar(Ferramenta::Carimbo, cx)))
+            .on_action(cx.listener(|ed, _: &UsarContaGotas, _, cx| {
+                ed.usar_auxiliar(Auxiliar::ContaGotas, cx)
+            }))
+            .on_action(
+                cx.listener(|ed, _: &UsarMover, _, cx| ed.usar_auxiliar(Auxiliar::Mover, cx)),
             )
             .on_action(cx.listener(|ed, _: &SelecionarTudo, _, cx| ed.selecionar_tudo(cx)))
             .on_action(cx.listener(|ed, _: &Desmarcar, _, cx| ed.desmarcar(cx)))
