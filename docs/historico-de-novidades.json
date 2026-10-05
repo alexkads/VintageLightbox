@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.97",
+    "data": "2026-10-05",
+    "titulo": "Editar Foto agora tem transformação livre e mover a seleção.",
+    "importante": false,
+    "novidades": [
+      "⌘T transforma a camada, ou só o que está selecionado: arraste dentro da caixa para mover, nos cantos para mudar o tamanho (com ⇧ sem manter a proporção) e fora dela para girar (com ⇧ de 15 em 15°). Enter aplica e Esc cancela.",
+      "Com uma seleção, o Mover (V) leva só o pedaço selecionado, e a seleção vai junto.",
+      "⌘J com uma seleção cria uma camada só com o pedaço; ⇧⌘J faz o mesmo e tira o pedaço da camada de origem."
+    ],
+    "por_que_atualizar": "Para reposicionar, aumentar ou girar um retoque ou um pedaço da foto sem sair do editor."
+  },
+  {
     "versao": "0.1.96",
     "data": "2026-10-05",
     "titulo": "Editar Foto agora tem carimbo, conta-gotas e mover.",
