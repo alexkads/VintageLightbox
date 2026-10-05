@@ -1,5 +1,18 @@
 [
   {
+    "versao": "0.1.94",
+    "data": "2026-10-04",
+    "titulo": "Editar Foto agora tem várias camadas, modos de mesclagem e zoom.",
+    "importante": false,
+    "novidades": [
+      "Camadas: nova (⇧⌘N), duplicar (⌘J), excluir, subir e descer (⌘] ⌘[), e renomear com duplo clique no nome. O pincel pinta na camada realçada.",
+      "Cada camada tem um modo de mesclagem, os 16 do Photoshop: Multiplicação, Tela, Sobrepor, Luz Suave, Cor, Luminosidade e os outros.",
+      "Zoom com os mesmos gestos da Revelação: pinça, ⌘ + roda, Z, Espaço, ⌘= ⌘− ⌘0 e ⌘⌥0 (1:1). A roda, ou o Espaço segurado com arrasto, move a foto ampliada.",
+      "Ampliada, a foto aparece em resolução cheia, e acima de 8:1 cada pixel vira um quadrado nítido, para retoque fino."
+    ],
+    "por_que_atualizar": "Para retocar em camadas separadas, ver de perto o que está pintando e combinar as camadas com a foto como no Photoshop. Edições salvas nesta versão não abrem nas versões anteriores."
+  },
+  {
     "versao": "0.1.93",
     "data": "2026-10-04",
     "titulo": "A negociação agora é só para as fotos levadas (sinalizadas com P).",
