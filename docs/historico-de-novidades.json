@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.98",
+    "data": "2026-10-06",
+    "titulo": "Editar Foto agora tira manchas e objetos pelo conteúdo em volta.",
+    "importante": false,
+    "novidades": [
+      "Pincel de correção (J): pinte por cima de uma mancha, fio ou espinha; ao soltar, a área é refeita pelo que está em volta.",
+      "Com uma área selecionada, ⇧⌫ (ou o botão ✨ ao lado de \"Desmarcar\") apaga o que está nela e completa com o entorno.",
+      "O resultado entra na camada escolhida — numa camada vazia por cima, o retoque fica separado. O cálculo leva alguns segundos e não trava a tela."
+    ],
+    "por_que_atualizar": "Para limpar a foto sem precisar escolher de onde copiar, como no Photoshop."
+  },
+  {
     "versao": "0.1.97",
     "data": "2026-10-05",
     "titulo": "Editar Foto agora tem transformação livre e mover a seleção.",

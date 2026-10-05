@@ -1,11 +1,11 @@
 {
-  "versao": "0.1.97",
-  "titulo": "Editar Foto agora tem transformação livre e mover a seleção.",
+  "versao": "0.1.98",
+  "titulo": "Editar Foto agora tira manchas e objetos pelo conteúdo em volta.",
   "importante": false,
   "novidades": [
-    "⌘T transforma a camada, ou só o que está selecionado: arraste dentro da caixa para mover, nos cantos para mudar o tamanho (com ⇧ sem manter a proporção) e fora dela para girar (com ⇧ de 15 em 15°). Enter aplica e Esc cancela.",
-    "Com uma seleção, o Mover (V) leva só o pedaço selecionado, e a seleção vai junto.",
-    "⌘J com uma seleção cria uma camada só com o pedaço; ⇧⌘J faz o mesmo e tira o pedaço da camada de origem."
+    "Pincel de correção (J): pinte por cima de uma mancha, fio ou espinha; ao soltar, a área é refeita pelo que está em volta.",
+    "Com uma área selecionada, ⇧⌫ (ou o botão ✨ ao lado de \"Desmarcar\") apaga o que está nela e completa com o entorno.",
+    "O resultado entra na camada escolhida — numa camada vazia por cima, o retoque fica separado. O cálculo leva alguns segundos e não trava a tela."
   ],
-  "por_que_atualizar": "Para reposicionar, aumentar ou girar um retoque ou um pedaço da foto sem sair do editor."
+  "por_que_atualizar": "Para limpar a foto sem precisar escolher de onde copiar, como no Photoshop."
 }
