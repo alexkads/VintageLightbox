@@ -37,6 +37,7 @@ Sem projeto editável, o fluxo é o de sempre: a Revelação parte do bruto.
 | [03-GRAVACAO-E-CATALOGO.md](03-GRAVACAO-E-CATALOGO.md) | O formato do projeto, os tiles, a gravação atômica, a recuperação e a tabela do catálogo |
 | [04-PLANO-ETAPA-1.md](04-PLANO-ETAPA-1.md) | O que a etapa 1 entrega, arquivo por arquivo, os testes e as medidas |
 | [05-ETAPA-2.md](05-ETAPA-2.md) | Várias camadas, os 16 modos de mesclagem, o formato 2 do projeto, zoom, mão e lupa |
+| [06-ETAPA-3.md](06-ETAPA-3.md) | Seleção (retângulo, elipse, laço), apagar e preencher, mesclar para baixo, miniaturas, formato 3 e a emenda dos ladrilhos |
 
 ## Etapa 1 — o que entra
 
@@ -52,10 +53,15 @@ Sem projeto editável, o fluxo é o de sempre: a Revelação parte do bruto.
 Várias camadas (nova, duplicar, excluir, mover, renomear), os 16 modos de mesclagem do Photoshop, zoom e
 mão com os gestos da Revelação, e a lupa em resolução cheia. Detalhes em [05-ETAPA-2.md](05-ETAPA-2.md).
 
+## Etapa 3 (0.1.95) — entregue
+
+Seleção retangular, elíptica e laço (⇧ soma, ⌥ tira, ⌘A ⌘D ⇧⌘I), pincel preso à seleção, Delete e
+⌥Delete, mesclar para baixo (⌘E) e a miniatura de cada camada. Detalhes em [06-ETAPA-3.md](06-ETAPA-3.md).
+
 ## Depois
 
-Seleções, mesclar camadas, ferramentas avançadas, mudança de geometria (girar/redimensionar) e levar o
-projeto ao site (divergência D23, ver o contrato).
+Mover o conteúdo da camada, mudança de geometria (girar/redimensionar) e levar o projeto ao site
+(divergência D23, ver o contrato).
 
 ## Onde mora o código
 
