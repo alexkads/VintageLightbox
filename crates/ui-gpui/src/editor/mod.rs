@@ -22,20 +22,39 @@ gpui_kit::actions!(
         PincelMenor,
         PincelMaior,
         AlternarCamada,
+        NovaCamada,
+        DuplicarCamada,
+        SubirCamada,
+        DescerCamada,
+        CamadaDeCima,
+        CamadaDeBaixo,
+        Aproximar,
+        Afastar,
+        Encaixar,
+        UmPorUm,
+        AlternarZoom,
+        SegurarAMao,
     ]
 );
 
 /// O contexto de teclas da janela do editor.
 pub const CONTEXTO: &str = "EditorDeFoto";
 
-/// As teclas do editor — as do Photoshop para pincel (B), borracha (E) e
-/// tamanho (`[` `]`); `Cmd`/`Ctrl` para desfazer, refazer e salvar.
+/// O mesmo, fora de campo de texto: a tecla solta (B, E, Z, Espaço…) não pode
+/// comer a letra de quem renomeia uma camada (a regra do `app.rs`).
+const SEM_CAMPO: &str = "EditorDeFoto && !Input";
+
+/// As teclas do editor — as do Photoshop para pincel (B), borracha (E),
+/// tamanho (`[` `]`) e camadas (⇧⌘N nova, ⌘J duplicar, ⌘] ⌘[ subir e descer,
+/// ⌥] ⌥[ escolher a de cima e a de baixo); as da Revelação para o zoom (Z,
+/// Espaço, ⌘= ⌘− ⌘0 ⌘⌥0); `Cmd`/`Ctrl` para desfazer, refazer e salvar.
 ///
 /// 🔑 **Com `Ctrl` também**: o balcão roda Windows e Linux, onde desfazer é
 /// `Ctrl+Z` e mais nada (a mesma regra do `app.rs`).
 pub fn init(cx: &mut gpui_kit::App) {
     use gpui_kit::KeyBinding;
     let c = Some(CONTEXTO);
+    let solta = Some(SEM_CAMPO);
     cx.bind_keys([
         KeyBinding::new("cmd-shift-z", RefazerNoEditor, c),
         KeyBinding::new("cmd-z", DesfazerNoEditor, c),
@@ -46,10 +65,32 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("ctrl-s", SalvarNoEditor, c),
         KeyBinding::new("cmd-w", FecharEditor, c),
         KeyBinding::new("ctrl-w", FecharEditor, c),
-        KeyBinding::new("b", UsarPincel, c),
-        KeyBinding::new("e", UsarBorracha, c),
-        KeyBinding::new("[", PincelMenor, c),
-        KeyBinding::new("]", PincelMaior, c),
-        KeyBinding::new("h", AlternarCamada, c),
+        KeyBinding::new("b", UsarPincel, solta),
+        KeyBinding::new("e", UsarBorracha, solta),
+        KeyBinding::new("[", PincelMenor, solta),
+        KeyBinding::new("]", PincelMaior, solta),
+        KeyBinding::new("h", AlternarCamada, solta),
+        KeyBinding::new("cmd-shift-n", NovaCamada, c),
+        KeyBinding::new("ctrl-shift-n", NovaCamada, c),
+        KeyBinding::new("cmd-j", DuplicarCamada, c),
+        KeyBinding::new("ctrl-j", DuplicarCamada, c),
+        KeyBinding::new("cmd-]", SubirCamada, c),
+        KeyBinding::new("ctrl-]", SubirCamada, c),
+        KeyBinding::new("cmd-[", DescerCamada, c),
+        KeyBinding::new("ctrl-[", DescerCamada, c),
+        KeyBinding::new("alt-]", CamadaDeCima, solta),
+        KeyBinding::new("alt-[", CamadaDeBaixo, solta),
+        KeyBinding::new("cmd-=", Aproximar, c),
+        KeyBinding::new("cmd-+", Aproximar, c),
+        KeyBinding::new("ctrl-=", Aproximar, c),
+        KeyBinding::new("ctrl-+", Aproximar, c),
+        KeyBinding::new("cmd--", Afastar, c),
+        KeyBinding::new("ctrl--", Afastar, c),
+        KeyBinding::new("cmd-0", Encaixar, c),
+        KeyBinding::new("ctrl-0", Encaixar, c),
+        KeyBinding::new("cmd-alt-0", UmPorUm, c),
+        KeyBinding::new("ctrl-alt-0", UmPorUm, c),
+        KeyBinding::new("z", AlternarZoom, solta),
+        KeyBinding::new("space", SegurarAMao, solta),
     ]);
 }

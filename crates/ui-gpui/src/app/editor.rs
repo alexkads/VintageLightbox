@@ -675,4 +675,277 @@ mod testes {
         assert!(!reaberto.read_with(cx, |ed, _| ed.alterado()));
         assert!(reaberto.read_with(cx, |ed, _| ed.sessao().unwrap().historico().pode_desfazer()));
     }
+
+    /// Abre o editor da primeira foto e devolve a janela dele com o contexto
+    /// visual — onde as teclas e os cliques do editor acontecem.
+    fn editor_aberto(
+        cx: &mut TestAppContext,
+    ) -> (Montado, gpui_kit::Entity<EditorDeFoto>, VisualTestContext) {
+        let (m, visual) = montar(cx);
+        m.janela
+            .update(cx, |app, _w, cx| {
+                app.revelacao
+                    .update(cx, |tela, cx| tela.pedir_edicao_para_teste(0, cx));
+            })
+            .unwrap();
+        visual.run_until_parked();
+        let (janela_do_editor, editor) = o_editor(&m, cx);
+        let mut ve = VisualTestContext::from_window(janela_do_editor, cx);
+        ve.run_until_parked();
+        // 🧪 O primeiro evento de ponteiro de uma janela do harness se perde.
+        ve.simulate_mouse_move(
+            gpui_kit::point(gpui_kit::px(1.), gpui_kit::px(1.)),
+            None,
+            gpui_kit::Modifiers::none(),
+        );
+        assert!(editor.read_with(&ve, |ed, _| ed.pronta()));
+        (m, editor, ve)
+    }
+
+    fn clicar_no_editor(ve: &mut VisualTestContext, alvo: &'static str) {
+        let caixa = ve
+            .debug_bounds(alvo)
+            .unwrap_or_else(|| panic!("{alvo} não está desenhado"));
+        ve.simulate_click(caixa.center(), gpui_kit::Modifiers::none());
+        ve.run_until_parked();
+    }
+
+    fn camadas(
+        editor: &gpui_kit::Entity<EditorDeFoto>,
+        ve: &VisualTestContext,
+    ) -> (Vec<String>, usize) {
+        editor.read_with(ve, |ed, _| {
+            let s = ed.sessao().unwrap();
+            (
+                s.documento()
+                    .camadas
+                    .iter()
+                    .map(|c| c.nome.clone())
+                    .collect(),
+                s.ativa(),
+            )
+        })
+    }
+
+    /// 🎨 As camadas pelas teclas do Photoshop e pelos botões do painel, e o
+    /// desfazer devolvendo a pilha.
+    #[gpui_kit::test]
+    fn camadas_pelas_teclas_e_pelo_painel(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        assert_eq!(camadas(&editor, &ve), (vec!["Pintura".to_string()], 0));
+
+        ve.simulate_keystrokes("cmd-shift-n");
+        ve.run_until_parked();
+        assert_eq!(
+            camadas(&editor, &ve),
+            (vec!["Pintura".to_string(), "Camada 1".to_string()], 1)
+        );
+        editor.update(&mut ve, |ed, cx| {
+            ed.tracar_para_teste((10., 24.), (54., 24.), cx)
+        });
+        let pintadas = editor.read_with(&ve, |ed, _| {
+            ed.sessao()
+                .unwrap()
+                .documento()
+                .camadas
+                .iter()
+                .map(|c| !c.pixels.vazia())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(pintadas, vec![false, true], "o pincel pintou na escolhida");
+
+        ve.simulate_keystrokes("cmd-j");
+        ve.run_until_parked();
+        assert_eq!(camadas(&editor, &ve).0[2], "Camada 1 cópia");
+        assert_eq!(camadas(&editor, &ve).1, 2);
+        ve.simulate_keystrokes("cmd-[");
+        ve.run_until_parked();
+        assert_eq!(
+            camadas(&editor, &ve),
+            (
+                vec![
+                    "Pintura".to_string(),
+                    "Camada 1 cópia".to_string(),
+                    "Camada 1".to_string()
+                ],
+                1
+            )
+        );
+        ve.simulate_keystrokes("alt-]");
+        ve.run_until_parked();
+        assert_eq!(camadas(&editor, &ve).1, 2, "⌥] escolhe a de cima");
+
+        // O olho esconde sem escolher; a linha escolhe.
+        clicar_no_editor(&mut ve, "editor-olho-0");
+        assert!(
+            !editor.read_with(&ve, |ed, _| ed.sessao().unwrap().documento().camadas[0]
+                .visivel)
+        );
+        assert_eq!(camadas(&editor, &ve).1, 2);
+        clicar_no_editor(&mut ve, "editor-camada-0");
+        assert_eq!(camadas(&editor, &ve).1, 0);
+        assert!(!editor.read_with(&ve, |ed, _| ed.camada_visivel()));
+
+        clicar_no_editor(&mut ve, "editor-camada-excluir");
+        assert_eq!(camadas(&editor, &ve).0.len(), 2);
+        clicar_no_editor(&mut ve, "editor-camada-nova");
+        assert_eq!(camadas(&editor, &ve).0.len(), 3);
+        assert_eq!(camadas(&editor, &ve).0[1], "Camada 2", "o número não volta");
+
+        for _ in 0..2 {
+            ve.simulate_keystrokes("cmd-z");
+        }
+        ve.run_until_parked();
+        assert_eq!(camadas(&editor, &ve).0[0], "Pintura", "a excluída voltou");
+        assert_eq!(camadas(&editor, &ve).0.len(), 3);
+    }
+
+    /// ✏️ Renomear pelo duplo clique: as letras vão para o nome, e não viram
+    /// atalho (B é o pincel, E a borracha, Z o zoom).
+    #[gpui_kit::test]
+    fn renomear_a_camada_nao_dispara_as_teclas_soltas(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        let caixa = ve.debug_bounds("editor-camada-0").unwrap();
+        ve.simulate_event(gpui_kit::MouseDownEvent {
+            button: gpui_kit::MouseButton::Left,
+            position: caixa.center(),
+            modifiers: gpui_kit::Modifiers::none(),
+            click_count: 2,
+            first_mouse: false,
+        });
+        ve.simulate_event(gpui_kit::MouseUpEvent {
+            button: gpui_kit::MouseButton::Left,
+            position: caixa.center(),
+            modifiers: gpui_kit::Modifiers::none(),
+            click_count: 2,
+        });
+        ve.run_until_parked();
+        ve.executor()
+            .advance_clock(std::time::Duration::from_millis(100));
+        ve.run_until_parked();
+        let nivel_antes = editor.read_with(&ve, |ed, _| ed.nivel_do_zoom());
+        ve.simulate_input("Bez fundo");
+        ve.simulate_keystrokes("enter");
+        ve.run_until_parked();
+        assert_eq!(camadas(&editor, &ve).0[0], "Bez fundo");
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.ferramenta()),
+            Some(editor_core::Ferramenta::Pincel)
+        );
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.nivel_do_zoom()),
+            nivel_antes
+        );
+        // O foco voltou ao editor: a tecla solta vale de novo.
+        ve.simulate_keystrokes("e");
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.ferramenta()),
+            Some(editor_core::Ferramenta::Borracha)
+        );
+    }
+
+    /// 🔍 O zoom pelas teclas da Revelação, e a roda movendo a foto ampliada.
+    #[gpui_kit::test]
+    fn zoom_pelas_teclas_e_a_roda(cx: &mut TestAppContext) {
+        use crate::revelacao::zoom::Nivel;
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.nivel_do_zoom()),
+            Nivel::Encaixar
+        );
+        let encaixada = editor.read_with(&ve, |ed, _| ed.area_na_janela().unwrap());
+
+        ve.simulate_keystrokes("cmd-=");
+        ve.run_until_parked();
+        let ampliada = editor.read_with(&ve, |ed, _| ed.area_na_janela().unwrap());
+        assert!(ampliada.size.width > encaixada.size.width, "⌘= ampliou");
+
+        // A roda move a foto ampliada.
+        let palco = ve.debug_bounds("palco-do-editor").unwrap();
+        ve.simulate_event(gpui_kit::ScrollWheelEvent {
+            position: palco.center(),
+            delta: gpui_kit::ScrollDelta::Pixels(gpui_kit::point(
+                gpui_kit::px(40.),
+                gpui_kit::px(30.),
+            )),
+            modifiers: gpui_kit::Modifiers::none(),
+            touch_phase: gpui_kit::TouchPhase::Moved,
+        });
+        ve.run_until_parked();
+        let movida = editor.read_with(&ve, |ed, _| ed.area_na_janela().unwrap());
+        assert_ne!(movida.origin, ampliada.origin, "a roda moveu");
+
+        ve.simulate_keystrokes("cmd-0");
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.nivel_do_zoom()),
+            Nivel::Encaixar
+        );
+        ve.simulate_keystrokes("cmd-alt-0");
+        ve.run_until_parked();
+        let razao = editor.read_with(&ve, |ed, _| ed.razao_do_zoom().unwrap());
+        assert!(
+            (razao - 1.0).abs() < 0.01,
+            "1:1 é um pixel por pixel ({razao})"
+        );
+        // Z tocado volta ao encaixe e, de novo, ao 1:1.
+        ve.simulate_keystrokes("z");
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.nivel_do_zoom()),
+            Nivel::Encaixar
+        );
+        ve.simulate_keystrokes("z");
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.nivel_do_zoom()),
+            Nivel::Razao(1.0)
+        );
+    }
+
+    /// 🖐️ Espaço segurado + arrastar move a foto ampliada e não pinta.
+    #[gpui_kit::test]
+    fn o_espaco_segurado_e_a_mao(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        for _ in 0..3 {
+            ve.simulate_keystrokes("cmd-=");
+        }
+        ve.run_until_parked();
+        let antes = editor.read_with(&ve, |ed, _| ed.area_na_janela().unwrap());
+        // A janela do editor na frente: sem foco, o editor larga o Espaço (a
+        // tecla solta não chegaria).
+        ve.update(|window, _| window.activate_window());
+        ve.run_until_parked();
+        editor.update(&mut ve, |ed, cx| ed.espaco_apertado(cx));
+        assert!(editor.read_with(&ve, |ed, _| ed.espaco_segurado()));
+        let palco = ve.debug_bounds("palco-do-editor").unwrap();
+        let inicio = palco.center();
+        let fim = inicio + gpui_kit::point(gpui_kit::px(-60.), gpui_kit::px(-40.));
+        ve.simulate_mouse_down(
+            inicio,
+            gpui_kit::MouseButton::Left,
+            gpui_kit::Modifiers::none(),
+        );
+        ve.run_until_parked();
+        ve.simulate_mouse_move(
+            fim,
+            Some(gpui_kit::MouseButton::Left),
+            gpui_kit::Modifiers::none(),
+        );
+        ve.run_until_parked();
+        ve.simulate_mouse_up(
+            fim,
+            gpui_kit::MouseButton::Left,
+            gpui_kit::Modifiers::none(),
+        );
+        ve.run_until_parked();
+        editor.update(&mut ve, |ed, cx| ed.espaco_solto(cx));
+        let depois = editor.read_with(&ve, |ed, _| ed.area_na_janela().unwrap());
+        assert_ne!(depois.origin, antes.origin, "a mão moveu a foto");
+        assert!(
+            !editor.read_with(&ve, |ed, _| ed.alterado()),
+            "e não pintou nada"
+        );
+    }
 }
