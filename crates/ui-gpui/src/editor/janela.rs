@@ -2260,7 +2260,7 @@ impl EditorDeFoto {
 fn subir(vista: &mut VistaDoEditor, imagens: &mut HashMap<(u32, u32), Arc<RenderImage>>) -> usize {
     let sujos = vista.levar_os_sujos();
     for &ladrilho in &sujos {
-        let (l, a, bytes) = vista.ladrilho_bgra(ladrilho);
+        let (l, a, bytes) = vista.ladrilho_bgra_com_folga(ladrilho);
         if let Some(imagem) = crate::imagem::de_bgra(l, a, bytes) {
             imagens.insert(ladrilho, imagem);
         }
@@ -2340,16 +2340,20 @@ impl Tela {
                     preto.move_to(gpui_kit::point(px(ox + ax), px(oy + ay)));
                     preto.line_to(gpui_kit::point(px(ox + bx), px(oy + by)));
                     let comprimento = (bx - ax).abs() + (by - ay).abs();
-                    let (dx, dy) = ((bx - ax).signum(), (by - ay).signum());
+                    // 🚨 Horizontal ou vertical, e nada de `signum`: no Rust
+                    // `0.0_f32.signum()` é 1, e cada traço saía em diagonal
+                    // (visto no app real).
+                    let horizontal = (by - ay).abs() < (bx - ax).abs();
+                    let (dx, dy) = if horizontal { (1.0, 0.0) } else { (0.0, 1.0) };
                     // Os traços alinhados à grade da tela, para os vizinhos
                     // emendarem no mesmo compasso.
-                    let inicio = if dx != 0.0 { ax.min(bx) } else { ay.min(by) };
+                    let inicio = if horizontal { ax.min(bx) } else { ay.min(by) };
                     let mut t = (inicio / 8.0).ceil() * 8.0 - inicio;
                     let (sx, sy) = (ax.min(bx), ay.min(by));
                     while t < comprimento {
                         let fim = (t + 4.0).min(comprimento);
-                        let (px0, py0) = (sx + dx.abs() * t, sy + dy.abs() * t);
-                        let (px1, py1) = (sx + dx.abs() * fim, sy + dy.abs() * fim);
+                        let (px0, py0) = (sx + dx * t, sy + dy * t);
+                        let (px1, py1) = (sx + dx * fim, sy + dy * fim);
                         branco.move_to(gpui_kit::point(px(ox + px0), px(oy + py0)));
                         branco.line_to(gpui_kit::point(px(ox + px1), px(oy + py1)));
                         t += 8.0;
@@ -2410,15 +2414,18 @@ impl Tela {
         let regiao = vista.regiao();
         let escala = self.v.escala * vista.fator() as f32;
         let dpr = self.fator_da_tela;
-        // 🚨 **Alinhado aos pixels da tela, e sobrando um.** Com a posição
-        // fracionária, a borda de dois ladrilhos vizinhos caía no meio de um
-        // pixel e abria uma fresta escura (visto no app real, 27/set/2026).
-        // Início para baixo, fim para cima e um pixel do dispositivo a mais: o
-        // vizinho cobre.
-        let alinhar = |v: f32, cima: bool| {
-            let d = v * dpr;
-            (if cima { d.ceil() } else { d.floor() }) / dpr
-        };
+        // 🚨 **A emenda entre dois ladrilhos** (achada duas vezes no app real).
+        // Com a posição fracionária, a borda caía no meio de um pixel e abria
+        // uma fresta escura (27/set/2026); a sobra de um pixel que a corrigiu
+        // fez outra linha, e mesmo na grade do dispositivo ela voltava
+        // (05/out/2026): ampliada, o GPU lê meio texel além da borda da
+        // textura, e ali está o vizinho dela **no atlas**, que muda a cada
+        // ladrilho reenviado. Agora cada textura traz um pixel de folga (os
+        // pixels de verdade do vizinho na vista) e é desenhada recortada
+        // (`overflow_hidden`) no retângulo exato do ladrilho, com as bordas
+        // arredondadas pela mesma conta dos dois lados: o meio texel lido além
+        // da borda é foto, e a sobra fica fora do recorte.
+        let alinhar = |v: f32| (v * dpr).round() / dpr;
         let ox = self.v.x + regiao.x as f32 * self.v.escala;
         let oy = self.v.y + regiao.y as f32 * self.v.escala;
         let mut saida = Vec::new();
@@ -2431,25 +2438,32 @@ impl Tela {
                 let x0 = ox + r.x as f32 * escala;
                 let y0 = oy + r.y as f32 * escala;
                 let (x1, y1) = (
-                    x0 + r.largura as f32 * escala,
-                    y0 + r.altura as f32 * escala,
+                    ox + r.direita() as f32 * escala,
+                    oy + r.baixo() as f32 * escala,
                 );
                 // Fora do palco não desenha: ampliada, quase toda a vista
                 // inteira fica de fora.
                 if x1 < 0.0 || y1 < 0.0 || x0 > self.area.largura || y0 > self.area.altura {
                     continue;
                 }
-                let (esq, topo) = (alinhar(x0, false), alinhar(y0, false));
-                let dir = alinhar(x1, true) + 1.0 / dpr;
-                let baixo = alinhar(y1, true) + 1.0 / dpr;
+                let (esq, topo, dir, baixo) = (alinhar(x0), alinhar(y0), alinhar(x1), alinhar(y1));
                 saida.push(
-                    img(imagem.clone())
-                        .object_fit(ObjectFit::Fill)
+                    div()
                         .absolute()
                         .left(px(esq))
                         .top(px(topo))
                         .w(px(dir - esq))
                         .h(px(baixo - topo))
+                        .overflow_hidden()
+                        .child(
+                            img(imagem.clone())
+                                .object_fit(ObjectFit::Fill)
+                                .absolute()
+                                .left(px(x0 - escala - esq))
+                                .top(px(y0 - escala - topo))
+                                .w(px((r.largura + 2) as f32 * escala))
+                                .h(px((r.altura + 2) as f32 * escala)),
+                        )
                         .into_any_element(),
                 );
             }
