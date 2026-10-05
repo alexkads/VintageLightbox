@@ -37,6 +37,7 @@ Sem projeto editável, o fluxo é o de sempre: a Revelação parte do bruto.
 | [03-GRAVACAO-E-CATALOGO.md](03-GRAVACAO-E-CATALOGO.md) | O formato do projeto, os tiles, a gravação atômica, a recuperação e a tabela do catálogo |
 | [04-PLANO-ETAPA-1.md](04-PLANO-ETAPA-1.md) | O que a etapa 1 entrega, arquivo por arquivo, os testes e as medidas |
 | [05-ETAPA-2.md](05-ETAPA-2.md) | Várias camadas, os 16 modos de mesclagem, o formato 2 do projeto, zoom, mão e lupa |
+| [09-ETAPA-6.md](09-ETAPA-6.md) | Pincel de correção (J) e preencher a seleção pelo conteúdo (⇧⌫) |
 | [08-ETAPA-5.md](08-ETAPA-5.md) | Transformação livre (⌘T), mover a seleção, camada via cópia e via recorte |
 | [07-ETAPA-4.md](07-ETAPA-4.md) | Carimbo (S), conta-gotas (I), mover (V) e o seletor de cor |
 | [06-ETAPA-3.md](06-ETAPA-3.md) | Seleção (retângulo, elipse, laço), apagar e preencher, mesclar para baixo, miniaturas, formato 3 e a emenda dos ladrilhos |
@@ -69,6 +70,11 @@ camada (V) e o seletor de cor do kit. Detalhes em [07-ETAPA-4.md](07-ETAPA-4.md)
 
 Transformação livre (⌘T: mover, escalar, girar; Enter e Esc), o Mover com seleção e camada via cópia e via
 recorte (⌘J, ⇧⌘J). Detalhes em [08-ETAPA-5.md](08-ETAPA-5.md).
+
+## Etapa 6 (0.1.98) — entregue
+
+Pincel de correção para manchas (J) e preencher a seleção pelo conteúdo (⇧⌫), com o motor de preenchimento
+da Revelação. Detalhes em [09-ETAPA-6.md](09-ETAPA-6.md).
 
 ## Depois
 
