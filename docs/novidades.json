@@ -1,12 +1,12 @@
 {
-  "versao": "0.1.94",
-  "titulo": "Editar Foto agora tem várias camadas, modos de mesclagem e zoom.",
+  "versao": "0.1.95",
+  "titulo": "Editar Foto agora tem seleção, mesclar camadas e miniaturas.",
   "importante": false,
   "novidades": [
-    "Camadas: nova (⇧⌘N), duplicar (⌘J), excluir, subir e descer (⌘] ⌘[), e renomear com duplo clique no nome. O pincel pinta na camada realçada.",
-    "Cada camada tem um modo de mesclagem, os 16 do Photoshop: Multiplicação, Tela, Sobrepor, Luz Suave, Cor, Luminosidade e os outros.",
-    "Zoom com os mesmos gestos da Revelação: pinça, ⌘ + roda, Z, Espaço, ⌘= ⌘− ⌘0 e ⌘⌥0 (1:1). A roda, ou o Espaço segurado com arrasto, move a foto ampliada.",
-    "Ampliada, a foto aparece em resolução cheia, e acima de 8:1 cada pixel vira um quadrado nítido, para retoque fino."
+    "Seleção retangular (M), elíptica (⇧M) e laço (L). Com ⇧ soma à seleção e com ⌥ tira. ⌘A seleciona tudo, ⌘D desmarca e ⇧⌘I inverte.",
+    "Com uma seleção ativa, o pincel e a borracha só pintam dentro dela. Delete apaga a seleção na camada e ⌥Delete a preenche com a cor do pincel.",
+    "⌘E mescla a camada na de baixo, levando o modo e a opacidade dela. Cada camada mostra uma miniatura no painel.",
+    "Corrigida a linha fina que às vezes aparecia na foto encaixada depois de pintar ou preencher."
   ],
-  "por_que_atualizar": "Para retocar em camadas separadas, ver de perto o que está pintando e combinar as camadas com a foto como no Photoshop. Edições salvas nesta versão não abrem nas versões anteriores."
+  "por_que_atualizar": "Para retocar só a área escolhida sem borrar o resto e juntar as camadas quando o retoque estiver pronto. Edições salvas nesta versão não abrem nas versões anteriores."
 }

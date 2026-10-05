@@ -1,5 +1,18 @@
 [
   {
+    "versao": "0.1.95",
+    "data": "2026-10-05",
+    "titulo": "Editar Foto agora tem seleção, mesclar camadas e miniaturas.",
+    "importante": false,
+    "novidades": [
+      "Seleção retangular (M), elíptica (⇧M) e laço (L). Com ⇧ soma à seleção e com ⌥ tira. ⌘A seleciona tudo, ⌘D desmarca e ⇧⌘I inverte.",
+      "Com uma seleção ativa, o pincel e a borracha só pintam dentro dela. Delete apaga a seleção na camada e ⌥Delete a preenche com a cor do pincel.",
+      "⌘E mescla a camada na de baixo, levando o modo e a opacidade dela. Cada camada mostra uma miniatura no painel.",
+      "Corrigida a linha fina que às vezes aparecia na foto encaixada depois de pintar ou preencher."
+    ],
+    "por_que_atualizar": "Para retocar só a área escolhida sem borrar o resto e juntar as camadas quando o retoque estiver pronto. Edições salvas nesta versão não abrem nas versões anteriores."
+  },
+  {
     "versao": "0.1.94",
     "data": "2026-10-04",
     "titulo": "Editar Foto agora tem várias camadas, modos de mesclagem e zoom.",
