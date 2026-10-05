@@ -1167,4 +1167,90 @@ mod testes {
                 > 0
         );
     }
+
+    /// ⌘T: arrastar dentro da caixa move; Enter aplica num passo só; Esc
+    /// cancela.
+    #[gpui_kit::test]
+    fn a_transformacao_livre_move_aplica_e_cancela(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        editor.update(&mut ve, |ed, cx| {
+            ed.tracar_para_teste((20., 20.), (24., 20.), cx)
+        });
+        let passos = |ed: &EditorDeFoto| ed.sessao().unwrap().historico().posicao();
+        let antes = editor.read_with(&ve, |ed, _| passos(ed));
+
+        ve.simulate_keystrokes("cmd-t");
+        ve.run_until_parked();
+        assert!(editor.read_with(&ve, |ed, _| ed.transformando()));
+        // O traço está em (20..24, 20): 31% e 42% do palco de 64×48.
+        arrastar_no_palco(
+            &mut ve,
+            (22.0 / 64.0, 20.0 / 48.0),
+            (38.0 / 64.0, 20.0 / 48.0),
+        );
+        ve.simulate_keystrokes("enter");
+        ve.run_until_parked();
+        assert!(!editor.read_with(&ve, |ed, _| ed.transformando()));
+        let (velho, novo) = editor.read_with(&ve, |ed, _| {
+            let c = &ed.sessao().unwrap().documento().camadas[0].pixels;
+            (c.pixel(20, 20)[3], c.pixel(36, 20)[3])
+        });
+        assert_eq!(velho, 0);
+        assert!(novo > 0, "andou 16 px");
+        assert_eq!(editor.read_with(&ve, |ed, _| passos(ed)), antes + 1);
+
+        ve.simulate_keystrokes("cmd-t");
+        ve.run_until_parked();
+        arrastar_no_palco(
+            &mut ve,
+            (38.0 / 64.0, 20.0 / 48.0),
+            (10.0 / 64.0, 40.0 / 48.0),
+        );
+        ve.simulate_keystrokes("escape");
+        ve.run_until_parked();
+        assert!(
+            editor.read_with(&ve, |ed, _| ed.sessao().unwrap().documento().camadas[0]
+                .pixels
+                .pixel(36, 20)[3])
+                > 0,
+            "Esc devolveu"
+        );
+        assert_eq!(editor.read_with(&ve, |ed, _| passos(ed)), antes + 1);
+    }
+
+    /// ⌘J com seleção copia só o pedaço para uma camada nova; ⇧⌘J recorta.
+    #[gpui_kit::test]
+    fn camada_via_copia_e_via_recorte_pelas_teclas(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.simulate_keystrokes("cmd-a alt-backspace");
+        ve.run_until_parked();
+        ve.simulate_keystrokes("m");
+        ve.run_until_parked();
+        ve.update(|window, _| window.activate_window());
+        arrastar_no_palco(&mut ve, (0.0, 0.0), (0.5, 0.5));
+        ve.simulate_keystrokes("cmd-j");
+        ve.run_until_parked();
+        let (quantas, dentro, fora) = editor.read_with(&ve, |ed, _| {
+            let d = ed.sessao().unwrap().documento();
+            (
+                d.camadas.len(),
+                d.camadas[1].pixels.pixel(10, 10)[3],
+                d.camadas[1].pixels.pixel(50, 40)[3],
+            )
+        });
+        assert_eq!((quantas, dentro, fora), (2, 255, 0));
+        editor.update(&mut ve, |ed, cx| ed.escolher_camada(0, cx));
+        ve.simulate_keystrokes("cmd-shift-j");
+        ve.run_until_parked();
+        let (quantas, recortado, resto) = editor.read_with(&ve, |ed, _| {
+            let d = ed.sessao().unwrap().documento();
+            (
+                d.camadas.len(),
+                d.camadas[0].pixels.pixel(10, 10)[3],
+                d.camadas[0].pixels.pixel(50, 40)[3],
+            )
+        });
+        assert_eq!((quantas, recortado, resto), (3, 0, 255));
+    }
 }
