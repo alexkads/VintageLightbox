@@ -1,5 +1,18 @@
 [
   {
+    "versao": "0.1.96",
+    "data": "2026-10-05",
+    "titulo": "Editar Foto agora tem carimbo, conta-gotas e mover.",
+    "importante": false,
+    "novidades": [
+      "Carimbo (S): ⌥ + clique escolhe de onde copiar, e o pincel copia dali. Copia a foto como ela aparece, então funciona numa camada vazia por cima — o retoque fica separado e se desfaz apagando a camada.",
+      "Conta-gotas (I): clicar na foto pega a cor para o pincel. Com o pincel na mão, ⌥ + clique faz o mesmo.",
+      "Mover (V): arrastar desloca o conteúdo da camada escolhida.",
+      "\"Outra cor\" abre o seletor de cor, além das amostras."
+    ],
+    "por_que_atualizar": "Para tirar mancha, fio ou objeto da foto copiando de um lugar limpo ao lado, como no Photoshop."
+  },
+  {
     "versao": "0.1.95",
     "data": "2026-10-05",
     "titulo": "Editar Foto agora tem seleção, mesclar camadas e miniaturas.",
