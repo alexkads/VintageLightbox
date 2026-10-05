@@ -34,6 +34,15 @@ gpui_kit::actions!(
         UmPorUm,
         AlternarZoom,
         SegurarAMao,
+        SelecaoRetangular,
+        SelecaoEliptica,
+        SelecaoLaco,
+        SelecionarTudo,
+        Desmarcar,
+        InverterSelecao,
+        ApagarSelecao,
+        PreencherSelecao,
+        MesclarParaBaixo,
     ]
 );
 
@@ -46,7 +55,8 @@ const SEM_CAMPO: &str = "EditorDeFoto && !Input";
 
 /// As teclas do editor — as do Photoshop para pincel (B), borracha (E),
 /// tamanho (`[` `]`) e camadas (⇧⌘N nova, ⌘J duplicar, ⌘] ⌘[ subir e descer,
-/// ⌥] ⌥[ escolher a de cima e a de baixo); as da Revelação para o zoom (Z,
+/// ⌥] ⌥[ escolher a de cima e a de baixo, ⌘E mesclar para baixo), seleção (M
+/// retângulo, ⇧M elipse, L laço, ⌘A ⌘D ⇧⌘I, Delete apaga, ⌥Delete preenche); as da Revelação para o zoom (Z,
 /// Espaço, ⌘= ⌘− ⌘0 ⌘⌥0); `Cmd`/`Ctrl` para desfazer, refazer e salvar.
 ///
 /// 🔑 **Com `Ctrl` também**: o balcão roda Windows e Linux, onde desfazer é
@@ -92,5 +102,20 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("ctrl-alt-0", UmPorUm, c),
         KeyBinding::new("z", AlternarZoom, solta),
         KeyBinding::new("space", SegurarAMao, solta),
+        KeyBinding::new("m", SelecaoRetangular, solta),
+        KeyBinding::new("shift-m", SelecaoEliptica, solta),
+        KeyBinding::new("l", SelecaoLaco, solta),
+        KeyBinding::new("cmd-a", SelecionarTudo, c),
+        KeyBinding::new("ctrl-a", SelecionarTudo, c),
+        KeyBinding::new("cmd-d", Desmarcar, c),
+        KeyBinding::new("ctrl-d", Desmarcar, c),
+        KeyBinding::new("cmd-shift-i", InverterSelecao, c),
+        KeyBinding::new("ctrl-shift-i", InverterSelecao, c),
+        KeyBinding::new("backspace", ApagarSelecao, solta),
+        KeyBinding::new("delete", ApagarSelecao, solta),
+        KeyBinding::new("alt-backspace", PreencherSelecao, solta),
+        KeyBinding::new("alt-delete", PreencherSelecao, solta),
+        KeyBinding::new("cmd-e", MesclarParaBaixo, c),
+        KeyBinding::new("ctrl-e", MesclarParaBaixo, c),
     ]);
 }

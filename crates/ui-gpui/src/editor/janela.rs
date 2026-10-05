@@ -37,8 +37,10 @@ use std::time::{Duration, Instant};
 use editor_core::sessao::PedidoDeLupa;
 use editor_core::vista::Vista as VistaDoEditor;
 use editor_core::{
-    BaseRef, Documento, Ferramenta, Historico, Modo, Retangulo, Sessao, VersaoEditada,
+    BaseRef, Documento, Ferramenta, Forma, Historico, Modo, Operacao, Retangulo, Sessao,
+    VersaoEditada,
 };
+use gpui_kit::component::button::ButtonVariants as _;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::slider::{SliderEvent, SliderState};
@@ -46,17 +48,18 @@ use gpui_kit::component::{ActiveTheme, Disableable, Sizable};
 use gpui_kit::{
     canvas, div, img, prelude::*, px, AnyElement, Bounds, Context, Entity, EventEmitter,
     FocusHandle, Focusable, KeyUpEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ObjectFit, PinchEvent, Pixels, Point, RenderImage, ScrollWheelEvent, SharedString,
+    ObjectFit, PathBuilder, PinchEvent, Pixels, Point, RenderImage, ScrollWheelEvent, SharedString,
     Subscription, Task, Window,
 };
 use image::DynamicImage;
 
 use super::porta::{Abertura, Edicoes, FotoDoEditor};
 use super::{
-    Afastar, AlternarCamada, AlternarZoom, Aproximar, CamadaDeBaixo, CamadaDeCima, DescerCamada,
-    DesfazerNoEditor, DuplicarCamada, Encaixar, FecharEditor, NovaCamada, PincelMaior, PincelMenor,
-    RefazerNoEditor, SalvarNoEditor, SegurarAMao, SubirCamada, UmPorUm, UsarBorracha, UsarPincel,
-    CONTEXTO,
+    Afastar, AlternarCamada, AlternarZoom, ApagarSelecao, Aproximar, CamadaDeBaixo, CamadaDeCima,
+    DescerCamada, DesfazerNoEditor, Desmarcar, DuplicarCamada, Encaixar, FecharEditor,
+    InverterSelecao, MesclarParaBaixo, NovaCamada, PincelMaior, PincelMenor, PreencherSelecao,
+    RefazerNoEditor, SalvarNoEditor, SegurarAMao, SelecaoEliptica, SelecaoLaco, SelecaoRetangular,
+    SelecionarTudo, SubirCamada, UmPorUm, UsarBorracha, UsarPincel, CONTEXTO,
 };
 use crate::campo::TrocarValor as _;
 use crate::recursos::Icone;
@@ -114,6 +117,76 @@ pub struct Medidas {
     pub ultima_lupa: Option<Duration>,
 }
 
+/// Um segmento da borda da seleção, em pixels da foto: `(x0, y0, x1, y1)`.
+type Segmento = (u32, u32, u32, u32);
+
+/// De que versão da sessão e de que lupa (região, fator) a borda é.
+type ChaveDasBordas = (u64, Option<(Retangulo, u32)>);
+
+/// As ferramentas de seleção (M, ⇧M, L).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TipoDeSelecao {
+    Retangulo,
+    Elipse,
+    Laco,
+}
+
+/// Uma seleção sendo desenhada: os pontos em pixels da foto (no retângulo e
+/// na elipse, o primeiro e o último são os cantos).
+struct GestoDeSelecao {
+    tipo: TipoDeSelecao,
+    operacao: Operacao,
+    pontos: Vec<(f32, f32)>,
+}
+
+impl GestoDeSelecao {
+    fn forma(&self) -> Forma {
+        let (a, b) = (
+            self.pontos[0],
+            *self.pontos.last().unwrap_or(&self.pontos[0]),
+        );
+        let x0 = a.0.min(b.0).max(0.0);
+        let y0 = a.1.min(b.1).max(0.0);
+        let caixa = Retangulo::novo(
+            x0.round() as u32,
+            y0.round() as u32,
+            (a.0.max(b.0).max(0.0) - x0).round() as u32,
+            (a.1.max(b.1).max(0.0) - y0).round() as u32,
+        );
+        match self.tipo {
+            TipoDeSelecao::Retangulo => Forma::Retangulo(caixa),
+            TipoDeSelecao::Elipse => Forma::Elipse(caixa),
+            TipoDeSelecao::Laco => Forma::Laco(self.pontos.clone()),
+        }
+    }
+
+    /// O contorno para desenhar enquanto arrasta, em pixels da foto.
+    fn contorno(&self) -> Vec<(f32, f32)> {
+        let (a, b) = (
+            self.pontos[0],
+            *self.pontos.last().unwrap_or(&self.pontos[0]),
+        );
+        match self.tipo {
+            TipoDeSelecao::Retangulo => vec![a, (b.0, a.1), b, (a.0, b.1), a],
+            TipoDeSelecao::Elipse => {
+                let (cx, cy) = ((a.0 + b.0) / 2.0, (a.1 + b.1) / 2.0);
+                let (rx, ry) = ((b.0 - a.0).abs() / 2.0, (b.1 - a.1).abs() / 2.0);
+                (0..=64)
+                    .map(|i| {
+                        let t = i as f32 / 64.0 * std::f32::consts::TAU;
+                        (cx + rx * t.cos(), cy + ry * t.sin())
+                    })
+                    .collect()
+            }
+            TipoDeSelecao::Laco => {
+                let mut v = self.pontos.clone();
+                v.push(a);
+                v
+            }
+        }
+    }
+}
+
 /// A mão: onde o arrasto começou e a vista de então.
 #[derive(Clone, Copy)]
 struct Mao {
@@ -162,6 +235,14 @@ pub struct EditorDeFoto {
     _assinatura_do_nome: Option<Subscription>,
     _tarefa: Option<Task<()>>,
     _tarefa_da_lupa: Option<Task<()>>,
+    /// A ferramenta de seleção, quando é ela que está na mão.
+    selecionando: Option<TipoDeSelecao>,
+    gesto_de_selecao: Option<GestoDeSelecao>,
+    /// A borda da seleção em segmentos da foto, e de que versão/lupa ela é.
+    bordas: Option<(ChaveDasBordas, Arc<Vec<Segmento>>)>,
+    /// A miniatura de cada camada e a versão da sessão em que foi feita.
+    miniaturas: Vec<Arc<RenderImage>>,
+    versao_das_miniaturas: Option<u64>,
 }
 
 fn slider(
@@ -296,6 +377,11 @@ impl EditorDeFoto {
             _assinatura_do_nome: None,
             _tarefa: None,
             _tarefa_da_lupa: None,
+            selecionando: None,
+            gesto_de_selecao: None,
+            bordas: None,
+            miniaturas: Vec::new(),
+            versao_das_miniaturas: None,
         };
         editor.carregar(carregar_base, cx);
         editor
@@ -636,8 +722,38 @@ impl EditorDeFoto {
             .then_some((x, y))
     }
 
+    /// O ponteiro desceu no palco com uma ferramenta de seleção: o gesto
+    /// começa (⇧ soma, ⌥ subtrai), mesmo fora da foto.
+    pub fn comecar_selecao(
+        &mut self,
+        ponto: Point<Pixels>,
+        modificadores: gpui_kit::Modifiers,
+        cx: &mut Context<Self>,
+    ) {
+        let (Some(tipo), Some(p)) = (self.selecionando, self.na_foto_sem_limite(ponto)) else {
+            return;
+        };
+        let operacao = if modificadores.shift {
+            Operacao::Somar
+        } else if modificadores.alt {
+            Operacao::Subtrair
+        } else {
+            Operacao::Nova
+        };
+        self.gesto_de_selecao = Some(GestoDeSelecao {
+            tipo,
+            operacao,
+            pontos: vec![p, p],
+        });
+        cx.notify();
+    }
+
     /// O ponteiro desceu na foto.
     pub fn apertar(&mut self, ponto: Point<Pixels>, cx: &mut Context<Self>) {
+        if self.selecionando.is_some() {
+            self.comecar_selecao(ponto, gpui_kit::Modifiers::none(), cx);
+            return;
+        }
         let Some((x, y)) = self.na_foto(ponto) else {
             return;
         };
@@ -661,6 +777,29 @@ impl EditorDeFoto {
     /// O ponteiro andou — pinta se estiver apertado; sempre move o círculo.
     pub fn mover(&mut self, ponto: Point<Pixels>, cx: &mut Context<Self>) {
         self.ponteiro = Some(ponto);
+        if self.gesto_de_selecao.is_some() {
+            let escala = self.vista_do_zoom().map_or(1.0, |(_, v)| v.escala);
+            let no_ponto = self.na_foto_sem_limite(ponto);
+            if let (Some(p), Some(gesto)) = (no_ponto, self.gesto_de_selecao.as_mut()) {
+                match gesto.tipo {
+                    TipoDeSelecao::Laco => {
+                        // Um ponto a cada 2 pontos da tela: o laço segue a mão
+                        // sem guardar cada evento.
+                        let ultimo = *gesto.pontos.last().unwrap();
+                        if (p.0 - ultimo.0).hypot(p.1 - ultimo.1) * escala >= 2.0 {
+                            gesto.pontos.push(p);
+                        }
+                    }
+                    _ => {
+                        if let Some(fim) = gesto.pontos.last_mut() {
+                            *fim = p;
+                        }
+                    }
+                }
+            }
+            cx.notify();
+            return;
+        }
         if self.pintando {
             // Fora da foto o traço continua (a conta dá coordenada negativa ou
             // além da borda, e o pincel corta) — como no Photoshop.
@@ -680,6 +819,14 @@ impl EditorDeFoto {
         if self.mao.take().is_some() {
             cx.notify();
         }
+        if let Some(gesto) = self.gesto_de_selecao.take() {
+            let forma = gesto.forma();
+            if let Some(s) = self.sessao_mut() {
+                s.selecionar(&forma, gesto.operacao);
+            }
+            cx.notify();
+            return;
+        }
         if !std::mem::take(&mut self.pintando) {
             return;
         }
@@ -694,7 +841,23 @@ impl EditorDeFoto {
         self.sessao().map(|s| s.pincel.ferramenta)
     }
 
+    /// A ferramenta de seleção na mão (`None`: volta ao pincel/borracha).
+    pub fn selecionando(&self) -> Option<TipoDeSelecao> {
+        self.selecionando
+    }
+
+    /// Quantas miniaturas o painel tem prontas (uma por camada).
+    pub fn quantas_miniaturas(&self) -> usize {
+        self.miniaturas.len()
+    }
+
+    pub fn usar_selecao(&mut self, tipo: TipoDeSelecao, cx: &mut Context<Self>) {
+        self.selecionando = Some(tipo);
+        cx.notify();
+    }
+
     pub fn usar(&mut self, ferramenta: Ferramenta, cx: &mut Context<Self>) {
+        self.selecionando = None;
         if let Some(s) = self.sessao_mut() {
             s.pincel.ferramenta = ferramenta;
         }
@@ -702,9 +865,12 @@ impl EditorDeFoto {
     }
 
     pub fn escolher_cor(&mut self, cor: [u8; 3], cx: &mut Context<Self>) {
+        let com_o_pincel = self.selecionando.is_none();
         if let Some(s) = self.sessao_mut() {
             s.pincel.cor = cor;
-            s.pincel.ferramenta = Ferramenta::Pincel;
+            if com_o_pincel {
+                s.pincel.ferramenta = Ferramenta::Pincel;
+            }
         }
         cx.notify();
     }
@@ -775,6 +941,109 @@ impl EditorDeFoto {
 
     pub fn mudar_modo(&mut self, modo: Modo, cx: &mut Context<Self>) {
         self.na_sessao(cx, |s| s.mudar_modo(modo));
+    }
+
+    /// ⌘E — com o motivo na barra quando não dá.
+    pub fn mesclar_para_baixo(&mut self, cx: &mut Context<Self>) {
+        let Some(s) = self.sessao_mut() else {
+            return;
+        };
+        self.aviso = s
+            .mesclar_para_baixo()
+            .err()
+            .map(|motivo| (SharedString::from(motivo), true));
+        cx.notify();
+    }
+
+    pub fn selecionar_tudo(&mut self, cx: &mut Context<Self>) {
+        self.na_sessao(cx, Sessao::selecionar_tudo);
+    }
+
+    pub fn desmarcar(&mut self, cx: &mut Context<Self>) {
+        self.na_sessao(cx, Sessao::desmarcar);
+    }
+
+    pub fn inverter_selecao(&mut self, cx: &mut Context<Self>) {
+        self.na_sessao(cx, Sessao::inverter_selecao);
+    }
+
+    /// Delete: apaga a seleção na camada escolhida.
+    pub fn apagar_selecao(&mut self, cx: &mut Context<Self>) {
+        self.na_sessao(cx, |s| {
+            s.apagar_selecao();
+        });
+    }
+
+    /// ⌥Delete: preenche a seleção (ou a camada) com a cor do pincel.
+    pub fn preencher_selecao(&mut self, cx: &mut Context<Self>) {
+        let Some(s) = self.sessao_mut() else {
+            return;
+        };
+        let escondida = !s.camada_ativa().visivel;
+        s.preencher_selecao();
+        self.aviso = escondida.then(|| {
+            (
+                SharedString::from("A camada está escondida — mostre-a (H) para preencher"),
+                true,
+            )
+        });
+        cx.notify();
+    }
+
+    /// Refaz a borda da seleção quando ela, a pilha ou a lupa mudaram. Com a
+    /// lupa, a borda é a do pedaço dela no fator dela (fina no zoom); sem, a da
+    /// foto inteira no fator da vista.
+    fn atualizar_as_bordas(&mut self) {
+        let Some(s) = self.sessao() else {
+            self.bordas = None;
+            return;
+        };
+        let Some(selecao) = s.selecao() else {
+            self.bordas = None;
+            return;
+        };
+        let lupa = s.lupa().map(|l| (l.regiao(), l.fator()));
+        let chave = (s.versao(), lupa);
+        if self.bordas.as_ref().is_some_and(|(c, _)| *c == chave) {
+            return;
+        }
+        let (regiao, passo) = lupa.unwrap_or((
+            Retangulo::inteiro(selecao.largura(), selecao.altura()),
+            s.vista().fator(),
+        ));
+        self.bordas = Some((chave, Arc::new(selecao.bordas(&regiao, passo))));
+    }
+
+    /// As miniaturas do painel, refeitas quando a sessão mudou e não há traço
+    /// em curso (não a cada movimento do pincel).
+    fn atualizar_as_miniaturas(&mut self) {
+        let Some(s) = self.sessao() else {
+            return;
+        };
+        if s.tracando()
+            || (self.versao_das_miniaturas == Some(s.versao())
+                && self.miniaturas.len() == s.documento().camadas.len())
+        {
+            return;
+        }
+        let (lf, af) = (s.base().width().max(1), s.base().height().max(1));
+        let (l, a) = if lf >= af {
+            (LADO_DA_MINIATURA, (LADO_DA_MINIATURA * af / lf).max(1))
+        } else {
+            ((LADO_DA_MINIATURA * lf / af).max(1), LADO_DA_MINIATURA)
+        };
+        let versao = s.versao();
+        let miniaturas = s
+            .documento()
+            .camadas
+            .iter()
+            .filter_map(|c| {
+                let rgba = editor_core::operacoes::miniatura(&c.pixels, l, a);
+                crate::imagem::de_bgra(l, a, sobre_xadrez(&rgba, l))
+            })
+            .collect();
+        self.miniaturas = miniaturas;
+        self.versao_das_miniaturas = Some(versao);
     }
 
     pub fn renomear_camada(&mut self, indice: usize, nome: &str, cx: &mut Context<Self>) {
@@ -1027,6 +1296,7 @@ impl EditorDeFoto {
                     "nova" => self.nova_camada(cx),
                     "duplicar" => self.duplicar_camada(cx),
                     "excluir" => self.excluir_camada(cx),
+                    "mesclar" => self.mesclar_para_baixo(cx),
                     "subir" => self.mover_camada(1, cx),
                     "descer" => self.mover_camada(-1, cx),
                     "escolher" => self.escolher_camada(indice, cx),
@@ -1068,6 +1338,82 @@ impl EditorDeFoto {
                     outro => eprintln!("[roteiro] editor zoom {outro}?"),
                 }
             }
+            "selecao" => {
+                // Frações da foto inteira, como o `mouse`.
+                let (largura, altura) = self.sessao().map_or((1.0, 1.0), |s| {
+                    (s.base().width() as f32, s.base().height() as f32)
+                });
+                let ponto = |i: usize| (numero(i) * largura, numero(i + 1) * altura);
+                let operacao = match partes.last().copied() {
+                    Some("somar") => Operacao::Somar,
+                    Some("subtrair") => Operacao::Subtrair,
+                    _ => Operacao::Nova,
+                };
+                let caixa = || {
+                    let (a, b) = (ponto(2), ponto(4));
+                    Retangulo::novo(
+                        a.0.min(b.0) as u32,
+                        a.1.min(b.1) as u32,
+                        (a.0 - b.0).abs() as u32,
+                        (a.1 - b.1).abs() as u32,
+                    )
+                };
+                let forma = match partes.get(1).copied().unwrap_or_default() {
+                    "retangulo" => Some(Forma::Retangulo(caixa())),
+                    "elipse" => Some(Forma::Elipse(caixa())),
+                    "laco" => {
+                        let numeros = partes
+                            .iter()
+                            .skip(2)
+                            .filter_map(|v| v.parse::<f32>().ok())
+                            .collect::<Vec<_>>();
+                        Some(Forma::Laco(
+                            numeros
+                                .as_chunks::<2>()
+                                .0
+                                .iter()
+                                .map(|[x, y]| (x * largura, y * altura))
+                                .collect(),
+                        ))
+                    }
+                    "tudo" => {
+                        self.selecionar_tudo(cx);
+                        None
+                    }
+                    "desmarcar" => {
+                        self.desmarcar(cx);
+                        None
+                    }
+                    "inverter" => {
+                        self.inverter_selecao(cx);
+                        None
+                    }
+                    "apagar" => {
+                        self.apagar_selecao(cx);
+                        None
+                    }
+                    "preencher" => {
+                        self.preencher_selecao(cx);
+                        None
+                    }
+                    "ferramenta" => {
+                        match partes.get(2).copied() {
+                            Some("retangulo") => self.usar_selecao(TipoDeSelecao::Retangulo, cx),
+                            Some("elipse") => self.usar_selecao(TipoDeSelecao::Elipse, cx),
+                            Some("laco") => self.usar_selecao(TipoDeSelecao::Laco, cx),
+                            _ => self.usar(Ferramenta::Pincel, cx),
+                        }
+                        None
+                    }
+                    outro => {
+                        eprintln!("[roteiro] editor selecao {outro}?");
+                        None
+                    }
+                };
+                if let Some(forma) = forma {
+                    self.na_sessao(cx, |s| s.selecionar(&forma, operacao));
+                }
+            }
             "espaco" => match partes.get(1).copied() {
                 Some("segurar") => self.espaco_apertado(cx),
                 _ => self.espaco_solto(cx),
@@ -1101,12 +1447,16 @@ impl EditorDeFoto {
                         .collect::<Vec<_>>()
                         .join(" | ")
                 });
+                let selecao = self
+                    .sessao()
+                    .and_then(|s| s.selecao())
+                    .map(|s| format!("{:?}", s.limites()));
                 let lupa = self
                     .sessao()
                     .and_then(|s| s.lupa())
                     .map(|l| format!("fator {} {:?}", l.fator(), l.regiao()));
                 eprintln!(
-                    "[roteiro] editor: foto={} pronta={} falha={:?} alterado={} salvando={} aviso={:?} passos={} camadas=[{camadas}] zoom={} razao={:?} lupa={lupa:?} medidas={:?}",
+                    "[roteiro] editor: foto={} pronta={} falha={:?} alterado={} salvando={} aviso={:?} passos={} camadas=[{camadas}] zoom={} razao={:?} lupa={lupa:?} selecao={selecao:?} medidas={:?}",
                     self.foto.id,
                     self.pronta(),
                     self.falha(),
@@ -1235,7 +1585,7 @@ impl EditorDeFoto {
         let fator_da_tela = window.scale_factor().max(1.0);
         let medidor = cx.entity();
         let ouvinte = cx.entity();
-        let pintando = self.pintando;
+        let pintando = self.pintando || self.gesto_de_selecao.is_some();
         let com_a_mao = self.mao.is_some();
         let medida = canvas(
             move |bounds, window, cx| {
@@ -1321,12 +1671,20 @@ impl EditorDeFoto {
                             palco = palco.child(nitidos);
                         }
                     }
+                    // O letreiro da seleção e a forma sendo desenhada.
+                    if let Some((_, bordas)) = &self.bordas {
+                        palco = palco.child(tela.letreiro(bordas.clone()));
+                    }
+                    if let Some(gesto) = &self.gesto_de_selecao {
+                        palco = palco.child(tela.contorno(gesto.contorno()));
+                    }
                     // O círculo do pincel, do tamanho que ele pinta.
                     let dentro = self.ponteiro.filter(|p| {
                         self.area_na_janela().is_some_and(|a| a.contains(p))
                             && self.palco.contains(p)
                     });
-                    if let (Some(ponteiro), None) = (dentro, self.espaco) {
+                    let com_pincel = self.selecionando.is_none();
+                    if let (Some(ponteiro), None, true) = (dentro, self.espaco, com_pincel) {
                         let raio = sessao.pincel.raio * v.escala;
                         let centro = ponteiro - self.palco.origin;
                         palco = palco.child(
@@ -1356,6 +1714,8 @@ impl EditorDeFoto {
                             window.focus(&ed.foco, cx);
                             if ed.espaco.is_some() {
                                 ed.pegar_com_a_mao(evento.position, cx);
+                            } else if ed.selecionando.is_some() {
+                                ed.comecar_selecao(evento.position, evento.modifiers, cx);
                             } else {
                                 ed.apertar(evento.position, cx);
                             }
@@ -1372,7 +1732,7 @@ impl EditorDeFoto {
                         cx.listener(|ed, e: &ScrollWheelEvent, _w, cx| ed.ao_rolar(e, cx)),
                     )
                     .on_mouse_move(cx.listener(|ed, evento: &MouseMoveEvent, _w, cx| {
-                        if !ed.pintando && ed.mao.is_none() {
+                        if !ed.pintando && ed.mao.is_none() && ed.gesto_de_selecao.is_none() {
                             ed.mover(evento.position, cx);
                         }
                     }));
@@ -1511,7 +1871,8 @@ impl EditorDeFoto {
 
     fn painel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let tema = cx.theme().clone();
-        let ferramenta = self.ferramenta();
+        let ferramenta = self.ferramenta().filter(|_| self.selecionando.is_none());
+        let selecionando = self.selecionando;
         let cor_atual = self.sessao().map(|s| s.pincel.cor);
         let rotulo = |texto: &'static str| {
             div()
@@ -1558,6 +1919,40 @@ impl EditorDeFoto {
                         Ferramenta::Borracha,
                         cx,
                     )),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.))
+                    .children(
+                        [
+                            (TipoDeSelecao::Retangulo, Icone::Square, "editor-selecao-retangulo", "Seleção retangular (M) — ⇧ soma, ⌥ tira"),
+                            (TipoDeSelecao::Elipse, Icone::CircleDashed, "editor-selecao-elipse", "Seleção elíptica (⇧M) — ⇧ soma, ⌥ tira"),
+                            (TipoDeSelecao::Laco, Icone::Lasso, "editor-selecao-laco", "Laço (L) — ⇧ soma, ⌥ tira"),
+                        ]
+                        .into_iter()
+                        .map(|(tipo, icone, id, dica)| {
+                            let botao = crate::estilo::botao_icone_padrao(id, icone)
+                                .debug_selector(move || id.into())
+                                .tooltip(dica)
+                                .on_click(cx.listener(move |ed, _, _, cx| ed.usar_selecao(tipo, cx)));
+                            if selecionando == Some(tipo) {
+                                botao.primary()
+                            } else {
+                                botao
+                            }
+                        }),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        crate::estilo::botao_fantasma_pequeno("editor-desmarcar", cx)
+                            .debug_selector(|| "editor-desmarcar".into())
+                            .label("Desmarcar")
+                            .tooltip("Tirar a seleção (⌘D) · ⌘A tudo · ⇧⌘I inverter · Delete apaga · ⌥Delete preenche")
+                            .disabled(self.sessao().and_then(Sessao::selecao).is_none())
+                            .on_click(cx.listener(|ed, _, _, cx| ed.desmarcar(cx))),
+                    ),
             )
             .child(rotulo("Tamanho  [  ]"))
             .child(div().h(px(20.)).child(crate::estilo::slider(&self.tamanho)))
@@ -1613,6 +2008,7 @@ impl EditorDeFoto {
         };
         let quantas = camadas.len();
         let renomeando = self.renomeando.clone();
+        let miniaturas = self.miniaturas.clone();
         let linhas = camadas
             .into_iter()
             .enumerate()
@@ -1667,6 +2063,15 @@ impl EditorDeFoto {
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                             .child(olho),
                     )
+                    .when_some(miniaturas.get(i).cloned(), |d, m| {
+                        d.child(
+                            img(m)
+                                .object_fit(ObjectFit::Contain)
+                                .w(px(LADO_DA_MINIATURA as f32 * 0.75))
+                                .h(px(LADO_DA_MINIATURA as f32 * 0.75))
+                                .flex_none(),
+                        )
+                    })
                     .child(texto)
                     .when(modo != Modo::Normal, |d| {
                         d.child(
@@ -1782,6 +2187,15 @@ impl EditorDeFoto {
                         )
                         .on_click(cx.listener(|ed, _, _, cx| ed.mover_camada(-1, cx))),
                     )
+                    .child(
+                        botao(
+                            "editor-camada-mesclar",
+                            Icone::Layers,
+                            "Mesclar para baixo (⌘E)",
+                            ativa > 0 && quantas > 1,
+                        )
+                        .on_click(cx.listener(|ed, _, _, cx| ed.mesclar_para_baixo(cx))),
+                    )
                     .child(div().flex_1())
                     .child(
                         botao(
@@ -1854,6 +2268,26 @@ fn subir(vista: &mut VistaDoEditor, imagens: &mut HashMap<(u32, u32), Arc<Render
     sujos.len()
 }
 
+/// O lado maior da miniatura da camada, em pixels.
+const LADO_DA_MINIATURA: u32 = 48;
+
+/// A miniatura RGBA sobre o xadrez do transparente, em BGRA opaco.
+fn sobre_xadrez(rgba: &[u8], largura: u32) -> Vec<u8> {
+    let mut saida = Vec::with_capacity(rgba.len());
+    for (k, p) in rgba.as_chunks::<4>().0.iter().enumerate() {
+        let (x, y) = (k as u32 % largura, k as u32 / largura);
+        let fundo: f32 = if (x / 6 + y / 6) % 2 == 0 {
+            204.0
+        } else {
+            153.0
+        };
+        let a = p[3] as f32 / 255.0;
+        let c = |v: u8| (v as f32 * a + fundo * (1.0 - a)).round() as u8;
+        saida.extend_from_slice(&[c(p[2]), c(p[1]), c(p[0]), 255]);
+    }
+    saida
+}
+
 /// `dentro` cabe inteiro em `fora`.
 fn contem(fora: &Retangulo, dentro: &Retangulo) -> bool {
     dentro.x >= fora.x
@@ -1870,6 +2304,103 @@ struct Tela {
 }
 
 impl Tela {
+    /// O letreiro: a borda da seleção em preto, com traços brancos de 4 pontos
+    /// por cima — lê sobre qualquer foto.
+    fn letreiro(&self, bordas: Arc<Vec<Segmento>>) -> AnyElement {
+        let (vx, vy, esc) = (self.v.x, self.v.y, self.v.escala);
+        let area = self.area;
+        canvas(
+            |_, _, _| {},
+            move |limites, _, window, _| {
+                let (ox, oy) = (f(limites.origin.x), f(limites.origin.y));
+                let mut preto = PathBuilder::stroke(px(1.5));
+                let mut branco = PathBuilder::stroke(px(1.));
+                let mut algum = false;
+                for &(x0, y0, x1, y1) in bordas.iter() {
+                    let (ax, ay) = (vx + x0 as f32 * esc, vy + y0 as f32 * esc);
+                    let (bx, by) = (vx + x1 as f32 * esc, vy + y1 as f32 * esc);
+                    if ax.max(bx) < 0.0
+                        || ay.max(by) < 0.0
+                        || ax.min(bx) > area.largura
+                        || ay.min(by) > area.altura
+                    {
+                        continue;
+                    }
+                    // Só o pedaço dentro do palco (com folga): ampliada, uma
+                    // borda pode ter milhares de pontos de comprimento.
+                    let (ax, bx) = (
+                        ax.clamp(-2.0, area.largura + 2.0),
+                        bx.clamp(-2.0, area.largura + 2.0),
+                    );
+                    let (ay, by) = (
+                        ay.clamp(-2.0, area.altura + 2.0),
+                        by.clamp(-2.0, area.altura + 2.0),
+                    );
+                    algum = true;
+                    preto.move_to(gpui_kit::point(px(ox + ax), px(oy + ay)));
+                    preto.line_to(gpui_kit::point(px(ox + bx), px(oy + by)));
+                    let comprimento = (bx - ax).abs() + (by - ay).abs();
+                    let (dx, dy) = ((bx - ax).signum(), (by - ay).signum());
+                    // Os traços alinhados à grade da tela, para os vizinhos
+                    // emendarem no mesmo compasso.
+                    let inicio = if dx != 0.0 { ax.min(bx) } else { ay.min(by) };
+                    let mut t = (inicio / 8.0).ceil() * 8.0 - inicio;
+                    let (sx, sy) = (ax.min(bx), ay.min(by));
+                    while t < comprimento {
+                        let fim = (t + 4.0).min(comprimento);
+                        let (px0, py0) = (sx + dx.abs() * t, sy + dy.abs() * t);
+                        let (px1, py1) = (sx + dx.abs() * fim, sy + dy.abs() * fim);
+                        branco.move_to(gpui_kit::point(px(ox + px0), px(oy + py0)));
+                        branco.line_to(gpui_kit::point(px(ox + px1), px(oy + py1)));
+                        t += 8.0;
+                    }
+                }
+                if !algum {
+                    return;
+                }
+                if let Ok(caminho) = preto.build() {
+                    window.paint_path(caminho, gpui_kit::black());
+                }
+                if let Ok(caminho) = branco.build() {
+                    window.paint_path(caminho, gpui_kit::white());
+                }
+            },
+        )
+        .absolute()
+        .inset_0()
+        .into_any_element()
+    }
+
+    /// A forma sendo desenhada (pixels da foto), fechada.
+    fn contorno(&self, pontos: Vec<(f32, f32)>) -> AnyElement {
+        let (vx, vy, esc) = (self.v.x, self.v.y, self.v.escala);
+        canvas(
+            |_, _, _| {},
+            move |limites, _, window, _| {
+                let (ox, oy) = (f(limites.origin.x), f(limites.origin.y));
+                let ponto = |p: &(f32, f32)| {
+                    gpui_kit::point(px(ox + vx + p.0 * esc), px(oy + vy + p.1 * esc))
+                };
+                for (largura, cor) in [(2.0, gpui_kit::black()), (1.0, gpui_kit::white())] {
+                    let mut traco = PathBuilder::stroke(px(largura));
+                    let Some(primeiro) = pontos.first() else {
+                        return;
+                    };
+                    traco.move_to(ponto(primeiro));
+                    for p in &pontos[1..] {
+                        traco.line_to(ponto(p));
+                    }
+                    if let Ok(caminho) = traco.build() {
+                        window.paint_path(caminho, cor);
+                    }
+                }
+            },
+        )
+        .absolute()
+        .inset_0()
+        .into_any_element()
+    }
+
     /// Os ladrilhos de uma vista (a inteira ou a lupa) que caem no palco.
     fn ladrilhos(
         &self,
@@ -2015,6 +2546,8 @@ impl Render for EditorDeFoto {
         }
         self.atualizar_a_lupa(cx);
         self.subir_os_ladrilhos();
+        self.atualizar_as_bordas();
+        self.atualizar_as_miniaturas();
         window.set_window_title(&self.titulo());
         // O slider e o modo acompanham a camada escolhida, o desfazer e a
         // reabertura.
@@ -2087,6 +2620,21 @@ impl Render for EditorDeFoto {
             }))
             .on_action(cx.listener(|ed, _: &AlternarZoom, _, cx| ed.z_apertado(cx)))
             .on_action(cx.listener(|ed, _: &SegurarAMao, _, cx| ed.espaco_apertado(cx)))
+            .on_action(cx.listener(|ed, _: &SelecaoRetangular, _, cx| {
+                ed.usar_selecao(TipoDeSelecao::Retangulo, cx)
+            }))
+            .on_action(cx.listener(|ed, _: &SelecaoEliptica, _, cx| {
+                ed.usar_selecao(TipoDeSelecao::Elipse, cx)
+            }))
+            .on_action(
+                cx.listener(|ed, _: &SelecaoLaco, _, cx| ed.usar_selecao(TipoDeSelecao::Laco, cx)),
+            )
+            .on_action(cx.listener(|ed, _: &SelecionarTudo, _, cx| ed.selecionar_tudo(cx)))
+            .on_action(cx.listener(|ed, _: &Desmarcar, _, cx| ed.desmarcar(cx)))
+            .on_action(cx.listener(|ed, _: &InverterSelecao, _, cx| ed.inverter_selecao(cx)))
+            .on_action(cx.listener(|ed, _: &ApagarSelecao, _, cx| ed.apagar_selecao(cx)))
+            .on_action(cx.listener(|ed, _: &PreencherSelecao, _, cx| ed.preencher_selecao(cx)))
+            .on_action(cx.listener(|ed, _: &MesclarParaBaixo, _, cx| ed.mesclar_para_baixo(cx)))
             .child(self.barra(cx))
             .child(
                 div()

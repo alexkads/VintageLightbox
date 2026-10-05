@@ -948,4 +948,110 @@ mod testes {
             "e não pintou nada"
         );
     }
+
+    fn arrastar_no_palco(ve: &mut VisualTestContext, de: (f32, f32), ate: (f32, f32)) {
+        let palco = ve.debug_bounds("palco-do-editor").unwrap();
+        let ponto = |f: (f32, f32)| {
+            palco.origin + gpui_kit::point(palco.size.width * f.0, palco.size.height * f.1)
+        };
+        let nada = gpui_kit::Modifiers::none();
+        ve.simulate_mouse_down(ponto(de), gpui_kit::MouseButton::Left, nada);
+        ve.run_until_parked();
+        ve.simulate_mouse_move(ponto(ate), Some(gpui_kit::MouseButton::Left), nada);
+        ve.run_until_parked();
+        ve.simulate_mouse_up(ponto(ate), gpui_kit::MouseButton::Left, nada);
+        ve.run_until_parked();
+    }
+
+    /// ⬚ A seleção pelo palco (M + arrastar), o pincel preso nela, e ⌘D ⌘A ⇧⌘I.
+    #[gpui_kit::test]
+    fn a_selecao_pelo_palco_prende_o_pincel(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        ve.simulate_keystrokes("m");
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.selecionando()),
+            Some(crate::editor::janela::TipoDeSelecao::Retangulo)
+        );
+        // A foto encaixada (64×48) ocupa o palco inteiro na largura: o meio
+        // da largura é o meio da foto.
+        arrastar_no_palco(&mut ve, (0.25, 0.5), (0.5, 0.6));
+        let limites = editor.read_with(&ve, |ed, _| {
+            ed.sessao().unwrap().selecao().map(|s| s.limites())
+        });
+        assert!(limites.is_some(), "o arrasto selecionou");
+        let (dentro, fora) = editor.read_with(&ve, |ed, _| {
+            let s = ed.sessao().unwrap().selecao().unwrap();
+            (s.valor(24, 24), s.valor(60, 24))
+        });
+        assert_eq!((dentro, fora), (255, 0));
+
+        ve.simulate_keystrokes("b");
+        ve.run_until_parked();
+        assert_eq!(editor.read_with(&ve, |ed, _| ed.selecionando()), None);
+        editor.update(&mut ve, |ed, cx| {
+            ed.tracar_para_teste((2., 24.), (62., 24.), cx)
+        });
+        let (pintado, nao) = editor.read_with(&ve, |ed, _| {
+            let c = &ed.sessao().unwrap().documento().camadas[0].pixels;
+            (c.pixel(24, 24)[3], c.pixel(60, 24)[3])
+        });
+        assert!(pintado > 0 && nao == 0, "dentro {pintado}, fora {nao}");
+
+        ve.simulate_keystrokes("cmd-d");
+        ve.run_until_parked();
+        assert!(editor.read_with(&ve, |ed, _| ed.sessao().unwrap().selecao().is_none()));
+        ve.simulate_keystrokes("cmd-a");
+        ve.run_until_parked();
+        assert!(editor.read_with(&ve, |ed, _| ed.sessao().unwrap().selecao().is_some()));
+        ve.simulate_keystrokes("cmd-shift-i");
+        ve.run_until_parked();
+        assert!(
+            editor.read_with(&ve, |ed, _| ed.sessao().unwrap().selecao().is_none()),
+            "tudo invertido é nada"
+        );
+    }
+
+    /// ⌫ ⌥⌫ ⌘E e as miniaturas do painel.
+    #[gpui_kit::test]
+    fn apagar_preencher_e_mesclar_pelas_teclas(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.simulate_keystrokes("cmd-shift-n");
+        ve.simulate_keystrokes("cmd-a");
+        ve.simulate_keystrokes("alt-backspace");
+        ve.run_until_parked();
+        let alfa = |ed: &EditorDeFoto| {
+            ed.sessao().unwrap().documento().camadas[1]
+                .pixels
+                .pixel(30, 30)[3]
+        };
+        assert_eq!(editor.read_with(&ve, |ed, _| alfa(ed)), 255, "⌥⌫ preencheu");
+        ve.simulate_keystrokes("backspace");
+        ve.run_until_parked();
+        assert_eq!(editor.read_with(&ve, |ed, _| alfa(ed)), 0, "⌫ apagou");
+        ve.simulate_keystrokes("cmd-z");
+        ve.run_until_parked();
+        assert_eq!(editor.read_with(&ve, |ed, _| alfa(ed)), 255);
+        assert_eq!(editor.read_with(&ve, |ed, _| ed.quantas_miniaturas()), 2);
+
+        ve.simulate_keystrokes("cmd-e");
+        ve.run_until_parked();
+        let (quantas, de_baixo) = editor.read_with(&ve, |ed, _| {
+            let d = ed.sessao().unwrap().documento();
+            (d.camadas.len(), d.camadas[0].pixels.pixel(30, 30)[3])
+        });
+        assert_eq!(
+            (quantas, de_baixo),
+            (1, 255),
+            "⌘E levou o preenchido para a de baixo"
+        );
+        assert_eq!(editor.read_with(&ve, |ed, _| ed.quantas_miniaturas()), 1);
+        ve.simulate_keystrokes("cmd-e");
+        ve.run_until_parked();
+        assert!(
+            editor.read_with(&ve, |ed, _| ed.aviso().is_some_and(|(_, erro)| erro)),
+            "na última não há o que mesclar"
+        );
+    }
 }
