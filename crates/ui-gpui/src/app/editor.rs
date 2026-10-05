@@ -1253,4 +1253,55 @@ mod testes {
         });
         assert_eq!((quantas, recortado, resto), (3, 0, 255));
     }
+
+    /// ✨ ⇧⌫ refaz a seleção pelo conteúdo em volta, numa camada vazia por
+    /// cima, num passo só; o J faz o mesmo no traço.
+    #[gpui_kit::test]
+    fn preencher_pelo_conteudo_e_o_pincel_de_correcao(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        ve.simulate_keystrokes("cmd-shift-n m");
+        ve.run_until_parked();
+        arrastar_no_palco(&mut ve, (0.4, 0.4), (0.55, 0.6));
+        ve.simulate_keystrokes("shift-backspace");
+        ve.run_until_parked();
+        let (preenchido, fora, passos) = editor.read_with(&ve, |ed, _| {
+            let s = ed.sessao().unwrap();
+            let c = &s.documento().camadas[1].pixels;
+            (
+                c.pixel(30, 24)[3],
+                c.pixel(5, 5)[3],
+                s.historico().posicao(),
+            )
+        });
+        assert!(!editor.read_with(&ve, |ed, _| ed.preenchendo()));
+        assert_eq!(
+            (preenchido, fora),
+            (255, 0),
+            "só a seleção, na camada de cima"
+        );
+        assert!(
+            editor.read_with(&ve, |ed, _| ed.sessao().unwrap().documento().camadas[0]
+                .pixels
+                .vazia())
+        );
+
+        ve.simulate_keystrokes("cmd-d j");
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.auxiliar()),
+            Some(crate::editor::janela::Auxiliar::Correcao)
+        );
+        arrastar_no_palco(&mut ve, (0.1, 0.8), (0.2, 0.8));
+        ve.run_until_parked();
+        let (corrigido, depois) = editor.read_with(&ve, |ed, _| {
+            let s = ed.sessao().unwrap();
+            (
+                s.documento().camadas[1].pixels.pixel(9, 38)[3],
+                s.historico().posicao(),
+            )
+        });
+        assert!(corrigido > 0, "o traço foi refeito");
+        assert_eq!(depois, passos + 1);
+    }
 }

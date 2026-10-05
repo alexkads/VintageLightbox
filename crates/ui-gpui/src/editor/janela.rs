@@ -59,10 +59,10 @@ use super::{
     Afastar, AlternarCamada, AlternarZoom, ApagarSelecao, AplicarTransformacao, Aproximar,
     CamadaDeBaixo, CamadaDeCima, CamadaViaRecorte, CancelarTransformacao, DescerCamada,
     DesfazerNoEditor, Desmarcar, DuplicarCamada, Encaixar, FecharEditor, InverterSelecao,
-    MesclarParaBaixo, NovaCamada, PincelMaior, PincelMenor, PreencherSelecao, RefazerNoEditor,
-    SalvarNoEditor, SegurarAMao, SelecaoEliptica, SelecaoLaco, SelecaoRetangular, SelecionarTudo,
-    SubirCamada, TransformacaoLivre, UmPorUm, UsarBorracha, UsarCarimbo, UsarContaGotas, UsarMover,
-    UsarPincel, CONTEXTO,
+    MesclarParaBaixo, NovaCamada, PincelMaior, PincelMenor, PreencherPeloConteudo,
+    PreencherSelecao, RefazerNoEditor, SalvarNoEditor, SegurarAMao, SelecaoEliptica, SelecaoLaco,
+    SelecaoRetangular, SelecionarTudo, SubirCamada, TransformacaoLivre, UmPorUm, UsarBorracha,
+    UsarCarimbo, UsarContaGotas, UsarCorrecao, UsarMover, UsarPincel, CONTEXTO,
 };
 use crate::campo::TrocarValor as _;
 use crate::recursos::Icone;
@@ -120,6 +120,8 @@ pub struct Medidas {
     pub ultima_lupa: Option<Duration>,
     /// A última borda da seleção montada (o letreiro).
     pub ultima_borda: Option<Duration>,
+    /// O último preenchimento por conteúdo, do pedido ao remendo pronto.
+    pub ultimo_preenchimento: Option<Duration>,
 }
 
 /// Um segmento da borda da seleção, em pixels da foto: `(x0, y0, x1, y1)`.
@@ -135,6 +137,88 @@ pub enum Auxiliar {
     ContaGotas,
     /// V — arrasta o conteúdo da camada escolhida.
     Mover,
+    /// J — o pincel de correção para manchas: pinta por cima, e ao soltar a
+    /// área é refeita pelo que está em volta.
+    Correcao,
+}
+
+/// O buraco de um preenchimento por conteúdo.
+#[derive(Clone)]
+enum Buraco {
+    /// O traço do pincel de correção: os pontos (pixels da foto) e o raio.
+    Traco(Vec<(f32, f32)>, f32),
+    /// A seleção (⇧⌫).
+    Selecao(Arc<editor_core::Selecao>),
+}
+
+impl Buraco {
+    /// Quanto do remendo entra no pixel `(x, y)`: 255 dentro, uma rampa de um
+    /// pixel na borda.
+    fn peso(&self, x: f32, y: f32) -> u8 {
+        match self {
+            Buraco::Traco(pontos, raio) => {
+                let d = distancia_ao_traco(pontos, x, y);
+                ((raio + 0.5 - d).clamp(0.0, 1.0) * 255.0).round() as u8
+            }
+            Buraco::Selecao(s) => s.valor(x as u32, y as u32),
+        }
+    }
+
+    /// A caixa `(x0, y0, x1, y1)` do buraco, na foto.
+    fn caixa(&self, largura: u32, altura: u32) -> Option<(u32, u32, u32, u32)> {
+        let (x0, y0, x1, y1) = match self {
+            Buraco::Traco(pontos, raio) => {
+                let (mut a, mut b, mut c, mut d) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+                for (x, y) in pontos {
+                    a = a.min(*x);
+                    b = b.min(*y);
+                    c = c.max(*x);
+                    d = d.max(*y);
+                }
+                let r = raio + 1.0;
+                (
+                    (a - r).floor(),
+                    (b - r).floor(),
+                    (c + r).ceil(),
+                    (d + r).ceil(),
+                )
+            }
+            Buraco::Selecao(s) => {
+                let l = s.limites();
+                (l.x as f32, l.y as f32, l.direita() as f32, l.baixo() as f32)
+            }
+        };
+        let caixa = (
+            x0.max(0.0) as u32,
+            y0.max(0.0) as u32,
+            (x1.max(0.0) as u32).min(largura),
+            (y1.max(0.0) as u32).min(altura),
+        );
+        (caixa.2 > caixa.0 && caixa.3 > caixa.1).then_some(caixa)
+    }
+}
+
+/// A distância de um ponto ao traço (a linha quebrada pelos pontos).
+fn distancia_ao_traco(pontos: &[(f32, f32)], x: f32, y: f32) -> f32 {
+    let trechos: Vec<((f32, f32), (f32, f32))> = if pontos.len() == 1 {
+        vec![(pontos[0], pontos[0])]
+    } else {
+        pontos.windows(2).map(|q| (q[0], q[1])).collect()
+    };
+    trechos
+        .iter()
+        .map(|(a, b)| {
+            let ab = (b.0 - a.0, b.1 - a.1);
+            let ap = (x - a.0, y - a.1);
+            let l2 = ab.0 * ab.0 + ab.1 * ab.1;
+            let t = if l2 > 1e-9 {
+                ((ap.0 * ab.0 + ap.1 * ab.1) / l2).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            (ap.0 - ab.0 * t).hypot(ap.1 - ab.1 * t)
+        })
+        .fold(f32::MAX, f32::min)
 }
 
 /// `[r, g, b]` → a cor do kit.
@@ -297,6 +381,11 @@ pub struct EditorDeFoto {
     /// A cor que o seletor mostra — para só mexer nele quando mudar.
     cor_mostrada: Option<[u8; 3]>,
     gesto_de_transformacao: Option<GestoDeTransformacao>,
+    /// O traço do pincel de correção em curso (pixels da foto).
+    traco_de_correcao: Option<Vec<(f32, f32)>>,
+    /// Um preenchimento por conteúdo calculando em segundo plano.
+    preenchendo: bool,
+    _tarefa_do_preenchimento: Option<Task<()>>,
 }
 
 fn slider(
@@ -459,6 +548,9 @@ impl EditorDeFoto {
             seletor_de_cor,
             cor_mostrada: None,
             gesto_de_transformacao: None,
+            traco_de_correcao: None,
+            preenchendo: false,
+            _tarefa_do_preenchimento: None,
         };
         editor.carregar(carregar_base, cx);
         editor
@@ -858,6 +950,13 @@ impl EditorDeFoto {
                 self.comecar_a_mover(ponto, cx);
                 return;
             }
+            Some(Auxiliar::Correcao) => {
+                if let Some(p) = self.na_foto(ponto) {
+                    self.traco_de_correcao = Some(vec![p]);
+                    cx.notify();
+                }
+                return;
+            }
             None => {}
         }
         if modificadores.alt {
@@ -915,6 +1014,115 @@ impl EditorDeFoto {
 
     pub fn transformando(&self) -> bool {
         self.sessao().is_some_and(Sessao::transformando)
+    }
+
+    // -------------------------------------------- preenchimento por conteúdo
+
+    /// ⇧⌫: a seleção refeita pelo que está em volta dela.
+    pub fn preencher_a_selecao_pelo_conteudo(&mut self, cx: &mut Context<Self>) {
+        match self.sessao().and_then(|s| s.selecao().cloned()) {
+            Some(s) => self.preencher_pelo_conteudo(Buraco::Selecao(Arc::new(s)), cx),
+            None => {
+                self.aviso = Some((
+                    "Selecione a área a refazer pelo conteúdo em volta".into(),
+                    true,
+                ));
+                cx.notify();
+            }
+        }
+    }
+
+    pub fn preenchendo(&self) -> bool {
+        self.preenchendo
+    }
+
+    /// O preenchimento por conteúdo (o mesmo PatchMatch da Revelação): a foto
+    /// até a camada escolhida, num recorte com a margem de trabalho, vai para o
+    /// executor de fundo; o remendo volta e entra na camada como um passo do
+    /// desfazer.
+    fn preencher_pelo_conteudo(&mut self, buraco: Buraco, cx: &mut Context<Self>) {
+        if self.preenchendo {
+            return;
+        }
+        let Some(s) = self.sessao() else {
+            return;
+        };
+        let (largura, altura) = (s.base().width(), s.base().height());
+        let Some(caixa) = buraco.caixa(largura, altura) else {
+            return;
+        };
+        let raio = match &buraco {
+            Buraco::Traco(_, r) => *r,
+            Buraco::Selecao(_) => 0.0,
+        };
+        let margem = revelacao_core::preenchimento::margem_de_trabalho(caixa, raio);
+        let (rx, ry) = (
+            caixa.0.saturating_sub(margem),
+            caixa.1.saturating_sub(margem),
+        );
+        let regiao = Retangulo::novo(
+            rx,
+            ry,
+            (caixa.2 + margem).min(largura) - rx,
+            (caixa.3 + margem).min(altura) - ry,
+        );
+        let camada = s.ativa();
+        let foto = s.foto_ate_a_ativa(&regiao);
+        self.preenchendo = true;
+        self.aviso = Some(("Refazendo pelo conteúdo em volta…".into(), false));
+        cx.notify();
+
+        let semente = ((caixa.0 as u64) << 48)
+            ^ ((caixa.1 as u64) << 32)
+            ^ ((caixa.2 as u64) << 16)
+            ^ caixa.3 as u64;
+        let para_o_fundo = buraco.clone();
+        let inicio = Instant::now();
+        let trabalho = cx.background_executor().spawn(async move {
+            let rgba: Vec<u8> = foto
+                .pixels()
+                .flat_map(|p| [p.0[0], p.0[1], p.0[2], 255])
+                .collect();
+            let (ox, oy) = (regiao.x as f32, regiao.y as f32);
+            let no_buraco = |x: f32, y: f32| para_o_fundo.peso(x + ox, y + oy) >= 128;
+            let relativa = (
+                caixa.0 - regiao.x,
+                caixa.1 - regiao.y,
+                caixa.2 - regiao.x,
+                caixa.3 - regiao.y,
+            );
+            revelacao_core::preenchimento::preencher_buraco(
+                &rgba,
+                regiao.largura,
+                regiao.altura,
+                relativa,
+                &no_buraco,
+                semente,
+            )
+        });
+        self._tarefa_do_preenchimento = Some(cx.spawn(async move |esta, cx| {
+            let remendo = trabalho.await;
+            let _ = esta.update(cx, |ed, cx| {
+                ed.preenchendo = false;
+                ed.medidas.ultimo_preenchimento = Some(inicio.elapsed());
+                let Some(r) = remendo else {
+                    ed.aviso = Some((
+                        "Não há em volta de onde tirar o preenchimento — selecione uma área menor"
+                            .into(),
+                        true,
+                    ));
+                    cx.notify();
+                    return;
+                };
+                let ret = Retangulo::novo(regiao.x + r.x0, regiao.y + r.y0, r.largura, r.altura);
+                let peso = |x: u32, y: u32| buraco.peso(x as f32 + 0.5, y as f32 + 0.5);
+                if let Some(s) = ed.sessao_mut() {
+                    s.colar_remendo(camada, &ret, &r.rgba, &peso);
+                }
+                ed.aviso = None;
+                cx.notify();
+            });
+        }));
     }
 
     /// Em que parte da caixa o ponto (da foto) cai — o canto conta com uma
@@ -1107,6 +1315,20 @@ impl EditorDeFoto {
             self.arrastar_na_caixa(ponto, modificadores.shift, cx);
             return;
         }
+        if self.traco_de_correcao.is_some() {
+            let escala = self.vista_do_zoom().map_or(1.0, |(_, v)| v.escala);
+            if let (Some(p), Some(traco)) = (
+                self.na_foto_sem_limite(ponto),
+                self.traco_de_correcao.as_mut(),
+            ) {
+                let ultimo = *traco.last().unwrap_or(&p);
+                if (p.0 - ultimo.0).hypot(p.1 - ultimo.1) * escala >= 2.0 {
+                    traco.push(p);
+                }
+            }
+            cx.notify();
+            return;
+        }
         if self.pegando_cor {
             self.pegar_cor(ponto, cx);
             return;
@@ -1171,6 +1393,11 @@ impl EditorDeFoto {
         self.pegando_cor = false;
         if self.gesto_de_transformacao.take().is_some() {
             cx.notify();
+            return;
+        }
+        if let Some(traco) = self.traco_de_correcao.take() {
+            let raio = self.sessao().map_or(10.0, |s| s.pincel.raio);
+            self.preencher_pelo_conteudo(Buraco::Traco(traco, raio), cx);
             return;
         }
         if self.arrasto_do_mover.take().is_some() {
@@ -1823,6 +2050,7 @@ impl EditorDeFoto {
                     self.na_sessao(cx, |s| s.selecionar(&forma, operacao));
                 }
             }
+            "conteudo" => self.preencher_a_selecao_pelo_conteudo(cx),
             "transformar" => match partes.get(1).copied().unwrap_or_default() {
                 "comecar" => self.transformar(cx),
                 "aplicar" => self.aplicar_transformacao(cx),
@@ -1846,6 +2074,7 @@ impl EditorDeFoto {
                 "carimbo" => self.usar(Ferramenta::Carimbo, cx),
                 "conta-gotas" => self.usar_auxiliar(Auxiliar::ContaGotas, cx),
                 "mover" => self.usar_auxiliar(Auxiliar::Mover, cx),
+                "correcao" => self.usar_auxiliar(Auxiliar::Correcao, cx),
                 outra => eprintln!("[roteiro] editor ferramenta {outra}?"),
             },
             "espaco" => match partes.get(1).copied() {
@@ -2023,7 +2252,8 @@ impl EditorDeFoto {
             || self.gesto_de_selecao.is_some()
             || self.pegando_cor
             || self.arrasto_do_mover.is_some()
-            || self.gesto_de_transformacao.is_some();
+            || self.gesto_de_transformacao.is_some()
+            || self.traco_de_correcao.is_some();
         let com_a_mao = self.mao.is_some();
         let medida = canvas(
             move |bounds, window, cx| {
@@ -2129,6 +2359,38 @@ impl EditorDeFoto {
                                     .border_color(gpui_kit::black()),
                             );
                         }
+                    }
+                    // O traço do pincel de correção, por onde o remendo vai passar.
+                    if let Some(traco) = &self.traco_de_correcao {
+                        let largura = sessao.pincel.raio * 2.0 * v.escala;
+                        let pontos: Vec<_> = traco
+                            .iter()
+                            .map(|(x, y)| (v.x + x * v.escala, v.y + y * v.escala))
+                            .collect();
+                        palco = palco.child(
+                            canvas(
+                                |_, _, _| {},
+                                move |limites, _, window, _| {
+                                    let (ox, oy) = (f(limites.origin.x), f(limites.origin.y));
+                                    let mut caminho = PathBuilder::stroke(px(largura.max(1.0)));
+                                    let p0 = pontos[0];
+                                    caminho.move_to(gpui_kit::point(px(ox + p0.0), px(oy + p0.1)));
+                                    // Um ponto só ainda precisa de um traço visível.
+                                    caminho.line_to(gpui_kit::point(
+                                        px(ox + p0.0 + 0.01),
+                                        px(oy + p0.1),
+                                    ));
+                                    for (x, y) in &pontos[1..] {
+                                        caminho.line_to(gpui_kit::point(px(ox + x), px(oy + y)));
+                                    }
+                                    if let Ok(c) = caminho.build() {
+                                        window.paint_path(c, gpui_kit::white().opacity(0.45));
+                                    }
+                                },
+                            )
+                            .absolute()
+                            .inset_0(),
+                        );
                     }
                     // O letreiro da seleção e a forma sendo desenhada.
                     if let Some((_, bordas)) = &self.bordas {
@@ -2457,6 +2719,13 @@ impl EditorDeFoto {
                     )
                     .child(div().flex_1())
                     .child(
+                        crate::estilo::botao_icone_padrao("editor-preencher-conteudo", Icone::Sparkles)
+                            .debug_selector(|| "editor-preencher-conteudo".into())
+                            .tooltip("Refazer a seleção pelo conteúdo em volta (⇧⌫)")
+                            .disabled(self.preenchendo || self.sessao().and_then(Sessao::selecao).is_none())
+                            .on_click(cx.listener(|ed, _, _, cx| ed.preencher_a_selecao_pelo_conteudo(cx))),
+                    )
+                    .child(
                         crate::estilo::botao_fantasma_pequeno("editor-desmarcar", cx)
                             .debug_selector(|| "editor-desmarcar".into())
                             .label("Desmarcar")
@@ -2485,6 +2754,7 @@ impl EditorDeFoto {
                         [
                             (Auxiliar::ContaGotas, Icone::Pipette, "editor-conta-gotas", "Conta-gotas (I) — a cor da foto vai para o pincel; com o pincel, ⌥ + clique"),
                             (Auxiliar::Mover, Icone::Move, "editor-mover", "Mover (V) — arrasta o conteúdo da camada escolhida"),
+                            (Auxiliar::Correcao, Icone::Bandage, "editor-correcao", "Pincel de correção (J) — pinte sobre a mancha; ao soltar, ela é refeita pelo que está em volta"),
                         ]
                         .into_iter()
                         .map(|(qual, icone, id, dica)| {
@@ -3186,6 +3456,12 @@ impl Render for EditorDeFoto {
             .on_action(cx.listener(|ed, _: &DuplicarCamada, _, cx| ed.duplicar_camada(cx)))
             .on_action(cx.listener(|ed, _: &CamadaViaRecorte, _, cx| ed.camada_via_recorte(cx)))
             .on_action(cx.listener(|ed, _: &TransformacaoLivre, _, cx| ed.transformar(cx)))
+            .on_action(
+                cx.listener(|ed, _: &UsarCorrecao, _, cx| ed.usar_auxiliar(Auxiliar::Correcao, cx)),
+            )
+            .on_action(cx.listener(|ed, _: &PreencherPeloConteudo, _, cx| {
+                ed.preencher_a_selecao_pelo_conteudo(cx)
+            }))
             .on_action(
                 cx.listener(|ed, _: &AplicarTransformacao, _, cx| ed.aplicar_transformacao(cx)),
             )
