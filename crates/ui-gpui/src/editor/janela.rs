@@ -1010,11 +1010,19 @@ impl EditorDeFoto {
                 t.angulo = a;
             }
         }
-        let inicio = Instant::now();
-        if let Some(s) = self.sessao_mut() {
-            s.definir_transformacao(t);
+        // Só mede o que mudou: o soltar no mesmo ponto não é gesto.
+        if self
+            .sessao()
+            .and_then(Sessao::transformacao)
+            .map(|(_, t0)| t0)
+            != Some(t)
+        {
+            let inicio = Instant::now();
+            if let Some(s) = self.sessao_mut() {
+                s.definir_transformacao(t);
+            }
+            self.medidas.ultimo_gesto = Some(inicio.elapsed());
         }
-        self.medidas.ultimo_gesto = Some(inicio.elapsed());
         cx.notify();
     }
 
