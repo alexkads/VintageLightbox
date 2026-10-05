@@ -37,6 +37,7 @@ Sem projeto editável, o fluxo é o de sempre: a Revelação parte do bruto.
 | [03-GRAVACAO-E-CATALOGO.md](03-GRAVACAO-E-CATALOGO.md) | O formato do projeto, os tiles, a gravação atômica, a recuperação e a tabela do catálogo |
 | [04-PLANO-ETAPA-1.md](04-PLANO-ETAPA-1.md) | O que a etapa 1 entrega, arquivo por arquivo, os testes e as medidas |
 | [05-ETAPA-2.md](05-ETAPA-2.md) | Várias camadas, os 16 modos de mesclagem, o formato 2 do projeto, zoom, mão e lupa |
+| [07-ETAPA-4.md](07-ETAPA-4.md) | Carimbo (S), conta-gotas (I), mover (V) e o seletor de cor |
 | [06-ETAPA-3.md](06-ETAPA-3.md) | Seleção (retângulo, elipse, laço), apagar e preencher, mesclar para baixo, miniaturas, formato 3 e a emenda dos ladrilhos |
 
 ## Etapa 1 — o que entra
@@ -58,9 +59,14 @@ mão com os gestos da Revelação, e a lupa em resolução cheia. Detalhes em [0
 Seleção retangular, elíptica e laço (⇧ soma, ⌥ tira, ⌘A ⌘D ⇧⌘I), pincel preso à seleção, Delete e
 ⌥Delete, mesclar para baixo (⌘E) e a miniatura de cada camada. Detalhes em [06-ETAPA-3.md](06-ETAPA-3.md).
 
+## Etapa 4 (0.1.96) — entregue
+
+Carimbo alinhado (S, ⌥ + clique na origem) copiando da camada escolhida para baixo, conta-gotas (I), mover a
+camada (V) e o seletor de cor do kit. Detalhes em [07-ETAPA-4.md](07-ETAPA-4.md).
+
 ## Depois
 
-Mover o conteúdo da camada, mudança de geometria (girar/redimensionar) e levar o projeto ao site
+Mover só o que está selecionado, mudança de geometria (girar/redimensionar) e levar o projeto ao site
 (divergência D23, ver o contrato).
 
 ## Onde mora o código
