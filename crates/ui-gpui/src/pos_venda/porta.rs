@@ -282,6 +282,11 @@ impl PedidoDeFoto {
 }
 
 pub trait Publicador: Send + Sync + 'static {
+    /// ✂️ A edição em camadas desta foto do site foi excluída aqui: o próximo
+    /// "Salvar na galeria" dela tira a editada do site (D23) antes de revelar
+    /// a partir do bruto. Sem isto, o site continuaria revelando o retoque.
+    fn edicao_excluida(&self, _foto_no_site: &str) {}
+
     /// Abre o navegador para o operador autorizar este computador.
     ///
     /// Todas devolvem na hora; a resposta vem pelo canal — e esta demora o que o
@@ -451,6 +456,9 @@ pub struct PublicadorDaApi {
     /// 🖌️ A imagem editada vigente de uma foto do site, pelo id de lá
     /// (`docs/editor-em-camadas/02-CONTRATO.md`, C32).
     editada_de: EditadaDoSite,
+    /// ✂️ As fotos do site cuja edição foi excluída aqui e ainda não subiram
+    /// sem ela — ver [`Publicador::edicao_excluida`].
+    excluidas: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     /// 🌪️ Uma fila por foto para os gestos da classificação: a nota e o `B`
     /// da mesma foto saem **em ordem**, mesmo quando a nota está repetindo
     /// depois de uma piscada da rede — senão o `B` chegava antes e ouvia
@@ -511,7 +519,13 @@ impl crate::exportacao::porta::RevelaDoSite for RevelacaoDoSite {
                     // ainda tem o bruto.
                     Err(_) => controlador.original(&sessao, &foto_no_site).await?,
                 },
-                (None, None) => controlador.original(&sessao, &foto_no_site).await?,
+                // ✂️ Sem nada aqui: a fonte do site, que traz o retoque de
+                // outro balcão quando houver (D23).
+                (None, None) => {
+                    controlador
+                        .fonte_para_revelar(&sessao, &foto_no_site)
+                        .await?
+                }
             };
             tokio::task::spawn_blocking(move || {
                 exportador
@@ -542,6 +556,7 @@ impl PublicadorDaApi {
             tokio,
             locais_de: Arc::new(|_| None),
             editada_de: Arc::new(|_| None),
+            excluidas: Arc::default(),
             filas_por_foto: Arc::default(),
         }
     }
@@ -601,7 +616,15 @@ async fn revelar_e_salvar(
     corte: CropSettings,
     locais: ParametrosLocais,
     editada: Option<std::path::PathBuf>,
+    excluida: bool,
 ) -> Result<(), String> {
+    // ✂️ A edição foi excluída aqui: o site para de revelar o retoque (D23)
+    // antes de qualquer coisa — senão o "zerar" e a fonte do site ainda o
+    // trariam de volta.
+    if excluida {
+        controlador.remover_editada(sessao, foto_no_site).await?;
+    }
+
     // 🔑 **Zerou tudo: o bruto volta ao lugar dele, e nada sobe.** Pelo caminho
     // de baixo isto seria baixar o original, revelá-lo com os ajustes neutros e
     // subir o resultado — entregando ao cliente uma geração a mais de JPEG no
@@ -619,12 +642,27 @@ async fn revelar_e_salvar(
         return controlador.restaurar_original(sessao, foto_no_site).await;
     }
 
-    // 🖌️ A entrada é a imagem editada quando há (C32); senão o bruto do site.
+    // 🖌️ A entrada é a imagem editada quando há (C32) — e ela sobe junto
+    // (D23), para toda revelação no site partir do retoque. Sem edição aqui, a
+    // fonte do site: o retoque de outro balcão, ou o bruto. Excluída, o bruto.
     let original = match editada {
-        Some(arquivo) => tokio::fs::read(&arquivo)
-            .await
-            .map_err(|e| format!("a imagem editada não abriu: {e}"))?,
-        None => controlador.original(sessao, foto_no_site).await?,
+        Some(arquivo) => {
+            let png = tokio::fs::read(&arquivo)
+                .await
+                .map_err(|e| format!("a imagem editada não abriu: {e}"))?;
+            let revisao = revisao_da_editada(&arquivo);
+            let para_jpeg = png.clone();
+            let jpeg = tokio::task::spawn_blocking(move || jpeg_da_editada(&para_jpeg))
+                .await
+                .map_err(|e| format!("a imagem editada não converteu: {e}"))??;
+            controlador
+                .salvar_editada(sessao, foto_no_site, jpeg, revisao)
+                .await
+                .map_err(|e| format!("a edição não subiu: {e}"))?;
+            png
+        }
+        None if excluida => controlador.original(sessao, foto_no_site).await?,
+        None => controlador.fonte_para_revelar(sessao, foto_no_site).await?,
     };
 
     let exportador = exportador.clone();
@@ -646,6 +684,40 @@ async fn revelar_e_salvar(
         .await
 }
 
+/// A qualidade da editada que sobe ao site (D23). Ela é a base de toda
+/// revelação lá; 95 guarda o retoque sem a PNG de dezenas de MB, e o bruto do
+/// balcão já sobe com perdas (WebP).
+const QUALIDADE_DA_EDITADA: u8 = 95;
+
+/// A PNG editada (C29) em JPEG para o site.
+fn jpeg_da_editada(png: &[u8]) -> Result<Vec<u8>, String> {
+    let imagem = image::load_from_memory_with_format(png, image::ImageFormat::Png)
+        .map_err(|e| format!("a imagem editada não abriu: {e}"))?
+        .to_rgb8();
+    let mut saida = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut saida, QUALIDADE_DA_EDITADA)
+        .encode_image(&imagem)
+        .map_err(|e| format!("a imagem editada não virou JPEG: {e}"))?;
+    Ok(saida)
+}
+
+/// A revisão da editada, do nome do arquivo (`composta-<rev>.png`, o projeto
+/// do editor). Sem número no nome, a hora do arquivo — também cresce.
+fn revisao_da_editada(arquivo: &std::path::Path) -> u64 {
+    arquivo
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .and_then(|s| s.strip_prefix("composta-"))
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| {
+            std::fs::metadata(arquivo)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(1, |d| d.as_secs())
+        })
+}
+
 /// A revelação como o site a grava — mora no `infrastructure`, junto com a
 /// compressão com que ela sobe. Ver `infrastructure::pos_venda::parametros`.
 pub(crate) use infrastructure::pos_venda::parametros::{
@@ -653,6 +725,12 @@ pub(crate) use infrastructure::pos_venda::parametros::{
 };
 
 impl Publicador for PublicadorDaApi {
+    fn edicao_excluida(&self, foto_no_site: &str) {
+        if let Ok(mut e) = self.excluidas.lock() {
+            e.insert(foto_no_site.to_string());
+        }
+    }
+
     fn autorizar(&self, canal: Sender<Recado>) {
         let controlador = self.controlador.clone();
         self.tokio.spawn(async move {
@@ -733,6 +811,8 @@ impl Publicador for PublicadorDaApi {
         let exportador = self.exportador.clone();
         let locais = locais_lidos(&self.locais_de, &foto_no_site);
         let editada = (self.editada_de)(&foto_no_site);
+        let excluidas = self.excluidas.clone();
+        let excluida = excluidas.lock().is_ok_and(|e| e.contains(&foto_no_site));
         self.tokio.spawn(async move {
             let feito = match locais {
                 Ok(locais) => {
@@ -745,6 +825,7 @@ impl Publicador for PublicadorDaApi {
                         corte,
                         locais,
                         editada,
+                        excluida,
                     )
                     .await
                 }
@@ -752,6 +833,13 @@ impl Publicador for PublicadorDaApi {
                     "a Revelação local desta foto não pôde ser lida: {erro}"
                 )),
             };
+            // A marca sai só quando subiu sem a edição: falhou, a repetição
+            // ainda precisa tirá-la do site.
+            if feito.is_ok() && excluida {
+                if let Ok(mut e) = excluidas.lock() {
+                    e.remove(&foto_no_site);
+                }
+            }
             let recado = match feito {
                 Ok(()) => Recado::RevelacaoSalva {
                     foto_no_site: foto_no_site.clone(),
@@ -1093,6 +1181,32 @@ impl Publicador for PublicadorDaApi {
             };
             let _ = canal.send(recado);
         });
+    }
+}
+
+#[cfg(test)]
+mod testes_da_editada {
+    use super::*;
+
+    #[test]
+    fn a_editada_sobe_em_jpeg_e_a_revisao_sai_do_nome() {
+        let imagem =
+            image::RgbImage::from_fn(40, 30, |x, y| image::Rgb([x as u8 * 6, y as u8 * 8, 90]));
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgb8(imagem)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let jpeg = jpeg_da_editada(&png).unwrap();
+        assert_eq!(&jpeg[..3], &[0xFF, 0xD8, 0xFF]);
+        let de_volta = image::load_from_memory(&jpeg).unwrap();
+        assert_eq!((de_volta.width(), de_volta.height()), (40, 30));
+        assert!(jpeg_da_editada(b"nao e png").is_err());
+
+        assert_eq!(
+            revisao_da_editada(std::path::Path::new("/x/composta-12.png")),
+            12
+        );
+        assert!(revisao_da_editada(std::path::Path::new("/x/sem-numero.png")) >= 1);
     }
 }
 

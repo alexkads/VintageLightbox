@@ -918,6 +918,19 @@ pub trait PosVendaApi: Send + Sync {
     /// aqui nada é enviado. Foto que nunca foi revelada responde certo — zerar
     /// o que já estava zerado não é erro.
     async fn restaurar_original(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<()>;
+
+    /// ✂️ A fonte da revelação no site (D23): a imagem EDITADA de algum balcão
+    /// quando a foto foi retocada, senão o bruto. O [`Self::original`] continua
+    /// sendo sempre o bruto — é a base do editor em camadas daqui.
+    async fn fonte_para_revelar(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<Vec<u8>>;
+
+    /// ✂️ Sobe a imagem EDITADA (JPEG) desta foto com o bilhete de revelação
+    /// dela (D23). O site ignora uma `revisao` que não seja mais nova que a
+    /// gravada — o envio atrasado não desfaz o retoque mais novo.
+    async fn salvar_editada(&self, bilhete: &str, jpeg: Vec<u8>, revisao: u64) -> DomainResult<()>;
+
+    /// ✂️ A edição foi excluída aqui: o site volta a revelar a partir do bruto.
+    async fn remover_editada(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<()>;
 }
 
 #[cfg(test)]

@@ -915,6 +915,50 @@ impl PosVendaApi for PosVendaApiHttp {
         Ok(())
     }
 
+    async fn fonte_para_revelar(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<Vec<u8>> {
+        self.bytes_da_imagem(
+            sessao,
+            &format!("/pos-venda/fotos/{foto_id}/fonte-para-revelar"),
+        )
+        .await
+    }
+
+    async fn salvar_editada(&self, bilhete: &str, jpeg: Vec<u8>, revisao: u64) -> DomainResult<()> {
+        let arquivo = reqwest::multipart::Part::bytes(jpeg)
+            .file_name("editada.jpg")
+            .mime_str("image/jpeg")
+            .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
+        let form = reqwest::multipart::Form::new()
+            .text("revisao", revisao.to_string())
+            .part("file", arquivo);
+        // Sem `bearer_auth`, como a revelação: o bilhete é a credencial.
+        let resposta = self
+            .client
+            .post(self.url(&format!("/public/pos-venda/editada/{bilhete}")))
+            .multipart(form)
+            .send()
+            .await
+            .map_err(rede)?;
+        if !resposta.status().is_success() {
+            return Err(recusa(resposta).await);
+        }
+        Ok(())
+    }
+
+    async fn remover_editada(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<()> {
+        let resposta = self
+            .client
+            .delete(self.url(&format!("/pos-venda/fotos/{foto_id}/editada")))
+            .bearer_auth(self.token(sessao).await?)
+            .send()
+            .await
+            .map_err(rede)?;
+        if !resposta.status().is_success() {
+            return Err(recusa(resposta).await);
+        }
+        Ok(())
+    }
+
     async fn restaurar_original(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<()> {
         // Com token, e não com bilhete: nada sobe aqui. O bilhete existe para o
         // upload que o servidor do site não aguenta — este pedido é vazio.
@@ -2107,6 +2151,56 @@ mod tests {
         api.remover_foto(&sessao, "f1").await.unwrap();
         let erro = api.remover_foto(&sessao, "f9").await.unwrap_err();
         assert!(erro.to_string().contains("nao encontrada"), "{erro}");
+    }
+
+    /// ✂️ D23: a editada sobe pelo bilhete com a revisão, sai com DELETE e
+    /// a fonte da revelação tem rota própria (o `/original` é o bruto).
+    #[tokio::test]
+    async fn a_editada_sobe_sai_e_a_fonte_tem_rota_propria() {
+        let servidor = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v2/public/pos-venda/editada/bil-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+            .expect(1)
+            .mount(&servidor)
+            .await;
+        Mock::given(method("DELETE"))
+            .and(path("/api/v2/pos-venda/fotos/f1/editada"))
+            .and(header("authorization", "Bearer tok"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+            .expect(1)
+            .mount(&servidor)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/pos-venda/fotos/f1/fonte-para-revelar"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![0xFF, 0xD8, 7]))
+            .expect(1)
+            .mount(&servidor)
+            .await;
+
+        let api = PosVendaApiHttp::nova(servidor.uri());
+        let sessao = sessao_valida();
+        api.salvar_editada("bil-1", vec![0xFF, 0xD8, 0xFF], 7)
+            .await
+            .unwrap();
+        api.remover_editada(&sessao, "f1").await.unwrap();
+        // O multipart leva a revisão e o JPEG (o corpo tem bytes binários: a
+        // conferência é em bytes, e não em texto).
+        let enviada = servidor.received_requests().await.unwrap().remove(0);
+        let corpo = &enviada.body;
+        let tem = |agulha: &[u8]| corpo.windows(agulha.len()).any(|j| j == agulha);
+        assert!(
+            tem(b"name=\"revisao\"") && tem(b"\r\n\r\n7\r\n"),
+            "a revisão vai"
+        );
+        assert!(
+            tem(b"editada.jpg") && tem(&[0xFF, 0xD8, 0xFF]),
+            "o JPEG vai"
+        );
+        assert_eq!(
+            api.fonte_para_revelar(&sessao, "f1").await.unwrap(),
+            vec![0xFF, 0xD8, 7]
+        );
     }
 
     /// 🚨 O link vem do backend, e não é montado aqui.

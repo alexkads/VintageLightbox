@@ -56,10 +56,10 @@ BRUTO ──base_neutra──▶ BASE NEUTRA ──PROJETO──▶ IMAGEM EDITA
   revisão anterior (arquivo e linha do catálogo) continua servindo até a nova estar confirmada no catálogo; uma
   gravação que falha no meio deixa a anterior de pé. Ver `03-GRAVACAO-E-CATALOGO.md`.
 
-- **C34 — O projeto é do balcão (divergência D23).** O site não conhece o projeto. A REVELADA que sobe já leva a
-  edição, porque é renderizada a partir da imagem editada, e o "bruto" que sobe continua o bruto verdadeiro.
-  Uma revelação feita **no site** a partir do bruto perde a edição: fica registrado como divergência aberta,
-  como a Revelação local ficou no começo.
+- **C34 — O projeto é do balcão; a imagem editada vai ao site** (D23 resolvida em 06/out/2026, etapa 7). As
+  camadas ficam aqui. A REVELADA que sobe leva a edição, e a **imagem editada** sobe também, como peça própria
+  (JPEG, com a revisão do projeto): toda revelação no site parte dela. O `/original` do site continua sendo o
+  bruto verdadeiro — é a base deste editor. Ver `10-ETAPA-7.md`.
 
 ## A interface em código
 

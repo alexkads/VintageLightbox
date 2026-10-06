@@ -172,6 +172,26 @@ impl PublicarNoPosVendaUseCase {
             .map_err(|e| e.to_string())
     }
 
+    /// ✂️ Sobe a imagem EDITADA desta foto (D23) pelo bilhete de revelação
+    /// dela — o mesmo caminho do revelado.
+    pub async fn salvar_editada(
+        &self,
+        sessao: &Sessao,
+        foto_no_site: &str,
+        jpeg: Vec<u8>,
+        revisao: u64,
+    ) -> Result<(), String> {
+        let bilhete = self
+            .api
+            .bilhete_de_revelacao(sessao, foto_no_site)
+            .await
+            .map_err(|e| e.to_string())?;
+        self.api
+            .salvar_editada(&bilhete, jpeg, revisao)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
     /// Devolve a foto do site ao **original**: o bruto volta ao lugar dele.
     ///
     /// 🔑 É o "Zerar tudo" salvo, e o par de [`Self::salvar_revelacao`]. Sem
@@ -560,6 +580,8 @@ mod tests {
         reveladas: Mutex<Vec<(String, usize, serde_json::Value)>>,
         /// As fotos que voltaram ao original — o "Zerar tudo" salvo.
         restauradas: Mutex<Vec<String>>,
+        /// `(bilhete, tamanho do JPEG, revisão)` de cada editada que subiu.
+        editadas: Mutex<Vec<(String, usize, u64)>>,
     }
 
     #[async_trait::async_trait]
@@ -693,6 +715,28 @@ mod tests {
         }
         async fn restaurar_original(&self, _: &Sessao, foto_id: &str) -> DomainResult<()> {
             self.restauradas.lock().unwrap().push(foto_id.to_string());
+            Ok(())
+        }
+        async fn fonte_para_revelar(&self, _: &Sessao, _: &str) -> DomainResult<Vec<u8>> {
+            unreachable!("quem baixa a fonte é a porta do app, que tem o motor de GPU")
+        }
+        async fn salvar_editada(
+            &self,
+            bilhete: &str,
+            jpeg: Vec<u8>,
+            revisao: u64,
+        ) -> DomainResult<()> {
+            self.editadas
+                .lock()
+                .unwrap()
+                .push((bilhete.to_string(), jpeg.len(), revisao));
+            Ok(())
+        }
+        async fn remover_editada(&self, _: &Sessao, foto_id: &str) -> DomainResult<()> {
+            self.restauradas
+                .lock()
+                .unwrap()
+                .push(format!("sem-editada:{foto_id}"));
             Ok(())
         }
     }
@@ -1215,6 +1259,25 @@ mod tests {
             &*reveladas,
             &[("bilhete-de-foto-do-site".to_string(), 42, ajustes)],
             "o bilhete é o daquela foto, e os ajustes vão inteiros"
+        );
+    }
+
+    /// ✂️ A editada (D23) sobe pelo bilhete daquela foto, com a revisão.
+    #[tokio::test]
+    async fn salvar_editada_sobe_o_jpeg_pelo_bilhete_com_a_revisao() {
+        let api = Arc::new(ApiDeMentira::default());
+        let caso = PublicarNoPosVendaUseCase::new(
+            Arc::new(MockPhotoRepo::new()),
+            Arc::new(MockExportador::new()),
+            Arc::new(MockThumbnailGen::new()),
+            api.clone(),
+        );
+        caso.salvar_editada(&sessao(), "foto-do-site", vec![1; 7], 4)
+            .await
+            .unwrap();
+        assert_eq!(
+            &*api.editadas.lock().unwrap(),
+            &[("bilhete-de-foto-do-site".to_string(), 7, 4)]
         );
     }
 

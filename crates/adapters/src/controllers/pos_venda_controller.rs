@@ -252,6 +252,40 @@ impl PosVendaController {
         self.api.original(sessao, foto_id).await.map_err(frase)
     }
 
+    /// ✂️ A fonte da revelação no site (D23): a editada de algum balcão, ou o
+    /// bruto. O [`Self::original`] é sempre o bruto.
+    pub async fn fonte_para_revelar(
+        &self,
+        sessao: &Sessao,
+        foto_id: &str,
+    ) -> Result<Vec<u8>, String> {
+        self.api
+            .fonte_para_revelar(sessao, foto_id)
+            .await
+            .map_err(frase)
+    }
+
+    /// ✂️ Sobe a imagem editada desta foto (D23).
+    pub async fn salvar_editada(
+        &self,
+        sessao: &Sessao,
+        foto_no_site: &str,
+        jpeg: Vec<u8>,
+        revisao: u64,
+    ) -> Result<(), String> {
+        self.publicar
+            .salvar_editada(sessao, foto_no_site, jpeg, revisao)
+            .await
+    }
+
+    /// ✂️ A edição foi excluída aqui: o site volta a revelar do bruto.
+    pub async fn remover_editada(&self, sessao: &Sessao, foto_id: &str) -> Result<(), String> {
+        self.api
+            .remover_editada(sessao, foto_id)
+            .await
+            .map_err(frase)
+    }
+
     /// **Salvar na galeria**: o JPEG revelado entra no lugar do original.
     ///
     /// `foto_no_site` é o id **remoto** — o do storage, e não o do catálogo

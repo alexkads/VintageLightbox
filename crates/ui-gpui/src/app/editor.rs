@@ -217,6 +217,11 @@ impl Aplicativo {
             let _ = raiz.update(cx, |raiz, cx| match resultado {
                 Ok(_) => {
                     crate::telemetria::avisar!("🖌️ [Editor] edição de {} excluída", alvo.nome);
+                    // ✂️ O site deixa de revelar o retoque no próximo envio desta
+                    // foto (D23).
+                    if let Some(no_site) = &alvo.pos_venda_foto_id {
+                        raiz.publicador.edicao_excluida(no_site);
+                    }
                     raiz.a_fonte_da_foto_mudou(&alvo, cx);
                     raiz.avisar_em_toast(
                         format!(

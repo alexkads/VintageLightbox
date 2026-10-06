@@ -432,3 +432,91 @@ fn salvar_a_revelacao_com_a_rede_caindo_chega_depois(cx: &mut TestAppContext) {
     assert!(bruto_antes == bruto_depois, "o bruto nunca muda");
     c.b.ato_limpo(cx, "a revelação com a rede caindo");
 }
+
+/// ✂️ **O retoque do balcão vai ao site** (D23): editar uma foto da sessão,
+/// salvar e mandar para a galeria sobe a imagem editada, e toda revelação no
+/// site passa a partir dela — o `/original` continua o bruto. Excluir a edição
+/// e salvar de novo a tira de lá.
+#[gpui_kit::test]
+#[ignore = "precisa da API de teste: rode `make e2e-ciclo`"]
+fn o_retoque_do_balcao_vai_ao_site_e_sai_com_a_edicao(cx: &mut TestAppContext) {
+    let c = preparar(cx, "operacional-retoque", 1);
+    let (galeria, fotos) = criar_a_sessao(cx, &c, "Retoque no balcão", "cliente-retoque@e2e.test");
+    let foto = fotos[0].clone();
+    let (_, bruto) = c.site.bytes(&format!("/pos-venda/fotos/{foto}/original"));
+    c.b.ir_na_grade(cx, &foto);
+    c.b.clicar(cx, "sessao-revelar");
+    c.b.ate(cx, "a Revelação abre com a foto", |b, cx| {
+        b.revelacao(cx, |tela, _w, _cx| tela.tem_pixels())
+    });
+
+    // "Editar Foto" na foto aberta: o editor abre com o bruto do site.
+    let posicao = c.b.revelacao(cx, |tela, _w, _cx| tela.posicao());
+    c.b.revelacao(cx, |tela, _w, cx| tela.pedir_edicao_para_teste(posicao, cx));
+    c.b.ate(cx, "o editor abre com o bruto do site", |b, cx| {
+        b.app(cx, |app, _w, cx| {
+            app.editores_abertos()
+                .first()
+                .is_some_and(|(_, e)| e.read(cx).pronta())
+        })
+    });
+    let (janela, editor) =
+        c.b.app(cx, |app, _w, _cx| app.editores_abertos()[0].clone());
+    editor.update(cx, |ed, cx| ed.tracar_para_teste((4., 4.), (60., 4.), cx));
+    cx.update_window(janela, |_, window, cx| {
+        editor.update(cx, |ed, cx| ed.salvar(false, window, cx))
+    })
+    .unwrap();
+    c.b.ate(cx, "a edição é salva", |_b, cx| {
+        editor.read_with(cx, |ed, _| !ed.salvando() && !ed.alterado())
+    });
+
+    c.b.clicar(cx, "revelacao-salvar-na-galeria");
+    c.b.ate_na_api(cx, "a editada chega ao site", || {
+        let f = foto_no_painel(&c.site, &galeria, &foto).ok_or("sumiu")?;
+        (f["editada_revisao"].as_i64() == Some(1))
+            .then_some(())
+            .ok_or(format!("ainda não: {}", f["editada_revisao"]))
+    });
+    c.b.ate(cx, "a fila de envios esvazia", |b, cx| {
+        b.app(cx, |app, _w, _cx| app.a_subir_para_teste().is_empty())
+    });
+    let (_, fonte) = c
+        .site
+        .bytes(&format!("/pos-venda/fotos/{foto}/fonte-para-revelar"));
+    assert!(fonte != bruto, "a fonte da revelação no site é o retoque");
+    let (_, original) = c.site.bytes(&format!("/pos-venda/fotos/{foto}/original"));
+    assert!(original == bruto, "o /original continua o bruto");
+
+    // Excluir a edição e salvar de novo: o site volta ao bruto.
+    c.b.ate(cx, "a sessão volta depois do Salvar", |b, cx| {
+        b.app(cx, |app, _w, _cx| app.tela() == Tela::Sessao)
+    });
+    c.b.ir_na_grade(cx, &foto);
+    c.b.clicar(cx, "sessao-revelar");
+    c.b.ate(cx, "a Revelação abre de novo", |b, cx| {
+        b.revelacao(cx, |tela, _w, _cx| tela.tem_pixels())
+    });
+    let posicao = c.b.revelacao(cx, |tela, _w, _cx| tela.posicao());
+    c.b.revelacao(cx, |tela, _w, cx| {
+        tela.excluir_edicao_para_teste(posicao, cx)
+    });
+    c.b.ate(cx, "a edição sai daqui", |b, cx| {
+        b.revelacao(cx, |tela, _w, _cx| {
+            tela.foto_aberta().is_some_and(|f| !tela.tem_edicao(f))
+        })
+    });
+    c.b.clicar(cx, "revelacao-salvar-na-galeria");
+    c.b.ate_na_api(cx, "a editada sai do site", || {
+        let f = foto_no_painel(&c.site, &galeria, &foto).ok_or("sumiu")?;
+        f["editada_revisao"]
+            .is_null()
+            .then_some(())
+            .ok_or(format!("ainda tem: {}", f["editada_revisao"]))
+    });
+    let (_, fonte) = c
+        .site
+        .bytes(&format!("/pos-venda/fotos/{foto}/fonte-para-revelar"));
+    assert!(fonte == bruto, "sem edição, a fonte volta ao bruto");
+    c.b.ato_limpo(cx, "o retoque do balcão");
+}

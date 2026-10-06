@@ -123,6 +123,15 @@ impl Revelacao {
         });
     }
 
+    /// 🧪 O "Excluir a edição" já confirmado, para os testes da raiz.
+    #[cfg(test)]
+    pub fn excluir_edicao_para_teste(&mut self, posicao: usize, cx: &mut Context<Self>) {
+        if let Some(foto) = self.acervo.get(posicao).cloned() {
+            self.tira.a_excluir = Some(foto);
+            cx.emit(PedidoDaRevelacao::ExcluirEdicao);
+        }
+    }
+
     /// A foto que o menu mandou excluir — a raiz a leva uma vez.
     pub fn levar_a_excluir(&mut self) -> Option<PhotoViewModel> {
         self.tira.a_excluir.take()

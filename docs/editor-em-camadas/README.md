@@ -37,6 +37,7 @@ Sem projeto editável, o fluxo é o de sempre: a Revelação parte do bruto.
 | [03-GRAVACAO-E-CATALOGO.md](03-GRAVACAO-E-CATALOGO.md) | O formato do projeto, os tiles, a gravação atômica, a recuperação e a tabela do catálogo |
 | [04-PLANO-ETAPA-1.md](04-PLANO-ETAPA-1.md) | O que a etapa 1 entrega, arquivo por arquivo, os testes e as medidas |
 | [05-ETAPA-2.md](05-ETAPA-2.md) | Várias camadas, os 16 modos de mesclagem, o formato 2 do projeto, zoom, mão e lupa |
+| [10-ETAPA-7.md](10-ETAPA-7.md) | A imagem editada vai ao site e é a base de toda revelação lá (D23 resolvida) |
 | [09-ETAPA-6.md](09-ETAPA-6.md) | Pincel de correção (J) e preencher a seleção pelo conteúdo (⇧⌫) |
 | [08-ETAPA-5.md](08-ETAPA-5.md) | Transformação livre (⌘T), mover a seleção, camada via cópia e via recorte |
 | [07-ETAPA-4.md](07-ETAPA-4.md) | Carimbo (S), conta-gotas (I), mover (V) e o seletor de cor |
@@ -76,10 +77,14 @@ recorte (⌘J, ⇧⌘J). Detalhes em [08-ETAPA-5.md](08-ETAPA-5.md).
 Pincel de correção para manchas (J) e preencher a seleção pelo conteúdo (⇧⌫), com o motor de preenchimento
 da Revelação. Detalhes em [09-ETAPA-6.md](09-ETAPA-6.md).
 
+## Etapa 7 (0.1.99) — entregue
+
+A imagem editada sobe ao site e toda revelação lá parte dela; o `/original` continua o bruto (D23 resolvida).
+Detalhes em [10-ETAPA-7.md](10-ETAPA-7.md).
+
 ## Depois
 
-Mudança de geometria (girar/redimensionar) e levar o projeto ao site
-(divergência D23, ver o contrato).
+Mudança de geometria da foto inteira (girar/redimensionar) — o C31 recusa outra proporção.
 
 ## Onde mora o código
 
