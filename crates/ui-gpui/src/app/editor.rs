@@ -954,6 +954,105 @@ mod testes {
         );
     }
 
+    /// 🧰 A barra de ferramentas à esquerda: cada botão escolhe a ferramenta e
+    /// fica aceso; a lupa amplia com um clique e afasta com ⌥ + clique; a mão
+    /// arrasta a foto ampliada sem pintar.
+    #[gpui_kit::test]
+    fn a_barra_de_ferramentas_escolhe_e_a_lupa_e_a_mao_funcionam(cx: &mut TestAppContext) {
+        use crate::editor::janela::{Auxiliar, TipoDeSelecao};
+        use editor_core::Ferramenta;
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        let barra = ve.debug_bounds("editor-barra-de-ferramentas").unwrap();
+        let palco = ve.debug_bounds("palco-do-editor").unwrap();
+        assert!(
+            barra.origin.x < palco.origin.x && barra.size.width < gpui_kit::px(60.),
+            "a barra é estreita e fica à esquerda do palco"
+        );
+
+        clicar_no_editor(&mut ve, "editor-borracha");
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.ferramenta()),
+            Some(Ferramenta::Borracha)
+        );
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.nome_da_ferramenta()),
+            "Borracha (E)"
+        );
+        clicar_no_editor(&mut ve, "editor-selecao-laco");
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.selecionando()),
+            Some(TipoDeSelecao::Laco)
+        );
+        clicar_no_editor(&mut ve, "editor-subexposicao");
+        assert!(matches!(
+            editor.read_with(&ve, |ed, _| ed.ferramenta()),
+            Some(Ferramenta::Subexposicao(_))
+        ));
+        assert_eq!(editor.read_with(&ve, |ed, _| ed.selecionando()), None);
+        assert!(
+            ve.debug_bounds("editor-faixa").is_some(),
+            "a faixa aparece nas opções"
+        );
+        clicar_no_editor(&mut ve, "editor-pincel");
+        assert!(ve.debug_bounds("editor-faixa").is_none());
+
+        // A lupa: clique amplia em torno do ponto, ⌥ + clique afasta.
+        clicar_no_editor(&mut ve, "editor-lupa");
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.auxiliar()),
+            Some(Auxiliar::Zoom)
+        );
+        let encaixada = editor.read_with(&ve, |ed, _| ed.area_na_janela().unwrap());
+        let alvo = ponto_do_palco(&mut ve, (0.5, 0.5));
+        ve.simulate_click(alvo, gpui_kit::Modifiers::none());
+        ve.run_until_parked();
+        let ampliada = editor.read_with(&ve, |ed, _| ed.area_na_janela().unwrap());
+        assert!(
+            ampliada.size.width > encaixada.size.width * 1.5,
+            "o clique ampliou"
+        );
+        ve.simulate_click(alvo, gpui_kit::Modifiers::alt());
+        ve.run_until_parked();
+        let afastada = editor.read_with(&ve, |ed, _| ed.area_na_janela().unwrap());
+        assert!(
+            afastada.size.width < ampliada.size.width,
+            "⌥ + clique afastou"
+        );
+        for _ in 0..2 {
+            ve.simulate_click(alvo, gpui_kit::Modifiers::none());
+        }
+        ve.run_until_parked();
+
+        // A mão: arrastar move a foto ampliada e não pinta.
+        clicar_no_editor(&mut ve, "editor-mao");
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.auxiliar()),
+            Some(Auxiliar::Mao)
+        );
+        assert!(
+            ve.debug_bounds("editor-tamanho").is_none(),
+            "a mão não tem tamanho de pincel"
+        );
+        let antes = editor.read_with(&ve, |ed, _| ed.area_na_janela().unwrap());
+        arrastar_no_palco(&mut ve, (0.5, 0.5), (0.3, 0.35));
+        let depois = editor.read_with(&ve, |ed, _| ed.area_na_janela().unwrap());
+        assert_ne!(depois.origin, antes.origin, "a mão moveu a foto");
+        assert!(
+            !editor.read_with(&ve, |ed, _| ed.alterado()),
+            "e não pintou nada"
+        );
+
+        // A tecla da ferramenta volta ao pincel e apaga a mão da barra.
+        ve.update(|window, _| window.activate_window());
+        ve.simulate_keystrokes("b");
+        ve.run_until_parked();
+        assert_eq!(editor.read_with(&ve, |ed, _| ed.auxiliar()), None);
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.ferramenta()),
+            Some(Ferramenta::Pincel)
+        );
+    }
+
     fn arrastar_no_palco(ve: &mut VisualTestContext, de: (f32, f32), ate: (f32, f32)) {
         let palco = ve.debug_bounds("palco-do-editor").unwrap();
         let ponto = |f: (f32, f32)| {

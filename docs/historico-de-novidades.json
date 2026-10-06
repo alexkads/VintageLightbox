@@ -1,5 +1,18 @@
 [
   {
+    "versao": "0.1.101",
+    "data": "2026-10-06",
+    "titulo": "Editar Foto ganhou a barra de ferramentas à esquerda, como no Photoshop.",
+    "importante": false,
+    "novidades": [
+      "Todas as ferramentas do editor ficam numa barra vertical à esquerda da foto, na ordem do Photoshop. A que está em uso fica acesa, e passar o mouse mostra o nome e o atalho.",
+      "Duas ferramentas novas na barra: a Mão arrasta a foto ampliada, e o Zoom amplia com um clique e afasta com ⌥ + clique.",
+      "A cor atual fica embaixo da barra e abre o seletor de cor.",
+      "O painel da direita mostra só as opções da ferramenta escolhida, as cores e as abas Camadas e Histórico."
+    ],
+    "por_que_atualizar": "Para achar cada ferramenta onde quem vem do Photoshop já procura, sem botões espalhados no painel."
+  },
+  {
     "versao": "0.1.100",
     "data": "2026-10-06",
     "titulo": "Editar Foto agora tem subexposição, superexposição, desfoque, nitidez e o Histórico.",

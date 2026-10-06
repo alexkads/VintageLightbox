@@ -141,6 +141,11 @@ pub enum Auxiliar {
     /// J — o pincel de correção para manchas: pinta por cima, e ao soltar a
     /// área é refeita pelo que está em volta.
     Correcao,
+    /// A mão da barra: arrastar move a foto ampliada (o Espaço segurado, sem
+    /// segurar nada).
+    Mao,
+    /// A lupa da barra: clicar amplia em torno do ponto; ⌥ + clique afasta.
+    Zoom,
 }
 
 /// O buraco de um preenchimento por conteúdo.
@@ -988,6 +993,15 @@ impl EditorDeFoto {
                 self.comecar_a_mover(ponto, cx);
                 return;
             }
+            Some(Auxiliar::Mao) => {
+                self.pegar_com_a_mao(ponto, cx);
+                return;
+            }
+            Some(Auxiliar::Zoom) => {
+                let p = self.ponto_no_palco(ponto);
+                self.ampliar_em_torno(if modificadores.alt { 0.5 } else { 2.0 }, p, cx);
+                return;
+            }
             Some(Auxiliar::Correcao) => {
                 if let Some(p) = self.na_foto(ponto) {
                     self.traco_de_correcao = Some(vec![p]);
@@ -1492,6 +1506,195 @@ impl EditorDeFoto {
 
     pub fn auxiliar(&self) -> Option<Auxiliar> {
         self.auxiliar
+    }
+
+    /// O nome da ferramenta na mão, com o atalho — o título das opções no
+    /// painel da direita.
+    pub fn nome_da_ferramenta(&self) -> &'static str {
+        if let Some(tipo) = self.selecionando {
+            return match tipo {
+                TipoDeSelecao::Retangulo => "Seleção retangular (M)",
+                TipoDeSelecao::Elipse => "Seleção elíptica (⇧M)",
+                TipoDeSelecao::Laco => "Laço (L)",
+            };
+        }
+        if let Some(a) = self.auxiliar {
+            return match a {
+                Auxiliar::ContaGotas => "Conta-gotas (I)",
+                Auxiliar::Mover => "Mover (V)",
+                Auxiliar::Correcao => "Pincel de correção (J)",
+                Auxiliar::Mao => "Mão (Espaço)",
+                Auxiliar::Zoom => "Zoom — clique amplia, ⌥ + clique afasta",
+            };
+        }
+        match self.ferramenta() {
+            Some(Ferramenta::Borracha) => "Borracha (E)",
+            Some(Ferramenta::Carimbo) => "Carimbo (S) — ⌥ + clique na origem",
+            Some(Ferramenta::Subexposicao(_)) => "Subexposição (O)",
+            Some(Ferramenta::Superexposicao(_)) => "Superexposição (⇧O)",
+            Some(Ferramenta::Desfoque) => "Desfoque (R)",
+            Some(Ferramenta::Nitidez) => "Nitidez (⇧R)",
+            _ => "Pincel (B)",
+        }
+    }
+
+    /// A barra de ferramentas vertical do Photoshop, à esquerda do palco: as
+    /// ferramentas na ordem de lá, em grupos, e a cor atual embaixo.
+    fn barra_de_ferramentas(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let tema = cx.theme().clone();
+        let pincel_na_mao = self.selecionando.is_none() && self.auxiliar.is_none();
+        let ferramenta = self.ferramenta().filter(|_| pincel_na_mao);
+        let mesma = |a: Ferramenta| {
+            ferramenta.is_some_and(|f| std::mem::discriminant(&f) == std::mem::discriminant(&a))
+        };
+        #[derive(Clone, Copy)]
+        enum Item {
+            F(Ferramenta),
+            S(TipoDeSelecao),
+            A(Auxiliar),
+        }
+        let faixa = self.faixa;
+        let grupos: [&[(Item, Icone, &'static str, &'static str)]; 7] = [
+            &[(
+                Item::A(Auxiliar::Mover),
+                Icone::Move,
+                "editor-mover",
+                "Mover (V)",
+            )],
+            &[
+                (
+                    Item::S(TipoDeSelecao::Retangulo),
+                    Icone::Square,
+                    "editor-selecao-retangulo",
+                    "Seleção retangular (M) — ⇧ soma, ⌥ tira",
+                ),
+                (
+                    Item::S(TipoDeSelecao::Elipse),
+                    Icone::CircleDashed,
+                    "editor-selecao-elipse",
+                    "Seleção elíptica (⇧M)",
+                ),
+                (
+                    Item::S(TipoDeSelecao::Laco),
+                    Icone::Lasso,
+                    "editor-selecao-laco",
+                    "Laço (L)",
+                ),
+            ],
+            &[(
+                Item::A(Auxiliar::ContaGotas),
+                Icone::Pipette,
+                "editor-conta-gotas",
+                "Conta-gotas (I) — com o pincel, ⌥ + clique",
+            )],
+            &[
+                (
+                    Item::A(Auxiliar::Correcao),
+                    Icone::Bandage,
+                    "editor-correcao",
+                    "Pincel de correção (J)",
+                ),
+                (
+                    Item::F(Ferramenta::Pincel),
+                    Icone::Paintbrush,
+                    "editor-pincel",
+                    "Pincel (B)",
+                ),
+                (
+                    Item::F(Ferramenta::Borracha),
+                    Icone::Eraser,
+                    "editor-borracha",
+                    "Borracha (E)",
+                ),
+                (
+                    Item::F(Ferramenta::Carimbo),
+                    Icone::Stamp,
+                    "editor-carimbo",
+                    "Carimbo (S) — ⌥ + clique escolhe a origem",
+                ),
+            ],
+            &[
+                (
+                    Item::F(Ferramenta::Desfoque),
+                    Icone::Droplet,
+                    "editor-desfoque",
+                    "Desfoque (R)",
+                ),
+                (
+                    Item::F(Ferramenta::Nitidez),
+                    Icone::Triangle,
+                    "editor-nitidez",
+                    "Nitidez (⇧R)",
+                ),
+            ],
+            &[
+                (
+                    Item::F(Ferramenta::Subexposicao(faixa)),
+                    Icone::Sun,
+                    "editor-subexposicao",
+                    "Subexposição (O) — clareia",
+                ),
+                (
+                    Item::F(Ferramenta::Superexposicao(faixa)),
+                    Icone::Moon,
+                    "editor-superexposicao",
+                    "Superexposição (⇧O) — escurece",
+                ),
+            ],
+            &[
+                (
+                    Item::A(Auxiliar::Mao),
+                    Icone::Hand,
+                    "editor-mao",
+                    "Mão — arrasta a foto ampliada (ou segure o Espaço)",
+                ),
+                (
+                    Item::A(Auxiliar::Zoom),
+                    Icone::ZoomIn,
+                    "editor-lupa",
+                    "Zoom — clique amplia, ⌥ + clique afasta (⌘= ⌘− ⌘0)",
+                ),
+            ],
+        ];
+        let mut barra = div()
+            .id("editor-barra-de-ferramentas")
+            .debug_selector(|| "editor-barra-de-ferramentas".into())
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap(px(2.))
+            .w(px(44.))
+            .h_full()
+            .py(px(8.))
+            .border_r_1()
+            .border_color(tema.border)
+            .bg(tema.background);
+        for (n, grupo) in grupos.iter().enumerate() {
+            if n > 0 {
+                barra = barra.child(div().my(px(4.)).h(px(1.)).w(px(24.)).bg(tema.border));
+            }
+            for &(item, icone, id, dica) in grupo.iter() {
+                let ativa = match item {
+                    Item::F(f) => mesma(f),
+                    Item::S(t) => self.selecionando == Some(t),
+                    Item::A(a) => self.auxiliar == Some(a),
+                };
+                let botao = crate::estilo::botao_icone_padrao(id, icone)
+                    .debug_selector(move || id.into())
+                    .tooltip(dica)
+                    .on_click(cx.listener(move |ed, _, _, cx| match item {
+                        Item::F(f) => ed.usar(f, cx),
+                        Item::S(t) => ed.usar_selecao(t, cx),
+                        Item::A(a) => ed.usar_auxiliar(a, cx),
+                    }));
+                barra = barra.child(if ativa { botao.primary() } else { botao });
+            }
+        }
+        barra.child(div().flex_1()).child(
+            div()
+                .debug_selector(|| "editor-seletor-de-cor".into())
+                .child(ColorPicker::new(&self.seletor_de_cor)),
+        )
     }
 
     /// A faixa de tons da subexposição e da superexposição; a ferramenta na
@@ -2134,6 +2337,8 @@ impl EditorDeFoto {
                 "conta-gotas" => self.usar_auxiliar(Auxiliar::ContaGotas, cx),
                 "mover" => self.usar_auxiliar(Auxiliar::Mover, cx),
                 "correcao" => self.usar_auxiliar(Auxiliar::Correcao, cx),
+                "mao" => self.usar_auxiliar(Auxiliar::Mao, cx),
+                "lupa" => self.usar_auxiliar(Auxiliar::Zoom, cx),
                 "subexposicao" => {
                     let faixa = self.faixa;
                     self.usar(Ferramenta::Subexposicao(faixa), cx)
@@ -2521,7 +2726,7 @@ impl EditorDeFoto {
                 }
                 let cursor = if self.mao.is_some() {
                     gpui_kit::CursorStyle::ClosedHand
-                } else if self.espaco.is_some() {
+                } else if self.espaco.is_some() || self.auxiliar == Some(Auxiliar::Mao) {
                     gpui_kit::CursorStyle::OpenHand
                 } else {
                     gpui_kit::CursorStyle::Crosshair
@@ -2717,28 +2922,16 @@ impl EditorDeFoto {
         let ferramenta = self
             .ferramenta()
             .filter(|_| self.selecionando.is_none() && self.auxiliar.is_none());
-        let selecionando = self.selecionando;
-        let auxiliar = self.auxiliar;
         let cor_atual = self.sessao().map(|s| s.pincel.cor);
+        // Como no Photoshop, as opções seguem a ferramenta: tamanho, dureza e
+        // força só para quem pinta (o pincel de correção também).
+        let pinta = ferramenta.is_some() || self.auxiliar == Some(Auxiliar::Correcao);
         let rotulo = |texto: &'static str| {
             div()
                 .text_xs()
                 .text_color(tema.muted_foreground)
                 .child(texto)
         };
-        let botao_ferramenta =
-            |id: &'static str, nome: &'static str, qual: Ferramenta, cx: &mut Context<Self>| {
-                let ativa = ferramenta == Some(qual);
-                let botao = if ativa {
-                    crate::estilo::botao_primario(id, cx)
-                } else {
-                    crate::estilo::botao_contorno(id, cx)
-                };
-                botao
-                    .debug_selector(move || id.into())
-                    .child(nome)
-                    .on_click(cx.listener(move |ed, _, _, cx| ed.usar(qual, cx)))
-            };
         div()
             .flex()
             .flex_col()
@@ -2748,48 +2941,13 @@ impl EditorDeFoto {
             .p(px(12.))
             .border_l_1()
             .border_color(tema.border)
-            .child(rotulo("Ferramenta"))
-            .child(
-                div()
-                    .flex()
-                    .gap(px(6.))
-                    .child(botao_ferramenta(
-                        "editor-pincel",
-                        "Pincel (B)",
-                        Ferramenta::Pincel,
-                        cx,
-                    ))
-                    .child(botao_ferramenta(
-                        "editor-borracha",
-                        "Borracha (E)",
-                        Ferramenta::Borracha,
-                        cx,
-                    )),
-            )
+            .child(rotulo(self.nome_da_ferramenta()))
             .child(
                 div()
                     .flex()
                     .items_center()
                     .gap(px(4.))
-                    .children(
-                        [
-                            (TipoDeSelecao::Retangulo, Icone::Square, "editor-selecao-retangulo", "Seleção retangular (M) — ⇧ soma, ⌥ tira"),
-                            (TipoDeSelecao::Elipse, Icone::CircleDashed, "editor-selecao-elipse", "Seleção elíptica (⇧M) — ⇧ soma, ⌥ tira"),
-                            (TipoDeSelecao::Laco, Icone::Lasso, "editor-selecao-laco", "Laço (L) — ⇧ soma, ⌥ tira"),
-                        ]
-                        .into_iter()
-                        .map(|(tipo, icone, id, dica)| {
-                            let botao = crate::estilo::botao_icone_padrao(id, icone)
-                                .debug_selector(move || id.into())
-                                .tooltip(dica)
-                                .on_click(cx.listener(move |ed, _, _, cx| ed.usar_selecao(tipo, cx)));
-                            if selecionando == Some(tipo) {
-                                botao.primary()
-                            } else {
-                                botao
-                            }
-                        }),
-                    )
+                    .child(rotulo("Seleção"))
                     .child(div().flex_1())
                     .child(
                         crate::estilo::botao_icone_padrao("editor-preencher-conteudo", Icone::Sparkles)
@@ -2807,113 +2965,46 @@ impl EditorDeFoto {
                             .on_click(cx.listener(|ed, _, _, cx| ed.desmarcar(cx))),
                     ),
             )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(4.))
-                    .child({
-                        let botao = crate::estilo::botao_icone_padrao("editor-carimbo", Icone::Stamp)
-                            .debug_selector(|| "editor-carimbo".into())
-                            .tooltip("Carimbo (S) — ⌥ + clique escolhe de onde copiar")
-                            .on_click(cx.listener(|ed, _, _, cx| ed.usar(Ferramenta::Carimbo, cx)));
-                        if ferramenta == Some(Ferramenta::Carimbo) {
-                            botao.primary()
-                        } else {
-                            botao
-                        }
-                    })
-                    .children(
-                        [
-                            (Auxiliar::ContaGotas, Icone::Pipette, "editor-conta-gotas", "Conta-gotas (I) — a cor da foto vai para o pincel; com o pincel, ⌥ + clique"),
-                            (Auxiliar::Mover, Icone::Move, "editor-mover", "Mover (V) — arrasta o conteúdo da camada escolhida"),
-                            (Auxiliar::Correcao, Icone::Bandage, "editor-correcao", "Pincel de correção (J) — pinte sobre a mancha; ao soltar, ela é refeita pelo que está em volta"),
-                        ]
-                        .into_iter()
-                        .map(|(qual, icone, id, dica)| {
-                            let botao = crate::estilo::botao_icone_padrao(id, icone)
-                                .debug_selector(move || id.into())
-                                .tooltip(dica)
-                                .on_click(cx.listener(move |ed, _, _, cx| ed.usar_auxiliar(qual, cx)));
-                            if auxiliar == Some(qual) {
-                                botao.primary()
-                            } else {
-                                botao
-                            }
-                        }),
-                    ),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(4.))
-                    .children(
-                        [
-                            (Ferramenta::Subexposicao(self.faixa), Icone::Sun, "editor-subexposicao", "Subexposição (O) — clareia onde passa"),
-                            (Ferramenta::Superexposicao(self.faixa), Icone::Moon, "editor-superexposicao", "Superexposição (⇧O) — escurece onde passa"),
-                            (Ferramenta::Desfoque, Icone::Droplet, "editor-desfoque", "Desfoque (R) — suaviza (a pele, um fundo)"),
-                            (Ferramenta::Nitidez, Icone::Triangle, "editor-nitidez", "Nitidez (⇧R) — realça o detalhe"),
-                        ]
-                        .into_iter()
-                        .map(|(qual, icone, id, dica)| {
-                            let botao = crate::estilo::botao_icone_padrao(id, icone)
-                                .debug_selector(move || id.into())
-                                .tooltip(dica)
-                                .on_click(cx.listener(move |ed, _, _, cx| ed.usar(qual, cx)));
-                            let ativa = ferramenta.is_some_and(|f| {
-                                std::mem::discriminant(&f) == std::mem::discriminant(&qual)
-                            });
-                            if ativa {
-                                botao.primary()
-                            } else {
-                                botao
-                            }
-                        }),
+            .when(
+                matches!(
+                    ferramenta,
+                    Some(Ferramenta::Subexposicao(_) | Ferramenta::Superexposicao(_))
+                ),
+                |painel| {
+                    painel.child(
+                        div()
+                            .debug_selector(|| "editor-faixa".into())
+                            .child(crate::estilo::campo_pequeno(
+                                Select::new(&self.seletor_de_faixa).xsmall(),
+                            )),
                     )
-                    .when(
-                        matches!(
-                            ferramenta,
-                            Some(Ferramenta::Subexposicao(_) | Ferramenta::Superexposicao(_))
-                        ),
-                        |linha| {
-                            linha.child(
-                                div()
-                                    .flex_1()
-                                    .debug_selector(|| "editor-faixa".into())
-                                    .child(crate::estilo::campo_pequeno(
-                                        Select::new(&self.seletor_de_faixa).xsmall(),
-                                    )),
-                            )
-                        },
-                    ),
+                },
             )
-            .child(rotulo("Tamanho  [  ]"))
-            .child(div().h(px(20.)).child(crate::estilo::slider(&self.tamanho)))
-            .child(rotulo("Dureza"))
-            .child(div().h(px(20.)).child(crate::estilo::slider(&self.dureza)))
-            .child(rotulo(match ferramenta {
-                Some(Ferramenta::Subexposicao(_) | Ferramenta::Superexposicao(_)) => "Exposição",
-                Some(Ferramenta::Desfoque | Ferramenta::Nitidez) => "Força",
-                _ => "Opacidade do pincel",
-            }))
-            .child(
-                div()
-                    .h(px(20.))
-                    .child(crate::estilo::slider(&self.opacidade)),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(rotulo("Cor"))
+            .when(pinta, |painel| {
+                painel
+                    .child(rotulo("Tamanho  [  ]"))
                     .child(
                         div()
-                            .debug_selector(|| "editor-seletor-de-cor".into())
-                            .child(ColorPicker::new(&self.seletor_de_cor).label("Outra cor")),
-                    ),
-            )
+                            .h(px(20.))
+                            .debug_selector(|| "editor-tamanho".into())
+                            .child(crate::estilo::slider(&self.tamanho)),
+                    )
+                    .child(rotulo("Dureza"))
+                    .child(div().h(px(20.)).child(crate::estilo::slider(&self.dureza)))
+                    .child(rotulo(match ferramenta {
+                        Some(Ferramenta::Subexposicao(_) | Ferramenta::Superexposicao(_)) => {
+                            "Exposição"
+                        }
+                        Some(Ferramenta::Desfoque | Ferramenta::Nitidez) => "Força",
+                        _ => "Opacidade do pincel",
+                    }))
+                    .child(
+                        div()
+                            .h(px(20.))
+                            .child(crate::estilo::slider(&self.opacidade)),
+                    )
+            })
+            .child(rotulo("Cor"))
             .child(
                 div()
                     .flex()
@@ -3721,6 +3812,7 @@ impl Render for EditorDeFoto {
                     .flex()
                     .flex_1()
                     .min_h(px(0.))
+                    .child(self.barra_de_ferramentas(cx))
                     .child(self.palco(window, cx))
                     .child(self.painel(cx)),
             )

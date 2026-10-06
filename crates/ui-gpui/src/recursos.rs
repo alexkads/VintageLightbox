@@ -67,6 +67,7 @@ pub enum Icone {
     // Desfoque e nitidez do editor.
     Droplet,
     Triangle,
+    Eraser,
     Building2,
     Calculator,
     Camera,
@@ -204,6 +205,7 @@ impl Icone {
         Icone::Move,
         Icone::Droplet,
         Icone::Triangle,
+        Icone::Eraser,
         Icone::Building2,
         Icone::Calculator,
         Icone::Camera,
@@ -329,6 +331,7 @@ impl Icone {
             Icone::Move => "move",
             Icone::Droplet => "droplet",
             Icone::Triangle => "triangle",
+            Icone::Eraser => "eraser",
             Icone::Building2 => "building-2",
             Icone::Calculator => "calculator",
             Icone::Camera => "camera",

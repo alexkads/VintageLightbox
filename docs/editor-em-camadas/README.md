@@ -37,6 +37,7 @@ Sem projeto editável, o fluxo é o de sempre: a Revelação parte do bruto.
 | [03-GRAVACAO-E-CATALOGO.md](03-GRAVACAO-E-CATALOGO.md) | O formato do projeto, os tiles, a gravação atômica, a recuperação e a tabela do catálogo |
 | [04-PLANO-ETAPA-1.md](04-PLANO-ETAPA-1.md) | O que a etapa 1 entrega, arquivo por arquivo, os testes e as medidas |
 | [05-ETAPA-2.md](05-ETAPA-2.md) | Várias camadas, os 16 modos de mesclagem, o formato 2 do projeto, zoom, mão e lupa |
+| [12-ETAPA-9.md](12-ETAPA-9.md) | A barra de ferramentas vertical à esquerda, como no Photoshop, com Mão e Zoom |
 | [11-ETAPA-8.md](11-ETAPA-8.md) | Subexposição, superexposição, desfoque, nitidez e o painel Histórico |
 | [10-ETAPA-7.md](10-ETAPA-7.md) | A imagem editada vai ao site e é a base de toda revelação lá (D23 resolvida) |
 | [09-ETAPA-6.md](09-ETAPA-6.md) | Pincel de correção (J) e preencher a seleção pelo conteúdo (⇧⌫) |
@@ -88,6 +89,12 @@ Detalhes em [10-ETAPA-7.md](10-ETAPA-7.md).
 Subexposição e superexposição por faixa (O, ⇧O), desfoque e nitidez (R, ⇧R) e o painel Histórico. Girar e
 redimensionar a foto inteira ficam na Revelação e na exportação, de propósito. Detalhes em
 [11-ETAPA-8.md](11-ETAPA-8.md).
+
+## Etapa 9 (0.1.101) — entregue
+
+A barra de ferramentas vertical à esquerda, na ordem do Photoshop, com a cor atual embaixo e duas ferramentas novas,
+Mão e Zoom; o painel da direita ficou com as opções da ferramenta, as cores e as abas. Detalhes em
+[12-ETAPA-9.md](12-ETAPA-9.md).
 
 ## Onde mora o código
 

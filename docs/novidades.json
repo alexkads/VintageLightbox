@@ -1,12 +1,12 @@
 {
-  "versao": "0.1.100",
-  "titulo": "Editar Foto agora tem subexposição, superexposição, desfoque, nitidez e o Histórico.",
+  "versao": "0.1.101",
+  "titulo": "Editar Foto ganhou a barra de ferramentas à esquerda, como no Photoshop.",
   "importante": false,
   "novidades": [
-    "Subexposição (O) clareia e Superexposição (⇧O) escurece onde você pinta, só nas sombras, nos meios-tons ou nos realces. O efeito vai se construindo a cada passada.",
-    "Desfoque (R) suaviza — a pele, um fundo — e Nitidez (⇧R) realça o detalhe.",
-    "As quatro trabalham sobre a foto como ela aparece e escrevem na camada escolhida: numa camada vazia por cima, o retoque fica separado.",
-    "A aba Histórico, ao lado de Camadas, lista cada passo; clicar num passo volta a ele."
+    "Todas as ferramentas do editor ficam numa barra vertical à esquerda da foto, na ordem do Photoshop. A que está em uso fica acesa, e passar o mouse mostra o nome e o atalho.",
+    "Duas ferramentas novas na barra: a Mão arrasta a foto ampliada, e o Zoom amplia com um clique e afasta com ⌥ + clique.",
+    "A cor atual fica embaixo da barra e abre o seletor de cor.",
+    "O painel da direita mostra só as opções da ferramenta escolhida, as cores e as abas Camadas e Histórico."
   ],
-  "por_que_atualizar": "Para o retoque de retrato — clarear olheiras, escurecer brilho, suavizar a pele — sem sair do editor."
+  "por_que_atualizar": "Para achar cada ferramenta onde quem vem do Photoshop já procura, sem botões espalhados no painel."
 }
