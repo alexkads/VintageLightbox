@@ -37,6 +37,7 @@ Sem projeto editável, o fluxo é o de sempre: a Revelação parte do bruto.
 | [03-GRAVACAO-E-CATALOGO.md](03-GRAVACAO-E-CATALOGO.md) | O formato do projeto, os tiles, a gravação atômica, a recuperação e a tabela do catálogo |
 | [04-PLANO-ETAPA-1.md](04-PLANO-ETAPA-1.md) | O que a etapa 1 entrega, arquivo por arquivo, os testes e as medidas |
 | [05-ETAPA-2.md](05-ETAPA-2.md) | Várias camadas, os 16 modos de mesclagem, o formato 2 do projeto, zoom, mão e lupa |
+| [11-ETAPA-8.md](11-ETAPA-8.md) | Subexposição, superexposição, desfoque, nitidez e o painel Histórico |
 | [10-ETAPA-7.md](10-ETAPA-7.md) | A imagem editada vai ao site e é a base de toda revelação lá (D23 resolvida) |
 | [09-ETAPA-6.md](09-ETAPA-6.md) | Pincel de correção (J) e preencher a seleção pelo conteúdo (⇧⌫) |
 | [08-ETAPA-5.md](08-ETAPA-5.md) | Transformação livre (⌘T), mover a seleção, camada via cópia e via recorte |
@@ -82,9 +83,11 @@ da Revelação. Detalhes em [09-ETAPA-6.md](09-ETAPA-6.md).
 A imagem editada sobe ao site e toda revelação lá parte dela; o `/original` continua o bruto (D23 resolvida).
 Detalhes em [10-ETAPA-7.md](10-ETAPA-7.md).
 
-## Depois
+## Etapa 8 (0.1.100) — entregue
 
-Mudança de geometria da foto inteira (girar/redimensionar) — o C31 recusa outra proporção.
+Subexposição e superexposição por faixa (O, ⇧O), desfoque e nitidez (R, ⇧R) e o painel Histórico. Girar e
+redimensionar a foto inteira ficam na Revelação e na exportação, de propósito. Detalhes em
+[11-ETAPA-8.md](11-ETAPA-8.md).
 
 ## Onde mora o código
 
