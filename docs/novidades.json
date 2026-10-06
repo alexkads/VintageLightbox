@@ -1,11 +1,11 @@
 {
-  "versao": "0.1.98",
-  "titulo": "Editar Foto agora tira manchas e objetos pelo conteúdo em volta.",
+  "versao": "0.1.99",
+  "titulo": "O retoque feito em Editar Foto agora vale também no site.",
   "importante": false,
   "novidades": [
-    "Pincel de correção (J): pinte por cima de uma mancha, fio ou espinha; ao soltar, a área é refeita pelo que está em volta.",
-    "Com uma área selecionada, ⇧⌫ (ou o botão ✨ ao lado de \"Desmarcar\") apaga o que está nela e completa com o entorno.",
-    "O resultado entra na camada escolhida — numa camada vazia por cima, o retoque fica separado. O cálculo leva alguns segundos e não trava a tela."
+    "Ao salvar na galeria uma foto editada (Editar Foto), a imagem editada sobe junto, e toda revelação feita no site parte dela — a do painel e a do cliente em \"Meus ensaios\". Antes, revelar de novo no site partia do arquivo bruto e o retoque sumia.",
+    "Uma foto retocada em outro balcão é revelada aqui a partir do retoque, e não do bruto.",
+    "\"Excluir a edição\" tira a imagem editada do site no próximo \"Salvar na galeria\" daquela foto."
   ],
-  "por_que_atualizar": "Para limpar a foto sem precisar escolher de onde copiar, como no Photoshop."
+  "por_que_atualizar": "Para o cliente e a equipe verem sempre a foto com o retoque, mesmo depois de ajustar a revelação no site."
 }

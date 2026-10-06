@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.99",
+    "data": "2026-10-06",
+    "titulo": "O retoque feito em Editar Foto agora vale também no site.",
+    "importante": false,
+    "novidades": [
+      "Ao salvar na galeria uma foto editada (Editar Foto), a imagem editada sobe junto, e toda revelação feita no site parte dela — a do painel e a do cliente em \"Meus ensaios\". Antes, revelar de novo no site partia do arquivo bruto e o retoque sumia.",
+      "Uma foto retocada em outro balcão é revelada aqui a partir do retoque, e não do bruto.",
+      "\"Excluir a edição\" tira a imagem editada do site no próximo \"Salvar na galeria\" daquela foto."
+    ],
+    "por_que_atualizar": "Para o cliente e a equipe verem sempre a foto com o retoque, mesmo depois de ajustar a revelação no site."
+  },
+  {
     "versao": "0.1.98",
     "data": "2026-10-06",
     "titulo": "Editar Foto agora tira manchas e objetos pelo conteúdo em volta.",
