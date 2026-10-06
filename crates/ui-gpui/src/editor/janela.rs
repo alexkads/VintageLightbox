@@ -64,6 +64,7 @@ use super::{
     SelecaoRetangular, SelecionarTudo, SubirCamada, TransformacaoLivre, UmPorUm, UsarBorracha,
     UsarCarimbo, UsarContaGotas, UsarCorrecao, UsarMover, UsarPincel, CONTEXTO,
 };
+use super::{UsarDesfoque, UsarNitidez, UsarSubexposicao, UsarSuperexposicao};
 use crate::campo::TrocarValor as _;
 use crate::recursos::Icone;
 use crate::revelacao::zoom::{self, Cena, EstadoDoZoom, Medidas as MedidasDaCena, Nivel, Ponto};
@@ -357,6 +358,11 @@ pub struct EditorDeFoto {
     modo: Entity<SelectState<Vec<Opcao>>>,
     /// O modo que o Select mostra — para só mexer nele quando mudar.
     modo_mostrado: Option<Modo>,
+    /// A faixa de tons da subexposição e da superexposição (Select do kit).
+    faixa: editor_core::pincel::Faixa,
+    seletor_de_faixa: Entity<SelectState<Vec<Opcao>>>,
+    /// A aba de baixo do painel: 0 = Camadas, 1 = Histórico.
+    aba_do_painel: usize,
     /// A camada sendo renomeada e o campo do nome.
     renomeando: Option<(usize, Entity<InputState>)>,
     medidas: Medidas,
@@ -435,6 +441,18 @@ impl EditorDeFoto {
             .map(|m| Opcao::nova(m.chave(), m.nome()))
             .collect();
         let modo = cx.new(|cx| SelectState::new(opcoes, None, window, cx));
+        let faixas: Vec<Opcao> = editor_core::pincel::Faixa::TODAS
+            .iter()
+            .map(|f| Opcao::nova(f.nome(), f.nome()))
+            .collect();
+        let seletor_de_faixa = cx.new(|cx| SelectState::new(faixas, None, window, cx));
+        seletor_de_faixa.update(cx, |s, cx| {
+            s.set_selected_value(
+                &editor_core::pincel::Faixa::default().nome().to_string(),
+                window,
+                cx,
+            )
+        });
         let seletor_de_cor =
             cx.new(|cx| ColorPickerState::new(window, cx).default_value(hsla_de(pincel.cor)));
 
@@ -493,6 +511,23 @@ impl EditorDeFoto {
             },
         ));
 
+        assinaturas.push(cx.subscribe_in(
+            &seletor_de_faixa,
+            window,
+            |ed: &mut Self, _e, evento: &SelectEvent<Vec<Opcao>>, window, cx| {
+                let SelectEvent::Confirm(Some(nome)) = evento else {
+                    return;
+                };
+                if let Some(faixa) = editor_core::pincel::Faixa::TODAS
+                    .into_iter()
+                    .find(|f| f.nome() == nome)
+                {
+                    ed.escolher_faixa(faixa, cx);
+                }
+                window.focus(&ed.foco, cx);
+            },
+        ));
+
         let foco = cx.focus_handle();
         window.focus(&foco, cx);
 
@@ -531,6 +566,9 @@ impl EditorDeFoto {
             opacidade_da_camada,
             modo,
             modo_mostrado: None,
+            faixa: editor_core::pincel::Faixa::default(),
+            seletor_de_faixa,
+            aba_do_painel: 0,
             renomeando: None,
             medidas: Medidas::default(),
             _assinaturas: assinaturas,
@@ -1456,6 +1494,27 @@ impl EditorDeFoto {
         self.auxiliar
     }
 
+    /// A faixa de tons da subexposição e da superexposição; a ferramenta na
+    /// mão, se for uma delas, passa a usá-la.
+    pub fn escolher_faixa(&mut self, faixa: editor_core::pincel::Faixa, cx: &mut Context<Self>) {
+        self.faixa = faixa;
+        if let Some(s) = self.sessao_mut() {
+            s.pincel.ferramenta = match s.pincel.ferramenta {
+                Ferramenta::Subexposicao(_) => Ferramenta::Subexposicao(faixa),
+                Ferramenta::Superexposicao(_) => Ferramenta::Superexposicao(faixa),
+                outra => outra,
+            };
+        }
+        cx.notify();
+    }
+
+    /// O painel Histórico: volta ou avança até `posicao` passos.
+    pub fn ir_para_no_historico(&mut self, posicao: usize, cx: &mut Context<Self>) {
+        self.na_sessao(cx, |s| {
+            s.ir_para(posicao);
+        });
+    }
+
     pub fn usar(&mut self, ferramenta: Ferramenta, cx: &mut Context<Self>) {
         self.selecionando = None;
         self.auxiliar = None;
@@ -2075,6 +2134,20 @@ impl EditorDeFoto {
                 "conta-gotas" => self.usar_auxiliar(Auxiliar::ContaGotas, cx),
                 "mover" => self.usar_auxiliar(Auxiliar::Mover, cx),
                 "correcao" => self.usar_auxiliar(Auxiliar::Correcao, cx),
+                "subexposicao" => {
+                    let faixa = self.faixa;
+                    self.usar(Ferramenta::Subexposicao(faixa), cx)
+                }
+                "superexposicao" => {
+                    let faixa = self.faixa;
+                    self.usar(Ferramenta::Superexposicao(faixa), cx)
+                }
+                "desfoque" => self.usar(Ferramenta::Desfoque, cx),
+                "nitidez" => self.usar(Ferramenta::Nitidez, cx),
+                "historico" => {
+                    let alvo = partes.get(2).and_then(|v| v.parse().ok()).unwrap_or(0);
+                    self.ir_para_no_historico(alvo, cx)
+                }
                 outra => eprintln!("[roteiro] editor ferramenta {outra}?"),
             },
             "espaco" => match partes.get(1).copied() {
@@ -2770,11 +2843,60 @@ impl EditorDeFoto {
                         }),
                     ),
             )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.))
+                    .children(
+                        [
+                            (Ferramenta::Subexposicao(self.faixa), Icone::Sun, "editor-subexposicao", "Subexposição (O) — clareia onde passa"),
+                            (Ferramenta::Superexposicao(self.faixa), Icone::Moon, "editor-superexposicao", "Superexposição (⇧O) — escurece onde passa"),
+                            (Ferramenta::Desfoque, Icone::Droplet, "editor-desfoque", "Desfoque (R) — suaviza (a pele, um fundo)"),
+                            (Ferramenta::Nitidez, Icone::Triangle, "editor-nitidez", "Nitidez (⇧R) — realça o detalhe"),
+                        ]
+                        .into_iter()
+                        .map(|(qual, icone, id, dica)| {
+                            let botao = crate::estilo::botao_icone_padrao(id, icone)
+                                .debug_selector(move || id.into())
+                                .tooltip(dica)
+                                .on_click(cx.listener(move |ed, _, _, cx| ed.usar(qual, cx)));
+                            let ativa = ferramenta.is_some_and(|f| {
+                                std::mem::discriminant(&f) == std::mem::discriminant(&qual)
+                            });
+                            if ativa {
+                                botao.primary()
+                            } else {
+                                botao
+                            }
+                        }),
+                    )
+                    .when(
+                        matches!(
+                            ferramenta,
+                            Some(Ferramenta::Subexposicao(_) | Ferramenta::Superexposicao(_))
+                        ),
+                        |linha| {
+                            linha.child(
+                                div()
+                                    .flex_1()
+                                    .debug_selector(|| "editor-faixa".into())
+                                    .child(crate::estilo::campo_pequeno(
+                                        Select::new(&self.seletor_de_faixa).xsmall(),
+                                    )),
+                            )
+                        },
+                    ),
+            )
             .child(rotulo("Tamanho  [  ]"))
             .child(div().h(px(20.)).child(crate::estilo::slider(&self.tamanho)))
             .child(rotulo("Dureza"))
             .child(div().h(px(20.)).child(crate::estilo::slider(&self.dureza)))
-            .child(rotulo("Opacidade do pincel"))
+            .child(rotulo(match ferramenta {
+                Some(Ferramenta::Subexposicao(_) | Ferramenta::Superexposicao(_)) => "Exposição",
+                Some(Ferramenta::Desfoque | Ferramenta::Nitidez) => "Força",
+                _ => "Opacidade do pincel",
+            }))
             .child(
                 div()
                     .h(px(20.))
@@ -2814,7 +2936,40 @@ impl EditorDeFoto {
                     })),
             )
             .child(div().h(px(1.)).bg(tema.border))
-            .child(self.painel_de_camadas(cx))
+            .child({
+                // 🗂️ Camadas e Histórico dividem o resto da coluna em abas, como os
+                // painéis agrupados do Photoshop: um embaixo do outro, o
+                // Histórico ficava abaixo da borda da janela.
+                let esta = cx.entity();
+                gpui_kit::component::tab::TabBar::new("editor-abas")
+                    .segmented()
+                    .small()
+                    .selected_index(self.aba_do_painel)
+                    .on_click(move |indice, _, cx| {
+                        let indice = *indice;
+                        esta.update(cx, |ed, cx| {
+                            ed.aba_do_painel = indice;
+                            cx.notify();
+                        });
+                    })
+                    .child(
+                        gpui_kit::component::tab::Tab::new()
+                            .debug_selector(|| "editor-aba-camadas".into())
+                            .label("Camadas"),
+                    )
+                    .child(
+                        gpui_kit::component::tab::Tab::new()
+                            .debug_selector(|| "editor-aba-historico".into())
+                            .label("Histórico"),
+                    )
+            })
+            .map(|painel| {
+                if self.aba_do_painel == 1 {
+                    painel.child(self.painel_do_historico(cx).into_any_element())
+                } else {
+                    painel.child(self.painel_de_camadas(cx).into_any_element())
+                }
+            })
     }
 
     /// O painel Camadas do Photoshop: o modo e a opacidade da escolhida, a
@@ -2939,12 +3094,6 @@ impl EditorDeFoto {
             .min_h(px(0.))
             .child(
                 div()
-                    .text_xs()
-                    .text_color(tema.muted_foreground)
-                    .child("Camadas"),
-            )
-            .child(
-                div()
                     .debug_selector(|| "editor-modo".into())
                     .child(crate::estilo::campo_pequeno(
                         Select::new(&self.modo)
@@ -3034,6 +3183,57 @@ impl EditorDeFoto {
                         .on_click(cx.listener(|ed, _, _, cx| ed.excluir_camada(cx))),
                     ),
             )
+    }
+
+    /// O painel Histórico do Photoshop: a abertura e cada passo, do mais
+    /// antigo ao mais novo; o vigente realçado, os desfeitos apagados. Clicar
+    /// num passo volta (ou avança) até ele.
+    fn painel_do_historico(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let tema = cx.theme().clone();
+        let (nomes, posicao) = match self.sessao() {
+            Some(s) => (
+                std::iter::once("Abertura".to_string())
+                    .chain(
+                        s.historico()
+                            .passos()
+                            .iter()
+                            .map(|p| p.descricao(s.documento())),
+                    )
+                    .collect::<Vec<_>>(),
+                s.historico().posicao(),
+            ),
+            None => (Vec::new(), 0),
+        };
+        let linhas = nomes.into_iter().enumerate().map(|(i, nome)| {
+            let vigente = i == posicao;
+            let desfeito = i > posicao;
+            div()
+                .id(("editor-historico", i))
+                .debug_selector(move || format!("editor-historico-{i}"))
+                .px(px(6.))
+                .py(px(2.))
+                .rounded(crate::tema::canto(4.))
+                .text_sm()
+                .cursor_pointer()
+                .when(vigente, |d| {
+                    d.bg(tema.accent).text_color(tema.accent_foreground)
+                })
+                .when(desfeito, |d| {
+                    d.text_color(tema.muted_foreground).opacity(0.6)
+                })
+                .when(!vigente, |d| d.hover(|d| d.bg(tema.muted)))
+                .child(nome)
+                .on_click(cx.listener(move |ed, _, _, cx| ed.ir_para_no_historico(i, cx)))
+        });
+        div()
+            .id("editor-historico")
+            .flex()
+            .flex_col()
+            .gap(px(1.))
+            .flex_1()
+            .min_h(px(0.))
+            .overflow_y_scroll()
+            .children(linhas)
     }
 
     fn pergunta_de_fechar(
@@ -3499,6 +3699,16 @@ impl Render for EditorDeFoto {
             .on_action(
                 cx.listener(|ed, _: &UsarMover, _, cx| ed.usar_auxiliar(Auxiliar::Mover, cx)),
             )
+            .on_action(cx.listener(|ed, _: &UsarSubexposicao, _, cx| {
+                let faixa = ed.faixa;
+                ed.usar(Ferramenta::Subexposicao(faixa), cx)
+            }))
+            .on_action(cx.listener(|ed, _: &UsarSuperexposicao, _, cx| {
+                let faixa = ed.faixa;
+                ed.usar(Ferramenta::Superexposicao(faixa), cx)
+            }))
+            .on_action(cx.listener(|ed, _: &UsarDesfoque, _, cx| ed.usar(Ferramenta::Desfoque, cx)))
+            .on_action(cx.listener(|ed, _: &UsarNitidez, _, cx| ed.usar(Ferramenta::Nitidez, cx)))
             .on_action(cx.listener(|ed, _: &SelecionarTudo, _, cx| ed.selecionar_tudo(cx)))
             .on_action(cx.listener(|ed, _: &Desmarcar, _, cx| ed.desmarcar(cx)))
             .on_action(cx.listener(|ed, _: &InverterSelecao, _, cx| ed.inverter_selecao(cx)))

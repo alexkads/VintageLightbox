@@ -1309,4 +1309,67 @@ mod testes {
         assert!(corrigido > 0, "o traço foi refeito");
         assert_eq!(depois, passos + 1);
     }
+
+    /// ☀️ O e R escolhem as ferramentas de tom e de foco; a subexposição
+    /// clareia numa camada vazia; um clique no Histórico volta um passo.
+    #[gpui_kit::test]
+    fn tom_foco_e_o_historico(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.simulate_keystrokes("cmd-shift-n o");
+        ve.run_until_parked();
+        assert!(matches!(
+            editor.read_with(&ve, |ed, _| ed.ferramenta()),
+            Some(editor_core::Ferramenta::Subexposicao(_))
+        ));
+        assert!(ve.debug_bounds("editor-faixa").is_some(), "a faixa aparece");
+        let antes = editor.read_with(&ve, |ed, _| {
+            ed.sessao().unwrap().compor().get_pixel(30, 24).0
+        });
+        editor.update(&mut ve, |ed, cx| {
+            ed.tracar_para_teste((26., 24.), (34., 24.), cx)
+        });
+        let depois = editor.read_with(&ve, |ed, _| {
+            ed.sessao().unwrap().compor().get_pixel(30, 24).0
+        });
+        assert!(depois[1] > antes[1], "clareou: {antes:?} → {depois:?}");
+        assert!(
+            editor.read_with(&ve, |ed, _| ed.sessao().unwrap().documento().camadas[0]
+                .pixels
+                .vazia())
+        );
+
+        ve.simulate_keystrokes("shift-r");
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.ferramenta()),
+            Some(editor_core::Ferramenta::Nitidez)
+        );
+        assert!(ve.debug_bounds("editor-faixa").is_none());
+
+        // Histórico: Abertura, Criar Camada 1, Pincel. Clicar na 1 volta.
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.sessao().unwrap().historico().posicao()),
+            2
+        );
+        clicar_no_editor(&mut ve, "editor-aba-historico");
+        clicar_no_editor(&mut ve, "editor-historico-1");
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.sessao().unwrap().historico().posicao()),
+            1
+        );
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed
+                .sessao()
+                .unwrap()
+                .compor()
+                .get_pixel(30, 24)
+                .0),
+            antes
+        );
+        clicar_no_editor(&mut ve, "editor-historico-2");
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.sessao().unwrap().historico().posicao()),
+            2
+        );
+    }
 }

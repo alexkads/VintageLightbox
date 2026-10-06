@@ -64,10 +64,9 @@ pub enum Icone {
     ArrowDown,
     // A ferramenta Mover do editor (V).
     Move,
-    // Desfoque e nitidez do editor, e o painel Histórico.
+    // Desfoque e nitidez do editor.
     Droplet,
     Triangle,
-    History,
     Building2,
     Calculator,
     Camera,
@@ -205,7 +204,6 @@ impl Icone {
         Icone::Move,
         Icone::Droplet,
         Icone::Triangle,
-        Icone::History,
         Icone::Building2,
         Icone::Calculator,
         Icone::Camera,
@@ -331,7 +329,6 @@ impl Icone {
             Icone::Move => "move",
             Icone::Droplet => "droplet",
             Icone::Triangle => "triangle",
-            Icone::History => "history",
             Icone::Building2 => "building-2",
             Icone::Calculator => "calculator",
             Icone::Camera => "camera",

@@ -52,6 +52,10 @@ gpui_kit::actions!(
         CancelarTransformacao,
         UsarCorrecao,
         PreencherPeloConteudo,
+        UsarSubexposicao,
+        UsarSuperexposicao,
+        UsarDesfoque,
+        UsarNitidez,
     ]
 );
 
@@ -65,7 +69,8 @@ const SEM_CAMPO: &str = "EditorDeFoto && !Input";
 /// As teclas do editor — as do Photoshop para pincel (B), borracha (E),
 /// carimbo (S), conta-gotas (I), mover (V), transformação livre (⌘T, Enter,
 /// Esc), camada via cópia e via recorte (⌘J, ⇧⌘J), pincel de correção (J) e
-/// preencher a seleção pelo conteúdo (⇧⌫),
+/// preencher a seleção pelo conteúdo (⇧⌫), subexposição e superexposição (O,
+/// ⇧O), desfoque e nitidez (R, ⇧R),
 /// tamanho (`[` `]`) e camadas (⇧⌘N nova, ⌘J duplicar, ⌘] ⌘[ subir e descer,
 /// ⌥] ⌥[ escolher a de cima e a de baixo, ⌘E mesclar para baixo), seleção (M
 /// retângulo, ⇧M elipse, L laço, ⌘A ⌘D ⇧⌘I, Delete apaga, ⌥Delete preenche); as da Revelação para o zoom (Z,
@@ -137,6 +142,10 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("enter", AplicarTransformacao, solta),
         KeyBinding::new("escape", CancelarTransformacao, solta),
         KeyBinding::new("j", UsarCorrecao, solta),
+        KeyBinding::new("o", UsarSubexposicao, solta),
+        KeyBinding::new("shift-o", UsarSuperexposicao, solta),
+        KeyBinding::new("r", UsarDesfoque, solta),
+        KeyBinding::new("shift-r", UsarNitidez, solta),
         KeyBinding::new("shift-backspace", PreencherPeloConteudo, solta),
         KeyBinding::new("shift-delete", PreencherPeloConteudo, solta),
         KeyBinding::new("cmd-e", MesclarParaBaixo, c),
