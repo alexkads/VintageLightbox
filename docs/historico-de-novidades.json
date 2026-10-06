@@ -1,5 +1,18 @@
 [
   {
+    "versao": "0.1.102",
+    "data": "2026-10-06",
+    "titulo": "Editar Foto ganhou a máscara de camada, o degradê e a lata de tinta.",
+    "importante": false,
+    "novidades": [
+      "Máscara de camada, como no Photoshop: o botão embaixo das Camadas cria a máscara, e pintar de preto nela esconde a camada, de branco revela. Com ⌥ ela já nasce escondendo tudo; com uma seleção feita, nasce dela.",
+      "Clique na miniatura da máscara para pintar nela, e na da camada para voltar. ⇧ + clique na máscara liga e desliga.",
+      "Degradê (G): arraste do começo ao fim. Na camada, vai da cor ao transparente; na máscara, de preto a branco — o jeito de esmaecer um efeito pela foto.",
+      "Lata de tinta (⇧G): um clique pinta a área parecida em volta."
+    ],
+    "por_que_atualizar": "Para escurecer um céu, clarear só um rosto ou esmaecer um efeito sem apagar nada: o que a máscara esconde continua lá."
+  },
+  {
     "versao": "0.1.101",
     "data": "2026-10-06",
     "titulo": "Editar Foto ganhou a barra de ferramentas à esquerda, como no Photoshop.",

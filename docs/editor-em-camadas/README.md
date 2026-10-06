@@ -37,6 +37,7 @@ Sem projeto editável, o fluxo é o de sempre: a Revelação parte do bruto.
 | [03-GRAVACAO-E-CATALOGO.md](03-GRAVACAO-E-CATALOGO.md) | O formato do projeto, os tiles, a gravação atômica, a recuperação e a tabela do catálogo |
 | [04-PLANO-ETAPA-1.md](04-PLANO-ETAPA-1.md) | O que a etapa 1 entrega, arquivo por arquivo, os testes e as medidas |
 | [05-ETAPA-2.md](05-ETAPA-2.md) | Várias camadas, os 16 modos de mesclagem, o formato 2 do projeto, zoom, mão e lupa |
+| [13-ETAPA-10.md](13-ETAPA-10.md) | Máscara de camada, degradê (G) e lata de tinta (⇧G); projeto no formato 4 |
 | [12-ETAPA-9.md](12-ETAPA-9.md) | A barra de ferramentas vertical à esquerda, como no Photoshop, com Mão e Zoom |
 | [11-ETAPA-8.md](11-ETAPA-8.md) | Subexposição, superexposição, desfoque, nitidez e o painel Histórico |
 | [10-ETAPA-7.md](10-ETAPA-7.md) | A imagem editada vai ao site e é a base de toda revelação lá (D23 resolvida) |
@@ -95,6 +96,12 @@ redimensionar a foto inteira ficam na Revelação e na exportação, de propósi
 A barra de ferramentas vertical à esquerda, na ordem do Photoshop, com a cor atual embaixo e duas ferramentas novas,
 Mão e Zoom; o painel da direita ficou com as opções da ferramenta, as cores e as abas. Detalhes em
 [12-ETAPA-9.md](12-ETAPA-9.md).
+
+## Etapa 10 (0.1.102) — entregue
+
+A máscara de camada do Photoshop (adicionar, ⌥ esconder tudo, nascer da seleção, ⇧ + clique desliga, ⌘E aplica),
+o degradê (G) e a lata de tinta (⇧G), nos pixels e na máscara. Projeto no formato 4. Detalhes em
+[13-ETAPA-10.md](13-ETAPA-10.md).
 
 ## Onde mora o código
 

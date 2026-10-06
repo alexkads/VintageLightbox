@@ -1053,6 +1053,144 @@ mod testes {
         );
     }
 
+    /// 🎭 A máscara de camada pela tela: o botão (e com ⌥), as miniaturas que
+    /// escolhem onde o pincel pinta, ⇧ + clique que desliga, o degradê (G) e a
+    /// lata (⇧G) nela, e a lixeira que a exclui.
+    #[gpui_kit::test]
+    fn a_mascara_de_camada_pela_tela(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        // Uma camada vermelha cheia por cima da foto.
+        editor.update(&mut ve, |ed, cx| {
+            ed.na_sessao_para_teste(cx, |s| {
+                s.pincel.cor = [255, 0, 0];
+                s.selecionar_tudo();
+                s.preencher_selecao();
+                s.desmarcar();
+            })
+        });
+        let cor = |ve: &mut VisualTestContext, x: f32, y: f32| {
+            editor.read_with(ve, |ed, _| ed.sessao().unwrap().cor_em(x, y).unwrap())
+        };
+        let mascara = |ve: &mut VisualTestContext| {
+            editor.read_with(ve, |ed, _| {
+                ed.sessao().unwrap().documento().camadas[0]
+                    .mascara
+                    .as_ref()
+                    .map(|m| (m.fundo, m.ativa))
+            })
+        };
+        let na_mascara = |ve: &mut VisualTestContext| editor.read_with(ve, |ed, _| ed.na_mascara());
+
+        clicar_no_editor(&mut ve, "editor-camada-mascara");
+        assert_eq!(mascara(&mut ve), Some((255, true)));
+        assert!(na_mascara(&mut ve), "o pincel vai para a máscara nova");
+        assert!(
+            ve.debug_bounds("editor-na-mascara").is_some(),
+            "o painel avisa"
+        );
+        assert!(
+            ve.debug_bounds("editor-mascara-0").is_some(),
+            "a miniatura aparece"
+        );
+
+        // A miniatura da camada (a linha) volta aos pixels; a da máscara, a ela.
+        clicar_no_editor(&mut ve, "editor-miniatura-0");
+        assert!(!na_mascara(&mut ve));
+        clicar_no_editor(&mut ve, "editor-mascara-0");
+        assert!(na_mascara(&mut ve));
+
+        // G e um arrasto da esquerda para a direita: preto → branco na máscara.
+        editor.update(&mut ve, |ed, cx| {
+            ed.na_sessao_para_teste(cx, |s| s.pincel.cor = [0; 3])
+        });
+        ve.simulate_keystrokes("g");
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.auxiliar()),
+            Some(crate::editor::janela::Auxiliar::Degrade)
+        );
+        let base = editor.read_with(&ve, |ed, _| ed.sessao().unwrap().base().clone());
+        // Em frações da foto (o palco é mais largo que ela).
+        let foto = editor.read_with(&ve, |ed, _| ed.area_na_janela().unwrap());
+        let na_foto = |fx: f32, fy: f32| {
+            foto.origin + gpui_kit::point(foto.size.width * fx, foto.size.height * fy)
+        };
+        let (de, ate) = (na_foto(0.1, 0.5), na_foto(0.9, 0.5));
+        ve.simulate_mouse_down(de, gpui_kit::MouseButton::Left, gpui_kit::Modifiers::none());
+        ve.simulate_mouse_move(
+            ate,
+            Some(gpui_kit::MouseButton::Left),
+            gpui_kit::Modifiers::none(),
+        );
+        ve.simulate_mouse_up(
+            ate,
+            gpui_kit::MouseButton::Left,
+            gpui_kit::Modifiers::none(),
+        );
+        ve.run_until_parked();
+        let (l, a) = (base.width() as f32, base.height() as f32);
+        assert_eq!(
+            cor(&mut ve, 1.0, a / 2.0),
+            base.get_pixel(1, (a / 2.0) as u32).0,
+            "a esquerda some"
+        );
+        assert_eq!(
+            cor(&mut ve, l - 1.0, a / 2.0),
+            [255, 0, 0],
+            "a direita fica"
+        );
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed
+                .sessao()
+                .unwrap()
+                .historico()
+                .a_desfazer()
+                .map(|p| p.descricao(ed.sessao().unwrap().documento()))),
+            Some("Pincel na máscara".to_string())
+        );
+
+        // ⇧ + clique na miniatura desliga: a camada inteira de novo.
+        let miniatura = ve.debug_bounds("editor-mascara-0").unwrap();
+        ve.simulate_click(miniatura.center(), gpui_kit::Modifiers::shift());
+        ve.run_until_parked();
+        assert_eq!(mascara(&mut ve), Some((255, false)));
+        assert_eq!(cor(&mut ve, 1.0, a / 2.0), [255, 0, 0]);
+        ve.simulate_click(miniatura.center(), gpui_kit::Modifiers::shift());
+        ve.run_until_parked();
+        assert_eq!(mascara(&mut ve), Some((255, true)));
+
+        // ⇧G e um clique na parte preta: a lata (com branco) revela de volta.
+        ve.simulate_keystrokes("shift-g");
+        ve.run_until_parked();
+        editor.update(&mut ve, |ed, cx| {
+            ed.na_sessao_para_teste(cx, |s| s.pincel.cor = [255; 3])
+        });
+        let ponto = na_foto(0.02, 0.5);
+        ve.simulate_click(ponto, gpui_kit::Modifiers::none());
+        ve.run_until_parked();
+        assert_eq!(cor(&mut ve, 1.0, a / 2.0), [255, 0, 0], "a lata revelou");
+
+        // A lixeira com a máscara escolhida exclui a máscara, não a camada.
+        clicar_no_editor(&mut ve, "editor-mascara-0");
+        clicar_no_editor(&mut ve, "editor-camada-excluir");
+        assert_eq!(mascara(&mut ve), None);
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.sessao().unwrap().documento().camadas.len()),
+            1
+        );
+
+        // ⌥ + o botão: uma máscara que esconde tudo.
+        let botao = ve.debug_bounds("editor-camada-mascara").unwrap();
+        ve.simulate_click(botao.center(), gpui_kit::Modifiers::alt());
+        ve.run_until_parked();
+        assert_eq!(mascara(&mut ve), Some((0, true)));
+        assert_eq!(
+            cor(&mut ve, l / 2.0, a / 2.0),
+            base.get_pixel((l / 2.0) as u32, (a / 2.0) as u32).0
+        );
+    }
+
     fn arrastar_no_palco(ve: &mut VisualTestContext, de: (f32, f32), ate: (f32, f32)) {
         let palco = ve.debug_bounds("palco-do-editor").unwrap();
         let ponto = |f: (f32, f32)| {

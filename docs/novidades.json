@@ -1,12 +1,12 @@
 {
-  "versao": "0.1.101",
-  "titulo": "Editar Foto ganhou a barra de ferramentas à esquerda, como no Photoshop.",
+  "versao": "0.1.102",
+  "titulo": "Editar Foto ganhou a máscara de camada, o degradê e a lata de tinta.",
   "importante": false,
   "novidades": [
-    "Todas as ferramentas do editor ficam numa barra vertical à esquerda da foto, na ordem do Photoshop. A que está em uso fica acesa, e passar o mouse mostra o nome e o atalho.",
-    "Duas ferramentas novas na barra: a Mão arrasta a foto ampliada, e o Zoom amplia com um clique e afasta com ⌥ + clique.",
-    "A cor atual fica embaixo da barra e abre o seletor de cor.",
-    "O painel da direita mostra só as opções da ferramenta escolhida, as cores e as abas Camadas e Histórico."
+    "Máscara de camada, como no Photoshop: o botão embaixo das Camadas cria a máscara, e pintar de preto nela esconde a camada, de branco revela. Com ⌥ ela já nasce escondendo tudo; com uma seleção feita, nasce dela.",
+    "Clique na miniatura da máscara para pintar nela, e na da camada para voltar. ⇧ + clique na máscara liga e desliga.",
+    "Degradê (G): arraste do começo ao fim. Na camada, vai da cor ao transparente; na máscara, de preto a branco — o jeito de esmaecer um efeito pela foto.",
+    "Lata de tinta (⇧G): um clique pinta a área parecida em volta."
   ],
-  "por_que_atualizar": "Para achar cada ferramenta onde quem vem do Photoshop já procura, sem botões espalhados no painel."
+  "por_que_atualizar": "Para escurecer um céu, clarear só um rosto ou esmaecer um efeito sem apagar nada: o que a máscara esconde continua lá."
 }

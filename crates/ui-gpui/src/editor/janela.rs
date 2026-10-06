@@ -64,7 +64,9 @@ use super::{
     SelecaoRetangular, SelecionarTudo, SubirCamada, TransformacaoLivre, UmPorUm, UsarBorracha,
     UsarCarimbo, UsarContaGotas, UsarCorrecao, UsarMover, UsarPincel, CONTEXTO,
 };
-use super::{UsarDesfoque, UsarNitidez, UsarSubexposicao, UsarSuperexposicao};
+use super::{
+    UsarDegrade, UsarDesfoque, UsarLata, UsarNitidez, UsarSubexposicao, UsarSuperexposicao,
+};
 use crate::campo::TrocarValor as _;
 use crate::recursos::Icone;
 use crate::revelacao::zoom::{self, Cena, EstadoDoZoom, Medidas as MedidasDaCena, Nivel, Ponto};
@@ -146,6 +148,10 @@ pub enum Auxiliar {
     Mao,
     /// A lupa da barra: clicar amplia em torno do ponto; ⌥ + clique afasta.
     Zoom,
+    /// G — o degradê: arrastar do começo ao fim (⇧ prende em 45°).
+    Degrade,
+    /// ⇧G — a lata de tinta: um clique pinta a área parecida em volta.
+    Lata,
 }
 
 /// O buraco de um preenchimento por conteúdo.
@@ -394,6 +400,10 @@ pub struct EditorDeFoto {
     gesto_de_transformacao: Option<GestoDeTransformacao>,
     /// O traço do pincel de correção em curso (pixels da foto).
     traco_de_correcao: Option<Vec<(f32, f32)>>,
+    /// O degradê sendo arrastado: começo e fim, em pixels da foto.
+    degrade_em_curso: Option<((f32, f32), (f32, f32))>,
+    /// A miniatura da máscara de cada camada (`None` sem máscara).
+    miniaturas_das_mascaras: Vec<Option<Arc<RenderImage>>>,
     /// Um preenchimento por conteúdo calculando em segundo plano.
     preenchendo: bool,
     _tarefa_do_preenchimento: Option<Task<()>>,
@@ -592,6 +602,8 @@ impl EditorDeFoto {
             cor_mostrada: None,
             gesto_de_transformacao: None,
             traco_de_correcao: None,
+            degrade_em_curso: None,
+            miniaturas_das_mascaras: Vec::new(),
             preenchendo: false,
             _tarefa_do_preenchimento: None,
         };
@@ -1002,7 +1014,23 @@ impl EditorDeFoto {
                 self.ampliar_em_torno(if modificadores.alt { 0.5 } else { 2.0 }, p, cx);
                 return;
             }
+            Some(Auxiliar::Degrade) => {
+                if let Some(p) = self.na_foto_sem_limite(ponto) {
+                    self.degrade_em_curso = Some((p, p));
+                    cx.notify();
+                }
+                return;
+            }
+            Some(Auxiliar::Lata) => {
+                if let Some((x, y)) = self.na_foto(ponto) {
+                    self.lata_de_tinta(x, y, cx);
+                }
+                return;
+            }
             Some(Auxiliar::Correcao) => {
+                if self.avisar_se_na_mascara(cx) {
+                    return;
+                }
                 if let Some(p) = self.na_foto(ponto) {
                     self.traco_de_correcao = Some(vec![p]);
                     cx.notify();
@@ -1093,7 +1121,7 @@ impl EditorDeFoto {
     /// executor de fundo; o remendo volta e entra na camada como um passo do
     /// desfazer.
     fn preencher_pelo_conteudo(&mut self, buraco: Buraco, cx: &mut Context<Self>) {
-        if self.preenchendo {
+        if self.preenchendo || self.avisar_se_na_mascara(cx) {
             return;
         }
         let Some(s) = self.sessao() else {
@@ -1339,6 +1367,12 @@ impl EditorDeFoto {
                 "⌥ + clique na foto para escolher de onde o carimbo copia".into(),
                 true,
             ));
+        } else if s.na_mascara() && s.pincel.ferramenta.le_a_foto() {
+            self.aviso = Some((
+                "Na máscara se pinta com o pincel e a borracha: preto esconde, branco revela"
+                    .into(),
+                true,
+            ));
         } else {
             let nome = s.camada_ativa().nome.clone();
             self.aviso = Some((
@@ -1365,6 +1399,21 @@ impl EditorDeFoto {
         self.ponteiro = Some(ponto);
         if self.gesto_de_transformacao.is_some() {
             self.arrastar_na_caixa(ponto, modificadores.shift, cx);
+            return;
+        }
+        if let Some((de, _)) = self.degrade_em_curso {
+            if let Some(mut p) = self.na_foto_sem_limite(ponto) {
+                if modificadores.shift {
+                    // ⇧ prende o ângulo em múltiplos de 45°, como no Photoshop.
+                    let (dx, dy) = (p.0 - de.0, p.1 - de.1);
+                    let passo = std::f32::consts::FRAC_PI_4;
+                    let angulo = (dy.atan2(dx) / passo).round() * passo;
+                    let r = dx.hypot(dy);
+                    p = (de.0 + r * angulo.cos(), de.1 + r * angulo.sin());
+                }
+                self.degrade_em_curso = Some((de, p));
+            }
+            cx.notify();
             return;
         }
         if self.traco_de_correcao.is_some() {
@@ -1447,6 +1496,21 @@ impl EditorDeFoto {
             cx.notify();
             return;
         }
+        if let Some((de, ate)) = self.degrade_em_curso.take() {
+            let escondida = self.sessao().is_some_and(|s| !s.camada_ativa().visivel);
+            let inicio = Instant::now();
+            self.na_sessao(cx, |s| {
+                s.degrade(de, ate);
+            });
+            self.medidas.ultimo_gesto = Some(inicio.elapsed());
+            if escondida {
+                self.aviso = Some((
+                    "A camada está escondida — mostre-a (H) para o degradê".into(),
+                    true,
+                ));
+            }
+            return;
+        }
         if let Some(traco) = self.traco_de_correcao.take() {
             let raio = self.sessao().map_or(10.0, |s| s.pincel.raio);
             self.preencher_pelo_conteudo(Buraco::Traco(traco, raio), cx);
@@ -1523,6 +1587,8 @@ impl EditorDeFoto {
                 Auxiliar::ContaGotas => "Conta-gotas (I)",
                 Auxiliar::Mover => "Mover (V)",
                 Auxiliar::Correcao => "Pincel de correção (J)",
+                Auxiliar::Degrade => "Degradê (G) — arraste do começo ao fim",
+                Auxiliar::Lata => "Lata de tinta (⇧G)",
                 Auxiliar::Mao => "Mão (Espaço)",
                 Auxiliar::Zoom => "Zoom — clique amplia, ⌥ + clique afasta",
             };
@@ -1554,7 +1620,7 @@ impl EditorDeFoto {
             A(Auxiliar),
         }
         let faixa = self.faixa;
-        let grupos: [&[(Item, Icone, &'static str, &'static str)]; 7] = [
+        let grupos: [&[(Item, Icone, &'static str, &'static str)]; 8] = [
             &[(
                 Item::A(Auxiliar::Mover),
                 Icone::Move,
@@ -1611,6 +1677,20 @@ impl EditorDeFoto {
                     Icone::Stamp,
                     "editor-carimbo",
                     "Carimbo (S) — ⌥ + clique escolhe a origem",
+                ),
+            ],
+            &[
+                (
+                    Item::A(Auxiliar::Degrade),
+                    Icone::Gradient,
+                    "editor-degrade",
+                    "Degradê (G) — arraste; ⇧ prende em 45°. Na máscara, preto → branco",
+                ),
+                (
+                    Item::A(Auxiliar::Lata),
+                    Icone::PaintBucket,
+                    "editor-lata",
+                    "Lata de tinta (⇧G) — pinta a área parecida em volta do clique",
                 ),
             ],
             &[
@@ -1774,6 +1854,78 @@ impl EditorDeFoto {
         self.na_sessao(cx, |s| s.escolher_camada(indice));
     }
 
+    // ----------------------------------------------------------- máscara
+
+    /// O botão da máscara: revela tudo (com ⌥, esconde tudo); com seleção, a
+    /// máscara nasce dela. O pincel passa a pintar na máscara.
+    pub fn adicionar_mascara(&mut self, esconder: bool, cx: &mut Context<Self>) {
+        self.na_sessao(cx, |s| {
+            s.adicionar_mascara(esconder);
+        });
+    }
+
+    /// A miniatura da máscara clicada: o pincel pinta nela.
+    pub fn escolher_mascara(&mut self, indice: usize, cx: &mut Context<Self>) {
+        self.na_sessao(cx, |s| {
+            s.escolher_mascara(indice);
+        });
+    }
+
+    /// ⇧ + clique na miniatura da máscara: liga ou desliga.
+    pub fn alternar_mascara_de(&mut self, indice: usize, cx: &mut Context<Self>) {
+        self.na_sessao(cx, |s| {
+            s.alternar_mascara_de(indice);
+        });
+    }
+
+    pub fn excluir_mascara(&mut self, cx: &mut Context<Self>) {
+        self.na_sessao(cx, |s| {
+            s.excluir_mascara();
+        });
+    }
+
+    /// O pincel está na máscara da escolhida.
+    pub fn na_mascara(&self) -> bool {
+        self.sessao().is_some_and(Sessao::na_mascara)
+    }
+
+    /// O que refaz a foto (o pincel de correção, o preenchimento por conteúdo)
+    /// não pinta máscara: avisa e devolve `true` quando o pincel está nela.
+    fn avisar_se_na_mascara(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.na_mascara() {
+            return false;
+        }
+        self.aviso = Some((
+            "Isto refaz a foto: clique na miniatura da camada, e não na da máscara".into(),
+            true,
+        ));
+        cx.notify();
+        true
+    }
+
+    /// A lata de tinta em `(x, y)`, pixels da foto.
+    pub fn lata_de_tinta(&mut self, x: f32, y: f32, cx: &mut Context<Self>) {
+        let escondida = self.sessao().is_some_and(|s| !s.camada_ativa().visivel);
+        let inicio = Instant::now();
+        self.na_sessao(cx, |s| {
+            s.lata_de_tinta(x, y);
+        });
+        self.medidas.ultimo_gesto = Some(inicio.elapsed());
+        if escondida {
+            self.aviso = Some((
+                "A camada está escondida — mostre-a (H) para pintar nela".into(),
+                true,
+            ));
+        }
+    }
+
+    /// O degradê de `de` a `ate`, pixels da foto — o roteiro e os testes.
+    pub fn degrade(&mut self, de: (f32, f32), ate: (f32, f32), cx: &mut Context<Self>) {
+        self.na_sessao(cx, |s| {
+            s.degrade(de, ate);
+        });
+    }
+
     /// `⌥]` (1) e `⌥[` (-1): a camada de cima ou de baixo passa a ser a escolhida.
     pub fn escolher_vizinha(&mut self, direcao: i32, cx: &mut Context<Self>) {
         self.na_sessao(cx, |s| {
@@ -1928,7 +2080,18 @@ impl EditorDeFoto {
                 crate::imagem::de_bgra(l, a, sobre_xadrez(&rgba, l))
             })
             .collect();
+        let das_mascaras = s
+            .documento()
+            .camadas
+            .iter()
+            .map(|c| {
+                let m = c.mascara.as_ref()?;
+                let rgba = editor_core::operacoes::miniatura_da_mascara(m, l, a);
+                crate::imagem::de_bgra(l, a, sobre_xadrez(&rgba, l))
+            })
+            .collect();
         self.miniaturas = miniaturas;
+        self.miniaturas_das_mascaras = das_mascaras;
         self.versao_das_miniaturas = Some(versao);
     }
 
@@ -2199,6 +2362,12 @@ impl EditorDeFoto {
                     "descer" => self.mover_camada(-1, cx),
                     "escolher" => self.escolher_camada(indice, cx),
                     "olho" => self.alternar_visibilidade_de(indice, cx),
+                    // camada mascara [esconder] | mascara-escolher N |
+                    // mascara-alternar N | mascara-excluir
+                    "mascara" => self.adicionar_mascara(partes.get(2) == Some(&"esconder"), cx),
+                    "mascara-escolher" => self.escolher_mascara(indice, cx),
+                    "mascara-alternar" => self.alternar_mascara_de(indice, cx),
+                    "mascara-excluir" => self.excluir_mascara(cx),
                     "opacidade" => self.mover_opacidade_da_camada(numero(2) / 100.0, true, cx),
                     "modo" => match partes.get(2).and_then(|c| Modo::da_chave(c)) {
                         Some(modo) => self.mudar_modo(modo, cx),
@@ -2330,6 +2499,8 @@ impl EditorDeFoto {
                 }
                 outro => eprintln!("[roteiro] editor transformar {outro}?"),
             },
+            // cor R G B
+            "cor" => self.escolher_cor([numero(1) as u8, numero(2) as u8, numero(3) as u8], cx),
             "ferramenta" => match partes.get(1).copied().unwrap_or_default() {
                 "pincel" => self.usar(Ferramenta::Pincel, cx),
                 "borracha" => self.usar(Ferramenta::Borracha, cx),
@@ -2339,6 +2510,8 @@ impl EditorDeFoto {
                 "correcao" => self.usar_auxiliar(Auxiliar::Correcao, cx),
                 "mao" => self.usar_auxiliar(Auxiliar::Mao, cx),
                 "lupa" => self.usar_auxiliar(Auxiliar::Zoom, cx),
+                "degrade" => self.usar_auxiliar(Auxiliar::Degrade, cx),
+                "lata" => self.usar_auxiliar(Auxiliar::Lata, cx),
                 "subexposicao" => {
                     let faixa = self.faixa;
                     self.usar(Ferramenta::Subexposicao(faixa), cx)
@@ -2376,13 +2549,24 @@ impl EditorDeFoto {
                         .enumerate()
                         .map(|(i, c)| {
                             format!(
-                                "{}{}:{}:{}:{:.0}%:{}tiles",
+                                "{}{}:{}:{}:{:.0}%:{}tiles{}",
                                 if i == s.ativa() { "*" } else { "" },
                                 c.nome,
                                 c.modo.chave(),
                                 if c.visivel { "vis" } else { "oculta" },
                                 c.opacidade * 100.0,
-                                c.pixels.quantos()
+                                c.pixels.quantos(),
+                                c.mascara.as_ref().map_or(String::new(), |m| format!(
+                                    ":mascara({}fundo={},{}tiles{})",
+                                    if i == s.ativa() && s.na_mascara() {
+                                        "*"
+                                    } else {
+                                        ""
+                                    },
+                                    m.fundo,
+                                    m.pixels.quantos(),
+                                    if m.ativa { "" } else { ",desligada" }
+                                ))
                             )
                         })
                         .collect::<Vec<_>>()
@@ -2412,6 +2596,16 @@ impl EditorDeFoto {
             }
             outro => eprintln!("[roteiro] gesto do editor desconhecido: {outro}"),
         }
+    }
+
+    /// 🧪 Prepara a sessão (a cor, uma camada pintada) sem passar pela tela.
+    #[cfg(test)]
+    pub fn na_sessao_para_teste(
+        &mut self,
+        cx: &mut Context<Self>,
+        fazer: impl FnOnce(&mut Sessao),
+    ) {
+        self.na_sessao(cx, fazer);
     }
 
     /// 🧪 Um traço de `de` a `ate`, em pixels da foto — o que o ponteiro faz,
@@ -2531,7 +2725,8 @@ impl EditorDeFoto {
             || self.pegando_cor
             || self.arrasto_do_mover.is_some()
             || self.gesto_de_transformacao.is_some()
-            || self.traco_de_correcao.is_some();
+            || self.traco_de_correcao.is_some()
+            || self.degrade_em_curso.is_some();
         let com_a_mao = self.mao.is_some();
         let medida = canvas(
             move |bounds, window, cx| {
@@ -2669,6 +2864,49 @@ impl EditorDeFoto {
                             .absolute()
                             .inset_0(),
                         );
+                    }
+                    // A linha do degradê, do começo ao fim.
+                    if let Some((de, ate)) = self.degrade_em_curso {
+                        let a = (v.x + de.0 * v.escala, v.y + de.1 * v.escala);
+                        let b = (v.x + ate.0 * v.escala, v.y + ate.1 * v.escala);
+                        palco = palco.child(
+                            canvas(
+                                |_, _, _| {},
+                                move |limites, _, window, _| {
+                                    let (ox, oy) = (f(limites.origin.x), f(limites.origin.y));
+                                    for (largura, cor) in [
+                                        (3.0, gpui_kit::black().opacity(0.6)),
+                                        (1.5, gpui_kit::white()),
+                                    ] {
+                                        let mut caminho = PathBuilder::stroke(px(largura));
+                                        caminho
+                                            .move_to(gpui_kit::point(px(ox + a.0), px(oy + a.1)));
+                                        caminho.line_to(gpui_kit::point(
+                                            px(ox + b.0 + 0.01),
+                                            px(oy + b.1),
+                                        ));
+                                        if let Ok(c) = caminho.build() {
+                                            window.paint_path(c, cor);
+                                        }
+                                    }
+                                },
+                            )
+                            .absolute()
+                            .inset_0(),
+                        );
+                        for (x, y) in [a, b] {
+                            palco = palco.child(
+                                div()
+                                    .absolute()
+                                    .left(px(x - 3.5))
+                                    .top(px(y - 3.5))
+                                    .size(px(7.0))
+                                    .rounded_full()
+                                    .bg(gpui_kit::white())
+                                    .border_1()
+                                    .border_color(gpui_kit::black()),
+                            );
+                        }
                     }
                     // O letreiro da seleção e a forma sendo desenhada.
                     if let Some((_, bordas)) = &self.bordas {
@@ -2942,6 +3180,24 @@ impl EditorDeFoto {
             .border_l_1()
             .border_color(tema.border)
             .child(rotulo(self.nome_da_ferramenta()))
+            .when(self.na_mascara(), |painel| {
+                let nome = self
+                    .sessao()
+                    .map(|s| s.camada_ativa().nome.clone())
+                    .unwrap_or_default();
+                painel.child(
+                    div()
+                        .debug_selector(|| "editor-na-mascara".into())
+                        .text_xs()
+                        .px(px(6.))
+                        .py(px(4.))
+                        .rounded(crate::tema::canto(4.))
+                        .bg(tema.muted)
+                        .child(format!(
+                            "Pintando na máscara de {nome}: preto esconde, branco revela"
+                        )),
+                )
+            })
             .child(
                 div()
                     .flex()
@@ -3072,21 +3328,33 @@ impl EditorDeFoto {
                 s.documento()
                     .camadas
                     .iter()
-                    .map(|c| (c.nome.clone(), c.visivel, c.modo))
+                    .map(|c| {
+                        (
+                            c.nome.clone(),
+                            c.visivel,
+                            c.modo,
+                            c.mascara.as_ref().map(|m| m.ativa),
+                        )
+                    })
                     .collect::<Vec<_>>(),
                 s.ativa(),
                 true,
             ),
             None => (Vec::new(), 0, false),
         };
+        let na_mascara = self.na_mascara();
+        let tem_mascara = camadas.get(ativa).is_some_and(|c| c.3.is_some());
         let quantas = camadas.len();
         let renomeando = self.renomeando.clone();
         let miniaturas = self.miniaturas.clone();
+        let das_mascaras = self.miniaturas_das_mascaras.clone();
+        let lado = px(LADO_DA_MINIATURA as f32 * 0.75);
+        let cor_da_moldura = tema.foreground;
         let linhas = camadas
             .into_iter()
             .enumerate()
             .rev()
-            .map(|(i, (nome, visivel, modo))| {
+            .map(|(i, (nome, visivel, modo, mascara))| {
                 let escolhida = i == ativa;
                 let id_do_olho: SharedString = format!("editor-olho-{i}").into();
                 let olho = crate::estilo::botao_icone_pequeno(
@@ -3138,13 +3406,66 @@ impl EditorDeFoto {
                     )
                     .when_some(miniaturas.get(i).cloned(), |d, m| {
                         d.child(
-                            img(m)
-                                .object_fit(ObjectFit::Contain)
-                                .w(px(LADO_DA_MINIATURA as f32 * 0.75))
-                                .h(px(LADO_DA_MINIATURA as f32 * 0.75))
-                                .flex_none(),
+                            moldura(
+                                div().debug_selector(move || format!("editor-miniatura-{i}")),
+                                escolhida && mascara.is_some() && !na_mascara,
+                                cor_da_moldura,
+                            )
+                            .child(
+                                img(m).object_fit(ObjectFit::Contain).w(lado).h(lado),
+                            ),
                         )
                     })
+                    // A máscara: clique escolhe, ⇧ + clique liga e desliga.
+                    .when_some(
+                        mascara.zip(das_mascaras.get(i).cloned().flatten()),
+                        |d, (ligada, m)| {
+                            d.child(
+                                moldura(
+                                    div()
+                                        .id(("editor-mascara", i))
+                                        .debug_selector(move || format!("editor-mascara-{i}"))
+                                        .relative()
+                                        .tooltip(move |window, cx| {
+                                            gpui_kit::component::tooltip::Tooltip::new(if ligada {
+                                                "Máscara — clique para pintar nela; ⇧ + clique desliga"
+                                            } else {
+                                                "Máscara desligada — ⇧ + clique liga"
+                                            })
+                                            .build(window, cx)
+                                        }),
+                                    escolhida && na_mascara,
+                                    cor_da_moldura,
+                                )
+                                .child(img(m).object_fit(ObjectFit::Contain).w(lado).h(lado))
+                                .when(!ligada, |d| {
+                                    d.child(
+                                        div()
+                                            .absolute()
+                                            .inset_0()
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .text_color(gpui_kit::red())
+                                            .text_lg()
+                                            .child("✕"),
+                                    )
+                                })
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |ed, e: &MouseDownEvent, window, cx| {
+                                        cx.stop_propagation();
+                                        if e.modifiers.shift {
+                                            ed.alternar_mascara_de(i, cx);
+                                        } else {
+                                            ed.escolher_mascara(i, cx);
+                                        }
+                                        window.focus(&ed.foco, cx);
+                                    }),
+                                ),
+                            )
+                        },
+                    )
                     .child(texto)
                     .when(modo != Modo::Normal, |d| {
                         d.child(
@@ -3256,6 +3577,19 @@ impl EditorDeFoto {
                     )
                     .child(
                         botao(
+                            "editor-camada-mascara",
+                            Icone::LayerMask,
+                            "Adicionar máscara (⌥ esconde tudo; com seleção, nasce dela)",
+                            pode_desfazer_alguma && !tem_mascara,
+                        )
+                        .on_click(cx.listener(
+                            |ed, e: &gpui_kit::ClickEvent, _, cx| {
+                                ed.adicionar_mascara(e.modifiers().alt, cx)
+                            },
+                        )),
+                    )
+                    .child(
+                        botao(
                             "editor-camada-mesclar",
                             Icone::Layers,
                             "Mesclar para baixo (⌘E)",
@@ -3268,10 +3602,20 @@ impl EditorDeFoto {
                         botao(
                             "editor-camada-excluir",
                             Icone::Trash2,
-                            "Excluir a camada",
-                            quantas > 1,
+                            if na_mascara {
+                                "Excluir a máscara"
+                            } else {
+                                "Excluir a camada"
+                            },
+                            quantas > 1 || na_mascara,
                         )
-                        .on_click(cx.listener(|ed, _, _, cx| ed.excluir_camada(cx))),
+                        .on_click(cx.listener(move |ed, _, _, cx| {
+                            if na_mascara {
+                                ed.excluir_mascara(cx)
+                            } else {
+                                ed.excluir_camada(cx)
+                            }
+                        })),
                     ),
             )
     }
@@ -3384,6 +3728,19 @@ fn subir(vista: &mut VistaDoEditor, imagens: &mut HashMap<(u32, u32), Arc<Render
         }
     }
     sujos.len()
+}
+
+/// A miniatura onde o pincel pinta leva a moldura, como no Photoshop.
+fn moldura<E: Styled>(elemento: E, alvo: bool, cor: gpui_kit::Hsla) -> E {
+    elemento
+        .flex_none()
+        .p(px(1.))
+        .border_1()
+        .border_color(if alvo {
+            cor
+        } else {
+            gpui_kit::transparent_black()
+        })
 }
 
 /// O lado maior da miniatura da camada, em pixels.
@@ -3800,6 +4157,10 @@ impl Render for EditorDeFoto {
             }))
             .on_action(cx.listener(|ed, _: &UsarDesfoque, _, cx| ed.usar(Ferramenta::Desfoque, cx)))
             .on_action(cx.listener(|ed, _: &UsarNitidez, _, cx| ed.usar(Ferramenta::Nitidez, cx)))
+            .on_action(
+                cx.listener(|ed, _: &UsarDegrade, _, cx| ed.usar_auxiliar(Auxiliar::Degrade, cx)),
+            )
+            .on_action(cx.listener(|ed, _: &UsarLata, _, cx| ed.usar_auxiliar(Auxiliar::Lata, cx)))
             .on_action(cx.listener(|ed, _: &SelecionarTudo, _, cx| ed.selecionar_tudo(cx)))
             .on_action(cx.listener(|ed, _: &Desmarcar, _, cx| ed.desmarcar(cx)))
             .on_action(cx.listener(|ed, _: &InverterSelecao, _, cx| ed.inverter_selecao(cx)))

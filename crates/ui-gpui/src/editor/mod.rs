@@ -56,6 +56,8 @@ gpui_kit::actions!(
         UsarSuperexposicao,
         UsarDesfoque,
         UsarNitidez,
+        UsarDegrade,
+        UsarLata,
     ]
 );
 
@@ -70,7 +72,7 @@ const SEM_CAMPO: &str = "EditorDeFoto && !Input";
 /// carimbo (S), conta-gotas (I), mover (V), transformação livre (⌘T, Enter,
 /// Esc), camada via cópia e via recorte (⌘J, ⇧⌘J), pincel de correção (J) e
 /// preencher a seleção pelo conteúdo (⇧⌫), subexposição e superexposição (O,
-/// ⇧O), desfoque e nitidez (R, ⇧R),
+/// ⇧O), desfoque e nitidez (R, ⇧R), degradê e lata de tinta (G, ⇧G),
 /// tamanho (`[` `]`) e camadas (⇧⌘N nova, ⌘J duplicar, ⌘] ⌘[ subir e descer,
 /// ⌥] ⌥[ escolher a de cima e a de baixo, ⌘E mesclar para baixo), seleção (M
 /// retângulo, ⇧M elipse, L laço, ⌘A ⌘D ⇧⌘I, Delete apaga, ⌥Delete preenche); as da Revelação para o zoom (Z,
@@ -146,6 +148,8 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("shift-o", UsarSuperexposicao, solta),
         KeyBinding::new("r", UsarDesfoque, solta),
         KeyBinding::new("shift-r", UsarNitidez, solta),
+        KeyBinding::new("g", UsarDegrade, solta),
+        KeyBinding::new("shift-g", UsarLata, solta),
         KeyBinding::new("shift-backspace", PreencherPeloConteudo, solta),
         KeyBinding::new("shift-delete", PreencherPeloConteudo, solta),
         KeyBinding::new("cmd-e", MesclarParaBaixo, c),
