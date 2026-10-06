@@ -1,11 +1,12 @@
 {
-  "versao": "0.1.99",
-  "titulo": "O retoque feito em Editar Foto agora vale também no site.",
+  "versao": "0.1.100",
+  "titulo": "Editar Foto agora tem subexposição, superexposição, desfoque, nitidez e o Histórico.",
   "importante": false,
   "novidades": [
-    "Ao salvar na galeria uma foto editada (Editar Foto), a imagem editada sobe junto, e toda revelação feita no site parte dela — a do painel e a do cliente em \"Meus ensaios\". Antes, revelar de novo no site partia do arquivo bruto e o retoque sumia.",
-    "Uma foto retocada em outro balcão é revelada aqui a partir do retoque, e não do bruto.",
-    "\"Excluir a edição\" tira a imagem editada do site no próximo \"Salvar na galeria\" daquela foto."
+    "Subexposição (O) clareia e Superexposição (⇧O) escurece onde você pinta, só nas sombras, nos meios-tons ou nos realces. O efeito vai se construindo a cada passada.",
+    "Desfoque (R) suaviza — a pele, um fundo — e Nitidez (⇧R) realça o detalhe.",
+    "As quatro trabalham sobre a foto como ela aparece e escrevem na camada escolhida: numa camada vazia por cima, o retoque fica separado.",
+    "A aba Histórico, ao lado de Camadas, lista cada passo; clicar num passo volta a ele."
   ],
-  "por_que_atualizar": "Para o cliente e a equipe verem sempre a foto com o retoque, mesmo depois de ajustar a revelação no site."
+  "por_que_atualizar": "Para o retoque de retrato — clarear olheiras, escurecer brilho, suavizar a pele — sem sair do editor."
 }
