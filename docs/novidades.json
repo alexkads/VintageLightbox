@@ -1,11 +1,10 @@
 {
-  "versao": "0.1.112",
-  "titulo": "Editar Foto: o que sai da foto com o Mover ou a Transformação livre fica guardado e volta inteiro.",
-  "importante": false,
+  "versao": "0.1.113",
+  "titulo": "Correção importante: com várias sessões abertas em guias, a tela do cliente podia mostrar o QR de outra sessão.",
+  "importante": true,
   "novidades": [
-    "Mover (V) e Transformação livre (⌘T): o pedaço levado para fora da foto não se perde mais — ao trazer de volta, ele volta inteiro, também depois de salvar e reabrir.",
-    "O Mover aparece como \"Mover\" no Histórico (antes aparecia como \"Pincel\").",
-    "Atenção: edições salvas nesta versão só abrem da 0.1.112 em diante — atualize todos os balcões que abrem as mesmas fotos."
+    "Trocar de guia enquanto o site ainda respondia à sessão anterior fazia o QR, as fotos ou o \"Copiar link\" daquela sessão aparecerem na sessão da frente. O cliente lia o QR e recebia o link das fotos de outra pessoa. Agora cada sessão só aceita as respostas que são dela.",
+    "O \"Copiar link\" e o \"Avisar cliente\" pedidos numa guia não passam mais para a guia seguinte."
   ],
-  "por_que_atualizar": "Para mover e transformar retoques sem perder o que passa da borda da foto."
+  "por_que_atualizar": "Para que o cliente sempre receba o link das próprias fotos — atualize todos os balcões hoje."
 }
