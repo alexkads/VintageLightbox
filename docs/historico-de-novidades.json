@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.112",
+    "data": "2026-10-07",
+    "titulo": "Editar Foto: o que sai da foto com o Mover ou a Transformação livre fica guardado e volta inteiro.",
+    "importante": false,
+    "novidades": [
+      "Mover (V) e Transformação livre (⌘T): o pedaço levado para fora da foto não se perde mais — ao trazer de volta, ele volta inteiro, também depois de salvar e reabrir.",
+      "O Mover aparece como \"Mover\" no Histórico (antes aparecia como \"Pincel\").",
+      "Atenção: edições salvas nesta versão só abrem da 0.1.112 em diante — atualize todos os balcões que abrem as mesmas fotos."
+    ],
+    "por_que_atualizar": "Para mover e transformar retoques sem perder o que passa da borda da foto."
+  },
+  {
     "versao": "0.1.111",
     "data": "2026-10-07",
     "titulo": "Editar Foto: carimbo com as opções do Photoshop e a Transformação livre com oito alças e ponto de referência.",

@@ -1,14 +1,11 @@
 {
-  "versao": "0.1.111",
-  "titulo": "Editar Foto: carimbo com as opções do Photoshop e a Transformação livre com oito alças e ponto de referência.",
+  "versao": "0.1.112",
+  "titulo": "Editar Foto: o que sai da foto com o Mover ou a Transformação livre fica guardado e volta inteiro.",
   "importante": false,
   "novidades": [
-    "Carimbo (S): escolha de onde copiar — só a camada atual, a atual e as de baixo (como antes) ou todas as camadas — e o Alinhado, que agora pode ser desligado para cada traço voltar a copiar da origem.",
-    "O carimbo mostra, dentro do círculo do pincel, o que vai copiar antes de você pintar (dá para desligar em \"Mostrar a origem no pincel\").",
-    "Pincel e carimbo ganharam o Modo da ferramenta (Multiplicação, Escurecer, Tela…), separado do modo da camada.",
-    "Transformação livre (⌘T) com oito alças: os meios dos lados esticam só a largura ou a altura, e o lado oposto fica parado.",
-    "Ponto de referência no meio da caixa: arraste para mudar; ⌥ + alça escala em volta dele e o giro é em volta dele. X, Y, largura, altura e ângulo podem ser digitados na barra de cima da foto.",
-    "No Histórico, a transformação aparece como \"Transformação livre\" (antes aparecia como \"Pincel\")."
+    "Mover (V) e Transformação livre (⌘T): o pedaço levado para fora da foto não se perde mais — ao trazer de volta, ele volta inteiro, também depois de salvar e reabrir.",
+    "O Mover aparece como \"Mover\" no Histórico (antes aparecia como \"Pincel\").",
+    "Atenção: edições salvas nesta versão só abrem da 0.1.112 em diante — atualize todos os balcões que abrem as mesmas fotos."
   ],
-  "por_que_atualizar": "Para retocar com o carimbo e transformar com a precisão do Photoshop."
+  "por_que_atualizar": "Para mover e transformar retoques sem perder o que passa da borda da foto."
 }
