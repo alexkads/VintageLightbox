@@ -172,10 +172,35 @@ impl Render for Arrastando {
 pub fn controles(prefixo: &'static str, cor: Hsla, window: &Window, cx: &App) -> Div {
     // Em tela cheia a janela principal é o app inteiro: os botões somem, como
     // no Zed. A tela do cliente é diferente — ver [`controles_mesmo_em_tela_cheia`].
+    controles_com_fechar(
+        prefixo,
+        cor,
+        window,
+        cx,
+        crate::segundo_plano::fechar_pelo_botao,
+    )
+}
+
+/// [`controles`] com o "Fechar" de quem tem o que perguntar antes.
+///
+/// # 🚨 O editor perdia a edição pelo botão
+///
+/// *"A janela do editor de fotos no Fedora 44 Gnome não tem barra com
+/// minimizar, restaurar e fechar"* (dono, 07/out/2026). Ao pô-la, o fechar de
+/// sempre seria o errado: fora da janela principal ele faz `remove_window`, e
+/// o `remove_window` **não passa pelo `on_window_should_close`** — que é onde o
+/// editor pergunta se descarta as alterações. O editor passa o próprio fechar.
+pub fn controles_com_fechar(
+    prefixo: &'static str,
+    cor: Hsla,
+    window: &Window,
+    cx: &App,
+    fechar: impl Fn(&mut Window, &mut App) + 'static,
+) -> Div {
     if !app_desenha_a_barra(window) || window.is_fullscreen() {
         return div();
     }
-    desenhar_controles(prefixo, cor, window, cx)
+    desenhar_controles(prefixo, cor, window, cx, fechar)
 }
 
 /// Os botões de janela que **não somem em tela cheia** — os da tela do
@@ -203,10 +228,22 @@ pub fn controles_mesmo_em_tela_cheia(
     if !(app_desenha_a_barra(window) || window.is_fullscreen()) {
         return div();
     }
-    desenhar_controles(prefixo, cor, window, cx)
+    desenhar_controles(
+        prefixo,
+        cor,
+        window,
+        cx,
+        crate::segundo_plano::fechar_pelo_botao,
+    )
 }
 
-fn desenhar_controles(prefixo: &'static str, cor: Hsla, window: &Window, cx: &App) -> Div {
+fn desenhar_controles(
+    prefixo: &'static str,
+    cor: Hsla,
+    window: &Window,
+    cx: &App,
+    fechar: impl Fn(&mut Window, &mut App) + 'static,
+) -> Div {
     #[cfg(test)]
     teste::DESENHADOS.with(|d| d.borrow_mut().insert(prefixo));
 
@@ -265,7 +302,7 @@ fn desenhar_controles(prefixo: &'static str, cor: Hsla, window: &Window, cx: &Ap
             (fundo, realce),
             // 🚨 O mesmo caminho do fechar do sistema: na janela principal ele
             // leva à bandeja (dono, 21/set/2026), e não encerra o app.
-            crate::segundo_plano::fechar_pelo_botao,
+            fechar,
         ))
 }
 
@@ -287,7 +324,7 @@ fn desenhar_controles(prefixo: &'static str, cor: Hsla, window: &Window, cx: &Ap
 ///
 /// Parar o clique aqui é seguro porque a área legítima de redimensionar — a
 /// sombra — **não é conteúdo**: ela continua chegando à moldura.
-pub fn raiz_do_conteudo(elemento: Div) -> Div {
+pub fn raiz_do_conteudo<E: InteractiveElement>(elemento: E) -> E {
     elemento.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
 }
 

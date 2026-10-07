@@ -52,24 +52,35 @@ revelacao-core            ia-local (comum a toda IA do app)
    não tem região de amostragem: o painel diz isso e mostra a **moldura tracejada do contexto** que ela vê, com
    a **margem de contexto** ajustável.
 4. **Suavização da borda** (px): o peso é a seleção difundida e o destino cobre a rampa.
-5. A prévia aparece por cima da foto (o documento não muda). PatchMatch: primeiro uma **prévia provisória
-   reduzida** (o destino com até 160 px), depois o **resultado final** na resolução da foto. **Ver o original**
-   compara.
-6. **Aplicar** (Enter) só com o resultado final pronto: uma **camada "Preenchimento N"** acima da escolhida —
-   criar a camada e pintar o remendo são **um** passo do desfazer; só os tiles tocados existem. **Cancelar**
-   (Esc) deixa tudo como estava.
+5. **Visualizar** (ou Enter): só então calcula. PatchMatch: primeiro uma **prévia provisória reduzida** (o
+   destino com até 160 px), depois o **resultado final** na resolução da foto. O resultado aparece na janela da
+   **Visualização** (o recorte em volta da área), com **Antes / Depois** para comparar. Qualquer ajuste depois
+   disso (pincel, suavização, método, backend, margem) tira a visualização e trava o Aplicar até visualizar de
+   novo; durante o cálculo o botão vira **Parar**.
+6. **Aplicar** (Enter) só com o resultado final visualizado: uma **camada "Preenchimento N"** acima da
+   escolhida — criar a camada e pintar o remendo são **um** passo do desfazer; só os tiles tocados existem.
+   **Cancelar** (Esc) deixa tudo como estava.
+
+**Espaço modal, como no Photoshop** (dono, 07/out/2026: *"logo de cara o efeito já aplicado. Precisa ter um
+botão de visualizar"* e *"deveria abrir um modal separado, como Photoshop faz"*, na 0.1.108). Abrir não calcula
+mais: até a 0.1.107 o painel calculava ao abrir e a cada ajuste. O preenchimento toma a janela do editor: a
+barra dele no lugar da do editor (sem Salvar, zoom nem desfazer), a foto com o pincel à esquerda (só a
+sobreposição — vermelho e verde), a Visualização no meio, os ajustes à direita. Enquanto aberto, nenhum comando
+mexe no documento (`na_sessao`, `usar`, `usar_auxiliar` e ⌘S recusam): o que se aplica é o que foi visto.
+As escolhas (método, backend, margem, suavização, camada nova) ficam em `preenchimento.json` no catálogo,
+gravadas a cada mudança (`Lembrado`), e voltam na próxima abertura.
 
 **O painel** (pedido do dono, 07/out/2026: *"essa dock tá muito desorganizada, utilize os componentes do GPUI
 KIT … com o tamanho ajustável"*): cabeçalho com o ícone e uma linha de explicação; seções `GroupBox` do kit
 (Método, Modelo de IA, Pincel, Ajustes, Resultado); o estado do modelo num `Tag` (Instalado, Não instalado,
 Baixando, Incompleto); Incluir/Excluir num `ButtonGroup` por alvo (as bolinhas verde e vermelha são as cores do
 palco); `Switch` para "Ver o original" e "Aplicar numa camada nova"; o cálculo com `Spinner` e `Progress`, o
-resultado num `Alert` (sucesso, informação ou erro); Cancelar e Aplicar fixos no rodapé. **O painel da direita
-do editor (o normal e o do preenchimento) tem a largura ajustável** pelo `h_resizable` do kit — de 240 a 560
+resultado num `Alert` (sucesso, informação ou erro); Cancelar, Visualizar e Aplicar fixos no rodapé. **O painel da direita
+do editor tem a largura ajustável** pelo `h_resizable` do kit — de 240 a 560
 pontos, 320 por padrão — gravada em `docas-editor.json`, como as colunas do caixa.
 
 Responsividade: o cálculo roda fora da thread da tela; cada pedido tem um número e a resposta de um pedido antigo
-é descartada; mudanças rápidas do pincel são agrupadas (250 ms); o pedido anterior é **cancelado de verdade**
+é descartada; só o Visualizar dispara um cálculo; o pedido anterior é **cancelado de verdade**
 (PatchMatch entre etapas e cascas; LaMa pelo `RunOptions::terminate` do ONNX Runtime); a versão do documento é
 conferida antes de aplicar; fechar a janela derruba o cálculo e solta a sessão da IA.
 

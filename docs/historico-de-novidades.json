@@ -1,5 +1,19 @@
 [
   {
+    "versao": "0.1.108",
+    "data": "2026-10-07",
+    "titulo": "O Preenchimento sensível ao conteúdo virou um espaço próprio, como no Photoshop, e só calcula quando você pede.",
+    "importante": false,
+    "novidades": [
+      "O Preenchimento sensível ao conteúdo abre num espaço próprio: a foto com o pincel à esquerda, a Visualização no meio (Antes e Depois) e os ajustes à direita.",
+      "Nada é calculado ao abrir: escolha o método e os ajustes e clique em Visualizar (ou Enter). Mudou algum ajuste? A visualização sai e o Aplicar espera um novo Visualizar.",
+      "As últimas escolhas do preenchimento (método, processamento, margem, suavização e \"camada nova\") ficam gravadas e voltam na próxima vez.",
+      "Enquanto ele está aberto, o resto do editor fica fora de alcance — o que se aplica é exatamente o que foi visualizado.",
+      "No Linux com GNOME, a janela do editor ganhou a barra com minimizar, maximizar e fechar; o fechar pergunta antes de descartar alterações."
+    ],
+    "por_que_atualizar": "Para ajustar o preenchimento com calma e ver o resultado antes de aplicar."
+  },
+  {
     "versao": "0.1.107",
     "data": "2026-10-07",
     "titulo": "Corrige a instalação no Linux e simplifica o painel do editor.",

@@ -219,22 +219,67 @@ pub fn sobreposicao(destino: &Selecao, amostragem: &Selecao, lado: u32) -> (u32,
     (w, h, bgra)
 }
 
-/// A prévia, em BGRA com o peso de aplicação (o valor da seleção no meio de
-/// cada pixel) como alfa — o que a camada vai mostrar.
-pub fn previa_bgra(r: &Resultado, destino: &Selecao) -> Vec<u8> {
-    let mut bgra = Vec::with_capacity(r.rgba.len());
-    for y in 0..r.altura {
-        for x in 0..r.largura {
-            let k = ((y * r.largura + x) * 4) as usize;
-            let (fx, fy) = (
-                r.ret.x + x * r.fator + r.fator / 2,
-                r.ret.y + y * r.fator + r.fator / 2,
-            );
-            let peso = destino.valor(fx, fy);
-            bgra.extend_from_slice(&[r.rgba[k + 2], r.rgba[k + 1], r.rgba[k], peso]);
+/// A janela da Visualização (o painel do meio, como no Photoshop): o recorte
+/// da foto em volta do destino — meia área de margem, pelo menos 32 px —, com
+/// o resultado por cima no peso da aplicação quando há um. Em BGRA opaco, no
+/// máximo `lado_maximo` de lado (amostra por vizinho mais próximo).
+pub fn visualizacao(
+    foto: &RgbImage,
+    destino: &Selecao,
+    peso: &Selecao,
+    resultado: Option<&Resultado>,
+    lado_maximo: u32,
+) -> (u32, u32, Vec<u8>) {
+    let (fl, fa) = foto.dimensions();
+    let caixa = destino.caixa_justa();
+    let recorte = if caixa.largura == 0 || caixa.altura == 0 {
+        Retangulo::inteiro(fl, fa)
+    } else {
+        let margem = caixa.largura.max(caixa.altura) / 2 + 32;
+        let x0 = caixa.x.saturating_sub(margem);
+        let y0 = caixa.y.saturating_sub(margem);
+        let x1 = (caixa.x + caixa.largura + margem).min(fl);
+        let y1 = (caixa.y + caixa.altura + margem).min(fa);
+        Retangulo::novo(x0, y0, x1 - x0, y1 - y0)
+    };
+    let passo = recorte
+        .largura
+        .max(recorte.altura)
+        .div_ceil(lado_maximo.max(1))
+        .max(1);
+    let (w, h) = (
+        recorte.largura.div_ceil(passo),
+        recorte.altura.div_ceil(passo),
+    );
+    let mut bgra = Vec::with_capacity((w * h * 4) as usize);
+    for j in 0..h {
+        for i in 0..w {
+            let (x, y) = (recorte.x + i * passo, recorte.y + j * passo);
+            let base = foto.get_pixel(x, y).0;
+            let mut cor = [base[0] as f32, base[1] as f32, base[2] as f32];
+            if let Some(r) = resultado {
+                let dentro = x >= r.ret.x && y >= r.ret.y;
+                let (rx, ry) = (
+                    (x.wrapping_sub(r.ret.x)) / r.fator.max(1),
+                    (y.wrapping_sub(r.ret.y)) / r.fator.max(1),
+                );
+                if dentro && rx < r.largura && ry < r.altura {
+                    let k = ((ry * r.largura + rx) * 4) as usize;
+                    let a = peso.valor(x, y) as f32 / 255.0;
+                    for (c, v) in cor.iter_mut().zip(&r.rgba[k..k + 3]) {
+                        *c += (*v as f32 - *c) * a;
+                    }
+                }
+            }
+            bgra.extend_from_slice(&[
+                cor[2].round() as u8,
+                cor[1].round() as u8,
+                cor[0].round() as u8,
+                255,
+            ]);
         }
     }
-    bgra
+    (w, h, bgra)
 }
 
 #[cfg(test)]
@@ -265,6 +310,33 @@ mod testes {
     }
 
     #[test]
+    fn a_visualizacao_recorta_em_volta_e_mostra_o_resultado_so_com_ele() {
+        let foto = piso();
+        let destino = mala();
+        // Sem resultado: a mala à vista, num recorte com margem em volta dela.
+        let (w, h, antes) = visualizacao(&foto, &destino, &destino, None, 4096);
+        // 58 de lado + 2 × (29 + 32) de margem.
+        assert_eq!((w, h), (180, 180));
+        let vermelho = |b: &[u8]| b.chunks(4).filter(|p| p[2] > 200 && p[1] < 60).count();
+        assert_eq!(vermelho(&antes), 50 * 50, "a mala inteira");
+        // Com o resultado (todo cinza), nenhum vermelho sobra.
+        let r = Resultado {
+            ret: Retangulo::novo(176, 116, 58, 58),
+            largura: 58,
+            altura: 58,
+            rgba: [90, 90, 90, 255].repeat(58 * 58),
+            fator: 1,
+            reducao_do_motor: 1.0,
+            executado_em: String::new(),
+        };
+        let (_, _, depois) = visualizacao(&foto, &destino, &destino, Some(&r), 4096);
+        assert_eq!(vermelho(&depois), 0);
+        // E reduz para caber no lado pedido.
+        let (w, h, _) = visualizacao(&foto, &destino, &destino, None, 60);
+        assert!(w <= 60 && h <= 60, "{w}×{h}");
+    }
+
+    #[test]
     fn a_mala_sai_e_o_piso_continua_na_previa_e_no_final() {
         let foto = piso();
         let destino = mala();
@@ -289,7 +361,6 @@ mod testes {
         assert_eq!(previa.fator, 4);
         assert!(previa.ret.x <= 176 && previa.ret.direita() >= 234);
         assert!(previa.largura < final_.largura);
-        assert_eq!(previa_bgra(&final_, &destino).len(), final_.rgba.len());
     }
 
     #[test]

@@ -715,6 +715,46 @@ mod testes {
         ve.run_until_parked();
     }
 
+    /// 🪟 No GNOME o sistema não decora a janela do editor: a barra dele tem
+    /// minimizar, maximizar e fechar no alto, à direita (dono, 07/out/2026:
+    /// *"a janela do editor de fotos no Fedora 44 Gnome não tem barra"*). E o
+    /// fechar dela é o do editor — com alterações, pergunta, e a janela fica.
+    #[gpui_kit::test]
+    fn no_gnome_a_barra_do_editor_tem_os_botoes_e_o_fechar_pergunta(cx: &mut TestAppContext) {
+        crate::janela::teste::forcar_barra_do_app();
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.refresh());
+        ve.run_until_parked();
+        let largura = ve.update(|window, _| window.viewport_size().width);
+        for botao in ["janela-minimizar", "janela-maximizar", "janela-fechar"] {
+            let b = ve
+                .debug_bounds(botao)
+                .unwrap_or_else(|| panic!("{botao} não está na barra do editor"));
+            assert!(
+                b.bottom() <= gpui_kit::px(48.),
+                "{botao} fora do alto ({b:?})"
+            );
+            assert!(
+                b.right() >= largura - gpui_kit::px(140.),
+                "{botao} fora do canto direito ({b:?})"
+            );
+        }
+
+        editor.update(&mut ve, |ed, cx| {
+            ed.tracar_para_teste((10., 24.), (54., 24.), cx)
+        });
+        ve.run_until_parked();
+        clicar_no_editor(&mut ve, "janela-fechar");
+        assert!(
+            editor.read_with(&ve, |ed, _| ed.perguntando()),
+            "o fechar da barra pergunta antes de descartar"
+        );
+        assert!(
+            editor.read_with(&ve, |ed, _| ed.alterado()),
+            "a edição continua lá"
+        );
+    }
+
     fn camadas(
         editor: &gpui_kit::Entity<EditorDeFoto>,
         ve: &VisualTestContext,
@@ -1453,7 +1493,9 @@ mod testes {
         );
     }
 
-    /// 🪄 O Preenchimento sensível ao conteúdo pela tela, com o PatchMatch: a
+    /// 🪄 O Preenchimento sensível ao conteúdo pela tela, com o PatchMatch: o
+    /// espaço modal abre **sem calcular** (dono, 07/out/2026), Visualizar
+    /// calcula, mexer num ajuste derruba a prévia e o Aplicar; a
     /// prévia não mexe no documento, Esc cancela sem rastro, Enter aplica numa
     /// camada nova num passo só (⌘Z desfaz), um resultado de pedido antigo é
     /// descartado, e um documento mudado depois do instantâneo recusa.
@@ -1493,13 +1535,46 @@ mod testes {
             ve.debug_bounds("editor-preenchimento").is_some(),
             "o painel abre"
         );
+        assert!(
+            ve.debug_bounds("editor-visualizacao").is_some(),
+            "a janela da Visualização, ao lado da foto"
+        );
+        for fora in [
+            "editor-varinha",
+            "editor-salvar",
+            "editor-abrir-preenchimento",
+        ] {
+            assert!(
+                ve.debug_bounds(fora).is_none(),
+                "{fora}: o resto do editor sai de cena (é modal)"
+            );
+        }
+        assert_eq!(
+            estado(&mut ve),
+            Some(EstadoDoCalculo::Ocioso),
+            "abrir não calcula"
+        );
+        assert!(ve.debug_bounds("editor-visualizacao-depois").is_none());
+        clicar_no_editor(&mut ve, "editor-preenchimento-visualizar");
         assert_eq!(
             estado(&mut ve),
             Some(EstadoDoCalculo::Pronto { final_: true })
         );
         assert!(
-            ve.debug_bounds("editor-preenchimento-previa").is_some(),
-            "a prévia por cima"
+            ve.debug_bounds("editor-visualizacao-depois").is_some(),
+            "o resultado na Visualização"
+        );
+        // Um ajuste mudou: a prévia sai, e o Enter visualiza de novo.
+        editor.update(&mut ve, |ed, cx| ed.redefinir_amostragem(cx));
+        ve.run_until_parked();
+        assert_eq!(estado(&mut ve), Some(EstadoDoCalculo::Ocioso));
+        assert!(ve.debug_bounds("editor-visualizacao-depois").is_none());
+        ve.simulate_keystrokes("enter");
+        ve.run_until_parked();
+        assert_eq!(
+            estado(&mut ve),
+            Some(EstadoDoCalculo::Pronto { final_: true }),
+            "Enter sem prévia visualiza"
         );
         assert_eq!(
             fotografia(&mut ve).as_raw(),
@@ -1517,6 +1592,7 @@ mod testes {
         // De novo, e um resultado de um pedido antigo é descartado.
         clicar_no_editor(&mut ve, "editor-abrir-preenchimento");
         ve.run_until_parked();
+        clicar_no_editor(&mut ve, "editor-preenchimento-visualizar");
         let atual = editor.read_with(&ve, |ed, _| {
             ed.espaco_do_preenchimento()
                 .unwrap()
@@ -1588,6 +1664,9 @@ mod testes {
             ed.na_sessao_para_teste(cx, |s| s.confirmar_opacidade())
         });
         let camadas_antes = camadas(&editor, &ve).0.len();
+        // O primeiro Enter visualiza; o segundo aplica — e recusa.
+        ve.simulate_keystrokes("enter");
+        ve.run_until_parked();
         ve.simulate_keystrokes("enter");
         ve.run_until_parked();
         assert!(matches!(estado(&mut ve), Some(EstadoDoCalculo::Falhou(m)) if m.contains("mudou")));

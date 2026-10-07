@@ -21,6 +21,9 @@ use gpui_kit::App;
 use super::*;
 use crate::editor::preenchimento::{self as calculo, Resultado};
 
+/// O lado maior das imagens da Visualização (a janela do meio).
+const LADO_DA_VISUALIZACAO: u32 = 1400;
+
 /// O que o pincel pinta enquanto o painel está aberto.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AlvoDoPincel {
@@ -68,9 +71,14 @@ pub struct EspacoDoPreenchimento {
     pub progresso: Arc<Mutex<Option<Progresso>>>,
     pub estado: EstadoDoCalculo,
     pub resultado: Option<Resultado>,
-    pub previa: Option<Arc<RenderImage>>,
+    /// A janela da Visualização: o recorte em volta do destino, antes e
+    /// depois (este só com um resultado).
+    pub visualizacao_antes: Option<Arc<RenderImage>>,
+    pub visualizacao_depois: Option<Arc<RenderImage>>,
     pub sobreposicao: Option<Arc<RenderImage>>,
     pub pincelando: Option<(f32, f32)>,
+    /// Já pediu Visualizar alguma vez (a dica muda para "visualize de novo").
+    pub visualizou: bool,
     pub download: Option<Download>,
     pub aviso_do_modelo: Option<String>,
     pub tempo: Option<Duration>,
@@ -91,7 +99,114 @@ pub const SUAVIZACAO_PADRAO: f32 = 2.0;
 /// A margem de contexto padrão da IA (fração do lado do destino).
 pub const CONTEXTO_PADRAO: f32 = 0.6;
 
+/// 💾 As últimas escolhas do preenchimento — método, backend, margem de
+/// contexto, suavização e "camada nova" —, de volta na próxima vez (dono,
+/// 07/out/2026: *"deixe as últimas configurações gravadas"*). Gravadas a cada
+/// mudança em `preenchimento.json`, ao lado das docas; o que faltar ou não
+/// valer mais (um backend que esta versão não compila) volta ao padrão.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct Lembrado {
+    pub metodo: String,
+    pub backend: String,
+    /// Em porcentagem, como no slider.
+    pub contexto: f32,
+    pub suavizacao: f32,
+    pub camada_nova: bool,
+}
+
+impl Default for Lembrado {
+    fn default() -> Self {
+        Self {
+            metodo: Metodo::PatchMatch.chave().into(),
+            backend: Backend::Automatico.chave().into(),
+            contexto: CONTEXTO_PADRAO * 100.0,
+            suavizacao: SUAVIZACAO_PADRAO,
+            camada_nova: true,
+        }
+    }
+}
+
+impl Lembrado {
+    /// Nos testes, em lugar nenhum: a suíte não mexe no que o dono escolheu.
+    #[cfg(not(test))]
+    fn arquivo() -> Option<std::path::PathBuf> {
+        Some(infrastructure::paths::AppPaths::catalog_root().join("preenchimento.json"))
+    }
+
+    #[cfg(test)]
+    fn arquivo() -> Option<std::path::PathBuf> {
+        None
+    }
+
+    pub fn ler() -> Self {
+        Self::arquivo()
+            .and_then(|c| std::fs::read_to_string(c).ok())
+            .map(|t| Self::do_texto(&t))
+            .unwrap_or_default()
+    }
+
+    /// O JSON gravado, com o que não vale mais trocado pelo padrão.
+    pub fn do_texto(texto: &str) -> Self {
+        let mut l: Self = serde_json::from_str(texto).unwrap_or_default();
+        let padrao = Self::default();
+        if Metodo::da_chave(&l.metodo).is_none() {
+            l.metodo = padrao.metodo;
+        }
+        if !Backend::da_chave(&l.backend).is_some_and(|b| Backend::compilados().contains(&b)) {
+            l.backend = padrao.backend;
+        }
+        if !l.contexto.is_finite() {
+            l.contexto = padrao.contexto;
+        }
+        if !l.suavizacao.is_finite() {
+            l.suavizacao = padrao.suavizacao;
+        }
+        l.contexto = l.contexto.clamp(0.0, 200.0);
+        l.suavizacao = l.suavizacao.clamp(0.0, 30.0);
+        l
+    }
+
+    pub fn metodo(&self) -> Metodo {
+        Metodo::da_chave(&self.metodo).unwrap_or(Metodo::PatchMatch)
+    }
+
+    pub fn backend(&self) -> Backend {
+        Backend::da_chave(&self.backend).unwrap_or(Backend::Automatico)
+    }
+
+    fn gravar(&self) {
+        let Some(caminho) = Self::arquivo() else {
+            return;
+        };
+        let Ok(texto) = serde_json::to_string_pretty(self) else {
+            return;
+        };
+        if let Some(pasta) = caminho.parent() {
+            let _ = std::fs::create_dir_all(pasta);
+        }
+        if let Err(erro) = std::fs::write(&caminho, texto) {
+            crate::telemetria::avisar!(
+                "⚠️ as escolhas do preenchimento não foram gravadas: {erro}"
+            );
+        }
+    }
+}
+
 impl EditorDeFoto {
+    /// Grava as escolhas de agora (ver [`Lembrado`]).
+    pub(super) fn lembrar_o_preenchimento(&self, cx: &App) {
+        Lembrado {
+            metodo: self.metodo_do_preenchimento.chave().into(),
+            backend: self.backend_da_ia.chave().into(),
+            // Um décimo basta: o slider anda de 5 em 5 e de 1 em 1.
+            contexto: (self.contexto_da_ia.read(cx).value().start() * 10.0).round() / 10.0,
+            suavizacao: (self.suavizacao.read(cx).value().start() * 10.0).round() / 10.0,
+            camada_nova: self.camada_nova_do_preenchimento,
+        }
+        .gravar();
+    }
+
     pub fn preenchendo_pelo_painel(&self) -> bool {
         self.area_do_preenchimento.is_some()
     }
@@ -100,8 +215,8 @@ impl EditorDeFoto {
         self.area_do_preenchimento.as_ref()
     }
 
-    /// Abre o painel: o instantâneo, o destino (a seleção), a amostragem
-    /// automática, e o primeiro cálculo.
+    /// Abre o painel: o instantâneo, o destino (a seleção) e a amostragem
+    /// automática. **Não calcula**: o operador ajusta e pede Visualizar.
     pub fn abrir_preenchimento(&mut self, cx: &mut Context<Self>) {
         if self.area_do_preenchimento.is_some() || self.avisar_se_na_mascara(cx) {
             return;
@@ -133,22 +248,87 @@ impl EditorDeFoto {
             alvo: AlvoDoPincel::Amostragem,
             incluir: true,
             ver_original: false,
-            em_camada_nova: true,
+            em_camada_nova: self.camada_nova_do_preenchimento,
             pedido: 0,
             cancelar: Arc::new(AtomicBool::new(false)),
             progresso: Arc::new(Mutex::new(None)),
             estado: EstadoDoCalculo::Ocioso,
             resultado: None,
-            previa: None,
+            visualizacao_antes: None,
+            visualizacao_depois: None,
             sobreposicao: None,
             pincelando: None,
+            visualizou: false,
             download: None,
             aviso_do_modelo: None,
             tempo: None,
         });
         self.refazer_a_sobreposicao();
+        self.refazer_a_visualizacao();
         self.aviso = None;
+        cx.notify();
+    }
+
+    /// Refaz as imagens da Visualização com o destino e o resultado de agora.
+    pub(super) fn refazer_a_visualizacao(&mut self) {
+        let Some(e) = self.area_do_preenchimento.as_mut() else {
+            return;
+        };
+        let (w, h, bgra) =
+            calculo::visualizacao(&e.foto, &e.destino, &e.peso, None, LADO_DA_VISUALIZACAO);
+        e.visualizacao_antes = crate::imagem::de_bgra(w, h, bgra);
+        e.visualizacao_depois = e.resultado.as_ref().and_then(|r| {
+            let (w, h, bgra) =
+                calculo::visualizacao(&e.foto, &e.destino, &e.peso, Some(r), LADO_DA_VISUALIZACAO);
+            crate::imagem::de_bgra(w, h, bgra)
+        });
+    }
+
+    /// Visualizar (ou Enter sem prévia): calcula com os ajustes de agora.
+    ///
+    /// # 🚨 Por que não calcula sozinho
+    ///
+    /// *"Quando você entra na ferramenta de Preenchimento sensível ao
+    /// conteúdo, logo de cara o efeito já aplicado. Precisa ter um botão de
+    /// visualizar, pois nem temos oportunidade de mexer nas configurações"*
+    /// (dono, 07/out/2026). Até a 0.1.107 o painel calculava ao abrir e a cada
+    /// ajuste — com a IA, segundos de CPU por mudança que o operador ainda
+    /// nem terminou. Agora abrir e ajustar só preparam; o cálculo é pedido.
+    pub fn visualizar_preenchimento(&mut self, cx: &mut Context<Self>) {
+        if let Some(e) = self.area_do_preenchimento.as_mut() {
+            e.visualizou = true;
+        }
         self.agendar_preenchimento(Duration::ZERO, cx);
+    }
+
+    /// Um ajuste mudou (ou Parar): o cálculo em andamento é derrubado e a
+    /// prévia sai — ela não mostra mais o que Aplicar gravaria. Volta com
+    /// Visualizar.
+    pub fn invalidar_previa(&mut self, cx: &mut Context<Self>) {
+        let Some(e) = self.area_do_preenchimento.as_mut() else {
+            return;
+        };
+        e.cancelar.store(true, Ordering::Relaxed);
+        e.cancelar = Arc::new(AtomicBool::new(false));
+        e.pedido += 1;
+        e.resultado = None;
+        e.tempo = None;
+        e.estado = EstadoDoCalculo::Ocioso;
+        e.visualizacao_depois = None;
+        *e.progresso.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        cx.notify();
+    }
+
+    /// Enter com o painel aberto: aplica a prévia final; sem ela, visualiza.
+    pub fn confirmar_preenchimento(&mut self, cx: &mut Context<Self>) {
+        let Some(e) = self.area_do_preenchimento.as_ref() else {
+            return;
+        };
+        match e.estado {
+            EstadoDoCalculo::Pronto { final_: true } => self.aplicar_preenchimento(cx),
+            EstadoDoCalculo::Calculando { .. } => {}
+            _ => self.visualizar_preenchimento(cx),
+        }
     }
 
     /// Esc / Cancelar: o documento fica como estava.
@@ -179,6 +359,7 @@ impl EditorDeFoto {
             e.amostragem = calculo::amostragem_automatica(&e.destino);
         }
         self.refazer_a_sobreposicao();
+        self.refazer_a_visualizacao();
     }
 
     pub(super) fn refazer_a_sobreposicao(&mut self) {
@@ -207,7 +388,7 @@ impl EditorDeFoto {
         e.cancelar = Arc::new(AtomicBool::new(false));
         e.pedido += 1;
         e.resultado = None;
-        e.previa = None;
+        e.visualizacao_depois = None;
         e.tempo = None;
         *e.progresso.lock().unwrap_or_else(|p| p.into_inner()) = None;
         let pedido = e.pedido;
@@ -347,11 +528,17 @@ impl EditorDeFoto {
         };
         let continua = match resultado {
             Ok(r) => {
-                let bgra = calculo::previa_bgra(&r, &e.peso);
-                e.previa = crate::imagem::de_bgra(r.largura, r.altura, bgra);
                 e.resultado = Some(r);
                 e.tempo = Some(tempo);
                 e.estado = EstadoDoCalculo::Pronto { final_ };
+                let (w, h, bgra) = calculo::visualizacao(
+                    &e.foto,
+                    &e.destino,
+                    &e.peso,
+                    e.resultado.as_ref(),
+                    LADO_DA_VISUALIZACAO,
+                );
+                e.visualizacao_depois = crate::imagem::de_bgra(w, h, bgra);
                 !final_
             }
             Err(Erro::Cancelado) => false,
@@ -486,7 +673,7 @@ impl EditorDeFoto {
         if e.alvo == AlvoDoPincel::Destino {
             self.refazer_o_destino(cx);
         }
-        self.agendar_preenchimento(Duration::from_millis(250), cx);
+        self.invalidar_previa(cx);
         true
     }
 
@@ -532,7 +719,7 @@ impl EditorDeFoto {
     pub(super) fn suavizacao_mudou(&mut self, cx: &mut Context<Self>) {
         if self.area_do_preenchimento.is_some() {
             self.refazer_o_destino(cx);
-            self.agendar_preenchimento(Duration::ZERO, cx);
+            self.invalidar_previa(cx);
         }
     }
 
@@ -541,11 +728,12 @@ impl EditorDeFoto {
             e.amostragem_manual = false;
         }
         self.refazer_o_destino(cx);
-        self.agendar_preenchimento(Duration::ZERO, cx);
+        self.invalidar_previa(cx);
     }
 
     pub fn mudar_metodo_do_preenchimento(&mut self, metodo: Metodo, cx: &mut Context<Self>) {
         self.metodo_do_preenchimento = metodo;
+        self.lembrar_o_preenchimento(cx);
         if let Some(e) = self.area_do_preenchimento.as_mut() {
             e.metodo = metodo;
             if !metodo.capacidades().amostragem {
@@ -553,16 +741,17 @@ impl EditorDeFoto {
             }
         }
         self.refazer_a_sobreposicao();
-        self.agendar_preenchimento(Duration::ZERO, cx);
+        self.invalidar_previa(cx);
     }
 
     pub fn mudar_backend_da_ia(&mut self, backend: Backend, cx: &mut Context<Self>) {
         self.backend_da_ia = backend;
+        self.lembrar_o_preenchimento(cx);
         if let Some(e) = self.area_do_preenchimento.as_mut() {
             e.backend = backend;
         }
         if self.metodo_do_preenchimento == Metodo::LaMa {
-            self.agendar_preenchimento(Duration::ZERO, cx);
+            self.invalidar_previa(cx);
         }
     }
 
@@ -683,7 +872,7 @@ impl EditorDeFoto {
         }
         if ok && self.metodo_do_preenchimento == Metodo::LaMa {
             ia_local::execucao::liberar();
-            self.agendar_preenchimento(Duration::ZERO, cx);
+            self.invalidar_previa(cx);
         }
         cx.notify();
     }
@@ -698,7 +887,7 @@ impl EditorDeFoto {
             });
         }
         if self.metodo_do_preenchimento == Metodo::LaMa {
-            self.agendar_preenchimento(Duration::ZERO, cx);
+            self.invalidar_previa(cx);
         }
         cx.notify();
     }
@@ -722,31 +911,15 @@ impl EditorDeFoto {
                 .w(px(r.largura as f32 * v.escala))
                 .h(px(r.altura as f32 * v.escala))
         };
-        if !e.ver_original {
-            if let (Some(p), Some(r)) = (&e.previa, &e.resultado) {
-                elementos.push(
-                    caixa(r.ret)
-                        .debug_selector(|| "editor-preenchimento-previa".into())
-                        .child(img(p.clone()).size_full().object_fit(ObjectFit::Fill))
-                        .into_any_element(),
-                );
-            } else if let Some(s) = &e.sobreposicao {
-                elementos.push(
-                    caixa(Retangulo::novo(0, 0, l as u32, a as u32))
-                        .child(img(s.clone()).size_full().object_fit(ObjectFit::Fill))
-                        .into_any_element(),
-                );
-            }
-            if e.previa.is_some() {
-                // Com a prévia à vista, a sobreposição só onde se pinta.
-                if let (Some(s), true) = (&e.sobreposicao, e.pincelando.is_some()) {
-                    elementos.push(
-                        caixa(Retangulo::novo(0, 0, l as u32, a as u32))
-                            .child(img(s.clone()).size_full().object_fit(ObjectFit::Fill))
-                            .into_any_element(),
-                    );
-                }
-            }
+        // 🖼️ Como no Photoshop, a foto da esquerda mostra só o que se pinta
+        // (vermelho = a remover, verde = de onde amostrar); o resultado mora
+        // na janela da Visualização, ao lado.
+        if let Some(s) = &e.sobreposicao {
+            elementos.push(
+                caixa(Retangulo::novo(0, 0, l as u32, a as u32))
+                    .child(img(s.clone()).size_full().object_fit(ObjectFit::Fill))
+                    .into_any_element(),
+            );
         }
         if !e.metodo.capacidades().amostragem {
             let contexto = self.contexto_do_preenchimento(cx);
@@ -1081,27 +1254,20 @@ impl EditorDeFoto {
 
         // --- Saída
         let saida = secao("Resultado").child(
-            v_flex()
-                .gap(px(8.))
-                .child(
-                    Switch::new("editor-ver-original")
-                        .xsmall()
-                        .label("Ver o original (comparar)")
-                        .checked(e.ver_original)
-                        .on_click(cx.listener(|ed, _: &bool, _, cx| ed.alternar_original(cx))),
-                )
-                .child(
-                    Switch::new("editor-camada-nova-preenchimento")
-                        .xsmall()
-                        .label("Aplicar numa camada nova")
-                        .checked(e.em_camada_nova)
-                        .on_click(cx.listener(|ed, marcado: &bool, _, cx| {
-                            if let Some(e) = ed.area_do_preenchimento.as_mut() {
-                                e.em_camada_nova = *marcado;
-                            }
-                            cx.notify();
-                        })),
-                ),
+            v_flex().gap(px(8.)).child(
+                Switch::new("editor-camada-nova-preenchimento")
+                    .xsmall()
+                    .label("Aplicar numa camada nova")
+                    .checked(e.em_camada_nova)
+                    .on_click(cx.listener(|ed, marcado: &bool, _, cx| {
+                        if let Some(e) = ed.area_do_preenchimento.as_mut() {
+                            e.em_camada_nova = *marcado;
+                        }
+                        ed.camada_nova_do_preenchimento = *marcado;
+                        ed.lembrar_o_preenchimento(cx);
+                        cx.notify();
+                    })),
+            ),
         );
 
         // --- O estado do cálculo
@@ -1167,8 +1333,23 @@ impl EditorDeFoto {
             EstadoDoCalculo::Falhou(m) => Alert::error("editor-preenchimento-falhou", m.clone())
                 .xsmall()
                 .into_any_element(),
-            EstadoDoCalculo::Ocioso => div().into_any_element(),
+            EstadoDoCalculo::Ocioso => Alert::info(
+                "editor-preenchimento-ocioso",
+                if e.visualizou {
+                    "Os ajustes mudaram desde a última visualização."
+                } else {
+                    "Pinte a área e escolha os ajustes; o cálculo só roda quando você pedir."
+                },
+            )
+            .title(if e.visualizou {
+                "Visualize de novo (Enter)"
+            } else {
+                "Clique em Visualizar (Enter)"
+            })
+            .xsmall()
+            .into_any_element(),
         };
+        let calculando = matches!(e.estado, EstadoDoCalculo::Calculando { .. });
 
         let pronto = matches!(e.estado, EstadoDoCalculo::Pronto { final_: true });
         v_flex()
@@ -1178,38 +1359,6 @@ impl EditorDeFoto {
             .border_l_1()
             .border_color(tema.border)
             .bg(tema.background)
-            // O cabeçalho.
-            .child(
-                v_flex()
-                    .gap(px(2.))
-                    .px(px(14.))
-                    .pt(px(12.))
-                    .pb(px(10.))
-                    .border_b_1()
-                    .border_color(tema.border)
-                    .child(
-                        h_flex()
-                            .items_start()
-                            .gap(px(8.))
-                            .child(
-                                gpui_kit::component::Icon::new(Icone::Sparkles)
-                                    .size_4()
-                                    .mt(px(2.)),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w(px(0.))
-                                    .text_sm()
-                                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                                    .child("Preenchimento sensível ao conteúdo"),
-                            ),
-                    )
-                    .child(apagado(
-                        "Remove o selecionado e reconstrói o fundo. A foto só muda ao aplicar."
-                            .into(),
-                    )),
-            )
             // As seções, rolando.
             .child(
                 v_flex()
@@ -1230,7 +1379,7 @@ impl EditorDeFoto {
                             .child(estado),
                     ),
             )
-            // O rodapé: cancelar e aplicar, sempre à vista.
+            // O rodapé: cancelar, visualizar e aplicar, sempre à vista.
             .child(
                 h_flex()
                     .gap(px(8.))
@@ -1244,14 +1393,199 @@ impl EditorDeFoto {
                             .tooltip("Esc — a foto fica como estava")
                             .on_click(cx.listener(|ed, _, _, cx| ed.cancelar_preenchimento(cx))),
                     )
+                    .child(if calculando {
+                        crate::estilo::botao_secundario("editor-preenchimento-visualizar", cx)
+                            .flex_1()
+                            .child("Parar")
+                            .tooltip("Interrompe o cálculo; os ajustes ficam")
+                            .on_click(cx.listener(|ed, _, _, cx| ed.invalidar_previa(cx)))
+                    } else {
+                        crate::estilo::botao_secundario("editor-preenchimento-visualizar", cx)
+                            .flex_1()
+                            .child("Visualizar")
+                            .tooltip("Enter — calcula com os ajustes de agora; a foto não muda")
+                            .on_click(cx.listener(|ed, _, _, cx| ed.visualizar_preenchimento(cx)))
+                    })
                     .child(
                         crate::estilo::botao_primario("editor-preenchimento-aplicar", cx)
                             .flex_1()
                             .child("Aplicar")
-                            .tooltip("Enter — numa camada de retoque nova")
+                            .tooltip(if pronto {
+                                "Enter — grava o visualizado numa camada de retoque"
+                            } else {
+                                "Visualize primeiro: só se aplica o que foi visto"
+                            })
                             .disabled(!pronto)
                             .on_click(cx.listener(|ed, _, _, cx| ed.aplicar_preenchimento(cx))),
                     ),
+            )
+            .into_any_element()
+    }
+}
+
+impl EditorDeFoto {
+    /// 🖼️ A barra do espaço modal: no lugar da do editor (Salvar, zoom,
+    /// desfazer ficam fora de alcance enquanto ele está aberto, como no
+    /// Photoshop). Também é a barra de título no GNOME.
+    pub(super) fn barra_do_preenchimento(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let tema = cx.theme().clone();
+        let fraca = cx.entity().downgrade();
+        let controles = crate::janela::controles_com_fechar(
+            "janela-editor",
+            tema.foreground,
+            window,
+            cx,
+            move |window, cx| {
+                let _ = fraca.update(cx, |ed, cx| ed.fechar(window, cx));
+            },
+        );
+        crate::janela::como_barra_de_titulo(div(), "barra-do-preenchimento", window, cx)
+            .debug_selector(|| "editor-barra-do-preenchimento".into())
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .h(px(48.))
+            .pl(px(12.))
+            .pr(px(4.))
+            .border_b_1()
+            .border_color(tema.border)
+            .child(gpui_kit::component::Icon::new(Icone::Sparkles).size_4())
+            .child(
+                div()
+                    .text_sm()
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                    .child("Preenchimento sensível ao conteúdo"),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .truncate()
+                    .text_xs()
+                    .text_color(tema.muted_foreground)
+                    .child(format!("{} · a foto só muda ao aplicar", self.foto.nome)),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(tema.muted_foreground)
+                    .child("Esc cancela · Enter visualiza ou aplica"),
+            )
+            .child(controles)
+            .into_any_element()
+    }
+
+    /// 🖼️ A janela da Visualização (o meio do espaço modal): o recorte em
+    /// volta da área, antes ou depois.
+    pub(super) fn visualizacao_do_preenchimento(&self, cx: &mut Context<Self>) -> AnyElement {
+        use gpui_kit::component::button::ButtonGroup;
+        use gpui_kit::component::spinner::Spinner;
+        use gpui_kit::component::{h_flex, v_flex, Selectable as _};
+
+        let tema = cx.theme().clone();
+        let Some(e) = self.area_do_preenchimento.as_ref() else {
+            return div().into_any_element();
+        };
+        let ha_depois = e.visualizacao_depois.is_some();
+        let depois = ha_depois && !e.ver_original;
+        let (imagem, seletor) = if depois {
+            (e.visualizacao_depois.clone(), "editor-visualizacao-depois")
+        } else {
+            (e.visualizacao_antes.clone(), "editor-visualizacao-antes")
+        };
+        let calculando = matches!(e.estado, EstadoDoCalculo::Calculando { .. });
+        let legenda = if calculando {
+            "Calculando…"
+        } else if !ha_depois {
+            "Antes — clique em Visualizar para ver o resultado"
+        } else if depois {
+            "Depois — é o que Aplicar grava"
+        } else {
+            "Antes — a foto como está"
+        };
+        v_flex()
+            .id("editor-visualizacao")
+            .debug_selector(|| "editor-visualizacao".into())
+            .size_full()
+            .border_l_1()
+            .border_color(tema.border)
+            .bg(tema.secondary)
+            .child(
+                h_flex()
+                    .gap(px(8.))
+                    .h(px(40.))
+                    .px(px(12.))
+                    .border_b_1()
+                    .border_color(tema.border)
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                            .child("Visualização"),
+                    )
+                    .when(calculando, |d| d.child(Spinner::new().xsmall()))
+                    .child(div().flex_1())
+                    .child(
+                        ButtonGroup::new("editor-ver-original")
+                            .outline()
+                            .xsmall()
+                            .child(
+                                crate::estilo::botao_contorno_pequeno("editor-ver-antes", cx)
+                                    .label("Antes")
+                                    .selected(!depois),
+                            )
+                            .child(
+                                crate::estilo::botao_contorno_pequeno("editor-ver-depois", cx)
+                                    .label("Depois")
+                                    .selected(depois)
+                                    .disabled(!ha_depois),
+                            )
+                            .on_click(cx.listener(|ed, cliques: &Vec<usize>, _, cx| {
+                                if let Some(e) = ed.area_do_preenchimento.as_mut() {
+                                    e.ver_original = cliques.first() != Some(&1);
+                                }
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .p(px(16.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .when_some(imagem, |d, imagem| {
+                        d.child(
+                            div()
+                                .debug_selector(move || seletor.into())
+                                .size_full()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(
+                                    img(imagem)
+                                        .max_w_full()
+                                        .max_h_full()
+                                        .object_fit(ObjectFit::Contain),
+                                ),
+                        )
+                    }),
+            )
+            .child(
+                div()
+                    .px(px(12.))
+                    .py(px(8.))
+                    .border_t_1()
+                    .border_color(tema.border)
+                    .text_xs()
+                    .text_color(tema.muted_foreground)
+                    .child(legenda),
             )
             .into_any_element()
     }
@@ -1263,5 +1597,34 @@ impl Drop for EditorDeFoto {
     fn drop(&mut self) {
         self.area_do_preenchimento = None;
         ia_local::execucao::liberar();
+    }
+}
+
+#[cfg(test)]
+mod testes_do_lembrado {
+    use super::*;
+
+    #[test]
+    fn o_lembrado_volta_inteiro_e_o_que_nao_vale_cai_no_padrao() {
+        let l = Lembrado {
+            metodo: Metodo::LaMa.chave().into(),
+            backend: Backend::Cpu.chave().into(),
+            contexto: 85.0,
+            suavizacao: 7.0,
+            camada_nova: false,
+        };
+        let texto = serde_json::to_string(&l).unwrap();
+        assert_eq!(Lembrado::do_texto(&texto), l);
+        assert_eq!(Lembrado::do_texto(&texto).metodo(), Metodo::LaMa);
+        // Campo a menos, método e backend desconhecidos, número fora da faixa.
+        let estranho = Lembrado::do_texto(
+            r#"{"metodo":"photoshop","backend":"tpu","contexto":999,"camada_nova":false}"#,
+        );
+        assert_eq!(estranho.metodo(), Metodo::PatchMatch);
+        assert_eq!(estranho.backend(), Backend::Automatico);
+        assert_eq!(estranho.contexto, 200.0);
+        assert_eq!(estranho.suavizacao, SUAVIZACAO_PADRAO);
+        assert!(!estranho.camada_nova);
+        assert_eq!(Lembrado::do_texto("lixo"), Lembrado::default());
     }
 }
