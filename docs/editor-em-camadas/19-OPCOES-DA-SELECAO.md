@@ -122,5 +122,8 @@ novo `janela tipo x y`, em pontos da janela, para a barra e os diálogos) e as c
 - proporção 16:9 e tamanho 300 × 200 com zoom 2× e vista girada 30°;
 - varinha em "Camada atual" numa camada vazia pegando a foto inteira.
 
-Limites: o "mover" nativo não chega à janela em segundo plano — a prévia do próximo segmento foi conferida no
-harness. Windows e Linux: só compilação.
+A prévia do próximo segmento do poligonal: o `mouse mover` do roteiro **não** chega ao GPUI (nem o círculo do
+pincel o acompanha), então ela foi conferida com movimento real do sistema — um `CGEvent` de `mouseMoved` postado
+por um script Swift que acha a janela pela `CGWindowListCopyWindowInfo` — e a linha seguiu o cursor.
+
+Windows e Linux: só compilação (`cargo check` do `ui-gpui` num contêiner Debian).
