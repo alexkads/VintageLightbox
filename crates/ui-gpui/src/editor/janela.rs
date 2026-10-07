@@ -66,7 +66,7 @@ use super::{
     SelecaoRetangular, SelecionarTudo, SubirCamada, TransformacaoLivre, UmPorUm, UsarBorracha,
     UsarCarimbo, UsarContaGotas, UsarCorrecao, UsarMover, UsarPincel, CONTEXTO,
 };
-use super::{DifundirSelecao, UsarVarinha};
+use super::{CoresPadrao, DifundirSelecao, TrocarCores, UsarVarinha};
 use super::{
     UsarDegrade, UsarDesfoque, UsarLata, UsarNitidez, UsarSubexposicao, UsarSuperexposicao,
 };
@@ -1817,11 +1817,53 @@ impl EditorDeFoto {
                 barra = barra.child(if ativa { botao.primary() } else { botao });
             }
         }
+        // As cores de frente e de fundo do Photoshop: a de frente abre o
+        // seletor; a de fundo, embaixo e à direita, troca com ela no clique
+        // (X); D volta a preto e branco.
+        let fundo = self.sessao().map_or([255; 3], |s| s.pincel.cor_de_fundo);
         barra.child(div().flex_1()).child(
             div()
-                .debug_selector(|| "editor-seletor-de-cor".into())
-                .child(ColorPicker::new(&self.seletor_de_cor)),
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(px(2.))
+                .child(
+                    div()
+                        .debug_selector(|| "editor-seletor-de-cor".into())
+                        .child(ColorPicker::new(&self.seletor_de_cor)),
+                )
+                .child(
+                    div()
+                        .id("editor-cor-de-fundo")
+                        .debug_selector(|| "editor-cor-de-fundo".into())
+                        .size(px(16.))
+                        .ml(px(12.))
+                        .rounded(crate::tema::canto(3.))
+                        .border_1()
+                        .border_color(tema.border)
+                        .bg(gpui_kit::rgb(
+                            (fundo[0] as u32) << 16 | (fundo[1] as u32) << 8 | fundo[2] as u32,
+                        ))
+                        .cursor_pointer()
+                        .tooltip(|window, cx| {
+                            gpui_kit::component::tooltip::Tooltip::new(
+                                "Cor de fundo — clique ou X troca com a de frente; D volta a preto e branco",
+                            )
+                            .build(window, cx)
+                        })
+                        .on_click(cx.listener(|ed, _, _, cx| ed.trocar_cores(cx))),
+                ),
         )
+    }
+
+    /// X.
+    pub fn trocar_cores(&mut self, cx: &mut Context<Self>) {
+        self.na_sessao(cx, Sessao::trocar_cores);
+    }
+
+    /// D.
+    pub fn cores_padrao(&mut self, cx: &mut Context<Self>) {
+        self.na_sessao(cx, Sessao::cores_padrao);
     }
 
     /// A faixa de tons da subexposição e da superexposição; a ferramenta na
@@ -2745,6 +2787,28 @@ impl EditorDeFoto {
                     None => eprintln!("[roteiro] editor ajuste {chave}?"),
                 }
             }
+            // pincel tamanho|dureza|opacidade V (dureza e opacidade em %)
+            "pincel" => {
+                let v = numero(2);
+                let (estado, valor) = match partes.get(1).copied() {
+                    Some("tamanho") => (self.tamanho.clone(), v),
+                    Some("dureza") => (self.dureza.clone(), v),
+                    _ => (self.opacidade.clone(), v),
+                };
+                estado.update(cx, |s, cx| s.set_value(valor, window, cx));
+                if let Some(s) = self.sessao_mut() {
+                    match partes.get(1).copied() {
+                        Some("tamanho") => s.pincel.raio = v.max(1.0),
+                        Some("dureza") => s.pincel.dureza = v / 100.0,
+                        _ => s.pincel.opacidade = v / 100.0,
+                    }
+                }
+            }
+            // cores trocar|padrao
+            "cores" => match partes.get(1).copied() {
+                Some("padrao") => self.cores_padrao(cx),
+                _ => self.trocar_cores(cx),
+            },
             // cor R G B
             "cor" => self.escolher_cor([numero(1) as u8, numero(2) as u8, numero(3) as u8], cx),
             "ferramenta" => match partes.get(1).copied().unwrap_or_default() {
@@ -3447,7 +3511,7 @@ impl EditorDeFoto {
                         .rounded(crate::tema::canto(4.))
                         .bg(tema.muted)
                         .child(format!(
-                            "Pintando na máscara de {nome}: preto esconde, branco revela"
+                            "Pintando na máscara de {nome}: preto esconde, branco revela. X troca as cores, D volta a preto e branco"
                         )),
                 )
             })
@@ -3687,7 +3751,9 @@ impl EditorDeFoto {
         let miniaturas = self.miniaturas.clone();
         let das_mascaras = self.miniaturas_das_mascaras.clone();
         let lado = px(LADO_DA_MINIATURA as f32 * 0.75);
-        let cor_da_moldura = tema.foreground;
+        // A moldura do alvo na cor de destaque do tema: em volta de uma
+        // máscara branca, a do texto sumia.
+        let cor_da_moldura = tema.ring;
         let cor_do_icone_de_ajuste = tema.muted;
         let linhas = camadas
             .into_iter()
@@ -4332,7 +4398,7 @@ fn moldura<E: Styled>(elemento: E, alvo: bool, cor: gpui_kit::Hsla) -> E {
     elemento
         .flex_none()
         .p(px(1.))
-        .border_1()
+        .border_2()
         .border_color(if alvo {
             cor
         } else {
@@ -4771,6 +4837,8 @@ impl Render for EditorDeFoto {
                 cx.listener(|ed, _: &UsarVarinha, _, cx| ed.usar_auxiliar(Auxiliar::Varinha, cx)),
             )
             .on_action(cx.listener(|ed, _: &DifundirSelecao, _, cx| ed.difundir_selecao(cx)))
+            .on_action(cx.listener(|ed, _: &TrocarCores, _, cx| ed.trocar_cores(cx)))
+            .on_action(cx.listener(|ed, _: &CoresPadrao, _, cx| ed.cores_padrao(cx)))
             .on_action(cx.listener(|ed, _: &SelecionarTudo, _, cx| ed.selecionar_tudo(cx)))
             .on_action(cx.listener(|ed, _: &Desmarcar, _, cx| ed.desmarcar(cx)))
             .on_action(cx.listener(|ed, _: &InverterSelecao, _, cx| ed.inverter_selecao(cx)))

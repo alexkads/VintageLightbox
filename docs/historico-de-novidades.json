@@ -1,5 +1,18 @@
 [
   {
+    "versao": "0.1.105",
+    "data": "2026-10-06",
+    "titulo": "Editar Foto: cor de frente e de fundo, com X e D, e a máscara mais clara de usar.",
+    "importante": false,
+    "novidades": [
+      "Embaixo da barra de ferramentas ficam a cor de frente e a de fundo, como no Photoshop: X troca as duas e D volta a preto e branco.",
+      "Na máscara, as cores viram cinza (é o que a máscara usa) e a borracha pinta a cor de fundo, revelando a camada.",
+      "A miniatura onde o pincel pinta (a da camada ou a da máscara) ganhou uma moldura azul bem visível.",
+      "O aviso da máscara lembra: preto esconde, branco revela; X troca as cores."
+    ],
+    "por_que_atualizar": "Para esconder e revelar partes de uma camada alternando preto e branco com uma tecla só."
+  },
+  {
     "versao": "0.1.104",
     "data": "2026-10-06",
     "titulo": "Editar Foto ganhou a varinha mágica e os comandos de seleção do Photoshop.",

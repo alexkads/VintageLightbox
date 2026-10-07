@@ -1,12 +1,12 @@
 {
-  "versao": "0.1.104",
-  "titulo": "Editar Foto ganhou a varinha mágica e os comandos de seleção do Photoshop.",
+  "versao": "0.1.105",
+  "titulo": "Editar Foto: cor de frente e de fundo, com X e D, e a máscara mais clara de usar.",
   "importante": false,
   "novidades": [
-    "Varinha mágica (W): um clique seleciona a cor parecida em volta. A tolerância e o \"Contígua\" ficam nas opções; ⇧ + clique soma e ⌥ + clique tira.",
-    "⌘ + clique na miniatura de uma camada seleciona o que ela tem pintado; na miniatura da máscara, o que a máscara revela.",
-    "Com uma seleção feita, aparecem Difundir (⇧F6), Expandir e Contrair, com o raio em pixels.",
-    "Junto com as camadas de ajuste: selecione um colete com a varinha, difunda a borda e crie um Matiz/Saturação — só o colete muda."
+    "Embaixo da barra de ferramentas ficam a cor de frente e a de fundo, como no Photoshop: X troca as duas e D volta a preto e branco.",
+    "Na máscara, as cores viram cinza (é o que a máscara usa) e a borracha pinta a cor de fundo, revelando a camada.",
+    "A miniatura onde o pincel pinta (a da camada ou a da máscara) ganhou uma moldura azul bem visível.",
+    "O aviso da máscara lembra: preto esconde, branco revela; X troca as cores."
   ],
-  "por_que_atualizar": "Para escolher uma parte da foto pela cor e mexer só nela, com a borda suave."
+  "por_que_atualizar": "Para esconder e revelar partes de uma camada alternando preto e branco com uma tecla só."
 }

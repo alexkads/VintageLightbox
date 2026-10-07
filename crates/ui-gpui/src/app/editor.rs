@@ -1326,6 +1326,133 @@ mod testes {
         assert!(borda > 0 && borda < 255, "a difusão fez rampa ({borda})");
     }
 
+    /// 🎭 O fluxo do Photoshop na janela, com a foto ampliada e movida: a
+    /// máscara pelo botão, D (preto), um clique que revela a base **no ponto
+    /// exato** da foto, X (branco) que restaura, ⌘Z/⇧⌘Z, e a miniatura da
+    /// camada que devolve o pincel aos pixels.
+    #[gpui_kit::test]
+    fn pintar_de_preto_na_mascara_revela_o_de_baixo_com_zoom_e_mao(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        editor.update(&mut ve, |ed, cx| {
+            ed.na_sessao_para_teste(cx, |s| {
+                s.pincel.cor = [255, 0, 0];
+                s.selecionar_tudo();
+                s.preencher_selecao();
+                s.desmarcar();
+                s.pincel.raio = 1.5;
+                s.pincel.dureza = 1.0;
+            })
+        });
+        let base = editor.read_with(&ve, |ed, _| ed.sessao().unwrap().base().clone());
+        let cor = |ve: &mut VisualTestContext, x: u32, y: u32| {
+            editor.read_with(ve, |ed, _| {
+                ed.sessao().unwrap().cor_em(x as f32, y as f32).unwrap()
+            })
+        };
+        let pixels_da_camada = editor.read_with(&ve, |ed, _| {
+            ed.sessao().unwrap().documento().camadas[0].pixels.clone()
+        });
+
+        clicar_no_editor(&mut ve, "editor-camada-mascara");
+        assert!(editor.read_with(&ve, |ed, _| ed.na_mascara()));
+        assert!(ve.debug_bounds("editor-na-mascara").is_some());
+        ve.simulate_keystrokes("d");
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.sessao().unwrap().pincel.cor),
+            [0; 3]
+        );
+
+        // Ampliada três passos e movida com a mão.
+        for _ in 0..3 {
+            ve.simulate_keystrokes("cmd-=");
+        }
+        ve.run_until_parked();
+        clicar_no_editor(&mut ve, "editor-mao");
+        arrastar_no_palco(&mut ve, (0.5, 0.5), (0.4, 0.45));
+        clicar_no_editor(&mut ve, "editor-pincel");
+
+        // Um clique no centro do pixel (40, 20) da foto, achado pela área da
+        // foto na tela de agora.
+        let (alvo_x, alvo_y) = (40u32, 20u32);
+        let clicar_na_foto = |ve: &mut VisualTestContext| {
+            let (area, (l, a)) = editor.read_with(ve, |ed, _| {
+                let b = ed.sessao().unwrap().base();
+                (
+                    ed.area_na_janela().unwrap(),
+                    (b.width() as f32, b.height() as f32),
+                )
+            });
+            let ponto = area.origin
+                + gpui_kit::point(
+                    area.size.width * ((alvo_x as f32 + 0.5) / l),
+                    area.size.height * ((alvo_y as f32 + 0.5) / a),
+                );
+            assert!(
+                ve.debug_bounds("palco-do-editor").unwrap().contains(&ponto),
+                "o alvo está à vista"
+            );
+            ve.simulate_click(ponto, gpui_kit::Modifiers::none());
+            ve.run_until_parked();
+        };
+        clicar_na_foto(&mut ve);
+        assert_eq!(
+            cor(&mut ve, alvo_x, alvo_y),
+            base.get_pixel(alvo_x, alvo_y).0,
+            "revelou a base ali"
+        );
+        assert_eq!(cor(&mut ve, alvo_x + 4, alvo_y), [255, 0, 0], "e só ali");
+        let valor = |ve: &mut VisualTestContext| {
+            editor.read_with(ve, |ed, _| {
+                ed.sessao().unwrap().documento().camadas[0]
+                    .mascara
+                    .as_ref()
+                    .unwrap()
+                    .valor(alvo_x, alvo_y)
+            })
+        };
+        assert_eq!(valor(&mut ve), 0);
+
+        // X: branco na frente — restaura.
+        ve.simulate_keystrokes("x");
+        ve.run_until_parked();
+        clicar_na_foto(&mut ve);
+        assert_eq!(cor(&mut ve, alvo_x, alvo_y), [255, 0, 0]);
+        // ⌘Z volta o furo; ⇧⌘Z o fecha de novo.
+        ve.simulate_keystrokes("cmd-z");
+        ve.run_until_parked();
+        assert_eq!(valor(&mut ve), 0);
+        ve.simulate_keystrokes("cmd-shift-z");
+        ve.run_until_parked();
+        assert_eq!(valor(&mut ve), 255);
+        // Os pixels da camada nunca mudaram.
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.sessao().unwrap().documento().camadas[0]
+                .pixels
+                .clone()),
+            pixels_da_camada
+        );
+
+        // A miniatura do conteúdo: o pincel volta aos pixels (e pinta neles).
+        clicar_no_editor(&mut ve, "editor-miniatura-0");
+        assert!(!editor.read_with(&ve, |ed, _| ed.na_mascara()));
+        ve.simulate_keystrokes("x");
+        ve.run_until_parked();
+        clicar_na_foto(&mut ve);
+        assert_eq!(
+            cor(&mut ve, alvo_x, alvo_y),
+            [0, 0, 0],
+            "pintou preto nos pixels"
+        );
+        assert_ne!(
+            editor.read_with(&ve, |ed, _| ed.sessao().unwrap().documento().camadas[0]
+                .pixels
+                .clone()),
+            pixels_da_camada
+        );
+    }
+
     fn arrastar_no_palco(ve: &mut VisualTestContext, de: (f32, f32), ate: (f32, f32)) {
         let palco = ve.debug_bounds("palco-do-editor").unwrap();
         let ponto = |f: (f32, f32)| {
