@@ -184,3 +184,10 @@ H é a Mão e R gira só a vista; ⇧ + letra alterna no grupo; ⌘/Ctrl pela pl
 opacidade, espaçamento, suavização, ⇧ + clique em reta, `{` `}`, números e predefinições; a dureza revista.
 Seleção com interseção (⇧⌥), quadrado/centro, mover só o contorno, e no desfazer; ⇧⌘J num passo só. Projeto no
 formato 6. Detalhes, limitações e o plano das próximas etapas em [18-ETAPA-13.md](18-ETAPA-13.md).
+
+## Opções das ferramentas de seleção
+
+Barra de opções embaixo da barra de cima com os quatro modos (Nova, Adicionar, Subtrair, Intersectar — ⇧/⌥ trocam
+só no gesto), difusão, estilo (normal, proporção fixa, tamanho fixo, ⇄), antisserrilhado, laço poligonal (⇧L),
+varinha com amostra da camada atual ou de todas, "Modificar seleção ▾" com valor em pixels e "Transformar seleção".
+Detalhes em [19-OPCOES-DA-SELECAO.md](19-OPCOES-DA-SELECAO.md).

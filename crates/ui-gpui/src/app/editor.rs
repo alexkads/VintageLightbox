@@ -1318,6 +1318,8 @@ mod testes {
             editor.read_with(&ve, |ed, _| ed.auxiliar()),
             Some(crate::editor::janela::Auxiliar::Varinha)
         );
+        // Sem antisserrilhado: o ⌥ abaixo tira tudo, sem a rampa da borda.
+        editor.update(&mut ve, |ed, _| ed.opcoes_da_varinha_mut().suavizar = false);
         assert!(ve.debug_bounds("editor-tolerancia").is_some());
         assert!(ve.debug_bounds("editor-contigua").is_some());
         let foto = editor.read_with(&ve, |ed, _| ed.area_na_janela().unwrap());
@@ -1353,17 +1355,62 @@ mod testes {
         ve.run_until_parked();
         assert_eq!((valor(&mut ve, 15, 15), valor(&mut ve, 5, 5)), (255, 0));
 
-        // Os comandos aparecem com a seleção; Expandir e Difundir mexem na borda.
-        assert!(ve.debug_bounds("editor-difundir").is_some());
-        clicar_no_editor(&mut ve, "editor-expandir");
+        // "Modificar seleção ▾": o menu tem os três comandos e, separado,
+        // Transformar seleção; cada comando pede o valor em pixels.
+        use crate::editor::janela::Modificacao;
+        clicar_no_editor(&mut ve, "editor-modificar-selecao");
+        for item in [
+            "editor-modificar-difundir",
+            "editor-modificar-expandir",
+            "editor-modificar-contrair",
+            "editor-transformar-selecao",
+        ] {
+            assert!(ve.debug_bounds(item).is_some(), "{item} no menu");
+        }
+        clicar_no_editor(&mut ve, "editor-modificar-expandir");
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.modificando()),
+            Some(Modificacao::Expandir)
+        );
+        assert!(ve.debug_bounds("editor-valor-da-modificacao").is_some());
+        assert!(ve.debug_bounds("editor-confirmar-modificacao").is_some());
+        // O foco está no campo: Enter confirma (o OK faz o mesmo).
+        ve.simulate_keystrokes("enter");
+        ve.run_until_parked();
         assert_eq!(valor(&mut ve, 6, 15), 255, "expandiu 5 px");
-        clicar_no_editor(&mut ve, "editor-contrair");
+        ve.update(|window, cx| {
+            editor.update(cx, |ed, cx| {
+                ed.abrir_modificacao(Modificacao::Contrair, window, cx)
+            })
+        });
+        ve.run_until_parked();
+        ve.simulate_keystrokes("enter");
+        ve.run_until_parked();
         assert_eq!(valor(&mut ve, 6, 15), 0);
         assert_eq!(valor(&mut ve, 10, 15), 255);
+        // ⇧F6 abre o Difundir; Enter no campo confirma.
         ve.simulate_keystrokes("shift-f6");
         ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.modificando()),
+            Some(Modificacao::Difundir)
+        );
+        ve.simulate_keystrokes("enter");
+        ve.run_until_parked();
+        assert!(editor.read_with(&ve, |ed, _| ed.modificando()).is_none());
         let borda = valor(&mut ve, 10, 15);
         assert!(borda > 0 && borda < 255, "a difusão fez rampa ({borda})");
+        // Esc no diálogo cancela sem passo.
+        let passos = editor.read_with(&ve, |ed, _| ed.sessao().unwrap().historico().passos().len());
+        ve.simulate_keystrokes("shift-f6");
+        ve.run_until_parked();
+        ve.simulate_keystrokes("escape");
+        ve.run_until_parked();
+        assert!(editor.read_with(&ve, |ed, _| ed.modificando()).is_none());
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.sessao().unwrap().historico().passos().len()),
+            passos
+        );
     }
 
     /// 🎭 O fluxo do Photoshop na janela, com a foto ampliada e movida: a
@@ -2482,5 +2529,357 @@ mod testes {
             "{r:?}"
         );
         assert!(r.largura >= 11, "o dobro da distância: {r:?}");
+    }
+
+    // ------------------------------------------- opções das ferramentas de seleção
+
+    fn selecao_de(
+        editor: &gpui_kit::Entity<EditorDeFoto>,
+        ve: &VisualTestContext,
+    ) -> Option<editor_core::Selecao> {
+        editor.read_with(ve, |ed, _| ed.sessao().unwrap().selecao().cloned())
+    }
+
+    fn passos_de(editor: &gpui_kit::Entity<EditorDeFoto>, ve: &VisualTestContext) -> usize {
+        editor.read_with(ve, |ed, _| ed.sessao().unwrap().historico().passos().len())
+    }
+
+    /// ⬚ A barra de opções: os quatro modos com o ativo realçado; o modo da
+    /// barra vale sem modificador, e ⇧/⌥ trocam só durante o gesto.
+    #[gpui_kit::test]
+    fn os_modos_da_barra_e_os_modificadores_so_no_gesto(cx: &mut TestAppContext) {
+        use editor_core::Operacao;
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        assert!(ve.debug_bounds("editor-opcoes-da-selecao").is_none());
+        ve.simulate_keystrokes("m");
+        ve.run_until_parked();
+        for id in [
+            "editor-opcoes-da-selecao",
+            "editor-modo-nova",
+            "editor-modo-adicionar",
+            "editor-modo-subtrair",
+            "editor-modo-intersectar",
+            "editor-difusao",
+            "editor-estilo",
+        ] {
+            assert!(ve.debug_bounds(id).is_some(), "{id} na barra");
+        }
+        let nada = gpui_kit::Modifiers::none();
+        // Nova: a esquerda inteira da foto.
+        let (a, b) = (
+            ponto_da_foto(&mut ve, &editor, (0.0, 0.0)),
+            ponto_da_foto(&mut ve, &editor, (0.5, 1.0)),
+        );
+        arrastar_com(&mut ve, a, b, nada, nada);
+        let s = selecao_de(&editor, &ve).unwrap();
+        assert_eq!((s.valor(10, 10), s.valor(40, 10)), (255, 0));
+        // Subtrair pela barra, sem modificador: tira o alto.
+        clicar_no_editor(&mut ve, "editor-modo-subtrair");
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.modo_de_selecao()),
+            Operacao::Subtrair
+        );
+        let (a, b) = (
+            ponto_da_foto(&mut ve, &editor, (0.0, 0.0)),
+            ponto_da_foto(&mut ve, &editor, (1.0, 0.25)),
+        );
+        arrastar_com(&mut ve, a, b, nada, nada);
+        let s = selecao_de(&editor, &ve).unwrap();
+        assert_eq!((s.valor(10, 5), s.valor(10, 30)), (0, 255));
+        // ⇧ no clique soma, só neste gesto: a direita de baixo entra…
+        let shift = gpui_kit::Modifiers::shift();
+        let (a, b) = (
+            ponto_da_foto(&mut ve, &editor, (0.75, 0.75)),
+            ponto_da_foto(&mut ve, &editor, (1.0, 1.0)),
+        );
+        arrastar_com(&mut ve, a, b, shift, nada);
+        let s = selecao_de(&editor, &ve).unwrap();
+        assert_eq!(s.valor(56, 42), 255);
+        // …e a barra continua em Subtrair.
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.modo_de_selecao()),
+            Operacao::Subtrair
+        );
+        // Intersectar pela barra.
+        clicar_no_editor(&mut ve, "editor-modo-intersectar");
+        let (a, b) = (
+            ponto_da_foto(&mut ve, &editor, (0.0, 0.5)),
+            ponto_da_foto(&mut ve, &editor, (1.0, 1.0)),
+        );
+        arrastar_com(&mut ve, a, b, nada, nada);
+        let s = selecao_de(&editor, &ve).unwrap();
+        assert_eq!(
+            (s.valor(10, 20), s.valor(10, 40), s.valor(56, 42)),
+            (0, 255, 255)
+        );
+        assert_eq!(passos_de(&editor, &ve), 4);
+        assert!(
+            !editor.read_with(&ve, |ed, _| ed.alterado()),
+            "só seleção: nada a salvar"
+        );
+        // Mudar opção não é passo e não mexe na seleção de agora.
+        let antes = selecao_de(&editor, &ve);
+        editor.update(&mut ve, |ed, cx| {
+            ed.opcoes_da_forma_mut(crate::editor::janela::TipoDeSelecao::Retangulo)
+                .acabamento
+                .difusao = 10;
+            ed.escolher_modo_de_selecao(Operacao::Nova, cx);
+        });
+        ve.run_until_parked();
+        assert_eq!(selecao_de(&editor, &ve), antes);
+        assert_eq!(passos_de(&editor, &ve), 4);
+    }
+
+    /// 📐 Proporção fixa e tamanho fixo pelo palco, com a medida em pixels
+    /// do documento durante o gesto — a mesma com zoom e com a vista girada.
+    #[gpui_kit::test]
+    fn proporcao_e_tamanho_fixos_nao_dependem_do_zoom_nem_do_giro(cx: &mut TestAppContext) {
+        use crate::editor::janela::{TipoDeEstilo, TipoDeSelecao};
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        ve.simulate_keystrokes("m");
+        ve.run_until_parked();
+        // Proporção 2:1: um arrasto alto vira a caixa 2:1 que cobre o ponteiro.
+        editor.update(&mut ve, |ed, cx| {
+            ed.escolher_estilo(TipoDeEstilo::Proporcao, cx);
+            ed.opcoes_da_forma_mut(TipoDeSelecao::Retangulo).proporcao = (2.0, 1.0);
+        });
+        ve.run_until_parked();
+        assert!(ve.debug_bounds("editor-estilo-largura").is_some());
+        assert!(ve.debug_bounds("editor-trocar-medidas").is_some());
+        let nada = gpui_kit::Modifiers::none();
+        let a = ponto_da_foto(&mut ve, &editor, (0.0, 0.0));
+        let b = ponto_da_foto(&mut ve, &editor, (10.0 / 64.0, 12.0 / 48.0));
+        ve.simulate_mouse_down(a, gpui_kit::MouseButton::Left, nada);
+        ve.simulate_mouse_move(b, Some(gpui_kit::MouseButton::Left), nada);
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.medida_do_gesto()),
+            Some((24, 12))
+        );
+        assert!(ve.debug_bounds("editor-medida-da-selecao").is_some());
+        ve.simulate_mouse_up(b, gpui_kit::MouseButton::Left, nada);
+        ve.run_until_parked();
+        let c = selecao_de(&editor, &ve).unwrap().caixa_justa();
+        assert_eq!((c.largura, c.altura), (24, 12));
+        // ⇄ troca: 1:2.
+        clicar_no_editor(&mut ve, "editor-trocar-medidas");
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed
+                .opcoes_da_forma(TipoDeSelecao::Retangulo)
+                .proporcao),
+            (1.0, 2.0)
+        );
+
+        // Tamanho fixo 20×10, com zoom de 4× e a vista girada 30°: o clique
+        // dá 20×10 pixels do documento.
+        editor.update(&mut ve, |ed, cx| {
+            ed.escolher_estilo(TipoDeEstilo::Tamanho, cx);
+            ed.opcoes_da_forma_mut(TipoDeSelecao::Retangulo).tamanho = (20, 10);
+            ed.ir_para_nivel(crate::revelacao::zoom::Nivel::Razao(4.0), None, cx);
+            ed.girar_a_vista(30f32.to_radians(), cx);
+        });
+        ve.run_until_parked();
+        let p = ponto_do_palco(&mut ve, (0.5, 0.5));
+        ve.simulate_mouse_down(p, gpui_kit::MouseButton::Left, nada);
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.medida_do_gesto()),
+            Some((20, 10))
+        );
+        ve.simulate_mouse_up(p, gpui_kit::MouseButton::Left, nada);
+        ve.run_until_parked();
+        let c = selecao_de(&editor, &ve).unwrap().caixa_justa();
+        assert_eq!((c.largura, c.altura), (20, 10));
+        assert!(!editor.read_with(&ve, |ed, _| ed.alterado()));
+    }
+
+    /// ⬠ O laço poligonal (⇧L): clique a clique, ⌫ tira o último vértice,
+    /// fechar no primeiro vira um passo só; Esc cancela e a seleção de antes
+    /// fica; o duplo clique também fecha.
+    #[gpui_kit::test]
+    fn o_laco_poligonal_clique_a_clique(cx: &mut TestAppContext) {
+        use crate::editor::janela::{Item, TipoDeSelecao};
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        ve.simulate_keystrokes("l shift-l");
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.item_atual()),
+            Some(Item::S(TipoDeSelecao::LacoPoligonal))
+        );
+        let nada = gpui_kit::Modifiers::none();
+        let clique = |ve: &mut VisualTestContext, f: (f32, f32)| {
+            let p = ponto_da_foto(ve, &editor, f);
+            ve.simulate_click(p, gpui_kit::Modifiers::none());
+            ve.run_until_parked();
+        };
+        clique(&mut ve, (0.1, 0.1));
+        clique(&mut ve, (0.9, 0.1));
+        clique(&mut ve, (0.5, 0.5)); // um vértice errado…
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.vertices_do_poligono().len()),
+            3
+        );
+        ve.simulate_keystrokes("backspace"); // …tirado com ⌫
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.vertices_do_poligono().len()),
+            2
+        );
+        assert!(
+            selecao_de(&editor, &ve).is_none(),
+            "⌫ não apagou pixel nem seleção"
+        );
+        // A prévia segue o ponteiro sem botão.
+        let p = ponto_da_foto(&mut ve, &editor, (0.9, 0.9));
+        ve.simulate_mouse_move(p, None, nada);
+        ve.run_until_parked();
+        let (px_, py_) = editor
+            .read_with(&ve, |ed, _| ed.proximo_do_poligono())
+            .expect("a prévia segue o ponteiro");
+        assert!(
+            (px_ - 57.6).abs() < 1.0 && (py_ - 43.2).abs() < 1.0,
+            "({px_}, {py_})"
+        );
+        clique(&mut ve, (0.9, 0.9));
+        clique(&mut ve, (0.1, 0.9));
+        assert!(selecao_de(&editor, &ve).is_none(), "ainda aberto");
+        clique(&mut ve, (0.1, 0.1)); // no primeiro: fecha
+        assert!(!editor.read_with(&ve, |ed, _| ed.poligono_aberto()));
+        let s = selecao_de(&editor, &ve).unwrap();
+        assert_eq!((s.valor(32, 24), s.valor(2, 2)), (255, 0));
+        assert_eq!(passos_de(&editor, &ve), 1);
+
+        // Esc no meio: a seleção de antes fica, sem passo.
+        clique(&mut ve, (0.05, 0.05));
+        clique(&mut ve, (0.3, 0.05));
+        ve.simulate_keystrokes("escape");
+        ve.run_until_parked();
+        assert!(!editor.read_with(&ve, |ed, _| ed.poligono_aberto()));
+        assert_eq!(selecao_de(&editor, &ve), Some(s));
+        assert_eq!(passos_de(&editor, &ve), 1);
+
+        // Duplo clique fecha (Nova: troca a de antes).
+        clique(&mut ve, (0.6, 0.6));
+        clique(&mut ve, (0.95, 0.6));
+        let p = ponto_da_foto(&mut ve, &editor, (0.95, 0.95));
+        ve.simulate_click(p, nada);
+        ve.simulate_event(gpui_kit::MouseDownEvent {
+            position: p,
+            button: gpui_kit::MouseButton::Left,
+            modifiers: nada,
+            click_count: 2,
+            first_mouse: false,
+        });
+        ve.simulate_event(gpui_kit::MouseUpEvent {
+            position: p,
+            button: gpui_kit::MouseButton::Left,
+            modifiers: nada,
+            click_count: 2,
+        });
+        ve.run_until_parked();
+        assert!(!editor.read_with(&ve, |ed, _| ed.poligono_aberto()));
+        let s = selecao_de(&editor, &ve).unwrap();
+        assert_eq!((s.valor(58, 38), s.valor(32, 24)), (255, 0));
+        assert_eq!(passos_de(&editor, &ve), 2);
+    }
+
+    /// 🪄 A varinha pela barra: "Camada atual" lê só a camada (o transparente
+    /// conta), "Todas as camadas" a foto como aparece.
+    #[gpui_kit::test]
+    fn a_varinha_amostra_a_camada_ou_todas(cx: &mut TestAppContext) {
+        use editor_core::AmostraDaVarinha;
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        ve.simulate_keystrokes("w");
+        ve.run_until_parked();
+        for id in [
+            "editor-tolerancia",
+            "editor-contigua",
+            "editor-suavizar",
+            "editor-amostra",
+        ] {
+            assert!(ve.debug_bounds(id).is_some(), "{id} na barra");
+        }
+        // Na camada atual (vazia), o clique pega a foto inteira: tudo é
+        // transparente nela.
+        editor.update(&mut ve, |ed, _| {
+            ed.opcoes_da_varinha_mut().amostra = AmostraDaVarinha::CamadaAtual;
+            ed.opcoes_da_varinha_mut().tolerancia = 0;
+        });
+        let p = ponto_da_foto(&mut ve, &editor, (0.5, 0.5));
+        ve.simulate_click(p, gpui_kit::Modifiers::none());
+        ve.run_until_parked();
+        let s = selecao_de(&editor, &ve).unwrap();
+        assert_eq!((s.valor(0, 0), s.valor(63, 47)), (255, 255));
+        // Todas as camadas, tolerância 0: só o que tem a cor da base ali.
+        editor.update(&mut ve, |ed, _| {
+            ed.opcoes_da_varinha_mut().amostra = AmostraDaVarinha::Todas;
+        });
+        ve.simulate_click(p, gpui_kit::Modifiers::none());
+        ve.run_until_parked();
+        let todas = selecao_de(&editor, &ve);
+        assert_ne!(
+            todas,
+            Some(s),
+            "a base entra em Todas e não em Camada atual"
+        );
+    }
+
+    /// ↔️ "Transformar seleção" pelo menu: só o contorno anda; Enter aplica
+    /// num passo de seleção; os pixels ficam.
+    #[gpui_kit::test]
+    fn transformar_a_selecao_pelo_menu(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        editor.update(&mut ve, |ed, cx| {
+            ed.na_sessao_para_teste(cx, |s| {
+                s.selecionar(
+                    &editor_core::Forma::Retangulo(editor_core::Retangulo::novo(4, 4, 10, 10)),
+                    editor_core::Operacao::Nova,
+                );
+            })
+        });
+        ve.simulate_keystrokes("m");
+        ve.run_until_parked();
+        let doc = editor.read_with(&ve, |ed, _| ed.sessao().unwrap().documento().clone());
+        clicar_no_editor(&mut ve, "editor-modificar-selecao");
+        clicar_no_editor(&mut ve, "editor-transformar-selecao");
+        assert!(editor.read_with(&ve, |ed, _| ed.transformando()));
+        assert!(ve.debug_bounds("editor-dica-da-transformacao").is_some());
+        // Arrastar por dentro da caixa leva o contorno.
+        let (a, b) = (
+            ponto_da_foto(&mut ve, &editor, (8.0 / 64.0, 8.0 / 48.0)),
+            ponto_da_foto(&mut ve, &editor, (28.0 / 64.0, 8.0 / 48.0)),
+        );
+        arrastar_com(
+            &mut ve,
+            a,
+            b,
+            gpui_kit::Modifiers::none(),
+            gpui_kit::Modifiers::none(),
+        );
+        ve.simulate_keystrokes("enter");
+        ve.run_until_parked();
+        assert!(!editor.read_with(&ve, |ed, _| ed.transformando()));
+        let s = selecao_de(&editor, &ve).unwrap();
+        assert_eq!((s.valor(26, 8), s.valor(6, 8)), (255, 0));
+        editor.read_with(&ve, |ed, _| {
+            assert_eq!(ed.sessao().unwrap().documento(), &doc, "pixels intactos");
+            assert!(!ed.alterado());
+        });
+        assert_eq!(passos_de(&editor, &ve), 2);
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| {
+                let s = ed.sessao().unwrap();
+                s.historico()
+                    .a_desfazer()
+                    .map(|p| p.descricao(s.documento()))
+            }),
+            Some("Transformar seleção".to_string()),
+            "o arrasto foi da caixa, e não um mover do contorno"
+        );
     }
 }

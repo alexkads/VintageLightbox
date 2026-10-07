@@ -66,6 +66,7 @@ gpui_kit::actions!(
         GrupoH,
         GrupoR,
         ProximaDoGrupoM,
+        ProximaDoGrupoL,
         ProximaDoGrupoG,
         ProximaDoGrupoO,
     ]
@@ -82,7 +83,7 @@ const SEM_CAMPO: &str = "EditorDeFoto && !Input";
 /// ("Keyboard shortcuts", PDF do helpx, 07/out/2026):
 ///
 /// - ferramentas por letra: Mover (V), seleção retangular/elíptica (M), laço
-///   (L), varinha (W), conta-gotas (I), pincel de correção (J), pincel (B),
+///   e poligonal (L, ⇧L), varinha (W), conta-gotas (I), pincel de correção (J), pincel (B),
 ///   carimbo (S), borracha (E), degradê/lata (G), subexposição/superexposição
 ///   (O), Mão (H) e Girar vista (R). **⇧ + letra passa para a ferramenta
 ///   seguinte do mesmo grupo** ("Use Shift Key for Tool Switch", o padrão de
@@ -155,7 +156,7 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("m", GrupoM, solta),
         KeyBinding::new("shift-m", ProximaDoGrupoM, solta),
         KeyBinding::new("l", GrupoL, solta),
-        KeyBinding::new("shift-l", GrupoL, solta),
+        KeyBinding::new("shift-l", ProximaDoGrupoL, solta),
         KeyBinding::new("w", GrupoW, solta),
         KeyBinding::new("shift-w", GrupoW, solta),
         KeyBinding::new("i", GrupoI, solta),

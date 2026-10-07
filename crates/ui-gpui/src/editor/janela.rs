@@ -37,12 +37,13 @@ use std::time::{Duration, Instant};
 mod painel_do_preenchimento;
 pub use painel_do_preenchimento::{AlvoDoPincel, EspacoDoPreenchimento, EstadoDoCalculo};
 
+use editor_core::selecao::{caixa_do_arrasto, medida_da_caixa};
 use editor_core::sessao::PedidoDeLupa;
 use editor_core::vista::Vista as VistaDoEditor;
 use editor_core::Ajuste;
 use editor_core::{
-    BaseRef, Documento, Ferramenta, Forma, Historico, Modo, Operacao, Retangulo, Sessao,
-    Transformacao, VersaoEditada,
+    Acabamento, AmostraDaVarinha, BaseRef, Documento, Estilo, Ferramenta, Forma, Historico, Modo,
+    OpcoesDaVarinha, Operacao, Retangulo, Sessao, Transformacao, VarinhaRecusada, VersaoEditada,
 };
 use gpui_kit::component::button::ButtonVariants as _;
 use gpui_kit::component::color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState};
@@ -50,7 +51,7 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::slider::{SliderEvent, SliderState};
-use gpui_kit::component::{ActiveTheme, Disableable, Sizable};
+use gpui_kit::component::{ActiveTheme, Disableable, Selectable as _, Sizable};
 use gpui_kit::{
     canvas, div, img, prelude::*, px, AnyElement, Bounds, Context, Entity, EventEmitter,
     FocusHandle, Focusable, KeyDownEvent, KeyUpEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
@@ -68,8 +69,8 @@ use super::{
     DurezaMenor, Encaixar, FecharEditor, GrupoB, GrupoE, GrupoG, GrupoH, GrupoI, GrupoJ, GrupoL,
     GrupoM, GrupoO, GrupoR, GrupoS, GrupoV, GrupoW, InverterSelecao, MesclarParaBaixo, NovaCamada,
     PincelMaior, PincelMenor, PreencherPeloConteudo, PreencherSelecao, ProximaDoGrupoG,
-    ProximaDoGrupoM, ProximaDoGrupoO, RefazerNoEditor, SalvarNoEditor, SegurarAMao, SelecionarTudo,
-    SubirCamada, TransformacaoLivre, TrocarCores, UmPorUm, CONTEXTO,
+    ProximaDoGrupoL, ProximaDoGrupoM, ProximaDoGrupoO, RefazerNoEditor, SalvarNoEditor,
+    SegurarAMao, SelecionarTudo, SubirCamada, TransformacaoLivre, TrocarCores, UmPorUm, CONTEXTO,
 };
 use crate::campo::TrocarValor as _;
 use crate::recursos::Icone;
@@ -202,7 +203,13 @@ pub const GRUPOS: &[(char, &[Item])] = &[
             Item::S(TipoDeSelecao::Elipse),
         ],
     ),
-    ('l', &[Item::S(TipoDeSelecao::Laco)]),
+    (
+        'l',
+        &[
+            Item::S(TipoDeSelecao::Laco),
+            Item::S(TipoDeSelecao::LacoPoligonal),
+        ],
+    ),
     ('w', &[Item::A(Auxiliar::Varinha)]),
     ('i', &[Item::A(Auxiliar::ContaGotas)]),
     ('j', &[Item::A(Auxiliar::Correcao)]),
@@ -325,13 +332,165 @@ fn rgb_de(cor: gpui_kit::Hsla) -> [u8; 3] {
     [q(c.r), q(c.g), q(c.b)]
 }
 
-/// As ferramentas de seleção (M, ⇧M, L).
+/// As ferramentas de seleção (M, ⇧M, L, ⇧L).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TipoDeSelecao {
     Retangulo,
     Elipse,
     Laco,
+    /// Clique a clique: cada clique é um vértice; fecha clicando perto do
+    /// primeiro, com duplo clique ou Enter; ⌫ tira o último, Esc cancela.
+    LacoPoligonal,
 }
+
+impl TipoDeSelecao {
+    pub const TODOS: [TipoDeSelecao; 4] = [
+        TipoDeSelecao::Retangulo,
+        TipoDeSelecao::Elipse,
+        TipoDeSelecao::Laco,
+        TipoDeSelecao::LacoPoligonal,
+    ];
+
+    fn indice(self) -> usize {
+        self as usize
+    }
+
+    /// Retangular e elíptica têm estilo (proporção ou tamanho fixos).
+    pub fn tem_estilo(self) -> bool {
+        matches!(self, TipoDeSelecao::Retangulo | TipoDeSelecao::Elipse)
+    }
+
+    /// O retângulo é sempre exato: não tem antisserrilhado.
+    pub fn suaviza(self) -> bool {
+        self != TipoDeSelecao::Retangulo
+    }
+}
+
+/// O tipo do estilo escolhido na barra (os números moram em [`OpcoesDaForma`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TipoDeEstilo {
+    #[default]
+    Normal,
+    Proporcao,
+    Tamanho,
+}
+
+impl TipoDeEstilo {
+    const TODOS: [TipoDeEstilo; 3] = [
+        TipoDeEstilo::Normal,
+        TipoDeEstilo::Proporcao,
+        TipoDeEstilo::Tamanho,
+    ];
+
+    fn chave(self) -> &'static str {
+        match self {
+            TipoDeEstilo::Normal => "normal",
+            TipoDeEstilo::Proporcao => "proporcao",
+            TipoDeEstilo::Tamanho => "tamanho",
+        }
+    }
+
+    fn nome(self) -> &'static str {
+        match self {
+            TipoDeEstilo::Normal => "Normal",
+            TipoDeEstilo::Proporcao => "Proporção fixa",
+            TipoDeEstilo::Tamanho => "Tamanho fixo",
+        }
+    }
+}
+
+/// As opções de uma ferramenta de seleção — valem para a **próxima** seleção
+/// e não entram no desfazer.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OpcoesDaForma {
+    pub acabamento: Acabamento,
+    pub estilo: TipoDeEstilo,
+    /// A razão largura:altura da proporção fixa.
+    pub proporcao: (f32, f32),
+    /// Largura e altura do tamanho fixo, em pixels do documento.
+    pub tamanho: (u32, u32),
+}
+
+impl Default for OpcoesDaForma {
+    /// O padrão do Photoshop: Normal, difusão 0, antisserrilhado ligado,
+    /// proporção 1:1 e tamanho 64×64.
+    fn default() -> Self {
+        Self {
+            acabamento: Acabamento::default(),
+            estilo: TipoDeEstilo::Normal,
+            proporcao: (1.0, 1.0),
+            tamanho: (64, 64),
+        }
+    }
+}
+
+impl OpcoesDaForma {
+    pub fn estilo(&self) -> Estilo {
+        match self.estilo {
+            TipoDeEstilo::Normal => Estilo::Normal,
+            TipoDeEstilo::Proporcao => Estilo::Proporcao {
+                largura: self.proporcao.0,
+                altura: self.proporcao.1,
+            },
+            TipoDeEstilo::Tamanho => Estilo::Tamanho {
+                largura: self.tamanho.0,
+                altura: self.tamanho.1,
+            },
+        }
+    }
+}
+
+/// O que o menu "Modificar seleção" faz na seleção que já existe — um passo
+/// do desfazer cada um, com o valor em pixels do documento.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Modificacao {
+    Difundir,
+    Expandir,
+    Contrair,
+}
+
+impl Modificacao {
+    fn indice(self) -> usize {
+        self as usize
+    }
+
+    fn titulo(self) -> &'static str {
+        match self {
+            Modificacao::Difundir => "Difundir seleção",
+            Modificacao::Expandir => "Expandir seleção",
+            Modificacao::Contrair => "Contrair seleção",
+        }
+    }
+
+    fn rotulo(self) -> &'static str {
+        match self {
+            Modificacao::Difundir => "Raio da difusão",
+            Modificacao::Expandir => "Expandir em",
+            Modificacao::Contrair => "Contrair em",
+        }
+    }
+}
+
+/// O nome do modo na barra de opções.
+pub fn nome_do_modo(operacao: Operacao) -> &'static str {
+    match operacao {
+        Operacao::Nova => "Nova",
+        Operacao::Somar => "Adicionar",
+        Operacao::Subtrair => "Subtrair",
+        Operacao::Intersecao => "Intersectar",
+    }
+}
+
+const MODOS: [Operacao; 4] = [
+    Operacao::Nova,
+    Operacao::Somar,
+    Operacao::Subtrair,
+    Operacao::Intersecao,
+];
+
+/// A distância, em pontos da tela, em que o clique "pega" o primeiro vértice
+/// do laço poligonal e fecha.
+const FECHAR_O_POLIGONO: f32 = 8.0;
 
 /// Uma seleção sendo desenhada: os pontos em pixels da foto (no retângulo e
 /// na elipse, o primeiro e o último são os cantos).
@@ -356,8 +515,17 @@ struct GestoDeTransformacao {
 
 struct GestoDeSelecao {
     tipo: TipoDeSelecao,
+    /// O modo deste gesto: o da barra, ou o dos modificadores apertados no
+    /// começo (só neste gesto — a barra não muda).
     operacao: Operacao,
+    /// O estilo e o acabamento de quando o gesto começou.
+    estilo: Estilo,
+    acabamento: Acabamento,
+    /// No laço poligonal, os vértices; nos outros, o começo e o ponto de agora
+    /// (no laço livre, o caminho todo).
     pontos: Vec<(f32, f32)>,
+    /// O laço poligonal: onde o ponteiro está — a prévia do próximo segmento.
+    proximo: Option<(f32, f32)>,
     /// ⇧ segurado no arrasto: quadrado ou círculo.
     quadrado: bool,
     /// ⌥ segurado no arrasto: desenha a partir do centro.
@@ -365,50 +533,56 @@ struct GestoDeSelecao {
 }
 
 impl GestoDeSelecao {
-    /// Os dois cantos do retângulo (ou da caixa da elipse), com ⇧ e ⌥ — as
-    /// regras "Constrain marquee to square" e "Draw marquee from center" da
-    /// tabela da Adobe.
+    /// Os dois cantos do retângulo (ou da caixa da elipse), com o estilo, ⇧ e
+    /// ⌥ — "Constrain marquee to square" e "Draw marquee from center" da
+    /// tabela da Adobe (`selecao::caixa_do_arrasto` tem a tabela da conversa
+    /// deles com a proporção e o tamanho fixos).
     fn cantos(&self) -> ((f32, f32), (f32, f32)) {
         let a = self.pontos[0];
-        let mut b = *self.pontos.last().unwrap_or(&a);
-        if self.quadrado {
-            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-            let lado = dx.abs().max(dy.abs());
-            b = (a.0 + lado * dx.signum(), a.1 + lado * dy.signum());
-            // `signum(0.0)` é 1 (lição da etapa 3): sem andar, fica no lugar.
-            if dx == 0.0 {
-                b.0 = a.0;
-            }
-            if dy == 0.0 {
-                b.1 = a.1;
-            }
-        }
-        if self.do_centro {
-            ((2.0 * a.0 - b.0, 2.0 * a.1 - b.1), b)
-        } else {
-            (a, b)
-        }
+        let b = *self.pontos.last().unwrap_or(&a);
+        caixa_do_arrasto(a, b, self.estilo, self.quadrado, self.do_centro)
+    }
+
+    /// Largura e altura da caixa em pixels do documento (retângulo e elipse) —
+    /// o que a tela mostra junto do ponteiro.
+    fn medida(&self) -> Option<(u32, u32)> {
+        self.tipo.tem_estilo().then(|| {
+            let (a, b) = self.cantos();
+            medida_da_caixa(a, b)
+        })
     }
 
     fn forma(&self) -> Forma {
         let (a, b) = self.cantos();
-        let x0 = a.0.min(b.0).max(0.0);
-        let y0 = a.1.min(b.1).max(0.0);
-        let caixa = Retangulo::novo(
-            x0.round() as u32,
-            y0.round() as u32,
-            (a.0.max(b.0).max(0.0) - x0).round() as u32,
-            (a.1.max(b.1).max(0.0) - y0).round() as u32,
-        );
+        let (x0, x1) = (a.0.min(b.0).round(), a.0.max(b.0).round());
+        let (y0, y1) = (a.1.min(b.1).round(), a.1.max(b.1).round());
         match self.tipo {
-            TipoDeSelecao::Retangulo => Forma::Retangulo(caixa),
-            TipoDeSelecao::Elipse => Forma::Elipse(caixa),
-            TipoDeSelecao::Laco => Forma::Laco(self.pontos.clone()),
+            TipoDeSelecao::Retangulo => {
+                let (cx0, cy0) = (x0.max(0.0), y0.max(0.0));
+                Forma::Retangulo(Retangulo::novo(
+                    cx0 as u32,
+                    cy0 as u32,
+                    (x1.max(0.0) - cx0) as u32,
+                    (y1.max(0.0) - cy0) as u32,
+                ))
+            }
+            // A caixa inteira, mesmo passando da foto: a elipse não achata.
+            TipoDeSelecao::Elipse => Forma::ElipseNaCaixa(x0, y0, x1, y1),
+            TipoDeSelecao::Laco | TipoDeSelecao::LacoPoligonal => Forma::Laco(self.pontos.clone()),
         }
     }
 
     /// O contorno para desenhar enquanto arrasta, em pixels da foto.
     fn contorno(&self) -> Vec<(f32, f32)> {
+        if self.tipo == TipoDeSelecao::LacoPoligonal {
+            // Os segmentos fixos e o próximo, até o ponteiro.
+            let mut v = self.pontos.clone();
+            v.extend(self.proximo);
+            if v.len() == 1 {
+                v.push(v[0]);
+            }
+            return v;
+        }
         let (a, b) = self.cantos();
         match self.tipo {
             TipoDeSelecao::Retangulo => vec![a, (b.0, a.1), b, (a.0, b.1), a],
@@ -422,12 +596,18 @@ impl GestoDeSelecao {
                     })
                     .collect()
             }
-            TipoDeSelecao::Laco => {
+            _ => {
                 let mut v = self.pontos.clone();
                 v.push(self.pontos[0]);
                 v
             }
         }
+    }
+
+    /// O clique cai perto do primeiro vértice do laço poligonal (`folga` em
+    /// pixels da foto)?
+    fn perto_do_primeiro(&self, p: (f32, f32), folga: f32) -> bool {
+        self.pontos.len() >= 3 && (p.0 - self.pontos[0].0).hypot(p.1 - self.pontos[0].1) <= folga
     }
 }
 
@@ -472,11 +652,31 @@ pub struct EditorDeFoto {
     /// Um slider por parâmetro de ajuste ([`PARAMETROS_DE_AJUSTE`]); o painel
     /// mostra os do ajuste escolhido.
     ajustes: Vec<Entity<SliderState>>,
-    /// A tolerância da varinha (0–255; 32 no Photoshop) e se ela é contígua.
-    tolerancia_da_varinha: Entity<SliderState>,
-    varinha_contigua: bool,
-    /// O raio, em pixels, da difusão, do expandir e do contrair.
-    raio_da_selecao: Entity<SliderState>,
+    /// O modo escolhido na barra de opções da seleção. Os modificadores (⇧,
+    /// ⌥, ⇧⌥) trocam só durante o gesto, sem mexer nele.
+    modo_de_selecao: Operacao,
+    /// As opções de cada ferramenta de seleção (`TipoDeSelecao::indice`).
+    opcoes_das_formas: [OpcoesDaForma; 4],
+    /// As opções da varinha (W): tolerância, contígua, antisserrilhado e de
+    /// onde ela lê a cor.
+    opcoes_da_varinha: OpcoesDaVarinha,
+    /// Os campos da barra de opções: difusão, largura e altura (proporção ou
+    /// tamanho fixo) e a tolerância da varinha.
+    campo_da_difusao: Entity<InputState>,
+    campo_da_largura: Entity<InputState>,
+    campo_da_altura: Entity<InputState>,
+    campo_da_tolerancia: Entity<InputState>,
+    seletor_de_estilo: Entity<SelectState<Vec<Opcao>>>,
+    seletor_de_amostra: Entity<SelectState<Vec<Opcao>>>,
+    /// De que ferramenta e estilo os campos estão mostrando os valores — para
+    /// só reescrevê-los quando a ferramenta ou o estilo mudam.
+    campos_de: Option<(TipoDeSelecao, TipoDeEstilo)>,
+    /// A amostra da varinha que o Select mostra.
+    amostra_mostrada: Option<AmostraDaVarinha>,
+    /// O "Modificar seleção" aberto: o comando e o campo do valor.
+    modificando: Option<(Modificacao, Entity<InputState>)>,
+    /// O último valor usado em cada comando de "Modificar seleção", em px.
+    valores_da_modificacao: [u32; 3],
     modo: Entity<SelectState<Vec<Opcao>>>,
     /// O modo que o Select mostra — para só mexer nele quando mudar.
     modo_mostrado: Option<Modo>,
@@ -509,6 +709,7 @@ pub struct EditorDeFoto {
     medidas: Medidas,
     _assinaturas: Vec<Subscription>,
     _assinatura_do_nome: Option<Subscription>,
+    _assinatura_da_modificacao: Option<Subscription>,
     _tarefa: Option<Task<()>>,
     _tarefa_da_lupa: Option<Task<()>>,
     /// A ferramenta de seleção, quando é ela que está na mão.
@@ -621,8 +822,37 @@ impl EditorDeFoto {
         let seletor_de_predefinicao =
             cx.new(|cx| SelectState::new(predefinicoes, None, window, cx));
         let opacidade_da_camada = slider(0.0, 100.0, 1.0, 100.0, cx);
-        let tolerancia_da_varinha = slider(0.0, 255.0, 1.0, 32.0, cx);
-        let raio_da_selecao = slider(1.0, 100.0, 1.0, 5.0, cx);
+        let campo_numerico =
+            |valor: &str, min: f64, max: f64, window: &mut Window, cx: &mut Context<Self>| {
+                let valor = valor.to_string();
+                cx.new(move |cx| {
+                    InputState::new(window, cx)
+                        .step(1.0)
+                        .min(min)
+                        .max(max)
+                        .default_value(valor)
+                })
+            };
+        let campo_da_difusao = campo_numerico("0", 0.0, 250.0, window, cx);
+        let campo_da_largura = campo_numerico("1", 0.0, 30000.0, window, cx);
+        let campo_da_altura = campo_numerico("1", 0.0, 30000.0, window, cx);
+        let campo_da_tolerancia = campo_numerico("32", 0.0, 255.0, window, cx);
+        let estilos: Vec<Opcao> = TipoDeEstilo::TODOS
+            .iter()
+            .map(|e| Opcao::nova(e.chave(), e.nome()))
+            .collect();
+        let seletor_de_estilo = cx.new(|cx| SelectState::new(estilos, None, window, cx));
+        seletor_de_estilo.update(cx, |s, cx| {
+            s.set_selected_value(&TipoDeEstilo::Normal.chave().to_string(), window, cx)
+        });
+        let amostras = vec![
+            Opcao::nova("camada", "Camada atual"),
+            Opcao::nova("todas", "Todas as camadas"),
+        ];
+        let seletor_de_amostra = cx.new(|cx| SelectState::new(amostras, None, window, cx));
+        seletor_de_amostra.update(cx, |s, cx| {
+            s.set_selected_value(&"todas".to_string(), window, cx)
+        });
         let ajustes: Vec<Entity<SliderState>> = PARAMETROS_DE_AJUSTE
             .iter()
             .map(|p| slider(p.min, p.max, p.passo, p.inicial, cx))
@@ -842,6 +1072,55 @@ impl EditorDeFoto {
             },
         ));
 
+        // Os campos da barra de opções: cada mudança vira opção da ferramenta
+        // (nunca um passo do desfazer); Enter devolve o foco ao palco.
+        for (campo, qual) in [
+            (&campo_da_difusao, 0u8),
+            (&campo_da_largura, 1),
+            (&campo_da_altura, 2),
+            (&campo_da_tolerancia, 3),
+        ] {
+            assinaturas.push(cx.subscribe_in(
+                campo,
+                window,
+                move |ed: &mut Self, estado, evento: &InputEvent, window, cx| match evento {
+                    InputEvent::Change => {
+                        let texto = estado.read(cx).value().to_string();
+                        ed.campo_da_selecao_mudou(qual, &texto, cx);
+                    }
+                    InputEvent::PressEnter { .. } => window.focus(&ed.foco, cx),
+                    _ => {}
+                },
+            ));
+        }
+        assinaturas.push(cx.subscribe_in(
+            &seletor_de_estilo,
+            window,
+            |ed: &mut Self, _e, evento: &SelectEvent<Vec<Opcao>>, window, cx| {
+                if let SelectEvent::Confirm(Some(chave)) = evento {
+                    if let Some(e) = TipoDeEstilo::TODOS.into_iter().find(|e| e.chave() == chave) {
+                        ed.escolher_estilo(e, cx);
+                    }
+                }
+                window.focus(&ed.foco, cx);
+            },
+        ));
+        assinaturas.push(cx.subscribe_in(
+            &seletor_de_amostra,
+            window,
+            |ed: &mut Self, _e, evento: &SelectEvent<Vec<Opcao>>, window, cx| {
+                if let SelectEvent::Confirm(Some(chave)) = evento {
+                    ed.opcoes_da_varinha.amostra = if chave == "camada" {
+                        AmostraDaVarinha::CamadaAtual
+                    } else {
+                        AmostraDaVarinha::Todas
+                    };
+                    cx.notify();
+                }
+                window.focus(&ed.foco, cx);
+            },
+        ));
+
         let foco = cx.focus_handle();
         window.focus(&foco, cx);
 
@@ -879,9 +1158,19 @@ impl EditorDeFoto {
             opacidade,
             opacidade_da_camada,
             ajustes,
-            tolerancia_da_varinha,
-            varinha_contigua: true,
-            raio_da_selecao,
+            modo_de_selecao: Operacao::Nova,
+            opcoes_das_formas: [OpcoesDaForma::default(); 4],
+            opcoes_da_varinha: OpcoesDaVarinha::default(),
+            campo_da_difusao,
+            campo_da_largura,
+            campo_da_altura,
+            campo_da_tolerancia,
+            seletor_de_estilo,
+            seletor_de_amostra,
+            campos_de: None,
+            amostra_mostrada: Some(AmostraDaVarinha::Todas),
+            modificando: None,
+            valores_da_modificacao: [5, 5, 5],
             modo,
             modo_mostrado: None,
             faixa: editor_core::pincel::Faixa::default(),
@@ -904,6 +1193,7 @@ impl EditorDeFoto {
             medidas: Medidas::default(),
             _assinaturas: assinaturas,
             _assinatura_do_nome: None,
+            _assinatura_da_modificacao: None,
             _tarefa: None,
             _tarefa_da_lupa: None,
             selecionando: None,
@@ -1344,24 +1634,185 @@ impl EditorDeFoto {
             .then_some((x, y))
     }
 
+    /// O modo de um gesto de seleção: o dos modificadores, se algum está
+    /// apertado (⇧ soma, ⌥ tira, ⇧⌥ cruza); senão, o escolhido na barra. A
+    /// barra não muda — o modificador vale só para este gesto.
+    pub fn operacao_do_gesto(&self, modificadores: gpui_kit::Modifiers) -> Operacao {
+        if modificadores.shift || modificadores.alt {
+            operacao_dos(modificadores)
+        } else {
+            self.modo_de_selecao
+        }
+    }
+
+    /// O modo da barra (os quatro botões).
+    pub fn modo_de_selecao(&self) -> Operacao {
+        self.modo_de_selecao
+    }
+
+    pub fn escolher_modo_de_selecao(&mut self, operacao: Operacao, cx: &mut Context<Self>) {
+        self.modo_de_selecao = operacao;
+        cx.notify();
+    }
+
+    /// O modo que a barra realça: o do gesto em curso (com o modificador que
+    /// o trocou), ou o escolhido.
+    fn modo_realcado(&self) -> Operacao {
+        self.gesto_de_selecao
+            .as_ref()
+            .map_or(self.modo_de_selecao, |g| g.operacao)
+    }
+
+    /// As opções da ferramenta de seleção na mão (ou da retangular).
+    pub fn opcoes_da_forma(&self, tipo: TipoDeSelecao) -> OpcoesDaForma {
+        self.opcoes_das_formas[tipo.indice()]
+    }
+
+    pub fn opcoes_da_forma_mut(&mut self, tipo: TipoDeSelecao) -> &mut OpcoesDaForma {
+        &mut self.opcoes_das_formas[tipo.indice()]
+    }
+
+    pub fn opcoes_da_varinha(&self) -> OpcoesDaVarinha {
+        self.opcoes_da_varinha
+    }
+
+    pub fn opcoes_da_varinha_mut(&mut self) -> &mut OpcoesDaVarinha {
+        &mut self.opcoes_da_varinha
+    }
+
+    /// O laço poligonal está aberto (com vértices à espera).
+    pub fn poligono_aberto(&self) -> bool {
+        self.gesto_de_selecao
+            .as_ref()
+            .is_some_and(|g| g.tipo == TipoDeSelecao::LacoPoligonal)
+    }
+
+    /// Os vértices do laço poligonal aberto.
+    pub fn vertices_do_poligono(&self) -> Vec<(f32, f32)> {
+        self.gesto_de_selecao
+            .as_ref()
+            .filter(|g| g.tipo == TipoDeSelecao::LacoPoligonal)
+            .map(|g| g.pontos.clone())
+            .unwrap_or_default()
+    }
+
+    /// Onde a prévia do próximo segmento do laço poligonal termina (o
+    /// ponteiro), em pixels da foto.
+    pub fn proximo_do_poligono(&self) -> Option<(f32, f32)> {
+        self.gesto_de_selecao
+            .as_ref()
+            .filter(|g| g.tipo == TipoDeSelecao::LacoPoligonal)
+            .and_then(|g| g.proximo)
+    }
+
+    /// Largura e altura (pixels do documento) da forma sendo desenhada.
+    pub fn medida_do_gesto(&self) -> Option<(u32, u32)> {
+        self.gesto_de_selecao
+            .as_ref()
+            .and_then(GestoDeSelecao::medida)
+    }
+
+    /// Fecha o laço poligonal: a seleção entra num passo só. Com menos de três
+    /// vértices não há área — o gesto some e a seleção de antes fica.
+    pub fn concluir_poligono(&mut self, cx: &mut Context<Self>) {
+        let Some(gesto) = self.gesto_de_selecao.take() else {
+            return;
+        };
+        let mut vertices = gesto.pontos;
+        vertices.dedup_by(|a, b| (a.0 - b.0).hypot(a.1 - b.1) < 0.5);
+        if vertices.len() >= 3 {
+            let (operacao, acabamento) = (gesto.operacao, gesto.acabamento);
+            if let Some(s) = self.sessao_mut() {
+                s.selecionar_poligono(vertices, operacao, acabamento);
+            }
+        }
+        cx.notify();
+    }
+
+    /// ⌫ no laço poligonal: tira o último vértice (o último que sobra cancela).
+    pub fn tirar_o_ultimo_vertice(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(gesto) = self
+            .gesto_de_selecao
+            .as_mut()
+            .filter(|g| g.tipo == TipoDeSelecao::LacoPoligonal)
+        else {
+            return false;
+        };
+        gesto.pontos.pop();
+        if gesto.pontos.is_empty() {
+            self.gesto_de_selecao = None;
+        }
+        cx.notify();
+        true
+    }
+
+    /// Esc com uma seleção sendo desenhada: o gesto some e a seleção de antes
+    /// fica como estava (nada foi mexido nela até o fim do gesto).
+    pub fn cancelar_gesto_de_selecao(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.gesto_de_selecao.take().is_none() {
+            return false;
+        }
+        self.reposicionando = None;
+        cx.notify();
+        true
+    }
+
     /// O ponteiro desceu no palco com uma ferramenta de seleção: o gesto
-    /// começa (⇧ soma, ⌥ subtrai), mesmo fora da foto.
+    /// começa com o modo da barra (⇧ soma, ⌥ tira e ⇧⌥ cruza só neste gesto),
+    /// mesmo fora da foto. `cliques` é a contagem do GPUI (2 = duplo clique,
+    /// que fecha o laço poligonal).
     pub fn comecar_selecao(
         &mut self,
         ponto: Point<Pixels>,
         modificadores: gpui_kit::Modifiers,
         cx: &mut Context<Self>,
     ) {
+        self.comecar_selecao_com_cliques(ponto, modificadores, 1, cx);
+    }
+
+    pub fn comecar_selecao_com_cliques(
+        &mut self,
+        ponto: Point<Pixels>,
+        modificadores: gpui_kit::Modifiers,
+        cliques: usize,
+        cx: &mut Context<Self>,
+    ) {
         let (Some(tipo), Some(p)) = (self.selecionando, self.na_foto_sem_limite(ponto)) else {
             return;
         };
-        let operacao = operacao_dos(modificadores);
+        // O laço poligonal aberto: cada clique é um vértice; perto do primeiro
+        // ou no duplo clique, fecha.
+        let escala = self
+            .vista_do_zoom()
+            .map_or(1.0, |(_, v)| v.escala)
+            .max(1e-3);
+        if let Some(gesto) = self
+            .gesto_de_selecao
+            .as_mut()
+            .filter(|g| g.tipo == TipoDeSelecao::LacoPoligonal)
+        {
+            if gesto.perto_do_primeiro(p, FECHAR_O_POLIGONO / escala) {
+                self.concluir_poligono(cx);
+                return;
+            }
+            gesto.pontos.push(p);
+            gesto.proximo = Some(p);
+            if cliques >= 2 {
+                self.concluir_poligono(cx);
+                return;
+            }
+            cx.notify();
+            return;
+        }
+        let operacao = self.operacao_do_gesto(modificadores);
+        let opcoes = self.opcoes_da_forma(tipo);
         // Sem modificador, arrastar por dentro da seleção move **só o
-        // contorno** — o "Nova seleção" do Photoshop.
+        // contorno** — o "Nova seleção" do Photoshop. No laço poligonal o
+        // clique é sempre um vértice.
         let dentro = self
             .sessao()
             .and_then(Sessao::selecao)
-            .filter(|_| operacao == Operacao::Nova)
+            .filter(|_| operacao == Operacao::Nova && tipo != TipoDeSelecao::LacoPoligonal)
             .is_some_and(|sel| {
                 p.0 >= 0.0
                     && p.1 >= 0.0
@@ -1378,10 +1829,25 @@ impl EditorDeFoto {
             cx.notify();
             return;
         }
+        let pontos = if tipo == TipoDeSelecao::LacoPoligonal {
+            vec![p]
+        } else {
+            vec![p, p]
+        };
         self.gesto_de_selecao = Some(GestoDeSelecao {
             tipo,
             operacao,
-            pontos: vec![p, p],
+            estilo: if tipo.tem_estilo() {
+                opcoes.estilo()
+            } else {
+                Estilo::Normal
+            },
+            acabamento: Acabamento {
+                suavizar: opcoes.acabamento.suavizar || !tipo.suaviza(),
+                ..opcoes.acabamento
+            },
+            pontos,
+            proximo: Some(p),
             quadrado: false,
             do_centro: false,
         });
@@ -1455,7 +1921,8 @@ impl EditorDeFoto {
             }
             Some(Auxiliar::Varinha) => {
                 if let Some((x, y)) = self.na_foto(ponto) {
-                    self.varinha(x, y, operacao_dos(modificadores), cx);
+                    let operacao = self.operacao_do_gesto(modificadores);
+                    self.varinha(x, y, operacao, cx);
                 }
                 return;
             }
@@ -1991,6 +2458,15 @@ impl EditorDeFoto {
             cx.notify();
             return;
         }
+        if self.poligono_aberto() {
+            // O laço poligonal só mostra o próximo segmento até o ponteiro.
+            let no_ponto = self.na_foto_sem_limite(ponto);
+            if let Some(g) = self.gesto_de_selecao.as_mut() {
+                g.proximo = no_ponto;
+            }
+            cx.notify();
+            return;
+        }
         if self.gesto_de_selecao.is_some() {
             let escala = self.vista_do_zoom().map_or(1.0, |(_, v)| v.escala);
             let no_ponto = self.na_foto_sem_limite(ponto);
@@ -2106,10 +2582,14 @@ impl EditorDeFoto {
             cx.notify();
             return;
         }
+        if self.poligono_aberto() {
+            // O laço poligonal continua aberto entre os cliques.
+            return;
+        }
         if let Some(gesto) = self.gesto_de_selecao.take() {
             let forma = gesto.forma();
             if let Some(s) = self.sessao_mut() {
-                s.selecionar(&forma, gesto.operacao);
+                s.selecionar_com(&forma, gesto.operacao, gesto.acabamento);
             }
             cx.notify();
             return;
@@ -2139,6 +2619,9 @@ impl EditorDeFoto {
     }
 
     pub fn usar_selecao(&mut self, tipo: TipoDeSelecao, cx: &mut Context<Self>) {
+        if self.selecionando != Some(tipo) {
+            self.gesto_de_selecao = None;
+        }
         self.selecionando = Some(tipo);
         self.auxiliar = None;
         self.lembrar_do_grupo(Item::S(tipo));
@@ -2152,6 +2635,7 @@ impl EditorDeFoto {
         }
         self.auxiliar = Some(auxiliar);
         self.selecionando = None;
+        self.gesto_de_selecao = None;
         self.lembrar_do_grupo(Item::A(auxiliar));
         cx.notify();
     }
@@ -2219,6 +2703,9 @@ impl EditorDeFoto {
                 TipoDeSelecao::Retangulo => "Seleção retangular (M) — ⇧ soma, ⌥ tira, ⇧⌥ cruza",
                 TipoDeSelecao::Elipse => "Seleção elíptica (M) — ⇧ soma, ⌥ tira, ⇧⌥ cruza",
                 TipoDeSelecao::Laco => "Laço (L) — ⇧ soma, ⌥ tira, ⇧⌥ cruza",
+                TipoDeSelecao::LacoPoligonal => {
+                    "Laço poligonal (L) — clique a clique; fecha no primeiro vértice, duplo clique ou Enter; ⌫ tira o último, Esc cancela"
+                }
             };
         }
         if let Some(a) = self.auxiliar {
@@ -2282,6 +2769,12 @@ impl EditorDeFoto {
                     Icone::Lasso,
                     "editor-selecao-laco",
                     "Laço (L)",
+                ),
+                (
+                    Item::S(TipoDeSelecao::LacoPoligonal),
+                    Icone::Pentagon,
+                    "editor-selecao-poligonal",
+                    "Laço poligonal (L; ⇧L alterna com o laço) — clique a clique, fecha no primeiro vértice, duplo clique ou Enter; ⌫ tira o último, Esc cancela",
                 ),
                 (
                     Item::A(Auxiliar::Varinha),
@@ -2648,6 +3141,9 @@ impl EditorDeFoto {
         if self.area_do_preenchimento.is_some() {
             return;
         }
+        // Um comando no meio de um laço poligonal aberto o descarta (a seleção
+        // de antes fica).
+        self.gesto_de_selecao = None;
         if let Some(s) = self.sessao_mut() {
             fazer(s);
             self.aviso = None;
@@ -2669,48 +3165,252 @@ impl EditorDeFoto {
 
     // ----------------------------------------------------------- seleção
 
-    /// A varinha em `(x, y)`, pixels da foto.
+    /// A varinha em `(x, y)`, pixels da foto, com as opções da barra.
     pub fn varinha(&mut self, x: f32, y: f32, operacao: Operacao, cx: &mut Context<Self>) {
-        let tolerancia = self.tolerancia_da_varinha.read(cx).value().start().round() as u8;
-        let contigua = self.varinha_contigua;
+        let opcoes = self.opcoes_da_varinha;
         let inicio = Instant::now();
+        let mut recusa = None;
         self.na_sessao(cx, |s| {
-            s.varinha(x, y, tolerancia, contigua, operacao);
+            recusa = s.varinha_com(x, y, opcoes, operacao).err();
         });
         self.medidas.ultimo_gesto = Some(inicio.elapsed());
+        let texto = match recusa {
+            Some(VarinhaRecusada::CamadaSemPixels) => Some(
+                "A camada de ajuste não tem pixels: escolha a máscara dela ou amostre todas as camadas",
+            ),
+            Some(VarinhaRecusada::CamadaEscondida) => Some(
+                "A camada atual está escondida: mostre-a ou amostre todas as camadas",
+            ),
+            _ => None,
+        };
+        if let Some(texto) = texto {
+            self.aviso = Some((texto.into(), true));
+            cx.notify();
+        }
     }
 
-    pub fn alternar_varinha_contigua(&mut self, cx: &mut Context<Self>) {
-        self.varinha_contigua = !self.varinha_contigua;
+    // ------------------------------------------------- opções da barra
+
+    /// Um campo da barra de opções mudou (0 difusão, 1 largura, 2 altura, 3
+    /// tolerância). Texto que não é número fica para o próximo — a opção só
+    /// muda com um valor que serve. Nenhum passo do desfazer, e a seleção que
+    /// existe não muda.
+    fn campo_da_selecao_mudou(&mut self, qual: u8, texto: &str, cx: &mut Context<Self>) {
+        let Ok(numero) = texto.trim().replace(',', ".").parse::<f32>() else {
+            return;
+        };
+        if !numero.is_finite() || numero < 0.0 {
+            return;
+        }
+        if qual == 3 {
+            self.opcoes_da_varinha.tolerancia = numero.round().min(255.0) as u8;
+            cx.notify();
+            return;
+        }
+        let Some(tipo) = self.selecionando else {
+            return;
+        };
+        let opcoes = self.opcoes_da_forma_mut(tipo);
+        match (qual, opcoes.estilo) {
+            (0, _) => opcoes.acabamento.difusao = numero.round().min(250.0) as u32,
+            (1, TipoDeEstilo::Proporcao) if numero > 0.0 => opcoes.proporcao.0 = numero,
+            (2, TipoDeEstilo::Proporcao) if numero > 0.0 => opcoes.proporcao.1 = numero,
+            (1, TipoDeEstilo::Tamanho) if numero >= 1.0 => opcoes.tamanho.0 = numero.round() as u32,
+            (2, TipoDeEstilo::Tamanho) if numero >= 1.0 => opcoes.tamanho.1 = numero.round() as u32,
+            _ => {}
+        }
         cx.notify();
     }
 
-    /// O raio de agora para difundir, expandir e contrair.
-    fn raio_da_selecao(&self, cx: &Context<Self>) -> u32 {
-        self.raio_da_selecao
-            .read(cx)
-            .value()
-            .start()
-            .round()
-            .max(1.0) as u32
+    /// O estilo da retangular ou da elíptica na mão.
+    pub fn escolher_estilo(&mut self, estilo: TipoDeEstilo, cx: &mut Context<Self>) {
+        if let Some(tipo) = self.selecionando.filter(|t| t.tem_estilo()) {
+            self.opcoes_da_forma_mut(tipo).estilo = estilo;
+        }
+        cx.notify();
     }
 
-    /// ⇧F6 e o botão Difundir.
-    pub fn difundir_selecao(&mut self, cx: &mut Context<Self>) {
-        let raio = self.raio_da_selecao(cx);
+    /// Uma proporção pronta (1:1, 3:2, 4:3, 16:9): o estilo vira proporção
+    /// fixa com ela.
+    pub fn usar_proporcao(&mut self, largura: f32, altura: f32, cx: &mut Context<Self>) {
+        if let Some(tipo) = self.selecionando.filter(|t| t.tem_estilo()) {
+            let o = self.opcoes_da_forma_mut(tipo);
+            o.estilo = TipoDeEstilo::Proporcao;
+            o.proporcao = (largura, altura);
+        }
+        cx.notify();
+    }
+
+    /// ⇄ troca largura e altura da proporção ou do tamanho fixo.
+    pub fn trocar_largura_e_altura(&mut self, cx: &mut Context<Self>) {
+        if let Some(tipo) = self.selecionando.filter(|t| t.tem_estilo()) {
+            let o = self.opcoes_da_forma_mut(tipo);
+            o.proporcao = (o.proporcao.1, o.proporcao.0);
+            o.tamanho = (o.tamanho.1, o.tamanho.0);
+            // Força os campos a mostrar os valores trocados.
+            self.campos_de = None;
+        }
+        cx.notify();
+    }
+
+    /// Liga ou desliga o antisserrilhado da ferramenta na mão (elipse, laços,
+    /// varinha).
+    pub fn alternar_suavizar(&mut self, cx: &mut Context<Self>) {
+        if self.auxiliar == Some(Auxiliar::Varinha) {
+            self.opcoes_da_varinha.suavizar = !self.opcoes_da_varinha.suavizar;
+        } else if let Some(tipo) = self.selecionando.filter(|t| t.suaviza()) {
+            let a = &mut self.opcoes_da_forma_mut(tipo).acabamento;
+            a.suavizar = !a.suavizar;
+        }
+        cx.notify();
+    }
+
+    pub fn alternar_varinha_contigua(&mut self, cx: &mut Context<Self>) {
+        self.opcoes_da_varinha.contigua = !self.opcoes_da_varinha.contigua;
+        cx.notify();
+    }
+
+    /// Os campos da barra acompanham a ferramenta e o estilo escolhidos (e o
+    /// Select do estilo também). Chamado no `render`.
+    fn sincronizar_os_campos(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let amostra = self.opcoes_da_varinha.amostra;
+        if self.amostra_mostrada != Some(amostra) {
+            self.amostra_mostrada = Some(amostra);
+            let chave = match amostra {
+                AmostraDaVarinha::CamadaAtual => "camada",
+                AmostraDaVarinha::Todas => "todas",
+            }
+            .to_string();
+            self.seletor_de_amostra
+                .update(cx, |s, cx| s.set_selected_value(&chave, window, cx));
+        }
+        let Some(tipo) = self.selecionando else {
+            self.campos_de = None;
+            return;
+        };
+        let o = self.opcoes_da_forma(tipo);
+        if self.campos_de == Some((tipo, o.estilo)) {
+            return;
+        }
+        self.campos_de = Some((tipo, o.estilo));
+        let numero = |v: f32| {
+            if v.fract() == 0.0 {
+                format!("{v:.0}")
+            } else {
+                format!("{v}")
+            }
+        };
+        let (l, a) = match o.estilo {
+            TipoDeEstilo::Tamanho => (o.tamanho.0.to_string(), o.tamanho.1.to_string()),
+            _ => (numero(o.proporcao.0), numero(o.proporcao.1)),
+        };
+        let difusao = o.acabamento.difusao.to_string();
+        for (campo, texto) in [
+            (&self.campo_da_difusao, difusao),
+            (&self.campo_da_largura, l),
+            (&self.campo_da_altura, a),
+        ] {
+            campo.update(cx, |c, cx| c.set_value(texto, window, cx));
+        }
+        let chave = o.estilo.chave().to_string();
+        self.seletor_de_estilo
+            .update(cx, |s, cx| s.set_selected_value(&chave, window, cx));
+    }
+
+    // ------------------------------------------------ modificar seleção
+
+    /// Abre o "Modificar seleção" de um comando: o valor em pixels num campo.
+    pub fn abrir_modificacao(
+        &mut self,
+        modificacao: Modificacao,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.sessao().and_then(Sessao::selecao).is_none() {
+            self.aviso = Some(("Não há seleção para modificar".into(), true));
+            cx.notify();
+            return;
+        }
+        let valor = self.valores_da_modificacao[modificacao.indice()].to_string();
+        let campo = cx.new(|cx| {
+            InputState::new(window, cx)
+                .step(1.0)
+                .min(1.0)
+                .max(500.0)
+                .default_value(valor)
+        });
+        let sub = cx.subscribe_in(
+            &campo,
+            window,
+            |ed: &mut Self, _c, evento: &InputEvent, window, cx| {
+                if let InputEvent::PressEnter { .. } = evento {
+                    ed.confirmar_modificacao(window, cx);
+                }
+            },
+        );
+        self._assinatura_da_modificacao = Some(sub);
+        window.focus(&campo.focus_handle(cx), cx);
+        self.modificando = Some((modificacao, campo));
+        cx.notify();
+    }
+
+    /// OK no "Modificar seleção": um passo do desfazer.
+    pub fn confirmar_modificacao(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((modificacao, campo)) = self.modificando.take() else {
+            return;
+        };
+        window.focus(&self.foco, cx);
+        let texto = campo.read(cx).value().to_string();
+        match texto.trim().parse::<f32>() {
+            Ok(v) if v >= 1.0 => self.modificar_selecao(modificacao, v.round() as u32, cx),
+            _ => {
+                self.aviso = Some(("Use um número de pixels a partir de 1".into(), true));
+                cx.notify();
+            }
+        }
+    }
+
+    pub fn cancelar_modificacao(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.modificando = None;
+        window.focus(&self.foco, cx);
+        cx.notify();
+    }
+
+    /// Difundir, expandir ou contrair a seleção que existe em `px` pixels do
+    /// documento — diferente da difusão da ferramenta, que vale para a próxima
+    /// forma.
+    pub fn modificar_selecao(&mut self, modificacao: Modificacao, px: u32, cx: &mut Context<Self>) {
+        let px = px.max(1);
+        self.valores_da_modificacao[modificacao.indice()] = px;
         let inicio = Instant::now();
         self.na_sessao(cx, |s| {
-            s.difundir_selecao(raio);
+            match modificacao {
+                Modificacao::Difundir => s.difundir_selecao(px),
+                Modificacao::Expandir => s.expandir_selecao(px as i32),
+                Modificacao::Contrair => s.expandir_selecao(-(px as i32)),
+            };
         });
         self.medidas.ultimo_gesto = Some(inicio.elapsed());
     }
 
-    /// Expandir (`sinal` 1) ou contrair (−1) pelo raio de agora.
-    pub fn expandir_selecao(&mut self, sinal: i32, cx: &mut Context<Self>) {
-        let px = self.raio_da_selecao(cx) as i32 * sinal.signum();
-        self.na_sessao(cx, |s| {
-            s.expandir_selecao(px);
-        });
+    /// ⇧F6: o Difundir do "Modificar seleção".
+    pub fn difundir_selecao(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.abrir_modificacao(Modificacao::Difundir, window, cx);
+    }
+
+    /// "Transformar seleção": a caixa do ⌘T em volta da seleção, que só mexe
+    /// no contorno.
+    pub fn transformar_selecao(&mut self, cx: &mut Context<Self>) {
+        let mut abriu = false;
+        self.na_sessao(cx, |s| abriu = s.comecar_a_transformar_a_selecao());
+        if !abriu {
+            self.aviso = Some(("Não há seleção para transformar".into(), true));
+            cx.notify();
+        }
+    }
+
+    pub fn modificando(&self) -> Option<Modificacao> {
+        self.modificando.as_ref().map(|(m, _)| *m)
     }
 
     /// ⌘ + clique numa miniatura: a seleção da camada (ou da máscara).
@@ -3305,6 +4005,27 @@ impl EditorDeFoto {
                 let r = crate::depuracao::mouse_nativo(window, tipo, x, y, mods);
                 eprintln!("[roteiro] editor mouse {tipo} ({x:.0}, {y:.0}): {r:?}");
             }
+            // janela apertar|soltar|clicar|duplo|mover x y [mods] — em pontos da
+            // janela (a barra de opções, o painel, os diálogos).
+            "janela" => {
+                let tipo = partes.get(1).copied().unwrap_or("clicar");
+                let mods = partes
+                    .iter()
+                    .skip(4)
+                    .map(|n| match *n {
+                        "shift" => 1 << 17,
+                        "alt" => 1 << 19,
+                        "cmd" => 1 << 20,
+                        _ => 0,
+                    })
+                    .fold(0, |a, b| a | b);
+                let r = crate::depuracao::mouse_nativo(window, tipo, numero(2), numero(3), mods);
+                eprintln!(
+                    "[roteiro] editor janela {tipo} ({}, {}): {r:?}",
+                    numero(2),
+                    numero(3)
+                );
+            }
             "tecla" => {
                 let codigo = numero(1) as u16;
                 let mods = partes
@@ -3448,16 +4169,84 @@ impl EditorDeFoto {
                         self.varinha(x, y, operacao, cx);
                         None
                     }
-                    // selecao difundir|expandir|contrair N
+                    // selecao difundir|expandir|contrair N — direto, sem o diálogo
                     "difundir" | "expandir" | "contrair" => {
-                        let raio = numero(2);
-                        self.raio_da_selecao
-                            .update(cx, |s, cx| s.set_value(raio, window, cx));
-                        match partes[1] {
-                            "difundir" => self.difundir_selecao(cx),
-                            "expandir" => self.expandir_selecao(1, cx),
-                            _ => self.expandir_selecao(-1, cx),
+                        let px = numero(2).round().max(1.0) as u32;
+                        let m = match partes[1] {
+                            "difundir" => Modificacao::Difundir,
+                            "expandir" => Modificacao::Expandir,
+                            _ => Modificacao::Contrair,
+                        };
+                        self.modificar_selecao(m, px, cx);
+                        None
+                    }
+                    // selecao modificar difundir|expandir|contrair — abre o diálogo
+                    "modificar" => {
+                        let m = match partes.get(2).copied() {
+                            Some("expandir") => Modificacao::Expandir,
+                            Some("contrair") => Modificacao::Contrair,
+                            _ => Modificacao::Difundir,
+                        };
+                        self.abrir_modificacao(m, window, cx);
+                        None
+                    }
+                    "transformar" => {
+                        self.transformar_selecao(cx);
+                        None
+                    }
+                    // selecao modo nova|somar|subtrair|cruzar
+                    "modo" => {
+                        let m = match partes.get(2).copied() {
+                            Some("somar") => Operacao::Somar,
+                            Some("subtrair") => Operacao::Subtrair,
+                            Some("cruzar") => Operacao::Intersecao,
+                            _ => Operacao::Nova,
+                        };
+                        self.escolher_modo_de_selecao(m, cx);
+                        None
+                    }
+                    // selecao estilo normal|proporcao L A|tamanho L A
+                    "estilo" => {
+                        if let Some(tipo) = self.selecionando {
+                            let o = self.opcoes_da_forma_mut(tipo);
+                            match partes.get(2).copied() {
+                                Some("proporcao") => {
+                                    o.estilo = TipoDeEstilo::Proporcao;
+                                    o.proporcao = (numero(3), numero(4));
+                                }
+                                Some("tamanho") => {
+                                    o.estilo = TipoDeEstilo::Tamanho;
+                                    o.tamanho = (numero(3) as u32, numero(4) as u32);
+                                }
+                                _ => o.estilo = TipoDeEstilo::Normal,
+                            }
+                            self.campos_de = None;
                         }
+                        None
+                    }
+                    // selecao difusao N | selecao suavizar sim|nao | selecao amostra camada|todas
+                    "difusao" => {
+                        if let Some(tipo) = self.selecionando {
+                            self.opcoes_da_forma_mut(tipo).acabamento.difusao = numero(2) as u32;
+                            self.campos_de = None;
+                        }
+                        None
+                    }
+                    "suavizar" => {
+                        let sim = partes.get(2) != Some(&"nao");
+                        if self.auxiliar == Some(Auxiliar::Varinha) {
+                            self.opcoes_da_varinha.suavizar = sim;
+                        } else if let Some(tipo) = self.selecionando {
+                            self.opcoes_da_forma_mut(tipo).acabamento.suavizar = sim;
+                        }
+                        None
+                    }
+                    "amostra" => {
+                        self.opcoes_da_varinha.amostra = if partes.get(2) == Some(&"camada") {
+                            AmostraDaVarinha::CamadaAtual
+                        } else {
+                            AmostraDaVarinha::Todas
+                        };
                         None
                     }
                     // selecao camada N [mascara] [somar|subtrair]
@@ -3468,13 +4257,14 @@ impl EditorDeFoto {
                     }
                     // selecao tolerancia N | selecao contigua sim|nao
                     "tolerancia" => {
-                        let v = numero(2);
-                        self.tolerancia_da_varinha
-                            .update(cx, |s, cx| s.set_value(v, window, cx));
+                        let v = numero(2).clamp(0.0, 255.0);
+                        self.opcoes_da_varinha.tolerancia = v as u8;
+                        self.campo_da_tolerancia
+                            .update(cx, |c, cx| c.set_value(format!("{v:.0}"), window, cx));
                         None
                     }
                     "contigua" => {
-                        self.varinha_contigua = partes.get(2) != Some(&"nao");
+                        self.opcoes_da_varinha.contigua = partes.get(2) != Some(&"nao");
                         None
                     }
                     "ferramenta" => {
@@ -3482,6 +4272,9 @@ impl EditorDeFoto {
                             Some("retangulo") => self.usar_selecao(TipoDeSelecao::Retangulo, cx),
                             Some("elipse") => self.usar_selecao(TipoDeSelecao::Elipse, cx),
                             Some("laco") => self.usar_selecao(TipoDeSelecao::Laco, cx),
+                            Some("poligonal") => {
+                                self.usar_selecao(TipoDeSelecao::LacoPoligonal, cx)
+                            }
                             _ => self.usar(Ferramenta::Pincel, cx),
                         }
                         None
@@ -3701,7 +4494,17 @@ impl EditorDeFoto {
                 let selecao = self
                     .sessao()
                     .and_then(|s| s.selecao())
-                    .map(|s| format!("{:?}", s.limites()));
+                    .map(|s| format!("{:?}", s.caixa_justa()));
+                eprintln!(
+                    "[roteiro] editor selecao: modo={:?} opcoes={:?} varinha={:?} poligono={:?} medida={:?} modificando={:?} transformando_selecao={}",
+                    self.modo_de_selecao,
+                    self.selecionando.map(|t| self.opcoes_da_forma(t)),
+                    self.opcoes_da_varinha,
+                    self.vertices_do_poligono(),
+                    self.medida_do_gesto(),
+                    self.modificando(),
+                    self.sessao().is_some_and(Sessao::transformando_a_selecao),
+                );
                 let lupa = self
                     .sessao()
                     .and_then(|s| s.lupa())
@@ -4112,6 +4915,25 @@ impl EditorDeFoto {
                     }
                     if let Some(gesto) = &self.gesto_de_selecao {
                         palco = palco.child(tela.contorno(gesto.contorno()));
+                        // Largura e altura em pixels do documento, junto do
+                        // ponteiro — zoom e giro da vista não as mudam.
+                        if let (Some((l, a)), Some(ponteiro)) = (gesto.medida(), self.ponteiro) {
+                            let onde = ponteiro - self.palco.origin;
+                            palco = palco.child(
+                                div()
+                                    .debug_selector(|| "editor-medida-da-selecao".into())
+                                    .absolute()
+                                    .left(onde.x + px(14.))
+                                    .top(onde.y + px(14.))
+                                    .px(px(6.))
+                                    .py(px(2.))
+                                    .rounded(crate::tema::canto(4.))
+                                    .bg(gpui_kit::black().opacity(0.75))
+                                    .text_color(gpui_kit::white())
+                                    .text_xs()
+                                    .child(format!("L: {l} px   A: {a} px")),
+                            );
+                        }
                     }
                     // O círculo do pincel, do tamanho que ele pinta.
                     let dentro = self.ponteiro.filter(|p| {
@@ -4180,8 +5002,15 @@ impl EditorDeFoto {
                             window.focus(&ed.foco, cx);
                             if ed.espaco.is_some() {
                                 ed.pegar_com_a_mao(evento.position, cx);
-                            } else if ed.selecionando.is_some() {
-                                ed.comecar_selecao(evento.position, evento.modifiers, cx);
+                            } else if ed.selecionando.is_some() && !ed.transformando() {
+                                // Com a caixa da transformação aberta (⌘T ou
+                                // "Transformar seleção"), o clique é dela.
+                                ed.comecar_selecao_com_cliques(
+                                    evento.position,
+                                    evento.modifiers,
+                                    evento.click_count,
+                                    cx,
+                                );
                             } else {
                                 ed.apertar_com(evento.position, evento.modifiers, cx);
                             }
@@ -4306,12 +5135,20 @@ impl EditorDeFoto {
                 )
             })
             .when(self.transformando(), |barra| {
+                let so_o_contorno = self
+                    .sessao()
+                    .is_some_and(Sessao::transformando_a_selecao);
                 barra
                     .child(
                         div()
+                            .debug_selector(|| "editor-dica-da-transformacao".into())
                             .text_xs()
                             .text_color(tema.muted_foreground)
-                            .child("Transformar — arraste dentro, nos cantos (⇧ livre) ou fora para girar (⇧ de 15°)"),
+                            .child(if so_o_contorno {
+                                "Transformar seleção (só o contorno) — arraste dentro, nos cantos (⇧ livre) ou fora para girar (⇧ de 15°)"
+                            } else {
+                                "Transformar — arraste dentro, nos cantos (⇧ livre) ou fora para girar (⇧ de 15°)"
+                            }),
                     )
                     .child(
                         crate::estilo::botao_primario_pequeno("editor-aplicar-transformacao", cx)
@@ -4405,6 +5242,351 @@ impl EditorDeFoto {
             .child(controles)
     }
 
+    /// O botão "Modificar seleção ▾": Difundir…, Expandir…, Contrair… (cada um
+    /// pede o valor em pixels) e, separado, "Transformar seleção" — só o
+    /// contorno, ao contrário do ⌘T, que leva os pixels.
+    fn menu_modificar_selecao(
+        &self,
+        id: &'static str,
+        rotulo: &'static str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let tem_selecao = self.sessao().and_then(Sessao::selecao).is_some();
+        let ed = cx.entity();
+        crate::estilo::botao_contorno_pequeno(id, cx)
+            .debug_selector(move || id.into())
+            .label(rotulo)
+            .tooltip("Difundir, expandir, contrair (com o valor em pixels) e Transformar seleção")
+            .disabled(!tem_selecao || self.transformando())
+            .dropdown_menu_with_anchor(gpui_kit::Anchor::TopLeft, move |menu, _window, _cx| {
+                let item = |item_id: &'static str, rotulo: &'static str, m: Modificacao| {
+                    let ed = ed.clone();
+                    crate::estilo::item_de_menu(item_id, rotulo, None).on_click(
+                        move |_ev, window, cx| {
+                            ed.update(cx, |ed, cx| ed.abrir_modificacao(m, window, cx));
+                        },
+                    )
+                };
+                let transformar = {
+                    let ed = ed.clone();
+                    crate::estilo::item_de_menu(
+                        "editor-transformar-selecao",
+                        "Transformar seleção",
+                        None,
+                    )
+                    .on_click(move |_ev, _window, cx| {
+                        ed.update(cx, |ed, cx| ed.transformar_selecao(cx));
+                    })
+                };
+                menu.item(item(
+                    "editor-modificar-difundir",
+                    "Difundir…  ⇧F6",
+                    Modificacao::Difundir,
+                ))
+                .item(item(
+                    "editor-modificar-expandir",
+                    "Expandir…",
+                    Modificacao::Expandir,
+                ))
+                .item(item(
+                    "editor-modificar-contrair",
+                    "Contrair…",
+                    Modificacao::Contrair,
+                ))
+                .separator()
+                .item(transformar)
+            })
+            .into_any_element()
+    }
+
+    /// A barra de opções das ferramentas de seleção, embaixo da barra de cima
+    /// (a do Photoshop): os quatro modos, e as opções de cada ferramenta —
+    /// difusão e estilo na retangular e na elíptica, antisserrilhado na
+    /// elíptica e nos laços, tolerância/contígua/amostra na varinha. Mudar uma
+    /// opção não mexe na seleção que existe nem entra no desfazer.
+    fn barra_de_opcoes_da_selecao(&self, cx: &mut Context<Self>) -> AnyElement {
+        use gpui_kit::component::button::ButtonGroup;
+        use gpui_kit::component::checkbox::Checkbox;
+        use gpui_kit::component::input::NumberInput;
+        let tema = cx.theme().clone();
+        let varinha = self.auxiliar == Some(Auxiliar::Varinha);
+        let tipo = self.selecionando;
+        let rotulo = |texto: &'static str| {
+            div()
+                .text_xs()
+                .text_color(tema.muted_foreground)
+                .child(texto)
+        };
+        let separador = || div().w(px(1.)).h(px(18.)).bg(tema.border);
+        let numero =
+            |campo: &Entity<InputState>, seletor: &'static str, sufixo: Option<&'static str>| {
+                div()
+                    .w(px(84.))
+                    .debug_selector(move || seletor.into())
+                    .child(crate::estilo::campo_pequeno(
+                        NumberInput::new(campo)
+                            .xsmall()
+                            .when_some(sufixo, |n, s| n.suffix(div().text_xs().child(s))),
+                    ))
+            };
+        let realcado = self.modo_realcado();
+        // O ativo no botão primário (a cor de destaque do tema): o realce do
+        // contorno do kit é um cinza quase igual ao do fundo.
+        let modos = ButtonGroup::new("editor-modos-de-selecao")
+            .xsmall()
+            .children(MODOS.iter().enumerate().map(|(i, modo)| {
+                let id: &'static str = [
+                    "editor-modo-nova",
+                    "editor-modo-adicionar",
+                    "editor-modo-subtrair",
+                    "editor-modo-intersectar",
+                ][i];
+                let dica = [
+                    "Nova seleção",
+                    "Adicionar à seleção (⇧ no gesto)",
+                    "Subtrair da seleção (⌥ no gesto)",
+                    "Intersectar com a seleção (⇧⌥ no gesto)",
+                ][i];
+                if realcado == *modo {
+                    crate::estilo::botao_primario_pequeno(id, cx)
+                } else {
+                    crate::estilo::botao_contorno_pequeno(id, cx)
+                }
+                .debug_selector(move || id.into())
+                .label(nome_do_modo(*modo))
+                .tooltip(dica)
+                .selected(realcado == *modo)
+            }))
+            .on_click(cx.listener(|ed, cliques: &Vec<usize>, _, cx| {
+                if let Some(modo) = cliques.first().and_then(|i| MODOS.get(*i)) {
+                    ed.escolher_modo_de_selecao(*modo, cx);
+                }
+            }));
+        let nome = match (tipo, varinha) {
+            (Some(TipoDeSelecao::Retangulo), _) => "Retangular",
+            (Some(TipoDeSelecao::Elipse), _) => "Elíptica",
+            (Some(TipoDeSelecao::Laco), _) => "Laço",
+            (Some(TipoDeSelecao::LacoPoligonal), _) => "Laço poligonal",
+            (None, _) => "Varinha mágica",
+        };
+        let mut barra = div()
+            .id("editor-opcoes-da-selecao")
+            .debug_selector(|| "editor-opcoes-da-selecao".into())
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(10.))
+            .px(px(12.))
+            .py(px(6.))
+            .border_b_1()
+            .border_color(tema.border)
+            .child(
+                div()
+                    .text_xs()
+                    .font_weight(gpui_kit::FontWeight::MEDIUM)
+                    .child(nome),
+            )
+            .child(separador())
+            .child(modos);
+
+        if let Some(tipo) = tipo {
+            let o = self.opcoes_da_forma(tipo);
+            barra = barra
+                .child(separador())
+                .child(rotulo("Difusão"))
+                .child(numero(&self.campo_da_difusao, "editor-difusao", Some("px")));
+            if tipo.suaviza() {
+                barra = barra.child(
+                    div().debug_selector(|| "editor-suavizar".into()).child(
+                        Checkbox::new("editor-suavizar")
+                            .xsmall()
+                            .label("Antisserrilhado")
+                            .checked(o.acabamento.suavizar)
+                            .on_click(cx.listener(|ed, _: &bool, _, cx| ed.alternar_suavizar(cx))),
+                    ),
+                );
+            }
+            if tipo.tem_estilo() {
+                barra = barra.child(separador()).child(rotulo("Estilo")).child(
+                    div()
+                        .w(px(140.))
+                        .debug_selector(|| "editor-estilo".into())
+                        .child(crate::estilo::campo_pequeno(
+                            Select::new(&self.seletor_de_estilo).xsmall(),
+                        )),
+                );
+                if o.estilo != TipoDeEstilo::Normal {
+                    let unidade = (o.estilo == TipoDeEstilo::Tamanho).then_some("px");
+                    barra = barra
+                        .child(rotulo("Largura"))
+                        .child(numero(
+                            &self.campo_da_largura,
+                            "editor-estilo-largura",
+                            unidade,
+                        ))
+                        .child(
+                            crate::estilo::botao_fantasma_pequeno("editor-trocar-medidas", cx)
+                                .debug_selector(|| "editor-trocar-medidas".into())
+                                .label("⇄")
+                                .tooltip("Trocar largura e altura")
+                                .on_click(
+                                    cx.listener(|ed, _, _, cx| ed.trocar_largura_e_altura(cx)),
+                                ),
+                        )
+                        .child(rotulo("Altura"))
+                        .child(numero(
+                            &self.campo_da_altura,
+                            "editor-estilo-altura",
+                            unidade,
+                        ));
+                }
+                if o.estilo == TipoDeEstilo::Proporcao {
+                    let ed = cx.entity();
+                    barra = barra.child(
+                        crate::estilo::botao_fantasma_pequeno("editor-proporcoes", cx)
+                            .debug_selector(|| "editor-proporcoes".into())
+                            .label("Predefinições ▾")
+                            .dropdown_menu_with_anchor(
+                                gpui_kit::Anchor::TopLeft,
+                                move |mut menu, _window, _cx| {
+                                    for (l, a) in Estilo::PROPORCOES {
+                                        let ed = ed.clone();
+                                        menu =
+                                            menu.item(
+                                                crate::estilo::item_de_menu(
+                                                    match (l, a) {
+                                                        (1, 1) => "editor-proporcao-1-1",
+                                                        (3, 2) => "editor-proporcao-3-2",
+                                                        (4, 3) => "editor-proporcao-4-3",
+                                                        _ => "editor-proporcao-16-9",
+                                                    },
+                                                    format!("{l}:{a}"),
+                                                    None,
+                                                )
+                                                .on_click(move |_ev, _w, cx| {
+                                                    ed.update(cx, |ed, cx| {
+                                                        ed.usar_proporcao(l as f32, a as f32, cx);
+                                                        ed.campos_de = None;
+                                                    });
+                                                }),
+                                            );
+                                    }
+                                    menu
+                                },
+                            ),
+                    );
+                }
+            }
+        } else {
+            let v = self.opcoes_da_varinha;
+            barra = barra
+                .child(separador())
+                .child(rotulo("Tolerância"))
+                .child(numero(&self.campo_da_tolerancia, "editor-tolerancia", None))
+                .child(
+                    div().debug_selector(|| "editor-suavizar".into()).child(
+                        Checkbox::new("editor-suavizar")
+                            .xsmall()
+                            .label("Antisserrilhado")
+                            .checked(v.suavizar)
+                            .on_click(cx.listener(|ed, _: &bool, _, cx| ed.alternar_suavizar(cx))),
+                    ),
+                )
+                .child(
+                    div().debug_selector(|| "editor-contigua".into()).child(
+                        Checkbox::new("editor-contigua")
+                            .xsmall()
+                            .label("Contígua")
+                            .checked(v.contigua)
+                            .on_click(
+                                cx.listener(|ed, _: &bool, _, cx| ed.alternar_varinha_contigua(cx)),
+                            ),
+                    ),
+                )
+                .child(rotulo("Amostra"))
+                .child(
+                    div()
+                        .w(px(150.))
+                        .debug_selector(|| "editor-amostra".into())
+                        .child(crate::estilo::campo_pequeno(
+                            Select::new(&self.seletor_de_amostra).xsmall(),
+                        )),
+                );
+        }
+        barra
+            .child(div().flex_1())
+            .child(self.menu_modificar_selecao(
+                "editor-modificar-selecao",
+                "Modificar seleção ▾",
+                cx,
+            ))
+            .into_any_element()
+    }
+
+    /// O diálogo do "Modificar seleção": o valor em pixels do documento.
+    fn dialogo_da_modificacao(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        use gpui_kit::component::input::NumberInput;
+        let (modificacao, campo) = self.modificando.clone()?;
+        let tema = cx.theme().clone();
+        Some(
+            gpui_kit::component::v_flex()
+                .gap(px(16.))
+                .debug_selector(|| "editor-dialogo-modificar".into())
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(crate::estilo::cabecalho_do_dialogo(
+                    modificacao.titulo(),
+                    "Vale para a seleção que já existe, num passo do desfazer — a difusão da barra de opções é a da próxima seleção.",
+                    None,
+                    cx,
+                ))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .child(
+                            div()
+                                .text_sm()
+                                .text_color(tema.muted_foreground)
+                                .child(modificacao.rotulo()),
+                        )
+                        .child(
+                            div()
+                                .w(px(120.))
+                                .debug_selector(|| "editor-valor-da-modificacao".into())
+                                .child(crate::estilo::campo(
+                                    NumberInput::new(&campo)
+                                        .suffix(div().text_sm().child("px")),
+                                )),
+                        ),
+                )
+                .child(
+                    crate::estilo::rodape_do_dialogo()
+                        .child(
+                            crate::estilo::botao_contorno("editor-cancelar-modificacao", cx)
+                                .debug_selector(|| "editor-cancelar-modificacao".into())
+                                .child("Cancelar")
+                                .on_click(cx.listener(|ed, _, window, cx| {
+                                    ed.cancelar_modificacao(window, cx)
+                                })),
+                        )
+                        .child(
+                            crate::estilo::botao_primario("editor-confirmar-modificacao", cx)
+                                .debug_selector(|| "editor-confirmar-modificacao".into())
+                                .child("OK")
+                                .on_click(cx.listener(|ed, _, window, cx| {
+                                    ed.confirmar_modificacao(window, cx)
+                                })),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+
     fn painel(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let tema = cx.theme().clone();
         let ferramenta = self
@@ -4460,6 +5642,7 @@ impl EditorDeFoto {
                     .gap(px(4.))
                     .child(rotulo("Seleção"))
                     .child(div().flex_1())
+                    .child(self.menu_modificar_selecao("editor-modificar-selecao-painel", "Modificar ▾", cx))
                     .child(
                         crate::estilo::botao_fantasma_pequeno("editor-desmarcar", cx)
                             .debug_selector(|| "editor-desmarcar".into())
@@ -4475,79 +5658,6 @@ impl EditorDeFoto {
                     .tooltip("Remover o selecionado com prévia: PatchMatch ou IA local · ⇧⌫ preenche direto, sem prévia")
                     .on_click(cx.listener(|ed, _, _, cx| ed.abrir_preenchimento(cx))),
             )
-            .when(self.auxiliar == Some(Auxiliar::Varinha), |painel| {
-                let tolerancia = self.tolerancia_da_varinha.read(cx).value().start();
-                painel
-                    .child(
-                        div()
-                            .flex()
-                            .justify_between()
-                            .text_xs()
-                            .text_color(tema.muted_foreground)
-                            .child("Tolerância")
-                            .child(format!("{tolerancia:.0}")),
-                    )
-                    .child(
-                        div()
-                            .h(px(20.))
-                            .debug_selector(|| "editor-tolerancia".into())
-                            .child(crate::estilo::slider(&self.tolerancia_da_varinha)),
-                    )
-                    .child(
-                        div().debug_selector(|| "editor-contigua".into()).child(
-                            gpui_kit::component::checkbox::Checkbox::new("editor-contigua")
-                                .label("Contígua")
-                                .checked(self.varinha_contigua)
-                                .on_click(cx.listener(|ed, _: &bool, _, cx| {
-                                    ed.alternar_varinha_contigua(cx)
-                                })),
-                        ),
-                    )
-            })
-            // Modificar a seleção: o raio e os três comandos do Photoshop.
-            .when(self.sessao().and_then(Sessao::selecao).is_some(), |painel| {
-                let raio = self.raio_da_selecao.read(cx).value().start();
-                painel
-                    .child(
-                        div()
-                            .flex()
-                            .justify_between()
-                            .text_xs()
-                            .text_color(tema.muted_foreground)
-                            .child("Raio para modificar")
-                            .child(format!("{raio:.0} px")),
-                    )
-                    .child(
-                        div()
-                            .h(px(20.))
-                            .debug_selector(|| "editor-raio-da-selecao".into())
-                            .child(crate::estilo::slider(&self.raio_da_selecao)),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .gap(px(4.))
-                            .child(
-                                crate::estilo::botao_fantasma_pequeno("editor-difundir", cx)
-                                    .debug_selector(|| "editor-difundir".into())
-                                    .label("Difundir")
-                                    .tooltip("Suavizar a borda pelo raio (⇧F6)")
-                                    .on_click(cx.listener(|ed, _, _, cx| ed.difundir_selecao(cx))),
-                            )
-                            .child(
-                                crate::estilo::botao_fantasma_pequeno("editor-expandir", cx)
-                                    .debug_selector(|| "editor-expandir".into())
-                                    .label("Expandir")
-                                    .on_click(cx.listener(|ed, _, _, cx| ed.expandir_selecao(1, cx))),
-                            )
-                            .child(
-                                crate::estilo::botao_fantasma_pequeno("editor-contrair", cx)
-                                    .debug_selector(|| "editor-contrair".into())
-                                    .label("Contrair")
-                                    .on_click(cx.listener(|ed, _, _, cx| ed.expandir_selecao(-1, cx))),
-                            ),
-                    )
-            })
             .when(
                 matches!(
                     ferramenta,
@@ -5904,6 +7014,7 @@ impl Render for EditorDeFoto {
             }
         }
         self.acompanhar_o_pincel(window, cx);
+        self.sincronizar_os_campos(window, cx);
         self.atualizar_a_lupa(cx);
         self.subir_os_ladrilhos();
         self.atualizar_as_bordas();
@@ -5952,6 +7063,21 @@ impl Render for EditorDeFoto {
                 cx,
             )
         };
+        let modificacao = {
+            let quer = self.modificando.is_some();
+            crate::dialogo::desenhar(
+                self,
+                quer,
+                crate::dialogo::Jeito::dialogo(400.),
+                Self::dialogo_da_modificacao,
+                |ed, window, cx| ed.cancelar_modificacao(window, cx),
+                window,
+                cx,
+            )
+        };
+        let opcoes_da_selecao = (self.area_do_preenchimento.is_none()
+            && (self.selecionando.is_some() || self.auxiliar == Some(Auxiliar::Varinha)))
+        .then(|| self.barra_de_opcoes_da_selecao(cx));
         let tema = cx.theme().clone();
         // A moldura do `Root` não pode tomar o clique do conteúdo encostado na
         // borda com a janela maximizada (`janela::raiz_do_conteudo`).
@@ -6074,16 +7200,24 @@ impl Render for EditorDeFoto {
             .on_action(cx.listener(|ed, _: &PreencherPeloConteudo, _, cx| {
                 ed.preencher_a_selecao_pelo_conteudo(cx)
             }))
-            .on_action(cx.listener(|ed, _: &AplicarTransformacao, _, cx| {
+            .on_action(cx.listener(|ed, _: &AplicarTransformacao, window, cx| {
                 if ed.area_do_preenchimento.is_some() {
                     ed.confirmar_preenchimento(cx)
+                } else if ed.modificando.is_some() {
+                    ed.confirmar_modificacao(window, cx)
+                } else if ed.poligono_aberto() {
+                    ed.concluir_poligono(cx)
                 } else {
                     ed.aplicar_transformacao(cx)
                 }
             }))
-            .on_action(cx.listener(|ed, _: &CancelarTransformacao, _, cx| {
+            .on_action(cx.listener(|ed, _: &CancelarTransformacao, window, cx| {
                 if ed.area_do_preenchimento.is_some() {
                     ed.cancelar_preenchimento(cx)
+                } else if ed.modificando.is_some() {
+                    ed.cancelar_modificacao(window, cx)
+                } else if ed.cancelar_gesto_de_selecao(cx) {
+                    // O gesto de seleção some; a seleção de antes fica.
                 } else if ed.transformando() {
                     ed.cancelar_transformacao(cx)
                 } else if ed.auxiliar == Some(Auxiliar::GirarVista) {
@@ -6108,18 +7242,28 @@ impl Render for EditorDeFoto {
             }))
             .on_action(cx.listener(|ed, _: &AlternarZoom, _, cx| ed.z_apertado(cx)))
             .on_action(cx.listener(|ed, _: &SegurarAMao, _, cx| ed.espaco_apertado(cx)))
-            .on_action(cx.listener(|ed, _: &DifundirSelecao, _, cx| ed.difundir_selecao(cx)))
+            .on_action(
+                cx.listener(|ed, _: &DifundirSelecao, window, cx| ed.difundir_selecao(window, cx)),
+            )
+            .on_action(cx.listener(|ed, _: &ProximaDoGrupoL, _, cx| ed.pela_letra('l', true, cx)))
             .on_action(cx.listener(|ed, _: &TrocarCores, _, cx| ed.trocar_cores(cx)))
             .on_action(cx.listener(|ed, _: &CoresPadrao, _, cx| ed.cores_padrao(cx)))
             .on_action(cx.listener(|ed, _: &SelecionarTudo, _, cx| ed.selecionar_tudo(cx)))
             .on_action(cx.listener(|ed, _: &Desmarcar, _, cx| ed.desmarcar(cx)))
             .on_action(cx.listener(|ed, _: &InverterSelecao, _, cx| ed.inverter_selecao(cx)))
-            .on_action(cx.listener(|ed, _: &ApagarSelecao, _, cx| ed.apagar_selecao(cx)))
+            .on_action(cx.listener(|ed, _: &ApagarSelecao, _, cx| {
+                // ⌫ com o laço poligonal aberto tira o último vértice.
+                if !ed.tirar_o_ultimo_vertice(cx) {
+                    ed.apagar_selecao(cx)
+                }
+            }))
             .on_action(cx.listener(|ed, _: &PreencherSelecao, _, cx| ed.preencher_selecao(cx)))
             .on_action(cx.listener(|ed, _: &MesclarParaBaixo, _, cx| ed.mesclar_para_baixo(cx)))
             .child(barra)
+            .children(opcoes_da_selecao)
             .child(corpo)
             .children(pergunta)
+            .children(modificacao)
     }
 }
 
