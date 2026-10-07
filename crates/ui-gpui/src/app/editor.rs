@@ -1624,7 +1624,15 @@ mod testes {
         assert!(estado(&mut ve).is_none(), "o painel fecha");
         let (nomes, _) = camadas(&editor, &ve);
         assert_eq!(nomes.last().map(String::as_str), Some("Preenchimento 1"));
-        assert_eq!(passos(&mut ve), n_passos + 1);
+        let descr = editor.read_with(&ve, |ed, _| {
+            let s = ed.sessao().unwrap();
+            s.historico()
+                .passos()
+                .iter()
+                .map(|p| p.descricao(s.documento()))
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(passos(&mut ve), n_passos + 1, "{descr:?}");
         let depois = fotografia(&mut ve);
         let vermelhos = (16..26)
             .flat_map(|y| (24..36).map(move |x| (x, y)))
@@ -2041,7 +2049,8 @@ mod testes {
             )
         });
         assert!(corrigido > 0, "o traço foi refeito");
-        assert_eq!(depois, passos + 1);
+        // ⌘D (a seleção entra no desfazer desde a etapa 13) e o remendo.
+        assert_eq!(depois, passos + 2);
     }
 
     /// ☀️ O e R escolhem as ferramentas de tom e de foco; a subexposição
@@ -2072,8 +2081,8 @@ mod testes {
                 .vazia())
         );
 
-        ve.simulate_keystrokes("shift-r");
-        ve.run_until_parked();
+        // Nitidez não tem letra (como no Photoshop): pela barra.
+        clicar_no_editor(&mut ve, "editor-nitidez");
         assert_eq!(
             editor.read_with(&ve, |ed, _| ed.ferramenta()),
             Some(editor_core::Ferramenta::Nitidez)
@@ -2105,5 +2114,373 @@ mod testes {
             editor.read_with(&ve, |ed, _| ed.sessao().unwrap().historico().posicao()),
             2
         );
+    }
+
+    // -------------------------------------------- etapa 13: os controles
+
+    /// Um ponto da janela pela fração da **foto** (e não do palco).
+    fn ponto_da_foto(
+        ve: &mut VisualTestContext,
+        editor: &gpui_kit::Entity<EditorDeFoto>,
+        f: (f32, f32),
+    ) -> gpui_kit::Point<gpui_kit::Pixels> {
+        let area = editor.read_with(ve, |ed, _| ed.area_na_janela().unwrap());
+        area.origin + gpui_kit::point(area.size.width * f.0, area.size.height * f.1)
+    }
+
+    /// Um arrasto com `ao_apertar` no clique e `no_arrasto` durante o
+    /// movimento e no soltar — no Photoshop, ⇧⌥ no clique cruza a seleção, e
+    /// segurados no arrasto fazem quadrado a partir do centro.
+    fn arrastar_com(
+        ve: &mut VisualTestContext,
+        a: gpui_kit::Point<gpui_kit::Pixels>,
+        b: gpui_kit::Point<gpui_kit::Pixels>,
+        ao_apertar: gpui_kit::Modifiers,
+        no_arrasto: gpui_kit::Modifiers,
+    ) {
+        ve.simulate_mouse_down(a, gpui_kit::MouseButton::Left, ao_apertar);
+        ve.run_until_parked();
+        // Em dois passos: o meio do caminho e o fim.
+        let meio = gpui_kit::point((a.x + b.x) / 2., (a.y + b.y) / 2.);
+        ve.simulate_mouse_move(meio, Some(gpui_kit::MouseButton::Left), no_arrasto);
+        ve.simulate_mouse_move(b, Some(gpui_kit::MouseButton::Left), no_arrasto);
+        ve.run_until_parked();
+        ve.simulate_mouse_up(b, gpui_kit::MouseButton::Left, no_arrasto);
+        ve.run_until_parked();
+    }
+
+    /// 🔤 As letras do Photoshop (tabela oficial da Adobe): H é a Mão, R a
+    /// Girar vista, ⇧ + letra passa para a seguinte do grupo, e a letra volta
+    /// à última usada nele. O H deixou de esconder a camada — agora é ⌘,.
+    #[gpui_kit::test]
+    fn as_letras_do_photoshop_escolhem_e_alternam_no_grupo(cx: &mut TestAppContext) {
+        use crate::editor::janela::{Auxiliar, Item, TipoDeSelecao};
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        let tecla = |ve: &mut VisualTestContext, t: &str| {
+            ve.simulate_keystrokes(t);
+            ve.run_until_parked();
+            editor.read_with(ve, |ed, _| ed.item_atual())
+        };
+        assert_eq!(tecla(&mut ve, "h"), Some(Item::A(Auxiliar::Mao)));
+        assert!(
+            editor.read_with(&ve, |ed, _| ed.camada_visivel()),
+            "o H não esconde mais a camada"
+        );
+        assert_eq!(tecla(&mut ve, "r"), Some(Item::A(Auxiliar::GirarVista)));
+        assert_eq!(tecla(&mut ve, "m"), Some(Item::S(TipoDeSelecao::Retangulo)));
+        assert_eq!(
+            tecla(&mut ve, "shift-m"),
+            Some(Item::S(TipoDeSelecao::Elipse))
+        );
+        assert_eq!(
+            tecla(&mut ve, "b"),
+            Some(Item::F(editor_core::Ferramenta::Pincel))
+        );
+        assert_eq!(
+            tecla(&mut ve, "m"),
+            Some(Item::S(TipoDeSelecao::Elipse)),
+            "a letra volta à última do grupo"
+        );
+        assert_eq!(
+            tecla(&mut ve, "shift-m"),
+            Some(Item::S(TipoDeSelecao::Retangulo))
+        );
+        assert!(matches!(
+            tecla(&mut ve, "o"),
+            Some(Item::F(editor_core::Ferramenta::Subexposicao(_)))
+        ));
+        assert!(matches!(
+            tecla(&mut ve, "shift-o"),
+            Some(Item::F(editor_core::Ferramenta::Superexposicao(_)))
+        ));
+        assert_eq!(tecla(&mut ve, "g"), Some(Item::A(Auxiliar::Degrade)));
+        assert_eq!(tecla(&mut ve, "shift-g"), Some(Item::A(Auxiliar::Lata)));
+        assert_eq!(tecla(&mut ve, "shift-g"), Some(Item::A(Auxiliar::Degrade)));
+        // ⌘, esconde e mostra a escolhida.
+        tecla(&mut ve, "cmd-,");
+        assert!(!editor.read_with(&ve, |ed, _| ed.camada_visivel()));
+        tecla(&mut ve, "cmd-,");
+        assert!(editor.read_with(&ve, |ed, _| ed.camada_visivel()));
+    }
+
+    /// 🔄 R + arrastar gira **só a vista**: nenhum pixel, dimensão ou passo do
+    /// histórico muda; o clique na vista girada pinta onde o ponteiro aponta na
+    /// foto; Esc volta a 0°.
+    #[gpui_kit::test]
+    fn girar_a_vista_nao_muda_a_foto_e_o_pincel_segue_o_giro(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        let (doc, passos) = editor.read_with(&ve, |ed, _| {
+            let s = ed.sessao().unwrap();
+            (s.documento().clone(), s.historico().passos().len())
+        });
+        ve.simulate_keystrokes("r");
+        ve.run_until_parked();
+        // Da direita do centro para baixo do centro: +90° (horário), com ⇧
+        // preso no múltiplo de 15°.
+        let shift = gpui_kit::Modifiers {
+            shift: true,
+            ..Default::default()
+        };
+        let (a, b) = (
+            ponto_do_palco(&mut ve, (0.8, 0.5)),
+            ponto_do_palco(&mut ve, (0.52, 0.95)),
+        );
+        arrastar_com(&mut ve, a, b, gpui_kit::Modifiers::none(), shift);
+        let graus = editor.read_with(&ve, |ed, _| ed.giro_da_vista().to_degrees());
+        assert!((graus - 90.0).abs() < 0.01, "girou {graus}°");
+        ve.update(|window, _| window.refresh());
+        ve.run_until_parked();
+        assert!(
+            editor.read_with(&ve, |ed, _| ed.ladrilhos_do_palco_girado()) > 0,
+            "o palco girado foi montado"
+        );
+        editor.read_with(&ve, |ed, _| {
+            let s = ed.sessao().unwrap();
+            assert_eq!(s.documento(), &doc, "nenhum pixel mudou");
+            assert_eq!((s.base().width(), s.base().height()), (64, 48));
+            assert_eq!(s.historico().passos().len(), passos, "girar não é passo");
+            assert!(!ed.alterado());
+        });
+
+        // O pincel na vista girada: abaixo do centro na tela é à direita do
+        // centro na foto.
+        ve.simulate_keystrokes("b");
+        ve.run_until_parked();
+        editor.update(&mut ve, |ed, cx| {
+            ed.na_sessao_para_teste(cx, |s| {
+                s.pincel.raio = 2.0;
+                s.pincel.dureza = 1.0;
+                s.pincel.suavizacao = 0.0;
+                s.pincel.cor = [255, 0, 0];
+            })
+        });
+        let largura = ve.debug_bounds("palco-do-editor").unwrap().size.width;
+        let alvo =
+            ponto_do_palco(&mut ve, (0.5, 0.5)) + gpui_kit::point(gpui_kit::px(0.), largura * 0.2);
+        ve.simulate_click(alvo, gpui_kit::Modifiers::none());
+        ve.run_until_parked();
+        let (x, y) = editor.read_with(&ve, |ed, _| {
+            let c = &ed.sessao().unwrap().documento().camadas[0].pixels;
+            let mut achado = (0, 0);
+            for y in 0..48 {
+                for x in 0..64 {
+                    if c.pixel(x, y)[3] > 200 {
+                        achado = (x, y);
+                    }
+                }
+            }
+            achado
+        });
+        assert!(x > 38 && (y as i32 - 24).abs() <= 2, "pintou em ({x}, {y})");
+
+        ve.simulate_keystrokes("r escape");
+        ve.run_until_parked();
+        assert_eq!(editor.read_with(&ve, |ed, _| ed.giro_da_vista()), 0.0);
+    }
+
+    /// 🔢 Os números dão a opacidade (4 e 5 em seguida = 45%), ⇧ + números o
+    /// fluxo, e `{` `}` a dureza em passos de 25%.
+    #[gpui_kit::test]
+    fn numeros_e_chaves_ajustam_o_pincel(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        let pincel =
+            |ve: &mut VisualTestContext| editor.read_with(ve, |ed, _| ed.sessao().unwrap().pincel);
+        ve.simulate_keystrokes("b 4 5");
+        ve.run_until_parked();
+        assert!((pincel(&mut ve).opacidade - 0.45).abs() < 1e-4);
+        ve.simulate_keystrokes("shift-3");
+        ve.run_until_parked();
+        assert!(
+            (pincel(&mut ve).fluxo - 0.3).abs() < 1e-4,
+            "⇧ + número é o fluxo"
+        );
+        assert!(
+            (pincel(&mut ve).opacidade - 0.45).abs() < 1e-4,
+            "a opacidade ficou"
+        );
+        ve.simulate_keystrokes("0");
+        ve.run_until_parked();
+        assert_eq!(pincel(&mut ve).opacidade, 1.0);
+        let dureza = pincel(&mut ve).dureza;
+        ve.simulate_keystrokes("shift-[");
+        ve.run_until_parked();
+        let menos = pincel(&mut ve).dureza;
+        assert!(
+            menos < dureza && (menos / 0.25).fract().abs() < 1e-4,
+            "{dureza} → {menos}"
+        );
+        ve.simulate_keystrokes("shift-] shift-] shift-]");
+        ve.run_until_parked();
+        assert_eq!(pincel(&mut ve).dureza, 1.0);
+        // Os sliders acompanham.
+        ve.update(|window, _| window.refresh());
+        ve.run_until_parked();
+        assert!(ve.debug_bounds("editor-fluxo").is_some());
+        assert!(ve.debug_bounds("editor-espacamento").is_some());
+        assert!(ve.debug_bounds("editor-suavizacao").is_some());
+    }
+
+    /// ／ ⇧ + clique liga com uma reta desde o fim do traço anterior, num passo
+    /// do desfazer próprio.
+    #[gpui_kit::test]
+    fn shift_clique_no_palco_traca_uma_reta(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        ve.simulate_keystrokes("b");
+        editor.update(&mut ve, |ed, cx| {
+            ed.na_sessao_para_teste(cx, |s| {
+                s.pincel.raio = 1.5;
+                s.pincel.dureza = 1.0;
+                s.pincel.suavizacao = 0.0;
+                s.pincel.cor = [0, 0, 255];
+            })
+        });
+        let a = ponto_da_foto(&mut ve, &editor, (0.1, 0.5));
+        let b = ponto_da_foto(&mut ve, &editor, (0.9, 0.5));
+        ve.simulate_click(a, gpui_kit::Modifiers::none());
+        ve.run_until_parked();
+        let shift = gpui_kit::Modifiers {
+            shift: true,
+            ..Default::default()
+        };
+        ve.simulate_click(b, shift);
+        ve.run_until_parked();
+        let (meio, passos) = editor.read_with(&ve, |ed, _| {
+            let s = ed.sessao().unwrap();
+            let fim = s.fim_do_ultimo_traco().unwrap();
+            (
+                s.documento().camadas[0].pixels.pixel(32, fim.1 as u32)[3],
+                s.historico().passos().len(),
+            )
+        });
+        assert_eq!(meio, 255, "o meio da reta foi pintado");
+        assert_eq!(passos, 2);
+        ve.simulate_keystrokes("cmd-z");
+        ve.run_until_parked();
+        let meio = editor.read_with(&ve, |ed, _| {
+            ed.sessao().unwrap().documento().camadas[0]
+                .pixels
+                .pixel(32, 24)[3]
+        });
+        assert_eq!(meio, 0, "desfazer tira só a reta");
+    }
+
+    /// ⬚ ⇧⌥ + arrasto cruza a seleção, o desfazer volta a anterior, e
+    /// arrastar por dentro (sem modificador) move só o contorno.
+    #[gpui_kit::test]
+    fn a_intersecao_e_o_contorno_pelo_palco(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        ve.simulate_keystrokes("m");
+        ve.run_until_parked();
+        let (a, b) = (
+            ponto_da_foto(&mut ve, &editor, (0.1, 0.1)),
+            ponto_da_foto(&mut ve, &editor, (0.6, 0.6)),
+        );
+        arrastar_com(
+            &mut ve,
+            a,
+            b,
+            gpui_kit::Modifiers::none(),
+            gpui_kit::Modifiers::none(),
+        );
+        let shift_alt = gpui_kit::Modifiers {
+            shift: true,
+            alt: true,
+            ..Default::default()
+        };
+        let (a, b) = (
+            ponto_da_foto(&mut ve, &editor, (0.4, 0.05)),
+            ponto_da_foto(&mut ve, &editor, (0.95, 0.95)),
+        );
+        arrastar_com(&mut ve, a, b, shift_alt, gpui_kit::Modifiers::none());
+        let valor = |ve: &mut VisualTestContext, x: u32, y: u32| {
+            editor.read_with(ve, |ed, _| {
+                ed.sessao().unwrap().selecao().map_or(0, |s| s.valor(x, y))
+            })
+        };
+        // A foto (64×48) encaixada: 50% da largura é x = 32.
+        assert_eq!(valor(&mut ve, 32, 20), 255, "no cruzamento");
+        assert_eq!(valor(&mut ve, 10, 20), 0, "só na primeira");
+        assert_eq!(valor(&mut ve, 50, 40), 0, "só na segunda");
+        ve.simulate_keystrokes("cmd-z");
+        ve.run_until_parked();
+        assert_eq!(valor(&mut ve, 10, 20), 255, "o desfazer volta a primeira");
+
+        // Arrastar por dentro move o contorno; os pixels ficam.
+        let doc = editor.read_with(&ve, |ed, _| ed.sessao().unwrap().documento().clone());
+        let (a, b) = (
+            ponto_da_foto(&mut ve, &editor, (0.3, 0.3)),
+            ponto_da_foto(&mut ve, &editor, (0.5, 0.3)),
+        );
+        arrastar_com(
+            &mut ve,
+            a,
+            b,
+            gpui_kit::Modifiers::none(),
+            gpui_kit::Modifiers::none(),
+        );
+        assert_eq!(valor(&mut ve, 8, 20), 0, "o contorno saiu daqui");
+        assert_eq!(valor(&mut ve, 45, 20), 255, "e veio para cá");
+        editor.read_with(&ve, |ed, _| {
+            assert_eq!(ed.sessao().unwrap().documento(), &doc, "nenhum pixel andou")
+        });
+    }
+
+    /// ⇧ no arrasto faz quadrado; ⌥ desenha a partir do centro.
+    #[gpui_kit::test]
+    fn shift_e_alt_no_arrasto_fazem_quadrado_e_centro(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        ve.simulate_keystrokes("m");
+        ve.run_until_parked();
+        let shift = gpui_kit::Modifiers {
+            shift: true,
+            ..Default::default()
+        };
+        let nada = gpui_kit::Modifiers::none();
+        let limites = |ve: &mut VisualTestContext| {
+            editor.read_with(ve, |ed, _| {
+                ed.sessao().unwrap().selecao().unwrap().caixa_justa()
+            })
+        };
+        // De (10%, 10%) até (60%, 30%) da foto 64×48: sem ⇧ seria 32×10; com
+        // ⇧, o maior lado nos dois.
+        let (a, b) = (
+            ponto_da_foto(&mut ve, &editor, (0.1, 0.1)),
+            ponto_da_foto(&mut ve, &editor, (0.6, 0.3)),
+        );
+        arrastar_com(&mut ve, a, b, nada, shift);
+        let r = limites(&mut ve);
+        assert!(
+            (r.largura as i32 - r.altura as i32).abs() <= 1,
+            "quadrado: {r:?}"
+        );
+        assert!(r.largura >= 30, "{r:?}");
+
+        // ⌥: o ponto do clique é o centro.
+        let alt = gpui_kit::Modifiers {
+            alt: true,
+            ..Default::default()
+        };
+        ve.simulate_keystrokes("cmd-d");
+        let (a, b) = (
+            ponto_da_foto(&mut ve, &editor, (0.5, 0.5)),
+            ponto_da_foto(&mut ve, &editor, (0.6, 0.6)),
+        );
+        arrastar_com(&mut ve, a, b, nada, alt);
+        let r = limites(&mut ve);
+        let centro = (
+            r.x as f32 + r.largura as f32 / 2.0,
+            r.y as f32 + r.altura as f32 / 2.0,
+        );
+        assert!(
+            (centro.0 - 32.0).abs() <= 1.0 && (centro.1 - 24.0).abs() <= 1.0,
+            "{r:?}"
+        );
+        assert!(r.largura >= 11, "o dobro da distância: {r:?}");
     }
 }

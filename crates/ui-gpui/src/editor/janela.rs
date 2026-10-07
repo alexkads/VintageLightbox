@@ -53,25 +53,23 @@ use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::component::{ActiveTheme, Disableable, Sizable};
 use gpui_kit::{
     canvas, div, img, prelude::*, px, AnyElement, Bounds, Context, Entity, EventEmitter,
-    FocusHandle, Focusable, KeyUpEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ObjectFit, PathBuilder, PinchEvent, Pixels, Point, RenderImage, ScrollWheelEvent, SharedString,
-    Subscription, Task, Window,
+    FocusHandle, Focusable, KeyDownEvent, KeyUpEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, ObjectFit, PathBuilder, PinchEvent, Pixels, Point, RenderImage, ScrollWheelEvent,
+    SharedString, Subscription, Task, Window,
 };
 use image::DynamicImage;
 
+use super::giro;
 use super::porta::{Abertura, Edicoes, FotoDoEditor};
 use super::{
     Afastar, AlternarCamada, AlternarZoom, ApagarSelecao, AplicarTransformacao, Aproximar,
-    CamadaDeBaixo, CamadaDeCima, CamadaViaRecorte, CancelarTransformacao, DescerCamada,
-    DesfazerNoEditor, Desmarcar, DuplicarCamada, Encaixar, FecharEditor, InverterSelecao,
-    MesclarParaBaixo, NovaCamada, PincelMaior, PincelMenor, PreencherPeloConteudo,
-    PreencherSelecao, RefazerNoEditor, SalvarNoEditor, SegurarAMao, SelecaoEliptica, SelecaoLaco,
-    SelecaoRetangular, SelecionarTudo, SubirCamada, TransformacaoLivre, UmPorUm, UsarBorracha,
-    UsarCarimbo, UsarContaGotas, UsarCorrecao, UsarMover, UsarPincel, CONTEXTO,
-};
-use super::{CoresPadrao, DifundirSelecao, TrocarCores, UsarVarinha};
-use super::{
-    UsarDegrade, UsarDesfoque, UsarLata, UsarNitidez, UsarSubexposicao, UsarSuperexposicao,
+    CamadaDeBaixo, CamadaDeCima, CamadaViaRecorte, CancelarTransformacao, CoresPadrao,
+    DescerCamada, DesfazerNoEditor, Desmarcar, DifundirSelecao, DuplicarCamada, DurezaMaior,
+    DurezaMenor, Encaixar, FecharEditor, GrupoB, GrupoE, GrupoG, GrupoH, GrupoI, GrupoJ, GrupoL,
+    GrupoM, GrupoO, GrupoR, GrupoS, GrupoV, GrupoW, InverterSelecao, MesclarParaBaixo, NovaCamada,
+    PincelMaior, PincelMenor, PreencherPeloConteudo, PreencherSelecao, ProximaDoGrupoG,
+    ProximaDoGrupoM, ProximaDoGrupoO, RefazerNoEditor, SalvarNoEditor, SegurarAMao, SelecionarTudo,
+    SubirCamada, TransformacaoLivre, TrocarCores, UmPorUm, CONTEXTO,
 };
 use crate::campo::TrocarValor as _;
 use crate::recursos::Icone;
@@ -131,6 +129,8 @@ pub struct Medidas {
     pub ultima_borda: Option<Duration>,
     /// O último preenchimento por conteúdo, do pedido ao remendo pronto.
     pub ultimo_preenchimento: Option<Duration>,
+    /// A última montagem do palco girado (só os ladrilhos refeitos).
+    pub palco_girado: Option<Duration>,
 }
 
 /// Um segmento da borda da seleção, em pixels da foto: `(x0, y0, x1, y1)`.
@@ -161,6 +161,77 @@ pub enum Auxiliar {
     /// W — a varinha mágica: um clique seleciona a cor parecida (⇧ soma, ⌥
     /// tira).
     Varinha,
+    /// R — girar a vista: arrastar gira a foto **na tela** (⇧ de 15 em 15
+    /// graus); nenhum pixel muda. Ver `giro.rs`.
+    GirarVista,
+}
+
+/// O atalho de mostrar e esconder a camada, como a plataforma escreve.
+const MOSTRAR: &str = if cfg!(target_os = "macos") {
+    "⌘,"
+} else {
+    "Ctrl+,"
+};
+
+/// Uma ferramenta da barra: as que pintam, as de seleção e as auxiliares.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Item {
+    F(Ferramenta),
+    S(TipoDeSelecao),
+    A(Auxiliar),
+}
+
+impl Item {
+    /// A mesma ferramenta, sem olhar a faixa de tons da subexposição.
+    fn mesma(&self, outra: &Item) -> bool {
+        match (self, outra) {
+            (Item::F(a), Item::F(b)) => std::mem::discriminant(a) == std::mem::discriminant(b),
+            _ => self == outra,
+        }
+    }
+}
+
+/// Os grupos de letra do Photoshop ("Select tools", na tabela da Adobe): a
+/// letra escolhe a última usada do grupo, e ⇧ + letra passa para a seguinte.
+pub const GRUPOS: &[(char, &[Item])] = &[
+    ('v', &[Item::A(Auxiliar::Mover)]),
+    (
+        'm',
+        &[
+            Item::S(TipoDeSelecao::Retangulo),
+            Item::S(TipoDeSelecao::Elipse),
+        ],
+    ),
+    ('l', &[Item::S(TipoDeSelecao::Laco)]),
+    ('w', &[Item::A(Auxiliar::Varinha)]),
+    ('i', &[Item::A(Auxiliar::ContaGotas)]),
+    ('j', &[Item::A(Auxiliar::Correcao)]),
+    ('b', &[Item::F(Ferramenta::Pincel)]),
+    ('s', &[Item::F(Ferramenta::Carimbo)]),
+    ('e', &[Item::F(Ferramenta::Borracha)]),
+    ('g', &[Item::A(Auxiliar::Degrade), Item::A(Auxiliar::Lata)]),
+    (
+        'o',
+        &[
+            Item::F(Ferramenta::Subexposicao(
+                editor_core::pincel::Faixa::MeiosTons,
+            )),
+            Item::F(Ferramenta::Superexposicao(
+                editor_core::pincel::Faixa::MeiosTons,
+            )),
+        ],
+    ),
+    ('h', &[Item::A(Auxiliar::Mao)]),
+    ('r', &[Item::A(Auxiliar::GirarVista)]),
+];
+
+/// A letra do grupo de uma ferramenta (`None`: desfoque, nitidez e zoom não
+/// têm).
+pub fn letra_de(item: &Item) -> Option<char> {
+    GRUPOS
+        .iter()
+        .find(|(_, itens)| itens.iter().any(|i| i.mesma(item)))
+        .map(|(letra, _)| *letra)
 }
 
 /// O buraco de um preenchimento por conteúdo.
@@ -287,14 +358,40 @@ struct GestoDeSelecao {
     tipo: TipoDeSelecao,
     operacao: Operacao,
     pontos: Vec<(f32, f32)>,
+    /// ⇧ segurado no arrasto: quadrado ou círculo.
+    quadrado: bool,
+    /// ⌥ segurado no arrasto: desenha a partir do centro.
+    do_centro: bool,
 }
 
 impl GestoDeSelecao {
+    /// Os dois cantos do retângulo (ou da caixa da elipse), com ⇧ e ⌥ — as
+    /// regras "Constrain marquee to square" e "Draw marquee from center" da
+    /// tabela da Adobe.
+    fn cantos(&self) -> ((f32, f32), (f32, f32)) {
+        let a = self.pontos[0];
+        let mut b = *self.pontos.last().unwrap_or(&a);
+        if self.quadrado {
+            let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+            let lado = dx.abs().max(dy.abs());
+            b = (a.0 + lado * dx.signum(), a.1 + lado * dy.signum());
+            // `signum(0.0)` é 1 (lição da etapa 3): sem andar, fica no lugar.
+            if dx == 0.0 {
+                b.0 = a.0;
+            }
+            if dy == 0.0 {
+                b.1 = a.1;
+            }
+        }
+        if self.do_centro {
+            ((2.0 * a.0 - b.0, 2.0 * a.1 - b.1), b)
+        } else {
+            (a, b)
+        }
+    }
+
     fn forma(&self) -> Forma {
-        let (a, b) = (
-            self.pontos[0],
-            *self.pontos.last().unwrap_or(&self.pontos[0]),
-        );
+        let (a, b) = self.cantos();
         let x0 = a.0.min(b.0).max(0.0);
         let y0 = a.1.min(b.1).max(0.0);
         let caixa = Retangulo::novo(
@@ -312,10 +409,7 @@ impl GestoDeSelecao {
 
     /// O contorno para desenhar enquanto arrasta, em pixels da foto.
     fn contorno(&self) -> Vec<(f32, f32)> {
-        let (a, b) = (
-            self.pontos[0],
-            *self.pontos.last().unwrap_or(&self.pontos[0]),
-        );
+        let (a, b) = self.cantos();
         match self.tipo {
             TipoDeSelecao::Retangulo => vec![a, (b.0, a.1), b, (a.0, b.1), a],
             TipoDeSelecao::Elipse => {
@@ -330,7 +424,7 @@ impl GestoDeSelecao {
             }
             TipoDeSelecao::Laco => {
                 let mut v = self.pontos.clone();
-                v.push(a);
+                v.push(self.pontos[0]);
                 v
             }
         }
@@ -443,6 +537,37 @@ pub struct EditorDeFoto {
     /// Um preenchimento por conteúdo calculando em segundo plano.
     preenchendo: bool,
     _tarefa_do_preenchimento: Option<Task<()>>,
+    /// O giro da vista (R), em radianos — só a tela; e os ladrilhos do palco
+    /// girado.
+    giro: f32,
+    palco_girado: giro::PalcoGirado,
+    /// O arrasto da ferramenta Girar vista: o ângulo do ponteiro em volta do
+    /// centro do palco e o giro de quando começou.
+    gesto_de_giro: Option<(f32, f32)>,
+    /// O giro guardado enquanto o preenchimento modal está aberto (ele
+    /// desenha sem giro).
+    giro_antes_do_preenchimento: Option<f32>,
+    /// Fluxo, espaçamento e suavização do pincel, e a predefinição.
+    fluxo: Entity<SliderState>,
+    espacamento: Entity<SliderState>,
+    suavizacao_do_pincel: Entity<SliderState>,
+    seletor_de_predefinicao: Entity<SelectState<Vec<Opcao>>>,
+    /// Os números do teclado (opacidade; com ⇧, fluxo): o primeiro dígito e
+    /// quando chegou — "4 e 5 em seguida = 45%", como no Photoshop.
+    digito: Option<(Instant, u8, bool)>,
+    /// O ajuste rápido de tamanho e dureza arrastando (⌃⌥ + arrasto no Mac,
+    /// ⌥ + botão direito no Windows e no Linux): onde começou, o raio e a
+    /// dureza de então.
+    ajuste_rapido: Option<(Point<Pixels>, f32, f32)>,
+    /// O arrasto do contorno da seleção (só a borda, sem os pixels): onde
+    /// começou, em pixels da foto.
+    arrasto_do_contorno: Option<(f32, f32)>,
+    /// O Espaço segurado no meio do desenho de uma seleção reposiciona a forma
+    /// (a tabela da Adobe): onde o ponteiro estava quando o Espaço desceu.
+    reposicionando: Option<(f32, f32)>,
+    /// A última ferramenta de cada grupo da barra — a letra volta a ela, e ⇧ +
+    /// letra passa para a seguinte do grupo, como no Photoshop.
+    ultima_do_grupo: HashMap<char, Item>,
 }
 
 fn slider(
@@ -486,6 +611,15 @@ impl EditorDeFoto {
         let tamanho = slider(1.0, 800.0, 1.0, pincel.raio, cx);
         let dureza = slider(0.0, 100.0, 1.0, pincel.dureza * 100.0, cx);
         let opacidade = slider(1.0, 100.0, 1.0, pincel.opacidade * 100.0, cx);
+        let fluxo = slider(1.0, 100.0, 1.0, pincel.fluxo * 100.0, cx);
+        let espacamento = slider(1.0, 1000.0, 1.0, pincel.espacamento * 100.0, cx);
+        let suavizacao_do_pincel = slider(0.0, 100.0, 1.0, pincel.suavizacao * 100.0, cx);
+        let predefinicoes: Vec<Opcao> = editor_core::pincel::PREDEFINICOES
+            .iter()
+            .map(|p| Opcao::nova(p.nome, p.nome))
+            .collect();
+        let seletor_de_predefinicao =
+            cx.new(|cx| SelectState::new(predefinicoes, None, window, cx));
         let opacidade_da_camada = slider(0.0, 100.0, 1.0, 100.0, cx);
         let tolerancia_da_varinha = slider(0.0, 255.0, 1.0, 32.0, cx);
         let raio_da_selecao = slider(1.0, 100.0, 1.0, 5.0, cx);
@@ -559,7 +693,14 @@ impl EditorDeFoto {
                 ed.guardar_a_largura_do_painel(cx)
             },
         ));
-        for (estado, qual) in [(&tamanho, 0u8), (&dureza, 1), (&opacidade, 2)] {
+        for (estado, qual) in [
+            (&tamanho, 0u8),
+            (&dureza, 1),
+            (&opacidade, 2),
+            (&fluxo, 3),
+            (&espacamento, 4),
+            (&suavizacao_do_pincel, 5),
+        ] {
             assinaturas.push(cx.subscribe_in(
                 estado,
                 window,
@@ -569,13 +710,26 @@ impl EditorDeFoto {
                         match qual {
                             0 => s.pincel.raio = v.max(1.0),
                             1 => s.pincel.dureza = v / 100.0,
-                            _ => s.pincel.opacidade = v / 100.0,
+                            2 => s.pincel.opacidade = v / 100.0,
+                            3 => s.pincel.fluxo = v / 100.0,
+                            4 => s.pincel.espacamento = v / 100.0,
+                            _ => s.pincel.suavizacao = v / 100.0,
                         }
                     }
                     cx.notify();
                 },
             ));
         }
+        assinaturas.push(cx.subscribe_in(
+            &seletor_de_predefinicao,
+            window,
+            |ed: &mut Self, _e, evento: &SelectEvent<Vec<Opcao>>, window, cx| {
+                if let SelectEvent::Confirm(Some(nome)) = evento {
+                    ed.usar_predefinicao(nome, cx);
+                }
+                window.focus(&ed.foco, cx);
+            },
+        ));
         assinaturas.push(cx.subscribe_in(
             &opacidade_da_camada,
             window,
@@ -768,6 +922,19 @@ impl EditorDeFoto {
             miniaturas_das_mascaras: Vec::new(),
             preenchendo: false,
             _tarefa_do_preenchimento: None,
+            giro: 0.0,
+            palco_girado: giro::PalcoGirado::default(),
+            gesto_de_giro: None,
+            giro_antes_do_preenchimento: None,
+            fluxo,
+            espacamento,
+            suavizacao_do_pincel,
+            seletor_de_predefinicao,
+            digito: None,
+            ajuste_rapido: None,
+            arrasto_do_contorno: None,
+            reposicionando: None,
+            ultima_do_grupo: HashMap::new(),
         };
         editor.carregar(carregar_base, cx);
         editor
@@ -831,6 +998,18 @@ impl EditorDeFoto {
     /// Ampliada, passa das bordas do palco.
     pub fn area_na_janela(&self) -> Option<Bounds<Pixels>> {
         let (cena, v) = self.vista_do_zoom()?;
+        if self.giro != 0.0 {
+            // Girada, a caixa dos quatro cantos da foto.
+            let visor = self.visor()?;
+            let (x0, y0, x1, y1) = visor.caixa_na_tela(&Retangulo::inteiro(
+                cena.janela.largura as u32,
+                cena.janela.altura as u32,
+            ));
+            return Some(Bounds::new(
+                self.palco.origin + gpui_kit::point(px(x0), px(y0)),
+                gpui_kit::size(px(x1 - x0), px(y1 - y0)),
+            ));
+        }
         Some(Bounds::new(
             self.palco.origin + gpui_kit::point(px(v.x), px(v.y)),
             gpui_kit::size(
@@ -919,11 +1098,60 @@ impl EditorDeFoto {
             .map(|(cena, v)| zoom::razao_da_escala(v.escala, &cena))
     }
 
+    /// Um ponto da janela no palco, **sem o giro da vista** — o espaço em que
+    /// o zoom, a mão e a conversão para a foto trabalham.
     fn ponto_no_palco(&self, posicao: Point<Pixels>) -> Ponto {
-        Ponto {
-            x: f(posicao.x - self.palco.origin.x),
-            y: f(posicao.y - self.palco.origin.y),
+        let p = (
+            f(posicao.x - self.palco.origin.x),
+            f(posicao.y - self.palco.origin.y),
+        );
+        let (x, y) = giro::girar(
+            p,
+            (
+                f(self.palco.size.width) / 2.0,
+                f(self.palco.size.height) / 2.0,
+            ),
+            -self.giro,
+        );
+        Ponto { x, y }
+    }
+
+    /// Onde a foto está no palco, com o giro — o que o desenho usa.
+    fn visor(&self) -> Option<giro::Visor> {
+        let (cena, v) = self.vista_do_zoom()?;
+        Some(giro::Visor {
+            vx: v.x,
+            vy: v.y,
+            escala: v.escala,
+            largura: cena.area.largura,
+            altura: cena.area.altura,
+            angulo: self.giro,
+        })
+    }
+
+    /// O giro da vista, em radianos.
+    pub fn giro_da_vista(&self) -> f32 {
+        self.giro
+    }
+
+    /// Quantos ladrilhos o palco girado tem montados (0 sem giro).
+    pub fn ladrilhos_do_palco_girado(&self) -> usize {
+        self.palco_girado.ladrilhos.len()
+    }
+
+    /// Gira só a tela (R). Nenhum pixel nem dimensão da foto muda.
+    pub fn girar_a_vista(&mut self, angulo: f32, cx: &mut Context<Self>) {
+        let angulo = giro::normalizar(angulo);
+        if (angulo - self.giro).abs() > 1e-6 {
+            self.giro = if angulo.abs() < 1e-4 { 0.0 } else { angulo };
+            cx.notify();
         }
+    }
+
+    /// O ângulo do ponteiro em volta do centro do palco.
+    fn angulo_do_ponteiro(&self, posicao: Point<Pixels>) -> f32 {
+        let c = self.palco.center();
+        f(posicao.y - c.y).atan2(f(posicao.x - c.x))
     }
 
     pub fn ir_para_nivel(&mut self, nivel: Nivel, ponto: Option<Ponto>, cx: &mut Context<Self>) {
@@ -986,6 +1214,7 @@ impl EditorDeFoto {
         if !zoom::passa_da_area(&vista, &cena) {
             return;
         }
+        let (dx, dy) = giro::girar((dx, dy), (0.0, 0.0), -self.giro);
         self.zoom.centro = zoom::centro_arrastado(&vista, dx, dy, &cena);
         cx.notify();
     }
@@ -1046,6 +1275,7 @@ impl EditorDeFoto {
         let Some((desde, usado)) = self.espaco.take() else {
             return;
         };
+        self.reposicionando = None;
         if !usado && self.mao.is_none() && desde.elapsed() < Duration::from_millis(500) {
             self.alternar_zoom(cx);
         }
@@ -1085,7 +1315,13 @@ impl EditorDeFoto {
         // 🔑 Da vista do começo do gesto: somar sobre a de agora perderia
         // movimento no arrasto rápido.
         if zoom::passa_da_area(&mao.vista, &cena) {
-            let (dx, dy) = (f(posicao.x - mao.inicio.x), f(posicao.y - mao.inicio.y));
+            // O arrasto na tela, tirado o giro: a foto segue a mão mesmo com a
+            // vista girada.
+            let (dx, dy) = giro::girar(
+                (f(posicao.x - mao.inicio.x), f(posicao.y - mao.inicio.y)),
+                (0.0, 0.0),
+                -self.giro,
+            );
             self.zoom.centro = zoom::centro_arrastado(&mao.vista, dx, dy, &cena);
         }
         cx.notify();
@@ -1119,18 +1355,37 @@ impl EditorDeFoto {
         let (Some(tipo), Some(p)) = (self.selecionando, self.na_foto_sem_limite(ponto)) else {
             return;
         };
-        let operacao = if modificadores.shift {
-            Operacao::Somar
-        } else if modificadores.alt {
-            Operacao::Subtrair
-        } else {
-            Operacao::Nova
-        };
+        let operacao = operacao_dos(modificadores);
+        // Sem modificador, arrastar por dentro da seleção move **só o
+        // contorno** — o "Nova seleção" do Photoshop.
+        let dentro = self
+            .sessao()
+            .and_then(Sessao::selecao)
+            .filter(|_| operacao == Operacao::Nova)
+            .is_some_and(|sel| {
+                p.0 >= 0.0
+                    && p.1 >= 0.0
+                    && p.0 < sel.largura() as f32
+                    && p.1 < sel.altura() as f32
+                    && sel.valor(p.0 as u32, p.1 as u32) >= 128
+            });
+        if dentro {
+            if let Some(s) = self.sessao_mut() {
+                if s.comecar_a_mover_o_contorno() {
+                    self.arrasto_do_contorno = Some(p);
+                }
+            }
+            cx.notify();
+            return;
+        }
         self.gesto_de_selecao = Some(GestoDeSelecao {
             tipo,
             operacao,
             pontos: vec![p, p],
+            quadrado: false,
+            do_centro: false,
         });
+        self.reposicionando = None;
         cx.notify();
     }
 
@@ -1162,6 +1417,11 @@ impl EditorDeFoto {
             return;
         }
         match self.auxiliar {
+            Some(Auxiliar::GirarVista) => {
+                self.gesto_de_giro = Some((self.angulo_do_ponteiro(ponto), self.giro));
+                cx.notify();
+                return;
+            }
             Some(Auxiliar::ContaGotas) => {
                 self.pegando_cor = true;
                 self.pegar_cor(ponto, cx);
@@ -1229,7 +1489,58 @@ impl EditorDeFoto {
                 _ => {}
             }
         }
-        self.apertar(ponto, cx);
+        // ⇧ + clique: uma reta desde o fim do traço anterior.
+        self.apertar_e_tracar(ponto, modificadores.shift, cx);
+    }
+
+    /// Há um arrasto em curso no palco (pincel, seleção, mover, giro…): o
+    /// movimento e o soltar são ouvidos na janela inteira.
+    fn em_gesto(&self) -> bool {
+        self.pintando
+            || self.gesto_de_selecao.is_some()
+            || self.pegando_cor
+            || self.arrasto_do_mover.is_some()
+            || self.gesto_de_transformacao.is_some()
+            || self.traco_de_correcao.is_some()
+            || self.degrade_em_curso.is_some()
+            || self.gesto_de_giro.is_some()
+            || self.ajuste_rapido.is_some()
+            || self.arrasto_do_contorno.is_some()
+            || self
+                .area_do_preenchimento
+                .as_ref()
+                .is_some_and(|e| e.pincelando.is_some())
+    }
+
+    /// Uma ferramenta de pintura está na mão (o pincel de correção também).
+    fn pinta(&self) -> bool {
+        self.selecionando.is_none()
+            && (self.auxiliar.is_none() || self.auxiliar == Some(Auxiliar::Correcao))
+    }
+
+    fn comecar_ajuste_rapido(&mut self, ponto: Point<Pixels>, cx: &mut Context<Self>) {
+        if let Some(p) = self.sessao().map(|s| s.pincel) {
+            self.ajuste_rapido = Some((ponto, p.raio, p.dureza));
+            cx.notify();
+        }
+    }
+
+    /// O arrasto do ajuste rápido: um ponto da tela para a direita é um pixel
+    /// a mais de raio na tela; 200 pontos para cima, a dureza inteira.
+    fn arrastar_ajuste_rapido(&mut self, ponto: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some((inicio, raio, dureza)) = self.ajuste_rapido else {
+            return;
+        };
+        let escala = self
+            .vista_do_zoom()
+            .map_or(1.0, |(_, v)| v.escala)
+            .max(1e-3);
+        let (dx, dy) = (f(ponto.x - inicio.x), f(ponto.y - inicio.y));
+        if let Some(s) = self.sessao_mut() {
+            s.pincel.raio = (raio + dx / escala).clamp(1.0, 800.0).round();
+            s.pincel.dureza = (dureza - dy / 200.0).clamp(0.0, 1.0);
+        }
+        cx.notify();
     }
 
     // ---------------------------------------------- transformação livre
@@ -1527,7 +1838,10 @@ impl EditorDeFoto {
         } else {
             let nome = s.camada_ativa().nome.clone();
             self.aviso = Some((
-                format!("{nome} está escondida — mostre a camada (H) para movê-la").into(),
+                format!(
+                    "{nome} está escondida — mostre a camada (o olho, ou {MOSTRAR}) para movê-la"
+                )
+                .into(),
                 true,
             ));
         }
@@ -1536,6 +1850,11 @@ impl EditorDeFoto {
 
     /// O ponteiro desceu na foto.
     pub fn apertar(&mut self, ponto: Point<Pixels>, cx: &mut Context<Self>) {
+        self.apertar_e_tracar(ponto, false, cx);
+    }
+
+    /// O ponteiro desceu na foto; `em_reta` (⇧) liga ao fim do traço anterior.
+    fn apertar_e_tracar(&mut self, ponto: Point<Pixels>, em_reta: bool, cx: &mut Context<Self>) {
         if self.selecionando.is_some() {
             self.comecar_selecao(ponto, gpui_kit::Modifiers::none(), cx);
             return;
@@ -1544,10 +1863,18 @@ impl EditorDeFoto {
             return;
         };
         let inicio = Instant::now();
+        let escala = self.vista_do_zoom().map_or(1.0, |(_, v)| v.escala);
         let Some(s) = self.sessao_mut() else {
             return;
         };
-        if s.apertar(x, y) {
+        // A suavização é medida na tela: o zoom de agora.
+        s.escala_da_tela = escala;
+        let comecou = if em_reta {
+            s.apertar_em_reta(x, y)
+        } else {
+            s.apertar(x, y)
+        };
+        if comecou {
             self.pintando = true;
         } else if s.pincel.ferramenta == Ferramenta::Carimbo && s.origem().is_none() {
             self.aviso = Some((
@@ -1563,7 +1890,7 @@ impl EditorDeFoto {
         } else {
             let nome = s.camada_ativa().nome.clone();
             self.aviso = Some((
-                format!("{nome} está escondida — mostre a camada (H) para pintar nela").into(),
+                format!("{nome} está escondida — mostre a camada (o olho, ou {MOSTRAR}) para pintar nela").into(),
                 true,
             ));
         }
@@ -1585,6 +1912,31 @@ impl EditorDeFoto {
     ) {
         self.ponteiro = Some(ponto);
         if self.arrastar_no_preenchimento(ponto, modificadores, cx) {
+            return;
+        }
+        if let Some((de, giro_de_antes)) = self.gesto_de_giro {
+            let mut angulo = giro_de_antes + (self.angulo_do_ponteiro(ponto) - de);
+            if modificadores.shift {
+                angulo = giro::em_passos(angulo);
+            }
+            self.girar_a_vista(angulo, cx);
+            return;
+        }
+        if self.ajuste_rapido.is_some() {
+            self.arrastar_ajuste_rapido(ponto, cx);
+            return;
+        }
+        if let Some(inicio) = self.arrasto_do_contorno {
+            if let Some(p) = self.na_foto_sem_limite(ponto) {
+                let (dx, dy) = (
+                    (p.0 - inicio.0).round() as i64,
+                    (p.1 - inicio.1).round() as i64,
+                );
+                if let Some(s) = self.sessao_mut() {
+                    s.mover_o_contorno_por(dx, dy);
+                }
+            }
+            cx.notify();
             return;
         }
         if self.gesto_de_transformacao.is_some() {
@@ -1642,7 +1994,31 @@ impl EditorDeFoto {
         if self.gesto_de_selecao.is_some() {
             let escala = self.vista_do_zoom().map_or(1.0, |(_, v)| v.escala);
             let no_ponto = self.na_foto_sem_limite(ponto);
+            let espaco = self.espaco.is_some();
+            // Espaço segurado no meio do desenho: a forma anda inteira com o
+            // ponteiro ("Reposition marquee while selecting").
+            if let (Some(p), true) = (no_ponto, espaco) {
+                // O Espaço foi usado: soltar não alterna o zoom.
+                if let Some((_, usado)) = self.espaco.as_mut() {
+                    *usado = true;
+                }
+                let antes = self.reposicionando.replace(p);
+                if let (Some(antes), Some(gesto)) = (antes, self.gesto_de_selecao.as_mut()) {
+                    if gesto.tipo != TipoDeSelecao::Laco {
+                        let (dx, dy) = (p.0 - antes.0, p.1 - antes.1);
+                        for q in gesto.pontos.iter_mut() {
+                            q.0 += dx;
+                            q.1 += dy;
+                        }
+                    }
+                }
+                cx.notify();
+                return;
+            }
+            self.reposicionando = None;
             if let (Some(p), Some(gesto)) = (no_ponto, self.gesto_de_selecao.as_mut()) {
+                gesto.quadrado = modificadores.shift;
+                gesto.do_centro = modificadores.alt;
                 match gesto.tipo {
                     TipoDeSelecao::Laco => {
                         // Um ponto a cada 2 pontos da tela: o laço segue a mão
@@ -1684,6 +2060,17 @@ impl EditorDeFoto {
         if self.soltar_no_preenchimento(cx) {
             return;
         }
+        if self.gesto_de_giro.take().is_some() || self.ajuste_rapido.take().is_some() {
+            cx.notify();
+            return;
+        }
+        if self.arrasto_do_contorno.take().is_some() {
+            if let Some(s) = self.sessao_mut() {
+                s.terminar_de_mover_o_contorno();
+            }
+            cx.notify();
+            return;
+        }
         self.pegando_cor = false;
         if self.gesto_de_transformacao.take().is_some() {
             cx.notify();
@@ -1698,7 +2085,10 @@ impl EditorDeFoto {
             self.medidas.ultimo_gesto = Some(inicio.elapsed());
             if escondida {
                 self.aviso = Some((
-                    "A camada está escondida — mostre-a (H) para o degradê".into(),
+                    format!(
+                        "A camada está escondida — mostre-a (o olho, ou {MOSTRAR}) para o degradê"
+                    )
+                    .into(),
                     true,
                 ));
             }
@@ -1751,6 +2141,7 @@ impl EditorDeFoto {
     pub fn usar_selecao(&mut self, tipo: TipoDeSelecao, cx: &mut Context<Self>) {
         self.selecionando = Some(tipo);
         self.auxiliar = None;
+        self.lembrar_do_grupo(Item::S(tipo));
         cx.notify();
     }
 
@@ -1761,7 +2152,59 @@ impl EditorDeFoto {
         }
         self.auxiliar = Some(auxiliar);
         self.selecionando = None;
+        self.lembrar_do_grupo(Item::A(auxiliar));
         cx.notify();
+    }
+
+    /// Uma ferramenta da barra, de qualquer tipo.
+    pub fn usar_item(&mut self, item: Item, cx: &mut Context<Self>) {
+        match item {
+            Item::F(f) => self.usar(f, cx),
+            Item::S(t) => self.usar_selecao(t, cx),
+            Item::A(a) => self.usar_auxiliar(a, cx),
+        }
+    }
+
+    /// A ferramenta na mão, como item da barra.
+    pub fn item_atual(&self) -> Option<Item> {
+        if let Some(t) = self.selecionando {
+            return Some(Item::S(t));
+        }
+        if let Some(a) = self.auxiliar {
+            return Some(Item::A(a));
+        }
+        self.ferramenta().map(Item::F)
+    }
+
+    fn lembrar_do_grupo(&mut self, item: Item) {
+        if let Some(letra) = letra_de(&item) {
+            self.ultima_do_grupo.insert(letra, item);
+        }
+    }
+
+    /// A letra de um grupo: a última ferramenta usada nele; com `proxima`
+    /// (⇧ + letra), a seguinte do grupo, em volta.
+    pub fn pela_letra(&mut self, letra: char, proxima: bool, cx: &mut Context<Self>) {
+        let Some((_, itens)) = GRUPOS.iter().find(|(l, _)| *l == letra) else {
+            return;
+        };
+        let ultima = self.ultima_do_grupo.get(&letra).copied();
+        let atual = self.item_atual().filter(|i| letra_de(i) == Some(letra));
+        let mut item = ultima.unwrap_or(itens[0]);
+        if proxima {
+            let de = atual.or(ultima).unwrap_or(itens[0]);
+            let i = itens.iter().position(|x| x.mesma(&de)).unwrap_or(0);
+            item = itens[(i + 1) % itens.len()];
+        }
+        // A subexposição e a superexposição levam a faixa escolhida.
+        if let Item::F(f) = item {
+            item = Item::F(match f {
+                Ferramenta::Subexposicao(_) => Ferramenta::Subexposicao(self.faixa),
+                Ferramenta::Superexposicao(_) => Ferramenta::Superexposicao(self.faixa),
+                outra => outra,
+            });
+        }
+        self.usar_item(item, cx);
     }
 
     pub fn auxiliar(&self) -> Option<Auxiliar> {
@@ -1773,9 +2216,9 @@ impl EditorDeFoto {
     pub fn nome_da_ferramenta(&self) -> &'static str {
         if let Some(tipo) = self.selecionando {
             return match tipo {
-                TipoDeSelecao::Retangulo => "Seleção retangular (M)",
-                TipoDeSelecao::Elipse => "Seleção elíptica (⇧M)",
-                TipoDeSelecao::Laco => "Laço (L)",
+                TipoDeSelecao::Retangulo => "Seleção retangular (M) — ⇧ soma, ⌥ tira, ⇧⌥ cruza",
+                TipoDeSelecao::Elipse => "Seleção elíptica (M) — ⇧ soma, ⌥ tira, ⇧⌥ cruza",
+                TipoDeSelecao::Laco => "Laço (L) — ⇧ soma, ⌥ tira, ⇧⌥ cruza",
             };
         }
         if let Some(a) = self.auxiliar {
@@ -1784,9 +2227,12 @@ impl EditorDeFoto {
                 Auxiliar::Mover => "Mover (V)",
                 Auxiliar::Correcao => "Pincel de correção (J)",
                 Auxiliar::Degrade => "Degradê (G) — arraste do começo ao fim",
-                Auxiliar::Lata => "Lata de tinta (⇧G)",
-                Auxiliar::Varinha => "Varinha mágica (W) — ⇧ soma, ⌥ tira",
-                Auxiliar::Mao => "Mão (Espaço)",
+                Auxiliar::Lata => "Lata de tinta (G)",
+                Auxiliar::Varinha => "Varinha mágica (W) — ⇧ soma, ⌥ tira, ⇧⌥ cruza",
+                Auxiliar::Mao => "Mão (H, ou o Espaço segurado)",
+                Auxiliar::GirarVista => {
+                    "Girar vista (R) — só a tela; ⇧ de 15° em 15°, Esc volta a 0°"
+                }
                 Auxiliar::Zoom => "Zoom — clique amplia, ⌥ + clique afasta",
             };
         }
@@ -1794,9 +2240,9 @@ impl EditorDeFoto {
             Some(Ferramenta::Borracha) => "Borracha (E)",
             Some(Ferramenta::Carimbo) => "Carimbo (S) — ⌥ + clique na origem",
             Some(Ferramenta::Subexposicao(_)) => "Subexposição (O)",
-            Some(Ferramenta::Superexposicao(_)) => "Superexposição (⇧O)",
-            Some(Ferramenta::Desfoque) => "Desfoque (R)",
-            Some(Ferramenta::Nitidez) => "Nitidez (⇧R)",
+            Some(Ferramenta::Superexposicao(_)) => "Superexposição (O)",
+            Some(Ferramenta::Desfoque) => "Desfoque",
+            Some(Ferramenta::Nitidez) => "Nitidez",
             _ => "Pincel (B)",
         }
     }
@@ -1810,12 +2256,6 @@ impl EditorDeFoto {
         let mesma = |a: Ferramenta| {
             ferramenta.is_some_and(|f| std::mem::discriminant(&f) == std::mem::discriminant(&a))
         };
-        #[derive(Clone, Copy)]
-        enum Item {
-            F(Ferramenta),
-            S(TipoDeSelecao),
-            A(Auxiliar),
-        }
         let faixa = self.faixa;
         let grupos: [&[(Item, Icone, &'static str, &'static str)]; 8] = [
             &[(
@@ -1829,13 +2269,13 @@ impl EditorDeFoto {
                     Item::S(TipoDeSelecao::Retangulo),
                     Icone::Square,
                     "editor-selecao-retangulo",
-                    "Seleção retangular (M) — ⇧ soma, ⌥ tira",
+                    "Seleção retangular (M) — ⇧ soma, ⌥ tira, ⇧⌥ cruza; ⇧ no arrasto faz quadrado, ⌥ desenha do centro; arrastar dentro move só o contorno",
                 ),
                 (
                     Item::S(TipoDeSelecao::Elipse),
                     Icone::CircleDashed,
                     "editor-selecao-elipse",
-                    "Seleção elíptica (⇧M)",
+                    "Seleção elíptica (M; ⇧M alterna com a retangular)",
                 ),
                 (
                     Item::S(TipoDeSelecao::Laco),
@@ -1847,7 +2287,7 @@ impl EditorDeFoto {
                     Item::A(Auxiliar::Varinha),
                     Icone::WandSparkles,
                     "editor-varinha",
-                    "Varinha mágica (W) — clique na cor; ⇧ soma, ⌥ tira",
+                    "Varinha mágica (W) — clique na cor; ⇧ soma, ⌥ tira, ⇧⌥ cruza",
                 ),
             ],
             &[(
@@ -1867,13 +2307,13 @@ impl EditorDeFoto {
                     Item::F(Ferramenta::Pincel),
                     Icone::Paintbrush,
                     "editor-pincel",
-                    "Pincel (B)",
+                    "Pincel (B) — ⇧ + clique liga com uma reta · [ ] tamanho · { } dureza · números: opacidade, ⇧ + números: fluxo",
                 ),
                 (
                     Item::F(Ferramenta::Borracha),
                     Icone::Eraser,
                     "editor-borracha",
-                    "Borracha (E)",
+                    "Borracha (E) — ⇧ + clique liga com uma reta",
                 ),
                 (
                     Item::F(Ferramenta::Carimbo),
@@ -1887,13 +2327,13 @@ impl EditorDeFoto {
                     Item::A(Auxiliar::Degrade),
                     Icone::Gradient,
                     "editor-degrade",
-                    "Degradê (G) — arraste; ⇧ prende em 45°. Na máscara, preto → branco",
+                    "Degradê (G; ⇧G alterna com a lata) — arraste; ⇧ prende em 45°. Na máscara, preto → branco",
                 ),
                 (
                     Item::A(Auxiliar::Lata),
                     Icone::PaintBucket,
                     "editor-lata",
-                    "Lata de tinta (⇧G) — pinta a área parecida em volta do clique",
+                    "Lata de tinta (G; ⇧G alterna com o degradê) — pinta a área parecida em volta do clique",
                 ),
             ],
             &[
@@ -1901,13 +2341,13 @@ impl EditorDeFoto {
                     Item::F(Ferramenta::Desfoque),
                     Icone::Droplet,
                     "editor-desfoque",
-                    "Desfoque (R)",
+                    "Desfoque (sem atalho, como no Photoshop)",
                 ),
                 (
                     Item::F(Ferramenta::Nitidez),
                     Icone::Triangle,
                     "editor-nitidez",
-                    "Nitidez (⇧R)",
+                    "Nitidez (sem atalho, como no Photoshop)",
                 ),
             ],
             &[
@@ -1915,13 +2355,13 @@ impl EditorDeFoto {
                     Item::F(Ferramenta::Subexposicao(faixa)),
                     Icone::Sun,
                     "editor-subexposicao",
-                    "Subexposição (O) — clareia",
+                    "Subexposição (O) — clareia; ⇧O alterna com a superexposição",
                 ),
                 (
                     Item::F(Ferramenta::Superexposicao(faixa)),
                     Icone::Moon,
                     "editor-superexposicao",
-                    "Superexposição (⇧O) — escurece",
+                    "Superexposição (O; ⇧O alterna) — escurece",
                 ),
             ],
             &[
@@ -1929,7 +2369,13 @@ impl EditorDeFoto {
                     Item::A(Auxiliar::Mao),
                     Icone::Hand,
                     "editor-mao",
-                    "Mão — arrasta a foto ampliada (ou segure o Espaço)",
+                    "Mão (H) — arrasta a foto ampliada; ou segure o Espaço com qualquer ferramenta",
+                ),
+                (
+                    Item::A(Auxiliar::GirarVista),
+                    Icone::RotateCw,
+                    "editor-girar-vista",
+                    "Girar vista (R) — arraste para girar só a tela (⇧ de 15° em 15°); Esc volta a 0°. Nenhum pixel muda",
                 ),
                 (
                     Item::A(Auxiliar::Zoom),
@@ -1965,10 +2411,11 @@ impl EditorDeFoto {
                 let botao = crate::estilo::botao_icone_padrao(id, icone)
                     .debug_selector(move || id.into())
                     .tooltip(dica)
-                    .on_click(cx.listener(move |ed, _, _, cx| match item {
-                        Item::F(f) => ed.usar(f, cx),
-                        Item::S(t) => ed.usar_selecao(t, cx),
-                        Item::A(a) => ed.usar_auxiliar(a, cx),
+                    .on_click(cx.listener(move |ed, _, window, cx| {
+                        // O foco volta ao editor: as letras e os números
+                        // seguem valendo depois do clique na barra.
+                        window.focus(&ed.foco, cx);
+                        ed.usar_item(item, cx)
                     }));
                 barra = barra.child(if ativa { botao.primary() } else { botao });
             }
@@ -2049,6 +2496,7 @@ impl EditorDeFoto {
         }
         self.selecionando = None;
         self.auxiliar = None;
+        self.lembrar_do_grupo(Item::F(ferramenta));
         if let Some(s) = self.sessao_mut() {
             s.pincel.ferramenta = ferramenta;
         }
@@ -2077,6 +2525,116 @@ impl EditorDeFoto {
         self.tamanho
             .update(cx, |estado, cx| estado.set_value(novo, window, cx));
         cx.notify();
+    }
+
+    /// `{` e `}`: a dureza em passos de 25%, como no Photoshop.
+    fn mudar_dureza(&mut self, passo: f32, cx: &mut Context<Self>) {
+        if let Some(s) = self.sessao_mut() {
+            let nova = ((s.pincel.dureza + passo) / 0.25).round() * 0.25;
+            s.pincel.dureza = nova.clamp(0.0, 1.0);
+        }
+        cx.notify();
+    }
+
+    /// Uma predefinição de pincel pelo nome (o Select do painel).
+    pub fn usar_predefinicao(&mut self, nome: &str, cx: &mut Context<Self>) {
+        let Some(pre) = editor_core::pincel::PREDEFINICOES
+            .iter()
+            .find(|p| p.nome == nome)
+        else {
+            return;
+        };
+        if let Some(s) = self.sessao_mut() {
+            s.pincel = pre.aplicada(s.pincel);
+        }
+        cx.notify();
+    }
+
+    /// Os números do teclado com uma ferramenta de pintura: a opacidade (com
+    /// ⇧, o fluxo) — "1" = 10%, "0" = 100%, "4" e "5" em seguida = 45%, a regra
+    /// da tabela da Adobe. Só com o editor focado, nunca num campo de texto.
+    fn ao_apertar_tecla(&mut self, evento: &KeyDownEvent, window: &Window, cx: &mut Context<Self>) {
+        let m = evento.keystroke.modifiers;
+        if !self.foco.is_focused(window) || m.platform || m.control || m.alt || m.function {
+            return;
+        }
+        let Some(d) = evento
+            .keystroke
+            .key
+            .chars()
+            .next()
+            .filter(|c| evento.keystroke.key.len() == 1 && c.is_ascii_digit())
+            .and_then(|c| c.to_digit(10))
+        else {
+            return;
+        };
+        let pinta = self.selecionando.is_none()
+            && (self.auxiliar.is_none() || self.auxiliar == Some(Auxiliar::Correcao));
+        if !pinta {
+            return;
+        }
+        let fluxo = m.shift;
+        let agora = Instant::now();
+        let valor = match self.digito.take() {
+            Some((quando, primeiro, f))
+                if f == fluxo && agora.duration_since(quando) < Duration::from_millis(700) =>
+            {
+                (primeiro as f32 * 10.0 + d as f32) / 100.0
+            }
+            _ => {
+                self.digito = Some((agora, d as u8, fluxo));
+                if d == 0 {
+                    1.0
+                } else {
+                    d as f32 / 10.0
+                }
+            }
+        };
+        let valor = valor.clamp(0.01, 1.0);
+        if let Some(s) = self.sessao_mut() {
+            if fluxo {
+                s.pincel.fluxo = valor;
+            } else {
+                s.pincel.opacidade = valor;
+            }
+        }
+        cx.notify();
+    }
+
+    /// Os sliders do pincel acompanham o pincel (predefinição, números,
+    /// `{` `}`, o ajuste rápido arrastando).
+    fn acompanhar_o_pincel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(p) = self.sessao().map(|s| s.pincel) else {
+            return;
+        };
+        for (estado, v) in [
+            (self.tamanho.clone(), p.raio),
+            (self.dureza.clone(), p.dureza * 100.0),
+            (self.opacidade.clone(), p.opacidade * 100.0),
+            (self.fluxo.clone(), p.fluxo * 100.0),
+            (self.espacamento.clone(), p.espacamento * 100.0),
+            (self.suavizacao_do_pincel.clone(), p.suavizacao * 100.0),
+        ] {
+            if (estado.read(cx).value().start() - v).abs() > 0.5 {
+                estado.update(cx, |s, cx| s.set_value(v, window, cx));
+            }
+        }
+        // O Select mostra a predefinição só enquanto o pincel é ela.
+        let pre = editor_core::pincel::PREDEFINICOES
+            .iter()
+            .find(|pre| pre.e_a_de(&p))
+            .map(|pre| pre.nome.to_string());
+        let mostrada = self
+            .seletor_de_predefinicao
+            .read(cx)
+            .selected_value()
+            .cloned();
+        if pre != mostrada {
+            self.seletor_de_predefinicao.update(cx, |s, cx| match &pre {
+                Some(nome) => s.set_selected_value(nome, window, cx),
+                None => s.set_selected_index(None, window, cx),
+            });
+        }
     }
 
     // ------------------------------------------------------------ camadas
@@ -2312,7 +2870,10 @@ impl EditorDeFoto {
         self.medidas.ultimo_gesto = Some(inicio.elapsed());
         if escondida {
             self.aviso = Some((
-                "A camada está escondida — mostre-a (H) para pintar nela".into(),
+                format!(
+                    "A camada está escondida — mostre-a (o olho, ou {MOSTRAR}) para pintar nela"
+                )
+                .into(),
                 true,
             ));
         }
@@ -2417,7 +2978,9 @@ impl EditorDeFoto {
         s.preencher_selecao();
         self.aviso = escondida.then(|| {
             (
-                SharedString::from("A camada está escondida — mostre-a (H) para preencher"),
+                SharedString::from(format!(
+                    "A camada está escondida — mostre-a (o olho, ou {MOSTRAR}) para preencher"
+                )),
                 true,
             )
         });
@@ -2828,6 +3391,7 @@ impl EditorDeFoto {
                 let operacao = match partes.last().copied() {
                     Some("somar") => Operacao::Somar,
                     Some("subtrair") => Operacao::Subtrair,
+                    Some("cruzar") => Operacao::Intersecao,
                     _ => Operacao::Nova,
                 };
                 let caixa = || {
@@ -3032,16 +3596,20 @@ impl EditorDeFoto {
             // pincel tamanho|dureza|opacidade V (dureza e opacidade em %)
             "pincel" => {
                 let v = numero(2);
-                let (estado, valor) = match partes.get(1).copied() {
-                    Some("tamanho") => (self.tamanho.clone(), v),
-                    Some("dureza") => (self.dureza.clone(), v),
-                    _ => (self.opacidade.clone(), v),
-                };
-                estado.update(cx, |s, cx| s.set_value(valor, window, cx));
+                // pincel tamanho|dureza|opacidade|fluxo|espacamento|suavizacao V
+                // (V em %, o tamanho em px), ou pincel predefinicao <nome…>
+                if partes.get(1) == Some(&"predefinicao") {
+                    let nome = partes[2..].join(" ");
+                    self.usar_predefinicao(&nome, cx);
+                    return;
+                }
                 if let Some(s) = self.sessao_mut() {
                     match partes.get(1).copied() {
                         Some("tamanho") => s.pincel.raio = v.max(1.0),
                         Some("dureza") => s.pincel.dureza = v / 100.0,
+                        Some("fluxo") => s.pincel.fluxo = v / 100.0,
+                        Some("espacamento") => s.pincel.espacamento = v / 100.0,
+                        Some("suavizacao") => s.pincel.suavizacao = v / 100.0,
                         _ => s.pincel.opacidade = v / 100.0,
                     }
                 }
@@ -3065,6 +3633,7 @@ impl EditorDeFoto {
                 "degrade" => self.usar_auxiliar(Auxiliar::Degrade, cx),
                 "lata" => self.usar_auxiliar(Auxiliar::Lata, cx),
                 "varinha" => self.usar_auxiliar(Auxiliar::Varinha, cx),
+                "girar" => self.usar_auxiliar(Auxiliar::GirarVista, cx),
                 "subexposicao" => {
                     let faixa = self.faixa;
                     self.usar(Ferramenta::Subexposicao(faixa), cx)
@@ -3081,6 +3650,8 @@ impl EditorDeFoto {
                 }
                 outra => eprintln!("[roteiro] editor ferramenta {outra}?"),
             },
+            // giro <graus> — gira só a vista.
+            "giro" => self.girar_a_vista(numero(1).to_radians(), cx),
             "espaco" => match partes.get(1).copied() {
                 Some("segurar") => self.espaco_apertado(cx),
                 _ => self.espaco_solto(cx),
@@ -3147,6 +3718,26 @@ impl EditorDeFoto {
                         e.aviso_do_modelo
                     );
                 }
+                let pincel = self.sessao().map(|s| {
+                    let p = s.pincel;
+                    format!(
+                        "raio={:.0} dureza={:.2} opacidade={:.2} fluxo={:.2} espacamento={:.2} suavizacao={:.2}",
+                        p.raio, p.dureza, p.opacidade, p.fluxo, p.espacamento, p.suavizacao
+                    )
+                });
+                let historico = self.sessao().map(|s| {
+                    s.historico()
+                        .passos()
+                        .iter()
+                        .map(|p| p.descricao(s.documento()))
+                        .collect::<Vec<_>>()
+                        .join(" › ")
+                });
+                eprintln!(
+                    "[roteiro] editor: ferramenta={:?} giro={:.1}° pincel={pincel:?} historico={historico:?}",
+                    self.item_atual(),
+                    self.giro.to_degrees(),
+                );
                 eprintln!(
                     "[roteiro] editor: foto={} pronta={} falha={:?} alterado={} salvando={} aviso={:?} passos={} camadas=[{camadas}] zoom={} razao={:?} lupa={lupa:?} selecao={selecao:?} medidas={:?}",
                     self.foto.id,
@@ -3223,10 +3814,19 @@ impl EditorDeFoto {
             return;
         }
         let (largura, altura) = (cena.janela.largura, cena.janela.altura);
-        let x0 = (-v.x / v.escala).clamp(0.0, largura);
-        let y0 = (-v.y / v.escala).clamp(0.0, altura);
-        let x1 = ((cena.area.largura - v.x) / v.escala).clamp(0.0, largura);
-        let y1 = ((cena.area.altura - v.y) / v.escala).clamp(0.0, altura);
+        // O pedaço da foto que o palco mostra — girado, a caixa dos cantos do
+        // palco levados à foto.
+        let (x0, y0, x1, y1) = giro::Visor {
+            vx: v.x,
+            vy: v.y,
+            escala: v.escala,
+            largura: cena.area.largura,
+            altura: cena.area.altura,
+            angulo: self.giro,
+        }
+        .caixa_na_foto();
+        let (x0, y0) = (x0.clamp(0.0, largura), y0.clamp(0.0, altura));
+        let (x1, y1) = (x1.clamp(0.0, largura), y1.clamp(0.0, altura));
         let visivel = Retangulo::novo(
             x0.floor() as u32,
             y0.floor() as u32,
@@ -3280,28 +3880,45 @@ impl EditorDeFoto {
         let Fase::Pronta(sessao) = &mut self.fase else {
             return;
         };
-        let mut subidos = subir(sessao.vista_mut(), &mut self.ladrilhos);
+        let mut sujos = subir(sessao.vista_mut(), &mut self.ladrilhos);
         if let Some(lupa) = sessao.lupa_mut() {
-            subidos += subir(lupa, &mut self.ladrilhos_da_lupa);
+            sujos.extend(subir(lupa, &mut self.ladrilhos_da_lupa));
         }
-        self.medidas.ladrilhos_no_quadro = subidos;
+        self.medidas.ladrilhos_no_quadro = sujos.len();
+        // 🔄 A vista girada: os ladrilhos do palco sobre o que sujou, ou todos
+        // se o zoom, o giro, o palco ou a lupa mudaram.
+        if self.giro == 0.0 {
+            self.palco_girado.largar();
+            return;
+        }
+        for r in sujos {
+            self.palco_girado.sujar(r);
+        }
+        let Some(visor) = self.visor() else {
+            return;
+        };
+        let Fase::Pronta(sessao) = &self.fase else {
+            return;
+        };
+        let base = sessao.base();
+        let montagem = giro::Montagem {
+            visor,
+            dpr: self.dpr,
+            foto: (base.width(), base.height()),
+            vista: giro::Fonte::da_vista(sessao.vista()),
+            lupa: sessao.lupa().map(giro::Fonte::da_vista),
+        };
+        let inicio = Instant::now();
+        if self.palco_girado.atualizar(&montagem) > 0 {
+            self.medidas.palco_girado = Some(inicio.elapsed());
+        }
     }
 
     fn palco(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let fator_da_tela = window.scale_factor().max(1.0);
         let medidor = cx.entity();
         let ouvinte = cx.entity();
-        let pintando = self.pintando
-            || self.gesto_de_selecao.is_some()
-            || self.pegando_cor
-            || self.arrasto_do_mover.is_some()
-            || self.gesto_de_transformacao.is_some()
-            || self.traco_de_correcao.is_some()
-            || self.degrade_em_curso.is_some()
-            || self
-                .area_do_preenchimento
-                .as_ref()
-                .is_some_and(|e| e.pincelando.is_some());
+        let pintando = self.em_gesto();
         let com_a_mao = self.mao.is_some();
         let medida = canvas(
             move |bounds, window, cx| {
@@ -3379,12 +3996,18 @@ impl EditorDeFoto {
                         v,
                         area: cena.area,
                         fator_da_tela,
+                        angulo: self.giro,
                     };
-                    palco = palco.children(tela.ladrilhos(sessao.vista(), &self.ladrilhos));
-                    if let Some(lupa) = sessao.lupa() {
-                        palco = palco.children(tela.ladrilhos(lupa, &self.ladrilhos_da_lupa));
-                        if let Some(nitidos) = tela.pixels_nitidos(lupa) {
-                            palco = palco.child(nitidos);
+                    if self.giro != 0.0 {
+                        // 🔄 Girada: os ladrilhos do palco montados na CPU.
+                        palco = palco.children(tela.ladrilhos_girados(&self.palco_girado));
+                    } else {
+                        palco = palco.children(tela.ladrilhos(sessao.vista(), &self.ladrilhos));
+                        if let Some(lupa) = sessao.lupa() {
+                            palco = palco.children(tela.ladrilhos(lupa, &self.ladrilhos_da_lupa));
+                            if let Some(nitidos) = tela.pixels_nitidos(lupa) {
+                                palco = palco.child(nitidos);
+                            }
                         }
                     }
                     // O preenchimento aberto: a sobreposição e a prévia.
@@ -3397,7 +4020,7 @@ impl EditorDeFoto {
                         fechado.push(cantos[0]);
                         palco = palco.child(tela.contorno(fechado));
                         for (x, y) in cantos {
-                            let (sx, sy) = (v.x + x * v.escala, v.y + y * v.escala);
+                            let (sx, sy) = tela.p(x, y);
                             palco = palco.child(
                                 div()
                                     .absolute()
@@ -3413,10 +4036,7 @@ impl EditorDeFoto {
                     // O traço do pincel de correção, por onde o remendo vai passar.
                     if let Some(traco) = &self.traco_de_correcao {
                         let largura = sessao.pincel.raio * 2.0 * v.escala;
-                        let pontos: Vec<_> = traco
-                            .iter()
-                            .map(|(x, y)| (v.x + x * v.escala, v.y + y * v.escala))
-                            .collect();
+                        let pontos: Vec<_> = traco.iter().map(|(x, y)| tela.p(*x, *y)).collect();
                         palco = palco.child(
                             canvas(
                                 |_, _, _| {},
@@ -3444,8 +4064,8 @@ impl EditorDeFoto {
                     }
                     // A linha do degradê, do começo ao fim.
                     if let Some((de, ate)) = self.degrade_em_curso {
-                        let a = (v.x + de.0 * v.escala, v.y + de.1 * v.escala);
-                        let b = (v.x + ate.0 * v.escala, v.y + ate.1 * v.escala);
+                        let a = tela.p(de.0, de.1);
+                        let b = tela.p(ate.0, ate.1);
                         palco = palco.child(
                             canvas(
                                 |_, _, _| {},
@@ -3509,7 +4129,7 @@ impl EditorDeFoto {
                             .na_foto_sem_limite(ponteiro)
                             .and_then(|(x, y)| sessao.mira_do_carimbo(x, y));
                         if let Some((mx, my)) = mira {
-                            let (cx_, cy_) = (v.x + mx * v.escala, v.y + my * v.escala);
+                            let (cx_, cy_) = tela.p(mx, my);
                             for (l, a) in [(14.0, 1.5), (1.5, 14.0)] {
                                 palco = palco.child(
                                     div()
@@ -3544,6 +4164,10 @@ impl EditorDeFoto {
                     gpui_kit::CursorStyle::ClosedHand
                 } else if self.espaco.is_some() || self.auxiliar == Some(Auxiliar::Mao) {
                     gpui_kit::CursorStyle::OpenHand
+                } else if self.auxiliar == Some(Auxiliar::GirarVista) {
+                    gpui_kit::CursorStyle::PointingHand
+                } else if self.ajuste_rapido.is_some() {
+                    gpui_kit::CursorStyle::ResizeLeftRight
                 } else {
                     gpui_kit::CursorStyle::Crosshair
                 };
@@ -3562,6 +4186,20 @@ impl EditorDeFoto {
                             }
                         }),
                     )
+                    // O ajuste rápido de tamanho e dureza do Photoshop: ⌥ +
+                    // botão direito arrastando (Windows e Linux) e ⌃⌥ +
+                    // arrasto no Mac — 🚨 o GPUI do Mac **entrega o ⌃ +
+                    // clique como botão direito, sem o ⌃**, então os dois
+                    // chegam aqui como direito com ⌥.
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(|ed, evento: &MouseDownEvent, window, cx| {
+                            if evento.modifiers.alt && ed.pinta() {
+                                window.focus(&ed.foco, cx);
+                                ed.comecar_ajuste_rapido(evento.position, cx);
+                            }
+                        }),
+                    )
                     // O botão do meio é a mão também, sem o Espaço.
                     .on_mouse_down(
                         MouseButton::Middle,
@@ -3572,8 +4210,11 @@ impl EditorDeFoto {
                     .on_scroll_wheel(
                         cx.listener(|ed, e: &ScrollWheelEvent, _w, cx| ed.ao_rolar(e, cx)),
                     )
+                    // 🚨 Com um gesto em curso, quem trata o movimento é o
+                    // ouvinte da janela (com os modificadores). Tratar aqui
+                    // também, sem eles, desfazia o ⇧ do giro de 15° em 15°.
                     .on_mouse_move(cx.listener(|ed, evento: &MouseMoveEvent, _w, cx| {
-                        if !ed.pintando && ed.mao.is_none() && ed.gesto_de_selecao.is_none() {
+                        if !ed.em_gesto() && ed.mao.is_none() {
                             ed.mover(evento.position, cx);
                         }
                     }));
@@ -3908,8 +4549,42 @@ impl EditorDeFoto {
                     )
                 },
             )
+            .when(self.auxiliar == Some(Auxiliar::GirarVista), |painel| {
+                let graus = self.giro.to_degrees();
+                painel.child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .child(
+                            div()
+                                .debug_selector(|| "editor-angulo-da-vista".into())
+                                .text_xs()
+                                .child(format!("Ângulo da vista: {graus:.0}°")),
+                        )
+                        .child(div().flex_1())
+                        .child(
+                            crate::estilo::botao_fantasma_pequeno("editor-redefinir-vista", cx)
+                                .debug_selector(|| "editor-redefinir-vista".into())
+                                .label("Voltar a 0°")
+                                .tooltip("Redefinir a vista (Esc com a Girar vista na mão)")
+                                .disabled(self.giro == 0.0)
+                                .on_click(cx.listener(|ed, _, _, cx| ed.girar_a_vista(0.0, cx))),
+                        ),
+                )
+            })
             .when(pinta, |painel| {
+                let p = self.sessao().map(|s| s.pincel).unwrap_or_default();
                 painel
+                    .child(
+                        div()
+                            .debug_selector(|| "editor-predefinicao".into())
+                            .child(crate::estilo::campo_pequeno(
+                                Select::new(&self.seletor_de_predefinicao)
+                                    .xsmall()
+                                    .placeholder("Predefinição do pincel"),
+                            )),
+                    )
                     .child(rotulo("Tamanho  [  ]"))
                     .child(
                         div()
@@ -3917,20 +4592,78 @@ impl EditorDeFoto {
                             .debug_selector(|| "editor-tamanho".into())
                             .child(crate::estilo::slider(&self.tamanho)),
                     )
-                    .child(rotulo("Dureza"))
-                    .child(div().h(px(20.)).child(crate::estilo::slider(&self.dureza)))
+                    .child(rotulo("Dureza  {  }"))
+                    .child(
+                        div()
+                            .h(px(20.))
+                            .debug_selector(|| "editor-dureza".into())
+                            .child(crate::estilo::slider(&self.dureza)),
+                    )
                     .child(rotulo(match ferramenta {
                         Some(Ferramenta::Subexposicao(_) | Ferramenta::Superexposicao(_)) => {
                             "Exposição"
                         }
                         Some(Ferramenta::Desfoque | Ferramenta::Nitidez) => "Força",
-                        _ => "Opacidade do pincel",
+                        _ => "Opacidade — o teto do traço (números: 1 = 10%, 0 = 100%)",
                     }))
                     .child(
                         div()
                             .h(px(20.))
+                            .debug_selector(|| "editor-opacidade".into())
                             .child(crate::estilo::slider(&self.opacidade)),
                     )
+                    .child(
+                        div()
+                            .flex()
+                            .justify_between()
+                            .text_xs()
+                            .text_color(tema.muted_foreground)
+                            .child("Fluxo — quanto acumula por passada (⇧ + números)")
+                            .child(format!("{:.0}%", p.fluxo * 100.0)),
+                    )
+                    .child(
+                        div()
+                            .h(px(20.))
+                            .debug_selector(|| "editor-fluxo".into())
+                            .child(crate::estilo::slider(&self.fluxo)),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .justify_between()
+                            .text_xs()
+                            .text_color(tema.muted_foreground)
+                            .child("Espaçamento (% do diâmetro)")
+                            .child(format!("{:.0}%", p.espacamento * 100.0)),
+                    )
+                    .child(
+                        div()
+                            .h(px(20.))
+                            .debug_selector(|| "editor-espacamento".into())
+                            .child(crate::estilo::slider(&self.espacamento)),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .justify_between()
+                            .text_xs()
+                            .text_color(tema.muted_foreground)
+                            .child("Suavização")
+                            .child(format!("{:.0}%", p.suavizacao * 100.0)),
+                    )
+                    .child(
+                        div()
+                            .h(px(20.))
+                            .debug_selector(|| "editor-suavizacao".into())
+                            .child(crate::estilo::slider(&self.suavizacao_do_pincel)),
+                    )
+                    .child(div().text_xs().text_color(tema.muted_foreground).child(
+                        if cfg!(target_os = "macos") {
+                            "⇧ + clique: reta desde o último ponto · ⌃⌥ + arrasto: tamanho e dureza · pressão da mesa digitalizadora: ainda não lida"
+                        } else {
+                            "⇧ + clique: reta desde o último ponto · ⌥ + botão direito arrastando: tamanho e dureza · pressão da mesa digitalizadora: ainda não lida"
+                        },
+                    ))
             })
             .child(rotulo("Cor"))
             .child(
@@ -4050,9 +4783,9 @@ impl EditorDeFoto {
                 )
                 .debug_selector(move || id_do_olho.to_string())
                 .tooltip(if visivel {
-                    "Esconder a camada (H)"
+                    format!("Esconder a camada (escolhida: {MOSTRAR})")
                 } else {
-                    "Mostrar a camada (H)"
+                    format!("Mostrar a camada (escolhida: {MOSTRAR})")
                 })
                 .on_click(cx.listener(move |ed, _, _, cx| ed.alternar_visibilidade_de(i, cx)));
                 let texto: AnyElement = match &renomeando {
@@ -4492,15 +5225,29 @@ impl EditorDeFoto {
 }
 
 /// Os ladrilhos sujos de uma vista, para a GPU. Devolve quantos subiram.
-fn subir(vista: &mut VistaDoEditor, imagens: &mut HashMap<(u32, u32), Arc<RenderImage>>) -> usize {
+/// Sobe os ladrilhos sujos de uma vista e devolve onde eles estão na foto
+/// (o palco girado refaz o que cai em cima).
+fn subir(
+    vista: &mut VistaDoEditor,
+    imagens: &mut HashMap<(u32, u32), Arc<RenderImage>>,
+) -> Vec<Retangulo> {
     let sujos = vista.levar_os_sujos();
+    let (regiao, fator) = (vista.regiao(), vista.fator());
+    let mut na_foto = Vec::with_capacity(sujos.len());
     for &ladrilho in &sujos {
         let (l, a, bytes) = vista.ladrilho_bgra_com_folga(ladrilho);
         if let Some(imagem) = crate::imagem::de_bgra(l, a, bytes) {
             imagens.insert(ladrilho, imagem);
         }
+        let r = vista.retangulo_do_ladrilho(ladrilho);
+        na_foto.push(Retangulo::novo(
+            regiao.x + r.x * fator,
+            regiao.y + r.y * fator,
+            r.largura * fator,
+            r.altura * fator,
+        ));
     }
-    sujos.len()
+    na_foto
 }
 
 /// O nome da arrumação do editor (`docas-editor.json` no catálogo).
@@ -4545,14 +5292,10 @@ impl EditorDeFoto {
 }
 
 /// A operação da seleção pelos modificadores: ⇧ soma, ⌥ tira.
+/// A operação de seleção dos modificadores — a mesma no palco, na varinha e
+/// na miniatura (⌘ + clique): ⇧ soma, ⌥ tira, ⇧⌥ cruza.
 fn operacao_dos(m: gpui_kit::Modifiers) -> Operacao {
-    if m.alt {
-        Operacao::Subtrair
-    } else if m.shift {
-        Operacao::Somar
-    } else {
-        Operacao::Nova
-    }
+    Operacao::dos_modificadores(m.shift, m.alt)
 }
 
 /// Um parâmetro de ajuste com o slider dele.
@@ -4762,12 +5505,114 @@ struct Tela {
     v: zoom::Vista,
     area: MedidasDaCena,
     fator_da_tela: f32,
+    /// O giro da vista (R), em torno do centro do palco.
+    angulo: f32,
 }
 
 impl Tela {
+    /// Um pixel da foto no palco, com o giro.
+    fn p(&self, x: f32, y: f32) -> (f32, f32) {
+        giro::girar(
+            (self.v.x + x * self.v.escala, self.v.y + y * self.v.escala),
+            (self.area.largura / 2.0, self.area.altura / 2.0),
+            self.angulo,
+        )
+    }
+
+    /// Os ladrilhos do palco girado (`giro.rs`), na grade do dispositivo.
+    fn ladrilhos_girados(&self, palco: &giro::PalcoGirado) -> Vec<AnyElement> {
+        let dpr = self.fator_da_tela;
+        palco
+            .ladrilhos
+            .iter()
+            .map(|(&(lx, ly), imagem)| {
+                let tamanho = imagem.size(0);
+                let (l, a) = (
+                    i32::from(tamanho.width) as f32,
+                    i32::from(tamanho.height) as f32,
+                );
+                img(imagem.clone())
+                    .object_fit(ObjectFit::Fill)
+                    .absolute()
+                    .left(px((lx * giro::LADO) as f32 / dpr))
+                    .top(px((ly * giro::LADO) as f32 / dpr))
+                    .w(px(l / dpr))
+                    .h(px(a / dpr))
+                    .into_any_element()
+            })
+            .collect()
+    }
+
+    /// O letreiro com a vista girada: as bordas viram segmentos em qualquer
+    /// direção, recortados ao palco sem entortar, e os traços brancos seguem
+    /// cada segmento.
+    fn letreiro_girado(&self, bordas: Arc<Vec<Segmento>>) -> AnyElement {
+        let (v, area, angulo) = (self.v, self.area, self.angulo);
+        canvas(
+            |_, _, _| {},
+            move |limites, _, window, _| {
+                let tela = Tela {
+                    v,
+                    area,
+                    fator_da_tela: 1.0,
+                    angulo,
+                };
+                let (ox, oy) = (f(limites.origin.x), f(limites.origin.y));
+                let caixa = (-2.0, -2.0, area.largura + 2.0, area.altura + 2.0);
+                let mut preto = PathBuilder::stroke(px(1.5));
+                let mut branco = PathBuilder::stroke(px(1.));
+                let mut algum = false;
+                for &(x0, y0, x1, y1) in bordas.iter() {
+                    let a = tela.p(x0 as f32, y0 as f32);
+                    let b = tela.p(x1 as f32, y1 as f32);
+                    let Some((a, b)) = giro::recortar(a, b, caixa) else {
+                        continue;
+                    };
+                    algum = true;
+                    preto.move_to(gpui_kit::point(px(ox + a.0), px(oy + a.1)));
+                    preto.line_to(gpui_kit::point(px(ox + b.0), px(oy + b.1)));
+                    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+                    let comprimento = dx.hypot(dy);
+                    if comprimento <= 0.0 {
+                        continue;
+                    }
+                    let (ux, uy) = (dx / comprimento, dy / comprimento);
+                    let mut t = 0.0;
+                    while t < comprimento {
+                        let fim = (t + 4.0).min(comprimento);
+                        branco.move_to(gpui_kit::point(
+                            px(ox + a.0 + ux * t),
+                            px(oy + a.1 + uy * t),
+                        ));
+                        branco.line_to(gpui_kit::point(
+                            px(ox + a.0 + ux * fim),
+                            px(oy + a.1 + uy * fim),
+                        ));
+                        t += 8.0;
+                    }
+                }
+                if !algum {
+                    return;
+                }
+                if let Ok(caminho) = preto.build() {
+                    window.paint_path(caminho, gpui_kit::black());
+                }
+                if let Ok(caminho) = branco.build() {
+                    window.paint_path(caminho, gpui_kit::white());
+                }
+            },
+        )
+        .absolute()
+        .inset_0()
+        .into_any_element()
+    }
+
     /// O letreiro: a borda da seleção em preto, com traços brancos de 4 pontos
     /// por cima — lê sobre qualquer foto.
     fn letreiro(&self, bordas: Arc<Vec<Segmento>>) -> AnyElement {
+        if self.angulo != 0.0 {
+            return self.letreiro_girado(bordas);
+        }
         let (vx, vy, esc) = (self.v.x, self.v.y, self.v.escala);
         let area = self.area;
         canvas(
@@ -4838,14 +5683,13 @@ impl Tela {
 
     /// A forma sendo desenhada (pixels da foto), fechada.
     fn contorno(&self, pontos: Vec<(f32, f32)>) -> AnyElement {
-        let (vx, vy, esc) = (self.v.x, self.v.y, self.v.escala);
+        let na_tela: Vec<(f32, f32)> = pontos.iter().map(|(x, y)| self.p(*x, *y)).collect();
+        let pontos = na_tela;
         canvas(
             |_, _, _| {},
             move |limites, _, window, _| {
                 let (ox, oy) = (f(limites.origin.x), f(limites.origin.y));
-                let ponto = |p: &(f32, f32)| {
-                    gpui_kit::point(px(ox + vx + p.0 * esc), px(oy + vy + p.1 * esc))
-                };
+                let ponto = |p: &(f32, f32)| gpui_kit::point(px(ox + p.0), px(oy + p.1));
                 for (largura, cor) in [(2.0, gpui_kit::black()), (1.0, gpui_kit::white())] {
                     let mut traco = PathBuilder::stroke(px(largura));
                     let Some(primeiro) = pontos.first() else {
@@ -5019,6 +5863,16 @@ impl Render for EditorDeFoto {
             self.espaco = None;
             self.z_desde = None;
         }
+        // O preenchimento modal desenha sem giro; a vista volta girada depois.
+        if self.area_do_preenchimento.is_some() && self.giro != 0.0 {
+            self.giro_antes_do_preenchimento = Some(self.giro);
+            self.giro = 0.0;
+        } else if self.area_do_preenchimento.is_none() {
+            if let Some(g) = self.giro_antes_do_preenchimento.take() {
+                self.giro = g;
+            }
+        }
+        self.acompanhar_o_pincel(window, cx);
         self.atualizar_a_lupa(cx);
         self.subir_os_ladrilhos();
         self.atualizar_as_bordas();
@@ -5148,28 +6002,44 @@ impl Render for EditorDeFoto {
             .on_key_up(
                 cx.listener(|ed, evento: &KeyUpEvent, _w, cx| ed.ao_soltar_tecla(evento, cx)),
             )
+            .on_key_down(cx.listener(|ed, evento: &KeyDownEvent, window, cx| {
+                ed.ao_apertar_tecla(evento, window, cx)
+            }))
             .on_action(cx.listener(|ed, _: &DesfazerNoEditor, _, cx| ed.desfazer(cx)))
             .on_action(cx.listener(|ed, _: &RefazerNoEditor, _, cx| ed.refazer(cx)))
             .on_action(
                 cx.listener(|ed, _: &SalvarNoEditor, window, cx| ed.salvar(false, window, cx)),
             )
             .on_action(cx.listener(|ed, _: &FecharEditor, window, cx| ed.fechar(window, cx)))
-            .on_action(cx.listener(|ed, _: &UsarPincel, _, cx| ed.usar(Ferramenta::Pincel, cx)))
-            .on_action(cx.listener(|ed, _: &UsarBorracha, _, cx| ed.usar(Ferramenta::Borracha, cx)))
             .on_action(cx.listener(|ed, _: &PincelMenor, window, cx| {
                 ed.mudar_tamanho(1.0 / 1.25, window, cx)
             }))
             .on_action(
                 cx.listener(|ed, _: &PincelMaior, window, cx| ed.mudar_tamanho(1.25, window, cx)),
             )
+            .on_action(cx.listener(|ed, _: &DurezaMenor, _, cx| ed.mudar_dureza(-0.25, cx)))
+            .on_action(cx.listener(|ed, _: &DurezaMaior, _, cx| ed.mudar_dureza(0.25, cx)))
+            .on_action(cx.listener(|ed, _: &GrupoV, _, cx| ed.pela_letra('v', false, cx)))
+            .on_action(cx.listener(|ed, _: &GrupoM, _, cx| ed.pela_letra('m', false, cx)))
+            .on_action(cx.listener(|ed, _: &ProximaDoGrupoM, _, cx| ed.pela_letra('m', true, cx)))
+            .on_action(cx.listener(|ed, _: &GrupoL, _, cx| ed.pela_letra('l', false, cx)))
+            .on_action(cx.listener(|ed, _: &GrupoW, _, cx| ed.pela_letra('w', false, cx)))
+            .on_action(cx.listener(|ed, _: &GrupoI, _, cx| ed.pela_letra('i', false, cx)))
+            .on_action(cx.listener(|ed, _: &GrupoJ, _, cx| ed.pela_letra('j', false, cx)))
+            .on_action(cx.listener(|ed, _: &GrupoB, _, cx| ed.pela_letra('b', false, cx)))
+            .on_action(cx.listener(|ed, _: &GrupoS, _, cx| ed.pela_letra('s', false, cx)))
+            .on_action(cx.listener(|ed, _: &GrupoE, _, cx| ed.pela_letra('e', false, cx)))
+            .on_action(cx.listener(|ed, _: &GrupoG, _, cx| ed.pela_letra('g', false, cx)))
+            .on_action(cx.listener(|ed, _: &ProximaDoGrupoG, _, cx| ed.pela_letra('g', true, cx)))
+            .on_action(cx.listener(|ed, _: &GrupoO, _, cx| ed.pela_letra('o', false, cx)))
+            .on_action(cx.listener(|ed, _: &ProximaDoGrupoO, _, cx| ed.pela_letra('o', true, cx)))
+            .on_action(cx.listener(|ed, _: &GrupoH, _, cx| ed.pela_letra('h', false, cx)))
+            .on_action(cx.listener(|ed, _: &GrupoR, _, cx| ed.pela_letra('r', false, cx)))
             .on_action(cx.listener(|ed, _: &AlternarCamada, _, cx| ed.alternar_visibilidade(cx)))
             .on_action(cx.listener(|ed, _: &NovaCamada, _, cx| ed.nova_camada(cx)))
             .on_action(cx.listener(|ed, _: &DuplicarCamada, _, cx| ed.duplicar_camada(cx)))
             .on_action(cx.listener(|ed, _: &CamadaViaRecorte, _, cx| ed.camada_via_recorte(cx)))
             .on_action(cx.listener(|ed, _: &TransformacaoLivre, _, cx| ed.transformar(cx)))
-            .on_action(
-                cx.listener(|ed, _: &UsarCorrecao, _, cx| ed.usar_auxiliar(Auxiliar::Correcao, cx)),
-            )
             .on_action(cx.listener(|ed, _: &PreencherPeloConteudo, _, cx| {
                 ed.preencher_a_selecao_pelo_conteudo(cx)
             }))
@@ -5183,6 +6053,11 @@ impl Render for EditorDeFoto {
             .on_action(cx.listener(|ed, _: &CancelarTransformacao, _, cx| {
                 if ed.area_do_preenchimento.is_some() {
                     ed.cancelar_preenchimento(cx)
+                } else if ed.transformando() {
+                    ed.cancelar_transformacao(cx)
+                } else if ed.auxiliar == Some(Auxiliar::GirarVista) {
+                    // Esc com a Girar vista na mão: a tela volta a 0°.
+                    ed.girar_a_vista(0.0, cx)
                 } else {
                     ed.cancelar_transformacao(cx)
                 }
@@ -5202,39 +6077,6 @@ impl Render for EditorDeFoto {
             }))
             .on_action(cx.listener(|ed, _: &AlternarZoom, _, cx| ed.z_apertado(cx)))
             .on_action(cx.listener(|ed, _: &SegurarAMao, _, cx| ed.espaco_apertado(cx)))
-            .on_action(cx.listener(|ed, _: &SelecaoRetangular, _, cx| {
-                ed.usar_selecao(TipoDeSelecao::Retangulo, cx)
-            }))
-            .on_action(cx.listener(|ed, _: &SelecaoEliptica, _, cx| {
-                ed.usar_selecao(TipoDeSelecao::Elipse, cx)
-            }))
-            .on_action(
-                cx.listener(|ed, _: &SelecaoLaco, _, cx| ed.usar_selecao(TipoDeSelecao::Laco, cx)),
-            )
-            .on_action(cx.listener(|ed, _: &UsarCarimbo, _, cx| ed.usar(Ferramenta::Carimbo, cx)))
-            .on_action(cx.listener(|ed, _: &UsarContaGotas, _, cx| {
-                ed.usar_auxiliar(Auxiliar::ContaGotas, cx)
-            }))
-            .on_action(
-                cx.listener(|ed, _: &UsarMover, _, cx| ed.usar_auxiliar(Auxiliar::Mover, cx)),
-            )
-            .on_action(cx.listener(|ed, _: &UsarSubexposicao, _, cx| {
-                let faixa = ed.faixa;
-                ed.usar(Ferramenta::Subexposicao(faixa), cx)
-            }))
-            .on_action(cx.listener(|ed, _: &UsarSuperexposicao, _, cx| {
-                let faixa = ed.faixa;
-                ed.usar(Ferramenta::Superexposicao(faixa), cx)
-            }))
-            .on_action(cx.listener(|ed, _: &UsarDesfoque, _, cx| ed.usar(Ferramenta::Desfoque, cx)))
-            .on_action(cx.listener(|ed, _: &UsarNitidez, _, cx| ed.usar(Ferramenta::Nitidez, cx)))
-            .on_action(
-                cx.listener(|ed, _: &UsarDegrade, _, cx| ed.usar_auxiliar(Auxiliar::Degrade, cx)),
-            )
-            .on_action(cx.listener(|ed, _: &UsarLata, _, cx| ed.usar_auxiliar(Auxiliar::Lata, cx)))
-            .on_action(
-                cx.listener(|ed, _: &UsarVarinha, _, cx| ed.usar_auxiliar(Auxiliar::Varinha, cx)),
-            )
             .on_action(cx.listener(|ed, _: &DifundirSelecao, _, cx| ed.difundir_selecao(cx)))
             .on_action(cx.listener(|ed, _: &TrocarCores, _, cx| ed.trocar_cores(cx)))
             .on_action(cx.listener(|ed, _: &CoresPadrao, _, cx| ed.cores_padrao(cx)))

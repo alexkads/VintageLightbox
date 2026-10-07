@@ -605,7 +605,8 @@ impl EditorDeFoto {
         let pesar = |x: u32, y: u32| peso.valor(x, y);
         match s.aplicar_preenchimento(versao, &ret, &rgba, &pesar, nova) {
             Ok(()) => {
-                s.desmarcar();
+                // Um passo só: a camada (ou o remendo) e o desmarcar.
+                s.desmarcar_junto_do_ultimo();
                 self.area_do_preenchimento = None;
                 self.aviso = None;
             }

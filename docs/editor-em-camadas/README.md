@@ -37,6 +37,7 @@ Sem projeto editável, o fluxo é o de sempre: a Revelação parte do bruto.
 | [03-GRAVACAO-E-CATALOGO.md](03-GRAVACAO-E-CATALOGO.md) | O formato do projeto, os tiles, a gravação atômica, a recuperação e a tabela do catálogo |
 | [04-PLANO-ETAPA-1.md](04-PLANO-ETAPA-1.md) | O que a etapa 1 entrega, arquivo por arquivo, os testes e as medidas |
 | [05-ETAPA-2.md](05-ETAPA-2.md) | Várias camadas, os 16 modos de mesclagem, o formato 2 do projeto, zoom, mão e lupa |
+| [18-ETAPA-13.md](18-ETAPA-13.md) | Controles com o comportamento do Photoshop (parte 1): H, R (girar vista), ⇧ + letra, opacidade × fluxo, espaçamento, suavização, ⇧ + clique, interseção, seleção no desfazer, ⇧⌘J num passo; formato 6; plano das próximas |
 | [17-PREENCHIMENTO.md](17-PREENCHIMENTO.md) | Preenchimento sensível ao conteúdo: PatchMatch melhorado (medido) e IA local (LaMa), os crates `ia-local` e `preenchimento` |
 | [16-REVISAO-DA-MASCARA.md](16-REVISAO-DA-MASCARA.md) | Revisão da máscara: o contrato conferido, cores de frente e de fundo (X, D), borracha e cores em cinza na máscara |
 | [15-ETAPA-12.md](15-ETAPA-12.md) | Varinha mágica (W), ⌘ + clique na miniatura, Difundir (⇧F6), Expandir e Contrair |
@@ -176,3 +177,10 @@ cargo run --release -p ui-gpui --bin editor -- foto.NEF --catalogo /tmp/edicoes
   `foto <nome>`, `estado`, `fim`, e os da etapa 2: `camada …`, `zoom …`, `espaco segurar|soltar`
   (lista em [05-ETAPA-2.md](05-ETAPA-2.md)). No app inteiro os mesmos passos valem com o prefixo `editor`, depois de
   `tira editar N`.
+
+## Etapa 13 — controles do Photoshop, parte 1
+
+H é a Mão e R gira só a vista; ⇧ + letra alterna no grupo; ⌘/Ctrl pela plataforma. Pincel com fluxo separado da
+opacidade, espaçamento, suavização, ⇧ + clique em reta, `{` `}`, números e predefinições; a dureza revista.
+Seleção com interseção (⇧⌥), quadrado/centro, mover só o contorno, e no desfazer; ⇧⌘J num passo só. Projeto no
+formato 6. Detalhes, limitações e o plano das próximas etapas em [18-ETAPA-13.md](18-ETAPA-13.md).

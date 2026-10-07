@@ -5,6 +5,7 @@
 //! moram no `editor-core`; aqui ficam a janela, os controles e a porta das
 //! edições. O contrato com a Revelação está em `docs/editor-em-camadas/`.
 
+pub mod giro;
 pub mod janela;
 pub mod porta;
 pub mod preenchimento;
@@ -18,10 +19,10 @@ gpui_kit::actions!(
         RefazerNoEditor,
         SalvarNoEditor,
         FecharEditor,
-        UsarPincel,
-        UsarBorracha,
         PincelMenor,
         PincelMaior,
+        DurezaMenor,
+        DurezaMaior,
         AlternarCamada,
         NovaCamada,
         DuplicarCamada,
@@ -35,34 +36,38 @@ gpui_kit::actions!(
         UmPorUm,
         AlternarZoom,
         SegurarAMao,
-        SelecaoRetangular,
-        SelecaoEliptica,
-        SelecaoLaco,
         SelecionarTudo,
         Desmarcar,
         InverterSelecao,
         ApagarSelecao,
         PreencherSelecao,
         MesclarParaBaixo,
-        UsarCarimbo,
-        UsarContaGotas,
-        UsarMover,
         CamadaViaRecorte,
         TransformacaoLivre,
         AplicarTransformacao,
         CancelarTransformacao,
-        UsarCorrecao,
         PreencherPeloConteudo,
-        UsarSubexposicao,
-        UsarSuperexposicao,
-        UsarDesfoque,
-        UsarNitidez,
-        UsarDegrade,
-        UsarLata,
-        UsarVarinha,
         DifundirSelecao,
         TrocarCores,
         CoresPadrao,
+        // As letras da barra (`janela::GRUPOS`): a letra volta à última
+        // ferramenta do grupo; ⇧ + letra passa para a seguinte.
+        GrupoV,
+        GrupoM,
+        GrupoL,
+        GrupoW,
+        GrupoI,
+        GrupoJ,
+        GrupoB,
+        GrupoS,
+        GrupoE,
+        GrupoG,
+        GrupoO,
+        GrupoH,
+        GrupoR,
+        ProximaDoGrupoM,
+        ProximaDoGrupoG,
+        ProximaDoGrupoO,
     ]
 );
 
@@ -73,97 +78,106 @@ pub const CONTEXTO: &str = "EditorDeFoto";
 /// comer a letra de quem renomeia uma camada (a regra do `app.rs`).
 const SEM_CAMPO: &str = "EditorDeFoto && !Input";
 
-/// As teclas do editor — as do Photoshop para pincel (B), borracha (E),
-/// carimbo (S), conta-gotas (I), mover (V), transformação livre (⌘T, Enter,
-/// Esc), camada via cópia e via recorte (⌘J, ⇧⌘J), pincel de correção (J) e
-/// preencher a seleção pelo conteúdo (⇧⌫), subexposição e superexposição (O,
-/// ⇧O), desfoque e nitidez (R, ⇧R), degradê e lata de tinta (G, ⇧G),
-/// varinha mágica (W) e difusão da seleção (⇧F6), as cores de frente e de
-/// fundo (X troca, D volta a preto e branco),
-/// tamanho (`[` `]`) e camadas (⇧⌘N nova, ⌘J duplicar, ⌘] ⌘[ subir e descer,
-/// ⌥] ⌥[ escolher a de cima e a de baixo, ⌘E mesclar para baixo), seleção (M
-/// retângulo, ⇧M elipse, L laço, ⌘A ⌘D ⇧⌘I, Delete apaga, ⌥Delete preenche); as da Revelação para o zoom (Z,
-/// Espaço, ⌘= ⌘− ⌘0 ⌘⌥0); `Cmd`/`Ctrl` para desfazer, refazer e salvar.
+/// As teclas do editor — as do Photoshop, conferidas na tabela oficial da Adobe
+/// ("Keyboard shortcuts", PDF do helpx, 07/out/2026):
 ///
-/// 🔑 **Com `Ctrl` também**: o balcão roda Windows e Linux, onde desfazer é
-/// `Ctrl+Z` e mais nada (a mesma regra do `app.rs`).
+/// - ferramentas por letra: Mover (V), seleção retangular/elíptica (M), laço
+///   (L), varinha (W), conta-gotas (I), pincel de correção (J), pincel (B),
+///   carimbo (S), borracha (E), degradê/lata (G), subexposição/superexposição
+///   (O), Mão (H) e Girar vista (R). **⇧ + letra passa para a ferramenta
+///   seguinte do mesmo grupo** ("Use Shift Key for Tool Switch", o padrão de
+///   lá). Desfoque e nitidez não têm letra — no Photoshop também não;
+/// - Espaço segurado: a Mão, e a ferramenta volta ao soltar;
+/// - tamanho `[` `]`, dureza `{` `}` (⇧[ ⇧]); os números dão a opacidade e ⇧ +
+///   números o fluxo (tratados na janela, fora de campo de texto);
+/// - X troca as cores, D volta a preto e branco, ⇧F6 difunde a seleção;
+/// - camadas: ⇧⌘N nova, ⌘J via cópia, ⇧⌘J via recorte, ⌘] ⌘[ subir e descer,
+///   ⌥] ⌥[ a de cima e a de baixo, ⌘E mesclar para baixo, ⌘, mostrar/esconder
+///   (o menu "Ocultar camadas" do Photoshop; ⚠️ não está na tabela em PDF);
+/// - seleção: ⌘A ⌘D ⇧⌘I, Delete apaga, ⌥Delete preenche, ⇧Delete preenche
+///   pelo conteúdo; ⌘T transformação livre, Enter confirma, Esc cancela;
+/// - zoom: ⌘= ⌘− ⌘0 ⌘⌥0, e o Z da Revelação (alterna encaixe e 100%; no
+///   Photoshop o Z é a ferramenta Zoom — diferença mantida de propósito).
+///
+/// 🔑 **`secondary`** é o ⌘ no macOS e o Ctrl no Windows e no Linux — a regra da
+/// plataforma, sem o Ctrl fazendo as vezes do ⌘ no Mac. O balcão roda Windows
+/// e Linux; ali o Ctrl+Y também refaz.
 pub fn init(cx: &mut gpui_kit::App) {
     use gpui_kit::KeyBinding;
     let c = Some(CONTEXTO);
     let solta = Some(SEM_CAMPO);
     cx.bind_keys([
-        KeyBinding::new("cmd-shift-z", RefazerNoEditor, c),
-        KeyBinding::new("cmd-z", DesfazerNoEditor, c),
-        KeyBinding::new("ctrl-shift-z", RefazerNoEditor, c),
-        KeyBinding::new("ctrl-y", RefazerNoEditor, c),
-        KeyBinding::new("ctrl-z", DesfazerNoEditor, c),
-        KeyBinding::new("cmd-s", SalvarNoEditor, c),
-        KeyBinding::new("ctrl-s", SalvarNoEditor, c),
-        KeyBinding::new("cmd-w", FecharEditor, c),
-        KeyBinding::new("ctrl-w", FecharEditor, c),
-        KeyBinding::new("b", UsarPincel, solta),
-        KeyBinding::new("e", UsarBorracha, solta),
+        KeyBinding::new("secondary-shift-z", RefazerNoEditor, c),
+        KeyBinding::new("secondary-z", DesfazerNoEditor, c),
+        KeyBinding::new("secondary-s", SalvarNoEditor, c),
+        KeyBinding::new("secondary-w", FecharEditor, c),
         KeyBinding::new("[", PincelMenor, solta),
         KeyBinding::new("]", PincelMaior, solta),
-        KeyBinding::new("h", AlternarCamada, solta),
-        KeyBinding::new("cmd-shift-n", NovaCamada, c),
-        KeyBinding::new("ctrl-shift-n", NovaCamada, c),
-        KeyBinding::new("cmd-j", DuplicarCamada, c),
-        KeyBinding::new("ctrl-j", DuplicarCamada, c),
-        KeyBinding::new("cmd-]", SubirCamada, c),
-        KeyBinding::new("ctrl-]", SubirCamada, c),
-        KeyBinding::new("cmd-[", DescerCamada, c),
-        KeyBinding::new("ctrl-[", DescerCamada, c),
+        KeyBinding::new("shift-[", DurezaMenor, solta),
+        KeyBinding::new("shift-]", DurezaMaior, solta),
+        KeyBinding::new("{", DurezaMenor, solta),
+        KeyBinding::new("}", DurezaMaior, solta),
+        KeyBinding::new("secondary-,", AlternarCamada, c),
+        KeyBinding::new("secondary-shift-n", NovaCamada, c),
+        KeyBinding::new("secondary-j", DuplicarCamada, c),
+        KeyBinding::new("secondary-]", SubirCamada, c),
+        KeyBinding::new("secondary-[", DescerCamada, c),
         KeyBinding::new("alt-]", CamadaDeCima, solta),
         KeyBinding::new("alt-[", CamadaDeBaixo, solta),
-        KeyBinding::new("cmd-=", Aproximar, c),
-        KeyBinding::new("cmd-+", Aproximar, c),
-        KeyBinding::new("ctrl-=", Aproximar, c),
-        KeyBinding::new("ctrl-+", Aproximar, c),
-        KeyBinding::new("cmd--", Afastar, c),
-        KeyBinding::new("ctrl--", Afastar, c),
-        KeyBinding::new("cmd-0", Encaixar, c),
-        KeyBinding::new("ctrl-0", Encaixar, c),
-        KeyBinding::new("cmd-alt-0", UmPorUm, c),
-        KeyBinding::new("ctrl-alt-0", UmPorUm, c),
+        KeyBinding::new("secondary-=", Aproximar, c),
+        KeyBinding::new("secondary-+", Aproximar, c),
+        KeyBinding::new("secondary--", Afastar, c),
+        KeyBinding::new("secondary-0", Encaixar, c),
+        KeyBinding::new("secondary-alt-0", UmPorUm, c),
         KeyBinding::new("z", AlternarZoom, solta),
         KeyBinding::new("space", SegurarAMao, solta),
-        KeyBinding::new("m", SelecaoRetangular, solta),
-        KeyBinding::new("shift-m", SelecaoEliptica, solta),
-        KeyBinding::new("l", SelecaoLaco, solta),
-        KeyBinding::new("cmd-a", SelecionarTudo, c),
-        KeyBinding::new("ctrl-a", SelecionarTudo, c),
-        KeyBinding::new("cmd-d", Desmarcar, c),
-        KeyBinding::new("ctrl-d", Desmarcar, c),
-        KeyBinding::new("cmd-shift-i", InverterSelecao, c),
-        KeyBinding::new("ctrl-shift-i", InverterSelecao, c),
+        KeyBinding::new("secondary-a", SelecionarTudo, c),
+        KeyBinding::new("secondary-d", Desmarcar, c),
+        KeyBinding::new("secondary-shift-i", InverterSelecao, c),
         KeyBinding::new("backspace", ApagarSelecao, solta),
         KeyBinding::new("delete", ApagarSelecao, solta),
         KeyBinding::new("alt-backspace", PreencherSelecao, solta),
         KeyBinding::new("alt-delete", PreencherSelecao, solta),
-        KeyBinding::new("s", UsarCarimbo, solta),
-        KeyBinding::new("i", UsarContaGotas, solta),
-        KeyBinding::new("v", UsarMover, solta),
-        KeyBinding::new("cmd-shift-j", CamadaViaRecorte, c),
-        KeyBinding::new("ctrl-shift-j", CamadaViaRecorte, c),
-        KeyBinding::new("cmd-t", TransformacaoLivre, c),
-        KeyBinding::new("ctrl-t", TransformacaoLivre, c),
+        KeyBinding::new("secondary-shift-j", CamadaViaRecorte, c),
+        KeyBinding::new("secondary-t", TransformacaoLivre, c),
         KeyBinding::new("enter", AplicarTransformacao, solta),
         KeyBinding::new("escape", CancelarTransformacao, solta),
-        KeyBinding::new("j", UsarCorrecao, solta),
-        KeyBinding::new("o", UsarSubexposicao, solta),
-        KeyBinding::new("shift-o", UsarSuperexposicao, solta),
-        KeyBinding::new("r", UsarDesfoque, solta),
-        KeyBinding::new("shift-r", UsarNitidez, solta),
-        KeyBinding::new("g", UsarDegrade, solta),
-        KeyBinding::new("shift-g", UsarLata, solta),
-        KeyBinding::new("w", UsarVarinha, solta),
         KeyBinding::new("x", TrocarCores, solta),
         KeyBinding::new("d", CoresPadrao, solta),
         KeyBinding::new("shift-f6", DifundirSelecao, solta),
         KeyBinding::new("shift-backspace", PreencherPeloConteudo, solta),
         KeyBinding::new("shift-delete", PreencherPeloConteudo, solta),
-        KeyBinding::new("cmd-e", MesclarParaBaixo, c),
-        KeyBinding::new("ctrl-e", MesclarParaBaixo, c),
+        KeyBinding::new("secondary-e", MesclarParaBaixo, c),
+        // As letras e ⇧ + letra. No grupo de uma ferramenta só, ⇧ + letra
+        // escolhe a mesma.
+        KeyBinding::new("v", GrupoV, solta),
+        KeyBinding::new("shift-v", GrupoV, solta),
+        KeyBinding::new("m", GrupoM, solta),
+        KeyBinding::new("shift-m", ProximaDoGrupoM, solta),
+        KeyBinding::new("l", GrupoL, solta),
+        KeyBinding::new("shift-l", GrupoL, solta),
+        KeyBinding::new("w", GrupoW, solta),
+        KeyBinding::new("shift-w", GrupoW, solta),
+        KeyBinding::new("i", GrupoI, solta),
+        KeyBinding::new("shift-i", GrupoI, solta),
+        KeyBinding::new("j", GrupoJ, solta),
+        KeyBinding::new("shift-j", GrupoJ, solta),
+        KeyBinding::new("b", GrupoB, solta),
+        KeyBinding::new("shift-b", GrupoB, solta),
+        KeyBinding::new("s", GrupoS, solta),
+        KeyBinding::new("shift-s", GrupoS, solta),
+        KeyBinding::new("e", GrupoE, solta),
+        KeyBinding::new("shift-e", GrupoE, solta),
+        KeyBinding::new("g", GrupoG, solta),
+        KeyBinding::new("shift-g", ProximaDoGrupoG, solta),
+        KeyBinding::new("o", GrupoO, solta),
+        KeyBinding::new("shift-o", ProximaDoGrupoO, solta),
+        KeyBinding::new("h", GrupoH, solta),
+        KeyBinding::new("shift-h", GrupoH, solta),
+        KeyBinding::new("r", GrupoR, solta),
+        KeyBinding::new("shift-r", GrupoR, solta),
     ]);
+    if !cfg!(target_os = "macos") {
+        cx.bind_keys([KeyBinding::new("ctrl-y", RefazerNoEditor, c)]);
+    }
 }
