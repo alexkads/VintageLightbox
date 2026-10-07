@@ -1,13 +1,15 @@
 {
-  "versao": "0.1.108",
-  "titulo": "O Preenchimento sensível ao conteúdo virou um espaço próprio, como no Photoshop, e só calcula quando você pede.",
+  "versao": "0.1.109",
+  "titulo": "Editar Foto ficou com os controles do Photoshop: atalhos, fluxo do pincel, girar a vista e seleção mais completa.",
   "importante": false,
   "novidades": [
-    "O Preenchimento sensível ao conteúdo abre num espaço próprio: a foto com o pincel à esquerda, a Visualização no meio (Antes e Depois) e os ajustes à direita.",
-    "Nada é calculado ao abrir: escolha o método e os ajustes e clique em Visualizar (ou Enter). Mudou algum ajuste? A visualização sai e o Aplicar espera um novo Visualizar.",
-    "As últimas escolhas do preenchimento (método, processamento, margem, suavização e \"camada nova\") ficam gravadas e voltam na próxima vez.",
-    "Enquanto ele está aberto, o resto do editor fica fora de alcance — o que se aplica é exatamente o que foi visualizado.",
-    "No Linux com GNOME, a janela do editor ganhou a barra com minimizar, maximizar e fechar; o fechar pergunta antes de descartar alterações."
+    "Atenção, atalhos novos: H agora é a Mão e R gira a vista. Esconder ou mostrar a camada passou para ⌘, (Ctrl+, no Windows e no Linux), além do olho no painel. Desfoque e nitidez ficaram sem letra, como no Photoshop.",
+    "⇧ + letra alterna as ferramentas do mesmo grupo (M: retangular e elíptica, G: degradê e lata, O: subexposição e superexposição), e a letra volta à última usada.",
+    "Girar vista (R): arraste para girar só a tela, com ⇧ de 15° em 15°; Esc volta a 0°. A foto não muda.",
+    "Pincel com fluxo separado da opacidade, espaçamento, suavização e predefinições. Os números mudam a opacidade (4 e 5 = 45%), ⇧ + números o fluxo, { } a dureza, e ⇧ + clique liga com uma reta ao último ponto.",
+    "A dureza do pincel agora vai suave até a borda (antes, com dureza intermediária, a borda tinha um degrau).",
+    "Seleção: ⇧⌥ cruza com a anterior, ⇧ no arrasto faz quadrado, ⌥ desenha do centro, o Espaço reposiciona e arrastar por dentro move só o contorno. Cada seleção entra no Desfazer.",
+    "Camada via recorte (⇧⌘J) e o Preenchimento sensível ao conteúdo se desfazem com um ⌘Z só."
   ],
-  "por_que_atualizar": "Para ajustar o preenchimento com calma e ver o resultado antes de aplicar."
+  "por_que_atualizar": "Para editar com os gestos e atalhos de quem já usa o Photoshop."
 }

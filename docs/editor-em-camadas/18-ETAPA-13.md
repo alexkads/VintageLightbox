@@ -185,5 +185,27 @@ falham antes, roteiro no app real).
 - A suavização no Photoshop tem outros modos além do cordão (e "alcançar no fim do traço"); aqui só o cordão.
 - Com a vista girada, o encaixe (⌘0) não considera o giro: cantos da foto podem sair do palco, como no
   Photoshop.
-- Conferido no harness e nos testes do núcleo no macOS; o app real foi conferido no macOS (ver o registro da
-  etapa no commit). Windows e Linux: só compilação (contêiner), sem gesto real.
+- Ajuste rápido arrastando no Mac: o GPUI entrega o ⌃ + clique como **botão direito sem o ⌃** — por isso o
+  gesto é tratado como "direito com ⌥" nas três plataformas (o ⌥ + direito também funciona no Mac).
+
+## Conferido no app real (macOS, 07/out/2026)
+
+O editor avulso (`--bin editor`, perfil `carga`) numa foto de 5020×4016, com teclas e cliques **nativos do AppKit**
+pelo roteiro (`tecla`, `mouse`), e as capturas da janela olhadas uma a uma:
+
+- H → Mão, R → Girar vista; arrasto com ⇧ parou em **90,0°** exatos; Esc voltou a 0°; nenhum passo no histórico e
+  "sem alterações". Palco girado inteiro em **22,7 ms**; refeito só onde o pincel sujou em **10 ms**. Pintar com a
+  vista a 18,9° caiu sob o cursor, e a borda da foto girada sai lisa.
+- "4" e "5" → opacidade 45%; ⇧3 → fluxo 30%; "0" → 100%. ⌃⌥ + arrasto mudou tamanho e dureza.
+- ⇧ + clique ligou as retas exatamente nos pontos; cada clique é um passo.
+- ⇧⌥ cruzou a seleção, arrastar por dentro moveu o contorno ("Mover seleção"), ⌘Z ⌘Z voltou os dois, ⇧M passou
+  para a elíptica, ⌘, escondeu e mostrou a camada.
+
+**Dois defeitos que o harness não pegava**, achados nessa rodada e corrigidos:
+1. **Clique mais rápido que um quadro perdia o soltar** — o ouvinte da janela só existe depois do quadro seguinte
+   ao apertar; o traço ficava aberto até o gesto seguinte. O palco passou a ouvir o soltar também.
+2. **⇧3 chegava como "#" e sem o ⇧** no GPUI do Mac — virava opacidade. O símbolo da fila dos números vale ⇧ +
+   número (americano e ABNT2).
+
+**Windows e Linux**: só compilação (`cargo check` do `ui-gpui` num contêiner Debian); nenhum gesto real nesses
+sistemas.
