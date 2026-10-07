@@ -1,12 +1,12 @@
 {
-  "versao": "0.1.103",
-  "titulo": "Editar Foto ganhou as camadas de ajuste: Brilho/Contraste, Níveis, Matiz/Saturação e Inverter.",
+  "versao": "0.1.104",
+  "titulo": "Editar Foto ganhou a varinha mágica e os comandos de seleção do Photoshop.",
   "importante": false,
   "novidades": [
-    "O botão de ajuste embaixo das Camadas cria uma camada que muda a cor de tudo o que está abaixo dela, sem mexer em nenhum pixel: dá para voltar atrás a qualquer hora.",
-    "Os controles do ajuste aparecem no topo do painel. Cada arrasto de controle é um passo só no desfazer, e a foto acompanha o arrasto sem travar.",
-    "Cada camada de ajuste nasce com máscara: pinte de preto onde o ajuste não deve valer. Com uma seleção feita, ela já nasce só ali.",
-    "O rodapé das Camadas ficou como o do Photoshop: duplicar, subir, descer e mesclar estão no menu ⋯."
+    "Varinha mágica (W): um clique seleciona a cor parecida em volta. A tolerância e o \"Contígua\" ficam nas opções; ⇧ + clique soma e ⌥ + clique tira.",
+    "⌘ + clique na miniatura de uma camada seleciona o que ela tem pintado; na miniatura da máscara, o que a máscara revela.",
+    "Com uma seleção feita, aparecem Difundir (⇧F6), Expandir e Contrair, com o raio em pixels.",
+    "Junto com as camadas de ajuste: selecione um colete com a varinha, difunda a borda e crie um Matiz/Saturação — só o colete muda."
   ],
-  "por_que_atualizar": "Para clarear um rosto, tirar a cor de um fundo ou corrigir os tons de uma parte da foto sem estragar o original."
+  "por_que_atualizar": "Para escolher uma parte da foto pela cor e mexer só nela, com a borda suave."
 }

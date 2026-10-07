@@ -1254,6 +1254,78 @@ mod testes {
         assert!(ve.debug_bounds("editor-propriedades").is_none());
     }
 
+    /// 🪄 A varinha (W) e os modificadores, a tolerância e o contíguo nas
+    /// opções, o ⌘ + clique na miniatura, e Difundir/Expandir/Contrair.
+    #[gpui_kit::test]
+    fn a_varinha_e_os_comandos_de_selecao_pela_tela(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        // Um retângulo azul pintado na camada: a varinha o pega inteiro.
+        editor.update(&mut ve, |ed, cx| {
+            ed.na_sessao_para_teste(cx, |s| {
+                s.selecionar(
+                    &editor_core::Forma::Retangulo(editor_core::Retangulo::novo(10, 10, 20, 20)),
+                    editor_core::Operacao::Nova,
+                );
+                s.pincel.cor = [0, 0, 255];
+                s.preencher_selecao();
+                s.desmarcar();
+            })
+        });
+        ve.simulate_keystrokes("w");
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.auxiliar()),
+            Some(crate::editor::janela::Auxiliar::Varinha)
+        );
+        assert!(ve.debug_bounds("editor-tolerancia").is_some());
+        assert!(ve.debug_bounds("editor-contigua").is_some());
+        let foto = editor.read_with(&ve, |ed, _| ed.area_na_janela().unwrap());
+        let (l, a) = editor.read_with(&ve, |ed, _| {
+            let b = ed.sessao().unwrap().base();
+            (b.width() as f32, b.height() as f32)
+        });
+        let na_foto = |x: f32, y: f32| {
+            foto.origin + gpui_kit::point(foto.size.width * (x / l), foto.size.height * (y / a))
+        };
+        ve.simulate_click(na_foto(20.0, 20.0), gpui_kit::Modifiers::none());
+        ve.run_until_parked();
+        let limites = |ve: &mut VisualTestContext| {
+            editor.read_with(ve, |ed, _| {
+                ed.sessao().unwrap().selecao().map(|s| s.limites())
+            })
+        };
+        let valor = |ve: &mut VisualTestContext, x: u32, y: u32| {
+            editor.read_with(ve, |ed, _| {
+                ed.sessao().unwrap().selecao().map_or(0, |s| s.valor(x, y))
+            })
+        };
+        assert_eq!((valor(&mut ve, 15, 15), valor(&mut ve, 5, 5)), (255, 0));
+        assert!(limites(&mut ve).is_some());
+        // ⌥ + clique no mesmo azul tira tudo.
+        ve.simulate_click(na_foto(20.0, 20.0), gpui_kit::Modifiers::alt());
+        ve.run_until_parked();
+        assert!(limites(&mut ve).is_none());
+
+        // ⌘ + clique na miniatura: o alfa da camada, sem trocar a escolhida.
+        let miniatura = ve.debug_bounds("editor-miniatura-0").unwrap();
+        ve.simulate_click(miniatura.center(), gpui_kit::Modifiers::secondary_key());
+        ve.run_until_parked();
+        assert_eq!((valor(&mut ve, 15, 15), valor(&mut ve, 5, 5)), (255, 0));
+
+        // Os comandos aparecem com a seleção; Expandir e Difundir mexem na borda.
+        assert!(ve.debug_bounds("editor-difundir").is_some());
+        clicar_no_editor(&mut ve, "editor-expandir");
+        assert_eq!(valor(&mut ve, 6, 15), 255, "expandiu 5 px");
+        clicar_no_editor(&mut ve, "editor-contrair");
+        assert_eq!(valor(&mut ve, 6, 15), 0);
+        assert_eq!(valor(&mut ve, 10, 15), 255);
+        ve.simulate_keystrokes("shift-f6");
+        ve.run_until_parked();
+        let borda = valor(&mut ve, 10, 15);
+        assert!(borda > 0 && borda < 255, "a difusão fez rampa ({borda})");
+    }
+
     fn arrastar_no_palco(ve: &mut VisualTestContext, de: (f32, f32), ate: (f32, f32)) {
         let palco = ve.debug_bounds("palco-do-editor").unwrap();
         let ponto = |f: (f32, f32)| {

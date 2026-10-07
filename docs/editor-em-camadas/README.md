@@ -37,6 +37,7 @@ Sem projeto editável, o fluxo é o de sempre: a Revelação parte do bruto.
 | [03-GRAVACAO-E-CATALOGO.md](03-GRAVACAO-E-CATALOGO.md) | O formato do projeto, os tiles, a gravação atômica, a recuperação e a tabela do catálogo |
 | [04-PLANO-ETAPA-1.md](04-PLANO-ETAPA-1.md) | O que a etapa 1 entrega, arquivo por arquivo, os testes e as medidas |
 | [05-ETAPA-2.md](05-ETAPA-2.md) | Várias camadas, os 16 modos de mesclagem, o formato 2 do projeto, zoom, mão e lupa |
+| [15-ETAPA-12.md](15-ETAPA-12.md) | Varinha mágica (W), ⌘ + clique na miniatura, Difundir (⇧F6), Expandir e Contrair |
 | [14-ETAPA-11.md](14-ETAPA-11.md) | Camadas de ajuste (Brilho/Contraste, Níveis, Matiz/Saturação, Inverter), Propriedades e o rodapé do Photoshop; formato 5 |
 | [13-ETAPA-10.md](13-ETAPA-10.md) | Máscara de camada, degradê (G) e lata de tinta (⇧G); projeto no formato 4 |
 | [12-ETAPA-9.md](12-ETAPA-9.md) | A barra de ferramentas vertical à esquerda, como no Photoshop, com Mão e Zoom |
@@ -108,6 +109,11 @@ o degradê (G) e a lata de tinta (⇧G), nos pixels e na máscara. Projeto no fo
 
 Camadas de ajuste com máscara, as Propriedades no topo do painel, a vista em rascunho durante o arrasto e o rodapé
 das Camadas como o do Photoshop. Projeto no formato 5. Detalhes em [14-ETAPA-11.md](14-ETAPA-11.md).
+
+## Etapa 12 (0.1.104) — entregue
+
+Varinha mágica com tolerância e contígua, a seleção pela miniatura (⌘ + clique) e os comandos de modificar a seleção
+(Difundir, Expandir, Contrair). Detalhes em [15-ETAPA-12.md](15-ETAPA-12.md).
 
 ## Onde mora o código
 

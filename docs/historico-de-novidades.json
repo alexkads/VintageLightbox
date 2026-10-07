@@ -1,5 +1,18 @@
 [
   {
+    "versao": "0.1.104",
+    "data": "2026-10-06",
+    "titulo": "Editar Foto ganhou a varinha mágica e os comandos de seleção do Photoshop.",
+    "importante": false,
+    "novidades": [
+      "Varinha mágica (W): um clique seleciona a cor parecida em volta. A tolerância e o \"Contígua\" ficam nas opções; ⇧ + clique soma e ⌥ + clique tira.",
+      "⌘ + clique na miniatura de uma camada seleciona o que ela tem pintado; na miniatura da máscara, o que a máscara revela.",
+      "Com uma seleção feita, aparecem Difundir (⇧F6), Expandir e Contrair, com o raio em pixels.",
+      "Junto com as camadas de ajuste: selecione um colete com a varinha, difunda a borda e crie um Matiz/Saturação — só o colete muda."
+    ],
+    "por_que_atualizar": "Para escolher uma parte da foto pela cor e mexer só nela, com a borda suave."
+  },
+  {
     "versao": "0.1.103",
     "data": "2026-10-06",
     "titulo": "Editar Foto ganhou as camadas de ajuste: Brilho/Contraste, Níveis, Matiz/Saturação e Inverter.",

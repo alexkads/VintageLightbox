@@ -66,6 +66,7 @@ use super::{
     SelecaoRetangular, SelecionarTudo, SubirCamada, TransformacaoLivre, UmPorUm, UsarBorracha,
     UsarCarimbo, UsarContaGotas, UsarCorrecao, UsarMover, UsarPincel, CONTEXTO,
 };
+use super::{DifundirSelecao, UsarVarinha};
 use super::{
     UsarDegrade, UsarDesfoque, UsarLata, UsarNitidez, UsarSubexposicao, UsarSuperexposicao,
 };
@@ -154,6 +155,9 @@ pub enum Auxiliar {
     Degrade,
     /// ⇧G — a lata de tinta: um clique pinta a área parecida em volta.
     Lata,
+    /// W — a varinha mágica: um clique seleciona a cor parecida (⇧ soma, ⌥
+    /// tira).
+    Varinha,
 }
 
 /// O buraco de um preenchimento por conteúdo.
@@ -371,6 +375,11 @@ pub struct EditorDeFoto {
     /// Um slider por parâmetro de ajuste ([`PARAMETROS_DE_AJUSTE`]); o painel
     /// mostra os do ajuste escolhido.
     ajustes: Vec<Entity<SliderState>>,
+    /// A tolerância da varinha (0–255; 32 no Photoshop) e se ela é contígua.
+    tolerancia_da_varinha: Entity<SliderState>,
+    varinha_contigua: bool,
+    /// O raio, em pixels, da difusão, do expandir e do contrair.
+    raio_da_selecao: Entity<SliderState>,
     modo: Entity<SelectState<Vec<Opcao>>>,
     /// O modo que o Select mostra — para só mexer nele quando mudar.
     modo_mostrado: Option<Modo>,
@@ -456,6 +465,8 @@ impl EditorDeFoto {
         let dureza = slider(0.0, 100.0, 1.0, pincel.dureza * 100.0, cx);
         let opacidade = slider(1.0, 100.0, 1.0, pincel.opacidade * 100.0, cx);
         let opacidade_da_camada = slider(0.0, 100.0, 1.0, 100.0, cx);
+        let tolerancia_da_varinha = slider(0.0, 255.0, 1.0, 32.0, cx);
+        let raio_da_selecao = slider(1.0, 100.0, 1.0, 5.0, cx);
         let ajustes: Vec<Entity<SliderState>> = PARAMETROS_DE_AJUSTE
             .iter()
             .map(|p| slider(p.min, p.max, p.passo, p.inicial, cx))
@@ -599,6 +610,9 @@ impl EditorDeFoto {
             opacidade,
             opacidade_da_camada,
             ajustes,
+            tolerancia_da_varinha,
+            varinha_contigua: true,
+            raio_da_selecao,
             modo,
             modo_mostrado: None,
             faixa: editor_core::pincel::Faixa::default(),
@@ -1044,6 +1058,12 @@ impl EditorDeFoto {
             Some(Auxiliar::Lata) => {
                 if let Some((x, y)) = self.na_foto(ponto) {
                     self.lata_de_tinta(x, y, cx);
+                }
+                return;
+            }
+            Some(Auxiliar::Varinha) => {
+                if let Some((x, y)) = self.na_foto(ponto) {
+                    self.varinha(x, y, operacao_dos(modificadores), cx);
                 }
                 return;
             }
@@ -1609,6 +1629,7 @@ impl EditorDeFoto {
                 Auxiliar::Correcao => "Pincel de correção (J)",
                 Auxiliar::Degrade => "Degradê (G) — arraste do começo ao fim",
                 Auxiliar::Lata => "Lata de tinta (⇧G)",
+                Auxiliar::Varinha => "Varinha mágica (W) — ⇧ soma, ⌥ tira",
                 Auxiliar::Mao => "Mão (Espaço)",
                 Auxiliar::Zoom => "Zoom — clique amplia, ⌥ + clique afasta",
             };
@@ -1665,6 +1686,12 @@ impl EditorDeFoto {
                     Icone::Lasso,
                     "editor-selecao-laco",
                     "Laço (L)",
+                ),
+                (
+                    Item::A(Auxiliar::Varinha),
+                    Icone::WandSparkles,
+                    "editor-varinha",
+                    "Varinha mágica (W) — clique na cor; ⇧ soma, ⌥ tira",
                 ),
             ],
             &[(
@@ -1872,6 +1899,65 @@ impl EditorDeFoto {
 
     pub fn escolher_camada(&mut self, indice: usize, cx: &mut Context<Self>) {
         self.na_sessao(cx, |s| s.escolher_camada(indice));
+    }
+
+    // ----------------------------------------------------------- seleção
+
+    /// A varinha em `(x, y)`, pixels da foto.
+    pub fn varinha(&mut self, x: f32, y: f32, operacao: Operacao, cx: &mut Context<Self>) {
+        let tolerancia = self.tolerancia_da_varinha.read(cx).value().start().round() as u8;
+        let contigua = self.varinha_contigua;
+        let inicio = Instant::now();
+        self.na_sessao(cx, |s| {
+            s.varinha(x, y, tolerancia, contigua, operacao);
+        });
+        self.medidas.ultimo_gesto = Some(inicio.elapsed());
+    }
+
+    pub fn alternar_varinha_contigua(&mut self, cx: &mut Context<Self>) {
+        self.varinha_contigua = !self.varinha_contigua;
+        cx.notify();
+    }
+
+    /// O raio de agora para difundir, expandir e contrair.
+    fn raio_da_selecao(&self, cx: &Context<Self>) -> u32 {
+        self.raio_da_selecao
+            .read(cx)
+            .value()
+            .start()
+            .round()
+            .max(1.0) as u32
+    }
+
+    /// ⇧F6 e o botão Difundir.
+    pub fn difundir_selecao(&mut self, cx: &mut Context<Self>) {
+        let raio = self.raio_da_selecao(cx);
+        let inicio = Instant::now();
+        self.na_sessao(cx, |s| {
+            s.difundir_selecao(raio);
+        });
+        self.medidas.ultimo_gesto = Some(inicio.elapsed());
+    }
+
+    /// Expandir (`sinal` 1) ou contrair (−1) pelo raio de agora.
+    pub fn expandir_selecao(&mut self, sinal: i32, cx: &mut Context<Self>) {
+        let px = self.raio_da_selecao(cx) as i32 * sinal.signum();
+        self.na_sessao(cx, |s| {
+            s.expandir_selecao(px);
+        });
+    }
+
+    /// ⌘ + clique numa miniatura: a seleção da camada (ou da máscara).
+    pub fn selecionar_da_camada(
+        &mut self,
+        indice: usize,
+        da_mascara: bool,
+        operacao: Operacao,
+        cx: &mut Context<Self>,
+    ) {
+        self.na_sessao(cx, |s| {
+            s.selecionar_da_camada(indice, da_mascara, operacao);
+        });
     }
 
     // ------------------------------------------------------------ ajuste
@@ -2576,6 +2662,41 @@ impl EditorDeFoto {
                         self.preencher_selecao(cx);
                         None
                     }
+                    // selecao varinha fx fy [somar|subtrair]
+                    "varinha" => {
+                        let (x, y) = ponto(2);
+                        self.varinha(x, y, operacao, cx);
+                        None
+                    }
+                    // selecao difundir|expandir|contrair N
+                    "difundir" | "expandir" | "contrair" => {
+                        let raio = numero(2);
+                        self.raio_da_selecao
+                            .update(cx, |s, cx| s.set_value(raio, window, cx));
+                        match partes[1] {
+                            "difundir" => self.difundir_selecao(cx),
+                            "expandir" => self.expandir_selecao(1, cx),
+                            _ => self.expandir_selecao(-1, cx),
+                        }
+                        None
+                    }
+                    // selecao camada N [mascara] [somar|subtrair]
+                    "camada" => {
+                        let mascara = partes.get(3) == Some(&"mascara");
+                        self.selecionar_da_camada(numero(2) as usize, mascara, operacao, cx);
+                        None
+                    }
+                    // selecao tolerancia N | selecao contigua sim|nao
+                    "tolerancia" => {
+                        let v = numero(2);
+                        self.tolerancia_da_varinha
+                            .update(cx, |s, cx| s.set_value(v, window, cx));
+                        None
+                    }
+                    "contigua" => {
+                        self.varinha_contigua = partes.get(2) != Some(&"nao");
+                        None
+                    }
                     "ferramenta" => {
                         match partes.get(2).copied() {
                             Some("retangulo") => self.usar_selecao(TipoDeSelecao::Retangulo, cx),
@@ -2637,6 +2758,7 @@ impl EditorDeFoto {
                 "lupa" => self.usar_auxiliar(Auxiliar::Zoom, cx),
                 "degrade" => self.usar_auxiliar(Auxiliar::Degrade, cx),
                 "lata" => self.usar_auxiliar(Auxiliar::Lata, cx),
+                "varinha" => self.usar_auxiliar(Auxiliar::Varinha, cx),
                 "subexposicao" => {
                     let faixa = self.faixa;
                     self.usar(Ferramenta::Subexposicao(faixa), cx)
@@ -3352,6 +3474,79 @@ impl EditorDeFoto {
                             .on_click(cx.listener(|ed, _, _, cx| ed.desmarcar(cx))),
                     ),
             )
+            .when(self.auxiliar == Some(Auxiliar::Varinha), |painel| {
+                let tolerancia = self.tolerancia_da_varinha.read(cx).value().start();
+                painel
+                    .child(
+                        div()
+                            .flex()
+                            .justify_between()
+                            .text_xs()
+                            .text_color(tema.muted_foreground)
+                            .child("Tolerância")
+                            .child(format!("{tolerancia:.0}")),
+                    )
+                    .child(
+                        div()
+                            .h(px(20.))
+                            .debug_selector(|| "editor-tolerancia".into())
+                            .child(crate::estilo::slider(&self.tolerancia_da_varinha)),
+                    )
+                    .child(
+                        div().debug_selector(|| "editor-contigua".into()).child(
+                            gpui_kit::component::checkbox::Checkbox::new("editor-contigua")
+                                .label("Contígua")
+                                .checked(self.varinha_contigua)
+                                .on_click(cx.listener(|ed, _: &bool, _, cx| {
+                                    ed.alternar_varinha_contigua(cx)
+                                })),
+                        ),
+                    )
+            })
+            // Modificar a seleção: o raio e os três comandos do Photoshop.
+            .when(self.sessao().and_then(Sessao::selecao).is_some(), |painel| {
+                let raio = self.raio_da_selecao.read(cx).value().start();
+                painel
+                    .child(
+                        div()
+                            .flex()
+                            .justify_between()
+                            .text_xs()
+                            .text_color(tema.muted_foreground)
+                            .child("Raio para modificar")
+                            .child(format!("{raio:.0} px")),
+                    )
+                    .child(
+                        div()
+                            .h(px(20.))
+                            .debug_selector(|| "editor-raio-da-selecao".into())
+                            .child(crate::estilo::slider(&self.raio_da_selecao)),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(4.))
+                            .child(
+                                crate::estilo::botao_fantasma_pequeno("editor-difundir", cx)
+                                    .debug_selector(|| "editor-difundir".into())
+                                    .label("Difundir")
+                                    .tooltip("Suavizar a borda pelo raio (⇧F6)")
+                                    .on_click(cx.listener(|ed, _, _, cx| ed.difundir_selecao(cx))),
+                            )
+                            .child(
+                                crate::estilo::botao_fantasma_pequeno("editor-expandir", cx)
+                                    .debug_selector(|| "editor-expandir".into())
+                                    .label("Expandir")
+                                    .on_click(cx.listener(|ed, _, _, cx| ed.expandir_selecao(1, cx))),
+                            )
+                            .child(
+                                crate::estilo::botao_fantasma_pequeno("editor-contrair", cx)
+                                    .debug_selector(|| "editor-contrair".into())
+                                    .label("Contrair")
+                                    .on_click(cx.listener(|ed, _, _, cx| ed.expandir_selecao(-1, cx))),
+                            ),
+                    )
+            })
             .when(
                 matches!(
                     ferramenta,
@@ -3622,7 +3817,14 @@ impl EditorDeFoto {
                                     MouseButton::Left,
                                     cx.listener(move |ed, e: &MouseDownEvent, window, cx| {
                                         cx.stop_propagation();
-                                        if e.modifiers.shift {
+                                        if e.modifiers.secondary() {
+                                            ed.selecionar_da_camada(
+                                                i,
+                                                true,
+                                                operacao_dos(e.modifiers),
+                                                cx,
+                                            );
+                                        } else if e.modifiers.shift {
                                             ed.alternar_mascara_de(i, cx);
                                         } else {
                                             ed.escolher_mascara(i, cx);
@@ -3645,7 +3847,11 @@ impl EditorDeFoto {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |ed, evento: &MouseDownEvent, window, cx| {
-                            if evento.click_count >= 2 {
+                            if evento.modifiers.secondary() {
+                                // ⌘ + clique: a seleção do que a camada tem,
+                                // sem trocar a escolhida (⇧ soma, ⌥ tira).
+                                ed.selecionar_da_camada(i, false, operacao_dos(evento.modifiers), cx);
+                            } else if evento.click_count >= 2 {
                                 ed.comecar_a_renomear(i, window, cx);
                             } else {
                                 if ed.renomeando.as_ref().is_some_and(|(j, _)| *j != i) {
@@ -3947,6 +4153,17 @@ fn subir(vista: &mut VistaDoEditor, imagens: &mut HashMap<(u32, u32), Arc<Render
         }
     }
     sujos.len()
+}
+
+/// A operação da seleção pelos modificadores: ⇧ soma, ⌥ tira.
+fn operacao_dos(m: gpui_kit::Modifiers) -> Operacao {
+    if m.alt {
+        Operacao::Subtrair
+    } else if m.shift {
+        Operacao::Somar
+    } else {
+        Operacao::Nova
+    }
 }
 
 /// Um parâmetro de ajuste com o slider dele.
@@ -4550,6 +4767,10 @@ impl Render for EditorDeFoto {
                 cx.listener(|ed, _: &UsarDegrade, _, cx| ed.usar_auxiliar(Auxiliar::Degrade, cx)),
             )
             .on_action(cx.listener(|ed, _: &UsarLata, _, cx| ed.usar_auxiliar(Auxiliar::Lata, cx)))
+            .on_action(
+                cx.listener(|ed, _: &UsarVarinha, _, cx| ed.usar_auxiliar(Auxiliar::Varinha, cx)),
+            )
+            .on_action(cx.listener(|ed, _: &DifundirSelecao, _, cx| ed.difundir_selecao(cx)))
             .on_action(cx.listener(|ed, _: &SelecionarTudo, _, cx| ed.selecionar_tudo(cx)))
             .on_action(cx.listener(|ed, _: &Desmarcar, _, cx| ed.desmarcar(cx)))
             .on_action(cx.listener(|ed, _: &InverterSelecao, _, cx| ed.inverter_selecao(cx)))
