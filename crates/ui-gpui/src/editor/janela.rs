@@ -2558,14 +2558,9 @@ impl EditorDeFoto {
         if !self.foco.is_focused(window) || m.platform || m.control || m.alt || m.function {
             return;
         }
-        let Some(d) = evento
-            .keystroke
-            .key
-            .chars()
-            .next()
-            .filter(|c| evento.keystroke.key.len() == 1 && c.is_ascii_digit())
-            .and_then(|c| c.to_digit(10))
-        else {
+        // 🚨 No teclado real, ⇧3 chega como "#" (visto no app real): os
+        // símbolos da fila dos números valem o número, com ⇧.
+        let Some(d) = digito_da_tecla(&evento.keystroke.key) else {
             return;
         };
         let pinta = self.selecionando.is_none()
@@ -2573,7 +2568,13 @@ impl EditorDeFoto {
         if !pinta {
             return;
         }
-        let fluxo = m.shift;
+        // O símbolo ("#") já é o ⇧: o GPUI do Mac o entrega sem o ⇧ nos
+        // modificadores (visto no app real).
+        let simbolo = !evento
+            .keystroke
+            .key
+            .starts_with(|c: char| c.is_ascii_digit());
+        let fluxo = m.shift || simbolo;
         let agora = Instant::now();
         let valor = match self.digito.take() {
             Some((quando, primeiro, f))
@@ -4210,6 +4211,19 @@ impl EditorDeFoto {
                     .on_scroll_wheel(
                         cx.listener(|ed, e: &ScrollWheelEvent, _w, cx| ed.ao_rolar(e, cx)),
                     )
+                    // 🚨 O soltar também no próprio palco: o ouvinte da janela
+                    // só existe depois do quadro seguinte ao apertar, e um
+                    // clique mais rápido que um quadro (visto no app real, o
+                    // ⇧ + clique) perdia o soltar e deixava o traço aberto até
+                    // o gesto seguinte. `soltar` repetido não faz nada.
+                    .on_mouse_up(
+                        MouseButton::Left,
+                        cx.listener(|ed, _: &MouseUpEvent, _w, cx| ed.soltar(cx)),
+                    )
+                    .on_mouse_up(
+                        MouseButton::Right,
+                        cx.listener(|ed, _: &MouseUpEvent, _w, cx| ed.soltar(cx)),
+                    )
                     // 🚨 Com um gesto em curso, quem trata o movimento é o
                     // ouvinte da janela (com os modificadores). Tratar aqui
                     // também, sem eles, desfazia o ⇧ do giro de 15° em 15°.
@@ -4604,7 +4618,7 @@ impl EditorDeFoto {
                             "Exposição"
                         }
                         Some(Ferramenta::Desfoque | Ferramenta::Nitidez) => "Força",
-                        _ => "Opacidade — o teto do traço (números: 1 = 10%, 0 = 100%)",
+                        _ => "Opacidade (números)",
                     }))
                     .child(
                         div()
@@ -4618,7 +4632,7 @@ impl EditorDeFoto {
                             .justify_between()
                             .text_xs()
                             .text_color(tema.muted_foreground)
-                            .child("Fluxo — quanto acumula por passada (⇧ + números)")
+                            .child("Fluxo (⇧ + números)")
                             .child(format!("{:.0}%", p.fluxo * 100.0)),
                     )
                     .child(
@@ -4633,7 +4647,7 @@ impl EditorDeFoto {
                             .justify_between()
                             .text_xs()
                             .text_color(tema.muted_foreground)
-                            .child("Espaçamento (% do diâmetro)")
+                            .child("Espaçamento")
                             .child(format!("{:.0}%", p.espacamento * 100.0)),
                     )
                     .child(
@@ -5292,6 +5306,23 @@ impl EditorDeFoto {
 }
 
 /// A operação da seleção pelos modificadores: ⇧ soma, ⌥ tira.
+/// O número de uma tecla da fila dos números — o próprio, ou o símbolo que ⇧
+/// dá nela no teclado americano e no ABNT2 (`!@#$%^¨&*()`).
+fn digito_da_tecla(tecla: &str) -> Option<u32> {
+    let mut letras = tecla.chars();
+    let c = letras.next()?;
+    if letras.next().is_some() {
+        return None;
+    }
+    if let Some(d) = c.to_digit(10) {
+        return Some(d);
+    }
+    "!@#$%^&*()"
+        .find(c)
+        .map(|i| ((i + 1) % 10) as u32)
+        .or((c == '¨').then_some(6))
+}
+
 /// A operação de seleção dos modificadores — a mesma no palco, na varinha e
 /// na miniatura (⌘ + clique): ⇧ soma, ⌥ tira, ⇧⌥ cruza.
 fn operacao_dos(m: gpui_kit::Modifiers) -> Operacao {
@@ -6089,5 +6120,21 @@ impl Render for EditorDeFoto {
             .child(barra)
             .child(corpo)
             .children(pergunta)
+    }
+}
+
+#[cfg(test)]
+mod testes_das_teclas {
+    use super::digito_da_tecla;
+
+    #[test]
+    fn o_numero_vem_do_digito_ou_do_simbolo_do_shift() {
+        assert_eq!(digito_da_tecla("4"), Some(4));
+        assert_eq!(digito_da_tecla("#"), Some(3), "⇧3 no teclado real");
+        assert_eq!(digito_da_tecla(")"), Some(0));
+        assert_eq!(digito_da_tecla("!"), Some(1));
+        assert_eq!(digito_da_tecla("¨"), Some(6), "⇧6 no ABNT2");
+        assert_eq!(digito_da_tecla("a"), None);
+        assert_eq!(digito_da_tecla("f4"), None);
     }
 }

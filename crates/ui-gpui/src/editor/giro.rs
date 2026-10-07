@@ -309,6 +309,9 @@ impl Montagem<'_> {
     }
 }
 
+/// Um ladrilho montado: largura, altura e os bytes em BGRA.
+type LadrilhoBgra = (u32, u32, Vec<u8>);
+
 /// O que identifica a montagem inteira: mudou, refaz todos os ladrilhos.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Chave {
@@ -370,7 +373,7 @@ impl PalcoGirado {
         // de uma tela Retina são ~5 milhões de pixels.
         let threads = std::thread::available_parallelism().map_or(1, |n| n.get());
         let por = lista.len().div_ceil(threads).max(1);
-        let feitos: Vec<((u32, u32), (u32, u32, Vec<u8>))> = std::thread::scope(|escopo| {
+        let feitos: Vec<((u32, u32), LadrilhoBgra)> = std::thread::scope(|escopo| {
             let tarefas: Vec<_> = lista
                 .chunks(por)
                 .map(|parte| {
