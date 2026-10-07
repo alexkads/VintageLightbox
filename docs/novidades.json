@@ -1,10 +1,9 @@
 {
-  "versao": "0.1.113",
-  "titulo": "Correção importante: com várias sessões abertas em guias, a tela do cliente podia mostrar o QR de outra sessão.",
-  "importante": true,
+  "versao": "0.1.114",
+  "titulo": "Atualização importante agora aparece em vermelho no rodapé.",
+  "importante": false,
   "novidades": [
-    "Trocar de guia enquanto o site ainda respondia à sessão anterior fazia o QR, as fotos ou o \"Copiar link\" daquela sessão aparecerem na sessão da frente. O cliente lia o QR e recebia o link das fotos de outra pessoa. Agora cada sessão só aceita as respostas que são dela.",
-    "O \"Copiar link\" e o \"Avisar cliente\" pedidos numa guia não passam mais para a guia seguinte."
+    "Quando a versão nova corrige um problema sério, a faixa do rodapé fica vermelha e com um brilho passando pelo texto — do aviso até o \"Reabrir agora\". Antes ela era amarela e passava por um aviso qualquer."
   ],
-  "por_que_atualizar": "Para que o cliente sempre receba o link das próprias fotos — atualize todos os balcões hoje."
+  "por_que_atualizar": "Para não deixar passar a próxima correção séria."
 }
