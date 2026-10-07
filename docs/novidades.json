@@ -1,12 +1,13 @@
 {
-  "versao": "0.1.105",
-  "titulo": "Editar Foto: cor de frente e de fundo, com X e D, e a máscara mais clara de usar.",
+  "versao": "0.1.106",
+  "titulo": "Editar Foto ganhou o Preenchimento sensível ao conteúdo, com IA local opcional.",
   "importante": false,
   "novidades": [
-    "Embaixo da barra de ferramentas ficam a cor de frente e a de fundo, como no Photoshop: X troca as duas e D volta a preto e branco.",
-    "Na máscara, as cores viram cinza (é o que a máscara usa) e a borracha pinta a cor de fundo, revelando a camada.",
-    "A miniatura onde o pincel pinta (a da camada ou a da máscara) ganhou uma moldura azul bem visível.",
-    "O aviso da máscara lembra: preto esconde, branco revela; X troca as cores."
+    "Selecione um objeto e clique em \"Preenchimento sensível ao conteúdo…\": a prévia aparece por cima da foto, e Aplicar cria uma camada de retoque — um passo só no desfazer.",
+    "Dois métodos: o tradicional (PatchMatch), agora com linhas e quinas que atravessam a área e sem emenda na borda; e a IA local (LaMa), que roda no seu computador.",
+    "No método tradicional, pinte de verde de onde os pedaços podem vir. Na IA, ajuste a margem de contexto. Nos dois, a suavização da borda e \"Ver o original\" para comparar.",
+    "A IA precisa de um modelo de 208 MB, baixado uma vez pelo botão Baixar (ou importado de um arquivo). Depois funciona sem internet — a foto não sai do computador.",
+    "O painel da direita do editor ficou mais largo e organizado, e agora a largura dele se ajusta arrastando a borda."
   ],
-  "por_que_atualizar": "Para esconder e revelar partes de uma camada alternando preto e branco com uma tecla só."
+  "por_que_atualizar": "Para remover objetos da foto e escolher, caso a caso, o método que fica melhor."
 }

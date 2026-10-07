@@ -37,6 +37,7 @@ Sem projeto editável, o fluxo é o de sempre: a Revelação parte do bruto.
 | [03-GRAVACAO-E-CATALOGO.md](03-GRAVACAO-E-CATALOGO.md) | O formato do projeto, os tiles, a gravação atômica, a recuperação e a tabela do catálogo |
 | [04-PLANO-ETAPA-1.md](04-PLANO-ETAPA-1.md) | O que a etapa 1 entrega, arquivo por arquivo, os testes e as medidas |
 | [05-ETAPA-2.md](05-ETAPA-2.md) | Várias camadas, os 16 modos de mesclagem, o formato 2 do projeto, zoom, mão e lupa |
+| [17-PREENCHIMENTO.md](17-PREENCHIMENTO.md) | Preenchimento sensível ao conteúdo: PatchMatch melhorado (medido) e IA local (LaMa), os crates `ia-local` e `preenchimento` |
 | [16-REVISAO-DA-MASCARA.md](16-REVISAO-DA-MASCARA.md) | Revisão da máscara: o contrato conferido, cores de frente e de fundo (X, D), borracha e cores em cinza na máscara |
 | [15-ETAPA-12.md](15-ETAPA-12.md) | Varinha mágica (W), ⌘ + clique na miniatura, Difundir (⇧F6), Expandir e Contrair |
 | [14-ETAPA-11.md](14-ETAPA-11.md) | Camadas de ajuste (Brilho/Contraste, Níveis, Matiz/Saturação, Inverter), Propriedades e o rodapé do Photoshop; formato 5 |
@@ -121,6 +122,12 @@ Varinha mágica com tolerância e contígua, a seleção pela miniatura (⌘ + c
 O contrato do Photoshop conferido por testes de ponta a ponta (preto revela exatamente o de baixo) e as lacunas da
 tela fechadas: cores de frente e de fundo com X e D, cores em cinza na máscara, a borracha pintando o fundo e a
 moldura do alvo visível. Detalhes em [16-REVISAO-DA-MASCARA.md](16-REVISAO-DA-MASCARA.md).
+
+## Preenchimento sensível ao conteúdo (0.1.106) — entregue
+
+O painel do Photoshop (destino, amostragem, prévia, camada de retoque num passo), o PatchMatch melhorado pela
+bancada (estrutura, gradiente, membrana) e a IA local LaMa (ONNX, baixada pelo operador, CPU/CoreML/DirectML),
+sobre o crate `ia-local`, comum a outras tarefas de IA. Detalhes em [17-PREENCHIMENTO.md](17-PREENCHIMENTO.md).
 
 ## Onde mora o código
 

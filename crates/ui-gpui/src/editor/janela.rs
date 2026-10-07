@@ -34,6 +34,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+mod painel_do_preenchimento;
+pub use painel_do_preenchimento::{AlvoDoPincel, EspacoDoPreenchimento, EstadoDoCalculo};
+
 use editor_core::sessao::PedidoDeLupa;
 use editor_core::vista::Vista as VistaDoEditor;
 use editor_core::Ajuste;
@@ -386,6 +389,23 @@ pub struct EditorDeFoto {
     /// A faixa de tons da subexposição e da superexposição (Select do kit).
     faixa: editor_core::pincel::Faixa,
     seletor_de_faixa: Entity<SelectState<Vec<Opcao>>>,
+    /// O Preenchimento sensível ao conteúdo aberto (o painel no lugar das
+    /// opções), e o que ele lembra entre aberturas: o método e o backend.
+    area_do_preenchimento: Option<EspacoDoPreenchimento>,
+    metodo_do_preenchimento: preenchimento::Metodo,
+    backend_da_ia: ia_local::execucao::Backend,
+    seletor_de_metodo: Entity<SelectState<Vec<Opcao>>>,
+    seletor_de_backend: Entity<SelectState<Vec<Opcao>>>,
+    /// A margem de contexto da IA (%) e a suavização da borda (px).
+    contexto_da_ia: Entity<SliderState>,
+    suavizacao: Entity<SliderState>,
+    tarefa_do_painel: Option<Task<()>>,
+    vigia_do_painel: Option<Task<()>>,
+    tarefa_do_modelo: Option<Task<()>>,
+    /// O palco e o painel da direita, com a borda arrastável do kit; a
+    /// largura do painel fica gravada (`docas-editor.json`).
+    colunas: Entity<gpui_kit::component::resizable::ResizableState>,
+    arrumacao: crate::docas::Arrumacao,
     /// A aba de baixo do painel: 0 = Camadas, 1 = Histórico.
     aba_do_painel: usize,
     /// A camada sendo renomeada e o campo do nome.
@@ -490,8 +510,71 @@ impl EditorDeFoto {
         });
         let seletor_de_cor =
             cx.new(|cx| ColorPickerState::new(window, cx).default_value(hsla_de(pincel.cor)));
+        let metodos: Vec<Opcao> = preenchimento::Metodo::disponiveis()
+            .into_iter()
+            .map(|m| Opcao::nova(m.chave(), m.nome()))
+            .collect();
+        let seletor_de_metodo = cx.new(|cx| SelectState::new(metodos, None, window, cx));
+        seletor_de_metodo.update(cx, |s, cx| {
+            s.set_selected_value(
+                &preenchimento::Metodo::PatchMatch.chave().to_string(),
+                window,
+                cx,
+            )
+        });
+        // Os backends compilados, com o que a máquina não tem marcado.
+        let backends: Vec<Opcao> = ia_local::execucao::Backend::compilados()
+            .into_iter()
+            .map(|b| {
+                let nome = match (b, b.disponivel()) {
+                    (ia_local::execucao::Backend::Automatico, _) => {
+                        format!(
+                            "Automático ({})",
+                            preenchimento::lama::BACKEND_AUTOMATICO.nome()
+                        )
+                    }
+                    // Medido num Mac: a LaMa leva 6× mais no CoreML (as FFTs
+                    // voltam à CPU) — escolher continua possível.
+                    (ia_local::execucao::Backend::CoreMl, Ok(())) => {
+                        format!("{} — mais lento com este modelo (medido)", b.nome())
+                    }
+                    (_, Ok(())) => b.nome().to_string(),
+                    (_, Err(_)) => format!("{} — indisponível aqui", b.nome()),
+                };
+                Opcao::nova(b.chave(), nome)
+            })
+            .collect();
+        let seletor_de_backend = cx.new(|cx| SelectState::new(backends, None, window, cx));
+        seletor_de_backend.update(cx, |s, cx| {
+            s.set_selected_value(
+                &ia_local::execucao::Backend::Automatico.chave().to_string(),
+                window,
+                cx,
+            )
+        });
+        let colunas = cx.new(|_| gpui_kit::component::resizable::ResizableState::default());
+        let contexto_da_ia = slider(
+            0.0,
+            200.0,
+            5.0,
+            painel_do_preenchimento::CONTEXTO_PADRAO * 100.0,
+            cx,
+        );
+        let suavizacao = slider(
+            0.0,
+            30.0,
+            1.0,
+            painel_do_preenchimento::SUAVIZACAO_PADRAO,
+            cx,
+        );
 
         let mut assinaturas = Vec::new();
+        assinaturas.push(cx.subscribe(
+            &colunas,
+            |ed: &mut Self, _, _: &gpui_kit::component::resizable::ResizablePanelEvent, cx| {
+                ed.guardar_a_largura_do_painel(cx)
+            },
+        ));
         for (estado, qual) in [(&tamanho, 0u8), (&dureza, 1), (&opacidade, 2)] {
             assinaturas.push(cx.subscribe_in(
                 estado,
@@ -557,6 +640,50 @@ impl EditorDeFoto {
         ));
 
         assinaturas.push(cx.subscribe_in(
+            &seletor_de_metodo,
+            window,
+            |ed: &mut Self, _e, evento: &SelectEvent<Vec<Opcao>>, window, cx| {
+                if let SelectEvent::Confirm(Some(chave)) = evento {
+                    if let Some(m) = preenchimento::Metodo::da_chave(chave) {
+                        ed.mudar_metodo_do_preenchimento(m, cx);
+                    }
+                }
+                window.focus(&ed.foco, cx);
+            },
+        ));
+        assinaturas.push(cx.subscribe_in(
+            &seletor_de_backend,
+            window,
+            |ed: &mut Self, _e, evento: &SelectEvent<Vec<Opcao>>, window, cx| {
+                if let SelectEvent::Confirm(Some(chave)) = evento {
+                    if let Some(b) = ia_local::execucao::Backend::da_chave(chave) {
+                        ed.mudar_backend_da_ia(b, cx);
+                    }
+                }
+                window.focus(&ed.foco, cx);
+            },
+        ));
+        assinaturas.push(cx.subscribe_in(
+            &suavizacao,
+            window,
+            |ed: &mut Self, _e, evento: &SliderEvent, _w, cx| {
+                if valor(evento).1 {
+                    ed.suavizacao_mudou(cx);
+                }
+                cx.notify();
+            },
+        ));
+        assinaturas.push(cx.subscribe_in(
+            &contexto_da_ia,
+            window,
+            |ed: &mut Self, _e, evento: &SliderEvent, _w, cx| {
+                if valor(evento).1 && ed.metodo_do_preenchimento == preenchimento::Metodo::LaMa {
+                    ed.agendar_preenchimento(std::time::Duration::ZERO, cx);
+                }
+                cx.notify();
+            },
+        ));
+        assinaturas.push(cx.subscribe_in(
             &seletor_de_faixa,
             window,
             |ed: &mut Self, _e, evento: &SelectEvent<Vec<Opcao>>, window, cx| {
@@ -617,6 +744,18 @@ impl EditorDeFoto {
             modo_mostrado: None,
             faixa: editor_core::pincel::Faixa::default(),
             seletor_de_faixa,
+            area_do_preenchimento: None,
+            metodo_do_preenchimento: preenchimento::Metodo::PatchMatch,
+            backend_da_ia: ia_local::execucao::Backend::Automatico,
+            seletor_de_metodo,
+            seletor_de_backend,
+            contexto_da_ia,
+            suavizacao,
+            tarefa_do_painel: None,
+            vigia_do_painel: None,
+            tarefa_do_modelo: None,
+            colunas,
+            arrumacao: crate::docas::ler(COLUNAS_DO_EDITOR),
             aba_do_painel: 0,
             renomeando: None,
             medidas: Medidas::default(),
@@ -1020,6 +1159,10 @@ impl EditorDeFoto {
         modificadores: gpui_kit::Modifiers,
         cx: &mut Context<Self>,
     ) {
+        if self.area_do_preenchimento.is_some() {
+            self.apertar_no_preenchimento(ponto, modificadores, cx);
+            return;
+        }
         let ferramenta = self.ferramenta();
         if self.sessao().is_some_and(Sessao::transformando) {
             self.comecar_gesto_na_caixa(ponto, cx);
@@ -1187,6 +1330,9 @@ impl EditorDeFoto {
             (caixa.3 + margem).min(altura) - ry,
         );
         let camada = s.ativa();
+        // A versão do instantâneo: o remendo só entra se o documento ainda
+        // for este quando ele chegar.
+        let versao = s.versao();
         let foto = s.foto_ate_a_ativa(&regiao);
         self.preenchendo = true;
         self.aviso = Some(("Refazendo pelo conteúdo em volta…".into(), false));
@@ -1204,7 +1350,10 @@ impl EditorDeFoto {
                 .flat_map(|p| [p.0[0], p.0[1], p.0[2], 255])
                 .collect();
             let (ox, oy) = (regiao.x as f32, regiao.y as f32);
-            let no_buraco = |x: f32, y: f32| para_o_fundo.peso(x + ox, y + oy) >= 128;
+            // Toda a borda suave da seleção é refeita (e misturada pelo peso
+            // ao colar): com ≥ 128, a rampa de uma seleção difundida ficava
+            // fora do remendo e a borda saía dura.
+            let no_buraco = |x: f32, y: f32| para_o_fundo.peso(x + ox, y + oy) > 0;
             let relativa = (
                 caixa.0 - regiao.x,
                 caixa.1 - regiao.y,
@@ -1236,10 +1385,19 @@ impl EditorDeFoto {
                 };
                 let ret = Retangulo::novo(regiao.x + r.x0, regiao.y + r.y0, r.largura, r.altura);
                 let peso = |x: u32, y: u32| buraco.peso(x as f32 + 0.5, y as f32 + 0.5);
+                let mut mudou = false;
                 if let Some(s) = ed.sessao_mut() {
-                    s.colar_remendo(camada, &ret, &r.rgba, &peso);
+                    mudou = s.mudou_desde(versao);
+                    if !mudou {
+                        s.colar_remendo(camada, &ret, &r.rgba, &peso);
+                    }
                 }
-                ed.aviso = None;
+                ed.aviso = mudou.then(|| {
+                    (
+                        "A foto mudou enquanto o preenchimento era calculado — o remendo foi descartado; refaça".into(),
+                        true,
+                    )
+                });
                 cx.notify();
             });
         }));
@@ -1437,6 +1595,9 @@ impl EditorDeFoto {
         cx: &mut Context<Self>,
     ) {
         self.ponteiro = Some(ponto);
+        if self.arrastar_no_preenchimento(ponto, modificadores, cx) {
+            return;
+        }
         if self.gesto_de_transformacao.is_some() {
             self.arrastar_na_caixa(ponto, modificadores.shift, cx);
             return;
@@ -1530,6 +1691,9 @@ impl EditorDeFoto {
     pub fn soltar(&mut self, cx: &mut Context<Self>) {
         if self.mao.take().is_some() {
             cx.notify();
+        }
+        if self.soltar_no_preenchimento(cx) {
+            return;
         }
         self.pegando_cor = false;
         if self.gesto_de_transformacao.take().is_some() {
@@ -2758,6 +2922,74 @@ impl EditorDeFoto {
                 }
             }
             "conteudo" => self.preencher_a_selecao_pelo_conteudo(cx),
+            // preenchimento abrir|aplicar|cancelar|original|redefinir |
+            // metodo patchmatch|lama | backend CHAVE | contexto N | suavizar N |
+            // pincel amostra|remover [excluir] | camada-nova sim|nao
+            "preenchimento" => {
+                use painel_do_preenchimento::AlvoDoPincel as Alvo;
+                match partes.get(1).copied().unwrap_or_default() {
+                    "abrir" => self.abrir_preenchimento(cx),
+                    "aplicar" => self.aplicar_preenchimento(cx),
+                    "cancelar" => self.cancelar_preenchimento(cx),
+                    "original" => self.alternar_original(cx),
+                    "redefinir" => self.redefinir_amostragem(cx),
+                    "baixar" => self.baixar_modelo(cx),
+                    "remover" => self.remover_modelo(cx),
+                    "importar" => {
+                        let caminho = partes.get(2..).map(|p| p.join(" ")).unwrap_or_default();
+                        self.importar_modelo_de(caminho.into(), cx);
+                    }
+                    "metodo" => {
+                        if let Some(m) = partes
+                            .get(2)
+                            .and_then(|c| preenchimento::Metodo::da_chave(c))
+                        {
+                            self.seletor_de_metodo.update(cx, |s, cx| {
+                                s.set_selected_value(&m.chave().to_string(), window, cx)
+                            });
+                            self.mudar_metodo_do_preenchimento(m, cx);
+                        }
+                    }
+                    "backend" => {
+                        if let Some(b) = partes
+                            .get(2)
+                            .and_then(|c| ia_local::execucao::Backend::da_chave(c))
+                        {
+                            self.seletor_de_backend.update(cx, |s, cx| {
+                                s.set_selected_value(&b.chave().to_string(), window, cx)
+                            });
+                            self.mudar_backend_da_ia(b, cx);
+                        }
+                    }
+                    "contexto" => {
+                        let v = numero(2);
+                        self.contexto_da_ia
+                            .update(cx, |s, cx| s.set_value(v, window, cx));
+                        self.agendar_preenchimento(std::time::Duration::ZERO, cx);
+                    }
+                    "suavizar" => {
+                        let v = numero(2);
+                        self.suavizacao
+                            .update(cx, |s, cx| s.set_value(v, window, cx));
+                        self.suavizacao_mudou(cx);
+                    }
+                    "pincel" => {
+                        let incluir = partes.get(3) != Some(&"excluir");
+                        let alvo = if partes.get(2) == Some(&"amostra") {
+                            Alvo::Amostragem
+                        } else {
+                            Alvo::Destino
+                        };
+                        self.escolher_alvo_do_pincel(alvo, incluir, cx);
+                    }
+                    "camada-nova" => {
+                        if let Some(e) = self.area_do_preenchimento.as_mut() {
+                            e.em_camada_nova = partes.get(2) != Some(&"nao");
+                        }
+                    }
+                    outro => eprintln!("[roteiro] editor preenchimento {outro}?"),
+                }
+            }
             "transformar" => match partes.get(1).copied().unwrap_or_default() {
                 "comecar" => self.transformar(cx),
                 "aplicar" => self.aplicar_transformacao(cx),
@@ -2892,6 +3124,19 @@ impl EditorDeFoto {
                     .sessao()
                     .and_then(|s| s.lupa())
                     .map(|l| format!("fator {} {:?}", l.fator(), l.regiao()));
+                if let Some(e) = self.area_do_preenchimento.as_ref() {
+                    eprintln!(
+                        "[roteiro] preenchimento: metodo={:?} backend={:?} estado={:?} destino={:?} amostragem={:?} resultado={:?} tempo={:?} aviso_do_modelo={:?}",
+                        e.metodo,
+                        e.backend,
+                        e.estado,
+                        e.destino.caixa_justa(),
+                        e.amostragem.caixa_justa(),
+                        e.resultado.as_ref().map(|r| (r.ret, r.fator, r.reducao_do_motor, r.executado_em.clone())),
+                        e.tempo,
+                        e.aviso_do_modelo
+                    );
+                }
                 eprintln!(
                     "[roteiro] editor: foto={} pronta={} falha={:?} alterado={} salvando={} aviso={:?} passos={} camadas=[{camadas}] zoom={} razao={:?} lupa={lupa:?} selecao={selecao:?} medidas={:?}",
                     self.foto.id,
@@ -3038,7 +3283,11 @@ impl EditorDeFoto {
             || self.arrasto_do_mover.is_some()
             || self.gesto_de_transformacao.is_some()
             || self.traco_de_correcao.is_some()
-            || self.degrade_em_curso.is_some();
+            || self.degrade_em_curso.is_some()
+            || self
+                .area_do_preenchimento
+                .as_ref()
+                .is_some_and(|e| e.pincelando.is_some());
         let com_a_mao = self.mao.is_some();
         let medida = canvas(
             move |bounds, window, cx| {
@@ -3124,6 +3373,8 @@ impl EditorDeFoto {
                             palco = palco.child(nitidos);
                         }
                     }
+                    // O preenchimento aberto: a sobreposição e a prévia.
+                    palco = palco.children(self.elementos_do_preenchimento(&v, cx));
                     // A caixa da transformação livre, com as quatro alças.
                     if let Some((caixa, t)) = sessao.transformacao() {
                         let cantos: Vec<(f32, f32)> =
@@ -3232,9 +3483,10 @@ impl EditorDeFoto {
                         self.area_na_janela().is_some_and(|a| a.contains(p))
                             && self.palco.contains(p)
                     });
-                    let com_pincel = self.selecionando.is_none()
-                        && self.auxiliar.is_none()
-                        && !sessao.transformando();
+                    let com_pincel = self.area_do_preenchimento.is_some()
+                        || (self.selecionando.is_none()
+                            && self.auxiliar.is_none()
+                            && !sessao.transformando());
                     // A mira do carimbo: de onde ele copia para o ponteiro.
                     if let (Some(ponteiro), Some(Ferramenta::Carimbo), true) =
                         (dentro, self.ferramenta(), com_pincel)
@@ -3538,6 +3790,12 @@ impl EditorDeFoto {
                             .on_click(cx.listener(|ed, _, _, cx| ed.desmarcar(cx))),
                     ),
             )
+            .child(
+                crate::estilo::botao_secundario_pequeno("editor-abrir-preenchimento", cx)
+                    .label("Preenchimento sensível ao conteúdo…")
+                    .tooltip("Remover o selecionado com prévia: PatchMatch ou IA local")
+                    .on_click(cx.listener(|ed, _, _, cx| ed.abrir_preenchimento(cx))),
+            )
             .when(self.auxiliar == Some(Auxiliar::Varinha), |painel| {
                 let tolerancia = self.tolerancia_da_varinha.read(cx).value().start();
                 painel
@@ -3677,7 +3935,7 @@ impl EditorDeFoto {
             .flex()
             .flex_col()
             .gap(px(12.))
-            .w(px(260.))
+            .size_full()
             .h_full()
             .p(px(12.))
             .border_l_1()
@@ -4219,6 +4477,47 @@ fn subir(vista: &mut VistaDoEditor, imagens: &mut HashMap<(u32, u32), Arc<Render
         }
     }
     sujos.len()
+}
+
+/// O nome da arrumação do editor (`docas-editor.json` no catálogo).
+const COLUNAS_DO_EDITOR: &str = "editor";
+
+/// A largura do painel da direita, em pontos.
+const LIMITES_DO_PAINEL: crate::docas::Limites = crate::docas::Limites {
+    minimo: 240.0,
+    maximo: 560.0,
+    padrao: 320.0,
+};
+
+impl EditorDeFoto {
+    fn largura_do_painel(&self) -> f32 {
+        LIMITES_DO_PAINEL.limitar(
+            self.arrumacao
+                .direita
+                .map_or(LIMITES_DO_PAINEL.padrao, |c| c.largura),
+        )
+    }
+
+    /// A borda foi arrastada: grava a largura nova do painel.
+    fn guardar_a_largura_do_painel(&mut self, cx: &mut Context<Self>) {
+        let larguras: Vec<f32> = self
+            .colunas
+            .read(cx)
+            .sizes()
+            .iter()
+            .map(|l| f32::from(*l))
+            .collect();
+        if let [_, painel] = larguras[..] {
+            if painel > 0. {
+                self.arrumacao.direita = Some(crate::docas::Coluna {
+                    aberta: true,
+                    largura: LIMITES_DO_PAINEL.limitar(painel),
+                });
+                crate::docas::gravar(COLUNAS_DO_EDITOR, &self.arrumacao);
+            }
+        }
+        cx.notify();
+    }
 }
 
 /// A operação da seleção pelos modificadores: ⇧ soma, ⌥ tira.
@@ -4782,12 +5081,20 @@ impl Render for EditorDeFoto {
             .on_action(cx.listener(|ed, _: &PreencherPeloConteudo, _, cx| {
                 ed.preencher_a_selecao_pelo_conteudo(cx)
             }))
-            .on_action(
-                cx.listener(|ed, _: &AplicarTransformacao, _, cx| ed.aplicar_transformacao(cx)),
-            )
-            .on_action(
-                cx.listener(|ed, _: &CancelarTransformacao, _, cx| ed.cancelar_transformacao(cx)),
-            )
+            .on_action(cx.listener(|ed, _: &AplicarTransformacao, _, cx| {
+                if ed.area_do_preenchimento.is_some() {
+                    ed.aplicar_preenchimento(cx)
+                } else {
+                    ed.aplicar_transformacao(cx)
+                }
+            }))
+            .on_action(cx.listener(|ed, _: &CancelarTransformacao, _, cx| {
+                if ed.area_do_preenchimento.is_some() {
+                    ed.cancelar_preenchimento(cx)
+                } else {
+                    ed.cancelar_transformacao(cx)
+                }
+            }))
             .on_action(cx.listener(|ed, _: &SubirCamada, _, cx| ed.mover_camada(1, cx)))
             .on_action(cx.listener(|ed, _: &DescerCamada, _, cx| ed.mover_camada(-1, cx)))
             .on_action(cx.listener(|ed, _: &CamadaDeCima, _, cx| ed.escolher_vizinha(1, cx)))
@@ -4852,8 +5159,34 @@ impl Render for EditorDeFoto {
                     .flex_1()
                     .min_h(px(0.))
                     .child(self.barra_de_ferramentas(cx))
-                    .child(self.palco(window, cx))
-                    .child(self.painel(cx)),
+                    .child({
+                        use gpui_kit::component::resizable::{h_resizable, resizable_panel};
+                        let largura = self.largura_do_painel();
+                        let painel = if self.area_do_preenchimento.is_some() {
+                            self.painel_do_preenchimento(cx)
+                        } else {
+                            self.painel(cx).into_any_element()
+                        };
+                        h_resizable("editor-colunas")
+                            .with_state(&self.colunas)
+                            .child(
+                                resizable_panel()
+                                    .size_range(px(320.)..gpui_kit::Pixels::MAX)
+                                    .child(self.palco(window, cx)),
+                            )
+                            .child(
+                                // A largura como `flex_basis` (o padrão da tela do caixa):
+                                // não cresce com a janela, encolhe até o mínimo.
+                                resizable_panel()
+                                    .size_range(
+                                        px(LIMITES_DO_PAINEL.minimo)..px(LIMITES_DO_PAINEL.maximo),
+                                    )
+                                    .flex_basis(px(largura))
+                                    .flex_grow_0()
+                                    .flex_shrink(1.)
+                                    .child(painel),
+                            )
+                    }),
             )
             .children(pergunta)
     }

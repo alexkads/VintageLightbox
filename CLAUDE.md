@@ -218,6 +218,12 @@ VintageLightbox follows **Clean Architecture** with 4 layers as separate crates:
 └─────────────────────────────────────────────────────┘
 ```
 
+🧠 **A IA local mora em `crates/ia-local`** (07/out/2026): modelos ONNX baixados pelo operador (hash
+conferido, pasta de dados do app), backends (CPU, CoreML, DirectML, CUDA opcional) e a sessão reaproveitada —
+sem saber para que serve. O primeiro uso é o `crates/preenchimento` (PatchMatch e LaMa, o contrato `Motor`).
+Uma tarefa nova de IA declara o seu `Modelo` ali e não leva o ONNX Runtime para o `editor-core` nem para o
+`revelacao-core` (wasm). Ver `docs/editor-em-camadas/17-PREENCHIMENTO.md`.
+
 ⚠️ **`biblioteca-web` é motor, não tela** — como o `revelacao-web`. Em 5/set/2026 ele desenhou a
 galeria inteira do site em egui, a pedido do dono, e no mesmo dia o dono reverteu ("deveria usar as
 tecnologias de revelacao-web"). O registro, com a lista do que não refazer, está em

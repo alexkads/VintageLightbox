@@ -1453,6 +1453,162 @@ mod testes {
         );
     }
 
+    /// 🪄 O Preenchimento sensível ao conteúdo pela tela, com o PatchMatch: a
+    /// prévia não mexe no documento, Esc cancela sem rastro, Enter aplica numa
+    /// camada nova num passo só (⌘Z desfaz), um resultado de pedido antigo é
+    /// descartado, e um documento mudado depois do instantâneo recusa.
+    #[gpui_kit::test]
+    fn o_preenchimento_sensivel_ao_conteudo_pela_tela(cx: &mut TestAppContext) {
+        use crate::editor::janela::EstadoDoCalculo;
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        // Um "objeto" vermelho num fundo listrado (pintado na camada).
+        editor.update(&mut ve, |ed, cx| {
+            ed.na_sessao_para_teste(cx, |s| {
+                s.selecionar(
+                    &editor_core::Forma::Retangulo(editor_core::Retangulo::novo(24, 16, 12, 10)),
+                    editor_core::Operacao::Nova,
+                );
+                s.pincel.cor = [230, 20, 20];
+                s.preencher_selecao();
+            })
+        });
+        let fotografia = |ve: &mut VisualTestContext| {
+            editor.read_with(ve, |ed, _| ed.sessao().unwrap().compor())
+        };
+        let antes = fotografia(&mut ve);
+        let passos = |ve: &mut VisualTestContext| {
+            editor.read_with(ve, |ed, _| ed.sessao().unwrap().historico().passos().len())
+        };
+        let n_passos = passos(&mut ve);
+        let estado = |ve: &mut VisualTestContext| {
+            editor.read_with(ve, |ed, _| {
+                ed.espaco_do_preenchimento().map(|e| e.estado.clone())
+            })
+        };
+
+        clicar_no_editor(&mut ve, "editor-abrir-preenchimento");
+        ve.run_until_parked();
+        assert!(
+            ve.debug_bounds("editor-preenchimento").is_some(),
+            "o painel abre"
+        );
+        assert_eq!(
+            estado(&mut ve),
+            Some(EstadoDoCalculo::Pronto { final_: true })
+        );
+        assert!(
+            ve.debug_bounds("editor-preenchimento-previa").is_some(),
+            "a prévia por cima"
+        );
+        assert_eq!(
+            fotografia(&mut ve).as_raw(),
+            antes.as_raw(),
+            "a prévia não mexe no documento"
+        );
+        assert_eq!(passos(&mut ve), n_passos);
+
+        // Esc: fecha sem rastro.
+        ve.simulate_keystrokes("escape");
+        ve.run_until_parked();
+        assert!(estado(&mut ve).is_none());
+        assert_eq!(fotografia(&mut ve).as_raw(), antes.as_raw());
+
+        // De novo, e um resultado de um pedido antigo é descartado.
+        clicar_no_editor(&mut ve, "editor-abrir-preenchimento");
+        ve.run_until_parked();
+        let atual = editor.read_with(&ve, |ed, _| {
+            ed.espaco_do_preenchimento()
+                .unwrap()
+                .resultado
+                .clone()
+                .unwrap()
+        });
+        let pedido = editor.read_with(&ve, |ed, _| ed.espaco_do_preenchimento().unwrap().pedido);
+        let mut velho = atual.clone();
+        velho.rgba.iter_mut().for_each(|v| *v = 7);
+        let aceito = editor.update(&mut ve, |ed, cx| {
+            ed.receber_para_teste(pedido - 1, velho, cx)
+        });
+        assert!(!aceito);
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed
+                .espaco_do_preenchimento()
+                .unwrap()
+                .resultado
+                .clone()
+                .unwrap()),
+            atual,
+            "o antigo não entrou"
+        );
+
+        // Enter: a camada nova, num passo só, sem nada do vermelho.
+        ve.simulate_keystrokes("enter");
+        ve.run_until_parked();
+        assert!(estado(&mut ve).is_none(), "o painel fecha");
+        let (nomes, _) = camadas(&editor, &ve);
+        assert_eq!(nomes.last().map(String::as_str), Some("Preenchimento 1"));
+        assert_eq!(passos(&mut ve), n_passos + 1);
+        let depois = fotografia(&mut ve);
+        let vermelhos = (16..26)
+            .flat_map(|y| (24..36).map(move |x| (x, y)))
+            .filter(|&(x, y)| depois.get_pixel(x, y).0 == [230, 20, 20])
+            .count();
+        assert_eq!(vermelhos, 0, "o objeto sumiu");
+        for (x, y) in [(2, 2), (60, 40), (10, 30)] {
+            assert_eq!(
+                depois.get_pixel(x, y),
+                antes.get_pixel(x, y),
+                "fora da seleção, intacto"
+            );
+        }
+        ve.simulate_keystrokes("cmd-z");
+        ve.run_until_parked();
+        assert_eq!(
+            fotografia(&mut ve).as_raw(),
+            antes.as_raw(),
+            "⌘Z volta tudo"
+        );
+
+        // O documento muda depois do instantâneo: aplicar recusa.
+        editor.update(&mut ve, |ed, cx| {
+            ed.na_sessao_para_teste(cx, |s| {
+                s.selecionar(
+                    &editor_core::Forma::Retangulo(editor_core::Retangulo::novo(24, 16, 12, 10)),
+                    editor_core::Operacao::Nova,
+                );
+            })
+        });
+        clicar_no_editor(&mut ve, "editor-abrir-preenchimento");
+        ve.run_until_parked();
+        editor.update(&mut ve, |ed, cx| {
+            ed.na_sessao_para_teste(cx, |s| s.mover_opacidade(0.5))
+        });
+        editor.update(&mut ve, |ed, cx| {
+            ed.na_sessao_para_teste(cx, |s| s.confirmar_opacidade())
+        });
+        let camadas_antes = camadas(&editor, &ve).0.len();
+        ve.simulate_keystrokes("enter");
+        ve.run_until_parked();
+        assert!(matches!(estado(&mut ve), Some(EstadoDoCalculo::Falhou(m)) if m.contains("mudou")));
+        assert_eq!(
+            camadas(&editor, &ve).0.len(),
+            camadas_antes,
+            "nada aplicado"
+        );
+        ve.simulate_keystrokes("escape");
+        ve.run_until_parked();
+
+        // Na máscara de camada não abre: o preenchimento refaz a foto.
+        editor.update(&mut ve, |ed, cx| {
+            ed.na_sessao_para_teste(cx, |s| {
+                s.adicionar_mascara(false);
+            })
+        });
+        clicar_no_editor(&mut ve, "editor-abrir-preenchimento");
+        assert!(estado(&mut ve).is_none());
+    }
+
     fn arrastar_no_palco(ve: &mut VisualTestContext, de: (f32, f32), ate: (f32, f32)) {
         let palco = ve.debug_bounds("palco-do-editor").unwrap();
         let ponto = |f: (f32, f32)| {

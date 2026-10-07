@@ -51,6 +51,11 @@ members = [
     # histórico, composição e a gravação do projeto. A janela mora no `ui-gpui`;
     # o contrato com a Revelação está em docs/editor-em-camadas/.
     "crates/editor-core",
+    # 🧠 A IA local (2026-10-06): modelos ONNX baixados pelo operador, backends
+    # e sessões — comum a toda tarefa de IA do app, sem saber para que serve.
+    "crates/ia-local",
+    # Os motores do Preenchimento sensível ao conteúdo: PatchMatch e LaMa.
+    "crates/preenchimento",
     # 💾 Recuperar as fotos de um cartão formatado (2026-09-29): varre os
     # setores atrás de JPEG e RAW, sem janela e sem dispositivo — a leitura do
     # cartão de verdade mora no `infrastructure`.
@@ -68,7 +73,7 @@ exclude = ["vendor/rawler", "vendor/gpui-pre-linux"]
 gpui-pre-linux = { path = "vendor/gpui-pre-linux" }
 
 [workspace.package]
-version = "0.1.105"
+version = "0.1.106"
 edition = "2021"
 authors = ["VintageLightbox Team"]
 license = "MIT"

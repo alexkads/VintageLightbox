@@ -7,6 +7,7 @@
 
 pub mod janela;
 pub mod porta;
+pub mod preenchimento;
 
 pub use janela::{EditorDeFoto, EventoDoEditor};
 
