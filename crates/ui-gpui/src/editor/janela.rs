@@ -36,6 +36,7 @@ use std::time::{Duration, Instant};
 
 use editor_core::sessao::PedidoDeLupa;
 use editor_core::vista::Vista as VistaDoEditor;
+use editor_core::Ajuste;
 use editor_core::{
     BaseRef, Documento, Ferramenta, Forma, Historico, Modo, Operacao, Retangulo, Sessao,
     Transformacao, VersaoEditada,
@@ -43,6 +44,7 @@ use editor_core::{
 use gpui_kit::component::button::ButtonVariants as _;
 use gpui_kit::component::color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::component::{ActiveTheme, Disableable, Sizable};
@@ -366,6 +368,9 @@ pub struct EditorDeFoto {
     dureza: Entity<SliderState>,
     opacidade: Entity<SliderState>,
     opacidade_da_camada: Entity<SliderState>,
+    /// Um slider por parâmetro de ajuste ([`PARAMETROS_DE_AJUSTE`]); o painel
+    /// mostra os do ajuste escolhido.
+    ajustes: Vec<Entity<SliderState>>,
     modo: Entity<SelectState<Vec<Opcao>>>,
     /// O modo que o Select mostra — para só mexer nele quando mudar.
     modo_mostrado: Option<Modo>,
@@ -451,6 +456,10 @@ impl EditorDeFoto {
         let dureza = slider(0.0, 100.0, 1.0, pincel.dureza * 100.0, cx);
         let opacidade = slider(1.0, 100.0, 1.0, pincel.opacidade * 100.0, cx);
         let opacidade_da_camada = slider(0.0, 100.0, 1.0, 100.0, cx);
+        let ajustes: Vec<Entity<SliderState>> = PARAMETROS_DE_AJUSTE
+            .iter()
+            .map(|p| slider(p.min, p.max, p.passo, p.inicial, cx))
+            .collect();
         let opcoes: Vec<Opcao> = Modo::TODOS
             .iter()
             .map(|m| Opcao::nova(m.chave(), m.nome()))
@@ -497,6 +506,16 @@ impl EditorDeFoto {
                 ed.mover_opacidade_da_camada(v / 100.0, soltou, cx);
             },
         ));
+        for (qual, estado) in ajustes.iter().enumerate() {
+            assinaturas.push(cx.subscribe_in(
+                estado,
+                window,
+                move |ed: &mut Self, _e, evento: &SliderEvent, _w, cx| {
+                    let (v, soltou) = valor(evento);
+                    ed.mover_parametro_do_ajuste(qual, v, soltou, cx);
+                },
+            ));
+        }
         assinaturas.push(cx.subscribe_in(
             &modo,
             window,
@@ -579,6 +598,7 @@ impl EditorDeFoto {
             dureza,
             opacidade,
             opacidade_da_camada,
+            ajustes,
             modo,
             modo_mostrado: None,
             faixa: editor_core::pincel::Faixa::default(),
@@ -1854,6 +1874,92 @@ impl EditorDeFoto {
         self.na_sessao(cx, |s| s.escolher_camada(indice));
     }
 
+    // ------------------------------------------------------------ ajuste
+
+    /// O menu de ajustes: uma camada de ajuste acima da escolhida.
+    pub fn nova_camada_de_ajuste(&mut self, ajuste: Ajuste, cx: &mut Context<Self>) {
+        self.na_sessao(cx, |s| s.nova_camada_de_ajuste(ajuste));
+    }
+
+    /// O ajuste da camada escolhida, se ela for de ajuste.
+    pub fn ajuste_da_camada(&self) -> Option<Ajuste> {
+        self.sessao().and_then(|s| s.camada_ativa().ajuste)
+    }
+
+    /// O slider `qual` do ajuste andou (ou soltou: vira um passo).
+    pub fn mover_parametro_do_ajuste(
+        &mut self,
+        qual: usize,
+        valor: f32,
+        soltou: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let inicio = Instant::now();
+        if let Some(s) = self.sessao_mut() {
+            if let Some(a) = s.camada_ativa().ajuste {
+                s.mover_ajuste(ajuste_com(a, qual, valor));
+                if soltou {
+                    s.confirmar_ajuste();
+                }
+            }
+        }
+        self.medidas.ultimo_gesto = Some(inicio.elapsed());
+        cx.notify();
+    }
+
+    /// As Propriedades do Photoshop para a camada de ajuste escolhida: um
+    /// slider por parâmetro, com o valor ao lado.
+    fn propriedades_do_ajuste(&self, ajuste: Ajuste, cx: &mut Context<Self>) -> AnyElement {
+        let tema = cx.theme().clone();
+        let parametros = parametros_do_ajuste(&ajuste);
+        let mut coluna = div()
+            .debug_selector(|| "editor-propriedades".into())
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .child(
+                div()
+                    .text_sm()
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                    .child(format!("Propriedades — {}", ajuste.nome())),
+            );
+        if parametros.is_empty() {
+            coluna = coluna.child(
+                div()
+                    .text_xs()
+                    .text_color(tema.muted_foreground)
+                    .child("Sem controles: as cores de baixo viram o negativo"),
+            );
+        }
+        for (qual, v) in parametros {
+            let p = &PARAMETROS_DE_AJUSTE[qual];
+            let texto = if p.passo < 1.0 {
+                format!("{v:.2}")
+            } else if p.min < 0.0 && v > 0.0 {
+                format!("+{v:.0}")
+            } else {
+                format!("{v:.0}")
+            };
+            coluna = coluna
+                .child(
+                    div()
+                        .flex()
+                        .justify_between()
+                        .text_xs()
+                        .text_color(tema.muted_foreground)
+                        .child(p.nome)
+                        .child(texto),
+                )
+                .child(
+                    div()
+                        .h(px(20.))
+                        .debug_selector(move || format!("editor-ajuste-{}", p.chave))
+                        .child(crate::estilo::slider(&self.ajustes[qual])),
+                );
+        }
+        coluna.into_any_element()
+    }
+
     // ----------------------------------------------------------- máscara
 
     /// O botão da máscara: revela tudo (com ⌥, esconde tudo); com seleção, a
@@ -2368,6 +2474,13 @@ impl EditorDeFoto {
                     "mascara-escolher" => self.escolher_mascara(indice, cx),
                     "mascara-alternar" => self.alternar_mascara_de(indice, cx),
                     "mascara-excluir" => self.excluir_mascara(cx),
+                    // camada ajuste brilho|niveis|matiz|inverter
+                    "ajuste" => match partes.get(2).and_then(|c| Ajuste::da_chave(c)) {
+                        Some(a) => self.nova_camada_de_ajuste(a, cx),
+                        None => {
+                            eprintln!("[roteiro] editor: ajuste desconhecido {:?}", partes.get(2))
+                        }
+                    },
                     "opacidade" => self.mover_opacidade_da_camada(numero(2) / 100.0, true, cx),
                     "modo" => match partes.get(2).and_then(|c| Modo::da_chave(c)) {
                         Some(modo) => self.mudar_modo(modo, cx),
@@ -2499,6 +2612,18 @@ impl EditorDeFoto {
                 }
                 outro => eprintln!("[roteiro] editor transformar {outro}?"),
             },
+            // ajuste brilho|contraste|preto|gama|branco|matiz|saturacao|luminosidade V
+            // [arrastando] — sem `arrastando`, solta (um passo do desfazer)
+            "ajuste" => {
+                let chave = partes.get(1).copied().unwrap_or_default();
+                match PARAMETROS_DE_AJUSTE.iter().position(|p| p.chave == chave) {
+                    Some(qual) => {
+                        let soltou = partes.get(3) != Some(&"arrastando");
+                        self.mover_parametro_do_ajuste(qual, numero(2), soltou, cx)
+                    }
+                    None => eprintln!("[roteiro] editor ajuste {chave}?"),
+                }
+            }
             // cor R G B
             "cor" => self.escolher_cor([numero(1) as u8, numero(2) as u8, numero(3) as u8], cx),
             "ferramenta" => match partes.get(1).copied().unwrap_or_default() {
@@ -2556,17 +2681,18 @@ impl EditorDeFoto {
                                 if c.visivel { "vis" } else { "oculta" },
                                 c.opacidade * 100.0,
                                 c.pixels.quantos(),
-                                c.mascara.as_ref().map_or(String::new(), |m| format!(
-                                    ":mascara({}fundo={},{}tiles{})",
-                                    if i == s.ativa() && s.na_mascara() {
-                                        "*"
-                                    } else {
-                                        ""
-                                    },
-                                    m.fundo,
-                                    m.pixels.quantos(),
-                                    if m.ativa { "" } else { ",desligada" }
-                                ))
+                                c.ajuste.map_or(String::new(), |a| format!(":{a:?}"))
+                                    + &c.mascara.as_ref().map_or(String::new(), |m| format!(
+                                        ":mascara({}fundo={},{}tiles{})",
+                                        if i == s.ativa() && s.na_mascara() {
+                                            "*"
+                                        } else {
+                                            ""
+                                        },
+                                        m.fundo,
+                                        m.pixels.quantos(),
+                                        if m.ativa { "" } else { ",desligada" }
+                                    ))
                             )
                         })
                         .collect::<Vec<_>>()
@@ -3170,16 +3296,21 @@ impl EditorDeFoto {
                 .text_color(tema.muted_foreground)
                 .child(texto)
         };
-        div()
+        // As opções da ferramenta (e as Propriedades do ajuste) rolam num
+        // bloco que vai até pouco mais da metade da coluna: as camadas
+        // embaixo sempre ficam à vista.
+        let opcoes = div()
+            .id("editor-opcoes")
             .flex()
             .flex_col()
             .gap(px(12.))
-            .w(px(260.))
-            .h_full()
-            .p(px(12.))
-            .border_l_1()
-            .border_color(tema.border)
+            .flex_shrink_0()
+            .max_h(gpui_kit::relative(0.55))
+            .overflow_y_scroll()
             .child(rotulo(self.nome_da_ferramenta()))
+            .when_some(self.ajuste_da_camada(), |painel, a| {
+                painel.child(self.propriedades_do_ajuste(a, cx))
+            })
             .when(self.na_mascara(), |painel| {
                 let nome = self
                     .sessao()
@@ -3282,6 +3413,17 @@ impl EditorDeFoto {
                             .on_click(cx.listener(move |ed, _, _, cx| ed.escolher_cor(cor, cx)))
                     })),
             )
+;
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(12.))
+            .w(px(260.))
+            .h_full()
+            .p(px(12.))
+            .border_l_1()
+            .border_color(tema.border)
+            .child(opcoes)
             .child(div().h(px(1.)).bg(tema.border))
             .child({
                 // 🗂️ Camadas e Histórico dividem o resto da coluna em abas, como os
@@ -3334,6 +3476,7 @@ impl EditorDeFoto {
                             c.visivel,
                             c.modo,
                             c.mascara.as_ref().map(|m| m.ativa),
+                            c.ajuste.is_some(),
                         )
                     })
                     .collect::<Vec<_>>(),
@@ -3350,11 +3493,12 @@ impl EditorDeFoto {
         let das_mascaras = self.miniaturas_das_mascaras.clone();
         let lado = px(LADO_DA_MINIATURA as f32 * 0.75);
         let cor_da_moldura = tema.foreground;
+        let cor_do_icone_de_ajuste = tema.muted;
         let linhas = camadas
             .into_iter()
             .enumerate()
             .rev()
-            .map(|(i, (nome, visivel, modo, mascara))| {
+            .map(|(i, (nome, visivel, modo, mascara, de_ajuste))| {
                 let escolhida = i == ativa;
                 let id_do_olho: SharedString = format!("editor-olho-{i}").into();
                 let olho = crate::estilo::botao_icone_pequeno(
@@ -3404,18 +3548,41 @@ impl EditorDeFoto {
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                             .child(olho),
                     )
-                    .when_some(miniaturas.get(i).cloned(), |d, m| {
+                    // A camada de ajuste não tem pixels: o ícone dela, como no
+                    // Photoshop.
+                    .when(de_ajuste, |d| {
                         d.child(
                             moldura(
-                                div().debug_selector(move || format!("editor-miniatura-{i}")),
-                                escolhida && mascara.is_some() && !na_mascara,
+                                div()
+                                    .debug_selector(move || format!("editor-miniatura-{i}"))
+                                    .size(lado)
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .bg(cor_do_icone_de_ajuste)
+                                    .child(
+                                        gpui_kit::component::Icon::new(Icone::Contrast)
+                                            .size_4()
+                                            .text_color(cor_da_moldura),
+                                    ),
+                                false,
                                 cor_da_moldura,
-                            )
-                            .child(
-                                img(m).object_fit(ObjectFit::Contain).w(lado).h(lado),
                             ),
                         )
                     })
+                    .when_some(
+                        miniaturas.get(i).cloned().filter(|_| !de_ajuste),
+                        |d, m| {
+                            d.child(
+                                moldura(
+                                    div().debug_selector(move || format!("editor-miniatura-{i}")),
+                                    escolhida && mascara.is_some() && !na_mascara,
+                                    cor_da_moldura,
+                                )
+                                .child(img(m).object_fit(ObjectFit::Contain).w(lado).h(lado)),
+                            )
+                        },
+                    )
                     // A máscara: clique escolhe, ⇧ + clique liga e desliga.
                     .when_some(
                         mascara.zip(das_mascaras.get(i).cloned().flatten()),
@@ -3539,42 +3706,39 @@ impl EditorDeFoto {
                 div()
                     .flex()
                     .gap(px(4.))
-                    .child(
+                    .child({
+                        let ed = cx.entity();
                         botao(
-                            "editor-camada-nova",
-                            Icone::Plus,
-                            "Nova camada (⇧⌘N)",
+                            "editor-camada-ajuste",
+                            Icone::Contrast,
+                            "Nova camada de ajuste",
                             pode_desfazer_alguma,
                         )
-                        .on_click(cx.listener(|ed, _, _, cx| ed.nova_camada(cx))),
-                    )
-                    .child(
-                        botao(
-                            "editor-camada-duplicar",
-                            Icone::Copy,
-                            "Duplicar a camada (⌘J)",
-                            pode_desfazer_alguma,
+                        .dropdown_menu_with_anchor(
+                            gpui_kit::Anchor::BottomLeft,
+                            move |mut menu, _window, _cx| {
+                                for a in editor_core::ajuste::TODOS {
+                                    let ed = ed.clone();
+                                    let id: &'static str = match a.chave() {
+                                        "brilho" => "editor-ajuste-novo-brilho",
+                                        "niveis" => "editor-ajuste-novo-niveis",
+                                        "matiz" => "editor-ajuste-novo-matiz",
+                                        _ => "editor-ajuste-novo-inverter",
+                                    };
+                                    menu = menu.item(
+                                        crate::estilo::item_de_menu(id, a.nome(), None).on_click(
+                                            move |_ev, _window, cx| {
+                                                ed.update(cx, |ed, cx| {
+                                                    ed.nova_camada_de_ajuste(a, cx)
+                                                });
+                                            },
+                                        ),
+                                    );
+                                }
+                                menu
+                            },
                         )
-                        .on_click(cx.listener(|ed, _, _, cx| ed.duplicar_camada(cx))),
-                    )
-                    .child(
-                        botao(
-                            "editor-camada-subir",
-                            Icone::ArrowUp,
-                            "Subir a camada (⌘])",
-                            ativa + 1 < quantas,
-                        )
-                        .on_click(cx.listener(|ed, _, _, cx| ed.mover_camada(1, cx))),
-                    )
-                    .child(
-                        botao(
-                            "editor-camada-descer",
-                            Icone::ArrowDown,
-                            "Descer a camada (⌘[)",
-                            ativa > 0 && quantas > 1,
-                        )
-                        .on_click(cx.listener(|ed, _, _, cx| ed.mover_camada(-1, cx))),
-                    )
+                    })
                     .child(
                         botao(
                             "editor-camada-mascara",
@@ -3590,13 +3754,68 @@ impl EditorDeFoto {
                     )
                     .child(
                         botao(
-                            "editor-camada-mesclar",
-                            Icone::Layers,
-                            "Mesclar para baixo (⌘E)",
-                            ativa > 0 && quantas > 1,
+                            "editor-camada-nova",
+                            Icone::Plus,
+                            "Nova camada (⇧⌘N)",
+                            pode_desfazer_alguma,
                         )
-                        .on_click(cx.listener(|ed, _, _, cx| ed.mesclar_para_baixo(cx))),
+                        .on_click(cx.listener(|ed, _, _, cx| ed.nova_camada(cx))),
                     )
+                    // O resto do menu de camadas do Photoshop, com os atalhos.
+                    .child({
+                        let ed = cx.entity();
+                        let (pode_subir, pode_descer) =
+                            (ativa + 1 < quantas, ativa > 0 && quantas > 1);
+                        botao(
+                            "editor-camada-mais",
+                            Icone::EllipsisVertical,
+                            "Mais: duplicar, subir, descer, mesclar",
+                            pode_desfazer_alguma,
+                        )
+                        .dropdown_menu_with_anchor(
+                            gpui_kit::Anchor::BottomLeft,
+                            move |menu, _window, _cx| {
+                                let item = |id: &'static str,
+                                            rotulo: &'static str,
+                                            ligado: bool,
+                                            fazer: fn(
+                                    &mut EditorDeFoto,
+                                    &mut Context<EditorDeFoto>,
+                                )| {
+                                    let ed = ed.clone();
+                                    crate::estilo::item_de_menu(id, rotulo, None)
+                                        .disabled(!ligado)
+                                        .on_click(move |_ev, _window, cx| {
+                                            ed.update(cx, fazer);
+                                        })
+                                };
+                                menu.item(item(
+                                    "editor-camada-duplicar",
+                                    "Duplicar a camada  ⌘J",
+                                    true,
+                                    |ed, cx| ed.duplicar_camada(cx),
+                                ))
+                                .item(item(
+                                    "editor-camada-subir",
+                                    "Subir a camada  ⌘]",
+                                    pode_subir,
+                                    |ed, cx| ed.mover_camada(1, cx),
+                                ))
+                                .item(item(
+                                    "editor-camada-descer",
+                                    "Descer a camada  ⌘[",
+                                    pode_descer,
+                                    |ed, cx| ed.mover_camada(-1, cx),
+                                ))
+                                .item(item(
+                                    "editor-camada-mesclar",
+                                    "Mesclar para baixo  ⌘E",
+                                    pode_descer,
+                                    |ed, cx| ed.mesclar_para_baixo(cx),
+                                ))
+                            },
+                        )
+                    })
                     .child(div().flex_1())
                     .child(
                         botao(
@@ -3728,6 +3947,167 @@ fn subir(vista: &mut VistaDoEditor, imagens: &mut HashMap<(u32, u32), Arc<Render
         }
     }
     sujos.len()
+}
+
+/// Um parâmetro de ajuste com o slider dele.
+struct Parametro {
+    chave: &'static str,
+    nome: &'static str,
+    min: f32,
+    max: f32,
+    passo: f32,
+    inicial: f32,
+}
+
+/// Os parâmetros de todos os ajustes, com os limites do Photoshop. O índice é
+/// o do slider em `EditorDeFoto::ajustes`.
+const PARAMETROS_DE_AJUSTE: [Parametro; 8] = [
+    Parametro {
+        chave: "brilho",
+        nome: "Brilho",
+        min: -150.0,
+        max: 150.0,
+        passo: 1.0,
+        inicial: 0.0,
+    },
+    Parametro {
+        chave: "contraste",
+        nome: "Contraste",
+        min: -50.0,
+        max: 100.0,
+        passo: 1.0,
+        inicial: 0.0,
+    },
+    Parametro {
+        chave: "preto",
+        nome: "Preto de entrada",
+        min: 0.0,
+        max: 253.0,
+        passo: 1.0,
+        inicial: 0.0,
+    },
+    Parametro {
+        chave: "gama",
+        nome: "Meios-tons (gama)",
+        min: 0.1,
+        max: 3.0,
+        passo: 0.01,
+        inicial: 1.0,
+    },
+    Parametro {
+        chave: "branco",
+        nome: "Branco de entrada",
+        min: 2.0,
+        max: 255.0,
+        passo: 1.0,
+        inicial: 255.0,
+    },
+    Parametro {
+        chave: "matiz",
+        nome: "Matiz",
+        min: -180.0,
+        max: 180.0,
+        passo: 1.0,
+        inicial: 0.0,
+    },
+    Parametro {
+        chave: "saturacao",
+        nome: "Saturação",
+        min: -100.0,
+        max: 100.0,
+        passo: 1.0,
+        inicial: 0.0,
+    },
+    Parametro {
+        chave: "luminosidade",
+        nome: "Luminosidade",
+        min: -100.0,
+        max: 100.0,
+        passo: 1.0,
+        inicial: 0.0,
+    },
+];
+
+/// Os parâmetros do ajuste, como `(índice do slider, valor)`.
+fn parametros_do_ajuste(ajuste: &Ajuste) -> Vec<(usize, f32)> {
+    match *ajuste {
+        Ajuste::BrilhoContraste { brilho, contraste } => vec![(0, brilho), (1, contraste)],
+        Ajuste::Niveis {
+            preto,
+            gama,
+            branco,
+        } => vec![(2, preto), (3, gama), (4, branco)],
+        Ajuste::MatizSaturacao {
+            matiz,
+            saturacao,
+            luminosidade,
+        } => vec![(5, matiz), (6, saturacao), (7, luminosidade)],
+        Ajuste::Inverter => Vec::new(),
+    }
+}
+
+/// O ajuste com o parâmetro `qual` trocado por `v`.
+fn ajuste_com(ajuste: Ajuste, qual: usize, v: f32) -> Ajuste {
+    match (ajuste, qual) {
+        (Ajuste::BrilhoContraste { contraste, .. }, 0) => Ajuste::BrilhoContraste {
+            brilho: v,
+            contraste,
+        },
+        (Ajuste::BrilhoContraste { brilho, .. }, 1) => Ajuste::BrilhoContraste {
+            brilho,
+            contraste: v,
+        },
+        (Ajuste::Niveis { gama, branco, .. }, 2) => Ajuste::Niveis {
+            preto: v,
+            gama,
+            branco,
+        },
+        (Ajuste::Niveis { preto, branco, .. }, 3) => Ajuste::Niveis {
+            preto,
+            gama: v,
+            branco,
+        },
+        (Ajuste::Niveis { preto, gama, .. }, 4) => Ajuste::Niveis {
+            preto,
+            gama,
+            branco: v,
+        },
+        (
+            Ajuste::MatizSaturacao {
+                saturacao,
+                luminosidade,
+                ..
+            },
+            5,
+        ) => Ajuste::MatizSaturacao {
+            matiz: v,
+            saturacao,
+            luminosidade,
+        },
+        (
+            Ajuste::MatizSaturacao {
+                matiz,
+                luminosidade,
+                ..
+            },
+            6,
+        ) => Ajuste::MatizSaturacao {
+            matiz,
+            saturacao: v,
+            luminosidade,
+        },
+        (
+            Ajuste::MatizSaturacao {
+                matiz, saturacao, ..
+            },
+            7,
+        ) => Ajuste::MatizSaturacao {
+            matiz,
+            saturacao,
+            luminosidade: v,
+        },
+        (outro, _) => outro,
+    }
 }
 
 /// A miniatura onde o pincel pinta leva a moldura, como no Photoshop.
@@ -4044,6 +4424,15 @@ impl Render for EditorDeFoto {
         if (self.opacidade_da_camada.read(cx).value().start() - opacidade).abs() > 0.5 {
             self.opacidade_da_camada
                 .update(cx, |s, cx| s.set_value(opacidade, window, cx));
+        }
+        // Os sliders do ajuste acompanham a camada escolhida e o desfazer.
+        if let Some(a) = self.ajuste_da_camada() {
+            for (qual, v) in parametros_do_ajuste(&a) {
+                let estado = &self.ajustes[qual];
+                if (estado.read(cx).value().start() - v).abs() > 0.004 {
+                    estado.update(cx, |s, cx| s.set_value(v, window, cx));
+                }
+            }
         }
         // O seletor de cor acompanha a cor do pincel (amostras, conta-gotas).
         let cor = self.sessao().map(|s| s.pincel.cor);

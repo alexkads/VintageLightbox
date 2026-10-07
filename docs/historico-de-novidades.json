@@ -1,5 +1,18 @@
 [
   {
+    "versao": "0.1.103",
+    "data": "2026-10-06",
+    "titulo": "Editar Foto ganhou as camadas de ajuste: Brilho/Contraste, Níveis, Matiz/Saturação e Inverter.",
+    "importante": false,
+    "novidades": [
+      "O botão de ajuste embaixo das Camadas cria uma camada que muda a cor de tudo o que está abaixo dela, sem mexer em nenhum pixel: dá para voltar atrás a qualquer hora.",
+      "Os controles do ajuste aparecem no topo do painel. Cada arrasto de controle é um passo só no desfazer, e a foto acompanha o arrasto sem travar.",
+      "Cada camada de ajuste nasce com máscara: pinte de preto onde o ajuste não deve valer. Com uma seleção feita, ela já nasce só ali.",
+      "O rodapé das Camadas ficou como o do Photoshop: duplicar, subir, descer e mesclar estão no menu ⋯."
+    ],
+    "por_que_atualizar": "Para clarear um rosto, tirar a cor de um fundo ou corrigir os tons de uma parte da foto sem estragar o original."
+  },
+  {
     "versao": "0.1.102",
     "data": "2026-10-06",
     "titulo": "Editar Foto ganhou a máscara de camada, o degradê e a lata de tinta.",

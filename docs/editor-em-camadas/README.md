@@ -37,6 +37,7 @@ Sem projeto editável, o fluxo é o de sempre: a Revelação parte do bruto.
 | [03-GRAVACAO-E-CATALOGO.md](03-GRAVACAO-E-CATALOGO.md) | O formato do projeto, os tiles, a gravação atômica, a recuperação e a tabela do catálogo |
 | [04-PLANO-ETAPA-1.md](04-PLANO-ETAPA-1.md) | O que a etapa 1 entrega, arquivo por arquivo, os testes e as medidas |
 | [05-ETAPA-2.md](05-ETAPA-2.md) | Várias camadas, os 16 modos de mesclagem, o formato 2 do projeto, zoom, mão e lupa |
+| [14-ETAPA-11.md](14-ETAPA-11.md) | Camadas de ajuste (Brilho/Contraste, Níveis, Matiz/Saturação, Inverter), Propriedades e o rodapé do Photoshop; formato 5 |
 | [13-ETAPA-10.md](13-ETAPA-10.md) | Máscara de camada, degradê (G) e lata de tinta (⇧G); projeto no formato 4 |
 | [12-ETAPA-9.md](12-ETAPA-9.md) | A barra de ferramentas vertical à esquerda, como no Photoshop, com Mão e Zoom |
 | [11-ETAPA-8.md](11-ETAPA-8.md) | Subexposição, superexposição, desfoque, nitidez e o painel Histórico |
@@ -102,6 +103,11 @@ Mão e Zoom; o painel da direita ficou com as opções da ferramenta, as cores e
 A máscara de camada do Photoshop (adicionar, ⌥ esconder tudo, nascer da seleção, ⇧ + clique desliga, ⌘E aplica),
 o degradê (G) e a lata de tinta (⇧G), nos pixels e na máscara. Projeto no formato 4. Detalhes em
 [13-ETAPA-10.md](13-ETAPA-10.md).
+
+## Etapa 11 (0.1.103) — entregue
+
+Camadas de ajuste com máscara, as Propriedades no topo do painel, a vista em rascunho durante o arrasto e o rodapé
+das Camadas como o do Photoshop. Projeto no formato 5. Detalhes em [14-ETAPA-11.md](14-ETAPA-11.md).
 
 ## Onde mora o código
 

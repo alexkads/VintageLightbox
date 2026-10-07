@@ -1191,6 +1191,69 @@ mod testes {
         );
     }
 
+    /// 🎚️ A camada de ajuste pela tela: o menu do rodapé, as Propriedades com
+    /// os sliders, um passo só por arrasto, o ícone na linha e o ⌘E.
+    #[gpui_kit::test]
+    fn a_camada_de_ajuste_pela_tela(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        editor.update(&mut ve, |ed, cx| {
+            ed.na_sessao_para_teste(cx, |s| {
+                s.pincel.cor = [200, 100, 50];
+                s.selecionar_tudo();
+                s.preencher_selecao();
+                s.desmarcar();
+            })
+        });
+        assert!(ve.debug_bounds("editor-propriedades").is_none());
+        clicar_no_editor(&mut ve, "editor-camada-ajuste");
+        clicar_no_editor(&mut ve, "editor-ajuste-novo-niveis");
+        let (nomes, ativa) = camadas(&editor, &ve);
+        assert_eq!(nomes, vec!["Pintura".to_string(), "Níveis 1".to_string()]);
+        assert_eq!(ativa, 1);
+        assert!(
+            ve.debug_bounds("editor-propriedades").is_some(),
+            "as Propriedades aparecem"
+        );
+        assert!(ve.debug_bounds("editor-ajuste-branco").is_some());
+        assert!(
+            ve.debug_bounds("editor-ajuste-brilho").is_none(),
+            "só os do ajuste escolhido"
+        );
+
+        // Um arrasto do slider do branco: a foto muda a cada valor, e o
+        // desfazer volta tudo de uma vez.
+        let passos = editor.read_with(&ve, |ed, _| ed.sessao().unwrap().historico().passos().len());
+        for (v, soltou) in [(230.0, false), (210.0, false), (200.0, true)] {
+            editor.update(&mut ve, |ed, cx| {
+                ed.mover_parametro_do_ajuste(4, v, soltou, cx)
+            });
+        }
+        ve.run_until_parked();
+        let cor = |ve: &mut VisualTestContext| {
+            editor.read_with(ve, |ed, _| ed.sessao().unwrap().cor_em(5.0, 5.0).unwrap())
+        };
+        assert_eq!(cor(&mut ve), [255, 128, 64], "200 vira o branco");
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.sessao().unwrap().historico().passos().len()),
+            passos + 1
+        );
+        ve.simulate_keystrokes("cmd-z");
+        ve.run_until_parked();
+        assert_eq!(cor(&mut ve), [200, 100, 50]);
+        ve.simulate_keystrokes("cmd-shift-z");
+        ve.run_until_parked();
+        assert_eq!(cor(&mut ve), [255, 128, 64]);
+
+        // ⌘E: o ajuste entra nos pixels da Pintura.
+        ve.simulate_keystrokes("cmd-e");
+        ve.run_until_parked();
+        let (nomes, _) = camadas(&editor, &ve);
+        assert_eq!(nomes, vec!["Pintura".to_string()]);
+        assert_eq!(cor(&mut ve), [255, 128, 64]);
+        assert!(ve.debug_bounds("editor-propriedades").is_none());
+    }
+
     fn arrastar_no_palco(ve: &mut VisualTestContext, de: (f32, f32), ate: (f32, f32)) {
         let palco = ve.debug_bounds("palco-do-editor").unwrap();
         let ponto = |f: (f32, f32)| {

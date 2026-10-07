@@ -68,7 +68,7 @@ exclude = ["vendor/rawler", "vendor/gpui-pre-linux"]
 gpui-pre-linux = { path = "vendor/gpui-pre-linux" }
 
 [workspace.package]
-version = "0.1.102"
+version = "0.1.103"
 edition = "2021"
 authors = ["VintageLightbox Team"]
 license = "MIT"
