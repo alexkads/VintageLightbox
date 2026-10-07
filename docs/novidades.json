@@ -1,13 +1,10 @@
 {
-  "versao": "0.1.106",
-  "titulo": "Editar Foto ganhou o Preenchimento sensível ao conteúdo, com IA local opcional.",
-  "importante": false,
+  "versao": "0.1.107",
+  "titulo": "Corrige a instalação no Linux e simplifica o painel do editor.",
+  "importante": true,
   "novidades": [
-    "Selecione um objeto e clique em \"Preenchimento sensível ao conteúdo…\": a prévia aparece por cima da foto, e Aplicar cria uma camada de retoque — um passo só no desfazer.",
-    "Dois métodos: o tradicional (PatchMatch), agora com linhas e quinas que atravessam a área e sem emenda na borda; e a IA local (LaMa), que roda no seu computador.",
-    "No método tradicional, pinte de verde de onde os pedaços podem vir. Na IA, ajuste a margem de contexto. Nos dois, a suavização da borda e \"Ver o original\" para comparar.",
-    "A IA precisa de um modelo de 208 MB, baixado uma vez pelo botão Baixar (ou importado de um arquivo). Depois funciona sem internet — a foto não sai do computador.",
-    "O painel da direita do editor ficou mais largo e organizado, e agora a largura dele se ajusta arrastando a borda."
+    "No Linux a 0.1.106 não compilava: a instalação parava com erro no módulo de IA local. Agora compila de novo.",
+    "No painel do editor ficou um botão só para o Preenchimento sensível ao conteúdo; o atalho ⇧⌫ continua preenchendo direto, sem prévia."
   ],
-  "por_que_atualizar": "Para remover objetos da foto e escolher, caso a caso, o método que fica melhor."
+  "por_que_atualizar": "Para os computadores com Linux voltarem a receber atualizações."
 }

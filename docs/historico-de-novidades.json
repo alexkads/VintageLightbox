@@ -1,5 +1,16 @@
 [
   {
+    "versao": "0.1.107",
+    "data": "2026-10-07",
+    "titulo": "Corrige a instalação no Linux e simplifica o painel do editor.",
+    "importante": true,
+    "novidades": [
+      "No Linux a 0.1.106 não compilava: a instalação parava com erro no módulo de IA local. Agora compila de novo.",
+      "No painel do editor ficou um botão só para o Preenchimento sensível ao conteúdo; o atalho ⇧⌫ continua preenchendo direto, sem prévia."
+    ],
+    "por_que_atualizar": "Para os computadores com Linux voltarem a receber atualizações."
+  },
+  {
     "versao": "0.1.106",
     "data": "2026-10-07",
     "titulo": "Editar Foto ganhou o Preenchimento sensível ao conteúdo, com IA local opcional.",

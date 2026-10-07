@@ -3775,13 +3775,6 @@ impl EditorDeFoto {
                     .child(rotulo("Seleção"))
                     .child(div().flex_1())
                     .child(
-                        crate::estilo::botao_icone_padrao("editor-preencher-conteudo", Icone::Sparkles)
-                            .debug_selector(|| "editor-preencher-conteudo".into())
-                            .tooltip("Refazer a seleção pelo conteúdo em volta (⇧⌫)")
-                            .disabled(self.preenchendo || self.sessao().and_then(Sessao::selecao).is_none())
-                            .on_click(cx.listener(|ed, _, _, cx| ed.preencher_a_selecao_pelo_conteudo(cx))),
-                    )
-                    .child(
                         crate::estilo::botao_fantasma_pequeno("editor-desmarcar", cx)
                             .debug_selector(|| "editor-desmarcar".into())
                             .label("Desmarcar")
@@ -3793,7 +3786,7 @@ impl EditorDeFoto {
             .child(
                 crate::estilo::botao_secundario_pequeno("editor-abrir-preenchimento", cx)
                     .label("Preenchimento sensível ao conteúdo…")
-                    .tooltip("Remover o selecionado com prévia: PatchMatch ou IA local")
+                    .tooltip("Remover o selecionado com prévia: PatchMatch ou IA local · ⇧⌫ preenche direto, sem prévia")
                     .on_click(cx.listener(|ed, _, _, cx| ed.abrir_preenchimento(cx))),
             )
             .when(self.auxiliar == Some(Auxiliar::Varinha), |painel| {
