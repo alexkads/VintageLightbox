@@ -2888,7 +2888,7 @@ mod testes {
     fn transformacao_de(
         editor: &gpui_kit::Entity<EditorDeFoto>,
         ve: &VisualTestContext,
-    ) -> (editor_core::Retangulo, editor_core::Transformacao) {
+    ) -> (editor_core::Caixa, editor_core::Transformacao) {
         editor.read_with(ve, |ed, _| ed.sessao().unwrap().transformacao().unwrap())
     }
 
@@ -2925,7 +2925,7 @@ mod testes {
             assert!(ve.debug_bounds(id).is_some(), "{id}");
         }
         let (caixa, _) = transformacao_de(&editor, &ve);
-        assert_eq!(caixa, editor_core::Retangulo::novo(16, 12, 32, 24));
+        assert_eq!(caixa, editor_core::Caixa::nova(16, 12, 32, 24));
         let foto = |ve: &mut VisualTestContext, x: f32, y: f32| {
             ponto_da_foto(ve, &editor, (x / 64.0, y / 48.0))
         };
@@ -3059,5 +3059,51 @@ mod testes {
         ve.simulate_mouse_move(p, None, gpui_kit::Modifiers::none());
         ve.run_until_parked();
         assert!(!editor.read_with(&ve, |ed, _| ed.tem_previa_do_carimbo()));
+    }
+
+    /// 🧱 O Mover pelo palco leva o conteúdo para fora da foto e traz de
+    /// volta inteiro (etapa 14, parte 2).
+    #[gpui_kit::test]
+    fn o_mover_leva_para_fora_e_traz_de_volta(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        editor.update(&mut ve, |ed, cx| {
+            ed.na_sessao_para_teste(cx, |s| {
+                s.selecionar(
+                    &editor_core::Forma::Retangulo(editor_core::Retangulo::novo(4, 4, 12, 12)),
+                    editor_core::Operacao::Nova,
+                );
+                s.pincel.cor = [255, 0, 0];
+                s.preencher_selecao();
+                s.desmarcar();
+            })
+        });
+        ve.simulate_keystrokes("v");
+        ve.run_until_parked();
+        let nada = gpui_kit::Modifiers::none();
+        let foto = |ve: &mut VisualTestContext, x: f32, y: f32| {
+            ponto_da_foto(ve, &editor, (x / 64.0, y / 48.0))
+        };
+        // Para a esquerda, 30 px: o quadrado (4..16) sai inteiro da foto.
+        let (a, b) = (foto(&mut ve, 10.0, 10.0), foto(&mut ve, -20.0, 10.0));
+        arrastar_com(&mut ve, a, b, nada, nada);
+        let pixel = |ve: &mut VisualTestContext, x: i64, y: i64| {
+            editor.read_with(ve, |ed, _| {
+                ed.sessao().unwrap().documento().camadas[0]
+                    .pixels
+                    .pixel_em(x, y)
+            })
+        };
+        assert_eq!(pixel(&mut ve, 10, 10)[3], 0, "saiu da foto");
+        assert_eq!(
+            pixel(&mut ve, -20, 10),
+            [255, 0, 0, 255],
+            "mas ficou guardado"
+        );
+        // De volta, num arrasto novo.
+        let (a, b) = (foto(&mut ve, 30.0, 30.0), foto(&mut ve, 60.0, 30.0));
+        arrastar_com(&mut ve, a, b, nada, nada);
+        assert_eq!(pixel(&mut ve, 4, 4), [255, 0, 0, 255]);
+        assert_eq!(pixel(&mut ve, 15, 15), [255, 0, 0, 255], "inteiro");
     }
 }

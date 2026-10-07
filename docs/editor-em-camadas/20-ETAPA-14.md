@@ -1,8 +1,7 @@
 # 20 — Etapa 14: carimbo e transformação livre
 
-> Plano em [18-ETAPA-13.md](18-ETAPA-13.md) ("Próximas etapas"). Esta etapa entrega o carimbo e o ⌘T com os
-> controles do Photoshop (0.1.111). O conteúdo fora da tela — camada com origem própria — é a parte 2, com
-> formato novo do projeto.
+> Plano em [18-ETAPA-13.md](18-ETAPA-13.md) ("Próximas etapas"). Parte 1 (0.1.111): o carimbo e o ⌘T com os
+> controles do Photoshop. Parte 2 (0.1.112): o conteúdo fora da foto, com o formato 7 do projeto.
 
 ## Carimbo (S)
 
@@ -53,3 +52,38 @@ Editor avulso numa foto de 3000 × 2000: a prévia da origem (o vermelho da orig
 com o cursor movido de verdade (`CGEvent`), as opções do carimbo no painel; ⌘T com as oito alças, o alvo da
 referência e a barra X/Y/L/A/Ângulo, o meio do lado direito esticando só a largura (150%) com o lado esquerdo
 parado, e Enter num passo. Windows e Linux: só compilação.
+
+## Parte 2 — conteúdo fora da foto (0.1.112, formato 7)
+
+Antes, a camada tinha o tamanho da foto e cortava: mover um retoque para fora e trazer de volta perdia o pedaço
+que saiu (o teste antigo chamava-se `deslocar_leva_cada_pixel_e_perde_o_que_sai`).
+
+- **A posição do tile tem sinal** (`tiles::Posicao = (i32, i32)`): a camada guarda tiles à esquerda e acima da
+  foto (negativos) e além da última coluna ou linha. Num tile da borda, a parte que passa da foto também guarda
+  conteúdo.
+- 🔑 **Quem só vê não muda**: `CamadaDePixels::existentes()` continua mostrando só os tiles dentro da foto —
+  composição, vista, miniaturas, pincel, seleção e varinha seguem iguais. `todos()` mostra também os de fora, e é
+  o que usam:
+  - o **Mover** (`operacoes::deslocada`): o que sai vira tile de fora e volta inteiro no gesto seguinte;
+  - o **⌘T** (`transformar::Conteudo::da_camada`, `desenhar`, `sobre`): a caixa (`transformar::Caixa`, com sinal)
+    enxerga o pedaço de fora, e o desenho não corta na borda — até uma margem do tamanho do maior lado da foto
+    em volta dela (`MARGEM_FORA_DA_FOTO`), para ampliar 100× não alocar uma camada enorme;
+  - o **desfazer** (`operacoes::diferenca`);
+  - o **projeto**: os tiles de fora são gravados com a coluna e a linha com sinal. **Formato 7** — a 0.1.111
+    recusa abrir com o aviso de versão mais nova (leria a coluna negativa como erro). Os formatos 1–6 se leem
+    como estão.
+- O preenchimento, o apagar e o pincel continuam presos à foto (a seleção só existe dentro dela).
+- ⚠️ **⌘E (mesclar para baixo)** junta só o que está dentro da foto: o que a camada de cima tem fora não desce.
+
+| Onde | O que prova |
+|---|---|
+| `testes_fora_da_foto.rs` | Mover para fora (esquerda e acima) e de volta em dois gestos, inteiro, sem aparecer na composta; além da borda direita; o desfazer pelos dois gestos; ⌘T levando metade para fora e o ⌘T seguinte com a caixa inteira (x = −50); gravar no formato 7, coletar, reabrir, trazer de volta e desfazer |
+| `tiles.rs` | o tile de fora existe, não aparece em `existentes`, e o retângulo dele na foto é vazio |
+| `operacoes.rs` | `deslocar_leva_cada_pixel_e_guarda_o_que_sai` (o teste antigo, com o contrato novo) |
+
+O Mover também passou a aparecer como "Mover" no Histórico (era "Pincel").
+
+**Conferido no app real (macOS, 07/out/2026)**: com o Mover, um bloco preto levado inteiro para fora da foto, à
+esquerda; ⌘S gravou o projeto no formato 7 com os seis tiles nas colunas −1 e −2; numa execução nova do editor,
+a reabertura trouxe os tiles e o Mover devolveu o bloco inteiro para dentro. `make e2e-ciclo` (o do lançamento)
+cobre o resto do app. Windows e Linux: só compilação.

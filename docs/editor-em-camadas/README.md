@@ -197,3 +197,5 @@ Detalhes em [19-OPCOES-DA-SELECAO.md](19-OPCOES-DA-SELECAO.md).
 Carimbo com modo da ferramenta, amostra (camada atual, atual e abaixo, todas), Alinhado ligável e a origem dentro
 do círculo do pincel; ⌘T com oito alças, alça oposta parada, ponto de referência (⌥ e giro em volta dele) e
 X/Y/L/A/Ângulo numa barra. Detalhes em [20-ETAPA-14.md](20-ETAPA-14.md).
+Parte 2 (0.1.112, formato 7): o conteúdo levado para fora da foto pelo Mover e pelo ⌘T fica guardado e volta
+inteiro, no desfazer e depois de reabrir.
