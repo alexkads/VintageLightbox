@@ -1,15 +1,14 @@
 {
-  "versao": "0.1.109",
-  "titulo": "Editar Foto ficou com os controles do Photoshop: atalhos, fluxo do pincel, girar a vista e seleção mais completa.",
+  "versao": "0.1.110",
+  "titulo": "Editar Foto: barra de opções da seleção com os quatro modos, proporção e tamanho fixos, laço poligonal e Modificar/Transformar seleção.",
   "importante": false,
   "novidades": [
-    "Atenção, atalhos novos: H agora é a Mão e R gira a vista. Esconder ou mostrar a camada passou para ⌘, (Ctrl+, no Windows e no Linux), além do olho no painel. Desfoque e nitidez ficaram sem letra, como no Photoshop.",
-    "⇧ + letra alterna as ferramentas do mesmo grupo (M: retangular e elíptica, G: degradê e lata, O: subexposição e superexposição), e a letra volta à última usada.",
-    "Girar vista (R): arraste para girar só a tela, com ⇧ de 15° em 15°; Esc volta a 0°. A foto não muda.",
-    "Pincel com fluxo separado da opacidade, espaçamento, suavização e predefinições. Os números mudam a opacidade (4 e 5 = 45%), ⇧ + números o fluxo, { } a dureza, e ⇧ + clique liga com uma reta ao último ponto.",
-    "A dureza do pincel agora vai suave até a borda (antes, com dureza intermediária, a borda tinha um degrau).",
-    "Seleção: ⇧⌥ cruza com a anterior, ⇧ no arrasto faz quadrado, ⌥ desenha do centro, o Espaço reposiciona e arrastar por dentro move só o contorno. Cada seleção entra no Desfazer.",
-    "Camada via recorte (⇧⌘J) e o Preenchimento sensível ao conteúdo se desfazem com um ⌘Z só."
+    "Com uma ferramenta de seleção (M, L, W), aparece uma barra de opções em cima da foto: Nova, Adicionar, Subtrair e Intersectar. ⇧ e ⌥ continuam valendo, só durante o gesto.",
+    "Seleção retangular e elíptica com Estilo: Normal, Proporção fixa (1:1, 3:2, 4:3, 16:9 ou a sua) e Tamanho fixo em pixels; ⇄ troca largura e altura. Durante o arrasto aparece a medida em pixels da foto.",
+    "Difusão e antisserrilhado ajustáveis antes de desenhar — valem para a próxima seleção, sem mexer na que já existe.",
+    "Laço poligonal (⇧L): clique a clique; fecha no primeiro ponto, com duplo clique ou Enter; ⌫ tira o último ponto e Esc cancela.",
+    "Varinha mágica com antisserrilhado e Amostra: só a camada atual (a foto de fundo não entra) ou todas as camadas.",
+    "Menu Modificar seleção: Difundir, Expandir e Contrair com o valor em pixels, e Transformar seleção, que mexe só no contorno."
   ],
-  "por_que_atualizar": "Para editar com os gestos e atalhos de quem já usa o Photoshop."
+  "por_que_atualizar": "Para selecionar com precisão, do jeito do Photoshop."
 }

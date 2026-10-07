@@ -1,5 +1,20 @@
 [
   {
+    "versao": "0.1.110",
+    "data": "2026-10-07",
+    "titulo": "Editar Foto: barra de opções da seleção com os quatro modos, proporção e tamanho fixos, laço poligonal e Modificar/Transformar seleção.",
+    "importante": false,
+    "novidades": [
+      "Com uma ferramenta de seleção (M, L, W), aparece uma barra de opções em cima da foto: Nova, Adicionar, Subtrair e Intersectar. ⇧ e ⌥ continuam valendo, só durante o gesto.",
+      "Seleção retangular e elíptica com Estilo: Normal, Proporção fixa (1:1, 3:2, 4:3, 16:9 ou a sua) e Tamanho fixo em pixels; ⇄ troca largura e altura. Durante o arrasto aparece a medida em pixels da foto.",
+      "Difusão e antisserrilhado ajustáveis antes de desenhar — valem para a próxima seleção, sem mexer na que já existe.",
+      "Laço poligonal (⇧L): clique a clique; fecha no primeiro ponto, com duplo clique ou Enter; ⌫ tira o último ponto e Esc cancela.",
+      "Varinha mágica com antisserrilhado e Amostra: só a camada atual (a foto de fundo não entra) ou todas as camadas.",
+      "Menu Modificar seleção: Difundir, Expandir e Contrair com o valor em pixels, e Transformar seleção, que mexe só no contorno."
+    ],
+    "por_que_atualizar": "Para selecionar com precisão, do jeito do Photoshop."
+  },
+  {
     "versao": "0.1.109",
     "data": "2026-10-07",
     "titulo": "Editar Foto ficou com os controles do Photoshop: atalhos, fluxo do pincel, girar a vista e seleção mais completa.",
