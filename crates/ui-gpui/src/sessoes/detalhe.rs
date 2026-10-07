@@ -845,6 +845,18 @@ pub struct Detalhe {
     /// O último arquivo que a importação recusou: vai no aviso do fim do lote.
     ultima_falha_da_importacao: Option<String>,
     recados: (Sender<Recado>, Receiver<Recado>),
+    /// 🚨 **O canal do que é desta sessão** — a galeria, o QR do bot, o link,
+    /// o aviso e os dados do cliente. Refeito a cada `entrar`: a resposta de
+    /// um pedido da sessão anterior chega num canal que ninguém lê mais.
+    ///
+    /// A tela é uma só para todas as guias, e as respostas não dizem de que
+    /// sessão são. Num canal só, a galeria, o QR ou o link da guia de antes,
+    /// atrasados na rede, entravam na guia da frente — o QR de outro cliente
+    /// na tela do cliente, e o link dele no "Copiar link" (dono, 07/out/2026:
+    /// *"as fotos que apareceram não eram a dele quando o mesmo recebeu
+    /// link"*). Nota, miniatura, catálogo e estúdios ficam em `recados`: a
+    /// nota da guia de antes tem de terminar, e as outras não são de sessão.
+    da_sessao: (Sender<Recado>, Receiver<Recado>),
     colhendo: bool,
     _colheita: Option<Task<()>>,
     /// 📸 O QR do bot da sessão (`super::qr_do_bot`).
@@ -1112,6 +1124,7 @@ impl Detalhe {
             avisos_dados: Vec::new(),
             ultima_falha_da_importacao: None,
             recados: channel(),
+            da_sessao: channel(),
             colhendo: false,
             _colheita: None,
             bot: Default::default(),
@@ -1156,6 +1169,12 @@ impl Detalhe {
         // sempre. Zerar aqui deixa a grade vazia pelo tempo da leitura, que é o
         // estado honesto: ainda não se sabe o que esta sessão tem.
         self.galeria_id = Some(galeria_id.clone());
+        // 🚨 O que a sessão anterior pediu e não chegou fica no canal velho —
+        // ver `da_sessao`. O link e o aviso no ar eram dela: esta sessão pode
+        // pedir os seus.
+        self.da_sessao = channel();
+        self.pedindo_link = false;
+        self.avisando = false;
         self.aberta = None;
         self.do_site.clear();
         self.locais.clear();
@@ -1193,7 +1212,7 @@ impl Detalhe {
         self.publicador
             .estudios(sessao.clone(), self.recados.0.clone());
         self.publicador
-            .abrir_galeria(sessao, galeria_id, self.recados.0.clone());
+            .abrir_galeria(sessao, galeria_id, self.da_sessao.0.clone());
         self.acompanhar(cx);
         // 📸 O QR desta sessão: o da anterior sai da segunda tela já.
         self.bot = Default::default();
@@ -1241,7 +1260,7 @@ impl Detalhe {
             return;
         };
         self.publicador
-            .abrir_galeria(sessao, id, self.recados.0.clone());
+            .abrir_galeria(sessao, id, self.da_sessao.0.clone());
         self.carregando = true;
         self.acompanhar(cx);
     }
@@ -2830,7 +2849,7 @@ impl Detalhe {
         }
         self.avisando = true;
         self.publicador
-            .avisar(sessao, galeria_id, self.recados.0.clone());
+            .avisar(sessao, galeria_id, self.da_sessao.0.clone());
         self.acompanhar(cx);
         cx.notify();
     }
@@ -2855,7 +2874,7 @@ impl Detalhe {
         // botão do passo 7 não copiava nada, e não dizia nada.
         self.pedindo_link = true;
         self.publicador
-            .link(sessao, galeria_id, self.recados.0.clone());
+            .link(sessao, galeria_id, self.da_sessao.0.clone());
         self.acompanhar(cx);
         cx.notify();
     }
@@ -3111,7 +3130,7 @@ impl Detalhe {
                 whatsapp: mudancas.whatsapp,
                 ..Default::default()
             },
-            self.recados.0.clone(),
+            self.da_sessao.0.clone(),
         );
         self.acompanhar(cx);
         cx.notify();
@@ -3350,9 +3369,25 @@ impl Detalhe {
             cx.emit(Pedido::CatalogoMudou);
         }
 
-        while let Ok(recado) = self.recados.1.try_recv() {
+        while let Ok(recado) = self
+            .recados
+            .1
+            .try_recv()
+            .or_else(|_| self.da_sessao.1.try_recv())
+        {
             mudou = true;
             match recado {
+                // 🚨 A galeria de outra sessão nunca entra nesta — o canal já
+                // separa, e o id confere de novo (ver `da_sessao`).
+                Recado::Aberta(aberta)
+                    if self.galeria_id.as_deref() != Some(aberta.galeria.id.as_str()) =>
+                {
+                    crate::telemetria::avisar!(
+                        "⚠️ [Sessão] galeria {} chegou com a sessão {:?} na frente; ignorada",
+                        aberta.galeria.id,
+                        self.galeria_id
+                    );
+                }
                 Recado::Aberta(mut aberta) => {
                     self.carregando = false;
                     // 🚨 **Reler a galeria não pode desmanchar o que a mão fez.**
@@ -3528,7 +3563,7 @@ impl Detalhe {
                             (self.sessao.clone(), self.galeria_id.clone())
                         {
                             self.publicador
-                                .abrir_galeria(sessao, id, self.recados.0.clone());
+                                .abrir_galeria(sessao, id, self.da_sessao.0.clone());
                             self.carregando = true;
                         }
                     }
@@ -3574,7 +3609,7 @@ impl Detalhe {
                             (self.sessao.clone(), self.galeria_id.clone())
                         {
                             self.publicador
-                                .abrir_galeria(sessao, id, self.recados.0.clone());
+                                .abrir_galeria(sessao, id, self.da_sessao.0.clone());
                             self.carregando = true;
                         }
                         self.seguir_o_gesto(motivo, cx);
@@ -3590,7 +3625,7 @@ impl Detalhe {
                             (self.sessao.clone(), self.galeria_id.clone())
                         {
                             self.publicador
-                                .abrir_galeria(sessao, id, self.recados.0.clone());
+                                .abrir_galeria(sessao, id, self.da_sessao.0.clone());
                             self.carregando = true;
                         }
                     }
@@ -4256,7 +4291,7 @@ impl Detalhe {
                 super::qr_do_bot::PEDIDO_DA_SITUACAO,
                 super::qr_do_bot::caminho_da_situacao(&id),
             ),
-            self.recados.0.clone(),
+            self.da_sessao.0.clone(),
         );
         self.acompanhar(cx);
     }
@@ -4349,7 +4384,7 @@ impl Detalhe {
                     if let (Some(sessao), Some(id)) = (self.sessao.clone(), self.galeria_id.clone())
                     {
                         self.publicador
-                            .abrir_galeria(sessao, id, self.recados.0.clone());
+                            .abrir_galeria(sessao, id, self.da_sessao.0.clone());
                         self.carregando = true;
                         self.acompanhar(cx);
                     }
@@ -4437,7 +4472,7 @@ impl Detalhe {
                 titulo: Some(nome),
                 ..Default::default()
             },
-            self.recados.0.clone(),
+            self.da_sessao.0.clone(),
         );
         self.acompanhar(cx);
         cx.notify();
@@ -4782,7 +4817,7 @@ impl Detalhe {
                 super::qr_do_bot::caminho_do_novo_qr(&id),
                 serde_json::json!({}),
             ),
-            self.recados.0.clone(),
+            self.da_sessao.0.clone(),
         );
         self.acompanhar(cx);
         cx.notify();
@@ -7344,7 +7379,7 @@ impl Detalhe {
         }
         self.erro = None;
         self.publicador
-            .atualizar_galeria(sessao, galeria_id, mudanca, self.recados.0.clone());
+            .atualizar_galeria(sessao, galeria_id, mudanca, self.da_sessao.0.clone());
         self.acompanhar(cx);
         cx.notify();
     }
@@ -10113,6 +10148,159 @@ mod testes {
                     Some("WhatsApp ficou de fora: a janela de 24 horas fechou há 2 dias")
                 );
                 assert!(!tela.avisando);
+            })
+            .unwrap();
+    }
+
+    /// 🚨 **Guias: a resposta da sessão de antes não entra na de agora**
+    /// (dono, 07/out/2026: *"o cliente viu as suas fotos no monitor, passou o
+    /// QRCode mas as fotos que apareceram não eram a dele"*).
+    ///
+    /// A tela da sessão é uma só para todas as guias. O operador entra na
+    /// sessão A e troca para a B antes de o site responder; a rede devolve
+    /// fora de ordem. A situação do bot e a galeria de A chegam por último —
+    /// e, sem conferir de quem são, o QR de A ia para a tela do cliente de B:
+    /// o cliente lia, o bot o ligava à sessão A e o link levava às fotos de
+    /// outra pessoa.
+    #[gpui_kit::test]
+    fn trocar_de_guia_com_a_resposta_da_anterior_no_ar_nao_troca_o_qr_nem_a_galeria(
+        cx: &mut TestAppContext,
+    ) {
+        let publicador = publicador_com(vec![], true);
+        publicador
+            .galeria_demorada
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        publicador
+            .galerias
+            .lock()
+            .unwrap()
+            .push(domain::services::pos_venda::GaleriaDoPainel {
+                id: "g2".into(),
+                titulo: "Ensaio da Bia".into(),
+                email: Some("bia@x.com".into()),
+                produto_id: "p1".into(),
+                criada_em_iso: "2026-10-07".into(),
+                ..Default::default()
+            });
+        let situacao = |codigo: &str| {
+            serde_json::json!({
+                "convite": { "codigo": codigo, "url": format!("https://x/s/{codigo}") },
+                "qr": [[true, false], [false, true]],
+                "clientes": [],
+            })
+        };
+        let janela = janela_com(
+            cx,
+            publicador.clone(),
+            Arc::new(SeletorDeMentira::default()),
+        );
+        let tela = janela.root(cx).expect("a raiz da janela");
+        let na_tela_do_cliente: Arc<std::sync::Mutex<Vec<Option<String>>>> = Default::default();
+        let _inscricao = cx.update({
+            let na_tela_do_cliente = na_tela_do_cliente.clone();
+            move |cx| {
+                cx.subscribe(&tela, move |_tela, pedido: &Pedido, _cx| {
+                    if let Pedido::ConviteNaTela(c) = pedido {
+                        na_tela_do_cliente
+                            .lock()
+                            .unwrap()
+                            .push(c.as_ref().map(|c| c.codigo.clone()));
+                    }
+                })
+            }
+        });
+
+        // Guia A: o pedido sai e fica no ar.
+        publicador.responder_json(
+            crate::sessoes::qr_do_bot::PEDIDO_DA_SITUACAO,
+            Ok(situacao("RF-AAAAAA")),
+        );
+        janela
+            .update(cx, |tela, _w, cx| {
+                tela.entrar("g1".into(), cx);
+                // E o "Copiar link" de A, também no ar.
+                tela.pedir_o_link(cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        // Guia B, com o cliente da B na frente do monitor.
+        publicador.responder_json(
+            crate::sessoes::qr_do_bot::PEDIDO_DA_SITUACAO,
+            Ok(situacao("RF-BBBBBB")),
+        );
+        janela
+            .update(cx, |tela, _w, cx| tela.entrar("g2".into(), cx))
+            .unwrap();
+        cx.run_until_parked();
+
+        // A rede responde fora de ordem: o que é de B chega antes.
+        publicador.guardados.lock().unwrap().reverse();
+        publicador.responder();
+        for _ in 0..10 {
+            let _ = janela.update(cx, |tela, _w, cx| tela.colher(cx));
+            cx.run_until_parked();
+        }
+
+        janela
+            .update(cx, |tela, _w, _cx| {
+                assert_eq!(tela.galeria_id(), Some("g2"));
+                assert_eq!(
+                    tela.aberta().map(|a| a.galeria.id.as_str()),
+                    Some("g2"),
+                    "a galeria de A não pode tomar a tela de B"
+                );
+                assert_eq!(
+                    tela.bot
+                        .situacao
+                        .as_ref()
+                        .map(|s| s.convite.codigo.as_str()),
+                    Some("RF-BBBBBB"),
+                    "o painel do atendente mostra o QR de B"
+                );
+            })
+            .unwrap();
+        assert_eq!(
+            na_tela_do_cliente.lock().unwrap().last().cloned().flatten(),
+            Some("RF-BBBBBB".to_string()),
+            "a tela do cliente de B termina com o QR de B: {:?}",
+            na_tela_do_cliente.lock().unwrap()
+        );
+        assert!(
+            !na_tela_do_cliente
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|c| c.as_deref() == Some("RF-AAAAAA")),
+            "o QR de A nunca aparece na tela do cliente depois de trocar de guia: {:?}",
+            na_tela_do_cliente.lock().unwrap()
+        );
+
+        // O link de A chegou na guia B: nem na tela, nem na área de transferência.
+        janela
+            .update(cx, |tela, _w, _cx| assert!(tela.link().is_none()))
+            .unwrap();
+        assert!(
+            !cx.read_from_clipboard()
+                .and_then(|c| c.text())
+                .is_some_and(|t| t.contains("g1")),
+            "o link de A não vai para o \"Copiar link\" de B"
+        );
+        // E o "Copiar link" de B, pedido agora, copia o de B.
+        janela
+            .update(cx, |tela, _w, cx| tela.pedir_o_link(cx))
+            .unwrap();
+        publicador.responder();
+        for _ in 0..5 {
+            let _ = janela.update(cx, |tela, _w, cx| tela.colher(cx));
+            cx.run_until_parked();
+        }
+        janela
+            .update(cx, |tela, _w, _cx| {
+                assert_eq!(
+                    tela.link().map(|l| l.url.as_str()),
+                    Some("https://recordarfotos.com.br/entrar?t=g2")
+                );
             })
             .unwrap();
     }
