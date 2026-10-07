@@ -191,3 +191,9 @@ Barra de opções embaixo da barra de cima com os quatro modos (Nova, Adicionar,
 só no gesto), difusão, estilo (normal, proporção fixa, tamanho fixo, ⇄), antisserrilhado, laço poligonal (⇧L),
 varinha com amostra da camada atual ou de todas, "Modificar seleção ▾" com valor em pixels e "Transformar seleção".
 Detalhes em [19-OPCOES-DA-SELECAO.md](19-OPCOES-DA-SELECAO.md).
+
+## Etapa 14 — carimbo e transformação
+
+Carimbo com modo da ferramenta, amostra (camada atual, atual e abaixo, todas), Alinhado ligável e a origem dentro
+do círculo do pincel; ⌘T com oito alças, alça oposta parada, ponto de referência (⌥ e giro em volta dele) e
+X/Y/L/A/Ângulo numa barra. Detalhes em [20-ETAPA-14.md](20-ETAPA-14.md).

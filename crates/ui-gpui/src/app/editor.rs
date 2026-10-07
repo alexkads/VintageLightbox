@@ -2882,4 +2882,182 @@ mod testes {
             "o arrasto foi da caixa, e não um mover do contorno"
         );
     }
+
+    // ------------------------------------------- etapa 14: ⌘T e carimbo
+
+    fn transformacao_de(
+        editor: &gpui_kit::Entity<EditorDeFoto>,
+        ve: &VisualTestContext,
+    ) -> (editor_core::Retangulo, editor_core::Transformacao) {
+        editor.read_with(ve, |ed, _| ed.sessao().unwrap().transformacao().unwrap())
+    }
+
+    /// ↔️ ⌘T com oito alças: o meio do lado muda só a largura com o outro lado
+    /// parado; ⌥ no canto escala em volta do ponto de referência; o ponto de
+    /// referência anda e o giro passa a ser em volta dele; os números da barra
+    /// mudam a caixa; Enter é um passo só.
+    #[gpui_kit::test]
+    fn a_transformacao_tem_oito_alcas_e_ponto_de_referencia(cx: &mut TestAppContext) {
+        use crate::editor::janela::ParteDaCaixa;
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        editor.update(&mut ve, |ed, cx| {
+            ed.na_sessao_para_teste(cx, |s| {
+                s.selecionar(
+                    &editor_core::Forma::Retangulo(editor_core::Retangulo::novo(16, 12, 32, 24)),
+                    editor_core::Operacao::Nova,
+                );
+                s.pincel.cor = [255, 0, 0];
+                s.preencher_selecao();
+                s.desmarcar();
+            });
+            ed.transformar(cx);
+        });
+        ve.run_until_parked();
+        let passos = passos_de(&editor, &ve);
+        for id in [
+            "editor-opcoes-da-transformacao",
+            "editor-transformacao-x",
+            "editor-transformacao-l",
+            "editor-transformacao-angulo",
+            "editor-referencia-da-caixa",
+        ] {
+            assert!(ve.debug_bounds(id).is_some(), "{id}");
+        }
+        let (caixa, _) = transformacao_de(&editor, &ve);
+        assert_eq!(caixa, editor_core::Retangulo::novo(16, 12, 32, 24));
+        let foto = |ve: &mut VisualTestContext, x: f32, y: f32| {
+            ponto_da_foto(ve, &editor, (x / 64.0, y / 48.0))
+        };
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.parte_da_caixa(48.0, 24.0)),
+            Some(ParteDaCaixa::Alca(3))
+        );
+        // O meio do lado direito (48, 24) até (56, 24): só a largura, 40/32.
+        let nada = gpui_kit::Modifiers::none();
+        let (a, b) = (foto(&mut ve, 48.0, 24.0), foto(&mut ve, 56.0, 24.0));
+        arrastar_com(&mut ve, a, b, nada, nada);
+        let (caixa, t) = transformacao_de(&editor, &ve);
+        assert!(
+            (t.escala_x - 1.25).abs() < 0.05 && (t.escala_y - 1.0).abs() < 1e-4,
+            "{t:?}"
+        );
+        let esquerda = t.aplicar(&caixa, 16.0, 24.0);
+        assert!(
+            (esquerda.0 - 16.0).abs() < 0.5,
+            "o lado esquerdo ficou: {esquerda:?}"
+        );
+
+        // Esc e de novo; ⌥ no canto ↘: o centro (a referência) fica parado.
+        ve.simulate_keystrokes("escape");
+        ve.run_until_parked();
+        editor.update(&mut ve, |ed, cx| ed.transformar(cx));
+        ve.run_until_parked();
+        let alt = gpui_kit::Modifiers::alt();
+        let (a, b) = (foto(&mut ve, 48.0, 36.0), foto(&mut ve, 56.0, 42.0));
+        arrastar_com(&mut ve, a, b, alt, alt);
+        let (caixa, t) = transformacao_de(&editor, &ve);
+        let c = t.aplicar(&caixa, 32.0, 24.0);
+        assert!(
+            (c.0 - 32.0).abs() < 0.5 && (c.1 - 24.0).abs() < 0.5,
+            "o centro ficou: {c:?}"
+        );
+        assert!(t.escala_x > 1.2, "{t:?}");
+
+        // A referência levada ao canto ↖ (16, 12), e o giro em volta dela.
+        ve.simulate_keystrokes("escape");
+        ve.run_until_parked();
+        editor.update(&mut ve, |ed, cx| ed.transformar(cx));
+        ve.run_until_parked();
+        let (a, b) = (foto(&mut ve, 32.0, 24.0), foto(&mut ve, 20.0, 14.0));
+        arrastar_com(&mut ve, a, b, nada, nada);
+        let r = editor
+            .read_with(&ve, |ed, _| ed.referencia_da_caixa())
+            .unwrap();
+        assert!(
+            (r.0 - 20.0).abs() < 1.0 && (r.1 - 14.0).abs() < 1.0,
+            "{r:?}"
+        );
+        let shift = gpui_kit::Modifiers::shift();
+        let (a, b) = (foto(&mut ve, 60.0, 14.0), foto(&mut ve, 20.0, 46.0));
+        arrastar_com(&mut ve, a, b, nada, shift);
+        let (caixa, t) = transformacao_de(&editor, &ve);
+        assert!(
+            (t.angulo.to_degrees() - 90.0).abs() < 0.01,
+            "{}",
+            t.angulo.to_degrees()
+        );
+        let q = t.aplicar(&caixa, r.0, r.1);
+        assert!(
+            (q.0 - r.0).abs() < 0.5 && (q.1 - r.1).abs() < 0.5,
+            "a referência ficou: {q:?}"
+        );
+
+        // Os números: largura a 50% em volta da referência, ângulo 0.
+        editor.update(&mut ve, |ed, cx| {
+            ed.numero_da_transformacao_mudou(4, 0.0, cx);
+            ed.numero_da_transformacao_mudou(2, 50.0, cx);
+        });
+        ve.run_until_parked();
+        let (caixa, t) = transformacao_de(&editor, &ve);
+        assert!((t.escala_x - 0.5).abs() < 1e-4 && t.angulo.abs() < 1e-4);
+        let q = t.aplicar(&caixa, r.0, r.1);
+        assert!((q.0 - r.0).abs() < 0.5, "{q:?}");
+        let (x, _, l, _, _) = editor
+            .read_with(&ve, |ed, _| ed.numeros_da_transformacao())
+            .unwrap();
+        assert!((l - 50.0).abs() < 1e-3 && (x - r.0).abs() < 0.5);
+        ve.simulate_keystrokes("enter");
+        ve.run_until_parked();
+        assert!(!editor.read_with(&ve, |ed, _| ed.transformando()));
+        assert_eq!(passos_de(&editor, &ve), passos + 1, "Enter é um passo só");
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| {
+                let s = ed.sessao().unwrap();
+                s.historico()
+                    .a_desfazer()
+                    .map(|p| p.descricao(s.documento()))
+            }),
+            Some("Transformação livre".to_string())
+        );
+    }
+
+    /// 🖃 O carimbo pela tela: as opções no painel (modo, amostra, alinhado,
+    /// a origem no pincel), Alinhado desligado pelo clique e a prévia da
+    /// origem no círculo.
+    #[gpui_kit::test]
+    fn as_opcoes_do_carimbo_e_a_previa_da_origem(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        ve.simulate_keystrokes("s");
+        ve.run_until_parked();
+        for id in [
+            "editor-modo-da-ferramenta",
+            "editor-amostra-do-carimbo",
+            "editor-carimbo-alinhado",
+            "editor-carimbo-sobreposicao",
+        ] {
+            assert!(ve.debug_bounds(id).is_some(), "{id} no painel");
+        }
+        clicar_no_editor(&mut ve, "editor-carimbo-alinhado");
+        assert!(!editor.read_with(&ve, |ed, _| ed.sessao().unwrap().carimbo.alinhado));
+        // ⌥ + clique escolhe a origem; o ponteiro em outro lugar mostra a
+        // prévia dentro do círculo.
+        let origem = ponto_da_foto(&mut ve, &editor, (0.25, 0.25));
+        ve.simulate_click(origem, gpui_kit::Modifiers::alt());
+        ve.run_until_parked();
+        assert!(editor.read_with(&ve, |ed, _| ed.sessao().unwrap().origem().is_some()));
+        let p = ponto_da_foto(&mut ve, &editor, (0.7, 0.6));
+        ve.simulate_mouse_move(p, None, gpui_kit::Modifiers::none());
+        ve.run_until_parked();
+        ve.update(|window, _| window.refresh());
+        ve.run_until_parked();
+        assert!(editor.read_with(&ve, |ed, _| ed.tem_previa_do_carimbo()));
+        assert!(ve.debug_bounds("editor-previa-do-carimbo").is_some());
+        // Desligada, some.
+        clicar_no_editor(&mut ve, "editor-carimbo-sobreposicao");
+        ve.simulate_mouse_move(p, None, gpui_kit::Modifiers::none());
+        ve.run_until_parked();
+        assert!(!editor.read_with(&ve, |ed, _| ed.tem_previa_do_carimbo()));
+    }
 }

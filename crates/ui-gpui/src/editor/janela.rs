@@ -137,6 +137,16 @@ pub struct Medidas {
 /// Um segmento da borda da seleção, em pixels da foto: `(x0, y0, x1, y1)`.
 type Segmento = (u32, u32, u32, u32);
 
+/// De que estado a prévia do carimbo é: versão da sessão, ponteiro (pixels da
+/// foto), raio, mira e amostra.
+type ChaveDaPrevia = (
+    u64,
+    (i32, i32),
+    u32,
+    (i32, i32),
+    editor_core::AmostraDoCarimbo,
+);
+
 /// De que versão da sessão e de que lupa (região, fator) a borda é.
 type ChaveDasBordas = (u64, Option<(Retangulo, u32)>);
 
@@ -496,12 +506,17 @@ const FECHAR_O_POLIGONO: f32 = 8.0;
 /// na elipse, o primeiro e o último são os cantos).
 /// O que o arrasto faz na caixa da transformação livre.
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum ParteDaCaixa {
+pub enum ParteDaCaixa {
     Dentro,
-    /// Um canto: muda o tamanho (proporcional; ⇧ solta).
-    Canto,
-    /// Fora da caixa: gira (⇧ de 15 em 15 graus).
+    /// Uma das oito alças (`Transformacao::alcas`): canto proporcional (⇧
+    /// solta), meio de lado só naquele eixo; a oposta fica parada, ou o ponto
+    /// de referência com ⌥.
+    Alca(usize),
+    /// Fora da caixa: gira em volta do ponto de referência (⇧ de 15 em 15
+    /// graus).
     Fora,
+    /// O ponto de referência: arrastar o leva para outro lugar.
+    Referencia,
 }
 
 /// Um arrasto na caixa: o que começou a fazer, onde (pixels da foto), e a
@@ -511,6 +526,8 @@ struct GestoDeTransformacao {
     parte: ParteDaCaixa,
     inicio: (f32, f32),
     t: Transformacao,
+    /// O ponto de referência de quando o arrasto começou (caixa de origem).
+    referencia: (f32, f32),
 }
 
 struct GestoDeSelecao {
@@ -673,6 +690,16 @@ pub struct EditorDeFoto {
     campos_de: Option<(TipoDeSelecao, TipoDeEstilo)>,
     /// A amostra da varinha que o Select mostra.
     amostra_mostrada: Option<AmostraDaVarinha>,
+    /// O modo da ferramenta (pincel e carimbo) e a amostra do carimbo, nos
+    /// Selects do kit.
+    seletor_do_modo_da_ferramenta: Entity<SelectState<Vec<Opcao>>>,
+    seletor_da_amostra_do_carimbo: Entity<SelectState<Vec<Opcao>>>,
+    /// "Mostrar sobreposição" do carimbo: a origem dentro do círculo do
+    /// pincel (o "Show Overlay" do Photoshop, recortado no círculo).
+    sobreposicao_do_carimbo: bool,
+    /// A prévia da origem montada para o ponteiro de agora: de que estado ela
+    /// é, o recorte da foto que ela cobre e a imagem.
+    previa_do_carimbo: Option<(ChaveDaPrevia, Retangulo, Arc<RenderImage>)>,
     /// O "Modificar seleção" aberto: o comando e o campo do valor.
     modificando: Option<(Modificacao, Entity<InputState>)>,
     /// O último valor usado em cada comando de "Modificar seleção", em px.
@@ -729,6 +756,15 @@ pub struct EditorDeFoto {
     /// A cor que o seletor mostra — para só mexer nele quando mudar.
     cor_mostrada: Option<[u8; 3]>,
     gesto_de_transformacao: Option<GestoDeTransformacao>,
+    /// O ponto de referência da caixa do ⌘T (na caixa de origem); `None` é o
+    /// centro. Some ao abrir e ao fechar a caixa.
+    referencia_da_caixa: Option<(f32, f32)>,
+    /// Os campos X, Y, L, A e ângulo da barra da transformação, e se a janela
+    /// está escrevendo neles (para a mudança não voltar como gesto).
+    campos_da_transformacao: [Entity<InputState>; 5],
+    escrevendo_os_campos: bool,
+    /// De que números os campos estão mostrando.
+    numeros_mostrados: Option<(f32, f32, f32, f32, f32)>,
     /// O traço do pincel de correção em curso (pixels da foto).
     traco_de_correcao: Option<Vec<(f32, f32)>>,
     /// O degradê sendo arrastado: começo e fim, em pixels da foto.
@@ -1121,6 +1157,90 @@ impl EditorDeFoto {
             },
         ));
 
+        let campos_da_transformacao: [Entity<InputState>; 5] = std::array::from_fn(|i| {
+            let (min, max, passo) = match i {
+                0 | 1 => (-100000.0, 100000.0, 1.0),
+                2 | 3 => (1.0, 10000.0, 1.0),
+                _ => (-360.0, 360.0, 1.0),
+            };
+            cx.new(|cx| {
+                InputState::new(window, cx)
+                    .step(passo)
+                    .min(min)
+                    .max(max)
+                    .default_value("0")
+            })
+        });
+        for (qual, campo) in campos_da_transformacao.iter().enumerate() {
+            assinaturas.push(cx.subscribe_in(
+                campo,
+                window,
+                move |ed: &mut Self, estado, evento: &InputEvent, window, cx| match evento {
+                    InputEvent::Change if !ed.escrevendo_os_campos => {
+                        let texto = estado.read(cx).value().replace(',', ".");
+                        if let Ok(v) = texto.trim().parse::<f32>() {
+                            ed.numero_da_transformacao_mudou(qual as u8, v, cx);
+                        }
+                    }
+                    InputEvent::PressEnter { .. } => window.focus(&ed.foco, cx),
+                    _ => {}
+                },
+            ));
+        }
+        let modos_da_ferramenta: Vec<Opcao> = Modo::TODOS
+            .iter()
+            .map(|m| Opcao::nova(m.chave(), m.nome()))
+            .collect();
+        let seletor_do_modo_da_ferramenta =
+            cx.new(|cx| SelectState::new(modos_da_ferramenta, None, window, cx));
+        seletor_do_modo_da_ferramenta.update(cx, |s, cx| {
+            s.set_selected_value(&Modo::Normal.chave().to_string(), window, cx)
+        });
+        assinaturas.push(cx.subscribe_in(
+            &seletor_do_modo_da_ferramenta,
+            window,
+            |ed: &mut Self, _e, evento: &SelectEvent<Vec<Opcao>>, window, cx| {
+                if let SelectEvent::Confirm(Some(chave)) = evento {
+                    if let (Some(modo), Some(s)) = (Modo::da_chave(chave), ed.sessao_mut()) {
+                        s.pincel.modo = modo;
+                    }
+                    cx.notify();
+                }
+                window.focus(&ed.foco, cx);
+            },
+        ));
+        let amostras_do_carimbo: Vec<Opcao> = editor_core::AmostraDoCarimbo::TODAS
+            .iter()
+            .map(|a| Opcao::nova(a.chave(), a.nome()))
+            .collect();
+        let seletor_da_amostra_do_carimbo =
+            cx.new(|cx| SelectState::new(amostras_do_carimbo, None, window, cx));
+        seletor_da_amostra_do_carimbo.update(cx, |s, cx| {
+            s.set_selected_value(
+                &editor_core::AmostraDoCarimbo::AtualEAbaixo
+                    .chave()
+                    .to_string(),
+                window,
+                cx,
+            )
+        });
+        assinaturas.push(cx.subscribe_in(
+            &seletor_da_amostra_do_carimbo,
+            window,
+            |ed: &mut Self, _e, evento: &SelectEvent<Vec<Opcao>>, window, cx| {
+                if let SelectEvent::Confirm(Some(chave)) = evento {
+                    let amostra = editor_core::AmostraDoCarimbo::TODAS
+                        .into_iter()
+                        .find(|a| a.chave() == chave);
+                    if let (Some(amostra), Some(s)) = (amostra, ed.sessao_mut()) {
+                        s.carimbo.amostra = amostra;
+                    }
+                    cx.notify();
+                }
+                window.focus(&ed.foco, cx);
+            },
+        ));
+
         let foco = cx.focus_handle();
         window.focus(&foco, cx);
 
@@ -1169,6 +1289,10 @@ impl EditorDeFoto {
             seletor_de_amostra,
             campos_de: None,
             amostra_mostrada: Some(AmostraDaVarinha::Todas),
+            seletor_do_modo_da_ferramenta,
+            seletor_da_amostra_do_carimbo,
+            sobreposicao_do_carimbo: true,
+            previa_do_carimbo: None,
             modificando: None,
             valores_da_modificacao: [5, 5, 5],
             modo,
@@ -1207,6 +1331,10 @@ impl EditorDeFoto {
             seletor_de_cor,
             cor_mostrada: None,
             gesto_de_transformacao: None,
+            referencia_da_caixa: None,
+            campos_da_transformacao,
+            escrevendo_os_campos: false,
+            numeros_mostrados: None,
             traco_de_correcao: None,
             degrade_em_curso: None,
             miniaturas_das_mascaras: Vec::new(),
@@ -2013,7 +2141,39 @@ impl EditorDeFoto {
     // ---------------------------------------------- transformação livre
 
     /// ⌘T: a caixa aparece em volta do conteúdo da camada (ou da seleção).
+    /// Os campos da barra da transformação acompanham a caixa (fora de um
+    /// campo em edição), e o ponto de referência volta ao centro quando a
+    /// caixa fecha. Chamado no `render`.
+    fn sincronizar_a_transformacao(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(numeros) = self.numeros_da_transformacao() else {
+            self.referencia_da_caixa = None;
+            self.numeros_mostrados = None;
+            return;
+        };
+        if self.numeros_mostrados == Some(numeros) {
+            return;
+        }
+        self.numeros_mostrados = Some(numeros);
+        let (x, y, l, a, g) = numeros;
+        let textos = [
+            format!("{x:.0}"),
+            format!("{y:.0}"),
+            format!("{l:.1}"),
+            format!("{a:.1}"),
+            format!("{g:.1}"),
+        ];
+        self.escrevendo_os_campos = true;
+        for (campo, texto) in self.campos_da_transformacao.clone().iter().zip(textos) {
+            if campo.focus_handle(cx).is_focused(window) {
+                continue;
+            }
+            campo.update(cx, |c, cx| c.set_value(texto, window, cx));
+        }
+        self.escrevendo_os_campos = false;
+    }
+
     pub fn transformar(&mut self, cx: &mut Context<Self>) {
+        self.referencia_da_caixa = None;
         let Some(s) = self.sessao_mut() else {
             return;
         };
@@ -2170,17 +2330,33 @@ impl EditorDeFoto {
         }));
     }
 
-    /// Em que parte da caixa o ponto (da foto) cai — o canto conta com uma
-    /// folga de 8 pontos da tela.
-    fn parte_da_caixa(&self, x: f32, y: f32) -> Option<ParteDaCaixa> {
+    /// O ponto de referência da caixa, na caixa de origem: o escolhido, ou
+    /// o centro.
+    pub fn referencia_da_caixa(&self) -> Option<(f32, f32)> {
+        let (caixa, _) = self.sessao()?.transformacao()?;
+        Some(self.referencia_da_caixa.unwrap_or((
+            caixa.x as f32 + caixa.largura as f32 / 2.0,
+            caixa.y as f32 + caixa.altura as f32 / 2.0,
+        )))
+    }
+
+    /// Em que parte da caixa o ponto (da foto) cai — o ponto de referência e
+    /// as alças contam com uma folga de 8 pontos da tela.
+    pub fn parte_da_caixa(&self, x: f32, y: f32) -> Option<ParteDaCaixa> {
         let (caixa, t) = self.sessao()?.transformacao()?;
         let escala = self.vista_do_zoom().map_or(1.0, |(_, v)| v.escala);
         let folga = 8.0 / escala;
-        if t.cantos(&caixa)
-            .iter()
-            .any(|(cx_, cy_)| (cx_ - x).hypot(cy_ - y) <= folga)
-        {
-            return Some(ParteDaCaixa::Canto);
+        let perto = |q: (f32, f32)| (q.0 - x).hypot(q.1 - y) <= folga;
+        let referencia = self.referencia_da_caixa()?;
+        if perto(t.aplicar(&caixa, referencia.0, referencia.1)) {
+            return Some(ParteDaCaixa::Referencia);
+        }
+        // Os cantos primeiro: numa caixa pequena eles ganham dos meios.
+        let alcas = Transformacao::alcas(&caixa);
+        for i in [0, 2, 4, 6, 1, 3, 5, 7] {
+            if perto(t.aplicar(&caixa, alcas[i].0, alcas[i].1)) {
+                return Some(ParteDaCaixa::Alca(i));
+            }
         }
         let (u, v) = t.inversa(&caixa, x, y);
         let dentro = u >= caixa.x as f32
@@ -2201,19 +2377,30 @@ impl EditorDeFoto {
         ) else {
             return;
         };
-        let Some(parte) = self.parte_da_caixa(p.0, p.1) else {
+        let (Some(parte), Some(referencia)) =
+            (self.parte_da_caixa(p.0, p.1), self.referencia_da_caixa())
+        else {
             return;
         };
         self.gesto_de_transformacao = Some(GestoDeTransformacao {
             parte,
             inicio: p,
             t,
+            referencia,
         });
         cx.notify();
     }
 
-    /// O arrasto na caixa: mover, escalar (em volta do centro) ou girar.
-    fn arrastar_na_caixa(&mut self, ponto: Point<Pixels>, livre: bool, cx: &mut Context<Self>) {
+    /// O arrasto na caixa: mover, escalar por uma alça, girar em volta do
+    /// ponto de referência ou levar o ponto de referência. ⇧ solta a
+    /// proporção nos cantos e prende o giro em 15°; ⌥ escala em volta do ponto
+    /// de referência.
+    fn arrastar_na_caixa(
+        &mut self,
+        ponto: Point<Pixels>,
+        modificadores: gpui_kit::Modifiers,
+        cx: &mut Context<Self>,
+    ) {
         let (Some(g), Some(p), Some((caixa, _))) = (
             self.gesto_de_transformacao,
             self.na_foto_sem_limite(ponto),
@@ -2222,48 +2409,42 @@ impl EditorDeFoto {
             return;
         };
         let mut t = g.t;
-        let centro = (
-            caixa.x as f32 + caixa.largura as f32 / 2.0 + g.t.dx,
-            caixa.y as f32 + caixa.altura as f32 / 2.0 + g.t.dy,
-        );
         match g.parte {
             ParteDaCaixa::Dentro => {
                 t.dx = g.t.dx + (p.0 - g.inicio.0).round();
                 t.dy = g.t.dy + (p.1 - g.inicio.1).round();
             }
-            ParteDaCaixa::Canto => {
-                // O ponteiro no referencial da caixa (sem o giro).
-                let (s, c) = g.t.angulo.sin_cos();
-                let local = |q: (f32, f32)| {
-                    let (x, y) = (q.0 - centro.0, q.1 - centro.1);
-                    (x * c + y * s, -x * s + y * c)
-                };
-                let (meia_l, meia_a) = (caixa.largura as f32 / 2.0, caixa.altura as f32 / 2.0);
-                let (lx, ly) = local(p);
-                let (sx, sy) = ((lx / meia_l).abs().max(0.01), (ly / meia_a).abs().max(0.01));
-                if livre {
-                    t.escala_x = sx;
-                    t.escala_y = sy;
+            ParteDaCaixa::Alca(i) => {
+                let ancora = if modificadores.alt {
+                    g.referencia
                 } else {
-                    // Proporcional: a distância ao centro ao longo da diagonal.
-                    let (ix, iy) = local(g.inicio);
-                    let antes = ix.hypot(iy).max(1.0);
-                    let fator = lx.hypot(ly) / antes;
-                    t.escala_x = (g.t.escala_x * fator).max(0.01);
-                    t.escala_y = (g.t.escala_y * fator).max(0.01);
-                }
+                    Transformacao::alcas(&caixa)[(i + 4) % 8]
+                };
+                t = g.t.pela_alca(&caixa, i, p, ancora, !modificadores.shift);
             }
             ParteDaCaixa::Fora => {
-                let angulo = |q: (f32, f32)| (q.1 - centro.1).atan2(q.0 - centro.0);
-                let mut a = g.t.angulo + angulo(p) - angulo(g.inicio);
-                if livre {
+                let r = g.t.aplicar(&caixa, g.referencia.0, g.referencia.1);
+                let angulo = |q: (f32, f32)| (q.1 - r.1).atan2(q.0 - r.0);
+                let mut final_ = g.t.angulo + angulo(p) - angulo(g.inicio);
+                if modificadores.shift {
                     let passo = std::f32::consts::PI / 12.0;
-                    a = (a / passo).round() * passo;
+                    final_ = (final_ / passo).round() * passo;
                 }
-                t.angulo = a;
+                t =
+                    g.t.girada_em_volta(&caixa, g.referencia, final_ - g.t.angulo);
+            }
+            ParteDaCaixa::Referencia => {
+                self.referencia_da_caixa = Some(g.t.inversa(&caixa, p.0, p.1));
+                cx.notify();
+                return;
             }
         }
-        // Só mede o que mudou: o soltar no mesmo ponto não é gesto.
+        self.definir_transformacao_medindo(t, cx);
+    }
+
+    /// A transformação nova, só se mudou (o soltar no mesmo ponto não é
+    /// gesto), medindo o tempo.
+    fn definir_transformacao_medindo(&mut self, t: Transformacao, cx: &mut Context<Self>) {
         if self
             .sessao()
             .and_then(Sessao::transformacao)
@@ -2277,6 +2458,63 @@ impl EditorDeFoto {
             self.medidas.ultimo_gesto = Some(inicio.elapsed());
         }
         cx.notify();
+    }
+
+    /// Os números da barra da transformação: X e Y do ponto de referência
+    /// (pixels da foto), largura e altura em % e o ângulo em graus.
+    pub fn numeros_da_transformacao(&self) -> Option<(f32, f32, f32, f32, f32)> {
+        let (caixa, t) = self.sessao()?.transformacao()?;
+        let r = self.referencia_da_caixa()?;
+        let (x, y) = t.aplicar(&caixa, r.0, r.1);
+        Some((
+            x,
+            y,
+            t.escala_x * 100.0,
+            t.escala_y * 100.0,
+            t.angulo.to_degrees(),
+        ))
+    }
+
+    /// Um campo da barra da transformação mudou (0 X, 1 Y, 2 L%, 3 A%, 4
+    /// ângulo): a escala e o ângulo em volta do ponto de referência.
+    pub fn numero_da_transformacao_mudou(&mut self, qual: u8, valor: f32, cx: &mut Context<Self>) {
+        let (Some((caixa, t)), Some(r)) = (
+            self.sessao().and_then(Sessao::transformacao),
+            self.referencia_da_caixa(),
+        ) else {
+            return;
+        };
+        if !valor.is_finite() {
+            return;
+        }
+        let mut n = t;
+        match qual {
+            0 | 1 => {
+                let (x, y) = t.aplicar(&caixa, r.0, r.1);
+                if qual == 0 {
+                    n.dx += valor - x;
+                } else {
+                    n.dy += valor - y;
+                }
+            }
+            2 if valor >= 1.0 => {
+                n = Transformacao {
+                    escala_x: valor / 100.0,
+                    ..t
+                }
+                .fixando(&caixa, r, &t)
+            }
+            3 if valor >= 1.0 => {
+                n = Transformacao {
+                    escala_y: valor / 100.0,
+                    ..t
+                }
+                .fixando(&caixa, r, &t)
+            }
+            4 => n = t.girada_em_volta(&caixa, r, valor.to_radians() - t.angulo),
+            _ => return,
+        }
+        self.definir_transformacao_medindo(n, cx);
     }
 
     /// O conta-gotas: a cor da foto (como ela aparece) no ponto.
@@ -2407,7 +2645,7 @@ impl EditorDeFoto {
             return;
         }
         if self.gesto_de_transformacao.is_some() {
-            self.arrastar_na_caixa(ponto, modificadores.shift, cx);
+            self.arrastar_na_caixa(ponto, modificadores, cx);
             return;
         }
         if let Some((de, _)) = self.degrade_em_curso {
@@ -3401,6 +3639,7 @@ impl EditorDeFoto {
     /// "Transformar seleção": a caixa do ⌘T em volta da seleção, que só mexe
     /// no contorno.
     pub fn transformar_selecao(&mut self, cx: &mut Context<Self>) {
+        self.referencia_da_caixa = None;
         let mut abriu = false;
         self.na_sessao(cx, |s| abriu = s.comecar_a_transformar_a_selecao());
         if !abriu {
@@ -3411,6 +3650,81 @@ impl EditorDeFoto {
 
     pub fn modificando(&self) -> Option<Modificacao> {
         self.modificando.as_ref().map(|(m, _)| *m)
+    }
+
+    // ------------------------------------------------ opções do carimbo
+
+    pub fn alternar_carimbo_alinhado(&mut self, cx: &mut Context<Self>) {
+        if let Some(s) = self.sessao_mut() {
+            s.carimbo.alinhado = !s.carimbo.alinhado;
+        }
+        cx.notify();
+    }
+
+    pub fn alternar_sobreposicao_do_carimbo(&mut self, cx: &mut Context<Self>) {
+        self.sobreposicao_do_carimbo = !self.sobreposicao_do_carimbo;
+        cx.notify();
+    }
+
+    /// A prévia da origem para o ponteiro de agora: só com o carimbo na mão,
+    /// a sobreposição ligada, fora de um traço (ela some enquanto se pinta,
+    /// como o "Ocultar automaticamente" do Photoshop) e sem a vista girada (o
+    /// GPUI não gira imagem). Refeita só quando o estado muda.
+    fn atualizar_a_previa_do_carimbo(&mut self) {
+        let carimbo = self.selecionando.is_none()
+            && self.auxiliar.is_none()
+            && self.ferramenta() == Some(Ferramenta::Carimbo);
+        let ponto = self
+            .ponteiro
+            .filter(|p| self.palco.contains(p))
+            .and_then(|p| self.na_foto(p));
+        let (Some((x, y)), true, true, false, true) = (
+            ponto,
+            carimbo,
+            self.sobreposicao_do_carimbo,
+            self.pintando,
+            self.giro == 0.0,
+        ) else {
+            self.previa_do_carimbo = None;
+            return;
+        };
+        let Some(s) = self.sessao() else {
+            return;
+        };
+        let Some(mira) = s.mira_do_carimbo(x, y) else {
+            self.previa_do_carimbo = None;
+            return;
+        };
+        let raio = s.pincel.raio;
+        let chave: ChaveDaPrevia = (
+            s.versao(),
+            (x.round() as i32, y.round() as i32),
+            raio.round() as u32,
+            (mira.0.round() as i32, mira.1.round() as i32),
+            s.carimbo.amostra,
+        );
+        if self
+            .previa_do_carimbo
+            .as_ref()
+            .is_some_and(|(c, _, _)| *c == chave)
+        {
+            return;
+        }
+        let Some((ret, rgba)) = s.previa_do_carimbo(x, y, raio) else {
+            self.previa_do_carimbo = None;
+            return;
+        };
+        let mut bytes = rgba.into_raw();
+        for p in bytes.as_chunks_mut::<4>().0 {
+            p.swap(0, 2);
+        }
+        self.previa_do_carimbo =
+            crate::imagem::de_bgra(ret.largura, ret.altura, bytes).map(|img| (chave, ret, img));
+    }
+
+    /// A prévia da origem está montada (para os testes).
+    pub fn tem_previa_do_carimbo(&self) -> bool {
+        self.previa_do_carimbo.is_some()
     }
 
     /// ⌘ + clique numa miniatura: a seleção da camada (ou da máscara).
@@ -4823,7 +5137,39 @@ impl EditorDeFoto {
                         let mut fechado = cantos.clone();
                         fechado.push(cantos[0]);
                         palco = palco.child(tela.contorno(fechado));
-                        for (x, y) in cantos {
+                        // O ponto de referência: um círculo com a cruz.
+                        if let Some(r) = self.referencia_da_caixa() {
+                            let (qx, qy) = t.aplicar(&caixa, r.0, r.1);
+                            let (rx, ry) = tela.p(qx, qy);
+                            palco = palco.child(
+                                div()
+                                    .debug_selector(|| "editor-referencia-da-caixa".into())
+                                    .absolute()
+                                    .left(px(rx - 6.0))
+                                    .top(px(ry - 6.0))
+                                    .size(px(12.0))
+                                    .rounded_full()
+                                    .border_1()
+                                    .border_color(gpui_kit::white())
+                                    .bg(gpui_kit::black().opacity(0.35)),
+                            );
+                            for (l, a) in [(16.0, 1.0), (1.0, 16.0)] {
+                                palco = palco.child(
+                                    div()
+                                        .absolute()
+                                        .left(px(rx - l / 2.0))
+                                        .top(px(ry - a / 2.0))
+                                        .w(px(l))
+                                        .h(px(a))
+                                        .bg(gpui_kit::white().opacity(0.9)),
+                                );
+                            }
+                        }
+                        let alcas: Vec<(f32, f32)> = Transformacao::alcas(&caixa)
+                            .iter()
+                            .map(|(x, y)| t.aplicar(&caixa, *x, *y))
+                            .collect();
+                        for (x, y) in alcas {
                             let (sx, sy) = tela.p(x, y);
                             palco = palco.child(
                                 div()
@@ -4944,6 +5290,35 @@ impl EditorDeFoto {
                         || (self.selecionando.is_none()
                             && self.auxiliar.is_none()
                             && !sessao.transformando());
+                    // A prévia da origem dentro do círculo do pincel.
+                    if let (Some(ponteiro), Some((_, ret, imagem))) =
+                        (dentro, self.previa_do_carimbo.as_ref())
+                    {
+                        let raio = sessao.pincel.raio * v.escala;
+                        let centro = ponteiro - self.palco.origin;
+                        let (cx0, cy0) = (f(centro.x) - raio, f(centro.y) - raio);
+                        let (ix, iy) = tela.p(ret.x as f32, ret.y as f32);
+                        palco = palco.child(
+                            div()
+                                .debug_selector(|| "editor-previa-do-carimbo".into())
+                                .absolute()
+                                .left(px(cx0))
+                                .top(px(cy0))
+                                .size(px(raio * 2.0))
+                                .rounded_full()
+                                .overflow_hidden()
+                                .opacity(0.75)
+                                .child(
+                                    img(imagem.clone())
+                                        .absolute()
+                                        .left(px(ix - cx0))
+                                        .top(px(iy - cy0))
+                                        .w(px(ret.largura as f32 * v.escala))
+                                        .h(px(ret.altura as f32 * v.escala))
+                                        .object_fit(ObjectFit::Fill),
+                                ),
+                        );
+                    }
                     // A mira do carimbo: de onde ele copia para o ponteiro.
                     if let (Some(ponteiro), Some(Ferramenta::Carimbo), true) =
                         (dentro, self.ferramenta(), com_pincel)
@@ -5135,9 +5510,7 @@ impl EditorDeFoto {
                 )
             })
             .when(self.transformando(), |barra| {
-                let so_o_contorno = self
-                    .sessao()
-                    .is_some_and(Sessao::transformando_a_selecao);
+                let so_o_contorno = self.sessao().is_some_and(Sessao::transformando_a_selecao);
                 barra
                     .child(
                         div()
@@ -5145,9 +5518,9 @@ impl EditorDeFoto {
                             .text_xs()
                             .text_color(tema.muted_foreground)
                             .child(if so_o_contorno {
-                                "Transformar seleção (só o contorno) — arraste dentro, nos cantos (⇧ livre) ou fora para girar (⇧ de 15°)"
+                                "Transformar seleção (só o contorno)"
                             } else {
-                                "Transformar — arraste dentro, nos cantos (⇧ livre) ou fora para girar (⇧ de 15°)"
+                                "Transformação livre"
                             }),
                     )
                     .child(
@@ -5523,6 +5896,67 @@ impl EditorDeFoto {
             .into_any_element()
     }
 
+    /// A barra de opções da transformação (⌘T e Transformar seleção): X e Y do
+    /// ponto de referência, largura e altura em %, o ângulo, e a dica dos
+    /// gestos — a barra do Photoshop durante a transformação livre.
+    fn barra_da_transformacao(&self, cx: &mut Context<Self>) -> AnyElement {
+        let tema = cx.theme().clone();
+        div()
+            .id("editor-opcoes-da-transformacao")
+            .debug_selector(|| "editor-opcoes-da-transformacao".into())
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(10.))
+            .px(px(12.))
+            .py(px(6.))
+            .border_b_1()
+            .border_color(tema.border)
+            .children({
+                        use gpui_kit::component::input::NumberInput;
+                        let rotulos = ["X", "Y", "L %", "A %", "Ângulo"];
+                        let seletores = [
+                            "editor-transformacao-x",
+                            "editor-transformacao-y",
+                            "editor-transformacao-l",
+                            "editor-transformacao-a",
+                            "editor-transformacao-angulo",
+                        ];
+                        self.campos_da_transformacao
+                            .iter()
+                            .zip(rotulos.into_iter().zip(seletores))
+                            .map(|(campo, (rotulo, seletor))| {
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(4.))
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(tema.muted_foreground)
+                                            .child(rotulo),
+                                    )
+                                    .child(
+                                        div()
+                                            .w(px(84.))
+                                            .debug_selector(move || seletor.into())
+                                            .child(crate::estilo::campo_pequeno(
+                                                NumberInput::new(campo).xsmall(),
+                                            )),
+                                    )
+                            })
+                            .collect::<Vec<_>>()
+                    })
+            .child(div().flex_1())
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(tema.muted_foreground)
+                    .child("Alças: tamanho (⇧ livre, ⌥ em volta da referência) · fora: girar (⇧ 15°) · arraste o alvo para mudar a referência"),
+            )
+            .into_any_element()
+    }
+
     /// O diálogo do "Modificar seleção": o valor em pixels do documento.
     fn dialogo_da_modificacao(
         &mut self,
@@ -5709,6 +6143,81 @@ impl EditorDeFoto {
                                     .placeholder("Predefinição do pincel"),
                             )),
                     )
+                    .when(
+                        matches!(ferramenta, Some(Ferramenta::Pincel | Ferramenta::Carimbo)),
+                        |painel| {
+                            painel.child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(8.))
+                                    .child(rotulo("Modo"))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .debug_selector(|| "editor-modo-da-ferramenta".into())
+                                            .child(crate::estilo::campo_pequeno(
+                                                Select::new(&self.seletor_do_modo_da_ferramenta)
+                                                    .xsmall(),
+                                            )),
+                                    ),
+                            )
+                        },
+                    )
+                    .when(ferramenta == Some(Ferramenta::Carimbo), |painel| {
+                        let opcoes = self.sessao().map(|s| s.carimbo).unwrap_or_default();
+                        painel
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(8.))
+                                    .child(rotulo("Amostra"))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .debug_selector(|| "editor-amostra-do-carimbo".into())
+                                            .child(crate::estilo::campo_pequeno(
+                                                Select::new(&self.seletor_da_amostra_do_carimbo)
+                                                    .xsmall(),
+                                            )),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_wrap()
+                                    .gap(px(12.))
+                                    .child(
+                                        div().debug_selector(|| "editor-carimbo-alinhado".into()).child(
+                                            gpui_kit::component::checkbox::Checkbox::new(
+                                                "editor-carimbo-alinhado",
+                                            )
+                                            .xsmall()
+                                            .label("Alinhado")
+                                            .checked(opcoes.alinhado)
+                                            .on_click(cx.listener(|ed, _: &bool, _, cx| {
+                                                ed.alternar_carimbo_alinhado(cx)
+                                            })),
+                                        ),
+                                    )
+                                    .child(
+                                        div()
+                                            .debug_selector(|| "editor-carimbo-sobreposicao".into())
+                                            .child(
+                                                gpui_kit::component::checkbox::Checkbox::new(
+                                                    "editor-carimbo-sobreposicao",
+                                                )
+                                                .xsmall()
+                                                .label("Mostrar a origem no pincel")
+                                                .checked(self.sobreposicao_do_carimbo)
+                                                .on_click(cx.listener(|ed, _: &bool, _, cx| {
+                                                    ed.alternar_sobreposicao_do_carimbo(cx)
+                                                })),
+                                            ),
+                                    ),
+                            )
+                    })
                     .child(rotulo("Tamanho  [  ]"))
                     .child(
                         div()
@@ -7015,6 +7524,8 @@ impl Render for EditorDeFoto {
         }
         self.acompanhar_o_pincel(window, cx);
         self.sincronizar_os_campos(window, cx);
+        self.sincronizar_a_transformacao(window, cx);
+        self.atualizar_a_previa_do_carimbo();
         self.atualizar_a_lupa(cx);
         self.subir_os_ladrilhos();
         self.atualizar_as_bordas();
@@ -7075,9 +7586,14 @@ impl Render for EditorDeFoto {
                 cx,
             )
         };
-        let opcoes_da_selecao = (self.area_do_preenchimento.is_none()
-            && (self.selecionando.is_some() || self.auxiliar == Some(Auxiliar::Varinha)))
-        .then(|| self.barra_de_opcoes_da_selecao(cx));
+        let opcoes_da_selecao = if self.area_do_preenchimento.is_some() {
+            None
+        } else if self.transformando() {
+            Some(self.barra_da_transformacao(cx))
+        } else {
+            (self.selecionando.is_some() || self.auxiliar == Some(Auxiliar::Varinha))
+                .then(|| self.barra_de_opcoes_da_selecao(cx))
+        };
         let tema = cx.theme().clone();
         // A moldura do `Root` não pode tomar o clique do conteúdo encostado na
         // borda com a janela maximizada (`janela::raiz_do_conteudo`).
