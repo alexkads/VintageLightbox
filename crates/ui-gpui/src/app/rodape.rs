@@ -377,9 +377,9 @@ impl Aplicativo {
                     .px(px(6.))
                     .items_center()
                     .when(destaque, |d| {
-                        d.bg(aviso.opacity(0.15))
+                        d.bg(perigo.opacity(0.18))
                             .border_x_1()
-                            .border_color(aviso.opacity(0.4))
+                            .border_color(perigo.opacity(0.55))
                     })
                     .children(meio),
             )

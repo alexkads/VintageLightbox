@@ -549,10 +549,36 @@ impl Aplicativo {
                     (Some("desta"), _) => Some(Pedido::VerEstaVersao),
                     (Some("ver"), Some(indice)) => Some(Pedido::VerVersao(indice)),
                     (Some("fechar"), _) => Some(Pedido::FecharNovidades),
+                    // A faixa vermelha da versão importante compilando — só
+                    // pinta: o `true` de "comece a compilar" fica ignorado.
+                    (Some("compilando"), _) => {
+                        use crate::atualizacao::porta::{Aviso, JeitoDeAtualizar, VersaoNova};
+                        let versao = "9.9.9".to_string();
+                        let novidades = crate::atualizacao::novidades::Novidades::do_anuncio(
+                            versao.clone(),
+                            "Correção séria".into(),
+                            true,
+                        );
+                        let _ = self.atualizacao.receber(Aviso::Disponivel {
+                            versao: VersaoNova {
+                                versao,
+                                notas: None,
+                                jeito: JeitoDeAtualizar::Compilar,
+                                novidades: Some(novidades),
+                            },
+                            automatico: true,
+                        });
+                        self.atualizacao.receber(Aviso::Progresso(
+                            "compilando (15 a 40 minutos na primeira vez)".into(),
+                        ));
+                        cx.notify();
+                        None
+                    }
                     _ => None,
                 };
                 match pedido {
                     Some(pedido) => self.atender(pedido, cx),
+                    None if acao == "compilando" => {}
                     None => eprintln!("[roteiro] novidades: não entendi '{acao}'"),
                 }
             }

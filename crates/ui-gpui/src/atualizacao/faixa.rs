@@ -30,6 +30,7 @@ use std::sync::Arc;
 
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::list::ListItem;
+use gpui_kit::component::shimmer::ShimmerText;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Disableable, Sizable};
 use gpui_kit::{div, prelude::*, px, AnyElement, FontWeight, MouseButton, SharedString, Window};
 
@@ -369,9 +370,18 @@ pub fn botoes(estado: &Estado) -> Vec<(&'static str, &'static str, bool, Pedido)
     lista
 }
 
-/// Se a faixa pede destaque: versão nova importante, ainda por instalar.
+/// Se a faixa pede destaque: versão nova importante (a correção de um defeito
+/// sério), do anúncio até o "Reabrir agora".
+///
+/// 🚨 **Vermelho e com brilho correndo** (dono, 07/out/2026: *"quando for um
+/// bug sério tipo dessa versão, tem que ser vermelho e com shimmer"*) — o
+/// amarelo de antes passava por aviso qualquer no rodapé.
 pub fn em_destaque(estado: &Estado) -> bool {
-    estado.importante() && matches!(estado.visivel(), Some(Aviso::Disponivel { .. }))
+    estado.importante()
+        && matches!(
+            estado.visivel(),
+            Some(Aviso::Disponivel { .. } | Aviso::Instalada(_))
+        )
 }
 
 /// Desenha a faixa **dentro do rodapé**: a frase e os botões, numa linha que
@@ -391,19 +401,16 @@ pub fn desenhar(estado: &Estado, cx: &gpui_kit::App, agir: Agir) -> Option<AnyEl
             .min_w(px(0.))
             .items_center()
             .gap(px(8.))
-            .child(
-                div()
-                    .min_w(px(0.))
-                    .truncate()
-                    .text_xs()
-                    .text_color(if destaque {
-                        tema.foreground
-                    } else {
-                        tema.muted_foreground
-                    })
-                    .when(destaque, |d| d.font_weight(FontWeight::MEDIUM))
-                    .child(texto.clone()),
-            )
+            .child(div().min_w(px(0.)).truncate().text_xs().map(|d| {
+                if destaque {
+                    // O `ShimmerText` herda corte, fonte e cor daqui.
+                    d.text_color(tema.danger)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(ShimmerText::new(texto.clone()).id("faixa-brilho"))
+                } else {
+                    d.text_color(tema.muted_foreground).child(texto.clone())
+                }
+            }))
             .child(linha)
             // A frase inteira, quando o rodapé estreito a cortou.
             .tooltip(move |window, cx| {
@@ -1004,6 +1011,18 @@ mod testes {
             comum.texto().as_deref(),
             Some("Versão 0.1.13 disponível — Chatbot e Agendamentos")
         );
+    }
+
+    #[test]
+    fn a_versao_importante_fica_em_destaque_do_anuncio_ao_reabrir() {
+        let mut estado = Estado::default();
+        estado.receber(para_compilar("0.1.13", true, true));
+        assert!(em_destaque(&estado), "compilando");
+        estado.receber(Aviso::Instalada("0.1.13".into()));
+        assert!(em_destaque(&estado), "instalada, falta reabrir");
+        estado.receber(Aviso::Falhou("sem disco".into()));
+        assert!(!em_destaque(&estado), "a falha tem a faixa dela");
+        assert!(!em_destaque(&com(para_compilar("0.1.13", false, true))));
     }
 
     #[test]

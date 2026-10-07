@@ -214,7 +214,8 @@ pub enum Passo {
     /// `relatorio` (imprime o texto do "Copiar relatório" no terminal).
     Desempenho(String),
     /// `novidades desta` (o clique na versão do rodapé) · `novidades ver 3`
-    /// (a quarta versão da lista) · `novidades fechar`.
+    /// (a quarta versão da lista) · `novidades fechar` · `novidades
+    /// compilando` (a faixa da versão importante compilando, sem compilar).
     Novidades(String),
     /// `aviso ok <texto>` · `aviso erro <texto>` — o toast da raiz, para
     /// conferir na tela o que o operador vê (o erro passa pela tradução do
