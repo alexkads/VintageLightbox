@@ -235,7 +235,7 @@ impl EditorDeFoto {
                     div()
                         .text_sm()
                         .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                        .child(format!("Propriedades — Máscara de {}", camada.nome)),
+                        .child(format!("Máscara de {}", camada.nome)),
                 )
                 .child(rotulo("Densidade", format!("{:.0}%", densidade * 100.0)))
                 .child(

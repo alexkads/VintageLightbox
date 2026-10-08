@@ -716,6 +716,36 @@ mod testes {
         ve.run_until_parked();
     }
 
+    /// Um item de um menu do editor (Arquivo, Editar…): abre o menu e clica.
+    fn pelo_menu(ve: &mut VisualTestContext, menu: &'static str, item: &'static str) {
+        clicar_no_editor(ve, menu);
+        clicar_no_editor(ve, item);
+    }
+
+    /// Uma ferramenta escondida no grupo da barra: o botão direito no grupo
+    /// abre o flyout, e o clique na linha a escolhe.
+    fn pelo_flyout(ve: &mut VisualTestContext, ferramenta: &'static str) {
+        let d = crate::editor::janela::FERRAMENTAS
+            .iter()
+            .find(|d| d.id == ferramenta)
+            .unwrap_or_else(|| panic!("{ferramenta} não está na tabela"));
+        let grupo: &'static str = Box::leak(format!("editor-grupo-{}", d.grupo).into_boxed_str());
+        let caixa = ve.debug_bounds(grupo).expect("o grupo na barra");
+        ve.simulate_mouse_down(
+            caixa.center(),
+            gpui_kit::MouseButton::Right,
+            gpui_kit::Modifiers::none(),
+        );
+        ve.simulate_mouse_up(
+            caixa.center(),
+            gpui_kit::MouseButton::Right,
+            gpui_kit::Modifiers::none(),
+        );
+        ve.run_until_parked();
+        let linha: &'static str = Box::leak(format!("editor-flyout-{ferramenta}").into_boxed_str());
+        clicar_no_editor(ve, linha);
+    }
+
     /// 🪟 No GNOME o sistema não decora a janela do editor: a barra dele tem
     /// minimizar, maximizar e fechar no alto, à direita (dono, 07/out/2026:
     /// *"a janela do editor de fotos no Fedora 44 Gnome não tem barra"*). E o
@@ -935,18 +965,17 @@ mod testes {
             (razao - 1.0).abs() < 0.01,
             "1:1 é um pixel por pixel ({razao})"
         );
-        // Z tocado volta ao encaixe e, de novo, ao 1:1.
+        // Z é a Lupa, como no Photoshop — e não mexe no zoom sozinho.
         ve.simulate_keystrokes("z");
         ve.run_until_parked();
         assert_eq!(
-            editor.read_with(&ve, |ed, _| ed.nivel_do_zoom()),
-            Nivel::Encaixar
+            editor.read_with(&ve, |ed, _| ed.auxiliar()),
+            Some(crate::editor::janela::Auxiliar::Zoom)
         );
-        ve.simulate_keystrokes("z");
-        ve.run_until_parked();
         assert_eq!(
             editor.read_with(&ve, |ed, _| ed.nivel_do_zoom()),
-            Nivel::Razao(1.0)
+            Nivel::Razao(1.0),
+            "a tecla escolhe a ferramenta, o zoom fica"
         );
     }
 
@@ -1577,7 +1606,7 @@ mod testes {
             })
         };
 
-        clicar_no_editor(&mut ve, "editor-abrir-preenchimento");
+        pelo_menu(&mut ve, "editor-menu-editar", "editor-abrir-preenchimento");
         ve.run_until_parked();
         assert!(
             ve.debug_bounds("editor-preenchimento").is_some(),
@@ -1638,7 +1667,7 @@ mod testes {
         assert_eq!(fotografia(&mut ve).as_raw(), antes.as_raw());
 
         // De novo, e um resultado de um pedido antigo é descartado.
-        clicar_no_editor(&mut ve, "editor-abrir-preenchimento");
+        pelo_menu(&mut ve, "editor-menu-editar", "editor-abrir-preenchimento");
         ve.run_until_parked();
         clicar_no_editor(&mut ve, "editor-preenchimento-visualizar");
         let atual = editor.read_with(&ve, |ed, _| {
@@ -1711,7 +1740,7 @@ mod testes {
                 );
             })
         });
-        clicar_no_editor(&mut ve, "editor-abrir-preenchimento");
+        pelo_menu(&mut ve, "editor-menu-editar", "editor-abrir-preenchimento");
         ve.run_until_parked();
         editor.update(&mut ve, |ed, cx| {
             ed.na_sessao_para_teste(cx, |s| s.mover_opacidade(0.5))
@@ -1740,7 +1769,7 @@ mod testes {
                 s.adicionar_mascara(false);
             })
         });
-        clicar_no_editor(&mut ve, "editor-abrir-preenchimento");
+        pelo_menu(&mut ve, "editor-menu-editar", "editor-abrir-preenchimento");
         assert!(estado(&mut ve).is_none());
     }
 
@@ -1903,7 +1932,8 @@ mod testes {
             let s = ed.sessao().unwrap();
             (
                 s.documento().camadas[1].pixels.pixel(48, 24),
-                s.base().get_pixel(o.0 as u32, o.1 as u32).0,
+                // O carimbo arredonda o deslocamento (`carimbo.rs`).
+                s.base().get_pixel(o.0.round() as u32, o.1.round() as u32).0,
             )
         });
         assert_eq!([camada[0], camada[1], camada[2]], base, "copiou a origem");
@@ -2134,7 +2164,7 @@ mod testes {
         );
 
         // Nitidez não tem letra (como no Photoshop): pela barra.
-        clicar_no_editor(&mut ve, "editor-nitidez");
+        pelo_flyout(&mut ve, "editor-nitidez");
         assert_eq!(
             editor.read_with(&ve, |ed, _| ed.ferramenta()),
             Some(editor_core::Ferramenta::Nitidez)
@@ -2146,7 +2176,7 @@ mod testes {
             editor.read_with(&ve, |ed, _| ed.sessao().unwrap().historico().posicao()),
             2
         );
-        clicar_no_editor(&mut ve, "editor-aba-historico");
+        pelo_menu(&mut ve, "editor-menu-janela", "editor-janela-historico");
         clicar_no_editor(&mut ve, "editor-historico-1");
         assert_eq!(
             editor.read_with(&ve, |ed, _| ed.sessao().unwrap().historico().posicao()),
@@ -2371,8 +2401,10 @@ mod testes {
         ve.update(|window, _| window.refresh());
         ve.run_until_parked();
         assert!(ve.debug_bounds("editor-fluxo").is_some());
-        assert!(ve.debug_bounds("editor-espacamento").is_some());
         assert!(ve.debug_bounds("editor-suavizacao").is_some());
+        // O espaçamento (avançado) mora no painel Pincel.
+        clicar_no_editor(&mut ve, "editor-abrir-painel-pincel");
+        assert!(ve.debug_bounds("editor-espacamento").is_some());
     }
 
     /// ／ ⇧ + clique liga com uma reta desde o fim do traço anterior, num passo
@@ -3210,8 +3242,7 @@ mod testes {
         // 6. Deformar pelo menu Transformar ▾: Esc devolve tudo.
         let antes = doc(&ve);
         let passos_antes = passos_de(&editor, &ve);
-        clicar_no_editor(&mut ve, "editor-menu-transformar");
-        clicar_no_editor(&mut ve, "editor-transformar-deformar");
+        pelo_menu(&mut ve, "editor-menu-editar", "editor-transformar-deformar");
         assert!(editor.read_with(&ve, |ed, _| ed.deformando()));
         assert!(ve.debug_bounds("editor-opcoes-do-deformar").is_some());
         let arrastar_o_ponto = |ve: &mut VisualTestContext| {
@@ -3539,7 +3570,12 @@ mod testes {
         clicar_no_editor(&mut ve, "editor-ajuste-novo-curvas");
         let (nomes, _) = camadas(&editor, &ve);
         assert_eq!(nomes.last().map(String::as_str), Some("Curvas 1"));
+        let painel = caixa(&mut ve, "editor-painel-propriedades");
         let grafico = ve.debug_bounds("editor-curva").expect("o gráfico");
+        assert!(
+            grafico.bottom() <= painel.bottom() + gpui_kit::px(1.),
+            "o gráfico inteiro à vista no grupo padrão: {grafico:?} em {painel:?}"
+        );
         let no_grafico = |x: f32, y: f32| {
             grafico.origin
                 + gpui_kit::point(
@@ -3616,7 +3652,7 @@ mod testes {
         assert!(ve.debug_bounds("editor-selo-antes").is_some());
         assert_ne!(vista(&ve), depois, "a tela mostra o antes");
         assert_eq!(passos_de(&editor, &ve), passos, "nada no Histórico");
-        clicar_no_editor(&mut ve, "editor-antes-depois");
+        pelo_menu(&mut ve, "editor-menu-visualizar", "editor-antes-depois");
         assert!(!editor.read_with(&ve, |ed, _| ed.mostrando_antes()));
         assert_eq!(vista(&ve), depois);
         // Pintar com o antes ligado volta ao depois.
@@ -3749,5 +3785,395 @@ mod testes {
         });
         assert!(cor[0] > 60, "a mancha preta sumiu: {cor:?}");
         assert!(!nova, "pintou na camada de cima");
+    }
+
+    // ------------------------------------------------- a área de trabalho
+
+    fn caixa(ve: &mut VisualTestContext, alvo: &'static str) -> gpui_kit::Bounds<gpui_kit::Pixels> {
+        ve.debug_bounds(alvo)
+            .unwrap_or_else(|| panic!("{alvo} não está desenhado"))
+    }
+
+    /// 🧭 As regiões do Photoshop, cada uma no lugar: menus em cima, a barra
+    /// de opções embaixo deles, ferramentas à esquerda, a aba do documento em
+    /// cima do palco, os painéis à direita e o status embaixo. E a barra de
+    /// opções não muda de altura com a ferramenta: o palco fica parado.
+    #[gpui_kit::test]
+    fn as_regioes_da_area_de_trabalho_e_o_palco_parado(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        let menus = caixa(&mut ve, "editor-menu-arquivo");
+        let opcoes = caixa(&mut ve, "editor-barra-de-opcoes");
+        let barra = caixa(&mut ve, "editor-barra-de-ferramentas");
+        let aba = caixa(&mut ve, "editor-aba-do-documento");
+        let palco = caixa(&mut ve, "palco-do-editor");
+        let paineis = caixa(&mut ve, "editor-coluna-de-paineis");
+        let status = caixa(&mut ve, "editor-barra-de-status");
+        assert!(
+            menus.bottom() <= opcoes.top() + gpui_kit::px(1.),
+            "menus em cima das opções"
+        );
+        assert!(
+            opcoes.bottom() <= barra.top() + gpui_kit::px(1.),
+            "opções em cima das ferramentas"
+        );
+        assert!(
+            barra.right() <= palco.left() + gpui_kit::px(1.),
+            "ferramentas à esquerda"
+        );
+        assert!(
+            aba.bottom() <= palco.top() + gpui_kit::px(1.),
+            "a aba em cima do palco"
+        );
+        assert!(
+            palco.right() <= paineis.left() + gpui_kit::px(1.),
+            "painéis à direita"
+        );
+        assert!(
+            status.top() >= palco.bottom() - gpui_kit::px(1.),
+            "status embaixo"
+        );
+        assert!((opcoes.size.height - gpui_kit::px(36.)).abs() < gpui_kit::px(1.));
+        // Pincel, laço, varinha, mão e lupa: o palco não anda.
+        for tecla in ["l", "w", "h", "z", "j", "b"] {
+            ve.simulate_keystrokes(tecla);
+            ve.run_until_parked();
+            assert_eq!(caixa(&mut ve, "palco-do-editor"), palco, "com {tecla}");
+        }
+        // Nem com a transformação aberta (Cancelar e Aplicar à direita).
+        editor.update(&mut ve, |ed, cx| {
+            ed.tracar_para_teste((10., 24.), (54., 24.), cx)
+        });
+        ve.simulate_keystrokes("cmd-t");
+        ve.run_until_parked();
+        assert!(editor.read_with(&ve, |ed, _| ed.transformando()));
+        assert_eq!(caixa(&mut ve, "palco-do-editor"), palco, "com ⌘T");
+        let aplicar = caixa(&mut ve, "editor-aplicar-transformacao");
+        assert!(aplicar.right() <= opcoes.right() + gpui_kit::px(1.));
+        clicar_no_editor(&mut ve, "editor-aplicar-transformacao");
+        assert!(!editor.read_with(&ve, |ed, _| ed.transformando()));
+    }
+
+    /// 🧰 Os grupos da barra: uma ferramenta por grupo; o botão direito abre o
+    /// flyout dentro da janela; a escolhida vira o ícone do grupo; a letra
+    /// volta a ela e ⇧ + letra anda; Esc fecha; ↑ ↓ Enter escolhem; o aperto
+    /// longo também abre e não usa a ferramenta.
+    #[gpui_kit::test]
+    fn os_grupos_da_barra_e_o_flyout(cx: &mut TestAppContext) {
+        use crate::editor::janela::{Auxiliar, Item};
+        use editor_core::Ferramenta;
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        assert!(
+            ve.debug_bounds("editor-correcao").is_some(),
+            "o J mostra a correção"
+        );
+        assert!(
+            ve.debug_bounds("editor-recuperacao").is_none(),
+            "e esconde as outras"
+        );
+
+        pelo_flyout(&mut ve, "editor-recuperacao");
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.ferramenta()),
+            Some(Ferramenta::Recuperacao)
+        );
+        assert_eq!(editor.read_with(&ve, |ed, _| ed.flyout_aberto()), None);
+        assert!(
+            ve.debug_bounds("editor-recuperacao").is_some(),
+            "o grupo mostra a escolhida"
+        );
+        assert!(ve.debug_bounds("editor-correcao").is_none());
+        // A letra volta à última do grupo; ⇧ + letra anda.
+        ve.simulate_keystrokes("b j");
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.ferramenta()),
+            Some(Ferramenta::Recuperacao)
+        );
+        ve.simulate_keystrokes("shift-j");
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.item_atual()),
+            Some(Item::A(Auxiliar::Remendo))
+        );
+        assert!(ve.debug_bounds("editor-remendo").is_some());
+
+        // O flyout fica dentro da janela, e Esc fecha sem trocar nada.
+        let grupo = caixa(&mut ve, "editor-grupo-12");
+        ve.simulate_mouse_down(
+            grupo.center(),
+            gpui_kit::MouseButton::Right,
+            gpui_kit::Modifiers::none(),
+        );
+        ve.simulate_mouse_up(
+            grupo.center(),
+            gpui_kit::MouseButton::Right,
+            gpui_kit::Modifiers::none(),
+        );
+        ve.run_until_parked();
+        assert_eq!(editor.read_with(&ve, |ed, _| ed.flyout_aberto()), Some(12));
+        let flyout = caixa(&mut ve, "editor-flyout");
+        let janela = ve.update(|window, _| window.viewport_size());
+        assert!(flyout.left() >= grupo.right(), "ao lado do botão");
+        assert!(flyout.right() <= janela.width && flyout.bottom() <= janela.height);
+        ve.simulate_keystrokes("escape");
+        ve.run_until_parked();
+        assert_eq!(editor.read_with(&ve, |ed, _| ed.flyout_aberto()), None);
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.item_atual()),
+            Some(Item::A(Auxiliar::Remendo)),
+            "Esc não troca a ferramenta"
+        );
+        // Pelo teclado: ↓ e Enter escolhem a segunda (Girar vista).
+        editor.update(&mut ve, |ed, cx| ed.abrir_flyout(12, cx));
+        ve.simulate_keystrokes("down enter");
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.auxiliar()),
+            Some(Auxiliar::GirarVista)
+        );
+        // O aperto longo no grupo do laço abre o flyout, e o soltar não usa
+        // a ferramenta.
+        let laco = caixa(&mut ve, "editor-grupo-2");
+        ve.simulate_mouse_down(
+            laco.center(),
+            gpui_kit::MouseButton::Left,
+            gpui_kit::Modifiers::none(),
+        );
+        ve.executor()
+            .advance_clock(std::time::Duration::from_millis(500));
+        ve.run_until_parked();
+        assert_eq!(editor.read_with(&ve, |ed, _| ed.flyout_aberto()), Some(2));
+        ve.simulate_mouse_up(
+            laco.center(),
+            gpui_kit::MouseButton::Left,
+            gpui_kit::Modifiers::none(),
+        );
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.auxiliar()),
+            Some(Auxiliar::GirarVista),
+            "o aperto longo não escolheu o laço"
+        );
+        assert!(
+            !editor.read_with(&ve, |ed, _| ed.alterado()),
+            "nada foi pintado pela barra"
+        );
+    }
+
+    /// ⇥ Tab esconde ferramentas, opções e painéis (o palco cresce); ⇧Tab só
+    /// os painéis. Não grava a arrumação, e não reenvia ladrilhos à GPU.
+    #[gpui_kit::test]
+    fn tab_e_shift_tab_escondem_sem_gravar_nem_reenviar(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        let palco = caixa(&mut ve, "palco-do-editor");
+        let gravacoes = editor.read_with(&ve, |ed, _| ed.gravacoes_da_area_de_trabalho());
+        ve.simulate_keystrokes("tab");
+        ve.run_until_parked();
+        for fora in [
+            "editor-barra-de-ferramentas",
+            "editor-barra-de-opcoes",
+            "editor-coluna-de-paineis",
+        ] {
+            assert!(ve.debug_bounds(fora).is_none(), "{fora} some com o Tab");
+        }
+        let grande = caixa(&mut ve, "palco-do-editor");
+        assert!(grande.size.width > palco.size.width && grande.size.height > palco.size.height);
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.medidas().ladrilhos_no_quadro),
+            0,
+            "esconder não reenvia a foto"
+        );
+        ve.simulate_keystrokes("tab");
+        ve.run_until_parked();
+        assert_eq!(caixa(&mut ve, "palco-do-editor"), palco, "volta tudo");
+        ve.simulate_keystrokes("shift-tab");
+        ve.run_until_parked();
+        assert!(ve.debug_bounds("editor-coluna-de-paineis").is_none());
+        assert!(ve.debug_bounds("editor-barra-de-ferramentas").is_some());
+        assert!(ve.debug_bounds("editor-barra-de-opcoes").is_some());
+        ve.simulate_keystrokes("shift-tab");
+        ve.run_until_parked();
+        assert!(ve.debug_bounds("editor-coluna-de-paineis").is_some());
+        ve.executor()
+            .advance_clock(std::time::Duration::from_secs(2));
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.gravacoes_da_area_de_trabalho()),
+            gravacoes,
+            "esconder é passageiro: nada gravado"
+        );
+        assert!(editor.read_with(&ve, |ed, _| ed.arranjo().ocultos.is_empty()));
+    }
+
+    /// 🖐️ O Espaço segurado é a Mão por um instante; ao soltar, a ferramenta
+    /// é a mesma, e tocar sem arrastar não mexe no zoom.
+    #[gpui_kit::test]
+    fn o_espaco_e_a_mao_temporaria(cx: &mut TestAppContext) {
+        use crate::revelacao::zoom::Nivel;
+        use editor_core::Ferramenta;
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        ve.simulate_keystrokes("e");
+        ve.run_until_parked();
+        let nivel = editor.read_with(&ve, |ed, _| ed.nivel_do_zoom());
+        editor.update(&mut ve, |ed, cx| ed.espaco_apertado(cx));
+        assert!(editor.read_with(&ve, |ed, _| ed.espaco_segurado()));
+        editor.update(&mut ve, |ed, cx| ed.espaco_solto(cx));
+        ve.run_until_parked();
+        assert!(!editor.read_with(&ve, |ed, _| ed.espaco_segurado()));
+        assert_eq!(editor.read_with(&ve, |ed, _| ed.nivel_do_zoom()), nivel);
+        assert_eq!(nivel, Nivel::Encaixar);
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.ferramenta()),
+            Some(Ferramenta::Borracha)
+        );
+    }
+
+    /// 🗂️ Os painéis: o menu Janela esconde e traz de volta; recolher vira
+    /// faixa de ícones e o ícone abre a coluna no painel; restaurar volta ao
+    /// padrão. Tudo pelo menu (os mesmos métodos das teclas).
+    #[gpui_kit::test]
+    fn os_paineis_pelo_menu_janela(cx: &mut TestAppContext) {
+        use crate::editor::janela::QualPainel;
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        assert_eq!(
+            editor.read_with(&ve, |ed, cx| ed.paineis_no_dock(cx)).len(),
+            6,
+            "os seis painéis no dock"
+        );
+        assert!(ve.debug_bounds("editor-painel-camadas").is_some());
+        assert!(ve.debug_bounds("editor-painel-propriedades").is_some());
+        let camadas = caixa(&mut ve, "editor-painel-camadas");
+        let propriedades = caixa(&mut ve, "editor-painel-propriedades");
+        assert!(camadas.top() > propriedades.top(), "Camadas embaixo");
+        assert!(camadas.size.height > propriedades.size.height * 0.6);
+
+        pelo_menu(&mut ve, "editor-menu-janela", "editor-janela-camadas");
+        assert!(
+            ve.debug_bounds("editor-painel-camadas").is_none(),
+            "escondido"
+        );
+        assert!(editor.read_with(&ve, |ed, _| !ed.painel_visivel(QualPainel::Camadas)));
+        pelo_menu(&mut ve, "editor-menu-janela", "editor-janela-camadas");
+        assert!(
+            ve.debug_bounds("editor-painel-camadas").is_some(),
+            "de volta"
+        );
+
+        // O Histórico, atrás de Propriedades, vem para a frente.
+        assert!(ve.debug_bounds("editor-painel-historico").is_none());
+        pelo_menu(&mut ve, "editor-menu-janela", "editor-janela-historico");
+        assert!(ve.debug_bounds("editor-painel-historico").is_some());
+
+        pelo_menu(&mut ve, "editor-menu-janela", "editor-janela-recolher");
+        assert!(ve.debug_bounds("editor-faixa-de-icones").is_some());
+        assert!(ve.debug_bounds("editor-painel-camadas").is_none());
+        clicar_no_editor(&mut ve, "editor-icone-camadas");
+        assert!(ve.debug_bounds("editor-faixa-de-icones").is_none());
+        assert!(ve.debug_bounds("editor-painel-camadas").is_some());
+
+        editor.update(&mut ve, |ed, cx| {
+            ed.definir_painel_oculto(QualPainel::Cor, true, cx)
+        });
+        pelo_menu(&mut ve, "editor-menu-janela", "editor-restaurar-area");
+        assert!(editor.read_with(&ve, |ed, _| ed.painel_visivel(QualPainel::Cor)));
+        assert!(!editor.read_with(&ve, |ed, _| ed.arranjo().recolhido));
+    }
+
+    /// 💾 Uma arrumação gravada com painel desconhecido, repetido e grupo
+    /// vazio: o que serve fica, o que falta ganha lugar — nenhum painel some.
+    #[gpui_kit::test]
+    fn a_arrumacao_estragada_nao_perde_painel(cx: &mut TestAppContext) {
+        use gpui_kit::component::dock::{PanelInfo, PanelState};
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        let abas = |nomes: &[&str]| PanelState {
+            panel_name: String::new(),
+            children: nomes.iter().map(|n| PanelState::new(*n)).collect(),
+            info: PanelInfo::tabs(9),
+        };
+        let estragada = PanelState {
+            panel_name: String::new(),
+            children: vec![
+                abas(&["editor:camadas", "editor:sumiu", "editor:camadas"]),
+                abas(&[]),
+                abas(&["editor:historico"]),
+            ],
+            info: PanelInfo::Stack {
+                sizes: vec![
+                    gpui_kit::px(-5.),
+                    gpui_kit::px(f32::NAN),
+                    gpui_kit::px(100.),
+                ],
+                axis: 1,
+            },
+        };
+        editor.update(&mut ve, |ed, cx| {
+            ed.remontar_a_area_com(Some(estragada), cx)
+        });
+        ve.update(|window, _| window.refresh());
+        ve.run_until_parked();
+        let mut no_dock = editor.read_with(&ve, |ed, cx| ed.paineis_no_dock(cx));
+        no_dock.sort_by_key(|q| q.nome());
+        no_dock.dedup();
+        assert_eq!(no_dock.len(), 6, "os seis, uma vez cada: {no_dock:?}");
+        assert!(ve.debug_bounds("editor-painel-camadas").is_some());
+    }
+
+    /// 📋 Os menus chamam o mesmo que as teclas: Editar › Desfazer desfaz o
+    /// traço, e fica apagado sem nada para desfazer; o atalho escrito ao lado
+    /// é o da plataforma.
+    #[gpui_kit::test]
+    fn os_menus_chamam_as_mesmas_acoes(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        editor.update(&mut ve, |ed, cx| {
+            ed.tracar_para_teste((10., 24.), (54., 24.), cx)
+        });
+        ve.run_until_parked();
+        let posicao = |ve: &VisualTestContext| {
+            editor.read_with(ve, |ed, _| ed.sessao().unwrap().historico().posicao())
+        };
+        assert_eq!(posicao(&ve), 1);
+        pelo_menu(&mut ve, "editor-menu-editar", "editor-menu-desfazer");
+        assert_eq!(posicao(&ve), 0, "desfez pelo menu");
+        pelo_menu(&mut ve, "editor-menu-editar", "editor-menu-refazer");
+        assert_eq!(posicao(&ve), 1, "refez pelo menu");
+        let foco = editor.read_with(&ve, |ed, cx| ed.focus_handle(cx));
+        let atalho = ve.update(|window, _| {
+            crate::editor::janela::menus_atalho(&crate::editor::DesfazerNoEditor, &foco, window)
+        });
+        assert_eq!(
+            atalho.as_deref(),
+            Some(if cfg!(target_os = "macos") {
+                "⌘Z"
+            } else {
+                "Ctrl+Z"
+            })
+        );
+        // Z é a Lupa também pelo menu da Ajuda (a tabela é a mesma).
+        pelo_menu(&mut ve, "editor-menu-ajuda", "editor-ajuda-atalhos");
+        assert!(ve.debug_bounds("editor-dialogo-atalhos").is_some());
+    }
+
+    /// 🎨 As duas cores na barra: ⇄ troca (como o X) e o quadradinho volta a
+    /// preto e branco (como o D).
+    #[gpui_kit::test]
+    fn as_cores_da_barra_trocam_e_voltam(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        editor.update(&mut ve, |ed, cx| ed.escolher_cor([200, 30, 30], cx));
+        clicar_no_editor(&mut ve, "editor-trocar-cores");
+        let (frente, fundo) = editor.read_with(&ve, |ed, _| {
+            let p = ed.sessao().unwrap().pincel;
+            (p.cor, p.cor_de_fundo)
+        });
+        assert_eq!((frente, fundo), ([255; 3], [200, 30, 30]));
+        clicar_no_editor(&mut ve, "editor-cores-padrao");
+        let p = editor.read_with(&ve, |ed, _| ed.sessao().unwrap().pincel);
+        assert_eq!((p.cor, p.cor_de_fundo), ([0; 3], [255; 3]));
     }
 }

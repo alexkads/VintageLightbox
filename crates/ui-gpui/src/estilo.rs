@@ -635,6 +635,16 @@ pub fn item_de_menu_com_fim(
     linha_de_menu(id, Some(icone), rotulo.into(), None, Some(fim.into()))
 }
 
+/// O item sem ícone com o atalho apagado no fim — os menus do editor (o
+/// atalho já vem escrito como a plataforma escreve).
+pub fn item_de_menu_com_atalho(
+    id: &'static str,
+    rotulo: impl Into<SharedString>,
+    atalho: Option<String>,
+) -> gpui_kit::component::menu::PopupMenuItem {
+    linha_de_menu(id, None, rotulo.into(), None, atalho.map(Into::into))
+}
+
 fn linha_de_menu(
     id: &'static str,
     icone: Option<Icone>,

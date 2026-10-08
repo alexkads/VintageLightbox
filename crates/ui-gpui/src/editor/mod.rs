@@ -34,7 +34,6 @@ gpui_kit::actions!(
         Afastar,
         Encaixar,
         UmPorUm,
-        AlternarZoom,
         SegurarAMao,
         SelecionarTudo,
         Desmarcar,
@@ -50,7 +49,7 @@ gpui_kit::actions!(
         DifundirSelecao,
         TrocarCores,
         CoresPadrao,
-        // As letras da barra (`janela::GRUPOS`): a letra volta à última
+        // As letras da barra (`janela::ferramentas`): a letra volta à última
         // ferramenta do grupo; ⇧ + letra passa para a seguinte.
         GrupoV,
         GrupoM,
@@ -65,6 +64,7 @@ gpui_kit::actions!(
         GrupoO,
         GrupoH,
         GrupoR,
+        GrupoZ,
         ProximaDoGrupoM,
         ProximaDoGrupoL,
         ProximaDoGrupoG,
@@ -88,6 +88,10 @@ gpui_kit::actions!(
         AlternarAntesDepois,
         // ⇧⌘X: Liquidificar.
         Liquidificar,
+        // Tab: barra de ferramentas, opções e painéis somem (e voltam); ⇧Tab:
+        // só os painéis — como no Photoshop.
+        AlternarInterface,
+        AlternarPaineis,
     ]
 );
 
@@ -124,8 +128,10 @@ const SEM_CAMPO: &str = "EditorDeFoto && !Input";
 ///   carimbar visível; ⌘I inverter (a máscara, ou as cores da camada); `\`
 ///   a máscara em rubi; `/` o cadeado da transparência. Fora de campo de
 ///   texto: o campo do nome da camada tem a área de transferência dele;
-/// - zoom: ⌘= ⌘− ⌘0 ⌘⌥0, e o Z da Revelação (alterna encaixe e 100%; no
-///   Photoshop o Z é a ferramenta Zoom — diferença mantida de propósito).
+/// - zoom: ⌘= ⌘− ⌘0 ⌘⌥0; **Z é a Lupa**, como no Photoshop (a tecla de
+///   alternar encaixe e 100% é da Revelação, não do editor);
+/// - Tab esconde barra de ferramentas, opções e painéis; ⇧Tab só os painéis;
+/// - as ferramentas e as letras saem de `janela::ferramentas::FERRAMENTAS`.
 ///
 /// 🔑 **`secondary`** é o ⌘ no macOS e o Ctrl no Windows e no Linux — a regra da
 /// plataforma, sem o Ctrl fazendo as vezes do ⌘ no Mac. O balcão roda Windows
@@ -157,7 +163,8 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("secondary--", Afastar, c),
         KeyBinding::new("secondary-0", Encaixar, c),
         KeyBinding::new("secondary-alt-0", UmPorUm, c),
-        KeyBinding::new("z", AlternarZoom, solta),
+        KeyBinding::new("tab", AlternarInterface, solta),
+        KeyBinding::new("shift-tab", AlternarPaineis, solta),
         KeyBinding::new("space", SegurarAMao, solta),
         KeyBinding::new("secondary-a", SelecionarTudo, c),
         KeyBinding::new("secondary-d", Desmarcar, c),
@@ -216,6 +223,8 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("shift-h", GrupoH, solta),
         KeyBinding::new("r", GrupoR, solta),
         KeyBinding::new("shift-r", GrupoR, solta),
+        KeyBinding::new("z", GrupoZ, solta),
+        KeyBinding::new("shift-z", GrupoZ, solta),
     ]);
     if !cfg!(target_os = "macos") {
         cx.bind_keys([KeyBinding::new("ctrl-y", RefazerNoEditor, c)]);

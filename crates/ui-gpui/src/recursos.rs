@@ -203,6 +203,14 @@ pub enum Icone {
     Link2Off,
     /// O xadrez do "Bloquear pixels transparentes" (desenho próprio).
     Transparencia,
+    History,
+    ChevronsLeft,
+    ChevronsRight,
+    ArrowLeftRight,
+    Grid3x3,
+    Palette,
+    Maximize,
+    Menu,
 }
 
 impl Icone {
@@ -336,6 +344,14 @@ impl Icone {
         Icone::Lock,
         Icone::Link2Off,
         Icone::Transparencia,
+        Icone::History,
+        Icone::ChevronsLeft,
+        Icone::ChevronsRight,
+        Icone::ArrowLeftRight,
+        Icone::Grid3x3,
+        Icone::Palette,
+        Icone::Maximize,
+        Icone::Menu,
     ];
 
     fn arquivo(self) -> &'static str {
@@ -469,6 +485,14 @@ impl Icone {
             Icone::Lock => "lock",
             Icone::Link2Off => "link-2-off",
             Icone::Transparencia => "transparencia",
+            Icone::History => "history",
+            Icone::ChevronsLeft => "chevrons-left",
+            Icone::ChevronsRight => "chevrons-right",
+            Icone::ArrowLeftRight => "arrow-left-right",
+            Icone::Grid3x3 => "grid-3x3",
+            Icone::Palette => "palette",
+            Icone::Maximize => "maximize",
+            Icone::Menu => "menu",
         }
     }
 }

@@ -1,16 +1,14 @@
 //! A janela do editor em camadas — uma por foto.
 //!
 //! ```text
-//! ┌ ✎ img0042.jpg  • Alterações não salvas   Encaixar 1:1 25%   ↶ ↷  [Salvar] [Fechar] ┐
-//! ├────────────────────────────────────────────────────────────────┬──────────────────┤
-//! │                                                                │ Ferramenta       │
-//! │                  a foto (vista em ladrilhos)                   │ Tamanho …        │
-//! │                                                                │ Camadas          │
-//! │                                                                │  [Normal ▾] op.  │
-//! │                                                                │  👁 Camada 2     │
-//! │                                                                │  👁 Pintura      │
-//! │                                                                │  + ⧉ ↑ ↓ 🗑      │
-//! └────────────────────────────────────────────────────────────────┴──────────────────┘
+//! ┌ Arquivo Editar Camada Selecionar Filtro Visualizar Janela Ajuda            (menus.rs) ┐
+//! ├ opções da ferramenta — altura fixa                                         (opcoes.rs) ┤
+//! ├──┬ foto.jpg @ 32% (RGB/8) • × ─────────────────────┬ Cor | Amostras ───────────────────┤
+//! │▣ │                                               │ Propriedades | Pincel | Histórico │
+//! │▢◢│   a foto (vista em ladrilhos)                 │ Camadas       (area_de_trabalho.rs) │
+//! │■□│  (ferramentas.rs)                             │                                   │
+//! └──┴───────────────────────────────────────────────┴───────────────────────────────────┘
+//!   zoom · 100% · Encaixar · medidas · aviso                        Salvo  Salvar (status.rs)
 //! ```
 //!
 //! 🔑 **A janela não sabe da Revelação.** Ela carrega a base neutra, pinta,
@@ -24,7 +22,7 @@
 //!
 //! 🔍 **O zoom é o da Revelação** (`revelacao::zoom`, com o "1:1" de um pixel
 //! da foto num pixel do dispositivo) e os gestos também: pinça e `⌘`/`⌥` + roda
-//! ampliam em torno do cursor, a roda e o Espaço + arrastar movem, `Z` alterna,
+//! ampliam em torno do cursor, a roda e o Espaço + arrastar movem (Z é a Lupa),
 //! `⌘=` `⌘−` `⌘0` `⌘⌥0`. Com a foto ampliada além da vista, a janela pede uma
 //! **lupa**: a vista só do pedaço visível, montada fora da thread da tela, por
 //! cima da vista inteira. A partir de 8 pixels do dispositivo por pixel, cada
@@ -34,9 +32,20 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+mod aparencia;
+pub mod area_de_trabalho;
+mod camadas;
+pub mod ferramentas;
 mod mascara_e_cadeados;
+mod menus;
+mod opcoes;
+mod paineis;
 mod painel_do_preenchimento;
+mod status;
 mod transferencia;
+pub use area_de_trabalho::QualPainel;
+pub use ferramentas::{letra_de, DefDeFerramenta, FERRAMENTAS};
+pub use menus::atalho_da_acao as menus_atalho;
 pub use painel_do_preenchimento::{AlvoDoPincel, EspacoDoPreenchimento, EstadoDoCalculo};
 
 use editor_core::selecao::{caixa_do_arrasto, medida_da_caixa};
@@ -48,13 +57,12 @@ use editor_core::{
     OpcoesDaVarinha, Operacao, Retangulo, Sessao, Transformacao, VarinhaRecusada, VersaoEditada,
 };
 use gpui_kit::component::button::ButtonVariants as _;
-use gpui_kit::component::color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState};
-use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::color_picker::{ColorPickerEvent, ColorPickerState};
+use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::menu::ContextMenuExt as _;
-use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::slider::{SliderEvent, SliderState};
-use gpui_kit::component::{ActiveTheme, Disableable, Selectable as _, Sizable};
+use gpui_kit::component::{ActiveTheme, Disableable, Sizable};
 use gpui_kit::{
     canvas, div, img, prelude::*, px, AnyElement, Bounds, Context, Entity, EventEmitter,
     FocusHandle, Focusable, KeyDownEvent, KeyUpEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
@@ -66,15 +74,15 @@ use image::DynamicImage;
 use super::giro;
 use super::porta::{Abertura, Edicoes, FotoDoEditor};
 use super::{
-    Afastar, AlternarAntesDepois, AlternarCamada, AlternarMascaraDeCorte, AlternarZoom,
-    ApagarSelecao, AplicarTransformacao, Aproximar, CamadaDeBaixo, CamadaDeCima, CamadaViaRecorte,
-    CancelarTransformacao, CoresPadrao, DescerCamada, DesfazerNoEditor, Desmarcar, DifundirSelecao,
-    DuplicarCamada, DurezaMaior, DurezaMenor, Encaixar, FecharEditor, GrupoB, GrupoE, GrupoG,
-    GrupoH, GrupoI, GrupoJ, GrupoL, GrupoM, GrupoO, GrupoR, GrupoS, GrupoV, GrupoW,
-    InverterSelecao, Liquidificar, MesclarParaBaixo, NovaCamada, PincelMaior, PincelMenor,
-    PreencherPeloConteudo, PreencherSelecao, ProximaDoGrupoG, ProximaDoGrupoJ, ProximaDoGrupoL,
-    ProximaDoGrupoM, ProximaDoGrupoO, RefazerNoEditor, SalvarNoEditor, SegurarAMao, SelecionarTudo,
-    SubirCamada, TransformacaoLivre, TrocarCores, UmPorUm, CONTEXTO,
+    Afastar, AlternarAntesDepois, AlternarCamada, AlternarInterface, AlternarMascaraDeCorte,
+    AlternarPaineis, ApagarSelecao, AplicarTransformacao, Aproximar, CamadaDeBaixo, CamadaDeCima,
+    CamadaViaRecorte, CancelarTransformacao, CoresPadrao, DescerCamada, DesfazerNoEditor,
+    Desmarcar, DifundirSelecao, DuplicarCamada, DurezaMaior, DurezaMenor, Encaixar, FecharEditor,
+    GrupoB, GrupoE, GrupoG, GrupoH, GrupoI, GrupoJ, GrupoL, GrupoM, GrupoO, GrupoR, GrupoS, GrupoV,
+    GrupoW, GrupoZ, InverterSelecao, Liquidificar, MesclarParaBaixo, NovaCamada, PincelMaior,
+    PincelMenor, PreencherPeloConteudo, PreencherSelecao, ProximaDoGrupoG, ProximaDoGrupoJ,
+    ProximaDoGrupoL, ProximaDoGrupoM, ProximaDoGrupoO, RefazerNoEditor, SalvarNoEditor,
+    SegurarAMao, SelecionarTudo, SubirCamada, TransformacaoLivre, TrocarCores, UmPorUm, CONTEXTO,
 };
 use super::{
     AlternarRubi, BloquearTransparencia, CarimbarVisivel, Colar, ColarNoLugar, Copiar,
@@ -103,6 +111,11 @@ const AMOSTRAS: [[u8; 3]; 10] = [
     [140, 60, 200],
     [120, 80, 50],
 ];
+
+/// As amostras em `Hsla`, para as cores em destaque dos seletores.
+fn amostras_em_hsla() -> Vec<gpui_kit::Hsla> {
+    AMOSTRAS.iter().map(|c| hsla_de(*c)).collect()
+}
 
 /// O que a janela anuncia.
 #[derive(Clone, Debug)]
@@ -212,62 +225,6 @@ impl Item {
             _ => self == outra,
         }
     }
-}
-
-/// Os grupos de letra do Photoshop ("Select tools", na tabela da Adobe): a
-/// letra escolhe a última usada do grupo, e ⇧ + letra passa para a seguinte.
-pub const GRUPOS: &[(char, &[Item])] = &[
-    ('v', &[Item::A(Auxiliar::Mover)]),
-    (
-        'm',
-        &[
-            Item::S(TipoDeSelecao::Retangulo),
-            Item::S(TipoDeSelecao::Elipse),
-        ],
-    ),
-    (
-        'l',
-        &[
-            Item::S(TipoDeSelecao::Laco),
-            Item::S(TipoDeSelecao::LacoPoligonal),
-        ],
-    ),
-    ('w', &[Item::A(Auxiliar::Varinha)]),
-    ('i', &[Item::A(Auxiliar::ContaGotas)]),
-    (
-        'j',
-        &[
-            Item::A(Auxiliar::Correcao),
-            Item::F(Ferramenta::Recuperacao),
-            Item::A(Auxiliar::Remendo),
-        ],
-    ),
-    ('b', &[Item::F(Ferramenta::Pincel)]),
-    ('s', &[Item::F(Ferramenta::Carimbo)]),
-    ('e', &[Item::F(Ferramenta::Borracha)]),
-    ('g', &[Item::A(Auxiliar::Degrade), Item::A(Auxiliar::Lata)]),
-    (
-        'o',
-        &[
-            Item::F(Ferramenta::Subexposicao(
-                editor_core::pincel::Faixa::MeiosTons,
-            )),
-            Item::F(Ferramenta::Superexposicao(
-                editor_core::pincel::Faixa::MeiosTons,
-            )),
-        ],
-    ),
-    ('h', &[Item::A(Auxiliar::Mao)]),
-    ('r', &[Item::A(Auxiliar::GirarVista)]),
-];
-
-/// A letra do grupo de uma ferramenta (`None`: desfoque, nitidez e zoom não
-/// têm).
-pub fn letra_de(item: &Item) -> Option<char> {
-    GRUPOS
-        .iter()
-        .find(|(_, itens)| itens.iter().any(|i| i.mesma(item)))
-        .map(|(letra, _)| *letra)
 }
 
 /// O buraco de um preenchimento por conteúdo.
@@ -680,7 +637,6 @@ pub struct EditorDeFoto {
     zoom: EstadoDoZoom,
     /// O nível a que o `Z` volta quando a foto está encaixada.
     alvo_do_z: Nivel,
-    z_desde: Option<Instant>,
     /// O Espaço segurado: quando desceu, e se já arrastou com ele.
     espaco: Option<(Instant, bool)>,
     mao: Option<Mao>,
@@ -755,12 +711,49 @@ pub struct EditorDeFoto {
     tarefa_do_painel: Option<Task<()>>,
     vigia_do_painel: Option<Task<()>>,
     tarefa_do_modelo: Option<Task<()>>,
-    /// O palco e o painel da direita, com a borda arrastável do kit; a
-    /// largura do painel fica gravada (`docas-editor.json`).
+    /// O documento e a coluna dos painéis, com a borda arrastável do kit; a
+    /// largura vai na área de trabalho (`area_de_trabalho.rs`).
     colunas: Entity<gpui_kit::component::resizable::ResizableState>,
-    arrumacao: crate::docas::Arrumacao,
-    /// A aba de baixo do painel: 0 = Camadas, 1 = Histórico.
-    aba_do_painel: usize,
+    /// A área de trabalho: o dock dos painéis (montado no primeiro quadro) e
+    /// a arrumação que vai para o disco.
+    area_de_trabalho: Option<area_de_trabalho::AreaDeTrabalho>,
+    arranjo: area_de_trabalho::Arranjo,
+    _gravacao_da_area: Option<Task<()>>,
+    gravacoes_da_area: usize,
+    /// `Tab` (barra, opções e painéis) e `⇧Tab` (só os painéis): passageiros.
+    interface_oculta: bool,
+    paineis_ocultos: bool,
+    /// A barra de ferramentas em duas colunas.
+    barra_em_duas_colunas: bool,
+    /// O que cada grupo da barra mostra, o flyout aberto, o aperto que pode
+    /// virar flyout e as caixas dos botões (do último quadro).
+    mostrada_na_barra: [Option<Item>; ferramentas::QUANTOS_GRUPOS],
+    flyout: Option<ferramentas::Flyout>,
+    aperto_na_barra: Option<usize>,
+    abriu_pelo_aperto: bool,
+    _tarefa_do_aperto: Option<Task<()>>,
+    caixas_da_barra: [Bounds<Pixels>; ferramentas::QUANTOS_GRUPOS],
+    /// A cor de fundo no seletor da barra (e qual cor o painel Cor edita).
+    seletor_de_fundo: Entity<ColorPickerState>,
+    fundo_mostrado: Option<[u8; 3]>,
+    cor_do_painel_e_o_fundo: bool,
+    rgb_do_painel: [Entity<SliderState>; 3],
+    /// O zoom editável da barra de status, e o que ele mostra.
+    campo_do_zoom: Entity<InputState>,
+    zoom_mostrado: Option<String>,
+    /// O ângulo da Girar vista na barra de opções.
+    campo_do_giro: Entity<InputState>,
+    giro_mostrado: Option<f32>,
+    /// A opacidade da camada no painel Camadas (o número; o slider é o de
+    /// sempre, no popover).
+    campo_da_opacidade_da_camada: Entity<InputState>,
+    opacidade_mostrada: Option<f32>,
+    /// A Lupa em "Reduzir" (o ⌥ inverte no clique).
+    lupa_reduz: bool,
+    /// Largura e altura juntas na barra da transformação.
+    proporcao_travada: bool,
+    /// A Ajuda dos atalhos aberta.
+    mostrando_atalhos: bool,
     /// A camada sendo renomeada e o campo do nome.
     renomeando: Option<(usize, Entity<InputState>)>,
     medidas: Medidas,
@@ -981,6 +974,15 @@ impl EditorDeFoto {
         });
         let seletor_de_cor =
             cx.new(|cx| ColorPickerState::new(window, cx).default_value(hsla_de(pincel.cor)));
+        let seletor_de_fundo = cx.new(|cx| {
+            ColorPickerState::new(window, cx).default_value(hsla_de(pincel.cor_de_fundo))
+        });
+        let campo_do_zoom = cx.new(|cx| InputState::new(window, cx));
+        let campo_do_giro = campo_numerico("0", -180.0, 180.0, window, cx);
+        let campo_da_opacidade_da_camada = campo_numerico("100", 0.0, 100.0, window, cx);
+        let rgb_do_painel =
+            [0u8, 1, 2].map(|i| slider(0.0, 255.0, 1.0, pincel.cor[i as usize] as f32, cx));
+        let arranjo = area_de_trabalho::ler();
         let metodos: Vec<Opcao> = preenchimento::Metodo::disponiveis()
             .into_iter()
             .map(|m| Opcao::nova(m.chave(), m.nome()))
@@ -1132,15 +1134,88 @@ impl EditorDeFoto {
             |ed: &mut Self, _e, evento: &ColorPickerEvent, _w, cx| {
                 if let ColorPickerEvent::Change(Some(cor)) = evento {
                     let cor = rgb_de(*cor);
-                    ed.cor_mostrada = Some(cor);
                     if let Some(s) = ed.sessao_mut() {
-                        s.pincel.cor = cor;
+                        s.definir_cor_de_frente(cor);
                     }
+                    ed.cor_mostrada = ed.sessao().map(|s| s.pincel.cor);
                     cx.notify();
                 }
             },
         ));
 
+        assinaturas.push(cx.subscribe_in(
+            &seletor_de_fundo,
+            window,
+            |ed: &mut Self, _e, evento: &ColorPickerEvent, _w, cx| {
+                if let ColorPickerEvent::Change(Some(cor)) = evento {
+                    let cor = rgb_de(*cor);
+                    if let Some(s) = ed.sessao_mut() {
+                        s.definir_cor_de_fundo(cor);
+                    }
+                    ed.fundo_mostrado = ed.sessao().map(|s| s.pincel.cor_de_fundo);
+                    cx.notify();
+                }
+            },
+        ));
+        assinaturas.push(cx.subscribe_in(
+            &campo_do_zoom,
+            window,
+            |ed: &mut Self, campo, evento: &InputEvent, window, cx| {
+                ed.campo_do_zoom_mudou(campo, evento, window, cx)
+            },
+        ));
+        assinaturas.push(cx.subscribe_in(
+            &campo_do_giro,
+            window,
+            |ed: &mut Self, campo, evento: &InputEvent, _window, cx| {
+                if matches!(evento, InputEvent::Change | InputEvent::PressEnter { .. }) {
+                    if let Ok(graus) = campo
+                        .read(cx)
+                        .value()
+                        .trim()
+                        .replace(',', ".")
+                        .parse::<f32>()
+                    {
+                        if graus.is_finite() && (graus.to_radians() - ed.giro).abs() > 1e-3 {
+                            ed.girar_a_vista(graus.to_radians(), cx);
+                        }
+                    }
+                }
+            },
+        ));
+        assinaturas.push(cx.subscribe_in(
+            &campo_da_opacidade_da_camada,
+            window,
+            |ed: &mut Self, campo, evento: &InputEvent, _window, cx| {
+                if matches!(
+                    evento,
+                    InputEvent::PressEnter { .. } | InputEvent::Blur | InputEvent::Change
+                ) {
+                    if let Ok(v) = campo
+                        .read(cx)
+                        .value()
+                        .trim()
+                        .replace(',', ".")
+                        .parse::<f32>()
+                    {
+                        let v = v.clamp(0.0, 100.0);
+                        if (v - ed.opacidade_da_camada() * 100.0).abs() > 0.4 {
+                            let soltou = !matches!(evento, InputEvent::Change);
+                            ed.mover_opacidade_da_camada(v, soltou, cx);
+                        }
+                    }
+                }
+            },
+        ));
+        for (i, estado) in rgb_do_painel.iter().enumerate() {
+            assinaturas.push(cx.subscribe_in(
+                estado,
+                window,
+                move |ed: &mut Self, _e, evento: &SliderEvent, _w, cx| {
+                    ed.canal_do_painel_mudou(i, valor(evento).0, cx);
+                },
+            ));
+        }
         assinaturas.push(cx.subscribe_in(
             &seletor_de_metodo,
             window,
@@ -1363,7 +1438,6 @@ impl EditorDeFoto {
             pintando: false,
             zoom: EstadoDoZoom::default(),
             alvo_do_z: Nivel::Razao(1.0),
-            z_desde: None,
             espaco: None,
             mao: None,
             salvando: false,
@@ -1409,8 +1483,32 @@ impl EditorDeFoto {
             vigia_do_painel: None,
             tarefa_do_modelo: None,
             colunas,
-            arrumacao: crate::docas::ler(COLUNAS_DO_EDITOR),
-            aba_do_painel: 0,
+            area_de_trabalho: None,
+            barra_em_duas_colunas: arranjo.barra_em_duas_colunas,
+            arranjo,
+            _gravacao_da_area: None,
+            gravacoes_da_area: 0,
+            interface_oculta: false,
+            paineis_ocultos: false,
+            mostrada_na_barra: [None; ferramentas::QUANTOS_GRUPOS],
+            flyout: None,
+            aperto_na_barra: None,
+            abriu_pelo_aperto: false,
+            _tarefa_do_aperto: None,
+            caixas_da_barra: [Bounds::default(); ferramentas::QUANTOS_GRUPOS],
+            seletor_de_fundo,
+            fundo_mostrado: None,
+            cor_do_painel_e_o_fundo: false,
+            rgb_do_painel,
+            campo_do_zoom,
+            zoom_mostrado: None,
+            campo_do_giro,
+            giro_mostrado: None,
+            campo_da_opacidade_da_camada,
+            opacidade_mostrada: None,
+            lupa_reduz: false,
+            proporcao_travada: false,
+            mostrando_atalhos: false,
             renomeando: None,
             medidas: Medidas::default(),
             _assinaturas: assinaturas,
@@ -1779,24 +1877,6 @@ impl EditorDeFoto {
         self.mover_a_foto(f(delta.x), f(delta.y), cx);
     }
 
-    /// `Z` desceu (repetição não conta): alterna.
-    pub fn z_apertado(&mut self, cx: &mut Context<Self>) {
-        if self.z_desde.is_some() {
-            return;
-        }
-        self.z_desde = Some(Instant::now());
-        self.alternar_zoom(cx);
-    }
-
-    /// `Z` subiu: segurado mais de 400 ms era espiar, e volta.
-    pub fn z_solto(&mut self, cx: &mut Context<Self>) {
-        if let Some(desde) = self.z_desde.take() {
-            if desde.elapsed() > Duration::from_millis(400) {
-                self.alternar_zoom(cx);
-            }
-        }
-    }
-
     /// Espaço desceu: a mão, enquanto segurado.
     pub fn espaco_apertado(&mut self, cx: &mut Context<Self>) {
         if self.espaco.is_none() {
@@ -1810,10 +1890,10 @@ impl EditorDeFoto {
         let Some((desde, usado)) = self.espaco.take() else {
             return;
         };
+        // O Photoshop só tem a Mão no Espaço: tocar sem arrastar não mexe no
+        // zoom (o que a Revelação faz não vale aqui).
+        let _ = (desde, usado);
         self.reposicionando = None;
-        if !usado && self.mao.is_none() && desde.elapsed() < Duration::from_millis(500) {
-            self.alternar_zoom(cx);
-        }
         cx.notify();
     }
 
@@ -1822,10 +1902,8 @@ impl EditorDeFoto {
     }
 
     fn ao_soltar_tecla(&mut self, evento: &KeyUpEvent, cx: &mut Context<Self>) {
-        match evento.keystroke.key.as_str() {
-            "space" => self.espaco_solto(cx),
-            "z" => self.z_solto(cx),
-            _ => {}
+        if evento.keystroke.key == "space" {
+            self.espaco_solto(cx);
         }
     }
 
@@ -2159,7 +2237,9 @@ impl EditorDeFoto {
             }
             Some(Auxiliar::Zoom) => {
                 let p = self.ponto_no_palco(ponto);
-                self.ampliar_em_torno(if modificadores.alt { 0.5 } else { 2.0 }, p, cx);
+                // O modo da barra de opções (Ampliar/Reduzir); o ⌥ inverte.
+                let reduz = modificadores.alt != self.lupa_reduz;
+                self.ampliar_em_torno(if reduz { 0.5 } else { 2.0 }, p, cx);
                 return;
             }
             Some(Auxiliar::Degrade) => {
@@ -2891,6 +2971,27 @@ impl EditorDeFoto {
                     n.dy += valor - y;
                 }
             }
+            // Com a corrente da barra fechada, largura e altura andam juntas
+            // (a proporção da caixa fica).
+            2 | 3 if valor >= 1.0 && self.proporcao_travada => {
+                let (ex, ey) = if qual == 2 {
+                    (
+                        valor / 100.0,
+                        t.escala_y * (valor / 100.0) / t.escala_x.max(1e-6),
+                    )
+                } else {
+                    (
+                        t.escala_x * (valor / 100.0) / t.escala_y.max(1e-6),
+                        valor / 100.0,
+                    )
+                };
+                n = Transformacao {
+                    escala_x: ex,
+                    escala_y: ey,
+                    ..t
+                }
+                .fixando(&caixa, r, &t)
+            }
             2 if valor >= 1.0 => {
                 n = Transformacao {
                     escala_x: valor / 100.0,
@@ -3300,7 +3401,7 @@ impl EditorDeFoto {
         }
         self.selecionando = Some(tipo);
         self.auxiliar = None;
-        self.lembrar_do_grupo(Item::S(tipo));
+        self.lembrar_na_barra(Item::S(tipo));
         cx.notify();
     }
 
@@ -3312,7 +3413,7 @@ impl EditorDeFoto {
         self.auxiliar = Some(auxiliar);
         self.selecionando = None;
         self.gesto_de_selecao = None;
-        self.lembrar_do_grupo(Item::A(auxiliar));
+        self.lembrar_na_barra(Item::A(auxiliar));
         cx.notify();
     }
 
@@ -3336,316 +3437,17 @@ impl EditorDeFoto {
         self.ferramenta().map(Item::F)
     }
 
-    fn lembrar_do_grupo(&mut self, item: Item) {
-        if let Some(letra) = letra_de(&item) {
-            self.ultima_do_grupo.insert(letra, item);
-        }
-    }
-
-    /// A letra de um grupo: a última ferramenta usada nele; com `proxima`
-    /// (⇧ + letra), a seguinte do grupo, em volta.
-    pub fn pela_letra(&mut self, letra: char, proxima: bool, cx: &mut Context<Self>) {
-        let Some((_, itens)) = GRUPOS.iter().find(|(l, _)| *l == letra) else {
-            return;
-        };
-        let ultima = self.ultima_do_grupo.get(&letra).copied();
-        let atual = self.item_atual().filter(|i| letra_de(i) == Some(letra));
-        let mut item = ultima.unwrap_or(itens[0]);
-        if proxima {
-            let de = atual.or(ultima).unwrap_or(itens[0]);
-            let i = itens.iter().position(|x| x.mesma(&de)).unwrap_or(0);
-            item = itens[(i + 1) % itens.len()];
-        }
-        // A subexposição e a superexposição levam a faixa escolhida.
-        if let Item::F(f) = item {
-            item = Item::F(match f {
-                Ferramenta::Subexposicao(_) => Ferramenta::Subexposicao(self.faixa),
-                Ferramenta::Superexposicao(_) => Ferramenta::Superexposicao(self.faixa),
-                outra => outra,
-            });
-        }
-        self.usar_item(item, cx);
-    }
-
     pub fn auxiliar(&self) -> Option<Auxiliar> {
         self.auxiliar
     }
 
-    /// O nome da ferramenta na mão, com o atalho — o título das opções no
-    /// painel da direita.
-    pub fn nome_da_ferramenta(&self) -> &'static str {
-        if let Some(tipo) = self.selecionando {
-            return match tipo {
-                TipoDeSelecao::Retangulo => "Seleção retangular (M) — ⇧ soma, ⌥ tira, ⇧⌥ cruza",
-                TipoDeSelecao::Elipse => "Seleção elíptica (M) — ⇧ soma, ⌥ tira, ⇧⌥ cruza",
-                TipoDeSelecao::Laco => "Laço (L) — ⇧ soma, ⌥ tira, ⇧⌥ cruza",
-                TipoDeSelecao::LacoPoligonal => {
-                    "Laço poligonal (L) — clique a clique; fecha no primeiro vértice, duplo clique ou Enter; ⌫ tira o último, Esc cancela"
-                }
-            };
-        }
-        if let Some(a) = self.auxiliar {
-            return match a {
-                Auxiliar::ContaGotas => "Conta-gotas (I)",
-                Auxiliar::Mover => "Mover (V)",
-                Auxiliar::Correcao => {
-                    "Pincel de correção para manchas (J) — automático, sem origem"
-                }
-                Auxiliar::Remendo => {
-                    "Remendo (J) — contorne a área com defeito e arraste-a até a pele limpa"
-                }
-                Auxiliar::Degrade => "Degradê (G) — arraste do começo ao fim",
-                Auxiliar::Lata => "Lata de tinta (G)",
-                Auxiliar::Varinha => "Varinha mágica (W) — ⇧ soma, ⌥ tira, ⇧⌥ cruza",
-                Auxiliar::Mao => "Mão (H, ou o Espaço segurado)",
-                Auxiliar::GirarVista => {
-                    "Girar vista (R) — só a tela; ⇧ de 15° em 15°, Esc volta a 0°"
-                }
-                Auxiliar::Zoom => "Zoom — clique amplia, ⌥ + clique afasta",
-            };
-        }
-        match self.ferramenta() {
-            Some(Ferramenta::Borracha) => "Borracha (E)",
-            Some(Ferramenta::Carimbo) => "Carimbo (S) — ⌥ + clique na origem",
-            Some(Ferramenta::Recuperacao) => {
-                "Pincel de recuperação (J) — ⌥ + clique na origem; a cor se adapta ao soltar"
-            }
-            Some(Ferramenta::Subexposicao(_)) => "Subexposição (O)",
-            Some(Ferramenta::Superexposicao(_)) => "Superexposição (O)",
-            Some(Ferramenta::Desfoque) => "Desfoque",
-            Some(Ferramenta::Nitidez) => "Nitidez",
-            _ => "Pincel (B)",
-        }
-    }
-
-    /// A barra de ferramentas vertical do Photoshop, à esquerda do palco: as
-    /// ferramentas na ordem de lá, em grupos, e a cor atual embaixo.
-    fn barra_de_ferramentas(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let tema = cx.theme().clone();
-        let pincel_na_mao = self.selecionando.is_none() && self.auxiliar.is_none();
-        let ferramenta = self.ferramenta().filter(|_| pincel_na_mao);
-        let mesma = |a: Ferramenta| {
-            ferramenta.is_some_and(|f| std::mem::discriminant(&f) == std::mem::discriminant(&a))
-        };
-        let faixa = self.faixa;
-        let grupos: [&[(Item, Icone, &'static str, &'static str)]; 8] = [
-            &[(
-                Item::A(Auxiliar::Mover),
-                Icone::Move,
-                "editor-mover",
-                "Mover (V)",
-            )],
-            &[
-                (
-                    Item::S(TipoDeSelecao::Retangulo),
-                    Icone::Square,
-                    "editor-selecao-retangulo",
-                    "Seleção retangular (M) — ⇧ soma, ⌥ tira, ⇧⌥ cruza; ⇧ no arrasto faz quadrado, ⌥ desenha do centro; arrastar dentro move só o contorno",
-                ),
-                (
-                    Item::S(TipoDeSelecao::Elipse),
-                    Icone::CircleDashed,
-                    "editor-selecao-elipse",
-                    "Seleção elíptica (M; ⇧M alterna com a retangular)",
-                ),
-                (
-                    Item::S(TipoDeSelecao::Laco),
-                    Icone::Lasso,
-                    "editor-selecao-laco",
-                    "Laço (L)",
-                ),
-                (
-                    Item::S(TipoDeSelecao::LacoPoligonal),
-                    Icone::Pentagon,
-                    "editor-selecao-poligonal",
-                    "Laço poligonal (L; ⇧L alterna com o laço) — clique a clique, fecha no primeiro vértice, duplo clique ou Enter; ⌫ tira o último, Esc cancela",
-                ),
-                (
-                    Item::A(Auxiliar::Varinha),
-                    Icone::WandSparkles,
-                    "editor-varinha",
-                    "Varinha mágica (W) — clique na cor; ⇧ soma, ⌥ tira, ⇧⌥ cruza",
-                ),
-            ],
-            &[(
-                Item::A(Auxiliar::ContaGotas),
-                Icone::Pipette,
-                "editor-conta-gotas",
-                "Conta-gotas (I) — com o pincel, ⌥ + clique",
-            )],
-            &[
-                (
-                    Item::A(Auxiliar::Correcao),
-                    Icone::Bandage,
-                    "editor-correcao",
-                    "Pincel de correção para manchas (J; ⇧J alterna com o de recuperação) — refaz a mancha pelo que está em volta, sem origem",
-                ),
-                (
-                    Item::A(Auxiliar::Remendo),
-                    Icone::Scan,
-                    "editor-remendo",
-                    "Remendo (J; ⇧J alterna) — contorne a área e arraste-a até a pele limpa: a textura vem de lá, a cor fica a daqui",
-                ),
-                (
-                    Item::F(Ferramenta::Recuperacao),
-                    Icone::Sparkles,
-                    "editor-recuperacao",
-                    "Pincel de recuperação (J; ⇧J alterna) — ⌥ + clique escolhe a origem; a textura vem dela e a cor se adapta ao destino",
-                ),
-                (
-                    Item::F(Ferramenta::Pincel),
-                    Icone::Paintbrush,
-                    "editor-pincel",
-                    "Pincel (B) — ⇧ + clique liga com uma reta · [ ] tamanho · { } dureza · números: opacidade, ⇧ + números: fluxo",
-                ),
-                (
-                    Item::F(Ferramenta::Borracha),
-                    Icone::Eraser,
-                    "editor-borracha",
-                    "Borracha (E) — ⇧ + clique liga com uma reta",
-                ),
-                (
-                    Item::F(Ferramenta::Carimbo),
-                    Icone::Stamp,
-                    "editor-carimbo",
-                    "Carimbo (S) — ⌥ + clique escolhe a origem",
-                ),
-            ],
-            &[
-                (
-                    Item::A(Auxiliar::Degrade),
-                    Icone::Gradient,
-                    "editor-degrade",
-                    "Degradê (G; ⇧G alterna com a lata) — arraste; ⇧ prende em 45°. Na máscara, preto → branco",
-                ),
-                (
-                    Item::A(Auxiliar::Lata),
-                    Icone::PaintBucket,
-                    "editor-lata",
-                    "Lata de tinta (G; ⇧G alterna com o degradê) — pinta a área parecida em volta do clique",
-                ),
-            ],
-            &[
-                (
-                    Item::F(Ferramenta::Desfoque),
-                    Icone::Droplet,
-                    "editor-desfoque",
-                    "Desfoque (sem atalho, como no Photoshop)",
-                ),
-                (
-                    Item::F(Ferramenta::Nitidez),
-                    Icone::Triangle,
-                    "editor-nitidez",
-                    "Nitidez (sem atalho, como no Photoshop)",
-                ),
-            ],
-            &[
-                (
-                    Item::F(Ferramenta::Subexposicao(faixa)),
-                    Icone::Sun,
-                    "editor-subexposicao",
-                    "Subexposição (O) — clareia; ⇧O alterna com a superexposição",
-                ),
-                (
-                    Item::F(Ferramenta::Superexposicao(faixa)),
-                    Icone::Moon,
-                    "editor-superexposicao",
-                    "Superexposição (O; ⇧O alterna) — escurece",
-                ),
-            ],
-            &[
-                (
-                    Item::A(Auxiliar::Mao),
-                    Icone::Hand,
-                    "editor-mao",
-                    "Mão (H) — arrasta a foto ampliada; ou segure o Espaço com qualquer ferramenta",
-                ),
-                (
-                    Item::A(Auxiliar::GirarVista),
-                    Icone::RotateCw,
-                    "editor-girar-vista",
-                    "Girar vista (R) — arraste para girar só a tela (⇧ de 15° em 15°); Esc volta a 0°. Nenhum pixel muda",
-                ),
-                (
-                    Item::A(Auxiliar::Zoom),
-                    Icone::ZoomIn,
-                    "editor-lupa",
-                    "Zoom — clique amplia, ⌥ + clique afasta (⌘= ⌘− ⌘0)",
-                ),
-            ],
-        ];
-        let mut barra = div()
-            .id("editor-barra-de-ferramentas")
-            .debug_selector(|| "editor-barra-de-ferramentas".into())
-            .flex()
-            .flex_col()
-            .items_center()
-            .gap(px(2.))
-            .w(px(44.))
-            .h_full()
-            .py(px(8.))
-            .border_r_1()
-            .border_color(tema.border)
-            .bg(tema.background);
-        for (n, grupo) in grupos.iter().enumerate() {
-            if n > 0 {
-                barra = barra.child(div().my(px(4.)).h(px(1.)).w(px(24.)).bg(tema.border));
-            }
-            for &(item, icone, id, dica) in grupo.iter() {
-                let ativa = match item {
-                    Item::F(f) => mesma(f),
-                    Item::S(t) => self.selecionando == Some(t),
-                    Item::A(a) => self.auxiliar == Some(a),
-                };
-                let botao = crate::estilo::botao_icone_padrao(id, icone)
-                    .debug_selector(move || id.into())
-                    .tooltip(dica)
-                    .on_click(cx.listener(move |ed, _, window, cx| {
-                        // O foco volta ao editor: as letras e os números
-                        // seguem valendo depois do clique na barra.
-                        window.focus(&ed.foco, cx);
-                        ed.usar_item(item, cx)
-                    }));
-                barra = barra.child(if ativa { botao.primary() } else { botao });
-            }
-        }
-        // As cores de frente e de fundo do Photoshop: a de frente abre o
-        // seletor; a de fundo, embaixo e à direita, troca com ela no clique
-        // (X); D volta a preto e branco.
-        let fundo = self.sessao().map_or([255; 3], |s| s.pincel.cor_de_fundo);
-        barra.child(div().flex_1()).child(
-            div()
-                .flex()
-                .flex_col()
-                .items_center()
-                .gap(px(2.))
-                .child(
-                    div()
-                        .debug_selector(|| "editor-seletor-de-cor".into())
-                        .child(ColorPicker::new(&self.seletor_de_cor)),
-                )
-                .child(
-                    div()
-                        .id("editor-cor-de-fundo")
-                        .debug_selector(|| "editor-cor-de-fundo".into())
-                        .size(px(16.))
-                        .ml(px(12.))
-                        .rounded(crate::tema::canto(3.))
-                        .border_1()
-                        .border_color(tema.border)
-                        .bg(gpui_kit::rgb(
-                            (fundo[0] as u32) << 16 | (fundo[1] as u32) << 8 | fundo[2] as u32,
-                        ))
-                        .cursor_pointer()
-                        .tooltip(|window, cx| {
-                            gpui_kit::component::tooltip::Tooltip::new(
-                                "Cor de fundo — clique ou X troca com a de frente; D volta a preto e branco",
-                            )
-                            .build(window, cx)
-                        })
-                        .on_click(cx.listener(|ed, _, _, cx| ed.trocar_cores(cx))),
-                ),
-        )
+    /// O nome da ferramenta na mão, com a letra ("Borracha (E)") — da
+    /// tabela da barra.
+    pub fn nome_da_ferramenta(&self) -> String {
+        self.item_atual()
+            .and_then(|i| ferramentas::def_de(&i))
+            .map(ferramentas::nome_com_letra)
+            .unwrap_or_default()
     }
 
     /// X.
@@ -3685,7 +3487,7 @@ impl EditorDeFoto {
         }
         self.selecionando = None;
         self.auxiliar = None;
-        self.lembrar_do_grupo(Item::F(ferramenta));
+        self.lembrar_na_barra(Item::F(ferramenta));
         if let Some(s) = self.sessao_mut() {
             s.pincel.ferramenta = ferramenta;
         }
@@ -3743,6 +3545,14 @@ impl EditorDeFoto {
     /// ⇧, o fluxo) — "1" = 10%, "0" = 100%, "4" e "5" em seguida = 45%, a regra
     /// da tabela da Adobe. Só com o editor focado, nunca num campo de texto.
     fn ao_apertar_tecla(&mut self, evento: &KeyDownEvent, window: &Window, cx: &mut Context<Self>) {
+        // ↑ ↓ com o flyout da barra aberto (Enter e Esc vêm pelas ações).
+        if self.flyout.is_some()
+            && matches!(evento.keystroke.key.as_str(), "up" | "down")
+            && self.tecla_no_flyout(&evento.keystroke.key, cx)
+        {
+            cx.stop_propagation();
+            return;
+        }
         let m = evento.keystroke.modifiers;
         if !self.foco.is_focused(window) || m.platform || m.control || m.alt || m.function {
             return;
@@ -4549,7 +4359,7 @@ impl EditorDeFoto {
                 div()
                     .text_sm()
                     .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                    .child(format!("Propriedades — {}", ajuste.nome())),
+                    .child(ajuste.nome().to_string()),
             );
         if let Ajuste::Curvas { .. } = ajuste {
             return coluna
@@ -5289,6 +5099,55 @@ impl EditorDeFoto {
                         .map(|(c, m)| (c, m.pontos)),
                     self.medidas.ultimo_gesto
                 ),
+            },
+            // tamanho <largura> <altura> — a janela em pontos (1366 768 …).
+            "tamanho" => {
+                window.resize(gpui_kit::size(px(numero(1)), px(numero(2))));
+                eprintln!(
+                    "[roteiro] editor tamanho pedido {}×{}; escala {}",
+                    numero(1),
+                    numero(2),
+                    window.scale_factor()
+                );
+            }
+            // area tab|shift-tab|recolher|colunas|restaurar|mostrar <painel>|
+            // esconder <painel>|flyout <grupo>|estado
+            "area" => match partes.get(1).copied().unwrap_or_default() {
+                "tab" => self.alternar_interface(cx),
+                "shift-tab" => self.alternar_paineis(cx),
+                "recolher" => self.alternar_recolhido(cx),
+                "colunas" => self.alternar_colunas_da_barra(cx),
+                "restaurar" => self.restaurar_area_de_trabalho(window, cx),
+                "flyout" => self.abrir_flyout(numero(2) as usize, cx),
+                "mostrar" | "esconder" => {
+                    let nome = format!("editor:{}", partes.get(2).copied().unwrap_or_default());
+                    if let Some(q) = QualPainel::do_nome(&nome) {
+                        if partes[1] == "mostrar" {
+                            self.mostrar_painel(q, window, cx)
+                        } else {
+                            self.definir_painel_oculto(q, true, cx)
+                        }
+                    }
+                }
+                _ => {
+                    let v = window.viewport_size();
+                    eprintln!(
+                        "[roteiro] editor area: janela={:.0}×{:.0} escala={} palco={:?} interface_oculta={} paineis_ocultos={} recolhido={} ocultos={:?} duas_colunas={} flyout={:?} gravacoes={} ladrilhos={} largura={:.0}",
+                        f(v.width),
+                        f(v.height),
+                        window.scale_factor(),
+                        self.palco,
+                        self.interface_oculta,
+                        self.paineis_ocultos,
+                        self.arranjo.recolhido,
+                        self.arranjo.ocultos,
+                        self.barra_em_duas_colunas,
+                        self.flyout,
+                        self.gravacoes_da_area,
+                        self.ladrilhos.len(),
+                        self.largura_do_painel(),
+                    );
+                }
             },
             "zoom" => {
                 let ponto_da_fracao = |ed: &Self, fx: f32, fy: f32| {
@@ -6610,718 +6469,6 @@ impl EditorDeFoto {
             .into_any_element()
     }
 
-    fn barra(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let tema = cx.theme().clone();
-        let pronta = self.pronta();
-        let (pode_desfazer, pode_refazer) = self
-            .sessao()
-            .map(|s| (s.historico().pode_desfazer(), s.historico().pode_refazer()))
-            .unwrap_or((false, false));
-        let dica = |passo: Option<&editor_core::Comando>, verbo: &str| -> SharedString {
-            match (self.sessao(), passo) {
-                (Some(s), Some(p)) => format!("{verbo} {}", p.descricao(s.documento())).into(),
-                _ => verbo.to_string().into(),
-            }
-        };
-        let dica_desfazer = dica(
-            self.sessao().and_then(|s| s.historico().a_desfazer()),
-            "Desfazer",
-        );
-        let dica_refazer = dica(
-            self.sessao().and_then(|s| s.historico().a_refazer()),
-            "Refazer",
-        );
-        let rotulo_do_zoom = match self.zoom.nivel {
-            Nivel::Encaixar => self
-                .razao_do_zoom()
-                .map(zoom::porcentagem)
-                .unwrap_or_default(),
-            nivel => zoom::rotulo_do_nivel(nivel),
-        };
-        // 🪟 No GNOME o sistema não decora a janela: esta barra é a de título
-        // (arrasta, duplo clique maximiza, botão direito abre o menu da
-        // janela) e leva minimizar, maximizar e fechar no fim. O fechar é o do
-        // editor, que pergunta antes de descartar alterações. Fora do Linux os
-        // botões não aparecem — o sistema já põe os dele.
-        let fraca = cx.entity().downgrade();
-        let controles = crate::janela::controles_com_fechar(
-            "janela-editor",
-            tema.foreground,
-            window,
-            cx,
-            move |window, cx| {
-                let _ = fraca.update(cx, |ed, cx| ed.fechar(window, cx));
-            },
-        );
-        crate::janela::como_barra_de_titulo(div(), "barra-do-editor", window, cx)
-            .flex()
-            .items_center()
-            .gap(px(8.))
-            .h(px(48.))
-            .pl(px(12.))
-            .pr(px(4.))
-            .border_b_1()
-            .border_color(tema.border)
-            .child(
-                div()
-                    .text_sm()
-                    .font_weight(gpui_kit::FontWeight::MEDIUM)
-                    .child(format!("Editar — {}", self.foto.nome)),
-            )
-            .when(self.alterado(), |barra| {
-                barra.child(
-                    div()
-                        .id("editor-alterado")
-                        .debug_selector(|| "editor-alterado".into())
-                        .text_xs()
-                        .text_color(tema::cores::quente())
-                        .child("• Alterações não salvas"),
-                )
-            })
-            .when(self.transformando() || self.liquidificando(), |barra| {
-                let so_o_contorno = self.sessao().is_some_and(Sessao::transformando_a_selecao);
-                barra
-                    .child(
-                        div()
-                            .debug_selector(|| "editor-dica-da-transformacao".into())
-                            .text_xs()
-                            .text_color(tema.muted_foreground)
-                            .child(if so_o_contorno {
-                                "Transformar seleção (só o contorno)"
-                            } else if self.liquidificando() {
-                                "Liquidificar"
-                            } else if self.deformando() {
-                                "Deformar"
-                            } else {
-                                "Transformação livre"
-                            }),
-                    )
-                    .child(
-                        crate::estilo::botao_primario_pequeno("editor-aplicar-transformacao", cx)
-                            .debug_selector(|| "editor-aplicar-transformacao".into())
-                            .label("Aplicar")
-                            .tooltip("Enter")
-                            .on_click(cx.listener(|ed, _, _, cx| ed.aplicar_transformacao(cx))),
-                    )
-                    .child(
-                        crate::estilo::botao_contorno_pequeno("editor-cancelar-transformacao", cx)
-                            .debug_selector(|| "editor-cancelar-transformacao".into())
-                            .label("Cancelar")
-                            .tooltip("Esc")
-                            .on_click(cx.listener(|ed, _, _, cx| ed.cancelar_transformacao(cx))),
-                    )
-            })
-            .when(pronta, |barra| {
-                let antes = self.mostrando_antes();
-                let botao = crate::estilo::botao_contorno_pequeno("editor-antes-depois", cx);
-                let botao = if antes {
-                    crate::estilo::botao_primario_pequeno("editor-antes-depois", cx)
-                } else {
-                    botao
-                };
-                barra.child(
-                    botao
-                        .debug_selector(|| "editor-antes-depois".into())
-                        .label(if antes { "Antes ✓" } else { "Antes/Depois" })
-                        .tooltip("Y — mostra a foto como abriu nesta janela, sem mexer no projeto nem no Histórico")
-                        .on_click(cx.listener(|ed, _, _, cx| ed.alternar_antes_depois(cx))),
-                )
-            })
-            .when(pronta && !self.transformando() && !self.liquidificando(), |barra| {
-                let ed = cx.entity();
-                let tem_selecao = self.sessao().and_then(Sessao::selecao).is_some();
-                barra.child(
-                    crate::estilo::botao_contorno_pequeno("editor-menu-transformar", cx)
-                        .debug_selector(|| "editor-menu-transformar".into())
-                        .label("Transformar ▾")
-                        .tooltip("Transformação livre (⌘T), Deformar (malha) e Transformar seleção")
-                        .dropdown_menu_with_anchor(
-                            gpui_kit::Anchor::TopLeft,
-                            move |menu, _window, _cx| {
-                                let item = |id: &'static str,
-                                            rotulo: &'static str,
-                                            ligado: bool,
-                                            fazer: fn(
-                                    &mut EditorDeFoto,
-                                    &mut Context<EditorDeFoto>,
-                                )| {
-                                    let ed = ed.clone();
-                                    crate::estilo::item_de_menu(id, rotulo, None)
-                                        .disabled(!ligado)
-                                        .on_click(move |_ev, _window, cx| {
-                                            ed.update(cx, fazer);
-                                        })
-                                };
-                                menu.item(item(
-                                    "editor-transformar-livre",
-                                    "Transformação livre  ⌘T",
-                                    true,
-                                    |ed, cx| ed.transformar(cx),
-                                ))
-                                .item(item(
-                                    "editor-transformar-deformar",
-                                    "Deformar",
-                                    true,
-                                    |ed, cx| ed.deformar(cx),
-                                ))
-                                .item(item(
-                                    "editor-transformar-liquidificar",
-                                    "Liquidificar…  ⇧⌘X",
-                                    true,
-                                    |ed, cx| ed.liquidificar(cx),
-                                ))
-                                .separator()
-                                .item(item(
-                                    "editor-transformar-a-selecao",
-                                    "Transformar seleção",
-                                    tem_selecao,
-                                    |ed, cx| ed.transformar_selecao(cx),
-                                ))
-                            },
-                        ),
-                )
-            })
-            .when_some(self.aviso.clone(), |barra, (texto, erro)| {
-                barra.child(
-                    div()
-                        .text_xs()
-                        .text_color(if erro {
-                            tema.danger
-                        } else {
-                            tema.muted_foreground
-                        })
-                        .child(texto),
-                )
-            })
-            .child(div().flex_1())
-            .child(
-                crate::estilo::botao_fantasma_pequeno("editor-encaixar", cx)
-                    .debug_selector(|| "editor-encaixar".into())
-                    .label("Encaixar")
-                    .tooltip("Encaixar a foto na janela (⌘0)")
-                    .disabled(!pronta)
-                    .on_click(
-                        cx.listener(|ed, _, _, cx| ed.ir_para_nivel(Nivel::Encaixar, None, cx)),
-                    ),
-            )
-            .child(
-                crate::estilo::botao_fantasma_pequeno("editor-1-1", cx)
-                    .debug_selector(|| "editor-1-1".into())
-                    .label("1:1")
-                    .tooltip("Um pixel da foto num pixel da tela (⌘⌥0)")
-                    .disabled(!pronta)
-                    .on_click(
-                        cx.listener(|ed, _, _, cx| ed.ir_para_nivel(Nivel::Razao(1.0), None, cx)),
-                    ),
-            )
-            .child(
-                div()
-                    .debug_selector(|| "editor-zoom".into())
-                    .w(px(56.))
-                    .text_xs()
-                    .text_color(tema.muted_foreground)
-                    .child(rotulo_do_zoom),
-            )
-            .child(
-                crate::estilo::botao_fantasma("editor-desfazer", cx)
-                    .debug_selector(|| "editor-desfazer".into())
-                    .child("↶")
-                    .tooltip(dica_desfazer)
-                    .disabled(!pode_desfazer)
-                    .on_click(cx.listener(|ed, _, _, cx| ed.desfazer(cx))),
-            )
-            .child(
-                crate::estilo::botao_fantasma("editor-refazer", cx)
-                    .debug_selector(|| "editor-refazer".into())
-                    .child("↷")
-                    .tooltip(dica_refazer)
-                    .disabled(!pode_refazer)
-                    .on_click(cx.listener(|ed, _, _, cx| ed.refazer(cx))),
-            )
-            .child(
-                crate::estilo::botao_primario("editor-salvar", cx)
-                    .debug_selector(|| "editor-salvar".into())
-                    .child(if self.salvando {
-                        "Salvando…"
-                    } else {
-                        "Salvar"
-                    })
-                    .disabled(!pronta || self.salvando)
-                    .on_click(cx.listener(|ed, _, window, cx| ed.salvar(false, window, cx))),
-            )
-            .child(
-                crate::estilo::botao_contorno("editor-fechar", cx)
-                    .debug_selector(|| "editor-fechar".into())
-                    .child("Fechar")
-                    .on_click(cx.listener(|ed, _, window, cx| ed.fechar(window, cx))),
-            )
-            .child(controles)
-    }
-
-    /// O botão "Modificar seleção ▾": Difundir…, Expandir…, Contrair… (cada um
-    /// pede o valor em pixels) e, separado, "Transformar seleção" — só o
-    /// contorno, ao contrário do ⌘T, que leva os pixels.
-    fn menu_modificar_selecao(
-        &self,
-        id: &'static str,
-        rotulo: &'static str,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let tem_selecao = self.sessao().and_then(Sessao::selecao).is_some();
-        let ed = cx.entity();
-        crate::estilo::botao_contorno_pequeno(id, cx)
-            .debug_selector(move || id.into())
-            .label(rotulo)
-            .tooltip("Difundir, expandir, contrair (com o valor em pixels) e Transformar seleção")
-            .disabled(!tem_selecao || self.transformando())
-            .dropdown_menu_with_anchor(gpui_kit::Anchor::TopLeft, move |menu, _window, _cx| {
-                let item = |item_id: &'static str, rotulo: &'static str, m: Modificacao| {
-                    let ed = ed.clone();
-                    crate::estilo::item_de_menu(item_id, rotulo, None).on_click(
-                        move |_ev, window, cx| {
-                            ed.update(cx, |ed, cx| ed.abrir_modificacao(m, window, cx));
-                        },
-                    )
-                };
-                let transformar = {
-                    let ed = ed.clone();
-                    crate::estilo::item_de_menu(
-                        "editor-transformar-selecao",
-                        "Transformar seleção",
-                        None,
-                    )
-                    .on_click(move |_ev, _window, cx| {
-                        ed.update(cx, |ed, cx| ed.transformar_selecao(cx));
-                    })
-                };
-                menu.item(item(
-                    "editor-modificar-difundir",
-                    "Difundir…  ⇧F6",
-                    Modificacao::Difundir,
-                ))
-                .item(item(
-                    "editor-modificar-expandir",
-                    "Expandir…",
-                    Modificacao::Expandir,
-                ))
-                .item(item(
-                    "editor-modificar-contrair",
-                    "Contrair…",
-                    Modificacao::Contrair,
-                ))
-                .separator()
-                .item(transformar)
-            })
-            .into_any_element()
-    }
-
-    /// A barra de opções das ferramentas de seleção, embaixo da barra de cima
-    /// (a do Photoshop): os quatro modos, e as opções de cada ferramenta —
-    /// difusão e estilo na retangular e na elíptica, antisserrilhado na
-    /// elíptica e nos laços, tolerância/contígua/amostra na varinha. Mudar uma
-    /// opção não mexe na seleção que existe nem entra no desfazer.
-    fn barra_de_opcoes_da_selecao(&self, cx: &mut Context<Self>) -> AnyElement {
-        use gpui_kit::component::button::ButtonGroup;
-        use gpui_kit::component::checkbox::Checkbox;
-        use gpui_kit::component::input::NumberInput;
-        let tema = cx.theme().clone();
-        let varinha = self.auxiliar == Some(Auxiliar::Varinha);
-        let tipo = self.selecionando;
-        let rotulo = |texto: &'static str| {
-            div()
-                .text_xs()
-                .text_color(tema.muted_foreground)
-                .child(texto)
-        };
-        let separador = || div().w(px(1.)).h(px(18.)).bg(tema.border);
-        let numero =
-            |campo: &Entity<InputState>, seletor: &'static str, sufixo: Option<&'static str>| {
-                div()
-                    .w(px(84.))
-                    .debug_selector(move || seletor.into())
-                    .child(crate::estilo::campo_pequeno(
-                        NumberInput::new(campo)
-                            .xsmall()
-                            .when_some(sufixo, |n, s| n.suffix(div().text_xs().child(s))),
-                    ))
-            };
-        let realcado = self.modo_realcado();
-        // O ativo no botão primário (a cor de destaque do tema): o realce do
-        // contorno do kit é um cinza quase igual ao do fundo.
-        let modos = ButtonGroup::new("editor-modos-de-selecao")
-            .xsmall()
-            .children(MODOS.iter().enumerate().map(|(i, modo)| {
-                let id: &'static str = [
-                    "editor-modo-nova",
-                    "editor-modo-adicionar",
-                    "editor-modo-subtrair",
-                    "editor-modo-intersectar",
-                ][i];
-                let dica = [
-                    "Nova seleção",
-                    "Adicionar à seleção (⇧ no gesto)",
-                    "Subtrair da seleção (⌥ no gesto)",
-                    "Intersectar com a seleção (⇧⌥ no gesto)",
-                ][i];
-                if realcado == *modo {
-                    crate::estilo::botao_primario_pequeno(id, cx)
-                } else {
-                    crate::estilo::botao_contorno_pequeno(id, cx)
-                }
-                .debug_selector(move || id.into())
-                .label(nome_do_modo(*modo))
-                .tooltip(dica)
-                .selected(realcado == *modo)
-            }))
-            .on_click(cx.listener(|ed, cliques: &Vec<usize>, _, cx| {
-                if let Some(modo) = cliques.first().and_then(|i| MODOS.get(*i)) {
-                    ed.escolher_modo_de_selecao(*modo, cx);
-                }
-            }));
-        let nome = match (tipo, varinha) {
-            (Some(TipoDeSelecao::Retangulo), _) => "Retangular",
-            (Some(TipoDeSelecao::Elipse), _) => "Elíptica",
-            (Some(TipoDeSelecao::Laco), _) => "Laço",
-            (Some(TipoDeSelecao::LacoPoligonal), _) => "Laço poligonal",
-            (None, _) => "Varinha mágica",
-        };
-        let mut barra = div()
-            .id("editor-opcoes-da-selecao")
-            .debug_selector(|| "editor-opcoes-da-selecao".into())
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap(px(10.))
-            .px(px(12.))
-            .py(px(6.))
-            .border_b_1()
-            .border_color(tema.border)
-            .child(
-                div()
-                    .text_xs()
-                    .font_weight(gpui_kit::FontWeight::MEDIUM)
-                    .child(nome),
-            )
-            .child(separador())
-            .child(modos);
-
-        if let Some(tipo) = tipo {
-            let o = self.opcoes_da_forma(tipo);
-            barra = barra
-                .child(separador())
-                .child(rotulo("Difusão"))
-                .child(numero(&self.campo_da_difusao, "editor-difusao", Some("px")));
-            if tipo.suaviza() {
-                barra = barra.child(
-                    div().debug_selector(|| "editor-suavizar".into()).child(
-                        Checkbox::new("editor-suavizar")
-                            .xsmall()
-                            .label("Antisserrilhado")
-                            .checked(o.acabamento.suavizar)
-                            .on_click(cx.listener(|ed, _: &bool, _, cx| ed.alternar_suavizar(cx))),
-                    ),
-                );
-            }
-            if tipo.tem_estilo() {
-                barra = barra.child(separador()).child(rotulo("Estilo")).child(
-                    div()
-                        .w(px(140.))
-                        .debug_selector(|| "editor-estilo".into())
-                        .child(crate::estilo::campo_pequeno(
-                            Select::new(&self.seletor_de_estilo).xsmall(),
-                        )),
-                );
-                if o.estilo != TipoDeEstilo::Normal {
-                    let unidade = (o.estilo == TipoDeEstilo::Tamanho).then_some("px");
-                    barra = barra
-                        .child(rotulo("Largura"))
-                        .child(numero(
-                            &self.campo_da_largura,
-                            "editor-estilo-largura",
-                            unidade,
-                        ))
-                        .child(
-                            crate::estilo::botao_fantasma_pequeno("editor-trocar-medidas", cx)
-                                .debug_selector(|| "editor-trocar-medidas".into())
-                                .label("⇄")
-                                .tooltip("Trocar largura e altura")
-                                .on_click(
-                                    cx.listener(|ed, _, _, cx| ed.trocar_largura_e_altura(cx)),
-                                ),
-                        )
-                        .child(rotulo("Altura"))
-                        .child(numero(
-                            &self.campo_da_altura,
-                            "editor-estilo-altura",
-                            unidade,
-                        ));
-                }
-                if o.estilo == TipoDeEstilo::Proporcao {
-                    let ed = cx.entity();
-                    barra = barra.child(
-                        crate::estilo::botao_fantasma_pequeno("editor-proporcoes", cx)
-                            .debug_selector(|| "editor-proporcoes".into())
-                            .label("Predefinições ▾")
-                            .dropdown_menu_with_anchor(
-                                gpui_kit::Anchor::TopLeft,
-                                move |mut menu, _window, _cx| {
-                                    for (l, a) in Estilo::PROPORCOES {
-                                        let ed = ed.clone();
-                                        menu =
-                                            menu.item(
-                                                crate::estilo::item_de_menu(
-                                                    match (l, a) {
-                                                        (1, 1) => "editor-proporcao-1-1",
-                                                        (3, 2) => "editor-proporcao-3-2",
-                                                        (4, 3) => "editor-proporcao-4-3",
-                                                        _ => "editor-proporcao-16-9",
-                                                    },
-                                                    format!("{l}:{a}"),
-                                                    None,
-                                                )
-                                                .on_click(move |_ev, _w, cx| {
-                                                    ed.update(cx, |ed, cx| {
-                                                        ed.usar_proporcao(l as f32, a as f32, cx);
-                                                        ed.campos_de = None;
-                                                    });
-                                                }),
-                                            );
-                                    }
-                                    menu
-                                },
-                            ),
-                    );
-                }
-            }
-        } else {
-            let v = self.opcoes_da_varinha;
-            barra = barra
-                .child(separador())
-                .child(rotulo("Tolerância"))
-                .child(numero(&self.campo_da_tolerancia, "editor-tolerancia", None))
-                .child(
-                    div().debug_selector(|| "editor-suavizar".into()).child(
-                        Checkbox::new("editor-suavizar")
-                            .xsmall()
-                            .label("Antisserrilhado")
-                            .checked(v.suavizar)
-                            .on_click(cx.listener(|ed, _: &bool, _, cx| ed.alternar_suavizar(cx))),
-                    ),
-                )
-                .child(
-                    div().debug_selector(|| "editor-contigua".into()).child(
-                        Checkbox::new("editor-contigua")
-                            .xsmall()
-                            .label("Contígua")
-                            .checked(v.contigua)
-                            .on_click(
-                                cx.listener(|ed, _: &bool, _, cx| ed.alternar_varinha_contigua(cx)),
-                            ),
-                    ),
-                )
-                .child(rotulo("Amostra"))
-                .child(
-                    div()
-                        .w(px(150.))
-                        .debug_selector(|| "editor-amostra".into())
-                        .child(crate::estilo::campo_pequeno(
-                            Select::new(&self.seletor_de_amostra).xsmall(),
-                        )),
-                );
-        }
-        barra
-            .child(div().flex_1())
-            .child(self.menu_modificar_selecao(
-                "editor-modificar-selecao",
-                "Modificar seleção ▾",
-                cx,
-            ))
-            .into_any_element()
-    }
-
-    /// A barra de opções da transformação (⌘T e Transformar seleção): X e Y do
-    /// ponto de referência, largura e altura em %, o ângulo, e a dica dos
-    /// gestos — a barra do Photoshop durante a transformação livre.
-    /// A barra do Liquidificar: a ferramenta, o tamanho (`[` `]`), a pressão
-    /// e "Restaurar tudo".
-    fn barra_do_liquidificar(&self, cx: &mut Context<Self>) -> AnyElement {
-        let tema = cx.theme().clone();
-        let (raio, forca) = self
-            .sessao()
-            .map(|s| (s.pincel.raio, s.forca_do_liquido))
-            .unwrap_or((40.0, 0.5));
-        div()
-            .id("editor-opcoes-do-liquidificar")
-            .debug_selector(|| "editor-opcoes-do-liquidificar".into())
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap(px(10.))
-            .px(px(12.))
-            .py(px(6.))
-            .border_b_1()
-            .border_color(tema.border)
-            .child(div().text_xs().child("Deformação para a frente"))
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(tema.muted_foreground)
-                    .child(format!("Tamanho {:.0} px  [ ]", raio * 2.0)),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(tema.muted_foreground)
-                    .child(format!("Pressão {:.0}%", forca * 100.0)),
-            )
-            .child(
-                div()
-                    .w(px(140.))
-                    .h(px(20.))
-                    .debug_selector(|| "editor-pressao-do-liquido".into())
-                    .child(crate::estilo::slider(&self.pressao_do_liquido)),
-            )
-            .child(
-                crate::estilo::botao_contorno_pequeno("editor-restaurar-liquido", cx)
-                    .debug_selector(|| "editor-restaurar-liquido".into())
-                    .label("Restaurar tudo")
-                    .tooltip("A camada volta a como estava, e o Liquidificar continua aberto")
-                    .on_click(cx.listener(|ed, _, _, cx| ed.restaurar_liquidificacao(cx))),
-            )
-            .child(div().flex_1())
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(tema.muted_foreground)
-                    .child("Arraste para empurrar os pixels · { } dureza · com seleção, o de fora fica parado · Enter aplica · Esc cancela"),
-            )
-            .into_any_element()
-    }
-
-    fn barra_da_transformacao(&self, cx: &mut Context<Self>) -> AnyElement {
-        let tema = cx.theme().clone();
-        if self.deformando() {
-            let intocada = self.sessao().is_some_and(Sessao::malha_intocada);
-            return div()
-                .id("editor-opcoes-do-deformar")
-                .debug_selector(|| "editor-opcoes-do-deformar".into())
-                .flex()
-                .flex_wrap()
-                .items_center()
-                .gap(px(10.))
-                .px(px(12.))
-                .py(px(6.))
-                .border_b_1()
-                .border_color(tema.border)
-                .child(
-                    div()
-                        .text_xs()
-                        .child("Deformar — grade de 3 × 3 células (16 pontos de controle)"),
-                )
-                .child(
-                    div().debug_selector(|| "editor-grade-do-deformar".into()).child(
-                        gpui_kit::component::checkbox::Checkbox::new("editor-grade-do-deformar")
-                            .xsmall()
-                            .label("Mostrar a grade")
-                            .checked(self.grade_visivel)
-                            .on_click(cx.listener(|ed, _: &bool, _, cx| ed.alternar_grade(cx))),
-                    ),
-                )
-                .child(
-                    crate::estilo::botao_contorno_pequeno("editor-redefinir-malha", cx)
-                        .debug_selector(|| "editor-redefinir-malha".into())
-                        .label("Redefinir")
-                        .tooltip("Volta à malha do começo, sem aplicar")
-                        .disabled(intocada)
-                        .on_click(cx.listener(|ed, _, _, cx| ed.redefinir_malha(cx))),
-                )
-                .child(
-                    crate::estilo::botao_fantasma_pequeno("editor-voltar-a-transformacao", cx)
-                        .debug_selector(|| "editor-voltar-a-transformacao".into())
-                        .label("Transformação livre")
-                        .tooltip(if intocada {
-                            "Volta à caixa da transformação livre"
-                        } else {
-                            "Só com a malha intocada (Redefinir antes): uma malha deformada não cabe numa caixa"
-                        })
-                        .disabled(!intocada)
-                        .on_click(cx.listener(|ed, _, _, cx| ed.voltar_a_transformacao_livre(cx))),
-                )
-                .child(div().flex_1())
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(tema.muted_foreground)
-                        .child("Arraste um ponto (o canto leva as alças junto) ou puxe por dentro da malha · Enter aplica · Esc cancela"),
-                )
-                .into_any_element();
-        }
-        let so_o_contorno = self.sessao().is_some_and(Sessao::transformando_a_selecao);
-        div()
-            .id("editor-opcoes-da-transformacao")
-            .debug_selector(|| "editor-opcoes-da-transformacao".into())
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap(px(10.))
-            .px(px(12.))
-            .py(px(6.))
-            .border_b_1()
-            .border_color(tema.border)
-            .children({
-                        use gpui_kit::component::input::NumberInput;
-                        let rotulos = ["X", "Y", "L %", "A %", "Ângulo"];
-                        let seletores = [
-                            "editor-transformacao-x",
-                            "editor-transformacao-y",
-                            "editor-transformacao-l",
-                            "editor-transformacao-a",
-                            "editor-transformacao-angulo",
-                        ];
-                        self.campos_da_transformacao
-                            .iter()
-                            .zip(rotulos.into_iter().zip(seletores))
-                            .map(|(campo, (rotulo, seletor))| {
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(4.))
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(tema.muted_foreground)
-                                            .child(rotulo),
-                                    )
-                                    .child(
-                                        div()
-                                            .w(px(84.))
-                                            .debug_selector(move || seletor.into())
-                                            .child(crate::estilo::campo_pequeno(
-                                                NumberInput::new(campo).xsmall(),
-                                            )),
-                                    )
-                            })
-                            .collect::<Vec<_>>()
-                    })
-            .when(!so_o_contorno, |barra| {
-                barra.child(
-                    crate::estilo::botao_contorno_pequeno("editor-alternar-deformar", cx)
-                        .debug_selector(|| "editor-alternar-deformar".into())
-                        .label("Deformar")
-                        .tooltip("Trocar a caixa pela malha de 3 × 3 células (Warp)")
-                        .on_click(cx.listener(|ed, _, _, cx| ed.deformar(cx))),
-                )
-            })
-            .child(div().flex_1())
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(tema.muted_foreground)
-                    .child("Alças: tamanho (⇧ livre, ⌥ em volta da referência) · fora: girar (⇧ 15°) · arraste o alvo para mudar a referência"),
-            )
-            .into_any_element()
-    }
-
     /// O diálogo do "Modificar seleção": o valor em pixels do documento.
     fn dialogo_da_modificacao(
         &mut self,
@@ -7384,1142 +6531,6 @@ impl EditorDeFoto {
                 )
                 .into_any_element(),
         )
-    }
-
-    fn painel(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let tema = cx.theme().clone();
-        let ferramenta = self
-            .ferramenta()
-            .filter(|_| self.selecionando.is_none() && self.auxiliar.is_none());
-        let cor_atual = self.sessao().map(|s| s.pincel.cor);
-        // Como no Photoshop, as opções seguem a ferramenta: tamanho, dureza e
-        // força só para quem pinta (o pincel de correção também).
-        let pinta = ferramenta.is_some() || self.auxiliar == Some(Auxiliar::Correcao);
-        let rotulo = |texto: &'static str| {
-            div()
-                .text_xs()
-                .text_color(tema.muted_foreground)
-                .child(texto)
-        };
-        // As opções da ferramenta (e as Propriedades do ajuste) rolam num
-        // bloco que vai até pouco mais da metade da coluna: as camadas
-        // embaixo sempre ficam à vista.
-        let opcoes = div()
-            .id("editor-opcoes")
-            .flex()
-            .flex_col()
-            .gap(px(12.))
-            .flex_shrink_0()
-            .max_h(gpui_kit::relative(0.55))
-            .overflow_y_scroll()
-            .child(rotulo(self.nome_da_ferramenta()))
-            .when_some(self.ajuste_da_camada(), |painel, a| {
-                painel.child(self.propriedades_do_ajuste(a, cx))
-            })
-            .children(self.propriedades_da_mascara(cx))
-            .when(self.na_mascara(), |painel| {
-                let nome = self
-                    .sessao()
-                    .map(|s| s.camada_ativa().nome.clone())
-                    .unwrap_or_default();
-                painel.child(
-                    div()
-                        .debug_selector(|| "editor-na-mascara".into())
-                        .text_xs()
-                        .px(px(6.))
-                        .py(px(4.))
-                        .rounded(crate::tema::canto(4.))
-                        .bg(tema.muted)
-                        .child(format!(
-                            "Pintando na máscara de {nome}: preto esconde, branco revela. X troca as cores, D volta a preto e branco"
-                        )),
-                )
-            })
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(4.))
-                    .child(rotulo("Seleção"))
-                    .child(div().flex_1())
-                    .child(self.menu_modificar_selecao("editor-modificar-selecao-painel", "Modificar ▾", cx))
-                    .child(
-                        crate::estilo::botao_fantasma_pequeno("editor-desmarcar", cx)
-                            .debug_selector(|| "editor-desmarcar".into())
-                            .label("Desmarcar")
-                            .tooltip("Tirar a seleção (⌘D) · ⌘A tudo · ⇧⌘I inverter · Delete apaga · ⌥Delete preenche")
-                            .disabled(self.sessao().and_then(Sessao::selecao).is_none())
-                            .on_click(cx.listener(|ed, _, _, cx| ed.desmarcar(cx))),
-                    ),
-            )
-            .child(
-                crate::estilo::botao_secundario_pequeno("editor-abrir-preenchimento", cx)
-                    .label("Preenchimento sensível ao conteúdo…")
-                    .tooltip("Remover o selecionado com prévia: PatchMatch ou IA local · ⇧⌫ preenche direto, sem prévia")
-                    .on_click(cx.listener(|ed, _, _, cx| ed.abrir_preenchimento(cx))),
-            )
-            .when(
-                matches!(
-                    ferramenta,
-                    Some(Ferramenta::Subexposicao(_) | Ferramenta::Superexposicao(_))
-                ),
-                |painel| {
-                    painel.child(
-                        div()
-                            .debug_selector(|| "editor-faixa".into())
-                            .child(crate::estilo::campo_pequeno(
-                                Select::new(&self.seletor_de_faixa).xsmall(),
-                            )),
-                    )
-                },
-            )
-            .when(self.auxiliar == Some(Auxiliar::Remendo), |painel| {
-                let difusao = self.sessao().map_or(5, |s| s.pincel.difusao);
-                painel
-                    .child(
-                        div()
-                            .flex()
-                            .justify_between()
-                            .text_xs()
-                            .text_color(tema.muted_foreground)
-                            .child("Difusão")
-                            .child(format!("{difusao}")),
-                    )
-                    .child(
-                        div()
-                            .h(px(20.))
-                            .debug_selector(|| "editor-difusao-do-remendo".into())
-                            .child(crate::estilo::slider(&self.difusao_da_recuperacao)),
-                    )
-                    .child(div().text_xs().text_color(tema.muted_foreground).child(
-                        "Contorne a área com defeito (ou use a seleção que já existe) e arraste-a até a pele limpa. A textura vem de lá; a cor e a luz se adaptam à borda daqui. Lê a foto até a camada escolhida e pinta nela — numa camada vazia por cima o retoque fica separado.",
-                    ))
-            })
-            .when(self.auxiliar == Some(Auxiliar::GirarVista), |painel| {
-                let graus = self.giro.to_degrees();
-                painel.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(6.))
-                        .child(
-                            div()
-                                .debug_selector(|| "editor-angulo-da-vista".into())
-                                .text_xs()
-                                .child(format!("Ângulo da vista: {graus:.0}°")),
-                        )
-                        .child(div().flex_1())
-                        .child(
-                            crate::estilo::botao_fantasma_pequeno("editor-redefinir-vista", cx)
-                                .debug_selector(|| "editor-redefinir-vista".into())
-                                .label("Voltar a 0°")
-                                .tooltip("Redefinir a vista (Esc com a Girar vista na mão)")
-                                .disabled(self.giro == 0.0)
-                                .on_click(cx.listener(|ed, _, _, cx| ed.girar_a_vista(0.0, cx))),
-                        ),
-                )
-            })
-            .when(pinta, |painel| {
-                let p = self.sessao().map(|s| s.pincel).unwrap_or_default();
-                painel
-                    .child(
-                        div()
-                            .debug_selector(|| "editor-predefinicao".into())
-                            .child(crate::estilo::campo_pequeno(
-                                Select::new(&self.seletor_de_predefinicao)
-                                    .xsmall()
-                                    .placeholder("Predefinição do pincel"),
-                            )),
-                    )
-                    .when(
-                        matches!(ferramenta, Some(Ferramenta::Pincel | Ferramenta::Carimbo)),
-                        |painel| {
-                            painel.child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(8.))
-                                    .child(rotulo("Modo"))
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .debug_selector(|| "editor-modo-da-ferramenta".into())
-                                            .child(crate::estilo::campo_pequeno(
-                                                Select::new(&self.seletor_do_modo_da_ferramenta)
-                                                    .xsmall(),
-                                            )),
-                                    ),
-                            )
-                        },
-                    )
-                    .when(ferramenta.is_some_and(Ferramenta::copia_da_origem), |painel| {
-                        let opcoes = self.sessao().map(|s| s.carimbo).unwrap_or_default();
-                        painel
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(8.))
-                                    .child(rotulo("Amostra"))
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .debug_selector(|| "editor-amostra-do-carimbo".into())
-                                            .child(crate::estilo::campo_pequeno(
-                                                Select::new(&self.seletor_da_amostra_do_carimbo)
-                                                    .xsmall(),
-                                            )),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_wrap()
-                                    .gap(px(12.))
-                                    .child(
-                                        div().debug_selector(|| "editor-carimbo-alinhado".into()).child(
-                                            gpui_kit::component::checkbox::Checkbox::new(
-                                                "editor-carimbo-alinhado",
-                                            )
-                                            .xsmall()
-                                            .label("Alinhado")
-                                            .checked(opcoes.alinhado)
-                                            .on_click(cx.listener(|ed, _: &bool, _, cx| {
-                                                ed.alternar_carimbo_alinhado(cx)
-                                            })),
-                                        ),
-                                    )
-                                    .child(
-                                        div()
-                                            .debug_selector(|| "editor-carimbo-sobreposicao".into())
-                                            .child(
-                                                gpui_kit::component::checkbox::Checkbox::new(
-                                                    "editor-carimbo-sobreposicao",
-                                                )
-                                                .xsmall()
-                                                .label("Mostrar a origem no pincel")
-                                                .checked(self.sobreposicao_do_carimbo)
-                                                .on_click(cx.listener(|ed, _: &bool, _, cx| {
-                                                    ed.alternar_sobreposicao_do_carimbo(cx)
-                                                })),
-                                            ),
-                                    ),
-                            )
-                    })
-                    .when(ferramenta == Some(Ferramenta::Recuperacao), |painel| {
-                        painel
-                            .child(
-                                div()
-                                    .flex()
-                                    .justify_between()
-                                    .text_xs()
-                                    .text_color(tema.muted_foreground)
-                                    .child("Difusão da recuperação")
-                                    .child(format!("{}", p.difusao)),
-                            )
-                            .child(
-                                div()
-                                    .h(px(20.))
-                                    .debug_selector(|| "editor-difusao-da-recuperacao".into())
-                                    .child(crate::estilo::slider(&self.difusao_da_recuperacao)),
-                            )
-                            .child(div().text_xs().text_color(tema.muted_foreground).child(
-                                "Baixa: a cor casa pixel a pixel com a borda (grão, textura fina). Alta: casa com a média em volta (transição mais lisa). Não é a difusão da seleção. A cor se adapta ao soltar o botão; perto de uma aresta forte (a mandíbula), passe sem tocá-la ou selecione antes.",
-                            ))
-                    })
-                    .child(rotulo("Tamanho  [  ]"))
-                    .child(
-                        div()
-                            .h(px(20.))
-                            .debug_selector(|| "editor-tamanho".into())
-                            .child(crate::estilo::slider(&self.tamanho)),
-                    )
-                    .child(rotulo("Dureza  {  }"))
-                    .child(
-                        div()
-                            .h(px(20.))
-                            .debug_selector(|| "editor-dureza".into())
-                            .child(crate::estilo::slider(&self.dureza)),
-                    )
-                    .child(rotulo(match ferramenta {
-                        Some(Ferramenta::Subexposicao(_) | Ferramenta::Superexposicao(_)) => {
-                            "Exposição"
-                        }
-                        Some(Ferramenta::Desfoque | Ferramenta::Nitidez) => "Força",
-                        _ => "Opacidade (números)",
-                    }))
-                    .child(
-                        div()
-                            .h(px(20.))
-                            .debug_selector(|| "editor-opacidade".into())
-                            .child(crate::estilo::slider(&self.opacidade)),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .justify_between()
-                            .text_xs()
-                            .text_color(tema.muted_foreground)
-                            .child("Fluxo (⇧ + números)")
-                            .child(format!("{:.0}%", p.fluxo * 100.0)),
-                    )
-                    .child(
-                        div()
-                            .h(px(20.))
-                            .debug_selector(|| "editor-fluxo".into())
-                            .child(crate::estilo::slider(&self.fluxo)),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .justify_between()
-                            .text_xs()
-                            .text_color(tema.muted_foreground)
-                            .child("Espaçamento")
-                            .child(format!("{:.0}%", p.espacamento * 100.0)),
-                    )
-                    .child(
-                        div()
-                            .h(px(20.))
-                            .debug_selector(|| "editor-espacamento".into())
-                            .child(crate::estilo::slider(&self.espacamento)),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .justify_between()
-                            .text_xs()
-                            .text_color(tema.muted_foreground)
-                            .child("Suavização")
-                            .child(format!("{:.0}%", p.suavizacao * 100.0)),
-                    )
-                    .child(
-                        div()
-                            .h(px(20.))
-                            .debug_selector(|| "editor-suavizacao".into())
-                            .child(crate::estilo::slider(&self.suavizacao_do_pincel)),
-                    )
-                    .child(div().text_xs().text_color(tema.muted_foreground).child(
-                        if cfg!(target_os = "macos") {
-                            "⇧ + clique: reta desde o último ponto · ⌃⌥ + arrasto: tamanho e dureza · pressão da mesa digitalizadora: ainda não lida"
-                        } else {
-                            "⇧ + clique: reta desde o último ponto · ⌥ + botão direito arrastando: tamanho e dureza · pressão da mesa digitalizadora: ainda não lida"
-                        },
-                    ))
-            })
-            .child(rotulo("Cor"))
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .gap(px(6.))
-                    .children(AMOSTRAS.iter().enumerate().map(|(i, cor)| {
-                        let cor = *cor;
-                        let escolhida = cor_atual == Some(cor);
-                        div()
-                            .id(("editor-cor", i))
-                            .size(px(22.))
-                            .rounded(crate::tema::canto(4.))
-                            .border_2()
-                            .border_color(if escolhida { tema.ring } else { tema.border })
-                            .bg(gpui_kit::rgb(
-                                (cor[0] as u32) << 16 | (cor[1] as u32) << 8 | cor[2] as u32,
-                            ))
-                            .cursor_pointer()
-                            .on_click(cx.listener(move |ed, _, _, cx| ed.escolher_cor(cor, cx)))
-                    })),
-            )
-;
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(12.))
-            .size_full()
-            .h_full()
-            .p(px(12.))
-            .border_l_1()
-            .border_color(tema.border)
-            .child(opcoes)
-            .child(div().h(px(1.)).bg(tema.border))
-            .child({
-                // 🗂️ Camadas e Histórico dividem o resto da coluna em abas, como os
-                // painéis agrupados do Photoshop: um embaixo do outro, o
-                // Histórico ficava abaixo da borda da janela.
-                let esta = cx.entity();
-                gpui_kit::component::tab::TabBar::new("editor-abas")
-                    .segmented()
-                    .small()
-                    .selected_index(self.aba_do_painel)
-                    .on_click(move |indice, _, cx| {
-                        let indice = *indice;
-                        esta.update(cx, |ed, cx| {
-                            ed.aba_do_painel = indice;
-                            cx.notify();
-                        });
-                    })
-                    .child(
-                        gpui_kit::component::tab::Tab::new()
-                            .debug_selector(|| "editor-aba-camadas".into())
-                            .label("Camadas"),
-                    )
-                    .child(
-                        gpui_kit::component::tab::Tab::new()
-                            .debug_selector(|| "editor-aba-historico".into())
-                            .label("Histórico"),
-                    )
-            })
-            .map(|painel| {
-                if self.aba_do_painel == 1 {
-                    painel.child(self.painel_do_historico(cx).into_any_element())
-                } else {
-                    painel.child(self.painel_de_camadas(cx).into_any_element())
-                }
-            })
-    }
-
-    /// O painel Camadas do Photoshop: o modo e a opacidade da escolhida, a
-    /// pilha de cima para baixo, e os botões embaixo.
-    fn painel_de_camadas(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let tema = cx.theme().clone();
-        let cadeados = self.barra_de_cadeados(cx);
-        let (camadas, ativa, pode_desfazer_alguma) = match self.sessao() {
-            Some(s) => (
-                s.documento()
-                    .camadas
-                    .iter()
-                    .enumerate()
-                    .map(|(i, c)| {
-                        (
-                            c.nome.clone(),
-                            c.visivel,
-                            c.modo,
-                            c.mascara.as_ref().map(|m| m.ativa),
-                            c.ajuste.is_some(),
-                            s.documento().base_do_recorte(i).is_some(),
-                            c.bloqueio.algum(),
-                            c.mascara.as_ref().is_some_and(|m| m.vinculada),
-                        )
-                    })
-                    .collect::<Vec<_>>(),
-                s.ativa(),
-                true,
-            ),
-            None => (Vec::new(), 0, false),
-        };
-        let na_mascara = self.na_mascara();
-        let tem_mascara = camadas.get(ativa).is_some_and(|c| c.3.is_some());
-        let quantas = camadas.len();
-        let (ativa_recortada, ativa_pode_recortar, ativa_e_base) = self
-            .sessao()
-            .map(|s| {
-                let doc = s.documento();
-                (
-                    doc.camadas.get(ativa).is_some_and(|c| c.recortada),
-                    s.pode_recortar(ativa),
-                    doc.camadas.get(ativa).is_some_and(|c| !c.recortada)
-                        && doc.fim_do_conjunto(ativa) > ativa,
-                )
-            })
-            .unwrap_or_default();
-        let criando_a_fotografia = self.criando_a_fotografia;
-        let renomeando = self.renomeando.clone();
-        let miniaturas = self.miniaturas.clone();
-        let das_mascaras = self.miniaturas_das_mascaras.clone();
-        let lado = px(LADO_DA_MINIATURA as f32 * 0.75);
-        // A moldura do alvo na cor de destaque do tema: em volta de uma
-        // máscara branca, a do texto sumia.
-        let cor_da_moldura = tema.ring;
-        let cor_do_icone_de_ajuste = tema.muted;
-        let linhas = camadas
-            .into_iter()
-            .enumerate()
-            .rev()
-            .map(|(i, (nome, visivel, modo, mascara, de_ajuste, recortada, bloqueada, vinculada))| {
-                let escolhida = i == ativa;
-                let nome_do_arrasto: SharedString = nome.clone().into();
-                let id_do_olho: SharedString = format!("editor-olho-{i}").into();
-                let olho = crate::estilo::botao_icone_pequeno(
-                    id_do_olho.clone(),
-                    if visivel { Icone::Eye } else { Icone::EyeOff },
-                )
-                .debug_selector(move || id_do_olho.to_string())
-                .tooltip(if visivel {
-                    format!("Esconder a camada (escolhida: {MOSTRAR})")
-                } else {
-                    format!("Mostrar a camada (escolhida: {MOSTRAR})")
-                })
-                .on_click(cx.listener(move |ed, _, _, cx| ed.alternar_visibilidade_de(i, cx)));
-                let texto: AnyElement = match &renomeando {
-                    Some((j, campo)) if *j == i => div()
-                        .flex_1()
-                        .child(crate::estilo::campo_pequeno(Input::new(campo).xsmall()))
-                        .into_any_element(),
-                    _ => div()
-                        .flex_1()
-                        .min_w(px(0.))
-                        .overflow_hidden()
-                        .text_ellipsis()
-                        .whitespace_nowrap()
-                        .text_sm()
-                        .when(!visivel, |d| d.text_color(tema.muted_foreground))
-                        .child(nome)
-                        .into_any_element(),
-                };
-                let linha = div()
-                    .id(("editor-camada", i))
-                    .debug_selector(move || format!("editor-camada-{i}"))
-                    .flex()
-                    .items_center()
-                    .gap(px(6.))
-                    .px(px(4.))
-                    .py(px(2.))
-                    .rounded(crate::tema::canto(4.))
-                    .cursor_pointer()
-                    .when(escolhida, |d| {
-                        d.bg(tema.accent).text_color(tema.accent_foreground)
-                    })
-                    .when(!escolhida, |d| d.hover(|d| d.bg(tema.muted)))
-                    // O olho não escolhe a camada, como no Photoshop.
-                    .child(
-                        div()
-                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .child(olho),
-                    )
-                    // Recortada: recuada, com a seta que desce para a base.
-                    .when(recortada, |d| {
-                        d.child(
-                            div()
-                                .id(("editor-recorte", i))
-                                .debug_selector(move || format!("editor-recorte-{i}"))
-                                .w(px(14.))
-                                .text_sm()
-                                .text_color(cor_da_moldura)
-                                .child("↳")
-                                .tooltip(|window, cx| {
-                                    gpui_kit::component::tooltip::Tooltip::new(
-                                        "Máscara de corte: aparece só onde a camada de baixo tem pixels (⌥ + clique na divisa libera)",
-                                    )
-                                    .build(window, cx)
-                                }),
-                        )
-                    })
-                    // A camada de ajuste não tem pixels: o ícone dela, como no
-                    // Photoshop.
-                    .when(de_ajuste, |d| {
-                        d.child(
-                            moldura(
-                                div()
-                                    .debug_selector(move || format!("editor-miniatura-{i}"))
-                                    .size(lado)
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .bg(cor_do_icone_de_ajuste)
-                                    .child(
-                                        gpui_kit::component::Icon::new(Icone::Contrast)
-                                            .size_4()
-                                            .text_color(cor_da_moldura),
-                                    ),
-                                false,
-                                cor_da_moldura,
-                            ),
-                        )
-                    })
-                    .when_some(
-                        miniaturas.get(i).cloned().filter(|_| !de_ajuste),
-                        |d, m| {
-                            d.child(
-                                moldura(
-                                    div().debug_selector(move || format!("editor-miniatura-{i}")),
-                                    escolhida && mascara.is_some() && !na_mascara,
-                                    cor_da_moldura,
-                                )
-                                .child(img(m).object_fit(ObjectFit::Contain).w(lado).h(lado)),
-                            )
-                        },
-                    )
-                    // A corrente entre as duas miniaturas: clique solta ou
-                    // vincula a máscara à camada.
-                    .when(mascara.is_some() && !de_ajuste, |d| {
-                        d.child(
-                            div()
-                                .id(("editor-corrente", i))
-                                .debug_selector(move || format!("editor-corrente-{i}"))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .w(px(12.))
-                                .child(
-                                    gpui_kit::component::Icon::new(if vinculada {
-                                        Icone::Link2
-                                    } else {
-                                        Icone::Link2Off
-                                    })
-                                    .size_3()
-                                    .text_color(if vinculada {
-                                        cor_da_moldura
-                                    } else {
-                                        tema.muted_foreground
-                                    }),
-                                )
-                                .tooltip(move |window, cx| {
-                                    gpui_kit::component::tooltip::Tooltip::new(if vinculada {
-                                        "Vinculada: a máscara anda com a camada — clique para soltar"
-                                    } else {
-                                        "Solta: a máscara fica no lugar — clique para vincular"
-                                    })
-                                    .build(window, cx)
-                                })
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(move |ed, _e: &MouseDownEvent, window, cx| {
-                                        cx.stop_propagation();
-                                        ed.alternar_vinculo_de(i, cx);
-                                        window.focus(&ed.foco, cx);
-                                    }),
-                                ),
-                        )
-                    })
-                    // A máscara: clique escolhe, ⇧ + clique liga e desliga,
-                    // ⌥ + clique mostra só ela no palco.
-                    .when_some(
-                        mascara.zip(das_mascaras.get(i).cloned().flatten()),
-                        |d, (ligada, m)| {
-                            d.child(
-                                moldura(
-                                    div()
-                                        .id(("editor-mascara", i))
-                                        .debug_selector(move || format!("editor-mascara-{i}"))
-                                        .relative()
-                                        .tooltip(move |window, cx| {
-                                            gpui_kit::component::tooltip::Tooltip::new(if ligada {
-                                                "Máscara — clique para pintar nela; ⇧ + clique desliga; ⌥ + clique mostra só ela"
-                                            } else {
-                                                "Máscara desligada — ⇧ + clique liga"
-                                            })
-                                            .build(window, cx)
-                                        }),
-                                    escolhida && na_mascara,
-                                    cor_da_moldura,
-                                )
-                                .child(img(m).object_fit(ObjectFit::Contain).w(lado).h(lado))
-                                .when(!ligada, |d| {
-                                    d.child(
-                                        div()
-                                            .absolute()
-                                            .inset_0()
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .text_color(gpui_kit::red())
-                                            .text_lg()
-                                            .child("✕"),
-                                    )
-                                })
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(move |ed, e: &MouseDownEvent, window, cx| {
-                                        cx.stop_propagation();
-                                        if e.modifiers.secondary() {
-                                            ed.selecionar_da_camada(
-                                                i,
-                                                true,
-                                                operacao_dos(e.modifiers),
-                                                cx,
-                                            );
-                                        } else if e.modifiers.shift {
-                                            ed.alternar_mascara_de(i, cx);
-                                        } else if e.modifiers.alt {
-                                            ed.alternar_so_a_mascara(i, cx);
-                                        } else {
-                                            ed.escolher_mascara(i, cx);
-                                        }
-                                        window.focus(&ed.foco, cx);
-                                    }),
-                                ),
-                            )
-                        },
-                    )
-                    .child(texto)
-                    .when(bloqueada, |d| {
-                        d.child(
-                            div()
-                                .debug_selector(move || format!("editor-cadeado-da-camada-{i}"))
-                                .child(
-                                    gpui_kit::component::Icon::new(Icone::Lock)
-                                        .size_3()
-                                        .text_color(tema.muted_foreground),
-                                ),
-                        )
-                    })
-                    .when(modo != Modo::Normal, |d| {
-                        d.child(
-                            div()
-                                .text_xs()
-                                .text_color(tema.muted_foreground)
-                                .child(modo.nome()),
-                        )
-                    })
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |ed, evento: &MouseDownEvent, window, cx| {
-                            if evento.modifiers.secondary() {
-                                // ⌘ + clique: a seleção do que a camada tem,
-                                // sem trocar a escolhida (⇧ soma, ⌥ tira).
-                                ed.selecionar_da_camada(i, false, operacao_dos(evento.modifiers), cx);
-                            } else if evento.click_count >= 2 {
-                                ed.comecar_a_renomear(i, window, cx);
-                            } else {
-                                if ed.renomeando.as_ref().is_some_and(|(j, _)| *j != i) {
-                                    ed.terminar_de_renomear(true, window, cx);
-                                }
-                                ed.escolher_camada(i, cx);
-                                ed.apertou_na_camada();
-                                if ed.renomeando.is_none() {
-                                    window.focus(&ed.foco, cx);
-                                }
-                            }
-                        }),
-                    );
-                // Arrastar a linha para outra muda a camada de lugar (um passo
-                // só; o conjunto de recorte anda inteiro).
-                let cor_do_alvo = tema.muted;
-                let linha = linha
-                    .on_drag(
-                        mascara_e_cadeados::ArrastoDeCamada {
-                            nome: nome_do_arrasto.clone(),
-                        },
-                        |valor, _posicao, _window, cx| {
-                            let nome = valor.nome.clone();
-                            cx.new(|_| mascara_e_cadeados::FantasmaDaCamada { nome })
-                        },
-                    )
-                    .drag_over::<mascara_e_cadeados::ArrastoDeCamada>(move |estilo, _, _, _| {
-                        estilo.bg(cor_do_alvo)
-                    })
-
-                    // 🔑 Ao vivo, como as guias (`app/guias.rs`): passar sobre
-                    // outra linha já leva a camada para lá — o soltar não
-                    // precisa cair numa linha. O arrasto inteiro é um passo.
-                    .on_drag_move(cx.listener(
-                        move |ed,
-                              evento: &gpui_kit::DragMoveEvent<
-                            mascara_e_cadeados::ArrastoDeCamada,
-                        >,
-                              _window,
-                              cx| {
-                            if evento.bounds.contains(&evento.event.position) {
-                                ed.arrastar_camada_ate(i, cx);
-                            }
-                        },
-                    ));
-                // O botão direito na linha: o menu da camada (ela passa a ser
-                // a escolhida, como no Photoshop).
-                let ed = cx.entity();
-                let linha = linha.context_menu(move |menu, window, cx| {
-                    let menu = match window.focused(cx) {
-                        Some(antes) => menu.action_context(antes),
-                        None => menu,
-                    };
-                    let (recortada, pode, quantas, com_mascara, de_pixels) = ed.update(cx, |ed, cx| {
-                        ed.escolher_camada(i, cx);
-                        ed.sessao()
-                            .map(|s| {
-                                let c = s.documento().camadas.get(i);
-                                (
-                                    c.is_some_and(|c| c.recortada),
-                                    s.pode_recortar(i),
-                                    s.documento().camadas.len(),
-                                    c.is_some_and(|c| c.mascara.is_some()),
-                                    c.is_some_and(|c| c.ajuste.is_none()),
-                                )
-                            })
-                            .unwrap_or_default()
-                    });
-                    let item = |id: &'static str, rotulo: &'static str, ligado: bool, fazer: fn(&mut EditorDeFoto, &mut Context<EditorDeFoto>)| {
-                        let ed = ed.clone();
-                        crate::estilo::item_de_menu(id, rotulo, None)
-                            .disabled(!ligado)
-                            .on_click(move |_ev, _window, cx| {
-                                ed.update(cx, fazer);
-                            })
-                    };
-                    let recorte = {
-                        let ed = ed.clone();
-                        crate::estilo::item_de_menu(
-                            "editor-menu-recorte",
-                            if recortada {
-                                "Liberar máscara de corte  ⌥⌘G"
-                            } else {
-                                "Criar máscara de corte  ⌥⌘G"
-                            },
-                            None,
-                        )
-                        .disabled(!recortada && !pode)
-                        .on_click(move |_ev, _window, cx| {
-                            ed.update(cx, |ed, cx| ed.alternar_mascara_de_corte(i, cx));
-                        })
-                    };
-                    menu.item(recorte)
-                        .separator()
-                        .item(item(
-                            "editor-menu-aplicar-mascara",
-                            "Aplicar máscara",
-                            com_mascara && de_pixels,
-                            |ed, cx| ed.aplicar_mascara(cx),
-                        ))
-                        .item(item(
-                            "editor-menu-inverter-mascara",
-                            "Inverter máscara",
-                            com_mascara,
-                            |ed, cx| ed.inverter_mascara(cx),
-                        ))
-                        .item(item(
-                            "editor-menu-vinculo",
-                            "Vincular ou soltar a máscara",
-                            com_mascara && de_pixels,
-                            move |ed, cx| ed.alternar_vinculo_de_ativa(cx),
-                        ))
-                        .separator()
-                        .item(item(
-                            "editor-menu-duplicar",
-                            "Duplicar camada",
-                            true,
-                            |ed, cx| ed.duplicar_camada_inteira(cx),
-                        ))
-                        .item(item(
-                            "editor-menu-fotografia",
-                            "Criar camada da fotografia base",
-                            true,
-                            |ed, cx| ed.criar_camada_da_fotografia(cx),
-                        ))
-                        .item(item(
-                            "editor-menu-mesclar",
-                            "Mesclar para baixo  ⌘E",
-                            i > 0 && quantas > 1,
-                            |ed, cx| ed.mesclar_para_baixo(cx),
-                        ))
-                        .item(item(
-                            "editor-menu-excluir",
-                            "Excluir camada",
-                            quantas > 1,
-                            |ed, cx| ed.excluir_camada(cx),
-                        ))
-                });
-                // A divisa com a de baixo: ⌥ + clique cria ou libera a máscara
-                // de corte da de cima (a desta linha).
-                let divisa = (i > 0).then(|| {
-                    div()
-                        .id(("editor-divisa", i))
-                        .debug_selector(move || format!("editor-divisa-{i}"))
-                        .h(px(4.))
-                        .mx(px(4.))
-                        .rounded(crate::tema::canto(2.))
-                        .hover(|d| d.bg(tema.border))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |ed, e: &MouseDownEvent, window, cx| {
-                                cx.stop_propagation();
-                                if e.modifiers.alt {
-                                    ed.alternar_mascara_de_corte(i, cx);
-                                } else {
-                                    ed.escolher_camada(i, cx);
-                                }
-                                window.focus(&ed.foco, cx);
-                            }),
-                        )
-                });
-                div().flex().flex_col().child(linha).children(divisa)
-            });
-        let botao = |id: &'static str, icone: Icone, dica: &'static str, ligado: bool| {
-            crate::estilo::botao_icone_pequeno(id, icone)
-                .debug_selector(move || id.into())
-                .tooltip(dica)
-                .disabled(!ligado)
-        };
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(8.))
-            .flex_1()
-            .min_h(px(0.))
-            .child(
-                div()
-                    .debug_selector(|| "editor-modo".into())
-                    .child(crate::estilo::campo_pequeno(
-                        Select::new(&self.modo)
-                            .xsmall()
-                            .disabled(!pode_desfazer_alguma),
-                    )),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(tema.muted_foreground)
-                    .child("Opacidade da camada"),
-            )
-            .child(
-                div()
-                    .h(px(20.))
-                    .child(crate::estilo::slider(&self.opacidade_da_camada)),
-            )
-            .child(cadeados)
-            .child(
-                div()
-                    .id("editor-camadas")
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_h(px(0.))
-                    .overflow_y_scroll()
-                    .children(linhas),
-            )
-            .child(
-                div()
-                    .flex()
-                    .gap(px(4.))
-                    .child({
-                        let ed = cx.entity();
-                        botao(
-                            "editor-camada-ajuste",
-                            Icone::Contrast,
-                            "Nova camada de ajuste",
-                            pode_desfazer_alguma,
-                        )
-                        .dropdown_menu_with_anchor(
-                            gpui_kit::Anchor::BottomLeft,
-                            move |mut menu, _window, _cx| {
-                                for a in editor_core::ajuste::TODOS {
-                                    let ed = ed.clone();
-                                    let id: &'static str = match a.chave() {
-                                        "brilho" => "editor-ajuste-novo-brilho",
-                                        "niveis" => "editor-ajuste-novo-niveis",
-                                        "curvas" => "editor-ajuste-novo-curvas",
-                                        "matiz" => "editor-ajuste-novo-matiz",
-                                        _ => "editor-ajuste-novo-inverter",
-                                    };
-                                    menu = menu.item(
-                                        crate::estilo::item_de_menu(id, a.nome(), None).on_click(
-                                            move |_ev, _window, cx| {
-                                                ed.update(cx, |ed, cx| {
-                                                    ed.nova_camada_de_ajuste(a, cx)
-                                                });
-                                            },
-                                        ),
-                                    );
-                                }
-                                menu
-                            },
-                        )
-                    })
-                    .child(
-                        botao(
-                            "editor-camada-mascara",
-                            Icone::LayerMask,
-                            "Adicionar máscara (⌥ esconde tudo; com seleção, nasce dela)",
-                            pode_desfazer_alguma && !tem_mascara,
-                        )
-                        .on_click(cx.listener(
-                            |ed, e: &gpui_kit::ClickEvent, _, cx| {
-                                ed.adicionar_mascara(e.modifiers().alt, cx)
-                            },
-                        )),
-                    )
-                    .child(
-                        botao(
-                            "editor-camada-nova",
-                            Icone::Plus,
-                            "Nova camada (⇧⌘N)",
-                            pode_desfazer_alguma,
-                        )
-                        .on_click(cx.listener(|ed, _, _, cx| ed.nova_camada(cx))),
-                    )
-                    // O resto do menu de camadas do Photoshop, com os atalhos.
-                    .child({
-                        let ed = cx.entity();
-                        let (pode_subir, pode_descer) =
-                            (ativa + 1 < quantas, ativa > 0 && quantas > 1);
-                        botao(
-                            "editor-camada-mais",
-                            Icone::EllipsisVertical,
-                            "Mais: duplicar, fotografia base, máscara de corte, subir, descer, mesclar",
-                            pode_desfazer_alguma,
-                        )
-                        .dropdown_menu_with_anchor(
-                            gpui_kit::Anchor::BottomLeft,
-                            move |menu, _window, _cx| {
-                                let item = |id: &'static str,
-                                            rotulo: &'static str,
-                                            ligado: bool,
-                                            fazer: fn(
-                                    &mut EditorDeFoto,
-                                    &mut Context<EditorDeFoto>,
-                                )| {
-                                    let ed = ed.clone();
-                                    crate::estilo::item_de_menu(id, rotulo, None)
-                                        .disabled(!ligado)
-                                        .on_click(move |_ev, _window, cx| {
-                                            ed.update(cx, fazer);
-                                        })
-                                };
-                                let recorte = {
-                                    let ed = ed.clone();
-                                    crate::estilo::item_de_menu(
-                                        "editor-camada-recorte",
-                                        if ativa_recortada {
-                                            "Liberar máscara de corte  ⌥⌘G"
-                                        } else {
-                                            "Criar máscara de corte  ⌥⌘G"
-                                        },
-                                        None,
-                                    )
-                                    .disabled(!ativa_recortada && !ativa_pode_recortar)
-                                    .on_click(move |_ev, _window, cx| {
-                                        ed.update(cx, |ed, cx| {
-                                            ed.alternar_mascara_de_corte(ativa, cx)
-                                        });
-                                    })
-                                };
-                                menu.item(item(
-                                    "editor-camada-duplicar",
-                                    "Duplicar camada (exata)",
-                                    true,
-                                    |ed, cx| ed.duplicar_camada_inteira(cx),
-                                ))
-                                .item(item(
-                                    "editor-camada-via-copia",
-                                    "Camada via cópia  ⌘J",
-                                    true,
-                                    |ed, cx| ed.duplicar_camada(cx),
-                                ))
-                                .item(item(
-                                    "editor-camada-fotografia",
-                                    if criando_a_fotografia {
-                                        "Criando a camada da fotografia…"
-                                    } else {
-                                        "Criar camada da fotografia base"
-                                    },
-                                    !criando_a_fotografia,
-                                    |ed, cx| ed.criar_camada_da_fotografia(cx),
-                                ))
-                                .item(item(
-                                    "editor-camada-carimbar",
-                                    "Carimbar visível  ⇧⌥⌘E",
-                                    true,
-                                    |ed, cx| ed.carimbar_visivel(cx),
-                                ))
-                                .item(item(
-                                    "editor-camada-importar",
-                                    "Importar imagem como camada…",
-                                    true,
-                                    |ed, cx| ed.importar_imagem(cx),
-                                ))
-                                .separator()
-                                .item(recorte)
-                                .item(item(
-                                    "editor-camada-aplicar-mascara",
-                                    "Aplicar máscara",
-                                    true,
-                                    |ed, cx| ed.aplicar_mascara(cx),
-                                ))
-                                .separator()
-                                .item(item(
-                                    "editor-camada-subir",
-                                    "Subir a camada  ⌘]",
-                                    pode_subir,
-                                    |ed, cx| ed.mover_camada(1, cx),
-                                ))
-                                .item(item(
-                                    "editor-camada-descer",
-                                    "Descer a camada  ⌘[",
-                                    pode_descer,
-                                    |ed, cx| ed.mover_camada(-1, cx),
-                                ))
-                                .item(item(
-                                    "editor-camada-mesclar",
-                                    if ativa_e_base {
-                                        "Mesclar máscara de corte  ⌘E"
-                                    } else {
-                                        "Mesclar para baixo  ⌘E"
-                                    },
-                                    pode_descer || ativa_e_base,
-                                    |ed, cx| ed.mesclar_para_baixo(cx),
-                                ))
-                            },
-                        )
-                    })
-                    .child(div().flex_1())
-                    .child(
-                        botao(
-                            "editor-camada-excluir",
-                            Icone::Trash2,
-                            if na_mascara {
-                                "Excluir a máscara"
-                            } else {
-                                "Excluir a camada"
-                            },
-                            quantas > 1 || na_mascara,
-                        )
-                        .on_click(cx.listener(move |ed, _, _, cx| {
-                            if na_mascara {
-                                ed.excluir_mascara(cx)
-                            } else {
-                                ed.excluir_camada(cx)
-                            }
-                        })),
-                    ),
-            )
-    }
-
-    /// O painel Histórico do Photoshop: a abertura e cada passo, do mais
-    /// antigo ao mais novo; o vigente realçado, os desfeitos apagados. Clicar
-    /// num passo volta (ou avança) até ele.
-    fn painel_do_historico(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let tema = cx.theme().clone();
-        let (nomes, posicao) = match self.sessao() {
-            Some(s) => (
-                std::iter::once("Abertura".to_string())
-                    .chain(
-                        s.historico()
-                            .passos()
-                            .iter()
-                            .map(|p| p.descricao(s.documento())),
-                    )
-                    .collect::<Vec<_>>(),
-                s.historico().posicao(),
-            ),
-            None => (Vec::new(), 0),
-        };
-        let linhas = nomes.into_iter().enumerate().map(|(i, nome)| {
-            let vigente = i == posicao;
-            let desfeito = i > posicao;
-            div()
-                .id(("editor-historico", i))
-                .debug_selector(move || format!("editor-historico-{i}"))
-                .px(px(6.))
-                .py(px(2.))
-                .rounded(crate::tema::canto(4.))
-                .text_sm()
-                .cursor_pointer()
-                .when(vigente, |d| {
-                    d.bg(tema.accent).text_color(tema.accent_foreground)
-                })
-                .when(desfeito, |d| {
-                    d.text_color(tema.muted_foreground).opacity(0.6)
-                })
-                .when(!vigente, |d| d.hover(|d| d.bg(tema.muted)))
-                .child(nome)
-                .on_click(cx.listener(move |ed, _, _, cx| ed.ir_para_no_historico(i, cx)))
-        });
-        div()
-            .id("editor-historico")
-            .flex()
-            .flex_col()
-            .gap(px(1.))
-            .flex_1()
-            .min_h(px(0.))
-            .overflow_y_scroll()
-            .children(linhas)
     }
 
     fn pergunta_de_fechar(
@@ -8593,47 +6604,6 @@ fn subir(
         ));
     }
     na_foto
-}
-
-/// O nome da arrumação do editor (`docas-editor.json` no catálogo).
-const COLUNAS_DO_EDITOR: &str = "editor";
-
-/// A largura do painel da direita, em pontos.
-const LIMITES_DO_PAINEL: crate::docas::Limites = crate::docas::Limites {
-    minimo: 240.0,
-    maximo: 560.0,
-    padrao: 320.0,
-};
-
-impl EditorDeFoto {
-    fn largura_do_painel(&self) -> f32 {
-        LIMITES_DO_PAINEL.limitar(
-            self.arrumacao
-                .direita
-                .map_or(LIMITES_DO_PAINEL.padrao, |c| c.largura),
-        )
-    }
-
-    /// A borda foi arrastada: grava a largura nova do painel.
-    fn guardar_a_largura_do_painel(&mut self, cx: &mut Context<Self>) {
-        let larguras: Vec<f32> = self
-            .colunas
-            .read(cx)
-            .sizes()
-            .iter()
-            .map(|l| f32::from(*l))
-            .collect();
-        if let [_, painel] = larguras[..] {
-            if painel > 0. {
-                self.arrumacao.direita = Some(crate::docas::Coluna {
-                    aberta: true,
-                    largura: LIMITES_DO_PAINEL.limitar(painel),
-                });
-                crate::docas::gravar(COLUNAS_DO_EDITOR, &self.arrumacao);
-            }
-        }
-        cx.notify();
-    }
 }
 
 /// A operação da seleção pelos modificadores: ⇧ soma, ⌥ tira.
@@ -8828,7 +6798,7 @@ struct ArrastoDaCurva {
 const CANAIS_DA_CURVA: [&str; 4] = ["RGB", "Vermelho", "Verde", "Azul"];
 
 /// O lado do gráfico das Curvas, em pontos.
-const LADO_DA_CURVA: f32 = 220.0;
+const LADO_DA_CURVA: f32 = 176.0;
 
 /// O ajuste com o parâmetro `qual` trocado por `v`.
 fn ajuste_com(ajuste: Ajuste, qual: usize, v: f32) -> Ajuste {
@@ -9294,9 +7264,9 @@ impl Focusable for EditorDeFoto {
 impl Render for EditorDeFoto {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // 🚨 A tecla solta fora da janela nunca chega: sem foco, larga tudo.
-        if !window.is_window_active() && (self.espaco.is_some() || self.z_desde.is_some()) {
+        if !window.is_window_active() && self.espaco.is_some() {
             self.espaco = None;
-            self.z_desde = None;
+            self.mao = None;
         }
         // O preenchimento modal desenha sem giro; a vista volta girada depois.
         if self.area_do_preenchimento.is_some() && self.giro != 0.0 {
@@ -9355,6 +7325,55 @@ impl Render for EditorDeFoto {
             self.seletor_de_cor
                 .update(cx, |s, cx| s.set_value(hsla, window, cx));
         }
+        // A de fundo também (X, D, a máscara em cinza).
+        let fundo = self.sessao().map(|s| s.pincel.cor_de_fundo);
+        if fundo.is_some() && fundo != self.fundo_mostrado {
+            self.fundo_mostrado = fundo;
+            let hsla = hsla_de(fundo.unwrap_or([255; 3]));
+            self.seletor_de_fundo
+                .update(cx, |s, cx| s.set_value(hsla, window, cx));
+        }
+        // R G B do painel Cor: a cor que ele edita.
+        if let Some(s) = self.sessao() {
+            let cor = if self.cor_do_painel_e_o_fundo {
+                s.pincel.cor_de_fundo
+            } else {
+                s.pincel.cor
+            };
+            for (i, estado) in self.rgb_do_painel.clone().iter().enumerate() {
+                if (estado.read(cx).value().start() - cor[i] as f32).abs() > 0.5 {
+                    estado.update(cx, |e, cx| e.set_value(cor[i] as f32, window, cx));
+                }
+            }
+        }
+        self.sincronizar_o_campo_do_zoom(window, cx);
+        // O ângulo da Girar vista e a opacidade da camada, nos campos (menos
+        // enquanto se digita neles).
+        let graus = (self.giro.to_degrees() * 10.0).round() / 10.0;
+        if self.giro_mostrado != Some(graus)
+            && !self
+                .campo_do_giro
+                .read(cx)
+                .focus_handle(cx)
+                .is_focused(window)
+        {
+            self.giro_mostrado = Some(graus);
+            self.campo_do_giro
+                .update(cx, |c, cx| c.set_value(format!("{graus}"), window, cx));
+        }
+        let opacidade = (self.opacidade_da_camada() * 100.0).round();
+        if self.opacidade_mostrada != Some(opacidade)
+            && !self
+                .campo_da_opacidade_da_camada
+                .read(cx)
+                .focus_handle(cx)
+                .is_focused(window)
+        {
+            self.opacidade_mostrada = Some(opacidade);
+            self.campo_da_opacidade_da_camada.update(cx, |c, cx| {
+                c.set_value(format!("{opacidade:.0}"), window, cx)
+            });
+        }
         let modo = self.sessao().map(|s| s.camada_ativa().modo);
         if modo.is_some() && modo != self.modo_mostrado {
             self.modo_mostrado = modo;
@@ -9386,16 +7405,22 @@ impl Render for EditorDeFoto {
                 cx,
             )
         };
-        let opcoes_da_selecao = if self.area_do_preenchimento.is_some() {
-            None
-        } else if self.liquidificando() {
-            Some(self.barra_do_liquidificar(cx))
-        } else if self.transformando() {
-            Some(self.barra_da_transformacao(cx))
-        } else {
-            (self.selecionando.is_some() || self.auxiliar == Some(Auxiliar::Varinha))
-                .then(|| self.barra_de_opcoes_da_selecao(cx))
+        let atalhos = {
+            let quer = self.mostrando_atalhos;
+            crate::dialogo::desenhar(
+                self,
+                quer,
+                crate::dialogo::Jeito::dialogo(620.),
+                Self::dialogo_dos_atalhos,
+                |ed, _, cx| {
+                    ed.mostrando_atalhos = false;
+                    cx.notify();
+                },
+                window,
+                cx,
+            )
         };
+        let flyout = self.flyout_da_barra(cx);
         let tema = cx.theme().clone();
         // A moldura do `Root` não pode tomar o clique do conteúdo encostado na
         // borda com a janela maximizada (`janela::raiz_do_conteudo`).
@@ -9433,37 +7458,78 @@ impl Render for EditorDeFoto {
                 .into_any_element();
             (self.barra_do_preenchimento(window, cx), corpo)
         } else {
+            // 🧭 A área de trabalho do Photoshop: menus; opções da ferramenta
+            // (altura fixa); barra de ferramentas à esquerda; a aba do
+            // documento e o palco no meio; as docas à direita; o status
+            // embaixo. Tab esconde barra, opções e docas; ⇧Tab só as docas.
+            self.garantir_a_area_de_trabalho(window, cx);
+            let ferramentas_a_vista = !self.interface_oculta;
+            let paineis_a_vista = !self.interface_oculta && !self.paineis_ocultos;
+            let documento = div()
+                .flex()
+                .flex_col()
+                .size_full()
+                .min_w(px(0.))
+                .child(self.aba_do_documento(cx))
+                .child(
+                    div()
+                        .flex()
+                        .flex_1()
+                        .min_h(px(0.))
+                        .child(self.palco(window, cx)),
+                )
+                .into_any_element();
+            let meio: AnyElement = if !paineis_a_vista {
+                documento
+            } else if self.arranjo.recolhido {
+                div()
+                    .flex()
+                    .size_full()
+                    .child(div().flex_1().min_w(px(0.)).h_full().child(documento))
+                    .child(self.coluna_de_paineis(cx))
+                    .into_any_element()
+            } else {
+                use gpui_kit::component::resizable::{h_resizable, resizable_panel};
+                let largura = self.largura_do_painel();
+                let limites = area_de_trabalho::LIMITES_DA_COLUNA;
+                h_resizable("editor-colunas")
+                    .with_state(&self.colunas)
+                    .child(
+                        resizable_panel()
+                            .size_range(px(320.)..gpui_kit::Pixels::MAX)
+                            .child(documento),
+                    )
+                    .child(
+                        // A largura como `flex_basis` (o padrão da tela do caixa):
+                        // não cresce com a janela, encolhe até o mínimo.
+                        resizable_panel()
+                            .size_range(px(limites.minimo)..px(limites.maximo))
+                            .flex_basis(px(largura))
+                            .flex_grow_0()
+                            .flex_shrink(1.)
+                            .child(self.coluna_de_paineis(cx)),
+                    )
+                    .into_any_element()
+            };
             let corpo = div()
                 .flex()
+                .flex_col()
                 .flex_1()
                 .min_h(px(0.))
-                .child(self.barra_de_ferramentas(cx))
-                .child({
-                    use gpui_kit::component::resizable::{h_resizable, resizable_panel};
-                    let largura = self.largura_do_painel();
-                    let painel = self.painel(cx).into_any_element();
-                    h_resizable("editor-colunas")
-                        .with_state(&self.colunas)
-                        .child(
-                            resizable_panel()
-                                .size_range(px(320.)..gpui_kit::Pixels::MAX)
-                                .child(self.palco(window, cx)),
-                        )
-                        .child(
-                            // A largura como `flex_basis` (o padrão da tela do caixa):
-                            // não cresce com a janela, encolhe até o mínimo.
-                            resizable_panel()
-                                .size_range(
-                                    px(LIMITES_DO_PAINEL.minimo)..px(LIMITES_DO_PAINEL.maximo),
-                                )
-                                .flex_basis(px(largura))
-                                .flex_grow_0()
-                                .flex_shrink(1.)
-                                .child(painel),
-                        )
-                })
+                .when(ferramentas_a_vista, |d| d.child(self.barra_de_opcoes(cx)))
+                .child(
+                    div()
+                        .flex()
+                        .flex_1()
+                        .min_h(px(0.))
+                        .when(ferramentas_a_vista, |d| {
+                            d.child(self.barra_de_ferramentas(cx))
+                        })
+                        .child(div().flex_1().min_w(px(0.)).h_full().child(meio)),
+                )
+                .child(self.barra_de_status(cx))
                 .into_any_element();
-            (self.barra(window, cx).into_any_element(), corpo)
+            (self.linha_de_menus(window, cx), corpo)
         };
         crate::janela::raiz_do_conteudo(div())
             .id("editor-de-foto")
@@ -9529,7 +7595,8 @@ impl Render for EditorDeFoto {
                 ed.preencher_a_selecao_pelo_conteudo(cx)
             }))
             .on_action(cx.listener(|ed, _: &AplicarTransformacao, window, cx| {
-                if ed.area_do_preenchimento.is_some() {
+                if ed.tecla_no_flyout("enter", cx) {
+                } else if ed.area_do_preenchimento.is_some() {
                     ed.confirmar_preenchimento(cx)
                 } else if ed.modificando.is_some() {
                     ed.confirmar_modificacao(window, cx)
@@ -9540,7 +7607,8 @@ impl Render for EditorDeFoto {
                 }
             }))
             .on_action(cx.listener(|ed, _: &CancelarTransformacao, window, cx| {
-                if ed.area_do_preenchimento.is_some() {
+                if ed.tecla_no_flyout("escape", cx) {
+                } else if ed.area_do_preenchimento.is_some() {
                     ed.cancelar_preenchimento(cx)
                 } else if ed.modificando.is_some() {
                     ed.cancelar_modificacao(window, cx)
@@ -9568,7 +7636,9 @@ impl Render for EditorDeFoto {
                 let ponto = ed.ponteiro.map(|p| ed.ponto_no_palco(p));
                 ed.ir_para_nivel(Nivel::Razao(1.0), ponto, cx)
             }))
-            .on_action(cx.listener(|ed, _: &AlternarZoom, _, cx| ed.z_apertado(cx)))
+            .on_action(cx.listener(|ed, _: &GrupoZ, _, cx| ed.pela_letra('z', false, cx)))
+            .on_action(cx.listener(|ed, _: &AlternarInterface, _, cx| ed.alternar_interface(cx)))
+            .on_action(cx.listener(|ed, _: &AlternarPaineis, _, cx| ed.alternar_paineis(cx)))
             .on_action(cx.listener(|ed, _: &SegurarAMao, _, cx| ed.espaco_apertado(cx)))
             .on_action(
                 cx.listener(|ed, _: &DifundirSelecao, window, cx| ed.difundir_selecao(window, cx)),
@@ -9599,10 +7669,11 @@ impl Render for EditorDeFoto {
                 cx.listener(|ed, _: &BloquearTransparencia, _, cx| ed.bloquear_transparencia(cx)),
             )
             .child(barra)
-            .children(opcoes_da_selecao)
             .child(corpo)
+            .children(flyout)
             .children(pergunta)
             .children(modificacao)
+            .children(atalhos)
     }
 }
 

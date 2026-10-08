@@ -211,3 +211,10 @@ do círculo do pincel; ⌘T com oito alças, alça oposta parada, ponto de refer
 X/Y/L/A/Ângulo numa barra. Detalhes em [20-ETAPA-14.md](20-ETAPA-14.md).
 Parte 2 (0.1.112, formato 7): o conteúdo levado para fora da foto pelo Mover e pelo ⌘T fica guardado e volta
 inteiro, no desfazer e depois de reabrir.
+
+## Área de trabalho do Photoshop
+
+Menus na janela (Arquivo, Editar, Camada, Selecionar, Filtro, Visualizar, Janela, Ajuda), barra de opções de altura
+fixa para todas as ferramentas, barra de ferramentas em 14 grupos com flyout (Z é a Lupa), aba do documento, docas
+do gpui-kit só do editor (Cor/Amostras, Propriedades/Pincel/Histórico, Camadas) com arrumação gravada por máquina,
+status com zoom editável, Tab/⇧Tab. Detalhes em [24-AREA-DE-TRABALHO.md](24-AREA-DE-TRABALHO.md).
