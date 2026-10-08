@@ -1,5 +1,21 @@
 [
   {
+    "versao": "0.1.116",
+    "data": "2026-10-08",
+    "titulo": "Editar Foto: máscaras como no Photoshop (densidade, difusão, ver a máscara), cadeados nas camadas e copiar e colar.",
+    "importante": false,
+    "novidades": [
+      "Com a máscara escolhida, o painel mostra as Propriedades da máscara: Densidade (o preto passa a esconder só em parte) e Difusão (a borda fica macia sem repintar — voltar a 0 devolve a borda). Também Inverter (⌘I), Aplicar e Desligar.",
+      "⌥ + clique na miniatura da máscara mostra só a máscara, em cinza; a tecla \\ mostra em vermelho, por cima da foto, o que ela esconde.",
+      "A corrente entre a camada e a máscara: ligada, o Mover, o ⌘T e o Deformar levam as duas juntas, como no Photoshop. Clique nela para soltar.",
+      "Bloquear: embaixo da opacidade da camada, os quatro cadeados — pixels transparentes (/), pixels, posição e tudo. A camada bloqueada mostra o cadeado e o editor avisa quando um gesto esbarra nele.",
+      "Copiar e colar: ⌘C, ⌘X, ⌘V (no meio da tela ou da seleção), ⇧⌘V (no mesmo lugar) e ⇧⌘C (a foto como aparece). O que foi copiado também cola em outros programas, e uma imagem copiada de outro programa cola como camada.",
+      "⇧⌥⌘E carimba o visível numa camada nova, e Camadas → ⋯ → \"Importar imagem como camada…\" traz uma foto do disco.",
+      "Arraste uma camada no painel para mudar a ordem — um ⌘Z desfaz o arrasto inteiro. ⌘I numa camada de pixels faz o negativo."
+    ],
+    "por_que_atualizar": "Para fazer máscaras macias, travar as camadas prontas e levar pedaços de uma camada para outra sem sair do balcão."
+  },
+  {
     "versao": "0.1.115",
     "data": "2026-10-08",
     "titulo": "Editar Foto: retoque de queixo e pescoço como no Photoshop — camada da fotografia, máscara de corte, Deformar e Pincel de recuperação.",
