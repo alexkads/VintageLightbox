@@ -6365,7 +6365,7 @@ impl EditorDeFoto {
                     &mut Context<EditorDeFoto>,
                 )| {
                     let ed = ed.clone();
-                    crate::estilo::item_de_menu(id, rotulo, None)
+                    crate::estilo::item_de_menu(id, ferramentas::na_plataforma(rotulo), None)
                         .disabled(!ligado)
                         .on_click(move |_ev, window, cx| {
                             ed.update(cx, |ed, cx| fazer(ed, window, cx));
@@ -6438,6 +6438,20 @@ impl EditorDeFoto {
                     "Desmarcar  ⌘D",
                     true,
                     |ed, _, cx| ed.desmarcar(cx),
+                ))
+                .separator()
+                // O Content-Aware do Photoshop, à mão com a seleção feita.
+                .item(item(
+                    "editor-contexto-preenchimento",
+                    "Preenchimento sensível ao conteúdo…",
+                    true,
+                    |ed, _, cx| ed.abrir_preenchimento(cx),
+                ))
+                .item(item(
+                    "editor-contexto-preencher-conteudo",
+                    "Preencher pelo conteúdo  ⇧⌫",
+                    true,
+                    |ed, _, cx| ed.preencher_a_selecao_pelo_conteudo(cx),
                 ))
                 .separator()
                 .item(item(

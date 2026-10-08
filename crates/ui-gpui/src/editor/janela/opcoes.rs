@@ -895,6 +895,14 @@ impl EditorDeFoto {
         }
         barra
             .child(separador())
+            .child(
+                crate::estilo::botao_contorno_pequeno("editor-opcoes-preenchimento", cx)
+                    .label("Preenchimento sensível ao conteúdo…")
+                    .tooltip(na_plataforma(
+                        "Remover o selecionado com prévia: PatchMatch ou IA local (Editar › Preenchimento sensível ao conteúdo) · ⇧⌫ preenche direto",
+                    ))
+                    .on_click(cx.listener(|ed, _, _, cx| ed.abrir_preenchimento(cx))),
+            )
             .child(self.menu_modificar_selecao(
                 "editor-modificar-selecao",
                 "Modificar seleção ▾",

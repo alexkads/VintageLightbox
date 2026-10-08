@@ -4176,4 +4176,18 @@ mod testes {
         let p = editor.read_with(&ve, |ed, _| ed.sessao().unwrap().pincel);
         assert_eq!((p.cor, p.cor_de_fundo), ([0; 3], [255; 3]));
     }
+
+    /// 🪄 O Content-Aware se acha com a seleção na mão: o botão da barra de
+    /// opções das ferramentas de seleção abre o mesmo espaço do Editar.
+    #[gpui_kit::test]
+    fn o_preenchimento_sensivel_ao_conteudo_pela_barra_da_selecao(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        ve.simulate_keystrokes("m");
+        ve.run_until_parked();
+        arrastar_no_palco(&mut ve, (0.3, 0.3), (0.5, 0.5));
+        clicar_no_editor(&mut ve, "editor-opcoes-preenchimento");
+        assert!(editor.read_with(&ve, |ed, _| ed.espaco_do_preenchimento().is_some()));
+        assert!(ve.debug_bounds("editor-preenchimento").is_some());
+    }
 }
