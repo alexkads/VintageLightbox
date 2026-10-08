@@ -66,15 +66,15 @@ use image::DynamicImage;
 use super::giro;
 use super::porta::{Abertura, Edicoes, FotoDoEditor};
 use super::{
-    Afastar, AlternarCamada, AlternarMascaraDeCorte, AlternarZoom, ApagarSelecao,
-    AplicarTransformacao, Aproximar, CamadaDeBaixo, CamadaDeCima, CamadaViaRecorte,
+    Afastar, AlternarAntesDepois, AlternarCamada, AlternarMascaraDeCorte, AlternarZoom,
+    ApagarSelecao, AplicarTransformacao, Aproximar, CamadaDeBaixo, CamadaDeCima, CamadaViaRecorte,
     CancelarTransformacao, CoresPadrao, DescerCamada, DesfazerNoEditor, Desmarcar, DifundirSelecao,
     DuplicarCamada, DurezaMaior, DurezaMenor, Encaixar, FecharEditor, GrupoB, GrupoE, GrupoG,
     GrupoH, GrupoI, GrupoJ, GrupoL, GrupoM, GrupoO, GrupoR, GrupoS, GrupoV, GrupoW,
-    InverterSelecao, MesclarParaBaixo, NovaCamada, PincelMaior, PincelMenor, PreencherPeloConteudo,
-    PreencherSelecao, ProximaDoGrupoG, ProximaDoGrupoJ, ProximaDoGrupoL, ProximaDoGrupoM,
-    ProximaDoGrupoO, RefazerNoEditor, SalvarNoEditor, SegurarAMao, SelecionarTudo, SubirCamada,
-    TransformacaoLivre, TrocarCores, UmPorUm, CONTEXTO,
+    InverterSelecao, Liquidificar, MesclarParaBaixo, NovaCamada, PincelMaior, PincelMenor,
+    PreencherPeloConteudo, PreencherSelecao, ProximaDoGrupoG, ProximaDoGrupoJ, ProximaDoGrupoL,
+    ProximaDoGrupoM, ProximaDoGrupoO, RefazerNoEditor, SalvarNoEditor, SegurarAMao, SelecionarTudo,
+    SubirCamada, TransformacaoLivre, TrocarCores, UmPorUm, CONTEXTO,
 };
 use super::{
     AlternarRubi, BloquearTransparencia, CarimbarVisivel, Colar, ColarNoLugar, Copiar,
@@ -168,6 +168,10 @@ pub enum Auxiliar {
     /// J — o pincel de correção para manchas: pinta por cima, e ao soltar a
     /// área é refeita pelo que está em volta.
     Correcao,
+    /// J (⇧J até ele) — o Remendo: arrastar a seleção até a pele limpa refaz
+    /// a área selecionada com a textura de lá e a cor daqui. Sem seleção (ou
+    /// fora dela), o arrasto desenha a seleção à mão, como o laço.
+    Remendo,
     /// A mão da barra: arrastar move a foto ampliada (o Espaço segurado, sem
     /// segurar nada).
     Mao,
@@ -235,6 +239,7 @@ pub const GRUPOS: &[(char, &[Item])] = &[
         &[
             Item::A(Auxiliar::Correcao),
             Item::F(Ferramenta::Recuperacao),
+            Item::A(Auxiliar::Remendo),
         ],
     ),
     ('b', &[Item::F(Ferramenta::Pincel)]),
@@ -820,6 +825,18 @@ pub struct EditorDeFoto {
     gesto_de_malha: Option<GestoDeMalha>,
     /// A grade do Deformar à vista (os pontos ficam sempre).
     grade_visivel: bool,
+    /// Curvas: o canal à vista (0 = RGB), o ponto escolhido, o gráfico medido
+    /// no último quadro e o arrasto em curso.
+    canal_da_curva: usize,
+    ponto_da_curva: Option<usize>,
+    /// O Liquidificar: onde o ponteiro estava no último evento do arrasto
+    /// (pixels da foto), e o slider da Pressão.
+    arrasto_do_liquido: Option<(f32, f32)>,
+    /// O arrasto do Remendo: de onde e até onde (pixels da foto).
+    arrasto_do_remendo: Option<((f32, f32), (f32, f32))>,
+    pressao_do_liquido: Entity<SliderState>,
+    caixa_da_curva: Bounds<Pixels>,
+    arrasto_da_curva: Option<ArrastoDaCurva>,
     /// O giro da vista (R), em radianos — só a tela; e os ladrilhos do palco
     /// girado.
     giro: f32,
@@ -900,6 +917,7 @@ impl EditorDeFoto {
         let espacamento = slider(1.0, 1000.0, 1.0, pincel.espacamento * 100.0, cx);
         let suavizacao_do_pincel = slider(0.0, 100.0, 1.0, pincel.suavizacao * 100.0, cx);
         let difusao_da_recuperacao = slider(1.0, 7.0, 1.0, pincel.difusao as f32, cx);
+        let pressao_do_liquido = slider(1.0, 100.0, 1.0, 50.0, cx);
         let predefinicoes: Vec<Opcao> = editor_core::pincel::PREDEFINICOES
             .iter()
             .map(|p| Opcao::nova(p.nome, p.nome))
@@ -1047,6 +1065,17 @@ impl EditorDeFoto {
                     ed.usar_predefinicao(nome, cx);
                 }
                 window.focus(&ed.foco, cx);
+            },
+        ));
+        assinaturas.push(cx.subscribe_in(
+            &pressao_do_liquido,
+            window,
+            |ed: &mut Self, _e, evento: &SliderEvent, _w, cx| {
+                let (v, _) = valor(evento);
+                if let Some(s) = ed.sessao_mut() {
+                    s.forca_do_liquido = v / 100.0;
+                }
+                cx.notify();
             },
         ));
         assinaturas.push(cx.subscribe_in(
@@ -1420,6 +1449,13 @@ impl EditorDeFoto {
             _tarefa_do_carimbo: None,
             gesto_de_malha: None,
             grade_visivel: true,
+            canal_da_curva: 0,
+            ponto_da_curva: None,
+            arrasto_do_liquido: None,
+            arrasto_do_remendo: None,
+            pressao_do_liquido,
+            caixa_da_curva: Bounds::default(),
+            arrasto_da_curva: None,
             giro: 0.0,
             palco_girado: giro::PalcoGirado::default(),
             gesto_de_giro: None,
@@ -2083,6 +2119,13 @@ impl EditorDeFoto {
             return;
         }
         let ferramenta = self.ferramenta();
+        if self.liquidificando() {
+            if let Some(p) = self.na_foto_sem_limite(ponto) {
+                self.arrasto_do_liquido = Some(p);
+                cx.notify();
+            }
+            return;
+        }
         if self.sessao().is_some_and(Sessao::deformando) {
             self.comecar_gesto_na_malha(ponto, cx);
             return;
@@ -2139,6 +2182,39 @@ impl EditorDeFoto {
                 }
                 return;
             }
+            Some(Auxiliar::Remendo) => {
+                if self.avisar_se_na_mascara(cx) {
+                    return;
+                }
+                let Some(p) = self.na_foto_sem_limite(ponto) else {
+                    return;
+                };
+                let dentro = self.sessao().and_then(Sessao::selecao).is_some_and(|sel| {
+                    p.0 >= 0.0
+                        && p.1 >= 0.0
+                        && p.0 < sel.largura() as f32
+                        && p.1 < sel.altura() as f32
+                        && sel.valor(p.0 as u32, p.1 as u32) >= 128
+                });
+                if dentro {
+                    self.arrasto_do_remendo = Some((p, p));
+                } else {
+                    // O laço à mão: a área com defeito.
+                    let opcoes = self.opcoes_da_forma(TipoDeSelecao::Laco);
+                    self.gesto_de_selecao = Some(GestoDeSelecao {
+                        tipo: TipoDeSelecao::Laco,
+                        operacao: self.operacao_do_gesto(modificadores),
+                        estilo: Estilo::Normal,
+                        acabamento: opcoes.acabamento,
+                        pontos: vec![p, p],
+                        proximo: Some(p),
+                        quadrado: false,
+                        do_centro: false,
+                    });
+                }
+                cx.notify();
+                return;
+            }
             Some(Auxiliar::Correcao) => {
                 if self.avisar_se_na_mascara(cx) {
                     return;
@@ -2182,6 +2258,8 @@ impl EditorDeFoto {
             || self.arrasto_do_mover.is_some()
             || self.gesto_de_transformacao.is_some()
             || self.gesto_de_malha.is_some()
+            || self.arrasto_do_liquido.is_some()
+            || self.arrasto_do_remendo.is_some()
             || self.traco_de_correcao.is_some()
             || self.degrade_em_curso.is_some()
             || self.gesto_de_giro.is_some()
@@ -2282,6 +2360,13 @@ impl EditorDeFoto {
     pub fn aplicar_transformacao(&mut self, cx: &mut Context<Self>) {
         self.gesto_de_transformacao = None;
         self.gesto_de_malha = None;
+        self.arrasto_do_liquido = None;
+        if self.liquidificando() {
+            self.na_sessao(cx, |s| {
+                s.aplicar_liquidificacao();
+            });
+            return;
+        }
         self.na_sessao(cx, |s| {
             s.aplicar_transformacao();
         });
@@ -2291,11 +2376,99 @@ impl EditorDeFoto {
     pub fn cancelar_transformacao(&mut self, cx: &mut Context<Self>) {
         self.gesto_de_transformacao = None;
         self.gesto_de_malha = None;
+        self.arrasto_do_liquido = None;
+        if self.liquidificando() {
+            self.na_sessao(cx, Sessao::cancelar_liquidificacao);
+            return;
+        }
         self.na_sessao(cx, Sessao::cancelar_transformacao);
     }
 
     pub fn transformando(&self) -> bool {
         self.sessao().is_some_and(Sessao::transformando)
+    }
+
+    // ------------------------------------------------------------- remendo
+
+    /// O Remendo com a seleção levada `(dx, dy)` pixels da foto até a origem.
+    pub fn remendar(&mut self, dx: f32, dy: f32, cx: &mut Context<Self>) {
+        let inicio = Instant::now();
+        let Some(s) = self.sessao_mut() else {
+            return;
+        };
+        let feito = s.remendar(dx, dy);
+        self.medidas.ultimo_gesto = Some(inicio.elapsed());
+        self.aviso = (!feito).then(|| {
+            (
+                SharedString::from(
+                    "O Remendo precisa de uma seleção numa camada de pixels visível, com a origem dentro da foto",
+                ),
+                true,
+            )
+        });
+        cx.notify();
+    }
+
+    // -------------------------------------------------------- liquidificar
+
+    /// ⇧⌘X: o Liquidificar na camada escolhida (ou na máscara dela).
+    pub fn liquidificar(&mut self, cx: &mut Context<Self>) {
+        self.gesto_de_selecao = None;
+        let Some(s) = self.sessao_mut() else {
+            return;
+        };
+        self.aviso = (!s.comecar_a_liquidificar()).then(|| {
+            (
+                SharedString::from(
+                    "Nada para liquidificar: a camada está escondida (ou é de ajuste — escolha a máscara dela)",
+                ),
+                true,
+            )
+        });
+        cx.notify();
+    }
+
+    pub fn liquidificando(&self) -> bool {
+        self.sessao().is_some_and(Sessao::liquidificando)
+    }
+
+    pub fn restaurar_liquidificacao(&mut self, cx: &mut Context<Self>) {
+        self.arrasto_do_liquido = None;
+        if let Some(s) = self.sessao_mut() {
+            s.restaurar_liquidificacao();
+        }
+        cx.notify();
+    }
+
+    /// 🧪 O roteiro e os testes: um trecho de pincelada, em pixels da foto.
+    pub fn liquidificar_trecho(&mut self, de: (f32, f32), ate: (f32, f32), cx: &mut Context<Self>) {
+        let inicio = Instant::now();
+        if let Some(s) = self.sessao_mut() {
+            s.liquidificar(de, ate);
+        }
+        self.medidas.ultimo_gesto = Some(inicio.elapsed());
+        cx.notify();
+    }
+
+    // -------------------------------------------------------- antes/depois
+
+    /// Y e o botão da barra: a foto como abriu nesta janela, só na tela.
+    pub fn alternar_antes_depois(&mut self, cx: &mut Context<Self>) {
+        let Some(s) = self.sessao_mut() else {
+            return;
+        };
+        let agora = s.mostrando_antes();
+        self.aviso = (!s.mostrar_antes(!agora)).then(|| {
+            (
+                SharedString::from("Aplique ou cancele a transformação antes de comparar"),
+                true,
+            )
+        });
+        cx.notify();
+    }
+
+    pub fn mostrando_antes(&self) -> bool {
+        self.sessao().is_some_and(Sessao::mostrando_antes)
     }
 
     // ------------------------------------------------------------ deformar
@@ -2881,6 +3054,20 @@ impl EditorDeFoto {
             self.arrastar_na_malha(ponto, cx);
             return;
         }
+        if let Some((de, _)) = self.arrasto_do_remendo {
+            if let Some(ate) = self.na_foto_sem_limite(ponto) {
+                self.arrasto_do_remendo = Some((de, ate));
+                cx.notify();
+            }
+            return;
+        }
+        if let Some(de) = self.arrasto_do_liquido {
+            if let Some(ate) = self.na_foto_sem_limite(ponto) {
+                self.arrasto_do_liquido = Some(ate);
+                self.liquidificar_trecho(de, ate, cx);
+            }
+            return;
+        }
         if self.gesto_de_transformacao.is_some() {
             self.arrastar_na_caixa(ponto, modificadores, cx);
             return;
@@ -3023,7 +3210,18 @@ impl EditorDeFoto {
             return;
         }
         self.pegando_cor = false;
-        if self.gesto_de_transformacao.take().is_some() || self.gesto_de_malha.take().is_some() {
+        if let Some((de, ate)) = self.arrasto_do_remendo.take() {
+            let (dx, dy) = (ate.0 - de.0, ate.1 - de.1);
+            if dx.hypot(dy) >= 1.0 {
+                self.remendar(dx, dy, cx);
+            }
+            cx.notify();
+            return;
+        }
+        if self.gesto_de_transformacao.take().is_some()
+            || self.gesto_de_malha.take().is_some()
+            || self.arrasto_do_liquido.take().is_some()
+        {
             cx.notify();
             return;
         }
@@ -3193,6 +3391,9 @@ impl EditorDeFoto {
                 Auxiliar::Correcao => {
                     "Pincel de correção para manchas (J) — automático, sem origem"
                 }
+                Auxiliar::Remendo => {
+                    "Remendo (J) — contorne a área com defeito e arraste-a até a pele limpa"
+                }
                 Auxiliar::Degrade => "Degradê (G) — arraste do começo ao fim",
                 Auxiliar::Lata => "Lata de tinta (G)",
                 Auxiliar::Varinha => "Varinha mágica (W) — ⇧ soma, ⌥ tira, ⇧⌥ cruza",
@@ -3278,6 +3479,12 @@ impl EditorDeFoto {
                     Icone::Bandage,
                     "editor-correcao",
                     "Pincel de correção para manchas (J; ⇧J alterna com o de recuperação) — refaz a mancha pelo que está em volta, sem origem",
+                ),
+                (
+                    Item::A(Auxiliar::Remendo),
+                    Icone::Scan,
+                    "editor-remendo",
+                    "Remendo (J; ⇧J alterna) — contorne a área e arraste-a até a pele limpa: a textura vem de lá, a cor fica a daqui",
                 ),
                 (
                     Item::F(Ferramenta::Recuperacao),
@@ -3598,6 +3805,10 @@ impl EditorDeFoto {
             (self.espacamento.clone(), p.espacamento * 100.0),
             (self.suavizacao_do_pincel.clone(), p.suavizacao * 100.0),
             (self.difusao_da_recuperacao.clone(), p.difusao as f32),
+            (
+                self.pressao_do_liquido.clone(),
+                self.sessao().map_or(50.0, |s| s.forca_do_liquido * 100.0),
+            ),
         ] {
             if (estado.read(cx).value().start() - v).abs() > 0.5 {
                 estado.update(cx, |s, cx| s.set_value(v, window, cx));
@@ -4025,6 +4236,305 @@ impl EditorDeFoto {
         cx.notify();
     }
 
+    // ------------------------------------------------------------- curvas
+
+    /// O ponto do gráfico das Curvas (0..=255, saída para cima) sob `p`
+    /// (pontos da janela), e se ele está dentro do gráfico com folga.
+    fn na_curva(&self, p: Point<Pixels>) -> (u8, u8, bool) {
+        let c = self.caixa_da_curva;
+        let (l, a) = (f(c.size.width).max(1.0), f(c.size.height).max(1.0));
+        let fx = (f(p.x) - f(c.origin.x)) / l;
+        let fy = 1.0 - (f(p.y) - f(c.origin.y)) / a;
+        let folga = 24.0 / l;
+        let dentro = (-folga..=1.0 + folga).contains(&fx) && (-folga..=1.0 + folga).contains(&fy);
+        let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+        (q(fx), q(fy), dentro)
+    }
+
+    pub fn escolher_canal_da_curva(&mut self, canal: usize, cx: &mut Context<Self>) {
+        self.canal_da_curva = canal.min(3);
+        self.ponto_da_curva = None;
+        cx.notify();
+    }
+
+    pub fn canal_da_curva(&self) -> usize {
+        self.canal_da_curva
+    }
+
+    /// Apertar no gráfico: perto de um ponto (8 pontos da tela), pega ele;
+    /// senão cria um ponto ali (até 14) e pega o novo.
+    fn apertar_na_curva(&mut self, p: Point<Pixels>, cx: &mut Context<Self>) {
+        let canal = self.canal_da_curva;
+        let Some(ajuste) = self.sessao().and_then(|s| s.camada_ativa().ajuste) else {
+            return;
+        };
+        let Some(mut curva) = curva_do_canal(&ajuste, canal) else {
+            return;
+        };
+        let (x, y, _) = self.na_curva(p);
+        let escala = 255.0 / f(self.caixa_da_curva.size.width).max(1.0);
+        let perto = curva
+            .pontos()
+            .iter()
+            .position(|q| (q[0] as f32 - x as f32).hypot(q[1] as f32 - y as f32) <= 8.0 * escala);
+        let indice = match perto {
+            Some(i) => i,
+            None => match curva.com_ponto(x, y) {
+                Some(i) => {
+                    if let Some(s) = self.sessao_mut() {
+                        s.mover_ajuste(com_curva(ajuste, canal, curva));
+                    }
+                    i
+                }
+                None => {
+                    self.aviso = Some(("As Curvas aceitam até 14 pontos".into(), true));
+                    cx.notify();
+                    return;
+                }
+            },
+        };
+        self.ponto_da_curva = Some(indice);
+        self.arrasto_da_curva = Some(ArrastoDaCurva {
+            canal,
+            indice,
+            curva,
+        });
+        cx.notify();
+    }
+
+    /// O arrasto do ponto: dentro do gráfico ele anda (entre os vizinhos);
+    /// arrastado para fora, sai — como no Photoshop. Sempre a partir da curva
+    /// do começo do arrasto.
+    fn arrastar_na_curva(&mut self, p: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some(g) = self.arrasto_da_curva else {
+            return;
+        };
+        let (x, y, dentro) = self.na_curva(p);
+        let mut curva = g.curva;
+        let ultimo = curva.pontos().len() - 1;
+        if !dentro && g.indice != 0 && g.indice != ultimo {
+            curva.sem_ponto(g.indice);
+            self.ponto_da_curva = None;
+        } else {
+            curva.mover(g.indice, x, y);
+            self.ponto_da_curva = Some(g.indice);
+        }
+        let inicio = Instant::now();
+        if let Some(s) = self.sessao_mut() {
+            if let Some(a) = s.camada_ativa().ajuste {
+                s.mover_ajuste(com_curva(a, g.canal, curva));
+            }
+        }
+        self.medidas.ultimo_gesto = Some(inicio.elapsed());
+        cx.notify();
+    }
+
+    /// O soltar: o arrasto inteiro (ou o clique que criou o ponto) vira um
+    /// passo do desfazer.
+    fn soltar_na_curva(&mut self, cx: &mut Context<Self>) {
+        if self.arrasto_da_curva.take().is_some() {
+            if let Some(s) = self.sessao_mut() {
+                s.confirmar_ajuste();
+            }
+            cx.notify();
+        }
+    }
+
+    /// "Redefinir" do canal à vista: a reta, num passo.
+    pub fn redefinir_curva(&mut self, cx: &mut Context<Self>) {
+        let canal = self.canal_da_curva;
+        self.ponto_da_curva = None;
+        if let Some(s) = self.sessao_mut() {
+            if let Some(a) = s.camada_ativa().ajuste {
+                s.mover_ajuste(com_curva(
+                    a,
+                    canal,
+                    editor_core::ajuste::Curva::identidade(),
+                ));
+                s.confirmar_ajuste();
+            }
+        }
+        cx.notify();
+    }
+
+    /// 🧪 O roteiro e os testes: um ponto `(x, y)` posto no canal à vista,
+    /// num passo (o clique sem arrasto).
+    pub fn ponto_na_curva(&mut self, x: u8, y: u8, cx: &mut Context<Self>) {
+        let canal = self.canal_da_curva;
+        if let Some(s) = self.sessao_mut() {
+            if let Some(a) = s.camada_ativa().ajuste {
+                if let Some(mut c) = curva_do_canal(&a, canal) {
+                    c.com_ponto(x, y);
+                    s.mover_ajuste(com_curva(a, canal, c));
+                    s.confirmar_ajuste();
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// O editor das Curvas: o canal, o gráfico com a reta de referência, a
+    /// grade em quartos, a curva e os pontos, e a entrada/saída do ponto
+    /// escolhido.
+    fn editor_de_curvas(&self, ajuste: Ajuste, cx: &mut Context<Self>) -> AnyElement {
+        use gpui_kit::component::button::{Button, ButtonGroup};
+        let tema = cx.theme().clone();
+        let canal = self.canal_da_curva;
+        let Some(curva) = curva_do_canal(&ajuste, canal) else {
+            return div().into_any_element();
+        };
+        let cor = match canal {
+            1 => gpui_kit::hsla(0.0, 0.8, 0.55, 1.0),
+            2 => gpui_kit::hsla(0.33, 0.7, 0.45, 1.0),
+            3 => gpui_kit::hsla(0.6, 0.8, 0.6, 1.0),
+            _ => tema.foreground,
+        };
+        let pontos: Vec<[u8; 2]> = curva.pontos().to_vec();
+        let amostras: Vec<f32> = (0..=64)
+            .map(|k| curva.valor(k as f32 * 255.0 / 64.0))
+            .collect();
+        let escolhido = self.ponto_da_curva.filter(|i| *i < pontos.len());
+        let medidor = cx.entity();
+        let ouvinte = cx.entity();
+        let arrastando = self.arrasto_da_curva.is_some();
+        let linha = tema.border;
+        let grafico = canvas(
+            move |bounds, _window, cx| {
+                medidor.update(cx, |ed, _| ed.caixa_da_curva = bounds);
+            },
+            move |bounds, _, window, _| {
+                let (ox, oy) = (f(bounds.origin.x), f(bounds.origin.y));
+                let (l, a) = (f(bounds.size.width), f(bounds.size.height));
+                let ponto = |x: f32, y: f32| {
+                    gpui_kit::point(px(ox + x / 255.0 * l), px(oy + (1.0 - y / 255.0) * a))
+                };
+                // A grade em quartos e a reta de referência.
+                for k in 1..4 {
+                    let v = k as f32 * 255.0 / 4.0;
+                    for (de, ate) in [((v, 0.0), (v, 255.0)), ((0.0, v), (255.0, v))] {
+                        let mut t = PathBuilder::stroke(px(1.0));
+                        t.move_to(ponto(de.0, de.1));
+                        t.line_to(ponto(ate.0, ate.1));
+                        if let Ok(c) = t.build() {
+                            window.paint_path(c, linha);
+                        }
+                    }
+                }
+                let mut t = PathBuilder::stroke(px(1.0));
+                t.move_to(ponto(0.0, 0.0));
+                t.line_to(ponto(255.0, 255.0));
+                if let Ok(c) = t.build() {
+                    window.paint_path(c, linha);
+                }
+                // A curva.
+                let mut t = PathBuilder::stroke(px(2.0));
+                t.move_to(ponto(0.0, amostras[0]));
+                for (k, y) in amostras.iter().enumerate().skip(1) {
+                    t.line_to(ponto(k as f32 * 255.0 / 64.0, *y));
+                }
+                if let Ok(c) = t.build() {
+                    window.paint_path(c, cor);
+                }
+                // 🔑 O arrasto é ouvido na janela: o ponto continua quando o
+                // ponteiro sai do gráfico (e sai da curva lá fora).
+                if !arrastando {
+                    return;
+                }
+                window.on_mouse_event({
+                    let esta = ouvinte.clone();
+                    move |e: &MouseMoveEvent, fase, _w, cx| {
+                        if fase.bubble() {
+                            esta.update(cx, |ed, cx| ed.arrastar_na_curva(e.position, cx));
+                        }
+                    }
+                });
+                window.on_mouse_event({
+                    let esta = ouvinte.clone();
+                    move |e: &MouseUpEvent, fase, _w, cx| {
+                        if fase.bubble() && e.button == MouseButton::Left {
+                            esta.update(cx, |ed, cx| ed.soltar_na_curva(cx));
+                        }
+                    }
+                });
+            },
+        )
+        .absolute()
+        .inset_0();
+        let marcas = pontos.iter().enumerate().map(|(i, p)| {
+            let (x, y) = (
+                p[0] as f32 / 255.0 * LADO_DA_CURVA,
+                (1.0 - p[1] as f32 / 255.0) * LADO_DA_CURVA,
+            );
+            div()
+                .debug_selector(move || format!("editor-curva-ponto-{i}"))
+                .absolute()
+                .left(px(x - 4.0))
+                .top(px(y - 4.0))
+                .size(px(8.0))
+                .border_1()
+                .border_color(tema.foreground)
+                .when(escolhido == Some(i), |d| d.bg(tema.foreground))
+                .when(escolhido != Some(i), |d| d.bg(tema.background))
+        });
+        let leitura = match escolhido {
+            Some(i) => format!("Entrada {} · Saída {}", pontos[i][0], pontos[i][1]),
+            None => "Clique para pôr um ponto (até 14); arraste um ponto para fora do gráfico para tirá-lo".into(),
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .child(div().debug_selector(|| "editor-curva-canal".into()).child(
+                ButtonGroup::new("editor-curva-canais").xsmall().children(
+                    CANAIS_DA_CURVA.iter().enumerate().map(|(k, nome)| {
+                        let b = Button::new(("editor-curva-canal", k)).label(*nome);
+                        let b = if k == canal { b.primary() } else { b.outline() };
+                        b.on_click(
+                            cx.listener(move |ed, _, _, cx| ed.escolher_canal_da_curva(k, cx)),
+                        )
+                    }),
+                ),
+            ))
+            .child(
+                div()
+                    .id("editor-curva")
+                    .debug_selector(|| "editor-curva".into())
+                    .relative()
+                    .size(px(LADO_DA_CURVA))
+                    .bg(tema.muted)
+                    .border_1()
+                    .border_color(tema.border)
+                    .cursor_crosshair()
+                    .child(grafico)
+                    .children(marcas)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|ed, e: &MouseDownEvent, _w, cx| {
+                            cx.stop_propagation();
+                            ed.apertar_na_curva(e.position, cx);
+                        }),
+                    ),
+            )
+            .child(
+                div()
+                    .debug_selector(|| "editor-curva-leitura".into())
+                    .text_xs()
+                    .text_color(tema.muted_foreground)
+                    .child(leitura),
+            )
+            .child(
+                div().flex().justify_end().child(
+                    crate::estilo::botao_fantasma_pequeno("editor-curva-redefinir", cx)
+                        .debug_selector(|| "editor-curva-redefinir".into())
+                        .label("Redefinir")
+                        .tooltip("O canal à vista volta à reta")
+                        .disabled(curva.neutra())
+                        .on_click(cx.listener(|ed, _, _, cx| ed.redefinir_curva(cx))),
+                ),
+            )
+            .into_any_element()
+    }
+
     /// As Propriedades do Photoshop para a camada de ajuste escolhida: um
     /// slider por parâmetro, com o valor ao lado.
     fn propriedades_do_ajuste(&self, ajuste: Ajuste, cx: &mut Context<Self>) -> AnyElement {
@@ -4041,6 +4551,11 @@ impl EditorDeFoto {
                     .font_weight(gpui_kit::FontWeight::SEMIBOLD)
                     .child(format!("Propriedades — {}", ajuste.nome())),
             );
+        if let Ajuste::Curvas { .. } = ajuste {
+            return coluna
+                .child(self.editor_de_curvas(ajuste, cx))
+                .into_any_element();
+        }
         if parametros.is_empty() {
             coluna = coluna.child(
                 div()
@@ -4724,6 +5239,33 @@ impl EditorDeFoto {
                     outro => eprintln!("[roteiro] editor camada {outro}?"),
                 }
             }
+            // liquidificar comecar|aplicar|cancelar|restaurar|forca P|
+            //              trecho x0 y0 x1 y1 (pixels da foto)
+            "liquidificar" => match partes.get(1).copied().unwrap_or("comecar") {
+                "comecar" => self.liquidificar(cx),
+                "aplicar" => self.aplicar_transformacao(cx),
+                "cancelar" => self.cancelar_transformacao(cx),
+                "restaurar" => self.restaurar_liquidificacao(cx),
+                "forca" => {
+                    if let Some(s) = self.sessao_mut() {
+                        s.forca_do_liquido = numero(2) / 100.0;
+                    }
+                    cx.notify();
+                }
+                "trecho" => {
+                    self.liquidificar_trecho((numero(2), numero(3)), (numero(4), numero(5)), cx)
+                }
+                outro => eprintln!("[roteiro] editor liquidificar {outro}?"),
+            },
+            // remendo dx dy (pixels da foto)
+            "remendo" => self.remendar(numero(1), numero(2), cx),
+            // curva canal 0..3 | curva ponto x y | curva redefinir
+            "curva" => match partes.get(1).copied().unwrap_or_default() {
+                "canal" => self.escolher_canal_da_curva(numero(2) as usize, cx),
+                "ponto" => self.ponto_na_curva(numero(2) as u8, numero(3) as u8, cx),
+                "redefinir" => self.redefinir_curva(cx),
+                outro => eprintln!("[roteiro] editor curva {outro}?"),
+            },
             // deformar comecar|livre|redefinir|grade|aplicar|cancelar|
             //          ponto L C dx dy (pixels da foto)|estado
             "deformar" => match partes.get(1).copied().unwrap_or("comecar") {
@@ -5088,6 +5630,7 @@ impl EditorDeFoto {
                 "borracha" => self.usar(Ferramenta::Borracha, cx),
                 "carimbo" => self.usar(Ferramenta::Carimbo, cx),
                 "recuperacao" => self.usar(Ferramenta::Recuperacao, cx),
+                "remendo" => self.usar_auxiliar(Auxiliar::Remendo, cx),
                 "conta-gotas" => self.usar_auxiliar(Auxiliar::ContaGotas, cx),
                 "mover" => self.usar_auxiliar(Auxiliar::Mover, cx),
                 "correcao" => self.usar_auxiliar(Auxiliar::Correcao, cx),
@@ -5540,6 +6083,39 @@ impl EditorDeFoto {
                     }
                     // O preenchimento aberto: a sobreposição e a prévia.
                     palco = palco.children(self.elementos_do_preenchimento(&v, cx));
+                    // O Remendo em curso: a seleção levada até a origem.
+                    if let (Some((de, ate)), Some(sel)) =
+                        (self.arrasto_do_remendo, sessao.selecao())
+                    {
+                        let c = sel.caixa_justa();
+                        let (dx, dy) = (ate.0 - de.0, ate.1 - de.1);
+                        let (x0, y0) = (c.x as f32 + dx, c.y as f32 + dy);
+                        let (x1, y1) = (c.direita() as f32 + dx, c.baixo() as f32 + dy);
+                        palco = palco.child(tela.contorno(vec![
+                            (x0, y0),
+                            (x1, y0),
+                            (x1, y1),
+                            (x0, y1),
+                            (x0, y0),
+                        ]));
+                    }
+                    // O selo do Antes/Depois.
+                    if sessao.mostrando_antes() {
+                        palco = palco.child(
+                            div()
+                                .debug_selector(|| "editor-selo-antes".into())
+                                .absolute()
+                                .top(px(10.))
+                                .left(px(10.))
+                                .px(px(8.))
+                                .py(px(3.))
+                                .rounded(crate::tema::canto(4.))
+                                .bg(gpui_kit::black().opacity(0.7))
+                                .text_color(gpui_kit::white())
+                                .text_xs()
+                                .child("Antes — como abriu (Y volta)"),
+                        );
+                    }
                     // 🕸️ A malha do Deformar: as 8 linhas da grade de 3 × 3
                     // células (sobre a superfície, curvas) e os 16 pontos —
                     // cantos quadrados, alças e internos redondos, com a haste
@@ -5741,7 +6317,8 @@ impl EditorDeFoto {
                     let com_pincel = self.area_do_preenchimento.is_some()
                         || (self.selecionando.is_none()
                             && self.auxiliar.is_none()
-                            && !sessao.transformando());
+                            && !sessao.transformando())
+                        || sessao.liquidificando();
                     // A prévia da origem dentro do círculo do pincel.
                     if let (Some(ponteiro), Some((_, ret, imagem))) =
                         (dentro, self.previa_do_carimbo.as_ref())
@@ -5832,7 +6409,10 @@ impl EditorDeFoto {
                             window.focus(&ed.foco, cx);
                             if ed.espaco.is_some() {
                                 ed.pegar_com_a_mao(evento.position, cx);
-                            } else if ed.selecionando.is_some() && !ed.transformando() {
+                            } else if ed.selecionando.is_some()
+                                && !ed.transformando()
+                                && !ed.liquidificando()
+                            {
                                 // Com a caixa da transformação aberta (⌘T ou
                                 // "Transformar seleção"), o clique é dela.
                                 ed.comecar_selecao_com_cliques(
@@ -6098,7 +6678,7 @@ impl EditorDeFoto {
                         .child("• Alterações não salvas"),
                 )
             })
-            .when(self.transformando(), |barra| {
+            .when(self.transformando() || self.liquidificando(), |barra| {
                 let so_o_contorno = self.sessao().is_some_and(Sessao::transformando_a_selecao);
                 barra
                     .child(
@@ -6108,6 +6688,8 @@ impl EditorDeFoto {
                             .text_color(tema.muted_foreground)
                             .child(if so_o_contorno {
                                 "Transformar seleção (só o contorno)"
+                            } else if self.liquidificando() {
+                                "Liquidificar"
                             } else if self.deformando() {
                                 "Deformar"
                             } else {
@@ -6129,7 +6711,23 @@ impl EditorDeFoto {
                             .on_click(cx.listener(|ed, _, _, cx| ed.cancelar_transformacao(cx))),
                     )
             })
-            .when(pronta && !self.transformando(), |barra| {
+            .when(pronta, |barra| {
+                let antes = self.mostrando_antes();
+                let botao = crate::estilo::botao_contorno_pequeno("editor-antes-depois", cx);
+                let botao = if antes {
+                    crate::estilo::botao_primario_pequeno("editor-antes-depois", cx)
+                } else {
+                    botao
+                };
+                barra.child(
+                    botao
+                        .debug_selector(|| "editor-antes-depois".into())
+                        .label(if antes { "Antes ✓" } else { "Antes/Depois" })
+                        .tooltip("Y — mostra a foto como abriu nesta janela, sem mexer no projeto nem no Histórico")
+                        .on_click(cx.listener(|ed, _, _, cx| ed.alternar_antes_depois(cx))),
+                )
+            })
+            .when(pronta && !self.transformando() && !self.liquidificando(), |barra| {
                 let ed = cx.entity();
                 let tem_selecao = self.sessao().and_then(Sessao::selecao).is_some();
                 barra.child(
@@ -6165,6 +6763,12 @@ impl EditorDeFoto {
                                     "Deformar",
                                     true,
                                     |ed, cx| ed.deformar(cx),
+                                ))
+                                .item(item(
+                                    "editor-transformar-liquidificar",
+                                    "Liquidificar…  ⇧⌘X",
+                                    true,
+                                    |ed, cx| ed.liquidificar(cx),
                                 ))
                                 .separator()
                                 .item(item(
@@ -6538,6 +7142,62 @@ impl EditorDeFoto {
     /// A barra de opções da transformação (⌘T e Transformar seleção): X e Y do
     /// ponto de referência, largura e altura em %, o ângulo, e a dica dos
     /// gestos — a barra do Photoshop durante a transformação livre.
+    /// A barra do Liquidificar: a ferramenta, o tamanho (`[` `]`), a pressão
+    /// e "Restaurar tudo".
+    fn barra_do_liquidificar(&self, cx: &mut Context<Self>) -> AnyElement {
+        let tema = cx.theme().clone();
+        let (raio, forca) = self
+            .sessao()
+            .map(|s| (s.pincel.raio, s.forca_do_liquido))
+            .unwrap_or((40.0, 0.5));
+        div()
+            .id("editor-opcoes-do-liquidificar")
+            .debug_selector(|| "editor-opcoes-do-liquidificar".into())
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(10.))
+            .px(px(12.))
+            .py(px(6.))
+            .border_b_1()
+            .border_color(tema.border)
+            .child(div().text_xs().child("Deformação para a frente"))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(tema.muted_foreground)
+                    .child(format!("Tamanho {:.0} px  [ ]", raio * 2.0)),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(tema.muted_foreground)
+                    .child(format!("Pressão {:.0}%", forca * 100.0)),
+            )
+            .child(
+                div()
+                    .w(px(140.))
+                    .h(px(20.))
+                    .debug_selector(|| "editor-pressao-do-liquido".into())
+                    .child(crate::estilo::slider(&self.pressao_do_liquido)),
+            )
+            .child(
+                crate::estilo::botao_contorno_pequeno("editor-restaurar-liquido", cx)
+                    .debug_selector(|| "editor-restaurar-liquido".into())
+                    .label("Restaurar tudo")
+                    .tooltip("A camada volta a como estava, e o Liquidificar continua aberto")
+                    .on_click(cx.listener(|ed, _, _, cx| ed.restaurar_liquidificacao(cx))),
+            )
+            .child(div().flex_1())
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(tema.muted_foreground)
+                    .child("Arraste para empurrar os pixels · { } dureza · com seleção, o de fora fica parado · Enter aplica · Esc cancela"),
+            )
+            .into_any_element()
+    }
+
     fn barra_da_transformacao(&self, cx: &mut Context<Self>) -> AnyElement {
         let tema = cx.theme().clone();
         if self.deformando() {
@@ -6813,6 +7473,28 @@ impl EditorDeFoto {
                     )
                 },
             )
+            .when(self.auxiliar == Some(Auxiliar::Remendo), |painel| {
+                let difusao = self.sessao().map_or(5, |s| s.pincel.difusao);
+                painel
+                    .child(
+                        div()
+                            .flex()
+                            .justify_between()
+                            .text_xs()
+                            .text_color(tema.muted_foreground)
+                            .child("Difusão")
+                            .child(format!("{difusao}")),
+                    )
+                    .child(
+                        div()
+                            .h(px(20.))
+                            .debug_selector(|| "editor-difusao-do-remendo".into())
+                            .child(crate::estilo::slider(&self.difusao_da_recuperacao)),
+                    )
+                    .child(div().text_xs().text_color(tema.muted_foreground).child(
+                        "Contorne a área com defeito (ou use a seleção que já existe) e arraste-a até a pele limpa. A textura vem de lá; a cor e a luz se adaptam à borda daqui. Lê a foto até a camada escolhida e pinta nela — numa camada vazia por cima o retoque fica separado.",
+                    ))
+            })
             .when(self.auxiliar == Some(Auxiliar::GirarVista), |painel| {
                 let graus = self.giro.to_degrees();
                 painel.child(
@@ -7612,6 +8294,7 @@ impl EditorDeFoto {
                                     let id: &'static str = match a.chave() {
                                         "brilho" => "editor-ajuste-novo-brilho",
                                         "niveis" => "editor-ajuste-novo-niveis",
+                                        "curvas" => "editor-ajuste-novo-curvas",
                                         "matiz" => "editor-ajuste-novo-matiz",
                                         _ => "editor-ajuste-novo-inverter",
                                     };
@@ -8088,9 +8771,64 @@ fn parametros_do_ajuste(ajuste: &Ajuste) -> Vec<(usize, f32)> {
             saturacao,
             luminosidade,
         } => vec![(5, matiz), (6, saturacao), (7, luminosidade)],
-        Ajuste::Inverter => Vec::new(),
+        Ajuste::Inverter | Ajuste::Curvas { .. } => Vec::new(),
     }
 }
+
+/// A curva do canal `canal` (0 = RGB, 1 vermelho, 2 verde, 3 azul).
+fn curva_do_canal(ajuste: &Ajuste, canal: usize) -> Option<editor_core::ajuste::Curva> {
+    match *ajuste {
+        Ajuste::Curvas {
+            rgb,
+            vermelho,
+            verde,
+            azul,
+        } => Some([rgb, vermelho, verde, azul][canal.min(3)]),
+        _ => None,
+    }
+}
+
+/// As Curvas com a curva do canal `canal` trocada por `c`.
+fn com_curva(ajuste: Ajuste, canal: usize, c: editor_core::ajuste::Curva) -> Ajuste {
+    match ajuste {
+        Ajuste::Curvas {
+            mut rgb,
+            mut vermelho,
+            mut verde,
+            mut azul,
+        } => {
+            match canal {
+                1 => vermelho = c,
+                2 => verde = c,
+                3 => azul = c,
+                _ => rgb = c,
+            }
+            Ajuste::Curvas {
+                rgb,
+                vermelho,
+                verde,
+                azul,
+            }
+        }
+        outro => outro,
+    }
+}
+
+/// O arrasto de um ponto da curva: o canal, o índice, e a curva do começo
+/// (o arrasto parte sempre dela — ao voltar para dentro do gráfico, o ponto
+/// tirado volta).
+#[derive(Clone, Copy)]
+struct ArrastoDaCurva {
+    canal: usize,
+    indice: usize,
+    curva: editor_core::ajuste::Curva,
+}
+
+/// Os nomes dos canais das Curvas.
+const CANAIS_DA_CURVA: [&str; 4] = ["RGB", "Vermelho", "Verde", "Azul"];
+
+/// O lado do gráfico das Curvas, em pontos.
+const LADO_DA_CURVA: f32 = 220.0;
 
 /// O ajuste com o parâmetro `qual` trocado por `v`.
 fn ajuste_com(ajuste: Ajuste, qual: usize, v: f32) -> Ajuste {
@@ -8650,6 +9388,8 @@ impl Render for EditorDeFoto {
         };
         let opcoes_da_selecao = if self.area_do_preenchimento.is_some() {
             None
+        } else if self.liquidificando() {
+            Some(self.barra_do_liquidificar(cx))
         } else if self.transformando() {
             Some(self.barra_da_transformacao(cx))
         } else {
@@ -8762,6 +9502,10 @@ impl Render for EditorDeFoto {
             .on_action(cx.listener(|ed, _: &GrupoI, _, cx| ed.pela_letra('i', false, cx)))
             .on_action(cx.listener(|ed, _: &GrupoJ, _, cx| ed.pela_letra('j', false, cx)))
             .on_action(cx.listener(|ed, _: &ProximaDoGrupoJ, _, cx| ed.pela_letra('j', true, cx)))
+            .on_action(
+                cx.listener(|ed, _: &AlternarAntesDepois, _, cx| ed.alternar_antes_depois(cx)),
+            )
+            .on_action(cx.listener(|ed, _: &Liquidificar, _, cx| ed.liquidificar(cx)))
             .on_action(cx.listener(|ed, _: &AlternarMascaraDeCorte, _, cx| {
                 if let Some(i) = ed.sessao().map(Sessao::ativa) {
                     ed.alternar_mascara_de_corte(i, cx);
@@ -8802,7 +9546,7 @@ impl Render for EditorDeFoto {
                     ed.cancelar_modificacao(window, cx)
                 } else if ed.cancelar_gesto_de_selecao(cx) {
                     // O gesto de seleção some; a seleção de antes fica.
-                } else if ed.transformando() {
+                } else if ed.transformando() || ed.liquidificando() {
                     ed.cancelar_transformacao(cx)
                 } else if ed.auxiliar == Some(Auxiliar::GirarVista) {
                     // Esc com a Girar vista na mão: a tela volta a 0°.

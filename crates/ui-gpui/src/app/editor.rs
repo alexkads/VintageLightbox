@@ -3526,4 +3526,227 @@ mod testes {
             "um desfazer volta tudo"
         );
     }
+
+    /// 📈 Curvas pela tela: o menu de ajustes cria, o clique no gráfico põe
+    /// um ponto, o arrasto escurece os meios-tons num passo só, arrastar
+    /// para fora tira o ponto, e os canais têm curva própria.
+    #[gpui_kit::test]
+    fn as_curvas_pela_tela(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        clicar_no_editor(&mut ve, "editor-camada-ajuste");
+        clicar_no_editor(&mut ve, "editor-ajuste-novo-curvas");
+        let (nomes, _) = camadas(&editor, &ve);
+        assert_eq!(nomes.last().map(String::as_str), Some("Curvas 1"));
+        let grafico = ve.debug_bounds("editor-curva").expect("o gráfico");
+        let no_grafico = |x: f32, y: f32| {
+            grafico.origin
+                + gpui_kit::point(
+                    grafico.size.width * (x / 255.0),
+                    grafico.size.height * (1.0 - y / 255.0),
+                )
+        };
+        let cor = |ve: &mut VisualTestContext| {
+            editor.read_with(ve, |ed, _| ed.sessao().unwrap().cor_em(42.0, 32.0).unwrap())
+        };
+        let antes = cor(&mut ve); // (126, 128, 90)
+        let passos = passos_de(&editor, &ve);
+        let nada = gpui_kit::Modifiers::none();
+        arrastar_com(
+            &mut ve,
+            no_grafico(128.0, 128.0),
+            no_grafico(128.0, 80.0),
+            nada,
+            nada,
+        );
+        let depois = cor(&mut ve);
+        assert!(
+            depois[1] < antes[1] - 30,
+            "os meios-tons escureceram: {antes:?} → {depois:?}"
+        );
+        assert_eq!(passos_de(&editor, &ve), passos + 1, "um passo pelo arrasto");
+        assert!(ve.debug_bounds("editor-curva-ponto-1").is_some());
+        // Arrastar para fora tira o ponto: a curva volta à reta.
+        let p = no_grafico(128.0, 80.0);
+        let fora = gpui_kit::point(p.x, grafico.origin.y - gpui_kit::px(80.));
+        arrastar_com(&mut ve, p, fora, nada, nada);
+        assert_eq!(cor(&mut ve), antes);
+        assert!(ve.debug_bounds("editor-curva-ponto-2").is_none());
+        // O canal vermelho tem a curva dele.
+        assert!(ve.debug_bounds("editor-curva-canal").is_some());
+        editor.update(&mut ve, |ed, cx| ed.escolher_canal_da_curva(1, cx));
+        ve.run_until_parked();
+        arrastar_com(
+            &mut ve,
+            no_grafico(128.0, 128.0),
+            no_grafico(128.0, 200.0),
+            nada,
+            nada,
+        );
+        let vermelho = cor(&mut ve);
+        assert!(
+            vermelho[0] > antes[0] + 30 && vermelho[1] == antes[1],
+            "{vermelho:?}"
+        );
+        // Desfazer volta passo a passo.
+        ve.simulate_keystrokes("cmd-z");
+        ve.run_until_parked();
+        assert_eq!(cor(&mut ve), antes);
+    }
+
+    /// 🔁 Antes/Depois: Y (e o botão) mostra a foto como abriu, sem passo no
+    /// Histórico nem "alterado" novo; uma pincelada volta ao depois.
+    #[gpui_kit::test]
+    fn o_antes_depois_pela_tela(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        editor.update(&mut ve, |ed, cx| {
+            ed.na_sessao_para_teste(cx, |s| s.pincel.cor = [255, 0, 0]);
+            ed.tracar_para_teste((10., 24.), (54., 24.), cx)
+        });
+        let passos = passos_de(&editor, &ve);
+        let vista = |ve: &VisualTestContext| {
+            editor.read_with(ve, |ed, _| ed.sessao().unwrap().vista().imagem().clone())
+        };
+        let depois = vista(&ve);
+        ve.simulate_keystrokes("y");
+        ve.run_until_parked();
+        assert!(editor.read_with(&ve, |ed, _| ed.mostrando_antes()));
+        assert!(ve.debug_bounds("editor-selo-antes").is_some());
+        assert_ne!(vista(&ve), depois, "a tela mostra o antes");
+        assert_eq!(passos_de(&editor, &ve), passos, "nada no Histórico");
+        clicar_no_editor(&mut ve, "editor-antes-depois");
+        assert!(!editor.read_with(&ve, |ed, _| ed.mostrando_antes()));
+        assert_eq!(vista(&ve), depois);
+        // Pintar com o antes ligado volta ao depois.
+        ve.simulate_keystrokes("y");
+        ve.run_until_parked();
+        editor.update(&mut ve, |ed, cx| {
+            ed.tracar_para_teste((10., 10.), (20., 10.), cx)
+        });
+        assert!(!editor.read_with(&ve, |ed, _| ed.mostrando_antes()));
+    }
+
+    /// 🫧 Liquidificar pela tela: ⇧⌘X, arrastar empurra a camada, Esc devolve,
+    /// de novo e Enter num passo "Liquidificar".
+    #[gpui_kit::test]
+    fn o_liquidificar_pela_tela(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        // Uma faixa escura vertical em x = 30..33 sobre fundo claro.
+        editor.update(&mut ve, |ed, cx| {
+            ed.na_sessao_para_teste(cx, |s| {
+                s.pincel.cor = [230, 230, 230];
+                s.selecionar_tudo();
+                s.preencher_selecao();
+                s.selecionar(
+                    &editor_core::Forma::Retangulo(editor_core::Retangulo::novo(30, 0, 3, 48)),
+                    editor_core::Operacao::Nova,
+                );
+                s.pincel.cor = [10, 10, 10];
+                s.preencher_selecao();
+                s.desmarcar();
+                s.pincel.raio = 8.0;
+                s.forca_do_liquido = 1.0;
+            })
+        });
+        let pixel = |ve: &VisualTestContext, x: u32, y: u32| {
+            editor.read_with(ve, |ed, _| {
+                ed.sessao().unwrap().documento().camadas[0]
+                    .pixels
+                    .pixel(x, y)
+            })
+        };
+        let original = editor.read_with(&ve, |ed, _| {
+            ed.sessao().unwrap().documento().camadas[0].pixels.clone()
+        });
+        let passos = passos_de(&editor, &ve);
+        ve.simulate_keystrokes("cmd-shift-x");
+        ve.run_until_parked();
+        assert!(editor.read_with(&ve, |ed, _| ed.liquidificando()));
+        assert!(ve.debug_bounds("editor-opcoes-do-liquidificar").is_some());
+        let nada = gpui_kit::Modifiers::none();
+        let a = ponto_da_foto(&mut ve, &editor, (31.5 / 64.0, 24.0 / 48.0));
+        let b = ponto_da_foto(&mut ve, &editor, (39.5 / 64.0, 24.0 / 48.0));
+        arrastar_com(&mut ve, a, b, nada, nada);
+        assert!(
+            pixel(&ve, 38, 24)[0] < 100,
+            "a faixa andou: {:?}",
+            pixel(&ve, 38, 24)
+        );
+        ve.simulate_keystrokes("escape");
+        ve.run_until_parked();
+        assert!(!editor.read_with(&ve, |ed, _| ed.liquidificando()));
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.sessao().unwrap().documento().camadas[0]
+                .pixels
+                .clone()),
+            original,
+            "Esc devolve"
+        );
+        ve.simulate_keystrokes("cmd-shift-x");
+        ve.run_until_parked();
+        arrastar_com(&mut ve, a, b, nada, nada);
+        ve.simulate_keystrokes("enter");
+        ve.run_until_parked();
+        assert!(!editor.read_with(&ve, |ed, _| ed.liquidificando()));
+        assert_eq!(passos_de(&editor, &ve), passos + 1, "um passo");
+        assert!(pixel(&ve, 38, 24)[0] < 100);
+    }
+
+    /// 🩹 O Remendo pela tela: J/⇧J até ele, o laço à mão sobre a mancha, e
+    /// arrastar a seleção até a pele limpa — um passo "Remendo".
+    #[gpui_kit::test]
+    fn o_remendo_pela_tela(cx: &mut TestAppContext) {
+        use crate::editor::janela::{Auxiliar, Item};
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        // Uma mancha escura na foto (na Pintura), e uma camada vazia por cima.
+        editor.update(&mut ve, |ed, cx| {
+            ed.na_sessao_para_teste(cx, |s| {
+                s.selecionar(
+                    &editor_core::Forma::Retangulo(editor_core::Retangulo::novo(40, 20, 6, 6)),
+                    editor_core::Operacao::Nova,
+                );
+                s.pincel.cor = [0, 0, 0];
+                s.preencher_selecao();
+                s.desmarcar();
+                s.nova_camada();
+            })
+        });
+        ve.simulate_keystrokes("j shift-j shift-j");
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.item_atual()),
+            Some(Item::A(Auxiliar::Remendo))
+        );
+        let nada = gpui_kit::Modifiers::none();
+        // O laço à mão em volta da mancha.
+        let pts: Vec<_> = [(38.0, 18.0), (48.0, 18.0), (48.0, 28.0), (38.0, 28.0)]
+            .iter()
+            .map(|&(x, y)| ponto_da_foto(&mut ve, &editor, (x / 64.0, y / 48.0)))
+            .collect();
+        ve.simulate_mouse_down(pts[0], gpui_kit::MouseButton::Left, nada);
+        for p in &pts[1..] {
+            ve.simulate_mouse_move(*p, Some(gpui_kit::MouseButton::Left), nada);
+        }
+        ve.simulate_mouse_up(pts[3], gpui_kit::MouseButton::Left, nada);
+        ve.run_until_parked();
+        assert!(selecao_de(&editor, &ve).is_some(), "o laço do Remendo");
+        let passos = passos_de(&editor, &ve);
+        // Arrastar de dentro da seleção 20 px para a esquerda: a origem limpa.
+        let a = ponto_da_foto(&mut ve, &editor, (43.0 / 64.0, 23.0 / 48.0));
+        let b = ponto_da_foto(&mut ve, &editor, (23.0 / 64.0, 23.0 / 48.0));
+        arrastar_com(&mut ve, a, b, nada, nada);
+        assert_eq!(passos_de(&editor, &ve), passos + 1);
+        let (cor, nova) = editor.read_with(&ve, |ed, _| {
+            let s = ed.sessao().unwrap();
+            (
+                s.cor_em(42.0, 22.0).unwrap(),
+                s.documento().camadas[1].pixels.vazia(),
+            )
+        });
+        assert!(cor[0] > 60, "a mancha preta sumiu: {cor:?}");
+        assert!(!nova, "pintou na camada de cima");
+    }
 }

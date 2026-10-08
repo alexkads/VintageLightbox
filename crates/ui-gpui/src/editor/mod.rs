@@ -83,6 +83,11 @@ gpui_kit::actions!(
         Inverter,
         AlternarRubi,
         BloquearTransparencia,
+        // Y: o Antes/Depois (o `\\` é a sobreposição rubi da máscara, como no
+        // Photoshop).
+        AlternarAntesDepois,
+        // ⇧⌘X: Liquidificar.
+        Liquidificar,
     ]
 );
 
@@ -181,6 +186,8 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("secondary-i", Inverter, solta),
         KeyBinding::new("\\", AlternarRubi, solta),
         KeyBinding::new("/", BloquearTransparencia, solta),
+        KeyBinding::new("secondary-shift-x", Liquidificar, c),
+        KeyBinding::new("y", AlternarAntesDepois, solta),
         // As letras e ⇧ + letra. No grupo de uma ferramenta só, ⇧ + letra
         // escolhe a mesma.
         KeyBinding::new("v", GrupoV, solta),

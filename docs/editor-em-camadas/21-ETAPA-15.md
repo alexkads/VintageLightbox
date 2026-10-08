@@ -136,7 +136,7 @@ Georgiev (*Photoshop Healing Brush: a Tool for Seamless Cloning*, 2004):
 
 ```text
 dentro do traço (Ω):  Δh = 0
-na borda (∂Ω):        h = (D̃ + ε) / (S̃ + ε)       D̃, S̃: destino e origem suavizados pela Difusão (σ = 1…7 px)
+na borda (∂Ω):        h = (D + ε) / (S + ε)       suavizado ao longo da borda, só do lado de fora (etapa 16)
 resultado:            R = (S + ε) · h − ε           ε = 50/255, h limitado a [¼, 4]
 ```
 

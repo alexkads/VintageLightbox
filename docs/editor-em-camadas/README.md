@@ -37,6 +37,7 @@ Sem projeto editável, o fluxo é o de sempre: a Revelação parte do bruto.
 | [03-GRAVACAO-E-CATALOGO.md](03-GRAVACAO-E-CATALOGO.md) | O formato do projeto, os tiles, a gravação atômica, a recuperação e a tabela do catálogo |
 | [04-PLANO-ETAPA-1.md](04-PLANO-ETAPA-1.md) | O que a etapa 1 entrega, arquivo por arquivo, os testes e as medidas |
 | [05-ETAPA-2.md](05-ETAPA-2.md) | Várias camadas, os 16 modos de mesclagem, o formato 2 do projeto, zoom, mão e lupa |
+| [23-ETAPA-17.md](23-ETAPA-17.md) | Curvas (RGB e por canal), Antes/Depois (Y), Liquidificar (⇧⌘X, deformação para a frente) e Remendo (J); a borda da recuperação medida só do lado de fora; formato 9 |
 | [22-ETAPA-16.md](22-ETAPA-16.md) | Máscaras, cadeados e área de transferência: Propriedades da máscara (densidade, difusão não destrutiva, inverter, aplicar), ver só a máscara e rubi, vínculo, "Bloquear:", ⌘C ⌘X ⌘V ⇧⌘V ⇧⌘C, carimbar visível, importar imagem, arrastar camadas; formato 9 |
 | [21-ETAPA-15.md](21-ETAPA-15.md) | Retoque manual de queixo e pescoço: camada da fotografia base, ⌘J que desmarca, máscara de corte (⌥ + clique na divisa, ⌥⌘G), Deformar (malha 3 × 3, Bézier bicúbico), Pincel de recuperação (J/⇧J, origem manual), menus de contexto; formato 8 |
 | [20-ETAPA-14.md](20-ETAPA-14.md) | Carimbo (modo, amostra, alinhado, prévia), ⌘T com 8 alças e referência, conteúdo fora da foto; formato 7 |
