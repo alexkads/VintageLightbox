@@ -1,9 +1,11 @@
 {
-  "versao": "0.1.120",
-  "titulo": "Sessão: a nota de estrelas volta a valer na primeira foto clicada.",
+  "versao": "0.1.121",
+  "titulo": "Windows volta a atualizar; Preenchimento como o do Photoshop no editor.",
   "importante": true,
   "novidades": [
-    "Correção: ao abrir uma sessão, quem clicava na primeira foto enquanto a sessão ainda carregava do site perdia a seleção quando ela terminava de carregar — as teclas de nota (0–5), P e X deixavam de valer até clicar em outra foto. Agora a seleção fica, na grade e na tira de fotos."
+    "Correção: desde a 0.1.106 o Windows não conseguia compilar a atualização (a IA do Preenchimento sensível ao conteúdo pedia um componente que não existe para o Windows do balcão). Agora o componente da IA é baixado junto com o modelo, na primeira vez que o Preenchimento usa a IA.",
+    "O instalador do Windows confere o Visual C++ Redistributable, que a IA usa, e o instala se faltar. Sem ele, só a IA fica de fora; o resto do app funciona igual.",
+    "Editor: o Preenchimento sensível ao conteúdo ficou como o do Photoshop — ferramentas de área, sobreposição, opções de amostragem, adaptação de cor, saída em camada duplicada e Aplicar/OK. ⇧⌫ abre o Preencher."
   ],
-  "por_que_atualizar": "Para que a classificação pelo teclado funcione desde a primeira foto, mesmo com a internet lenta."
+  "por_que_atualizar": "Para o balcão Windows voltar a receber as versões novas, com tudo o que ficou parado desde a 0.1.106."
 }
