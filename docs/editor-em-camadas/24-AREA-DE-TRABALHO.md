@@ -136,5 +136,5 @@ Os valores são os mesmos estados do painel Pincel — nada duplicado.
 ## O que ficou de fora
 
 - Painel flutuante em janela própria; recolher um grupo só (o kit não tem; a coluna inteira recolhe).
-- Escala 100% e 150% não conferidas: este Mac só tem a tela retina (200%). Windows e Linux não executados aqui.
+- Escala 100% e 150% não conferidas: este Mac só tem a tela retina (200%).
 - Menus não trocam de um para o outro passando o mouse (cada um abre no clique, o `DropdownMenu` do kit).
