@@ -3414,28 +3414,31 @@ impl Detalhe {
                     // 🔑 **A seleção é guardada por id, não por posição** — que é
                     // o que a linha antiga estava certa em temer. O que estava
                     // errado era a conclusão: em vez de descartar, traduz.
+                    //
+                    // 🚨 **A primeira chegada também guarda** (dono, 08/out/2026:
+                    // *"a primeira foto às vezes a classificação não funciona"*).
+                    // A seleção era guardada só se já havia uma galeria aberta;
+                    // mas as fotos do disco aparecem antes da do site, e quem
+                    // clicava na primeira enquanto a sessão carregava perdia a
+                    // marcação na chegada — a tecla de nota não achava foto.
+                    // De outra sessão ela não pode ser: o `entrar` limpa a
+                    // seleção e o guarda acima confere o id da galeria.
                     let mesma_galeria = self
                         .aberta
                         .as_ref()
                         .is_some_and(|atual| atual.galeria.id == aberta.galeria.id);
 
-                    let marcadas: Vec<String> = if mesma_galeria {
-                        self.selecao
-                            .marcadas()
-                            .filter_map(|p| self.acervo.visivel(p))
-                            .map(|f| f.id.clone())
-                            .collect()
-                    } else {
-                        Vec::new()
-                    };
-                    let focada = if mesma_galeria {
-                        self.selecao
-                            .foco()
-                            .and_then(|p| self.acervo.visivel(p))
-                            .map(|f| f.id.clone())
-                    } else {
-                        None
-                    };
+                    let marcadas: Vec<String> = self
+                        .selecao
+                        .marcadas()
+                        .filter_map(|p| self.acervo.visivel(p))
+                        .map(|f| f.id.clone())
+                        .collect();
+                    let focada = self
+                        .selecao
+                        .foco()
+                        .and_then(|p| self.acervo.visivel(p))
+                        .map(|f| f.id.clone());
 
                     if mesma_galeria {
                         if let Some(atual) = self.aberta.as_ref() {
@@ -10357,6 +10360,52 @@ mod testes {
             let _ = janela.update(cx, |tela, _window, cx| tela.colher(cx));
             cx.run_until_parked();
         }
+    }
+
+    /// ⭐ **A foto clicada antes de o site responder continua marcada** (dono,
+    /// 08/out/2026: *"a primeira foto às vezes a classificação não funciona,
+    /// sendo necessário clicar na próxima foto"*). Ao entrar, as fotos do
+    /// disco aparecem antes da galeria do site; a primeira resposta dela
+    /// tratava a seleção como de outra galeria e a apagava — a tecla de nota
+    /// chegava sem foto marcada e não fazia nada.
+    #[gpui_kit::test]
+    fn a_selecao_feita_antes_da_galeria_chegar_continua(cx: &mut TestAppContext) {
+        let publicador = publicador_com(
+            vec![foto("s1", EstadoDaFotoNoSite::Disponivel, None)],
+            false,
+        );
+        publicador
+            .galeria_demorada
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let janela = janela_com(
+            cx,
+            publicador.clone(),
+            Arc::new(SeletorDeMentira::default()),
+        );
+        entrar(cx, &janela);
+        janela
+            .update(cx, |tela, _window, cx| {
+                assert!(tela.aberta().is_none(), "a galeria ainda não chegou");
+                tela.definir_locais(vec![local("l1"), local("l2")], cx);
+                let p = tela.acervo.posicao_de("l1").expect("a local está na grade");
+                tela.clicar(p, Modificadores::default(), cx);
+                assert_eq!(tela.marcadas(), ["l1"]);
+            })
+            .expect("a janela deve estar aberta");
+
+        publicador.responder();
+        colher_ate_parar(cx, &janela);
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert!(tela.aberta().is_some(), "a galeria chegou");
+                assert_eq!(
+                    tela.marcadas(),
+                    ["l1"],
+                    "a chegada da galeria apagou a seleção"
+                );
+                assert_eq!(tela.em_foco().map(|f| f.id.as_str()), Some("l1"));
+            })
+            .expect("a janela deve estar aberta");
     }
 
     /// A galeria "g1" do publicador sem contato nenhum — como o site a teria.

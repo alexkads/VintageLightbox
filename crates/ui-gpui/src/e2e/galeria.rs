@@ -559,6 +559,74 @@ fn classificar_e_rejeitar_a_foto_que_ainda_nao_subiu(cx: &mut TestAppContext) {
     assert_eq!(no_catalogo(&e, cx, "id-DSC_102.jpg"), (0, None));
 }
 
+/// 🐢 **Rede lenta: a nota vale na primeira foto clicada enquanto a sessão
+/// carrega** (dono, 08/out/2026: *"a primeira foto às vezes a classificação
+/// não funciona, sendo necessário clicar na próxima foto"*).
+///
+/// As fotos do disco aparecem antes da galeria do site. Quem clicava na
+/// primeira e teclava a nota com a resposta ainda no ar via a tecla funcionar;
+/// a chegada da galeria apagava a seleção, e a tecla seguinte não achava foto
+/// — na grade e na tira, que dividem a mesma seleção. Aqui o site segura a
+/// resposta, o clique e as teclas são de verdade, e o catálogo diz o que ficou.
+#[gpui_kit::test]
+fn com_o_site_lento_a_nota_vale_na_primeira_foto_clicada(cx: &mut TestAppContext) {
+    use std::sync::atomic::Ordering;
+    let e = abrir_o_app(
+        cx,
+        Cenario {
+            site: Box::new(|site| site.galeria_demorada.store(true, Ordering::SeqCst)),
+            ..Default::default()
+        },
+    );
+    e.entrar_na_conta(cx);
+    e.app(cx, |app, _w, cx| {
+        app.sessoes
+            .update(cx, |tela, cx| tela.abrir(GALERIA.into(), cx));
+    });
+    e.esperar(cx);
+    let primeira = "id-DSC_101.jpg";
+    let segunda = "id-DSC_102.jpg";
+    e.detalhe(cx, |tela, _w, _cx| {
+        assert!(
+            tela.aberta().is_none(),
+            "a galeria do site ainda não chegou"
+        );
+    });
+
+    // A primeira foto, clicada na grade com o site ainda calado.
+    clicar(&e, cx, "sessao-tile-id-DSC_101.jpg");
+    e.teclar(cx, "2");
+    e.esperar(cx);
+    assert_eq!(no_catalogo(&e, cx, primeira).0, 2, "a nota antes do site");
+
+    // O site responde — e a próxima tecla continua valendo nela.
+    e.site.galeria_demorada.store(false, Ordering::SeqCst);
+    e.site.responder();
+    e.esperar(cx);
+    e.detalhe(cx, |tela, _w, _cx| {
+        assert!(tela.aberta().is_some(), "a galeria chegou");
+        assert_eq!(tela.marcadas(), [primeira], "a chegada apagou a seleção");
+    });
+    e.teclar(cx, "4");
+    e.esperar(cx);
+    assert_eq!(
+        no_catalogo(&e, cx, primeira).0,
+        4,
+        "a tecla depois da chegada da galeria não achou a foto"
+    );
+
+    // 🎞️ Na tira, o mesmo gesto.
+    clicar(&e, cx, "tira-id-DSC_102.jpg");
+    e.teclar(cx, "5");
+    e.esperar(cx);
+    assert_eq!(no_catalogo(&e, cx, segunda).0, 5, "a nota pela tira");
+    assert_eq!(
+        no_catalogo(&e, cx, primeira).0,
+        4,
+        "a primeira ficou como estava"
+    );
+}
+
 /// 🔑 **A seleção em lote classifica e rejeita todas de uma vez**, na foto
 /// local — uma tecla, um desfecho (`⌘A` e depois a tecla).
 #[gpui_kit::test]
