@@ -63,7 +63,7 @@ Numa janela estreita o meio rola de lado; o ícone da ferramenta e Cancelar/Apli
 | Recuperação | pincel, amostra, Alinhado, origem, difusão |
 | Correção para manchas | predefinição, pincel |
 | Remendo | difusão (a ajuda longa no ⓘ) |
-| Seleções / varinha | os quatro modos, difusão, antisserrilhado, estilo e medidas; tolerância, contígua, amostra; Modificar ▾ |
+| Seleções / varinha | os quatro modos, difusão, antisserrilhado, estilo e medidas; tolerância, contígua, amostra; Preenchimento sensível ao conteúdo…; Modificar ▾ |
 | Degradê | a prévia frente → transparente (máscara: frente → fundo) |
 | Subexposição/superexposição | pincel, faixa, exposição |
 | Desfoque/nitidez | pincel, força |
@@ -107,6 +107,12 @@ Os valores são os mesmos estados do painel Pincel — nada duplicado.
 - **Cor** (R, G, B da frente ou do fundo), **Amostras** (clique: frente; ⌘/Ctrl + clique: fundo),
   **Pincel** (tamanho, dureza, espaçamento, suavização), **Histórico** (o de antes).
 - O gráfico das Curvas passou de 220 para 176 pt para caber no grupo padrão.
+
+## Onde está o Content-Aware
+
+O antigo botão do painel virou **Editar › Preenchimento sensível ao conteúdo…** (o lugar do Photoshop), e o dono
+não o achou (08/10). Ele está também no **botão direito sobre a foto com seleção** (com "Preencher pelo conteúdo
+⇧⌫", sem prévia) e na **barra de opções das ferramentas de seleção**.
 
 ## Menus, status e teclas (`janela/menus.rs`, `janela/status.rs`)
 
