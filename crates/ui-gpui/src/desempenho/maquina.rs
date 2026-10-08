@@ -500,7 +500,7 @@ fn do_sistema(m: &mut Maquina) {
     };
 }
 
-#[cfg_attr(target_os = "macos", allow(dead_code))]
+#[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(dead_code))]
 fn ler_xrandr(texto: &str, m: &mut Maquina) {
     let mut atual: Option<(String, bool)> = None;
     for linha in texto.lines() {
