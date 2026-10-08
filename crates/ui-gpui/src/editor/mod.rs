@@ -69,6 +69,9 @@ gpui_kit::actions!(
         ProximaDoGrupoL,
         ProximaDoGrupoG,
         ProximaDoGrupoO,
+        ProximaDoGrupoJ,
+        // ⌥⌘G: cria ou libera a máscara de corte da escolhida.
+        AlternarMascaraDeCorte,
     ]
 );
 
@@ -83,7 +86,8 @@ const SEM_CAMPO: &str = "EditorDeFoto && !Input";
 /// ("Keyboard shortcuts", PDF do helpx, 07/out/2026):
 ///
 /// - ferramentas por letra: Mover (V), seleção retangular/elíptica (M), laço
-///   e poligonal (L, ⇧L), varinha (W), conta-gotas (I), pincel de correção (J), pincel (B),
+///   e poligonal (L, ⇧L), varinha (W), conta-gotas (I), pincel de correção para manchas e de
+///   recuperação (J, ⇧J), pincel (B),
 ///   carimbo (S), borracha (E), degradê/lata (G), subexposição/superexposição
 ///   (O), Mão (H) e Girar vista (R). **⇧ + letra passa para a ferramenta
 ///   seguinte do mesmo grupo** ("Use Shift Key for Tool Switch", o padrão de
@@ -93,7 +97,9 @@ const SEM_CAMPO: &str = "EditorDeFoto && !Input";
 ///   números o fluxo (tratados na janela, fora de campo de texto);
 /// - X troca as cores, D volta a preto e branco, ⇧F6 difunde a seleção;
 /// - camadas: ⇧⌘N nova, ⌘J via cópia, ⇧⌘J via recorte, ⌘] ⌘[ subir e descer,
-///   ⌥] ⌥[ a de cima e a de baixo, ⌘E mesclar para baixo, ⌘, mostrar/esconder
+///   ⌥] ⌥[ a de cima e a de baixo, ⌘E mesclar para baixo (na base de
+///   uma máscara de corte, mescla o conjunto), ⌥⌘G cria ou libera a máscara de
+///   corte, ⌘, mostrar/esconder
 ///   (o menu "Ocultar camadas" do Photoshop; ⚠️ não está na tabela em PDF);
 /// - seleção: ⌘A ⌘D ⇧⌘I, Delete apaga, ⌥Delete preenche, ⇧Delete preenche
 ///   pelo conteúdo; ⌘T transformação livre, Enter confirma, Esc cancela;
@@ -149,6 +155,7 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("shift-backspace", PreencherPeloConteudo, solta),
         KeyBinding::new("shift-delete", PreencherPeloConteudo, solta),
         KeyBinding::new("secondary-e", MesclarParaBaixo, c),
+        KeyBinding::new("secondary-alt-g", AlternarMascaraDeCorte, c),
         // As letras e ⇧ + letra. No grupo de uma ferramenta só, ⇧ + letra
         // escolhe a mesma.
         KeyBinding::new("v", GrupoV, solta),
@@ -162,7 +169,7 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("i", GrupoI, solta),
         KeyBinding::new("shift-i", GrupoI, solta),
         KeyBinding::new("j", GrupoJ, solta),
-        KeyBinding::new("shift-j", GrupoJ, solta),
+        KeyBinding::new("shift-j", ProximaDoGrupoJ, solta),
         KeyBinding::new("b", GrupoB, solta),
         KeyBinding::new("shift-b", GrupoB, solta),
         KeyBinding::new("s", GrupoS, solta),

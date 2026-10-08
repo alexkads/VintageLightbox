@@ -48,6 +48,7 @@ use editor_core::{
 use gpui_kit::component::button::ButtonVariants as _;
 use gpui_kit::component::color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::menu::ContextMenuExt as _;
 use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
 use gpui_kit::component::slider::{SliderEvent, SliderState};
@@ -63,14 +64,15 @@ use image::DynamicImage;
 use super::giro;
 use super::porta::{Abertura, Edicoes, FotoDoEditor};
 use super::{
-    Afastar, AlternarCamada, AlternarZoom, ApagarSelecao, AplicarTransformacao, Aproximar,
-    CamadaDeBaixo, CamadaDeCima, CamadaViaRecorte, CancelarTransformacao, CoresPadrao,
-    DescerCamada, DesfazerNoEditor, Desmarcar, DifundirSelecao, DuplicarCamada, DurezaMaior,
-    DurezaMenor, Encaixar, FecharEditor, GrupoB, GrupoE, GrupoG, GrupoH, GrupoI, GrupoJ, GrupoL,
-    GrupoM, GrupoO, GrupoR, GrupoS, GrupoV, GrupoW, InverterSelecao, MesclarParaBaixo, NovaCamada,
-    PincelMaior, PincelMenor, PreencherPeloConteudo, PreencherSelecao, ProximaDoGrupoG,
-    ProximaDoGrupoL, ProximaDoGrupoM, ProximaDoGrupoO, RefazerNoEditor, SalvarNoEditor,
-    SegurarAMao, SelecionarTudo, SubirCamada, TransformacaoLivre, TrocarCores, UmPorUm, CONTEXTO,
+    Afastar, AlternarCamada, AlternarMascaraDeCorte, AlternarZoom, ApagarSelecao,
+    AplicarTransformacao, Aproximar, CamadaDeBaixo, CamadaDeCima, CamadaViaRecorte,
+    CancelarTransformacao, CoresPadrao, DescerCamada, DesfazerNoEditor, Desmarcar, DifundirSelecao,
+    DuplicarCamada, DurezaMaior, DurezaMenor, Encaixar, FecharEditor, GrupoB, GrupoE, GrupoG,
+    GrupoH, GrupoI, GrupoJ, GrupoL, GrupoM, GrupoO, GrupoR, GrupoS, GrupoV, GrupoW,
+    InverterSelecao, MesclarParaBaixo, NovaCamada, PincelMaior, PincelMenor, PreencherPeloConteudo,
+    PreencherSelecao, ProximaDoGrupoG, ProximaDoGrupoJ, ProximaDoGrupoL, ProximaDoGrupoM,
+    ProximaDoGrupoO, RefazerNoEditor, SalvarNoEditor, SegurarAMao, SelecionarTudo, SubirCamada,
+    TransformacaoLivre, TrocarCores, UmPorUm, CONTEXTO,
 };
 use crate::campo::TrocarValor as _;
 use crate::recursos::Icone;
@@ -222,7 +224,13 @@ pub const GRUPOS: &[(char, &[Item])] = &[
     ),
     ('w', &[Item::A(Auxiliar::Varinha)]),
     ('i', &[Item::A(Auxiliar::ContaGotas)]),
-    ('j', &[Item::A(Auxiliar::Correcao)]),
+    (
+        'j',
+        &[
+            Item::A(Auxiliar::Correcao),
+            Item::F(Ferramenta::Recuperacao),
+        ],
+    ),
     ('b', &[Item::F(Ferramenta::Pincel)]),
     ('s', &[Item::F(Ferramenta::Carimbo)]),
     ('e', &[Item::F(Ferramenta::Borracha)]),
@@ -519,6 +527,17 @@ pub enum ParteDaCaixa {
     Referencia,
 }
 
+/// O arrasto na malha do Deformar: um dos 16 pontos, ou um ponto da
+/// superfície (`u`, `v`) puxado por dentro; de onde começou (pixels da foto) e a
+/// malha de então.
+#[derive(Clone, Copy)]
+struct GestoDeMalha {
+    pega: Option<editor_core::deformar::Pega>,
+    uv: Option<(f32, f32)>,
+    inicio: (f32, f32),
+    malha: editor_core::Malha,
+}
+
 /// Um arrasto na caixa: o que começou a fazer, onde (pixels da foto), e a
 /// transformação de então.
 #[derive(Clone, Copy)]
@@ -774,6 +793,14 @@ pub struct EditorDeFoto {
     /// Um preenchimento por conteúdo calculando em segundo plano.
     preenchendo: bool,
     _tarefa_do_preenchimento: Option<Task<()>>,
+    /// "Criar camada da fotografia base": a camada é montada em segundo plano
+    /// (96 MB numa foto de 24 MP).
+    _tarefa_da_fotografia: Option<Task<()>>,
+    criando_a_fotografia: bool,
+    /// O arrasto na malha do Deformar.
+    gesto_de_malha: Option<GestoDeMalha>,
+    /// A grade do Deformar à vista (os pontos ficam sempre).
+    grade_visivel: bool,
     /// O giro da vista (R), em radianos — só a tela; e os ladrilhos do palco
     /// girado.
     giro: f32,
@@ -788,6 +815,8 @@ pub struct EditorDeFoto {
     fluxo: Entity<SliderState>,
     espacamento: Entity<SliderState>,
     suavizacao_do_pincel: Entity<SliderState>,
+    /// A difusão do pincel de recuperação (1 a 7) — não é a da seleção.
+    difusao_da_recuperacao: Entity<SliderState>,
     seletor_de_predefinicao: Entity<SelectState<Vec<Opcao>>>,
     /// Os números do teclado (opacidade; com ⇧, fluxo): o primeiro dígito e
     /// quando chegou — "4 e 5 em seguida = 45%", como no Photoshop.
@@ -851,6 +880,7 @@ impl EditorDeFoto {
         let fluxo = slider(1.0, 100.0, 1.0, pincel.fluxo * 100.0, cx);
         let espacamento = slider(1.0, 1000.0, 1.0, pincel.espacamento * 100.0, cx);
         let suavizacao_do_pincel = slider(0.0, 100.0, 1.0, pincel.suavizacao * 100.0, cx);
+        let difusao_da_recuperacao = slider(1.0, 7.0, 1.0, pincel.difusao as f32, cx);
         let predefinicoes: Vec<Opcao> = editor_core::pincel::PREDEFINICOES
             .iter()
             .map(|p| Opcao::nova(p.nome, p.nome))
@@ -966,6 +996,7 @@ impl EditorDeFoto {
             (&fluxo, 3),
             (&espacamento, 4),
             (&suavizacao_do_pincel, 5),
+            (&difusao_da_recuperacao, 6),
         ] {
             assinaturas.push(cx.subscribe_in(
                 estado,
@@ -979,7 +1010,8 @@ impl EditorDeFoto {
                             2 => s.pincel.opacidade = v / 100.0,
                             3 => s.pincel.fluxo = v / 100.0,
                             4 => s.pincel.espacamento = v / 100.0,
-                            _ => s.pincel.suavizacao = v / 100.0,
+                            5 => s.pincel.suavizacao = v / 100.0,
+                            _ => s.pincel.difusao = v.round().clamp(1.0, 7.0) as u8,
                         }
                     }
                     cx.notify();
@@ -1340,6 +1372,10 @@ impl EditorDeFoto {
             miniaturas_das_mascaras: Vec::new(),
             preenchendo: false,
             _tarefa_do_preenchimento: None,
+            _tarefa_da_fotografia: None,
+            criando_a_fotografia: false,
+            gesto_de_malha: None,
+            grade_visivel: true,
             giro: 0.0,
             palco_girado: giro::PalcoGirado::default(),
             gesto_de_giro: None,
@@ -1347,6 +1383,7 @@ impl EditorDeFoto {
             fluxo,
             espacamento,
             suavizacao_do_pincel,
+            difusao_da_recuperacao,
             seletor_de_predefinicao,
             digito: None,
             ajuste_rapido: None,
@@ -2002,6 +2039,10 @@ impl EditorDeFoto {
             return;
         }
         let ferramenta = self.ferramenta();
+        if self.sessao().is_some_and(Sessao::deformando) {
+            self.comecar_gesto_na_malha(ponto, cx);
+            return;
+        }
         if self.sessao().is_some_and(Sessao::transformando) {
             self.comecar_gesto_na_caixa(ponto, cx);
             return;
@@ -2068,7 +2109,7 @@ impl EditorDeFoto {
         }
         if modificadores.alt {
             match ferramenta {
-                Some(Ferramenta::Carimbo) => {
+                Some(Ferramenta::Carimbo | Ferramenta::Recuperacao) => {
                     if let (Some((x, y)), Some(s)) = (self.na_foto(ponto), self.sessao_mut()) {
                         s.definir_origem(x, y);
                     }
@@ -2096,6 +2137,7 @@ impl EditorDeFoto {
             || self.pegando_cor
             || self.arrasto_do_mover.is_some()
             || self.gesto_de_transformacao.is_some()
+            || self.gesto_de_malha.is_some()
             || self.traco_de_correcao.is_some()
             || self.degrade_em_curso.is_some()
             || self.gesto_de_giro.is_some()
@@ -2191,6 +2233,7 @@ impl EditorDeFoto {
     /// Enter.
     pub fn aplicar_transformacao(&mut self, cx: &mut Context<Self>) {
         self.gesto_de_transformacao = None;
+        self.gesto_de_malha = None;
         self.na_sessao(cx, |s| {
             s.aplicar_transformacao();
         });
@@ -2199,11 +2242,137 @@ impl EditorDeFoto {
     /// Esc.
     pub fn cancelar_transformacao(&mut self, cx: &mut Context<Self>) {
         self.gesto_de_transformacao = None;
+        self.gesto_de_malha = None;
         self.na_sessao(cx, Sessao::cancelar_transformacao);
     }
 
     pub fn transformando(&self) -> bool {
         self.sessao().is_some_and(Sessao::transformando)
+    }
+
+    // ------------------------------------------------------------ deformar
+
+    /// "Deformar": a malha de 3 × 3 células sobre o conteúdo (do ⌘T aberto,
+    /// ou começando um).
+    pub fn deformar(&mut self, cx: &mut Context<Self>) {
+        self.gesto_de_transformacao = None;
+        let Some(s) = self.sessao_mut() else {
+            return;
+        };
+        self.aviso = if s.comecar_a_deformar() {
+            None
+        } else if s.transformando_a_selecao() {
+            Some((
+                "Deformar leva pixels: aplique ou cancele o Transformar seleção antes".into(),
+                true,
+            ))
+        } else {
+            Some((
+                "Nada para deformar: a camada está vazia ou escondida".into(),
+                true,
+            ))
+        };
+        cx.notify();
+    }
+
+    pub fn deformando(&self) -> bool {
+        self.sessao().is_some_and(Sessao::deformando)
+    }
+
+    /// Do Deformar de volta à transformação livre (só com a malha intocada).
+    pub fn voltar_a_transformacao_livre(&mut self, cx: &mut Context<Self>) {
+        self.gesto_de_malha = None;
+        if let Some(s) = self.sessao_mut() {
+            if !s.voltar_a_transformacao_livre() {
+                self.aviso = Some((
+                    "A malha já foi deformada: Redefinir antes de voltar à transformação livre"
+                        .into(),
+                    true,
+                ));
+            }
+        }
+        cx.notify();
+    }
+
+    /// "Redefinir": a malha do começo, sem confirmar.
+    pub fn redefinir_malha(&mut self, cx: &mut Context<Self>) {
+        self.gesto_de_malha = None;
+        self.na_sessao(cx, Sessao::redefinir_malha);
+    }
+
+    pub fn alternar_grade(&mut self, cx: &mut Context<Self>) {
+        self.grade_visivel = !self.grade_visivel;
+        cx.notify();
+    }
+
+    pub fn grade_visivel(&self) -> bool {
+        self.grade_visivel
+    }
+
+    /// O apertar no Deformar: perto de um dos 16 pontos (9 pontos da tela),
+    /// pega o ponto; dentro da malha, puxa a superfície; fora, nada.
+    fn comecar_gesto_na_malha(&mut self, ponto: Point<Pixels>, cx: &mut Context<Self>) {
+        let (Some(p), Some((_, malha))) = (
+            self.na_foto_sem_limite(ponto),
+            self.sessao().and_then(Sessao::malha),
+        ) else {
+            return;
+        };
+        let escala = self.vista_do_zoom().map_or(1.0, |(_, v)| v.escala);
+        let pega = malha.pegar(p.0, p.1, 9.0 / escala);
+        let uv = if pega.is_none() {
+            malha.onde(p.0, p.1)
+        } else {
+            None
+        };
+        if pega.is_none() && uv.is_none() {
+            return;
+        }
+        self.gesto_de_malha = Some(GestoDeMalha {
+            pega,
+            uv,
+            inicio: p,
+            malha,
+        });
+        cx.notify();
+    }
+
+    fn arrastar_na_malha(&mut self, ponto: Point<Pixels>, cx: &mut Context<Self>) {
+        let (Some(g), Some(p)) = (self.gesto_de_malha, self.na_foto_sem_limite(ponto)) else {
+            return;
+        };
+        let (dx, dy) = (p.0 - g.inicio.0, p.1 - g.inicio.1);
+        let mut m = g.malha;
+        match (g.pega, g.uv) {
+            (Some(editor_core::deformar::Pega::Ponto(j, i)), _) => m.mover_ponto(j, i, dx, dy),
+            (None, Some((u, v))) => m.puxar(u, v, dx, dy),
+            _ => return,
+        }
+        let inicio = Instant::now();
+        if let Some(s) = self.sessao_mut() {
+            s.definir_malha(m);
+        }
+        self.medidas.ultimo_gesto = Some(inicio.elapsed());
+        cx.notify();
+    }
+
+    /// 🧪 O roteiro e os testes: um dos 16 pontos levado de `(dx, dy)` (pixels
+    /// da foto), como um arrasto.
+    pub fn mover_ponto_da_malha(
+        &mut self,
+        linha: usize,
+        coluna: usize,
+        dx: f32,
+        dy: f32,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(s) = self.sessao_mut() {
+            if let Some((_, mut m)) = s.malha() {
+                m.mover_ponto(linha, coluna, dx, dy);
+                s.definir_malha(m);
+            }
+        }
+        cx.notify();
     }
 
     // -------------------------------------------- preenchimento por conteúdo
@@ -2581,9 +2750,14 @@ impl EditorDeFoto {
         };
         if comecou {
             self.pintando = true;
-        } else if s.pincel.ferramenta == Ferramenta::Carimbo && s.origem().is_none() {
+        } else if s.pincel.ferramenta.copia_da_origem() && s.origem().is_none() {
             self.aviso = Some((
-                "⌥ + clique na foto para escolher de onde o carimbo copia".into(),
+                if s.pincel.ferramenta == Ferramenta::Recuperacao {
+                    "⌥ + clique na foto para escolher a pele limpa de onde a recuperação copia"
+                } else {
+                    "⌥ + clique na foto para escolher de onde o carimbo copia"
+                }
+                .into(),
                 true,
             ));
         } else if s.na_mascara() && s.pincel.ferramenta.le_a_foto() {
@@ -2642,6 +2816,10 @@ impl EditorDeFoto {
                 }
             }
             cx.notify();
+            return;
+        }
+        if self.gesto_de_malha.is_some() {
+            self.arrastar_na_malha(ponto, cx);
             return;
         }
         if self.gesto_de_transformacao.is_some() {
@@ -2786,7 +2964,7 @@ impl EditorDeFoto {
             return;
         }
         self.pegando_cor = false;
-        if self.gesto_de_transformacao.take().is_some() {
+        if self.gesto_de_transformacao.take().is_some() || self.gesto_de_malha.take().is_some() {
             cx.notify();
             return;
         }
@@ -2950,7 +3128,9 @@ impl EditorDeFoto {
             return match a {
                 Auxiliar::ContaGotas => "Conta-gotas (I)",
                 Auxiliar::Mover => "Mover (V)",
-                Auxiliar::Correcao => "Pincel de correção (J)",
+                Auxiliar::Correcao => {
+                    "Pincel de correção para manchas (J) — automático, sem origem"
+                }
                 Auxiliar::Degrade => "Degradê (G) — arraste do começo ao fim",
                 Auxiliar::Lata => "Lata de tinta (G)",
                 Auxiliar::Varinha => "Varinha mágica (W) — ⇧ soma, ⌥ tira, ⇧⌥ cruza",
@@ -2964,6 +3144,9 @@ impl EditorDeFoto {
         match self.ferramenta() {
             Some(Ferramenta::Borracha) => "Borracha (E)",
             Some(Ferramenta::Carimbo) => "Carimbo (S) — ⌥ + clique na origem",
+            Some(Ferramenta::Recuperacao) => {
+                "Pincel de recuperação (J) — ⌥ + clique na origem; a cor se adapta ao soltar"
+            }
             Some(Ferramenta::Subexposicao(_)) => "Subexposição (O)",
             Some(Ferramenta::Superexposicao(_)) => "Superexposição (O)",
             Some(Ferramenta::Desfoque) => "Desfoque",
@@ -3032,7 +3215,13 @@ impl EditorDeFoto {
                     Item::A(Auxiliar::Correcao),
                     Icone::Bandage,
                     "editor-correcao",
-                    "Pincel de correção (J)",
+                    "Pincel de correção para manchas (J; ⇧J alterna com o de recuperação) — refaz a mancha pelo que está em volta, sem origem",
+                ),
+                (
+                    Item::F(Ferramenta::Recuperacao),
+                    Icone::Sparkles,
+                    "editor-recuperacao",
+                    "Pincel de recuperação (J; ⇧J alterna) — ⌥ + clique escolhe a origem; a textura vem dela e a cor se adapta ao destino",
                 ),
                 (
                     Item::F(Ferramenta::Pincel),
@@ -3237,7 +3426,7 @@ impl EditorDeFoto {
     pub fn escolher_cor(&mut self, cor: [u8; 3], cx: &mut Context<Self>) {
         let com_o_pincel = self.selecionando.is_none()
             && self.auxiliar.is_none()
-            && self.ferramenta() != Some(Ferramenta::Carimbo);
+            && !self.ferramenta().is_some_and(Ferramenta::copia_da_origem);
         if let Some(s) = self.sessao_mut() {
             s.pincel.cor = cor;
             if com_o_pincel {
@@ -3346,6 +3535,7 @@ impl EditorDeFoto {
             (self.fluxo.clone(), p.fluxo * 100.0),
             (self.espacamento.clone(), p.espacamento * 100.0),
             (self.suavizacao_do_pincel.clone(), p.suavizacao * 100.0),
+            (self.difusao_da_recuperacao.clone(), p.difusao as f32),
         ] {
             if (estado.read(cx).value().start() - v).abs() > 0.5 {
                 estado.update(cx, |s, cx| s.set_value(v, window, cx));
@@ -3673,7 +3863,7 @@ impl EditorDeFoto {
     fn atualizar_a_previa_do_carimbo(&mut self) {
         let carimbo = self.selecionando.is_none()
             && self.auxiliar.is_none()
-            && self.ferramenta() == Some(Ferramenta::Carimbo);
+            && self.ferramenta().is_some_and(Ferramenta::copia_da_origem);
         let ponto = self
             .ponteiro
             .filter(|p| self.palco.contains(p))
@@ -3931,6 +4121,62 @@ impl EditorDeFoto {
         self.aviso = (!s.camada_via_copia(true)).then(|| {
             (
                 SharedString::from("Selecione o pedaço antes de recortá-lo para outra camada"),
+                true,
+            )
+        });
+        cx.notify();
+    }
+
+    /// "Duplicar camada": a escolhida inteira, exata — mesmo com seleção (o
+    /// ⌘J com seleção é a camada via cópia).
+    pub fn duplicar_camada_inteira(&mut self, cx: &mut Context<Self>) {
+        self.na_sessao(cx, Sessao::duplicar_camada);
+    }
+
+    /// "Criar camada da fotografia base": a camada opaca da base, logo acima
+    /// dela, montada em segundo plano.
+    pub fn criar_camada_da_fotografia(&mut self, cx: &mut Context<Self>) {
+        if self.criando_a_fotografia || self.area_do_preenchimento.is_some() {
+            return;
+        }
+        let Some(base) = self.sessao().map(|s| s.base().clone()) else {
+            return;
+        };
+        self.criando_a_fotografia = true;
+        self.aviso = Some(("Criando a camada da fotografia…".into(), false));
+        cx.notify();
+        let trabalho = cx
+            .background_executor()
+            .spawn(async move { editor_core::CamadaDePixels::da_imagem(&base) });
+        self._tarefa_da_fotografia = Some(cx.spawn(async move |esta, cx| {
+            let pixels = trabalho.await;
+            let _ = esta.update(cx, |ed, cx| {
+                ed.criando_a_fotografia = false;
+                ed.na_sessao(cx, |s| {
+                    s.criar_camada_da_fotografia(pixels);
+                });
+            });
+        }));
+    }
+
+    pub fn criando_a_fotografia(&self) -> bool {
+        self.criando_a_fotografia
+    }
+
+    /// ⌥ + clique na divisa entre a camada `indice` e a de baixo (e ⌥⌘G na
+    /// escolhida): cria ou libera a máscara de corte.
+    pub fn alternar_mascara_de_corte(&mut self, indice: usize, cx: &mut Context<Self>) {
+        let Some(s) = self.sessao_mut() else {
+            return;
+        };
+        let feito = s.alternar_mascara_de_corte(indice);
+        self.aviso = (!feito).then(|| {
+            (
+                SharedString::from(if indice == 0 {
+                    "A camada de baixo de todas não tem base para recortar"
+                } else {
+                    "A máscara de corte precisa de uma camada de pixels embaixo"
+                }),
                 true,
             )
         });
@@ -4361,6 +4607,12 @@ impl EditorDeFoto {
                 match partes.get(1).copied().unwrap_or_default() {
                     "nova" => self.nova_camada(cx),
                     "duplicar" => self.duplicar_camada(cx),
+                    "duplicar-exata" => self.duplicar_camada_inteira(cx),
+                    // camada fotografia — a camada da fotografia base (em
+                    // segundo plano: um `espera` depois).
+                    "fotografia" => self.criar_camada_da_fotografia(cx),
+                    // camada recorte N — ⌥ + clique na divisa sobre N.
+                    "recorte" => self.alternar_mascara_de_corte(indice, cx),
                     "excluir" => self.excluir_camada(cx),
                     "mesclar" => self.mesclar_para_baixo(cx),
                     "recortar" => self.camada_via_recorte(cx),
@@ -4395,6 +4647,30 @@ impl EditorDeFoto {
                     outro => eprintln!("[roteiro] editor camada {outro}?"),
                 }
             }
+            // deformar comecar|livre|redefinir|grade|aplicar|cancelar|
+            //          ponto L C dx dy (pixels da foto)|estado
+            "deformar" => match partes.get(1).copied().unwrap_or("comecar") {
+                "comecar" => self.deformar(cx),
+                "livre" => self.voltar_a_transformacao_livre(cx),
+                "redefinir" => self.redefinir_malha(cx),
+                "grade" => self.alternar_grade(cx),
+                "aplicar" => self.aplicar_transformacao(cx),
+                "cancelar" => self.cancelar_transformacao(cx),
+                "ponto" => self.mover_ponto_da_malha(
+                    numero(2) as usize,
+                    numero(3) as usize,
+                    numero(4),
+                    numero(5),
+                    cx,
+                ),
+                _ => eprintln!(
+                    "[roteiro] editor deformar: malha={:?} tempo={:?}",
+                    self.sessao()
+                        .and_then(Sessao::malha)
+                        .map(|(c, m)| (c, m.pontos)),
+                    self.medidas.ultimo_gesto
+                ),
+            },
             "zoom" => {
                 let ponto_da_fracao = |ed: &Self, fx: f32, fy: f32| {
                     ed.area_na_janela().map(|a| Ponto {
@@ -4718,6 +4994,7 @@ impl EditorDeFoto {
                         Some("fluxo") => s.pincel.fluxo = v / 100.0,
                         Some("espacamento") => s.pincel.espacamento = v / 100.0,
                         Some("suavizacao") => s.pincel.suavizacao = v / 100.0,
+                        Some("difusao") => s.pincel.difusao = v as u8,
                         _ => s.pincel.opacidade = v / 100.0,
                     }
                 }
@@ -4733,6 +5010,7 @@ impl EditorDeFoto {
                 "pincel" => self.usar(Ferramenta::Pincel, cx),
                 "borracha" => self.usar(Ferramenta::Borracha, cx),
                 "carimbo" => self.usar(Ferramenta::Carimbo, cx),
+                "recuperacao" => self.usar(Ferramenta::Recuperacao, cx),
                 "conta-gotas" => self.usar_auxiliar(Auxiliar::ContaGotas, cx),
                 "mover" => self.usar_auxiliar(Auxiliar::Mover, cx),
                 "correcao" => self.usar_auxiliar(Auxiliar::Correcao, cx),
@@ -4781,8 +5059,9 @@ impl EditorDeFoto {
                         .enumerate()
                         .map(|(i, c)| {
                             format!(
-                                "{}{}:{}:{}:{:.0}%:{}tiles{}",
+                                "{}{}{}:{}:{}:{:.0}%:{}tiles{}",
                                 if i == s.ativa() { "*" } else { "" },
+                                if c.recortada { "↳" } else { "" },
                                 c.nome,
                                 c.modo.chave(),
                                 if c.visivel { "vis" } else { "oculta" },
@@ -5040,8 +5319,14 @@ impl EditorDeFoto {
         let com_a_mao = self.mao.is_some();
         let medida = canvas(
             move |bounds, window, cx| {
-                medidor.update(cx, |ed, _cx| {
+                medidor.update(cx, |ed, cx| {
                     if ed.palco != bounds {
+                        // 🔑 O palco andou (uma barra de opções apareceu ou
+                        // sumiu): as marcas dele (caixa, malha, letreiro) foram
+                        // desenhadas com a medida velha — mais um quadro.
+                        if ed.palco.origin != bounds.origin {
+                            cx.notify();
+                        }
                         ed.palco = bounds;
                     }
                     ed.dpr = window.scale_factor().max(1.0);
@@ -5130,8 +5415,50 @@ impl EditorDeFoto {
                     }
                     // O preenchimento aberto: a sobreposição e a prévia.
                     palco = palco.children(self.elementos_do_preenchimento(&v, cx));
-                    // A caixa da transformação livre, com as quatro alças.
-                    if let Some((caixa, t)) = sessao.transformacao() {
+                    // 🕸️ A malha do Deformar: as 8 linhas da grade de 3 × 3
+                    // células (sobre a superfície, curvas) e os 16 pontos —
+                    // cantos quadrados, alças e internos redondos, com a haste
+                    // de cada alça até o canto dela.
+                    if let Some((_, malha)) = sessao.malha() {
+                        if self.grade_visivel {
+                            for linha in malha.linhas_da_grade(24) {
+                                palco = palco.child(tela.contorno(linha));
+                            }
+                        }
+                        let p = malha.pontos;
+                        for (canto, alca) in [
+                            ((0, 0), (0, 1)),
+                            ((0, 0), (1, 0)),
+                            ((0, 3), (0, 2)),
+                            ((0, 3), (1, 3)),
+                            ((3, 0), (3, 1)),
+                            ((3, 0), (2, 0)),
+                            ((3, 3), (3, 2)),
+                            ((3, 3), (2, 3)),
+                        ] {
+                            palco = palco
+                                .child(tela.contorno(vec![p[canto.0][canto.1], p[alca.0][alca.1]]));
+                        }
+                        for (j, linha) in p.iter().enumerate() {
+                            for (i, (x, y)) in linha.iter().enumerate() {
+                                let canto = (j == 0 || j == 3) && (i == 0 || i == 3);
+                                let (sx, sy) = tela.p(*x, *y);
+                                let lado = if canto { 9.0 } else { 7.0 };
+                                palco = palco.child(
+                                    div()
+                                        .debug_selector(move || format!("editor-malha-{j}-{i}"))
+                                        .absolute()
+                                        .left(px(sx - lado / 2.0))
+                                        .top(px(sy - lado / 2.0))
+                                        .size(px(lado))
+                                        .when(!canto, |d| d.rounded_full())
+                                        .bg(gpui_kit::white())
+                                        .border_1()
+                                        .border_color(gpui_kit::black()),
+                                );
+                            }
+                        }
+                    } else if let Some((caixa, t)) = sessao.transformacao() {
                         let cantos: Vec<(f32, f32)> =
                             t.cantos(&caixa).iter().map(|(x, y)| (*x, *y)).collect();
                         let mut fechado = cantos.clone();
@@ -5320,8 +5647,11 @@ impl EditorDeFoto {
                         );
                     }
                     // A mira do carimbo: de onde ele copia para o ponteiro.
-                    if let (Some(ponteiro), Some(Ferramenta::Carimbo), true) =
-                        (dentro, self.ferramenta(), com_pincel)
+                    if let (
+                        Some(ponteiro),
+                        Some(Ferramenta::Carimbo | Ferramenta::Recuperacao),
+                        true,
+                    ) = (dentro, self.ferramenta(), com_pincel)
                     {
                         let mira = self
                             .na_foto_sem_limite(ponteiro)
@@ -5438,7 +5768,141 @@ impl EditorDeFoto {
                     }));
             }
         }
-        palco.into_any_element()
+        // O botão direito no palco: o menu de contexto do Photoshop — o da
+        // transformação com a caixa ou a malha abertas, o da seleção com uma
+        // seleção. Com ⌥ é o ajuste rápido do pincel, e nada abre.
+        let ed = cx.entity();
+        palco
+            .context_menu(move |menu, window, cx| {
+                let menu = match window.focused(cx) {
+                    Some(antes) => menu.action_context(antes),
+                    None => menu,
+                };
+                if window.modifiers().alt {
+                    return menu;
+                }
+                let (transformando, deformando, contorno, tem_selecao, intocada) = {
+                    let e = ed.read(cx);
+                    let s = e.sessao();
+                    (
+                        e.transformando(),
+                        e.deformando(),
+                        s.is_some_and(Sessao::transformando_a_selecao),
+                        s.and_then(Sessao::selecao).is_some(),
+                        s.is_some_and(Sessao::malha_intocada),
+                    )
+                };
+                let item = |id: &'static str,
+                            rotulo: &'static str,
+                            ligado: bool,
+                            fazer: fn(
+                    &mut EditorDeFoto,
+                    &mut Window,
+                    &mut Context<EditorDeFoto>,
+                )| {
+                    let ed = ed.clone();
+                    crate::estilo::item_de_menu(id, rotulo, None)
+                        .disabled(!ligado)
+                        .on_click(move |_ev, window, cx| {
+                            ed.update(cx, |ed, cx| fazer(ed, window, cx));
+                        })
+                };
+                if transformando {
+                    return menu
+                        .item(item(
+                            "editor-contexto-transformacao-livre",
+                            "Transformação livre",
+                            deformando && intocada,
+                            |ed, _, cx| ed.voltar_a_transformacao_livre(cx),
+                        ))
+                        .item(item(
+                            "editor-contexto-deformar",
+                            "Deformar",
+                            !deformando && !contorno,
+                            |ed, _, cx| ed.deformar(cx),
+                        ))
+                        .item(item(
+                            "editor-contexto-redefinir",
+                            "Redefinir a malha",
+                            deformando && !intocada,
+                            |ed, _, cx| ed.redefinir_malha(cx),
+                        ))
+                        .separator()
+                        .item(item(
+                            "editor-contexto-aplicar",
+                            "Aplicar  ↵",
+                            true,
+                            |ed, _, cx| ed.aplicar_transformacao(cx),
+                        ))
+                        .item(item(
+                            "editor-contexto-cancelar",
+                            "Cancelar  Esc",
+                            true,
+                            |ed, _, cx| ed.cancelar_transformacao(cx),
+                        ));
+                }
+                if !tem_selecao {
+                    return menu;
+                }
+                menu.item(item(
+                    "editor-contexto-difundir",
+                    "Difusão…  ⇧F6",
+                    true,
+                    |ed, w, cx| ed.abrir_modificacao(Modificacao::Difundir, w, cx),
+                ))
+                .item(item(
+                    "editor-contexto-expandir",
+                    "Expandir…",
+                    true,
+                    |ed, w, cx| ed.abrir_modificacao(Modificacao::Expandir, w, cx),
+                ))
+                .item(item(
+                    "editor-contexto-contrair",
+                    "Contrair…",
+                    true,
+                    |ed, w, cx| ed.abrir_modificacao(Modificacao::Contrair, w, cx),
+                ))
+                .separator()
+                .item(item(
+                    "editor-contexto-inverter",
+                    "Inverter seleção  ⇧⌘I",
+                    true,
+                    |ed, _, cx| ed.inverter_selecao(cx),
+                ))
+                .item(item(
+                    "editor-contexto-desmarcar",
+                    "Desmarcar  ⌘D",
+                    true,
+                    |ed, _, cx| ed.desmarcar(cx),
+                ))
+                .separator()
+                .item(item(
+                    "editor-contexto-via-copia",
+                    "Camada via cópia  ⌘J",
+                    true,
+                    |ed, _, cx| ed.duplicar_camada(cx),
+                ))
+                .item(item(
+                    "editor-contexto-via-recorte",
+                    "Camada via recorte  ⇧⌘J",
+                    true,
+                    |ed, _, cx| ed.camada_via_recorte(cx),
+                ))
+                .separator()
+                .item(item(
+                    "editor-contexto-transformar-selecao",
+                    "Transformar seleção",
+                    true,
+                    |ed, _, cx| ed.transformar_selecao(cx),
+                ))
+                .item(item(
+                    "editor-contexto-deformar-selecao",
+                    "Deformar",
+                    true,
+                    |ed, _, cx| ed.deformar(cx),
+                ))
+            })
+            .into_any_element()
     }
 
     fn barra(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -5519,6 +5983,8 @@ impl EditorDeFoto {
                             .text_color(tema.muted_foreground)
                             .child(if so_o_contorno {
                                 "Transformar seleção (só o contorno)"
+                            } else if self.deformando() {
+                                "Deformar"
                             } else {
                                 "Transformação livre"
                             }),
@@ -5537,6 +6003,54 @@ impl EditorDeFoto {
                             .tooltip("Esc")
                             .on_click(cx.listener(|ed, _, _, cx| ed.cancelar_transformacao(cx))),
                     )
+            })
+            .when(pronta && !self.transformando(), |barra| {
+                let ed = cx.entity();
+                let tem_selecao = self.sessao().and_then(Sessao::selecao).is_some();
+                barra.child(
+                    crate::estilo::botao_contorno_pequeno("editor-menu-transformar", cx)
+                        .debug_selector(|| "editor-menu-transformar".into())
+                        .label("Transformar ▾")
+                        .tooltip("Transformação livre (⌘T), Deformar (malha) e Transformar seleção")
+                        .dropdown_menu_with_anchor(
+                            gpui_kit::Anchor::TopLeft,
+                            move |menu, _window, _cx| {
+                                let item = |id: &'static str,
+                                            rotulo: &'static str,
+                                            ligado: bool,
+                                            fazer: fn(
+                                    &mut EditorDeFoto,
+                                    &mut Context<EditorDeFoto>,
+                                )| {
+                                    let ed = ed.clone();
+                                    crate::estilo::item_de_menu(id, rotulo, None)
+                                        .disabled(!ligado)
+                                        .on_click(move |_ev, _window, cx| {
+                                            ed.update(cx, fazer);
+                                        })
+                                };
+                                menu.item(item(
+                                    "editor-transformar-livre",
+                                    "Transformação livre  ⌘T",
+                                    true,
+                                    |ed, cx| ed.transformar(cx),
+                                ))
+                                .item(item(
+                                    "editor-transformar-deformar",
+                                    "Deformar",
+                                    true,
+                                    |ed, cx| ed.deformar(cx),
+                                ))
+                                .separator()
+                                .item(item(
+                                    "editor-transformar-a-selecao",
+                                    "Transformar seleção",
+                                    tem_selecao,
+                                    |ed, cx| ed.transformar_selecao(cx),
+                                ))
+                            },
+                        ),
+                )
             })
             .when_some(self.aviso.clone(), |barra, (texto, erro)| {
                 barra.child(
@@ -5901,6 +6415,63 @@ impl EditorDeFoto {
     /// gestos — a barra do Photoshop durante a transformação livre.
     fn barra_da_transformacao(&self, cx: &mut Context<Self>) -> AnyElement {
         let tema = cx.theme().clone();
+        if self.deformando() {
+            let intocada = self.sessao().is_some_and(Sessao::malha_intocada);
+            return div()
+                .id("editor-opcoes-do-deformar")
+                .debug_selector(|| "editor-opcoes-do-deformar".into())
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap(px(10.))
+                .px(px(12.))
+                .py(px(6.))
+                .border_b_1()
+                .border_color(tema.border)
+                .child(
+                    div()
+                        .text_xs()
+                        .child("Deformar — grade de 3 × 3 células (16 pontos de controle)"),
+                )
+                .child(
+                    div().debug_selector(|| "editor-grade-do-deformar".into()).child(
+                        gpui_kit::component::checkbox::Checkbox::new("editor-grade-do-deformar")
+                            .xsmall()
+                            .label("Mostrar a grade")
+                            .checked(self.grade_visivel)
+                            .on_click(cx.listener(|ed, _: &bool, _, cx| ed.alternar_grade(cx))),
+                    ),
+                )
+                .child(
+                    crate::estilo::botao_contorno_pequeno("editor-redefinir-malha", cx)
+                        .debug_selector(|| "editor-redefinir-malha".into())
+                        .label("Redefinir")
+                        .tooltip("Volta à malha do começo, sem aplicar")
+                        .disabled(intocada)
+                        .on_click(cx.listener(|ed, _, _, cx| ed.redefinir_malha(cx))),
+                )
+                .child(
+                    crate::estilo::botao_fantasma_pequeno("editor-voltar-a-transformacao", cx)
+                        .debug_selector(|| "editor-voltar-a-transformacao".into())
+                        .label("Transformação livre")
+                        .tooltip(if intocada {
+                            "Volta à caixa da transformação livre"
+                        } else {
+                            "Só com a malha intocada (Redefinir antes): uma malha deformada não cabe numa caixa"
+                        })
+                        .disabled(!intocada)
+                        .on_click(cx.listener(|ed, _, _, cx| ed.voltar_a_transformacao_livre(cx))),
+                )
+                .child(div().flex_1())
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(tema.muted_foreground)
+                        .child("Arraste um ponto (o canto leva as alças junto) ou puxe por dentro da malha · Enter aplica · Esc cancela"),
+                )
+                .into_any_element();
+        }
+        let so_o_contorno = self.sessao().is_some_and(Sessao::transformando_a_selecao);
         div()
             .id("editor-opcoes-da-transformacao")
             .debug_selector(|| "editor-opcoes-da-transformacao".into())
@@ -5947,6 +6518,15 @@ impl EditorDeFoto {
                             })
                             .collect::<Vec<_>>()
                     })
+            .when(!so_o_contorno, |barra| {
+                barra.child(
+                    crate::estilo::botao_contorno_pequeno("editor-alternar-deformar", cx)
+                        .debug_selector(|| "editor-alternar-deformar".into())
+                        .label("Deformar")
+                        .tooltip("Trocar a caixa pela malha de 3 × 3 células (Warp)")
+                        .on_click(cx.listener(|ed, _, _, cx| ed.deformar(cx))),
+                )
+            })
             .child(div().flex_1())
             .child(
                 div()
@@ -6164,7 +6744,7 @@ impl EditorDeFoto {
                             )
                         },
                     )
-                    .when(ferramenta == Some(Ferramenta::Carimbo), |painel| {
+                    .when(ferramenta.is_some_and(Ferramenta::copia_da_origem), |painel| {
                         let opcoes = self.sessao().map(|s| s.carimbo).unwrap_or_default();
                         painel
                             .child(
@@ -6217,6 +6797,27 @@ impl EditorDeFoto {
                                             ),
                                     ),
                             )
+                    })
+                    .when(ferramenta == Some(Ferramenta::Recuperacao), |painel| {
+                        painel
+                            .child(
+                                div()
+                                    .flex()
+                                    .justify_between()
+                                    .text_xs()
+                                    .text_color(tema.muted_foreground)
+                                    .child("Difusão da recuperação")
+                                    .child(format!("{}", p.difusao)),
+                            )
+                            .child(
+                                div()
+                                    .h(px(20.))
+                                    .debug_selector(|| "editor-difusao-da-recuperacao".into())
+                                    .child(crate::estilo::slider(&self.difusao_da_recuperacao)),
+                            )
+                            .child(div().text_xs().text_color(tema.muted_foreground).child(
+                                "Baixa: a cor casa pixel a pixel com a borda (grão, textura fina). Alta: casa com a média em volta (transição mais lisa). Não é a difusão da seleção. A cor se adapta ao soltar o botão; perto de uma aresta forte (a mandíbula), passe sem tocá-la ou selecione antes.",
+                            ))
                     })
                     .child(rotulo("Tamanho  [  ]"))
                     .child(
@@ -6377,13 +6978,15 @@ impl EditorDeFoto {
                 s.documento()
                     .camadas
                     .iter()
-                    .map(|c| {
+                    .enumerate()
+                    .map(|(i, c)| {
                         (
                             c.nome.clone(),
                             c.visivel,
                             c.modo,
                             c.mascara.as_ref().map(|m| m.ativa),
                             c.ajuste.is_some(),
+                            s.documento().base_do_recorte(i).is_some(),
                         )
                     })
                     .collect::<Vec<_>>(),
@@ -6395,6 +6998,19 @@ impl EditorDeFoto {
         let na_mascara = self.na_mascara();
         let tem_mascara = camadas.get(ativa).is_some_and(|c| c.3.is_some());
         let quantas = camadas.len();
+        let (ativa_recortada, ativa_pode_recortar, ativa_e_base) = self
+            .sessao()
+            .map(|s| {
+                let doc = s.documento();
+                (
+                    doc.camadas.get(ativa).is_some_and(|c| c.recortada),
+                    s.pode_recortar(ativa),
+                    doc.camadas.get(ativa).is_some_and(|c| !c.recortada)
+                        && doc.fim_do_conjunto(ativa) > ativa,
+                )
+            })
+            .unwrap_or_default();
+        let criando_a_fotografia = self.criando_a_fotografia;
         let renomeando = self.renomeando.clone();
         let miniaturas = self.miniaturas.clone();
         let das_mascaras = self.miniaturas_das_mascaras.clone();
@@ -6407,7 +7023,7 @@ impl EditorDeFoto {
             .into_iter()
             .enumerate()
             .rev()
-            .map(|(i, (nome, visivel, modo, mascara, de_ajuste))| {
+            .map(|(i, (nome, visivel, modo, mascara, de_ajuste, recortada))| {
                 let escolhida = i == ativa;
                 let id_do_olho: SharedString = format!("editor-olho-{i}").into();
                 let olho = crate::estilo::botao_icone_pequeno(
@@ -6437,7 +7053,7 @@ impl EditorDeFoto {
                         .child(nome)
                         .into_any_element(),
                 };
-                div()
+                let linha = div()
                     .id(("editor-camada", i))
                     .debug_selector(move || format!("editor-camada-{i}"))
                     .flex()
@@ -6457,6 +7073,24 @@ impl EditorDeFoto {
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                             .child(olho),
                     )
+                    // Recortada: recuada, com a seta que desce para a base.
+                    .when(recortada, |d| {
+                        d.child(
+                            div()
+                                .id(("editor-recorte", i))
+                                .debug_selector(move || format!("editor-recorte-{i}"))
+                                .w(px(14.))
+                                .text_sm()
+                                .text_color(cor_da_moldura)
+                                .child("↳")
+                                .tooltip(|window, cx| {
+                                    gpui_kit::component::tooltip::Tooltip::new(
+                                        "Máscara de corte: aparece só onde a camada de baixo tem pixels (⌥ + clique na divisa libera)",
+                                    )
+                                    .build(window, cx)
+                                }),
+                        )
+                    })
                     // A camada de ajuste não tem pixels: o ícone dela, como no
                     // Photoshop.
                     .when(de_ajuste, |d| {
@@ -6577,7 +7211,102 @@ impl EditorDeFoto {
                                 }
                             }
                         }),
-                    )
+                    );
+                // O botão direito na linha: o menu da camada (ela passa a ser
+                // a escolhida, como no Photoshop).
+                let ed = cx.entity();
+                let linha = linha.context_menu(move |menu, window, cx| {
+                    let menu = match window.focused(cx) {
+                        Some(antes) => menu.action_context(antes),
+                        None => menu,
+                    };
+                    let (recortada, pode, quantas) = ed.update(cx, |ed, cx| {
+                        ed.escolher_camada(i, cx);
+                        ed.sessao()
+                            .map(|s| {
+                                (
+                                    s.documento().camadas.get(i).is_some_and(|c| c.recortada),
+                                    s.pode_recortar(i),
+                                    s.documento().camadas.len(),
+                                )
+                            })
+                            .unwrap_or_default()
+                    });
+                    let item = |id: &'static str, rotulo: &'static str, ligado: bool, fazer: fn(&mut EditorDeFoto, &mut Context<EditorDeFoto>)| {
+                        let ed = ed.clone();
+                        crate::estilo::item_de_menu(id, rotulo, None)
+                            .disabled(!ligado)
+                            .on_click(move |_ev, _window, cx| {
+                                ed.update(cx, fazer);
+                            })
+                    };
+                    let recorte = {
+                        let ed = ed.clone();
+                        crate::estilo::item_de_menu(
+                            "editor-menu-recorte",
+                            if recortada {
+                                "Liberar máscara de corte  ⌥⌘G"
+                            } else {
+                                "Criar máscara de corte  ⌥⌘G"
+                            },
+                            None,
+                        )
+                        .disabled(!recortada && !pode)
+                        .on_click(move |_ev, _window, cx| {
+                            ed.update(cx, |ed, cx| ed.alternar_mascara_de_corte(i, cx));
+                        })
+                    };
+                    menu.item(recorte)
+                        .separator()
+                        .item(item(
+                            "editor-menu-duplicar",
+                            "Duplicar camada",
+                            true,
+                            |ed, cx| ed.duplicar_camada_inteira(cx),
+                        ))
+                        .item(item(
+                            "editor-menu-fotografia",
+                            "Criar camada da fotografia base",
+                            true,
+                            |ed, cx| ed.criar_camada_da_fotografia(cx),
+                        ))
+                        .item(item(
+                            "editor-menu-mesclar",
+                            "Mesclar para baixo  ⌘E",
+                            i > 0 && quantas > 1,
+                            |ed, cx| ed.mesclar_para_baixo(cx),
+                        ))
+                        .item(item(
+                            "editor-menu-excluir",
+                            "Excluir camada",
+                            quantas > 1,
+                            |ed, cx| ed.excluir_camada(cx),
+                        ))
+                });
+                // A divisa com a de baixo: ⌥ + clique cria ou libera a máscara
+                // de corte da de cima (a desta linha).
+                let divisa = (i > 0).then(|| {
+                    div()
+                        .id(("editor-divisa", i))
+                        .debug_selector(move || format!("editor-divisa-{i}"))
+                        .h(px(4.))
+                        .mx(px(4.))
+                        .rounded(crate::tema::canto(2.))
+                        .hover(|d| d.bg(tema.border))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |ed, e: &MouseDownEvent, window, cx| {
+                                cx.stop_propagation();
+                                if e.modifiers.alt {
+                                    ed.alternar_mascara_de_corte(i, cx);
+                                } else {
+                                    ed.escolher_camada(i, cx);
+                                }
+                                window.focus(&ed.foco, cx);
+                            }),
+                        )
+                });
+                div().flex().flex_col().child(linha).children(divisa)
             });
         let botao = |id: &'static str, icone: Icone, dica: &'static str, ligado: bool| {
             crate::estilo::botao_icone_pequeno(id, icone)
@@ -6616,7 +7345,6 @@ impl EditorDeFoto {
                     .id("editor-camadas")
                     .flex()
                     .flex_col()
-                    .gap(px(2.))
                     .flex_1()
                     .min_h(px(0.))
                     .overflow_y_scroll()
@@ -6689,7 +7417,7 @@ impl EditorDeFoto {
                         botao(
                             "editor-camada-mais",
                             Icone::EllipsisVertical,
-                            "Mais: duplicar, subir, descer, mesclar",
+                            "Mais: duplicar, fotografia base, máscara de corte, subir, descer, mesclar",
                             pode_desfazer_alguma,
                         )
                         .dropdown_menu_with_anchor(
@@ -6709,12 +7437,49 @@ impl EditorDeFoto {
                                             ed.update(cx, fazer);
                                         })
                                 };
+                                let recorte = {
+                                    let ed = ed.clone();
+                                    crate::estilo::item_de_menu(
+                                        "editor-camada-recorte",
+                                        if ativa_recortada {
+                                            "Liberar máscara de corte  ⌥⌘G"
+                                        } else {
+                                            "Criar máscara de corte  ⌥⌘G"
+                                        },
+                                        None,
+                                    )
+                                    .disabled(!ativa_recortada && !ativa_pode_recortar)
+                                    .on_click(move |_ev, _window, cx| {
+                                        ed.update(cx, |ed, cx| {
+                                            ed.alternar_mascara_de_corte(ativa, cx)
+                                        });
+                                    })
+                                };
                                 menu.item(item(
                                     "editor-camada-duplicar",
-                                    "Duplicar a camada  ⌘J",
+                                    "Duplicar camada (exata)",
+                                    true,
+                                    |ed, cx| ed.duplicar_camada_inteira(cx),
+                                ))
+                                .item(item(
+                                    "editor-camada-via-copia",
+                                    "Camada via cópia  ⌘J",
                                     true,
                                     |ed, cx| ed.duplicar_camada(cx),
                                 ))
+                                .item(item(
+                                    "editor-camada-fotografia",
+                                    if criando_a_fotografia {
+                                        "Criando a camada da fotografia…"
+                                    } else {
+                                        "Criar camada da fotografia base"
+                                    },
+                                    !criando_a_fotografia,
+                                    |ed, cx| ed.criar_camada_da_fotografia(cx),
+                                ))
+                                .separator()
+                                .item(recorte)
+                                .separator()
                                 .item(item(
                                     "editor-camada-subir",
                                     "Subir a camada  ⌘]",
@@ -6729,8 +7494,12 @@ impl EditorDeFoto {
                                 ))
                                 .item(item(
                                     "editor-camada-mesclar",
-                                    "Mesclar para baixo  ⌘E",
-                                    pode_descer,
+                                    if ativa_e_base {
+                                        "Mesclar máscara de corte  ⌘E"
+                                    } else {
+                                        "Mesclar para baixo  ⌘E"
+                                    },
+                                    pode_descer || ativa_e_base,
                                     |ed, cx| ed.mesclar_para_baixo(cx),
                                 ))
                             },
@@ -7699,6 +8468,12 @@ impl Render for EditorDeFoto {
             .on_action(cx.listener(|ed, _: &GrupoW, _, cx| ed.pela_letra('w', false, cx)))
             .on_action(cx.listener(|ed, _: &GrupoI, _, cx| ed.pela_letra('i', false, cx)))
             .on_action(cx.listener(|ed, _: &GrupoJ, _, cx| ed.pela_letra('j', false, cx)))
+            .on_action(cx.listener(|ed, _: &ProximaDoGrupoJ, _, cx| ed.pela_letra('j', true, cx)))
+            .on_action(cx.listener(|ed, _: &AlternarMascaraDeCorte, _, cx| {
+                if let Some(i) = ed.sessao().map(Sessao::ativa) {
+                    ed.alternar_mascara_de_corte(i, cx);
+                }
+            }))
             .on_action(cx.listener(|ed, _: &GrupoB, _, cx| ed.pela_letra('b', false, cx)))
             .on_action(cx.listener(|ed, _: &GrupoS, _, cx| ed.pela_letra('s', false, cx)))
             .on_action(cx.listener(|ed, _: &GrupoE, _, cx| ed.pela_letra('e', false, cx)))

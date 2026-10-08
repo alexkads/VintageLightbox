@@ -2034,7 +2034,11 @@ mod testes {
             )
         });
         assert_eq!((quantas, dentro, fora), (2, 255, 0));
+        // Como no Photoshop, a seleção sai com a cópia (o ⌘J seguinte
+        // duplicaria a camada nova exata).
+        assert!(selecao_de(&editor, &ve).is_none());
         editor.update(&mut ve, |ed, cx| ed.escolher_camada(0, cx));
+        arrastar_no_palco(&mut ve, (0.0, 0.0), (0.5, 0.5));
         ve.simulate_keystrokes("cmd-shift-j");
         ve.run_until_parked();
         let (quantas, recortado, resto) = editor.read_with(&ve, |ed, _| {
@@ -3105,5 +3109,253 @@ mod testes {
         arrastar_com(&mut ve, a, b, nada, nada);
         assert_eq!(pixel(&mut ve, 4, 4), [255, 0, 0, 255]);
         assert_eq!(pixel(&mut ve, 15, 15), [255, 0, 0, 255], "inteiro");
+    }
+
+    /// ✂️ O retoque de queixo e pescoço do Photoshop, de ponta a ponta pela
+    /// tela: camada da fotografia, laço poligonal, difusão, duas camadas via
+    /// cópia, máscara de corte (⌥ + clique na divisa), Deformar (cancelar e
+    /// confirmar), recuperação com origem manual, mesclar e salvar/reabrir.
+    #[gpui_kit::test]
+    fn o_retoque_do_queixo_pela_tela(cx: &mut TestAppContext) {
+        use crate::editor::janela::Modificacao;
+        let (m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        let nada = gpui_kit::Modifiers::none();
+        let alt = gpui_kit::Modifiers {
+            alt: true,
+            ..Default::default()
+        };
+        let doc = |ve: &VisualTestContext| {
+            editor.read_with(ve, |ed, _| ed.sessao().unwrap().documento().clone())
+        };
+
+        // 1. A camada da fotografia, pelo menu ⋯ (montada em segundo plano).
+        clicar_no_editor(&mut ve, "editor-camada-mais");
+        clicar_no_editor(&mut ve, "editor-camada-fotografia");
+        ve.run_until_parked();
+        let (nomes, ativa) = camadas(&editor, &ve);
+        assert_eq!(nomes, vec!["Fotografia".to_string(), "Pintura".to_string()]);
+        assert_eq!(ativa, 0);
+        let base = editor.read_with(&ve, |ed, _| ed.sessao().unwrap().base().clone());
+        assert_eq!(doc(&ve).camadas[0].pixels.pixel(10, 20), {
+            let b = base.get_pixel(10, 20).0;
+            [b[0], b[1], b[2], 255]
+        });
+
+        // 2. O laço poligonal em volta do "queixo".
+        ve.simulate_keystrokes("l shift-l");
+        ve.run_until_parked();
+        for f in [
+            (0.25, 0.4),
+            (0.75, 0.4),
+            (0.75, 0.85),
+            (0.25, 0.85),
+            (0.25, 0.4),
+        ] {
+            let p = ponto_da_foto(&mut ve, &editor, f);
+            ve.simulate_click(p, nada);
+            ve.run_until_parked();
+        }
+        assert!(selecao_de(&editor, &ve).is_some(), "o polígono fechou");
+
+        // 3. Difusão de 2 px pelo menu de contexto do palco.
+        let p = ponto_da_foto(&mut ve, &editor, (0.5, 0.6));
+        ve.simulate_mouse_down(p, gpui_kit::MouseButton::Right, nada);
+        ve.simulate_mouse_up(p, gpui_kit::MouseButton::Right, nada);
+        ve.run_until_parked();
+        assert!(
+            ve.debug_bounds("editor-contexto-via-copia").is_some(),
+            "o menu da seleção"
+        );
+        clicar_no_editor(&mut ve, "editor-contexto-difundir");
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.modificando()),
+            Some(Modificacao::Difundir)
+        );
+        ve.update(|window, cx| {
+            editor.update(cx, |ed, cx| {
+                ed.cancelar_modificacao(window, cx);
+                ed.modificar_selecao(Modificacao::Difundir, 2, cx);
+            })
+        });
+        ve.run_until_parked();
+        let borda = selecao_de(&editor, &ve).unwrap().valor(16, 30);
+        assert!((1..255).contains(&borda), "borda difusa: {borda}");
+
+        // 4. ⌘J duas vezes: o trecho e a cópia exata dele.
+        ve.simulate_keystrokes("cmd-j");
+        ve.run_until_parked();
+        assert!(
+            selecao_de(&editor, &ve).is_none(),
+            "a seleção sai com a cópia"
+        );
+        ve.simulate_keystrokes("cmd-j");
+        ve.run_until_parked();
+        let d = doc(&ve);
+        assert_eq!(d.camadas.len(), 4);
+        assert_eq!(d.camadas[2].pixels, d.camadas[1].pixels, "duas iguais");
+        assert_eq!(d.camadas[1].pixels.pixel(16, 30)[3], borda);
+
+        // 5. ⌥ + clique na divisa: a de cima recortada pela de baixo.
+        let divisa = ve.debug_bounds("editor-divisa-2").expect("a divisa");
+        ve.simulate_click(divisa.center(), alt);
+        ve.run_until_parked();
+        assert!(doc(&ve).camadas[2].recortada);
+        assert!(
+            ve.debug_bounds("editor-recorte-2").is_some(),
+            "o ↳ no painel"
+        );
+
+        // 6. Deformar pelo menu Transformar ▾: Esc devolve tudo.
+        let antes = doc(&ve);
+        let passos_antes = passos_de(&editor, &ve);
+        clicar_no_editor(&mut ve, "editor-menu-transformar");
+        clicar_no_editor(&mut ve, "editor-transformar-deformar");
+        assert!(editor.read_with(&ve, |ed, _| ed.deformando()));
+        assert!(ve.debug_bounds("editor-opcoes-do-deformar").is_some());
+        let arrastar_o_ponto = |ve: &mut VisualTestContext| {
+            // Um quadro novo: a barra de opções trocou e o palco andou.
+            ve.update(|window, _| window.refresh());
+            ve.run_until_parked();
+            let (_, m) = editor
+                .read_with(ve, |ed, _| ed.sessao().unwrap().malha())
+                .unwrap();
+            let (x, y) = m.pontos[3][1];
+            let a = ponto_da_foto(ve, &editor, (x / 64.0, y / 48.0));
+            let desenhado = ve
+                .debug_bounds("editor-malha-3-1")
+                .expect("o ponto")
+                .center();
+            assert!(
+                (desenhado.x - a.x).abs() < gpui_kit::px(2.)
+                    && (desenhado.y - a.y).abs() < gpui_kit::px(2.),
+                "o ponto desenhado ({desenhado:?}) está onde ele pega ({a:?})"
+            );
+            let b = a - gpui_kit::point(gpui_kit::px(0.), gpui_kit::px(60.));
+            arrastar_com(
+                ve,
+                a,
+                b,
+                gpui_kit::Modifiers::none(),
+                gpui_kit::Modifiers::none(),
+            );
+        };
+        let malha = |ve: &VisualTestContext| {
+            editor.read_with(ve, |ed, _| {
+                ed.sessao().unwrap().malha().map(|(_, m)| m.pontos)
+            })
+        };
+        let m0 = malha(&ve);
+        arrastar_o_ponto(&mut ve);
+        assert_ne!(malha(&ve), m0, "o ponto andou");
+        assert_ne!(
+            doc(&ve).camadas[2].pixels,
+            antes.camadas[2].pixels,
+            "a prévia"
+        );
+        ve.simulate_keystrokes("escape");
+        ve.run_until_parked();
+        assert_eq!(doc(&ve), antes, "Esc restaura");
+        assert_eq!(passos_de(&editor, &ve), passos_antes);
+
+        // 7. De novo, pelo ⌘T e o menu de contexto, e Enter: um passo.
+        ve.simulate_keystrokes("cmd-t");
+        ve.run_until_parked();
+        let p = ponto_da_foto(&mut ve, &editor, (0.5, 0.6));
+        ve.simulate_mouse_down(p, gpui_kit::MouseButton::Right, nada);
+        ve.simulate_mouse_up(p, gpui_kit::MouseButton::Right, nada);
+        ve.run_until_parked();
+        clicar_no_editor(&mut ve, "editor-contexto-deformar");
+        assert!(editor.read_with(&ve, |ed, _| ed.deformando()));
+        arrastar_o_ponto(&mut ve);
+        ve.simulate_keystrokes("enter");
+        ve.run_until_parked();
+        assert!(!editor.read_with(&ve, |ed, _| ed.transformando()));
+        assert_eq!(passos_de(&editor, &ve), passos_antes + 1);
+        let deformado = doc(&ve);
+        assert_ne!(deformado.camadas[2].pixels, antes.camadas[2].pixels);
+        ve.simulate_keystrokes("cmd-z");
+        ve.run_until_parked();
+        assert_eq!(doc(&ve), antes);
+        ve.simulate_keystrokes("cmd-shift-z");
+        ve.run_until_parked();
+        assert_eq!(doc(&ve), deformado);
+
+        // 8. A recuperação (J, ⇧J) numa camada vazia por cima, com a origem
+        // escolhida com ⌥ + clique.
+        ve.simulate_keystrokes("cmd-shift-n j shift-j");
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.ferramenta()),
+            Some(editor_core::Ferramenta::Recuperacao)
+        );
+        let origem = ponto_da_foto(&mut ve, &editor, (0.15, 0.2));
+        ve.simulate_mouse_down(origem, gpui_kit::MouseButton::Left, alt);
+        ve.simulate_mouse_up(origem, gpui_kit::MouseButton::Left, alt);
+        ve.run_until_parked();
+        assert!(editor.read_with(&ve, |ed, _| ed.sessao().unwrap().origem().is_some()));
+        editor.update(&mut ve, |ed, cx| {
+            ed.na_sessao_para_teste(cx, |s| s.pincel.raio = 4.0);
+            ed.tracar_para_teste((40., 30.), (44., 34.), cx)
+        });
+        let d = doc(&ve);
+        assert_eq!(d.camadas.len(), 5);
+        // A nova entrou logo acima da escolhida (a recortada), fora do
+        // conjunto — acima dela não há recortada.
+        assert!(!d.camadas[3].recortada);
+        assert!(
+            !d.camadas[3].pixels.vazia(),
+            "a recuperação pintou na camada nova"
+        );
+        assert_eq!(
+            d.camadas[2].pixels, deformado.camadas[2].pixels,
+            "o deformado ficou"
+        );
+
+        // 9. Salvar com as camadas separadas, fechar e reabrir.
+        let (janela_do_editor, _) = o_editor(&m, cx);
+        let salvo = doc(&ve);
+        cx.update_window(janela_do_editor, |_, window, cx| {
+            editor.update(cx, |ed, cx| ed.salvar(false, window, cx))
+        })
+        .unwrap();
+        ve.run_until_parked();
+        assert!(!editor.read_with(&ve, |ed, _| ed.alterado()), "salvo");
+        let revisao = m
+            .janela
+            .update(cx, |app, _w, cx| app.revelacao.read(cx).revisao_da_aberta())
+            .unwrap();
+        assert_eq!(revisao, 1, "a Revelação usa a imagem editada");
+        cx.update_window(janela_do_editor, |_, window, cx| {
+            editor.update(cx, |ed, cx| ed.fechar(window, cx))
+        })
+        .unwrap();
+        drop(editor);
+        drop(ve);
+        cx.run_until_parked();
+        m.janela
+            .update(cx, |app, _w, cx| {
+                app.revelacao
+                    .update(cx, |tela, cx| tela.pedir_edicao_para_teste(0, cx));
+            })
+            .unwrap();
+        cx.run_until_parked();
+        let (_, reaberto) = o_editor(&m, cx);
+        let d = reaberto.read_with(cx, |ed, _| ed.sessao().unwrap().documento().clone());
+        assert_eq!(d, salvo, "camadas, recorte e pixels voltam");
+        assert!(d.camadas[2].recortada);
+
+        // 10. Mesclar a recortada na base: a foto não muda.
+        let foto = reaberto.read_with(cx, |ed, _| ed.sessao().unwrap().compor());
+        reaberto.update(cx, |ed, cx| {
+            ed.escolher_camada(2, cx);
+            ed.mesclar_para_baixo(cx);
+        });
+        let (foto2, quantas) = reaberto.read_with(cx, |ed, _| {
+            let s = ed.sessao().unwrap();
+            (s.compor(), s.documento().camadas.len())
+        });
+        assert_eq!(quantas, 4);
+        assert_eq!(foto2, foto, "mesclar não muda a foto");
     }
 }
