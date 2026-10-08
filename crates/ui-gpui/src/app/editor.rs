@@ -445,7 +445,8 @@ mod testes {
             })
             .unwrap();
 
-        // E a opção logo abaixo continua lá: ↓ ×4 é "Escolher também".
+        // E o grupo da escolha vem depois de "Baixar como…": ↓ ×5 é
+        // "Escolher também".
         m.janela
             .update(cx, |app, window, cx| {
                 app.revelacao.update(cx, |tela, cx| {
@@ -456,7 +457,7 @@ mod testes {
             })
             .unwrap();
         visual.run_until_parked();
-        visual.simulate_keystrokes("down down down down enter");
+        visual.simulate_keystrokes("down down down down down enter");
         visual.run_until_parked();
         m.janela
             .update(cx, |app, _w, cx| {

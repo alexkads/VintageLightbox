@@ -1617,6 +1617,13 @@ impl Revelacao {
 ///
 /// 🔑 Curto de propósito: as ações de acervo (nota, levada, apagar) são da
 /// galeria; aqui o assunto é o lote que vai receber os ajustes.
+///
+/// 🗂️ **Quatro grupos, do gesto leve ao que não tem volta** (dono, 08/10/2026:
+/// o menu estava "feio e sem organização"): esta foto · a escolha · o lote ·
+/// desfazer. Cada item com ícone, `⌘A`/`⌘D` à direita como o kit desenha
+/// atalho, e o que não se aplica à clicada **some** em vez de ficar cinza —
+/// metade do menu apagada era o que o deixava confuso. Grupo vazio não deixa
+/// separador.
 fn montar_o_menu(
     menu: gpui_kit::component::menu::PopupMenu,
     dados: Menu,
@@ -1640,109 +1647,169 @@ fn montar_o_menu(
     let para_editar = esta.clone();
     let para_excluir = esta.clone();
 
-    menu.label(dados.arquivo)
-        .separator()
-        .item(
+    // Esta foto.
+    let mut desta: Vec<PopupMenuItem> = Vec::new();
+    if !dados.e_a_aberta {
+        desta.push(
             PopupMenuItem::new("Abrir esta foto")
-                .disabled(dados.e_a_aberta)
+                .icon(Icon::new(Icone::Maximize2))
                 .on_click(move |_ev, window, cx| {
                     let _ = para_abrir.update(cx, |tela, cx| tela.ir_para(clicada, window, cx));
                 }),
-        )
-        // 🖌️ O editor em camadas, numa janela própria — **a clicada**, mesmo
-        // com várias marcadas: editar pixel é gesto de uma foto só, e o lote
-        // continua marcado para o que vier depois.
-        .item(
+        );
+    }
+    // 🖌️ O editor em camadas, numa janela própria — **a clicada**, mesmo
+    // com várias marcadas: editar pixel é gesto de uma foto só, e o lote
+    // continua marcado para o que vier depois.
+    if dados.editavel {
+        desta.push(
             PopupMenuItem::new("Editar Foto")
-                .disabled(!dados.editavel)
+                .icon(Icon::new(Icone::Pencil))
                 .on_click(move |_ev, _window, cx| {
                     let _ = para_editar.update(cx, |tela, cx| tela.pedir_edicao(clicada, cx));
                 }),
-        )
-        // 🖌️ Volta a foto ao bruto: o projeto e a imagem editada saem, e a
-        // **revelação fica**. Pergunta antes — não tem volta.
-        .item(
-            PopupMenuItem::new("Excluir a edição")
-                .disabled(!dados.com_edicao)
-                .on_click(move |_ev, window, cx| {
-                    let _ = para_excluir
-                        .update(cx, |tela, cx| tela.pedir_exclusao(clicada, window, cx));
-                }),
-        )
-        .item(
-            PopupMenuItem::new(if dados.na_escolha && !dados.e_a_aberta {
-                "Tirar da escolha"
-            } else {
-                "Escolher também"
-            })
-            .on_click(move |_ev, window, cx| {
-                let _ = para_escolher.update(cx, |tela, cx| {
-                    tela.clicar_na_tira(
-                        clicada,
-                        Modificadores {
-                            aditivo: true,
-                            faixa: false,
-                        },
-                        window,
-                        cx,
-                    )
-                });
-            }),
-        )
-        .item(
-            PopupMenuItem::new("Escolher todas")
-                .on_click(com(|tela, _window, cx| tela.marcar_todas(cx))),
-        )
-        .item(
-            PopupMenuItem::new("Desmarcar todas")
-                .on_click(com(|tela, _window, cx| tela.desmarcar(cx))),
-        )
-        .separator()
-        .item(
-            PopupMenuItem::new(if n_alvos > 1 {
-                format!("Baixar como… ({n_alvos})")
-            } else {
-                "Baixar como…".to_string()
-            })
-            .disabled(n_alvos == 0)
-            .on_click(move |_ev, window, cx| {
-                let alvos = alvos_baixar.clone();
-                let _ = para_baixar.update(cx, |tela, cx| tela.baixar_pelo_menu(alvos, window, cx));
-            }),
-        )
-        .separator()
-        .item(
+        );
+    }
+    desta.push(
+        PopupMenuItem::new(if n_alvos > 1 {
+            format!("Baixar como… ({n_alvos})")
+        } else {
+            "Baixar como…".to_string()
+        })
+        .icon(Icon::new(Icone::Download))
+        .disabled(n_alvos == 0)
+        .on_click(move |_ev, window, cx| {
+            let alvos = alvos_baixar.clone();
+            let _ = para_baixar.update(cx, |tela, cx| tela.baixar_pelo_menu(alvos, window, cx));
+        }),
+    );
+
+    // A escolha (o lote que recebe os ajustes).
+    let tirar = dados.na_escolha && !dados.e_a_aberta;
+    let escolha = vec![
+        PopupMenuItem::new(if tirar {
+            "Tirar da escolha"
+        } else {
+            "Escolher também"
+        })
+        .icon(Icon::new(if tirar {
+            Icone::CircleMinus
+        } else {
+            Icone::CirclePlus
+        }))
+        .on_click(move |_ev, window, cx| {
+            let _ = para_escolher.update(cx, |tela, cx| {
+                tela.clicar_na_tira(
+                    clicada,
+                    Modificadores {
+                        aditivo: true,
+                        faixa: false,
+                    },
+                    window,
+                    cx,
+                )
+            });
+        }),
+        com_atalho("Escolher todas", "secondary-a")
+            .icon(Icon::new(Icone::SquareCheck))
+            .on_click(com(|tela, _window, cx| tela.marcar_todas(cx))),
+        com_atalho("Desmarcar todas", "secondary-d")
+            .icon(Icon::new(Icone::Square))
+            .disabled(dados.marcadas < 2)
+            .on_click(com(|tela, _window, cx| tela.desmarcar(cx))),
+    ];
+
+    // O lote.
+    let mut lote: Vec<PopupMenuItem> = Vec::new();
+    if dados.pode_sincronizar {
+        lote.push(
             PopupMenuItem::new(format!("Sincronizar {} com esta", dados.marcadas))
-                .disabled(!dados.pode_sincronizar)
+                .icon(Icon::new(Icone::RefreshCw))
                 .on_click(com(|tela, window, cx| tela.abrir_sincronizacao(window, cx))),
-        )
-        .item(
+        );
+    }
+    if dados.quantas_zeram > 0 {
+        lote.push(
             PopupMenuItem::new(if dados.quantas_zeram > 1 {
                 format!("Zerar {} fotos", dados.quantas_zeram)
             } else {
                 "Zerar tudo".to_string()
             })
-            .disabled(dados.quantas_zeram == 0)
+            .icon(Icon::new(Icone::RotateCcw))
             .on_click(move |_ev, window, cx| {
                 let alvos = alvos_zerar.clone();
                 let _ = para_zerar.update(cx, |tela, cx| tela.zerar_pelo_menu(alvos, window, cx));
             }),
-        )
-        // 🗑️ O caminho de volta: a edição que não foi salva sai, e a foto
-        // fica como está na galeria (ver `descartar.rs`).
-        .item(
+        );
+    }
+
+    // Desfazer — o que não tem volta fica por último.
+    let mut desfazer: Vec<PopupMenuItem> = Vec::new();
+    // 🗑️ O caminho de volta: a edição que não foi salva sai, e a foto
+    // fica como está na galeria (ver `descartar.rs`).
+    if n_descartar > 0 {
+        desfazer.push(
             PopupMenuItem::new(if n_descartar > 1 {
                 format!("Descartar a revelação de {n_descartar} fotos")
             } else {
                 "Descartar a revelação".to_string()
             })
-            .disabled(n_descartar == 0)
+            .icon(Icon::new(Icone::Undo2))
             .on_click(move |_ev, window, cx| {
                 let alvos = alvos_descartar.clone();
                 let _ = para_descartar
                     .update(cx, |tela, cx| tela.descartar_pelo_menu(alvos, window, cx));
             }),
-        )
+        );
+    }
+    // 🖌️ Volta a foto ao bruto: o projeto e a imagem editada saem, e a
+    // **revelação fica**. Pergunta antes — não tem volta.
+    if dados.com_edicao {
+        desfazer.push(
+            PopupMenuItem::new("Excluir a edição…")
+                .icon(Icon::new(Icone::Trash2))
+                .on_click(move |_ev, window, cx| {
+                    let _ = para_excluir
+                        .update(cx, |tela, cx| tela.pedir_exclusao(clicada, window, cx));
+                }),
+        );
+    }
+
+    let mut menu = menu.min_w(px(240.)).label(dados.arquivo);
+    for grupo in [desta, escolha, lote, desfazer] {
+        if grupo.is_empty() {
+            continue;
+        }
+        menu = menu.separator();
+        for item in grupo {
+            menu = menu.item(item);
+        }
+    }
+    menu
+}
+
+/// Item do menu com o atalho à direita, como o kit desenha o de uma `Action`.
+///
+/// ⚠️ Não pela `Action`: `SelecionarTudo` tem `cmd-a` **e** `ctrl-a`, e o kit
+/// mostra o de maior precedência — o último ligado, `⌃A`, errado no Mac. O
+/// `secondary` é `⌘` no Mac e `Ctrl` no resto.
+fn com_atalho(rotulo: &'static str, tecla: &str) -> PopupMenuItem {
+    let tecla = gpui_kit::Keystroke::parse(tecla).expect("atalho do menu");
+    PopupMenuItem::element(move |_window, _cx| {
+        gpui_kit::component::h_flex()
+            .w_full()
+            .gap_3()
+            .items_center()
+            .justify_between()
+            .child(rotulo)
+            .child(
+                gpui_kit::component::kbd::Kbd::new(tecla.clone())
+                    .p_0()
+                    .flex_nowrap()
+                    .border_0()
+                    .bg(gpui_kit::transparent_white()),
+            )
+    })
 }
 
 #[cfg(test)]
