@@ -1,13 +1,10 @@
 {
-  "versao": "0.1.117",
-  "titulo": "Editar Foto: Curvas, Antes/Depois, Liquidificar e a ferramenta Remendo.",
+  "versao": "0.1.118",
+  "titulo": "Revelação: o menu do botão direito na tira de fotos ficou organizado.",
   "importante": false,
   "novidades": [
-    "Curvas: nova camada de ajuste (botão de ajustes → Curvas). Clique no gráfico para pôr um ponto e arraste para clarear ou escurecer os tons; arraste o ponto para fora do gráfico para tirá-lo. Dá para mexer no RGB ou em cada cor.",
-    "Antes/Depois: a tecla Y (ou o botão \"Antes/Depois\" na barra) mostra a foto como ela abriu, para comparar. Não mexe no trabalho nem no Histórico; Y de novo volta.",
-    "Liquidificar (⇧⌘X, ou Transformar ▾ → Liquidificar…): um pincel que empurra os pixels — por exemplo, para subir a linha do queixo. Tamanho com [ ], Pressão na barra, \"Restaurar tudo\", Enter aplica e Esc cancela.",
-    "Remendo: J e depois ⇧J até ele. Contorne a área com defeito e arraste até um pedaço de pele limpa — a textura vem de lá e a cor fica a do lugar.",
-    "Pincel de recuperação: a cor da mancha não volta mais na borda do retoque."
+    "Botão direito numa foto da tira: o menu agora vem em grupos — esta foto (Abrir, Editar Foto, Baixar como…), a escolha (Escolher também, Escolher todas ⌘A, Desmarcar todas ⌘D), o lote (Sincronizar, Zerar) e, por último, o que desfaz (Descartar a revelação, Excluir a edição…).",
+    "Cada opção tem ícone, e o que não serve para aquela foto não aparece mais apagado: só fica no menu o que dá para fazer."
   ],
-  "por_que_atualizar": "Para comparar antes e depois, acertar os tons com Curvas e fazer retoques de pele com o Liquidificar e o Remendo."
+  "por_que_atualizar": "Para achar mais rápido o que fazer com as fotos da tira."
 }

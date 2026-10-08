@@ -1,5 +1,16 @@
 [
   {
+    "versao": "0.1.118",
+    "data": "2026-10-08",
+    "titulo": "Revelação: o menu do botão direito na tira de fotos ficou organizado.",
+    "importante": false,
+    "novidades": [
+      "Botão direito numa foto da tira: o menu agora vem em grupos — esta foto (Abrir, Editar Foto, Baixar como…), a escolha (Escolher também, Escolher todas ⌘A, Desmarcar todas ⌘D), o lote (Sincronizar, Zerar) e, por último, o que desfaz (Descartar a revelação, Excluir a edição…).",
+      "Cada opção tem ícone, e o que não serve para aquela foto não aparece mais apagado: só fica no menu o que dá para fazer."
+    ],
+    "por_que_atualizar": "Para achar mais rápido o que fazer com as fotos da tira."
+  },
+  {
     "versao": "0.1.117",
     "data": "2026-10-08",
     "titulo": "Editar Foto: Curvas, Antes/Depois, Liquidificar e a ferramenta Remendo.",
