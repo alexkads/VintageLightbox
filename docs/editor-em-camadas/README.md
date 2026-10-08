@@ -37,6 +37,9 @@ Sem projeto editável, o fluxo é o de sempre: a Revelação parte do bruto.
 | [03-GRAVACAO-E-CATALOGO.md](03-GRAVACAO-E-CATALOGO.md) | O formato do projeto, os tiles, a gravação atômica, a recuperação e a tabela do catálogo |
 | [04-PLANO-ETAPA-1.md](04-PLANO-ETAPA-1.md) | O que a etapa 1 entrega, arquivo por arquivo, os testes e as medidas |
 | [05-ETAPA-2.md](05-ETAPA-2.md) | Várias camadas, os 16 modos de mesclagem, o formato 2 do projeto, zoom, mão e lupa |
+| [21-ETAPA-15.md](21-ETAPA-15.md) | Retoque manual de queixo e pescoço: camada da fotografia base, ⌘J que desmarca, máscara de corte (⌥ + clique na divisa, ⌥⌘G), Deformar (malha 3 × 3, Bézier bicúbico), Pincel de recuperação (J/⇧J, origem manual), menus de contexto; formato 8 |
+| [20-ETAPA-14.md](20-ETAPA-14.md) | Carimbo (modo, amostra, alinhado, prévia), ⌘T com 8 alças e referência, conteúdo fora da foto; formato 7 |
+| [19-OPCOES-DA-SELECAO.md](19-OPCOES-DA-SELECAO.md) | Barra de opções da seleção, laço poligonal, difusão e antisserrilhado da próxima seleção, Modificar e Transformar seleção |
 | [18-ETAPA-13.md](18-ETAPA-13.md) | Controles com o comportamento do Photoshop (parte 1): H, R (girar vista), ⇧ + letra, opacidade × fluxo, espaçamento, suavização, ⇧ + clique, interseção, seleção no desfazer, ⇧⌘J num passo; formato 6; plano das próximas |
 | [17-PREENCHIMENTO.md](17-PREENCHIMENTO.md) | Preenchimento sensível ao conteúdo: PatchMatch melhorado (medido) e IA local (LaMa), os crates `ia-local` e `preenchimento` |
 | [16-REVISAO-DA-MASCARA.md](16-REVISAO-DA-MASCARA.md) | Revisão da máscara: o contrato conferido, cores de frente e de fundo (X, D), borracha e cores em cinza na máscara |

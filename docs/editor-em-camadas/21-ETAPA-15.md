@@ -137,10 +137,12 @@ Georgiev (*Photoshop Healing Brush: a Tool for Seamless Cloning*, 2004):
 ```text
 dentro do traço (Ω):  Δh = 0
 na borda (∂Ω):        h = (D̃ + ε) / (S̃ + ε)       D̃, S̃: destino e origem suavizados pela Difusão (σ = 1…7 px)
-resultado:            R = (S + ε) · h − ε           ε = 10/255
+resultado:            R = (S + ε) · h − ε           ε = 50/255, h limitado a [¼, 4]
 ```
 
-`S` é o que o carimbo copiaria, `D` a foto no lugar antes do traço. `h` é o fator de correção mais liso que leva
+`S` é o que o carimbo copiaria, `D` a foto no lugar antes do traço. 🔑 `ε` vai do multiplicativo puro (`ε = 0`)
+ao aditivo (`ε → ∞`): a primeira versão, com `ε = 10`, explodia num brilho alaranjado quando a origem era escura
+(sobrancelha) e o destino pele clara (`h ≈ 7`) — visto na foto real e corrigido com `ε = 50` e o fator limitado. `h` é o fator de correção mais liso que leva
 a origem à cor do destino na borda; por multiplicar, o contraste da textura acompanha a luz (um poro de pele clara
 fica na força certa numa pele mais escura — a correção aditiva não faz isso). A equação é resolvida por SOR de
 grosso a fino (pirâmide 2×). Durante o traço a tela mostra a cópia crua; **no soltar** cada pixel tocado é refeito a
@@ -150,7 +152,8 @@ Reaproveita do carimbo: o instantâneo do documento no começo do traço (fonte 
 amostra, o alinhado, a prévia. Pinta só na camada escolhida, respeita a seleção (a borda dela também é borda do
 traço) e funciona numa camada vazia por cima com "Atual e abaixo" — o deformado de baixo é a fonte.
 
-**Limites**: se a borda do traço cruza uma aresta forte (a sombra da mandíbula), a cor dela entra como degradê —
+**Limites**: origem com uma feição escura (prega, sobrancelha, olho) que cruza a borda do traço também deixa um
+ponto claro — como no Photoshop, a origem tem de ser pele lisa. Se a borda do traço cruza uma aresta forte (a sombra da mandíbula), a cor dela entra como degradê —
 passe sem tocar a aresta ou selecione antes; traços com caixa acima de 8 MP ficam só com a cópia
 (`LIMITE_DE_PIXELS`, memória da solução); o cálculo roda no soltar, na thread da janela.
 
@@ -195,6 +198,57 @@ não publica versão.
 | `testes_do_retoque.rs` (núcleo) | camada da fotografia (pixels, posição, escolhida, desfazer, sem versão no salvar, reabre); via cópia com borda difusa tira a seleção; dois ⌘J = cópias idênticas; máscara de corte (só onde a base tem pixels, borda semitransparente uma vez, opacidade da base uma vez, máscara da base e da recortada, visibilidade, neutro, base sem recortada igual a solta); mesclar a recortada e o conjunto sem mudar a foto e desfazendo tudo; mesclar solta em recortada recusado; camada nova no meio entra no conjunto; excluir a base libera; mover o conjunto; base de ajuste recusada; formato 8 grava e reabre; Deformar: identidade e ⌘T → malha exatos, malha parada e deslocada reproduzem o conteúdo com alfa, levantar a mandíbula sem buracos e só dentro da caixa, dobra/degenerada/NaN/absurda não quebram, puxar por dentro, cancelar/redefinir/confirmar num passo, ⌘T ↔ Deformar, deformar para fora da foto e trazer de volta inteiro, grava/reabre/desfaz; recuperação leva a textura e a luz do destino (contra o carimbo), respeita a seleção sem emenda, sem origem não pinta |
 | `recuperacao.rs` | textura da origem e luz do destino; origem = destino passa igual; correção lisa entre bordas diferentes |
 | `app/editor.rs` (harness) `o_retoque_do_queixo_pela_tela` | o fluxo pela tela: menu ⋯ → camada da fotografia, ⇧L com cliques, menu de contexto → Difusão…, ⌘J ⌘J, ⌥ + clique na divisa, Transformar ▾ → Deformar com arrasto do ponto e Esc, ⌘T → menu de contexto → Deformar → Enter num passo, ⌘Z ⌘⇧Z, ⌘⇧N J ⇧J ⌥ + clique e traço, salvar (a Revelação passa a usar a editada), fechar, reabrir igual, mesclar sem mudar a foto |
+
+## Desempenho (perfil otimizado, 5020 × 4016)
+
+`medir_o_retoque` (`cargo test --release -p editor-core medir_o_retoque -- --ignored --nocapture`), Mac:
+
+| Gesto | Tempo |
+|---|---|
+| montar a camada da fotografia (`da_imagem`, em segundo plano) | 4 ms |
+| inserir a camada e refazer a vista | 34 ms |
+| um arrasto do Deformar num trecho de 470 × 330 (pior de 20) | 9,8 ms |
+| aplicar o Deformar | < 1 ms |
+| recuperação de um traço de 300 × 60 px, no soltar | 89 ms |
+
+No app real em **debug**: arrasto do Deformar ~100 ms por evento, salvar 20 MP com a camada da fotografia (320
+tiles) 6,1 s — o binário do balcão é o otimizado.
+
+## Conferido no app real (macOS, 07/out/2026)
+
+Editor avulso (`--bin editor`, debug) numa foto de 5020 × 4016 (Nikon D750), com teclas e cliques **nativos do
+AppKit** pelo roteiro (`tecla`, `mouse`), catálogo próprio, e as capturas olhadas:
+
+1. "camada fotografia" → `Fotografia` com 320 tiles, escolhida; Histórico "Criar Fotografia".
+2. L, ⇧L e sete cliques em volta do queixo/pescoço da senhora; ⌫ tirou um vértice errado; o clique no primeiro
+   fechou ("Laço poligonal").
+3. ⇧F6 abriu o diálogo; ⌘A + ⌘V colou "10"; Enter → "Difundir" (a caixa passou de 442 para 467 px).
+4. ⌘J ⌘J → "Camada via cópia" (a seleção saiu) e a cópia exata; **⌥⌘G** pela tecla → `↳Camada 1 cópia` com o
+   recuo e a seta no painel.
+5. ⌘T + Deformar: a malha de 3 × 3 desenhada como curvas sobre o trecho, os 16 pontos, a barra "Deformar — grade
+   de 3 × 3 células"; puxar por dentro com o mouse levantou o pescoço; Redefinir ligado e "Transformação livre"
+   desligado depois de mexer. **Esc** voltou ao estado de antes (6 passos); de novo + Enter → um passo
+   "Deformar"; ⌘Z e ⌘⇧Z.
+6. ⌘⇧N, J, ⇧J → Pincel de recuperação com as opções no painel (amostra, alinhado, origem no pincel, Difusão 5);
+   ⌥ + clique na origem e um traço.
+7. ⌘S → "salva revisão 1"; numa execução nova, o projeto reabriu com as camadas, o `↳` e o Histórico; salvar de
+   novo coletou a composta velha (só a da revisão vigente ficou no catálogo).
+8. Fora da região retocada, a imagem editada é igual ao original (amostras byte a byte); no pescoço, o trecho subiu.
+
+**O que a conferência mostrou e foi corrigido**: (a) o brilho da recuperação com origem escura (acima); (b) ao
+reabrir, os passos compostos de um passo só voltavam com o nome de dentro ("Deformar" virava "Pincel") — agora
+`Comando::sem_selecao` mantém o `Varios` e o nome volta (teste `deformado_grava_reabre_e_desfaz`); (c) o traço da
+recuperação e do carimbo aparecia como "Pincel" no Histórico; (d) quando a barra de opções troca de altura, o palco
+anda e as marcas (malha, caixa) eram desenhadas com a medida velha até o próximo evento — o palco pede mais um
+quadro quando a origem dele muda.
+
+**Não conferido no app real**: o menu do botão direito do kit não aparece nas capturas da janela (limite já
+anotado do roteiro) — os menus de contexto do palco e da camada foram conferidos no harness; ⌥ + clique na divisa
+foi pelo harness (no app real o mesmo comando foi pelo ⌥⌘G). A qualidade da recuperação em pele foi olhada no
+núcleo com a foto real (`olhar_a_recuperacao`): com origem em pele lisa, a prega do sorriso some sem emenda e a
+textura fica; o carimbo, no mesmo traço, deixa uma mancha mais clara.
+
+**Windows e Linux**: nada específico de sistema mudou (nenhum `#[cfg]` novo); só o Mac foi testado.
 
 ## Backlog (não implementado nesta etapa)
 
