@@ -37,6 +37,7 @@ Sem projeto editável, o fluxo é o de sempre: a Revelação parte do bruto.
 | [03-GRAVACAO-E-CATALOGO.md](03-GRAVACAO-E-CATALOGO.md) | O formato do projeto, os tiles, a gravação atômica, a recuperação e a tabela do catálogo |
 | [04-PLANO-ETAPA-1.md](04-PLANO-ETAPA-1.md) | O que a etapa 1 entrega, arquivo por arquivo, os testes e as medidas |
 | [05-ETAPA-2.md](05-ETAPA-2.md) | Várias camadas, os 16 modos de mesclagem, o formato 2 do projeto, zoom, mão e lupa |
+| [22-ETAPA-16.md](22-ETAPA-16.md) | Máscaras, cadeados e área de transferência: Propriedades da máscara (densidade, difusão não destrutiva, inverter, aplicar), ver só a máscara e rubi, vínculo, "Bloquear:", ⌘C ⌘X ⌘V ⇧⌘V ⇧⌘C, carimbar visível, importar imagem, arrastar camadas; formato 9 |
 | [21-ETAPA-15.md](21-ETAPA-15.md) | Retoque manual de queixo e pescoço: camada da fotografia base, ⌘J que desmarca, máscara de corte (⌥ + clique na divisa, ⌥⌘G), Deformar (malha 3 × 3, Bézier bicúbico), Pincel de recuperação (J/⇧J, origem manual), menus de contexto; formato 8 |
 | [20-ETAPA-14.md](20-ETAPA-14.md) | Carimbo (modo, amostra, alinhado, prévia), ⌘T com 8 alças e referência, conteúdo fora da foto; formato 7 |
 | [19-OPCOES-DA-SELECAO.md](19-OPCOES-DA-SELECAO.md) | Barra de opções da seleção, laço poligonal, difusão e antisserrilhado da próxima seleção, Modificar e Transformar seleção |
@@ -194,6 +195,13 @@ Barra de opções embaixo da barra de cima com os quatro modos (Nova, Adicionar,
 só no gesto), difusão, estilo (normal, proporção fixa, tamanho fixo, ⇄), antisserrilhado, laço poligonal (⇧L),
 varinha com amostra da camada atual ou de todas, "Modificar seleção ▾" com valor em pixels e "Transformar seleção".
 Detalhes em [19-OPCOES-DA-SELECAO.md](19-OPCOES-DA-SELECAO.md).
+
+## Etapa 16 — máscaras, cadeados e área de transferência
+
+Propriedades da máscara (densidade, difusão sem tocar nos pixels, inverter, aplicar), a máscara sozinha (⌥ +
+clique) e em rubi (`\`), a corrente que leva a máscara com o Mover/⌘T/Deformar, os cadeados do Photoshop, ⌘C ⌘X
+⌘V ⇧⌘V ⇧⌘C, carimbar visível, importar imagem como camada e arrastar camadas no painel. Detalhes em
+[22-ETAPA-16.md](22-ETAPA-16.md).
 
 ## Etapa 14 — carimbo e transformação
 
