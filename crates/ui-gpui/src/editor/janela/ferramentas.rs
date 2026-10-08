@@ -393,6 +393,16 @@ impl EditorDeFoto {
     /// A letra de um grupo: a última ferramenta usada nele; com `proxima`
     /// (⇧ + letra), a seguinte, em volta.
     pub fn pela_letra(&mut self, letra: char, proxima: bool, cx: &mut Context<Self>) {
+        // No Preenchimento sensível ao conteúdo, as letras são as do espaço
+        // dele (B, L, H, Z), como no Photoshop.
+        if self.area_do_preenchimento.is_some() {
+            if let Some(f) =
+                super::painel_do_preenchimento::FerramentaDoPreenchimento::da_letra(letra)
+            {
+                self.escolher_ferramenta_do_preenchimento(f, cx);
+            }
+            return;
+        }
         let itens: Vec<Item> = da_letra(letra).map(|d| d.item).collect();
         let Some(&primeira) = itens.first() else {
             return;
