@@ -761,3 +761,32 @@ pub fn slider(
 ) -> crate::slider_da_casa::SliderDaCasa {
     crate::slider_da_casa::SliderDaCasa::new(estado)
 }
+
+/// Item de menu do kit com o atalho à direita, desenhado como o kit desenha o
+/// de uma `Action` (o `Kbd` sem moldura).
+///
+/// ⚠️ Não pela `Action`: `SelecionarTudo` tem `cmd-a` **e** `ctrl-a`, e o kit
+/// mostra o de maior precedência — o último ligado, `⌃A`, errado no Mac. O
+/// `secondary` da tecla é `⌘` no Mac e `Ctrl` no resto.
+pub fn item_com_atalho(
+    rotulo: impl Into<SharedString>,
+    tecla: &str,
+) -> gpui_kit::component::menu::PopupMenuItem {
+    let rotulo: SharedString = rotulo.into();
+    let tecla = gpui_kit::Keystroke::parse(tecla).expect("atalho do menu");
+    gpui_kit::component::menu::PopupMenuItem::element(move |_window, _cx| {
+        gpui_kit::component::h_flex()
+            .w_full()
+            .gap_3()
+            .items_center()
+            .justify_between()
+            .child(rotulo.clone())
+            .child(
+                gpui_kit::component::kbd::Kbd::new(tecla.clone())
+                    .p_0()
+                    .flex_nowrap()
+                    .border_0()
+                    .bg(gpui_kit::transparent_white()),
+            )
+    })
+}

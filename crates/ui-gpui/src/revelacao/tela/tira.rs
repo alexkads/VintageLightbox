@@ -1710,10 +1710,10 @@ fn montar_o_menu(
                 )
             });
         }),
-        com_atalho("Escolher todas", "secondary-a")
+        crate::estilo::item_com_atalho("Escolher todas", "secondary-a")
             .icon(Icon::new(Icone::SquareCheck))
             .on_click(com(|tela, _window, cx| tela.marcar_todas(cx))),
-        com_atalho("Desmarcar todas", "secondary-d")
+        crate::estilo::item_com_atalho("Desmarcar todas", "secondary-d")
             .icon(Icon::new(Icone::Square))
             .disabled(dados.marcadas < 2)
             .on_click(com(|tela, _window, cx| tela.desmarcar(cx))),
@@ -1786,30 +1786,6 @@ fn montar_o_menu(
         }
     }
     menu
-}
-
-/// Item do menu com o atalho à direita, como o kit desenha o de uma `Action`.
-///
-/// ⚠️ Não pela `Action`: `SelecionarTudo` tem `cmd-a` **e** `ctrl-a`, e o kit
-/// mostra o de maior precedência — o último ligado, `⌃A`, errado no Mac. O
-/// `secondary` é `⌘` no Mac e `Ctrl` no resto.
-fn com_atalho(rotulo: &'static str, tecla: &str) -> PopupMenuItem {
-    let tecla = gpui_kit::Keystroke::parse(tecla).expect("atalho do menu");
-    PopupMenuItem::element(move |_window, _cx| {
-        gpui_kit::component::h_flex()
-            .w_full()
-            .gap_3()
-            .items_center()
-            .justify_between()
-            .child(rotulo)
-            .child(
-                gpui_kit::component::kbd::Kbd::new(tecla.clone())
-                    .p_0()
-                    .flex_nowrap()
-                    .border_0()
-                    .bg(gpui_kit::transparent_white()),
-            )
-    })
 }
 
 #[cfg(test)]

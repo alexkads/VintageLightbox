@@ -48,7 +48,7 @@ use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::collapsible::Collapsible;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
@@ -61,6 +61,8 @@ use gpui_kit::{
 use infrastructure::cache::preview_manager::PreviewManager;
 
 use super::altura_da_tira;
+
+mod menu_da_tira;
 use super::arquivos::SeletorDeFotos;
 use super::atendimento::{Atendimento, EventoDoAtendimento};
 use crate::balcao::tela::Abertura;
@@ -598,6 +600,13 @@ pub struct Detalhe {
     largura_da_coluna: f32,
     /// O pedaço da tira que vira elemento neste quadro: `[de, ate)`.
     tira_desenhada: (usize, usize),
+    /// A miniatura do último botão direito na tira — o alvo do menu.
+    menu_da_tira: Option<usize>,
+    /// 🧪 O menu da tira que o roteiro abriu, e onde.
+    menu_do_roteiro: Option<(
+        gpui_kit::Entity<gpui_kit::component::menu::PopupMenu>,
+        gpui_kit::Point<gpui_kit::Pixels>,
+    )>,
     /// A foto que a tira ainda tem de trazer à vista — espera a tira ter
     /// medida (o primeiro quadro não tem).
     tira_a_seguir: Option<usize>,
@@ -1048,6 +1057,8 @@ impl Detalhe {
             campos_do_lote: None,
             preco_do_lote_no_ar: None,
             tira_desenhada: (0, 0),
+            menu_da_tira: None,
+            menu_do_roteiro: None,
             tira_a_seguir: None,
             altura_da_tira: altura_da_tira::guardada("sessao"),
             arrasto_da_tira: None,
@@ -9143,11 +9154,38 @@ impl Detalhe {
                                     cx.notify();
                                 },
                             ))
-                            .children(itens),
+                            .children(itens)
+                            // 🖱️ **Um menu para a faixa inteira**, como na
+                            // tira da Revelação: a miniatura do botão direito
+                            // anota a clicada e ajeita a seleção; o menu lê
+                            // depois. No vão entre duas, não abre.
+                            .context_menu({
+                                let esta = cx.entity().downgrade();
+                                move |menu, window, cx| {
+                                    // O foco volta a quem o tinha quando o
+                                    // menu fechar — senão as setas e as teclas
+                                    // da tira param até um clique qualquer.
+                                    let menu = match window.focused(cx) {
+                                        Some(antes) => menu.action_context(antes),
+                                        None => menu,
+                                    };
+                                    let Some(dados) = esta
+                                        .update(cx, |tela, _cx| tela.dados_do_menu())
+                                        .ok()
+                                        .flatten()
+                                    else {
+                                        return menu;
+                                    };
+                                    menu_da_tira::montar(menu, dados, esta.clone(), window, cx)
+                                }
+                            }),
                     )
                     .when(tem_antes, |moldura| moldura.child(sombra(true, cx)))
                     .when(tem_depois, |moldura| moldura.child(sombra(false, cx))),
             )
+            .children(self.menu_do_roteiro.as_ref().map(|(menu, ponto)| {
+                gpui_kit::deferred(gpui_kit::anchored().position(*ponto).child(menu.clone()))
+            }))
     }
 
     /// Uma miniatura da tira, com os selos que o site desenha.
@@ -9275,6 +9313,12 @@ impl Detalhe {
                         .child("comprada"),
                 )
             })
+            .on_mouse_down(
+                gpui_kit::MouseButton::Right,
+                cx.listener(move |tela, _ev: &gpui_kit::MouseDownEvent, _w, cx| {
+                    tela.apontar_o_menu(posicao, cx)
+                }),
+            )
             .on_click(
                 cx.listener(move |tela, evento: &gpui_kit::ClickEvent, _window, cx| {
                     if evento.click_count() >= 2 {

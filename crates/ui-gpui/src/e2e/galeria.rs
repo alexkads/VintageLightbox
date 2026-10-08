@@ -1675,3 +1675,74 @@ fn a_grade_da_sessao_fecha_a_linha_na_largura_dela(cx: &mut TestAppContext) {
         "a linha fecha na borda da grade: sobraram {sobra} px"
     );
 }
+
+/// 🖱️ **O botão direito na tira da sessão abre o menu das ações**, como o da
+/// tira da Revelação (dono, 08/10/2026). Numa foto fora da seleção ele a
+/// seleciona sozinha; numa da seleção, o lote fica. O item chama o mesmo
+/// gesto da tecla: "Levada no balcão" é o `P`.
+#[gpui_kit::test]
+fn o_botao_direito_na_tira_abre_o_menu_e_age_na_selecao(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(
+        cx,
+        Cenario {
+            site: Box::new(|site| {
+                let mut fotos = site.fotos_da_sessao.lock().unwrap();
+                for foto in fotos.iter_mut() {
+                    foto.nota = Some(5);
+                }
+            }),
+            ..Default::default()
+        },
+    );
+    let direito = |e: &Estudio, cx: &mut TestAppContext, alvo: &'static str| {
+        let mut visual = super::chatbot::quadro_novo(e, cx);
+        let onde = visual
+            .debug_bounds(alvo)
+            .unwrap_or_else(|| panic!("{alvo} não está desenhado na tela"))
+            .center();
+        visual.simulate_mouse_move(onde, None, Modifiers::none());
+        visual.simulate_mouse_down(onde, gpui_kit::MouseButton::Right, Modifiers::none());
+        visual.simulate_mouse_up(onde, gpui_kit::MouseButton::Right, Modifiers::none());
+        visual.run_until_parked();
+    };
+    let menu_aberto = |e: &Estudio, cx: &mut TestAppContext| {
+        e.app(cx, |_app, window, _cx| {
+            window
+                .context_stack()
+                .iter()
+                .any(|c| c.contains("PopupMenu"))
+        })
+    };
+    let aditivo = Modifiers {
+        #[cfg(target_os = "macos")]
+        platform: true,
+        #[cfg(not(target_os = "macos"))]
+        control: true,
+        ..Modifiers::none()
+    };
+
+    // Fora da seleção: a clicada fica sozinha, e o menu abre.
+    clicar(&e, cx, "sessao-tile-a");
+    clicar_com(&e, cx, "tira-b", aditivo);
+    direito(&e, cx, "tira-d");
+    e.detalhe(cx, |tela, _, _| assert_eq!(tela.marcadas(), ["d"]));
+    assert!(menu_aberto(&e, cx), "o botão direito não abriu o menu");
+
+    // ↓ ×5: o título, Revelar, Nota, Exportar… e "Levada no balcão".
+    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    visual.simulate_keystrokes("down down down down down enter");
+    visual.run_until_parked();
+    e.esperar(cx);
+    let estado = e.detalhe(cx, |tela, _, _| {
+        tela.classificacoes(&["d".to_string()])[0].1.estado
+    });
+    assert_eq!(estado, Estado::LevadaNoBalcao, "o item não marcou a levada");
+    assert!(!menu_aberto(&e, cx), "o menu ficou aberto depois do item");
+
+    // Dentro da seleção: o lote fica.
+    clicar(&e, cx, "sessao-tile-a");
+    clicar_com(&e, cx, "tira-b", aditivo);
+    direito(&e, cx, "tira-b");
+    e.detalhe(cx, |tela, _, _| assert_eq!(tela.marcadas(), ["a", "b"]));
+    assert!(menu_aberto(&e, cx));
+}

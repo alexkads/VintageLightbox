@@ -115,6 +115,11 @@ pub enum Passo {
     /// tira da Revelação aberta (a posição é a da tira, contando de 0). O
     /// `menu` dá um botão direito de verdade sobre a miniatura.
     Tira(String),
+    /// `sessao_tira marcar 2` · `sessao_tira menu 2` · `sessao_tira fechar` —
+    /// a tira da sessão aberta (posição contando de 0). O `menu` desenha o
+    /// mesmo menu do botão direito sobre a miniatura, com a seleção que o
+    /// botão direito deixaria.
+    SessaoTira(String),
     /// 🖌️ A janela do editor em camadas aberta (`tira editar N` a abre):
     /// `editor mouse apertar|arrastar|soltar fx fy` (fração da foto, evento
     /// **real** do AppKit na janela do editor) · `editor tecla <keyCode> [mods]`
@@ -304,6 +309,7 @@ pub fn ler_roteiro(texto: &str) -> Result<Vec<Passo>, String> {
             "predefinicoes" => Passo::Predefinicoes(argumentos.join(" ")),
             "exportacao" => Passo::Exportacao(argumentos.join(" ")),
             "tira" => Passo::Tira(argumentos.join(" ")),
+            "sessao_tira" => Passo::SessaoTira(argumentos.join(" ")),
             "editor" => Passo::Editor(argumentos.join(" ")),
             "guias" => Passo::Guias(argumentos.join(" ")),
             "importar_modal" => Passo::ImportarModal,
