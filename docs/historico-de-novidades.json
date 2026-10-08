@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.119",
+    "data": "2026-10-08",
+    "titulo": "Sessão: menu no botão direito da tira de fotos. Editar Foto com a área de trabalho do Photoshop.",
+    "importante": false,
+    "novidades": [
+      "Botão direito numa foto da tira da sessão: Revelar, Nota (de 0 a 5 estrelas), Exportar…, Levada no balcão (P), Rejeitar (X), Negociação…, Selecionar todas (⌘A), Limpar a seleção (⌘D), Descartar a revelação e Excluir… (⌫). Numa foto fora da seleção ele seleciona só ela; numa foto já selecionada, vale para todas as selecionadas.",
+      "Editar Foto ficou organizado como o Photoshop: menus no alto (Arquivo, Editar, Camada, Selecionar, Filtro, Visualizar, Janela, Ajuda), barra de opções fixa para cada ferramenta e ferramentas em grupos — botão direito ou clique longo mostra as variantes.",
+      "Editar Foto: os painéis Cor, Amostras, Propriedades, Pincel, Histórico e Camadas podem ser arrastados, agrupados, escondidos e recolhidos; a arrumação fica guardada. Z agora é a Lupa e Espaço é a Mão."
+    ],
+    "por_que_atualizar": "Para fazer na tira da sessão, num clique, o que antes pedia tecla ou painel, e para editar fotos com o arranjo de quem vem do Photoshop."
+  },
+  {
     "versao": "0.1.118",
     "data": "2026-10-08",
     "titulo": "Revelação: o menu do botão direito na tira de fotos ficou organizado.",
