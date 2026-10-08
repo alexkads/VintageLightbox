@@ -152,6 +152,33 @@ if (-not $Seco -and -not $fxc) {
 }
 if ($fxc) { $env:GPUI_FXC_PATH = $fxc; Ok "fxc.exe: $fxc" }
 
+# O Visual C++ Redistributable (x64). Nao e para compilar: e o que o
+# onnxruntime.dll da Microsoft pede para a IA local (Preenchimento) abrir — o
+# app o baixa na primeira vez que a IA roda. Sem ele so a IA fica de fora, por
+# isso a falta e aviso, nao erro.
+function Tem-VCRedist {
+    foreach ($chave in "HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64",
+                       "HKLM:\SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64") {
+        $r = Get-ItemProperty $chave -ErrorAction SilentlyContinue
+        if ($r -and $r.Installed -eq 1) { return $true }
+    }
+    return $false
+}
+if (Tem-VCRedist) {
+    Ok "Visual C++ Redistributable (x64)"
+} elseif (Get-Command winget -ErrorAction SilentlyContinue) {
+    Aviso "nao ha o Visual C++ Redistributable (x64), que a IA local usa. Instalando pelo winget."
+    try {
+        Correr { winget install --silent --accept-package-agreements --accept-source-agreements Microsoft.VCRedist.2015+.x64 }
+    } catch {
+        Aviso "o Visual C++ Redistributable nao instalou ($_). O app funciona; so a IA local fica de fora."
+        Write-Host "   Para ela: https://aka.ms/vs/17/release/vc_redist.x64.exe"
+    }
+} else {
+    Aviso "nao ha o Visual C++ Redistributable (x64) nem o winget. O app funciona; so a IA local fica de fora."
+    Write-Host "   Para ela: https://aka.ms/vs/17/release/vc_redist.x64.exe"
+}
+
 # O Rust, pelo rustup. Um `cargo` instalado sem rustup nao serve: a toolchain
 # `-gnu` so se escolhe por ele.
 $cargoDoUsuario = "$env:USERPROFILE\.cargo\bin"

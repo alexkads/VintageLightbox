@@ -198,8 +198,12 @@ grande (piso, rodapé); o PatchMatch, onde a textura fina importa e a região de
 
 ## Limitações reais
 
-- **Testado só no macOS (Apple Silicon).** Windows (com DirectML) e Linux compilam o `ort` com binários baixados
-  na compilação — confira num balcão de cada sistema antes de confiar.
+- **Testado só no macOS (Apple Silicon).** Linux compila o `ort` com binários baixados na compilação.
+- **Windows (MSYS2, `-gnu`) carrega o runtime em tempo de execução** (0.1.121). O `ort` não tem binário pronto
+  para `x86_64-pc-windows-gnu`, e da 0.1.106 à 0.1.120 o balcão Windows não compilou (`ort-sys: no prebuilt
+  binaries`). Lá ele usa `load-dynamic`: o `onnxruntime.dll` oficial (1.28.0, só CPU) é baixado com o modelo
+  ou na primeira inferência, conferido pelo hash e carregado pelo caminho completo (`ia-local/src/runtime.rs`).
+  O DLL pede o Visual C++ Redistributable (x64), que o instalador põe pelo winget; sem ele só a IA avisa.
 - **CUDA não compilado** por padrão (feature `cuda`); nada medido com NVIDIA.
 - **LaMa em 512 px**: áreas grandes são reduzidas e ampliadas (o painel avisa); sem progresso interno (a barra é
   indeterminada).

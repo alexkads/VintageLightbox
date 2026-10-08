@@ -794,6 +794,11 @@ impl EditorDeFoto {
         e.aviso_do_modelo = None;
         self.vigiar_o_progresso(cx);
         let trabalho = cx.background_executor().spawn(async move {
+            // O runtime antes, onde ele não vem no executável (Windows/MSYS2).
+            ia_local::runtime::baixar(
+                &|r, t| *progresso.lock().unwrap_or_else(|e| e.into_inner()) = (r, t),
+                &cancelar,
+            )?;
             modelos::baixar(
                 &modelos::pasta_padrao(),
                 &lama::MODELO,
