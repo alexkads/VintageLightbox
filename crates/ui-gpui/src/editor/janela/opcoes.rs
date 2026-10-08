@@ -90,7 +90,7 @@ impl EditorDeFoto {
 
     /// O pincel: o círculo com o diâmetro, e tamanho e dureza num popover
     /// (o "Brush Preset picker" do Photoshop).
-    fn pincel_em_popover(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn pincel_em_popover(&self, cx: &mut Context<Self>) -> AnyElement {
         let p = self.sessao().map(|s| s.pincel).unwrap_or_default();
         let (tamanho, dureza) = (self.tamanho.clone(), self.dureza.clone());
         let ed = cx.entity().downgrade();
@@ -309,7 +309,7 @@ impl EditorDeFoto {
     }
 
     /// 100% e Encaixar — a Mão e a Lupa.
-    fn botoes_de_zoom(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(super) fn botoes_de_zoom(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         vec![
             crate::estilo::botao_contorno_pequeno("editor-opcoes-100", cx)
                 .label("100%")

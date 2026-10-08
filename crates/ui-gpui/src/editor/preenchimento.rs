@@ -54,6 +54,110 @@ pub fn amostragem_automatica(destino: &Selecao) -> Selecao {
     destino.expandida(margem as i32)
 }
 
+/// "Opções da área de amostragem" do Photoshop.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OpcaoDeAmostragem {
+    /// Em volta da área, pelo formato dela (a de sempre).
+    #[default]
+    Automatica,
+    /// O retângulo em volta da área, com a mesma margem.
+    Retangular,
+    /// Começa vazia: o operador pinta de onde amostrar.
+    Personalizada,
+}
+
+impl OpcaoDeAmostragem {
+    pub const TODAS: [OpcaoDeAmostragem; 3] = [
+        OpcaoDeAmostragem::Automatica,
+        OpcaoDeAmostragem::Retangular,
+        OpcaoDeAmostragem::Personalizada,
+    ];
+
+    pub fn chave(self) -> &'static str {
+        match self {
+            OpcaoDeAmostragem::Automatica => "automatica",
+            OpcaoDeAmostragem::Retangular => "retangular",
+            OpcaoDeAmostragem::Personalizada => "personalizada",
+        }
+    }
+
+    pub fn da_chave(chave: &str) -> Option<Self> {
+        Self::TODAS.into_iter().find(|o| o.chave() == chave)
+    }
+
+    pub fn nome(self) -> &'static str {
+        match self {
+            OpcaoDeAmostragem::Automatica => "Automática",
+            OpcaoDeAmostragem::Retangular => "Retangular",
+            OpcaoDeAmostragem::Personalizada => "Personalizada",
+        }
+    }
+}
+
+/// A amostragem de uma opção: a automática segue o formato da área; a
+/// retangular é a caixa em volta dela com a mesma margem; a personalizada
+/// começa vazia.
+pub fn amostragem_de(opcao: OpcaoDeAmostragem, destino: &Selecao) -> Selecao {
+    match opcao {
+        OpcaoDeAmostragem::Automatica => amostragem_automatica(destino),
+        OpcaoDeAmostragem::Personalizada => Selecao::vazia(destino.largura(), destino.altura()),
+        OpcaoDeAmostragem::Retangular => {
+            let l = destino.caixa_justa();
+            let margem = revelacao_core::preenchimento::margem_de_trabalho(
+                (l.x, l.y, l.direita(), l.baixo()),
+                0.0,
+            ) as i64;
+            let (largura, altura) = (destino.largura() as i64, destino.altura() as i64);
+            let (x0, y0) = ((l.x as i64 - margem).max(0), (l.y as i64 - margem).max(0));
+            let (x1, y1) = (
+                (l.direita() as i64 + margem).min(largura),
+                (l.baixo() as i64 + margem).min(altura),
+            );
+            let caixa = Retangulo::novo(
+                x0 as u32,
+                y0 as u32,
+                (x1 - x0).max(0) as u32,
+                (y1 - y0).max(0) as u32,
+            );
+            Selecao::da_forma(
+                destino.largura(),
+                destino.altura(),
+                &editor_core::Forma::Retangulo(caixa),
+            )
+        }
+    }
+}
+
+/// Como a área de amostragem aparece no palco ("Sobreposição da área de
+/// amostragem" do Photoshop): à vista ou não, a opacidade, a cor e se ela
+/// pinta a área de onde se amostra ou a excluída.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Sobreposicao {
+    pub mostrar: bool,
+    pub opacidade: f32,
+    pub cor: [u8; 3],
+    pub indica_excluida: bool,
+}
+
+impl Default for Sobreposicao {
+    fn default() -> Self {
+        Self {
+            mostrar: true,
+            opacidade: 0.5,
+            cor: CORES_DA_SOBREPOSICAO[0].1,
+            indica_excluida: false,
+        }
+    }
+}
+
+/// As cores da sobreposição: (nome, RGB).
+pub const CORES_DA_SOBREPOSICAO: [(&str, [u8; 3]); 4] = [
+    ("Verde", [60, 200, 80]),
+    ("Vermelho", [230, 40, 40]),
+    ("Azul", [40, 120, 230]),
+    ("Amarelo", [240, 210, 40]),
+];
+
 /// O fator da prévia provisória: o destino com no máximo [`LADO_DA_PREVIA`].
 pub fn fator_da_previa(destino: &Selecao) -> u32 {
     let l = destino.caixa_justa();
@@ -113,6 +217,7 @@ pub fn calcular(
     amostragem: &Selecao,
     motor: &dyn Motor,
     contexto: f32,
+    adaptar_cor: bool,
     fator: u32,
     semente: u64,
     controle: &Controle,
@@ -174,6 +279,7 @@ pub fn calcular(
         amostragem: amostra.then_some(fonte.as_slice()),
         semente,
         contexto,
+        adaptar_cor,
     };
     let r = motor.preencher(&entrada, controle)?;
     let ret = Retangulo::novo(
@@ -197,12 +303,26 @@ pub fn calcular(
 /// A sobreposição do palco, em BGRA com alfa, de no máximo `lado` no maior
 /// lado: vermelho onde será refeito, verde de onde os pedaços podem vir.
 pub fn sobreposicao(destino: &Selecao, amostragem: &Selecao, lado: u32) -> (u32, u32, Vec<u8>) {
+    sobreposicao_com(destino, Some(amostragem), &Sobreposicao::default(), lado)
+}
+
+/// A sobreposição com as opções do painel. A área a refazer fica sempre em
+/// vermelho (é o que vai mudar); a amostragem segue a cor, a opacidade e o
+/// "indica" (amostrada ou excluída) — e some com `mostrar` desligado ou sem
+/// amostragem (a IA não amostra).
+pub fn sobreposicao_com(
+    destino: &Selecao,
+    amostragem: Option<&Selecao>,
+    opcoes: &Sobreposicao,
+    lado: u32,
+) -> (u32, u32, Vec<u8>) {
     let (l, a) = (destino.largura().max(1), destino.altura().max(1));
     let escala = (l.max(a) as f32 / lado as f32).max(1.0);
     let (w, h) = (
         ((l as f32 / escala).round() as u32).max(1),
         ((a as f32 / escala).round() as u32).max(1),
     );
+    let alfa = (opcoes.opacidade.clamp(0.0, 1.0) * 160.0).round() as u8;
     let mut bgra = vec![0u8; (w * h * 4) as usize];
     for y in 0..h {
         let fy = ((y as f32 + 0.5) * a as f32 / h as f32) as u32;
@@ -211,8 +331,11 @@ pub fn sobreposicao(destino: &Selecao, amostragem: &Selecao, lado: u32) -> (u32,
             let k = ((y * w + x) * 4) as usize;
             if destino.valor(fx, fy) > 0 {
                 bgra[k..k + 4].copy_from_slice(&[40, 40, 230, 110]);
-            } else if amostragem.valor(fx, fy) >= 128 {
-                bgra[k..k + 4].copy_from_slice(&[80, 200, 60, 70]);
+            } else if let Some(amostragem) = amostragem.filter(|_| opcoes.mostrar) {
+                if (amostragem.valor(fx, fy) >= 128) != opcoes.indica_excluida {
+                    let [r, g, b] = opcoes.cor;
+                    bgra[k..k + 4].copy_from_slice(&[b, g, r, alfa]);
+                }
             }
         }
     }
@@ -347,7 +470,18 @@ mod testes {
             progresso: &|_| {},
         };
         let pm = preenchimento::patchmatch::PatchMatch;
-        let final_ = calcular(&foto, &destino, &amostragem, &pm, 0.5, 1, 9, &controle).unwrap();
+        let final_ = calcular(
+            &foto,
+            &destino,
+            &amostragem,
+            &pm,
+            0.5,
+            true,
+            1,
+            9,
+            &controle,
+        )
+        .unwrap();
         assert_eq!(final_.ret, Retangulo::novo(176, 116, 58, 58));
         assert_eq!(final_.fator, 1);
         let vermelhos = final_
@@ -357,7 +491,18 @@ mod testes {
             .count();
         assert_eq!(vermelhos, 0, "nada da mala");
         // A prévia provisória, reduzida, cobre o mesmo lugar.
-        let previa = calcular(&foto, &destino, &amostragem, &pm, 0.5, 4, 9, &controle).unwrap();
+        let previa = calcular(
+            &foto,
+            &destino,
+            &amostragem,
+            &pm,
+            0.5,
+            true,
+            4,
+            9,
+            &controle,
+        )
+        .unwrap();
         assert_eq!(previa.fator, 4);
         assert!(previa.ret.x <= 176 && previa.ret.direita() >= 234);
         assert!(previa.largura < final_.largura);
@@ -374,13 +519,13 @@ mod testes {
             progresso: &|_| {},
         };
         let pm = preenchimento::patchmatch::PatchMatch;
-        let r = calcular(&foto, &destino, &nada, &pm, 0.5, 1, 9, &controle);
+        let r = calcular(&foto, &destino, &nada, &pm, 0.5, true, 1, 9, &controle);
         assert_eq!(r, Err(Erro::SemFontes));
         assert!(Erro::SemFontes.mensagem().contains("verde"));
         // Amostragem só do lado esquerdo: o remendo usa só o de lá.
         let mut esquerda = Selecao::vazia(400, 300);
         esquerda.pintar_disco(60.0, 150.0, 60.0, true);
-        let r = calcular(&foto, &destino, &esquerda, &pm, 0.5, 1, 9, &controle).unwrap();
+        let r = calcular(&foto, &destino, &esquerda, &pm, 0.5, true, 1, 9, &controle).unwrap();
         assert_eq!(r.ret, Retangulo::novo(176, 116, 58, 58));
         assert_eq!(
             regiao_de_trabalho(&destino, &esquerda, Metodo::PatchMatch, 0.5).x,
@@ -409,6 +554,58 @@ mod testes {
         assert_eq!(em(100, 70)[2], 230, "vermelho no destino");
         assert_eq!(em(100, 40)[1], 200, "verde em volta");
         assert_eq!(em(2, 2)[3], 0, "longe, nada");
+    }
+
+    /// As três opções da área de amostragem do Photoshop.
+    #[test]
+    fn as_opcoes_da_amostragem() {
+        let destino = Selecao::da_forma(
+            400,
+            300,
+            &Forma::Elipse(Retangulo::novo(150, 100, 100, 80)),
+        );
+        let auto = amostragem_de(OpcaoDeAmostragem::Automatica, &destino);
+        let ret = amostragem_de(OpcaoDeAmostragem::Retangular, &destino);
+        let nada = amostragem_de(OpcaoDeAmostragem::Personalizada, &destino);
+        assert!(nada.caixa_justa().vazio(), "a personalizada começa vazia");
+        assert_eq!(ret.caixa_justa(), auto.caixa_justa(), "a mesma margem");
+        // Num canto da caixa, a retangular amostra e a automática (que segue
+        // o formato) não.
+        let c = ret.caixa_justa();
+        assert_eq!(ret.valor(c.x, c.y), 255);
+        assert!(auto.valor(c.x, c.y) < 128);
+    }
+
+    /// A sobreposição segue as opções: cor, "indica a excluída" e esconder.
+    #[test]
+    fn a_sobreposicao_segue_as_opcoes() {
+        let destino = mala();
+        let amostragem = amostragem_automatica(&destino);
+        let em = |b: &[u8], w: u32, x: u32, y: u32| b[((y * w + x) * 4) as usize..][..4].to_vec();
+        let azul = Sobreposicao {
+            cor: [40, 120, 230],
+            ..Sobreposicao::default()
+        };
+        let (w, _, b) = sobreposicao_com(&destino, Some(&amostragem), &azul, 200);
+        assert_eq!(
+            em(&b, w, 100, 40)[..3],
+            [230, 120, 40],
+            "azul (BGRA) na amostragem"
+        );
+        let excluida = Sobreposicao {
+            indica_excluida: true,
+            ..Sobreposicao::default()
+        };
+        let (w, _, b) = sobreposicao_com(&destino, Some(&amostragem), &excluida, 200);
+        assert_eq!(em(&b, w, 100, 40)[3], 0, "a amostrada fica limpa");
+        assert!(em(&b, w, 2, 2)[3] > 0, "a excluída pintada");
+        let escondida = Sobreposicao {
+            mostrar: false,
+            ..Sobreposicao::default()
+        };
+        let (w, _, b) = sobreposicao_com(&destino, Some(&amostragem), &escondida, 200);
+        assert_eq!(em(&b, w, 100, 40)[3], 0);
+        assert_eq!(em(&b, w, 100, 70)[2], 230, "a área a refazer continua");
     }
 
     #[test]

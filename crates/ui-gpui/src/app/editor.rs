@@ -2092,8 +2092,14 @@ mod testes {
         ve.simulate_keystrokes("cmd-shift-n m");
         ve.run_until_parked();
         arrastar_no_palco(&mut ve, (0.4, 0.4), (0.55, 0.6));
+        // ⇧⌫ abre o "Preencher" do Photoshop; Sensível ao conteúdo + Enter.
         ve.simulate_keystrokes("shift-backspace");
         ve.run_until_parked();
+        assert!(editor.read_with(&ve, |ed, _| ed.dialogo_de_preencher_aberto()));
+        assert!(ve.debug_bounds("editor-dialogo-preencher").is_some());
+        ve.simulate_keystrokes("enter");
+        ve.run_until_parked();
+        assert!(!editor.read_with(&ve, |ed, _| ed.dialogo_de_preencher_aberto()));
         let (preenchido, fora, passos) = editor.read_with(&ve, |ed, _| {
             let s = ed.sessao().unwrap();
             let c = &s.documento().camadas[1].pixels;
@@ -4189,5 +4195,129 @@ mod testes {
         clicar_no_editor(&mut ve, "editor-opcoes-preenchimento");
         assert!(editor.read_with(&ve, |ed, _| ed.espaco_do_preenchimento().is_some()));
         assert!(ve.debug_bounds("editor-preenchimento").is_some());
+    }
+
+    /// 🪄 O espaço do Content-Aware Fill como o do Photoshop, com a IA local
+    /// preservada: a barra de ferramentas dele (pincel de amostragem, laço,
+    /// mão, lupa) e as letras B L H Z; o laço marca a área; as opções da
+    /// área de amostragem, a adaptação de cor e "Saída para: Duplicar
+    /// camada"; Aplicar continua aberto, OK fecha; com a IA, nada de
+    /// amostragem nem de adaptação — e a margem de contexto dela continua.
+    #[gpui_kit::test]
+    fn o_content_aware_fill_como_o_do_photoshop(cx: &mut TestAppContext) {
+        use crate::editor::janela::{EstadoDoCalculo, FerramentaDoPreenchimento as F};
+        use crate::editor::preenchimento::OpcaoDeAmostragem;
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        editor.update(&mut ve, |ed, cx| {
+            ed.na_sessao_para_teste(cx, |s| {
+                s.selecionar(
+                    &editor_core::Forma::Retangulo(editor_core::Retangulo::novo(24, 16, 12, 10)),
+                    editor_core::Operacao::Nova,
+                );
+                s.pincel.cor = [230, 20, 20];
+                s.preencher_selecao();
+                s.desmarcar();
+            })
+        });
+        let espaco = |ve: &mut VisualTestContext| {
+            editor.read_with(ve, |ed, _| {
+                let e = ed.espaco_do_preenchimento().unwrap();
+                (
+                    e.ferramenta,
+                    e.opcao_amostragem,
+                    e.selecao.caixa_justa(),
+                    e.estado.clone(),
+                )
+            })
+        };
+        pelo_menu(&mut ve, "editor-menu-editar", "editor-abrir-preenchimento");
+        for alvo in [
+            "editor-caf-ferramentas",
+            "editor-caf-opcoes",
+            "editor-caf-pincel-amostragem",
+            "editor-caf-laco",
+            "editor-caf-mao",
+            "editor-caf-lupa",
+            "editor-caf-mostrar-amostragem",
+            "editor-caf-todas-as-camadas",
+            "editor-caf-saida",
+            "editor-preenchimento-redefinir",
+            "editor-preenchimento-aplicar-e-seguir",
+        ] {
+            assert!(ve.debug_bounds(alvo).is_some(), "{alvo} no espaço");
+        }
+        assert_eq!(espaco(&mut ve).0, F::Laco, "sem seleção, o laço primeiro");
+        // O laço marca a área por cima do objeto.
+        let pontos: Vec<_> = [(22.0, 14.0), (38.0, 14.0), (38.0, 28.0), (22.0, 28.0)]
+            .iter()
+            .map(|&(x, y)| ponto_da_foto(&mut ve, &editor, (x / 64.0, y / 48.0)))
+            .collect();
+        let nada = gpui_kit::Modifiers::none();
+        ve.simulate_mouse_down(pontos[0], gpui_kit::MouseButton::Left, nada);
+        for p in &pontos[1..] {
+            ve.simulate_mouse_move(*p, Some(gpui_kit::MouseButton::Left), nada);
+        }
+        ve.simulate_mouse_up(pontos[3], gpui_kit::MouseButton::Left, nada);
+        ve.run_until_parked();
+        let area = espaco(&mut ve).2;
+        assert!(
+            area.largura >= 14 && area.altura >= 12,
+            "o laço marcou: {area:?}"
+        );
+        // As letras do espaço.
+        for (tecla, f) in [
+            ("h", F::Mao),
+            ("z", F::Lupa),
+            ("b", F::PincelDeAmostragem),
+            ("l", F::Laco),
+        ] {
+            ve.simulate_keystrokes(tecla);
+            ve.run_until_parked();
+            assert_eq!(espaco(&mut ve).0, f, "a tecla {tecla}");
+        }
+        // As opções do Photoshop.
+        clicar_no_editor(&mut ve, "editor-caf-amostragem-retangular");
+        assert_eq!(espaco(&mut ve).1, OpcaoDeAmostragem::Retangular);
+        clicar_no_editor(&mut ve, "editor-caf-adaptacao-nenhuma");
+        assert!(!editor.read_with(&ve, |ed, _| ed
+            .espaco_do_preenchimento()
+            .unwrap()
+            .adaptar_cor));
+        editor.update(&mut ve, |ed, cx| {
+            ed.mudar_saida_do_preenchimento(editor_core::SaidaDoPreenchimento::Duplicada, cx)
+        });
+        // Visualizar e Aplicar: grava a cópia da camada com o remendo, e o
+        // espaço continua aberto para a próxima área.
+        clicar_no_editor(&mut ve, "editor-preenchimento-visualizar");
+        assert_eq!(espaco(&mut ve).3, EstadoDoCalculo::Pronto { final_: true });
+        let quantas = camadas(&editor, &ve).0.len();
+        clicar_no_editor(&mut ve, "editor-preenchimento-aplicar-e-seguir");
+        let nomes = camadas(&editor, &ve).0;
+        assert_eq!(nomes.len(), quantas + 1);
+        assert!(nomes.last().unwrap().ends_with(" cópia"), "{nomes:?}");
+        assert!(
+            editor.read_with(&ve, |ed, _| ed.espaco_do_preenchimento().is_some()),
+            "Aplicar continua no espaço"
+        );
+        // A IA local: sem pincel de amostragem, sem sobreposição nem
+        // adaptação; a margem de contexto fica.
+        editor.update(&mut ve, |ed, cx| {
+            ed.mudar_metodo_do_preenchimento(preenchimento::Metodo::LaMa, cx)
+        });
+        ve.run_until_parked();
+        assert!(ve.debug_bounds("editor-caf-mostrar-amostragem").is_none());
+        assert!(ve.debug_bounds("editor-caf-adaptacao-padrao").is_none());
+        assert!(ve.debug_bounds("editor-preenchimento-contexto").is_some());
+        ve.simulate_keystrokes("b");
+        ve.run_until_parked();
+        assert_ne!(espaco(&mut ve).0, F::PincelDeAmostragem, "a IA não amostra");
+        // OK fecha (aqui sem prévia: Esc).
+        ve.simulate_keystrokes("escape");
+        ve.run_until_parked();
+        assert!(editor.read_with(&ve, |ed, _| ed.espaco_do_preenchimento().is_none()));
+        editor.update(&mut ve, |ed, cx| {
+            ed.mudar_metodo_do_preenchimento(preenchimento::Metodo::PatchMatch, cx)
+        });
     }
 }

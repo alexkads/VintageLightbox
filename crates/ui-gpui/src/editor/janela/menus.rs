@@ -305,19 +305,10 @@ fn menu_editar(
         ed,
         foco,
         window,
-        "editor-menu-preencher",
-        "Preencher com a cor de frente",
-        PreencherSelecao,
-        p,
-    ))
-    .item(acao(
-        ed,
-        foco,
-        window,
         "editor-menu-preencher-conteudo",
-        "Preencher pelo conteúdo",
+        "Preencher…",
         PreencherPeloConteudo,
-        p && e.tem_selecao,
+        p,
     ))
     .item(item(
         ed,

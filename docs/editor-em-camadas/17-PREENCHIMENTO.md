@@ -208,3 +208,31 @@ grande (piso, rodapé); o PatchMatch, onde a textura fina importa e a região de
 - **Nenhum dos dois reconstrói estrutura que não existe na foto** (rostos, objetos parcialmente encobertos);
   cenas cheias de objetos pequenos (o bule) saem fracas nos dois.
 - O painel lembra o método e o backend só enquanto a janela está aberta.
+
+## Como o Content-Aware Fill do Photoshop (08/out/2026)
+
+Pedido do dono: *"faça parecido com o Photoshop, mas preserve o que fizemos com IA local"*. O espaço modal ganhou
+a organização de lá; o método (PatchMatch ou IA local), o modelo, a margem de contexto e o processamento ficam.
+
+- **Barra de ferramentas do espaço** (à esquerda): pincel de amostragem (B), pincel da área (o nosso, para marcar
+  sem seleção), laço (L) para a área a refazer, mão (H) e lupa (Z) — as letras valem dentro do espaço. Com a IA o
+  pincel de amostragem fica apagado. Sem seleção, abre com o laço.
+- **Barra de opções** em cima: Adicionar/Subtrair (⌥ inverte) e o tamanho nos pincéis; o modo no laço; 100%,
+  Encaixar e Preencher na mão e na lupa.
+- **Painel**, nas seções do Photoshop: Método (+ Modelo de IA); **Sobreposição da área de amostragem** (mostrar,
+  opacidade, cor, indica a área de amostragem ou a excluída — só o PatchMatch); **Opções da área de amostragem**
+  (Automática, Retangular, Personalizada — esta começa vazia com o pincel de amostragem na mão — e **Amostrar
+  todas as camadas**, que troca o instantâneo pela composição inteira); **Configurações de preenchimento**
+  (**Adaptação de cor** Nenhuma/Padrão, que liga a membrana do PatchMatch — `Entrada::adaptar_cor`,
+  `Capacidades::adaptacao_de_cor`; a IA não tem —, suavização da borda, margem de contexto e processamento da
+  IA); **Configurações de saída** (**Saída para**: camada atual, nova camada ou **duplicar camada** —
+  `SaidaDoPreenchimento::Duplicada`, a cópia da escolhida com o remendo num passo).
+- **Rodapé**: ↺ Redefinir (os ajustes voltam ao padrão; método e área ficam), Visualizar/Parar, Cancelar,
+  **Aplicar** (grava e o espaço reabre para a próxima área, com os mesmos ajustes) e **OK** (grava e fecha; Enter).
+- Tudo isso volta na próxima abertura (`preenchimento.json`; o arquivo antigo, sem `saida`, vale pelo
+  `camada_nova`).
+- Rotação, escala e espelhamento do Photoshop não entraram: o PatchMatch não busca patches transformados.
+- **⇧⌫ abre o "Preencher"** do Photoshop (Conteúdo: sensível ao conteúdo — o remendo direto de sempre —, cor de
+  frente, cor de fundo, preto, 50% cinza, branco); também em Editar › Preencher… e no botão direito com seleção.
+  ⌥⌫ continua preenchendo com a cor de frente.
+

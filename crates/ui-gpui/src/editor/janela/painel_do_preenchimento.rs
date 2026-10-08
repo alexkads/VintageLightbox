@@ -19,7 +19,10 @@ use editor_core::Selecao;
 use gpui_kit::App;
 
 use super::*;
-use crate::editor::preenchimento::{self as calculo, Resultado};
+use crate::editor::preenchimento::{
+    self as calculo, OpcaoDeAmostragem, Resultado, Sobreposicao, CORES_DA_SOBREPOSICAO,
+};
+use editor_core::SaidaDoPreenchimento;
 
 /// O lado maior das imagens da Visualização (a janela do meio).
 const LADO_DA_VISUALIZACAO: u32 = 1400;
@@ -31,6 +34,134 @@ pub enum AlvoDoPincel {
     Amostragem,
     /// A área a remover (a seleção do painel).
     Destino,
+}
+
+/// As ferramentas do espaço, na barra da esquerda dele (as do Photoshop:
+/// pincel de amostragem, laço, mão e lupa — e o pincel da área, que marca o
+/// que refazer sem seleção).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FerramentaDoPreenchimento {
+    PincelDeAmostragem,
+    PincelDaArea,
+    Laco,
+    Mao,
+    Lupa,
+}
+
+impl FerramentaDoPreenchimento {
+    pub const TODAS: [FerramentaDoPreenchimento; 5] = [
+        FerramentaDoPreenchimento::PincelDeAmostragem,
+        FerramentaDoPreenchimento::PincelDaArea,
+        FerramentaDoPreenchimento::Laco,
+        FerramentaDoPreenchimento::Mao,
+        FerramentaDoPreenchimento::Lupa,
+    ];
+
+    pub fn nome(self) -> &'static str {
+        match self {
+            FerramentaDoPreenchimento::PincelDeAmostragem => "Pincel de amostragem",
+            FerramentaDoPreenchimento::PincelDaArea => "Pincel da área a preencher",
+            FerramentaDoPreenchimento::Laco => "Laço",
+            FerramentaDoPreenchimento::Mao => "Mão",
+            FerramentaDoPreenchimento::Lupa => "Lupa",
+        }
+    }
+
+    pub fn letra(self) -> Option<char> {
+        match self {
+            FerramentaDoPreenchimento::PincelDeAmostragem => Some('b'),
+            FerramentaDoPreenchimento::PincelDaArea => None,
+            FerramentaDoPreenchimento::Laco => Some('l'),
+            FerramentaDoPreenchimento::Mao => Some('h'),
+            FerramentaDoPreenchimento::Lupa => Some('z'),
+        }
+    }
+
+    pub fn icone(self) -> Icone {
+        match self {
+            FerramentaDoPreenchimento::PincelDeAmostragem => Icone::Paintbrush,
+            FerramentaDoPreenchimento::PincelDaArea => Icone::Pencil,
+            FerramentaDoPreenchimento::Laco => Icone::Lasso,
+            FerramentaDoPreenchimento::Mao => Icone::Hand,
+            FerramentaDoPreenchimento::Lupa => Icone::ZoomIn,
+        }
+    }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            FerramentaDoPreenchimento::PincelDeAmostragem => "editor-caf-pincel-amostragem",
+            FerramentaDoPreenchimento::PincelDaArea => "editor-caf-pincel-area",
+            FerramentaDoPreenchimento::Laco => "editor-caf-laco",
+            FerramentaDoPreenchimento::Mao => "editor-caf-mao",
+            FerramentaDoPreenchimento::Lupa => "editor-caf-lupa",
+        }
+    }
+
+    pub fn dica(self) -> &'static str {
+        match self {
+            FerramentaDoPreenchimento::PincelDeAmostragem => {
+                "Pinta de onde os pedaços podem vir (⌥ tira) — só o PatchMatch amostra"
+            }
+            FerramentaDoPreenchimento::PincelDaArea => {
+                "Pinta a área a refazer (⌥ tira) — para marcar sem seleção"
+            }
+            FerramentaDoPreenchimento::Laco => "Contorna a área a refazer (⌥ tira)",
+            FerramentaDoPreenchimento::Mao => "Arrasta a foto ampliada (ou o Espaço segurado)",
+            FerramentaDoPreenchimento::Lupa => "Clique amplia; ⌥ + clique reduz",
+        }
+    }
+
+    pub fn da_letra(letra: char) -> Option<Self> {
+        Self::TODAS.into_iter().find(|f| f.letra() == Some(letra))
+    }
+}
+
+/// As escolhas do espaço que voltam na próxima abertura (as do Photoshop:
+/// área de amostragem, sobreposição, adaptação de cor e saída).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PreferenciasDoPreenchimento {
+    pub opcao_amostragem: OpcaoDeAmostragem,
+    pub amostrar_todas: bool,
+    pub adaptar_cor: bool,
+    pub saida: SaidaDoPreenchimento,
+    pub vista: Sobreposicao,
+}
+
+impl Default for PreferenciasDoPreenchimento {
+    fn default() -> Self {
+        Self {
+            opcao_amostragem: OpcaoDeAmostragem::Automatica,
+            amostrar_todas: false,
+            adaptar_cor: true,
+            saida: SaidaDoPreenchimento::CamadaNova,
+            vista: Sobreposicao::default(),
+        }
+    }
+}
+
+/// O nome e a chave de cada saída.
+pub const SAIDAS: [(SaidaDoPreenchimento, &str, &str); 3] = [
+    (SaidaDoPreenchimento::CamadaAtual, "atual", "Camada atual"),
+    (SaidaDoPreenchimento::CamadaNova, "nova", "Nova camada"),
+    (
+        SaidaDoPreenchimento::Duplicada,
+        "duplicada",
+        "Duplicar camada",
+    ),
+];
+
+pub fn chave_da_saida(saida: SaidaDoPreenchimento) -> &'static str {
+    SAIDAS
+        .iter()
+        .find(|(s, _, _)| *s == saida)
+        .map_or("nova", |(_, c, _)| c)
+}
+
+pub fn saida_da_chave(chave: &str) -> Option<SaidaDoPreenchimento> {
+    SAIDAS
+        .iter()
+        .find(|(_, c, _)| *c == chave)
+        .map(|(s, _, _)| *s)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -65,7 +196,18 @@ pub struct EspacoDoPreenchimento {
     pub alvo: AlvoDoPincel,
     pub incluir: bool,
     pub ver_original: bool,
-    pub em_camada_nova: bool,
+    /// A ferramenta da barra do espaço e o laço em curso (pixels da foto).
+    pub ferramenta: FerramentaDoPreenchimento,
+    pub laco: Option<Vec<(f32, f32)>>,
+    /// O laço em curso começou com ⌥ (tira em vez de somar).
+    pub laco_tira: bool,
+    /// As opções do painel (as do Photoshop) — ver
+    /// [`PreferenciasDoPreenchimento`].
+    pub opcao_amostragem: OpcaoDeAmostragem,
+    pub amostrar_todas: bool,
+    pub adaptar_cor: bool,
+    pub saida: SaidaDoPreenchimento,
+    pub vista: Sobreposicao,
     pub pedido: u64,
     pub cancelar: Arc<AtomicBool>,
     pub progresso: Arc<Mutex<Option<Progresso>>>,
@@ -112,7 +254,17 @@ pub struct Lembrado {
     /// Em porcentagem, como no slider.
     pub contexto: f32,
     pub suavizacao: f32,
+    /// Só para ler o arquivo de antes da "Saída para" (`saida` vazia).
     pub camada_nova: bool,
+    pub saida: String,
+    pub opcao_amostragem: String,
+    pub amostrar_todas: bool,
+    pub adaptar_cor: bool,
+    pub sobreposicao_mostrar: bool,
+    /// Em porcentagem.
+    pub sobreposicao_opacidade: f32,
+    pub sobreposicao_cor: String,
+    pub sobreposicao_excluida: bool,
 }
 
 impl Default for Lembrado {
@@ -123,6 +275,14 @@ impl Default for Lembrado {
             contexto: CONTEXTO_PADRAO * 100.0,
             suavizacao: SUAVIZACAO_PADRAO,
             camada_nova: true,
+            saida: String::new(),
+            opcao_amostragem: OpcaoDeAmostragem::Automatica.chave().into(),
+            amostrar_todas: false,
+            adaptar_cor: true,
+            sobreposicao_mostrar: true,
+            sobreposicao_opacidade: 50.0,
+            sobreposicao_cor: CORES_DA_SOBREPOSICAO[0].0.into(),
+            sobreposicao_excluida: false,
         }
     }
 }
@@ -171,6 +331,36 @@ impl Lembrado {
         Metodo::da_chave(&self.metodo).unwrap_or(Metodo::PatchMatch)
     }
 
+    /// As escolhas do painel; o que não vale cai no padrão. A saída de um
+    /// arquivo antigo vem do "camada nova".
+    pub fn preferencias(&self) -> PreferenciasDoPreenchimento {
+        let padrao = PreferenciasDoPreenchimento::default();
+        PreferenciasDoPreenchimento {
+            opcao_amostragem: OpcaoDeAmostragem::da_chave(&self.opcao_amostragem)
+                .unwrap_or(padrao.opcao_amostragem),
+            amostrar_todas: self.amostrar_todas,
+            adaptar_cor: self.adaptar_cor,
+            saida: saida_da_chave(&self.saida).unwrap_or(if self.camada_nova {
+                SaidaDoPreenchimento::CamadaNova
+            } else {
+                SaidaDoPreenchimento::CamadaAtual
+            }),
+            vista: Sobreposicao {
+                mostrar: self.sobreposicao_mostrar,
+                opacidade: if self.sobreposicao_opacidade.is_finite() {
+                    (self.sobreposicao_opacidade / 100.0).clamp(0.0, 1.0)
+                } else {
+                    padrao.vista.opacidade
+                },
+                cor: CORES_DA_SOBREPOSICAO
+                    .iter()
+                    .find(|(n, _)| *n == self.sobreposicao_cor)
+                    .map_or(padrao.vista.cor, |(_, c)| *c),
+                indica_excluida: self.sobreposicao_excluida,
+            },
+        }
+    }
+
     pub fn backend(&self) -> Backend {
         Backend::da_chave(&self.backend).unwrap_or(Backend::Automatico)
     }
@@ -202,7 +392,25 @@ impl EditorDeFoto {
             // Um décimo basta: o slider anda de 5 em 5 e de 1 em 1.
             contexto: (self.contexto_da_ia.read(cx).value().start() * 10.0).round() / 10.0,
             suavizacao: (self.suavizacao.read(cx).value().start() * 10.0).round() / 10.0,
-            camada_nova: self.camada_nova_do_preenchimento,
+            camada_nova: self.preferencias_do_preenchimento.saida
+                != SaidaDoPreenchimento::CamadaAtual,
+            saida: chave_da_saida(self.preferencias_do_preenchimento.saida).into(),
+            opcao_amostragem: self
+                .preferencias_do_preenchimento
+                .opcao_amostragem
+                .chave()
+                .into(),
+            amostrar_todas: self.preferencias_do_preenchimento.amostrar_todas,
+            adaptar_cor: self.preferencias_do_preenchimento.adaptar_cor,
+            sobreposicao_mostrar: self.preferencias_do_preenchimento.vista.mostrar,
+            sobreposicao_opacidade: (self.preferencias_do_preenchimento.vista.opacidade * 100.0)
+                .round(),
+            sobreposicao_cor: CORES_DA_SOBREPOSICAO
+                .iter()
+                .find(|(_, c)| *c == self.preferencias_do_preenchimento.vista.cor)
+                .map_or(CORES_DA_SOBREPOSICAO[0].0, |(n, _)| n)
+                .into(),
+            sobreposicao_excluida: self.preferencias_do_preenchimento.vista.indica_excluida,
         }
         .gravar();
     }
@@ -221,6 +429,7 @@ impl EditorDeFoto {
         if self.area_do_preenchimento.is_some() || self.avisar_se_na_mascara(cx) {
             return;
         }
+        let pref = self.preferencias_do_preenchimento;
         let Some(s) = self.sessao_mut() else {
             return;
         };
@@ -229,12 +438,24 @@ impl EditorDeFoto {
             .selecao()
             .cloned()
             .unwrap_or_else(|| Selecao::vazia(largura, altura));
-        let foto = Arc::new(s.foto_ate_a_ativa(&Retangulo::inteiro(largura, altura)));
+        let foto = Arc::new(if pref.amostrar_todas {
+            s.compor()
+        } else {
+            s.foto_ate_a_ativa(&Retangulo::inteiro(largura, altura))
+        });
         let versao = s.versao();
         let metodo = self.metodo_do_preenchimento;
         let raio = self.suavizacao_do_preenchimento(cx);
         let (destino, peso) = calculo::destino_e_peso(&selecao, raio);
-        let amostragem = calculo::amostragem_automatica(&destino);
+        let amostragem = calculo::amostragem_de(pref.opcao_amostragem, &destino);
+        // Sem seleção, o que se faz primeiro é marcar a área.
+        let ferramenta = if selecao.caixa_justa().vazio() {
+            FerramentaDoPreenchimento::Laco
+        } else if metodo.capacidades().amostragem {
+            FerramentaDoPreenchimento::PincelDeAmostragem
+        } else {
+            FerramentaDoPreenchimento::Laco
+        };
         self.area_do_preenchimento = Some(EspacoDoPreenchimento {
             metodo,
             backend: self.backend_da_ia,
@@ -242,13 +463,24 @@ impl EditorDeFoto {
             destino,
             peso,
             amostragem,
-            amostragem_manual: false,
+            amostragem_manual: pref.opcao_amostragem == OpcaoDeAmostragem::Personalizada,
             foto,
             versao,
-            alvo: AlvoDoPincel::Amostragem,
+            alvo: if ferramenta == FerramentaDoPreenchimento::PincelDeAmostragem {
+                AlvoDoPincel::Amostragem
+            } else {
+                AlvoDoPincel::Destino
+            },
             incluir: true,
             ver_original: false,
-            em_camada_nova: self.camada_nova_do_preenchimento,
+            ferramenta,
+            laco: None,
+            laco_tira: false,
+            opcao_amostragem: pref.opcao_amostragem,
+            amostrar_todas: pref.amostrar_todas,
+            adaptar_cor: pref.adaptar_cor,
+            saida: pref.saida,
+            vista: pref.vista,
             pedido: 0,
             cancelar: Arc::new(AtomicBool::new(false)),
             progresso: Arc::new(Mutex::new(None)),
@@ -356,7 +588,7 @@ impl EditorDeFoto {
         e.destino = destino;
         e.peso = peso;
         if !e.amostragem_manual {
-            e.amostragem = calculo::amostragem_automatica(&e.destino);
+            e.amostragem = calculo::amostragem_de(e.opcao_amostragem, &e.destino);
         }
         self.refazer_a_sobreposicao();
         self.refazer_a_visualizacao();
@@ -367,12 +599,8 @@ impl EditorDeFoto {
             return;
         };
         let amostra = e.metodo.capacidades().amostragem;
-        let vazia = Selecao::vazia(e.destino.largura(), e.destino.altura());
-        let (w, h, bgra) = calculo::sobreposicao(
-            &e.destino,
-            if amostra { &e.amostragem } else { &vazia },
-            1024,
-        );
+        let (w, h, bgra) =
+            calculo::sobreposicao_com(&e.destino, amostra.then_some(&e.amostragem), &e.vista, 1024);
         e.sobreposicao = crate::imagem::de_bgra(w, h, bgra);
     }
 
@@ -410,6 +638,7 @@ impl EditorDeFoto {
         let cancelar = e.cancelar.clone();
         let progresso = e.progresso.clone();
         let backend = e.backend;
+        let adaptar_cor = e.adaptar_cor;
         let caixa = destino.caixa_justa();
         let semente = ((caixa.x as u64) << 48)
             ^ ((caixa.y as u64) << 32)
@@ -444,6 +673,7 @@ impl EditorDeFoto {
                 &amostragem,
                 motor.as_ref(),
                 contexto,
+                adaptar_cor,
                 fator,
                 semente,
                 &controle,
@@ -586,29 +816,34 @@ impl EditorDeFoto {
     /// Enter / Aplicar: o resultado final entra numa camada nova (ou na
     /// escolhida), num passo do desfazer — se o documento não mudou.
     pub fn aplicar_preenchimento(&mut self, cx: &mut Context<Self>) {
+        self.aplicar_preenchimento_e(true, cx);
+    }
+
+    /// "Aplicar" do Photoshop: grava e o espaço continua aberto para a
+    /// próxima área (com os mesmos ajustes); "OK" grava e fecha.
+    pub fn aplicar_preenchimento_e(&mut self, fechar: bool, cx: &mut Context<Self>) {
         let Some(e) = self.area_do_preenchimento.as_ref() else {
             return;
         };
         let (Some(r), EstadoDoCalculo::Pronto { final_: true }) = (&e.resultado, &e.estado) else {
             return;
         };
-        let (versao, ret, rgba, peso, nova) = (
-            e.versao,
-            r.ret,
-            r.rgba.clone(),
-            e.peso.clone(),
-            e.em_camada_nova,
-        );
+        let (versao, ret, rgba, peso, saida) =
+            (e.versao, r.ret, r.rgba.clone(), e.peso.clone(), e.saida);
         let Some(s) = self.sessao_mut() else {
             return;
         };
         let pesar = |x: u32, y: u32| peso.valor(x, y);
-        match s.aplicar_preenchimento(versao, &ret, &rgba, &pesar, nova) {
+        match s.aplicar_preenchimento(versao, &ret, &rgba, &pesar, saida) {
             Ok(()) => {
                 // Um passo só: a camada (ou o remendo) e o desmarcar.
                 s.desmarcar_junto_do_ultimo();
                 self.area_do_preenchimento = None;
                 self.aviso = None;
+                if !fechar {
+                    // A foto nova é o instantâneo da próxima área.
+                    self.abrir_preenchimento(cx);
+                }
             }
             Err(motivo) => {
                 if let Some(e) = self.area_do_preenchimento.as_mut() {
@@ -629,11 +864,33 @@ impl EditorDeFoto {
         modificadores: gpui_kit::Modifiers,
         cx: &mut Context<Self>,
     ) {
+        let ferramenta = self
+            .area_do_preenchimento
+            .as_ref()
+            .map_or(FerramentaDoPreenchimento::Laco, |e| e.ferramenta);
+        match ferramenta {
+            FerramentaDoPreenchimento::Mao => {
+                self.pegar_com_a_mao(ponto, cx);
+                return;
+            }
+            FerramentaDoPreenchimento::Lupa => {
+                let p = self.ponto_no_palco(ponto);
+                self.ampliar_em_torno(if modificadores.alt { 0.5 } else { 2.0 }, p, cx);
+                return;
+            }
+            _ => {}
+        }
         let Some(p) = self.na_foto_sem_limite(ponto) else {
             return;
         };
         if let Some(e) = self.area_do_preenchimento.as_mut() {
             e.pincelando = Some(p);
+            if ferramenta == FerramentaDoPreenchimento::Laco {
+                e.laco = Some(vec![p]);
+                e.laco_tira = modificadores.alt;
+                cx.notify();
+                return;
+            }
             if e.alvo == AlvoDoPincel::Amostragem && !e.metodo.capacidades().amostragem {
                 e.pincelando = None;
                 return;
@@ -656,6 +913,20 @@ impl EditorDeFoto {
             return false;
         };
         if let Some(p) = self.na_foto_sem_limite(ponto) {
+            if let Some(laco) = self
+                .area_do_preenchimento
+                .as_mut()
+                .and_then(|e| e.laco.as_mut())
+            {
+                if laco
+                    .last()
+                    .is_none_or(|q| (q.0 - p.0).hypot(q.1 - p.1) >= 1.0)
+                {
+                    laco.push(p);
+                }
+                cx.notify();
+                return true;
+            }
             self.pintar_no_preenchimento(de, p, modificadores.alt, cx);
             if let Some(e) = self.area_do_preenchimento.as_mut() {
                 e.pincelando = Some(p);
@@ -670,6 +941,25 @@ impl EditorDeFoto {
         };
         if e.pincelando.take().is_none() {
             return false;
+        }
+        if let Some(pontos) = e.laco.take() {
+            // O laço fechado entra na área (⌥ ou "Subtrair" tira).
+            if pontos.len() >= 3 {
+                let alt = e.laco_tira;
+                let forma = editor_core::Forma::Laco(pontos);
+                let laco = Selecao::da_forma(e.selecao.largura(), e.selecao.altura(), &forma);
+                let operacao = if e.incluir != alt {
+                    Operacao::Somar
+                } else {
+                    Operacao::Subtrair
+                };
+                e.selecao.combinar(&laco, operacao);
+                self.refazer_o_destino(cx);
+                self.invalidar_previa(cx);
+            } else {
+                cx.notify();
+            }
+            return true;
         }
         if e.alvo == AlvoDoPincel::Destino {
             self.refazer_o_destino(cx);
@@ -774,6 +1064,163 @@ impl EditorDeFoto {
             e.incluir = incluir;
         }
         cx.notify();
+    }
+
+    /// Uma ferramenta da barra do espaço (o pincel de amostragem só para
+    /// quem amostra).
+    pub fn escolher_ferramenta_do_preenchimento(
+        &mut self,
+        ferramenta: FerramentaDoPreenchimento,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(e) = self.area_do_preenchimento.as_mut() else {
+            return;
+        };
+        if ferramenta == FerramentaDoPreenchimento::PincelDeAmostragem
+            && !e.metodo.capacidades().amostragem
+        {
+            return;
+        }
+        e.ferramenta = ferramenta;
+        e.laco = None;
+        e.pincelando = None;
+        match ferramenta {
+            FerramentaDoPreenchimento::PincelDeAmostragem => e.alvo = AlvoDoPincel::Amostragem,
+            FerramentaDoPreenchimento::PincelDaArea | FerramentaDoPreenchimento::Laco => {
+                e.alvo = AlvoDoPincel::Destino
+            }
+            _ => {}
+        }
+        cx.notify();
+    }
+
+    /// Adicionar ou subtrair (a barra de opções do espaço; o ⌥ inverte).
+    pub fn modo_do_preenchimento(&mut self, incluir: bool, cx: &mut Context<Self>) {
+        if let Some(e) = self.area_do_preenchimento.as_mut() {
+            e.incluir = incluir;
+        }
+        cx.notify();
+    }
+
+    /// "Opções da área de amostragem": automática, retangular, personalizada.
+    pub fn mudar_opcao_de_amostragem(&mut self, opcao: OpcaoDeAmostragem, cx: &mut Context<Self>) {
+        self.preferencias_do_preenchimento.opcao_amostragem = opcao;
+        self.lembrar_o_preenchimento(cx);
+        if let Some(e) = self.area_do_preenchimento.as_mut() {
+            e.opcao_amostragem = opcao;
+            e.amostragem_manual = opcao == OpcaoDeAmostragem::Personalizada;
+            e.amostragem = calculo::amostragem_de(opcao, &e.destino);
+            if opcao == OpcaoDeAmostragem::Personalizada && e.metodo.capacidades().amostragem {
+                // Começa vazia: o pincel de amostragem já na mão.
+                e.ferramenta = FerramentaDoPreenchimento::PincelDeAmostragem;
+                e.alvo = AlvoDoPincel::Amostragem;
+                e.incluir = true;
+            }
+        }
+        self.refazer_a_sobreposicao();
+        self.invalidar_previa(cx);
+    }
+
+    /// "Amostrar todas as camadas": o instantâneo passa a ser a composição
+    /// inteira (desligado: até a camada escolhida).
+    pub fn alternar_amostrar_todas(&mut self, cx: &mut Context<Self>) {
+        let todas = !self.preferencias_do_preenchimento.amostrar_todas;
+        self.preferencias_do_preenchimento.amostrar_todas = todas;
+        self.lembrar_o_preenchimento(cx);
+        let foto = self.sessao().map(|s| {
+            let (l, a) = (s.base().width(), s.base().height());
+            Arc::new(if todas {
+                s.compor()
+            } else {
+                s.foto_ate_a_ativa(&Retangulo::inteiro(l, a))
+            })
+        });
+        if let (Some(e), Some(foto)) = (self.area_do_preenchimento.as_mut(), foto) {
+            e.amostrar_todas = todas;
+            e.foto = foto;
+        }
+        self.refazer_a_visualizacao();
+        self.invalidar_previa(cx);
+    }
+
+    /// "Adaptação de cor": a membrana do PatchMatch ligada ou não.
+    pub fn mudar_adaptacao_de_cor(&mut self, adaptar: bool, cx: &mut Context<Self>) {
+        self.preferencias_do_preenchimento.adaptar_cor = adaptar;
+        self.lembrar_o_preenchimento(cx);
+        if let Some(e) = self.area_do_preenchimento.as_mut() {
+            e.adaptar_cor = adaptar;
+        }
+        self.invalidar_previa(cx);
+    }
+
+    /// "Saída para": a prévia continua valendo (só muda onde ela entra).
+    pub fn mudar_saida_do_preenchimento(
+        &mut self,
+        saida: SaidaDoPreenchimento,
+        cx: &mut Context<Self>,
+    ) {
+        self.preferencias_do_preenchimento.saida = saida;
+        self.lembrar_o_preenchimento(cx);
+        if let Some(e) = self.area_do_preenchimento.as_mut() {
+            e.saida = saida;
+        }
+        cx.notify();
+    }
+
+    /// A sobreposição da área de amostragem (só a tela).
+    pub fn mudar_vista_da_amostragem(
+        &mut self,
+        mudar: impl FnOnce(&mut Sobreposicao),
+        cx: &mut Context<Self>,
+    ) {
+        mudar(&mut self.preferencias_do_preenchimento.vista);
+        let vista = self.preferencias_do_preenchimento.vista;
+        self.lembrar_o_preenchimento(cx);
+        if let Some(e) = self.area_do_preenchimento.as_mut() {
+            e.vista = vista;
+        }
+        self.refazer_a_sobreposicao();
+        cx.notify();
+    }
+
+    /// ↺ "Redefinir": os ajustes do painel voltam ao padrão (o método, o
+    /// modelo e a área marcada ficam).
+    pub fn redefinir_preenchimento(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let pref = PreferenciasDoPreenchimento::default();
+        self.preferencias_do_preenchimento = pref;
+        self.suavizacao
+            .update(cx, |s, cx| s.set_value(SUAVIZACAO_PADRAO, window, cx));
+        self.contexto_da_ia
+            .update(cx, |s, cx| s.set_value(CONTEXTO_PADRAO * 100.0, window, cx));
+        self.opacidade_da_amostragem.update(cx, |s, cx| {
+            s.set_value(pref.vista.opacidade * 100.0, window, cx)
+        });
+        self.seletor_da_cor_da_amostragem.update(cx, |s, cx| {
+            s.set_selected_value(&CORES_DA_SOBREPOSICAO[0].0.to_string(), window, cx)
+        });
+        self.seletor_da_saida.update(cx, |s, cx| {
+            s.set_selected_value(&chave_da_saida(pref.saida).to_string(), window, cx)
+        });
+        let foto = self.sessao().map(|s| {
+            let (l, a) = (s.base().width(), s.base().height());
+            Arc::new(s.foto_ate_a_ativa(&Retangulo::inteiro(l, a)))
+        });
+        if let Some(e) = self.area_do_preenchimento.as_mut() {
+            e.opcao_amostragem = pref.opcao_amostragem;
+            e.amostragem_manual = false;
+            e.adaptar_cor = pref.adaptar_cor;
+            e.saida = pref.saida;
+            e.vista = pref.vista;
+            if e.amostrar_todas {
+                e.amostrar_todas = false;
+                if let Some(foto) = foto {
+                    e.foto = foto;
+                }
+            }
+        }
+        self.lembrar_o_preenchimento(cx);
+        self.refazer_o_destino(cx);
+        self.invalidar_previa(cx);
     }
 
     // ------------------------------------------------------------ modelos
@@ -1098,119 +1545,175 @@ impl EditorDeFoto {
             )
         });
 
-        // --- O pincel: a área a remover sempre; a amostragem, só para quem amostra.
-        let alternancia = |id: &'static str,
-                           ativo_incluir: bool,
-                           ativo_excluir: bool,
-                           alvo: AlvoDoPincel,
-                           cx: &mut Context<Self>| {
-            ButtonGroup::new(id)
-                .outline()
-                .xsmall()
-                .child(
-                    crate::estilo::botao_contorno_pequeno(
-                        SharedString::from(format!("{id}-incluir")),
-                        cx,
-                    )
-                    .label("Incluir")
-                    .selected(ativo_incluir),
-                )
-                .child(
-                    crate::estilo::botao_contorno_pequeno(
-                        SharedString::from(format!("{id}-excluir")),
-                        cx,
-                    )
-                    .label("Excluir")
-                    .selected(ativo_excluir),
-                )
-                .on_click(cx.listener(move |ed, cliques: &Vec<usize>, _, cx| {
-                    ed.escolher_alvo_do_pincel(alvo, cliques.first() != Some(&1), cx)
+        // As seções do painel "Preenchimento sensível ao conteúdo" do
+        // Photoshop. O pincel (amostragem e área), o laço, a mão e a lupa
+        // estão na barra da esquerda do espaço; o modo e o tamanho, na barra
+        // de opções em cima.
+        let escolhas =
+            |id: &'static str,
+             nomes: Vec<(&'static str, &'static str, bool)>,
+             cx: &mut Context<Self>,
+             ao_escolher: fn(&mut EditorDeFoto, usize, &mut Context<EditorDeFoto>)| {
+                let mut grupo = ButtonGroup::new(id).outline().xsmall();
+                for (sub, nome, ligado) in nomes {
+                    grupo = grupo.child(
+                        crate::estilo::botao_contorno_pequeno(
+                            SharedString::from(format!("{id}-{sub}")),
+                            cx,
+                        )
+                        .label(nome)
+                        .selected(ligado),
+                    );
+                }
+                grupo.on_click(cx.listener(move |ed, cliques: &Vec<usize>, _, cx| {
+                    if let Some(i) = cliques.first() {
+                        ao_escolher(ed, *i, cx);
+                    }
                 }))
-        };
-        let mut pincel = v_flex().gap(px(8.));
-        if cap.amostragem {
-            let (inc, exc) = (
-                e.alvo == AlvoDoPincel::Amostragem && e.incluir,
-                e.alvo == AlvoDoPincel::Amostragem && !e.incluir,
-            );
-            pincel = pincel.child(
-                h_flex()
-                    .flex_wrap()
-                    .justify_between()
-                    .gap(px(6.))
-                    .child(
-                        h_flex()
-                            .gap(px(6.))
-                            .child(
-                                div()
-                                    .size(px(9.))
-                                    .rounded_full()
-                                    .bg(gpui_kit::rgb(0x3cc850)),
-                            )
-                            .child(div().text_xs().child("De onde amostrar")),
-                    )
-                    .child(alternancia(
-                        "editor-amostra",
-                        inc,
-                        exc,
-                        AlvoDoPincel::Amostragem,
-                        cx,
-                    )),
-            );
-        }
-        let (inc, exc) = (
-            e.alvo == AlvoDoPincel::Destino && e.incluir,
-            e.alvo == AlvoDoPincel::Destino && !e.incluir,
-        );
-        pincel = pincel
-            .child(
-                h_flex()
-                    .flex_wrap()
-                    .justify_between()
-                    .gap(px(6.))
-                    .child(
-                        h_flex()
-                            .gap(px(6.))
-                            .child(
-                                div()
-                                    .size(px(9.))
-                                    .rounded_full()
-                                    .bg(gpui_kit::rgb(0xe62828)),
-                            )
-                            .child(div().text_xs().child("Área a remover")),
-                    )
-                    .child(alternancia(
-                        "editor-destino",
-                        inc,
-                        exc,
-                        AlvoDoPincel::Destino,
-                        cx,
-                    )),
-            )
-            .child(linha_de_valor(
-                "Tamanho do pincel  [ ]",
-                format!(
-                    "{:.0} px",
-                    self.sessao().map_or(0.0, |s| s.pincel.raio * 2.0)
-                ),
-            ))
-            .child(div().h(px(20.)).child(crate::estilo::slider(&self.tamanho)))
-            .child(apagado(if cap.amostragem {
-                "⌥ inverte incluir e excluir enquanto pinta.".into()
-            } else {
-                "A IA vê o contexto da moldura tracejada; não há área de amostragem.".into()
-            }));
-        if cap.amostragem {
-            pincel = pincel.child(
-                crate::estilo::botao_fantasma_pequeno("editor-amostra-redefinir", cx)
-                    .label("Voltar à amostragem automática")
-                    .on_click(cx.listener(|ed, _, _, cx| ed.redefinir_amostragem(cx))),
-            );
-        }
-        let pincel = secao("Pincel").child(pincel);
+            };
 
-        // --- Ajustes
+        // --- Sobreposição da área de amostragem (só quem amostra)
+        let sobreposicao = cap.amostragem.then(|| {
+            let v = e.vista;
+            secao("Sobreposição da área de amostragem").child(
+                v_flex()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .debug_selector(|| "editor-caf-mostrar-amostragem".into())
+                            .child(
+                                Switch::new("editor-caf-mostrar-amostragem")
+                                    .xsmall()
+                                    .label("Mostrar a área de amostragem")
+                                    .checked(v.mostrar)
+                                    .on_click(cx.listener(|ed, marcado: &bool, _, cx| {
+                                        let m = *marcado;
+                                        ed.mudar_vista_da_amostragem(|o| o.mostrar = m, cx);
+                                    })),
+                            ),
+                    )
+                    .child(linha_de_valor(
+                        "Opacidade",
+                        format!("{:.0}%", v.opacidade * 100.0),
+                    ))
+                    .child(
+                        div()
+                            .h(px(20.))
+                            .debug_selector(|| "editor-caf-opacidade".into())
+                            .child(crate::estilo::slider(&self.opacidade_da_amostragem)),
+                    )
+                    .child(
+                        h_flex()
+                            .gap(px(8.))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(tema.muted_foreground)
+                                    .child("Cor"),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .debug_selector(|| "editor-caf-cor".into())
+                                    .child(crate::estilo::campo_pequeno(
+                                        Select::new(&self.seletor_da_cor_da_amostragem).xsmall(),
+                                    )),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .gap(px(8.))
+                            .flex_wrap()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(tema.muted_foreground)
+                                    .child("Indica"),
+                            )
+                            .child(escolhas(
+                                "editor-caf-indica",
+                                vec![
+                                    ("amostragem", "Área de amostragem", !v.indica_excluida),
+                                    ("excluida", "Área excluída", v.indica_excluida),
+                                ],
+                                cx,
+                                |ed, i, cx| {
+                                    ed.mudar_vista_da_amostragem(|o| o.indica_excluida = i == 1, cx)
+                                },
+                            )),
+                    ),
+            )
+        });
+
+        // --- Opções da área de amostragem
+        let mut opcoes = v_flex().gap(px(8.));
+        if cap.amostragem {
+            opcoes = opcoes
+                .child(escolhas(
+                    "editor-caf-amostragem",
+                    OpcaoDeAmostragem::TODAS
+                        .iter()
+                        .map(|o| (o.chave(), o.nome(), *o == e.opcao_amostragem))
+                        .collect(),
+                    cx,
+                    |ed, i, cx| {
+                        if let Some(o) = OpcaoDeAmostragem::TODAS.get(i) {
+                            ed.mudar_opcao_de_amostragem(*o, cx)
+                        }
+                    },
+                ))
+                .child(apagado(match e.opcao_amostragem {
+                    OpcaoDeAmostragem::Automatica => "Em volta da área, no formato dela.".into(),
+                    OpcaoDeAmostragem::Retangular => "O retângulo em volta da área.".into(),
+                    OpcaoDeAmostragem::Personalizada => {
+                        "Pinte com o pincel de amostragem (B) de onde os pedaços podem vir.".into()
+                    }
+                }));
+        } else {
+            opcoes = opcoes.child(apagado(
+                "A IA não usa área de amostragem: ela vê o contexto da moldura tracejada.".into(),
+            ));
+        }
+        let opcoes = secao("Opções da área de amostragem").child(
+            opcoes.child(
+                div()
+                    .debug_selector(|| "editor-caf-todas-as-camadas".into())
+                    .child(
+                        gpui_kit::component::checkbox::Checkbox::new("editor-caf-todas-as-camadas")
+                            .xsmall()
+                            .label("Amostrar todas as camadas")
+                            .checked(e.amostrar_todas)
+                            .on_click(
+                                cx.listener(|ed, _: &bool, _, cx| ed.alternar_amostrar_todas(cx)),
+                            ),
+                    ),
+            ),
+        );
+
+        // --- Configurações de preenchimento
         let mut ajustes = v_flex().gap(px(8.));
+        if cap.adaptacao_de_cor {
+            ajustes = ajustes.child(
+                h_flex()
+                    .gap(px(8.))
+                    .flex_wrap()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(tema.muted_foreground)
+                            .child("Adaptação de cor"),
+                    )
+                    .child(escolhas(
+                        "editor-caf-adaptacao",
+                        vec![
+                            ("nenhuma", "Nenhuma", !e.adaptar_cor),
+                            ("padrao", "Padrão", e.adaptar_cor),
+                        ],
+                        cx,
+                        |ed, i, cx| ed.mudar_adaptacao_de_cor(i == 1, cx),
+                    )),
+            );
+        }
         if cap.contexto_ajustavel {
             ajustes = ajustes
                 .child(linha_de_valor(
@@ -1251,23 +1754,27 @@ impl EditorDeFoto {
                         )),
                 );
         }
-        let ajustes = secao("Ajustes").child(ajustes);
+        let ajustes = secao("Configurações de preenchimento").child(ajustes);
 
-        // --- Saída
-        let saida = secao("Resultado").child(
+        // --- Configurações de saída
+        let saida = secao("Configurações de saída").child(
             v_flex().gap(px(8.)).child(
-                Switch::new("editor-camada-nova-preenchimento")
-                    .xsmall()
-                    .label("Aplicar numa camada nova")
-                    .checked(e.em_camada_nova)
-                    .on_click(cx.listener(|ed, marcado: &bool, _, cx| {
-                        if let Some(e) = ed.area_do_preenchimento.as_mut() {
-                            e.em_camada_nova = *marcado;
-                        }
-                        ed.camada_nova_do_preenchimento = *marcado;
-                        ed.lembrar_o_preenchimento(cx);
-                        cx.notify();
-                    })),
+                h_flex()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(tema.muted_foreground)
+                            .child("Saída para"),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .debug_selector(|| "editor-caf-saida".into())
+                            .child(crate::estilo::campo_pequeno(
+                                Select::new(&self.seletor_da_saida).xsmall(),
+                            )),
+                    ),
             ),
         );
 
@@ -1371,7 +1878,8 @@ impl EditorDeFoto {
                     .p(px(12.))
                     .child(metodo)
                     .children(modelo)
-                    .child(pincel)
+                    .children(sobreposicao)
+                    .child(opcoes)
                     .child(ajustes)
                     .child(saida)
                     .child(
@@ -1380,19 +1888,21 @@ impl EditorDeFoto {
                             .child(estado),
                     ),
             )
-            // O rodapé: cancelar, visualizar e aplicar, sempre à vista.
+            // O rodapé do Photoshop: redefinir, cancelar, visualizar, aplicar
+            // (continua aberto) e OK (fecha), sempre à vista.
             .child(
-                h_flex()
-                    .gap(px(8.))
+                v_flex()
+                    .gap(px(6.))
                     .p(px(12.))
                     .border_t_1()
                     .border_color(tema.border)
                     .child(
-                        crate::estilo::botao_contorno("editor-preenchimento-cancelar", cx)
-                            .flex_1()
-                            .child("Cancelar")
-                            .tooltip("Esc — a foto fica como estava")
-                            .on_click(cx.listener(|ed, _, _, cx| ed.cancelar_preenchimento(cx))),
+                h_flex()
+                    .gap(px(6.))
+                    .child(
+                        crate::estilo::botao_icone("editor-preenchimento-redefinir", Icone::RotateCcw, 28., 15.)
+                            .tooltip("Redefinir os ajustes do preenchimento (o método e a área ficam)")
+                            .on_click(cx.listener(|ed, _, window, cx| ed.redefinir_preenchimento(window, cx))),
                     )
                     .child(if calculando {
                         crate::estilo::botao_secundario("editor-preenchimento-visualizar", cx)
@@ -1406,18 +1916,42 @@ impl EditorDeFoto {
                             .child("Visualizar")
                             .tooltip("Enter — calcula com os ajustes de agora; a foto não muda")
                             .on_click(cx.listener(|ed, _, _, cx| ed.visualizar_preenchimento(cx)))
-                    })
+                    }),
+                    )
                     .child(
-                        crate::estilo::botao_primario("editor-preenchimento-aplicar", cx)
+                h_flex()
+                    .gap(px(6.))
+                    .child(
+                        crate::estilo::botao_contorno("editor-preenchimento-cancelar", cx)
+                            .flex_1()
+                            .child("Cancelar")
+                            .tooltip("Esc — a foto fica como estava")
+                            .on_click(cx.listener(|ed, _, _, cx| ed.cancelar_preenchimento(cx))),
+                    )
+                    .child(
+                        crate::estilo::botao_secundario("editor-preenchimento-aplicar-e-seguir", cx)
                             .flex_1()
                             .child("Aplicar")
                             .tooltip(if pronto {
-                                "Enter — grava o visualizado numa camada de retoque"
+                                "Grava o visualizado e continua aqui para a próxima área"
+                            } else {
+                                "Visualize primeiro: só se aplica o que foi visto"
+                            })
+                            .disabled(!pronto)
+                            .on_click(cx.listener(|ed, _, _, cx| ed.aplicar_preenchimento_e(false, cx))),
+                    )
+                    .child(
+                        crate::estilo::botao_primario("editor-preenchimento-aplicar", cx)
+                            .flex_1()
+                            .child("OK")
+                            .tooltip(if pronto {
+                                "Enter — grava o visualizado e fecha"
                             } else {
                                 "Visualize primeiro: só se aplica o que foi visto"
                             })
                             .disabled(!pronto)
                             .on_click(cx.listener(|ed, _, _, cx| ed.aplicar_preenchimento(cx))),
+                    ),
                     ),
             )
             .into_any_element()
@@ -1444,39 +1978,173 @@ impl EditorDeFoto {
                 let _ = fraca.update(cx, |ed, cx| ed.fechar(window, cx));
             },
         );
-        crate::janela::como_barra_de_titulo(div(), "barra-do-preenchimento", window, cx)
-            .debug_selector(|| "editor-barra-do-preenchimento".into())
+        let titulo =
+            crate::janela::como_barra_de_titulo(div(), "barra-do-preenchimento", window, cx)
+                .debug_selector(|| "editor-barra-do-preenchimento".into())
+                .flex()
+                .flex_shrink_0()
+                .items_center()
+                .gap(px(8.))
+                .h(px(super::aparencia::medida::ALTURA_DOS_MENUS))
+                .pl(px(12.))
+                .pr(px(4.))
+                .border_b_1()
+                .border_color(tema.border)
+                .child(gpui_kit::component::Icon::new(Icone::Sparkles).size_4())
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                        .child("Preenchimento sensível ao conteúdo"),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .truncate()
+                        .text_xs()
+                        .text_color(tema.muted_foreground)
+                        .child(format!("{} · a foto só muda ao aplicar", self.foto.nome)),
+                )
+                .child(controles);
+        gpui_kit::component::v_flex()
+            .flex_shrink_0()
+            .child(titulo)
+            .child(self.opcoes_do_espaco(cx))
+            .into_any_element()
+    }
+
+    /// A barra de opções do espaço: a ferramenta e o que ela tem — o modo e o
+    /// tamanho dos pincéis, o modo do laço, o zoom da mão e da lupa.
+    fn opcoes_do_espaco(&self, cx: &mut Context<Self>) -> AnyElement {
+        use gpui_kit::component::button::ButtonGroup;
+        use gpui_kit::component::Selectable as _;
+        let c = super::aparencia::cores(cx);
+        let Some(e) = self.area_do_preenchimento.as_ref() else {
+            return div().into_any_element();
+        };
+        let f = e.ferramenta;
+        let mut conteudo: Vec<AnyElement> = Vec::new();
+        let modo = |cx: &mut Context<Self>| {
+            ButtonGroup::new("editor-caf-modo")
+                .outline()
+                .xsmall()
+                .child(
+                    crate::estilo::botao_contorno_pequeno("editor-caf-modo-adicionar", cx)
+                        .label("Adicionar")
+                        .selected(e.incluir),
+                )
+                .child(
+                    crate::estilo::botao_contorno_pequeno("editor-caf-modo-subtrair", cx)
+                        .label("Subtrair")
+                        .selected(!e.incluir),
+                )
+                .on_click(cx.listener(|ed, cliques: &Vec<usize>, _, cx| {
+                    ed.modo_do_preenchimento(cliques.first() != Some(&1), cx)
+                }))
+                .into_any_element()
+        };
+        match f {
+            FerramentaDoPreenchimento::PincelDeAmostragem
+            | FerramentaDoPreenchimento::PincelDaArea => {
+                conteudo.push(modo(cx));
+                conteudo.push(self.pincel_em_popover(cx));
+            }
+            FerramentaDoPreenchimento::Laco => conteudo.push(modo(cx)),
+            FerramentaDoPreenchimento::Mao | FerramentaDoPreenchimento::Lupa => {
+                conteudo.extend(self.botoes_de_zoom(cx))
+            }
+        }
+        conteudo.push(
+            div()
+                .text_xs()
+                .text_color(c.apagado)
+                .child(super::ferramentas::na_plataforma(f.dica()))
+                .into_any_element(),
+        );
+        div()
+            .id("editor-caf-opcoes")
+            .debug_selector(|| "editor-caf-opcoes".into())
             .flex()
+            .flex_shrink_0()
             .items_center()
-            .gap(px(8.))
-            .h(px(48.))
-            .pl(px(12.))
-            .pr(px(4.))
+            .gap(px(super::aparencia::medida::VAO))
+            .h(px(super::aparencia::medida::ALTURA_DAS_OPCOES))
+            .px(px(8.))
+            .bg(c.cromo)
             .border_b_1()
-            .border_color(tema.border)
-            .child(gpui_kit::component::Icon::new(Icone::Sparkles).size_4())
+            .border_color(c.borda)
+            .overflow_x_scroll()
             .child(
                 div()
-                    .text_sm()
-                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                    .child("Preenchimento sensível ao conteúdo"),
+                    .flex_shrink_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .size(px(26.))
+                    .border_1()
+                    .border_color(c.borda)
+                    .rounded(px(super::aparencia::medida::CANTO))
+                    .child(gpui_kit::component::Icon::new(f.icone()).size(px(16.))),
             )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .truncate()
-                    .text_xs()
-                    .text_color(tema.muted_foreground)
-                    .child(format!("{} · a foto só muda ao aplicar", self.foto.nome)),
-            )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(tema.muted_foreground)
-                    .child("Esc cancela · Enter visualiza ou aplica"),
-            )
-            .child(controles)
+            .children(conteudo.into_iter().map(|e| div().flex_shrink_0().child(e)))
+            .into_any_element()
+    }
+
+    /// A barra de ferramentas do espaço, à esquerda (a do Photoshop no
+    /// Content-Aware Fill).
+    pub(super) fn ferramentas_do_preenchimento(&self, cx: &mut Context<Self>) -> AnyElement {
+        use gpui_kit::component::button::ButtonVariants as _;
+        let c = super::aparencia::cores(cx);
+        let Some(e) = self.area_do_preenchimento.as_ref() else {
+            return div().into_any_element();
+        };
+        let amostra = e.metodo.capacidades().amostragem;
+        let atual = e.ferramenta;
+        div()
+            .id("editor-caf-ferramentas")
+            .debug_selector(|| "editor-caf-ferramentas".into())
+            .flex()
+            .flex_col()
+            .items_center()
+            .flex_shrink_0()
+            .gap(px(2.))
+            .py(px(6.))
+            .w(px(super::aparencia::medida::BARRA_UMA_COLUNA))
+            .h_full()
+            .bg(c.cromo)
+            .border_r_1()
+            .border_color(c.borda)
+            .children(FerramentaDoPreenchimento::TODAS.into_iter().map(|f| {
+                let desligada = f == FerramentaDoPreenchimento::PincelDeAmostragem && !amostra;
+                let nome = match f.letra() {
+                    Some(l) => format!("{} ({})", f.nome(), l.to_ascii_uppercase()),
+                    None => f.nome().to_string(),
+                };
+                let dica = if desligada {
+                    format!("{nome}\nA IA não usa área de amostragem")
+                } else {
+                    format!("{nome}\n{}", super::ferramentas::na_plataforma(f.dica()))
+                };
+                let b = crate::estilo::botao_icone(
+                    f.id(),
+                    f.icone(),
+                    super::aparencia::medida::BOTAO_DA_FERRAMENTA,
+                    super::aparencia::medida::ICONE_DA_FERRAMENTA,
+                )
+                .rounded(px(super::aparencia::medida::CANTO))
+                .tooltip(dica)
+                .disabled(desligada)
+                .on_click(cx.listener(move |ed, _, window, cx| {
+                    window.focus(&ed.foco, cx);
+                    ed.escolher_ferramenta_do_preenchimento(f, cx)
+                }));
+                if f == atual {
+                    b.primary()
+                } else {
+                    b
+                }
+            }))
             .into_any_element()
     }
 
@@ -1613,6 +2281,7 @@ mod testes_do_lembrado {
             contexto: 85.0,
             suavizacao: 7.0,
             camada_nova: false,
+            ..Lembrado::default()
         };
         let texto = serde_json::to_string(&l).unwrap();
         assert_eq!(Lembrado::do_texto(&texto), l);
@@ -1627,5 +2296,29 @@ mod testes_do_lembrado {
         assert_eq!(estranho.suavizacao, SUAVIZACAO_PADRAO);
         assert!(!estranho.camada_nova);
         assert_eq!(Lembrado::do_texto("lixo"), Lembrado::default());
+        // O arquivo de antes da "Saída para": o "camada nova" decide.
+        assert_eq!(
+            estranho.preferencias().saida,
+            SaidaDoPreenchimento::CamadaAtual
+        );
+        assert_eq!(
+            Lembrado::default().preferencias(),
+            PreferenciasDoPreenchimento::default()
+        );
+        // As escolhas do Photoshop vão e voltam.
+        let l = Lembrado {
+            saida: "duplicada".into(),
+            opcao_amostragem: "retangular".into(),
+            adaptar_cor: false,
+            sobreposicao_cor: "Azul".into(),
+            sobreposicao_opacidade: 30.0,
+            ..Lembrado::default()
+        };
+        let p = Lembrado::do_texto(&serde_json::to_string(&l).unwrap()).preferencias();
+        assert_eq!(p.saida, SaidaDoPreenchimento::Duplicada);
+        assert_eq!(p.opcao_amostragem, OpcaoDeAmostragem::Retangular);
+        assert!(!p.adaptar_cor);
+        assert_eq!(p.vista.cor, CORES_DA_SOBREPOSICAO[2].1);
+        assert!((p.vista.opacidade - 0.3).abs() < 1e-6);
     }
 }

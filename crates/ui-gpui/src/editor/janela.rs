@@ -41,12 +41,15 @@ mod menus;
 mod opcoes;
 mod paineis;
 mod painel_do_preenchimento;
+mod preencher;
 mod status;
 mod transferencia;
 pub use area_de_trabalho::QualPainel;
 pub use ferramentas::{letra_de, DefDeFerramenta, FERRAMENTAS};
 pub use menus::atalho_da_acao as menus_atalho;
-pub use painel_do_preenchimento::{AlvoDoPincel, EspacoDoPreenchimento, EstadoDoCalculo};
+pub use painel_do_preenchimento::{
+    AlvoDoPincel, EspacoDoPreenchimento, EstadoDoCalculo, FerramentaDoPreenchimento,
+};
 
 use editor_core::selecao::{caixa_do_arrasto, medida_da_caixa};
 use editor_core::sessao::PedidoDeLupa;
@@ -702,7 +705,12 @@ pub struct EditorDeFoto {
     metodo_do_preenchimento: preenchimento::Metodo,
     backend_da_ia: ia_local::execucao::Backend,
     /// "Aplicar numa camada nova" — lembrado entre aberturas.
-    camada_nova_do_preenchimento: bool,
+    /// As escolhas do Content-Aware que voltam na próxima abertura, e os
+    /// controles delas no painel.
+    preferencias_do_preenchimento: painel_do_preenchimento::PreferenciasDoPreenchimento,
+    opacidade_da_amostragem: Entity<SliderState>,
+    seletor_da_cor_da_amostragem: Entity<SelectState<Vec<Opcao>>>,
+    seletor_da_saida: Entity<SelectState<Vec<Opcao>>>,
     seletor_de_metodo: Entity<SelectState<Vec<Opcao>>>,
     seletor_de_backend: Entity<SelectState<Vec<Opcao>>>,
     /// A margem de contexto da IA (%) e a suavização da borda (px).
@@ -754,6 +762,9 @@ pub struct EditorDeFoto {
     proporcao_travada: bool,
     /// A Ajuda dos atalhos aberta.
     mostrando_atalhos: bool,
+    /// O diálogo "Preencher" (⇧⌫) e o conteúdo dele.
+    dialogo_de_preencher: bool,
+    seletor_do_conteudo: Entity<SelectState<Vec<Opcao>>>,
     /// A camada sendo renomeada e o campo do nome.
     renomeando: Option<(usize, Entity<InputState>)>,
     medidas: Medidas,
@@ -988,7 +999,47 @@ impl EditorDeFoto {
             .map(|m| Opcao::nova(m.chave(), m.nome()))
             .collect();
         // As últimas escolhas do preenchimento (`painel_do_preenchimento::Lembrado`).
+        let conteudos: Vec<Opcao> = preencher::CONTEUDOS
+            .iter()
+            .map(|(c, n)| Opcao::nova(*c, *n))
+            .collect();
+        let seletor_do_conteudo = cx.new(|cx| SelectState::new(conteudos, None, window, cx));
+        seletor_do_conteudo.update(cx, |s, cx| {
+            s.set_selected_value(&preencher::CONTEUDOS[0].0.to_string(), window, cx)
+        });
         let lembrado = painel_do_preenchimento::Lembrado::ler();
+        let pref_do_preenchimento = lembrado.preferencias();
+        let opacidade_da_amostragem = slider(
+            0.0,
+            100.0,
+            5.0,
+            pref_do_preenchimento.vista.opacidade * 100.0,
+            cx,
+        );
+        let cores_da_amostragem: Vec<Opcao> = crate::editor::preenchimento::CORES_DA_SOBREPOSICAO
+            .iter()
+            .map(|(n, _)| Opcao::nova(*n, *n))
+            .collect();
+        let seletor_da_cor_da_amostragem =
+            cx.new(|cx| SelectState::new(cores_da_amostragem, None, window, cx));
+        if let Some((nome, _)) = crate::editor::preenchimento::CORES_DA_SOBREPOSICAO
+            .iter()
+            .find(|(_, c)| *c == pref_do_preenchimento.vista.cor)
+        {
+            let nome = nome.to_string();
+            seletor_da_cor_da_amostragem
+                .update(cx, |s, cx| s.set_selected_value(&nome, window, cx));
+        }
+        let saidas: Vec<Opcao> = painel_do_preenchimento::SAIDAS
+            .iter()
+            .map(|(_, c, n)| Opcao::nova(*c, *n))
+            .collect();
+        let seletor_da_saida = cx.new(|cx| SelectState::new(saidas, None, window, cx));
+        {
+            let chave =
+                painel_do_preenchimento::chave_da_saida(pref_do_preenchimento.saida).to_string();
+            seletor_da_saida.update(cx, |s, cx| s.set_selected_value(&chave, window, cx));
+        }
         let seletor_de_metodo = cx.new(|cx| SelectState::new(metodos, None, window, cx));
         seletor_de_metodo.update(cx, |s, cx| {
             s.set_selected_value(&lembrado.metodo().chave().to_string(), window, cx)
@@ -1216,6 +1267,42 @@ impl EditorDeFoto {
                 },
             ));
         }
+        assinaturas.push(cx.subscribe_in(
+            &opacidade_da_amostragem,
+            window,
+            |ed: &mut Self, _e, evento: &SliderEvent, _w, cx| {
+                let (v, _) = valor(evento);
+                ed.mudar_vista_da_amostragem(|o| o.opacidade = v / 100.0, cx);
+            },
+        ));
+        assinaturas.push(cx.subscribe_in(
+            &seletor_da_cor_da_amostragem,
+            window,
+            |ed: &mut Self, _e, evento: &SelectEvent<Vec<Opcao>>, window, cx| {
+                if let SelectEvent::Confirm(Some(nome)) = evento {
+                    if let Some((_, cor)) = crate::editor::preenchimento::CORES_DA_SOBREPOSICAO
+                        .iter()
+                        .find(|(n, _)| n == nome)
+                    {
+                        let cor = *cor;
+                        ed.mudar_vista_da_amostragem(|o| o.cor = cor, cx);
+                    }
+                }
+                window.focus(&ed.foco, cx);
+            },
+        ));
+        assinaturas.push(cx.subscribe_in(
+            &seletor_da_saida,
+            window,
+            |ed: &mut Self, _e, evento: &SelectEvent<Vec<Opcao>>, window, cx| {
+                if let SelectEvent::Confirm(Some(chave)) = evento {
+                    if let Some(saida) = painel_do_preenchimento::saida_da_chave(chave) {
+                        ed.mudar_saida_do_preenchimento(saida, cx);
+                    }
+                }
+                window.focus(&ed.foco, cx);
+            },
+        ));
         assinaturas.push(cx.subscribe_in(
             &seletor_de_metodo,
             window,
@@ -1474,7 +1561,10 @@ impl EditorDeFoto {
             area_do_preenchimento: None,
             metodo_do_preenchimento: lembrado.metodo(),
             backend_da_ia: lembrado.backend(),
-            camada_nova_do_preenchimento: lembrado.camada_nova,
+            preferencias_do_preenchimento: lembrado.preferencias(),
+            opacidade_da_amostragem,
+            seletor_da_cor_da_amostragem,
+            seletor_da_saida,
             seletor_de_metodo,
             seletor_de_backend,
             contexto_da_ia,
@@ -1509,6 +1599,8 @@ impl EditorDeFoto {
             lupa_reduz: false,
             proporcao_travada: false,
             mostrando_atalhos: false,
+            dialogo_de_preencher: false,
+            seletor_do_conteudo,
             renomeando: None,
             medidas: Medidas::default(),
             _assinaturas: assinaturas,
@@ -5420,7 +5512,14 @@ impl EditorDeFoto {
                     }
                     "camada-nova" => {
                         if let Some(e) = self.area_do_preenchimento.as_mut() {
-                            e.em_camada_nova = partes.get(2) != Some(&"nao");
+                            e.saida = if partes.get(2) == Some(&"nao") {
+                                editor_core::SaidaDoPreenchimento::CamadaAtual
+                            } else {
+                                painel_do_preenchimento::saida_da_chave(
+                                    partes.get(2).copied().unwrap_or("nova"),
+                                )
+                                .unwrap_or_default()
+                            };
                         }
                     }
                     outro => eprintln!("[roteiro] editor preenchimento {outro}?"),
@@ -5940,8 +6039,17 @@ impl EditorDeFoto {
                             }
                         }
                     }
-                    // O preenchimento aberto: a sobreposição e a prévia.
+                    // O preenchimento aberto: a sobreposição e a prévia, e o
+                    // laço em curso.
                     palco = palco.children(self.elementos_do_preenchimento(&v, cx));
+                    if let Some(pontos) = self
+                        .area_do_preenchimento
+                        .as_ref()
+                        .and_then(|e| e.laco.clone())
+                        .filter(|p| p.len() > 1)
+                    {
+                        palco = palco.child(tela.contorno(pontos));
+                    }
                     // O Remendo em curso: a seleção levada até a origem.
                     if let (Some((de, ate)), Some(sel)) =
                         (self.arrasto_do_remendo, sessao.selecao())
@@ -6449,9 +6557,9 @@ impl EditorDeFoto {
                 ))
                 .item(item(
                     "editor-contexto-preencher-conteudo",
-                    "Preencher pelo conteúdo  ⇧⌫",
+                    "Preencher…  ⇧⌫",
                     true,
-                    |ed, _, cx| ed.preencher_a_selecao_pelo_conteudo(cx),
+                    |ed, _, cx| ed.abrir_dialogo_de_preencher(cx),
                 ))
                 .separator()
                 .item(item(
@@ -7435,6 +7543,18 @@ impl Render for EditorDeFoto {
             )
         };
         let flyout = self.flyout_da_barra(cx);
+        let preencher = {
+            let quer = self.dialogo_de_preencher;
+            crate::dialogo::desenhar(
+                self,
+                quer,
+                crate::dialogo::Jeito::dialogo(420.),
+                Self::dialogo_do_preencher,
+                |ed, window, cx| ed.cancelar_preencher(window, cx),
+                window,
+                cx,
+            )
+        };
         let tema = cx.theme().clone();
         // A moldura do `Root` não pode tomar o clique do conteúdo encostado na
         // borda com a janela maximizada (`janela::raiz_do_conteudo`).
@@ -7448,6 +7568,7 @@ impl Render for EditorDeFoto {
                 .flex()
                 .flex_1()
                 .min_h(px(0.))
+                .child(self.ferramentas_do_preenchimento(cx))
                 .child(
                     div()
                         .flex_1()
@@ -7605,11 +7726,15 @@ impl Render for EditorDeFoto {
             .on_action(cx.listener(|ed, _: &DuplicarCamada, _, cx| ed.duplicar_camada(cx)))
             .on_action(cx.listener(|ed, _: &CamadaViaRecorte, _, cx| ed.camada_via_recorte(cx)))
             .on_action(cx.listener(|ed, _: &TransformacaoLivre, _, cx| ed.transformar(cx)))
-            .on_action(cx.listener(|ed, _: &PreencherPeloConteudo, _, cx| {
-                ed.preencher_a_selecao_pelo_conteudo(cx)
-            }))
+            .on_action(
+                cx.listener(|ed, _: &PreencherPeloConteudo, _, cx| {
+                    ed.abrir_dialogo_de_preencher(cx)
+                }),
+            )
             .on_action(cx.listener(|ed, _: &AplicarTransformacao, window, cx| {
                 if ed.tecla_no_flyout("enter", cx) {
+                } else if ed.dialogo_de_preencher {
+                    ed.confirmar_preencher(window, cx)
                 } else if ed.area_do_preenchimento.is_some() {
                     ed.confirmar_preenchimento(cx)
                 } else if ed.modificando.is_some() {
@@ -7622,6 +7747,8 @@ impl Render for EditorDeFoto {
             }))
             .on_action(cx.listener(|ed, _: &CancelarTransformacao, window, cx| {
                 if ed.tecla_no_flyout("escape", cx) {
+                } else if ed.dialogo_de_preencher {
+                    ed.cancelar_preencher(window, cx)
                 } else if ed.area_do_preenchimento.is_some() {
                     ed.cancelar_preenchimento(cx)
                 } else if ed.modificando.is_some() {
@@ -7688,6 +7815,7 @@ impl Render for EditorDeFoto {
             .children(pergunta)
             .children(modificacao)
             .children(atalhos)
+            .children(preencher)
     }
 }
 
