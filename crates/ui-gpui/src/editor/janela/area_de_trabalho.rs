@@ -148,6 +148,9 @@ pub struct Arranjo {
     pub ocultos: Vec<String>,
     #[serde(default)]
     pub barra_em_duas_colunas: bool,
+    /// As réguas em volta do palco (⌘R).
+    #[serde(default)]
+    pub reguas: bool,
     /// Os grupos, as abas e os tamanhos — a árvore do dock do kit.
     #[serde(default)]
     pub grupos: Option<PanelState>,
@@ -161,6 +164,7 @@ impl Default for Arranjo {
             recolhido: false,
             ocultos: Vec::new(),
             barra_em_duas_colunas: false,
+            reguas: false,
             grupos: None,
         }
     }

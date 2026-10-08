@@ -92,6 +92,16 @@ gpui_kit::actions!(
         // só os painéis — como no Photoshop.
         AlternarInterface,
         AlternarPaineis,
+        // ⇧⌘D: a última seleção desmarcada de volta.
+        Reselecionar,
+        // Imagem › Ajustes: ⌘L Níveis, ⌘M Curvas, ⌘U Matiz/saturação — aqui
+        // nascem como camada de ajuste (não destrutivas), com a seleção de
+        // máscara.
+        AjusteNiveis,
+        AjusteCurvas,
+        AjusteMatiz,
+        // ⌘R: as réguas em volta do palco.
+        AlternarReguas,
     ]
 );
 
@@ -128,7 +138,9 @@ const SEM_CAMPO: &str = "EditorDeFoto && !Input";
 ///   carimbar visível; ⌘I inverter (a máscara, ou as cores da camada); `\`
 ///   a máscara em rubi; `/` o cadeado da transparência. Fora de campo de
 ///   texto: o campo do nome da camada tem a área de transferência dele;
-/// - zoom: ⌘= ⌘− ⌘0 ⌘⌥0; **Z é a Lupa**, como no Photoshop (a tecla de
+/// - ⇧⌘D reseleciona; ⌘L Níveis, ⌘M Curvas e ⌘U Matiz/saturação criam a
+///   camada de ajuste (Imagem › Ajustes); ⌘R mostra ou esconde as réguas;
+/// - zoom: ⌘= ⌘− ⌘0, e ⌘1 (ou ⌘⌥0) 100%; **Z é a Lupa**, como no Photoshop (a tecla de
 ///   alternar encaixe e 100% é da Revelação, não do editor);
 /// - Tab esconde barra de ferramentas, opções e painéis; ⇧Tab só os painéis;
 /// - as ferramentas e as letras saem de `janela::ferramentas::FERRAMENTAS`.
@@ -163,6 +175,12 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("secondary--", Afastar, c),
         KeyBinding::new("secondary-0", Encaixar, c),
         KeyBinding::new("secondary-alt-0", UmPorUm, c),
+        KeyBinding::new("secondary-1", UmPorUm, c),
+        KeyBinding::new("secondary-shift-d", Reselecionar, c),
+        KeyBinding::new("secondary-l", AjusteNiveis, c),
+        KeyBinding::new("secondary-m", AjusteCurvas, c),
+        KeyBinding::new("secondary-u", AjusteMatiz, c),
+        KeyBinding::new("secondary-r", AlternarReguas, c),
         KeyBinding::new("tab", AlternarInterface, solta),
         KeyBinding::new("shift-tab", AlternarPaineis, solta),
         KeyBinding::new("space", SegurarAMao, solta),

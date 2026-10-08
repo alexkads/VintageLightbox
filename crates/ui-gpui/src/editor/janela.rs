@@ -42,6 +42,7 @@ mod opcoes;
 mod paineis;
 mod painel_do_preenchimento;
 mod preencher;
+mod reguas;
 mod status;
 mod transferencia;
 pub use area_de_trabalho::QualPainel;
@@ -87,6 +88,7 @@ use super::{
     ProximaDoGrupoL, ProximaDoGrupoM, ProximaDoGrupoO, RefazerNoEditor, SalvarNoEditor,
     SegurarAMao, SelecionarTudo, SubirCamada, TransformacaoLivre, TrocarCores, UmPorUm, CONTEXTO,
 };
+use super::{AjusteCurvas, AjusteMatiz, AjusteNiveis, AlternarReguas, Reselecionar};
 use super::{
     AlternarRubi, BloquearTransparencia, CarimbarVisivel, Colar, ColarNoLugar, Copiar,
     CopiarMesclado, Inverter, Recortar,
@@ -805,6 +807,9 @@ pub struct EditorDeFoto {
     degrade_em_curso: Option<((f32, f32), (f32, f32))>,
     /// A miniatura da máscara de cada camada (`None` sem máscara).
     miniaturas_das_mascaras: Vec<Option<Arc<RenderImage>>>,
+    /// A miniatura da fotografia base — a linha "Fundo" das Camadas. Feita
+    /// uma vez: a base não muda (C28).
+    miniatura_do_fundo: Option<Arc<RenderImage>>,
     /// Um preenchimento por conteúdo calculando em segundo plano.
     preenchendo: bool,
     _tarefa_do_preenchimento: Option<Task<()>>,
@@ -1626,6 +1631,7 @@ impl EditorDeFoto {
             traco_de_correcao: None,
             degrade_em_curso: None,
             miniaturas_das_mascaras: Vec::new(),
+            miniatura_do_fundo: None,
             preenchendo: false,
             _tarefa_do_preenchimento: None,
             _tarefa_da_fotografia: None,
@@ -4707,6 +4713,18 @@ impl EditorDeFoto {
         self.na_sessao(cx, Sessao::desmarcar);
     }
 
+    /// ⇧⌘D.
+    pub fn reselecionar(&mut self, cx: &mut Context<Self>) {
+        self.na_sessao(cx, Sessao::reselecionar);
+    }
+
+    /// ⌘L ⌘M ⌘U: a camada de ajuste daquele tipo (Imagem › Ajustes).
+    pub fn ajuste_pela_chave(&mut self, chave: &str, cx: &mut Context<Self>) {
+        if let Some(a) = editor_core::ajuste::Ajuste::da_chave(chave) {
+            self.nova_camada_de_ajuste(a, cx);
+        }
+    }
+
     pub fn inverter_selecao(&mut self, cx: &mut Context<Self>) {
         self.na_sessao(cx, Sessao::inverter_selecao);
     }
@@ -4786,6 +4804,17 @@ impl EditorDeFoto {
             (LADO_DA_MINIATURA, (LADO_DA_MINIATURA * af / lf).max(1))
         } else {
             ((LADO_DA_MINIATURA * lf / af).max(1), LADO_DA_MINIATURA)
+        };
+        if self.miniatura_do_fundo.is_none() {
+            let reduzida = image::imageops::thumbnail(s.base().as_ref(), l, a);
+            let rgba = reduzida
+                .pixels()
+                .flat_map(|p| [p[2], p[1], p[0], 255])
+                .collect();
+            self.miniatura_do_fundo = crate::imagem::de_bgra(l, a, rgba);
+        }
+        let Some(s) = self.sessao() else {
+            return;
         };
         let versao = s.versao();
         let miniaturas = s
@@ -7606,13 +7635,14 @@ impl Render for EditorDeFoto {
                 .size_full()
                 .min_w(px(0.))
                 .child(self.aba_do_documento(cx))
-                .child(
+                .child({
+                    let palco = self.palco(window, cx);
                     div()
                         .flex()
                         .flex_1()
                         .min_h(px(0.))
-                        .child(self.palco(window, cx)),
-                )
+                        .child(self.com_reguas(palco, cx))
+                })
                 .into_any_element();
             let meio: AnyElement = if !paineis_a_vista {
                 documento
@@ -7789,6 +7819,15 @@ impl Render for EditorDeFoto {
             .on_action(cx.listener(|ed, _: &CoresPadrao, _, cx| ed.cores_padrao(cx)))
             .on_action(cx.listener(|ed, _: &SelecionarTudo, _, cx| ed.selecionar_tudo(cx)))
             .on_action(cx.listener(|ed, _: &Desmarcar, _, cx| ed.desmarcar(cx)))
+            .on_action(cx.listener(|ed, _: &Reselecionar, _, cx| ed.reselecionar(cx)))
+            .on_action(
+                cx.listener(|ed, _: &AjusteNiveis, _, cx| ed.ajuste_pela_chave("niveis", cx)),
+            )
+            .on_action(
+                cx.listener(|ed, _: &AjusteCurvas, _, cx| ed.ajuste_pela_chave("curvas", cx)),
+            )
+            .on_action(cx.listener(|ed, _: &AjusteMatiz, _, cx| ed.ajuste_pela_chave("matiz", cx)))
+            .on_action(cx.listener(|ed, _: &AlternarReguas, _, cx| ed.alternar_reguas(cx)))
             .on_action(cx.listener(|ed, _: &InverterSelecao, _, cx| ed.inverter_selecao(cx)))
             .on_action(cx.listener(|ed, _: &ApagarSelecao, _, cx| {
                 // ⌫ com o laço poligonal aberto tira o último vértice.

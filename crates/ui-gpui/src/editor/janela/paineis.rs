@@ -113,7 +113,22 @@ impl EditorDeFoto {
                             )
                             .child(div().text_xs().text_color(c.apagado).child(hex(editada))),
                     )
-                    .child(
+                    .child(if self.na_mascara() {
+                        // Na máscara, como no Photoshop: um cinza só (K),
+                        // preto esconde e branco revela.
+                        div()
+                            .id("editor-cor-cinza")
+                            .flex_1()
+                            .min_w(px(0.))
+                            .child(canal("K", 0, editada[0], self))
+                            .tooltip(|window, cx| {
+                                gpui_kit::component::tooltip::Tooltip::new(
+                                    "Na máscara as cores viram cinza: preto esconde, branco revela",
+                                )
+                                .build(window, cx)
+                            })
+                            .into_any_element()
+                    } else {
                         div()
                             .flex_1()
                             .min_w(px(0.))
@@ -122,17 +137,10 @@ impl EditorDeFoto {
                             .gap(px(2.))
                             .child(canal("R", 0, editada[0], self))
                             .child(canal("G", 1, editada[1], self))
-                            .child(canal("B", 2, editada[2], self)),
-                    ),
+                            .child(canal("B", 2, editada[2], self))
+                            .into_any_element()
+                    }),
             )
-            .when(self.na_mascara(), |d| {
-                d.child(
-                    div()
-                        .text_xs()
-                        .text_color(c.apagado)
-                        .child("Na máscara as cores viram cinza: preto esconde, branco revela."),
-                )
-            })
             .into_any_element()
     }
 
@@ -144,6 +152,7 @@ impl EditorDeFoto {
         cx: &mut Context<Self>,
     ) {
         let no_fundo = self.cor_do_painel_e_o_fundo;
+        let na_mascara = self.na_mascara();
         let Some(s) = self.sessao_mut() else {
             return;
         };
@@ -152,7 +161,13 @@ impl EditorDeFoto {
         } else {
             s.pincel.cor
         };
-        cor[canal.min(2)] = valor.round().clamp(0.0, 255.0) as u8;
+        let v = valor.round().clamp(0.0, 255.0) as u8;
+        if na_mascara {
+            // O K do painel na máscara: o cinza nos três canais.
+            cor = [v; 3];
+        } else {
+            cor[canal.min(2)] = v;
+        }
         if no_fundo {
             s.definir_cor_de_fundo(cor);
         } else {

@@ -51,6 +51,8 @@ struct Estado {
     tem_copia: bool,
     giro: bool,
     antes: bool,
+    pode_reselecionar: bool,
+    reguas: bool,
 }
 
 impl EditorDeFoto {
@@ -77,6 +79,8 @@ impl EditorDeFoto {
             tem_copia: self.copiado.is_some(),
             giro: self.giro != 0.0,
             antes: self.mostrando_antes(),
+            pode_reselecionar: s.is_some_and(Sessao::pode_reselecionar),
+            reguas: self.reguas_ligadas(),
         }
     }
 
@@ -124,6 +128,7 @@ impl EditorDeFoto {
             .border_color(c.borda)
             .child(menu("editor-menu-arquivo", "Arquivo", menu_arquivo, cx))
             .child(menu("editor-menu-editar", "Editar", menu_editar, cx))
+            .child(menu("editor-menu-imagem", "Imagem", menu_imagem, cx))
             .child(menu("editor-menu-camada", "Camada", menu_camada, cx))
             .child(menu(
                 "editor-menu-selecionar",
@@ -345,6 +350,71 @@ fn menu_editar(
         p,
         |ed, _, cx| ed.deformar(cx),
     ))
+}
+
+/// Imagem › Ajustes, com as teclas do Photoshop (⌘L, ⌘M, ⌘U, ⌘I). 🔑 Aqui
+/// eles nascem como **camada de ajuste** — a foto embaixo fica intacta e a
+/// seleção vira a máscara —, e o Inverter é o de sempre (cores da camada ou a
+/// máscara). Girar e redimensionar a foto inteira não entram no editor (C31).
+fn menu_imagem(
+    m: PopupMenu,
+    ed: &Entity<EditorDeFoto>,
+    foco: &FocusHandle,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
+    let p = ed.read(cx).estado_dos_menus().pronta;
+    let (ed2, foco2) = (ed.clone(), foco.clone());
+    m.submenu("Ajustes", window, cx, move |sub, window, _cx| {
+        let (ed, foco) = (&ed2, &foco2);
+        sub.item(item(
+            ed,
+            "editor-imagem-brilho",
+            "Brilho/Contraste…",
+            None,
+            p,
+            |ed, _, cx| ed.ajuste_pela_chave("brilho", cx),
+        ))
+        .separator()
+        .item(acao(
+            ed,
+            foco,
+            window,
+            "editor-imagem-niveis",
+            "Níveis…",
+            AjusteNiveis,
+            p,
+        ))
+        .item(acao(
+            ed,
+            foco,
+            window,
+            "editor-imagem-curvas",
+            "Curvas…",
+            AjusteCurvas,
+            p,
+        ))
+        .separator()
+        .item(acao(
+            ed,
+            foco,
+            window,
+            "editor-imagem-matiz",
+            "Matiz/Saturação…",
+            AjusteMatiz,
+            p,
+        ))
+        .separator()
+        .item(acao(
+            ed,
+            foco,
+            window,
+            "editor-imagem-inverter",
+            "Inverter",
+            Inverter,
+            p,
+        ))
+    })
 }
 
 fn menu_camada(
@@ -601,6 +671,15 @@ fn menu_selecionar(
         ed,
         foco,
         window,
+        "editor-menu-reselecionar",
+        "Reselecionar",
+        Reselecionar,
+        p && e.pode_reselecionar,
+    ))
+    .item(acao(
+        ed,
+        foco,
+        window,
         "editor-menu-inverter-selecao",
         "Inverter",
         InverterSelecao,
@@ -723,6 +802,19 @@ fn menu_visualizar(
         AlternarRubi,
         p && e.com_mascara,
     ))
+    .separator()
+    .item(
+        acao(
+            ed,
+            foco,
+            window,
+            "editor-menu-reguas",
+            "Réguas",
+            AlternarReguas,
+            true,
+        )
+        .checked(e.reguas),
+    )
     .separator()
     .item(item(
         ed,
@@ -877,12 +969,17 @@ impl EditorDeFoto {
             ("Selecionar tudo", Box::new(SelecionarTudo)),
             ("Desmarcar", Box::new(Desmarcar)),
             ("Inverter seleção", Box::new(InverterSelecao)),
+            ("Reselecionar", Box::new(Reselecionar)),
+            ("Níveis", Box::new(AjusteNiveis)),
+            ("Curvas", Box::new(AjusteCurvas)),
+            ("Matiz/Saturação", Box::new(AjusteMatiz)),
             ("Trocar frente e fundo", Box::new(TrocarCores)),
             ("Preto e branco", Box::new(CoresPadrao)),
             ("Ampliar", Box::new(Aproximar)),
             ("Reduzir", Box::new(Afastar)),
             ("Encaixar na tela", Box::new(Encaixar)),
             ("100%", Box::new(UmPorUm)),
+            ("Réguas", Box::new(AlternarReguas)),
             ("Ocultar ferramentas e painéis", Box::new(AlternarInterface)),
             ("Ocultar só os painéis", Box::new(AlternarPaineis)),
             ("Liquidificar", Box::new(Liquidificar)),

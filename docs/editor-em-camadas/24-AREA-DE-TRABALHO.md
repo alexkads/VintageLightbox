@@ -139,8 +139,37 @@ não o achou (08/10). Ele está também no **botão direito sobre a foto com sel
   arrumação gravada e relida. Passos novos do roteiro: `tamanho L A` e `area tab|shift-tab|recolher|colunas|
   restaurar|flyout N|mostrar P|esconder P|estado`.
 
+## Repasse do Photoshop (08/out/2026)
+
+Pedido do dono: "repase a interface de edição para equiparar com o UX do Photoshop". O app real foi fotografado
+em todos os estados e comparado com o Photoshop; entrou o que faltava:
+
+- **Fundo** embaixo de todas as camadas (`camadas.rs::linha_do_fundo`): a miniatura da fotografia base, o nome em
+  itálico e o cadeado, sem olho — como o Photoshop mostra um JPEG recém-aberto. A base nunca muda (C28), então o
+  clique explica onde pintar; **duplo clique ou o cadeado** cria a camada da fotografia (o "Fundo → Camada 0" de
+  lá); ⌘/Ctrl + clique seleciona tudo. A miniatura é feita uma vez (`miniatura_do_fundo`).
+- **Imagem › Ajustes** (menu novo, entre Editar e Camada): Brilho/Contraste, Níveis **⌘L**, Curvas **⌘M**,
+  Matiz/Saturação **⌘U**, Inverter ⌘I. Os quatro primeiros nascem como **camada de ajuste** (a seleção vira a
+  máscara) — o Photoshop aplica destrutivo; aqui a foto embaixo fica intacta, pela mesma regra do Fundo.
+- **Selecionar › Reselecionar ⇧⌘D**: `Sessao::desmarcada` guarda a última seleção que saiu (⌘D, ou o
+  desmarcar junto do preenchimento); volta num passo "Reselecionar" que o desfazer tira.
+- **Visualizar › Réguas ⌘R** (`janela/reguas.rs`): em cima e à esquerda do palco, em px da foto, zero no canto
+  da foto; passo maior 1/2/5 × 10ⁿ com ≥ 64 pt, subdivisões que deixem ≥ 4 pt; a marca do ponteiro corre nelas;
+  números da vertical empilhados (o GPUI não gira texto). Ligadas ou não ficam na arrumação (`Arranjo::reguas`).
+  Com a vista girada a régua segue a foto sem o giro.
+- **⌘1** é 100% (o ⌘⌥0 continua).
+- **Painel Cor na máscara**: um controle só, **K** (cinza nos três canais), como no Photoshop. O aviso de texto
+  que ficava cortado embaixo do painel virou a dica do controle.
+
+Conferência: `editor-core` 234 (com `reselecionar_traz_a_ultima_desmarcada`); `ui-gpui -- editor recursos docas`
+90 (com `reguas_ajustes_reselecionar_e_o_fundo` e os testes do passo das réguas). App real (bin `editor`, retina):
+⌘R com réguas 0–800 alinhadas à foto de 800 px, ⌘D → ⇧⌘D, ⌘M abrindo Curvas, menu Imagem, clique e duplo clique
+no Fundo (cria "Fotografia" no índice 0), K no painel Cor com a máscara escolhida.
+
 ## O que ficou de fora
 
 - Painel flutuante em janela própria; recolher um grupo só (o kit não tem; a coluna inteira recolhe).
 - Escala 100% e 150% não conferidas: este Mac só tem a tela retina (200%).
 - Menus não trocam de um para o outro passando o mouse (cada um abre no clique, o `DropdownMenu` do kit).
+- Guias arrastadas das réguas, painéis Navegador, Info e Ajustes, e Filtro › Desfoque gaussiano / Máscara de
+  nitidez: próximos candidatos do repasse.

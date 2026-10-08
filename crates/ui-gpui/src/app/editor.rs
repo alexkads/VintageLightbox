@@ -4165,6 +4165,85 @@ mod testes {
         assert!(ve.debug_bounds("editor-dialogo-atalhos").is_some());
     }
 
+    /// 📏 O repasse do Photoshop: ⌘R liga as réguas (e o palco encolhe para
+    /// elas), ⌘L e ⌘U criam Níveis e Matiz/Saturação, ⇧⌘D reseleciona, e o
+    /// Fundo fica embaixo das camadas — duplo clique cria a da fotografia.
+    #[gpui_kit::test]
+    fn reguas_ajustes_reselecionar_e_o_fundo(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        assert!(
+            ve.debug_bounds("editor-camada-fundo").is_some(),
+            "o Fundo na lista"
+        );
+        let antes = editor.read_with(&ve, |ed, _| ed.sessao().unwrap().documento().camadas.len());
+        let fundo = ve.debug_bounds("editor-camada-fundo").unwrap();
+        ve.simulate_mouse_move(fundo.center(), None, gpui_kit::Modifiers::none());
+        ve.simulate_event(gpui_kit::MouseDownEvent {
+            position: fundo.center(),
+            button: gpui_kit::MouseButton::Left,
+            modifiers: gpui_kit::Modifiers::none(),
+            click_count: 2,
+            first_mouse: false,
+        });
+        ve.simulate_event(gpui_kit::MouseUpEvent {
+            position: fundo.center(),
+            button: gpui_kit::MouseButton::Left,
+            modifiers: gpui_kit::Modifiers::none(),
+            click_count: 2,
+        });
+        for _ in 0..200 {
+            ve.run_until_parked();
+            if !editor.read_with(&ve, |ed, _| ed.criando_a_fotografia()) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        ve.run_until_parked();
+        editor.read_with(&ve, |ed, _| {
+            let d = ed.sessao().unwrap().documento();
+            assert_eq!(d.camadas.len(), antes + 1);
+            assert_eq!(
+                d.camadas[0].nome,
+                editor_core::documento::NOME_DA_FOTOGRAFIA
+            );
+        });
+        assert!(editor.read_with(&ve, |ed, _| !ed.reguas_ligadas()));
+        let palco_antes = ve.debug_bounds("palco-do-editor").unwrap();
+        ve.simulate_keystrokes("cmd-r");
+        ve.run_until_parked();
+        assert!(editor.read_with(&ve, |ed, _| ed.reguas_ligadas()));
+        let palco = ve.debug_bounds("palco-do-editor").unwrap();
+        assert!(palco.origin.x > palco_antes.origin.x && palco.origin.y > palco_antes.origin.y);
+        ve.simulate_keystrokes("cmd-r");
+        ve.run_until_parked();
+        assert!(editor.read_with(&ve, |ed, _| !ed.reguas_ligadas()));
+
+        let chaves = |ve: &VisualTestContext| {
+            editor.read_with(ve, |ed, _| {
+                ed.sessao()
+                    .unwrap()
+                    .documento()
+                    .camadas
+                    .iter()
+                    .filter_map(|c| c.ajuste.map(|a| a.chave()))
+                    .collect::<Vec<_>>()
+            })
+        };
+        ve.simulate_keystrokes("cmd-l");
+        ve.simulate_keystrokes("cmd-u");
+        ve.run_until_parked();
+        assert_eq!(chaves(&ve), ["niveis", "matiz"]);
+
+        editor.update(&mut ve, |ed, cx| ed.selecionar_tudo(cx));
+        ve.simulate_keystrokes("cmd-d");
+        ve.run_until_parked();
+        assert!(editor.read_with(&ve, |ed, _| ed.sessao().unwrap().selecao().is_none()));
+        ve.simulate_keystrokes("cmd-shift-d");
+        ve.run_until_parked();
+        assert!(editor.read_with(&ve, |ed, _| ed.sessao().unwrap().selecao().is_some()));
+    }
+
     /// 🎨 As duas cores na barra: ⇄ troca (como o X) e o quadradinho volta a
     /// preto e branco (como o D).
     #[gpui_kit::test]

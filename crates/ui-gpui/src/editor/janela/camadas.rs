@@ -24,6 +24,75 @@ use crate::recursos::Icone;
 use editor_core::Modo;
 
 impl EditorDeFoto {
+    /// O "Fundo" do Photoshop, embaixo de todas: a fotografia base, que nunca
+    /// muda (C28) — por isso com o cadeado e sem olho. Clique explica onde
+    /// pintar; duplo clique (ou o cadeado) cria a camada da fotografia, como o
+    /// "Fundo → Camada 0" de lá; ⌘/Ctrl + clique seleciona tudo.
+    fn linha_do_fundo(&self, lado: gpui_kit::Pixels, cx: &mut Context<Self>) -> AnyElement {
+        let tema = cx.theme().clone();
+        let criando = self.criando_a_fotografia;
+        div()
+            .id("editor-camada-fundo")
+            .debug_selector(|| "editor-camada-fundo".into())
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .px(px(4.))
+            .py(px(2.))
+            .mt(px(4.))
+            .rounded(crate::tema::canto(4.))
+            .cursor_pointer()
+            .hover(|d| d.bg(tema.muted))
+            // O lugar do olho (o mesmo botão do kit): o Fundo aparece sempre.
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .w(px(crate::tema::medidas().botao_icone)),
+            )
+            .when_some(self.miniatura_do_fundo.clone(), |d, m| {
+                d.child(
+                    moldura(div(), false, tema.ring)
+                        .child(img(m).object_fit(ObjectFit::Contain).w(lado).h(lado)),
+                )
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .text_sm()
+                    .italic()
+                    .child("Fundo"),
+            )
+            .child(
+                crate::estilo::botao_icone_pequeno("editor-fundo-cadeado", Icone::Lock)
+                    .debug_selector(|| "editor-fundo-cadeado".into())
+                    .tooltip("A fotografia base fica intacta. Clique para criar a camada da fotografia e retocá-la")
+                    .disabled(criando)
+                    .on_click(cx.listener(|ed, _, _, cx| ed.criar_camada_da_fotografia(cx))),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |ed, evento: &MouseDownEvent, window, cx| {
+                    if evento.modifiers.secondary() {
+                        ed.selecionar_tudo(cx);
+                    } else if evento.click_count >= 2 {
+                        ed.criar_camada_da_fotografia(cx);
+                    } else {
+                        ed.aviso = Some((
+                            na_plataforma(
+                                "O Fundo é a fotografia base e fica intacto — pinte numa camada (⇧⌘N) ou dê duplo clique para criar a camada da fotografia",
+                            )
+                            .into(),
+                            false,
+                        ));
+                        cx.notify();
+                    }
+                    window.focus(&ed.foco, cx);
+                }),
+            )
+            .into_any_element()
+    }
+
     /// O painel Camadas do Photoshop: o modo e a opacidade da escolhida, a
     /// pilha de cima para baixo, e os botões embaixo.
     pub(super) fn painel_de_camadas(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -568,7 +637,8 @@ impl EditorDeFoto {
                     .overflow_y_scroll()
                     .px(px(4.))
                     .py(px(2.))
-                    .children(linhas),
+                    .children(linhas)
+                    .when(pode_desfazer_alguma, |d| d.child(self.linha_do_fundo(lado, cx))),
             )
             .child(
                 div()
