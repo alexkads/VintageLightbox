@@ -1,5 +1,15 @@
 [
   {
+    "versao": "0.1.120",
+    "data": "2026-10-08",
+    "titulo": "Sessão: a nota de estrelas volta a valer na primeira foto clicada.",
+    "importante": true,
+    "novidades": [
+      "Correção: ao abrir uma sessão, quem clicava na primeira foto enquanto a sessão ainda carregava do site perdia a seleção quando ela terminava de carregar — as teclas de nota (0–5), P e X deixavam de valer até clicar em outra foto. Agora a seleção fica, na grade e na tira de fotos."
+    ],
+    "por_que_atualizar": "Para que a classificação pelo teclado funcione desde a primeira foto, mesmo com a internet lenta."
+  },
+  {
     "versao": "0.1.119",
     "data": "2026-10-08",
     "titulo": "Sessão: menu no botão direito da tira de fotos. Editar Foto com a área de trabalho do Photoshop.",

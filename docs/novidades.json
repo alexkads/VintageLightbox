@@ -1,11 +1,9 @@
 {
-  "versao": "0.1.119",
-  "titulo": "Sessão: menu no botão direito da tira de fotos. Editar Foto com a área de trabalho do Photoshop.",
-  "importante": false,
+  "versao": "0.1.120",
+  "titulo": "Sessão: a nota de estrelas volta a valer na primeira foto clicada.",
+  "importante": true,
   "novidades": [
-    "Botão direito numa foto da tira da sessão: Revelar, Nota (de 0 a 5 estrelas), Exportar…, Levada no balcão (P), Rejeitar (X), Negociação…, Selecionar todas (⌘A), Limpar a seleção (⌘D), Descartar a revelação e Excluir… (⌫). Numa foto fora da seleção ele seleciona só ela; numa foto já selecionada, vale para todas as selecionadas.",
-    "Editar Foto ficou organizado como o Photoshop: menus no alto (Arquivo, Editar, Camada, Selecionar, Filtro, Visualizar, Janela, Ajuda), barra de opções fixa para cada ferramenta e ferramentas em grupos — botão direito ou clique longo mostra as variantes.",
-    "Editar Foto: os painéis Cor, Amostras, Propriedades, Pincel, Histórico e Camadas podem ser arrastados, agrupados, escondidos e recolhidos; a arrumação fica guardada. Z agora é a Lupa e Espaço é a Mão."
+    "Correção: ao abrir uma sessão, quem clicava na primeira foto enquanto a sessão ainda carregava do site perdia a seleção quando ela terminava de carregar — as teclas de nota (0–5), P e X deixavam de valer até clicar em outra foto. Agora a seleção fica, na grade e na tira de fotos."
   ],
-  "por_que_atualizar": "Para fazer na tira da sessão, num clique, o que antes pedia tecla ou painel, e para editar fotos com o arranjo de quem vem do Photoshop."
+  "por_que_atualizar": "Para que a classificação pelo teclado funcione desde a primeira foto, mesmo com a internet lenta."
 }
