@@ -1,5 +1,18 @@
 [
   {
+    "versao": "0.1.122",
+    "data": "2026-10-08",
+    "titulo": "Editor mais parecido com o Photoshop: Fundo, Ajustes, Réguas e Reselecionar.",
+    "importante": false,
+    "novidades": [
+      "Editor: a foto aberta aparece como a camada Fundo, com cadeado, embaixo das outras, como no Photoshop. Dois cliques nela criam a camada da fotografia para retocar.",
+      "Editor: menu Imagem › Ajustes com as teclas do Photoshop: ⌘L Níveis, ⌘M Curvas, ⌘U Matiz/Saturação. Cada um cria uma camada de ajuste, e a foto embaixo fica intacta.",
+      "Editor: Réguas em volta da foto (⌘R, ou Visualizar › Réguas), em pixels, acompanhando o zoom e o ponteiro.",
+      "Editor: Selecionar › Reselecionar (⇧⌘D) traz de volta a última seleção desmarcada; ⌘1 mostra a foto em 100%.",
+      "Editor: com a máscara escolhida, o painel Cor mostra um controle de cinza só (K), e o aviso que aparecia cortado saiu."
+    ]
+  },
+  {
     "versao": "0.1.121",
     "data": "2026-10-08",
     "titulo": "Windows volta a atualizar; Preenchimento como o do Photoshop no editor.",
