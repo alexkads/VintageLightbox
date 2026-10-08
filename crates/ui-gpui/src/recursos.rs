@@ -198,6 +198,11 @@ pub enum Icone {
     Ruler,
     /// O conta-gotas do balanço de branco (painel Básico).
     Pipette,
+    // Os cadeados e a corrente da máscara no painel Camadas do editor.
+    Lock,
+    Link2Off,
+    /// O xadrez do "Bloquear pixels transparentes" (desenho próprio).
+    Transparencia,
 }
 
 impl Icone {
@@ -328,6 +333,9 @@ impl Icone {
         Icone::QrCode,
         Icone::Ruler,
         Icone::Pipette,
+        Icone::Lock,
+        Icone::Link2Off,
+        Icone::Transparencia,
     ];
 
     fn arquivo(self) -> &'static str {
@@ -458,6 +466,9 @@ impl Icone {
             Icone::QrCode => "qr-code",
             Icone::Ruler => "ruler",
             Icone::Pipette => "pipette",
+            Icone::Lock => "lock",
+            Icone::Link2Off => "link-2-off",
+            Icone::Transparencia => "transparencia",
         }
     }
 }

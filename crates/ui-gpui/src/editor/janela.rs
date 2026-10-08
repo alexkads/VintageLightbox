@@ -34,7 +34,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+mod mascara_e_cadeados;
 mod painel_do_preenchimento;
+mod transferencia;
 pub use painel_do_preenchimento::{AlvoDoPincel, EspacoDoPreenchimento, EstadoDoCalculo};
 
 use editor_core::selecao::{caixa_do_arrasto, medida_da_caixa};
@@ -73,6 +75,10 @@ use super::{
     PreencherSelecao, ProximaDoGrupoG, ProximaDoGrupoJ, ProximaDoGrupoL, ProximaDoGrupoM,
     ProximaDoGrupoO, RefazerNoEditor, SalvarNoEditor, SegurarAMao, SelecionarTudo, SubirCamada,
     TransformacaoLivre, TrocarCores, UmPorUm, CONTEXTO,
+};
+use super::{
+    AlternarRubi, BloquearTransparencia, CarimbarVisivel, Colar, ColarNoLugar, Copiar,
+    CopiarMesclado, Inverter, Recortar,
 };
 use crate::campo::TrocarValor as _;
 use crate::recursos::Icone;
@@ -797,6 +803,19 @@ pub struct EditorDeFoto {
     /// (96 MB numa foto de 24 MP).
     _tarefa_da_fotografia: Option<Task<()>>,
     criando_a_fotografia: bool,
+    /// Densidade (0–100) e difusão (px) da máscara escolhida — as
+    /// Propriedades da máscara.
+    densidade_da_mascara: Entity<SliderState>,
+    difusao_da_mascara: Entity<SliderState>,
+    /// O que ⌘C, ⇧⌘C e ⌘X guardaram (`transferencia.rs`).
+    copiado: Option<transferencia::Copiado>,
+    _tarefa_da_transferencia: Option<Task<()>>,
+    /// A posição do histórico quando a linha da camada foi apertada — o
+    /// arrasto dela no painel vira um passo só a partir daqui.
+    historico_no_aperto_da_camada: Option<usize>,
+    /// O "Carimbar visível" compondo em segundo plano.
+    carimbando: bool,
+    _tarefa_do_carimbo: Option<Task<()>>,
     /// O arrasto na malha do Deformar.
     gesto_de_malha: Option<GestoDeMalha>,
     /// A grade do Deformar à vista (os pontos ficam sempre).
@@ -923,6 +942,8 @@ impl EditorDeFoto {
             .iter()
             .map(|p| slider(p.min, p.max, p.passo, p.inicial, cx))
             .collect();
+        let densidade_da_mascara = slider(0.0, 100.0, 1.0, 100.0, cx);
+        let difusao_da_mascara = slider(0.0, editor_core::difusao::DIFUSAO_MAXIMA, 0.5, 0.0, cx);
         let opcoes: Vec<Opcao> = Modo::TODOS
             .iter()
             .map(|m| Opcao::nova(m.chave(), m.nome()))
@@ -1034,6 +1055,22 @@ impl EditorDeFoto {
             |ed: &mut Self, _e, evento: &SliderEvent, _w, cx| {
                 let (v, soltou) = valor(evento);
                 ed.mover_opacidade_da_camada(v / 100.0, soltou, cx);
+            },
+        ));
+        assinaturas.push(cx.subscribe_in(
+            &densidade_da_mascara,
+            window,
+            |ed: &mut Self, _e, evento: &SliderEvent, _w, cx| {
+                let (v, soltou) = valor(evento);
+                ed.mover_densidade_da_mascara(v, soltou, cx);
+            },
+        ));
+        assinaturas.push(cx.subscribe_in(
+            &difusao_da_mascara,
+            window,
+            |ed: &mut Self, _e, evento: &SliderEvent, _w, cx| {
+                let (v, soltou) = valor(evento);
+                ed.mover_difusao_da_mascara(v, soltou, cx);
             },
         ));
         for (qual, estado) in ajustes.iter().enumerate() {
@@ -1374,6 +1411,13 @@ impl EditorDeFoto {
             _tarefa_do_preenchimento: None,
             _tarefa_da_fotografia: None,
             criando_a_fotografia: false,
+            densidade_da_mascara,
+            difusao_da_mascara,
+            copiado: None,
+            _tarefa_da_transferencia: None,
+            historico_no_aperto_da_camada: None,
+            carimbando: false,
+            _tarefa_do_carimbo: None,
             gesto_de_malha: None,
             grade_visivel: true,
             giro: 0.0,
@@ -2219,6 +2263,10 @@ impl EditorDeFoto {
         let Some(s) = self.sessao_mut() else {
             return;
         };
+        if s.posicao_bloqueada() || s.pixels_bloqueados() {
+            self.avisar_cadeado("transformar", cx);
+            return;
+        }
         self.aviso = if s.comecar_a_transformar() {
             None
         } else {
@@ -2259,6 +2307,10 @@ impl EditorDeFoto {
         let Some(s) = self.sessao_mut() else {
             return;
         };
+        if s.posicao_bloqueada() || s.pixels_bloqueados() {
+            self.avisar_cadeado("deformar", cx);
+            return;
+        }
         self.aviso = if s.comecar_a_deformar() {
             None
         } else if s.transformando_a_selecao() {
@@ -2706,6 +2758,10 @@ impl EditorDeFoto {
         let Some(s) = self.sessao_mut() else {
             return;
         };
+        if s.posicao_bloqueada() || (s.selecao().is_some() && s.pixels_bloqueados()) {
+            self.avisar_cadeado("mover", cx);
+            return;
+        }
         if s.comecar_a_mover() {
             self.arrasto_do_mover = Some(p);
             self.aviso = None;
@@ -2750,6 +2806,9 @@ impl EditorDeFoto {
         };
         if comecou {
             self.pintando = true;
+        } else if s.pixels_bloqueados() {
+            self.avisar_cadeado("pintar", cx);
+            return;
         } else if s.pincel.ferramenta.copia_da_origem() && s.origem().is_none() {
             self.aviso = Some((
                 if s.pincel.ferramenta == Ferramenta::Recuperacao {
@@ -2969,6 +3028,9 @@ impl EditorDeFoto {
             return;
         }
         if let Some((de, ate)) = self.degrade_em_curso.take() {
+            if self.recusar_se_bloqueada("aplicar o degradê", cx) {
+                return;
+            }
             let escondida = self.sessao().is_some_and(|s| !s.camada_ativa().visivel);
             let inicio = Instant::now();
             self.na_sessao(cx, |s| {
@@ -4067,6 +4129,9 @@ impl EditorDeFoto {
 
     /// A lata de tinta em `(x, y)`, pixels da foto.
     pub fn lata_de_tinta(&mut self, x: f32, y: f32, cx: &mut Context<Self>) {
+        if self.recusar_se_bloqueada("preencher", cx) {
+            return;
+        }
         let escondida = self.sessao().is_some_and(|s| !s.camada_ativa().visivel);
         let inicio = Instant::now();
         self.na_sessao(cx, |s| {
@@ -4086,6 +4151,9 @@ impl EditorDeFoto {
 
     /// O degradê de `de` a `ate`, pixels da foto — o roteiro e os testes.
     pub fn degrade(&mut self, de: (f32, f32), ate: (f32, f32), cx: &mut Context<Self>) {
+        if self.recusar_se_bloqueada("aplicar o degradê", cx) {
+            return;
+        }
         self.na_sessao(cx, |s| {
             s.degrade(de, ate);
         });
@@ -4115,6 +4183,9 @@ impl EditorDeFoto {
 
     /// ⇧⌘J: o selecionado vai para uma camada nova e sai da de origem.
     pub fn camada_via_recorte(&mut self, cx: &mut Context<Self>) {
+        if self.recusar_se_bloqueada("recortar", cx) {
+            return;
+        }
         let Some(s) = self.sessao_mut() else {
             return;
         };
@@ -4225,6 +4296,9 @@ impl EditorDeFoto {
 
     /// Delete: apaga a seleção na camada escolhida.
     pub fn apagar_selecao(&mut self, cx: &mut Context<Self>) {
+        if self.recusar_se_bloqueada("apagar", cx) {
+            return;
+        }
         self.na_sessao(cx, |s| {
             s.apagar_selecao();
         });
@@ -4232,6 +4306,9 @@ impl EditorDeFoto {
 
     /// ⌥Delete: preenche a seleção (ou a camada) com a cor do pincel.
     pub fn preencher_selecao(&mut self, cx: &mut Context<Self>) {
+        if self.recusar_se_bloqueada("preencher", cx) {
+            return;
+        }
         let Some(s) = self.sessao_mut() else {
             return;
         };
@@ -5051,6 +5128,43 @@ impl EditorDeFoto {
                 let r = crate::depuracao::fotografar(window, &destino);
                 eprintln!("[foto] {}: {r:?}", destino.display());
             }
+            // Etapa 16: as Propriedades da máscara, os cadeados e a área de
+            // transferência (o mesmo caminho dos botões e das teclas).
+            "mascara" => match partes.get(1).copied().unwrap_or_default() {
+                "densidade" => self.mover_densidade_da_mascara(numero(2), true, cx),
+                "difusao" => self.mover_difusao_da_mascara(numero(2), true, cx),
+                "inverter" => self.inverter_mascara(cx),
+                "aplicar" => self.aplicar_mascara(cx),
+                "vinculo" => self.alternar_vinculo_de_ativa(cx),
+                "ver" => {
+                    if let Some(i) = self.sessao().map(Sessao::ativa) {
+                        self.alternar_so_a_mascara(i, cx);
+                    }
+                }
+                "rubi" => self.alternar_rubi(cx),
+                outro => eprintln!("[roteiro] editor: mascara {outro}?"),
+            },
+            "cadeado" => {
+                let cadeado = match partes.get(1).copied().unwrap_or_default() {
+                    "transparencia" => editor_core::Cadeado::Transparencia,
+                    "pixels" => editor_core::Cadeado::Pixels,
+                    "posicao" => editor_core::Cadeado::Posicao,
+                    _ => editor_core::Cadeado::Tudo,
+                };
+                if let Some(i) = self.sessao().map(Sessao::ativa) {
+                    self.alternar_bloqueio_de(i, cadeado, cx);
+                }
+            }
+            "copiar" => self.copiar(partes.get(1) == Some(&"mesclado"), cx),
+            "recortar" => self.recortar(cx),
+            "colar" => self.colar(partes.get(1) == Some(&"lugar"), cx),
+            "carimbar" => self.carimbar_visivel(cx),
+            "importar" => {
+                if let Some(caminho) = partes.get(1) {
+                    self.importar_arquivo(std::path::PathBuf::from(caminho), cx);
+                }
+            }
+            "arrastar_camada" => self.arrastar_camada(numero(1) as usize, numero(2) as usize, cx),
             "estado" => {
                 let camadas = self.sessao().map_or_else(String::new, |s| {
                     s.documento()
@@ -5077,8 +5191,13 @@ impl EditorDeFoto {
                                         },
                                         m.fundo,
                                         m.pixels.quantos(),
-                                        if m.ativa { "" } else { ",desligada" }
+                                        extras_da_mascara(m)
                                     ))
+                                    + &if c.bloqueio.algum() {
+                                        format!(":bloqueio{:?}", c.bloqueio)
+                                    } else {
+                                        String::new()
+                                    }
                             )
                         })
                         .collect::<Vec<_>>()
@@ -5134,6 +5253,12 @@ impl EditorDeFoto {
                     "[roteiro] editor: ferramenta={:?} giro={:.1}° pincel={pincel:?} historico={historico:?}",
                     self.item_atual(),
                     self.giro.to_degrees(),
+                );
+                eprintln!(
+                    "[roteiro] editor: exibicao={:?} copiado={:?} carimbando={}",
+                    self.exibicao(),
+                    self.copiado.as_ref().map(transferencia::Copiado::descricao),
+                    self.carimbando,
                 );
                 eprintln!(
                     "[roteiro] editor: foto={} pronta={} falha={:?} alterado={} salvando={} aviso={:?} passos={} camadas=[{camadas}] zoom={} razao={:?} lupa={lupa:?} selecao={selecao:?} medidas={:?}",
@@ -6631,6 +6756,7 @@ impl EditorDeFoto {
             .when_some(self.ajuste_da_camada(), |painel, a| {
                 painel.child(self.propriedades_do_ajuste(a, cx))
             })
+            .children(self.propriedades_da_mascara(cx))
             .when(self.na_mascara(), |painel| {
                 let nome = self
                     .sessao()
@@ -6973,6 +7099,7 @@ impl EditorDeFoto {
     /// pilha de cima para baixo, e os botões embaixo.
     fn painel_de_camadas(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let tema = cx.theme().clone();
+        let cadeados = self.barra_de_cadeados(cx);
         let (camadas, ativa, pode_desfazer_alguma) = match self.sessao() {
             Some(s) => (
                 s.documento()
@@ -6987,6 +7114,8 @@ impl EditorDeFoto {
                             c.mascara.as_ref().map(|m| m.ativa),
                             c.ajuste.is_some(),
                             s.documento().base_do_recorte(i).is_some(),
+                            c.bloqueio.algum(),
+                            c.mascara.as_ref().is_some_and(|m| m.vinculada),
                         )
                     })
                     .collect::<Vec<_>>(),
@@ -7023,8 +7152,9 @@ impl EditorDeFoto {
             .into_iter()
             .enumerate()
             .rev()
-            .map(|(i, (nome, visivel, modo, mascara, de_ajuste, recortada))| {
+            .map(|(i, (nome, visivel, modo, mascara, de_ajuste, recortada, bloqueada, vinculada))| {
                 let escolhida = i == ativa;
+                let nome_do_arrasto: SharedString = nome.clone().into();
                 let id_do_olho: SharedString = format!("editor-olho-{i}").into();
                 let olho = crate::estilo::botao_icone_pequeno(
                     id_do_olho.clone(),
@@ -7126,7 +7256,50 @@ impl EditorDeFoto {
                             )
                         },
                     )
-                    // A máscara: clique escolhe, ⇧ + clique liga e desliga.
+                    // A corrente entre as duas miniaturas: clique solta ou
+                    // vincula a máscara à camada.
+                    .when(mascara.is_some() && !de_ajuste, |d| {
+                        d.child(
+                            div()
+                                .id(("editor-corrente", i))
+                                .debug_selector(move || format!("editor-corrente-{i}"))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .w(px(12.))
+                                .child(
+                                    gpui_kit::component::Icon::new(if vinculada {
+                                        Icone::Link2
+                                    } else {
+                                        Icone::Link2Off
+                                    })
+                                    .size_3()
+                                    .text_color(if vinculada {
+                                        cor_da_moldura
+                                    } else {
+                                        tema.muted_foreground
+                                    }),
+                                )
+                                .tooltip(move |window, cx| {
+                                    gpui_kit::component::tooltip::Tooltip::new(if vinculada {
+                                        "Vinculada: a máscara anda com a camada — clique para soltar"
+                                    } else {
+                                        "Solta: a máscara fica no lugar — clique para vincular"
+                                    })
+                                    .build(window, cx)
+                                })
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |ed, _e: &MouseDownEvent, window, cx| {
+                                        cx.stop_propagation();
+                                        ed.alternar_vinculo_de(i, cx);
+                                        window.focus(&ed.foco, cx);
+                                    }),
+                                ),
+                        )
+                    })
+                    // A máscara: clique escolhe, ⇧ + clique liga e desliga,
+                    // ⌥ + clique mostra só ela no palco.
                     .when_some(
                         mascara.zip(das_mascaras.get(i).cloned().flatten()),
                         |d, (ligada, m)| {
@@ -7138,7 +7311,7 @@ impl EditorDeFoto {
                                         .relative()
                                         .tooltip(move |window, cx| {
                                             gpui_kit::component::tooltip::Tooltip::new(if ligada {
-                                                "Máscara — clique para pintar nela; ⇧ + clique desliga"
+                                                "Máscara — clique para pintar nela; ⇧ + clique desliga; ⌥ + clique mostra só ela"
                                             } else {
                                                 "Máscara desligada — ⇧ + clique liga"
                                             })
@@ -7174,6 +7347,8 @@ impl EditorDeFoto {
                                             );
                                         } else if e.modifiers.shift {
                                             ed.alternar_mascara_de(i, cx);
+                                        } else if e.modifiers.alt {
+                                            ed.alternar_so_a_mascara(i, cx);
                                         } else {
                                             ed.escolher_mascara(i, cx);
                                         }
@@ -7184,6 +7359,17 @@ impl EditorDeFoto {
                         },
                     )
                     .child(texto)
+                    .when(bloqueada, |d| {
+                        d.child(
+                            div()
+                                .debug_selector(move || format!("editor-cadeado-da-camada-{i}"))
+                                .child(
+                                    gpui_kit::component::Icon::new(Icone::Lock)
+                                        .size_3()
+                                        .text_color(tema.muted_foreground),
+                                ),
+                        )
+                    })
                     .when(modo != Modo::Normal, |d| {
                         d.child(
                             div()
@@ -7206,12 +7392,45 @@ impl EditorDeFoto {
                                     ed.terminar_de_renomear(true, window, cx);
                                 }
                                 ed.escolher_camada(i, cx);
+                                ed.apertou_na_camada();
                                 if ed.renomeando.is_none() {
                                     window.focus(&ed.foco, cx);
                                 }
                             }
                         }),
                     );
+                // Arrastar a linha para outra muda a camada de lugar (um passo
+                // só; o conjunto de recorte anda inteiro).
+                let cor_do_alvo = tema.muted;
+                let linha = linha
+                    .on_drag(
+                        mascara_e_cadeados::ArrastoDeCamada {
+                            nome: nome_do_arrasto.clone(),
+                        },
+                        |valor, _posicao, _window, cx| {
+                            let nome = valor.nome.clone();
+                            cx.new(|_| mascara_e_cadeados::FantasmaDaCamada { nome })
+                        },
+                    )
+                    .drag_over::<mascara_e_cadeados::ArrastoDeCamada>(move |estilo, _, _, _| {
+                        estilo.bg(cor_do_alvo)
+                    })
+
+                    // 🔑 Ao vivo, como as guias (`app/guias.rs`): passar sobre
+                    // outra linha já leva a camada para lá — o soltar não
+                    // precisa cair numa linha. O arrasto inteiro é um passo.
+                    .on_drag_move(cx.listener(
+                        move |ed,
+                              evento: &gpui_kit::DragMoveEvent<
+                            mascara_e_cadeados::ArrastoDeCamada,
+                        >,
+                              _window,
+                              cx| {
+                            if evento.bounds.contains(&evento.event.position) {
+                                ed.arrastar_camada_ate(i, cx);
+                            }
+                        },
+                    ));
                 // O botão direito na linha: o menu da camada (ela passa a ser
                 // a escolhida, como no Photoshop).
                 let ed = cx.entity();
@@ -7220,14 +7439,17 @@ impl EditorDeFoto {
                         Some(antes) => menu.action_context(antes),
                         None => menu,
                     };
-                    let (recortada, pode, quantas) = ed.update(cx, |ed, cx| {
+                    let (recortada, pode, quantas, com_mascara, de_pixels) = ed.update(cx, |ed, cx| {
                         ed.escolher_camada(i, cx);
                         ed.sessao()
                             .map(|s| {
+                                let c = s.documento().camadas.get(i);
                                 (
-                                    s.documento().camadas.get(i).is_some_and(|c| c.recortada),
+                                    c.is_some_and(|c| c.recortada),
                                     s.pode_recortar(i),
                                     s.documento().camadas.len(),
+                                    c.is_some_and(|c| c.mascara.is_some()),
+                                    c.is_some_and(|c| c.ajuste.is_none()),
                                 )
                             })
                             .unwrap_or_default()
@@ -7257,6 +7479,25 @@ impl EditorDeFoto {
                         })
                     };
                     menu.item(recorte)
+                        .separator()
+                        .item(item(
+                            "editor-menu-aplicar-mascara",
+                            "Aplicar máscara",
+                            com_mascara && de_pixels,
+                            |ed, cx| ed.aplicar_mascara(cx),
+                        ))
+                        .item(item(
+                            "editor-menu-inverter-mascara",
+                            "Inverter máscara",
+                            com_mascara,
+                            |ed, cx| ed.inverter_mascara(cx),
+                        ))
+                        .item(item(
+                            "editor-menu-vinculo",
+                            "Vincular ou soltar a máscara",
+                            com_mascara && de_pixels,
+                            move |ed, cx| ed.alternar_vinculo_de_ativa(cx),
+                        ))
                         .separator()
                         .item(item(
                             "editor-menu-duplicar",
@@ -7340,6 +7581,7 @@ impl EditorDeFoto {
                     .h(px(20.))
                     .child(crate::estilo::slider(&self.opacidade_da_camada)),
             )
+            .child(cadeados)
             .child(
                 div()
                     .id("editor-camadas")
@@ -7477,8 +7719,26 @@ impl EditorDeFoto {
                                     !criando_a_fotografia,
                                     |ed, cx| ed.criar_camada_da_fotografia(cx),
                                 ))
+                                .item(item(
+                                    "editor-camada-carimbar",
+                                    "Carimbar visível  ⇧⌥⌘E",
+                                    true,
+                                    |ed, cx| ed.carimbar_visivel(cx),
+                                ))
+                                .item(item(
+                                    "editor-camada-importar",
+                                    "Importar imagem como camada…",
+                                    true,
+                                    |ed, cx| ed.importar_imagem(cx),
+                                ))
                                 .separator()
                                 .item(recorte)
+                                .item(item(
+                                    "editor-camada-aplicar-mascara",
+                                    "Aplicar máscara",
+                                    true,
+                                    |ed, cx| ed.aplicar_mascara(cx),
+                                ))
                                 .separator()
                                 .item(item(
                                     "editor-camada-subir",
@@ -7696,6 +7956,24 @@ impl EditorDeFoto {
 /// A operação da seleção pelos modificadores: ⇧ soma, ⌥ tira.
 /// O número de uma tecla da fila dos números — o próprio, ou o símbolo que ⇧
 /// dá nela no teclado americano e no ABNT2 (`!@#$%^¨&*()`).
+/// As propriedades da máscara que não estão no padrão — o estado do roteiro.
+fn extras_da_mascara(m: &editor_core::Mascara) -> String {
+    let mut extras = String::new();
+    if !m.ativa {
+        extras.push_str(",desligada");
+    }
+    if !m.vinculada {
+        extras.push_str(",solta");
+    }
+    if m.densidade < 1.0 {
+        extras.push_str(&format!(",densidade={:.0}%", m.densidade * 100.0));
+    }
+    if m.difusao > 0.0 {
+        extras.push_str(&format!(",difusao={:.1}", m.difusao));
+    }
+    extras
+}
+
 fn digito_da_tecla(tecla: &str) -> Option<u32> {
     let mut letras = tecla.chars();
     let c = letras.next()?;
@@ -8316,6 +8594,21 @@ impl Render for EditorDeFoto {
                 }
             }
         }
+        // As Propriedades da máscara acompanham a escolhida e o desfazer.
+        if let Some((densidade, difusao)) = self
+            .sessao()
+            .and_then(|s| s.camada_ativa().mascara.as_ref())
+            .map(|m| (m.densidade * 100.0, m.difusao))
+        {
+            for (estado, v, folga) in [
+                (self.densidade_da_mascara.clone(), densidade, 0.5),
+                (self.difusao_da_mascara.clone(), difusao, 0.25),
+            ] {
+                if (estado.read(cx).value().start() - v).abs() > folga {
+                    estado.update(cx, |s, cx| s.set_value(v, window, cx));
+                }
+            }
+        }
         // O seletor de cor acompanha a cor do pincel (amostras, conta-gotas).
         let cor = self.sessao().map(|s| s.pincel.cor);
         if cor.is_some() && cor != self.cor_mostrada {
@@ -8550,6 +8843,17 @@ impl Render for EditorDeFoto {
             }))
             .on_action(cx.listener(|ed, _: &PreencherSelecao, _, cx| ed.preencher_selecao(cx)))
             .on_action(cx.listener(|ed, _: &MesclarParaBaixo, _, cx| ed.mesclar_para_baixo(cx)))
+            .on_action(cx.listener(|ed, _: &Copiar, _, cx| ed.copiar(false, cx)))
+            .on_action(cx.listener(|ed, _: &CopiarMesclado, _, cx| ed.copiar(true, cx)))
+            .on_action(cx.listener(|ed, _: &Recortar, _, cx| ed.recortar(cx)))
+            .on_action(cx.listener(|ed, _: &Colar, _, cx| ed.colar(false, cx)))
+            .on_action(cx.listener(|ed, _: &ColarNoLugar, _, cx| ed.colar(true, cx)))
+            .on_action(cx.listener(|ed, _: &CarimbarVisivel, _, cx| ed.carimbar_visivel(cx)))
+            .on_action(cx.listener(|ed, _: &Inverter, _, cx| ed.inverter(cx)))
+            .on_action(cx.listener(|ed, _: &AlternarRubi, _, cx| ed.alternar_rubi(cx)))
+            .on_action(
+                cx.listener(|ed, _: &BloquearTransparencia, _, cx| ed.bloquear_transparencia(cx)),
+            )
             .child(barra)
             .children(opcoes_da_selecao)
             .child(corpo)

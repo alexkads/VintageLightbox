@@ -3358,4 +3358,172 @@ mod testes {
         assert_eq!(quantas, 4);
         assert_eq!(foto2, foto, "mesclar não muda a foto");
     }
+
+    /// 🎭 Etapa 16 pela tela: a máscara pelo botão, as Propriedades dela
+    /// (inverter, ver sozinha, rubi), a corrente, os cadeados (clique e `/`),
+    /// ⌘I, ⌘C ⌘V ⇧⌘V, ⇧⌥⌘E e arrastar a camada no painel.
+    #[gpui_kit::test]
+    fn a_mascara_os_cadeados_e_a_area_de_transferencia_pela_tela(cx: &mut TestAppContext) {
+        use editor_core::Exibicao;
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        let doc = |ve: &VisualTestContext| {
+            editor.read_with(ve, |ed, _| ed.sessao().unwrap().documento().clone())
+        };
+        let redesenhar = |ve: &mut VisualTestContext| {
+            ve.update(|window, _| window.refresh());
+            ve.run_until_parked();
+        };
+
+        // Uma camada pintada inteira e a máscara pelo botão.
+        ve.simulate_keystrokes("cmd-a alt-backspace cmd-d");
+        ve.run_until_parked();
+        assert_eq!(doc(&ve).camadas[0].pixels.pixel(5, 5)[3], 255);
+        clicar_no_editor(&mut ve, "editor-camada-mascara");
+        redesenhar(&mut ve);
+        assert!(doc(&ve).camadas[0].mascara.is_some());
+        assert!(
+            ve.debug_bounds("editor-propriedades-da-mascara").is_some(),
+            "as Propriedades da máscara no painel"
+        );
+
+        // Inverter pelo botão; ⌥ + clique na miniatura mostra só a máscara;
+        // `\` troca para o rubi.
+        clicar_no_editor(&mut ve, "editor-mascara-inverter");
+        assert_eq!(doc(&ve).camadas[0].mascara.as_ref().unwrap().fundo, 0);
+        let miniatura = ve.debug_bounds("editor-mascara-0").expect("a miniatura");
+        ve.simulate_click(
+            miniatura.center(),
+            gpui_kit::Modifiers {
+                alt: true,
+                ..Default::default()
+            },
+        );
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.exibicao()),
+            Exibicao::SoAMascara(0)
+        );
+        ve.simulate_keystrokes("\\");
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.exibicao()),
+            Exibicao::Rubi(0)
+        );
+        ve.simulate_keystrokes("\\");
+        ve.run_until_parked();
+        assert_eq!(editor.read_with(&ve, |ed, _| ed.exibicao()), Exibicao::Foto);
+        // ⌘I na máscara escolhida volta a revelar.
+        ve.simulate_keystrokes("cmd-i");
+        ve.run_until_parked();
+        assert_eq!(doc(&ve).camadas[0].mascara.as_ref().unwrap().fundo, 255);
+
+        // A corrente entre as miniaturas.
+        redesenhar(&mut ve);
+        clicar_no_editor(&mut ve, "editor-corrente-0");
+        assert!(!doc(&ve).camadas[0].mascara.as_ref().unwrap().vinculada);
+
+        // Os cadeados: o dos pixels pelo clique (o pincel recusa e avisa),
+        // e `/` para a transparência.
+        let miniatura = ve.debug_bounds("editor-miniatura-0").expect("a camada");
+        ve.simulate_click(miniatura.center(), gpui_kit::Modifiers::none());
+        ve.run_until_parked();
+        clicar_no_editor(&mut ve, "editor-cadeado-pixels");
+        redesenhar(&mut ve);
+        assert!(doc(&ve).camadas[0].bloqueio.pixels);
+        assert!(ve.debug_bounds("editor-cadeado-da-camada-0").is_some());
+        ve.simulate_keystrokes("b");
+        let p = ponto_da_foto(&mut ve, &editor, (0.5, 0.5));
+        ve.simulate_click(p, gpui_kit::Modifiers::none());
+        ve.run_until_parked();
+        let aviso = editor.read_with(&ve, |ed, _| ed.aviso().map(|(t, e)| (t.to_string(), e)));
+        assert!(
+            aviso
+                .as_ref()
+                .is_some_and(|(t, erro)| *erro && t.contains("pixels da camada estão bloqueados")),
+            "{aviso:?}"
+        );
+        ve.simulate_keystrokes("/");
+        ve.run_until_parked();
+        assert!(doc(&ve).camadas[0].bloqueio.transparencia);
+        clicar_no_editor(&mut ve, "editor-cadeado-tudo");
+        clicar_no_editor(&mut ve, "editor-cadeado-tudo");
+        assert!(
+            !doc(&ve).camadas[0].bloqueio.algum(),
+            "tudo e de novo solta"
+        );
+
+        // ⌘C ⌘V: a cópia numa camada nova acima; ⇧⌘V também.
+        ve.simulate_keystrokes("cmd-a cmd-c");
+        ve.run_until_parked();
+        ve.simulate_keystrokes("cmd-v");
+        ve.run_until_parked();
+        let (nomes, ativa) = camadas(&editor, &ve);
+        assert_eq!(nomes, vec!["Pintura".to_string(), "Camada 1".to_string()]);
+        assert_eq!(ativa, 1);
+        assert_eq!(
+            doc(&ve).camadas[1].pixels.pixel(3, 3),
+            doc(&ve).camadas[0].pixels.pixel(3, 3)
+        );
+        ve.simulate_keystrokes("cmd-shift-v");
+        ve.run_until_parked();
+        assert_eq!(camadas(&editor, &ve).0.len(), 3);
+
+        // ⇧⌥⌘E: o visível numa camada nova (composta em segundo plano).
+        let foto = editor.read_with(&ve, |ed, _| ed.sessao().unwrap().compor());
+        ve.simulate_keystrokes("cmd-shift-alt-e");
+        ve.run_until_parked();
+        assert_eq!(camadas(&editor, &ve).0.len(), 4);
+        let d = doc(&ve);
+        let carimbo = &d.camadas[3].pixels;
+        assert_eq!(carimbo.pixel(7, 9)[..3], foto.get_pixel(7, 9).0);
+
+        // Arrastar a de cima para o fundo da pilha.
+        redesenhar(&mut ve);
+        let de = ve
+            .debug_bounds("editor-camada-3")
+            .expect("a linha de cima")
+            .center();
+        let para = ve
+            .debug_bounds("editor-camada-0")
+            .expect("a linha de baixo")
+            .center();
+        ve.simulate_mouse_down(de, gpui_kit::MouseButton::Left, gpui_kit::Modifiers::none());
+        ve.run_until_parked();
+        let meio = gpui_kit::point(de.x, (de.y + para.y) / 2.);
+        ve.simulate_mouse_move(
+            meio,
+            Some(gpui_kit::MouseButton::Left),
+            gpui_kit::Modifiers::none(),
+        );
+        ve.run_until_parked();
+        ve.simulate_mouse_move(
+            para,
+            Some(gpui_kit::MouseButton::Left),
+            gpui_kit::Modifiers::none(),
+        );
+        ve.run_until_parked();
+        ve.simulate_mouse_up(
+            para,
+            gpui_kit::MouseButton::Left,
+            gpui_kit::Modifiers::none(),
+        );
+        ve.run_until_parked();
+        let (nomes, ativa) = camadas(&editor, &ve);
+        assert_eq!(nomes[0], "Camada 3", "{nomes:?}");
+        assert_eq!(ativa, 0);
+        let passos = passos_de(&editor, &ve);
+        ve.simulate_keystrokes("cmd-z");
+        ve.run_until_parked();
+        assert_eq!(
+            passos_de(&editor, &ve),
+            passos,
+            "o desfazer não apaga passos"
+        );
+        assert_eq!(
+            camadas(&editor, &ve).0[3],
+            "Camada 3",
+            "um desfazer volta tudo"
+        );
+    }
 }

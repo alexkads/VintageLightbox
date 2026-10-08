@@ -72,6 +72,17 @@ gpui_kit::actions!(
         ProximaDoGrupoJ,
         // ⌥⌘G: cria ou libera a máscara de corte da escolhida.
         AlternarMascaraDeCorte,
+        // Etapa 16: a área de transferência, o carimbo visível, inverter, a
+        // sobreposição rubi e o cadeado da transparência.
+        Copiar,
+        CopiarMesclado,
+        Recortar,
+        Colar,
+        ColarNoLugar,
+        CarimbarVisivel,
+        Inverter,
+        AlternarRubi,
+        BloquearTransparencia,
     ]
 );
 
@@ -103,6 +114,11 @@ const SEM_CAMPO: &str = "EditorDeFoto && !Input";
 ///   (o menu "Ocultar camadas" do Photoshop; ⚠️ não está na tabela em PDF);
 /// - seleção: ⌘A ⌘D ⇧⌘I, Delete apaga, ⌥Delete preenche, ⇧Delete preenche
 ///   pelo conteúdo; ⌘T transformação livre, Enter confirma, Esc cancela;
+/// - área de transferência: ⌘C copiar, ⇧⌘C copiar mesclado, ⌘X recortar, ⌘V
+///   colar (no meio da vista, ou da seleção), ⇧⌘V colar no lugar; ⇧⌥⌘E
+///   carimbar visível; ⌘I inverter (a máscara, ou as cores da camada); `\`
+///   a máscara em rubi; `/` o cadeado da transparência. Fora de campo de
+///   texto: o campo do nome da camada tem a área de transferência dele;
 /// - zoom: ⌘= ⌘− ⌘0 ⌘⌥0, e o Z da Revelação (alterna encaixe e 100%; no
 ///   Photoshop o Z é a ferramenta Zoom — diferença mantida de propósito).
 ///
@@ -156,6 +172,15 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("shift-delete", PreencherPeloConteudo, solta),
         KeyBinding::new("secondary-e", MesclarParaBaixo, c),
         KeyBinding::new("secondary-alt-g", AlternarMascaraDeCorte, c),
+        KeyBinding::new("secondary-c", Copiar, solta),
+        KeyBinding::new("secondary-shift-c", CopiarMesclado, solta),
+        KeyBinding::new("secondary-x", Recortar, solta),
+        KeyBinding::new("secondary-v", Colar, solta),
+        KeyBinding::new("secondary-shift-v", ColarNoLugar, solta),
+        KeyBinding::new("secondary-shift-alt-e", CarimbarVisivel, c),
+        KeyBinding::new("secondary-i", Inverter, solta),
+        KeyBinding::new("\\", AlternarRubi, solta),
+        KeyBinding::new("/", BloquearTransparencia, solta),
         // As letras e ⇧ + letra. No grupo de uma ferramenta só, ⇧ + letra
         // escolhe a mesma.
         KeyBinding::new("v", GrupoV, solta),
