@@ -1,9 +1,15 @@
 {
-  "versao": "0.1.114",
-  "titulo": "Atualização importante agora aparece em vermelho no rodapé.",
+  "versao": "0.1.115",
+  "titulo": "Editar Foto: retoque de queixo e pescoço como no Photoshop — camada da fotografia, máscara de corte, Deformar e Pincel de recuperação.",
   "importante": false,
   "novidades": [
-    "Quando a versão nova corrige um problema sério, a faixa do rodapé fica vermelha e com um brilho passando pelo texto — do aviso até o \"Reabrir agora\". Antes ela era amarela e passava por um aviso qualquer."
+    "Camadas → ⋯ → \"Criar camada da fotografia base\": a foto vira uma camada que dá para selecionar, copiar e deformar, sem tocar no original.",
+    "⌘J com seleção agora tira a seleção depois de copiar, como no Photoshop: o segundo ⌘J faz uma cópia exata, sem a borda difusa ir sumindo. \"Duplicar camada (exata)\" também está no menu ⋯.",
+    "Máscara de corte: ⌥ + clique na linha entre duas camadas (ou ⌥⌘G) faz a de cima aparecer só onde a de baixo tem pixels. O painel mostra a camada recuada com ↳. ⌘E na camada de baixo mescla o conjunto sem mudar a foto.",
+    "Deformar: menu \"Transformar ▾\" → Deformar (ou o botão na barra do ⌘T). Uma grade de 3 × 3 sobre o trecho: arraste os pontos ou puxe por dentro para levantar a linha da mandíbula. Enter aplica, Esc volta tudo, Redefinir recomeça.",
+    "Pincel de recuperação: J e depois ⇧J. ⌥ + clique na pele limpa e passe sobre a emenda — a textura vem da origem e a cor se ajusta ao lugar ao soltar o botão. \"Difusão da recuperação\" deixa a transição mais lisa.",
+    "Botão direito na foto com uma seleção: Difusão…, Expandir…, Contrair…, Inverter, Desmarcar, Camada via cópia e Transformar seleção. Botão direito numa camada: máscara de corte, duplicar e mesclar.",
+    "Fora da área retocada, a foto editada continua idêntica ao original, e só a camada da fotografia sem retoque não conta como edição."
   ],
-  "por_que_atualizar": "Para não deixar passar a próxima correção séria."
+  "por_que_atualizar": "Para fazer no próprio balcão o retoque de queixo e pescoço que hoje pede o Photoshop."
 }
