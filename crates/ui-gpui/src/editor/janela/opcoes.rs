@@ -359,7 +359,7 @@ impl EditorDeFoto {
                      fazer: fn(&mut EditorDeFoto, &mut Context<EditorDeFoto>)| {
                         let ed = ed.clone();
                         crate::estilo::item_de_menu(id, rotulo, None)
-                            .on_click(move |_ev, _window, cx| ed.update(cx, |ed, cx| fazer(ed, cx)))
+                            .on_click(move |_ev, _window, cx| ed.update(cx, fazer))
                     };
                 menu.item(item(
                     "editor-misturador-carregar",
