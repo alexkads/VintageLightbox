@@ -218,13 +218,43 @@ Binário `editor` com roteiro (eventos reais do AppKit, `mouse`/`tecla`) sobre `
 10. a imagem editada salva (`composta-1.png`) tem a borda na resolução cheia (x = 240 exato), nenhuma linha do
     caminho, e a foto fora da máscara intacta.
 
+## Segunda rodada (09/out/2026 — "continue aumentando a equivalência")
+
+- **Seleção direta dobra a curva**: arrastar um segmento curvo move o ponto agarrado exatamente com o ponteiro,
+  mudando as duas alças do segmento com o peso de cada ponta pelo `t` (a conta do "arrastar a curva" do Inkscape;
+  `edicao::dobrar_segmento`); âncoras suaves das pontas giram a alça do outro lado. Reta: as duas pontas andam.
+- **Densidade e difusão da máscara vetorial** (Propriedades, quando a máscara vetorial está escolhida): não mudam
+  o caminho; entram na cobertura guardada (`MascaraVetorial::acabada`), um passo por arrasto do slider.
+- **Transformar caminho**: ⌘T com uma ferramenta de caminho abre a caixa do ⌘T (8 alças, giro, X/Y/L/A/ângulo) em
+  volta dos componentes escolhidos (ou do caminho inteiro); a afim vai às âncoras e alças em `f64`, Enter aplica
+  num passo ("Transformar caminho"/"Mover caminho"), Esc volta. O Deformar fica de fora para caminhos.
+- **Miniaturas** de cada caminho no painel (branco dentro, cinza fora), refeitas pela assinatura da geometria.
+- **Caneta de curvatura** (⇧P): cada clique é um ponto por onde a curva passa lisa (alças automáticas pela direção
+  dos vizinhos, um terço da distância de cada lado — `edicao::recalcular_automaticas`); duplo clique ou ⌥ faz canto
+  (duplo clique de novo volta a liso); arrastar um ponto o move e a curva se refaz; clique no segmento insere um
+  ponto liso; a prévia mostra os dois segmentos que o próximo ponto dobraria. Mexer à mão numa alça solta a âncora
+  da regra (`Ancora::automatica`, salvo no projeto).
+- **Caneta de forma livre** (⇧P): o traço à mão vira Béziers pelo ajuste de Schneider (`vetor/ajuste.rs`), com
+  cantos onde a direção vira mais de 70°, "Ajuste da curva" de 1/2/4/8 pontos da tela na barra (o erro máximo),
+  fecha ao voltar ao começo e continua uma ponta aberta quando começa nela.
+- **Preencher caminho…** (conteúdo frente/fundo/preto/branco/50% cinza, opacidade, raio de difusão) e
+  **Contornar caminho…** (pincel, borracha, desfoque, nitidez, subexposição, superexposição) no menu ⋯ do painel;
+  o contorno segue a curva exata (sem a suavização do pincel).
+- **Modo Forma** (Caminho | Forma na barra das ferramentas de desenho): começar um componente em modo Forma cria a
+  **camada de forma** "Forma N" — uma camada de preenchimento **Cor sólida** (o tipo novo `Ajuste::CorSolida`) com
+  a cor de frente e uma máscara vetorial que esconde tudo até a forma ter área (`revela_vazia = false`); ⇧ soma o
+  componente à forma escolhida ("Combinar formas"); Esc no meio do primeiro arrasto tira a camada. A cor muda nas
+  Propriedades ("Usar a cor de frente", um passo). Camada › "Nova camada de preenchimento: Cor sólida" cria a de
+  preenchimento sem forma. A miniatura das Camadas mostra a cor.
+- Achados só no app real (e corrigidos com teste): a curvatura e a forma livre não criavam o caminho de trabalho
+  sem caminho escolhido; o arrasto da caixa do Transformar caminho ia para a Caneta.
+
 ## Diferenças que ficam em relação ao Photoshop
 
-- Sem **modo Forma** (camada de forma) nem modo Pixels; sem Caneta de curvatura, de forma livre ou magnética.
-- Sem transformar caminho (⌘T na Seleção de caminho) e sem alinhar/distribuir componentes; a máscara vetorial anda
-  com o Mover/⌘T da camada, mas o Deformar não a leva.
-- Seleção direta num segmento curvo escolhe e move as duas pontas (o Photoshop dobra a curva pelo meio).
-- Sem densidade e difusão da máscara vetorial (só ligada/vinculada); sem miniatura desenhada do caminho no painel.
+- Sem modo **Pixels**, sem Caneta **magnética** e sem as ferramentas de forma prontas (retângulo, elipse,
+  polígono, linha, forma personalizada); sem traçado (contorno com espessura/tracejado) na camada de forma — só o
+  preenchimento.
+- Sem alinhar/distribuir componentes; o Deformar não leva caminho nem máscara vetorial.
 - Os cursores são os do sistema (mira e seta) com um selo de texto ao lado — o GPUI não carrega cursor próprio.
-- Preencher/contornar não abrem diálogo (cor de frente e opacidade do pincel; pincel de agora).
-- Arrastar o caminho de uma máscara vetorial mostra a foto nova ao soltar, não durante.
+- Arrastar o caminho de uma máscara vetorial (ou de uma forma) mostra a foto nova ao soltar, não durante.
+- A curvatura do Photoshop usa outra conta para as alças automáticas; a forma das curvas difere um pouco.
