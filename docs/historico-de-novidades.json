@@ -1,5 +1,15 @@
 [
   {
+    "versao": "0.1.127",
+    "data": "2026-10-09",
+    "titulo": "Exportar da sessão leva só as fotos marcadas.",
+    "importante": false,
+    "novidades": [
+      "Sessão: o Exportar (botão e menu da foto) leva só as fotos marcadas na grade; sem marca, leva as do filtro em vigor. Antes ele abria com todas as fotos da sessão."
+    ],
+    "por_que_atualizar": "Para exportar exatamente as fotos que você marcou."
+  },
+  {
     "versao": "0.1.126",
     "data": "2026-10-09",
     "titulo": "Editor: Caneta de curvatura, Caneta de forma livre, camadas de forma e transformar caminho.",

@@ -1,14 +1,9 @@
 {
-  "versao": "0.1.126",
-  "titulo": "Editor: Caneta de curvatura, Caneta de forma livre, camadas de forma e transformar caminho.",
+  "versao": "0.1.127",
+  "titulo": "Exportar da sessão leva só as fotos marcadas.",
   "importante": false,
   "novidades": [
-    "Editor: Caneta de curvatura (⇧P depois do P): cada clique põe um ponto por onde a curva passa lisa; duplo clique ou ⌥ faz canto; arrastar um ponto o move e a curva se refaz.",
-    "Editor: Caneta de forma livre (⇧P): desenhe à mão e o traço vira curvas editáveis; \"Ajuste da curva\" na barra escolhe o quanto ele segue a mão.",
-    "Editor: modo Forma na barra da Caneta: o desenho vira uma camada de forma com a cor de frente, que continua editável; ⇧ soma à forma escolhida. Camada › Nova camada de preenchimento: Cor sólida.",
-    "Editor: ⌘T com as setas de caminho transforma o caminho (mover, girar, escalar) na mesma caixa do Transformação livre.",
-    "Editor: Seleção direta: arrastar o meio de uma curva a dobra, como no Photoshop.",
-    "Editor: máscara vetorial com densidade e difusão nas Propriedades; miniaturas no painel Caminhos; Preencher caminho… e Contornar caminho… com opções."
+    "Sessão: o Exportar (botão e menu da foto) leva só as fotos marcadas na grade; sem marca, leva as do filtro em vigor. Antes ele abria com todas as fotos da sessão."
   ],
-  "por_que_atualizar": "Para recortar e desenhar formas no editor com as Canetas do Photoshop."
+  "por_que_atualizar": "Para exportar exatamente as fotos que você marcou."
 }
