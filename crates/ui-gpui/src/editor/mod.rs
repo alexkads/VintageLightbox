@@ -102,6 +102,11 @@ gpui_kit::actions!(
         AjusteMatiz,
         // ⌘R: as réguas em volta do palco.
         AlternarReguas,
+        // ⌘; mostra ou esconde as guias; ⌥⌘; trava.
+        AlternarGuias,
+        TravarGuias,
+        // ⇧⌘;: Visualizar › Ajustar (as seleções grudam nas guias e nas bordas).
+        AjustarAsGuias,
     ]
 );
 
@@ -144,6 +149,7 @@ const SEM_CAMPO: &str = "EditorDeFoto && !Input";
 ///   texto: o campo do nome da camada tem a área de transferência dele;
 /// - ⇧⌘D reseleciona; ⌘L Níveis, ⌘M Curvas e ⌘U Matiz/saturação criam a
 ///   camada de ajuste (Imagem › Ajustes); ⌘R mostra ou esconde as réguas;
+///   ⌘; as guias, ⌥⌘; trava as guias, ⇧⌘; liga o Ajustar;
 /// - zoom: ⌘= ⌘− ⌘0, e ⌘1 (ou ⌘⌥0) 100%; **Z é a Lupa**, como no Photoshop (a tecla de
 ///   alternar encaixe e 100% é da Revelação, não do editor);
 /// - Tab esconde barra de ferramentas, opções e painéis; ⇧Tab só os painéis;
@@ -187,6 +193,9 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("secondary-m", AjusteCurvas, c),
         KeyBinding::new("secondary-u", AjusteMatiz, c),
         KeyBinding::new("secondary-r", AlternarReguas, c),
+        KeyBinding::new("secondary-;", AlternarGuias, c),
+        KeyBinding::new("secondary-alt-;", TravarGuias, c),
+        KeyBinding::new("secondary-shift-;", AjustarAsGuias, c),
         KeyBinding::new("tab", AlternarInterface, solta),
         KeyBinding::new("shift-tab", AlternarPaineis, solta),
         KeyBinding::new("space", SegurarAMao, solta),

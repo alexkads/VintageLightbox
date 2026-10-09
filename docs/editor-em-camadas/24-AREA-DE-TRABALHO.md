@@ -166,10 +166,45 @@ Conferência: `editor-core` 234 (com `reselecionar_traz_a_ultima_desmarcada`); `
 ⌘R com réguas 0–800 alinhadas à foto de 800 px, ⌘D → ⇧⌘D, ⌘M abrindo Curvas, menu Imagem, clique e duplo clique
 no Fundo (cria "Fotografia" no índice 0), K no painel Cor com a máscara escolhida.
 
+## Repasse do Photoshop, parte 2 (08/out/2026)
+
+- **Filtro › Desfoque › Desfoque gaussiano… e Filtro › Nitidez › Máscara de nitidez…**
+  (`editor-core/src/filtros.rs`, `janela/filtro.rs`). Pré-multiplicado (a borda do transparente não escurece; na
+  máscara o desfoque se mistura ao fundo, que é a difusão do Photoshop), 3 caixas de Kutskir ≈ gaussiana de σ =
+  raio, borda repetida, só a região que muda (conteúdo + 3σ, cortado pela caixa da seleção), dosado pela seleção.
+  Nitidez: quantidade 1–500%, raio, limiar. ~0,4 s em 24 MP qualquer raio (`medir_os_filtros_em_24_mp`, release).
+  O diálogo é **modal sem véu escuro**: a caixa fica no canto do palco e a prévia é a própria foto (Visualizar);
+  um véu transparente toma os cliques e o contexto de teclas vira `FiltroDoEditor` (só Enter/Esc valem — as
+  teclas do editor não casam). A conta corre em segundo plano com respiro de 80 ms e geração; OK grava um passo
+  com o nome do filtro (`Sessao::comecar_filtro/mostrar_filtro/aplicar_filtro/cancelar_filtro`, o molde do
+  Liquidificar). Os valores ficam para a próxima vez. Raio em escala exponencial (0,1–250 px).
+- **Guias** (`janela/reguas.rs`): arrastar da régua de cima (horizontal) ou da esquerda (vertical); o Mover (ou
+  ⌘/Ctrl) pega a guia a até 4 pt e leva; solta fora da foto, exclui. Passos "Nova guia", "Mover guia", "Excluir
+  guia", "Limpar guias" — `Comando::Guias`, que como a seleção **não** vai ao histórico do projeto: as guias de
+  agora vão no manifesto (`guias`, opcional) e o **formato continua 10** (a 0.1.122 só as ignora). Visualizar ›
+  Guias ⌘;, Travar guias ⌥⌘;, Ajustar ⇧⌘; e Limpar guias (mostrar/travar/ajustar ficam na arrumação). Ciano.
+  Com a vista girada, as guias não aparecem nem se criam.
+- **Ajustar** (`ajustado_as_guias`): as seleções retangular, elíptica e poligonal grudam na guia ou na borda da
+  foto a até 8 pt da tela (o laço à mão, não). 🚨 Se o clique cai dentro ou fora da seleção decide o ponto
+  **cru**: com ⌘A, um clique 0,2 px fora da foto, ajustado para a borda, virava "mover o contorno" (pego pelo
+  teste `camada_via_copia_e_via_recorte_pelas_teclas`).
+- **Navegador** (aba ao lado de Cor/Amostras) e **Info** (aba ao lado de Camadas, onde cabe — com quatro abas em
+  cima o "Info" saía cortado): miniatura da vista reduzida (refeita quando o documento muda, fora do traço),
+  retângulo vermelho do visível, clique/arrasto centra (`zoom.centro` é fração da foto), − e + do zoom; Info com
+  RGB composto sob o ponteiro (`Sessao::cor_em`), X/Y e L × A da seleção (caixa exata guardada pela versão da
+  seleção). Arrumação gravada antes: o Navegador entra no primeiro grupo e o Info no das Camadas, sem grupo novo.
+- Roteiro: `filtro desfoque|nitidez|raio V|quantidade V|limiar V|visualizar|ok|cancelar|estado`,
+  `guia regua v|h|pegar x y|mover x y|soltar|limpar|mostrar|travar|estado`, `navegador fx fy`.
+
+Conferência: `editor-core` 240 (filtros, prévia/passo do filtro, guias no manifesto); `ui-gpui -- editor recursos
+docas` 94 (`o_filtro_e_modal_com_previa_e_um_passo`, `a_guia_sai_da_regua_e_a_selecao_gruda_nela`,
+`navegador_e_info`). App real: desfoque 12 px e nitidez 300% com a prévia na foto, Enter e Esc nativos, W barrado
+com o diálogo aberto; guias criadas, movidas e excluídas com o mouse nativo, ⌘Z e ⌘;; Navegador a 600%.
+
 ## O que ficou de fora
 
 - Painel flutuante em janela própria; recolher um grupo só (o kit não tem; a coluna inteira recolhe).
 - Escala 100% e 150% não conferidas: este Mac só tem a tela retina (200%).
 - Menus não trocam de um para o outro passando o mouse (cada um abre no clique, o `DropdownMenu` do kit).
-- Guias arrastadas das réguas, painéis Navegador, Info e Ajustes, e Filtro › Desfoque gaussiano / Máscara de
-  nitidez: próximos candidatos do repasse.
+- Painel Ajustes (os ajustes já estão em Imagem › Ajustes, no rodapé das Camadas e no menu Camada); guia em
+  vista girada; arrastar a caixa do filtro.

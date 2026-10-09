@@ -54,6 +54,10 @@ struct Estado {
     pode_reselecionar: bool,
     reguas: bool,
     na_mascara: bool,
+    guias_visiveis: bool,
+    guias_travadas: bool,
+    tem_guias: bool,
+    ajustar: bool,
 }
 
 impl EditorDeFoto {
@@ -83,6 +87,10 @@ impl EditorDeFoto {
             pode_reselecionar: s.is_some_and(Sessao::pode_reselecionar),
             reguas: self.reguas_ligadas(),
             na_mascara: self.na_mascara(),
+            guias_visiveis: self.guias_visiveis(),
+            guias_travadas: self.guias_travadas(),
+            tem_guias: s.is_some_and(|s| !s.guias().is_empty()),
+            ajustar: self.ajustar_ligado(),
         }
     }
 
@@ -840,6 +848,50 @@ fn menu_visualizar(
         )
         .checked(e.reguas),
     )
+    .item(
+        acao(
+            ed,
+            foco,
+            window,
+            "editor-menu-guias",
+            "Guias",
+            AlternarGuias,
+            true,
+        )
+        .checked(e.guias_visiveis),
+    )
+    .item(
+        acao(
+            ed,
+            foco,
+            window,
+            "editor-menu-travar-guias",
+            "Travar guias",
+            TravarGuias,
+            true,
+        )
+        .checked(e.guias_travadas),
+    )
+    .item(
+        acao(
+            ed,
+            foco,
+            window,
+            "editor-menu-ajustar",
+            "Ajustar",
+            AjustarAsGuias,
+            true,
+        )
+        .checked(e.ajustar),
+    )
+    .item(item(
+        ed,
+        "editor-menu-limpar-guias",
+        "Limpar guias",
+        None,
+        p && e.tem_guias,
+        |ed, _, cx| ed.limpar_guias(cx),
+    ))
     .separator()
     .item(item(
         ed,
@@ -872,6 +924,8 @@ fn menu_janela(
             QualPainel::Pincel => "editor-janela-pincel",
             QualPainel::Historico => "editor-janela-historico",
             QualPainel::Camadas => "editor-janela-camadas",
+            QualPainel::Navegador => "editor-janela-navegador",
+            QualPainel::Info => "editor-janela-info",
         };
         m = m.item(
             item(ed, id, qual.titulo(), None, true, move |ed, window, cx| {
@@ -1005,6 +1059,9 @@ impl EditorDeFoto {
             ("Encaixar na tela", Box::new(Encaixar)),
             ("100%", Box::new(UmPorUm)),
             ("Réguas", Box::new(AlternarReguas)),
+            ("Guias", Box::new(AlternarGuias)),
+            ("Travar guias", Box::new(TravarGuias)),
+            ("Ajustar", Box::new(AjustarAsGuias)),
             ("Ocultar ferramentas e painéis", Box::new(AlternarInterface)),
             ("Ocultar só os painéis", Box::new(AlternarPaineis)),
             ("Liquidificar", Box::new(Liquidificar)),

@@ -39,6 +39,7 @@ pub mod ferramentas;
 pub mod filtro;
 mod mascara_e_cadeados;
 mod menus;
+mod navegador;
 mod opcoes;
 mod paineis;
 mod painel_do_preenchimento;
@@ -89,6 +90,7 @@ use super::{
     ProximaDoGrupoL, ProximaDoGrupoM, ProximaDoGrupoO, RefazerNoEditor, SalvarNoEditor,
     SegurarAMao, SelecionarTudo, SubirCamada, TransformacaoLivre, TrocarCores, UmPorUm, CONTEXTO,
 };
+use super::{AjustarAsGuias, AlternarGuias, TravarGuias};
 use super::{AjusteCurvas, AjusteMatiz, AjusteNiveis, AlternarReguas, Reselecionar};
 use super::{
     AlternarRubi, BloquearTransparencia, CarimbarVisivel, Colar, ColarNoLugar, Copiar,
@@ -813,6 +815,12 @@ pub struct EditorDeFoto {
     miniatura_do_fundo: Option<Arc<RenderImage>>,
     /// O diálogo de Filtro › Desfoque gaussiano / Máscara de nitidez.
     filtro: filtro::Estado,
+    /// A miniatura do painel Navegador.
+    miniatura_do_navegador: Option<navegador::MiniaturaDoNavegador>,
+    /// A caixa exata da seleção (versão da seleção, largura, altura) — o Info.
+    selecao_medida: Option<(u64, u32, u32)>,
+    /// Uma guia a caminho (da régua, ou levada pelo Mover).
+    arrasto_de_guia: Option<reguas::ArrastoDeGuia>,
     /// Um preenchimento por conteúdo calculando em segundo plano.
     preenchendo: bool,
     _tarefa_do_preenchimento: Option<Task<()>>,
@@ -1637,6 +1645,9 @@ impl EditorDeFoto {
             miniaturas_das_mascaras: Vec::new(),
             miniatura_do_fundo: None,
             filtro: estado_do_filtro,
+            arrasto_de_guia: None,
+            miniatura_do_navegador: None,
+            selecao_medida: None,
             preenchendo: false,
             _tarefa_do_preenchimento: None,
             _tarefa_da_fotografia: None,
@@ -2206,6 +2217,15 @@ impl EditorDeFoto {
         let (Some(tipo), Some(p)) = (self.selecionando, self.na_foto_sem_limite(ponto)) else {
             return;
         };
+        // O Ajustar mexe só nos pontos da forma: se o clique caiu dentro ou
+        // fora da seleção, decide o ponto cru (um clique logo fora da foto
+        // com ⌘A não vira "mover o contorno").
+        let cru = p;
+        let p = if tipo == TipoDeSelecao::Laco {
+            p
+        } else {
+            self.ajustado_as_guias(p)
+        };
         // O laço poligonal aberto: cada clique é um vértice; perto do primeiro
         // ou no duplo clique, fecha.
         let escala = self
@@ -2240,16 +2260,16 @@ impl EditorDeFoto {
             .and_then(Sessao::selecao)
             .filter(|_| operacao == Operacao::Nova && tipo != TipoDeSelecao::LacoPoligonal)
             .is_some_and(|sel| {
-                p.0 >= 0.0
-                    && p.1 >= 0.0
-                    && p.0 < sel.largura() as f32
-                    && p.1 < sel.altura() as f32
-                    && sel.valor(p.0 as u32, p.1 as u32) >= 128
+                cru.0 >= 0.0
+                    && cru.1 >= 0.0
+                    && cru.0 < sel.largura() as f32
+                    && cru.1 < sel.altura() as f32
+                    && sel.valor(cru.0 as u32, cru.1 as u32) >= 128
             });
         if dentro {
             if let Some(s) = self.sessao_mut() {
                 if s.comecar_a_mover_o_contorno() {
-                    self.arrasto_do_contorno = Some(p);
+                    self.arrasto_do_contorno = Some(cru);
                 }
             }
             cx.notify();
@@ -3326,7 +3346,9 @@ impl EditorDeFoto {
         }
         if self.poligono_aberto() {
             // O laço poligonal só mostra o próximo segmento até o ponteiro.
-            let no_ponto = self.na_foto_sem_limite(ponto);
+            let no_ponto = self
+                .na_foto_sem_limite(ponto)
+                .map(|p| self.ajustado_as_guias(p));
             if let Some(g) = self.gesto_de_selecao.as_mut() {
                 g.proximo = no_ponto;
             }
@@ -3336,6 +3358,7 @@ impl EditorDeFoto {
         if self.gesto_de_selecao.is_some() {
             let escala = self.vista_do_zoom().map_or(1.0, |(_, v)| v.escala);
             let no_ponto = self.na_foto_sem_limite(ponto);
+            let ajustado = no_ponto.map(|p| self.ajustado_as_guias(p));
             let espaco = self.espaco.is_some();
             // Espaço segurado no meio do desenho: a forma anda inteira com o
             // ponteiro ("Reposition marquee while selecting").
@@ -3372,7 +3395,7 @@ impl EditorDeFoto {
                     }
                     _ => {
                         if let Some(fim) = gesto.pontos.last_mut() {
-                            *fim = p;
+                            *fim = ajustado.unwrap_or(p);
                         }
                     }
                 }
@@ -5654,6 +5677,35 @@ impl EditorDeFoto {
                 Some("segurar") => self.espaco_apertado(cx),
                 _ => self.espaco_solto(cx),
             },
+            // guia regua v|h · guia mover x y (pontos da janela) · guia soltar ·
+            // guia pegar x y · guia limpar|mostrar|travar|estado
+            "guia" => match partes.get(1).copied().unwrap_or_default() {
+                "regua" => self.comecar_guia_da_regua(partes.get(2) == Some(&"v"), cx),
+                "pegar" => {
+                    let p = gpui_kit::point(px(numero(2)), px(numero(3)));
+                    let pegou = self.pegar_guia(p, gpui_kit::Modifiers::secondary_key(), cx);
+                    eprintln!("[roteiro] editor guia pegar: {pegou}");
+                }
+                "mover" => self.arrastar_guia(gpui_kit::point(px(numero(2)), px(numero(3))), cx),
+                "soltar" => self.soltar_guia(cx),
+                "limpar" => self.limpar_guias(cx),
+                "mostrar" => self.alternar_guias(cx),
+                "travar" => self.alternar_trava_das_guias(cx),
+                _ => eprintln!(
+                    "[roteiro] editor guias: {:?} visiveis={} travadas={}",
+                    self.sessao().map(|s| s.guias().to_vec()),
+                    self.guias_visiveis(),
+                    self.guias_travadas()
+                ),
+            },
+            // navegador fx fy — o clique no Navegador (frações da foto).
+            "navegador" => {
+                self.centrar_em(numero(1), numero(2), cx);
+                eprintln!(
+                    "[roteiro] editor navegador: visivel={:?}",
+                    self.area_visivel()
+                );
+            }
             // filtro desfoque|nitidez|raio V|quantidade V|limiar V|visualizar|ok|cancelar|estado
             "filtro" => match partes.get(1).copied().unwrap_or_default() {
                 "desfoque" => self.abrir_filtro(filtro::Tipo::Desfoque, window, cx),
@@ -6427,6 +6479,11 @@ impl EditorDeFoto {
                             window.focus(&ed.foco, cx);
                             if ed.espaco.is_some() {
                                 ed.pegar_com_a_mao(evento.position, cx);
+                            } else if !ed.transformando()
+                                && !ed.liquidificando()
+                                && ed.pegar_guia(evento.position, evento.modifiers, cx)
+                            {
+                                // A guia debaixo do Mover (ou do ⌘) vai junto.
                             } else if ed.selecionando.is_some()
                                 && !ed.transformando()
                                 && !ed.liquidificando()
@@ -7458,6 +7515,7 @@ impl Render for EditorDeFoto {
         self.subir_os_ladrilhos();
         self.atualizar_as_bordas();
         self.atualizar_as_miniaturas();
+        self.atualizar_o_navegador();
         window.set_window_title(&self.titulo());
         // O slider e o modo acompanham a camada escolhida, o desfazer e a
         // reabertura.
@@ -7858,6 +7916,9 @@ impl Render for EditorDeFoto {
             )
             .on_action(cx.listener(|ed, _: &AjusteMatiz, _, cx| ed.ajuste_pela_chave("matiz", cx)))
             .on_action(cx.listener(|ed, _: &AlternarReguas, _, cx| ed.alternar_reguas(cx)))
+            .on_action(cx.listener(|ed, _: &AlternarGuias, _, cx| ed.alternar_guias(cx)))
+            .on_action(cx.listener(|ed, _: &TravarGuias, _, cx| ed.alternar_trava_das_guias(cx)))
+            .on_action(cx.listener(|ed, _: &AjustarAsGuias, _, cx| ed.alternar_ajuste(cx)))
             .on_action(cx.listener(|ed, _: &InverterSelecao, _, cx| ed.inverter_selecao(cx)))
             .on_action(cx.listener(|ed, _: &ApagarSelecao, _, cx| {
                 // ⌫ com o laço poligonal aberto tira o último vértice.

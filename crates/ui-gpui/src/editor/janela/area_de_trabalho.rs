@@ -68,12 +68,16 @@ pub enum QualPainel {
     Pincel,
     Historico,
     Camadas,
+    Navegador,
+    Info,
 }
 
 impl QualPainel {
-    pub const TODOS: [QualPainel; 6] = [
+    pub const TODOS: [QualPainel; 8] = [
         QualPainel::Cor,
         QualPainel::Amostras,
+        QualPainel::Navegador,
+        QualPainel::Info,
         QualPainel::Propriedades,
         QualPainel::Pincel,
         QualPainel::Historico,
@@ -90,6 +94,8 @@ impl QualPainel {
             QualPainel::Pincel => "editor:pincel",
             QualPainel::Historico => "editor:historico",
             QualPainel::Camadas => "editor:camadas",
+            QualPainel::Navegador => "editor:navegador",
+            QualPainel::Info => "editor:info",
         }
     }
 
@@ -105,6 +111,8 @@ impl QualPainel {
             QualPainel::Pincel => "Pincel",
             QualPainel::Historico => "Histórico",
             QualPainel::Camadas => "Camadas",
+            QualPainel::Navegador => "Navegador",
+            QualPainel::Info => "Info",
         }
     }
 
@@ -116,6 +124,8 @@ impl QualPainel {
             QualPainel::Pincel => Icone::Paintbrush,
             QualPainel::Historico => Icone::History,
             QualPainel::Camadas => Icone::Layers,
+            QualPainel::Navegador => Icone::Map,
+            QualPainel::Info => Icone::Info,
         }
     }
 
@@ -128,6 +138,8 @@ impl QualPainel {
             QualPainel::Pincel => "editor-painel-pincel",
             QualPainel::Historico => "editor-painel-historico",
             QualPainel::Camadas => "editor-painel-camadas",
+            QualPainel::Navegador => "editor-painel-navegador",
+            QualPainel::Info => "editor-painel-info",
         }
     }
 }
@@ -151,6 +163,14 @@ pub struct Arranjo {
     /// As réguas em volta do palco (⌘R).
     #[serde(default)]
     pub reguas: bool,
+    /// Visualizar › Guias desligado (⌘;) e Travar guias (⌥⌘;).
+    #[serde(default)]
+    pub guias_ocultas: bool,
+    #[serde(default)]
+    pub guias_travadas: bool,
+    /// Visualizar › Ajustar desligado (⇧⌘;) — ligado é o padrão de lá.
+    #[serde(default)]
+    pub sem_ajuste: bool,
     /// Os grupos, as abas e os tamanhos — a árvore do dock do kit.
     #[serde(default)]
     pub grupos: Option<PanelState>,
@@ -165,6 +185,9 @@ impl Default for Arranjo {
             ocultos: Vec::new(),
             barra_em_duas_colunas: false,
             reguas: false,
+            guias_ocultas: false,
+            guias_travadas: false,
+            sem_ajuste: false,
             grupos: None,
         }
     }
@@ -375,8 +398,9 @@ fn arranjo_padrao(paineis: &[(QualPainel, Entity<PainelDoEditor>)], cx: &App) ->
         .child(
             DockLayout::tabs()
                 .panel_view(p(QualPainel::Cor), cx)
-                .panel_view(p(QualPainel::Amostras), cx),
-            Some(px(128.)),
+                .panel_view(p(QualPainel::Amostras), cx)
+                .panel_view(p(QualPainel::Navegador), cx),
+            Some(px(150.)),
         )
         .child(
             DockLayout::tabs()
@@ -386,7 +410,9 @@ fn arranjo_padrao(paineis: &[(QualPainel, Entity<PainelDoEditor>)], cx: &App) ->
             Some(px(316.)),
         )
         .child(
-            DockLayout::tabs().panel_view(p(QualPainel::Camadas), cx),
+            DockLayout::tabs()
+                .panel_view(p(QualPainel::Camadas), cx)
+                .panel_view(p(QualPainel::Info), cx),
             None,
         )
 }
@@ -399,10 +425,19 @@ pub fn arranjo_gravado(
     paineis: &[(QualPainel, Entity<PainelDoEditor>)],
     cx: &App,
 ) -> Option<DockLayout> {
+    /// Os nomes que a árvore gravada cita.
+    fn nomes(estado: &PanelState, saida: &mut HashSet<String>) {
+        saida.insert(estado.panel_name.to_string());
+        for filho in &estado.children {
+            nomes(filho, saida);
+        }
+    }
+    #[allow(clippy::too_many_arguments)]
     fn montar(
         estado: &PanelState,
         paineis: &[(QualPainel, Entity<PainelDoEditor>)],
         usados: &mut HashSet<QualPainel>,
+        novos: &mut Vec<QualPainel>,
         profundidade: usize,
         cx: &App,
     ) -> Option<DockLayout> {
@@ -424,7 +459,7 @@ pub fn arranjo_gravado(
                 };
                 let mut algum = false;
                 for (i, filho) in estado.children.iter().enumerate() {
-                    if let Some(f) = montar(filho, paineis, usados, profundidade + 1, cx) {
+                    if let Some(f) = montar(filho, paineis, usados, novos, profundidade + 1, cx) {
                         let tamanho = sizes
                             .get(i)
                             .map(|t| f32::from(*t))
@@ -451,6 +486,31 @@ pub fn arranjo_gravado(
                         n += 1;
                     }
                 }
+                // Um painel que a versão de antes não tinha entra como aba
+                // num grupo que já existe — o Navegador no primeiro, o Info
+                // no das Camadas —, e não num grupo novo que apertaria os
+                // outros.
+                if n > 0 {
+                    let com_camadas = usados.contains(&QualPainel::Camadas)
+                        && estado
+                            .children
+                            .iter()
+                            .any(|c| c.panel_name == QualPainel::Camadas.nome());
+                    let primeiro = usados.len() == n;
+                    let mut ficam = Vec::new();
+                    for q in novos.drain(..) {
+                        let aqui = match q {
+                            QualPainel::Navegador => primeiro,
+                            QualPainel::Info => com_camadas,
+                            _ => false,
+                        };
+                        match painel(q).filter(|_| aqui && usados.insert(q)) {
+                            Some(p) => l = l.panel_view(p, cx),
+                            None => ficam.push(q),
+                        }
+                    }
+                    *novos = ficam;
+                }
                 (n > 0).then(|| l.active_index((*active_index).min(n - 1)))
             }
             PanelInfo::Panel(_) => {
@@ -463,7 +523,15 @@ pub fn arranjo_gravado(
         }
     }
     let mut usados = HashSet::new();
-    let layout = montar(estado, paineis, &mut usados, 0, cx)?;
+    let mut citados = HashSet::new();
+    nomes(estado, &mut citados);
+    let mut novos: Vec<QualPainel> = paineis
+        .iter()
+        .map(|(q, _)| *q)
+        .filter(|q| matches!(q, QualPainel::Navegador | QualPainel::Info))
+        .filter(|q| !citados.contains(q.nome()))
+        .collect();
+    let layout = montar(estado, paineis, &mut usados, &mut novos, 0, cx)?;
     let faltando: Vec<_> = paineis
         .iter()
         .filter(|(q, _)| !usados.contains(q))
@@ -742,6 +810,36 @@ impl EditorDeFoto {
             .collect()
     }
 
+    /// Os grupos de abas do dock, de cima para baixo, pelo nome dos painéis.
+    pub fn grupos_do_dock(&self, cx: &App) -> Vec<Vec<String>> {
+        fn juntar(no: &PaneNode, saida: &mut Vec<Vec<PanelId>>) {
+            match no.kind() {
+                PaneRef::Split { children, .. } => children.iter().for_each(|f| juntar(f, saida)),
+                PaneRef::Tabs { panels, .. } => saida.push(panels.to_vec()),
+            }
+        }
+        let Some(a) = self.area_de_trabalho.as_ref() else {
+            return Vec::new();
+        };
+        let mut grupos = Vec::new();
+        if let Some(t) = a.area.read(cx).layout(DockPlacement::Center) {
+            juntar(t.root(), &mut grupos);
+        }
+        grupos
+            .into_iter()
+            .map(|ids| {
+                ids.into_iter()
+                    .filter_map(|id| {
+                        a.paineis
+                            .iter()
+                            .find(|(_, e)| PanelId::from(e.entity_id()) == id)
+                            .map(|(q, _)| q.nome().to_string())
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
     /// A largura da coluna dos painéis.
     pub(super) fn largura_do_painel(&self) -> f32 {
         LIMITES_DA_COLUNA.limitar(self.arranjo.largura)
@@ -847,6 +945,8 @@ impl EditorDeFoto {
                 QualPainel::Pincel => "editor-icone-pincel",
                 QualPainel::Historico => "editor-icone-historico",
                 QualPainel::Camadas => "editor-icone-camadas",
+                QualPainel::Navegador => "editor-icone-navegador",
+                QualPainel::Info => "editor-icone-info",
             };
             faixa = faixa.child(
                 crate::estilo::botao_icone(id, qual.icone(), 28., 16.)
@@ -873,6 +973,8 @@ impl EditorDeFoto {
             QualPainel::Pincel => self.painel_do_pincel(cx),
             QualPainel::Historico => self.painel_do_historico(cx).into_any_element(),
             QualPainel::Camadas => self.painel_de_camadas(cx).into_any_element(),
+            QualPainel::Navegador => self.painel_do_navegador(cx),
+            QualPainel::Info => self.painel_de_info(cx),
         }
     }
 }
@@ -889,6 +991,8 @@ mod testes {
             [
                 "editor:cor",
                 "editor:amostras",
+                "editor:navegador",
+                "editor:info",
                 "editor:propriedades",
                 "editor:pincel",
                 "editor:historico",

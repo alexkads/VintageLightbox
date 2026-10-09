@@ -4048,8 +4048,8 @@ mod testes {
         ve.update(|window, _| window.activate_window());
         assert_eq!(
             editor.read_with(&ve, |ed, cx| ed.paineis_no_dock(cx)).len(),
-            6,
-            "os seis painéis no dock"
+            8,
+            "os oito painéis no dock"
         );
         assert!(ve.debug_bounds("editor-painel-camadas").is_some());
         assert!(ve.debug_bounds("editor-painel-propriedades").is_some());
@@ -4125,7 +4125,7 @@ mod testes {
         let mut no_dock = editor.read_with(&ve, |ed, cx| ed.paineis_no_dock(cx));
         no_dock.sort_by_key(|q| q.nome());
         no_dock.dedup();
-        assert_eq!(no_dock.len(), 6, "os seis, uma vez cada: {no_dock:?}");
+        assert_eq!(no_dock.len(), 8, "os oito, uma vez cada: {no_dock:?}");
         assert!(ve.debug_bounds("editor-painel-camadas").is_some());
     }
 
@@ -4253,7 +4253,9 @@ mod testes {
         let (_m, editor, mut ve) = editor_aberto(cx);
         ve.update(|window, _| window.activate_window());
         // Camada vazia: o filtro não abre e avisa.
-        editor.update_in(&mut ve, |ed, window, cx| ed.abrir_filtro(Tipo::Desfoque, window, cx));
+        editor.update_in(&mut ve, |ed, window, cx| {
+            ed.abrir_filtro(Tipo::Desfoque, window, cx)
+        });
         assert!(editor.read_with(&ve, |ed, _| ed.filtro_aberto().is_none()));
         editor.update(&mut ve, |ed, cx| ed.criar_camada_da_fotografia(cx));
         for _ in 0..200 {
@@ -4265,9 +4267,12 @@ mod testes {
         }
         ve.run_until_parked();
         let pixel = |ve: &VisualTestContext| {
-            editor.read_with(ve, |ed, _| ed.sessao().unwrap().camada_ativa().pixels.clone())
+            editor.read_with(ve, |ed, _| {
+                ed.sessao().unwrap().camada_ativa().pixels.clone()
+            })
         };
-        let igual = |a: &editor_core::tiles::CamadaDePixels, b: &editor_core::tiles::CamadaDePixels| {
+        let igual = |a: &editor_core::tiles::CamadaDePixels,
+                     b: &editor_core::tiles::CamadaDePixels| {
             editor_core::operacoes::diferenca(a, b).is_none()
         };
         let posicao = |ve: &VisualTestContext| {
@@ -4276,14 +4281,20 @@ mod testes {
         let (antes, passos) = (pixel(&ve), posicao(&ve));
         let ferramenta = editor.read_with(&ve, |ed, _| (ed.ferramenta(), ed.auxiliar()));
 
-        editor.update_in(&mut ve, |ed, window, cx| ed.abrir_filtro(Tipo::Desfoque, window, cx));
+        editor.update_in(&mut ve, |ed, window, cx| {
+            ed.abrir_filtro(Tipo::Desfoque, window, cx)
+        });
         editor.update_in(&mut ve, |ed, window, cx| {
             ed.definir_controle_do_filtro("raio", 8.0, window, cx)
         });
-        ve.executor().advance_clock(std::time::Duration::from_millis(200));
+        ve.executor()
+            .advance_clock(std::time::Duration::from_millis(200));
         ve.run_until_parked();
         assert!(editor.read_with(&ve, |ed, _| ed.previa_do_filtro_pronta()));
-        assert!(ve.debug_bounds("editor-filtro").is_some(), "a caixa do diálogo");
+        assert!(
+            ve.debug_bounds("editor-filtro").is_some(),
+            "a caixa do diálogo"
+        );
         let previa = pixel(&ve);
         assert!(!igual(&previa, &antes), "a prévia desfocou");
         assert_eq!(posicao(&ve), passos, "a prévia não é passo");
@@ -4301,7 +4312,9 @@ mod testes {
         assert_eq!(posicao(&ve), passos + 1);
         assert!(igual(&pixel(&ve), &previa));
 
-        editor.update_in(&mut ve, |ed, window, cx| ed.abrir_filtro(Tipo::Nitidez, window, cx));
+        editor.update_in(&mut ve, |ed, window, cx| {
+            ed.abrir_filtro(Tipo::Nitidez, window, cx)
+        });
         ve.run_until_parked();
         assert!(!igual(&pixel(&ve), &previa), "a prévia da nitidez");
         ve.simulate_keystrokes("escape");
@@ -4313,6 +4326,157 @@ mod testes {
         ve.simulate_keystrokes("cmd-z");
         ve.run_until_parked();
         assert!(igual(&pixel(&ve), &antes));
+    }
+
+    /// 📐 Guias: arrastar da régua da esquerda cria uma vertical (um passo,
+    /// que o ⌘Z tira); o retângulo de seleção gruda nela com o Ajustar
+    /// ligado, e não gruda com ele desligado (⇧⌘;).
+    #[gpui_kit::test]
+    fn a_guia_sai_da_regua_e_a_selecao_gruda_nela(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        ve.simulate_keystrokes("cmd-r");
+        ve.run_until_parked();
+        let regua = ve
+            .debug_bounds("editor-regua-vertical")
+            .expect("a régua da esquerda");
+        let area = editor.read_with(&ve, |ed, _| ed.area_na_janela().unwrap());
+        let (l, a) = editor.read_with(&ve, |ed, _| {
+            let d = ed.sessao().unwrap().documento();
+            (d.largura() as f32, d.altura() as f32)
+        });
+        let na_foto = |x: f32, y: f32| {
+            area.origin + gpui_kit::point(area.size.width * (x / l), area.size.height * (y / a))
+        };
+        let nada = gpui_kit::Modifiers::none();
+        ve.simulate_mouse_down(regua.center(), gpui_kit::MouseButton::Left, nada);
+        ve.run_until_parked();
+        ve.simulate_mouse_move(na_foto(20.2, 20.0), Some(gpui_kit::MouseButton::Left), nada);
+        ve.run_until_parked();
+        ve.simulate_mouse_up(na_foto(20.2, 20.0), gpui_kit::MouseButton::Left, nada);
+        ve.run_until_parked();
+        let guias = |ve: &VisualTestContext| {
+            editor.read_with(ve, |ed, _| ed.sessao().unwrap().guias().to_vec())
+        };
+        assert_eq!(
+            guias(&ve),
+            [editor_core::documento::Guia {
+                vertical: true,
+                posicao: 20.0
+            }]
+        );
+        let historico = |ve: &VisualTestContext| {
+            editor.read_with(ve, |ed, _| {
+                let s = ed.sessao().unwrap();
+                s.historico()
+                    .a_desfazer()
+                    .map(|p| p.descricao(s.documento()))
+            })
+        };
+        assert_eq!(historico(&ve).as_deref(), Some("Nova guia"));
+
+        // O retângulo começando a 0,3 px da guia gruda nela.
+        ve.simulate_keystrokes("m");
+        ve.run_until_parked();
+        let selecionar = |ve: &mut VisualTestContext| {
+            ve.simulate_mouse_down(na_foto(19.7, 10.0), gpui_kit::MouseButton::Left, nada);
+            ve.run_until_parked();
+            ve.simulate_mouse_move(na_foto(40.0, 30.0), Some(gpui_kit::MouseButton::Left), nada);
+            ve.run_until_parked();
+            ve.simulate_mouse_up(na_foto(40.0, 30.0), gpui_kit::MouseButton::Left, nada);
+            ve.run_until_parked();
+            editor.read_with(ve, |ed, _| {
+                ed.sessao().unwrap().selecao().map(|s| s.caixa_justa().x)
+            })
+        };
+        assert_eq!(selecionar(&mut ve), Some(20), "grudou na guia");
+        let ajustado = |ve: &VisualTestContext| {
+            editor.read_with(ve, |ed, _| ed.ajustado_as_guias((19.7, 10.0)))
+        };
+        assert_eq!(ajustado(&ve), (20.0, 10.0));
+        ve.simulate_keystrokes("cmd-d cmd-shift-;");
+        ve.run_until_parked();
+        assert!(editor.read_with(&ve, |ed, _| !ed.ajustar_ligado()));
+        assert_eq!(ajustado(&ve), (19.7, 10.0), "sem o Ajustar, não gruda");
+        selecionar(&mut ve);
+
+        // ⌘Z volta até tirar a guia.
+        for _ in 0..4 {
+            ve.simulate_keystrokes("cmd-z");
+        }
+        ve.run_until_parked();
+        assert!(guias(&ve).is_empty());
+    }
+
+    /// 🧭 A arrumação gravada pela 0.1.122 (sem Navegador nem Info) ganha o
+    /// Navegador como aba do grupo da Cor e o Info no das Camadas — nenhum
+    /// grupo novo. O clique no Navegador centra a vista; o Info lê a cor e o
+    /// ponto debaixo do ponteiro e a medida da seleção.
+    #[gpui_kit::test]
+    fn navegador_e_info(cx: &mut TestAppContext) {
+        use gpui_kit::component::dock::{PanelInfo, PanelState};
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        let abas = |nomes: &[&str]| PanelState {
+            panel_name: String::new(),
+            children: nomes.iter().map(|n| PanelState::new(*n)).collect(),
+            info: PanelInfo::tabs(0),
+        };
+        let antiga = PanelState {
+            panel_name: String::new(),
+            children: vec![
+                abas(&["editor:cor", "editor:amostras"]),
+                abas(&["editor:propriedades", "editor:pincel", "editor:historico"]),
+                abas(&["editor:camadas"]),
+            ],
+            info: PanelInfo::Stack {
+                sizes: vec![gpui_kit::px(128.), gpui_kit::px(316.), gpui_kit::px(300.)],
+                axis: 1,
+            },
+        };
+        editor.update(&mut ve, |ed, cx| ed.remontar_a_area_com(Some(antiga), cx));
+        ve.update(|window, _| window.refresh());
+        ve.run_until_parked();
+        let grupos = editor.read_with(&ve, |ed, cx| ed.grupos_do_dock(cx));
+        assert_eq!(grupos.len(), 3, "nenhum grupo novo: {grupos:?}");
+        assert!(
+            grupos[0].contains(&"editor:navegador".to_string()),
+            "{grupos:?}"
+        );
+        assert!(grupos[2].contains(&"editor:info".to_string()), "{grupos:?}");
+
+        // O Navegador: o clique centra (ampliada, a vista anda).
+        editor.update(&mut ve, |ed, cx| {
+            ed.ir_para_nivel(crate::revelacao::zoom::Nivel::Razao(8.0), None, cx)
+        });
+        ve.run_until_parked();
+        editor.update(&mut ve, |ed, cx| ed.centrar_em(0.9, 0.9, cx));
+        ve.run_until_parked();
+        let visivel = editor.read_with(&ve, |ed, _| ed.area_visivel().unwrap());
+        assert!(
+            visivel.2 > 0.99 && visivel.3 > 0.99,
+            "no canto: {visivel:?}"
+        );
+        editor.update(&mut ve, |ed, cx| {
+            ed.ir_para_nivel(crate::revelacao::zoom::Nivel::Encaixar, None, cx)
+        });
+        ve.run_until_parked();
+
+        // O Info: o ponteiro no meio da foto.
+        let area = editor.read_with(&ve, |ed, _| ed.area_na_janela().unwrap());
+        ve.simulate_mouse_move(area.center(), None, gpui_kit::Modifiers::none());
+        ve.run_until_parked();
+        editor.update(&mut ve, |ed, cx| ed.selecionar_tudo(cx));
+        let (cor, ponto, medida) = editor.update(&mut ve, |ed, _| ed.leitura_do_info());
+        let (l, a) = editor.read_with(&ve, |ed, _| {
+            let d = ed.sessao().unwrap().documento();
+            (d.largura(), d.altura())
+        });
+        let p = ponto.expect("o ponteiro na foto");
+        assert!((p.0 - l as f32 / 2.0).abs() <= 1.0 && (p.1 - a as f32 / 2.0).abs() <= 1.0);
+        let esperada = editor.read_with(&ve, |ed, _| ed.sessao().unwrap().cor_em(p.0, p.1));
+        assert_eq!(cor, esperada);
+        assert_eq!(medida, Some((l, a)));
     }
 
     /// 🎨 As duas cores na barra: ⇄ troca (como o X) e o quadradinho volta a
