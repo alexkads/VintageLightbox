@@ -5,7 +5,10 @@
     "titulo": "Windows: \"Editar Foto\" volta a abrir sem fechar o app.",
     "importante": true,
     "novidades": [
-      "Windows: clicar em \"Editar Foto\" fechava o app nos computadores que já tinham baixado a IA de preenchimento. O Windows trazia uma versão antiga da biblioteca de IA e o app a usava por engano; agora usa sempre a que ele mesmo baixou."
+      "Windows: clicar em \"Editar Foto\" fechava o app nos computadores que já tinham baixado a IA de preenchimento. O Windows trazia uma versão antiga da biblioteca de IA e o app a usava por engano; agora usa sempre a que ele mesmo baixou.",
+      "Editor: filtros de retoque do Photoshop — Desfoque de superfície (alisa a pele e guarda olhos, boca e contornos), Alta frequência (para a separação de frequências), Mediana (tira pontinhos e poeira) e Adicionar ruído. Todos com prévia na foto.",
+      "Editor: painel Ajustes, ao lado de Camadas: um botão para cada camada de ajuste.",
+      "Editor: a caixa dos filtros se arrasta pelo título e lembra os valores de cada filtro; as guias acompanham a vista girada."
     ],
     "por_que_atualizar": "Para o editor de fotos voltar a abrir no Windows."
   },
