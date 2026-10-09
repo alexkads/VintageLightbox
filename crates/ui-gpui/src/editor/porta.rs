@@ -53,6 +53,9 @@ impl FotoDoEditor {
 }
 
 /// O que a abertura do projeto encontrou.
+// Uma por abertura de foto, e logo desmontada: o `Documento` inteiro na
+// variante não pesa (os tiles são `Arc`), e caixa seria só ruído.
+#[allow(clippy::large_enum_variant)]
 pub enum Abertura {
     /// Nunca editada: um documento novo sobre a base.
     Nova,
