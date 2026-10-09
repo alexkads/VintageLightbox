@@ -5710,6 +5710,12 @@ impl EditorDeFoto {
             "filtro" => match partes.get(1).copied().unwrap_or_default() {
                 "desfoque" => self.abrir_filtro(filtro::Tipo::Desfoque, window, cx),
                 "nitidez" => self.abrir_filtro(filtro::Tipo::Nitidez, window, cx),
+                "superficie" => self.abrir_filtro(filtro::Tipo::Superficie, window, cx),
+                "alta" => self.abrir_filtro(filtro::Tipo::AltaFrequencia, window, cx),
+                "mediana" => self.abrir_filtro(filtro::Tipo::Mediana, window, cx),
+                "ruido" => self.abrir_filtro(filtro::Tipo::Ruido, window, cx),
+                "gaussiana" => self.alternar_opcao_do_ruido(false, cx),
+                "mono" => self.alternar_opcao_do_ruido(true, cx),
                 q @ ("raio" | "quantidade" | "limiar") => {
                     self.definir_controle_do_filtro(q, numero(2), window, cx)
                 }

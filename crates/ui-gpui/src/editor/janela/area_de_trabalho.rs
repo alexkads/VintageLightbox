@@ -70,10 +70,11 @@ pub enum QualPainel {
     Camadas,
     Navegador,
     Info,
+    Ajustes,
 }
 
 impl QualPainel {
-    pub const TODOS: [QualPainel; 8] = [
+    pub const TODOS: [QualPainel; 9] = [
         QualPainel::Cor,
         QualPainel::Amostras,
         QualPainel::Navegador,
@@ -82,6 +83,7 @@ impl QualPainel {
         QualPainel::Pincel,
         QualPainel::Historico,
         QualPainel::Camadas,
+        QualPainel::Ajustes,
     ];
 
     /// 🚨 **O nome é o que o arquivo guarda** — mudá-lo faz a arrumação
@@ -96,6 +98,7 @@ impl QualPainel {
             QualPainel::Camadas => "editor:camadas",
             QualPainel::Navegador => "editor:navegador",
             QualPainel::Info => "editor:info",
+            QualPainel::Ajustes => "editor:ajustes",
         }
     }
 
@@ -113,6 +116,7 @@ impl QualPainel {
             QualPainel::Camadas => "Camadas",
             QualPainel::Navegador => "Navegador",
             QualPainel::Info => "Info",
+            QualPainel::Ajustes => "Ajustes",
         }
     }
 
@@ -126,6 +130,7 @@ impl QualPainel {
             QualPainel::Camadas => Icone::Layers,
             QualPainel::Navegador => Icone::Map,
             QualPainel::Info => Icone::Info,
+            QualPainel::Ajustes => Icone::Contrast,
         }
     }
 
@@ -140,6 +145,7 @@ impl QualPainel {
             QualPainel::Camadas => "editor-painel-camadas",
             QualPainel::Navegador => "editor-painel-navegador",
             QualPainel::Info => "editor-painel-info",
+            QualPainel::Ajustes => "editor-painel-ajustes",
         }
     }
 }
@@ -412,6 +418,7 @@ fn arranjo_padrao(paineis: &[(QualPainel, Entity<PainelDoEditor>)], cx: &App) ->
         .child(
             DockLayout::tabs()
                 .panel_view(p(QualPainel::Camadas), cx)
+                .panel_view(p(QualPainel::Ajustes), cx)
                 .panel_view(p(QualPainel::Info), cx),
             None,
         )
@@ -501,7 +508,7 @@ pub fn arranjo_gravado(
                     for q in novos.drain(..) {
                         let aqui = match q {
                             QualPainel::Navegador => primeiro,
-                            QualPainel::Info => com_camadas,
+                            QualPainel::Info | QualPainel::Ajustes => com_camadas,
                             _ => false,
                         };
                         match painel(q).filter(|_| aqui && usados.insert(q)) {
@@ -528,7 +535,12 @@ pub fn arranjo_gravado(
     let mut novos: Vec<QualPainel> = paineis
         .iter()
         .map(|(q, _)| *q)
-        .filter(|q| matches!(q, QualPainel::Navegador | QualPainel::Info))
+        .filter(|q| {
+            matches!(
+                q,
+                QualPainel::Navegador | QualPainel::Info | QualPainel::Ajustes
+            )
+        })
         .filter(|q| !citados.contains(q.nome()))
         .collect();
     let layout = montar(estado, paineis, &mut usados, &mut novos, 0, cx)?;
@@ -947,6 +959,7 @@ impl EditorDeFoto {
                 QualPainel::Camadas => "editor-icone-camadas",
                 QualPainel::Navegador => "editor-icone-navegador",
                 QualPainel::Info => "editor-icone-info",
+                QualPainel::Ajustes => "editor-icone-ajustes",
             };
             faixa = faixa.child(
                 crate::estilo::botao_icone(id, qual.icone(), 28., 16.)
@@ -975,6 +988,7 @@ impl EditorDeFoto {
             QualPainel::Camadas => self.painel_de_camadas(cx).into_any_element(),
             QualPainel::Navegador => self.painel_do_navegador(cx),
             QualPainel::Info => self.painel_de_info(cx),
+            QualPainel::Ajustes => self.painel_de_ajustes(cx),
         }
     }
 }
@@ -996,7 +1010,8 @@ mod testes {
                 "editor:propriedades",
                 "editor:pincel",
                 "editor:historico",
-                "editor:camadas"
+                "editor:camadas",
+                "editor:ajustes"
             ]
         );
         for q in QualPainel::TODOS {

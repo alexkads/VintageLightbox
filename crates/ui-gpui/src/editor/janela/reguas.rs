@@ -14,8 +14,8 @@
 //! guia na foto e a leva; solta fora da foto, ela sai. Cada gesto é um passo
 //! ("Nova guia", "Mover guia", "Excluir guia"). Visualizar › Guias (⌘;)
 //! mostra ou esconde, Travar guias (⌥⌘;) e Limpar guias. Ciano, como o
-//! padrão de lá. Com a vista girada, as guias somem da tela (ficam no
-//! documento) e não se criam.
+//! padrão de lá. Com a vista girada, a guia gira junto (é da foto) e o
+//! ponteiro é medido sem o giro, como o pincel.
 
 use gpui_kit::{
     canvas, div, fill, point, prelude::*, px, size, AnyElement, App, Bounds, Context, Hsla, Pixels,
@@ -133,7 +133,7 @@ impl EditorDeFoto {
     /// na borda da foto que estiver a até 8 pontos da tela, eixo por eixo.
     /// As seleções retangular, elíptica e poligonal passam por aqui.
     pub fn ajustado_as_guias(&self, p: (f32, f32)) -> (f32, f32) {
-        if self.arranjo.sem_ajuste || self.giro != 0.0 {
+        if self.arranjo.sem_ajuste {
             return p;
         }
         let (Some((_, v)), Some(s)) = (self.vista_do_zoom(), self.sessao()) else {
@@ -171,21 +171,20 @@ impl EditorDeFoto {
 
     /// O ponto da janela na foto, só no eixo da guia (`vertical` = coluna).
     fn posicao_da_guia(&self, ponto: gpui_kit::Point<Pixels>, vertical: bool) -> Option<f32> {
-        if self.giro != 0.0 {
-            return None;
-        }
         let (_, v) = self.vista_do_zoom()?;
+        // Sem o giro da vista: a guia é da foto.
+        let p = self.ponto_no_palco(ponto);
         Some(if vertical {
-            (f(ponto.x - self.palco.origin.x) - v.x) / v.escala
+            (p.x - v.x) / v.escala
         } else {
-            (f(ponto.y - self.palco.origin.y) - v.y) / v.escala
+            (p.y - v.y) / v.escala
         })
     }
 
     /// O apertar numa régua: uma guia nova (`vertical` = da régua da
     /// esquerda) segue o ponteiro até soltar.
     pub fn comecar_guia_da_regua(&mut self, vertical: bool, cx: &mut Context<Self>) {
-        if self.giro != 0.0 || self.arranjo.guias_travadas || self.filtro_aberto().is_some() {
+        if self.arranjo.guias_travadas || self.filtro_aberto().is_some() {
             return;
         }
         let Some(antes) = self.sessao().map(|s| s.guias().to_vec()) else {
@@ -214,11 +213,7 @@ impl EditorDeFoto {
     ) -> bool {
         let com_o_mover =
             self.auxiliar == Some(super::Auxiliar::Mover) || modificadores.secondary();
-        if !com_o_mover
-            || self.arranjo.guias_ocultas
-            || self.arranjo.guias_travadas
-            || self.giro != 0.0
-        {
+        if !com_o_mover || self.arranjo.guias_ocultas || self.arranjo.guias_travadas {
             return false;
         }
         let Some((_, v)) = self.vista_do_zoom() else {
@@ -227,10 +222,9 @@ impl EditorDeFoto {
         let Some(guias) = self.sessao().map(|s| s.guias().to_vec()) else {
             return false;
         };
-        let (px_, py_) = (
-            f(ponto.x - self.palco.origin.x),
-            f(ponto.y - self.palco.origin.y),
-        );
+        // A distância à guia não muda com o giro: medida sem ele.
+        let sem_giro = self.ponto_no_palco(ponto);
+        let (px_, py_) = (sem_giro.x, sem_giro.y);
         let perto = guias.iter().rposition(|g| {
             let tela = if g.vertical {
                 v.x + g.posicao * v.escala - px_
@@ -305,7 +299,8 @@ impl EditorDeFoto {
     /// palco e as guias).
     pub(super) fn com_reguas(&self, palco: AnyElement, cx: &mut Context<Self>) -> AnyElement {
         let vista = self.vista_do_zoom().map(|(_, v)| v);
-        let guias: Vec<Guia> = if self.arranjo.guias_ocultas || self.giro != 0.0 {
+        let giro = self.giro;
+        let guias: Vec<Guia> = if self.arranjo.guias_ocultas {
             Vec::new()
         } else {
             self.sessao()
@@ -317,7 +312,36 @@ impl EditorDeFoto {
         let por_cima = canvas(
             |_, _, _| {},
             move |bounds, _, window, _cx| {
-                if let Some(v) = vista {
+                if let Some(v) = vista.filter(|_| giro != 0.0) {
+                    // Girada: a guia é uma linha inclinada — os dois pontos
+                    // bem fora do palco, girados em volta do meio dele.
+                    let meio = (f(bounds.size.width) / 2.0, f(bounds.size.height) / 2.0);
+                    let longe = 1.0e5;
+                    for g in &guias {
+                        let pos = if g.vertical { v.x } else { v.y } + g.posicao * v.escala;
+                        let (a, b) = if g.vertical {
+                            ((pos, -longe), (pos, longe))
+                        } else {
+                            ((-longe, pos), (longe, pos))
+                        };
+                        let na_tela = |q: (f32, f32)| {
+                            let (x, y) = crate::editor::giro::girar(q, meio, giro);
+                            bounds.origin + point(px(x), px(y))
+                        };
+                        let mut linha = gpui_kit::PathBuilder::stroke(px(1.));
+                        linha.move_to(na_tela(a));
+                        linha.line_to(na_tela(b));
+                        if let Ok(caminho) = linha.build() {
+                            // 🔑 O caminho não é recortado pelo pai: sem a
+                            // máscara, a linha passava por cima das réguas
+                            // e dos menus.
+                            window.with_content_mask(
+                                Some(gpui_kit::ContentMask { bounds }),
+                                |window| window.paint_path(caminho, ciano()),
+                            );
+                        }
+                    }
+                } else if let Some(v) = vista {
                     for g in &guias {
                         let r = if g.vertical {
                             let x = (v.x + g.posicao * v.escala).round();

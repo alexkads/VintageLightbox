@@ -23,6 +23,7 @@ use gpui_kit::{
 use super::aparencia::{self, medida};
 use super::area_de_trabalho::QualPainel;
 use super::ferramentas::{na_plataforma, nome_com_letra, FERRAMENTAS};
+use super::filtro::Tipo;
 use super::{EditorDeFoto, Modificacao};
 use crate::editor::*;
 use editor_core::Sessao;
@@ -735,7 +736,7 @@ fn menu_filtro(
 ) -> PopupMenu {
     let e = ed.read(cx).estado_dos_menus();
     let pode = e.pronta && (e.de_pixels || e.na_mascara);
-    let (ed_d, ed_n) = (ed.clone(), ed.clone());
+    let (ed_d, ed_n, ed_r, ed_o) = (ed.clone(), ed.clone(), ed.clone(), ed.clone());
     m.item(acao(
         ed,
         foco,
@@ -747,25 +748,46 @@ fn menu_filtro(
     ))
     .separator()
     .submenu("Desfoque", window, cx, move |sub, _window, _cx| {
-        sub.item(item(
+        sub.item(filtro(
             &ed_d,
             "editor-filtro-desfoque",
-            "Desfoque gaussiano…",
-            None,
+            Tipo::Desfoque,
             pode,
-            |ed, window, cx| ed.abrir_filtro(super::filtro::Tipo::Desfoque, window, cx),
+        ))
+        .item(filtro(
+            &ed_d,
+            "editor-filtro-superficie",
+            Tipo::Superficie,
+            pode,
         ))
     })
     .submenu("Nitidez", window, cx, move |sub, _window, _cx| {
-        sub.item(item(
-            &ed_n,
-            "editor-filtro-nitidez",
-            "Máscara de nitidez…",
-            None,
+        sub.item(filtro(&ed_n, "editor-filtro-nitidez", Tipo::Nitidez, pode))
+    })
+    .submenu("Ruído", window, cx, move |sub, _window, _cx| {
+        sub.item(filtro(&ed_r, "editor-filtro-ruido", Tipo::Ruido, pode))
+            .item(filtro(&ed_r, "editor-filtro-mediana", Tipo::Mediana, pode))
+    })
+    .submenu("Outros", window, cx, move |sub, _window, _cx| {
+        sub.item(filtro(
+            &ed_o,
+            "editor-filtro-alta-frequencia",
+            Tipo::AltaFrequencia,
             pode,
-            |ed, window, cx| ed.abrir_filtro(super::filtro::Tipo::Nitidez, window, cx),
         ))
     })
+}
+
+/// Um item de Filtro: abre o diálogo daquele filtro ("…" como no Photoshop).
+fn filtro(ed: &Entity<EditorDeFoto>, id: &'static str, tipo: Tipo, pode: bool) -> PopupMenuItem {
+    item(
+        ed,
+        id,
+        format!("{}…", tipo.titulo()),
+        None,
+        pode,
+        move |ed, window, cx| ed.abrir_filtro(tipo, window, cx),
+    )
 }
 
 fn menu_visualizar(
@@ -926,6 +948,7 @@ fn menu_janela(
             QualPainel::Camadas => "editor-janela-camadas",
             QualPainel::Navegador => "editor-janela-navegador",
             QualPainel::Info => "editor-janela-info",
+            QualPainel::Ajustes => "editor-janela-ajustes",
         };
         m = m.item(
             item(ed, id, qual.titulo(), None, true, move |ed, window, cx| {

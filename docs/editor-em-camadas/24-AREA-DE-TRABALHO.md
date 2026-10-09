@@ -201,10 +201,27 @@ docas` 94 (`o_filtro_e_modal_com_previa_e_um_passo`, `a_guia_sai_da_regua_e_a_se
 `navegador_e_info`). App real: desfoque 12 px e nitidez 300% com a prévia na foto, Enter e Esc nativos, W barrado
 com o diálogo aberto; guias criadas, movidas e excluídas com o mouse nativo, ⌘Z e ⌘;; Navegador a 600%.
 
+## Repasse do Photoshop, parte 3 (09/out/2026)
+
+- **Filtros de retoque** no mesmo `filtros.rs`: Desfoque › **Desfoque de superfície** (filtro guiado de He: em
+  cada janela 2r + 1 a cor vira a·I + b com a = var/(var + ε), ε = (limiar/255)²; médias pesadas pelo alfa;
+  custo independe do raio; raio 1–100 inteiro), Outros › **Alta frequência** (original − desfocada + 128),
+  Ruído › **Mediana** (histograma deslizante 16 + 256, raio 1–20) e Ruído › **Adicionar ruído** (uniforme ou
+  gaussiano, colorido ou monocromático; o grão sai de um hash da posição — prévia e OK iguais). 24 MP em release:
+  superfície 0,69 s, alta frequência 0,40 s, mediana 0,36 s, ruído 0,23 s.
+- O diálogo lembra os valores **por filtro**; a caixa se arrasta pelo título (o véu segue o ponteiro).
+- **Painel Ajustes** (aba ao lado de Camadas e Info): um botão por camada de ajuste. Arrumação antiga o recebe
+  no grupo das Camadas.
+- **Guias com a vista girada**: giram com a foto (`PathBuilder::stroke` girado em volta do meio do palco,
+  recortado com `with_content_mask` — sem ele a linha passava por cima das réguas e dos menus); criar, pegar e
+  ajustar medem o ponteiro sem o giro (`ponto_no_palco`), como o pincel.
+- Teste de janela `filtros_de_retoque_caixa_ajustes_e_guia_girada`; roteiro `filtro superficie|alta|mediana|
+  ruido|gaussiana|mono`.
+
 ## O que ficou de fora
 
 - Painel flutuante em janela própria; recolher um grupo só (o kit não tem; a coluna inteira recolhe).
 - Escala 100% e 150% não conferidas: este Mac só tem a tela retina (200%).
 - Menus não trocam de um para o outro passando o mouse (cada um abre no clique, o `DropdownMenu` do kit).
-- Painel Ajustes (os ajustes já estão em Imagem › Ajustes, no rodapé das Camadas e no menu Camada); guia em
-  vista girada; arrastar a caixa do filtro.
+- Separação de frequências automática (a ação do Photoshop): hoje se monta à mão com ⌘J, Desfoque gaussiano,
+  Alta frequência e o modo Luz linear.

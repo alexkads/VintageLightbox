@@ -19,7 +19,7 @@ use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::component::{ActiveTheme as _, Sizable as _};
 use gpui_kit::{
     anchored, deferred, div, point, prelude::*, px, AnyElement, Context, Entity, MouseButton,
-    Subscription, Task, Window,
+    Pixels, Subscription, Task, Window,
 };
 
 use super::aparencia;
@@ -37,35 +37,92 @@ const LARGURA: f32 = 300.0;
 pub enum Tipo {
     Desfoque,
     Nitidez,
+    Superficie,
+    AltaFrequencia,
+    Mediana,
+    Ruido,
 }
 
 impl Tipo {
+    pub const TODOS: [Tipo; 6] = [
+        Tipo::Desfoque,
+        Tipo::Nitidez,
+        Tipo::Superficie,
+        Tipo::AltaFrequencia,
+        Tipo::Mediana,
+        Tipo::Ruido,
+    ];
+
     pub fn titulo(self) -> &'static str {
         match self {
             Tipo::Desfoque => "Desfoque gaussiano",
             Tipo::Nitidez => "Máscara de nitidez",
+            Tipo::Superficie => "Desfoque de superfície",
+            Tipo::AltaFrequencia => "Alta frequência",
+            Tipo::Mediana => "Mediana",
+            Tipo::Ruido => "Adicionar ruído",
+        }
+    }
+
+    fn indice(self) -> usize {
+        Self::TODOS.iter().position(|t| *t == self).unwrap_or(0)
+    }
+
+    /// (raio, quantidade, limiar) com que abre na primeira vez — os do
+    /// Photoshop, menos o desfoque (1 px mal se vê em 24 MP; aqui 4).
+    fn padrao(self) -> (f32, f32, f32) {
+        match self {
+            Tipo::Desfoque => (4.0, 100.0, 0.0),
+            Tipo::Nitidez => (1.0, 100.0, 0.0),
+            Tipo::Superficie => (5.0, 100.0, 15.0),
+            Tipo::AltaFrequencia => (10.0, 100.0, 0.0),
+            Tipo::Mediana => (1.0, 100.0, 0.0),
+            Tipo::Ruido => (1.0, 10.0, 0.0),
+        }
+    }
+
+    fn tem_raio(self) -> bool {
+        self != Tipo::Ruido
+    }
+
+    fn tem_quantidade(self) -> bool {
+        matches!(self, Tipo::Nitidez | Tipo::Ruido)
+    }
+
+    fn tem_limiar(self) -> bool {
+        matches!(self, Tipo::Nitidez | Tipo::Superficie)
+    }
+
+    /// O raio do slider no passo do filtro: inteiro na superfície e na
+    /// mediana, e dentro do limite de cada um.
+    fn raio(self, r: f32) -> f32 {
+        match self {
+            Tipo::Superficie => r
+                .round()
+                .clamp(1.0, editor_core::filtros::SUPERFICIE_MAXIMA),
+            Tipo::Mediana => r
+                .round()
+                .clamp(1.0, editor_core::filtros::MEDIANA_MAXIMA as f32),
+            _ => r,
         }
     }
 }
 
-/// O que os controles valiam no último OK (a próxima abertura começa deles).
+/// O que os controles valiam no último OK de cada filtro (a próxima abertura
+/// começa deles), como no Photoshop.
 #[derive(Clone, Copy, Debug)]
 struct Lembrado {
-    raio_do_desfoque: f32,
-    quantidade: f32,
-    raio_da_nitidez: f32,
-    limiar: f32,
+    valores: [(f32, f32, f32); 6],
+    gaussiano: bool,
+    monocromatico: bool,
 }
 
 impl Default for Lembrado {
     fn default() -> Self {
-        // Os padrões do Photoshop: desfoque 1 px... que mal se vê numa foto
-        // de 24 MP; aqui 4 px. Nitidez 100%, 1 px, limiar 0.
         Self {
-            raio_do_desfoque: 4.0,
-            quantidade: 100.0,
-            raio_da_nitidez: 1.0,
-            limiar: 0.0,
+            valores: Tipo::TODOS.map(Tipo::padrao),
+            gaussiano: true,
+            monocromatico: false,
         }
     }
 }
@@ -83,7 +140,14 @@ pub struct Estado {
     quantidade: Entity<SliderState>,
     limiar: Entity<SliderState>,
     pub visualizar: bool,
+    /// As opções do Adicionar ruído.
+    pub gaussiano: bool,
+    pub monocromatico: bool,
     lembrado: Lembrado,
+    /// A caixa arrastada pelo título: o deslocamento do canto padrão, e o
+    /// arrasto em curso (onde o ponteiro desceu, o deslocamento de então).
+    deslocamento: gpui_kit::Point<Pixels>,
+    arrasto: Option<(gpui_kit::Point<Pixels>, gpui_kit::Point<Pixels>)>,
     /// Sobe a cada pedido de conta; `mostrada` é a que está na tela.
     geracao: u64,
     mostrada: u64,
@@ -122,9 +186,10 @@ impl Estado {
                     .default_value(v)
             })
         };
-        let raio = novo(0.0, 100.0, 0.1, posicao_do_raio(l.raio_do_desfoque), cx);
-        let quantidade = novo(1.0, 500.0, 1.0, l.quantidade, cx);
-        let limiar = novo(0.0, 255.0, 1.0, l.limiar, cx);
+        let (r, q, li) = l.valores[0];
+        let raio = novo(0.0, 100.0, 0.1, posicao_do_raio(r), cx);
+        let quantidade = novo(1.0, 500.0, 1.0, q, cx);
+        let limiar = novo(0.0, 255.0, 1.0, li, cx);
         let assinaturas = [&raio, &quantidade, &limiar]
             .into_iter()
             .map(|s| {
@@ -143,7 +208,11 @@ impl Estado {
             quantidade,
             limiar,
             visualizar: true,
+            gaussiano: l.gaussiano,
+            monocromatico: l.monocromatico,
             lembrado: l,
+            deslocamento: gpui_kit::point(px(0.), px(0.)),
+            arrasto: None,
             geracao: 0,
             mostrada: 0,
             _conta: None,
@@ -175,10 +244,9 @@ impl EditorDeFoto {
             return;
         };
         let l = self.filtro.lembrado;
-        let (raio, quantidade, limiar) = match tipo {
-            Tipo::Desfoque => (l.raio_do_desfoque, l.quantidade, l.limiar),
-            Tipo::Nitidez => (l.raio_da_nitidez, l.quantidade, l.limiar),
-        };
+        let (raio, quantidade, limiar) = l.valores[tipo.indice()];
+        self.filtro.gaussiano = l.gaussiano;
+        self.filtro.monocromatico = l.monocromatico;
         let f = &self.filtro;
         f.raio
             .clone()
@@ -201,20 +269,34 @@ impl EditorDeFoto {
     /// O filtro com os valores dos controles de agora.
     pub fn filtro_dos_controles(&self, cx: &gpui_kit::App) -> Option<Filtro> {
         let aberto = self.filtro.aberto.as_ref()?;
-        let raio = raio_da_posicao(self.filtro.raio.read(cx).value().start());
-        Some(match aberto.tipo {
+        let tipo = aberto.tipo;
+        let raio = tipo.raio(raio_da_posicao(self.filtro.raio.read(cx).value().start()));
+        let quantidade = self.filtro.quantidade.read(cx).value().start() / 100.0;
+        let limiar = self
+            .filtro
+            .limiar
+            .read(cx)
+            .value()
+            .start()
+            .round()
+            .clamp(0.0, 255.0) as u8;
+        Some(match tipo {
             Tipo::Desfoque => Filtro::DesfoqueGaussiano { raio },
             Tipo::Nitidez => Filtro::MascaraDeNitidez {
-                quantidade: self.filtro.quantidade.read(cx).value().start() / 100.0,
+                quantidade,
                 raio,
-                limiar: self
-                    .filtro
-                    .limiar
-                    .read(cx)
-                    .value()
-                    .start()
-                    .round()
-                    .clamp(0.0, 255.0) as u8,
+                limiar,
+            },
+            Tipo::Superficie => Filtro::DesfoqueDeSuperficie {
+                raio,
+                limiar: limiar.max(2),
+            },
+            Tipo::AltaFrequencia => Filtro::AltaFrequencia { raio },
+            Tipo::Mediana => Filtro::Mediana { raio: raio as u32 },
+            Tipo::Ruido => Filtro::AdicionarRuido {
+                quantidade,
+                gaussiano: self.filtro.gaussiano,
+                monocromatico: self.filtro.monocromatico,
             },
         })
     }
@@ -295,6 +377,17 @@ impl EditorDeFoto {
             && self.filtro.mostrada == self.filtro.geracao
     }
 
+    /// As opções do Adicionar ruído (Gaussiana / Monocromático).
+    pub fn alternar_opcao_do_ruido(&mut self, monocromatico: bool, cx: &mut Context<Self>) {
+        if monocromatico {
+            self.filtro.monocromatico = !self.filtro.monocromatico;
+        } else {
+            self.filtro.gaussiano = !self.filtro.gaussiano;
+        }
+        self.recalcular_o_filtro(Duration::ZERO, cx);
+        cx.notify();
+    }
+
     pub fn alternar_visualizar_o_filtro(&mut self, cx: &mut Context<Self>) {
         self.filtro.visualizar = !self.filtro.visualizar;
         self.recalcular_o_filtro(Duration::ZERO, cx);
@@ -318,19 +411,17 @@ impl EditorDeFoto {
             }
         }
         self.filtro.geracao += 1;
+        let valores = (
+            aberto
+                .tipo
+                .raio(raio_da_posicao(self.filtro.raio.read(cx).value().start())),
+            self.filtro.quantidade.read(cx).value().start(),
+            self.filtro.limiar.read(cx).value().start(),
+        );
         let l = &mut self.filtro.lembrado;
-        match filtro {
-            Filtro::DesfoqueGaussiano { raio } => l.raio_do_desfoque = raio,
-            Filtro::MascaraDeNitidez {
-                quantidade,
-                raio,
-                limiar,
-            } => {
-                l.quantidade = quantidade * 100.0;
-                l.raio_da_nitidez = raio;
-                l.limiar = limiar as f32;
-            }
-        }
+        l.valores[aberto.tipo.indice()] = valores;
+        l.gaussiano = self.filtro.gaussiano;
+        l.monocromatico = self.filtro.monocromatico;
         self.na_sessao(cx, |s| {
             s.aplicar_filtro(filtro.nome());
         });
@@ -351,6 +442,22 @@ impl EditorDeFoto {
         cx.notify();
     }
 
+    /// O título arrastado: a caixa anda com o ponteiro.
+    pub fn arrastar_a_caixa_do_filtro(
+        &mut self,
+        ponteiro: gpui_kit::Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some((de, antes)) = self.filtro.arrasto {
+            self.filtro.deslocamento = antes + (ponteiro - de);
+            cx.notify();
+        }
+    }
+
+    pub fn deslocamento_da_caixa_do_filtro(&self) -> gpui_kit::Point<Pixels> {
+        self.filtro.deslocamento
+    }
+
     /// A caixa do diálogo, no canto de cima à direita do palco.
     pub(super) fn caixa_do_filtro(
         &self,
@@ -360,7 +467,8 @@ impl EditorDeFoto {
         let aberto = self.filtro.aberto.as_ref()?;
         let c = aparencia::cores(cx);
         let tema = cx.theme().clone();
-        let raio = raio_da_posicao(self.filtro.raio.read(cx).value().start());
+        let tipo = aberto.tipo;
+        let raio = tipo.raio(raio_da_posicao(self.filtro.raio.read(cx).value().start()));
         let quantidade = self.filtro.quantidade.read(cx).value().start();
         let limiar = self.filtro.limiar.read(cx).value().start();
         let linha = |id: &'static str,
@@ -390,7 +498,8 @@ impl EditorDeFoto {
         let onde = point(
             self.palco.right() - px(LARGURA + 12.),
             self.palco.top() + px(12.),
-        );
+        ) + self.filtro.deslocamento;
+        let arrastando = self.filtro.arrasto.is_some();
         let corpo = div()
             .id("editor-filtro")
             .debug_selector(|| "editor-filtro".into())
@@ -407,8 +516,30 @@ impl EditorDeFoto {
             .rounded(px(6.))
             .shadow_lg()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_move(cx.listener(|ed, e: &gpui_kit::MouseMoveEvent, _, cx| {
+                ed.arrastar_a_caixa_do_filtro(e.position, cx)
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|ed, _: &gpui_kit::MouseUpEvent, _, cx| {
+                    if ed.filtro.arrasto.take().is_some() {
+                        cx.notify();
+                    }
+                }),
+            )
             .child(
+                // O título: arrastar leva a caixa, como a janela do filtro lá.
                 div()
+                    .id("editor-filtro-titulo")
+                    .debug_selector(|| "editor-filtro-titulo".into())
+                    .cursor(gpui_kit::CursorStyle::OpenHand)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|ed, e: &gpui_kit::MouseDownEvent, _, cx| {
+                            cx.stop_propagation();
+                            ed.filtro.arrasto = Some((e.position, ed.filtro.deslocamento));
+                        }),
+                    )
                     .flex()
                     .justify_between()
                     .items_center()
@@ -424,7 +555,7 @@ impl EditorDeFoto {
                         ""
                     })),
             )
-            .when(aberto.tipo == Tipo::Nitidez, |d| {
+            .when(tipo.tem_quantidade(), |d| {
                 d.child(linha(
                     "editor-filtro-quantidade",
                     "Quantidade",
@@ -432,13 +563,40 @@ impl EditorDeFoto {
                     format!("{}%", quantidade.round() as i32),
                 ))
             })
-            .child(linha(
-                "editor-filtro-raio",
-                "Raio",
-                &self.filtro.raio,
-                format!("{} px", numero(raio)),
-            ))
-            .when(aberto.tipo == Tipo::Nitidez, |d| {
+            .when(tipo.tem_raio(), |d| {
+                d.child(linha(
+                    "editor-filtro-raio",
+                    "Raio",
+                    &self.filtro.raio,
+                    format!("{} px", numero(raio)),
+                ))
+            })
+            .when(tipo == Tipo::Ruido, |d| {
+                d.child(
+                    div()
+                        .flex()
+                        .gap(px(16.))
+                        .child(
+                            Checkbox::new("editor-filtro-gaussiana")
+                                .small()
+                                .label("Gaussiana")
+                                .checked(self.filtro.gaussiano)
+                                .on_click(cx.listener(|ed, _: &bool, _, cx| {
+                                    ed.alternar_opcao_do_ruido(false, cx)
+                                })),
+                        )
+                        .child(
+                            Checkbox::new("editor-filtro-monocromatico")
+                                .small()
+                                .label("Monocromático")
+                                .checked(self.filtro.monocromatico)
+                                .on_click(cx.listener(|ed, _: &bool, _, cx| {
+                                    ed.alternar_opcao_do_ruido(true, cx)
+                                })),
+                        ),
+                )
+            })
+            .when(tipo.tem_limiar(), |d| {
                 d.child(linha(
                     "editor-filtro-limiar",
                     "Limiar",
@@ -482,13 +640,25 @@ impl EditorDeFoto {
             );
         // 🔒 Modal, como lá: um véu transparente toma os cliques do resto da
         // janela (as teclas, o contexto `FiltroDoEditor` já barra).
+        // O véu também segue o arrasto do título (o ponteiro sai da caixa).
         let veu = deferred(
             anchored().position(point(px(0.), px(0.))).child(
                 div()
                     .id("editor-filtro-veu")
                     .occlude()
                     .w(window.viewport_size().width)
-                    .h(window.viewport_size().height),
+                    .h(window.viewport_size().height)
+                    .when(arrastando, |d| d.cursor(gpui_kit::CursorStyle::ClosedHand))
+                    .on_mouse_move(cx.listener(|ed, e: &gpui_kit::MouseMoveEvent, _, cx| {
+                        ed.arrastar_a_caixa_do_filtro(e.position, cx)
+                    }))
+                    .on_mouse_up(
+                        MouseButton::Left,
+                        cx.listener(|ed, _: &gpui_kit::MouseUpEvent, _, cx| {
+                            ed.filtro.arrasto = None;
+                            cx.notify();
+                        }),
+                    ),
             ),
         )
         .with_priority(1);

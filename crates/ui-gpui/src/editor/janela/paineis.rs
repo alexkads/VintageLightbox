@@ -10,7 +10,7 @@
 //! - **Pincel**: as configurações avançadas (tamanho, dureza, espaçamento,
 //!   suavização), sobre os mesmos estados da barra de opções.
 
-use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::component::{ActiveTheme as _, Disableable as _};
 use gpui_kit::{div, prelude::*, px, AnyElement, Context, MouseButton, MouseDownEvent};
 
 use super::aparencia;
@@ -141,6 +141,41 @@ impl EditorDeFoto {
                             .into_any_element()
                     }),
             )
+            .into_any_element()
+    }
+
+    /// O painel Ajustes do Photoshop: um botão por camada de ajuste — a nova
+    /// nasce acima da escolhida, com a seleção de máscara (o mesmo do menu
+    /// Imagem › Ajustes e do botão do rodapé das Camadas).
+    pub(super) fn painel_de_ajustes(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let c = aparencia::cores(cx);
+        let pronta = self.pronta();
+        corpo("editor-corpo-ajustes")
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(c.apagado)
+                    .child("Adicionar um ajuste"),
+            )
+            .child(div().flex().flex_wrap().gap(px(4.)).children(
+                editor_core::ajuste::TODOS.into_iter().map(|a| {
+                    let id: &'static str = match a.chave() {
+                        "brilho" => "editor-ajustes-brilho",
+                        "niveis" => "editor-ajustes-niveis",
+                        "curvas" => "editor-ajustes-curvas",
+                        "matiz" => "editor-ajustes-matiz",
+                        _ => "editor-ajustes-inverter",
+                    };
+                    crate::estilo::botao_contorno_pequeno(id, cx)
+                        .child(a.nome())
+                        .tooltip(format!("Nova camada de ajuste: {}", a.nome()))
+                        .disabled(!pronta)
+                        .on_click(cx.listener(move |ed, _, window, cx| {
+                            ed.nova_camada_de_ajuste(a, cx);
+                            window.focus(&ed.foco, cx);
+                        }))
+                }),
+            ))
             .into_any_element()
     }
 
