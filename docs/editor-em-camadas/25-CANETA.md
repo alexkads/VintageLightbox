@@ -246,6 +246,8 @@ Binário `editor` com roteiro (eventos reais do AppKit, `mouse`/`tecla`) sobre `
   componente à forma escolhida ("Combinar formas"); Esc no meio do primeiro arrasto tira a camada. A cor muda nas
   Propriedades ("Usar a cor de frente", um passo). Camada › "Nova camada de preenchimento: Cor sólida" cria a de
   preenchimento sem forma. A miniatura das Camadas mostra a cor.
+- **Formato 13** do projeto: o ajuste `cor_solida`, densidade/difusão/`revela_vazia` da máscara vetorial e as
+  âncoras `automatica`. A 0.1.125 recusa com o aviso de versão mais nova; o 12 e os de antes abrem como estão.
 - Achados só no app real (e corrigidos com teste): a curvatura e a forma livre não criavam o caminho de trabalho
   sem caminho escolhido; o arrasto da caixa do Transformar caminho ia para a Caneta.
 
