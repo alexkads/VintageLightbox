@@ -1166,6 +1166,11 @@ impl EditorDeFoto {
             ("Ocultar ferramentas e painéis", Box::new(AlternarInterface)),
             ("Ocultar só os painéis", Box::new(AlternarPaineis)),
             ("Liquidificar", Box::new(Liquidificar)),
+            (
+                "Fazer seleção do caminho",
+                Box::new(super::super::FazerSelecaoDoCaminho),
+            ),
+            ("Ocultar o caminho", Box::new(super::super::OcultarCaminho)),
         ];
         let comandos: Vec<_> = comandos
             .into_iter()

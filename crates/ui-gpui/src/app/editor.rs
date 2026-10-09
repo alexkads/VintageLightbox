@@ -3932,7 +3932,7 @@ mod testes {
             "Esc não troca a ferramenta"
         );
         // Pelo teclado: ↓ e Enter escolhem a segunda (Girar vista).
-        editor.update(&mut ve, |ed, cx| ed.abrir_flyout(12, cx));
+        editor.update(&mut ve, |ed, cx| ed.abrir_flyout(14, cx));
         ve.simulate_keystrokes("down enter");
         ve.run_until_parked();
         assert_eq!(
@@ -4048,8 +4048,8 @@ mod testes {
         ve.update(|window, _| window.activate_window());
         assert_eq!(
             editor.read_with(&ve, |ed, cx| ed.paineis_no_dock(cx)).len(),
-            9,
-            "os nove painéis no dock"
+            10,
+            "os dez painéis no dock (com Caminhos)"
         );
         assert!(ve.debug_bounds("editor-painel-camadas").is_some());
         assert!(ve.debug_bounds("editor-painel-propriedades").is_some());
@@ -4125,7 +4125,7 @@ mod testes {
         let mut no_dock = editor.read_with(&ve, |ed, cx| ed.paineis_no_dock(cx));
         no_dock.sort_by_key(|q| q.nome());
         no_dock.dedup();
-        assert_eq!(no_dock.len(), 9, "os nove, uma vez cada: {no_dock:?}");
+        assert_eq!(no_dock.len(), 10, "os dez, uma vez cada: {no_dock:?}");
         assert!(ve.debug_bounds("editor-painel-camadas").is_some());
     }
 
