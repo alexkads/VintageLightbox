@@ -319,8 +319,9 @@ impl EditorDeFoto {
         v
     }
 
-    /// O Pincel misturador: a ponta (o reservatório sobre a sujeira), os
-    /// botões Carregar e Limpar, umidade, carga e mistura, e as caixas.
+    /// O Pincel misturador: a ponta (o reservatório sobre a sujeira) com o
+    /// menu do Photoshop (Carregar, Limpar, e "a cada traço"), umidade,
+    /// carga e mistura, e "Todas as camadas".
     fn opcoes_do_misturador(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let (m, ponta) = self
             .sessao()
@@ -334,44 +335,63 @@ impl EditorDeFoto {
         });
         let borda = aparencia::cores(cx).borda;
         let amostra = div()
-            .debug_selector(|| "editor-misturador-ponta".into())
-            .flex_shrink_0()
-            .size(px(18.))
+            .size(px(14.))
             .rounded(px(3.))
             .border_1()
             .border_color(borda)
-            .when_some(cor, |d, c| d.bg(c))
-            .when(cor.is_none(), |d| {
-                d.child(div().text_xs().text_color(borda).child("∅"))
+            .when_some(cor, |d, c| d.bg(c));
+        let ed = cx.entity();
+        let ponta = crate::estilo::botao_contorno_pequeno("editor-misturador-ponta", cx)
+            .debug_selector(|| "editor-misturador-ponta".into())
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.))
+                    .child(amostra)
+                    .child("▾"),
+            )
+            .tooltip("A tinta do pincel: carregar, limpar e o que fazer a cada traço")
+            .dropdown_menu_with_anchor(gpui_kit::Anchor::TopLeft, move |menu, _window, _cx| {
+                let item =
+                    |id: &'static str,
+                     rotulo: &'static str,
+                     fazer: fn(&mut EditorDeFoto, &mut Context<EditorDeFoto>)| {
+                        let ed = ed.clone();
+                        crate::estilo::item_de_menu(id, rotulo, None)
+                            .on_click(move |_ev, _window, cx| ed.update(cx, |ed, cx| fazer(ed, cx)))
+                    };
+                menu.item(item(
+                    "editor-misturador-carregar",
+                    "Carregar o pincel (cor de frente)",
+                    |ed, cx| ed.carregar_o_misturador(true, cx),
+                ))
+                .item(item(
+                    "editor-misturador-limpar",
+                    "Limpar o pincel",
+                    |ed, cx| ed.carregar_o_misturador(false, cx),
+                ))
+                .separator()
+                .item(
+                    item(
+                        "editor-misturador-carregar-apos",
+                        "Carregar a cada traço",
+                        |ed, cx| ed.alternar_opcao_do_misturador(0, cx),
+                    )
+                    .checked(m.carregar_apos),
+                )
+                .item(
+                    item(
+                        "editor-misturador-limpar-apos",
+                        "Limpar a cada traço",
+                        |ed, cx| ed.alternar_opcao_do_misturador(1, cx),
+                    )
+                    .checked(m.limpar_apos),
+                )
             });
         vec![
             separador_da_faixa(cx).into_any_element(),
-            amostra.into_any_element(),
-            crate::estilo::botao_contorno_pequeno("editor-misturador-carregar", cx)
-                .label("Carregar")
-                .tooltip("Carregar o pincel com a cor de frente")
-                .on_click(cx.listener(|ed, _, _, cx| ed.carregar_o_misturador(true, cx)))
-                .into_any_element(),
-            crate::estilo::botao_contorno_pequeno("editor-misturador-limpar", cx)
-                .label("Limpar")
-                .tooltip("Limpar o pincel (sem tinta e sem sujeira)")
-                .on_click(cx.listener(|ed, _, _, cx| ed.carregar_o_misturador(false, cx)))
-                .into_any_element(),
-            self.caixa_de_marcar(
-                "editor-misturador-carregar-apos",
-                "Carregar a cada traço",
-                m.carregar_apos,
-                |ed, cx| ed.alternar_opcao_do_misturador(0, cx),
-                cx,
-            ),
-            self.caixa_de_marcar(
-                "editor-misturador-limpar-apos",
-                "Limpar a cada traço",
-                m.limpar_apos,
-                |ed, cx| ed.alternar_opcao_do_misturador(1, cx),
-                cx,
-            ),
-            separador_da_faixa(cx).into_any_element(),
+            ponta.into_any_element(),
             self.valor_com_slider(
                 "editor-misturador-umidade",
                 "Umidade",

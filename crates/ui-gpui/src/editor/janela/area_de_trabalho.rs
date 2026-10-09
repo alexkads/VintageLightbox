@@ -56,8 +56,8 @@ const ESPERA_DA_GRAVACAO_MS: u64 = 400;
 pub const LIMITES_DA_COLUNA: crate::docas::Limites = crate::docas::Limites {
     minimo: 240.0,
     maximo: 560.0,
-    // 340: as quatro abas do grupo das Camadas (com a Pele) cabem.
-    padrao: 340.0,
+    // 360: as quatro abas do grupo das Camadas (com a Pele) cabem.
+    padrao: 360.0,
 };
 
 /// Os painéis do editor.
