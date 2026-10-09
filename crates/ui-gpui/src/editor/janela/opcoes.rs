@@ -595,7 +595,9 @@ impl EditorDeFoto {
             let so_o_contorno = self.sessao().is_some_and(Sessao::transformando_a_selecao);
             (
                 Icone::Move,
-                if so_o_contorno {
+                if self.sessao().is_some_and(Sessao::transformando_o_caminho) {
+                    "Transformar caminho"
+                } else if so_o_contorno {
                     "Transformar seleção (só o contorno)"
                 } else if self.deformando() {
                     "Deformar"

@@ -2596,9 +2596,22 @@ impl EditorDeFoto {
 
     pub fn transformar(&mut self, cx: &mut Context<Self>) {
         self.referencia_da_caixa = None;
+        // Com uma ferramenta de caminho e um caminho escolhido, o ⌘T é o
+        // "Transformar caminho" (os componentes escolhidos, ou todos).
+        let caminho = self.vetorial.is_some()
+            && self
+                .sessao()
+                .and_then(Sessao::caminho_alvo)
+                .is_some_and(|c| !c.vazio());
         let Some(s) = self.sessao_mut() else {
             return;
         };
+        if caminho {
+            s.comecar_a_transformar_caminho();
+            self.aviso = None;
+            cx.notify();
+            return;
+        }
         if s.posicao_bloqueada() || s.pixels_bloqueados() {
             self.avisar_cadeado("transformar", cx);
             return;
@@ -6818,7 +6831,9 @@ impl EditorDeFoto {
                     (
                         e.transformando(),
                         e.deformando(),
-                        s.is_some_and(Sessao::transformando_a_selecao),
+                        s.is_some_and(|s| {
+                            s.transformando_a_selecao() || s.transformando_o_caminho()
+                        }),
                         s.and_then(Sessao::selecao).is_some(),
                         s.is_some_and(Sessao::malha_intocada),
                     )
