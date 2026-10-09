@@ -911,6 +911,9 @@ pub struct EditorDeFoto {
     opcoes_da_selecao_do_caminho: editor_core::sessao::OpcoesDaSelecaoDoCaminho,
     dialogo_do_caminho: Option<caneta::DialogoDoCaminho>,
     _assinatura_do_caminho: Option<Subscription>,
+    /// Densidade (0–100) e difusão (px) da máscara vetorial escolhida.
+    densidade_vetorial: Entity<SliderState>,
+    difusao_vetorial: Entity<SliderState>,
 }
 
 fn slider(
@@ -1003,6 +1006,14 @@ impl EditorDeFoto {
             .collect();
         let densidade_da_mascara = slider(0.0, 100.0, 1.0, 100.0, cx);
         let difusao_da_mascara = slider(0.0, editor_core::difusao::DIFUSAO_MAXIMA, 0.5, 0.0, cx);
+        let densidade_vetorial = slider(0.0, 100.0, 1.0, 100.0, cx);
+        let difusao_vetorial = slider(
+            0.0,
+            editor_core::vetor::DIFUSAO_MAXIMA_VETORIAL,
+            0.5,
+            0.0,
+            cx,
+        );
         let opcoes: Vec<Opcao> = Modo::TODOS
             .iter()
             .map(|m| Opcao::nova(m.chave(), m.nome()))
@@ -1187,6 +1198,16 @@ impl EditorDeFoto {
                 ed.mover_densidade_da_mascara(v, soltou, cx);
             },
         ));
+        for (estado, e_densidade) in [(&densidade_vetorial, true), (&difusao_vetorial, false)] {
+            assinaturas.push(cx.subscribe_in(
+                estado,
+                window,
+                move |ed: &mut Self, _e, evento: &SliderEvent, _w, cx| {
+                    let (v, soltou) = valor(evento);
+                    ed.mover_propriedade_vetorial(e_densidade, v, soltou, cx);
+                },
+            ));
+        }
         assinaturas.push(cx.subscribe_in(
             &difusao_da_mascara,
             window,
@@ -1679,6 +1700,8 @@ impl EditorDeFoto {
             criando_a_fotografia: false,
             densidade_da_mascara,
             difusao_da_mascara,
+            densidade_vetorial,
+            difusao_vetorial,
             copiado: None,
             _tarefa_da_transferencia: None,
             historico_no_aperto_da_camada: None,
@@ -7771,6 +7794,21 @@ impl Render for EditorDeFoto {
             for (estado, v, folga) in [
                 (self.densidade_da_mascara.clone(), densidade, 0.5),
                 (self.difusao_da_mascara.clone(), difusao, 0.25),
+            ] {
+                if (estado.read(cx).value().start() - v).abs() > folga {
+                    estado.update(cx, |s, cx| s.set_value(v, window, cx));
+                }
+            }
+        }
+        // E as da máscara vetorial.
+        if let Some((densidade, difusao)) = self
+            .sessao()
+            .and_then(|s| s.camada_ativa().mascara_vetorial.as_ref())
+            .map(|m| (m.densidade * 100.0, m.difusao))
+        {
+            for (estado, v, folga) in [
+                (self.densidade_vetorial.clone(), densidade, 0.5),
+                (self.difusao_vetorial.clone(), difusao, 0.25),
             ] {
                 if (estado.read(cx).value().start() - v).abs() > folga {
                     estado.update(cx, |s, cx| s.set_value(v, window, cx));

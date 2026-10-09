@@ -289,6 +289,10 @@ impl EditorDeFoto {
             coluna = coluna.child(m);
             alguma = true;
         }
+        if let Some(m) = self.propriedades_da_mascara_vetorial(cx) {
+            coluna = coluna.child(m);
+            alguma = true;
+        }
         if !alguma {
             if let Some(info) = self.propriedades_da_camada(cx) {
                 coluna = coluna.child(info);

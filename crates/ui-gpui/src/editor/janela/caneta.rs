@@ -1218,6 +1218,7 @@ impl EditorDeFoto {
             Acao::MoverAlca { .. } => ("◦", "mover alça"),
             Acao::MoverAncoras(_) => ("▪", "mover ponto"),
             Acao::MoverComponente(_) => ("▣", "mover componente"),
+            Acao::DobrarSegmento { .. } => ("◠", "dobrar a curva"),
             Acao::Continuar { .. } | Acao::Retangulo | Acao::Nada | Acao::Encerrar => return None,
         };
         let ponteiro = self.ponteiro? - self.palco.origin;
@@ -1234,6 +1235,126 @@ impl EditorDeFoto {
                 .text_color(gpui_kit::white())
                 .text_xs()
                 .child(texto.to_string())
+                .into_any_element(),
+        )
+    }
+
+    /// O slider da densidade (0–100) ou da difusão (px) da máscara vetorial
+    /// da camada escolhida andou; soltar vira um passo.
+    pub fn mover_propriedade_vetorial(
+        &mut self,
+        e_densidade: bool,
+        valor: f32,
+        soltou: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(s) = self.sessao_mut() {
+            let i = s.ativa();
+            if e_densidade {
+                s.mover_propriedades_da_mascara_vetorial(i, Some(valor / 100.0), None);
+            } else {
+                s.mover_propriedades_da_mascara_vetorial(i, None, Some(valor));
+            }
+            if soltou {
+                s.confirmar_mascara_vetorial();
+            }
+        }
+        cx.notify();
+    }
+
+    /// As Propriedades da máscara vetorial (a escolhida no painel Caminhos ou
+    /// pela miniatura): densidade, difusão, ligar, vincular, excluir.
+    pub(super) fn propriedades_da_mascara_vetorial(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let s = self.sessao()?;
+        let i = s.ativa();
+        if s.alvo_vetorial() != Some(LugarDoCaminho::Mascara(i)) {
+            return None;
+        }
+        let camada = s.camada_ativa();
+        let m = camada.mascara_vetorial.as_ref()?;
+        let tema = cx.theme().clone();
+        let rotulo = |nome: &'static str, valor: String| {
+            div()
+                .flex()
+                .justify_between()
+                .text_xs()
+                .text_color(tema.muted_foreground)
+                .child(nome)
+                .child(valor)
+        };
+        let botao = |id: &'static str, texto: &'static str, dica: &'static str| {
+            crate::estilo::botao_secundario_pequeno(id, cx)
+                .debug_selector(move || id.into())
+                .label(texto)
+                .tooltip(dica)
+        };
+        Some(
+            div()
+                .debug_selector(|| "editor-propriedades-da-mascara-vetorial".into())
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                        .child(format!("Máscara vetorial de {}", camada.nome)),
+                )
+                .child(rotulo("Densidade", format!("{:.0}%", m.densidade * 100.0)))
+                .child(
+                    div()
+                        .h(px(20.))
+                        .debug_selector(|| "editor-vetorial-densidade".into())
+                        .child(crate::estilo::slider(&self.densidade_vetorial)),
+                )
+                .child(rotulo("Difusão", format!("{:.1} px", m.difusao)))
+                .child(
+                    div()
+                        .h(px(20.))
+                        .debug_selector(|| "editor-vetorial-difusao".into())
+                        .child(crate::estilo::slider(&self.difusao_vetorial)),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .gap(px(4.))
+                        .child(
+                            botao(
+                                "editor-vetorial-ligar",
+                                if m.ativa { "Desligar" } else { "Ligar" },
+                                "Desligar ou ligar a máscara vetorial (⇧ + clique na miniatura) — o caminho fica",
+                            )
+                            .on_click(cx.listener(move |ed, _, _, cx| {
+                                ed.na_sessao(cx, |s| {
+                                    s.alternar_mascara_vetorial(i);
+                                })
+                            })),
+                        )
+                        .child(
+                            botao(
+                                "editor-vetorial-vinculo",
+                                if m.vinculada { "Soltar" } else { "Vincular" },
+                                "Com a corrente, o Mover e o ⌘T levam o caminho junto com a camada",
+                            )
+                            .on_click(cx.listener(move |ed, _, _, cx| {
+                                ed.na_sessao(cx, |s| {
+                                    s.alternar_vinculo_vetorial(i);
+                                })
+                            })),
+                        )
+                        .child(
+                            botao("editor-vetorial-excluir", "Excluir", "Excluir a máscara vetorial")
+                                .on_click(cx.listener(move |ed, _, _, cx| {
+                                    ed.na_sessao(cx, |s| {
+                                        s.excluir_mascara_vetorial(i);
+                                    })
+                                })),
+                        ),
+                )
                 .into_any_element(),
         )
     }
