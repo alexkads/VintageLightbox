@@ -814,6 +814,41 @@ impl EditorDeFoto {
         );
         v.push(separador());
         match f {
+            FerramentaVetorial::FormaLivre => {
+                v.push(rotulo("Ajuste da curva"));
+                let atual = opcoes.ajuste_da_curva;
+                v.push(
+                    ButtonGroup::new("editor-caneta-ajuste-da-curva")
+                        .xsmall()
+                        .children([1.0f64, 2.0, 4.0, 8.0].iter().enumerate().map(|(i, px_)| {
+                            let id: &'static str = [
+                                "editor-ajuste-1",
+                                "editor-ajuste-2",
+                                "editor-ajuste-4",
+                                "editor-ajuste-8",
+                            ][i];
+                            if atual == *px_ {
+                                crate::estilo::botao_primario_pequeno(id, cx)
+                            } else {
+                                crate::estilo::botao_contorno_pequeno(id, cx)
+                            }
+                            .debug_selector(move || id.into())
+                            .label(format!("{} px", *px_ as u32))
+                            .selected(atual == *px_)
+                        }))
+                        .on_click(cx.listener(|ed, cliques: &Vec<usize>, _, cx| {
+                            if let Some(v) =
+                                cliques.first().and_then(|i| [1.0, 2.0, 4.0, 8.0].get(*i))
+                            {
+                                if let Some(s) = ed.sessao_mut() {
+                                    s.caneta.opcoes.ajuste_da_curva = *v;
+                                }
+                                cx.notify();
+                            }
+                        }))
+                        .into_any_element(),
+                );
+            }
             FerramentaVetorial::Curvatura => {
                 v.push(rotulo(
                     "Clique: ponto liso · duplo clique ou ⌥: canto · arraste um ponto para movê-lo",
@@ -1204,6 +1239,11 @@ impl EditorDeFoto {
                     );
                 }
             }
+        }
+        // O traço à mão da forma livre, como foi desenhado.
+        if let Some(t) = sessao.caneta.traco_livre().filter(|t| t.len() > 1) {
+            let pontos = t.iter().map(|q| tela.p(q.x as f32, q.y as f32)).collect();
+            v.push(traco(vec![pontos], aparencia.espessura, cor));
         }
         // O retângulo de seleção.
         if let Some((a, b)) = sessao.caneta.retangulo() {

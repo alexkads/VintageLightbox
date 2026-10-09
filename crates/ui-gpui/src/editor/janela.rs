@@ -5748,6 +5748,7 @@ impl EditorDeFoto {
                     "excluir" => FV::ExcluirPonto,
                     "converter" => FV::ConverterPonto,
                     "curvatura" => FV::Curvatura,
+                    "livre" => FV::FormaLivre,
                     "caminho" => FV::SelecaoDeCaminho,
                     "direta" => FV::SelecaoDireta,
                     _ => FV::Caneta,

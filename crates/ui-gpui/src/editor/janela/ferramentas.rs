@@ -276,6 +276,15 @@ pub const FERRAMENTAS: &[DefDeFerramenta] = &[
         "Clique põe um ponto por onde a curva passa lisa; duplo clique ou ⌥ faz canto; arraste um ponto para movê-lo; clique no primeiro fecha",
     ),
     def(
+        Item::P(FV::FormaLivre),
+        12,
+        Some('p'),
+        Icone::Pencil,
+        "editor-caneta-forma-livre",
+        "Caneta de forma livre",
+        "Desenhe à mão: o traço vira curvas ajustadas (Ajuste da curva na barra); comece numa ponta aberta para continuá-la; volte ao começo para fechar",
+    ),
+    def(
         Item::P(FV::AdicionarPonto),
         12,
         None,
@@ -978,12 +987,12 @@ mod testes {
             def_de(&Item::A(Auxiliar::GirarVista)).map(|d| d.grupo)
         );
         assert_eq!(da_letra('j').count(), 3);
-        // P anda na Caneta e na de curvatura (as de ponto não têm letra); A
+        // P anda na Caneta, na de curvatura e na de forma livre (as de ponto não têm letra); A
         // anda nas duas setas de caminho.
-        assert_eq!(da_letra('p').count(), 2);
+        assert_eq!(da_letra('p').count(), 3);
         assert_eq!(letra_de(&Item::P(FV::AdicionarPonto)), None);
         assert_eq!(da_letra('a').count(), 2);
-        assert_eq!(do_grupo(12).count(), 5);
+        assert_eq!(do_grupo(12).count(), 6);
         assert_eq!(letra_de(&Item::F(Ferramenta::Desfoque)), None);
         assert_eq!(
             letra_de(&Item::F(Ferramenta::Subexposicao(Faixa::Realces))),
