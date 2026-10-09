@@ -170,6 +170,24 @@ atualização do próprio app. No Windows ele só fazia `cargo check`, sem ligar
   dependência nativa, linker) chega sem aviso prévio. Ao mexer nesse tipo de código, diga ao dono
   para conferir num balcão daquele sistema.
 
+## 🚫 Nunca conferir Windows ou Linux em contêiner Docker
+
+> *"Como posso testar desempenho de GPU Windows / Linux usando container docker num MacOS? Isso é
+> um absurdo!"* — dono, 09/out/2026, depois de a validação em contêiner atrasar uma versão até ele
+> desistir dela.
+
+O Docker no Mac é uma máquina virtual Linux **sem GPU e sem Windows**: lá não se mede desempenho de
+GPU de balcão nenhum, e o GPUI do Windows nem compila. Os balcões Windows e Linux estão ao lado do
+dono, e é lá que se confere.
+
+- **Nenhum `docker run` para conferir Linux ou Windows** (nem `cargo check` em `rust:*`), nem antes
+  de lançar, nem por causa de `#[cfg(target_os)]`. Entregue e diga uma vez que vale conferir no
+  balcão daquele sistema.
+- **Desempenho de GPU de Windows ou Linux só no balcão daquele sistema.** Número medido no Mac não
+  vale para o balcão.
+- O único Docker do lançamento é o do ciclo de vida (`make producao`), que o script chama sozinho.
+  O roteiro completo: skill `lancar-o-app-desktop`, seção 🚫, no e-commerce.
+
 ## Architecture
 
 VintageLightbox follows **Clean Architecture** with 4 layers as separate crates:
