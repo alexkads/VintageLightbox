@@ -1,5 +1,20 @@
 [
   {
+    "versao": "0.1.125",
+    "data": "2026-10-09",
+    "titulo": "Editor: tratamento de pele do Photoshop (separação de frequências, Dodge & Burn, Pincel misturador) e a Caneta.",
+    "importante": false,
+    "novidades": [
+      "Editor: Filtro › Tratamento de pele › Separação de frequências. Divide a foto em baixa (tom e cor) e alta (textura) em duas camadas que recompõem a foto exatamente igual; o raio é em pixels da foto e há prévia da baixa, da alta, da recomposta e do antes.",
+      "Editor: painel Pele (ao lado de Camadas): escolher retocar no tom ou na textura, ver cada frequência sozinha ou o original, e a intensidade do tratamento — onde nada foi retocado a foto continua igual.",
+      "Editor: na textura, o Carimbo e o Pincel de recuperação copiam só os poros, sem levar a cor de outro lugar; no tom, \"Suavizar tons…\" alisa manchas só com a pele selecionada, sem puxar cabelo, olhos ou fundo.",
+      "Editor: Dodge & Burn: duas camadas que clareiam e escurecem só a luz (sem mudar a cor), pintadas de leve com pincel macio. Tudo continua editável depois de salvar e reabrir.",
+      "Editor: Pincel misturador (B, ⇧B): mistura a cor carregada com a da foto, com umidade, carga e mistura.",
+      "Editor: a Caneta (P): caminhos com retas e curvas, painel Caminhos, fazer seleção pelo caminho e máscara vetorial."
+    ],
+    "por_que_atualizar": "Para retocar pele no editor do jeito do Photoshop, sem perder a textura nem o volume do rosto."
+  },
+  {
     "versao": "0.1.124",
     "data": "2026-10-09",
     "titulo": "Windows: \"Editar Foto\" volta a abrir sem fechar o app.",
