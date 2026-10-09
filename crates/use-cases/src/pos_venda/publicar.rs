@@ -698,6 +698,9 @@ mod tests {
         async fn original(&self, _: &Sessao, _: &str) -> DomainResult<Vec<u8>> {
             unreachable!("quem baixa o original é a porta do app, que tem o motor de GPU")
         }
+        async fn previa_marcada(&self, _: &Sessao, _: &str) -> DomainResult<Vec<u8>> {
+            unreachable!("a prévia marcada é da exportação, não da publicação")
+        }
         async fn bilhete_de_revelacao(&self, _: &Sessao, foto_id: &str) -> DomainResult<String> {
             Ok(format!("bilhete-de-{foto_id}"))
         }

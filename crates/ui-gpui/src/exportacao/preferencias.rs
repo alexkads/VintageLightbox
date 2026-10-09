@@ -1,5 +1,5 @@
 //! O que a exportação lembra de uma vez para a outra: pasta, uso, formato,
-//! qualidade e marca d'água.
+//! qualidade e o "só as levadas" do fotolivro.
 //!
 //! 🔑 **Escolher a mesma pasta e o mesmo logotipo a cada lote é atrito puro.**
 //! Até aqui tudo vivia na memória da tela e morria ao fechar o app: o operador
@@ -26,8 +26,11 @@ pub const QUALIDADE_PADRAO: u8 = 92;
 #[serde(default)]
 pub struct Preferencias {
     pub pasta: Option<PathBuf>,
-    pub marca: Option<PathBuf>,
-    pub previa: bool,
+    /// 📖 O último uso foi o fotolivro. `previa` é o nome de antes de 09/10,
+    /// quando o segundo uso era a "prévia da galeria" com logotipo.
+    #[serde(alias = "previa")]
+    pub fotolivro: bool,
+    pub so_levadas: bool,
     pub formato: String,
     pub qualidade: u8,
 }
@@ -36,8 +39,8 @@ impl Default for Preferencias {
     fn default() -> Self {
         Self {
             pasta: None,
-            marca: None,
-            previa: false,
+            fotolivro: false,
+            so_levadas: false,
             formato: "jpg".into(),
             qualidade: QUALIDADE_PADRAO,
         }
@@ -46,10 +49,10 @@ impl Default for Preferencias {
 
 impl Preferencias {
     pub fn modo(&self) -> Modo {
-        if self.previa {
-            Modo::Previa
+        if self.fotolivro {
+            Modo::Fotolivro
         } else {
-            Modo::Entrega
+            Modo::Arquivos
         }
     }
 
@@ -116,8 +119,8 @@ mod testes {
         let arquivo = dir.path().join("exportacao.json");
         let escolhidas = Preferencias {
             pasta: Some(dir.path().to_path_buf()),
-            marca: Some("/logos/estudio.png".into()),
-            previa: true,
+            fotolivro: true,
+            so_levadas: true,
             formato: "tif".into(),
             qualidade: 80,
         };
@@ -125,8 +128,23 @@ mod testes {
         let lidas = ler_de(&arquivo);
         assert_eq!(lidas, escolhidas);
         assert_eq!(lidas.formato(), FormatoDeSaida::Tiff);
-        assert_eq!(lidas.modo(), Modo::Previa);
+        assert_eq!(lidas.modo(), Modo::Fotolivro);
         assert_eq!(lidas.pasta_que_existe(), Some(dir.path().to_path_buf()));
+    }
+
+    /// O arquivo de antes de 09/10 (com `marca` e `previa`) continua lendo.
+    #[test]
+    fn o_arquivo_antigo_continua_lendo() {
+        let dir = tempfile::tempdir().unwrap();
+        let arquivo = dir.path().join("exportacao.json");
+        std::fs::write(
+            &arquivo,
+            r#"{"marca":"/logo.png","previa":true,"formato":"png"}"#,
+        )
+        .unwrap();
+        let lidas = ler_de(&arquivo);
+        assert_eq!(lidas.modo(), Modo::Fotolivro);
+        assert_eq!(lidas.formato(), FormatoDeSaida::Png);
     }
 
     /// Arquivo estragado é o padrão, e não um erro.

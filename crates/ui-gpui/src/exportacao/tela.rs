@@ -17,11 +17,14 @@
 //! vista, e o rodapé do `AlertDialog`. Cada controle é uma peça do gpui-kit
 //! pelos atalhos do `estilo.rs` (dono, 28/09: *"Usa tudo da GPUI KIT"*).
 //!
-//! ## Os dois usos
+//! ## Os dois usos (09/10/2026)
 //!
-//! "Entrega final" e "Prévia da galeria" continuam sendo a decisão da frente:
-//! entregar contra mostrar. A prévia não sai sem marca d'água — ver
-//! [`Exportacao::opcoes`].
+//! *"A escolha de uso é PDF/Arquivo individual, sendo que a marca d'água fica
+//! automática baseado no se a foto foi sinalizada com LEVADA"* (dono). O modal
+//! não pergunta mais pela marca nem pede logotipo: a levada sai limpa e a
+//! outra sai com a marca d'água do site (ver [`super::porta`]). O que se
+//! escolhe é a forma — **arquivos** soltos ou o **fotolivro** em PDF, o mesmo
+//! livro que a galeria do cliente gera (crate `fotolivro`).
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -32,6 +35,7 @@ use std::time::Duration;
 
 use adapters::view_models::PhotoViewModel;
 use gpui_kit::component::button::ButtonGroup;
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::radio::Radio;
 use gpui_kit::component::slider::{SliderEvent, SliderState};
@@ -42,9 +46,7 @@ use gpui_kit::{
 };
 
 use domain::services::pos_venda::Sessao;
-use domain::value_objects::{
-    ExportOptions, FilePath, FormatoDeSaida, Watermark, WatermarkPosition,
-};
+use domain::value_objects::{ExportOptions, FormatoDeSaida};
 
 use crate::estilo;
 use crate::importacao::estado::Recado;
@@ -53,42 +55,78 @@ use crate::recursos::Icone;
 use crate::revelacao::persistencia;
 
 use super::destino::Destinos;
-use super::porta::{Andamento, Exportador, Origem, Saida};
+use super::porta::{Andamento, Exportador, FotoDoLivro, Origem, Saida};
 use super::preferencias::{self, Preferencias};
 
 /// O mesmo intervalo da colheita da importação.
 const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(100);
 
-/// Os dois desfechos de uma exportação neste estúdio.
-///
-/// 🔑 **São dois botões, e não dois preenchimentos do mesmo formulário.** A
-/// diferença entre eles não é de configuração: é *entregar* contra *mostrar*, e
-/// é a decisão que o fotógrafo já toma na triagem — esta foi comprada, esta
-/// ficou para trás.
+/// A forma da exportação. A marca d'água não é escolha: é a LEVADA de cada
+/// foto que decide (ver [`super::porta`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Modo {
-    /// O que o cliente comprou: tamanho original, sem marca.
+    /// Um arquivo por foto.
     #[default]
-    Entrega,
-    /// O que ficou para trás: reduzida e marcada, para a galeria.
-    Previa,
+    Arquivos,
+    /// 📖 O fotolivro: um PDF diagramado, para mandar ao cliente.
+    Fotolivro,
 }
 
 impl Modo {
     pub fn rotulo(self) -> &'static str {
         match self {
-            Modo::Entrega => "Entrega final",
-            Modo::Previa => "Prévia da galeria",
+            Modo::Arquivos => "Arquivos individuais",
+            Modo::Fotolivro => "Fotolivro (PDF)",
         }
     }
 
     pub fn explicacao(self) -> &'static str {
         match self {
-            Modo::Entrega => "Tamanho original, sem marca d'água — o que o cliente comprou.",
-            Modo::Previa => {
-                "Lado maior de 2048 px, com a marca d'água no centro — para mostrar sem entregar."
+            Modo::Arquivos => {
+                "Um arquivo por foto. As levadas saem inteiras, no formato escolhido; as outras, com a marca d'água do site."
+            }
+            Modo::Fotolivro => {
+                "Um livro diagramado para mandar ao cliente: as levadas limpas, as outras com a marca d'água, e cada foto com o link para baixar ou comprar."
             }
         }
+    }
+}
+
+/// O que a capa e os links do fotolivro precisam saber da sessão.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct InfoDoLivro {
+    pub titulo: String,
+    /// A galeria no site: é ela que vira os links do livro.
+    pub galeria_id: Option<String>,
+    /// `"2026-10-09"` — o dia do ensaio.
+    pub data_iso: String,
+}
+
+/// "2026-10-09" → "9 de outubro de 2026".
+pub fn data_por_extenso(iso: &str) -> String {
+    const MESES: [&str; 12] = [
+        "janeiro",
+        "fevereiro",
+        "março",
+        "abril",
+        "maio",
+        "junho",
+        "julho",
+        "agosto",
+        "setembro",
+        "outubro",
+        "novembro",
+        "dezembro",
+    ];
+    let partes: Vec<u32> = iso
+        .get(..10)
+        .unwrap_or("")
+        .split('-')
+        .filter_map(|p| p.parse().ok())
+        .collect();
+    match partes[..] {
+        [ano, mes @ 1..=12, dia] => format!("{dia} de {} de {ano}", MESES[mes as usize - 1]),
+        _ => String::new(),
     }
 }
 
@@ -101,13 +139,6 @@ fn detalhe_do_formato(formato: FormatoDeSaida) -> (&'static str, &'static str) {
         FormatoDeSaida::Webp => ("WebP", "sem perda, para web"),
     }
 }
-
-/// O lado maior da prévia. 2048 px é o que uma galeria mostra em tela cheia num
-/// monitor comum, e é pequeno o bastante para não servir de entrega.
-const LADO_DA_PREVIA: u32 = 2048;
-
-/// As extensões aceitas para a marca d'água.
-const IMAGENS_DE_MARCA: [&str; 4] = ["png", "jpg", "jpeg", "webp"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Progresso {
@@ -164,11 +195,12 @@ pub struct Exportacao {
     modo: Modo,
     formato: FormatoDeSaida,
     qualidade: Entity<SliderState>,
-    /// O arquivo da marca d'água — um PNG com transparência, o logotipo do
-    /// estúdio. Lembrado entre exportações e entre aberturas do app.
-    marca: Option<PathBuf>,
-    /// A marca escolhida não era imagem.
-    aviso_da_marca: Option<SharedString>,
+    /// 📖 No fotolivro, só as levadas — o livro do cliente, sem venda.
+    so_levadas: bool,
+    /// A sessão, para a capa e os links do fotolivro.
+    livro: InfoDoLivro,
+    /// O fotolivro gravado — o "Mostrar na pasta" aponta ele.
+    arquivo_do_livro: Option<PathBuf>,
     progresso: Option<Progresso>,
     /// O último nome gravado, para a tela mostrar que algo está acontecendo.
     ultimo: Option<SharedString>,
@@ -181,9 +213,6 @@ pub struct Exportacao {
     andamentos: (Sender<Andamento>, Receiver<Andamento>),
     recados: (Sender<Recado>, Receiver<Recado>),
     esperando_pasta: bool,
-    /// Para qual campo a resposta do seletor vai. Sem isto, escolher a marca
-    /// d'água mudaria a pasta de destino.
-    escolhendo_marca: bool,
     colhendo: bool,
     _colheita: Option<Task<()>>,
     _qualidade_mudou: Subscription,
@@ -225,8 +254,9 @@ impl Exportacao {
             modo: lembradas.modo(),
             formato: lembradas.formato(),
             qualidade,
-            marca: lembradas.marca.clone(),
-            aviso_da_marca: None,
+            so_levadas: lembradas.so_levadas,
+            livro: InfoDoLivro::default(),
+            arquivo_do_livro: None,
             progresso: None,
             ultimo: None,
             falhas: Vec::new(),
@@ -236,7 +266,6 @@ impl Exportacao {
             andamentos: channel(),
             recados: channel(),
             esperando_pasta: false,
-            escolhendo_marca: false,
             colhendo: false,
             _colheita: None,
             _qualidade_mudou: qualidade_mudou,
@@ -267,8 +296,13 @@ impl Exportacao {
         self.falhas.clear();
         self.feitas.clear();
         self.lote.clear();
-        self.aviso_da_marca = None;
+        self.arquivo_do_livro = None;
         cx.notify();
+    }
+
+    /// A sessão das fotos — a capa e os links do fotolivro.
+    pub fn definir_livro(&mut self, livro: InfoDoLivro) {
+        self.livro = livro;
     }
 
     pub fn quantas(&self) -> usize {
@@ -283,13 +317,34 @@ impl Exportacao {
         self.modo
     }
 
+    /// O formato das levadas. A não levada sai sempre em JPEG: é a prévia
+    /// marcada do site, como ele a grava.
     pub fn formato(&self) -> FormatoDeSaida {
-        // 🔑 A prévia vai sempre em JPEG: é para a galeria, e um TIFF de 2048
-        // px marcado não serve a ninguém.
-        match self.modo {
-            Modo::Previa => FormatoDeSaida::Jpeg,
-            Modo::Entrega => self.formato,
-        }
+        self.formato
+    }
+
+    pub fn so_levadas(&self) -> bool {
+        self.so_levadas
+    }
+
+    pub fn escolher_so_levadas(&mut self, sim: bool, cx: &mut Context<Self>) {
+        self.so_levadas = sim;
+        self.lembrar(cx);
+        cx.notify();
+    }
+
+    /// Quantas saem limpas e quantas com a marca.
+    pub fn contagem(&self) -> (usize, usize) {
+        let levadas = self
+            .fotos
+            .iter()
+            .filter(|f| f.comprada || !persistencia::so_existe_no_site(f))
+            .count();
+        (levadas, self.fotos.len() - levadas)
+    }
+
+    pub fn arquivo_do_livro(&self) -> Option<&PathBuf> {
+        self.arquivo_do_livro.as_ref()
     }
 
     pub fn qualidade(&self, cx: &gpui_kit::App) -> u8 {
@@ -312,48 +367,12 @@ impl Exportacao {
         cx.notify();
     }
 
-    pub fn marca(&self) -> Option<&PathBuf> {
-        self.marca.as_ref()
-    }
-
-    /// As opções que o modo atual pede.
-    ///
-    /// 🚨 **A prévia sem marca escolhida devolve `None`, e o botão fica
-    /// desligado por causa disso.** Exportar prévia sem marca produziria
-    /// exatamente o arquivo que não pode existir: a foto não comprada, legível,
-    /// na galeria. Um `unwrap_or_default` aqui seria o defeito mais caro do
-    /// aplicativo.
-    pub fn opcoes_com(&self, qualidade: u8) -> Option<ExportOptions> {
-        let base = ExportOptions::default()
-            .with_quality(qualidade)
-            .with_formato(self.formato());
-        match self.modo {
-            Modo::Entrega => Some(base),
-            Modo::Previa => {
-                let marca = self.marca.as_ref()?;
-                let arquivo = FilePath::new(marca.to_str()?).ok()?;
-                Some(
-                    base.with_longest_edge(LADO_DA_PREVIA)
-                        .with_watermark(Watermark::new(
-                            arquivo,
-                            WatermarkPosition::Center,
-                            0.35,
-                            0.55,
-                        )),
-                )
-            }
-        }
-    }
-
-    pub fn opcoes(&self, cx: &gpui_kit::App) -> Option<ExportOptions> {
-        self.opcoes_com(self.qualidade(cx))
-    }
-
-    /// A marca d'água, sem passar pelo seletor nativo.
-    #[cfg(test)]
-    pub fn escolher_marca_para_teste(&mut self, marca: PathBuf, cx: &mut Context<Self>) {
-        self.marca = Some(marca);
-        cx.notify();
+    /// As opções das levadas: tamanho cheio, no formato e na qualidade
+    /// escolhidos. A não levada não passa por elas — é a prévia marcada.
+    pub fn opcoes(&self, cx: &gpui_kit::App) -> ExportOptions {
+        ExportOptions::default()
+            .with_quality(self.qualidade(cx))
+            .with_formato(self.formato())
     }
 
     pub fn progresso(&self) -> Option<Progresso> {
@@ -363,7 +382,6 @@ impl Exportacao {
     /// Abre o seletor nativo de pasta.
     pub fn escolher_pasta(&mut self, cx: &mut Context<Self>) {
         self.esperando_pasta = true;
-        self.escolhendo_marca = false;
         self.seletor.escolher_destino(self.recados.0.clone(), cx);
         self.acompanhar(cx);
         cx.notify();
@@ -373,15 +391,6 @@ impl Exportacao {
     pub fn voltar_aos_downloads(&mut self, cx: &mut Context<Self>) {
         self.pasta = Some(preferencias::pasta_dos_downloads());
         self.lembrar(cx);
-        cx.notify();
-    }
-
-    /// Abre o seletor nativo de **arquivo** para a marca d'água.
-    pub fn escolher_marca(&mut self, cx: &mut Context<Self>) {
-        self.esperando_pasta = true;
-        self.escolhendo_marca = true;
-        self.seletor.escolher_arquivo(self.recados.0.clone(), cx);
-        self.acompanhar(cx);
         cx.notify();
     }
 
@@ -411,6 +420,7 @@ impl Exportacao {
                 ajustes: persistencia::da_foto(foto),
                 corte: persistencia::para_crop_settings(&persistencia::corte_da_foto(foto)),
                 original_local: self.copias_locais.get(no_site).cloned(),
+                levada: foto.comprada,
             },
             _ => Origem::Catalogo {
                 id: foto.id.clone(),
@@ -428,8 +438,11 @@ impl Exportacao {
         let Some(pasta) = self.pasta.clone() else {
             return;
         };
-        if self.fotos.is_empty() || self.correndo() || self.opcoes(cx).is_none() {
-            // Prévia sem marca escolhida. Ver `opcoes`.
+        if self.fotos.is_empty() || self.correndo() {
+            return;
+        }
+        if self.modo == Modo::Fotolivro {
+            self.montar_o_livro(pasta, cx);
             return;
         }
 
@@ -438,26 +451,124 @@ impl Exportacao {
         let saidas: Vec<Saida> = self
             .fotos
             .iter()
-            .map(|foto| Saida {
-                origem: self.origem_de(foto),
-                // A foto do site não tem caminho: o nome é o do arquivo da
-                // câmera, e não `foto`, `foto-2`… (o print).
-                destino: destinos.para(
-                    if foto.path.is_empty() {
-                        &foto.name
-                    } else {
-                        &foto.path
-                    },
-                    extensao,
-                ),
+            .map(|foto| {
+                let origem = self.origem_de(foto);
+                // 💧 A não levada é a prévia marcada do site: JPEG, sempre.
+                let extensao = match &origem {
+                    Origem::Site { levada: false, .. } => "jpg",
+                    _ => extensao,
+                };
+                Saida {
+                    origem,
+                    // A foto do site não tem caminho: o nome é o do arquivo da
+                    // câmera, e não `foto`, `foto-2`… (o print).
+                    destino: destinos.para(
+                        if foto.path.is_empty() {
+                            &foto.name
+                        } else {
+                            &foto.path
+                        },
+                        extensao,
+                    ),
+                }
             })
             .collect();
         self.mandar(saidas, cx);
     }
 
+    /// O endereço do site, sem barra no fim.
+    fn site(&self) -> String {
+        crate::pos_venda::config::ler()
+            .site()
+            .trim_end_matches('/')
+            .to_string()
+    }
+
+    /// 📖 As fotos do livro, com o link de cada uma para a galeria do cliente.
+    pub fn fotos_do_livro(&self) -> Vec<FotoDoLivro> {
+        let site = self.site();
+        self.fotos
+            .iter()
+            .map(|foto| {
+                let origem = self.origem_de(foto);
+                let link = match (&origem, &self.livro.galeria_id) {
+                    (Origem::Site { foto_no_site, .. }, Some(galeria)) => {
+                        Some(format!("{site}/meus-ensaios/{galeria}?foto={foto_no_site}"))
+                    }
+                    _ => None,
+                };
+                FotoDoLivro {
+                    origem,
+                    nome: foto.name.clone(),
+                    link,
+                }
+            })
+            .filter(|f| !self.so_levadas || f.levada())
+            .collect()
+    }
+
+    /// A capa do livro: o título, o dia e os links da galeria e do agendar.
+    pub fn capa_do_livro(&self) -> fotolivro::Capa {
+        let site = self.site();
+        fotolivro::Capa {
+            titulo: self.livro.titulo.clone(),
+            lugar_e_data: data_por_extenso(&self.livro.data_iso),
+            galeria: self
+                .livro
+                .galeria_id
+                .as_ref()
+                .map(|g| format!("{site}/meus-ensaios/{g}")),
+            agendar: Some(format!("{site}/agendar")),
+            site: site
+                .trim_start_matches("https://")
+                .trim_start_matches("http://")
+                .to_string(),
+        }
+    }
+
+    fn montar_o_livro(&mut self, pasta: PathBuf, cx: &mut Context<Self>) {
+        let fotos = self.fotos_do_livro();
+        if fotos.is_empty() {
+            return;
+        }
+        let titulo = if self.livro.titulo.trim().is_empty() {
+            "Fotolivro".to_string()
+        } else {
+            self.livro.titulo.trim().replace(['/', '\\', ':'], "-")
+        };
+        let destino = Destinos::na_pasta(pasta).para(&format!("{titulo}.pdf"), "pdf");
+        self.progresso = Some(Progresso {
+            total: fotos.len(),
+            ..Default::default()
+        });
+        self.ultimo = None;
+        self.falhas.clear();
+        self.feitas.clear();
+        self.lote.clear();
+        self.arquivo_do_livro = None;
+        self.cancelar = Arc::new(AtomicBool::new(false));
+        self.exportador.fotolivro(
+            fotos,
+            self.capa_do_livro(),
+            destino,
+            self.sessao.clone(),
+            self.cancelar.clone(),
+            self.andamentos.0.clone(),
+        );
+        self.acompanhar(cx);
+        cx.notify();
+    }
+
     /// Manda de novo só as que falharam, com os mesmos nomes.
     pub fn tentar_de_novo(&mut self, cx: &mut Context<Self>) {
         if self.correndo() {
+            return;
+        }
+        // O livro é um arquivo só: tentar de novo é refazê-lo.
+        if self.modo == Modo::Fotolivro {
+            if let Some(pasta) = self.pasta.clone() {
+                self.montar_o_livro(pasta, cx);
+            }
             return;
         }
         let falharam: HashSet<String> = self.falhas.iter().map(|f| f.nome.clone()).collect();
@@ -473,9 +584,7 @@ impl Exportacao {
     }
 
     fn mandar(&mut self, saidas: Vec<Saida>, cx: &mut Context<Self>) {
-        let Some(opcoes) = self.opcoes(cx) else {
-            return;
-        };
+        let opcoes = self.opcoes(cx);
         self.progresso = Some(Progresso {
             total: saidas.len(),
             ..Default::default()
@@ -518,8 +627,8 @@ impl Exportacao {
             &preferencias::caminho(),
             &Preferencias {
                 pasta: self.pasta.clone(),
-                marca: self.marca.clone(),
-                previa: self.modo == Modo::Previa,
+                fotolivro: self.modo == Modo::Fotolivro,
+                so_levadas: self.so_levadas,
                 formato: self.formato.extensao().into(),
                 qualidade: self.qualidade(cx),
             },
@@ -552,25 +661,10 @@ impl Exportacao {
             // 🔑 O seletor responde sempre, inclusive "desisti" — sem esse
             // recado a tela esperaria para sempre uma pasta que nunca vem.
             self.esperando_pasta = false;
-            match recado {
-                Recado::DestinoEscolhido(caminho) if !self.escolhendo_marca => {
-                    self.pasta = Some(PathBuf::from(caminho));
-                    self.lembrar(cx);
-                }
-                Recado::ArquivoEscolhido(caminho) if self.escolhendo_marca => {
-                    let caminho = PathBuf::from(caminho);
-                    if e_imagem(&caminho) {
-                        self.marca = Some(caminho);
-                        self.aviso_da_marca = None;
-                        self.lembrar(cx);
-                    } else {
-                        self.aviso_da_marca =
-                            Some("A marca d'água tem de ser uma imagem PNG ou JPEG.".into());
-                    }
-                }
-                _ => {}
+            if let Recado::DestinoEscolhido(caminho) = recado {
+                self.pasta = Some(PathBuf::from(caminho));
+                self.lembrar(cx);
             }
-            self.escolhendo_marca = false;
         }
 
         let estava_correndo = self.correndo();
@@ -617,6 +711,10 @@ impl Exportacao {
                     nome: nome(&destino),
                     erro,
                 });
+            }
+            Andamento::Livro { destino } => {
+                self.ultimo = Some(nome(&destino).into());
+                self.arquivo_do_livro = Some(destino);
             }
             Andamento::Terminou {
                 sucesso,
@@ -681,7 +779,7 @@ impl Exportacao {
     }
 
     fn mostrar_na_pasta(&self, cx: &mut Context<Self>) {
-        match self.feitas.first() {
+        match self.arquivo_do_livro.as_ref().or(self.feitas.first()) {
             Some(arquivo) => cx.reveal_path(arquivo),
             None => {
                 if let Some(pasta) = &self.pasta {
@@ -753,8 +851,9 @@ impl Exportacao {
                 )
                 .into_any_element(),
             None => {
-                let pronto =
-                    self.pasta.is_some() && !self.fotos.is_empty() && self.opcoes(cx).is_some();
+                let pronto = self.pasta.is_some()
+                    && !self.fotos.is_empty()
+                    && (self.modo == Modo::Arquivos || !self.fotos_do_livro().is_empty());
                 faixa
                     .child(
                         estilo::botao_contorno("exportacao-cancelar", cx)
@@ -765,7 +864,10 @@ impl Exportacao {
                     .child(
                         estilo::botao_primario("exportacao-exportar", cx)
                             .debug_selector(|| "exportacao-exportar".into())
-                            .label("Exportar")
+                            .label(match self.modo {
+                                Modo::Arquivos => "Exportar",
+                                Modo::Fotolivro => "Gerar o fotolivro",
+                            })
                             .disabled(!pronto)
                             .on_click(cx.listener(|tela, _, _, cx| tela.exportar(cx))),
                     )
@@ -833,6 +935,8 @@ impl Exportacao {
         let nos_downloads = self.pasta.as_deref() == Some(downloads.as_path());
         let formato_atual = self.formato();
         let qualidade = self.qualidade(cx);
+        let (levadas, marcadas) = self.contagem();
+        let contagem = frase_da_contagem(levadas, marcadas);
 
         v_flex()
             .gap(px(16.))
@@ -845,11 +949,11 @@ impl Exportacao {
                         ButtonGroup::new("exportacao-uso")
                             .outline()
                             .xsmall()
-                            .children([Modo::Entrega, Modo::Previa].map(|modo| {
+                            .children([Modo::Arquivos, Modo::Fotolivro].map(|modo| {
                                 estilo::botao_contorno_pequeno(
                                     match modo {
-                                        Modo::Entrega => "exportacao-modo-entrega",
-                                        Modo::Previa => "exportacao-modo-previa",
+                                        Modo::Arquivos => "exportacao-modo-arquivos",
+                                        Modo::Fotolivro => "exportacao-modo-fotolivro",
                                     },
                                     cx,
                                 )
@@ -858,9 +962,9 @@ impl Exportacao {
                             }))
                             .on_click(cx.listener(|tela, cliques: &Vec<usize>, _, cx| {
                                 let modo = if cliques.contains(&1) {
-                                    Modo::Previa
+                                    Modo::Fotolivro
                                 } else {
-                                    Modo::Entrega
+                                    Modo::Arquivos
                                 };
                                 tela.escolher_modo(modo, cx);
                             })),
@@ -870,23 +974,38 @@ impl Exportacao {
                             .text_xs()
                             .text_color(tema.muted_foreground)
                             .child(self.modo.explicacao()),
+                    )
+                    .child(
+                        div()
+                            .debug_selector(|| "exportacao-contagem".into())
+                            .text_xs()
+                            .child(contagem),
                     ),
             )
-            // Formato e qualidade: os do site.
-            .child(
+            // 📖 O fotolivro: o do cliente, só com as dele, ou o de vender.
+            .when(self.modo == Modo::Fotolivro, |raiz| {
+                raiz.child(
+                    Checkbox::new("exportacao-so-levadas")
+                        .label("Só as fotos levadas — o livro do cliente, sem as à venda")
+                        .checked(self.so_levadas)
+                        .on_click(cx.listener(|tela, marcado: &bool, _, cx| {
+                            tela.escolher_so_levadas(*marcado, cx)
+                        })),
+                )
+            })
+            // Formato e qualidade das levadas: os do site.
+            .when(self.modo == Modo::Arquivos, |raiz| raiz.child(
                 v_flex()
                     .gap(px(6.))
                     .child(Self::rotulo_de_secao("Formato"))
                     .children(FormatoDeSaida::TODOS.map(|formato| {
                         let (rotulo, detalhe) = detalhe_do_formato(formato);
-                        let travado = self.modo == Modo::Previa && formato != FormatoDeSaida::Jpeg;
                         h_flex()
                             .gap(px(8.))
                             .child(
                                 Radio::new(("exportacao-formato", formato as usize))
                                     .label(rotulo)
                                     .checked(formato_atual == formato)
-                                    .disabled(travado)
                                     .on_click(cx.listener(move |tela, _: &bool, _, cx| {
                                         tela.escolher_formato(formato, cx);
                                     })),
@@ -898,14 +1017,12 @@ impl Exportacao {
                                     .child(detalhe),
                             )
                     }))
-                    .when(self.modo == Modo::Previa, |d| {
-                        d.child(
-                            div()
-                                .text_xs()
-                                .text_color(tema.muted_foreground)
-                                .child("A prévia sai sempre em JPEG."),
-                        )
-                    })
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(tema.muted_foreground)
+                            .child("O formato vale para as levadas; as outras saem em JPEG, como o site as guarda."),
+                    )
                     .when(!formato_atual.sem_perda(), |d| {
                         d.child(
                             h_flex()
@@ -935,7 +1052,7 @@ impl Exportacao {
                                 .child("Sem perda: o arquivo fica grande — uma foto de 24 MP passa de 70 MB."),
                         )
                     }),
-            )
+            ))
             // Para onde.
             .child(
                 Self::caixa_de_caminho(Icone::FolderOpen, "Salvar em: ", pasta, false, cx)
@@ -956,36 +1073,6 @@ impl Exportacao {
                         )
                     }),
             )
-            // A marca d'água, só na prévia.
-            .when(self.modo == Modo::Previa, |raiz| {
-                let (texto, apagado): (SharedString, bool) = match &self.marca {
-                    Some(m) => (nome(m).into(), false),
-                    None => ("nenhuma escolhida".into(), true),
-                };
-                raiz.child(
-                    Self::caixa_de_caminho(Icone::ImagePlus, "Marca d'água: ", texto, apagado, cx)
-                        .debug_selector(|| "exportacao-marca".into())
-                        .child(
-                            estilo::botao_fantasma_pequeno("exportacao-escolher-marca", cx)
-                                .label(if self.marca.is_some() {
-                                    "Trocar…"
-                                } else {
-                                    "Escolher…"
-                                })
-                                .on_click(cx.listener(|tela, _, _, cx| tela.escolher_marca(cx))),
-                        ),
-                )
-                .when(self.marca.is_none() || self.aviso_da_marca.is_some(), |raiz| {
-                    raiz.child(estilo::aviso(
-                        self.aviso_da_marca.clone().unwrap_or_else(|| {
-                            "A prévia só sai com a marca d'água: escolha o logotipo do estúdio (PNG com transparência)."
-                                .into()
-                        }),
-                        true,
-                        cx,
-                    ))
-                })
-            })
             .into_any_element()
     }
 
@@ -1087,6 +1174,24 @@ impl Exportacao {
     }
 }
 
+/// "3 levadas saem limpas · 5 com a marca d'água do site".
+pub fn frase_da_contagem(levadas: usize, marcadas: usize) -> String {
+    let limpas = match levadas {
+        0 => None,
+        1 => Some("1 levada sai limpa".to_string()),
+        n => Some(format!("{n} levadas saem limpas")),
+    };
+    let com_marca = match marcadas {
+        0 => None,
+        n => Some(format!("{n} com a marca d'água do site")),
+    };
+    [limpas, com_marca]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
 /// O caminho como se lê: a pasta pessoal vira `~`.
 fn curto(caminho: &Path) -> String {
     let texto = caminho.to_string_lossy().to_string();
@@ -1098,13 +1203,6 @@ fn curto(caminho: &Path) -> String {
         },
         None => texto,
     }
-}
-
-fn e_imagem(caminho: &Path) -> bool {
-    caminho
-        .extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| IMAGENS_DE_MARCA.contains(&e.to_lowercase().as_str()))
 }
 
 fn nome(caminho: &Path) -> String {
@@ -1144,6 +1242,8 @@ mod testes {
             id: format!("{}{id}", persistencia::PREFIXO_DO_SITE),
             name: arquivo.into(),
             pos_venda_foto_id: Some(id.into()),
+            // Levada: sai revelada, no formato escolhido.
+            comprada: true,
             ..Default::default()
         }
     }
@@ -1202,7 +1302,7 @@ mod testes {
             Origem::Site { original_local: Some(p), .. } if *p == local));
     }
 
-    /// O formato escolhido muda a extensão e chega à porta; a prévia força JPEG.
+    /// O formato escolhido muda a extensão e chega à porta.
     #[gpui_kit::test]
     fn o_formato_escolhido_chega_ao_arquivo(cx: &mut TestAppContext) {
         let exportador = Arc::new(ExportadorDeMentira::default());
@@ -1221,7 +1321,7 @@ mod testes {
                 cx,
             );
             tela.escolher_pasta_para_teste(pasta.path().to_path_buf(), cx);
-            tela.escolher_modo(Modo::Entrega, cx);
+            tela.escolher_modo(Modo::Arquivos, cx);
             tela.escolher_formato(FormatoDeSaida::Tiff, cx);
             tela.exportar(cx);
         });
@@ -1231,43 +1331,24 @@ mod testes {
         );
         let opcoes = exportador.opcoes.lock().unwrap().clone().unwrap();
         assert_eq!(opcoes.formato(), FormatoDeSaida::Tiff);
-
-        tela.update(cx, |tela, cx| {
-            tela.escolher_modo(Modo::Previa, cx);
-            assert_eq!(tela.formato(), FormatoDeSaida::Jpeg, "a prévia vai em JPEG");
-            tela.escolher_modo(Modo::Entrega, cx);
-        });
     }
 
-    /// 🚨 A marca d'água é um **arquivo**: o seletor certo, e só imagem vale.
-    #[gpui_kit::test]
-    fn a_marca_dagua_e_escolhida_como_arquivo(cx: &mut TestAppContext) {
-        let seletor = Arc::new(SeletorDeMentira::escolhe("/logos/estudio.png"));
-        let tela = montar(
-            cx,
-            Arc::new(ExportadorDeMentira::default()),
-            seletor.clone(),
+    /// A contagem diz quantas saem limpas e quantas com a marca, e o dia vira
+    /// a data por extenso da capa.
+    #[test]
+    fn a_contagem_e_a_data_por_extenso() {
+        assert_eq!(
+            frase_da_contagem(3, 5),
+            "3 levadas saem limpas · 5 com a marca d'água do site"
         );
-
-        tela.update(cx, |tela, cx| {
-            tela.escolher_modo(Modo::Previa, cx);
-            tela.escolher_marca(cx);
-            tela.colher(cx);
-            assert_eq!(tela.marca(), Some(&PathBuf::from("/logos/estudio.png")));
-            assert!(tela.opcoes(cx).is_some());
-            tela.escolher_modo(Modo::Entrega, cx);
-        });
-
-        *seletor.escolha.lock().unwrap() = Some("/logos".into());
-        tela.update(cx, |tela, cx| {
-            tela.escolher_marca(cx);
-            tela.colher(cx);
-            assert_eq!(
-                tela.marca(),
-                Some(&PathBuf::from("/logos/estudio.png")),
-                "uma pasta não pode virar a marca d'água"
-            );
-        });
+        assert_eq!(frase_da_contagem(1, 0), "1 levada sai limpa");
+        assert_eq!(frase_da_contagem(0, 2), "2 com a marca d'água do site");
+        assert_eq!(data_por_extenso("2026-10-09"), "9 de outubro de 2026");
+        assert_eq!(
+            data_por_extenso("2026-10-09T12:00:00Z"),
+            "9 de outubro de 2026"
+        );
+        assert_eq!(data_por_extenso(""), "");
     }
 
     /// Durante o lote: a barra anda e "Parar" deixa de começar as outras.

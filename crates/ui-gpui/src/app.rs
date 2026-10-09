@@ -5405,8 +5405,21 @@ impl Aplicativo {
                 })
                 .collect()
         };
-        self.exportacao
-            .update(cx, |tela, cx| tela.abrir_para(fotos, sessao, copias, cx));
+        // 📖 A sessão aberta vira a capa e os links do fotolivro.
+        let livro = self
+            .detalhe
+            .read(cx)
+            .aberta()
+            .map(|a| crate::exportacao::tela::InfoDoLivro {
+                titulo: a.galeria.titulo.clone(),
+                galeria_id: Some(a.galeria.id.clone()),
+                data_iso: a.galeria.criada_em_iso.clone(),
+            })
+            .unwrap_or_default();
+        self.exportacao.update(cx, |tela, cx| {
+            tela.abrir_para(fotos, sessao, copias, cx);
+            tela.definir_livro(livro);
+        });
         self.exportando = true;
         cx.notify();
     }
@@ -7300,6 +7313,7 @@ mod testes {
     use crate::biblioteca::marcacao::mentira::MarcadorDeMentira;
     use crate::biblioteca::marcacao::Marca;
     use crate::exportacao::porta::mentira::ExportadorDeMentira;
+    use crate::exportacao::porta::Origem;
     use crate::exportacao::tela::Modo;
     use crate::importacao::explorador::mentira::{
         ExploradorDeMentira, GeradorDeMentira, ImportadorDeMentira, SeletorDeMentira,
@@ -12482,104 +12496,37 @@ mod testes {
         assert!(gravador.gravado().is_empty());
     }
 
-    /// 🚨 **A prévia não sai sem marca d\'água.**
-    ///
-    /// É o teste mais importante da exportação, e o defeito que ele impede é o
-    /// pior que este aplicativo pode cometer: a foto que o cliente **não
-    /// comprou** indo legível e em tamanho cheio para a galeria. Nada falharia —
-    /// o lote termina, o rodapé conta certo, e os arquivos estão lá.
-    ///
-    /// 🔑 O botão desligado não é a defesa; é o sintoma dela. Quem decide é
-    /// `opcoes()`, que devolve `None` — e `exportar` sai sem pedir nada.
-    #[gpui_kit::test]
-    fn a_previa_nao_sai_sem_marca_dagua(cx: &mut TestAppContext) {
-        let (previews, _dir) = previews_descartaveis();
-        cx.update(gpui_kit::init);
-
-        let exportador = Arc::new(ExportadorDeMentira::default());
-        let janela = cx.add_window({
-            let previews = previews.clone();
-            let exportador = exportador.clone();
-            |window, cx| {
-                Aplicativo::ja_dentro(
-                    acervo(),
-                    previews,
-                    Vec::new(),
-                    Portas {
-                        exportador,
-                        ..portas()
-                    },
-                    window,
-                    cx,
-                )
-            }
-        });
-
-        let pasta = tempfile::tempdir().expect("pasta de saída");
-        janela
-            .update(cx, |app, _window, cx| {
-                app.exportar(cx);
-                app.exportacao.update(cx, |tela, cx| {
-                    tela.escolher_pasta_para_teste(pasta.path().to_path_buf(), cx);
-                    tela.escolher_modo(Modo::Previa, cx);
-                    assert!(
-                        tela.opcoes(cx).is_none(),
-                        "sem marca escolhida não pode haver opções válidas"
-                    );
-                    tela.exportar(cx);
-                });
+    /// As fotos de uma sessão do site: a primeira levada, a segunda à venda.
+    fn acervo_do_site() -> Vec<PhotoViewModel> {
+        ["a", "b"]
+            .iter()
+            .enumerate()
+            .map(|(i, id)| PhotoViewModel {
+                id: format!("{}{id}", persistencia::PREFIXO_DO_SITE),
+                name: format!("IMG_{id}.CR3"),
+                pos_venda_foto_id: Some(id.to_string()),
+                comprada: i == 0,
+                ..Default::default()
             })
-            .expect("a janela deve estar aberta");
-
-        assert!(
-            exportador.pedidos().is_empty(),
-            "a prévia saiu sem marca d'água — a foto não comprada iria legível para a galeria"
-        );
-
-        // Com a marca escolhida, sai — e leva a marca junto.
-        let logo = pasta.path().join("logo.png");
-        janela
-            .update(cx, |app, _window, cx| {
-                app.exportacao.update(cx, |tela, cx| {
-                    tela.escolher_marca_para_teste(logo.clone(), cx);
-                    tela.exportar(cx);
-                });
-            })
-            .expect("a janela deve estar aberta");
-
-        let opcoes = exportador
-            .opcoes
-            .lock()
-            .expect("as opções")
-            .clone()
-            .expect("o lote saiu");
-        let marca = opcoes.watermark().expect("a prévia tem de levar marca");
-        assert_eq!(marca.file().as_str().unwrap(), logo.to_str().unwrap());
-        assert_eq!(
-            opcoes.longest_edge(),
-            Some(2048),
-            "a prévia também reduz — tamanho cheio na galeria é entrega, não prévia"
-        );
+            .collect()
     }
 
-    /// ⚠️ **A entrega final vai inteira e sem marca**, e o modo padrão é ela.
+    /// 💧 **A marca d'água segue a LEVADA, foto a foto** (dono, 09/10/2026).
     ///
-    /// O padrão importa: se fosse a prévia, a primeira exportação de um cliente
-    /// sairia com logotipo em cima — visível, e por isso corrigível. Sendo a
-    /// entrega, o erro possível é o inverso e **não** é visível, e é por isso que
-    /// o modo aparece escrito na tela em vez de ficar implícito.
+    /// Não há logotipo a escolher e não há modo em que a não levada saia limpa:
+    /// ela vai como a prévia marcada do site, em JPEG, mesmo com outro formato
+    /// escolhido para as levadas.
     #[gpui_kit::test]
-    fn a_entrega_final_e_o_padrao_e_vai_sem_marca(cx: &mut TestAppContext) {
+    fn a_marca_dagua_segue_a_levada(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         cx.update(gpui_kit::init);
-
         let exportador = Arc::new(ExportadorDeMentira::default());
         let janela = cx.add_window({
             let previews = previews.clone();
             let exportador = exportador.clone();
             |window, cx| {
                 Aplicativo::ja_dentro(
-                    acervo(),
+                    acervo_do_site(),
                     previews,
                     Vec::new(),
                     Portas {
@@ -12597,25 +12544,104 @@ mod testes {
             .update(cx, |app, _window, cx| {
                 app.exportar(cx);
                 app.exportacao.update(cx, |tela, cx| {
-                    assert_eq!(tela.modo(), Modo::Entrega, "o padrão é a entrega");
+                    assert_eq!(tela.modo(), Modo::Arquivos, "o padrão são os arquivos");
                     tela.escolher_pasta_para_teste(pasta.path().to_path_buf(), cx);
+                    tela.escolher_formato(domain::value_objects::FormatoDeSaida::Png, cx);
                     tela.exportar(cx);
                 });
             })
             .expect("a janela deve estar aberta");
 
-        let opcoes = exportador
-            .opcoes
-            .lock()
-            .expect("as opções")
-            .clone()
-            .expect("o lote saiu");
-        assert!(opcoes.watermark().is_none(), "a entrega não leva marca");
+        let lote = &exportador.pedidos()[0];
+        let levadas: Vec<bool> = lote
+            .iter()
+            .map(|s| matches!(s.origem, Origem::Site { levada: true, .. }))
+            .collect();
+        assert_eq!(levadas, [true, false], "a LEVADA da grade decide a marca");
+        assert_eq!(lote[0].destino, pasta.path().join("IMG_a.png"));
         assert_eq!(
-            opcoes.longest_edge(),
-            None,
-            "a entrega vai no tamanho cheio"
+            lote[1].destino,
+            pasta.path().join("IMG_b.jpg"),
+            "a marcada é a prévia do site, em JPEG"
         );
+        let opcoes = exportador.opcoes.lock().unwrap().clone().unwrap();
+        assert!(opcoes.watermark().is_none(), "não há mais logotipo");
+        assert_eq!(opcoes.longest_edge(), None, "a levada vai inteira");
+    }
+
+    /// 📖 O fotolivro leva as fotos na ordem, com o link de cada uma para a
+    /// galeria do cliente; "só as levadas" deixa a à venda de fora.
+    #[gpui_kit::test]
+    fn o_fotolivro_leva_as_fotos_e_pode_ser_so_das_levadas(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_kit::init);
+        let exportador = Arc::new(ExportadorDeMentira::default());
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            let exportador = exportador.clone();
+            |window, cx| {
+                Aplicativo::ja_dentro(
+                    acervo_do_site(),
+                    previews,
+                    Vec::new(),
+                    Portas {
+                        exportador,
+                        ..portas()
+                    },
+                    window,
+                    cx,
+                )
+            }
+        });
+
+        let pasta = tempfile::tempdir().expect("pasta de saída");
+        janela
+            .update(cx, |app, _window, cx| {
+                app.exportar(cx);
+                app.exportacao.update(cx, |tela, cx| {
+                    tela.definir_livro(crate::exportacao::tela::InfoDoLivro {
+                        titulo: "Ensaio da Maria".into(),
+                        galeria_id: Some("g1".into()),
+                        data_iso: "2026-10-09".into(),
+                    });
+                    tela.escolher_pasta_para_teste(pasta.path().to_path_buf(), cx);
+                    tela.escolher_modo(Modo::Fotolivro, cx);
+                    tela.escolher_so_levadas(false, cx);
+                    tela.exportar(cx);
+                    tela.colher(cx);
+                    assert_eq!(
+                        tela.arquivo_do_livro(),
+                        Some(&pasta.path().join("Ensaio da Maria.pdf"))
+                    );
+                    tela.escolher_so_levadas(true, cx);
+                    tela.exportar(cx);
+                    // Deixa o padrão como estava para quem roda depois.
+                    tela.escolher_so_levadas(false, cx);
+                    tela.escolher_modo(Modo::Arquivos, cx);
+                });
+            })
+            .expect("a janela deve estar aberta");
+
+        let livros = exportador.livros.lock().unwrap();
+        let (fotos, capa, destino) = &livros[0];
+        assert_eq!(destino, &pasta.path().join("Ensaio da Maria.pdf"));
+        assert_eq!(fotos.len(), 2);
+        assert!(fotos[0]
+            .link
+            .as_deref()
+            .is_some_and(|l| l.ends_with("/meus-ensaios/g1?foto=a")));
+        assert_eq!(capa.lugar_e_data, "9 de outubro de 2026");
+        assert!(capa
+            .galeria
+            .as_deref()
+            .is_some_and(|g| g.ends_with("/meus-ensaios/g1")));
+        assert!(capa
+            .agendar
+            .as_deref()
+            .is_some_and(|a| a.ends_with("/agendar")));
+        let (so_dele, _, _) = &livros[1];
+        assert_eq!(so_dele.len(), 1, "só as levadas");
+        assert!(so_dele[0].levada());
     }
 
     /// ⚠️ **A falha de uma foto não some, e não interrompe o lote.**

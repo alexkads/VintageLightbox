@@ -20,6 +20,11 @@ members = [
     # O mesmo codificador compilado para o navegador do **cliente** — sem GPU,
     # só para converter o WebP guardado no JPEG que ele leva ao laboratório.
     "crates/conversao-web",
+    # 📖 O fotolivro virtual do ensaio (2026-10-09): o PDF diagramado que o
+    # balcão exporta e que o cliente gera na galeria dele — sem tela e sem GPU.
+    "crates/fotolivro",
+    # O mesmo, compilado para a galeria do cliente (wasm-bindgen).
+    "crates/fotolivro-web",
     # O motor de revelação sem nada em volta (2026-09-04): o que o navegador
     # precisa e o `infrastructure` não consegue dar, porque puxa sqlx, reqwest e
     # LibRaw — nada disso compila para wasm32.

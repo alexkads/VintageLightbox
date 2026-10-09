@@ -870,6 +870,14 @@ impl PosVendaApi for PosVendaApiHttp {
             .await
     }
 
+    async fn previa_marcada(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<Vec<u8>> {
+        self.bytes_da_imagem(
+            sessao,
+            &format!("/pos-venda/fotos/{foto_id}/previa-marcada"),
+        )
+        .await
+    }
+
     async fn bilhete_de_revelacao(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<String> {
         let resposta = self
             .client

@@ -252,6 +252,15 @@ impl PosVendaController {
         self.api.original(sessao, foto_id).await.map_err(frase)
     }
 
+    /// 💧 A prévia com a marca d'água do sistema — ver
+    /// [`PosVendaApi::previa_marcada`].
+    pub async fn previa_marcada(&self, sessao: &Sessao, foto_id: &str) -> Result<Vec<u8>, String> {
+        self.api
+            .previa_marcada(sessao, foto_id)
+            .await
+            .map_err(frase)
+    }
+
     /// ✂️ A fonte da revelação no site (D23): a editada de algum balcão, ou o
     /// bruto. O [`Self::original`] é sempre o bruto.
     pub async fn fonte_para_revelar(

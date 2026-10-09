@@ -86,6 +86,9 @@ rfd = "0.17.2"
 # ⚠️ `default-features = false` de propósito: o padrão traz layout de texto e
 # HTML, e aqui não há texto nenhum — só imagens em retângulos.
 printpdf = { version = "0.12", default-features = false }
+# 📖 O fotolivro da exportação — o mesmo livro que a galeria do cliente gera.
+fotolivro = { path = "../fotolivro" }
+foto-codec = { path = "../foto-codec" }
 
 # O motor de revelação (`revelacao/processador.rs`). Nas mesmas versões do
 # `crates/ui`: o critério de saída da fase 2 é igualdade de pixel, e wgpu é

@@ -366,16 +366,19 @@ impl Aplicativo {
                             .update(cx, |tela, cx| tela.escolher_formato(formato, cx));
                     }
                     ["uso", qual] => {
-                        let modo = if qual == "previa" {
-                            Modo::Previa
+                        let modo = if qual == "fotolivro" || qual == "previa" {
+                            Modo::Fotolivro
                         } else {
-                            Modo::Entrega
+                            Modo::Arquivos
                         };
                         self.exportacao
                             .update(cx, |tela, cx| tela.escolher_modo(modo, cx));
                     }
                     ["exportar"] => self.exportacao.update(cx, |tela, cx| tela.exportar(cx)),
                     ["parar"] => self.exportacao.update(cx, |tela, cx| tela.parar(cx)),
+                    ["so_levadas", sim] => self
+                        .exportacao
+                        .update(cx, |tela, cx| tela.escolher_so_levadas(sim == "sim", cx)),
                     ["estado"] => {
                         let tela = self.exportacao.read(cx);
                         eprintln!(

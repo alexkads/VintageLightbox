@@ -882,6 +882,11 @@ pub trait PosVendaApi: Send + Sync {
     /// `baixarOriginal`.
     async fn original(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<Vec<u8>>;
 
+    /// 💧 A prévia **com a marca d'água do sistema** — a que o cliente vê à
+    /// venda (1400 px, JPEG). É o que a prévia da galeria exportada leva nas
+    /// fotos que não foram levadas: a marca é a do site, e não um logotipo.
+    async fn previa_marcada(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<Vec<u8>>;
+
     /// O bilhete que autoriza **substituir o original** desta foto pelo revelado.
     ///
     /// 🔑 É a porta de saída do editor, e ela é a mesma do site: o painel emite

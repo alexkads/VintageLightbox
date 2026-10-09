@@ -536,6 +536,14 @@ impl crate::exportacao::porta::RevelaDoSite for RevelacaoDoSite {
             .map_err(|e| e.to_string())
         })
     }
+    fn previa_marcada(
+        &self,
+        sessao: Sessao,
+        foto_no_site: String,
+    ) -> crate::exportacao::porta::Pronta {
+        let controlador = self.controlador.clone();
+        Box::pin(async move { controlador.previa_marcada(&sessao, &foto_no_site).await })
+    }
 }
 
 /// De onde a porta tira a imagem editada de uma foto do site.

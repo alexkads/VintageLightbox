@@ -17,6 +17,17 @@
 //! continua no controller; a do site é revelada a partir do bruto (o daqui,
 //! quando a foto subiu deste computador, ou o baixado) pelo **mesmo** motor do
 //! "Baixar JPEG" — [`RevelaDoSite`].
+//!
+//! # 💧 A marca d'água é da foto, e não do lote (09/10/2026)
+//!
+//! *"A marca d'água fica automática baseado no se a foto foi sinalizada com
+//! LEVADA"* (dono). A levada sai revelada e inteira; a que não foi levada sai
+//! como a **prévia marcada do site** — a mesma que o cliente vê à venda, com a
+//! marca resistente que o servidor grava (C27). Não há logotipo a escolher, e
+//! não há caminho em que a não levada saia limpa: a porta nem revela a foto.
+//!
+//! E o lote pode virar um **fotolivro** em PDF ([`Exportador::fotolivro`]) —
+//! o crate `fotolivro`, o mesmo que a galeria do cliente usa.
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -63,7 +74,28 @@ pub enum Origem {
         /// O bruto **neste disco**, quando a foto subiu deste computador —
         /// poupa o download. `None` = baixar do site.
         original_local: Option<PathBuf>,
+        /// 🔑 Levada (ou comprada): sai revelada e limpa. Senão, sai a prévia
+        /// marcada do site, e a revelação nem acontece.
+        levada: bool,
     },
+}
+
+/// Uma foto do fotolivro: de onde vem, o nome e para onde o toque leva.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FotoDoLivro {
+    pub origem: Origem,
+    pub nome: String,
+    pub link: Option<String>,
+}
+
+impl FotoDoLivro {
+    pub fn levada(&self) -> bool {
+        match &self.origem {
+            Origem::Site { levada, .. } => *levada,
+            // A do catálogo não está à venda: é do estúdio.
+            Origem::Catalogo { .. } => true,
+        }
+    }
 }
 
 /// O que a tela precisa saber enquanto o lote corre.
@@ -82,6 +114,10 @@ pub enum Andamento {
     Falhou {
         destino: PathBuf,
         erro: String,
+    },
+    /// O fotolivro foi gravado — é ele que o "Mostrar na pasta" aponta.
+    Livro {
+        destino: PathBuf,
     },
     Terminou {
         sucesso: usize,
@@ -108,6 +144,9 @@ pub trait RevelaDoSite: Send + Sync + 'static {
         original_local: Option<PathBuf>,
         opcoes: ExportOptions,
     ) -> Pronta;
+
+    /// 💧 A prévia com a marca d'água do sistema — a da foto não levada.
+    fn previa_marcada(&self, sessao: Sessao, foto_no_site: String) -> Pronta;
 }
 
 /// Quem exporta a foto do catálogo para um arquivo.
@@ -156,6 +195,19 @@ pub trait Exportador: Send + Sync + 'static {
         cancelar: Arc<AtomicBool>,
         canal: Sender<Andamento>,
     );
+
+    /// 📖 O fotolivro: as fotos, na ordem, num PDF só em `destino`. O
+    /// andamento conta as fotos (uma `Feita` por foto pronta, com o nome dela)
+    /// e termina com [`Andamento::Livro`].
+    fn fotolivro(
+        &self,
+        fotos: Vec<FotoDoLivro>,
+        capa: fotolivro::Capa,
+        destino: PathBuf,
+        sessao: Option<Sessao>,
+        cancelar: Arc<AtomicBool>,
+        canal: Sender<Andamento>,
+    );
 }
 
 pub struct ExportadorDoBanco {
@@ -193,6 +245,205 @@ impl Exportador for ExportadorDoBanco {
             saidas, opcoes, sessao, cancelar, canal, catalogo, site,
         ));
     }
+
+    fn fotolivro(
+        &self,
+        fotos: Vec<FotoDoLivro>,
+        capa: fotolivro::Capa,
+        destino: PathBuf,
+        sessao: Option<Sessao>,
+        cancelar: Arc<AtomicBool>,
+        canal: Sender<Andamento>,
+    ) {
+        let catalogo = self.catalogo.clone();
+        let site = self.site.clone();
+        self.tokio.spawn(montar_fotolivro(
+            fotos, capa, destino, sessao, cancelar, canal, catalogo, site,
+        ));
+    }
+}
+
+/// O lado maior das fotos levadas no fotolivro: o mesmo que o livro usa
+/// (`fotolivro::gerar` reduz a 1800 px) — revelar maior seria trabalho jogado
+/// fora.
+const LADO_NO_LIVRO: u32 = 1800;
+
+/// Os bytes de uma foto do lote, já com a decisão da marca tomada.
+async fn bytes_da_foto(
+    origem: &Origem,
+    opcoes: ExportOptions,
+    sessao: Option<Sessao>,
+    catalogo: &dyn ExportaDoCatalogo,
+    site: &dyn RevelaDoSite,
+) -> Result<Vec<u8>, String> {
+    match origem {
+        Origem::Catalogo { id } => {
+            // O catálogo só sabe gravar arquivo: um temporário, lido de volta.
+            let pasta = tempfile::tempdir().map_err(|e| format!("sem pasta temporária: {e}"))?;
+            let arquivo = pasta
+                .path()
+                .join(format!("foto.{}", opcoes.formato().extensao()));
+            catalogo
+                .exportar(id.clone(), arquivo.clone(), opcoes)
+                .await?;
+            tokio::fs::read(&arquivo)
+                .await
+                .map_err(|e| format!("o arquivo não pôde ser lido: {e}"))
+        }
+        Origem::Site {
+            foto_no_site,
+            ajustes,
+            corte,
+            original_local,
+            levada,
+        } => {
+            let sessao = sessao.ok_or_else(|| {
+                "entre na conta do site para exportar as fotos da sessão".to_string()
+            })?;
+            if *levada {
+                site.revelar(
+                    sessao,
+                    foto_no_site.clone(),
+                    *ajustes,
+                    corte.clone(),
+                    original_local.clone(),
+                    opcoes,
+                )
+                .await
+            } else {
+                site.previa_marcada(sessao, foto_no_site.clone()).await
+            }
+        }
+    }
+}
+
+/// O fotolivro inteiro: as fotos com até [`AO_MESMO_TEMPO`] andando juntas, o
+/// livro diagramado e o PDF gravado de uma vez (o nome final só aparece com o
+/// arquivo inteiro, como na exportação).
+#[allow(clippy::too_many_arguments)]
+pub async fn montar_fotolivro(
+    fotos: Vec<FotoDoLivro>,
+    capa: fotolivro::Capa,
+    destino: PathBuf,
+    sessao: Option<Sessao>,
+    cancelar: Arc<AtomicBool>,
+    canal: Sender<Andamento>,
+    catalogo: Arc<dyn ExportaDoCatalogo>,
+    site: Arc<dyn RevelaDoSite>,
+) {
+    let total = fotos.len();
+    let _ = canal.send(Andamento::Comecou { total });
+    let opcoes = ExportOptions::default()
+        .with_quality(92)
+        .with_longest_edge(LADO_NO_LIVRO);
+
+    let vagas = Arc::new(tokio::sync::Semaphore::new(AO_MESMO_TEMPO));
+    let mut tarefas = tokio::task::JoinSet::new();
+    let mut iniciadas = 0usize;
+    for (posicao, foto) in fotos.into_iter().enumerate() {
+        let Ok(vaga) = vagas.clone().acquire_owned().await else {
+            break;
+        };
+        if cancelar.load(Ordering::SeqCst) {
+            break;
+        }
+        iniciadas += 1;
+        let (catalogo, site, opcoes, sessao) = (
+            catalogo.clone(),
+            site.clone(),
+            opcoes.clone(),
+            sessao.clone(),
+        );
+        tarefas.spawn(async move {
+            let _vaga = vaga;
+            let bytes = bytes_da_foto(&foto.origem, opcoes, sessao, &*catalogo, &*site).await;
+            let imagem = bytes.and_then(|b| {
+                foto_codec::orientacao::decodificar_de_pe(&b)
+                    .map_err(|e| format!("a foto não abriu: {e}"))
+            });
+            (posicao, foto, imagem)
+        });
+    }
+
+    let mut prontas = Vec::new();
+    let mut falhas = 0usize;
+    while let Some(fim) = tarefas.join_next().await {
+        match fim {
+            Ok((posicao, foto, Ok(imagem))) => {
+                let _ = canal.send(Andamento::Feita {
+                    destino: PathBuf::from(&foto.nome),
+                });
+                let levada = foto.levada();
+                prontas.push((
+                    posicao,
+                    fotolivro::FotoDaFolha {
+                        imagem,
+                        nome: foto.nome,
+                        levada,
+                        link: foto.link,
+                    },
+                ));
+            }
+            Ok((_, foto, Err(erro))) => {
+                falhas += 1;
+                let _ = canal.send(Andamento::Falhou {
+                    destino: PathBuf::from(&foto.nome),
+                    erro: frase_do_erro(&erro),
+                });
+            }
+            Err(erro) => {
+                falhas += 1;
+                let _ = canal.send(Andamento::Falhou {
+                    destino: PathBuf::new(),
+                    erro: format!("a foto parou no meio: {erro}"),
+                });
+            }
+        }
+    }
+    // A ordem do livro é a do ensaio, e não a de quem terminou primeiro.
+    prontas.sort_by_key(|(posicao, _)| *posicao);
+    let sucesso = prontas.len();
+    let parado = cancelar.load(Ordering::SeqCst);
+
+    if !prontas.is_empty() && !parado {
+        let folhas: Vec<_> = prontas.into_iter().map(|(_, f)| f).collect();
+        let gravado = async {
+            let pdf = tokio::task::spawn_blocking(move || fotolivro::gerar(&capa, &folhas))
+                .await
+                .map_err(|e| format!("o livro não terminou: {e}"))??;
+            if let Some(pasta) = destino.parent() {
+                tokio::fs::create_dir_all(pasta)
+                    .await
+                    .map_err(|e| format!("a pasta de destino não pôde ser criada: {e}"))?;
+            }
+            let parcial = parcial_de(&destino);
+            tokio::fs::write(&parcial, pdf)
+                .await
+                .map_err(|e| format!("o arquivo não pôde ser gravado: {e}"))?;
+            gravar_por_cima(&parcial, &destino).await
+        }
+        .await;
+        match gravado {
+            Ok(()) => {
+                let _ = canal.send(Andamento::Livro {
+                    destino: destino.clone(),
+                });
+            }
+            Err(erro) => {
+                falhas += 1;
+                let _ = canal.send(Andamento::Falhou {
+                    destino: destino.clone(),
+                    erro,
+                });
+            }
+        }
+    }
+
+    let _ = canal.send(Andamento::Terminou {
+        sucesso,
+        falhas,
+        canceladas: total - iniciadas,
+    });
 }
 
 /// O lote inteiro, com até [`AO_MESMO_TEMPO`] fotos andando juntas.
@@ -290,25 +541,8 @@ async fn uma(
                 .exportar(id.clone(), parcial.clone(), opcoes)
                 .await?;
         }
-        Origem::Site {
-            foto_no_site,
-            ajustes,
-            corte,
-            original_local,
-        } => {
-            let sessao = sessao.ok_or_else(|| {
-                "entre na conta do site para exportar as fotos da sessão".to_string()
-            })?;
-            let bytes = site
-                .revelar(
-                    sessao,
-                    foto_no_site.clone(),
-                    *ajustes,
-                    corte.clone(),
-                    original_local.clone(),
-                    opcoes,
-                )
-                .await?;
+        Origem::Site { .. } => {
+            let bytes = bytes_da_foto(&saida.origem, opcoes, sessao, catalogo, site).await?;
             tokio::fs::write(&parcial, bytes)
                 .await
                 .map_err(|e| format!("o arquivo não pôde ser gravado: {e}"))?;
@@ -383,6 +617,8 @@ pub mod mentira {
         pub segurar: Mutex<bool>,
         /// O canal e o pedido do lote segurado.
         pub segurado: Mutex<Option<LoteSegurado>>,
+        /// Os fotolivros pedidos: as fotos, a capa e o arquivo.
+        pub livros: Mutex<Vec<(Vec<FotoDoLivro>, fotolivro::Capa, PathBuf)>>,
     }
 
     impl ExportadorDeMentira {
@@ -454,6 +690,37 @@ pub mod mentira {
             }
             self.responder(saidas, &cancelar, &canal);
         }
+
+        fn fotolivro(
+            &self,
+            fotos: Vec<FotoDoLivro>,
+            capa: fotolivro::Capa,
+            destino: PathBuf,
+            sessao: Option<Sessao>,
+            _cancelar: Arc<AtomicBool>,
+            canal: Sender<Andamento>,
+        ) {
+            self.sessoes.lock().expect("as sessões").push(sessao);
+            let total = fotos.len();
+            let _ = canal.send(Andamento::Comecou { total });
+            for foto in &fotos {
+                let _ = canal.send(Andamento::Feita {
+                    destino: PathBuf::from(&foto.nome),
+                });
+            }
+            let _ = canal.send(Andamento::Livro {
+                destino: destino.clone(),
+            });
+            let _ = canal.send(Andamento::Terminou {
+                sucesso: total,
+                falhas: 0,
+                canceladas: 0,
+            });
+            self.livros
+                .lock()
+                .expect("os livros")
+                .push((fotos, capa, destino));
+        }
     }
 }
 
@@ -465,6 +732,7 @@ mod testes {
     #[derive(Default)]
     struct SiteDeMentira {
         pedidos: Mutex<Vec<(String, Option<PathBuf>, ExportOptions)>>,
+        marcadas: Mutex<Vec<String>>,
     }
 
     impl RevelaDoSite for SiteDeMentira {
@@ -482,6 +750,11 @@ mod testes {
                 .unwrap()
                 .push((foto_no_site.clone(), original_local, opcoes));
             Box::pin(async move { Ok(format!("bytes de {foto_no_site}").into_bytes()) })
+        }
+
+        fn previa_marcada(&self, _sessao: Sessao, foto_no_site: String) -> Pronta {
+            self.marcadas.lock().unwrap().push(foto_no_site.clone());
+            Box::pin(async move { Ok(format!("marcada de {foto_no_site}").into_bytes()) })
         }
     }
 
@@ -521,6 +794,7 @@ mod testes {
                 ajustes: Ajustes::default(),
                 corte: CropSettings::default(),
                 original_local: None,
+                levada: true,
             },
             destino: pasta.join(format!("{id}.jpg")),
         }
@@ -584,6 +858,118 @@ mod testes {
             !pasta.path().join("a.jpg.part").exists(),
             "o arquivo de trabalho ficou para trás"
         );
+    }
+
+    /// 💧 **A não levada sai marcada, e nem é revelada** (dono, 09/10): a
+    /// levada vem do motor, limpa; a outra é a prévia marcada do site.
+    #[test]
+    fn a_marca_dagua_segue_a_levada() {
+        let pasta = tempfile::tempdir().unwrap();
+        let site = Arc::new(SiteDeMentira::default());
+        let mut a_venda = do_site("b", pasta.path());
+        if let Origem::Site { levada, .. } = &mut a_venda.origem {
+            *levada = false;
+        }
+        let andamentos = rodar(
+            vec![do_site("a", pasta.path()), a_venda],
+            Some(sessao()),
+            false,
+            site.clone(),
+        );
+        assert_eq!(terminou(&andamentos), (2, 0, 0));
+        assert_eq!(
+            std::fs::read(pasta.path().join("a.jpg")).unwrap(),
+            b"bytes de a"
+        );
+        assert_eq!(
+            std::fs::read(pasta.path().join("b.jpg")).unwrap(),
+            b"marcada de b"
+        );
+        let reveladas: Vec<_> = site
+            .pedidos
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|p| p.0.clone())
+            .collect();
+        assert_eq!(reveladas, ["a"], "a não levada não pode passar pelo motor");
+        assert_eq!(*site.marcadas.lock().unwrap(), ["b"]);
+    }
+
+    /// 📖 O fotolivro sai num PDF só, com as fotos na ordem do ensaio, e o
+    /// último recado aponta o arquivo.
+    #[test]
+    fn o_fotolivro_vira_um_pdf() {
+        struct SiteDeFotos;
+        impl RevelaDoSite for SiteDeFotos {
+            fn revelar(
+                &self,
+                _: Sessao,
+                _: String,
+                _: Ajustes,
+                _: CropSettings,
+                _: Option<PathBuf>,
+                _: ExportOptions,
+            ) -> Pronta {
+                Box::pin(async { Ok(jpeg(40, 30)) })
+            }
+            fn previa_marcada(&self, _: Sessao, _: String) -> Pronta {
+                Box::pin(async { Ok(jpeg(30, 40)) })
+            }
+        }
+        fn jpeg(l: u32, a: u32) -> Vec<u8> {
+            let mut bytes = Vec::new();
+            image::DynamicImage::ImageRgb8(image::RgbImage::new(l, a))
+                .write_to(
+                    &mut std::io::Cursor::new(&mut bytes),
+                    image::ImageFormat::Jpeg,
+                )
+                .unwrap();
+            bytes
+        }
+        let pasta = tempfile::tempdir().unwrap();
+        let destino = pasta.path().join("Ensaio.pdf");
+        let fotos: Vec<_> = ["a", "b"]
+            .iter()
+            .enumerate()
+            .map(|(i, id)| FotoDoLivro {
+                origem: Origem::Site {
+                    foto_no_site: id.to_string(),
+                    ajustes: Ajustes::default(),
+                    corte: CropSettings::default(),
+                    original_local: None,
+                    levada: i == 0,
+                },
+                nome: format!("{id}.jpg"),
+                link: Some(format!("https://site/meus-ensaios/g?foto={id}")),
+            })
+            .collect();
+        let (canal, recebe) = std::sync::mpsc::channel();
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(montar_fotolivro(
+                fotos,
+                fotolivro::Capa {
+                    titulo: "Ensaio".into(),
+                    ..Default::default()
+                },
+                destino.clone(),
+                Some(sessao()),
+                Arc::new(AtomicBool::new(false)),
+                canal,
+                Arc::new(CatalogoDeMentira),
+                Arc::new(SiteDeFotos),
+            ));
+        let andamentos: Vec<_> = recebe.try_iter().collect();
+        assert_eq!(terminou(&andamentos), (2, 0, 0));
+        assert!(andamentos
+            .iter()
+            .any(|a| matches!(a, Andamento::Livro { destino: d } if *d == destino)));
+        let pdf = std::fs::read(&destino).unwrap();
+        assert!(pdf.starts_with(b"%PDF"));
+        assert!(!pasta.path().join("Ensaio.pdf.part").exists());
     }
 
     /// A do catálogo continua pelo controller, no mesmo lote.
