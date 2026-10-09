@@ -1,5 +1,15 @@
 [
   {
+    "versao": "0.1.128",
+    "data": "2026-10-09",
+    "titulo": "Desempenho: comparar as APIs gráficas desta máquina com um clique.",
+    "importante": false,
+    "novidades": [
+      "Desempenho (rodapé): botão \"Comparar APIs gráficas\". Ele revela a mesma foto em cada API gráfica do computador (no Windows: DirectX 12, Vulkan e OpenGL, e também a subida da foto para a janela) e salva o resultado no banco sozinho. Leva de 1 a 5 minutos; deixe a Revelação parada enquanto isso."
+    ],
+    "por_que_atualizar": "Para medir, no próprio balcão, se a Revelação ficaria mais rápida em outra API gráfica."
+  },
+  {
     "versao": "0.1.127",
     "data": "2026-10-09",
     "titulo": "Exportar da sessão leva só as fotos marcadas.",
