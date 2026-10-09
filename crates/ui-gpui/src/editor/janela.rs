@@ -914,6 +914,10 @@ pub struct EditorDeFoto {
     /// Densidade (0–100) e difusão (px) da máscara vetorial escolhida.
     densidade_vetorial: Entity<SliderState>,
     difusao_vetorial: Entity<SliderState>,
+    /// O conteúdo do "Preencher caminho…" e a ferramenta do "Contornar
+    /// caminho…" da última vez.
+    conteudo_do_preenchimento_do_caminho: usize,
+    ferramenta_do_contorno: usize,
     /// A miniatura de cada caminho do painel, pela assinatura da geometria.
     miniaturas_dos_caminhos: HashMap<editor_core::vetor::LugarDoCaminho, (u64, Arc<RenderImage>)>,
 }
@@ -1705,6 +1709,8 @@ impl EditorDeFoto {
             densidade_vetorial,
             difusao_vetorial,
             miniaturas_dos_caminhos: HashMap::new(),
+            conteudo_do_preenchimento_do_caminho: 0,
+            ferramenta_do_contorno: 0,
             copiado: None,
             _tarefa_da_transferencia: None,
             historico_no_aperto_da_camada: None,
@@ -5765,6 +5771,8 @@ impl EditorDeFoto {
                 }
                 "mascara" => self.criar_mascara_vetorial(cx),
                 "preencher" => self.preencher_caminho(cx),
+                "dialogo-preencher" => self.abrir_preencher_caminho(window, cx),
+                "dialogo-contornar" => self.abrir_contornar_caminho(cx),
                 "contornar" => self.contornar_caminho(cx),
                 "salvar" => {
                     let nome = partes.get(2..).map(|p| p.join(" ")).unwrap_or_default();

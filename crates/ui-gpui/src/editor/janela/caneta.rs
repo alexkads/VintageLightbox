@@ -104,7 +104,38 @@ pub enum DialogoDoCaminho {
     FazerSelecao(Entity<InputState>),
     /// O nome de um caminho: `None` salva o de trabalho; `Some` renomeia.
     Nome(Option<LugarDoCaminho>, Entity<InputState>),
+    /// "Preencher caminho…": a opacidade (%) e a difusão (px); o conteúdo
+    /// em [`EditorDeFoto::conteudo_do_preenchimento_do_caminho`].
+    Preencher(Entity<InputState>, Entity<InputState>),
+    /// "Contornar caminho…": a ferramenta em
+    /// [`EditorDeFoto::ferramenta_do_contorno`].
+    Contornar,
 }
+
+/// O conteúdo do "Preencher caminho…", como no Photoshop.
+pub const CONTEUDOS_DO_PREENCHIMENTO: [&str; 5] = [
+    "Cor de frente",
+    "Cor de fundo",
+    "Preto",
+    "Branco",
+    "50% cinza",
+];
+
+/// As ferramentas do "Contornar caminho…".
+pub const FERRAMENTAS_DO_CONTORNO: [(&str, editor_core::Ferramenta); 6] = [
+    ("Pincel", editor_core::Ferramenta::Pincel),
+    ("Borracha", editor_core::Ferramenta::Borracha),
+    ("Desfoque", editor_core::Ferramenta::Desfoque),
+    ("Nitidez", editor_core::Ferramenta::Nitidez),
+    (
+        "Subexposição",
+        editor_core::Ferramenta::Subexposicao(editor_core::pincel::Faixa::MeiosTons),
+    ),
+    (
+        "Superexposição",
+        editor_core::Ferramenta::Superexposicao(editor_core::pincel::Faixa::MeiosTons),
+    ),
+];
 
 /// O lado de uma âncora na tela, em pontos.
 const LADO_DA_ANCORA: f32 = 7.0;
@@ -361,6 +392,30 @@ impl EditorDeFoto {
         cx.notify();
     }
 
+    /// "Preencher caminho…" (o diálogo); o botão do painel preenche direto.
+    pub fn abrir_preencher_caminho(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let campo = |valor: String, max: f64, window: &mut Window, cx: &mut Context<Self>| {
+            cx.new(|cx| {
+                InputState::new(window, cx)
+                    .step(1.0)
+                    .min(0.0)
+                    .max(max)
+                    .default_value(valor)
+            })
+        };
+        let opacidade = campo("100".into(), 100.0, window, cx);
+        let difusao = campo("0".into(), 250.0, window, cx);
+        window.focus(&opacidade.focus_handle(cx), cx);
+        self.dialogo_do_caminho = Some(DialogoDoCaminho::Preencher(opacidade, difusao));
+        cx.notify();
+    }
+
+    /// "Contornar caminho…" (o diálogo).
+    pub fn abrir_contornar_caminho(&mut self, cx: &mut Context<Self>) {
+        self.dialogo_do_caminho = Some(DialogoDoCaminho::Contornar);
+        cx.notify();
+    }
+
     /// O nome do caminho: salvar o de trabalho (`None`) ou renomear.
     pub fn abrir_nome_do_caminho(
         &mut self,
@@ -411,6 +466,64 @@ impl EditorDeFoto {
                         self.aviso = Some(("A difusão vai de 0 a 250 px".into(), true));
                         cx.notify();
                     }
+                }
+            }
+            DialogoDoCaminho::Preencher(opacidade, difusao) => {
+                let ler = |c: &Entity<InputState>, cx: &mut Context<Self>| {
+                    c.read(cx)
+                        .value()
+                        .trim()
+                        .replace(',', ".")
+                        .parse::<f32>()
+                        .ok()
+                };
+                let (Some(o), Some(d)) = (ler(&opacidade, cx), ler(&difusao, cx)) else {
+                    self.aviso = Some(("Use números na opacidade e na difusão".into(), true));
+                    cx.notify();
+                    return;
+                };
+                let conteudo = self.conteudo_do_preenchimento_do_caminho;
+                if self.recusar_se_bloqueada("preencher o caminho", cx) {
+                    return;
+                }
+                let mut ok = false;
+                self.na_sessao(cx, |s| {
+                    let cor = match conteudo {
+                        1 => s.pincel.cor_de_fundo,
+                        2 => [0, 0, 0],
+                        3 => [255, 255, 255],
+                        4 => [128, 128, 128],
+                        _ => s.pincel.cor,
+                    };
+                    ok = s.preencher_caminho_com(
+                        cor,
+                        (o / 100.0).clamp(0.0, 1.0),
+                        d.clamp(0.0, 250.0).round() as u32,
+                    );
+                });
+                if !ok {
+                    self.aviso = Some((
+                        "Nada a preencher: escolha um caminho com área e uma camada visível".into(),
+                        true,
+                    ));
+                    cx.notify();
+                }
+            }
+            DialogoDoCaminho::Contornar => {
+                let f = FERRAMENTAS_DO_CONTORNO
+                    .get(self.ferramenta_do_contorno)
+                    .map_or(editor_core::Ferramenta::Pincel, |(_, f)| *f);
+                if self.recusar_se_bloqueada("contornar o caminho", cx) {
+                    return;
+                }
+                let mut ok = false;
+                self.na_sessao(cx, |s| ok = s.contornar_caminho_com(f));
+                if !ok {
+                    self.aviso = Some((
+                        "Nada a contornar: escolha um caminho e uma camada visível".into(),
+                        true,
+                    ));
+                    cx.notify();
                 }
             }
             DialogoDoCaminho::Nome(lugar, campo) => {
@@ -536,6 +649,101 @@ impl EditorDeFoto {
                             .gap(px(8.))
                             .child(div().text_sm().text_color(tema.muted_foreground).child("Operação"))
                             .child(operacoes),
+                    )
+            }
+            DialogoDoCaminho::Preencher(opacidade, difusao) => {
+                let atual = self.conteudo_do_preenchimento_do_caminho;
+                let numero = |id: &'static str, campo: &Entity<InputState>, sufixo: &'static str| {
+                    div()
+                        .w(px(120.))
+                        .debug_selector(move || id.into())
+                        .child(crate::estilo::campo(
+                            NumberInput::new(campo).suffix(div().text_sm().child(sufixo)),
+                        ))
+                };
+                gpui_kit::component::v_flex()
+                    .gap(px(14.))
+                    .child(crate::estilo::cabecalho_do_dialogo(
+                        "Preencher caminho",
+                        "Pinta a área do caminho na camada escolhida (ou na máscara dela), dentro da seleção de agora. O caminho não muda.",
+                        None,
+                        cx,
+                    ))
+                    .child(
+                        ButtonGroup::new("editor-preencher-conteudo")
+                            .xsmall()
+                            .children(CONTEUDOS_DO_PREENCHIMENTO.iter().enumerate().map(|(i, nome)| {
+                                let id: &'static str = [
+                                    "editor-preencher-frente",
+                                    "editor-preencher-fundo",
+                                    "editor-preencher-preto",
+                                    "editor-preencher-branco",
+                                    "editor-preencher-cinza",
+                                ][i];
+                                if atual == i {
+                                    crate::estilo::botao_primario_pequeno(id, cx)
+                                } else {
+                                    crate::estilo::botao_contorno_pequeno(id, cx)
+                                }
+                                .debug_selector(move || id.into())
+                                .label(*nome)
+                                .selected(atual == i)
+                            }))
+                            .on_click(cx.listener(|ed, cliques: &Vec<usize>, _, cx| {
+                                if let Some(i) = cliques.first() {
+                                    ed.conteudo_do_preenchimento_do_caminho = *i;
+                                    cx.notify();
+                                }
+                            })),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(8.))
+                            .child(div().text_sm().text_color(tema.muted_foreground).child("Opacidade"))
+                            .child(numero("editor-preencher-opacidade", opacidade, "%"))
+                            .child(div().text_sm().text_color(tema.muted_foreground).child("Raio de difusão"))
+                            .child(numero("editor-preencher-difusao", difusao, "px")),
+                    )
+            }
+            DialogoDoCaminho::Contornar => {
+                let atual = self.ferramenta_do_contorno;
+                gpui_kit::component::v_flex()
+                    .gap(px(14.))
+                    .child(crate::estilo::cabecalho_do_dialogo(
+                        "Contornar caminho",
+                        "A ferramenta passa pela curva com o tamanho e as opções de agora, na camada escolhida e dentro da seleção.",
+                        None,
+                        cx,
+                    ))
+                    .child(
+                        ButtonGroup::new("editor-contorno-ferramenta")
+                            .xsmall()
+                            .children(FERRAMENTAS_DO_CONTORNO.iter().enumerate().map(|(i, (nome, _))| {
+                                let id: &'static str = [
+                                    "editor-contorno-pincel",
+                                    "editor-contorno-borracha",
+                                    "editor-contorno-desfoque",
+                                    "editor-contorno-nitidez",
+                                    "editor-contorno-subexposicao",
+                                    "editor-contorno-superexposicao",
+                                ][i];
+                                if atual == i {
+                                    crate::estilo::botao_primario_pequeno(id, cx)
+                                } else {
+                                    crate::estilo::botao_contorno_pequeno(id, cx)
+                                }
+                                .debug_selector(move || id.into())
+                                .label(*nome)
+                                .selected(atual == i)
+                            }))
+                            .on_click(cx.listener(|ed, cliques: &Vec<usize>, _, cx| {
+                                if let Some(i) = cliques.first() {
+                                    ed.ferramenta_do_contorno = *i;
+                                    cx.notify();
+                                }
+                            })),
                     )
             }
             DialogoDoCaminho::Nome(lugar, campo) => gpui_kit::component::v_flex()
@@ -1684,6 +1892,8 @@ impl EditorDeFoto {
                                         }
                                     }))
                                     .item(item("editor-caminho-fazer-selecao-menu", "Fazer seleção…", tem_area, |ed, w, cx| ed.abrir_fazer_selecao(w, cx)))
+                                    .item(item("editor-caminho-preencher-menu", "Preencher caminho…", tem_area, |ed, w, cx| ed.abrir_preencher_caminho(w, cx)))
+                                    .item(item("editor-caminho-contornar-menu", "Contornar caminho…", tem_alvo, |ed, _, cx| ed.abrir_contornar_caminho(cx)))
                                     .item(item("editor-caminho-ocultar", "Ocultar o caminho  ⇧⌘H", tem_alvo, |ed, _, cx| ed.escolher_caminho_no_painel(None, cx)))
                                     .separator()
                                     .item(item("editor-caminho-mascara-ligar", "Ligar/desligar a máscara vetorial", true, |ed, _, cx| {
