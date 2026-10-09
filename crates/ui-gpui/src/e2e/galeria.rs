@@ -1319,13 +1319,19 @@ fn exportar_pelo_botao_da_barra(cx: &mut TestAppContext) {
     let pasta = tempfile::TempDir::new().expect("pasta de destino");
 
     e.detalhe(cx, |tela, _w, cx| {
-        tela.marcar_ids(&["id-DSC_101.jpg".into()], cx)
+        tela.marcar_ids(&["id-DSC_101.jpg".into(), "b".into()], cx)
     });
     clicar(&e, cx, "detalhe-exportar");
     e.app(cx, |app, _w, cx| {
         assert!(app.exportando(), "o modal abriu");
         let modal = app.exportacao_para_teste();
-        assert!(modal.read(cx).quantas() >= 1);
+        // 🚨 As marcadas da grade, e só elas: até 09/out/2026 ia a seleção da
+        // Biblioteca — 5 marcadas na sessão viravam "Exportar 31 fotos".
+        assert_eq!(
+            modal.read(cx).quantas(),
+            2,
+            "o modal não abriu com as marcadas"
+        );
         let destino = pasta.path().to_path_buf();
         modal.update(cx, |tela, cx| {
             tela.escolher_pasta_para_teste(destino, cx);
@@ -1370,6 +1376,7 @@ fn exportar_pelo_botao_da_barra(cx: &mut TestAppContext) {
     e.esperar(cx);
     let pedidos = e.exportador.pedidos();
     assert_eq!(pedidos.len(), 1, "um lote");
+    assert_eq!(pedidos[0].len(), 2, "o lote levou outras além das marcadas");
     assert!(pedidos[0]
         .iter()
         .all(|s| s.destino.starts_with(pasta.path())));

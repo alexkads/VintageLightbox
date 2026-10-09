@@ -2881,7 +2881,7 @@ impl Aplicativo {
             }
             DetalhePedido::TelaDoCliente => self.alternar_cliente(cx),
             DetalhePedido::PoliticaDeRetencao => self.ir_para(Tela::Retencao, window, cx),
-            DetalhePedido::Exportar => self.exportar(cx),
+            DetalhePedido::Exportar(ids) => self.exportar_da_sessao(ids, cx),
             // 🔑 **A importação da sessão grava no catálogo local**, e as fotos
             // só aparecem depois desta releitura — a porta do acervo é daqui.
             // Chega a cada foto importada: agrupada, como as outras.
@@ -5373,6 +5373,19 @@ impl Aplicativo {
             selecionadas
         };
 
+        self.abrir_a_exportacao(fotos, cx);
+    }
+
+    /// Abre a exportação com as fotos que a grade da sessão mandou — as
+    /// marcadas dela, e não a seleção da Biblioteca, que nada tem a ver.
+    fn exportar_da_sessao(&mut self, ids: &[String], cx: &mut Context<Self>) {
+        if !self.pode_trabalhar() {
+            return;
+        }
+        let fotos = self.biblioteca.read(cx).fotos_dos_ids(ids);
+        if fotos.is_empty() {
+            return;
+        }
         self.abrir_a_exportacao(fotos, cx);
     }
 
@@ -11577,13 +11590,19 @@ mod testes {
         janela
             .update(cx, |app, window, cx| {
                 assert!(!app.exportando(), "a exportação começa fechada");
-                app.atender_a_sessao(&DetalhePedido::Exportar, window, cx);
-                assert!(app.exportando(), "o pedido da sessão não abriu a exportação");
+                // 🚨 A Biblioteca não tem nada marcado; a sessão marcou uma. Até
+                // 09/out/2026 iam as duas — "Exportar 31 fotos" com 5 marcadas.
+                let uma = app.biblioteca.read(cx).fotos_visiveis()[1].id.clone();
+                app.atender_a_sessao(&DetalhePedido::Exportar(vec![uma]), window, cx);
+                assert!(
+                    app.exportando(),
+                    "o pedido da sessão não abriu a exportação"
+                );
                 app.exportacao.update(cx, |tela, _cx| {
                     assert_eq!(
                         tela.quantas(),
-                        2,
-                        "sem seleção, vai o que a grade está mostrando — como o botão da barra fazia"
+                        1,
+                        "a exportação levou outra coisa que não as marcadas da sessão"
                     );
                 });
             })

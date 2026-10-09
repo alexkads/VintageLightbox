@@ -897,6 +897,19 @@ impl Biblioteca {
             .collect()
     }
 
+    /// As fotos destes ids (os da grade da sessão, com ou sem o prefixo das
+    /// do site), **na ordem pedida** — o que a exportação da sessão leva.
+    pub fn fotos_dos_ids(&self, ids: &[String]) -> Vec<PhotoViewModel> {
+        let prefixo = crate::revelacao::persistencia::PREFIXO_DO_SITE;
+        ids.iter()
+            .filter_map(|id| {
+                let do_site = format!("{prefixo}{id}");
+                self.fotos.iter().find(|f| f.id == *id || f.id == do_site)
+            })
+            .cloned()
+            .collect()
+    }
+
     /// As fotos da seleção múltipla, **na ordem do acervo**.
     ///
     /// Vazio quando ninguém marcou nada com `Cmd`/`Shift` — e é o que faz a

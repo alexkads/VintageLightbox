@@ -367,7 +367,11 @@ pub enum Pedido {
     /// 🔑 **A tela não escolhe as fotos**, como não escolhe nada que atravesse
     /// para fora dela: quem sabe o que a grade tem marcado, e o que sobra
     /// quando nada está, é a raiz.
-    Exportar,
+    ///
+    /// 🚨 **Leva os ids da grade** (as marcadas, ou o recorte em vigor quando
+    /// nada está marcado): até 09/out/2026 ia vazio, e a raiz exportava a
+    /// seleção da *Biblioteca* — 5 marcadas aqui viravam "Exportar 31 fotos".
+    Exportar(Vec<String>),
     /// ⚠️ Um aviso de gesto recusado em parte — a `Notification` do gpui-kit,
     /// que a raiz empurra (só ela tem a `Window`).
     ///
@@ -1381,6 +1385,17 @@ impl Detalhe {
             .marcadas()
             .filter_map(|p| self.acervo.visivel(p).map(|f| f.id.clone()))
             .collect()
+    }
+
+    /// O que o "Exportar" leva: as marcadas, ou o recorte em vigor quando
+    /// nada está marcado — a mesma regra da Biblioteca.
+    pub fn a_exportar(&self) -> Vec<String> {
+        let marcadas = self.marcadas();
+        if marcadas.is_empty() {
+            self.ids_visiveis()
+        } else {
+            marcadas
+        }
     }
 
     /// Marca estas fotos (ids da grade) — a seleção que volta da Revelação.
@@ -5610,7 +5625,9 @@ impl Detalhe {
                     .child(Icon::new(Icone::FolderInput).size(px(14.)))
                     .child("Exportar")
                     .when(!(sem_sessao || visiveis == 0), |b| {
-                        b.on_click(cx.listener(|_tela, _ev, _window, cx| cx.emit(Pedido::Exportar)))
+                        b.on_click(cx.listener(|tela, _ev, _window, cx| {
+                            cx.emit(Pedido::Exportar(tela.a_exportar()))
+                        }))
                     }),
                 sem_sessao || visiveis == 0,
             ))
@@ -11166,13 +11183,13 @@ mod testes {
         entrar(cx, &janela);
 
         let tela = janela.root(cx).expect("a raiz da janela");
-        let pedidos = Arc::new(std::sync::Mutex::new(0usize));
+        let pedidos: Arc<std::sync::Mutex<Vec<Vec<String>>>> = Default::default();
         let _inscricao = cx.update({
             let pedidos = pedidos.clone();
             move |cx| {
                 cx.subscribe(&tela, move |_tela, pedido: &Pedido, _cx| {
-                    if matches!(pedido, Pedido::Exportar) {
-                        *pedidos.lock().expect("os pedidos") += 1;
+                    if let Pedido::Exportar(ids) = pedido {
+                        pedidos.lock().expect("os pedidos").push(ids.clone());
                     }
                 })
             }
@@ -11182,12 +11199,24 @@ mod testes {
 
         assert_eq!(
             *pedidos.lock().expect("os pedidos"),
-            1,
-            "o clique no Exportar não virou pedido à raiz"
+            vec![vec!["a".to_string(), "b".to_string()]],
+            "sem marcada, o Exportar leva o recorte em vigor"
         );
         assert!(
             gasto < ORCAMENTO_DE_UM_QUADRO,
             "pedir a exportação custou {gasto:?}, mais que um quadro"
+        );
+
+        // 🚨 Com marcada, vai só ela — até 09/out/2026 o pedido ia vazio e a
+        // raiz exportava a seleção da Biblioteca (5 marcadas, "Exportar 31").
+        janela
+            .update(cx, |tela, _w, cx| tela.marcar_ids(&["b".to_string()], cx))
+            .unwrap();
+        clicar(cx, &janela, "detalhe-exportar");
+        assert_eq!(
+            pedidos.lock().expect("os pedidos").last(),
+            Some(&vec!["b".to_string()]),
+            "o Exportar não levou as marcadas da grade"
         );
     }
 

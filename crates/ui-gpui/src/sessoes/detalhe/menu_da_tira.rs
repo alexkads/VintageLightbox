@@ -176,7 +176,9 @@ pub(super) fn montar(
             "Exportar…".to_string()
         })
         .icon(Icon::new(Icone::FolderInput))
-        .on_click(com(&tela, |_tela, _w, cx| cx.emit(Pedido::Exportar))),
+        .on_click(com(&tela, |tela, _w, cx| {
+            cx.emit(Pedido::Exportar(tela.a_exportar()))
+        })),
     );
 
     // ── O balcão ──────────────────────────────────────────────────────
