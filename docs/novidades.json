@@ -1,14 +1,14 @@
 {
-  "versao": "0.1.125",
-  "titulo": "Editor: tratamento de pele do Photoshop (separação de frequências, Dodge & Burn, Pincel misturador) e a Caneta.",
+  "versao": "0.1.126",
+  "titulo": "Editor: Caneta de curvatura, Caneta de forma livre, camadas de forma e transformar caminho.",
   "importante": false,
   "novidades": [
-    "Editor: Filtro › Tratamento de pele › Separação de frequências. Divide a foto em baixa (tom e cor) e alta (textura) em duas camadas que recompõem a foto exatamente igual; o raio é em pixels da foto e há prévia da baixa, da alta, da recomposta e do antes.",
-    "Editor: painel Pele (ao lado de Camadas): escolher retocar no tom ou na textura, ver cada frequência sozinha ou o original, e a intensidade do tratamento — onde nada foi retocado a foto continua igual.",
-    "Editor: na textura, o Carimbo e o Pincel de recuperação copiam só os poros, sem levar a cor de outro lugar; no tom, \"Suavizar tons…\" alisa manchas só com a pele selecionada, sem puxar cabelo, olhos ou fundo.",
-    "Editor: Dodge & Burn: duas camadas que clareiam e escurecem só a luz (sem mudar a cor), pintadas de leve com pincel macio. Tudo continua editável depois de salvar e reabrir.",
-    "Editor: Pincel misturador (B, ⇧B): mistura a cor carregada com a da foto, com umidade, carga e mistura.",
-    "Editor: a Caneta (P): caminhos com retas e curvas, painel Caminhos, fazer seleção pelo caminho e máscara vetorial."
+    "Editor: Caneta de curvatura (⇧P depois do P): cada clique põe um ponto por onde a curva passa lisa; duplo clique ou ⌥ faz canto; arrastar um ponto o move e a curva se refaz.",
+    "Editor: Caneta de forma livre (⇧P): desenhe à mão e o traço vira curvas editáveis; \"Ajuste da curva\" na barra escolhe o quanto ele segue a mão.",
+    "Editor: modo Forma na barra da Caneta: o desenho vira uma camada de forma com a cor de frente, que continua editável; ⇧ soma à forma escolhida. Camada › Nova camada de preenchimento: Cor sólida.",
+    "Editor: ⌘T com as setas de caminho transforma o caminho (mover, girar, escalar) na mesma caixa do Transformação livre.",
+    "Editor: Seleção direta: arrastar o meio de uma curva a dobra, como no Photoshop.",
+    "Editor: máscara vetorial com densidade e difusão nas Propriedades; miniaturas no painel Caminhos; Preencher caminho… e Contornar caminho… com opções."
   ],
-  "por_que_atualizar": "Para retocar pele no editor do jeito do Photoshop, sem perder a textura nem o volume do rosto."
+  "por_que_atualizar": "Para recortar e desenhar formas no editor com as Canetas do Photoshop."
 }
