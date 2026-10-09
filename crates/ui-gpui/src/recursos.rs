@@ -192,6 +192,7 @@ pub enum Icone {
     Spline,
     // A Caneta e as setas de caminho (Seleção de caminho, Seleção direta).
     PenTool,
+    PenLine,
     MousePointer,
     MousePointer2,
     Pentagon,
@@ -341,6 +342,7 @@ impl Icone {
         Icone::RectangleHorizontal,
         Icone::Spline,
         Icone::PenTool,
+        Icone::PenLine,
         Icone::MousePointer,
         Icone::MousePointer2,
         Icone::Pentagon,
@@ -485,6 +487,7 @@ impl Icone {
             Icone::RectangleHorizontal => "rectangle-horizontal",
             Icone::Spline => "spline",
             Icone::PenTool => "pen-tool",
+            Icone::PenLine => "pen-line",
             Icone::MousePointer => "mouse-pointer",
             Icone::MousePointer2 => "mouse-pointer-2",
             Icone::Pentagon => "pentagon",

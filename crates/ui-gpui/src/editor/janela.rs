@@ -915,8 +915,7 @@ pub struct EditorDeFoto {
     densidade_vetorial: Entity<SliderState>,
     difusao_vetorial: Entity<SliderState>,
     /// A miniatura de cada caminho do painel, pela assinatura da geometria.
-    miniaturas_dos_caminhos:
-        HashMap<editor_core::vetor::LugarDoCaminho, (u64, Arc<RenderImage>)>,
+    miniaturas_dos_caminhos: HashMap<editor_core::vetor::LugarDoCaminho, (u64, Arc<RenderImage>)>,
 }
 
 fn slider(
@@ -5748,6 +5747,7 @@ impl EditorDeFoto {
                     "adicionar" => FV::AdicionarPonto,
                     "excluir" => FV::ExcluirPonto,
                     "converter" => FV::ConverterPonto,
+                    "curvatura" => FV::Curvatura,
                     "caminho" => FV::SelecaoDeCaminho,
                     "direta" => FV::SelecaoDireta,
                     _ => FV::Caneta,
@@ -6746,7 +6746,12 @@ impl EditorDeFoto {
                             {
                                 // A Caneta e as setas de caminho: o ⌘ é da
                                 // Seleção direta, não da guia.
-                                ed.apertar_vetorial(evento.position, evento.modifiers, cx);
+                                ed.apertar_vetorial(
+                                    evento.position,
+                                    evento.modifiers,
+                                    evento.click_count,
+                                    cx,
+                                );
                             } else if !ed.transformando()
                                 && !ed.liquidificando()
                                 && ed.pegar_guia(evento.position, evento.modifiers, cx)

@@ -267,6 +267,15 @@ pub const FERRAMENTAS: &[DefDeFerramenta] = &[
         "Clique faz canto, arraste faz curva; clique no primeiro ponto fecha. ⌘ seleção direta, ⌥ converte, ⇧ 45°; Enter termina aberto",
     ),
     def(
+        Item::P(FV::Curvatura),
+        12,
+        Some('p'),
+        Icone::PenLine,
+        "editor-caneta-de-curvatura",
+        "Caneta de curvatura",
+        "Clique põe um ponto por onde a curva passa lisa; duplo clique ou ⌥ faz canto; arraste um ponto para movê-lo; clique no primeiro fecha",
+    ),
+    def(
         Item::P(FV::AdicionarPonto),
         12,
         None,
@@ -969,12 +978,12 @@ mod testes {
             def_de(&Item::A(Auxiliar::GirarVista)).map(|d| d.grupo)
         );
         assert_eq!(da_letra('j').count(), 3);
-        // A Caneta é a única do grupo com P (as de ponto não têm letra); A
+        // P anda na Caneta e na de curvatura (as de ponto não têm letra); A
         // anda nas duas setas de caminho.
-        assert_eq!(da_letra('p').count(), 1);
+        assert_eq!(da_letra('p').count(), 2);
         assert_eq!(letra_de(&Item::P(FV::AdicionarPonto)), None);
         assert_eq!(da_letra('a').count(), 2);
-        assert_eq!(do_grupo(12).count(), 4);
+        assert_eq!(do_grupo(12).count(), 5);
         assert_eq!(letra_de(&Item::F(Ferramenta::Desfoque)), None);
         assert_eq!(
             letra_de(&Item::F(Ferramenta::Subexposicao(Faixa::Realces))),

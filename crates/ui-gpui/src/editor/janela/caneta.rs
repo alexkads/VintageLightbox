@@ -118,6 +118,7 @@ pub fn modificadores(m: gpui_kit::Modifiers) -> Modificadores {
         shift: m.shift,
         alt: m.alt,
         comando: m.secondary(),
+        duplo: false,
     }
 }
 
@@ -194,13 +195,17 @@ impl EditorDeFoto {
         &mut self,
         posicao: Point<Pixels>,
         m: gpui_kit::Modifiers,
+        cliques: usize,
         cx: &mut Context<Self>,
     ) {
         let Some(p) = self.na_foto_sem_limite(posicao) else {
             return;
         };
         let medida = self.medida_vetorial();
-        let mods = modificadores(m);
+        let mods = Modificadores {
+            duplo: cliques >= 2,
+            ..modificadores(m)
+        };
         self.ponteiro = Some(posicao);
         self.na_sessao(cx, |s| {
             s.caneta_apertar(ponto(p), mods, medida);
@@ -809,6 +814,11 @@ impl EditorDeFoto {
         );
         v.push(separador());
         match f {
+            FerramentaVetorial::Curvatura => {
+                v.push(rotulo(
+                    "Clique: ponto liso · duplo clique ou ⌥: canto · arraste um ponto para movê-lo",
+                ));
+            }
             FerramentaVetorial::Caneta => {
                 v.push(self.marcar_da_caneta(
                     "editor-caneta-auto",
@@ -1080,15 +1090,23 @@ impl EditorDeFoto {
                 linhas.push(pontos);
             }
         }
-        // A faixa elástica: o próximo segmento até o ponteiro.
-        if let Some(seg) = sessao.caneta.previa(c, window.modifiers().shift) {
-            let pontos: Vec<(f32, f32)> = (0..=32)
-                .map(|k| {
-                    let q = geometria::avaliar(&seg, k as f64 / 32.0);
-                    tela.p(q.x as f32, q.y as f32)
-                })
-                .collect();
-            v.push(traco(vec![pontos], 1.0, cor.opacity(0.7)));
+        // A faixa elástica: o próximo segmento até o ponteiro (na Caneta de
+        // curvatura, os dois que o ponto novo dobraria).
+        let previa: Vec<Vec<(f32, f32)>> = sessao
+            .caneta
+            .previa(c, window.modifiers().shift)
+            .iter()
+            .map(|seg| {
+                (0..=32)
+                    .map(|k| {
+                        let q = geometria::avaliar(seg, k as f64 / 32.0);
+                        tela.p(q.x as f32, q.y as f32)
+                    })
+                    .collect()
+            })
+            .collect();
+        if !previa.is_empty() {
+            v.push(traco(previa, 1.0, cor.opacity(0.7)));
         }
         if !linhas.is_empty() {
             v.push(traco(linhas, aparencia.espessura, cor));
@@ -1219,6 +1237,7 @@ impl EditorDeFoto {
             Acao::MoverAncoras(_) => ("▪", "mover ponto"),
             Acao::MoverComponente(_) => ("▣", "mover componente"),
             Acao::DobrarSegmento { .. } => ("◠", "dobrar a curva"),
+            Acao::AlternarCanto(_) => ("⌃", "canto ou suave"),
             Acao::Continuar { .. } | Acao::Retangulo | Acao::Nada | Acao::Encerrar => return None,
         };
         let ponteiro = self.ponteiro? - self.palco.origin;
@@ -1379,7 +1398,12 @@ impl EditorDeFoto {
         if doc.caminhos.trabalho.is_some() {
             lugares.push(LugarDoCaminho::Trabalho);
         }
-        lugares.extend(doc.caminhos.nomeados.iter().map(|c| LugarDoCaminho::Nomeado(c.id)));
+        lugares.extend(
+            doc.caminhos
+                .nomeados
+                .iter()
+                .map(|c| LugarDoCaminho::Nomeado(c.id)),
+        );
         lugares.extend(
             doc.camadas
                 .iter()
