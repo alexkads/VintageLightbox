@@ -559,11 +559,8 @@ mod testes {
     /// As três opções da área de amostragem do Photoshop.
     #[test]
     fn as_opcoes_da_amostragem() {
-        let destino = Selecao::da_forma(
-            400,
-            300,
-            &Forma::Elipse(Retangulo::novo(150, 100, 100, 80)),
-        );
+        let destino =
+            Selecao::da_forma(400, 300, &Forma::Elipse(Retangulo::novo(150, 100, 100, 80)));
         let auto = amostragem_de(OpcaoDeAmostragem::Automatica, &destino);
         let ret = amostragem_de(OpcaoDeAmostragem::Retangular, &destino);
         let nada = amostragem_de(OpcaoDeAmostragem::Personalizada, &destino);
