@@ -475,6 +475,11 @@ mod a_moldura_manda {
     /// a armadilha voltou das outras vezes.
     const COM_MOTIVO: &[(&str, &str)] = &[
         (
+            "editor/janela/navegador.rs",
+            "a miniatura é `absolute` dentro de uma caixa `overflow_hidden`, com \
+             `Contain`: o tamanho dela não entra no layout da doca (0.1.123)",
+        ),
+        (
             "cliente.rs",
             "a moldura é `cabe_em(janela, foto)` — já tem a proporção da foto",
         ),
