@@ -414,6 +414,10 @@ pub fn montar_sessao(
 
 /// O "Copiar relatório": texto para colar numa conversa ou num chamado.
 pub fn texto(sessao: &SessaoDeDesempenho) -> String {
+    // A comparação das APIs tem relatório próprio: não há quadros nem etapas.
+    if let Some(texto) = super::comparacao::texto(sessao) {
+        return texto;
+    }
     let c = &sessao.cabecalho;
     let mut t = String::new();
     let _ = writeln!(

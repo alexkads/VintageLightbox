@@ -600,6 +600,7 @@ impl Aplicativo {
                     "iniciar" => painel.update(cx, |p, cx| p.iniciar(cx)),
                     "parar" => painel.update(cx, |p, cx| p.parar(cx)),
                     "salvar" => painel.update(cx, |p, cx| p.salvar_pelo_roteiro(cx)),
+                    "comparar" => painel.update(cx, |p, cx| p.comparar_apis(cx)),
                     // `desempenho foto 03-painel` — fotografa a janela do painel.
                     foto if foto.starts_with("foto ") => {
                         let nome = foto.trim_start_matches("foto ").trim().to_string();

@@ -74,6 +74,19 @@ async fn main() {
             ));
         }
     }
+    // 📊 `--comparar-apis <arquivo>`: a comparação das APIs gráficas que a
+    // janela Desempenho pede (`desempenho::comparacao`). Num processo à parte
+    // porque abre drivers que o app não usa, e um driver ruim derruba quem o
+    // carregou; sai antes da janela e do catálogo, como o `--recuperar`.
+    {
+        let args: Vec<String> = std::env::args().collect();
+        if args
+            .iter()
+            .any(|a| a == ui_gpui::desempenho::comparacao::ARGUMENTO)
+        {
+            std::process::exit(ui_gpui::desempenho::comparacao::rodar_pela_linha_de_comando(&args));
+        }
+    }
     // 🧯 O panic vai para o depósito **antes** de qualquer coisa — janela,
     // catálogo, rede. Um panic na abertura também fica registrado, e sobe
     // quando a conta entrar (`telemetria`).
