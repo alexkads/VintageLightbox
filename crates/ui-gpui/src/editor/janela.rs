@@ -36,6 +36,7 @@ mod aparencia;
 pub mod area_de_trabalho;
 mod camadas;
 pub mod ferramentas;
+pub mod filtro;
 mod mascara_e_cadeados;
 mod menus;
 mod opcoes;
@@ -810,6 +811,8 @@ pub struct EditorDeFoto {
     /// A miniatura da fotografia base — a linha "Fundo" das Camadas. Feita
     /// uma vez: a base não muda (C28).
     miniatura_do_fundo: Option<Arc<RenderImage>>,
+    /// O diálogo de Filtro › Desfoque gaussiano / Máscara de nitidez.
+    filtro: filtro::Estado,
     /// Um preenchimento por conteúdo calculando em segundo plano.
     preenchendo: bool,
     _tarefa_do_preenchimento: Option<Task<()>>,
@@ -996,6 +999,7 @@ impl EditorDeFoto {
         let campo_do_zoom = cx.new(|cx| InputState::new(window, cx));
         let campo_do_giro = campo_numerico("0", -180.0, 180.0, window, cx);
         let campo_da_opacidade_da_camada = campo_numerico("100", 0.0, 100.0, window, cx);
+        let estado_do_filtro = filtro::Estado::novo(window, cx);
         let rgb_do_painel =
             [0u8, 1, 2].map(|i| slider(0.0, 255.0, 1.0, pincel.cor[i as usize] as f32, cx));
         let arranjo = area_de_trabalho::ler();
@@ -1632,6 +1636,7 @@ impl EditorDeFoto {
             degrade_em_curso: None,
             miniaturas_das_mascaras: Vec::new(),
             miniatura_do_fundo: None,
+            filtro: estado_do_filtro,
             preenchendo: false,
             _tarefa_do_preenchimento: None,
             _tarefa_da_fotografia: None,
@@ -3747,7 +3752,7 @@ impl EditorDeFoto {
         // O preenchimento é modal: nenhum comando mexe no documento por baixo
         // dele (⌘Z, camadas, seleção) — o que ele aplicaria deixaria de ser o
         // que foi visualizado.
-        if self.area_do_preenchimento.is_some() {
+        if self.area_do_preenchimento.is_some() || self.filtro.aberto.is_some() {
             return;
         }
         // Um comando no meio de um laço poligonal aberto o descarta (a seleção
@@ -5648,6 +5653,23 @@ impl EditorDeFoto {
             "espaco" => match partes.get(1).copied() {
                 Some("segurar") => self.espaco_apertado(cx),
                 _ => self.espaco_solto(cx),
+            },
+            // filtro desfoque|nitidez|raio V|quantidade V|limiar V|visualizar|ok|cancelar|estado
+            "filtro" => match partes.get(1).copied().unwrap_or_default() {
+                "desfoque" => self.abrir_filtro(filtro::Tipo::Desfoque, window, cx),
+                "nitidez" => self.abrir_filtro(filtro::Tipo::Nitidez, window, cx),
+                q @ ("raio" | "quantidade" | "limiar") => {
+                    self.definir_controle_do_filtro(q, numero(2), window, cx)
+                }
+                "visualizar" => self.alternar_visualizar_o_filtro(cx),
+                "ok" => self.confirmar_filtro(window, cx),
+                "cancelar" => self.cancelar_o_filtro(window, cx),
+                _ => eprintln!(
+                    "[roteiro] editor filtro: aberto={:?} controles={:?} previa_pronta={}",
+                    self.filtro_aberto(),
+                    self.filtro_dos_controles(cx),
+                    self.previa_do_filtro_pronta()
+                ),
             },
             "foto" => {
                 let Some(pasta) = pasta else {
@@ -7698,7 +7720,11 @@ impl Render for EditorDeFoto {
         };
         crate::janela::raiz_do_conteudo(div())
             .id("editor-de-foto")
-            .key_context(CONTEXTO)
+            .key_context(if self.filtro.aberto.is_some() {
+                super::CONTEXTO_DO_FILTRO
+            } else {
+                CONTEXTO
+            })
             .track_focus(&self.foco)
             .size_full()
             .flex()
@@ -7762,7 +7788,9 @@ impl Render for EditorDeFoto {
                 }),
             )
             .on_action(cx.listener(|ed, _: &AplicarTransformacao, window, cx| {
-                if ed.tecla_no_flyout("enter", cx) {
+                if ed.filtro.aberto.is_some() {
+                    ed.confirmar_filtro(window, cx)
+                } else if ed.tecla_no_flyout("enter", cx) {
                 } else if ed.dialogo_de_preencher {
                     ed.confirmar_preencher(window, cx)
                 } else if ed.area_do_preenchimento.is_some() {
@@ -7776,7 +7804,9 @@ impl Render for EditorDeFoto {
                 }
             }))
             .on_action(cx.listener(|ed, _: &CancelarTransformacao, window, cx| {
-                if ed.tecla_no_flyout("escape", cx) {
+                if ed.filtro.aberto.is_some() {
+                    ed.cancelar_o_filtro(window, cx)
+                } else if ed.tecla_no_flyout("escape", cx) {
                 } else if ed.dialogo_de_preencher {
                     ed.cancelar_preencher(window, cx)
                 } else if ed.area_do_preenchimento.is_some() {
@@ -7855,6 +7885,7 @@ impl Render for EditorDeFoto {
             .children(modificacao)
             .children(atalhos)
             .children(preencher)
+            .children(self.caixa_do_filtro(window, cx))
     }
 }
 

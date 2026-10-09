@@ -108,6 +108,10 @@ gpui_kit::actions!(
 /// O contexto de teclas da janela do editor.
 pub const CONTEXTO: &str = "EditorDeFoto";
 
+/// O contexto com o diálogo de um filtro aberto: as teclas do editor não
+/// casam (o diálogo é modal, como no Photoshop) — só Enter (OK) e Esc.
+pub const CONTEXTO_DO_FILTRO: &str = "FiltroDoEditor";
+
 /// O mesmo, fora de campo de texto: a tecla solta (B, E, Z, Espaço…) não pode
 /// comer a letra de quem renomeia uma camada (a regra do `app.rs`).
 const SEM_CAMPO: &str = "EditorDeFoto && !Input";
@@ -176,6 +180,8 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("secondary-0", Encaixar, c),
         KeyBinding::new("secondary-alt-0", UmPorUm, c),
         KeyBinding::new("secondary-1", UmPorUm, c),
+        KeyBinding::new("enter", AplicarTransformacao, Some(CONTEXTO_DO_FILTRO)),
+        KeyBinding::new("escape", CancelarTransformacao, Some(CONTEXTO_DO_FILTRO)),
         KeyBinding::new("secondary-shift-d", Reselecionar, c),
         KeyBinding::new("secondary-l", AjusteNiveis, c),
         KeyBinding::new("secondary-m", AjusteCurvas, c),

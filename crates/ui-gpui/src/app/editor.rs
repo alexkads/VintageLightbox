@@ -4244,6 +4244,77 @@ mod testes {
         assert!(editor.read_with(&ve, |ed, _| ed.sessao().unwrap().selecao().is_some()));
     }
 
+    /// 🌫️ Filtro › Desfoque gaussiano: a prévia troca os pixels sem passo; com
+    /// o diálogo aberto as teclas do editor não valem (B não troca de
+    /// ferramenta, ⌘Z não desfaz); Enter grava um passo e Esc volta a camada.
+    #[gpui_kit::test]
+    fn o_filtro_e_modal_com_previa_e_um_passo(cx: &mut TestAppContext) {
+        use crate::editor::janela::filtro::Tipo;
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        // Camada vazia: o filtro não abre e avisa.
+        editor.update_in(&mut ve, |ed, window, cx| ed.abrir_filtro(Tipo::Desfoque, window, cx));
+        assert!(editor.read_with(&ve, |ed, _| ed.filtro_aberto().is_none()));
+        editor.update(&mut ve, |ed, cx| ed.criar_camada_da_fotografia(cx));
+        for _ in 0..200 {
+            ve.run_until_parked();
+            if !editor.read_with(&ve, |ed, _| ed.criando_a_fotografia()) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        ve.run_until_parked();
+        let pixel = |ve: &VisualTestContext| {
+            editor.read_with(ve, |ed, _| ed.sessao().unwrap().camada_ativa().pixels.clone())
+        };
+        let igual = |a: &editor_core::tiles::CamadaDePixels, b: &editor_core::tiles::CamadaDePixels| {
+            editor_core::operacoes::diferenca(a, b).is_none()
+        };
+        let posicao = |ve: &VisualTestContext| {
+            editor.read_with(ve, |ed, _| ed.sessao().unwrap().historico().posicao())
+        };
+        let (antes, passos) = (pixel(&ve), posicao(&ve));
+        let ferramenta = editor.read_with(&ve, |ed, _| (ed.ferramenta(), ed.auxiliar()));
+
+        editor.update_in(&mut ve, |ed, window, cx| ed.abrir_filtro(Tipo::Desfoque, window, cx));
+        editor.update_in(&mut ve, |ed, window, cx| {
+            ed.definir_controle_do_filtro("raio", 8.0, window, cx)
+        });
+        ve.executor().advance_clock(std::time::Duration::from_millis(200));
+        ve.run_until_parked();
+        assert!(editor.read_with(&ve, |ed, _| ed.previa_do_filtro_pronta()));
+        assert!(ve.debug_bounds("editor-filtro").is_some(), "a caixa do diálogo");
+        let previa = pixel(&ve);
+        assert!(!igual(&previa, &antes), "a prévia desfocou");
+        assert_eq!(posicao(&ve), passos, "a prévia não é passo");
+        ve.simulate_keystrokes("w cmd-z");
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| (ed.ferramenta(), ed.auxiliar())),
+            ferramenta,
+            "W não trocou a ferramenta"
+        );
+        assert_eq!(posicao(&ve), passos);
+        ve.simulate_keystrokes("enter");
+        ve.run_until_parked();
+        assert!(editor.read_with(&ve, |ed, _| ed.filtro_aberto().is_none()));
+        assert_eq!(posicao(&ve), passos + 1);
+        assert!(igual(&pixel(&ve), &previa));
+
+        editor.update_in(&mut ve, |ed, window, cx| ed.abrir_filtro(Tipo::Nitidez, window, cx));
+        ve.run_until_parked();
+        assert!(!igual(&pixel(&ve), &previa), "a prévia da nitidez");
+        ve.simulate_keystrokes("escape");
+        ve.run_until_parked();
+        assert!(editor.read_with(&ve, |ed, _| ed.filtro_aberto().is_none()));
+        assert!(igual(&pixel(&ve), &previa), "o Esc voltou a camada");
+        assert_eq!(posicao(&ve), passos + 1);
+        // Fechado, as teclas voltam.
+        ve.simulate_keystrokes("cmd-z");
+        ve.run_until_parked();
+        assert!(igual(&pixel(&ve), &antes));
+    }
+
     /// 🎨 As duas cores na barra: ⇄ troca (como o X) e o quadradinho volta a
     /// preto e branco (como o D).
     #[gpui_kit::test]

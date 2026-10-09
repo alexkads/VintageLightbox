@@ -53,6 +53,7 @@ struct Estado {
     antes: bool,
     pode_reselecionar: bool,
     reguas: bool,
+    na_mascara: bool,
 }
 
 impl EditorDeFoto {
@@ -81,6 +82,7 @@ impl EditorDeFoto {
             antes: self.mostrando_antes(),
             pode_reselecionar: s.is_some_and(Sessao::pode_reselecionar),
             reguas: self.reguas_ligadas(),
+            na_mascara: self.na_mascara(),
         }
     }
 
@@ -724,6 +726,8 @@ fn menu_filtro(
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
     let e = ed.read(cx).estado_dos_menus();
+    let pode = e.pronta && (e.de_pixels || e.na_mascara);
+    let (ed_d, ed_n) = (ed.clone(), ed.clone());
     m.item(acao(
         ed,
         foco,
@@ -733,6 +737,27 @@ fn menu_filtro(
         Liquidificar,
         e.pronta && e.de_pixels,
     ))
+    .separator()
+    .submenu("Desfoque", window, cx, move |sub, _window, _cx| {
+        sub.item(item(
+            &ed_d,
+            "editor-filtro-desfoque",
+            "Desfoque gaussiano…",
+            None,
+            pode,
+            |ed, window, cx| ed.abrir_filtro(super::filtro::Tipo::Desfoque, window, cx),
+        ))
+    })
+    .submenu("Nitidez", window, cx, move |sub, _window, _cx| {
+        sub.item(item(
+            &ed_n,
+            "editor-filtro-nitidez",
+            "Máscara de nitidez…",
+            None,
+            pode,
+            |ed, window, cx| ed.abrir_filtro(super::filtro::Tipo::Nitidez, window, cx),
+        ))
+    })
 }
 
 fn menu_visualizar(
