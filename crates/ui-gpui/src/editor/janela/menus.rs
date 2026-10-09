@@ -736,7 +736,12 @@ fn menu_filtro(
 ) -> PopupMenu {
     let e = ed.read(cx).estado_dos_menus();
     let pode = e.pronta && (e.de_pixels || e.na_mascara);
-    let (ed_d, ed_n, ed_r, ed_o) = (ed.clone(), ed.clone(), ed.clone(), ed.clone());
+    let com_conjunto = ed
+        .read(cx)
+        .sessao()
+        .is_some_and(|s| s.conjunto_de_pele().is_some());
+    let (ed_d, ed_n, ed_r, ed_o, ed_p) =
+        (ed.clone(), ed.clone(), ed.clone(), ed.clone(), ed.clone());
     m.item(acao(
         ed,
         foco,
@@ -776,6 +781,56 @@ fn menu_filtro(
             pode,
         ))
     })
+    .separator()
+    .submenu(
+        "Tratamento de pele",
+        window,
+        cx,
+        move |sub, _window, _cx| {
+            sub.item(item(
+                &ed_p,
+                "editor-pele-menu-separar",
+                "Separação de frequências…",
+                None,
+                e.pronta,
+                |ed, window, cx| ed.abrir_separacao(false, window, cx),
+            ))
+            .item(item(
+                &ed_p,
+                "editor-pele-menu-regenerar",
+                "Regenerar separação…",
+                None,
+                e.pronta && com_conjunto,
+                |ed, window, cx| ed.abrir_separacao(true, window, cx),
+            ))
+            .separator()
+            .item(item(
+                &ed_p,
+                "editor-pele-menu-suavizar",
+                "Suavizar tons…",
+                None,
+                pode,
+                |ed, window, cx| ed.suavizar_tons(window, cx),
+            ))
+            .item(item(
+                &ed_p,
+                "editor-pele-menu-db",
+                "Dodge & Burn (Curvas em Luminosidade)",
+                None,
+                e.pronta,
+                |ed, _, cx| ed.dodge_and_burn(None, cx),
+            ))
+            .separator()
+            .item(item(
+                &ed_p,
+                "editor-pele-menu-painel",
+                "Painel Tratamento de pele",
+                None,
+                true,
+                |ed, window, cx| ed.mostrar_painel(QualPainel::Pele, window, cx),
+            ))
+        },
+    )
 }
 
 /// Um item de Filtro: abre o diálogo daquele filtro ("…" como no Photoshop).
@@ -949,6 +1004,7 @@ fn menu_janela(
             QualPainel::Navegador => "editor-janela-navegador",
             QualPainel::Info => "editor-janela-info",
             QualPainel::Ajustes => "editor-janela-ajustes",
+            QualPainel::Pele => "editor-janela-pele",
         };
         m = m.item(
             item(ed, id, qual.titulo(), None, true, move |ed, window, cx| {

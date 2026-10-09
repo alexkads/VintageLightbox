@@ -221,9 +221,12 @@ impl EditorDeFoto {
         let opacidade = match f {
             Some(Ferramenta::Subexposicao(_) | Ferramenta::Superexposicao(_)) => Some("Exposição"),
             Some(Ferramenta::Desfoque | Ferramenta::Nitidez) => Some("Força"),
-            Some(Ferramenta::Pincel | Ferramenta::Borracha | Ferramenta::Carimbo) => {
-                Some("Opacidade")
-            }
+            Some(
+                Ferramenta::Pincel
+                | Ferramenta::Borracha
+                | Ferramenta::Carimbo
+                | Ferramenta::Misturador,
+            ) => Some("Opacidade"),
             _ => None,
         };
         if let Some(nome) = opacidade {
@@ -236,9 +239,17 @@ impl EditorDeFoto {
                 cx,
             ));
         }
+        if f == Some(Ferramenta::Misturador) {
+            v.extend(self.opcoes_do_misturador(cx));
+        }
         if matches!(
             f,
-            Some(Ferramenta::Pincel | Ferramenta::Borracha | Ferramenta::Carimbo)
+            Some(
+                Ferramenta::Pincel
+                    | Ferramenta::Borracha
+                    | Ferramenta::Carimbo
+                    | Ferramenta::Misturador
+            )
         ) {
             v.push(self.valor_com_slider(
                 "editor-fluxo",
@@ -306,6 +317,90 @@ impl EditorDeFoto {
             .into_any_element(),
         );
         v
+    }
+
+    /// O Pincel misturador: a ponta (o reservatório sobre a sujeira), os
+    /// botões Carregar e Limpar, umidade, carga e mistura, e as caixas.
+    fn opcoes_do_misturador(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let (m, ponta) = self
+            .sessao()
+            .map(|s| (s.misturador, s.tinta.cor_da_ponta(s.misturador.mistura)))
+            .unwrap_or_default();
+        let cor = ponta.map(|c| gpui_kit::Rgba {
+            r: c[0] as f32 / 255.0,
+            g: c[1] as f32 / 255.0,
+            b: c[2] as f32 / 255.0,
+            a: 1.0,
+        });
+        let borda = aparencia::cores(cx).borda;
+        let amostra = div()
+            .debug_selector(|| "editor-misturador-ponta".into())
+            .flex_shrink_0()
+            .size(px(18.))
+            .rounded(px(3.))
+            .border_1()
+            .border_color(borda)
+            .when_some(cor, |d, c| d.bg(c))
+            .when(cor.is_none(), |d| {
+                d.child(div().text_xs().text_color(borda).child("∅"))
+            });
+        vec![
+            separador_da_faixa(cx).into_any_element(),
+            amostra.into_any_element(),
+            crate::estilo::botao_contorno_pequeno("editor-misturador-carregar", cx)
+                .label("Carregar")
+                .tooltip("Carregar o pincel com a cor de frente")
+                .on_click(cx.listener(|ed, _, _, cx| ed.carregar_o_misturador(true, cx)))
+                .into_any_element(),
+            crate::estilo::botao_contorno_pequeno("editor-misturador-limpar", cx)
+                .label("Limpar")
+                .tooltip("Limpar o pincel (sem tinta e sem sujeira)")
+                .on_click(cx.listener(|ed, _, _, cx| ed.carregar_o_misturador(false, cx)))
+                .into_any_element(),
+            self.caixa_de_marcar(
+                "editor-misturador-carregar-apos",
+                "Carregar a cada traço",
+                m.carregar_apos,
+                |ed, cx| ed.alternar_opcao_do_misturador(0, cx),
+                cx,
+            ),
+            self.caixa_de_marcar(
+                "editor-misturador-limpar-apos",
+                "Limpar a cada traço",
+                m.limpar_apos,
+                |ed, cx| ed.alternar_opcao_do_misturador(1, cx),
+                cx,
+            ),
+            separador_da_faixa(cx).into_any_element(),
+            self.valor_com_slider(
+                "editor-misturador-umidade",
+                "Umidade",
+                format!("{:.0}%", m.umidade * 100.0),
+                &self.pele.umidade,
+                cx,
+            ),
+            self.valor_com_slider(
+                "editor-misturador-carga",
+                "Carga",
+                format!("{:.0}%", m.carga * 100.0),
+                &self.pele.carga,
+                cx,
+            ),
+            self.valor_com_slider(
+                "editor-misturador-mistura",
+                "Mistura",
+                format!("{:.0}%", m.mistura * 100.0),
+                &self.pele.mistura,
+                cx,
+            ),
+            self.caixa_de_marcar(
+                "editor-misturador-todas",
+                "Todas as camadas",
+                m.todas_as_camadas,
+                |ed, cx| ed.alternar_opcao_do_misturador(2, cx),
+                cx,
+            ),
+        ]
     }
 
     /// 100% e Encaixar — a Mão e a Lupa.

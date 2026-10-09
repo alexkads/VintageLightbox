@@ -4048,8 +4048,8 @@ mod testes {
         ve.update(|window, _| window.activate_window());
         assert_eq!(
             editor.read_with(&ve, |ed, cx| ed.paineis_no_dock(cx)).len(),
-            9,
-            "os nove painéis no dock"
+            10,
+            "os dez painéis no dock"
         );
         assert!(ve.debug_bounds("editor-painel-camadas").is_some());
         assert!(ve.debug_bounds("editor-painel-propriedades").is_some());
@@ -4125,7 +4125,7 @@ mod testes {
         let mut no_dock = editor.read_with(&ve, |ed, cx| ed.paineis_no_dock(cx));
         no_dock.sort_by_key(|q| q.nome());
         no_dock.dedup();
-        assert_eq!(no_dock.len(), 9, "os nove, uma vez cada: {no_dock:?}");
+        assert_eq!(no_dock.len(), 10, "os dez, uma vez cada: {no_dock:?}");
         assert!(ve.debug_bounds("editor-painel-camadas").is_some());
     }
 
@@ -4247,6 +4247,113 @@ mod testes {
     /// 🌫️ Filtro › Desfoque gaussiano: a prévia troca os pixels sem passo; com
     /// o diálogo aberto as teclas do editor não valem (B não troca de
     /// ferramenta, ⌘Z não desfaz); Enter grava um passo e Esc volta a camada.
+    /// 🧴 Tratamento de pele pela janela: o diálogo da separação é modal,
+    /// mostra a prévia sem passo, Esc volta tudo, OK é um passo; o painel
+    /// Pele escolhe a frequência, isola e mexe na intensidade.
+    #[gpui_kit::test]
+    fn a_separacao_de_frequencias_pela_janela(cx: &mut TestAppContext) {
+        use editor_core::{Frequencia, VistaDaSeparacao};
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        ve.update(|window, _| window.activate_window());
+        let posicao = |ve: &VisualTestContext| {
+            editor.read_with(ve, |ed, _| ed.sessao().unwrap().historico().posicao())
+        };
+        let camadas = |ve: &VisualTestContext| {
+            editor.read_with(ve, |ed, _| ed.sessao().unwrap().documento().camadas.len())
+        };
+        let esperar = |ve: &mut VisualTestContext| {
+            for _ in 0..300 {
+                ve.executor()
+                    .advance_clock(std::time::Duration::from_millis(100));
+                ve.run_until_parked();
+                if editor.read_with(ve, |ed, _| ed.previa_da_separacao_pronta()) {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            panic!("a prévia não chegou");
+        };
+        let (p0, c0) = (posicao(&ve), camadas(&ve));
+        // Esc: nada fica.
+        editor.update_in(&mut ve, |ed, window, cx| {
+            ed.abrir_separacao(false, window, cx)
+        });
+        esperar(&mut ve);
+        assert!(ve.debug_bounds("editor-separacao").is_some());
+        assert_eq!(camadas(&ve), c0 + 2, "a prévia põe as duas");
+        assert_eq!(posicao(&ve), p0, "sem passo");
+        ve.simulate_keystrokes("escape");
+        ve.run_until_parked();
+        assert!(editor.read_with(&ve, |ed, _| ed.separacao_aberta().is_none()));
+        assert_eq!((camadas(&ve), posicao(&ve)), (c0, p0));
+        // Outra vez, com outro raio e a prévia da alta, e Enter.
+        editor.update_in(&mut ve, |ed, window, cx| {
+            ed.abrir_separacao(false, window, cx)
+        });
+        editor.update_in(&mut ve, |ed, window, cx| {
+            ed.definir_raio_da_separacao(6.0, window, cx)
+        });
+        esperar(&mut ve);
+        editor.update(&mut ve, |ed, cx| {
+            ed.ver_na_separacao(VistaDaSeparacao::Alta, cx)
+        });
+        // Modal: a tecla do editor não chega (B não troca a ferramenta).
+        let ferramenta = editor.read_with(&ve, |ed, _| ed.ferramenta());
+        ve.simulate_keystrokes("e");
+        assert_eq!(editor.read_with(&ve, |ed, _| ed.ferramenta()), ferramenta);
+        ve.simulate_keystrokes("enter");
+        ve.run_until_parked();
+        assert!(editor.read_with(&ve, |ed, _| ed.separacao_aberta().is_none()));
+        assert_eq!((camadas(&ve), posicao(&ve)), (c0 + 2, p0 + 1));
+        editor.read_with(&ve, |ed, _| {
+            let s = ed.sessao().unwrap();
+            assert_eq!(s.frequencia_escolhida(), Some(Frequencia::Alta));
+            assert_eq!(
+                s.documento().camadas[s.conjunto_de_pele().unwrap().0].retoque,
+                Some(editor_core::Retoque::Baixa { raio: 6.0 })
+            );
+            assert_eq!(s.compor().as_raw(), s.base().as_raw(), "recompõe a foto");
+        });
+        // O painel: baixa, isolar, intensidade (um passo ao soltar).
+        editor.update_in(&mut ve, |ed, window, cx| {
+            ed.mostrar_painel(crate::editor::janela::QualPainel::Pele, window, cx)
+        });
+        ve.run_until_parked();
+        assert!(ve.debug_bounds("editor-corpo-pele").is_some());
+        assert!(ve.debug_bounds("editor-pele-intensidade").is_some());
+        editor.update(&mut ve, |ed, cx| ed.retocar_em(Frequencia::Baixa, cx));
+        editor.update(&mut ve, |ed, cx| {
+            ed.ver_o_tratamento(VistaDaSeparacao::Baixa, cx)
+        });
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.sessao().unwrap().vista_da_separacao()),
+            VistaDaSeparacao::Baixa
+        );
+        editor.update(&mut ve, |ed, cx| {
+            ed.mover_intensidade_do_tratamento(0.4, false, cx)
+        });
+        editor.update(&mut ve, |ed, cx| {
+            ed.mover_intensidade_do_tratamento(0.6, true, cx)
+        });
+        assert_eq!(posicao(&ve), p0 + 2);
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed
+                .sessao()
+                .unwrap()
+                .intensidade_do_tratamento()),
+            Some(0.6)
+        );
+        // Dodge & Burn pelo painel: as duas camadas num passo, a máscara do
+        // Clarear com o pincel na mão.
+        editor.update(&mut ve, |ed, cx| ed.dodge_and_burn(None, cx));
+        assert_eq!((camadas(&ve), posicao(&ve)), (c0 + 4, p0 + 3));
+        assert!(editor.read_with(&ve, |ed, _| ed.na_mascara()));
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.ferramenta()),
+            Some(editor_core::Ferramenta::Pincel)
+        );
+    }
+
     #[gpui_kit::test]
     fn o_filtro_e_modal_com_previa_e_um_passo(cx: &mut TestAppContext) {
         use crate::editor::janela::filtro::Tipo;

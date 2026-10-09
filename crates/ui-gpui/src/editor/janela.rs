@@ -43,8 +43,10 @@ mod navegador;
 mod opcoes;
 mod paineis;
 mod painel_do_preenchimento;
+mod pele;
 mod preencher;
 mod reguas;
+pub mod separacao;
 mod status;
 mod transferencia;
 pub use area_de_trabalho::QualPainel;
@@ -86,9 +88,10 @@ use super::{
     Desmarcar, DifundirSelecao, DuplicarCamada, DurezaMaior, DurezaMenor, Encaixar, FecharEditor,
     GrupoB, GrupoE, GrupoG, GrupoH, GrupoI, GrupoJ, GrupoL, GrupoM, GrupoO, GrupoR, GrupoS, GrupoV,
     GrupoW, GrupoZ, InverterSelecao, Liquidificar, MesclarParaBaixo, NovaCamada, PincelMaior,
-    PincelMenor, PreencherPeloConteudo, PreencherSelecao, ProximaDoGrupoG, ProximaDoGrupoJ,
-    ProximaDoGrupoL, ProximaDoGrupoM, ProximaDoGrupoO, RefazerNoEditor, SalvarNoEditor,
-    SegurarAMao, SelecionarTudo, SubirCamada, TransformacaoLivre, TrocarCores, UmPorUm, CONTEXTO,
+    PincelMenor, PreencherPeloConteudo, PreencherSelecao, ProximaDoGrupoB, ProximaDoGrupoG,
+    ProximaDoGrupoJ, ProximaDoGrupoL, ProximaDoGrupoM, ProximaDoGrupoO, RefazerNoEditor,
+    SalvarNoEditor, SegurarAMao, SelecionarTudo, SubirCamada, TransformacaoLivre, TrocarCores,
+    UmPorUm, CONTEXTO,
 };
 use super::{AjustarAsGuias, AlternarGuias, TravarGuias};
 use super::{AjusteCurvas, AjusteMatiz, AjusteNiveis, AlternarReguas, Reselecionar};
@@ -815,6 +818,10 @@ pub struct EditorDeFoto {
     miniatura_do_fundo: Option<Arc<RenderImage>>,
     /// O diálogo de Filtro › Desfoque gaussiano / Máscara de nitidez.
     filtro: filtro::Estado,
+    /// O diálogo "Separação de frequências…".
+    separacao: separacao::Estado,
+    /// O painel Tratamento de pele.
+    pele: pele::Estado,
     /// A miniatura do painel Navegador.
     miniatura_do_navegador: Option<navegador::MiniaturaDoNavegador>,
     /// A caixa exata da seleção (versão da seleção, largura, altura) — o Info.
@@ -1008,6 +1015,8 @@ impl EditorDeFoto {
         let campo_do_giro = campo_numerico("0", -180.0, 180.0, window, cx);
         let campo_da_opacidade_da_camada = campo_numerico("100", 0.0, 100.0, window, cx);
         let estado_do_filtro = filtro::Estado::novo(window, cx);
+        let estado_da_separacao = separacao::Estado::novo(window, cx);
+        let estado_da_pele = pele::Estado::novo(window, cx);
         let rgb_do_painel =
             [0u8, 1, 2].map(|i| slider(0.0, 255.0, 1.0, pincel.cor[i as usize] as f32, cx));
         let arranjo = area_de_trabalho::ler();
@@ -1645,6 +1654,8 @@ impl EditorDeFoto {
             miniaturas_das_mascaras: Vec::new(),
             miniatura_do_fundo: None,
             filtro: estado_do_filtro,
+            separacao: estado_da_separacao,
+            pele: estado_da_pele,
             arrasto_de_guia: None,
             miniatura_do_navegador: None,
             selecao_medida: None,
@@ -3775,7 +3786,10 @@ impl EditorDeFoto {
         // O preenchimento é modal: nenhum comando mexe no documento por baixo
         // dele (⌘Z, camadas, seleção) — o que ele aplicaria deixaria de ser o
         // que foi visualizado.
-        if self.area_do_preenchimento.is_some() || self.filtro.aberto.is_some() {
+        if self.area_do_preenchimento.is_some()
+            || self.filtro.aberto.is_some()
+            || self.separacao.aberto.is_some()
+        {
             return;
         }
         // Um comando no meio de um laço poligonal aberto o descarta (a seleção
@@ -5645,6 +5659,7 @@ impl EditorDeFoto {
                 "borracha" => self.usar(Ferramenta::Borracha, cx),
                 "carimbo" => self.usar(Ferramenta::Carimbo, cx),
                 "recuperacao" => self.usar(Ferramenta::Recuperacao, cx),
+                "misturador" => self.usar(Ferramenta::Misturador, cx),
                 "remendo" => self.usar_auxiliar(Auxiliar::Remendo, cx),
                 "conta-gotas" => self.usar_auxiliar(Auxiliar::ContaGotas, cx),
                 "mover" => self.usar_auxiliar(Auxiliar::Mover, cx),
@@ -5706,6 +5721,46 @@ impl EditorDeFoto {
                     self.area_visivel()
                 );
             }
+            // separacao abrir|regenerar|raio V|origem visivel|camada|ver recomposta|baixa|alta|antes|ok|cancelar|estado
+            "separacao" => match partes.get(1).copied().unwrap_or_default() {
+                "abrir" => self.abrir_separacao(false, window, cx),
+                "regenerar" => self.abrir_separacao(true, window, cx),
+                "raio" => self.definir_raio_da_separacao(numero(2), window, cx),
+                "origem" => self.trocar_a_origem_da_separacao(
+                    if partes.get(2) == Some(&"camada") {
+                        separacao::Origem::Camada
+                    } else {
+                        separacao::Origem::Visivel
+                    },
+                    cx,
+                ),
+                "ver" => self.ver_na_separacao(
+                    match partes.get(2).copied().unwrap_or_default() {
+                        "baixa" => editor_core::VistaDaSeparacao::Baixa,
+                        "alta" => editor_core::VistaDaSeparacao::Alta,
+                        "antes" => editor_core::VistaDaSeparacao::Original,
+                        _ => editor_core::VistaDaSeparacao::Recomposta,
+                    },
+                    cx,
+                ),
+                "ok" => self.confirmar_separacao(window, cx),
+                "cancelar" => self.cancelar_a_separacao(window, cx),
+                _ => eprintln!(
+                    "[roteiro] editor separacao: aberta={:?} raio={} previa_pronta={} camadas={:?} posicao={:?}",
+                    self.separacao_aberta(),
+                    self.raio_da_separacao(cx),
+                    self.previa_da_separacao_pronta(),
+                    self.sessao().map(|s| s
+                        .documento()
+                        .camadas
+                        .iter()
+                        .map(|c| (c.nome.clone(), c.modo.chave(), c.recortada))
+                        .collect::<Vec<_>>()),
+                    self.sessao().map(|s| s.historico().posicao()),
+                ),
+            },
+            // pele baixa|alta|ver X|intensidade V|db|clarear|escurecer|misturador|estado
+            "pele" => self.roteiro_da_pele(&partes, window, cx),
             // filtro desfoque|nitidez|raio V|quantidade V|limiar V|visualizar|ok|cancelar|estado
             "filtro" => match partes.get(1).copied().unwrap_or_default() {
                 "desfoque" => self.abrir_filtro(filtro::Tipo::Desfoque, window, cx),
@@ -5714,9 +5769,10 @@ impl EditorDeFoto {
                 "alta" => self.abrir_filtro(filtro::Tipo::AltaFrequencia, window, cx),
                 "mediana" => self.abrir_filtro(filtro::Tipo::Mediana, window, cx),
                 "ruido" => self.abrir_filtro(filtro::Tipo::Ruido, window, cx),
+                "suavizar" => self.abrir_filtro(filtro::Tipo::SuavizarTons, window, cx),
                 "gaussiana" => self.alternar_opcao_do_ruido(false, cx),
                 "mono" => self.alternar_opcao_do_ruido(true, cx),
-                q @ ("raio" | "quantidade" | "limiar") => {
+                q @ ("raio" | "quantidade" | "limiar" | "intensidade") => {
                     self.definir_controle_do_filtro(q, numero(2), window, cx)
                 }
                 "visualizar" => self.alternar_visualizar_o_filtro(cx),
@@ -7516,6 +7572,7 @@ impl Render for EditorDeFoto {
         self.acompanhar_o_pincel(window, cx);
         self.sincronizar_os_campos(window, cx);
         self.sincronizar_a_transformacao(window, cx);
+        self.sincronizar_a_pele(window, cx);
         self.atualizar_a_previa_do_carimbo();
         self.atualizar_a_lupa(cx);
         self.subir_os_ladrilhos();
@@ -7784,11 +7841,13 @@ impl Render for EditorDeFoto {
         };
         crate::janela::raiz_do_conteudo(div())
             .id("editor-de-foto")
-            .key_context(if self.filtro.aberto.is_some() {
-                super::CONTEXTO_DO_FILTRO
-            } else {
-                CONTEXTO
-            })
+            .key_context(
+                if self.filtro.aberto.is_some() || self.separacao.aberto.is_some() {
+                    super::CONTEXTO_DO_FILTRO
+                } else {
+                    CONTEXTO
+                },
+            )
             .track_focus(&self.foco)
             .size_full()
             .flex()
@@ -7833,6 +7892,7 @@ impl Render for EditorDeFoto {
                 }
             }))
             .on_action(cx.listener(|ed, _: &GrupoB, _, cx| ed.pela_letra('b', false, cx)))
+            .on_action(cx.listener(|ed, _: &ProximaDoGrupoB, _, cx| ed.pela_letra('b', true, cx)))
             .on_action(cx.listener(|ed, _: &GrupoS, _, cx| ed.pela_letra('s', false, cx)))
             .on_action(cx.listener(|ed, _: &GrupoE, _, cx| ed.pela_letra('e', false, cx)))
             .on_action(cx.listener(|ed, _: &GrupoG, _, cx| ed.pela_letra('g', false, cx)))
@@ -7854,6 +7914,8 @@ impl Render for EditorDeFoto {
             .on_action(cx.listener(|ed, _: &AplicarTransformacao, window, cx| {
                 if ed.filtro.aberto.is_some() {
                     ed.confirmar_filtro(window, cx)
+                } else if ed.separacao.aberto.is_some() {
+                    ed.confirmar_separacao(window, cx)
                 } else if ed.tecla_no_flyout("enter", cx) {
                 } else if ed.dialogo_de_preencher {
                     ed.confirmar_preencher(window, cx)
@@ -7870,6 +7932,8 @@ impl Render for EditorDeFoto {
             .on_action(cx.listener(|ed, _: &CancelarTransformacao, window, cx| {
                 if ed.filtro.aberto.is_some() {
                     ed.cancelar_o_filtro(window, cx)
+                } else if ed.separacao.aberto.is_some() {
+                    ed.cancelar_a_separacao(window, cx)
                 } else if ed.tecla_no_flyout("escape", cx) {
                 } else if ed.dialogo_de_preencher {
                     ed.cancelar_preencher(window, cx)
@@ -7953,6 +8017,7 @@ impl Render for EditorDeFoto {
             .children(atalhos)
             .children(preencher)
             .children(self.caixa_do_filtro(window, cx))
+            .children(self.caixa_da_separacao(window, cx))
     }
 }
 

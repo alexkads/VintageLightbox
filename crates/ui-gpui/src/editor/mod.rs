@@ -70,6 +70,7 @@ gpui_kit::actions!(
         ProximaDoGrupoG,
         ProximaDoGrupoO,
         ProximaDoGrupoJ,
+        ProximaDoGrupoB,
         // ⌥⌘G: cria ou libera a máscara de corte da escolhida.
         AlternarMascaraDeCorte,
         // Etapa 16: a área de transferência, o carimbo visível, inverter, a
@@ -243,7 +244,7 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("j", GrupoJ, solta),
         KeyBinding::new("shift-j", ProximaDoGrupoJ, solta),
         KeyBinding::new("b", GrupoB, solta),
-        KeyBinding::new("shift-b", GrupoB, solta),
+        KeyBinding::new("shift-b", ProximaDoGrupoB, solta),
         KeyBinding::new("s", GrupoS, solta),
         KeyBinding::new("shift-s", GrupoS, solta),
         KeyBinding::new("e", GrupoE, solta),

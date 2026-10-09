@@ -24,7 +24,7 @@ use gpui_kit::{
 
 use super::aparencia;
 use super::EditorDeFoto;
-use editor_core::filtros::{filtrada, Filtro, RAIO_MAXIMO};
+use editor_core::filtros::{filtrada_com, Filtro, RAIO_MAXIMO};
 use editor_core::selecao::Selecao;
 use editor_core::tiles::CamadaDePixels;
 
@@ -41,16 +41,20 @@ pub enum Tipo {
     AltaFrequencia,
     Mediana,
     Ruido,
+    /// O desfoque pesado pela seleção, para a baixa frequência (Tratamento
+    /// de pele).
+    SuavizarTons,
 }
 
 impl Tipo {
-    pub const TODOS: [Tipo; 6] = [
+    pub const TODOS: [Tipo; 7] = [
         Tipo::Desfoque,
         Tipo::Nitidez,
         Tipo::Superficie,
         Tipo::AltaFrequencia,
         Tipo::Mediana,
         Tipo::Ruido,
+        Tipo::SuavizarTons,
     ];
 
     pub fn titulo(self) -> &'static str {
@@ -61,6 +65,7 @@ impl Tipo {
             Tipo::AltaFrequencia => "Alta frequência",
             Tipo::Mediana => "Mediana",
             Tipo::Ruido => "Adicionar ruído",
+            Tipo::SuavizarTons => "Suavizar tons",
         }
     }
 
@@ -78,6 +83,8 @@ impl Tipo {
             Tipo::AltaFrequencia => (10.0, 100.0, 0.0),
             Tipo::Mediana => (1.0, 100.0, 0.0),
             Tipo::Ruido => (1.0, 10.0, 0.0),
+            // Manchas de pele num retrato de 24 MP: dezenas de px.
+            Tipo::SuavizarTons => (20.0, 100.0, 0.0),
         }
     }
 
@@ -112,7 +119,9 @@ impl Tipo {
 /// começa deles), como no Photoshop.
 #[derive(Clone, Copy, Debug)]
 struct Lembrado {
-    valores: [(f32, f32, f32); 6],
+    valores: [(f32, f32, f32); 7],
+    /// A intensidade (%) de cada filtro.
+    intensidades: [f32; 7],
     gaussiano: bool,
     monocromatico: bool,
 }
@@ -121,6 +130,7 @@ impl Default for Lembrado {
     fn default() -> Self {
         Self {
             valores: Tipo::TODOS.map(Tipo::padrao),
+            intensidades: [100.0; 7],
             gaussiano: true,
             monocromatico: false,
         }
@@ -139,6 +149,9 @@ pub struct Estado {
     raio: Entity<SliderState>,
     quantidade: Entity<SliderState>,
     limiar: Entity<SliderState>,
+    /// A intensidade (o "Atenuar" do Photoshop), em %: o resultado sobre a
+    /// original, sempre a partir da original.
+    intensidade: Entity<SliderState>,
     pub visualizar: bool,
     /// As opções do Adicionar ruído.
     pub gaussiano: bool,
@@ -190,7 +203,8 @@ impl Estado {
         let raio = novo(0.0, 100.0, 0.1, posicao_do_raio(r), cx);
         let quantidade = novo(1.0, 500.0, 1.0, q, cx);
         let limiar = novo(0.0, 255.0, 1.0, li, cx);
-        let assinaturas = [&raio, &quantidade, &limiar]
+        let intensidade = novo(0.0, 100.0, 1.0, 100.0, cx);
+        let assinaturas = [&raio, &quantidade, &limiar, &intensidade]
             .into_iter()
             .map(|s| {
                 cx.subscribe_in(
@@ -207,6 +221,7 @@ impl Estado {
             raio,
             quantidade,
             limiar,
+            intensidade,
             visualizar: true,
             gaussiano: l.gaussiano,
             monocromatico: l.monocromatico,
@@ -257,6 +272,10 @@ impl EditorDeFoto {
         f.limiar
             .clone()
             .update(cx, |s, cx| s.set_value(limiar, window, cx));
+        let intensidade = l.intensidades[tipo.indice()];
+        f.intensidade
+            .clone()
+            .update(cx, |s, cx| s.set_value(intensidade, window, cx));
         self.filtro.aberto = Some(Aberto {
             tipo,
             original,
@@ -298,7 +317,13 @@ impl EditorDeFoto {
                 gaussiano: self.filtro.gaussiano,
                 monocromatico: self.filtro.monocromatico,
             },
+            Tipo::SuavizarTons => Filtro::SuavizarTons { raio },
         })
+    }
+
+    /// A intensidade dos controles, 0..=1.
+    fn intensidade_do_filtro(&self, cx: &gpui_kit::App) -> f32 {
+        (self.filtro.intensidade.read(cx).value().start() / 100.0).clamp(0.0, 1.0)
     }
 
     /// O roteiro e os testes: um controle pelo valor ("raio" em px,
@@ -314,6 +339,7 @@ impl EditorDeFoto {
             "raio" => (self.filtro.raio.clone(), posicao_do_raio(valor)),
             "quantidade" => (self.filtro.quantidade.clone(), valor),
             "limiar" => (self.filtro.limiar.clone(), valor),
+            "intensidade" => (self.filtro.intensidade.clone(), valor),
             _ => return,
         };
         estado.update(cx, |s, cx| s.set_value(v, window, cx));
@@ -349,13 +375,16 @@ impl EditorDeFoto {
             return;
         }
         let (original, selecao) = (aberto.original.clone(), aberto.selecao.clone());
+        let intensidade = self.intensidade_do_filtro(cx);
         self.filtro._conta = Some(cx.spawn(async move |ed, cx| {
             if !respiro.is_zero() {
                 cx.background_executor().timer(respiro).await;
             }
             let pixels = cx
                 .background_executor()
-                .spawn(async move { filtrada(&original, filtro, selecao.as_deref()) })
+                .spawn(
+                    async move { filtrada_com(&original, filtro, selecao.as_deref(), intensidade) },
+                )
                 .await;
             let _ = ed.update(cx, |ed, cx| {
                 if ed.filtro.geracao != geracao || ed.filtro.aberto.is_none() {
@@ -405,7 +434,12 @@ impl EditorDeFoto {
         // A prévia não está em dia (correndo, ou "Visualizar" desligado): a
         // conta termina aqui.
         if !(self.filtro.visualizar && self.filtro.mostrada == self.filtro.geracao) {
-            let pixels = filtrada(&aberto.original, filtro, aberto.selecao.as_deref());
+            let pixels = filtrada_com(
+                &aberto.original,
+                filtro,
+                aberto.selecao.as_deref(),
+                self.intensidade_do_filtro(cx),
+            );
             if let Some(s) = self.sessao_mut() {
                 s.mostrar_filtro(pixels);
             }
@@ -418,8 +452,10 @@ impl EditorDeFoto {
             self.filtro.quantidade.read(cx).value().start(),
             self.filtro.limiar.read(cx).value().start(),
         );
+        let intensidade = self.filtro.intensidade.read(cx).value().start();
         let l = &mut self.filtro.lembrado;
         l.valores[aberto.tipo.indice()] = valores;
+        l.intensidades[aberto.tipo.indice()] = intensidade;
         l.gaussiano = self.filtro.gaussiano;
         l.monocromatico = self.filtro.monocromatico;
         self.na_sessao(cx, |s| {
@@ -471,6 +507,7 @@ impl EditorDeFoto {
         let raio = tipo.raio(raio_da_posicao(self.filtro.raio.read(cx).value().start()));
         let quantidade = self.filtro.quantidade.read(cx).value().start();
         let limiar = self.filtro.limiar.read(cx).value().start();
+        let intensidade = self.filtro.intensidade.read(cx).value().start();
         let linha = |id: &'static str,
                      rotulo: &'static str,
                      estado: &Entity<SliderState>,
@@ -604,6 +641,20 @@ impl EditorDeFoto {
                     format!("{} níveis", limiar.round() as i32),
                 ))
             })
+            .when(tipo == Tipo::SuavizarTons, |d| {
+                d.child(
+                    div()
+                        .text_xs()
+                        .text_color(c.apagado)
+                        .child("Na baixa frequência: só os pixels selecionados entram na média — selecione a pele sem cabelo, olhos e lábios."),
+                )
+            })
+            .child(linha(
+                "editor-filtro-intensidade",
+                "Intensidade",
+                &self.filtro.intensidade,
+                format!("{}%", intensidade.round() as i32),
+            ))
             .child(
                 div()
                     .flex()

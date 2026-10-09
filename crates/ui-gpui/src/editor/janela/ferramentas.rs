@@ -174,6 +174,15 @@ pub const FERRAMENTAS: &[DefDeFerramenta] = &[
         "⇧ + clique liga com uma reta · [ ] tamanho · { } dureza · números: opacidade, ⇧ + números: fluxo",
     ),
     def(
+        Item::F(Ferramenta::Misturador),
+        6,
+        Some('b'),
+        Icone::Droplet,
+        "editor-misturador",
+        "Pincel misturador",
+        "Mistura a tinta carregada com a cor da tela · umidade, carga e mistura na barra",
+    ),
+    def(
         Item::F(Ferramenta::Carimbo),
         7,
         Some('s'),

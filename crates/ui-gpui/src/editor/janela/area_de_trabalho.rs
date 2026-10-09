@@ -56,7 +56,8 @@ const ESPERA_DA_GRAVACAO_MS: u64 = 400;
 pub const LIMITES_DA_COLUNA: crate::docas::Limites = crate::docas::Limites {
     minimo: 240.0,
     maximo: 560.0,
-    padrao: 300.0,
+    // 340: as quatro abas do grupo das Camadas (com a Pele) cabem.
+    padrao: 340.0,
 };
 
 /// Os painéis do editor.
@@ -71,10 +72,12 @@ pub enum QualPainel {
     Navegador,
     Info,
     Ajustes,
+    /// O Tratamento de pele (separação de frequências, D&B).
+    Pele,
 }
 
 impl QualPainel {
-    pub const TODOS: [QualPainel; 9] = [
+    pub const TODOS: [QualPainel; 10] = [
         QualPainel::Cor,
         QualPainel::Amostras,
         QualPainel::Navegador,
@@ -84,6 +87,7 @@ impl QualPainel {
         QualPainel::Historico,
         QualPainel::Camadas,
         QualPainel::Ajustes,
+        QualPainel::Pele,
     ];
 
     /// 🚨 **O nome é o que o arquivo guarda** — mudá-lo faz a arrumação
@@ -99,6 +103,7 @@ impl QualPainel {
             QualPainel::Navegador => "editor:navegador",
             QualPainel::Info => "editor:info",
             QualPainel::Ajustes => "editor:ajustes",
+            QualPainel::Pele => "editor:pele",
         }
     }
 
@@ -117,6 +122,15 @@ impl QualPainel {
             QualPainel::Navegador => "Navegador",
             QualPainel::Info => "Info",
             QualPainel::Ajustes => "Ajustes",
+            QualPainel::Pele => "Tratamento de pele",
+        }
+    }
+
+    /// O nome na aba (o título inteiro não cabe ao lado de três abas).
+    pub fn aba(self) -> &'static str {
+        match self {
+            QualPainel::Pele => "Pele",
+            q => q.titulo(),
         }
     }
 
@@ -131,6 +145,7 @@ impl QualPainel {
             QualPainel::Navegador => Icone::Map,
             QualPainel::Info => Icone::Info,
             QualPainel::Ajustes => Icone::Contrast,
+            QualPainel::Pele => Icone::Sparkles,
         }
     }
 
@@ -146,6 +161,7 @@ impl QualPainel {
             QualPainel::Navegador => "editor-painel-navegador",
             QualPainel::Info => "editor-painel-info",
             QualPainel::Ajustes => "editor-painel-ajustes",
+            QualPainel::Pele => "editor-painel-pele",
         }
     }
 }
@@ -343,7 +359,7 @@ impl BasePanel for PainelDoEditor {
 
 impl Panel for PainelDoEditor {
     fn title(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        SharedString::from(self.qual.titulo())
+        SharedString::from(self.qual.aba())
     }
 
     fn zoom_control(&self, _cx: &App) -> Option<gpui_kit::component::dock::PanelControl> {
@@ -419,7 +435,9 @@ fn arranjo_padrao(paineis: &[(QualPainel, Entity<PainelDoEditor>)], cx: &App) ->
             DockLayout::tabs()
                 .panel_view(p(QualPainel::Camadas), cx)
                 .panel_view(p(QualPainel::Ajustes), cx)
-                .panel_view(p(QualPainel::Info), cx),
+                .panel_view(p(QualPainel::Info), cx)
+                // Quatro abas só cabem no grupo das Camadas (nomes curtos).
+                .panel_view(p(QualPainel::Pele), cx),
             None,
         )
 }
@@ -508,7 +526,9 @@ pub fn arranjo_gravado(
                     for q in novos.drain(..) {
                         let aqui = match q {
                             QualPainel::Navegador => primeiro,
-                            QualPainel::Info | QualPainel::Ajustes => com_camadas,
+                            QualPainel::Info | QualPainel::Ajustes | QualPainel::Pele => {
+                                com_camadas
+                            }
                             _ => false,
                         };
                         match painel(q).filter(|_| aqui && usados.insert(q)) {
@@ -538,7 +558,7 @@ pub fn arranjo_gravado(
         .filter(|q| {
             matches!(
                 q,
-                QualPainel::Navegador | QualPainel::Info | QualPainel::Ajustes
+                QualPainel::Navegador | QualPainel::Info | QualPainel::Ajustes | QualPainel::Pele
             )
         })
         .filter(|q| !citados.contains(q.nome()))
@@ -960,6 +980,7 @@ impl EditorDeFoto {
                 QualPainel::Navegador => "editor-icone-navegador",
                 QualPainel::Info => "editor-icone-info",
                 QualPainel::Ajustes => "editor-icone-ajustes",
+                QualPainel::Pele => "editor-icone-pele",
             };
             faixa = faixa.child(
                 crate::estilo::botao_icone(id, qual.icone(), 28., 16.)
@@ -989,6 +1010,7 @@ impl EditorDeFoto {
             QualPainel::Navegador => self.painel_do_navegador(cx),
             QualPainel::Info => self.painel_de_info(cx),
             QualPainel::Ajustes => self.painel_de_ajustes(cx),
+            QualPainel::Pele => self.painel_da_pele(cx),
         }
     }
 }
@@ -1011,7 +1033,8 @@ mod testes {
                 "editor:pincel",
                 "editor:historico",
                 "editor:camadas",
-                "editor:ajustes"
+                "editor:ajustes",
+                "editor:pele"
             ]
         );
         for q in QualPainel::TODOS {
