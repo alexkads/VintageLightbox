@@ -460,6 +460,7 @@ impl EditorDeFoto {
                 ]
             }
             Item::A(Auxiliar::ContaGotas | Auxiliar::Lata) => Vec::new(),
+            Item::P(f) => self.opcoes_da_caneta(f, cx),
         }
     }
 

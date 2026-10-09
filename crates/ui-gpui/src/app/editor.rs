@@ -4735,4 +4735,218 @@ mod testes {
             ed.mudar_metodo_do_preenchimento(preenchimento::Metodo::PatchMatch, cx)
         });
     }
+
+    // ------------------------------------------------------------ a Caneta
+
+    fn ancoras(editor: &gpui_kit::Entity<EditorDeFoto>, ve: &VisualTestContext) -> Vec<(f64, f64)> {
+        editor.read_with(ve, |ed, _| {
+            ed.sessao()
+                .and_then(|s| s.caminho_alvo().cloned())
+                .map(|c| {
+                    c.subcaminhos
+                        .iter()
+                        .flat_map(|s| s.ancoras.iter().map(|a| (a.ponto.x, a.ponto.y)))
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+    }
+
+    fn clicar_na_foto(
+        editor: &gpui_kit::Entity<EditorDeFoto>,
+        ve: &mut VisualTestContext,
+        x: f32,
+        y: f32,
+        m: gpui_kit::Modifiers,
+    ) {
+        let p = editor
+            .read_with(ve, |ed, _| ed.ponto_da_foto_na_janela(x, y))
+            .expect("o palco medido");
+        let palco = ve.debug_bounds("palco-do-editor").expect("o palco");
+        assert!(
+            palco.contains(&p),
+            "({x}, {y}) fora do palco: {p:?} em {palco:?}"
+        );
+        ve.simulate_mouse_move(p, None, m);
+        ve.simulate_mouse_down(p, gpui_kit::MouseButton::Left, m);
+        ve.simulate_mouse_up(p, gpui_kit::MouseButton::Left, m);
+        ve.run_until_parked();
+    }
+
+    /// ✒️ **A Caneta pelo teclado e pelo palco, com a vista ampliada,
+    /// deslocada e girada**: P pega a Caneta; cada clique vira uma âncora
+    /// exatamente no ponto da foto debaixo do ponteiro; o clique a 3 pontos da
+    /// tela do primeiro fecha (a tolerância é da tela, não da foto); Delete,
+    /// ⌘Z e ⌘↵ fazem o que o Photoshop faz; A e ⇧A trocam as setas de
+    /// caminho; o caminho não entra na foto.
+    #[gpui_kit::test]
+    fn a_caneta_acerta_os_pontos_com_zoom_deslocamento_e_giro(cx: &mut TestAppContext) {
+        use crate::editor::janela::Item;
+        use editor_core::vetor::caneta::FerramentaVetorial as FV;
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        let nada = gpui_kit::Modifiers::none();
+        ve.simulate_keystrokes("p");
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.item_atual()),
+            Some(Item::P(FV::Caneta))
+        );
+        // Ampliada 3×, deslocada e girada 30°.
+        editor.update(&mut ve, |ed, cx| {
+            ed.ampliar_em_torno(
+                1.3,
+                crate::revelacao::zoom::Ponto { x: 500.0, y: 372.0 },
+                cx,
+            );
+            ed.girar_a_vista(30f32.to_radians(), cx);
+        });
+        ve.run_until_parked();
+        editor.update(&mut ve, |ed, cx| ed.mover_a_foto(-15.0, 10.0, cx));
+        ve.run_until_parked();
+        let foto_antes = editor.read_with(&ve, |ed, _| ed.sessao().unwrap().compor());
+
+        for (x, y) in [(22.0, 16.0), (40.0, 17.0), (37.0, 32.0)] {
+            clicar_na_foto(&editor, &mut ve, x, y, nada);
+        }
+        let a = ancoras(&editor, &ve);
+        assert_eq!(a.len(), 3);
+        for ((x, y), (ex, ey)) in a.iter().zip([(22.0, 16.0), (40.0, 17.0), (37.0, 32.0)]) {
+            assert!((x - ex).abs() < 0.05 && (y - ey).abs() < 0.05, "{a:?}");
+        }
+        // 3 pontos da tela ao lado do primeiro: fecha (a tolerância é de 6
+        // pontos da tela, em qualquer zoom).
+        let perto = editor.read_with(&ve, |ed, _| {
+            let p = ed.ponto_da_foto_na_janela(22.0, 16.0).unwrap();
+            gpui_kit::point(p.x + gpui_kit::px(3.0), p.y)
+        });
+        ve.simulate_mouse_move(perto, None, nada);
+        ve.simulate_mouse_down(perto, gpui_kit::MouseButton::Left, nada);
+        ve.simulate_mouse_up(perto, gpui_kit::MouseButton::Left, nada);
+        ve.run_until_parked();
+        let fechado = editor.read_with(&ve, |ed, _| {
+            ed.sessao().unwrap().caminho_alvo().unwrap().subcaminhos[0].fechado
+        });
+        assert!(fechado, "o clique perto do primeiro fechou");
+        assert_eq!(ancoras(&editor, &ve).len(), 3, "fechar não cria âncora");
+        assert_eq!(
+            editor
+                .read_with(&ve, |ed, _| ed.sessao().unwrap().compor())
+                .as_raw(),
+            foto_antes.as_raw(),
+            "o caminho não entra na foto"
+        );
+
+        // ⌘Z volta o fechamento; ⌘⇧Z o refaz.
+        ve.simulate_keystrokes("cmd-z");
+        ve.run_until_parked();
+        assert!(!editor.read_with(&ve, |ed, _| {
+            ed.sessao().unwrap().caminho_alvo().unwrap().subcaminhos[0].fechado
+        }));
+        ve.simulate_keystrokes("cmd-shift-z");
+        ve.run_until_parked();
+
+        // ⌘↵: a seleção do caminho.
+        ve.simulate_keystrokes("cmd-enter");
+        ve.run_until_parked();
+        let sel = editor.read_with(&ve, |ed, _| ed.sessao().unwrap().selecao().cloned());
+        let sel = sel.expect("⌘↵ fez a seleção");
+        assert_eq!(sel.valor(34, 22), 255);
+        assert_eq!(sel.valor(2, 40), 0);
+
+        // A: a Seleção de caminho (a primeira do grupo, sem outra usada);
+        // ⇧A alterna; A depois volta à última usada.
+        ve.simulate_keystrokes("a");
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.item_atual()),
+            Some(Item::P(FV::SelecaoDeCaminho))
+        );
+        ve.simulate_keystrokes("shift-a");
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.item_atual()),
+            Some(Item::P(FV::SelecaoDireta))
+        );
+        ve.simulate_keystrokes("p a");
+        ve.run_until_parked();
+        assert_eq!(
+            editor.read_with(&ve, |ed, _| ed.item_atual()),
+            Some(Item::P(FV::SelecaoDireta)),
+            "A volta à última usada"
+        );
+        // Seleção direta: arrastar uma âncora com o giro — ela segue o
+        // ponteiro na foto.
+        let de = editor.read_with(&ve, |ed, _| ed.ponto_da_foto_na_janela(40.0, 17.0).unwrap());
+        let ate = editor.read_with(&ve, |ed, _| ed.ponto_da_foto_na_janela(44.0, 22.0).unwrap());
+        ve.simulate_mouse_move(de, None, nada);
+        ve.simulate_mouse_down(de, gpui_kit::MouseButton::Left, nada);
+        ve.run_until_parked();
+        ve.simulate_mouse_move(ate, Some(gpui_kit::MouseButton::Left), nada);
+        ve.run_until_parked();
+        ve.simulate_mouse_up(ate, gpui_kit::MouseButton::Left, nada);
+        ve.run_until_parked();
+        let a = ancoras(&editor, &ve);
+        assert!(
+            (a[1].0 - 44.0).abs() < 0.05 && (a[1].1 - 22.0).abs() < 0.05,
+            "{a:?}"
+        );
+        // A seleção feita antes não mudou com o caminho.
+        let depois = editor.read_with(&ve, |ed, _| ed.sessao().unwrap().selecao().cloned());
+        assert_eq!(depois.as_ref(), Some(&sel));
+        // Setas: a âncora escolhida anda 1 px (10 com ⇧).
+        ve.simulate_keystrokes("right shift-down");
+        ve.run_until_parked();
+        let a = ancoras(&editor, &ve);
+        assert!(
+            (a[1].0 - 45.0).abs() < 0.05 && (a[1].1 - 32.0).abs() < 0.05,
+            "{a:?}"
+        );
+        // Esc solta a escolha; Delete sem nada escolhido não apaga o caminho.
+        ve.simulate_keystrokes("escape backspace");
+        ve.run_until_parked();
+        assert_eq!(ancoras(&editor, &ve).len(), 3);
+    }
+
+    /// O painel Caminhos aparece com o caminho de trabalho, e o "Salvar
+    /// caminho" pelo menu do painel o torna nomeado.
+    #[gpui_kit::test]
+    fn o_painel_caminhos_mostra_e_salva_o_de_trabalho(cx: &mut TestAppContext) {
+        let (_m, editor, mut ve) = editor_aberto(cx);
+        let nada = gpui_kit::Modifiers::none();
+        ve.simulate_keystrokes("p");
+        ve.run_until_parked();
+        for (x, y) in [(5.0, 5.0), (30.0, 5.0), (30.0, 30.0)] {
+            clicar_na_foto(&editor, &mut ve, x, y, nada);
+        }
+        ve.simulate_keystrokes("enter");
+        ve.run_until_parked();
+        let ed = editor.clone();
+        ve.update(|window, cx| {
+            ed.update(cx, |ed, cx| {
+                ed.mostrar_painel(crate::editor::janela::QualPainel::Caminhos, window, cx)
+            })
+        });
+        ve.run_until_parked();
+        assert!(
+            ve.debug_bounds("editor-caminho-0").is_some(),
+            "a linha do de trabalho"
+        );
+        editor.update(&mut ve, |ed, cx| {
+            ed.na_sessao_para_teste(cx, |s| {
+                s.salvar_caminho_de_trabalho("Contorno");
+            })
+        });
+        ve.run_until_parked();
+        let nomes = editor.read_with(&ve, |ed, _| {
+            ed.sessao()
+                .unwrap()
+                .documento()
+                .caminhos
+                .nomeados
+                .iter()
+                .map(|c| c.nome.clone())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(nomes, vec!["Contorno".to_string()]);
+    }
 }

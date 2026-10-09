@@ -31,6 +31,7 @@ use super::aparencia::{self, medida};
 use super::{Auxiliar, EditorDeFoto, Item, TipoDeSelecao};
 use crate::recursos::Icone;
 use editor_core::pincel::Faixa;
+use editor_core::vetor::caneta::FerramentaVetorial as FV;
 use editor_core::Ferramenta;
 
 /// Uma ferramenta da barra.
@@ -245,9 +246,65 @@ pub const FERRAMENTAS: &[DefDeFerramenta] = &[
         "Superexposição",
         "Escurece a faixa de tons escolhida",
     ),
+    // ✒️ Desenho: a Caneta (P) com Adicionar, Excluir e Converter ponto (sem
+    // letra, como no Photoshop); Seleção de caminho e Seleção direta (A).
+    def(
+        Item::P(FV::Caneta),
+        12,
+        Some('p'),
+        Icone::PenTool,
+        "editor-caneta",
+        "Caneta",
+        "Clique faz canto, arraste faz curva; clique no primeiro ponto fecha. ⌘ seleção direta, ⌥ converte, ⇧ 45°; Enter termina aberto",
+    ),
+    def(
+        Item::P(FV::AdicionarPonto),
+        12,
+        None,
+        Icone::CirclePlus,
+        "editor-adicionar-ponto",
+        "Adicionar ponto de ancoragem",
+        "Clique num segmento: a âncora entra sem mudar a curva",
+    ),
+    def(
+        Item::P(FV::ExcluirPonto),
+        12,
+        None,
+        Icone::CircleMinus,
+        "editor-excluir-ponto",
+        "Excluir ponto de ancoragem",
+        "Clique numa âncora: as vizinhas se ligam com as alças delas",
+    ),
+    def(
+        Item::P(FV::ConverterPonto),
+        12,
+        None,
+        Icone::Spline,
+        "editor-converter-ponto",
+        "Converter ponto",
+        "Arraste numa âncora para puxar alças; clique para fazer canto; arraste uma alça para soltá-la da outra",
+    ),
+    def(
+        Item::P(FV::SelecaoDeCaminho),
+        13,
+        Some('a'),
+        Icone::MousePointer,
+        "editor-selecao-de-caminho",
+        "Seleção de caminho",
+        "Escolhe e move componentes inteiros; ⇧ soma, ⌥ + arrasto duplica, Delete exclui",
+    ),
+    def(
+        Item::P(FV::SelecaoDireta),
+        13,
+        Some('a'),
+        Icone::MousePointer2,
+        "editor-selecao-direta",
+        "Seleção direta",
+        "Escolhe e move âncoras e alças; ⇧ soma, arraste no vazio para o retângulo, setas empurram",
+    ),
     def(
         Item::A(Auxiliar::Mao),
-        12,
+        14,
         Some('h'),
         Icone::Hand,
         "editor-mao",
@@ -256,7 +313,7 @@ pub const FERRAMENTAS: &[DefDeFerramenta] = &[
     ),
     def(
         Item::A(Auxiliar::GirarVista),
-        12,
+        14,
         Some('r'),
         Icone::RotateCw,
         "editor-girar-vista",
@@ -265,7 +322,7 @@ pub const FERRAMENTAS: &[DefDeFerramenta] = &[
     ),
     def(
         Item::A(Auxiliar::Zoom),
-        13,
+        15,
         Some('z'),
         Icone::ZoomIn,
         "editor-lupa",
@@ -275,11 +332,11 @@ pub const FERRAMENTAS: &[DefDeFerramenta] = &[
 ];
 
 /// Quantos grupos a barra tem.
-pub const QUANTOS_GRUPOS: usize = 14;
+pub const QUANTOS_GRUPOS: usize = 16;
 
 /// Depois de que grupos vem um separador (as seções da barra do Photoshop:
-/// mover e seleção; medida; retoque e pintura; navegação).
-pub const SEPARADOR_DEPOIS: &[usize] = &[0, 4, 11];
+/// mover e seleção; medida; retoque e pintura; desenho; navegação).
+pub const SEPARADOR_DEPOIS: &[usize] = &[0, 4, 11, 13];
 
 /// A definição de uma ferramenta (a subexposição vale com qualquer faixa).
 pub fn def_de(item: &Item) -> Option<&'static DefDeFerramenta> {
@@ -903,6 +960,12 @@ mod testes {
             def_de(&Item::A(Auxiliar::GirarVista)).map(|d| d.grupo)
         );
         assert_eq!(da_letra('j').count(), 3);
+        // A Caneta é a única do grupo com P (as de ponto não têm letra); A
+        // anda nas duas setas de caminho.
+        assert_eq!(da_letra('p').count(), 1);
+        assert_eq!(letra_de(&Item::P(FV::AdicionarPonto)), None);
+        assert_eq!(da_letra('a').count(), 2);
+        assert_eq!(do_grupo(12).count(), 4);
         assert_eq!(letra_de(&Item::F(Ferramenta::Desfoque)), None);
         assert_eq!(
             letra_de(&Item::F(Ferramenta::Subexposicao(Faixa::Realces))),

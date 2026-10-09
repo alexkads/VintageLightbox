@@ -557,6 +557,83 @@ fn menu_camada(
             ))
         },
     )
+    .submenu("Máscara vetorial", window, cx, {
+        let ed = ed.clone();
+        move |sub, _window, cx| {
+            let (com, ligada, tem_caminho) = ed
+                .read(cx)
+                .sessao()
+                .map(|s| {
+                    let m = s.camada_ativa().mascara_vetorial.as_ref();
+                    (
+                        m.is_some(),
+                        m.is_some_and(|m| m.ativa),
+                        s.caminho_alvo().is_some_and(|c| c.tem_area()),
+                    )
+                })
+                .unwrap_or_default();
+            sub.item(item(
+                &ed,
+                "editor-menu-vetorial-revelar",
+                "Revelar tudo",
+                None,
+                !com,
+                |ed, _, cx| {
+                    ed.na_sessao(cx, |s| {
+                        s.criar_mascara_vetorial_vazia();
+                    })
+                },
+            ))
+            .item(item(
+                &ed,
+                "editor-menu-vetorial-caminho",
+                "Caminho atual",
+                None,
+                !com && tem_caminho,
+                |ed, _, cx| ed.criar_mascara_vetorial(cx),
+            ))
+            .separator()
+            .item(item(
+                &ed,
+                "editor-menu-vetorial-excluir",
+                "Excluir",
+                None,
+                com,
+                |ed, _, cx| {
+                    ed.na_sessao(cx, |s| {
+                        let i = s.ativa();
+                        s.excluir_mascara_vetorial(i);
+                    })
+                },
+            ))
+            .item(item(
+                &ed,
+                "editor-menu-vetorial-ligar",
+                if ligada { "Desativar" } else { "Ativar" },
+                None,
+                com,
+                |ed, _, cx| {
+                    ed.na_sessao(cx, |s| {
+                        let i = s.ativa();
+                        s.alternar_mascara_vetorial(i);
+                    })
+                },
+            ))
+            .item(item(
+                &ed,
+                "editor-menu-vetorial-vinculo",
+                "Vincular ou soltar",
+                None,
+                com,
+                |ed, _, cx| {
+                    ed.na_sessao(cx, |s| {
+                        let i = s.ativa();
+                        s.alternar_vinculo_vetorial(i);
+                    })
+                },
+            ))
+        }
+    })
     .item(acao(
         ed,
         foco,
@@ -949,6 +1026,7 @@ fn menu_janela(
             QualPainel::Navegador => "editor-janela-navegador",
             QualPainel::Info => "editor-janela-info",
             QualPainel::Ajustes => "editor-janela-ajustes",
+            QualPainel::Caminhos => "editor-janela-caminhos",
         };
         m = m.item(
             item(ed, id, qual.titulo(), None, true, move |ed, window, cx| {

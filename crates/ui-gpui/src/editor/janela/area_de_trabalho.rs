@@ -70,11 +70,14 @@ pub enum QualPainel {
     Camadas,
     Navegador,
     Info,
+    /// O painel Caminhos (a Caneta): o de trabalho, os nomeados e a máscara
+    /// vetorial da camada escolhida.
+    Caminhos,
     Ajustes,
 }
 
 impl QualPainel {
-    pub const TODOS: [QualPainel; 9] = [
+    pub const TODOS: [QualPainel; 10] = [
         QualPainel::Cor,
         QualPainel::Amostras,
         QualPainel::Navegador,
@@ -84,6 +87,7 @@ impl QualPainel {
         QualPainel::Historico,
         QualPainel::Camadas,
         QualPainel::Ajustes,
+        QualPainel::Caminhos,
     ];
 
     /// 🚨 **O nome é o que o arquivo guarda** — mudá-lo faz a arrumação
@@ -99,6 +103,7 @@ impl QualPainel {
             QualPainel::Navegador => "editor:navegador",
             QualPainel::Info => "editor:info",
             QualPainel::Ajustes => "editor:ajustes",
+            QualPainel::Caminhos => "editor:caminhos",
         }
     }
 
@@ -117,6 +122,7 @@ impl QualPainel {
             QualPainel::Navegador => "Navegador",
             QualPainel::Info => "Info",
             QualPainel::Ajustes => "Ajustes",
+            QualPainel::Caminhos => "Caminhos",
         }
     }
 
@@ -131,6 +137,7 @@ impl QualPainel {
             QualPainel::Navegador => Icone::Map,
             QualPainel::Info => Icone::Info,
             QualPainel::Ajustes => Icone::Contrast,
+            QualPainel::Caminhos => Icone::PenTool,
         }
     }
 
@@ -146,6 +153,7 @@ impl QualPainel {
             QualPainel::Navegador => "editor-painel-navegador",
             QualPainel::Info => "editor-painel-info",
             QualPainel::Ajustes => "editor-painel-ajustes",
+            QualPainel::Caminhos => "editor-painel-caminhos",
         }
     }
 }
@@ -405,7 +413,8 @@ fn arranjo_padrao(paineis: &[(QualPainel, Entity<PainelDoEditor>)], cx: &App) ->
             DockLayout::tabs()
                 .panel_view(p(QualPainel::Cor), cx)
                 .panel_view(p(QualPainel::Amostras), cx)
-                .panel_view(p(QualPainel::Navegador), cx),
+                .panel_view(p(QualPainel::Navegador), cx)
+                .panel_view(p(QualPainel::Info), cx),
             Some(px(150.)),
         )
         .child(
@@ -418,8 +427,8 @@ fn arranjo_padrao(paineis: &[(QualPainel, Entity<PainelDoEditor>)], cx: &App) ->
         .child(
             DockLayout::tabs()
                 .panel_view(p(QualPainel::Camadas), cx)
-                .panel_view(p(QualPainel::Ajustes), cx)
-                .panel_view(p(QualPainel::Info), cx),
+                .panel_view(p(QualPainel::Caminhos), cx)
+                .panel_view(p(QualPainel::Ajustes), cx),
             None,
         )
 }
@@ -508,7 +517,9 @@ pub fn arranjo_gravado(
                     for q in novos.drain(..) {
                         let aqui = match q {
                             QualPainel::Navegador => primeiro,
-                            QualPainel::Info | QualPainel::Ajustes => com_camadas,
+                            QualPainel::Info | QualPainel::Ajustes | QualPainel::Caminhos => {
+                                com_camadas
+                            }
                             _ => false,
                         };
                         match painel(q).filter(|_| aqui && usados.insert(q)) {
@@ -538,7 +549,10 @@ pub fn arranjo_gravado(
         .filter(|q| {
             matches!(
                 q,
-                QualPainel::Navegador | QualPainel::Info | QualPainel::Ajustes
+                QualPainel::Navegador
+                    | QualPainel::Info
+                    | QualPainel::Ajustes
+                    | QualPainel::Caminhos
             )
         })
         .filter(|q| !citados.contains(q.nome()))
@@ -959,6 +973,7 @@ impl EditorDeFoto {
                 QualPainel::Camadas => "editor-icone-camadas",
                 QualPainel::Navegador => "editor-icone-navegador",
                 QualPainel::Info => "editor-icone-info",
+                QualPainel::Caminhos => "editor-icone-caminhos",
                 QualPainel::Ajustes => "editor-icone-ajustes",
             };
             faixa = faixa.child(
@@ -989,6 +1004,7 @@ impl EditorDeFoto {
             QualPainel::Navegador => self.painel_do_navegador(cx),
             QualPainel::Info => self.painel_de_info(cx),
             QualPainel::Ajustes => self.painel_de_ajustes(cx),
+            QualPainel::Caminhos => self.painel_de_caminhos(cx),
         }
     }
 }
@@ -1011,7 +1027,8 @@ mod testes {
                 "editor:pincel",
                 "editor:historico",
                 "editor:camadas",
-                "editor:ajustes"
+                "editor:ajustes",
+                "editor:caminhos"
             ]
         );
         for q in QualPainel::TODOS {
