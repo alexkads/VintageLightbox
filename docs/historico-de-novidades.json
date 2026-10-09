@@ -1,5 +1,16 @@
 [
   {
+    "versao": "0.1.123",
+    "data": "2026-10-08",
+    "titulo": "Editor: desfoque, nitidez, guias, Navegador e Info, como no Photoshop.",
+    "importante": false,
+    "novidades": [
+      "Editor: Filtro › Desfoque gaussiano e Filtro › Máscara de nitidez, como no Photoshop. A prévia aparece direto na foto (sem escurecer a tela), OK grava e Esc cancela. Servem também na máscara, para suavizar a borda.",
+      "Editor: guias. Arraste da régua (⌘R) para a foto; a ferramenta Mover leva a guia, e soltar fora da foto a tira. As seleções grudam nas guias e nas bordas (Visualizar › Ajustar, ⇧⌘;). ⌘; mostra ou esconde, ⌥⌘; trava. As guias ficam salvas com a edição.",
+      "Editor: painel Navegador (a foto inteira com o retângulo do que aparece na tela; clique para ir até lá) e painel Info (cor e posição debaixo do ponteiro, tamanho da seleção)."
+    ]
+  },
+  {
     "versao": "0.1.122",
     "data": "2026-10-08",
     "titulo": "Editor mais parecido com o Photoshop: Fundo, Ajustes, Réguas e Reselecionar.",

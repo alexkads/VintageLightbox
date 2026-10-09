@@ -1,13 +1,11 @@
 {
-  "versao": "0.1.122",
-  "titulo": "Editor mais parecido com o Photoshop: Fundo, Ajustes, Réguas e Reselecionar.",
+  "versao": "0.1.123",
+  "titulo": "Editor: desfoque, nitidez, guias, Navegador e Info, como no Photoshop.",
   "importante": false,
   "novidades": [
-    "Editor: a foto aberta aparece como a camada Fundo, com cadeado, embaixo das outras, como no Photoshop. Dois cliques nela criam a camada da fotografia para retocar.",
-    "Editor: menu Imagem › Ajustes com as teclas do Photoshop: ⌘L Níveis, ⌘M Curvas, ⌘U Matiz/Saturação. Cada um cria uma camada de ajuste, e a foto embaixo fica intacta.",
-    "Editor: Réguas em volta da foto (⌘R, ou Visualizar › Réguas), em pixels, acompanhando o zoom e o ponteiro.",
-    "Editor: Selecionar › Reselecionar (⇧⌘D) traz de volta a última seleção desmarcada; ⌘1 mostra a foto em 100%.",
-    "Editor: com a máscara escolhida, o painel Cor mostra um controle de cinza só (K), e o aviso que aparecia cortado saiu."
+    "Editor: Filtro › Desfoque gaussiano e Filtro › Máscara de nitidez, como no Photoshop. A prévia aparece direto na foto (sem escurecer a tela), OK grava e Esc cancela. Servem também na máscara, para suavizar a borda.",
+    "Editor: guias. Arraste da régua (⌘R) para a foto; a ferramenta Mover leva a guia, e soltar fora da foto a tira. As seleções grudam nas guias e nas bordas (Visualizar › Ajustar, ⇧⌘;). ⌘; mostra ou esconde, ⌥⌘; trava. As guias ficam salvas com a edição.",
+    "Editor: painel Navegador (a foto inteira com o retângulo do que aparece na tela; clique para ir até lá) e painel Info (cor e posição debaixo do ponteiro, tamanho da seleção)."
   ],
-  "por_que_atualizar": "Para editar no balcão com as teclas e os menus do Photoshop."
+  "por_que_atualizar": "Para retocar no balcão com os filtros, as guias e os painéis do Photoshop."
 }
