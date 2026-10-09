@@ -1,4 +1,4 @@
-# 25 — Tratamento de pele
+# 26 — Tratamento de pele
 
 > Pedido do dono (09/out/2026): o fluxo manual de retoque de pele do Photoshop — separação de frequências, tom na
 > baixa, textura na alta, Dodge & Burn — integrado ao editor em camadas, preservando poros, volume, identidade e os

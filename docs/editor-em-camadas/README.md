@@ -225,4 +225,4 @@ Separação de frequências exata em 8 bits (`H = (I − L + 255)/2`, baixa arre
 Luz Linear byte a byte), diálogo com origem, raio e prévias, regenerar sem perder retoque, painel Pele (retocar em
 baixa/alta, isolar, original, intensidade do conjunto), Suavizar tons pesado pela seleção, recuperação aditiva na
 alta, Dodge & Burn com Curvas em Luminosidade e Pincel misturador. Formato 11. Detalhes em
-[25-TRATAMENTO-DE-PELE.md](25-TRATAMENTO-DE-PELE.md).
+[26-TRATAMENTO-DE-PELE.md](26-TRATAMENTO-DE-PELE.md).
