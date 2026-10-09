@@ -128,3 +128,21 @@ fim
 
 Para comparar máquinas basta salvar em cada uma: a aba **Comparar** lê o servidor. **Exportar** e
 **Importar** continuam para quem mede sem conta (ou para levar a sessão a outro lugar).
+
+## Comparar as APIs gráficas: `medir-gpu`
+
+O botão Desempenho mede só a API em que o motor abriu e não alcança o GPUI. O binário
+`medir-gpu` (`crates/revelacao-core/src/bin/medir-gpu.rs`, pedido do dono em 9/out/2026) revela a
+mesma foto em **cada API da máquina** (DX12, Vulkan e OpenGL no Windows; Vulkan e OpenGL no Linux;
+Metal no Mac), em toda placa que cada uma enxerga, nos três tamanhos que a Revelação pede (rascunho
+do arrasto, 2560 ao soltar, a foto inteira). No Windows mede também a **subida ao DirectX 11** da
+janela, do jeito que o atlas do GPUI faz, e soma: motor + BGRA + subida = um quadro do slider.
+
+```bash
+cargo run --release -p revelacao-core --bin medir-gpu -- foto.jpg
+# o .exe para levar a um balcão Windows, feito no Mac (o GPUI não entra, então o fxc não é preciso):
+cargo build --profile carga --target x86_64-pc-windows-gnu -p revelacao-core --bin medir-gpu
+```
+
+O resultado vai para a tela e para `medir-gpu-<data>.txt`, ao lado do executável. No Mac (M2 Pro,
+9/out/2026, foto de 3840×2563): rascunho em 3,6 ms por quadro, a foto inteira em 8,6 ms.
