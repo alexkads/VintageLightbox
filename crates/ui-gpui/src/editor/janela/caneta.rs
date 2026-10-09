@@ -16,7 +16,7 @@
 //! saem da composição do documento, que não sabe de caminho nenhum (só da
 //! máscara vetorial, que é da camada).
 
-use editor_core::vetor::caneta::{Acao, FerramentaVetorial, Medida, Modificadores};
+use editor_core::vetor::caneta::{Acao, FerramentaVetorial, Medida, Modificadores, ModoDaCaneta};
 use editor_core::vetor::{
     edicao, geometria, Lado, Ligacao, LugarDoCaminho, OperacaoDoComponente, Ponto,
     RegraDePreenchimento, Subcaminho,
@@ -939,7 +939,62 @@ impl EditorDeFoto {
             .and_then(Sessao::caminho_alvo)
             .map(|c| c.regra)
             .unwrap_or_default();
-        let mut v: Vec<AnyElement> = vec![rotulo("Modo: Caminho")];
+        let mut v: Vec<AnyElement> = Vec::new();
+        if f.desenha() {
+            let forma = opcoes.modo == ModoDaCaneta::Forma;
+            v.push(
+                ButtonGroup::new("editor-caneta-modo")
+                    .xsmall()
+                    .child(
+                        if forma {
+                            crate::estilo::botao_contorno_pequeno("editor-modo-caminho", cx)
+                        } else {
+                            crate::estilo::botao_primario_pequeno("editor-modo-caminho", cx)
+                        }
+                        .label("Caminho")
+                        .tooltip("Desenha um caminho (o de trabalho ou o escolhido no painel Caminhos)")
+                        .selected(!forma),
+                    )
+                    .child(
+                        if forma {
+                            crate::estilo::botao_primario_pequeno("editor-modo-forma", cx)
+                        } else {
+                            crate::estilo::botao_contorno_pequeno("editor-modo-forma", cx)
+                        }
+                        .label("Forma")
+                        .tooltip(na_plataforma("Cria uma camada de forma com a cor de frente; ⇧ soma à forma escolhida"))
+                        .selected(forma),
+                    )
+                    .on_click(cx.listener(|ed, cliques: &Vec<usize>, _, cx| {
+                        let modo = if cliques.first() == Some(&1) {
+                            ModoDaCaneta::Forma
+                        } else {
+                            ModoDaCaneta::Caminho
+                        };
+                        if let Some(s) = ed.sessao_mut() {
+                            s.caneta.opcoes.modo = modo;
+                        }
+                        cx.notify();
+                    }))
+                    .into_any_element(),
+            );
+            if forma {
+                let cor = sessao.map(|s| s.pincel.cor).unwrap_or_default();
+                v.push(rotulo("Preenchimento"));
+                v.push(
+                    div()
+                        .flex_shrink_0()
+                        .debug_selector(|| "editor-forma-cor".into())
+                        .size(px(16.))
+                        .border_1()
+                        .border_color(c.borda)
+                        .bg(super::hsla_de(cor))
+                        .into_any_element(),
+                );
+            }
+        } else {
+            v.push(rotulo("Modo: Caminho"));
+        }
         // Operações dos componentes.
         v.push(separador());
         v.push(rotulo("Componentes"));

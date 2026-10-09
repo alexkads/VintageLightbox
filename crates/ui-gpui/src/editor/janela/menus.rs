@@ -500,6 +500,17 @@ fn menu_camada(
             sub
         },
     )
+    .item(item(
+        ed,
+        "editor-menu-preenchimento-cor",
+        "Nova camada de preenchimento: Cor sólida",
+        None,
+        p,
+        |ed, _, cx| {
+            let cor = ed.sessao().map(|s| s.pincel.cor).unwrap_or_default();
+            ed.nova_camada_de_ajuste(editor_core::Ajuste::CorSolida { cor }, cx)
+        },
+    ))
     .submenu(
         "Máscara de camada",
         window,

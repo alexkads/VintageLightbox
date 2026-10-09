@@ -4598,6 +4598,45 @@ impl EditorDeFoto {
                 .child(self.editor_de_curvas(ajuste, cx))
                 .into_any_element();
         }
+        // A camada de preenchimento (e a de forma): a cor, e trocá-la pela
+        // de frente num passo.
+        if let Ajuste::CorSolida { cor } = ajuste {
+            let frente = self.sessao().map(|s| s.pincel.cor).unwrap_or_default();
+            return coluna
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .child(
+                            div()
+                                .debug_selector(|| "editor-cor-solida".into())
+                                .size(px(28.))
+                                .border_1()
+                                .border_color(tema.border)
+                                .bg(hsla_de(cor)),
+                        )
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(tema.muted_foreground)
+                                .child(format!("#{:02x}{:02x}{:02x}", cor[0], cor[1], cor[2])),
+                        ),
+                )
+                .child(
+                    crate::estilo::botao_secundario_pequeno("editor-cor-solida-frente", cx)
+                        .debug_selector(|| "editor-cor-solida-frente".into())
+                        .label("Usar a cor de frente")
+                        .disabled(frente == cor)
+                        .on_click(cx.listener(move |ed, _, _, cx| {
+                            ed.na_sessao(cx, |s| {
+                                s.mover_ajuste(Ajuste::CorSolida { cor: frente });
+                                s.confirmar_ajuste();
+                            })
+                        })),
+                )
+                .into_any_element();
+        }
         if parametros.is_empty() {
             coluna = coluna.child(
                 div()
@@ -7255,7 +7294,7 @@ fn parametros_do_ajuste(ajuste: &Ajuste) -> Vec<(usize, f32)> {
             saturacao,
             luminosidade,
         } => vec![(5, matiz), (6, saturacao), (7, luminosidade)],
-        Ajuste::Inverter | Ajuste::Curvas { .. } => Vec::new(),
+        Ajuste::Inverter | Ajuste::Curvas { .. } | Ajuste::CorSolida { .. } => Vec::new(),
     }
 }
 

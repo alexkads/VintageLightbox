@@ -148,6 +148,20 @@ impl EditorDeFoto {
         // máscara branca, a do texto sumia.
         let cor_da_moldura = tema.ring;
         let cor_do_icone_de_ajuste = tema.muted;
+        // A camada de preenchimento (e a de forma) mostra a cor dela.
+        let cores_solidas: Vec<Option<[u8; 3]>> = self
+            .sessao()
+            .map(|s| {
+                s.documento()
+                    .camadas
+                    .iter()
+                    .map(|c| match c.ajuste {
+                        Some(editor_core::Ajuste::CorSolida { cor }) => Some(cor),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         let linhas = camadas
             .into_iter()
             .enumerate()
@@ -224,6 +238,7 @@ impl EditorDeFoto {
                     // A camada de ajuste não tem pixels: o ícone dela, como no
                     // Photoshop.
                     .when(de_ajuste, |d| {
+                        let solida = cores_solidas.get(i).copied().flatten();
                         d.child(
                             moldura(
                                 div()
@@ -232,12 +247,14 @@ impl EditorDeFoto {
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .bg(cor_do_icone_de_ajuste)
-                                    .child(
-                                        gpui_kit::component::Icon::new(Icone::Contrast)
-                                            .size_4()
-                                            .text_color(cor_da_moldura),
-                                    ),
+                                    .bg(solida.map_or(cor_do_icone_de_ajuste, super::hsla_de))
+                                    .when(solida.is_none(), |d| {
+                                        d.child(
+                                            gpui_kit::component::Icon::new(Icone::Contrast)
+                                                .size_4()
+                                                .text_color(cor_da_moldura),
+                                        )
+                                    }),
                                 false,
                                 cor_da_moldura,
                             ),
