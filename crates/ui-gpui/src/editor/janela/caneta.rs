@@ -1361,6 +1361,60 @@ impl EditorDeFoto {
 
     // ------------------------------------------------- o painel Caminhos
 
+    /// As miniaturas do painel Caminhos (branco dentro, cinza fora, como lá),
+    /// refeitas só quando a geometria de um caminho muda.
+    pub(super) fn atualizar_as_miniaturas_dos_caminhos(&mut self) {
+        let Some(s) = self.sessao() else {
+            return;
+        };
+        let doc = s.documento();
+        let (lf, af) = (doc.largura(), doc.altura());
+        let lado = super::LADO_DA_MINIATURA as f32 * 0.75;
+        let escala = lado / lf.max(af) as f32;
+        let (l, a) = (
+            ((lf as f32 * escala).round() as u32).max(1),
+            ((af as f32 * escala).round() as u32).max(1),
+        );
+        let mut lugares: Vec<LugarDoCaminho> = Vec::new();
+        if doc.caminhos.trabalho.is_some() {
+            lugares.push(LugarDoCaminho::Trabalho);
+        }
+        lugares.extend(doc.caminhos.nomeados.iter().map(|c| LugarDoCaminho::Nomeado(c.id)));
+        lugares.extend(
+            doc.camadas
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.mascara_vetorial.is_some())
+                .map(|(i, _)| LugarDoCaminho::Mascara(i)),
+        );
+        let mut novas = std::collections::HashMap::new();
+        for lugar in lugares {
+            let Some(c) = doc.caminho(lugar) else {
+                continue;
+            };
+            let chave = c.assinatura();
+            if let Some(m) = self
+                .miniaturas_dos_caminhos
+                .get(&lugar)
+                .filter(|(k, _)| *k == chave)
+            {
+                novas.insert(lugar, m.clone());
+                continue;
+            }
+            let cobertura = editor_core::vetor::cobertura::miniatura(c, lf, af, l, a);
+            let mut bgra = Vec::with_capacity(cobertura.len() * 4);
+            for v in cobertura {
+                // Cinza (96) fora, branco dentro.
+                let g = (96 + (159 * v as u32 + 127) / 255) as u8;
+                bgra.extend_from_slice(&[g, g, g, 255]);
+            }
+            if let Some(img) = crate::imagem::de_bgra(l, a, bgra) {
+                novas.insert(lugar, (chave, img));
+            }
+        }
+        self.miniaturas_dos_caminhos = novas;
+    }
+
     /// O painel Caminhos do Photoshop: o caminho de trabalho (em itálico,
     /// provisório), os nomeados e a máscara vetorial da camada escolhida.
     /// Clicar escolhe (e mostra); clicar de novo no escolhido o esconde;
@@ -1397,6 +1451,7 @@ impl EditorDeFoto {
                 true,
             ));
         }
+        let miniaturas = self.miniaturas_dos_caminhos.clone();
         let linhas = itens
             .into_iter()
             .enumerate()
@@ -1417,16 +1472,22 @@ impl EditorDeFoto {
                         d.bg(tema.accent).text_color(tema.accent_foreground)
                     })
                     .when(!escolhido, |d| d.hover(|d| d.bg(tema.muted)))
-                    .child(
-                        gpui_kit::component::Icon::new(
-                            if matches!(lugar, LugarDoCaminho::Mascara(_)) {
-                                Icone::LayerMask
-                            } else {
-                                Icone::Spline
-                            },
-                        )
-                        .size_4(),
-                    )
+                    .child(match miniaturas.get(&lugar) {
+                        Some((_, m)) => div()
+                            .flex_shrink_0()
+                            .border_1()
+                            .border_color(c.borda)
+                            .child(
+                                gpui_kit::img(m.clone())
+                                    .object_fit(gpui_kit::ObjectFit::Contain)
+                                    .w(px(super::LADO_DA_MINIATURA as f32 * 0.75))
+                                    .h(px(super::LADO_DA_MINIATURA as f32 * 0.75)),
+                            )
+                            .into_any_element(),
+                        None => gpui_kit::component::Icon::new(Icone::Spline)
+                            .size_4()
+                            .into_any_element(),
+                    })
                     .child(
                         div()
                             .flex_1()

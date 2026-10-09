@@ -914,6 +914,9 @@ pub struct EditorDeFoto {
     /// Densidade (0–100) e difusão (px) da máscara vetorial escolhida.
     densidade_vetorial: Entity<SliderState>,
     difusao_vetorial: Entity<SliderState>,
+    /// A miniatura de cada caminho do painel, pela assinatura da geometria.
+    miniaturas_dos_caminhos:
+        HashMap<editor_core::vetor::LugarDoCaminho, (u64, Arc<RenderImage>)>,
 }
 
 fn slider(
@@ -1702,6 +1705,7 @@ impl EditorDeFoto {
             difusao_da_mascara,
             densidade_vetorial,
             difusao_vetorial,
+            miniaturas_dos_caminhos: HashMap::new(),
             copiado: None,
             _tarefa_da_transferencia: None,
             historico_no_aperto_da_camada: None,
@@ -7782,6 +7786,7 @@ impl Render for EditorDeFoto {
         self.subir_os_ladrilhos();
         self.atualizar_as_bordas();
         self.atualizar_as_miniaturas();
+        self.atualizar_as_miniaturas_dos_caminhos();
         self.atualizar_o_navegador();
         window.set_window_title(&self.titulo());
         // O slider e o modo acompanham a camada escolhida, o desfazer e a
