@@ -3326,7 +3326,11 @@ impl EditorDeFoto {
         if self.arrastar_no_preenchimento(ponto, modificadores, cx) {
             return;
         }
-        if self.vetorial.is_some() || self.sessao().is_some_and(Sessao::caneta_em_gesto) {
+        // 🚨 Só sem outro arrasto em curso: com a caixa do "Transformar
+        // caminho" aberta, o arrasto é da caixa (visto no app real).
+        if self.sessao().is_some_and(Sessao::caneta_em_gesto)
+            || (self.vetorial.is_some() && !self.em_gesto())
+        {
             self.mover_vetorial(ponto, modificadores, cx);
             return;
         }
@@ -5834,6 +5838,17 @@ impl EditorDeFoto {
                         }),
                     };
                     self.escolher_caminho_no_painel(lugar, cx);
+                }
+                "forma" => {
+                    let sim = partes.get(2).copied() != Some("nao");
+                    if let Some(s) = self.sessao_mut() {
+                        s.caneta.opcoes.modo = if sim {
+                            editor_core::vetor::caneta::ModoDaCaneta::Forma
+                        } else {
+                            editor_core::vetor::caneta::ModoDaCaneta::Caminho
+                        };
+                    }
+                    cx.notify();
                 }
                 "faixa" | "auto" => {
                     let sim = partes.get(2).copied() != Some("nao");
