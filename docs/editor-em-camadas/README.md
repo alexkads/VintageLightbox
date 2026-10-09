@@ -219,10 +219,18 @@ fixa para todas as ferramentas, barra de ferramentas em 14 grupos com flyout (Z 
 do gpui-kit só do editor (Cor/Amostras, Propriedades/Pincel/Histórico, Camadas) com arrumação gravada por máquina,
 status com zoom editável, Tab/⇧Tab. Detalhes em [24-AREA-DE-TRABALHO.md](24-AREA-DE-TRABALHO.md).
 
+## A Caneta — caminhos vetoriais
+
+Caneta clássica (P) com Adicionar/Excluir/Converter ponto, Seleção de caminho e Seleção direta (A, ⇧A): retas e
+Béziers, âncoras canto/suave/simétrico, fechar, retomar pelas pontas, unir componentes, operações dos componentes e
+regra de preenchimento, painel Caminhos (de trabalho e nomeados), Fazer seleção (⌘↵, com difusão), máscara vetorial
+que nunca muda pixel, preencher e contornar. Projeto no **formato 11**. Detalhes, teclas e as diferenças que ficam
+em [25-CANETA.md](25-CANETA.md).
+
 ## Tratamento de pele
 
 Separação de frequências exata em 8 bits (`H = (I − L + 255)/2`, baixa arredondada pela paridade, recomposição pela
 Luz Linear byte a byte), diálogo com origem, raio e prévias, regenerar sem perder retoque, painel Pele (retocar em
 baixa/alta, isolar, original, intensidade do conjunto), Suavizar tons pesado pela seleção, recuperação aditiva na
-alta, Dodge & Burn com Curvas em Luminosidade e Pincel misturador. Formato 11. Detalhes em
+alta, Dodge & Burn com Curvas em Luminosidade e Pincel misturador. Formato 12. Detalhes em
 [26-TRATAMENTO-DE-PELE.md](26-TRATAMENTO-DE-PELE.md).

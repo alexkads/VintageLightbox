@@ -108,6 +108,14 @@ gpui_kit::actions!(
         TravarGuias,
         // ⇧⌘;: Visualizar › Ajustar (as seleções grudam nas guias e nas bordas).
         AjustarAsGuias,
+        // A Caneta (P, ⇧P) e as setas de caminho (A, ⇧A); ⌘↵ faz a seleção
+        // do caminho (ou termina o desenho aberto); ⇧⌘H esconde o caminho.
+        GrupoP,
+        ProximaDoGrupoP,
+        GrupoA,
+        ProximaDoGrupoA,
+        FazerSelecaoDoCaminho,
+        OcultarCaminho,
     ]
 );
 
@@ -129,7 +137,9 @@ const SEM_CAMPO: &str = "EditorDeFoto && !Input";
 ///   e poligonal (L, ⇧L), varinha (W), conta-gotas (I), pincel de correção para manchas e de
 ///   recuperação (J, ⇧J), pincel (B),
 ///   carimbo (S), borracha (E), degradê/lata (G), subexposição/superexposição
-///   (O), Mão (H) e Girar vista (R). **⇧ + letra passa para a ferramenta
+///   (O), Caneta (P; Adicionar, Excluir e Converter ponto sem letra, como
+///   lá), Seleção de caminho e Seleção direta (A, ⇧A), Mão (H) e Girar vista
+///   (R). **⇧ + letra passa para a ferramenta
 ///   seguinte do mesmo grupo** ("Use Shift Key for Tool Switch", o padrão de
 ///   lá). Desfoque e nitidez não têm letra — no Photoshop também não;
 /// - Espaço segurado: a Mão, e a ferramenta volta ao soltar;
@@ -151,6 +161,13 @@ const SEM_CAMPO: &str = "EditorDeFoto && !Input";
 /// - ⇧⌘D reseleciona; ⌘L Níveis, ⌘M Curvas e ⌘U Matiz/saturação criam a
 ///   camada de ajuste (Imagem › Ajustes); ⌘R mostra ou esconde as réguas;
 ///   ⌘; as guias, ⌥⌘; trava as guias, ⇧⌘; liga o Ajustar;
+/// - caminhos (`janela/caneta.rs`): ⌘ com a Caneta = a última seta de
+///   caminho, ⌥ converte o ponto (ou solta a alça), ⇧ prende em 45°; Enter
+///   termina o desenho aberto, Esc cancela o arrasto (ou termina o desenho,
+///   sem apagar), Delete/⌫ tira a última âncora desenhada ou exclui as âncoras
+///   e componentes escolhidos, as setas os empurram (⇧ 10 px); ⌘↵ faz a
+///   seleção do caminho — desenhando, termina o caminho aberto (a regra de
+///   hoje da Adobe para ⌘↵ com a Caneta); ⇧⌘H esconde o caminho;
 /// - zoom: ⌘= ⌘− ⌘0, e ⌘1 (ou ⌘⌥0) 100%; **Z é a Lupa**, como no Photoshop (a tecla de
 ///   alternar encaixe e 100% é da Revelação, não do editor);
 /// - Tab esconde barra de ferramentas, opções e painéis; ⇧Tab só os painéis;
@@ -259,6 +276,12 @@ pub fn init(cx: &mut gpui_kit::App) {
         KeyBinding::new("shift-r", GrupoR, solta),
         KeyBinding::new("z", GrupoZ, solta),
         KeyBinding::new("shift-z", GrupoZ, solta),
+        KeyBinding::new("p", GrupoP, solta),
+        KeyBinding::new("shift-p", ProximaDoGrupoP, solta),
+        KeyBinding::new("a", GrupoA, solta),
+        KeyBinding::new("shift-a", ProximaDoGrupoA, solta),
+        KeyBinding::new("secondary-enter", FazerSelecaoDoCaminho, solta),
+        KeyBinding::new("secondary-shift-h", OcultarCaminho, solta),
     ]);
     if !cfg!(target_os = "macos") {
         cx.bind_keys([KeyBinding::new("ctrl-y", RefazerNoEditor, c)]);

@@ -104,10 +104,10 @@ preta**: nada muda até pintar. Clarear/Escurecer escolhe a máscara com o pince
 "Dodge & Burn"). Luminosidade muda a luz sem mudar matiz (conferido: Δmatiz < 4°). Reversível (apagar, pintar de
 preto, desfazer, ou a opacidade/curva da camada), independente da separação.
 
-## Persistência — formato 11
+## Persistência — formato 12
 
 `luz_linear` no modo e `retoque` na camada (`{"papel": "baixa"|"alta", "raio": …}`, `"clarear"`, `"escurecer"`).
-A 0.1.124 recusa o formato 11 com o aviso; os formatos 1–10 abrem como estavam (sem papel). Testado: salvar,
+A 0.1.124 recusa o formato 12 com o aviso; os formatos 1–10 abrem como estavam (sem papel). Testado: salvar,
 coletar, reabrir, continuar o retoque e desfazer até antes da separação
 (`o_tratamento_inteiro_grava_reabre_e_continua_editavel`, `o_projeto_do_formato_10_abre_igual_e_sem_papel`).
 

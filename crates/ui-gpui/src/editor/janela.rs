@@ -35,6 +35,7 @@ use std::time::{Duration, Instant};
 mod aparencia;
 pub mod area_de_trabalho;
 mod camadas;
+mod caneta;
 pub mod ferramentas;
 pub mod filtro;
 mod mascara_e_cadeados;
@@ -98,6 +99,9 @@ use super::{AjusteCurvas, AjusteMatiz, AjusteNiveis, AlternarReguas, Reseleciona
 use super::{
     AlternarRubi, BloquearTransparencia, CarimbarVisivel, Colar, ColarNoLugar, Copiar,
     CopiarMesclado, Inverter, Recortar,
+};
+use super::{
+    FazerSelecaoDoCaminho, GrupoA, GrupoP, OcultarCaminho, ProximaDoGrupoA, ProximaDoGrupoP,
 };
 use crate::campo::TrocarValor as _;
 use crate::recursos::Icone;
@@ -226,6 +230,8 @@ pub enum Item {
     F(Ferramenta),
     S(TipoDeSelecao),
     A(Auxiliar),
+    /// As ferramentas de caminho: a Caneta e as de seleção vetorial.
+    P(editor_core::vetor::caneta::FerramentaVetorial),
 }
 
 impl Item {
@@ -897,6 +903,14 @@ pub struct EditorDeFoto {
     /// A última ferramenta de cada grupo da barra — a letra volta a ela, e ⇧ +
     /// letra passa para a seguinte do grupo, como no Photoshop.
     ultima_do_grupo: HashMap<char, Item>,
+    /// A ferramenta de caminho na mão (Caneta, Seleção direta…), e como o
+    /// caminho aparece no palco.
+    vetorial: Option<editor_core::vetor::caneta::FerramentaVetorial>,
+    aparencia_do_caminho: caneta::AparenciaDoCaminho,
+    /// As opções de "Fazer seleção" (o ⌘↵ usa as da última vez).
+    opcoes_da_selecao_do_caminho: editor_core::sessao::OpcoesDaSelecaoDoCaminho,
+    dialogo_do_caminho: Option<caneta::DialogoDoCaminho>,
+    _assinatura_do_caminho: Option<Subscription>,
 }
 
 fn slider(
@@ -1693,6 +1707,11 @@ impl EditorDeFoto {
             arrasto_do_contorno: None,
             reposicionando: None,
             ultima_do_grupo: HashMap::new(),
+            vetorial: None,
+            aparencia_do_caminho: caneta::AparenciaDoCaminho::default(),
+            opcoes_da_selecao_do_caminho: Default::default(),
+            dialogo_do_caminho: None,
+            _assinatura_do_caminho: None,
         };
         editor.carregar(carregar_base, cx);
         editor
@@ -2466,7 +2485,8 @@ impl EditorDeFoto {
     /// Há um arrasto em curso no palco (pincel, seleção, mover, giro…): o
     /// movimento e o soltar são ouvidos na janela inteira.
     fn em_gesto(&self) -> bool {
-        self.pintando
+        self.sessao().is_some_and(Sessao::caneta_em_gesto)
+            || self.pintando
             || self.gesto_de_selecao.is_some()
             || self.pegando_cor
             || self.arrasto_do_mover.is_some()
@@ -2487,7 +2507,8 @@ impl EditorDeFoto {
 
     /// Uma ferramenta de pintura está na mão (o pincel de correção também).
     fn pinta(&self) -> bool {
-        self.selecionando.is_none()
+        self.vetorial.is_none()
+            && self.selecionando.is_none()
             && (self.auxiliar.is_none() || self.auxiliar == Some(Auxiliar::Correcao))
     }
 
@@ -3260,6 +3281,10 @@ impl EditorDeFoto {
         if self.arrastar_no_preenchimento(ponto, modificadores, cx) {
             return;
         }
+        if self.vetorial.is_some() || self.sessao().is_some_and(Sessao::caneta_em_gesto) {
+            self.mover_vetorial(ponto, modificadores, cx);
+            return;
+        }
         if let Some((de, giro_de_antes)) = self.gesto_de_giro {
             let mut angulo = giro_de_antes + (self.angulo_do_ponteiro(ponto) - de);
             if modificadores.shift {
@@ -3436,6 +3461,9 @@ impl EditorDeFoto {
         if self.soltar_no_preenchimento(cx) {
             return;
         }
+        if self.soltar_vetorial(cx) {
+            return;
+        }
         if self.gesto_de_giro.take().is_some() || self.ajuste_rapido.take().is_some() {
             cx.notify();
             return;
@@ -3533,6 +3561,7 @@ impl EditorDeFoto {
     }
 
     pub fn usar_selecao(&mut self, tipo: TipoDeSelecao, cx: &mut Context<Self>) {
+        self.largar_ferramenta_vetorial();
         if self.selecionando != Some(tipo) {
             self.gesto_de_selecao = None;
         }
@@ -3547,6 +3576,7 @@ impl EditorDeFoto {
         if self.area_do_preenchimento.is_some() {
             return;
         }
+        self.largar_ferramenta_vetorial();
         self.auxiliar = Some(auxiliar);
         self.selecionando = None;
         self.gesto_de_selecao = None;
@@ -3560,11 +3590,15 @@ impl EditorDeFoto {
             Item::F(f) => self.usar(f, cx),
             Item::S(t) => self.usar_selecao(t, cx),
             Item::A(a) => self.usar_auxiliar(a, cx),
+            Item::P(f) => self.usar_ferramenta_vetorial(f, cx),
         }
     }
 
     /// A ferramenta na mão, como item da barra.
     pub fn item_atual(&self) -> Option<Item> {
+        if let Some(f) = self.vetorial {
+            return Some(Item::P(f));
+        }
         if let Some(t) = self.selecionando {
             return Some(Item::S(t));
         }
@@ -3622,6 +3656,7 @@ impl EditorDeFoto {
         if self.area_do_preenchimento.is_some() {
             return;
         }
+        self.largar_ferramenta_vetorial();
         self.selecionando = None;
         self.auxiliar = None;
         self.lembrar_na_barra(Item::F(ferramenta));
@@ -3691,6 +3726,20 @@ impl EditorDeFoto {
             return;
         }
         let m = evento.keystroke.modifiers;
+        // As setas com uma ferramenta de caminho levam as âncoras (ou os
+        // componentes) escolhidos: 1 px, 10 com ⇧. 🚨 No Mac a seta chega com
+        // o `function` ligado — por isso antes da regra de baixo.
+        if self.foco.is_focused(window)
+            && !(m.platform || m.control || m.alt)
+            && matches!(
+                evento.keystroke.key.as_str(),
+                "up" | "down" | "left" | "right"
+            )
+            && self.empurrar_vetorial(&evento.keystroke.key, m.shift, cx)
+        {
+            cx.stop_propagation();
+            return;
+        }
         if !self.foco.is_focused(window) || m.platform || m.control || m.alt || m.function {
             return;
         }
@@ -3699,9 +3748,7 @@ impl EditorDeFoto {
         let Some(d) = digito_da_tecla(&evento.keystroke.key) else {
             return;
         };
-        let pinta = self.selecionando.is_none()
-            && (self.auxiliar.is_none() || self.auxiliar == Some(Auxiliar::Correcao));
-        if !pinta {
+        if !self.pinta() {
             return;
         }
         // O símbolo ("#") já é o ⇧: o GPUI do Mac o entrega sem o ⇧ nos
@@ -5654,6 +5701,113 @@ impl EditorDeFoto {
             },
             // cor R G B
             "cor" => self.escolher_cor([numero(1) as u8, numero(2) as u8, numero(3) as u8], cx),
+            // caneta caneta|adicionar|excluir|converter|caminho|direta
+            "caneta" => {
+                use editor_core::vetor::caneta::FerramentaVetorial as FV;
+                let f = match partes.get(1).copied().unwrap_or_default() {
+                    "adicionar" => FV::AdicionarPonto,
+                    "excluir" => FV::ExcluirPonto,
+                    "converter" => FV::ConverterPonto,
+                    "caminho" => FV::SelecaoDeCaminho,
+                    "direta" => FV::SelecaoDireta,
+                    _ => FV::Caneta,
+                };
+                self.usar_ferramenta_vetorial(f, cx);
+            }
+            // caminho estado | selecao [difusao] | mascara | salvar NOME |
+            // escolher trabalho|nenhum|N | faixa sim|nao | auto sim|nao |
+            // preencher | contornar
+            "caminho" => match partes.get(1).copied().unwrap_or_default() {
+                "selecao" => {
+                    self.opcoes_da_selecao_do_caminho.difusao = numero(2) as u32;
+                    self.fazer_selecao_do_caminho(cx);
+                }
+                "mascara" => self.criar_mascara_vetorial(cx),
+                "preencher" => self.preencher_caminho(cx),
+                "contornar" => self.contornar_caminho(cx),
+                "salvar" => {
+                    let nome = partes.get(2..).map(|p| p.join(" ")).unwrap_or_default();
+                    self.na_sessao(cx, |s| {
+                        s.salvar_caminho_de_trabalho(&nome);
+                    });
+                }
+                "escolher" => {
+                    use editor_core::vetor::LugarDoCaminho as L;
+                    let lugar = match partes.get(2).copied().unwrap_or_default() {
+                        "trabalho" => Some(L::Trabalho),
+                        "nenhum" => None,
+                        n => self.sessao().and_then(|s| {
+                            let i: usize = n.parse().ok()?;
+                            s.documento()
+                                .caminhos
+                                .nomeados
+                                .get(i)
+                                .map(|c| L::Nomeado(c.id))
+                        }),
+                    };
+                    self.escolher_caminho_no_painel(lugar, cx);
+                }
+                "faixa" | "auto" => {
+                    let sim = partes.get(2).copied() != Some("nao");
+                    let qual = partes[1];
+                    if let Some(s) = self.sessao_mut() {
+                        if qual == "faixa" {
+                            s.caneta.opcoes.previa = sim;
+                        } else {
+                            s.caneta.opcoes.auto_adicionar_excluir = sim;
+                        }
+                    }
+                    cx.notify();
+                }
+                _ => {
+                    if let Some(s) = self.sessao() {
+                        let alvo = s.alvo_vetorial();
+                        let c = s.caminho_alvo();
+                        eprintln!(
+                            "[roteiro] caminho alvo={alvo:?} estado={:?} pontos={} componentes={} historico={}",
+                            s.caneta.estado(),
+                            s.caneta.pontos_escolhidos().len(),
+                            s.caneta.componentes_escolhidos().len(),
+                            s.historico()
+                                .a_desfazer()
+                                .map(|p| p.descricao(s.documento()))
+                                .unwrap_or_default()
+                        );
+                        if let Some(c) = c {
+                            for sub in &c.subcaminhos {
+                                let pontos: Vec<String> = sub
+                                    .ancoras
+                                    .iter()
+                                    .map(|a| {
+                                        format!(
+                                            "({:.1},{:.1}){}{}",
+                                            a.ponto.x,
+                                            a.ponto.y,
+                                            if a.entrada.is_some() || a.saida.is_some() {
+                                                "~"
+                                            } else {
+                                                ""
+                                            },
+                                            match a.ligacao {
+                                                editor_core::vetor::Ligacao::Canto => "",
+                                                editor_core::vetor::Ligacao::Suave => "s",
+                                                editor_core::vetor::Ligacao::Simetrico => "S",
+                                            }
+                                        )
+                                    })
+                                    .collect();
+                                eprintln!(
+                                    "[roteiro] caminho  sub {} {} {:?} [{}]",
+                                    sub.id,
+                                    if sub.fechado { "fechado" } else { "aberto" },
+                                    sub.operacao,
+                                    pontos.join(" ")
+                                );
+                            }
+                        }
+                    }
+                }
+            },
             "ferramenta" => match partes.get(1).copied().unwrap_or_default() {
                 "pincel" => self.usar(Ferramenta::Pincel, cx),
                 "borracha" => self.usar(Ferramenta::Borracha, cx),
@@ -6419,6 +6573,8 @@ impl EditorDeFoto {
                     if let Some((_, bordas)) = &self.bordas {
                         palco = palco.child(tela.letreiro(bordas.clone()));
                     }
+                    // O caminho escolhido, as âncoras e as alças (só a tela).
+                    palco = palco.children(self.sobreposicao_da_caneta(&tela, sessao, window));
                     if let Some(gesto) = &self.gesto_de_selecao {
                         palco = palco.child(tela.contorno(gesto.contorno()));
                         // Largura e altura em pixels do documento, junto do
@@ -6448,6 +6604,7 @@ impl EditorDeFoto {
                     });
                     let com_pincel = self.area_do_preenchimento.is_some()
                         || (self.selecionando.is_none()
+                            && self.vetorial.is_none()
                             && self.auxiliar.is_none()
                             && !sessao.transformando())
                         || sessao.liquidificando();
@@ -6530,6 +6687,8 @@ impl EditorDeFoto {
                     gpui_kit::CursorStyle::PointingHand
                 } else if self.ajuste_rapido.is_some() {
                     gpui_kit::CursorStyle::ResizeLeftRight
+                } else if let Some(c) = self.cursor_da_caneta(window.modifiers()) {
+                    c
                 } else {
                     gpui_kit::CursorStyle::Crosshair
                 };
@@ -6541,6 +6700,13 @@ impl EditorDeFoto {
                             window.focus(&ed.foco, cx);
                             if ed.espaco.is_some() {
                                 ed.pegar_com_a_mao(evento.position, cx);
+                            } else if ed.vetorial.is_some()
+                                && !ed.transformando()
+                                && !ed.liquidificando()
+                            {
+                                // A Caneta e as setas de caminho: o ⌘ é da
+                                // Seleção direta, não da guia.
+                                ed.apertar_vetorial(evento.position, evento.modifiers, cx);
                             } else if !ed.transformando()
                                 && !ed.liquidificando()
                                 && ed.pegar_guia(evento.position, evento.modifiers, cx)
@@ -7699,6 +7865,18 @@ impl Render for EditorDeFoto {
                 cx,
             )
         };
+        let dialogo_do_caminho = {
+            let quer = self.dialogo_do_caminho.is_some();
+            crate::dialogo::desenhar(
+                self,
+                quer,
+                crate::dialogo::Jeito::dialogo(440.),
+                Self::desenhar_dialogo_do_caminho,
+                |ed, window, cx| ed.cancelar_dialogo_do_caminho(window, cx),
+                window,
+                cx,
+            )
+        };
         let atalhos = {
             let quer = self.mostrando_atalhos;
             crate::dialogo::desenhar(
@@ -7901,6 +8079,27 @@ impl Render for EditorDeFoto {
             .on_action(cx.listener(|ed, _: &ProximaDoGrupoO, _, cx| ed.pela_letra('o', true, cx)))
             .on_action(cx.listener(|ed, _: &GrupoH, _, cx| ed.pela_letra('h', false, cx)))
             .on_action(cx.listener(|ed, _: &GrupoR, _, cx| ed.pela_letra('r', false, cx)))
+            .on_action(cx.listener(|ed, _: &GrupoP, _, cx| ed.pela_letra('p', false, cx)))
+            .on_action(cx.listener(|ed, _: &ProximaDoGrupoP, _, cx| ed.pela_letra('p', true, cx)))
+            .on_action(cx.listener(|ed, _: &GrupoA, _, cx| ed.pela_letra('a', false, cx)))
+            .on_action(cx.listener(|ed, _: &ProximaDoGrupoA, _, cx| ed.pela_letra('a', true, cx)))
+            .on_action(
+                cx.listener(|ed, _: &FazerSelecaoDoCaminho, _, cx| ed.comando_enter_do_caminho(cx)),
+            )
+            .on_action(
+                cx.listener(|ed, _: &OcultarCaminho, _, cx| {
+                    ed.escolher_caminho_no_painel(None, cx)
+                }),
+            )
+            // O selo e o cursor da Caneta mudam com o ⌘ e o ⌥ sem o ponteiro
+            // andar.
+            .on_modifiers_changed(
+                cx.listener(|ed, _: &gpui_kit::ModifiersChangedEvent, _, cx| {
+                    if ed.vetorial.is_some() {
+                        cx.notify();
+                    }
+                }),
+            )
             .on_action(cx.listener(|ed, _: &AlternarCamada, _, cx| ed.alternar_visibilidade(cx)))
             .on_action(cx.listener(|ed, _: &NovaCamada, _, cx| ed.nova_camada(cx)))
             .on_action(cx.listener(|ed, _: &DuplicarCamada, _, cx| ed.duplicar_camada(cx)))
@@ -7923,8 +8122,12 @@ impl Render for EditorDeFoto {
                     ed.confirmar_preenchimento(cx)
                 } else if ed.modificando.is_some() {
                     ed.confirmar_modificacao(window, cx)
+                } else if ed.dialogo_do_caminho_aberto() {
+                    ed.confirmar_dialogo_do_caminho(window, cx)
                 } else if ed.poligono_aberto() {
                     ed.concluir_poligono(cx)
+                } else if ed.enter_vetorial(cx) {
+                    // A Caneta termina o desenho; o caminho fica aberto.
                 } else {
                     ed.aplicar_transformacao(cx)
                 }
@@ -7941,6 +8144,11 @@ impl Render for EditorDeFoto {
                     ed.cancelar_preenchimento(cx)
                 } else if ed.modificando.is_some() {
                     ed.cancelar_modificacao(window, cx)
+                } else if ed.dialogo_do_caminho_aberto() {
+                    ed.cancelar_dialogo_do_caminho(window, cx)
+                } else if !ed.transformando() && ed.esc_vetorial(cx) {
+                    // Arrastando: o gesto volta; desenhando: o caminho fica
+                    // aberto; nada é apagado.
                 } else if ed.cancelar_gesto_de_selecao(cx) {
                     // O gesto de seleção some; a seleção de antes fica.
                 } else if ed.transformando() || ed.liquidificando() {
@@ -7991,8 +8199,10 @@ impl Render for EditorDeFoto {
             .on_action(cx.listener(|ed, _: &AjustarAsGuias, _, cx| ed.alternar_ajuste(cx)))
             .on_action(cx.listener(|ed, _: &InverterSelecao, _, cx| ed.inverter_selecao(cx)))
             .on_action(cx.listener(|ed, _: &ApagarSelecao, _, cx| {
-                // ⌫ com o laço poligonal aberto tira o último vértice.
-                if !ed.tirar_o_ultimo_vertice(cx) {
+                // ⌫ com o laço poligonal aberto tira o último vértice; com
+                // uma ferramenta de caminho, exclui do caminho (âncora,
+                // pontos ou componentes) antes de mexer em pixel.
+                if !ed.tirar_o_ultimo_vertice(cx) && !ed.excluir_vetorial(cx) {
                     ed.apagar_selecao(cx)
                 }
             }))
@@ -8014,6 +8224,7 @@ impl Render for EditorDeFoto {
             .children(flyout)
             .children(pergunta)
             .children(modificacao)
+            .children(dialogo_do_caminho)
             .children(atalhos)
             .children(preencher)
             .children(self.caixa_do_filtro(window, cx))

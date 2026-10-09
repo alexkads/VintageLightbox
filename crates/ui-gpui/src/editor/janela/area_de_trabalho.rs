@@ -56,8 +56,9 @@ const ESPERA_DA_GRAVACAO_MS: u64 = 400;
 pub const LIMITES_DA_COLUNA: crate::docas::Limites = crate::docas::Limites {
     minimo: 240.0,
     maximo: 560.0,
-    // 360: as quatro abas do grupo das Camadas (com a Pele) cabem.
-    padrao: 360.0,
+    // 420: quatro abas em cada grupo (Info em cima; Caminhos e Pele com as
+    // Camadas) cabem sem rolar.
+    padrao: 420.0,
 };
 
 /// Os painéis do editor.
@@ -71,13 +72,16 @@ pub enum QualPainel {
     Camadas,
     Navegador,
     Info,
+    /// O painel Caminhos (a Caneta): o de trabalho, os nomeados e a máscara
+    /// vetorial da camada escolhida.
+    Caminhos,
     Ajustes,
     /// O Tratamento de pele (separação de frequências, D&B).
     Pele,
 }
 
 impl QualPainel {
-    pub const TODOS: [QualPainel; 10] = [
+    pub const TODOS: [QualPainel; 11] = [
         QualPainel::Cor,
         QualPainel::Amostras,
         QualPainel::Navegador,
@@ -87,6 +91,7 @@ impl QualPainel {
         QualPainel::Historico,
         QualPainel::Camadas,
         QualPainel::Ajustes,
+        QualPainel::Caminhos,
         QualPainel::Pele,
     ];
 
@@ -103,6 +108,7 @@ impl QualPainel {
             QualPainel::Navegador => "editor:navegador",
             QualPainel::Info => "editor:info",
             QualPainel::Ajustes => "editor:ajustes",
+            QualPainel::Caminhos => "editor:caminhos",
             QualPainel::Pele => "editor:pele",
         }
     }
@@ -122,6 +128,7 @@ impl QualPainel {
             QualPainel::Navegador => "Navegador",
             QualPainel::Info => "Info",
             QualPainel::Ajustes => "Ajustes",
+            QualPainel::Caminhos => "Caminhos",
             QualPainel::Pele => "Tratamento de pele",
         }
     }
@@ -145,6 +152,7 @@ impl QualPainel {
             QualPainel::Navegador => Icone::Map,
             QualPainel::Info => Icone::Info,
             QualPainel::Ajustes => Icone::Contrast,
+            QualPainel::Caminhos => Icone::PenTool,
             QualPainel::Pele => Icone::Sparkles,
         }
     }
@@ -161,6 +169,7 @@ impl QualPainel {
             QualPainel::Navegador => "editor-painel-navegador",
             QualPainel::Info => "editor-painel-info",
             QualPainel::Ajustes => "editor-painel-ajustes",
+            QualPainel::Caminhos => "editor-painel-caminhos",
             QualPainel::Pele => "editor-painel-pele",
         }
     }
@@ -421,7 +430,8 @@ fn arranjo_padrao(paineis: &[(QualPainel, Entity<PainelDoEditor>)], cx: &App) ->
             DockLayout::tabs()
                 .panel_view(p(QualPainel::Cor), cx)
                 .panel_view(p(QualPainel::Amostras), cx)
-                .panel_view(p(QualPainel::Navegador), cx),
+                .panel_view(p(QualPainel::Navegador), cx)
+                .panel_view(p(QualPainel::Info), cx),
             Some(px(150.)),
         )
         .child(
@@ -434,9 +444,9 @@ fn arranjo_padrao(paineis: &[(QualPainel, Entity<PainelDoEditor>)], cx: &App) ->
         .child(
             DockLayout::tabs()
                 .panel_view(p(QualPainel::Camadas), cx)
+                .panel_view(p(QualPainel::Caminhos), cx)
                 .panel_view(p(QualPainel::Ajustes), cx)
-                .panel_view(p(QualPainel::Info), cx)
-                // Quatro abas só cabem no grupo das Camadas (nomes curtos).
+                // Quatro abas: cabem com a coluna padrão de 420 pt.
                 .panel_view(p(QualPainel::Pele), cx),
             None,
         )
@@ -526,9 +536,10 @@ pub fn arranjo_gravado(
                     for q in novos.drain(..) {
                         let aqui = match q {
                             QualPainel::Navegador => primeiro,
-                            QualPainel::Info | QualPainel::Ajustes | QualPainel::Pele => {
-                                com_camadas
-                            }
+                            QualPainel::Info
+                            | QualPainel::Ajustes
+                            | QualPainel::Caminhos
+                            | QualPainel::Pele => com_camadas,
                             _ => false,
                         };
                         match painel(q).filter(|_| aqui && usados.insert(q)) {
@@ -558,7 +569,11 @@ pub fn arranjo_gravado(
         .filter(|q| {
             matches!(
                 q,
-                QualPainel::Navegador | QualPainel::Info | QualPainel::Ajustes | QualPainel::Pele
+                QualPainel::Navegador
+                    | QualPainel::Info
+                    | QualPainel::Ajustes
+                    | QualPainel::Caminhos
+                    | QualPainel::Pele
             )
         })
         .filter(|q| !citados.contains(q.nome()))
@@ -979,6 +994,7 @@ impl EditorDeFoto {
                 QualPainel::Camadas => "editor-icone-camadas",
                 QualPainel::Navegador => "editor-icone-navegador",
                 QualPainel::Info => "editor-icone-info",
+                QualPainel::Caminhos => "editor-icone-caminhos",
                 QualPainel::Ajustes => "editor-icone-ajustes",
                 QualPainel::Pele => "editor-icone-pele",
             };
@@ -1010,6 +1026,7 @@ impl EditorDeFoto {
             QualPainel::Navegador => self.painel_do_navegador(cx),
             QualPainel::Info => self.painel_de_info(cx),
             QualPainel::Ajustes => self.painel_de_ajustes(cx),
+            QualPainel::Caminhos => self.painel_de_caminhos(cx),
             QualPainel::Pele => self.painel_da_pele(cx),
         }
     }
@@ -1034,6 +1051,7 @@ mod testes {
                 "editor:historico",
                 "editor:camadas",
                 "editor:ajustes",
+                "editor:caminhos",
                 "editor:pele"
             ]
         );

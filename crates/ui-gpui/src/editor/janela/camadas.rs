@@ -114,6 +114,7 @@ impl EditorDeFoto {
                             s.documento().base_do_recorte(i).is_some(),
                             c.bloqueio.algum(),
                             c.mascara.as_ref().is_some_and(|m| m.vinculada),
+                            c.mascara_vetorial.as_ref().map(|m| m.ativa),
                         )
                     })
                     .collect::<Vec<_>>(),
@@ -138,6 +139,7 @@ impl EditorDeFoto {
             })
             .unwrap_or_default();
         let criando_a_fotografia = self.criando_a_fotografia;
+        let alvo_vetorial = self.sessao().and_then(editor_core::Sessao::alvo_vetorial);
         let renomeando = self.renomeando.clone();
         let miniaturas = self.miniaturas.clone();
         let das_mascaras = self.miniaturas_das_mascaras.clone();
@@ -150,7 +152,7 @@ impl EditorDeFoto {
             .into_iter()
             .enumerate()
             .rev()
-            .map(|(i, (nome, visivel, modo, mascara, de_ajuste, recortada, bloqueada, vinculada))| {
+            .map(|(i, (nome, visivel, modo, mascara, de_ajuste, recortada, bloqueada, vinculada, vetorial))| {
                 let escolhida = i == ativa;
                 let nome_do_arrasto: SharedString = nome.clone().into();
                 let id_do_olho: SharedString = format!("editor-olho-{i}").into();
@@ -356,6 +358,71 @@ impl EditorDeFoto {
                             )
                         },
                     )
+                    // A máscara vetorial (a Caneta): clique escolhe o caminho
+                    // dela para editar; ⇧ + clique liga e desliga.
+                    .when_some(vetorial, |d, ligada| {
+                        let escolhida = alvo_vetorial
+                            == Some(editor_core::vetor::LugarDoCaminho::Mascara(i));
+                        d.child(
+                            moldura(
+                                div()
+                                    .id(("editor-mascara-vetorial", i))
+                                    .debug_selector(move || format!("editor-mascara-vetorial-{i}"))
+                                    .relative()
+                                    .size(lado)
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .bg(gpui_kit::white())
+                                    .child(
+                                        gpui_kit::component::Icon::new(Icone::PenTool)
+                                            .size_4()
+                                            .text_color(gpui_kit::black()),
+                                    )
+                                    .when(!ligada, |d| {
+                                        d.child(
+                                            div()
+                                                .absolute()
+                                                .inset_0()
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .text_color(gpui_kit::red())
+                                                .text_lg()
+                                                .child("✕"),
+                                        )
+                                    })
+                                    .tooltip(move |window, cx| {
+                                        gpui_kit::component::tooltip::Tooltip::new(if ligada {
+                                            "Máscara vetorial — clique para editar o caminho dela; ⇧ + clique desliga"
+                                        } else {
+                                            "Máscara vetorial desligada — ⇧ + clique liga"
+                                        })
+                                        .build(window, cx)
+                                    }),
+                                escolhida,
+                                cor_da_moldura,
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |ed, e: &MouseDownEvent, window, cx| {
+                                    cx.stop_propagation();
+                                    if e.modifiers.shift {
+                                        ed.na_sessao(cx, |s| {
+                                            s.alternar_mascara_vetorial(i);
+                                        });
+                                    } else {
+                                        ed.escolher_camada(i, cx);
+                                        ed.escolher_caminho_no_painel(
+                                            Some(editor_core::vetor::LugarDoCaminho::Mascara(i)),
+                                            cx,
+                                        );
+                                    }
+                                    window.focus(&ed.foco, cx);
+                                }),
+                            ),
+                        )
+                    })
                     .child(texto)
                     .when(bloqueada, |d| {
                         d.child(
