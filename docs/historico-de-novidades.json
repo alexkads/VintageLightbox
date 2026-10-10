@@ -1,5 +1,18 @@
 [
   {
+    "versao": "0.1.129",
+    "data": "2026-10-09",
+    "titulo": "Fotolivro: a exportação vira um álbum em PDF, e a lista de sessões mostra quem já recebeu.",
+    "importante": false,
+    "novidades": [
+      "Exportar: o uso agora é \"Arquivos individuais\" ou \"Fotolivro (PDF)\". A marca d'água é automática: a foto levada sai limpa, e as outras saem com a marca d'água do site, sem precisar escolher logotipo.",
+      "Fotolivro (PDF): capa, uma foto por página em fundo preto com moldura de álbum antigo, galeria, \"Leve o seu ensaio\" e \"Até a próxima viagem\". Nenhuma foto é cortada, e cada foto é um link para baixar ou comprar na galeria do cliente. Dá para gerar só com as levadas.",
+      "Sessões: coluna \"Fotolivro\". Mostra \"Não enviado\" na sessão cobrada no caixa que ainda não recebeu o livro, a data do envio, e quando o cliente abriu o e-mail. O filtro da coluna separa as não enviadas.",
+      "O fotolivro vai ao cliente sozinho quando a venda é registrada no caixa: por e-mail 6 horas depois, e pelo WhatsApp na hora (só com as fotos levadas, junto com o link) assim que o modelo de mensagem for aprovado na Meta."
+    ],
+    "por_que_atualizar": "Para mandar o ensaio como um fotolivro e ver na lista quem já recebeu e abriu."
+  },
+  {
     "versao": "0.1.127",
     "data": "2026-10-09",
     "titulo": "Exportar da sessão leva só as fotos marcadas.",
