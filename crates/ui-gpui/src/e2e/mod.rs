@@ -50,7 +50,7 @@
 //! | [`revelacao`] | a tira, os sliders, o histórico, as abas, a curva e as predefinições |
 //! | [`enquadrar`] | girar, espelhar, endireitar, proporção e alças |
 //! | [`zoom`] | as teclas do zoom, a folha de atalhos e o bruto em resolução cheia |
-//! | [`lote`] | sincronizar, zerar, a comprada, "Baixar JPEG" e "Salvar na galeria" |
+//! | [`lote`] | sincronizar, zerar, a comprada, "Baixar como…" e "Salvar na galeria" |
 //! | [`segundo_plano`] | minimizar, fechar com envio pendente e sair quando a fila esvazia |
 //! | [`ciclo_de_vida`] | 🎬 **o dia inteiro de uma sessão contra a API de verdade** (`make e2e-ciclo`): criação, seleção, revelação, caixa, estorno, fechamento e pós-venda |
 

@@ -1189,7 +1189,7 @@ impl Revelacao {
             "marcar_tudo" => self.marcar_todas(cx),
             "sincronizar" => self.abrir_sincronizacao(window, cx),
             "sincronizar_ok" => cx.emit(super::PedidoDaRevelacao::Sincronizar),
-            "baixar_jpeg" => cx.emit(super::PedidoDaRevelacao::Exportar),
+            "baixar_como" => self.baixar_a_aberta(window, cx),
             // 🧪 Vai à foto pelo nome do arquivo — para o roteiro revelar uma
             // foto certa (a que ainda sobe, por exemplo) sem contar setas.
             "abrir" => {

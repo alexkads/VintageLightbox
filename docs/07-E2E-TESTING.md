@@ -143,7 +143,7 @@ recebidos pelo `PublicadorDeMentira`; não comprova que as fotos foram alteradas
 | `revelacao` | a tira, os sliders, o histórico, as abas, a curva e as predefinições |
 | `enquadrar` | girar, espelhar, endireitar, proporção e alças |
 | `zoom` | as teclas do zoom, a folha de atalhos e o bruto em resolução cheia |
-| `lote` | sincronizar, zerar, a comprada, "Baixar JPEG" e "Salvar na galeria" |
+| `lote` | sincronizar, zerar, a comprada, "Baixar como…" e "Salvar na galeria" |
 | `segundo_plano` | minimizar, fechar com envio pendente e sair quando a fila esvazia |
 | **`ciclo_de_vida`** | **o app contra a API de verdade** (`make e2e-ciclo`), nos quatro caminhos. O que falta cobrir, com prioridade para classificação, sinalização e negociação: [`12-CICLO-DE-VIDA-O-QUE-FALTA.md`](12-CICLO-DE-VIDA-O-QUE-FALTA.md) |
 

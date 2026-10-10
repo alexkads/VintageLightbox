@@ -1,5 +1,5 @@
 //! 📦 O que a Revelação faz com mais de uma foto, e os dois botões do fim:
-//! "Baixar JPEG" e "Salvar na galeria e sair".
+//! "Baixar como…" e "Salvar na galeria e sair".
 
 use domain::services::PreviewType;
 use gpui_kit::TestAppContext;
@@ -257,50 +257,98 @@ fn a_foto_comprada_fica_travada(cx: &mut TestAppContext) {
     });
 }
 
-/// 🎬 **"Baixar JPEG"**: a foto do site é revelada em resolução cheia pelo
-/// site com o que está na tela, e o arquivo cai na pasta de downloads — a de
-/// teste. A foto que só está no disco sai pela exportação local.
+/// 🎬 **"Baixar como…"** (dono, 10/out/2026: *"tem que herdar as
+/// funcionalidades da exportação"*): o botão da barra abre a exportação com a
+/// foto aberta — formato, qualidade, pasta e a marca d'água pela LEVADA —, e o
+/// lote leva o que está na tela, salvo ou não. Nada sobe, e nada vai direto
+/// para a pasta Downloads, como ia o "Baixar JPEG".
 #[gpui_kit::test]
-fn baixar_jpeg_da_foto_do_site_e_da_local(cx: &mut TestAppContext) {
+fn baixar_como_abre_a_exportacao_com_a_foto_aberta(cx: &mut TestAppContext) {
+    use crate::exportacao::porta::Origem;
+
     let e = abrir_o_ensaio(cx, Cenario::default());
+    let pasta = tempfile::TempDir::new().expect("pasta de destino");
     e.revelar_a_do_site(cx, "a");
     e.revelacao(cx, |tela, _w, cx| tela.arrastar_slider(0, 0.6, cx));
     e.teclar(cx, "shift-h");
 
-    botao(&e, cx, PedidoDaRevelacao::Exportar);
-    e.revelacao(cx, |tela, _w, _cx| {
-        assert!(tela.gerando_jpeg(), "o botão diz que está gerando")
+    // 1 · A levada no balcão: o botão abre o modal, só com ela.
+    super::chatbot::clicar(&e, cx, "revelacao-exportar");
+    e.app(cx, |app, _w, cx| {
+        assert!(app.exportando(), "o botão abre a exportação");
+        let modal = app.exportacao_para_teste();
+        assert_eq!(modal.read(cx).quantas(), 1, "só a foto aberta");
+        assert_eq!(modal.read(cx).contagem(), (1, 0), "a levada sai limpa");
+        let destino = pasta.path().to_path_buf();
+        modal.update(cx, |tela, cx| tela.escolher_pasta_para_teste(destino, cx));
     });
+    assert!(
+        e.exportador.pedidos().is_empty(),
+        "nada sai antes do Exportar"
+    );
+    super::chatbot::clicar(&e, cx, "exportacao-exportar");
     e.esperar(cx);
 
-    let integrais = e.site.integrais();
-    assert_eq!(integrais.len(), 1);
-    assert_eq!(integrais[0].0, "a");
-    assert_eq!(
-        integrais[0].1.exposure, 0.6,
-        "com o que está na tela, salvo ou não"
+    let pedidos = e.exportador.pedidos();
+    assert_eq!(pedidos.len(), 1, "um lote");
+    assert_eq!(pedidos[0].len(), 1, "de uma foto");
+    assert!(
+        pedidos[0][0].destino.starts_with(pasta.path()),
+        "na pasta do \"Salvar em\", e não na Downloads"
     );
-    assert!(integrais[0].2.flip_horizontal(), "e o enquadramento junto");
+    match &pedidos[0][0].origem {
+        Origem::Site {
+            foto_no_site,
+            ajustes,
+            corte,
+            levada,
+            ..
+        } => {
+            assert_eq!(foto_no_site, "a");
+            assert_eq!(
+                ajustes.exposure, 0.6,
+                "com o que está na tela, salvo ou não"
+            );
+            assert!(corte.flip_horizontal(), "e o enquadramento junto");
+            assert!(*levada, "a levada no balcão sai revelada e inteira");
+        }
+        outra => panic!("a foto do site foi ao catálogo: {outra:?}"),
+    }
     assert!(e.site.reveladas().is_empty(), "baixar não sobe nada");
 
-    let pasta = e.app(cx, |app, _w, _cx| app.pasta_dos_downloads_para_teste());
-    let arquivo = pasta.join("a-revelada.jpg");
-    assert!(
-        arquivo.exists(),
-        "o JPEG foi gravado em {}",
-        pasta.display()
-    );
-    let na_pasta_do_usuario = directories::UserDirs::new()
-        .and_then(|d| d.download_dir().map(std::path::Path::to_path_buf));
-    assert_ne!(
-        Some(pasta.clone()),
-        na_pasta_do_usuario,
-        "nunca na pasta de quem roda"
-    );
-    e.revelacao(cx, |tela, _w, _cx| assert!(!tela.gerando_jpeg()));
-    let _ = std::fs::remove_dir_all(&pasta);
+    // 🔑 Fechado o modal, as teclas voltam a ser da Revelação.
+    e.app(cx, |app, window, cx| app.fechar_exportacao(window, cx));
+    e.teclar(cx, "shift-h");
+    e.revelacao(cx, |tela, _w, _cx| {
+        assert!(
+            !tela.enquadramento().flip_horizontal(),
+            "o ⇧H depois de fechar a exportação não chegou à Revelação"
+        );
+    });
 
-    // A foto local: a exportação abre com ela.
+    // 2 · A que está à venda: sai pela regra da exportação, com a marca.
+    e.revelacao(cx, |tela, window, cx| {
+        let a_venda = tela
+            .acervo()
+            .iter()
+            .position(|f| f.id == "site:d")
+            .expect("a que está à venda na tira");
+        tela.ir_para(a_venda, window, cx);
+    });
+    e.esperar(cx);
+    super::chatbot::clicar(&e, cx, "revelacao-exportar");
+    e.app(cx, |app, _w, cx| {
+        assert!(app.exportando());
+        let modal = app.exportacao_para_teste();
+        assert_eq!(
+            modal.read(cx).contagem(),
+            (0, 1),
+            "a não levada sai com a marca d'água"
+        );
+    });
+
+    // 3 · A foto que só está no disco: a mesma exportação, pelo catálogo.
+    e.app(cx, |app, window, cx| app.fechar_exportacao(window, cx));
     e.revelacao(cx, |tela, window, cx| {
         let local = tela
             .acervo()
@@ -309,12 +357,14 @@ fn baixar_jpeg_da_foto_do_site_e_da_local(cx: &mut TestAppContext) {
             .expect("a local na tira");
         tela.ir_para(local, window, cx);
     });
-    botao(&e, cx, PedidoDaRevelacao::Exportar);
+    e.esperar(cx);
+    super::chatbot::clicar(&e, cx, "revelacao-exportar");
     e.app(cx, |app, _w, cx| {
-        assert!(app.exportando(), "a local sai pela exportação");
-        assert_eq!(app.exportacao_para_teste().read(cx).quantas(), 1);
+        assert!(app.exportando(), "a local sai pela mesma exportação");
+        let modal = app.exportacao_para_teste();
+        assert_eq!(modal.read(cx).quantas(), 1);
+        assert_eq!(modal.read(cx).contagem(), (1, 0), "a do estúdio sai limpa");
     });
-    assert_eq!(e.site.integrais().len(), 1, "sem ida ao site para a local");
 }
 
 /// 🎬 **"Salvar na galeria e sair"**: sobe a aberta e as que o "Sincronizar"
@@ -471,8 +521,9 @@ fn salvar_na_galeria_com_falha_deixa_os_parametros_no_deposito(cx: &mut TestAppC
 /// 🚨 **Nasceu de "tem momentos que ele falta"** (dono, 18/set/2026). Eram duas
 /// coisas: o toast do `gpui-component` nasce no canto superior **direito** e
 /// cobria os três últimos botões da barra por quatro segundos (agora os avisos
-/// vão no topo **ao centro**, como o `sonner` do site), e o "Baixar JPEG" em
-/// curso não desligava o "Salvar" — na web o `ocupado` desliga os dois.
+/// vão no topo **ao centro**, como o `sonner` do site). O "Baixar JPEG" em curso
+/// também desligava o "Salvar"; desde 10/out/2026 ele é a exportação, que corre
+/// no modal dela, e não ocupa mais o botão.
 ///
 /// Os quatro estados aqui são os quatro `title` do `<Button>` da web:
 /// nada a salvar · esta foto · esta e mais N · a comprada e as N atrás dela.
@@ -507,17 +558,7 @@ fn o_botao_de_salvar_conta_o_que_ha_para_salvar(cx: &mut TestAppContext) {
         assert_eq!(botao.dica, "Salva esta foto na galeria e fecha a Revelação");
     });
 
-    // 3 · Enquanto o "Baixar JPEG" trabalha, ele fica quieto — o `ocupado`.
-    e.revelacao(cx, |tela, _w, cx| tela.definir_gerando_jpeg(true, cx));
-    e.revelacao(cx, |tela, _w, _cx| {
-        assert!(
-            !tela.botao_de_salvar().habilitado,
-            "um JPEG por vez: os dois pedem o bruto em resolução cheia"
-        );
-    });
-    e.revelacao(cx, |tela, _w, cx| tela.definir_gerando_jpeg(false, cx));
-
-    // 4 · O "Sincronizar" deixa outra pendente: a dica passa a contá-la.
+    // 3 · O "Sincronizar" deixa outra pendente: a dica passa a contá-la.
     e.revelacao(cx, |tela, window, cx| {
         let b = tela
             .acervo()
@@ -545,7 +586,7 @@ fn o_botao_de_salvar_conta_o_que_ha_para_salvar(cx: &mut TestAppContext) {
         );
     });
 
-    // 5 · Na comprada, que não se revela, o botão continua aceso pelas outras —
+    // 4 · Na comprada, que não se revela, o botão continua aceso pelas outras —
     // e a dica troca de frase (o `podeRevelar` do site).
     e.revelacao(cx, |tela, window, cx| {
         let c = tela
@@ -567,7 +608,7 @@ fn o_botao_de_salvar_conta_o_que_ha_para_salvar(cx: &mut TestAppContext) {
         );
     });
 
-    // 6 · O clique sai da revelação na hora — o lote sobe atrás.
+    // 5 · O clique sai da revelação na hora — o lote sobe atrás.
     botao(&e, cx, PedidoDaRevelacao::SalvarNaGaleria);
     e.esperar(cx);
     e.app(cx, |app, _w, _cx| {
@@ -645,7 +686,7 @@ fn o_lote_avisa_uma_vez_so_quando_termina(cx: &mut TestAppContext) {
 /// O que o teste alcança é o **lugar** deles: a lista de avisos da raiz, que o
 /// `render` desenha no topo ao centro. Antes disso era o `push_notification` do
 /// `gpui-component`, cuja lista mora fixa em `top_4().right_4()` — por cima de
-/// "Tela do cliente", "Baixar JPEG" e "Salvar na galeria e sair".
+/// "Tela do cliente", "Baixar como…" e "Salvar na galeria e sair".
 #[gpui_kit::test]
 fn o_aviso_de_sucesso_fica_no_topo_e_some_sozinho(cx: &mut TestAppContext) {
     let e = abrir_o_ensaio(cx, Cenario::default());

@@ -325,7 +325,6 @@ pub struct Revelacao {
     /// A tela do cliente está aberta? O botão fica âmbar, como no site.
     cliente_aberto: bool,
     /// "Gerando o JPEG…" no botão de baixar.
-    gerando_jpeg: bool,
     /// O histograma da foto **como ela está na tela**. Recalculado junto com a
     /// exibição, e `None` enquanto não há foto.
     histograma: Option<Histograma>,
@@ -780,7 +779,6 @@ impl Revelacao {
             aberta_no_deposito: false,
             parametros_ao_abrir: None,
             cliente_aberto: false,
-            gerando_jpeg: false,
             histograma: None,
             angulo,
             persp_vertical,
@@ -1199,10 +1197,9 @@ impl Revelacao {
         let ha = self.ha_o_que_salvar();
         let outras = self.nao_salvas;
         // 🚨 **Não há mais "salvando" aqui** (dono, 18/set/2026): o lote sobe em
-        // segundo plano e o editor fecha na hora, como no site. O que ainda
-        // ocupa o botão é o "Baixar JPEG", que disputa o mesmo bruto em
-        // resolução cheia.
-        let ocupado = self.gerando_jpeg;
+        // segundo plano e o editor fecha na hora, como no site. E o "Baixar
+        // como…" também não o ocupa mais: desde 10/out/2026 ele é a exportação,
+        // que corre no modal dela.
         let dica = if !ha {
             "Nada a salvar: o que está no canvas já está na galeria".to_string()
         } else if outras > 0 {
@@ -1219,22 +1216,8 @@ impl Revelacao {
         BotaoDeSalvar {
             rotulo: "Salvar na galeria e sair".to_string(),
             dica,
-            // Os três do site, na mesma ordem. `ocupado` inclui o "Baixar JPEG"
-            // em curso: os dois pedem o bruto em resolução cheia, e clicar num
-            // enquanto o outro trabalha era pedir a mesma foto duas vezes.
-            habilitado: self.tem_pixels() && !ocupado && ha,
+            habilitado: self.tem_pixels() && ha,
         }
-    }
-
-    pub fn definir_gerando_jpeg(&mut self, gerando: bool, cx: &mut Context<Self>) {
-        if self.gerando_jpeg != gerando {
-            self.gerando_jpeg = gerando;
-            cx.notify();
-        }
-    }
-
-    pub fn gerando_jpeg(&self) -> bool {
-        self.gerando_jpeg
     }
 
     pub fn definir_cliente_aberto(&mut self, aberto: bool, cx: &mut Context<Self>) {
@@ -2891,8 +2874,6 @@ impl Revelacao {
 pub enum PedidoDaRevelacao {
     /// O `X` da barra: fecha a Revelação e volta de onde se veio.
     Sair,
-    /// "Baixar JPEG" do site.
-    Exportar,
     /// "Tela do cliente" do site: abre ou fecha a tela do segundo monitor.
     TelaDoCliente,
     /// "Salvar na galeria e sair" do site: o revelado entra no lugar do
@@ -2908,7 +2889,8 @@ pub enum PedidoDaRevelacao {
     /// 2026-09-11). A foto aberta não vem por aqui: ela é zerada na própria
     /// tela, por `redefinir_ajustes`, para o `Cmd+Z` desfazer o gesto.
     ZerarAsMarcadas,
-    /// "Baixar como… (N)" do menu da tira: a exportação com essas fotos
+    /// "Baixar como…" — o botão da barra, com a foto aberta, e o "Baixar
+    /// como… (N)" do menu da tira: a exportação com essas fotos
     /// (`Revelacao::levar_a_baixar`).
     BaixarComo,
     /// "Descartar": as fotos de [`Revelacao::levar_a_descartar`] voltam à
@@ -3204,9 +3186,6 @@ impl Revelacao {
             .unwrap_or_default();
         let pronto = self.tem_pixels();
         let pode_revelar = self.pode_revelar();
-        // O `ocupado` do editor da web: enquanto um JPEG está sendo gerado ou o
-        // lote do "Salvar" está subindo, os dois botões do fim ficam quietos.
-        let ocupado = self.gerando_jpeg;
 
         div()
             .flex()
@@ -3433,24 +3412,25 @@ impl Revelacao {
             })
             // 🗑️ "Descartar": o caminho de volta do "Salvar" (dono,
             // 27/set/2026) — ver `descartar.rs`.
-            .child(self.botao_de_descartar(ocupado, cx))
-            // As duas últimas do site: "Baixar JPEG" e "Salvar na galeria e
-            // sair". Aqui elas **pedem à raiz**, que é quem tem o modal da
-            // pasta de destino e a conversa com o pós-venda.
+            .child(self.botao_de_descartar(cx))
+            // As duas últimas: "Baixar como…" e "Salvar na galeria e sair".
+            // Aqui elas **pedem à raiz**, que é quem tem o modal da exportação
+            // e a conversa com o pós-venda.
+            //
+            // 📥 **O "Baixar" é a exportação** (dono, 10/out/2026: *"tem que
+            // herdar as funcionalidades da exportação"*). Era o "Baixar JPEG"
+            // do site: um JPEG só, direto na pasta Downloads, sem formato, sem
+            // pasta e sem a regra da marca d'água.
             .child(
                 crate::estilo::botao_contorno_pequeno("revelacao-exportar", cx)
-                    .when(!self.gerando_jpeg, |b| b.icon(Icon::new(Icone::Download)))
-                    .loading(self.gerando_jpeg)
-                    .label(if self.gerando_jpeg {
-                        "Gerando o JPEG…"
-                    } else {
-                        "Baixar JPEG"
-                    })
-                    // O `ocupado` do site: um JPEG por vez, e nenhum enquanto o
-                    // lote do "Salvar" está subindo.
-                    .disabled(!pronto || ocupado)
-                    .on_click(cx.listener(|_tela, _ev, _window, cx| {
-                        cx.emit(PedidoDaRevelacao::Exportar);
+                    .icon(Icon::new(Icone::Download))
+                    .label("Baixar como…")
+                    .tooltip(
+                        "Baixar esta foto escolhendo formato, qualidade e pasta — a exportação da sessão",
+                    )
+                    .disabled(!pronto)
+                    .on_click(cx.listener(|tela, _ev, window, cx| {
+                        tela.baixar_a_aberta(window, cx);
                     })),
             )
             .child({

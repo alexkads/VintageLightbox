@@ -22,8 +22,6 @@ use domain::value_objects::{CropSettings, ExportOptions};
 use infrastructure::gpu_adjustments::Ajustes;
 use infrastructure::ImageExporterImpl;
 
-use crate::exportacao::porta::RevelaDoSite;
-
 /// O que volta pelo canal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Recado {
@@ -75,12 +73,6 @@ pub enum Recado {
     /// O bruto não veio. Não é recusa de gesto: a tela fica na cópia.
     OriginalIndisponivel {
         foto_no_site: String,
-    },
-    /// "Baixar JPEG": a foto aberta revelada em resolução cheia, com o que
-    /// está na tela — o `revelarIntegral` do site.
-    JpegRevelado {
-        foto_no_site: String,
-        bytes: Vec<u8>,
     },
     /// Os pixels de uma foto do site — o passo 11.
     ///
@@ -415,20 +407,6 @@ pub trait Publicador: Send + Sync + 'static {
     /// Baixa o bruto de uma foto do site. Volta como [`Recado::Original`].
     fn original(&self, _sessao: Sessao, foto_no_site: String, canal: Sender<Recado>) {
         let _ = canal.send(Recado::OriginalIndisponivel { foto_no_site });
-    }
-    /// Baixa o original e o revela com a revelação dada, **sem subir nada** —
-    /// o "Baixar JPEG" do editor. Volta como [`Recado::JpegRevelado`].
-    fn revelar_integral(
-        &self,
-        _sessao: Sessao,
-        _foto_no_site: String,
-        _ajustes: Ajustes,
-        _corte: CropSettings,
-        canal: Sender<Recado>,
-    ) {
-        let _ = canal.send(Recado::Falhou(
-            "este publicador não sabe revelar em resolução cheia".into(),
-        ));
     }
     /// O passo 11: os pixels da foto que só existe no storage.
     ///
@@ -889,34 +867,6 @@ impl Publicador for PublicadorDaApi {
         });
     }
 
-    fn revelar_integral(
-        &self,
-        sessao: Sessao,
-        foto_no_site: String,
-        ajustes: Ajustes,
-        corte: CropSettings,
-        canal: Sender<Recado>,
-    ) {
-        let revelado = self.revelacao_do_site().revelar(
-            sessao,
-            foto_no_site.clone(),
-            ajustes,
-            corte,
-            None,
-            ExportOptions::default().with_quality(QUALIDADE),
-        );
-        self.tokio.spawn(async move {
-            let recado = match revelado.await {
-                Ok(bytes) => Recado::JpegRevelado {
-                    foto_no_site,
-                    bytes,
-                },
-                Err(erro) => Recado::Falhou(format!("Não foi possível gerar o JPEG: {erro}")),
-            };
-            let _ = canal.send(recado);
-        });
-    }
-
     fn link(&self, sessao: Sessao, galeria_id: String, canal: Sender<Recado>) {
         let controlador = self.controlador.clone();
         self.tokio.spawn(async move {
@@ -1334,8 +1284,6 @@ pub mod mentira {
         pub originais: Mutex<Vec<String>>,
         /// Os estúdios cuja capa foi pedida.
         pub capas_pedidas: Mutex<Vec<String>>,
-        /// `(foto no site, ajustes, corte)` de cada "Baixar JPEG".
-        pub integrais: Mutex<Vec<(String, Ajustes, CropSettings)>>,
         /// Liga a recusa do site ao "Salvar na galeria", com esta frase.
         pub salvar_falha: Option<String>,
         /// **Quantas vezes cada foto ainda vai falhar** antes de passar — a
@@ -1473,10 +1421,6 @@ pub mod mentira {
 
         pub fn originais(&self) -> Vec<String> {
             self.originais.lock().expect("os originais").clone()
-        }
-
-        pub fn integrais(&self) -> Vec<(String, Ajustes, CropSettings)> {
-            self.integrais.lock().expect("os integrais").clone()
         }
 
         pub fn avisadas(&self) -> Vec<String> {
@@ -1682,30 +1626,6 @@ pub mod mentira {
                 None => Recado::OriginalIndisponivel { foto_no_site },
             };
             self.responder_ou_guardar(canal, recado);
-        }
-
-        /// Um JPEG de um pixel no lugar da revelação em resolução cheia — o
-        /// que importa aqui é **o que foi pedido**, e que a resposta chega.
-        fn revelar_integral(
-            &self,
-            _sessao: Sessao,
-            foto_no_site: String,
-            ajustes: Ajustes,
-            corte: CropSettings,
-            canal: Sender<Recado>,
-        ) {
-            self.integrais.lock().expect("os integrais").push((
-                foto_no_site.clone(),
-                ajustes,
-                corte,
-            ));
-            self.responder_ou_guardar(
-                canal,
-                Recado::JpegRevelado {
-                    foto_no_site,
-                    bytes: jpeg_de_um_pixel(),
-                },
-            );
         }
 
         fn link(&self, _sessao: Sessao, galeria_id: String, canal: Sender<Recado>) {

@@ -271,7 +271,7 @@ impl Revelacao {
     }
 
     /// O botão da barra, com o menu das duas escolhas.
-    pub(super) fn botao_de_descartar(&self, ocupado: bool, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn botao_de_descartar(&self, cx: &mut Context<Self>) -> AnyElement {
         let quantas = self.quantas_a_descartar();
         let esta_mudou = self.aberta_a_salvar();
         let tela = cx.entity().downgrade();
@@ -283,7 +283,7 @@ impl Revelacao {
             } else {
                 "Descartar a revelação não salva — a foto volta a ficar como está na galeria"
             })
-            .disabled(quantas == 0 || ocupado)
+            .disabled(quantas == 0)
             .dropdown_menu_with_anchor(gpui_kit::Anchor::TopRight, move |menu, window, cx| {
                 // 🚨 O menu devolve o foco a quem estiver no `action_context`
                 // — sem ele o foco ficava num menu que já fechou (ver a tira).

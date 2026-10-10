@@ -783,12 +783,21 @@ impl Revelacao {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // 💧 Só a que **não** foi levada sai como está na galeria (é a prévia
+        // marcada do site); a levada é revelada aqui, com o que a tira tem.
+        // E a aberta conta pelo que está na tela, e não só pelo depósito: o
+        // slider de um segundo atrás ainda não chegou lá.
+        let aberta_a_salvar = self
+            .foto_aberta()
+            .filter(|_| self.aberta_a_salvar())
+            .map(|f| f.id.clone());
         let pendentes = alvos
             .iter()
+            .filter(|f| !f.comprada)
             .filter(|f| {
-                f.pos_venda_foto_id
-                    .as_ref()
-                    .is_some_and(|id| self.tira.pendentes.contains(id))
+                f.pos_venda_foto_id.as_ref().is_some_and(|id| {
+                    self.tira.pendentes.contains(id) || aberta_a_salvar.as_ref() == Some(&f.id)
+                })
             })
             .count();
         if pendentes > 0 {
@@ -810,6 +819,20 @@ impl Revelacao {
         }
         self.tira.a_baixar = alvos;
         cx.emit(PedidoDaRevelacao::BaixarComo);
+    }
+
+    /// "Baixar como…" da barra: a exportação com a foto aberta — a mesma do
+    /// menu da tira e da sessão, com formato, qualidade, pasta, fotolivro e a
+    /// marca d'água decidida pela LEVADA.
+    ///
+    /// 🔑 **O gesto em curso fecha antes**: a exportação lê a revelação da
+    /// cópia da foto, e o arrasto de meio segundo atrás ainda não está nela.
+    pub fn baixar_a_aberta(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.gravar_o_que_estiver_pendente();
+        let Some(foto) = self.foto_aberta().cloned() else {
+            return;
+        };
+        self.baixar_pelo_menu(vec![foto], window, cx);
     }
 
     /// A foto tem revelação que a galeria ainda não recebeu — o ponto oco.

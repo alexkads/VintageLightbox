@@ -1,5 +1,5 @@
 //! Os downloads da Revelação que não são envio: o bruto da foto aberta (para
-//! medir o lado dele e para o zoom em resolução cheia), o "Baixar JPEG" e a
+//! medir o lado dele e para o zoom em resolução cheia) e a
 //! cópia de trabalho do passo 11 (a foto que só existe no site).
 //!
 //! 🔑 **Canal próprio**, e não o das sincronias: aquele conta "Subindo" na
@@ -51,12 +51,6 @@ pub(super) struct Baixas {
     /// A foto (id do site) cujo bruto a tela pediu.
     quer_bruto: Option<String>,
     _decodificando: Option<Task<()>>,
-    /// Onde o "Baixar JPEG" grava. `None` é a pasta Downloads de quem usa.
-    ///
-    /// 🚨 **Nos testes é uma pasta temporária por tela**: até 2026-09-17 o
-    /// caminho era sempre o `download_dir()`, e um teste que recebesse o JPEG
-    /// escreveria na pasta Downloads de quem roda a suíte.
-    downloads: Option<PathBuf>,
 }
 
 impl Baixas {
@@ -82,20 +76,7 @@ impl Baixas {
             copias_no_ar: HashSet::new(),
             quer_bruto: None,
             _decodificando: None,
-            downloads: downloads_de_teste(),
         }
-    }
-
-    /// A pasta do "Baixar JPEG": a Downloads do sistema (ou a temporária, se
-    /// ele não disser qual é); nos testes, a de [`downloads_de_teste`].
-    pub(super) fn pasta_dos_downloads(&self) -> PathBuf {
-        if let Some(pasta) = &self.downloads {
-            let _ = std::fs::create_dir_all(pasta);
-            return pasta.clone();
-        }
-        directories::UserDirs::new()
-            .and_then(|d| d.download_dir().map(std::path::Path::to_path_buf))
-            .unwrap_or_else(std::env::temp_dir)
     }
 
     pub(super) fn canal(&self) -> Sender<Recado> {
@@ -110,24 +91,6 @@ impl Baixas {
             }
         }
     }
-}
-
-#[cfg(not(test))]
-fn downloads_de_teste() -> Option<PathBuf> {
-    None
-}
-
-/// Uma pasta temporária por tela: testes em paralelo não disputam o nome do
-/// arquivo, e nenhum deles toca a pasta Downloads de quem roda a suíte.
-#[cfg(test)]
-fn downloads_de_teste() -> Option<PathBuf> {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static PROXIMA: AtomicUsize = AtomicUsize::new(0);
-    Some(std::env::temp_dir().join(format!(
-        "vlb-downloads-teste-{}-{}",
-        std::process::id(),
-        PROXIMA.fetch_add(1, Ordering::SeqCst)
-    )))
 }
 
 /// O maior lado de uma imagem, lendo só o cabeçalho.
@@ -394,15 +357,7 @@ impl Aplicativo {
                         }
                     }
                 }
-                Recado::JpegRevelado {
-                    foto_no_site,
-                    bytes,
-                } => self.guardar_o_jpeg(&foto_no_site, &bytes, cx),
-                Recado::Falhou(erro) => {
-                    self.revelacao
-                        .update(cx, |tela, cx| tela.definir_gerando_jpeg(false, cx));
-                    self.avisar_onde_esta_olhando(erro, cx);
-                }
+                Recado::Falhou(erro) => self.avisar_onde_esta_olhando(erro, cx),
                 _ => {}
             }
         }

@@ -666,7 +666,7 @@ pub struct Aplicativo {
     ///
     /// 🚨 **Só envios.** É esta conta que a bandeja chama de "Subindo", que o
     /// canto mostra e que o G9 consulta; os downloads (cópia de trabalho,
-    /// bruto, "Baixar JPEG") contam em `baixas` — ver `esperar_o_site`.
+    /// bruto) contam em `baixas` — ver `esperar_o_site`.
     sincronias_pendentes: usize,
     /// As fotos que receberam revelação nova aqui e cujo JPEG no site ainda é o
     /// de antes — a fila que o "Salvar na galeria" esvazia.
@@ -748,7 +748,7 @@ pub struct Aplicativo {
     /// 🚨 **No alto e no meio, e não no canto** (dono, 18/set/2026: *"tem
     /// momentos que ele falta"*). A lista de notificações do `gpui-component`
     /// mora fixa no canto superior **direito** (`NotificationList::render`), que
-    /// é exatamente onde ficam "Tela do cliente", "Baixar JPEG" e "Salvar na
+    /// é exatamente onde ficam "Tela do cliente", "Baixar como…" e "Salvar na
     /// galeria e sair": cada aviso apagava os três botões por alguns segundos, e
     /// o que se via era o botão sumir sozinho. O `sonner` do site é
     /// `position="top-center"` (`app/layout.tsx`) — sobre o nome do arquivo, que
@@ -935,7 +935,7 @@ pub struct Aplicativo {
     /// A tela só fecha quando todas responderem, e fica se alguma falhar —
     /// como o `salvarESair` do site.
     lote_no_ar: Option<(usize, usize, bool)>,
-    /// Os downloads da Revelação (bruto e "Baixar JPEG"), fora da fila de envios.
+    /// Os downloads da Revelação (bruto e cópia de trabalho), fora da fila de envios.
     baixas: resolucao_cheia::Baixas,
     pub(crate) tela: Tela,
     /// A raiz precisa de foco próprio para as ações de teclado chegarem nela.
@@ -3819,12 +3819,6 @@ impl Aplicativo {
                     self.contar_o_salvar(false, cx);
                     mudou = true;
                 }
-                PosVendaRecado::JpegRevelado {
-                    foto_no_site,
-                    bytes,
-                } => {
-                    self.guardar_o_jpeg(&foto_no_site, &bytes, cx);
-                }
                 // 🚨 **A falha de um envio, com o nome de quem falhou.**
                 //
                 // ⚠️ **Enquanto a esteira vai repetir, a tela não diz nada**: um
@@ -3839,8 +3833,6 @@ impl Aplicativo {
                 {
                     self.parametros_no_ar.remove(&alvo);
                     self.subindo_sozinhas.remove(&alvo);
-                    self.revelacao
-                        .update(cx, |tela, cx| tela.definir_gerando_jpeg(false, cx));
                     self.tirar_do_lote_do_salvar(cx);
                     self.recontar_o_que_falta_subir(cx);
                 }
@@ -3857,8 +3849,6 @@ impl Aplicativo {
                     // especialmente ao classificar uma foto que falhou sem
                     // nota durante a importação assíncrona.
                     self.subindo_sozinhas.remove(&alvo);
-                    self.revelacao
-                        .update(cx, |tela, cx| tela.definir_gerando_jpeg(false, cx));
                     self.contar_o_salvar(true, cx);
                     // 🔑 **Nada some em silêncio** (G7): a recusa fica no
                     // canto até alguém olhar, além do aviso na tela — e
@@ -3873,8 +3863,6 @@ impl Aplicativo {
                     self.avisar_falha(recusa, cx);
                 }
                 PosVendaRecado::Falhou(erro) => {
-                    self.revelacao
-                        .update(cx, |tela, cx| tela.definir_gerando_jpeg(false, cx));
                     self.contar_o_salvar(true, cx);
                     // 🔑 **Nada some em silêncio** (G7): a recusa fica no
                     // canto até alguém olhar, além do aviso na tela.
@@ -4338,12 +4326,12 @@ impl Aplicativo {
         }
     }
 
-    /// Atende os três botões da barra da Revelação que não são dela.
+    /// Atende os botões da barra da Revelação que não são dela.
     ///
-    /// 🔑 **São os dois últimos botões do editor do site, com os nomes de lá**:
-    /// "Baixar JPEG" (aqui, "Exportar JPEG", porque no desktop ele escreve num
-    /// disco) e "Salvar na galeria e sair". Valem para a foto aberta, que na
-    /// Revelação **é** a seleção — foi ela que trouxe o operador até aqui.
+    /// 🔑 **São os dois últimos botões do editor do site**: o "Baixar" (aqui,
+    /// "Baixar como…", que abre a exportação — dono, 10/out/2026) e o "Salvar
+    /// na galeria e sair". Valem para a foto aberta, que na Revelação **é** a
+    /// seleção — foi ela que trouxe o operador até aqui.
     pub(crate) fn atender_a_revelacao(
         &mut self,
         pedido: PedidoDaRevelacao,
@@ -4352,7 +4340,6 @@ impl Aplicativo {
     ) {
         match pedido {
             PedidoDaRevelacao::Sair => self.voltar_para_biblioteca(window, cx),
-            PedidoDaRevelacao::Exportar => self.baixar_jpeg(cx),
             PedidoDaRevelacao::TelaDoCliente => self.alternar_cliente(cx),
             PedidoDaRevelacao::SalvarNaGaleria => self.salvar_na_galeria(window, cx),
             PedidoDaRevelacao::Sincronizar => self.sincronizar_revelacao(window, cx),
@@ -4363,7 +4350,8 @@ impl Aplicativo {
                     .update(cx, |tela, _cx| tela.levar_a_descartar());
                 self.descartar_as_edicoes(ids, window, cx);
             }
-            // "Baixar como… (N)" do menu da tira: a exportação com os alvos dele.
+            // "Baixar como…" da barra (a foto aberta) e "Baixar como… (N)" do
+            // menu da tira: a exportação com os alvos dele.
             PedidoDaRevelacao::BaixarComo => {
                 let fotos = self.revelacao.update(cx, |tela, _cx| tela.levar_a_baixar());
                 if self.pode_trabalhar() && !fotos.is_empty() {
@@ -5428,77 +5416,6 @@ impl Aplicativo {
         });
         self.exportando = true;
         cx.notify();
-    }
-
-    /// **Baixar JPEG** da Revelação: a foto aberta, em resolução cheia, com o
-    /// que está na tela — inclusive o que ainda não foi salvo. É o `baixar` do
-    /// editor do site, e **não** a exportação da Biblioteca.
-    pub fn baixar_jpeg(&mut self, cx: &mut Context<Self>) {
-        if !self.pode_trabalhar() {
-            return;
-        }
-        let (aberta, ajustes, corte, gerando) = {
-            let revelacao = self.revelacao.read(cx);
-            (
-                revelacao.foto_aberta().cloned(),
-                revelacao.ajustes(),
-                revelacao.enquadramento(),
-                revelacao.gerando_jpeg(),
-            )
-        };
-        let Some(foto) = aberta else {
-            return;
-        };
-        if gerando {
-            return;
-        }
-        match (foto.pos_venda_foto_id.clone(), self.sessao().cloned()) {
-            (Some(no_site), Some(sessao)) => {
-                self.revelacao
-                    .update(cx, |tela, cx| tela.definir_gerando_jpeg(true, cx));
-                self.publicador.revelar_integral(
-                    sessao,
-                    no_site,
-                    ajustes,
-                    corte,
-                    self.baixas.canal(),
-                );
-                self.esperar_as_baixas(1, cx);
-            }
-            // A foto que ainda só está no disco sai pela exportação local, que
-            // lê a revelação gravada — por isso o gesto em curso fecha antes.
-            _ => {
-                self.revelacao
-                    .update(cx, |tela, _| tela.gravar_o_que_estiver_pendente());
-                self.abrir_a_exportacao(vec![foto], cx);
-            }
-        }
-    }
-
-    /// O JPEG chegou: vai para a pasta Downloads, como o download do site.
-    fn guardar_o_jpeg(&mut self, foto_no_site: &str, bytes: &[u8], cx: &mut Context<Self>) {
-        self.revelacao
-            .update(cx, |tela, cx| tela.definir_gerando_jpeg(false, cx));
-        let nome = self
-            .fotos_do_site
-            .iter()
-            .find(|f| f.pos_venda_foto_id.as_deref() == Some(foto_no_site))
-            .map(|f| f.name.clone())
-            .unwrap_or_else(|| "foto".into());
-        let pasta = self.baixas.pasta_dos_downloads();
-        let destino = arquivo_livre(&pasta, &nome_do_jpeg(&nome));
-        let aviso = match std::fs::write(&destino, bytes) {
-            Ok(()) => format!(
-                "JPEG salvo em {}",
-                destino
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or_default()
-            ),
-            Err(erro) => format!("Não foi possível gravar o JPEG: {erro}"),
-        };
-        let falhou = aviso.starts_with("Não foi possível");
-        self.avisar_em_toast(aviso, falhou, cx);
     }
 
     /// Fecha o modal. ⚠️ **Não cancela o lote em curso** — a `Task` de colheita
@@ -7294,33 +7211,6 @@ impl Aplicativo {
     pub(crate) fn exportacao_para_teste(&self) -> Entity<Exportacao> {
         self.exportacao.clone()
     }
-
-    /// Onde o "Baixar JPEG" grava nos testes — nunca a pasta do usuário.
-    pub(crate) fn pasta_dos_downloads_para_teste(&self) -> std::path::PathBuf {
-        self.baixas.pasta_dos_downloads()
-    }
-}
-
-/// O nome do download, como o site: `<nome sem extensão>-revelada.jpg`.
-fn nome_do_jpeg(arquivo: &str) -> String {
-    let base = match arquivo.rfind('.') {
-        Some(ponto) if ponto > 0 => &arquivo[..ponto],
-        _ => arquivo,
-    };
-    format!("{base}-revelada.jpg")
-}
-
-/// Um caminho que não pisa em arquivo existente: `x.jpg`, `x (2).jpg`…
-fn arquivo_livre(pasta: &std::path::Path, nome: &str) -> std::path::PathBuf {
-    let caminho = pasta.join(nome);
-    if !caminho.exists() {
-        return caminho;
-    }
-    let (base, extensao) = nome.rsplit_once('.').unwrap_or((nome, ""));
-    (2..)
-        .map(|n| pasta.join(format!("{base} ({n}).{extensao}")))
-        .find(|c| !c.exists())
-        .expect("sempre há um número livre")
 }
 
 /// A marca do aviso de gesto no `id` do kit: um de cada vez.
@@ -7337,27 +7227,6 @@ impl Drop for CronometroAoSair {
 
 #[cfg(test)]
 mod testes {
-    #[test]
-    fn o_jpeg_baixado_tem_o_nome_do_site() {
-        assert_eq!(
-            super::nome_do_jpeg("GRA_2729.webp"),
-            "GRA_2729-revelada.jpg"
-        );
-        assert_eq!(
-            super::nome_do_jpeg("sem-extensao"),
-            "sem-extensao-revelada.jpg"
-        );
-        let pasta = tempfile::tempdir().expect("pasta");
-        let primeiro = super::arquivo_livre(pasta.path(), "a-revelada.jpg");
-        std::fs::write(&primeiro, b"x").expect("gravar");
-        assert_eq!(
-            super::arquivo_livre(pasta.path(), "a-revelada.jpg")
-                .file_name()
-                .unwrap(),
-            "a-revelada (2).jpg"
-        );
-    }
-
     use super::*;
 
     use gpui_kit::TestAppContext;
