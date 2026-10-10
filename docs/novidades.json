@@ -1,12 +1,11 @@
 {
-  "versao": "0.1.136",
-  "titulo": "Exportar: diálogo novo, e o fotolivro visto dentro do app.",
+  "versao": "0.1.137",
+  "titulo": "Revelação: o \"Baixar JPEG\" virou \"Baixar como…\" e abre a exportação.",
   "importante": false,
   "novidades": [
-    "Exportar: o diálogo foi redesenhado. O uso (Arquivos individuais ou Fotolivro) e o formato viraram abas de ponta a ponta, um quadro mostra quantas fotos são levadas e quantas estão à venda e o que cada grupo leva, e a caixa não muda mais de tamanho quando você troca uma opção.",
-    "Fotolivro (PDF): quando o livro fica pronto, o botão \"Ver o fotolivro\" abre o livro dentro do app, com página anterior e próxima, zoom e \"Mostrar na pasta\".",
-    "Fotolivro (PDF): os links do livro funcionam no visualizador. \"Abrir minha galeria\" e a foto abrem no navegador; \"Folhear o álbum\" e \"Galeria\" pulam para a página.",
-    "Atualização: esta versão pede o Rust 1.92 ou mais novo. O atualizador cuida disso sozinho; no balcão que estiver com um Rust mais antigo, esta atualização demora mais, porque recompila tudo."
+    "Revelação: o botão \"Baixar JPEG\" da barra agora se chama \"Baixar como…\" e abre a exportação já com a foto aberta — dá para escolher o formato (JPEG, PNG, TIFF ou WebP), a qualidade e a pasta, gerar o fotolivro e usar o \"Mostrar na pasta\". Antes ele gravava um JPEG direto na pasta Downloads, sem escolha nenhuma.",
+    "Revelação: a foto baixada por ali segue a regra da exportação — a levada sai inteira e limpa, com o que está na tela, mesmo sem salvar; a que não foi levada sai com a marca d'água do site, como está na galeria.",
+    "Revelação: o aviso \"o arquivo sai como está na galeria\" só aparece para a foto não levada que tem revelação ainda não salva."
   ],
-  "por_que_atualizar": "Para conferir o fotolivro no próprio app antes de mandar ao cliente."
+  "por_que_atualizar": "Quem baixava a foto pela Revelação recebia sempre um JPEG na pasta Downloads, e a foto não levada saía sem a marca d'água."
 }
