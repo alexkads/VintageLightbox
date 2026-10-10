@@ -1,9 +1,10 @@
 {
-  "versao": "0.1.130",
-  "titulo": "Sessões: a coluna \"Fotolivro enviado em\".",
+  "versao": "0.1.131",
+  "titulo": "Fotolivro mais leve: pequeno para mandar e abrir no celular.",
   "importante": false,
   "novidades": [
-    "Sessões: coluna \"Fotolivro enviado em\", com a data e a hora em que o fotolivro foi ao cliente pela primeira vez (WhatsApp ou e-mail). Dá para ordenar e filtrar por período, como a coluna \"Criada\"."
+    "Fotolivro (PDF): as fotos entram no tamanho da tela do celular, e não de impressão — o livro de 21 fotos caiu de 7 MB para 3,6 MB. A foto em tamanho original continua a um toque, pelo link de cada página.",
+    "Fotolivro (PDF): o livro nunca passa de 20 MB, mesmo num ensaio enorme, e gera usando bem menos memória."
   ],
-  "por_que_atualizar": "Para ver na lista quando cada cliente recebeu o fotolivro."
+  "por_que_atualizar": "Para o fotolivro sair leve, fácil de mandar e de abrir no celular do cliente."
 }
