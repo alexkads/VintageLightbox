@@ -1,5 +1,18 @@
 [
   {
+    "versao": "0.1.140",
+    "data": "2026-10-10",
+    "titulo": "Chatbot: o áudio do WhatsApp toca no balcão, o vídeo aparece pela capa, e o anexo sai como foto, vídeo ou documento.",
+    "importante": false,
+    "novidades": [
+      "Chatbot: o áudio que o cliente manda pelo WhatsApp toca aqui mesmo, pelo ▶ ao lado do cartão (■ para parar). O cartão continua abrindo o arquivo no programa do sistema.",
+      "Chatbot: o vídeo recebido aparece na conversa pela capa, com o ▶ por cima; o clique abre o vídeo no programa do sistema. O clipe também anexa vídeo (MP4 ou 3GP).",
+      "Chatbot: ao anexar foto ou vídeo, a tira oferece \"Enviar como\" — foto/vídeo (dentro da conversa, recomprimido pela Meta) ou documento (o arquivo original, com o nome e sem perder qualidade) —, como no WhatsApp do telefone.",
+      "Chatbot: o PDF do fotolivro enviado ao cliente pelo pós-venda passa a aparecer no histórico da conversa."
+    ],
+    "por_que_atualizar": "Sem esta versão, o áudio e o vídeo do cliente não têm prévia no balcão, e a foto só sai recomprimida."
+  },
+  {
     "versao": "0.1.139",
     "data": "2026-10-10",
     "titulo": "Chatbot: as mensagens aparecem com a formatação do WhatsApp (negrito, itálico, riscado) e os links abrem com um clique.",
