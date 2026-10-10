@@ -59,10 +59,29 @@ impl TipoDeMidia {
         }
     }
 
-    /// A foto e a figurinha aparecem **dentro** do balão; o resto é um cartão
-    /// que abre no programa do sistema.
+    /// A foto e a figurinha aparecem **dentro** do balão como vêm; o vídeo
+    /// aparece pela capa (o quadro que o servidor prepara, ver [`Previa`]); o
+    /// resto é um cartão que abre no programa do sistema.
     pub fn aparece_no_balao(self) -> bool {
         matches!(self, Self::Imagem | Self::Figurinha)
+    }
+}
+
+/// A prévia que o servidor prepara de uma mídia, porque o app não decodifica
+/// o Opus do WhatsApp nem abre vídeo: o áudio em MP3 (que o `rodio` toca) e
+/// um quadro do vídeo em JPEG (a capa do balão).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Previa {
+    Mp3,
+    Quadro,
+}
+
+impl Previa {
+    fn parametro(self) -> &'static str {
+        match self {
+            Self::Mp3 => "mp3",
+            Self::Quadro => "quadro",
+        }
     }
 }
 
@@ -104,6 +123,15 @@ impl Midia {
             transcricao: texto("transcricao"),
             guardada: texto("chave").is_some_and(|chave| !chave.trim().is_empty()),
         })
+    }
+
+    /// A prévia que este tipo tem no servidor, se tem.
+    pub fn previa(&self) -> Option<Previa> {
+        match self.tipo {
+            TipoDeMidia::Audio => Some(Previa::Mp3),
+            TipoDeMidia::Video => Some(Previa::Quadro),
+            _ => None,
+        }
     }
 
     /// O título do cartão: o nome do arquivo, ou o tipo.
@@ -201,6 +229,16 @@ pub fn caminho_da_midia(mensagem_id: &str) -> String {
     )
 }
 
+/// `GET /whatsapp/messages/{id}/midia?previa=…` — a prévia preparada no
+/// servidor (`application::whatsapp::midia::Previa`).
+pub fn caminho_da_previa(mensagem_id: &str, previa: Previa) -> String {
+    format!(
+        "{}?previa={}",
+        caminho_da_midia(mensagem_id),
+        previa.parametro()
+    )
+}
+
 /// `"1,2 MB"`, `"340 kB"` — como no site (`formatarTamanho`).
 pub fn formatar_tamanho(bytes: u64) -> String {
     const MB: f64 = 1024.0 * 1024.0;
@@ -220,14 +258,65 @@ pub fn formatar_tamanho(bytes: u64) -> String {
 
 /// A maior foto: o teto da Cloud API para imagem.
 pub const TETO_DA_FOTO: u64 = 5 * 1024 * 1024;
-/// O maior áudio ou documento: o teto do backend (`TETO_DO_DOCUMENTO`).
+/// O maior áudio, vídeo ou documento: o teto do backend.
 pub const TETO_DO_ARQUIVO: u64 = 16 * 1024 * 1024;
+
+/// Como o anexo sai — a escolha que o WhatsApp dá ao anexar (dono,
+/// 2026-10-10: *"tem que ter as mesmas opções do whatsapp de enviar como
+/// documento, vídeo ou foto"*). Foto e vídeo chegam dentro da conversa,
+/// recomprimidos pela Meta; documento chega como arquivo, com o nome e sem
+/// perder qualidade. É o campo `como` do envio.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComoEnviar {
+    Foto,
+    Video,
+    Documento,
+}
+
+impl ComoEnviar {
+    pub fn rotulo(self) -> &'static str {
+        match self {
+            Self::Foto => "Foto",
+            Self::Video => "Vídeo",
+            Self::Documento => "Documento",
+        }
+    }
+
+    /// O nome do item do menu "Enviar como" (`chatbot-como-…`).
+    pub fn id_do_item(self) -> &'static str {
+        match self {
+            Self::Foto => "chatbot-como-foto",
+            Self::Video => "chatbot-como-video",
+            Self::Documento => "chatbot-como-documento",
+        }
+    }
+
+    /// O valor do campo `como`, como o backend o lê.
+    pub fn campo(self) -> &'static str {
+        match self {
+            Self::Foto => "foto",
+            Self::Video => "video",
+            Self::Documento => "documento",
+        }
+    }
+
+    /// As escolhas que este arquivo tem, na ordem em que a tira as oferece —
+    /// a primeira é o jeito natural dele. Uma só: a tira nem pergunta.
+    pub fn opcoes(nome: &str) -> Vec<Self> {
+        match classe_do_anexo(nome) {
+            Some(ClasseDoAnexo::Foto) => vec![Self::Foto, Self::Documento],
+            Some(ClasseDoAnexo::Video) => vec![Self::Video, Self::Documento],
+            _ => vec![Self::Documento],
+        }
+    }
+}
 
 /// Como um anexo sai: foto vira imagem na conversa do cliente, áudio toca lá,
 /// e o resto chega como documento, com o nome.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClasseDoAnexo {
     Foto,
+    Video,
     Audio,
     Documento,
 }
@@ -244,6 +333,8 @@ const ANEXOS: &[(&str, &str, ClasseDoAnexo)] = &[
     ("m4a", "audio/mp4", ClasseDoAnexo::Audio),
     ("aac", "audio/aac", ClasseDoAnexo::Audio),
     ("amr", "audio/amr", ClasseDoAnexo::Audio),
+    ("mp4", "video/mp4", ClasseDoAnexo::Video),
+    ("3gp", "video/3gpp", ClasseDoAnexo::Video),
     ("pdf", "application/pdf", ClasseDoAnexo::Documento),
     ("txt", "text/plain", ClasseDoAnexo::Documento),
     ("doc", "application/msword", ClasseDoAnexo::Documento),
@@ -290,7 +381,7 @@ pub fn classe_do_anexo(nome: &str) -> Option<ClasseDoAnexo> {
 pub fn recusa_do_anexo(nome: &str, tamanho: u64) -> Option<String> {
     let Some(classe) = classe_do_anexo(nome) else {
         return Some(
-            "Este tipo de arquivo não vai pelo WhatsApp. Anexe foto (JPG ou PNG), áudio, PDF, \
+            "Este tipo de arquivo não vai pelo WhatsApp. Anexe foto (JPG ou PNG), vídeo (MP4), áudio, PDF, \
              Word, Excel, PowerPoint ou texto."
                 .into(),
         );
@@ -300,6 +391,7 @@ pub fn recusa_do_anexo(nome: &str, tamanho: u64) -> Option<String> {
     }
     let (teto, o_que) = match classe {
         ClasseDoAnexo::Foto => (TETO_DA_FOTO, "A foto"),
+        ClasseDoAnexo::Video => (TETO_DO_ARQUIVO, "O vídeo"),
         ClasseDoAnexo::Audio => (TETO_DO_ARQUIVO, "O áudio"),
         ClasseDoAnexo::Documento => (TETO_DO_ARQUIVO, "O arquivo"),
     };
@@ -327,7 +419,7 @@ pub fn texto_do_anexo_em_voo(nome: &str, legenda: &str) -> String {
 }
 
 /// O corpo de `POST /whatsapp/messages/send-media`: `contact_id`, `caption`
-/// (quando há) e `file`.
+/// (quando há), `como` (quando escolhido) e `file`.
 ///
 /// `limite` vem de fora para o teste conferir o corpo byte a byte; quem chama
 /// passa um que não aparece no arquivo ([`limite_do_multipart`]).
@@ -336,6 +428,7 @@ pub fn multipart(
     legenda: &str,
     nome: &str,
     bytes: &[u8],
+    como: Option<ComoEnviar>,
     limite: &str,
 ) -> CorpoDoPedido {
     let tipo = do_anexo(nome).map_or("application/octet-stream", |(_, tipo, _)| tipo);
@@ -358,6 +451,9 @@ pub fn multipart(
     let legenda = legenda.trim();
     if !legenda.is_empty() {
         campo("caption", legenda);
+    }
+    if let Some(como) = como {
+        campo("como", como.campo());
     }
     corpo.extend_from_slice(
         format!(
@@ -527,7 +623,7 @@ mod testes {
             "a.webp",
             "b.html",
             "c.zip",
-            "d.mp4",
+            "d.mov",
             "sem-extensao",
             "voz.webm",
         ] {
@@ -567,7 +663,7 @@ mod testes {
 
     #[test]
     fn o_multipart_leva_o_contato_a_legenda_e_o_arquivo() {
-        let corpo = multipart(" 5554999 ", " segue ", "or\"ça.pdf", b"%PDF", "LIM");
+        let corpo = multipart(" 5554999 ", " segue ", "or\"ça.pdf", b"%PDF", None, "LIM");
         assert_eq!(corpo.tipo, "multipart/form-data; boundary=LIM");
         assert_eq!(
             String::from_utf8(corpo.bytes).unwrap(),
@@ -578,7 +674,7 @@ mod testes {
         );
 
         // Sem legenda o campo não vai: vazio seria uma legenda vazia.
-        let sem = multipart("5554999", "", "foto.jpg", b"x", "LIM");
+        let sem = multipart("5554999", "", "foto.jpg", b"x", None, "LIM");
         let texto = String::from_utf8(sem.bytes).unwrap();
         assert!(!texto.contains("caption"));
         assert!(texto.contains("Content-Type: image/jpeg"));
@@ -592,5 +688,62 @@ mod testes {
         assert!(!bytes
             .windows(limite.len())
             .any(|janela| janela == limite.as_bytes()));
+    }
+
+    /// 📎 Dono, 10/10: *"as mesmas opções do whatsapp de enviar como documento,
+    /// vídeo ou foto"*. A primeira opção é o jeito natural do arquivo.
+    #[test]
+    fn foto_e_video_podem_ir_como_documento_e_o_resto_so_como_documento() {
+        assert_eq!(
+            ComoEnviar::opcoes("a.jpg"),
+            [ComoEnviar::Foto, ComoEnviar::Documento]
+        );
+        assert_eq!(
+            ComoEnviar::opcoes("b.MP4"),
+            [ComoEnviar::Video, ComoEnviar::Documento]
+        );
+        assert_eq!(ComoEnviar::opcoes("c.pdf"), [ComoEnviar::Documento]);
+        assert_eq!(ComoEnviar::opcoes("voz.ogg"), [ComoEnviar::Documento]);
+        assert_eq!(recusa_do_anexo("b.mp4", 1000), None);
+        assert!(recusa_do_anexo("b.mp4", TETO_DO_ARQUIVO + 1024 * 1024)
+            .unwrap()
+            .starts_with("O vídeo tem"));
+
+        // A escolha vai no campo `como`, como o backend o lê.
+        let corpo = multipart(
+            "5554999",
+            "",
+            "foto.jpg",
+            b"x",
+            Some(ComoEnviar::Documento),
+            "LIM",
+        );
+        let texto = String::from_utf8(corpo.bytes).unwrap();
+        assert!(texto.contains("name=\"como\"\r\n\r\ndocumento\r\n"));
+    }
+
+    #[test]
+    fn a_previa_e_pedida_pelo_id_e_so_audio_e_video_a_tem() {
+        assert_eq!(
+            caminho_da_previa("m-1", Previa::Mp3),
+            "/whatsapp/messages/m-1/midia?previa=mp3"
+        );
+        assert_eq!(
+            caminho_da_previa("m-1", Previa::Quadro),
+            "/whatsapp/messages/m-1/midia?previa=quadro"
+        );
+        let m = |tipo| Midia {
+            tipo,
+            mime: None,
+            nome: None,
+            tamanho: None,
+            com_legenda: false,
+            transcricao: None,
+            guardada: true,
+        };
+        assert_eq!(m(TipoDeMidia::Audio).previa(), Some(Previa::Mp3));
+        assert_eq!(m(TipoDeMidia::Video).previa(), Some(Previa::Quadro));
+        assert_eq!(m(TipoDeMidia::Imagem).previa(), None);
+        assert_eq!(m(TipoDeMidia::Documento).previa(), None);
     }
 }

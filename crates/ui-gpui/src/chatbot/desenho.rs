@@ -25,7 +25,7 @@ use gpui_kit::{
 };
 
 use super::formatacao;
-use super::midia::{self, Midia, TipoDeMidia};
+use super::midia::{self, ComoEnviar, Midia, TipoDeMidia};
 use super::modelo::{self, Canal, Conversa, FiltroDeCanal, Mensagem, Status, Urgencia};
 use super::tela::{Chatbot, Dialogo, Miniatura, Pendente};
 use super::EnviarMensagem;
@@ -925,6 +925,51 @@ impl Chatbot {
         };
         let id = mensagem.id.clone();
 
+        // 🎬 O vídeo entra pela capa — o quadro que o servidor prepara —, com
+        // o ▶ por cima; o clique abre o arquivo no programa do sistema. Sem a
+        // capa ainda, o cartão.
+        if midia.tipo == TipoDeMidia::Video && midia.guardada {
+            if let Some(Miniatura::Pronta(imagem)) = self.miniaturas.get(&mensagem.id) {
+                let nome = format!("chatbot-video-{id}");
+                return Some(
+                    div()
+                        .id(SharedString::from(nome.clone()))
+                        .debug_selector(move || nome.clone())
+                        .relative()
+                        .w(px(240.))
+                        .h(px(240.))
+                        .cursor_pointer()
+                        .child(
+                            gpui_kit::img(imagem.clone())
+                                .w(px(240.))
+                                .h(px(240.))
+                                .rounded(px(8.)),
+                        )
+                        .child(
+                            div()
+                                .absolute()
+                                .inset_0()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(
+                                    div()
+                                        .size(px(44.))
+                                        .rounded_full()
+                                        .bg(gpui_kit::black().opacity(0.55))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .text_color(gpui_kit::white())
+                                        .child(Icon::new(Icone::Play).size(px(20.))),
+                                ),
+                        )
+                        .on_click(cx.listener(move |tela, _, _, cx| tela.abrir_midia(&id, cx)))
+                        .into_any_element(),
+                );
+            }
+        }
+
         // A foto só aparece dentro do balão depois de guardada; antes disso é
         // o cartão, e abrir é um gesto de quem atende.
         if midia.tipo.aparece_no_balao() && midia.guardada {
@@ -975,6 +1020,34 @@ impl Chatbot {
         if midia.tipo != TipoDeMidia::Audio {
             return Some(cartao);
         }
+
+        // 🎧 O ▶ toca aqui mesmo, pelo MP3 que o servidor prepara (o app não
+        // decodifica o Opus do WhatsApp); o cartão ao lado continua abrindo o
+        // arquivo no programa do sistema.
+        let tocando = self.tocando() == Some(mensagem.id.as_str());
+        let baixando = self.baixando_audio.contains(&mensagem.id);
+        let nome_do_botao = format!("chatbot-tocar-{id}");
+        let id_do_botao = id.clone();
+        let botao_de_tocar = estilo::desligado(
+            marcado(
+                if tocando {
+                    estilo::botao_primario(nome_do_botao.clone(), cx)
+                } else {
+                    estilo::botao_contorno(nome_do_botao.clone(), cx)
+                },
+                nome_do_botao,
+            )
+            .child(Icon::new(if tocando { Icone::Square } else { Icone::Play }).size(px(16.)))
+            .tooltip(if tocando { "Parar" } else { "Tocar o áudio" })
+            .on_click(cx.listener(move |tela, _, _, cx| tela.tocar_audio(&id_do_botao, cx))),
+            baixando || !midia.guardada,
+        );
+        let cartao = h_flex()
+            .gap(px(8.))
+            .items_center()
+            .child(botao_de_tocar)
+            .child(cartao)
+            .into_any_element();
 
         // 🎤 Debaixo do áudio, o que foi dito — ou o botão que pede a
         // transcrição. O áudio que o cliente manda já chega transcrito; o
@@ -1302,6 +1375,44 @@ impl Chatbot {
                                 .text_color(apagado)
                                 .child(midia::formatar_tamanho(anexo.bytes.len() as u64)),
                         )
+                        // "Enviar como": foto e vídeo podem ir como documento
+                        // (o original, sem a recompressão da Meta). Com um
+                        // jeito só, a tira não pergunta.
+                        .when(ComoEnviar::opcoes(&anexo.nome).len() > 1, |d| {
+                            let opcoes = ComoEnviar::opcoes(&anexo.nome);
+                            let atual = anexo.como.unwrap_or(opcoes[0]);
+                            let tela = cx.entity().downgrade();
+                            d.child(
+                                marcado(
+                                    estilo::botao_contorno_pequeno("chatbot-como-enviar", cx),
+                                    "chatbot-como-enviar",
+                                )
+                                .child(format!("Enviar como {}", atual.rotulo()))
+                                .tooltip("Como o arquivo chega ao cliente")
+                                .dropdown_menu_with_anchor(
+                                    gpui_kit::Anchor::BottomLeft,
+                                    move |menu, _window, _cx| {
+                                        let mut menu = menu.min_w(px(160.));
+                                        for opcao in opcoes.clone() {
+                                            let tela = tela.clone();
+                                            menu = menu.item(
+                                                estilo::item_de_menu(
+                                                    opcao.id_do_item(),
+                                                    opcao.rotulo(),
+                                                    None,
+                                                )
+                                                .on_click(move |_, _, cx| {
+                                                    let _ = tela.update(cx, |tela, cx| {
+                                                        tela.escolher_como(opcao, cx)
+                                                    });
+                                                }),
+                                            );
+                                        }
+                                        menu
+                                    },
+                                ),
+                            )
+                        })
                         .child(
                             marcado(
                                 estilo::botao_fantasma_pequeno("chatbot-tirar-anexo", cx),

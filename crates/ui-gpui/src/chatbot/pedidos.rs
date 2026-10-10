@@ -165,7 +165,13 @@ pub fn enviar(chave: &Chave, texto: &str) -> PedidoJson {
 /// 🔑 A janela de 24 h é conferida **no servidor**, antes de o arquivo subir
 /// para a Meta, pela mesma função do texto; fechada, a resposta é `409` com o
 /// motivo. Aqui o compositor inteiro já some com a janela fechada.
-pub fn enviar_anexo(contato: &str, legenda: &str, nome: &str, bytes: &[u8]) -> PedidoCru {
+pub fn enviar_anexo(
+    contato: &str,
+    legenda: &str,
+    nome: &str,
+    bytes: &[u8],
+    como: Option<midia::ComoEnviar>,
+) -> PedidoCru {
     PedidoCru {
         rotulo: "anexo-enviado",
         metodo: "POST",
@@ -175,9 +181,16 @@ pub fn enviar_anexo(contato: &str, legenda: &str, nome: &str, bytes: &[u8]) -> P
             legenda,
             nome,
             bytes,
+            como,
             &midia::limite_do_multipart(bytes),
         )),
     }
+}
+
+/// 🎬 A prévia de uma mídia (`GET …/midia?previa=mp3|quadro`): o áudio em MP3
+/// para tocar aqui, o quadro do vídeo para a capa do balão.
+pub fn baixar_previa(mensagem_id: &str, previa: midia::Previa) -> PedidoCru {
+    PedidoCru::baixar("previa", midia::caminho_da_previa(mensagem_id, previa))
 }
 
 /// 📎 O arquivo de uma mensagem (`GET /whatsapp/messages/{id}/midia`).
@@ -478,7 +491,7 @@ mod testes {
 
     #[test]
     fn o_anexo_sobe_em_multipart_para_a_rota_de_midia() {
-        let pedido = enviar_anexo("5554999", "segue", "orcamento.pdf", b"%PDF");
+        let pedido = enviar_anexo("5554999", "segue", "orcamento.pdf", b"%PDF", None);
         assert_eq!(
             (pedido.metodo, pedido.caminho.as_str()),
             ("POST", "/whatsapp/messages/send-media")

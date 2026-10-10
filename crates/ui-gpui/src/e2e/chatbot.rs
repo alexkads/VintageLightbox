@@ -1605,6 +1605,8 @@ fn o_clipe_anexa_e_o_envio_sobe_em_multipart_com_a_legenda(cx: &mut TestAppConte
     assert!(texto.contains("name=\"caption\"\r\n\r\nsegue o orçamento"));
     assert!(texto.contains("filename=\"orçamento do ensaio.pdf\""));
     assert!(texto.contains("%PDF-orcamento"));
+    // PDF só vai como documento: a tira nem pergunta, e o campo diz isso.
+    assert!(texto.contains("name=\"como\"\r\n\r\ndocumento"));
     assert!(
         !caminhos(&e)
             .iter()
@@ -1751,4 +1753,117 @@ fn so_o_whatsapp_anexa_e_so_com_a_janela_aberta(cx: &mut TestAppContext) {
         assert!(t.anexo.is_none(), "janela fechada: o seletor nem abre")
     });
     assert!(crus(&e).is_empty());
+}
+
+/// 📎 *"As mesmas opções do whatsapp de enviar como documento, vídeo ou
+/// foto"*: a foto começa como foto; escolhida como documento, o campo `como`
+/// vai assim — e o cliente recebe o original.
+#[gpui_kit::test]
+fn a_foto_anexada_pode_ir_como_documento(cx: &mut TestAppContext) {
+    let e = abrir_o_chatbot(cx);
+    clicar(&e, cx, "chatbot-conversa-0");
+    let pasta = tempfile::tempdir().unwrap();
+    let arquivo = pasta.path().join("ensaio.jpg");
+    std::fs::write(&arquivo, b"jpeg").unwrap();
+    *e.seletor.escolha.lock().unwrap() = Some(arquivo.to_string_lossy().to_string());
+    clicar(&e, cx, "chatbot-clipe");
+    passo(cx);
+    chatbot(&e, cx, |t, _w, _cx| {
+        assert_eq!(
+            t.anexo.as_ref().unwrap().como,
+            Some(crate::chatbot::midia::ComoEnviar::Foto),
+            "começa no jeito natural"
+        );
+    });
+    assert!(desenhado(&e, cx, "chatbot-como-enviar"));
+
+    chatbot(&e, cx, |t, _w, cx| {
+        t.escolher_como(crate::chatbot::midia::ComoEnviar::Documento, cx)
+    });
+    e.site.responder_cru(
+        "anexo-enviado",
+        Ok(RespostaDoPedido {
+            tipo: None,
+            bytes: b"{}".to_vec(),
+        }),
+    );
+    clicar(&e, cx, "chatbot-enviar");
+    e.esperar(cx);
+    let corpo = crus(&e)
+        .into_iter()
+        .find(|p| p.caminho == "/whatsapp/messages/send-media")
+        .and_then(|p| p.corpo)
+        .expect("a foto subiu");
+    let texto = String::from_utf8_lossy(&corpo.bytes).to_string();
+    assert!(texto.contains("name=\"como\"\r\n\r\ndocumento"));
+    assert!(texto.contains("Content-Type: image/jpeg"));
+}
+
+/// 🎬 O vídeo entra pela capa (o quadro que o servidor prepara) e o áudio
+/// toca pelo MP3 — as duas prévias pedidas pelo id, ao servidor.
+#[gpui_kit::test]
+fn o_video_pede_a_capa_e_o_audio_toca_pela_previa_em_mp3(cx: &mut TestAppContext) {
+    let e = abrir_o_chatbot(cx);
+    let mut com_video = mensagens_com_midia();
+    com_video.push(json!({
+        "id": "m-video", "recipient_id": ANA, "event": "received", "profile_name": "Ana",
+        "message_id": "wamid.m-video", "message": "🎬 Vídeo", "timestamp": ha(10),
+        "is_edited": false, "is_automated": false, "automation_type": null,
+        "created_at": ha(10), "midia": {
+            "tipo": "video", "id_na_meta": "5", "mime": "video/mp4", "nome": null,
+            "tamanho": 448_000, "chave": "whatsapp/midia/x/m-video.mp4", "com_legenda": false,
+            "transcricao": null
+        }
+    }));
+    e.site.responder_json(
+        "wa-conversas",
+        Ok(pagina(vec![conversa_da_ana(false)], com_video, 1)),
+    );
+    e.site.responder_cru(
+        "previa",
+        Ok(RespostaDoPedido {
+            tipo: Some("image/jpeg".into()),
+            bytes: png_de_teste(),
+        }),
+    );
+    e.site.responder_cru(
+        "midia",
+        Ok(RespostaDoPedido {
+            tipo: Some("image/png".into()),
+            bytes: png_de_teste(),
+        }),
+    );
+    chatbot(&e, cx, |t, _w, cx| t.recarregar(cx));
+    e.esperar(cx);
+    clicar(&e, cx, "chatbot-conversa-0");
+    e.esperar(cx);
+
+    let pedidos: Vec<String> = crus(&e).into_iter().map(|p| p.caminho).collect();
+    assert!(
+        pedidos.contains(&"/whatsapp/messages/m-video/midia?previa=quadro".to_string()),
+        "a capa do vídeo é pedida sozinha: {pedidos:?}"
+    );
+    assert!(
+        !pedidos
+            .iter()
+            .any(|p| p.contains("m-voz") || p.contains("m-mudo")),
+        "o áudio não é pedido antes do ▶: {pedidos:?}"
+    );
+
+    // O ▶ pede o MP3; o pedido sai pelo id da mensagem.
+    e.site.responder_cru(
+        "previa",
+        Ok(RespostaDoPedido {
+            tipo: Some("audio/mpeg".into()),
+            bytes: vec![0xFF, 0xFB],
+        }),
+    );
+    assert!(desenhado(&e, cx, "chatbot-tocar-m-voz"));
+    clicar(&e, cx, "chatbot-tocar-m-voz");
+    e.esperar(cx);
+    assert!(crus(&e)
+        .iter()
+        .any(|p| p.caminho == "/whatsapp/messages/m-voz/midia?previa=mp3"));
+    // Sem alto-falante no teste o áudio "termina" na hora: nada fica tocando.
+    chatbot(&e, cx, |t, _w, _cx| assert_eq!(t.tocando(), None));
 }

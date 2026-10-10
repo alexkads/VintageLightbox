@@ -22,6 +22,7 @@
 use crate::campo::TrocarValor as _;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -32,7 +33,7 @@ use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::{prelude::*, Context, Entity, EventEmitter, SharedString, Task, Window};
 use serde_json::Value;
 
-use super::midia::{self, ClasseDoAnexo, Midia};
+use super::midia::{self, ClasseDoAnexo, ComoEnviar, Midia, Previa, TipoDeMidia};
 use super::modelo::{
     self, Cadastro, Canal, Chave, Conversa, EventoDoChatbot, FiltroDeCanal, Mensagem,
     PaginaDoWhatsApp, Status, Urgencia, Voucher,
@@ -128,6 +129,9 @@ pub struct Anexo {
     pub bytes: Arc<Vec<u8>>,
     /// O que vai como legenda — vazio até o "Enviar", e sempre vazio no áudio.
     pub legenda: String,
+    /// Como sai: foto, vídeo ou documento — a escolha da tira. Começa no
+    /// jeito natural do arquivo (`ComoEnviar::opcoes`).
+    pub como: Option<ComoEnviar>,
 }
 
 /// A foto de um balão: a caminho, na tela, ou sem conseguir.
@@ -145,6 +149,43 @@ enum Baixa {
     Miniatura,
     /// O clique: gravar e entregar ao programa do sistema.
     Abrir(Midia),
+    /// 🎧 O MP3 do áudio, para tocar aqui.
+    Tocar,
+}
+
+/// O aviso de que um áudio terminou — o id e, se não tocou, o motivo.
+type FimDoAudio = (String, Option<String>);
+
+/// Toca o MP3 até o fim, ou até `parar`. Avisa `fim` com o id ao terminar —
+/// é o que apaga o "tocando" do balão.
+#[cfg(not(test))]
+fn tocar_mp3(id: String, bytes: Vec<u8>, parar: Arc<AtomicBool>, fim: Sender<FimDoAudio>) {
+    let _ = std::thread::Builder::new()
+        .name("audio-da-conversa".into())
+        .spawn(move || {
+            let desfecho = (|| -> Result<(), String> {
+                let mut saida = rodio::DeviceSinkBuilder::open_default_sink()
+                    .map_err(|e| format!("sem saída de áudio: {e}"))?;
+                saida.log_on_drop(false);
+                let tocador = rodio::Player::connect_new(saida.mixer());
+                let decodificado = rodio::Decoder::new(std::io::Cursor::new(bytes))
+                    .map_err(|e| format!("o áudio não decodificou: {e}"))?;
+                tocador.append(decodificado);
+                while !tocador.empty() && !parar.load(Ordering::Relaxed) {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                tocador.stop();
+                Ok(())
+            })();
+            let _ = fim.send((id, desfecho.err()));
+        });
+}
+
+/// Nos testes não há alto-falante: o áudio "termina" na hora, e o que se
+/// confere é o pedido da prévia e o estado do balão.
+#[cfg(test)]
+fn tocar_mp3(id: String, _bytes: Vec<u8>, _parar: Arc<AtomicBool>, fim: Sender<FimDoAudio>) {
+    let _ = fim.send((id, None));
 }
 
 /// O lado maior da foto do balão, em pixels. O balão a desenha com metade
@@ -294,6 +335,12 @@ pub struct Chatbot {
     pub(crate) abrindo: HashSet<String>,
     /// 🎤 Os áudios com a transcrição pedida.
     pub(crate) transcrevendo: HashSet<String>,
+    /// 🎧 O áudio que está tocando (id da mensagem) e como pará-lo.
+    tocando: Option<(String, Arc<AtomicBool>)>,
+    /// Os áudios cujo MP3 está a caminho.
+    pub(crate) baixando_audio: HashSet<String>,
+    /// O aviso de que um áudio terminou (ou não conseguiu tocar).
+    fim_da_reproducao: (Sender<FimDoAudio>, Receiver<FimDoAudio>),
     /// O que foi entregue ao programa do sistema, na ordem.
     pub(crate) abertos: Vec<PathBuf>,
 
@@ -407,6 +454,9 @@ impl Chatbot {
             decodificando: Vec::new(),
             abrindo: HashSet::new(),
             transcrevendo: HashSet::new(),
+            tocando: None,
+            baixando_audio: HashSet::new(),
+            fim_da_reproducao: channel(),
             abertos: Vec::new(),
             dialogo: Modal::default(),
             notas,
@@ -554,6 +604,7 @@ impl Chatbot {
         mudou |= self.colher_respostas(cx);
         mudou |= self.colher_escolha(cx);
         mudou |= self.colher_a_midia(cx);
+        mudou |= self.colher_o_fim_do_audio(cx);
         if std::mem::take(&mut self.conferir_miniaturas) {
             self.pedir_miniaturas();
         }
@@ -1174,6 +1225,7 @@ impl Chatbot {
                     &anexo.legenda,
                     &anexo.nome,
                     &anexo.bytes,
+                    anexo.como,
                 ),
                 &envia,
             ),
@@ -1199,6 +1251,61 @@ impl Chatbot {
         self.decodificando.clear();
         self.abrindo.clear();
         self.transcrevendo.clear();
+        self.parar_o_audio();
+        self.baixando_audio.clear();
+    }
+
+    /// 🎧 O áudio que está tocando agora, se há.
+    pub fn tocando(&self) -> Option<&str> {
+        self.tocando.as_ref().map(|(id, _)| id.as_str())
+    }
+
+    fn parar_o_audio(&mut self) {
+        if let Some((_, parar)) = self.tocando.take() {
+            parar.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// 🎧 O ▶ do balão: toca o áudio (pelo MP3 que o servidor prepara), ou
+    /// para o que está tocando. Um de cada vez — é um balcão, não uma rádio.
+    pub fn tocar_audio(&mut self, mensagem_id: &str, cx: &mut Context<Self>) {
+        if self.tocando() == Some(mensagem_id) {
+            self.parar_o_audio();
+            cx.notify();
+            return;
+        }
+        if !self.baixando_audio.insert(mensagem_id.to_string()) {
+            return;
+        }
+        self.parar_o_audio();
+        self.baixar(
+            mensagem_id,
+            Baixa::Tocar,
+            pedidos::baixar_previa(mensagem_id, Previa::Mp3),
+        );
+        cx.notify();
+    }
+
+    fn colher_o_fim_do_audio(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut mudou = false;
+        while let Ok((id, erro)) = self.fim_da_reproducao.1.try_recv() {
+            if self.tocando() == Some(id.as_str()) {
+                self.tocando = None;
+                mudou = true;
+            }
+            if let Some(erro) = erro {
+                self.toast(format!("Não foi possível tocar o áudio: {erro}"), true, cx);
+            }
+        }
+        mudou
+    }
+
+    /// A escolha da tira: como o anexo sai.
+    pub fn escolher_como(&mut self, como: ComoEnviar, cx: &mut Context<Self>) {
+        if let Some(anexo) = &mut self.anexo {
+            anexo.como = Some(como);
+        }
+        cx.notify();
     }
 
     /// O clipe: abre o seletor de arquivo do sistema.
@@ -1263,10 +1370,12 @@ impl Chatbot {
         }
         match std::fs::read(caminho) {
             Ok(bytes) => {
+                let como = ComoEnviar::opcoes(&nome).first().copied();
                 self.anexo = Some(Anexo {
                     nome,
                     bytes: Arc::new(bytes),
                     legenda: String::new(),
+                    como,
                 })
             }
             Err(erro) => self.toast(format!("Não foi possível ler o arquivo: {erro}"), true, cx),
@@ -1282,31 +1391,38 @@ impl Chatbot {
             .and_then(|m| m.midia)
     }
 
-    fn baixar(&mut self, mensagem_id: &str, baixa: Baixa) {
+    fn baixar(&mut self, mensagem_id: &str, baixa: Baixa, pedido: PedidoCru) {
         let (envia, recebe) = channel();
-        self.pedir_cru(pedidos::baixar_midia(mensagem_id), &envia);
+        self.pedir_cru(pedido, &envia);
         self.baixas.push((mensagem_id.to_string(), baixa, recebe));
     }
 
     /// Pede a foto de cada balão da conversa aberta que ainda não a tem.
     fn pedir_miniaturas(&mut self) {
-        let faltam: Vec<String> = self
+        let faltam: Vec<(String, bool)> = self
             .mensagens_da_aberta()
             .0
             .into_iter()
-            .filter(|m| {
-                m.midia
-                    .as_ref()
-                    // Só a que já está guardada: a que a Meta ainda não
-                    // entregou espera o clique — ver `Midia::guardada`.
-                    .is_some_and(|midia| midia.tipo.aparece_no_balao() && midia.guardada)
-                    && !self.miniaturas.contains_key(&m.id)
+            .filter_map(|m| {
+                let midia = m.midia.as_ref()?;
+                // Só a que já está guardada: a que a Meta ainda não entregou
+                // espera o clique — ver `Midia::guardada`. O vídeo entra pela
+                // capa, que o servidor prepara.
+                let e_video = midia.tipo == TipoDeMidia::Video;
+                ((midia.tipo.aparece_no_balao() || e_video)
+                    && midia.guardada
+                    && !self.miniaturas.contains_key(&m.id))
+                .then_some((m.id, e_video))
             })
-            .map(|m| m.id)
             .collect();
-        for id in faltam {
+        for (id, e_video) in faltam {
             self.miniaturas.insert(id.clone(), Miniatura::Baixando);
-            self.baixar(&id, Baixa::Miniatura);
+            let pedido = if e_video {
+                pedidos::baixar_previa(&id, Previa::Quadro)
+            } else {
+                pedidos::baixar_midia(&id)
+            };
+            self.baixar(&id, Baixa::Miniatura, pedido);
         }
     }
 
@@ -1320,7 +1436,11 @@ impl Chatbot {
             return;
         };
         self.abrindo.insert(mensagem_id.to_string());
-        self.baixar(mensagem_id, Baixa::Abrir(midia));
+        self.baixar(
+            mensagem_id,
+            Baixa::Abrir(midia),
+            pedidos::baixar_midia(mensagem_id),
+        );
         cx.notify();
     }
 
@@ -1373,6 +1493,26 @@ impl Chatbot {
                         Ok(caminho) => self.abertos.push(caminho),
                         Err(erro) => self.toast(erro, true, cx),
                     }
+                }
+                (Baixa::Tocar, Ok(resposta)) => {
+                    self.baixando_audio.remove(&id);
+                    self.parar_o_audio();
+                    let parar = Arc::new(AtomicBool::new(false));
+                    tocar_mp3(
+                        id.clone(),
+                        resposta.bytes,
+                        parar.clone(),
+                        self.fim_da_reproducao.0.clone(),
+                    );
+                    self.tocando = Some((id, parar));
+                }
+                (Baixa::Tocar, Err(erro)) => {
+                    self.baixando_audio.remove(&id);
+                    self.toast(
+                        modelo::explicar(&erro, "Não foi possível tocar o áudio."),
+                        true,
+                        cx,
+                    );
                 }
                 (Baixa::Abrir(_), Err(erro)) => {
                     self.abrindo.remove(&id);

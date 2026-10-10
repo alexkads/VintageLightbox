@@ -125,6 +125,8 @@ pub enum Icone {
     Send,
     // 📎 O anexo do chatbot.
     Paperclip,
+    // 🎧 Tocar o áudio da conversa.
+    Play,
     ShoppingCart,
     SlidersHorizontal,
     Settings,
@@ -317,6 +319,7 @@ impl Icone {
         Icone::Globe,
         Icone::Zap,
         Icone::Paperclip,
+        Icone::Play,
         Icone::EllipsisVertical,
         Icone::Inbox,
         Icone::Calendar,
@@ -463,6 +466,7 @@ impl Icone {
             Icone::Globe => "globe",
             Icone::Zap => "zap",
             Icone::Paperclip => "paperclip",
+            Icone::Play => "play",
             Icone::EllipsisVertical => "ellipsis-vertical",
             Icone::Inbox => "inbox",
             Icone::Calendar => "calendar",
