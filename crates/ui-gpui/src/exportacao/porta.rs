@@ -98,6 +98,45 @@ impl FotoDoLivro {
     }
 }
 
+/// 💬 A entrega pelo WhatsApp: o lote sai para uma pasta temporária e cada
+/// arquivo pronto sobe para a conversa — a foto como foto, o livro como
+/// documento (dono, 10/out/2026: *"utilize o próprio botão de exportar pra
+/// fazer isso com um combo para escolher o contato"*).
+///
+/// 🔑 **É o arquivo que a exportação gravaria**: a levada limpa, a à venda com
+/// a marca d'água. A entrega não decide nada sobre a foto.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Entrega {
+    /// O número da conversa (`contact_id`).
+    pub contato: String,
+    pub legenda: String,
+    /// O arquivo que leva a legenda — um só por lote, o primeiro. Guardado
+    /// pelo destino para o "tentar de novo" não a repetir nem a perder.
+    pub com_legenda: Option<PathBuf>,
+}
+
+/// Um contato do combo "Enviar para": conversa do WhatsApp com a janela de
+/// 24 horas aberta.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Contato {
+    pub id: String,
+    pub nome: String,
+    /// Quando ele escreveu pela última vez — de onde sai o "resta 3h 20min".
+    pub ultima_entrada: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// O lado maior da foto que vai pelo WhatsApp: a Meta recomprime o que
+/// recebe, e o teto dela para imagem é 5 MB.
+pub const LADO_NO_WHATSAPP: u32 = 2560;
+
+/// As opções da foto que vai pelo WhatsApp: JPEG, reduzida. Formato e
+/// qualidade da tela não valem neste destino.
+pub fn opcoes_do_whatsapp() -> ExportOptions {
+    ExportOptions::default()
+        .with_quality(85)
+        .with_longest_edge(LADO_NO_WHATSAPP)
+}
+
 /// O que a tela precisa saber enquanto o lote corre.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Andamento {
@@ -151,10 +190,36 @@ pub trait RevelaDoSite: Send + Sync + 'static {
     /// 🔗 O link que abre a galeria **sem senha**, assinado pelo site — o
     /// mesmo do "Copiar link". É dele que saem os links do fotolivro.
     fn link_da_galeria(&self, sessao: Sessao, galeria_id: String) -> LinkPronto;
+
+    /// 💬 As conversas do WhatsApp com a janela de 24 horas aberta — o combo
+    /// "Enviar para".
+    fn contatos_do_whatsapp(&self, _sessao: Sessao) -> ContatosProntos {
+        Box::pin(async { Err("esta montagem não fala com o WhatsApp".to_string()) })
+    }
+
+    /// 💬 Um arquivo pronto para a conversa (`send-media`). O servidor confere
+    /// a janela antes de subir o arquivo para a Meta.
+    fn enviar_ao_whatsapp(
+        &self,
+        _sessao: Sessao,
+        _contato: String,
+        _legenda: String,
+        _nome: String,
+        _bytes: Vec<u8>,
+    ) -> Entregue {
+        Box::pin(async { Err("esta montagem não fala com o WhatsApp".to_string()) })
+    }
 }
 
 /// O link assinado da galeria, ou a frase de por que ele não saiu.
 pub type LinkPronto = Pin<Box<dyn Future<Output = Result<String, String>> + Send>>;
+
+/// Os contatos com a janela aberta, ou a frase de por que a lista não veio.
+pub type ContatosProntos = Pin<Box<dyn Future<Output = Result<Vec<Contato>, String>> + Send>>;
+
+/// O arquivo entregue na conversa, ou a frase do servidor (a janela que
+/// fechou, o arquivo grande demais).
+pub type Entregue = Pin<Box<dyn Future<Output = Result<(), String>> + Send>>;
 
 /// Quem exporta a foto do catálogo para um arquivo.
 pub trait ExportaDoCatalogo: Send + Sync + 'static {
@@ -199,9 +264,17 @@ pub trait Exportador: Send + Sync + 'static {
         saidas: Vec<Saida>,
         opcoes: ExportOptions,
         sessao: Option<Sessao>,
+        entrega: Option<Entrega>,
         cancelar: Arc<AtomicBool>,
         canal: Sender<Andamento>,
     );
+
+    /// 💬 Quem pode receber pelo WhatsApp agora. Devolve na hora; a lista
+    /// chega pelo canal.
+    fn contatos(&self, sessao: Sessao, canal: Sender<Result<Vec<Contato>, String>>) {
+        let _ = sessao;
+        let _ = canal.send(Err("esta montagem não fala com o WhatsApp".to_string()));
+    }
 
     /// 📖 O fotolivro: as fotos, na ordem, num PDF só em `destino`. O
     /// andamento conta as fotos (uma `Feita` por foto pronta, com o nome dela)
@@ -217,6 +290,7 @@ pub trait Exportador: Send + Sync + 'static {
         galeria: Option<String>,
         destino: PathBuf,
         sessao: Option<Sessao>,
+        entrega: Option<Entrega>,
         cancelar: Arc<AtomicBool>,
         canal: Sender<Andamento>,
     );
@@ -248,14 +322,22 @@ impl Exportador for ExportadorDoBanco {
         saidas: Vec<Saida>,
         opcoes: ExportOptions,
         sessao: Option<Sessao>,
+        entrega: Option<Entrega>,
         cancelar: Arc<AtomicBool>,
         canal: Sender<Andamento>,
     ) {
         let catalogo = self.catalogo.clone();
         let site = self.site.clone();
         self.tokio.spawn(exportar_lote(
-            saidas, opcoes, sessao, cancelar, canal, catalogo, site,
+            saidas, opcoes, sessao, entrega, cancelar, canal, catalogo, site,
         ));
+    }
+
+    fn contatos(&self, sessao: Sessao, canal: Sender<Result<Vec<Contato>, String>>) {
+        let site = self.site.clone();
+        self.tokio.spawn(async move {
+            let _ = canal.send(site.contatos_do_whatsapp(sessao).await);
+        });
     }
 
     fn fotolivro(
@@ -265,15 +347,48 @@ impl Exportador for ExportadorDoBanco {
         galeria: Option<String>,
         destino: PathBuf,
         sessao: Option<Sessao>,
+        entrega: Option<Entrega>,
         cancelar: Arc<AtomicBool>,
         canal: Sender<Andamento>,
     ) {
         let catalogo = self.catalogo.clone();
         let site = self.site.clone();
         self.tokio.spawn(montar_fotolivro(
-            fotos, capa, galeria, destino, sessao, cancelar, canal, catalogo, site,
+            fotos, capa, galeria, destino, sessao, entrega, cancelar, canal, catalogo, site,
         ));
     }
+}
+
+/// 💬 Sobe um arquivo pronto para a conversa.
+///
+/// 🔑 **O andamento da foto só fecha depois daqui**: "feita" no destino
+/// WhatsApp quer dizer "chegou à conversa", e é por isso que progresso, "Parar"
+/// e "Tentar de novo" valem sem nada próprio.
+async fn entregar(
+    arquivo: &Path,
+    entrega: &Entrega,
+    sessao: Option<Sessao>,
+    site: &dyn RevelaDoSite,
+) -> Result<(), String> {
+    let sessao =
+        sessao.ok_or_else(|| "entre na conta do site para enviar pelo WhatsApp".to_string())?;
+    let bytes = tokio::fs::read(arquivo)
+        .await
+        .map_err(|e| format!("o arquivo não pôde ser lido: {e}"))?;
+    let nome = arquivo
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "foto.jpg".into());
+    let legenda = if entrega.com_legenda.as_deref() == Some(arquivo) {
+        entrega.legenda.clone()
+    } else {
+        String::new()
+    };
+    site.enviar_ao_whatsapp(sessao, entrega.contato.clone(), legenda, nome, bytes)
+        .await
+        .map_err(|erro| {
+            crate::chatbot::modelo::explicar(&erro, "O WhatsApp não recebeu o arquivo.")
+        })
 }
 
 /// O lado maior das fotos levadas no fotolivro: o mesmo que o livro usa
@@ -358,6 +473,7 @@ pub async fn montar_fotolivro(
     galeria: Option<String>,
     destino: PathBuf,
     sessao: Option<Sessao>,
+    entrega: Option<Entrega>,
     cancelar: Arc<AtomicBool>,
     canal: Sender<Andamento>,
     catalogo: Arc<dyn ExportaDoCatalogo>,
@@ -365,6 +481,7 @@ pub async fn montar_fotolivro(
 ) {
     let total = fotos.len();
     let _ = canal.send(Andamento::Comecou { total });
+    let sessao_da_entrega = sessao.clone();
     // 🔗 Os links entram sem senha quando o site assina; sessão sem e-mail
     // leva o link que pede o e-mail ao cliente. Sem assinatura (e-mail de
     // conta administradora, site fora do ar) ficam os da rota da galeria, que
@@ -469,6 +586,18 @@ pub async fn montar_fotolivro(
                 let _ = canal.send(Andamento::Livro {
                     destino: destino.clone(),
                 });
+                // 💬 O livro gravado segue para a conversa. Ele fica no disco
+                // mesmo se a entrega falhar: o "Ver o fotolivro" o abre.
+                if let Some(entrega) = &entrega {
+                    if let Err(erro) = entregar(&destino, entrega, sessao_da_entrega, &*site).await
+                    {
+                        falhas += 1;
+                        let _ = canal.send(Andamento::Falhou {
+                            destino: destino.clone(),
+                            erro,
+                        });
+                    }
+                }
             }
             Err(erro) => {
                 falhas += 1;
@@ -488,10 +617,15 @@ pub async fn montar_fotolivro(
 }
 
 /// O lote inteiro, com até [`AO_MESMO_TEMPO`] fotos andando juntas.
+///
+/// 💬 Com `entrega`, cada arquivo gravado sobe para a conversa e sai do disco:
+/// a pasta do lote é temporária, e some no fim.
+#[allow(clippy::too_many_arguments)]
 pub async fn exportar_lote(
     saidas: Vec<Saida>,
     opcoes: ExportOptions,
     sessao: Option<Sessao>,
+    entrega: Option<Entrega>,
     cancelar: Arc<AtomicBool>,
     canal: Sender<Andamento>,
     catalogo: Arc<dyn ExportaDoCatalogo>,
@@ -499,6 +633,10 @@ pub async fn exportar_lote(
 ) {
     let total = saidas.len();
     let _ = canal.send(Andamento::Comecou { total });
+    let pasta_temporaria = entrega
+        .as_ref()
+        .and_then(|_| saidas.first())
+        .and_then(|s| s.destino.parent().map(Path::to_path_buf));
 
     let vagas = Arc::new(tokio::sync::Semaphore::new(AO_MESMO_TEMPO));
     let mut tarefas = tokio::task::JoinSet::new();
@@ -512,15 +650,23 @@ pub async fn exportar_lote(
             break;
         }
         iniciadas += 1;
-        let (catalogo, site, opcoes, sessao) = (
+        let (catalogo, site, opcoes, sessao, entrega) = (
             catalogo.clone(),
             site.clone(),
             opcoes.clone(),
             sessao.clone(),
+            entrega.clone(),
         );
         tarefas.spawn(async move {
             let _vaga = vaga;
-            let resultado = uma(&saida, opcoes, sessao, &*catalogo, &*site).await;
+            let mut resultado = uma(&saida, opcoes, sessao.clone(), &*catalogo, &*site).await;
+            if let Some(entrega) = &entrega {
+                if resultado.is_ok() {
+                    resultado = entregar(&saida.destino, entrega, sessao, &*site).await;
+                }
+                // Entregue ou não, o arquivo era só o caminho até a conversa.
+                let _ = tokio::fs::remove_file(&saida.destino).await;
+            }
             (saida.destino, resultado)
         });
     }
@@ -548,6 +694,11 @@ pub async fn exportar_lote(
                 });
             }
         }
+    }
+
+    // Vazia, a pasta temporária sai; com algo dentro (não deveria), fica.
+    if let Some(pasta) = pasta_temporaria {
+        let _ = tokio::fs::remove_dir(&pasta).await;
     }
 
     let _ = canal.send(Andamento::Terminou {
@@ -662,6 +813,12 @@ pub mod mentira {
         pub livros: Mutex<Vec<(Vec<FotoDoLivro>, fotolivro::Capa, PathBuf)>>,
         /// A galeria que cada fotolivro levou — é dela que o link é assinado.
         pub galerias: Mutex<Vec<Option<String>>>,
+        /// 💬 A entrega de cada lote e de cada fotolivro, na ordem dos pedidos.
+        pub entregas: Mutex<Vec<Option<Entrega>>>,
+        /// 💬 O que o combo "Enviar para" recebe.
+        pub contatos: Mutex<Vec<Contato>>,
+        /// 💬 A lista de contatos falha com esta frase.
+        pub contatos_falham: Mutex<Option<String>>,
     }
 
     impl ExportadorDeMentira {
@@ -714,11 +871,13 @@ pub mod mentira {
             saidas: Vec<Saida>,
             opcoes: ExportOptions,
             sessao: Option<Sessao>,
+            entrega: Option<Entrega>,
             cancelar: Arc<AtomicBool>,
             canal: Sender<Andamento>,
         ) {
             *self.opcoes.lock().expect("as opções") = Some(opcoes);
             self.sessoes.lock().expect("as sessões").push(sessao);
+            self.entregas.lock().expect("as entregas").push(entrega);
             self.pedidos
                 .lock()
                 .expect("os pedidos")
@@ -741,10 +900,12 @@ pub mod mentira {
             galeria: Option<String>,
             destino: PathBuf,
             sessao: Option<Sessao>,
+            entrega: Option<Entrega>,
             _cancelar: Arc<AtomicBool>,
             canal: Sender<Andamento>,
         ) {
             self.sessoes.lock().expect("as sessões").push(sessao);
+            self.entregas.lock().expect("as entregas").push(entrega);
             self.galerias.lock().expect("as galerias").push(galeria);
             let total = fotos.len();
             let _ = canal.send(Andamento::Comecou { total });
@@ -766,6 +927,15 @@ pub mod mentira {
                 .expect("os livros")
                 .push((fotos, capa, destino));
         }
+
+        fn contatos(&self, _sessao: Sessao, canal: Sender<Result<Vec<Contato>, String>>) {
+            let _ = canal.send(
+                match self.contatos_falham.lock().expect("a falha").clone() {
+                    Some(frase) => Err(frase),
+                    None => Ok(self.contatos.lock().expect("os contatos").clone()),
+                },
+            );
+        }
     }
 }
 
@@ -774,10 +944,17 @@ mod testes {
     use super::*;
     use std::sync::Mutex;
 
+    /// O que subiu para a conversa: contato, legenda, nome e bytes.
+    type Enviado = (String, String, String, Vec<u8>);
+
     #[derive(Default)]
     struct SiteDeMentira {
         pedidos: Mutex<Vec<(String, Option<PathBuf>, ExportOptions)>>,
         marcadas: Mutex<Vec<String>>,
+        /// 💬 O que subiu para a conversa: contato, legenda, nome e bytes.
+        enviados: Mutex<Vec<Enviado>>,
+        /// 💬 O servidor recusa o envio com este erro (a janela que fechou).
+        recusa: Mutex<Option<String>>,
     }
 
     impl RevelaDoSite for SiteDeMentira {
@@ -804,6 +981,24 @@ mod testes {
 
         fn link_da_galeria(&self, _sessao: Sessao, _galeria_id: String) -> LinkPronto {
             Box::pin(async { Err("sem link no teste".to_string()) })
+        }
+
+        fn enviar_ao_whatsapp(
+            &self,
+            _sessao: Sessao,
+            contato: String,
+            legenda: String,
+            nome: String,
+            bytes: Vec<u8>,
+        ) -> Entregue {
+            let recusa = self.recusa.lock().unwrap().clone();
+            if recusa.is_none() {
+                self.enviados
+                    .lock()
+                    .unwrap()
+                    .push((contato, legenda, nome, bytes));
+            }
+            Box::pin(async move { recusa.map_or(Ok(()), Err) })
         }
     }
 
@@ -855,6 +1050,16 @@ mod testes {
         cancelar: bool,
         site: Arc<SiteDeMentira>,
     ) -> Vec<Andamento> {
+        rodar_para(saidas, sessao, None, cancelar, site)
+    }
+
+    fn rodar_para(
+        saidas: Vec<Saida>,
+        sessao: Option<Sessao>,
+        entrega: Option<Entrega>,
+        cancelar: bool,
+        site: Arc<SiteDeMentira>,
+    ) -> Vec<Andamento> {
         let (canal, recebe) = std::sync::mpsc::channel();
         let tokio = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -864,6 +1069,7 @@ mod testes {
             saidas,
             ExportOptions::default(),
             sessao,
+            entrega,
             Arc::new(AtomicBool::new(cancelar)),
             canal,
             Arc::new(CatalogoDeMentira),
@@ -949,8 +1155,10 @@ mod testes {
     /// último recado aponta o arquivo.
     #[test]
     fn o_fotolivro_vira_um_pdf() {
-        /// `Some` = o site assina o link da galeria; `None` = recusa.
-        struct SiteDeFotos(Option<&'static str>);
+        /// `Some` = o site assina o link da galeria; `None` = recusa. O
+        /// segundo campo guarda o que subiu para a conversa.
+        struct SiteDeFotos(Option<&'static str>, Enviados);
+        type Enviados = Arc<Mutex<Vec<(String, String, String, bool)>>>;
         impl RevelaDoSite for SiteDeFotos {
             fn revelar(
                 &self,
@@ -970,6 +1178,20 @@ mod testes {
                 assert_eq!(galeria_id, "g", "o link é o desta galeria");
                 let link = self.0.map(str::to_string);
                 Box::pin(async move { link.ok_or_else(|| "sem e-mail".to_string()) })
+            }
+            fn enviar_ao_whatsapp(
+                &self,
+                _: Sessao,
+                contato: String,
+                legenda: String,
+                nome: String,
+                bytes: Vec<u8>,
+            ) -> Entregue {
+                self.1
+                    .lock()
+                    .unwrap()
+                    .push((contato, legenda, nome, bytes.starts_with(b"%PDF")));
+                Box::pin(async { Ok(()) })
             }
         }
         fn jpeg(l: u32, a: u32) -> Vec<u8> {
@@ -999,7 +1221,7 @@ mod testes {
                 })
                 .collect()
         };
-        let montar = |site: SiteDeFotos, destino: &Path| {
+        let montar = |site: SiteDeFotos, destino: &Path, entrega: Option<Entrega>| {
             let (canal, recebe) = std::sync::mpsc::channel();
             tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -1015,6 +1237,7 @@ mod testes {
                     Some("g".into()),
                     destino.to_path_buf(),
                     Some(sessao()),
+                    entrega,
                     Arc::new(AtomicBool::new(false)),
                     canal,
                     Arc::new(CatalogoDeMentira),
@@ -1030,7 +1253,11 @@ mod testes {
         let pasta = tempfile::tempdir().unwrap();
         let destino = pasta.path().join("Ensaio.pdf");
         let assinado = "https://site/entrar/fast-link?token=abc.def.ghi";
-        let andamentos = montar(SiteDeFotos(Some(assinado)), &destino);
+        let andamentos = montar(
+            SiteDeFotos(Some(assinado), Enviados::default()),
+            &destino,
+            None,
+        );
         assert_eq!(terminou(&andamentos), (2, 0, 0));
         assert!(andamentos
             .iter()
@@ -1057,12 +1284,130 @@ mod testes {
 
         // Sem assinatura (sessão sem e-mail) o livro sai, com a rota da galeria.
         let sem_email = pasta.path().join("Sem e-mail.pdf");
-        let andamentos = montar(SiteDeFotos(None), &sem_email);
+        let andamentos = montar(SiteDeFotos(None, Enviados::default()), &sem_email, None);
         assert_eq!(terminou(&andamentos), (2, 0, 0));
         let pdf = std::fs::read(&sem_email).unwrap();
         assert!(tem(&pdf, "https://site/meus-ensaios/g?foto=a"));
         assert!(tem(&pdf, "https://site/meus-ensaios/g?acao=baixar-todas"));
         assert!(!tem(&pdf, "fast-link"));
+
+        // 💬 Para o WhatsApp, o livro gravado sobe como um arquivo só, com a
+        // legenda, e continua no disco para o "Ver o fotolivro".
+        let pelo_whatsapp = pasta.path().join("Pelo WhatsApp.pdf");
+        let enviados = Enviados::default();
+        let andamentos = montar(
+            SiteDeFotos(Some(assinado), enviados.clone()),
+            &pelo_whatsapp,
+            Some(Entrega {
+                contato: "5547999998888".into(),
+                legenda: "Seu fotolivro".into(),
+                com_legenda: Some(pelo_whatsapp.clone()),
+            }),
+        );
+        assert_eq!(terminou(&andamentos), (2, 0, 0));
+        assert_eq!(
+            *enviados.lock().unwrap(),
+            [(
+                "5547999998888".to_string(),
+                "Seu fotolivro".to_string(),
+                "Pelo WhatsApp.pdf".to_string(),
+                true
+            )]
+        );
+        assert!(pelo_whatsapp.exists());
+    }
+
+    /// 💬 Para o WhatsApp sobe **o arquivo que a exportação gravaria** — a
+    /// levada limpa, a à venda marcada —, a legenda vai num só, e a pasta
+    /// temporária some.
+    #[test]
+    fn o_lote_para_o_whatsapp_sobe_cada_arquivo_e_limpa_a_pasta() {
+        let raiz = tempfile::tempdir().unwrap();
+        let pasta = raiz.path().join("lote");
+        let site = Arc::new(SiteDeMentira::default());
+        let mut a_venda = do_site("b", &pasta);
+        if let Origem::Site { levada, .. } = &mut a_venda.origem {
+            *levada = false;
+        }
+        let andamentos = rodar_para(
+            vec![do_site("a", &pasta), a_venda],
+            Some(sessao()),
+            Some(Entrega {
+                contato: "5547999998888".into(),
+                legenda: "Suas fotos".into(),
+                com_legenda: Some(pasta.join("a.jpg")),
+            }),
+            false,
+            site.clone(),
+        );
+
+        assert_eq!(terminou(&andamentos), (2, 0, 0));
+        let mut enviados = site.enviados.lock().unwrap().clone();
+        enviados.sort_by(|x, y| x.2.cmp(&y.2));
+        assert_eq!(
+            enviados,
+            [
+                (
+                    "5547999998888".to_string(),
+                    "Suas fotos".to_string(),
+                    "a.jpg".to_string(),
+                    b"bytes de a".to_vec()
+                ),
+                (
+                    "5547999998888".to_string(),
+                    String::new(),
+                    "b.jpg".to_string(),
+                    b"marcada de b".to_vec()
+                ),
+            ]
+        );
+        assert!(!pasta.exists(), "a pasta temporária tinha de sumir");
+    }
+
+    /// 💬 A janela que fechou no meio do lote: cada foto vira falha, com a
+    /// frase do servidor, e nada fica no disco.
+    #[test]
+    fn a_recusa_do_whatsapp_vira_falha_com_a_frase_do_servidor() {
+        let raiz = tempfile::tempdir().unwrap();
+        let pasta = raiz.path().join("lote");
+        let site = Arc::new(SiteDeMentira::default());
+        *site.recusa.lock().unwrap() =
+            Some("o site respondeu 409: A janela de 24 horas fechou.".into());
+        let entrega = Entrega {
+            contato: "5547999998888".into(),
+            legenda: String::new(),
+            com_legenda: None,
+        };
+        let andamentos = rodar_para(
+            vec![do_site("a", &pasta)],
+            Some(sessao()),
+            Some(entrega.clone()),
+            false,
+            site.clone(),
+        );
+        assert_eq!(terminou(&andamentos), (0, 1, 0));
+        assert!(andamentos.iter().any(|a| matches!(
+            a,
+            Andamento::Falhou { erro, .. } if erro == "A janela de 24 horas fechou."
+        )));
+        assert!(!pasta.join("a.jpg").exists());
+
+        // Sem conta, a frase diz o que fazer — e nada é pedido ao site.
+        let andamentos = rodar_para(
+            vec![Saida {
+                origem: Origem::Catalogo { id: "boa".into() },
+                destino: pasta.join("boa.jpg"),
+            }],
+            None,
+            Some(entrega),
+            false,
+            site,
+        );
+        assert!(andamentos.iter().any(|a| matches!(
+            a,
+            Andamento::Falhou { erro, .. }
+                if erro == "entre na conta do site para enviar pelo WhatsApp"
+        )));
     }
 
     /// A do catálogo continua pelo controller, no mesmo lote.

@@ -74,6 +74,16 @@ pub fn conversa_fora_da_pagina(contato: &str) -> PedidoJson {
     )
 }
 
+/// 💬 Quem pode receber mensagem de sessão agora: as conversas com a janela
+/// de 24 horas aberta, a mais recente primeiro — o combo "Enviar para" da
+/// exportação. Uma página grande: a busca do combo é feita aqui.
+pub fn conversas_com_janela_aberta() -> PedidoJson {
+    PedidoJson::ler(
+        "wa-abertas",
+        "/whatsapp/conversations?janela_aberta=true&show_automated=true&page=1&limit=100",
+    )
+}
+
 /// O rótulo da lista de cada um dos outros canais.
 pub fn rotulo_da_lista(canal: Canal) -> &'static str {
     match canal {
@@ -341,6 +351,10 @@ mod testes {
         assert_eq!(
             conversa_fora_da_pagina("5554").caminho,
             "/whatsapp/conversations?contact_filter=5554&show_automated=true&page=1&limit=1"
+        );
+        assert_eq!(
+            conversas_com_janela_aberta().caminho,
+            "/whatsapp/conversations?janela_aberta=true&show_automated=true&page=1&limit=100"
         );
     }
 

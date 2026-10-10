@@ -377,6 +377,10 @@ pub enum Pedido {
     /// nada está marcado): até 09/out/2026 ia vazio, e a raiz exportava a
     /// seleção da *Biblioteca* — 5 marcadas aqui viravam "Exportar 31 fotos".
     Exportar(Vec<String>),
+    /// 💬 "Enviar por WhatsApp…": a mesma exportação, já no destino WhatsApp
+    /// (o combo com as conversas de janela aberta). Leva os ids da grade,
+    /// como [`Pedido::Exportar`].
+    EnviarPorWhatsApp(Vec<String>),
     /// ⚠️ Um aviso de gesto recusado em parte — a `Notification` do gpui-kit,
     /// que a raiz empurra (só ela tem a `Window`).
     ///
@@ -6160,6 +6164,12 @@ impl Detalhe {
             .when_some(cores::grade_em_celulas(), |grade, fundo| grade.bg(fundo))
             .overflow_y_scroll()
             .children(filhos)
+            // 🖱️ **O mesmo menu da tira**, na galeria (dono, 10/10/2026:
+            // *"ligar o menu quando clicado com o botão direito na galeria,
+            // igual ao que foi feito no filmstrip"*). A célula do botão
+            // direito anota a clicada e ajeita a seleção; no vão entre duas,
+            // não abre.
+            .context_menu(menu_da_tira::ao_abrir(cx.entity().downgrade()))
             .into_any_element()
     }
 
@@ -6203,6 +6213,12 @@ impl Detalhe {
                     .text_color(tinta)
             })
             .cursor_pointer()
+            .on_mouse_down(
+                gpui_kit::MouseButton::Right,
+                cx.listener(move |tela, _ev: &gpui_kit::MouseDownEvent, _w, cx| {
+                    tela.apontar_o_menu(posicao, cx)
+                }),
+            )
             .on_click(
                 cx.listener(move |tela, evento: &gpui_kit::ClickEvent, _window, cx| {
                     if evento.click_count() >= 2 {
@@ -9296,26 +9312,7 @@ impl Detalhe {
                             // tira da Revelação: a miniatura do botão direito
                             // anota a clicada e ajeita a seleção; o menu lê
                             // depois. No vão entre duas, não abre.
-                            .context_menu({
-                                let esta = cx.entity().downgrade();
-                                move |menu, window, cx| {
-                                    // O foco volta a quem o tinha quando o
-                                    // menu fechar — senão as setas e as teclas
-                                    // da tira param até um clique qualquer.
-                                    let menu = match window.focused(cx) {
-                                        Some(antes) => menu.action_context(antes),
-                                        None => menu,
-                                    };
-                                    let Some(dados) = esta
-                                        .update(cx, |tela, _cx| tela.dados_do_menu())
-                                        .ok()
-                                        .flatten()
-                                    else {
-                                        return menu;
-                                    };
-                                    menu_da_tira::montar(menu, dados, esta.clone(), window, cx)
-                                }
-                            }),
+                            .context_menu(menu_da_tira::ao_abrir(cx.entity().downgrade())),
                     )
                     .when(tem_antes, |moldura| moldura.child(sombra(true, cx)))
                     .when(tem_depois, |moldura| moldura.child(sombra(false, cx))),
@@ -13021,6 +13018,77 @@ mod testes {
         assert!(pedidos[2..].iter().all(|(_, m)| {
             m.preco_de_venda == Some(Some("31.90".into())) && m.produto_id.is_none()
         }));
+    }
+
+    /// 🖱️ **O botão direito na galeria** ajeita a seleção como na tira: numa
+    /// foto fora das marcadas, ela passa a ser a seleção; numa das marcadas, o
+    /// lote fica e ela vira a do foco. É dessa seleção que o menu sai.
+    #[gpui_kit::test]
+    fn o_botao_direito_na_galeria_ajeita_a_selecao_como_na_tira(cx: &mut TestAppContext) {
+        let (janela, _publicador) = janela(
+            cx,
+            vec![
+                foto("f1", EstadoDaFotoNoSite::Disponivel, Some(4)),
+                foto("f2", EstadoDaFotoNoSite::LevadaNoBalcao, Some(5)),
+                foto("f3", EstadoDaFotoNoSite::Disponivel, Some(5)),
+            ],
+        );
+        entrar(cx, &janela);
+        let botao_direito = |cx: &mut TestAppContext, alvo: &'static str| {
+            let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+            visual.run_until_parked();
+            let onde = visual
+                .debug_bounds(alvo)
+                .unwrap_or_else(|| panic!("a célula {alvo} não está desenhada"))
+                .center();
+            visual.simulate_mouse_down(
+                onde,
+                gpui_kit::MouseButton::Right,
+                gpui_kit::Modifiers::none(),
+            );
+            visual.simulate_mouse_up(
+                onde,
+                gpui_kit::MouseButton::Right,
+                gpui_kit::Modifiers::none(),
+            );
+            visual.run_until_parked();
+        };
+
+        // Fora da seleção: a clicada passa a ser a seleção.
+        janela
+            .update(cx, |tela, _, cx| {
+                tela.clicar(0, Modificadores::default(), cx)
+            })
+            .expect("a janela deve estar aberta");
+        botao_direito(cx, "sessao-tile-f2");
+        janela
+            .update(cx, |tela, _, _| {
+                assert_eq!(tela.marcadas(), ["f2"]);
+                assert_eq!(tela.selecao.foco(), Some(1));
+            })
+            .expect("a janela deve estar aberta");
+
+        // Dentro da seleção: o lote fica, e a clicada vira a do foco.
+        janela
+            .update(cx, |tela, _, cx| {
+                tela.clicar(
+                    2,
+                    Modificadores {
+                        aditivo: true,
+                        faixa: false,
+                    },
+                    cx,
+                );
+                assert_eq!(tela.selecao.foco(), Some(2));
+            })
+            .expect("a janela deve estar aberta");
+        botao_direito(cx, "sessao-tile-f2");
+        janela
+            .update(cx, |tela, _, _| {
+                assert_eq!(tela.marcadas(), ["f2", "f3"]);
+                assert_eq!(tela.selecao.foco(), Some(1));
+            })
+            .expect("a janela deve estar aberta");
     }
 
     /// 🚨 **A grade mostra a foto revelada pela revelação padrão, e não o bruto.**

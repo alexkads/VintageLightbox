@@ -2888,7 +2888,10 @@ impl Aplicativo {
             }
             DetalhePedido::TelaDoCliente => self.alternar_cliente(cx),
             DetalhePedido::PoliticaDeRetencao => self.ir_para(Tela::Retencao, window, cx),
-            DetalhePedido::Exportar(ids) => self.exportar_da_sessao(ids, cx),
+            DetalhePedido::Exportar(ids) => self.exportar_da_sessao(ids, None, cx),
+            DetalhePedido::EnviarPorWhatsApp(ids) => {
+                self.exportar_da_sessao(ids, Some(crate::exportacao::tela::Destino::WhatsApp), cx)
+            }
             // 🔑 **A importação da sessão grava no catálogo local**, e as fotos
             // só aparecem depois desta releitura — a porta do acervo é daqui.
             // Chega a cada foto importada: agrupada, como as outras.
@@ -5373,7 +5376,15 @@ impl Aplicativo {
 
     /// Abre a exportação com as fotos que a grade da sessão mandou — as
     /// marcadas dela, e não a seleção da Biblioteca, que nada tem a ver.
-    fn exportar_da_sessao(&mut self, ids: &[String], cx: &mut Context<Self>) {
+    ///
+    /// 💬 `destino` é o "Enviar por WhatsApp…" do menu das fotos: a mesma
+    /// tela, aberta já no combo das conversas.
+    fn exportar_da_sessao(
+        &mut self,
+        ids: &[String],
+        destino: Option<crate::exportacao::tela::Destino>,
+        cx: &mut Context<Self>,
+    ) {
         if !self.pode_trabalhar() {
             return;
         }
@@ -5382,6 +5393,10 @@ impl Aplicativo {
             return;
         }
         self.abrir_a_exportacao(fotos, cx);
+        if destino.is_some() {
+            self.exportacao
+                .update(cx, |tela, cx| tela.escolher_destino_inicial(destino, cx));
+        }
     }
 
     /// Abre o modal de exportação para estas fotos, com o que a porta precisa
@@ -5411,9 +5426,16 @@ impl Aplicativo {
                 data_iso: a.galeria.criada_em_iso.clone(),
             })
             .unwrap_or_default();
+        // 💬 O WhatsApp da sessão aberta vem escolhido no combo "Enviar para".
+        let whatsapp = self
+            .detalhe
+            .read(cx)
+            .aberta()
+            .and_then(|a| a.galeria.whatsapp.clone());
         self.exportacao.update(cx, |tela, cx| {
             tela.abrir_para(fotos, sessao, copias, cx);
             tela.definir_livro(livro);
+            tela.definir_whatsapp(whatsapp, None, cx);
         });
         self.exportando = true;
         cx.notify();
@@ -11544,6 +11566,46 @@ mod testes {
                         tela.quantas(),
                         1,
                         "a exportação levou outra coisa que não as marcadas da sessão"
+                    );
+                });
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 💬 "Enviar por WhatsApp…" (o menu do botão direito das fotos) abre a
+    /// **mesma** exportação, já no destino WhatsApp; o "Exportar" continua
+    /// abrindo na pasta, mesmo logo depois.
+    #[gpui_kit::test]
+    fn o_enviar_por_whatsapp_abre_a_exportacao_no_destino(cx: &mut TestAppContext) {
+        use crate::exportacao::tela::Destino;
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_kit::init);
+
+        let janela = cx.add_window({
+            let previews = previews.clone();
+            |window, cx| Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas(), window, cx)
+        });
+
+        janela
+            .update(cx, |app, window, cx| {
+                let uma = app.biblioteca.read(cx).fotos_visiveis()[1].id.clone();
+                app.atender_a_sessao(
+                    &DetalhePedido::EnviarPorWhatsApp(vec![uma.clone()]),
+                    window,
+                    cx,
+                );
+                assert!(app.exportando(), "o pedido não abriu a exportação");
+                app.exportacao.update(cx, |tela, _cx| {
+                    assert_eq!(tela.quantas(), 1);
+                    assert_eq!(tela.destino(), Destino::WhatsApp);
+                });
+
+                app.atender_a_sessao(&DetalhePedido::Exportar(vec![uma]), window, cx);
+                app.exportacao.update(cx, |tela, _cx| {
+                    assert_eq!(
+                        tela.destino(),
+                        Destino::Pasta,
+                        "o Exportar abre sempre na pasta"
                     );
                 });
             })

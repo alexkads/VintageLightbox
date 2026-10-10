@@ -1,5 +1,6 @@
-//! 🖱️ O menu do botão direito na tira da sessão — o par do menu da tira da
-//! Revelação (`revelacao/tela/tira.rs`), com o que a sessão faz com as fotos.
+//! 🖱️ O menu do botão direito na tira **e na galeria** da sessão — o par do
+//! menu da tira da Revelação (`revelacao/tela/tira.rs`), com o que a sessão
+//! faz com as fotos. Um menu só para os dois lugares ([`ao_abrir`]).
 //!
 //! Dono, 08/10/2026: *"Eu quero também um menu como esse dentro na sessão
 //! fotográfica na filmstrip com as opções de lá"*. As opções são as mesmas do
@@ -106,6 +107,29 @@ impl Detalhe {
     }
 }
 
+/// O que o `context_menu` da tira e o da galeria chamam ao abrir: o menu das
+/// marcadas, ou nada se o botão direito caiu no vão entre duas fotos.
+pub(super) fn ao_abrir(
+    esta: WeakEntity<Detalhe>,
+) -> impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static {
+    move |menu, window, cx| {
+        // O foco volta a quem o tinha quando o menu fechar — senão as setas
+        // e as teclas da tira param até um clique qualquer.
+        let menu = match window.focused(cx) {
+            Some(antes) => menu.action_context(antes),
+            None => menu,
+        };
+        let Some(dados) = esta
+            .update(cx, |tela, _cx| tela.dados_do_menu())
+            .ok()
+            .flatten()
+        else {
+            return menu;
+        };
+        montar(menu, dados, esta.clone(), window, cx)
+    }
+}
+
 /// Um clique de item que chama um método do `Detalhe`.
 fn com(
     tela: &WeakEntity<Detalhe>,
@@ -178,6 +202,18 @@ pub(super) fn montar(
         .icon(Icon::new(Icone::FolderInput))
         .on_click(com(&tela, |tela, _w, cx| {
             cx.emit(Pedido::Exportar(tela.a_exportar()))
+        })),
+    );
+    // 💬 A mesma exportação, já com o combo das conversas à frente.
+    menu = menu.item(
+        PopupMenuItem::new(if varias {
+            format!("Enviar por WhatsApp… ({})", dados.marcadas)
+        } else {
+            "Enviar por WhatsApp…".to_string()
+        })
+        .icon(Icon::new(Icone::MessageCircle))
+        .on_click(com(&tela, |tela, _w, cx| {
+            cx.emit(Pedido::EnviarPorWhatsApp(tela.a_exportar()))
         })),
     );
 

@@ -1878,9 +1878,10 @@ fn o_botao_direito_na_tira_abre_o_menu_e_age_na_selecao(cx: &mut TestAppContext)
     e.detalhe(cx, |tela, _, _| assert_eq!(tela.marcadas(), ["d"]));
     assert!(menu_aberto(&e, cx), "o botão direito não abriu o menu");
 
-    // ↓ ×5: o título, Revelar, Nota, Exportar… e "Levada no balcão".
+    // ↓ ×6: o título, Revelar, Nota, Exportar…, Enviar por WhatsApp… e
+    // "Levada no balcão".
     let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
-    visual.simulate_keystrokes("down down down down down enter");
+    visual.simulate_keystrokes("down down down down down down enter");
     visual.run_until_parked();
     e.esperar(cx);
     let estado = e.detalhe(cx, |tela, _, _| {

@@ -574,6 +574,63 @@ impl crate::exportacao::porta::RevelaDoSite for RevelacaoDoSite {
             }
         })
     }
+
+    /// 💬 As mesmas rotas do painel do chatbot (`chatbot::pedidos`): a lista
+    /// é a de lá com o filtro da janela, e o envio é o anexo de lá.
+    fn contatos_do_whatsapp(&self, sessao: Sessao) -> crate::exportacao::porta::ContatosProntos {
+        let controlador = self.controlador.clone();
+        Box::pin(async move {
+            let pedido = crate::chatbot::pedidos::conversas_com_janela_aberta();
+            let valor = controlador
+                .pedir_json(&sessao, pedido.metodo, &pedido.caminho, None)
+                .await
+                .map_err(|erro| {
+                    crate::chatbot::modelo::explicar(
+                        &erro,
+                        "As conversas do WhatsApp não carregaram.",
+                    )
+                })?;
+            Ok(crate::chatbot::modelo::pagina_do_whatsapp(&valor)
+                .conversas
+                .into_iter()
+                .map(|conversa| crate::exportacao::porta::Contato {
+                    id: conversa.chave.id,
+                    nome: conversa.nome,
+                    ultima_entrada: conversa.ultima_entrada,
+                })
+                .collect())
+        })
+    }
+
+    fn enviar_ao_whatsapp(
+        &self,
+        sessao: Sessao,
+        contato: String,
+        legenda: String,
+        nome: String,
+        bytes: Vec<u8>,
+    ) -> crate::exportacao::porta::Entregue {
+        let controlador = self.controlador.clone();
+        Box::pin(async move {
+            // A foto chega dentro da conversa; o livro, como arquivo com nome.
+            let como = if nome.to_lowercase().ends_with(".pdf") {
+                crate::chatbot::midia::ComoEnviar::Documento
+            } else {
+                crate::chatbot::midia::ComoEnviar::Foto
+            };
+            let pedido = crate::chatbot::pedidos::enviar_anexo(
+                &contato,
+                &legenda,
+                &nome,
+                &bytes,
+                Some(como),
+            );
+            controlador
+                .pedir_cru(&sessao, pedido.metodo, &pedido.caminho, pedido.corpo)
+                .await
+                .map(|_| ())
+        })
+    }
 }
 
 /// De onde a porta tira a imagem editada de uma foto do site.

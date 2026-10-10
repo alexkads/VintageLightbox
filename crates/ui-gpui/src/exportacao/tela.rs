@@ -50,6 +50,19 @@
 //! ligar a chave, o aviso do livro vazio e a passagem para o lote: tudo que se
 //! alterna divide o mesmo lugar ([`estilo::mesmo_lugar`]), e a caixa tem
 //! sempre a altura do maior estado.
+//!
+//! ## O destino WhatsApp (10/10/2026)
+//!
+//! *"Utilize o próprio botão de exportar pra fazer isso com um combo para
+//! escolher o contato no WhatsApp"* (dono). O "para onde" ganhou um segundo
+//! destino: em vez da pasta, uma conversa do WhatsApp com a janela de 24 horas
+//! aberta. O lote é o mesmo — a levada limpa, a à venda com a marca, ou o
+//! fotolivro — e cada arquivo pronto sobe para a conversa
+//! ([`super::porta::Entrega`]).
+//!
+//! 🔑 **O destino WhatsApp não é lembrado**: quem clica em "Exportar" encontra
+//! sempre a pasta. Mandar foto a um cliente por engano custa mais que um
+//! clique a mais.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -60,7 +73,9 @@ use std::time::Duration;
 
 use adapters::view_models::PhotoViewModel;
 use gpui_kit::component::group_box::{GroupBox, GroupBoxVariants as _};
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::progress::Progress;
+use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectState};
 use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::tab::{Tab, TabBar};
@@ -78,9 +93,10 @@ use crate::importacao::estado::Recado;
 use crate::importacao::explorador::SeletorDePasta;
 use crate::recursos::Icone;
 use crate::revelacao::persistencia;
+use crate::sessoes::filtros_da_lista::Opcao;
 
 use super::destino::Destinos;
-use super::porta::{Andamento, Exportador, FotoDoLivro, Origem, Saida};
+use super::porta::{Andamento, Contato, Entrega, Exportador, FotoDoLivro, Origem, Saida};
 use super::preferencias::{self, Preferencias};
 
 /// O mesmo intervalo da colheita da importação.
@@ -95,6 +111,77 @@ pub enum Modo {
     Arquivos,
     /// 📖 O fotolivro: um PDF diagramado, para mandar ao cliente.
     Fotolivro,
+}
+
+/// Para onde o lote vai.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Destino {
+    /// Uma pasta deste computador.
+    #[default]
+    Pasta,
+    /// 💬 Uma conversa do WhatsApp com a janela de 24 horas aberta.
+    WhatsApp,
+}
+
+impl Destino {
+    pub fn rotulo(self) -> &'static str {
+        match self {
+            Destino::Pasta => "Pasta",
+            Destino::WhatsApp => "WhatsApp",
+        }
+    }
+}
+
+/// Só os algarismos de um número de telefone.
+fn algarismos(numero: &str) -> String {
+    numero.chars().filter(char::is_ascii_digit).collect()
+}
+
+/// O mesmo telefone, escrito de dois jeitos? Compara os algarismos, e aceita
+/// os oito últimos iguais: o cadastro da sessão pode vir sem o 55 ou sem o
+/// nono dígito que o WhatsApp guarda.
+fn mesmo_numero(a: &str, b: &str) -> bool {
+    let (a, b) = (algarismos(a), algarismos(b));
+    if a.is_empty() || b.is_empty() {
+        return false;
+    }
+    a == b || (a.len() >= 8 && b.len() >= 8 && a[a.len() - 8..] == b[b.len() - 8..])
+}
+
+/// A linha de um contato no combo: "Maria (da sessão) · 5547… · resta 3h 20min".
+fn titulo_do_contato(
+    contato: &Contato,
+    da_sessao: bool,
+    agora: chrono::DateTime<chrono::Utc>,
+) -> String {
+    // "da sessão" vem colado ao nome: no fim da linha o combo o cortava.
+    let mut partes = vec![if da_sessao {
+        format!("{} (da sessão)", contato.nome)
+    } else {
+        contato.nome.clone()
+    }];
+    if contato.nome != contato.id {
+        partes.push(contato.id.clone());
+    }
+    if let crate::chatbot::modelo::Janela::Aberta { restante, .. } =
+        crate::chatbot::modelo::Janela::avaliar(contato.ultima_entrada, agora)
+    {
+        partes.push(format!(
+            "resta {}",
+            crate::chatbot::modelo::formatar_restante(restante)
+        ));
+    }
+    partes.join(" · ")
+}
+
+/// Os campos do destino WhatsApp que precisam de janela: nascem na primeira
+/// pintura, como os do caixa.
+struct CamposDoWhatsApp {
+    contato: Entity<SelectState<SearchableVec<Opcao>>>,
+    legenda: Entity<InputState>,
+    /// O que o combo mostra agora — para só trocar os itens quando mudam.
+    vista: Vec<(String, String)>,
+    _assinaturas: [Subscription; 2],
 }
 
 impl Modo {
@@ -254,6 +341,23 @@ pub struct Exportacao {
     /// de lá: poupa o download.
     copias_locais: HashMap<String, PathBuf>,
     pasta: Option<PathBuf>,
+    /// 💬 Pasta ou WhatsApp. Não é lembrado: abre sempre na pasta.
+    destino: Destino,
+    /// 💬 Quem pode receber agora (janela aberta), como o site devolveu.
+    contatos: Vec<Contato>,
+    /// A lista de contatos pedida e ainda sem resposta.
+    contatos_a_caminho: Option<Receiver<Result<Vec<Contato>, String>>>,
+    erro_dos_contatos: Option<String>,
+    /// O contato escolhido no combo (o número da conversa).
+    contato: Option<String>,
+    /// O WhatsApp da sessão aberta: vem escolhido quando está na lista.
+    contato_sugerido: Option<String>,
+    legenda: String,
+    /// O arquivo que leva a legenda neste lote — o primeiro.
+    com_legenda: Option<PathBuf>,
+    /// O lote em curso (ou o último) foi para o WhatsApp: muda as frases.
+    entregando: bool,
+    campos_do_whatsapp: Option<CamposDoWhatsApp>,
     modo: Modo,
     formato: FormatoDeSaida,
     qualidade: Entity<SliderState>,
@@ -313,6 +417,16 @@ impl Exportacao {
                     .pasta_que_existe()
                     .unwrap_or_else(preferencias::pasta_dos_downloads),
             ),
+            destino: Destino::Pasta,
+            contatos: Vec::new(),
+            contatos_a_caminho: None,
+            erro_dos_contatos: None,
+            contato: None,
+            contato_sugerido: None,
+            legenda: String::new(),
+            com_legenda: None,
+            entregando: false,
+            campos_do_whatsapp: None,
             modo: lembradas.modo(),
             formato: lembradas.formato(),
             qualidade,
@@ -359,12 +473,204 @@ impl Exportacao {
         self.feitas.clear();
         self.lote.clear();
         self.arquivo_do_livro = None;
+        // 💬 Cada abertura começa na pasta e sem contato: o de ontem não
+        // pode ser o destino das fotos de hoje.
+        self.destino = Destino::Pasta;
+        self.contato = None;
+        self.contato_sugerido = None;
+        self.contatos.clear();
+        self.erro_dos_contatos = None;
+        self.legenda.clear();
+        self.com_legenda = None;
+        self.entregando = false;
         cx.notify();
     }
 
     /// A sessão das fotos — a capa e os links do fotolivro.
     pub fn definir_livro(&mut self, livro: InfoDoLivro) {
         self.livro = livro;
+    }
+
+    // ── 💬 O destino WhatsApp ───────────────────────────────────────────
+
+    /// O WhatsApp da sessão aberta (vem escolhido no combo quando está com a
+    /// janela aberta) e, se pedido, o destino em que a tela abre — o "Enviar
+    /// por WhatsApp…" do menu das fotos.
+    pub fn definir_whatsapp(
+        &mut self,
+        sugerido: Option<String>,
+        destino: Option<Destino>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.correndo() {
+            return;
+        }
+        self.contato_sugerido = sugerido.filter(|n| !algarismos(n).is_empty());
+        if let Some(destino) = destino {
+            self.escolher_destino(destino, cx);
+        }
+    }
+
+    pub fn destino(&self) -> Destino {
+        self.destino
+    }
+
+    /// O destino em que a tela abre, quando quem a abriu já sabe — sem mexer
+    /// num lote em curso.
+    pub fn escolher_destino_inicial(&mut self, destino: Option<Destino>, cx: &mut Context<Self>) {
+        if self.correndo() {
+            return;
+        }
+        if let Some(destino) = destino {
+            self.escolher_destino(destino, cx);
+        }
+    }
+
+    pub fn escolher_destino(&mut self, destino: Destino, cx: &mut Context<Self>) {
+        self.destino = destino;
+        if destino == Destino::WhatsApp {
+            self.pedir_contatos(cx);
+        }
+        cx.notify();
+    }
+
+    /// Pede ao site quem está com a janela aberta. Sem conta, nada a pedir.
+    fn pedir_contatos(&mut self, cx: &mut Context<Self>) {
+        if self.contatos_a_caminho.is_some() {
+            return;
+        }
+        let Some(sessao) = self.sessao.clone() else {
+            return;
+        };
+        let (envia, recebe) = channel();
+        self.erro_dos_contatos = None;
+        self.contatos_a_caminho = Some(recebe);
+        self.exportador.contatos(sessao, envia);
+        self.acompanhar(cx);
+    }
+
+    fn contatos_chegaram(&mut self, resposta: Result<Vec<Contato>, String>) {
+        match resposta {
+            Ok(contatos) => {
+                self.contatos = contatos;
+                self.erro_dos_contatos = None;
+            }
+            Err(erro) => {
+                self.contatos.clear();
+                self.erro_dos_contatos = Some(erro);
+            }
+        }
+        // O escolhido só vale se ainda pode receber; sem escolha, o contato
+        // da sessão entra sozinho.
+        let ainda_vale = self
+            .contato
+            .as_ref()
+            .is_some_and(|id| self.contatos.iter().any(|c| &c.id == id));
+        if !ainda_vale {
+            self.contato = self.contato_da_sessao().map(|c| c.id.clone());
+        }
+    }
+
+    /// O contato da sessão, se ele está entre os que podem receber.
+    fn contato_da_sessao(&self) -> Option<&Contato> {
+        let sugerido = self.contato_sugerido.as_ref()?;
+        self.contatos.iter().find(|c| mesmo_numero(&c.id, sugerido))
+    }
+
+    pub fn contatos(&self) -> &[Contato] {
+        &self.contatos
+    }
+
+    /// O contato escolhido (o número da conversa).
+    pub fn contato(&self) -> Option<&str> {
+        self.contato.as_deref()
+    }
+
+    pub fn escolher_contato(&mut self, id: Option<String>, cx: &mut Context<Self>) {
+        self.contato = id.filter(|id| self.contatos.iter().any(|c| &c.id == id));
+        cx.notify();
+    }
+
+    pub fn definir_legenda(&mut self, legenda: impl Into<String>, cx: &mut Context<Self>) {
+        self.legenda = legenda.into();
+        cx.notify();
+    }
+
+    /// O nome de quem recebe, para as frases do lote.
+    fn nome_do_contato(&self) -> String {
+        self.contato
+            .as_ref()
+            .and_then(|id| self.contatos.iter().find(|c| &c.id == id))
+            .map(|c| c.nome.clone())
+            .or_else(|| self.contato.clone())
+            .unwrap_or_default()
+    }
+
+    /// A linha de baixo do combo: por que ele está vazio, ou a regra.
+    fn nota_dos_contatos(&self) -> (String, bool) {
+        if self.sessao.is_none() {
+            return (
+                "Entre na conta do site para enviar pelo WhatsApp.".into(),
+                true,
+            );
+        }
+        if let Some(erro) = &self.erro_dos_contatos {
+            return (erro.clone(), true);
+        }
+        if self.contatos_a_caminho.is_some() {
+            return (
+                "Procurando quem escreveu nas últimas 24 horas…".into(),
+                false,
+            );
+        }
+        if self.contatos.is_empty() {
+            return (
+                "Ninguém escreveu nas últimas 24 horas — o WhatsApp só entrega a quem escreveu."
+                    .into(),
+                true,
+            );
+        }
+        if self.contato_sugerido.is_some() && self.contato_da_sessao().is_none() {
+            return (
+                "O WhatsApp desta sessão não escreveu nas últimas 24 horas.".into(),
+                true,
+            );
+        }
+        (
+            "Só aparece quem escreveu nas últimas 24 horas.".into(),
+            false,
+        )
+    }
+
+    /// A entrega do lote, quando o destino é o WhatsApp e há para quem.
+    fn entrega(&self) -> Option<Entrega> {
+        if self.destino != Destino::WhatsApp {
+            return None;
+        }
+        Some(Entrega {
+            contato: self.contato.clone()?,
+            legenda: self.legenda.trim().to_string(),
+            com_legenda: self.com_legenda.clone(),
+        })
+    }
+
+    /// A pasta em que o lote grava: a escolhida, ou uma temporária só deste
+    /// lote quando ele vai para o WhatsApp.
+    fn pasta_do_lote(&self) -> Option<PathBuf> {
+        match self.destino {
+            Destino::Pasta => self.pasta.clone(),
+            Destino::WhatsApp => {
+                self.contato.as_ref()?;
+                let agora = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or_default();
+                Some(
+                    std::env::temp_dir()
+                        .join(format!("vlb-whatsapp-{}-{agora}", std::process::id())),
+                )
+            }
+        }
     }
 
     pub fn quantas(&self) -> usize {
@@ -382,6 +688,10 @@ impl Exportacao {
     /// O formato das levadas. A não levada sai sempre em JPEG: é a prévia
     /// marcada do site, como ele a grava.
     pub fn formato(&self) -> FormatoDeSaida {
+        // 💬 Pelo WhatsApp a foto é sempre JPEG: a Meta recomprime o resto.
+        if self.destino == Destino::WhatsApp {
+            return FormatoDeSaida::Jpeg;
+        }
         self.formato
     }
 
@@ -432,6 +742,9 @@ impl Exportacao {
     /// As opções das levadas: tamanho cheio, no formato e na qualidade
     /// escolhidos. A não levada não passa por elas — é a prévia marcada.
     pub fn opcoes(&self, cx: &gpui_kit::App) -> ExportOptions {
+        if self.destino == Destino::WhatsApp {
+            return super::porta::opcoes_do_whatsapp();
+        }
         ExportOptions::default()
             .with_quality(self.qualidade(cx))
             .with_formato(self.formato())
@@ -509,12 +822,14 @@ impl Exportacao {
     /// mesmo nome de origem apontando para o mesmo arquivo. Ver
     /// [`super::destino`].
     pub fn exportar(&mut self, cx: &mut Context<Self>) {
-        let Some(pasta) = self.pasta.clone() else {
+        let Some(pasta) = self.pasta_do_lote() else {
             return;
         };
         if self.fotos.is_empty() || self.correndo() {
             return;
         }
+        self.entregando = self.destino == Destino::WhatsApp;
+        self.com_legenda = None;
         if self.modo == Modo::Fotolivro {
             self.montar_o_livro(pasta, cx);
             return;
@@ -547,6 +862,8 @@ impl Exportacao {
                 }
             })
             .collect();
+        // 💬 A legenda vai com a primeira foto, e só com ela.
+        self.com_legenda = saidas.first().map(|s| s.destino.clone());
         self.mandar(saidas, cx);
     }
 
@@ -611,6 +928,7 @@ impl Exportacao {
             self.livro.titulo.trim().replace(['/', '\\', ':'], "-")
         };
         let destino = Destinos::na_pasta(pasta).para(&format!("{titulo}.pdf"), "pdf");
+        self.com_legenda = Some(destino.clone());
         self.progresso = Some(Progresso {
             total: fotos.len(),
             ..Default::default()
@@ -627,6 +945,7 @@ impl Exportacao {
             self.livro.galeria_id.clone(),
             destino,
             self.sessao.clone(),
+            self.entrega(),
             self.cancelar.clone(),
             self.andamentos.0.clone(),
         );
@@ -641,7 +960,7 @@ impl Exportacao {
         }
         // O livro é um arquivo só: tentar de novo é refazê-lo.
         if self.modo == Modo::Fotolivro {
-            if let Some(pasta) = self.pasta.clone() {
+            if let Some(pasta) = self.pasta_do_lote() {
                 self.montar_o_livro(pasta, cx);
             }
             return;
@@ -674,6 +993,7 @@ impl Exportacao {
             saidas,
             opcoes,
             self.sessao.clone(),
+            self.entrega(),
             self.cancelar.clone(),
             self.andamentos.0.clone(),
         );
@@ -742,6 +1062,22 @@ impl Exportacao {
             }
         }
 
+        if let Some(a_caminho) = &self.contatos_a_caminho {
+            match a_caminho.try_recv() {
+                Ok(resposta) => {
+                    mudou = true;
+                    self.contatos_a_caminho = None;
+                    self.contatos_chegaram(resposta);
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    mudou = true;
+                    self.contatos_a_caminho = None;
+                    self.contatos_chegaram(Err("As conversas do WhatsApp não carregaram.".into()));
+                }
+            }
+        }
+
         let estava_correndo = self.correndo();
         while let Ok(andamento) = self.andamentos.1.try_recv() {
             mudou = true;
@@ -759,7 +1095,7 @@ impl Exportacao {
             cx.notify();
         }
 
-        let continua = self.esperando_pasta || self.correndo();
+        let continua = self.esperando_pasta || self.correndo() || self.contatos_a_caminho.is_some();
         if !continua {
             self.colhendo = false;
         }
@@ -813,10 +1149,11 @@ impl Exportacao {
                     "{} {} {}",
                     p.feitas,
                     fotos(p.feitas),
-                    if p.feitas == 1 {
-                        "exportada"
-                    } else {
-                        "exportadas"
+                    match (self.entregando, p.feitas == 1) {
+                        (false, true) => "exportada",
+                        (false, false) => "exportadas",
+                        (true, true) => "enviada",
+                        (true, false) => "enviadas",
                     }
                 )];
                 if p.falhas > 0 {
@@ -888,7 +1225,12 @@ impl Exportacao {
                         estilo::botao_primario("exportacao-exportar", cx)
                             .debug_selector(|| "exportacao-exportar".into())
                             .label(format!(
-                                "Exportando {}/{}…",
+                                "{} {}/{}…",
+                                if self.entregando {
+                                    "Enviando"
+                                } else {
+                                    "Exportando"
+                                },
                                 (p.feitas + p.falhas + 1).min(p.total),
                                 p.total
                             ))
@@ -909,7 +1251,8 @@ impl Exportacao {
                             })),
                     )
                 })
-                .when(p.feitas > 0, |f| {
+                // 💬 O que foi para a conversa não está em pasta nenhuma.
+                .when(p.feitas > 0 && !self.entregando, |f| {
                     f.child(
                         estilo::botao_contorno("exportacao-mostrar", cx)
                             .debug_selector(|| "exportacao-mostrar".into())
@@ -937,9 +1280,24 @@ impl Exportacao {
                 )
                 .into_any_element(),
             None => {
-                let pronto = self.pasta.is_some()
+                let para_o_whatsapp = self.destino == Destino::WhatsApp;
+                let tem_destino = if para_o_whatsapp {
+                    self.contato.is_some() && self.sessao.is_some()
+                } else {
+                    self.pasta.is_some()
+                };
+                let pronto = tem_destino
                     && !self.fotos.is_empty()
                     && (self.modo == Modo::Arquivos || !self.fotos_do_livro().is_empty());
+                let rotulo: SharedString = match (self.modo, para_o_whatsapp) {
+                    (Modo::Arquivos, false) => "Exportar".into(),
+                    (Modo::Fotolivro, false) => "Gerar o fotolivro".into(),
+                    (Modo::Arquivos, true) => match self.fotos.len() {
+                        1 => "Enviar 1 foto".into(),
+                        n => format!("Enviar {n} fotos").into(),
+                    },
+                    (Modo::Fotolivro, true) => "Enviar o fotolivro".into(),
+                };
                 faixa
                     .child(
                         estilo::botao_contorno("exportacao-cancelar", cx)
@@ -950,10 +1308,7 @@ impl Exportacao {
                     .child(
                         estilo::botao_primario("exportacao-exportar", cx)
                             .debug_selector(|| "exportacao-exportar".into())
-                            .label(match self.modo {
-                                Modo::Arquivos => "Exportar",
-                                Modo::Fotolivro => "Gerar o fotolivro",
-                            })
+                            .label(rotulo)
                             .disabled(!pronto)
                             .on_click(cx.listener(|tela, _, _, cx| tela.exportar(cx))),
                     )
@@ -1207,9 +1562,175 @@ impl Exportacao {
             ]))
     }
 
-    /// 📁 Para onde: a pasta à vista, o "Trocar…" e a volta aos Downloads —
-    /// o "Salvar em" do site.
-    fn render_destino(&self, cx: &mut Context<Self>) -> gpui_kit::Div {
+    /// 🧭 Para onde: a pasta ou o WhatsApp. As duas vistas dividem o mesmo
+    /// lugar — trocar de destino não muda a altura da caixa.
+    fn render_destino(&mut self, window: &mut Window, cx: &mut Context<Self>) -> gpui_kit::Div {
+        let destinos = [Destino::Pasta, Destino::WhatsApp];
+        let para_o_whatsapp = self.destino == Destino::WhatsApp;
+        let pasta = self.render_pasta(cx).into_any_element();
+        let whatsapp = self.render_whatsapp(window, cx).into_any_element();
+        v_flex()
+            .gap(px(8.))
+            .child(Self::rotulo_de_secao("Destino"))
+            .child(
+                TabBar::new("exportacao-para-onde")
+                    .segmented()
+                    .w_full()
+                    .selected_index(usize::from(para_o_whatsapp))
+                    .children(destinos.map(|destino| {
+                        let id = match destino {
+                            Destino::Pasta => "exportacao-destino-pasta",
+                            Destino::WhatsApp => "exportacao-destino-whatsapp",
+                        };
+                        Tab::new()
+                            .label(destino.rotulo())
+                            .flex_1()
+                            .debug_selector(move || id.to_string())
+                    }))
+                    .on_click(cx.listener(move |tela, i: &usize, _, cx| {
+                        if let Some(destino) = destinos.get(*i) {
+                            tela.escolher_destino(*destino, cx);
+                        }
+                    })),
+            )
+            .child(estilo::mesmo_lugar([
+                (!para_o_whatsapp, pasta),
+                (para_o_whatsapp, whatsapp),
+            ]))
+    }
+
+    /// Os campos do WhatsApp, criados na primeira pintura e postos em dia
+    /// com o que a tela sabe (a lista que chegou, o contato escolhido).
+    fn campos_do_whatsapp(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> (
+        Entity<SelectState<SearchableVec<Opcao>>>,
+        Entity<InputState>,
+    ) {
+        let agora = chrono::Utc::now();
+        let da_sessao = self.contato_da_sessao().map(|c| c.id.clone());
+        let lista: Vec<(String, String)> = self
+            .contatos
+            .iter()
+            .map(|c| {
+                (
+                    c.id.clone(),
+                    titulo_do_contato(c, da_sessao.as_ref() == Some(&c.id), agora),
+                )
+            })
+            .collect();
+        let opcoes = |lista: &[(String, String)]| {
+            SearchableVec::new(
+                lista
+                    .iter()
+                    .map(|(id, titulo)| Opcao::nova(id.clone(), titulo.clone()))
+                    .collect::<Vec<_>>(),
+            )
+        };
+        let (contato, legenda) = match self.campos_do_whatsapp.as_mut() {
+            Some(campos) => {
+                if campos.vista != lista {
+                    campos.contato.update(cx, |estado, cx| {
+                        estado.set_items(opcoes(&lista), window, cx)
+                    });
+                    campos.vista = lista;
+                }
+                (campos.contato.clone(), campos.legenda.clone())
+            }
+            None => {
+                let contato = cx
+                    .new(|cx| SelectState::new(opcoes(&lista), None, window, cx).searchable(true));
+                let escolha = cx.subscribe_in(
+                    &contato,
+                    window,
+                    |tela, _, evento: &SelectEvent<SearchableVec<Opcao>>, _, cx| {
+                        let SelectEvent::Confirm(id) = evento;
+                        tela.escolher_contato(id.clone(), cx);
+                    },
+                );
+                let legenda = cx.new(|cx| {
+                    InputState::new(window, cx)
+                        .placeholder("Legenda (opcional) — vai com a primeira foto")
+                });
+                let escrita = cx.subscribe_in(
+                    &legenda,
+                    window,
+                    |tela, campo, evento: &InputEvent, _, cx| {
+                        if let InputEvent::Change = evento {
+                            let texto: String = campo.read(cx).value().chars().take(1024).collect();
+                            if tela.legenda != texto {
+                                tela.legenda = texto;
+                                cx.notify();
+                            }
+                        }
+                    },
+                );
+                self.campos_do_whatsapp = Some(CamposDoWhatsApp {
+                    contato: contato.clone(),
+                    legenda: legenda.clone(),
+                    vista: lista,
+                    _assinaturas: [escolha, escrita],
+                });
+                (contato, legenda)
+            }
+        };
+        if contato.read(cx).selected_value() != self.contato.as_ref() {
+            let escolhido = self.contato.clone();
+            contato.update(cx, |estado, cx| match &escolhido {
+                Some(id) => estado.set_selected_value(id, window, cx),
+                None => estado.set_selected_index(None, window, cx),
+            });
+        }
+        // A legenda zerada por fora (a tela reaberta) esvazia o campo.
+        if self.legenda.is_empty() && !legenda.read(cx).value().is_empty() {
+            legenda.update(cx, |estado, cx| estado.set_value("", window, cx));
+        }
+        (contato, legenda)
+    }
+
+    /// 💬 Para quem: o combo das conversas com a janela aberta e a legenda.
+    fn render_whatsapp(&mut self, window: &mut Window, cx: &mut Context<Self>) -> gpui_kit::Div {
+        let (contato, legenda) = self.campos_do_whatsapp(window, cx);
+        let tema = cx.theme().clone();
+        let (nota, alerta) = self.nota_dos_contatos();
+        let sem_contatos = self.contatos.is_empty();
+        v_flex()
+            .gap(px(8.))
+            .child(Self::rotulo_de_secao("Enviar para"))
+            .child(
+                div().debug_selector(|| "exportacao-contato".into()).child(
+                    estilo::campo(Select::new(&contato))
+                        .w_full()
+                        .placeholder("Escolha a conversa…")
+                        .search_placeholder("Buscar nome ou número…")
+                        .disabled(sem_contatos),
+                ),
+            )
+            // 📐 Uma linha só, sempre: a nota troca de texto, não de altura.
+            .child(
+                div()
+                    .debug_selector(|| "exportacao-nota-do-contato".into())
+                    .truncate()
+                    .text_xs()
+                    .text_color(if alerta {
+                        tema.warning
+                    } else {
+                        tema.muted_foreground
+                    })
+                    .child(nota),
+            )
+            .child(
+                div()
+                    .debug_selector(|| "exportacao-legenda".into())
+                    .child(estilo::campo(Input::new(&legenda)).w_full()),
+            )
+    }
+
+    /// 📁 A pasta à vista, o "Trocar…" e a volta aos Downloads — o "Salvar em"
+    /// do site.
+    fn render_pasta(&self, cx: &mut Context<Self>) -> gpui_kit::Div {
         let tema = cx.theme().clone();
         let downloads = preferencias::pasta_dos_downloads();
         let nos_downloads = self.pasta.as_deref() == Some(downloads.as_path());
@@ -1273,29 +1794,63 @@ impl Exportacao {
             )
     }
 
-    fn render_configuracao(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    /// 💬 No lugar do formato, quando o destino é o WhatsApp: lá ele não é
+    /// escolha.
+    fn render_formato_do_whatsapp(&self, cx: &mut Context<Self>) -> gpui_kit::Div {
+        v_flex()
+            .gap(px(8.))
+            .child(Self::rotulo_de_secao("Formato"))
+            .child(
+                div()
+                    .debug_selector(|| "exportacao-formato-do-whatsapp".into())
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(
+                        "Pelo WhatsApp a foto vai em JPEG, reduzida para chegar dentro da conversa.",
+                    ),
+            )
+    }
+
+    fn render_configuracao(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let arquivos = self.modo == Modo::Arquivos;
+        let para_o_whatsapp = self.destino == Destino::WhatsApp;
         v_flex()
             .gap(px(16.))
             .child(self.render_uso(cx))
             .child(self.render_o_que_sai(cx))
-            // 📐 A opção de cada uso, no mesmo lugar: trocar de aba não muda a
-            // altura da caixa.
+            // 📐 A opção de cada uso, no mesmo lugar: trocar de aba ou de
+            // destino não muda a altura da caixa.
             .child(estilo::mesmo_lugar([
-                (arquivos, self.render_formato(cx).into_any_element()),
+                (
+                    arquivos && !para_o_whatsapp,
+                    self.render_formato(cx).into_any_element(),
+                ),
+                (
+                    arquivos && para_o_whatsapp,
+                    self.render_formato_do_whatsapp(cx).into_any_element(),
+                ),
                 (!arquivos, self.render_livro(cx).into_any_element()),
             ]))
-            .child(self.render_destino(cx))
+            .child(self.render_destino(window, cx))
             .into_any_element()
     }
 
     fn render_lote(&mut self, p: Progresso, cx: &mut Context<Self>) -> AnyElement {
         let tema = cx.theme().clone();
-        let destino = self.pasta.as_deref().map(curto).unwrap_or_default();
+        // 💬 "em ~/Downloads" ou "para Maria": a mesma frase, com o destino
+        // do lote.
+        let destino = if self.entregando {
+            format!("para {}", self.nome_do_contato())
+        } else {
+            format!(
+                "em {}",
+                self.pasta.as_deref().map(curto).unwrap_or_default()
+            )
+        };
         let andamento = match &self.ultimo {
             Some(ultimo) if !p.terminou => format!("{} · {ultimo}", self.resumo()),
             _ if !p.terminou => format!("{} · preparando…", self.resumo()),
-            _ => format!("{} de {} · em {destino}", p.feitas, p.total),
+            _ => format!("{} de {} · {destino}", p.feitas, p.total),
         };
         let falhou = p.terminou && p.falhas > 0;
 
@@ -1306,7 +1861,7 @@ impl Exportacao {
                     if falhou {
                         self.resumo()
                     } else {
-                        format!("{} em {destino}", self.resumo())
+                        format!("{} {destino}", self.resumo())
                     },
                     falhou,
                     cx,
@@ -1408,7 +1963,7 @@ fn nome(caminho: &Path) -> String {
 }
 
 impl gpui_kit::Render for Exportacao {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // 🧹 Sem frase solta no alto: o que o uso entrega está embaixo das
         // abas, e durante o lote a barra já diz o que está acontecendo.
         //
@@ -1423,7 +1978,7 @@ impl gpui_kit::Render for Exportacao {
         });
         let configurando = lote.is_none();
         estilo::mesmo_lugar(
-            [(configurando, self.render_configuracao(cx))]
+            [(configurando, self.render_configuracao(window, cx))]
                 .into_iter()
                 .chain(lote.map(|lote| (true, lote))),
         )
@@ -1717,5 +2272,286 @@ mod testes {
             assert_eq!(tela.formato(), FormatoDeSaida::Png);
             assert_eq!(tela.pasta(), Some(&pasta.path().to_path_buf()));
         });
+    }
+
+    // ── 💬 O destino WhatsApp ───────────────────────────────────────────
+
+    fn conta() -> Sessao {
+        Sessao {
+            access_token: "tok".into(),
+            refresh_token: "r".into(),
+            access_vence_em: 4_102_444_800,
+            refresh_vence_em: 4_102_444_800,
+        }
+    }
+
+    fn contato(id: &str, nome: &str) -> Contato {
+        Contato {
+            id: id.into(),
+            nome: nome.into(),
+            ultima_entrada: Some(chrono::Utc::now() - chrono::Duration::hours(2)),
+        }
+    }
+
+    /// A tela aberta no destino WhatsApp, com a lista de contatos já colhida.
+    fn no_whatsapp(
+        cx: &mut TestAppContext,
+        exportador: Arc<ExportadorDeMentira>,
+        fotos: Vec<PhotoViewModel>,
+        da_sessao: Option<&str>,
+    ) -> Entity<Exportacao> {
+        *exportador.contatos.lock().unwrap() = vec![
+            contato("5547988881234", "João Pereira"),
+            contato("5547999998888", "Maria Souza"),
+        ];
+        let tela = montar(cx, exportador, Arc::new(SeletorDeMentira::default()));
+        tela.update(cx, |tela, cx| {
+            tela.abrir_para(fotos, Some(conta()), HashMap::new(), cx);
+            tela.definir_whatsapp(da_sessao.map(str::to_string), Some(Destino::WhatsApp), cx);
+            tela.colher(cx);
+        });
+        tela
+    }
+
+    /// O combo lista quem o site devolveu, e o WhatsApp da sessão — escrito
+    /// como o operador o digitou — vem escolhido.
+    #[gpui_kit::test]
+    fn o_contato_da_sessao_vem_escolhido_no_combo(cx: &mut TestAppContext) {
+        let exportador = Arc::new(ExportadorDeMentira::default());
+        let tela = no_whatsapp(
+            cx,
+            exportador,
+            vec![foto_do_site("a", "IMG_1.CR3")],
+            Some("(47) 99999-8888"),
+        );
+        tela.update(cx, |tela, _| {
+            assert_eq!(tela.destino(), Destino::WhatsApp);
+            assert_eq!(tela.contatos().len(), 2);
+            assert_eq!(tela.contato(), Some("5547999998888"));
+            assert_eq!(
+                tela.nota_dos_contatos(),
+                (
+                    "Só aparece quem escreveu nas últimas 24 horas.".into(),
+                    false
+                )
+            );
+        });
+    }
+
+    /// Sem ninguém escolhido nada sai; e o contato da sessão que não escreveu
+    /// nas últimas 24 horas não entra por conta própria — a nota diz por quê.
+    #[gpui_kit::test]
+    fn sem_contato_escolhido_nada_e_enviado(cx: &mut TestAppContext) {
+        let exportador = Arc::new(ExportadorDeMentira::default());
+        let tela = no_whatsapp(
+            cx,
+            exportador.clone(),
+            vec![foto_do_site("a", "IMG_1.CR3")],
+            Some("47 97777-0000"),
+        );
+        tela.update(cx, |tela, cx| {
+            assert_eq!(tela.contato(), None);
+            assert_eq!(
+                tela.nota_dos_contatos().0,
+                "O WhatsApp desta sessão não escreveu nas últimas 24 horas."
+            );
+            tela.exportar(cx);
+            assert!(!tela.correndo());
+            // Um número que não está na lista não vira destino.
+            tela.escolher_contato(Some("5500000000000".into()), cx);
+            assert_eq!(tela.contato(), None);
+        });
+        assert!(exportador.pedidos().is_empty());
+    }
+
+    /// 💬 O lote para o WhatsApp é o mesmo da pasta — a levada limpa, a à
+    /// venda marcada —, em JPEG reduzido, numa pasta temporária, com o contato
+    /// e a legenda na primeira foto.
+    #[gpui_kit::test]
+    fn o_lote_vai_para_a_conversa_escolhida(cx: &mut TestAppContext) {
+        let exportador = Arc::new(ExportadorDeMentira::default());
+        let mut a_venda = foto_do_site("b", "IMG_2.CR3");
+        a_venda.comprada = false;
+        let tela = no_whatsapp(
+            cx,
+            exportador.clone(),
+            vec![foto_do_site("a", "IMG_1.CR3"), a_venda],
+            Some("5547999998888"),
+        );
+        let downloads = tela.update(cx, |tela, cx| {
+            tela.escolher_formato(FormatoDeSaida::Png, cx);
+            tela.definir_legenda("  Suas fotos  ", cx);
+            tela.exportar(cx);
+            tela.colher(cx);
+            assert_eq!(tela.resumo(), "2 fotos enviadas");
+            tela.pasta().cloned()
+        });
+
+        let lote = &exportador.pedidos()[0];
+        assert!(matches!(&lote[0].origem, Origem::Site { levada: true, .. }));
+        assert!(matches!(
+            &lote[1].origem,
+            Origem::Site { levada: false, .. }
+        ));
+        let pasta = lote[0].destino.parent().unwrap().to_path_buf();
+        assert!(pasta.starts_with(std::env::temp_dir()));
+        assert_ne!(
+            Some(&pasta),
+            downloads.as_ref(),
+            "nada vai para a pasta do operador"
+        );
+        assert_eq!(
+            lote[0].destino,
+            pasta.join("IMG_1.jpg"),
+            "JPEG, e não o PNG da tela"
+        );
+
+        let opcoes = exportador.opcoes.lock().unwrap().clone().unwrap();
+        assert_eq!(opcoes, crate::exportacao::porta::opcoes_do_whatsapp());
+        assert_eq!(
+            exportador.entregas.lock().unwrap()[0],
+            Some(Entrega {
+                contato: "5547999998888".into(),
+                legenda: "Suas fotos".into(),
+                com_legenda: Some(lote[0].destino.clone()),
+            })
+        );
+    }
+
+    /// 💬 A que falhou vai de novo para a mesma conversa — e a legenda segue
+    /// presa à primeira foto do lote, não à primeira da repetição.
+    #[gpui_kit::test]
+    fn tentar_de_novo_manda_para_a_mesma_conversa(cx: &mut TestAppContext) {
+        let exportador = Arc::new(ExportadorDeMentira::default());
+        *exportador.falham.lock().unwrap() = 1;
+        let tela = no_whatsapp(
+            cx,
+            exportador.clone(),
+            vec![foto_do_site("a", "A.CR3"), foto_do_site("b", "B.CR3")],
+            Some("5547999998888"),
+        );
+        tela.update(cx, |tela, cx| {
+            tela.exportar(cx);
+            tela.colher(cx);
+            assert_eq!(tela.resumo(), "1 foto enviada · 1 falhou");
+        });
+        *exportador.falham.lock().unwrap() = 0;
+        tela.update(cx, |tela, cx| {
+            tela.tentar_de_novo(cx);
+            tela.colher(cx);
+        });
+        let pedidos = exportador.pedidos();
+        assert_eq!(pedidos[1].len(), 1);
+        let entregas = exportador.entregas.lock().unwrap().clone();
+        assert_eq!(entregas[0], entregas[1]);
+        assert_eq!(
+            entregas[1].as_ref().unwrap().com_legenda,
+            Some(pedidos[0][0].destino.clone())
+        );
+    }
+
+    /// 📖 O fotolivro vai como um arquivo só, para a conversa escolhida.
+    #[gpui_kit::test]
+    fn o_fotolivro_vai_para_a_conversa(cx: &mut TestAppContext) {
+        let exportador = Arc::new(ExportadorDeMentira::default());
+        let tela = no_whatsapp(
+            cx,
+            exportador.clone(),
+            vec![foto_do_site("a", "IMG_1.CR3")],
+            Some("5547999998888"),
+        );
+        tela.update(cx, |tela, cx| {
+            tela.definir_livro(InfoDoLivro {
+                titulo: "Ensaio da Maria".into(),
+                galeria_id: Some("g".into()),
+                data_iso: "2026-10-10T12:00:00Z".into(),
+            });
+            tela.escolher_modo(Modo::Fotolivro, cx);
+            tela.exportar(cx);
+            tela.colher(cx);
+        });
+        let (_, _, arquivo) = exportador.livros.lock().unwrap()[0].clone();
+        assert_eq!(arquivo.file_name().unwrap(), "Ensaio da Maria.pdf");
+        assert!(arquivo.starts_with(std::env::temp_dir()));
+        assert_eq!(
+            exportador.entregas.lock().unwrap()[0],
+            Some(Entrega {
+                contato: "5547999998888".into(),
+                legenda: String::new(),
+                com_legenda: Some(arquivo),
+            })
+        );
+    }
+
+    /// A lista que não veio vira a nota do combo, e a tela reaberta volta à
+    /// pasta, sem contato: o de ontem não é o destino de hoje.
+    #[gpui_kit::test]
+    fn a_tela_reaberta_volta_a_pasta(cx: &mut TestAppContext) {
+        let exportador = Arc::new(ExportadorDeMentira::default());
+        let tela = no_whatsapp(
+            cx,
+            exportador.clone(),
+            vec![foto_do_site("a", "IMG_1.CR3")],
+            Some("5547999998888"),
+        );
+        *exportador.contatos_falham.lock().unwrap() =
+            Some("As conversas do WhatsApp não carregaram.".into());
+        tela.update(cx, |tela, cx| {
+            tela.abrir_para(
+                vec![foto_do_site("a", "IMG_1.CR3")],
+                Some(conta()),
+                HashMap::new(),
+                cx,
+            );
+            assert_eq!(tela.destino(), Destino::Pasta);
+            assert_eq!(tela.contato(), None);
+            assert_eq!(tela.formato(), FormatoDeSaida::Jpeg);
+
+            tela.escolher_destino(Destino::WhatsApp, cx);
+            tela.colher(cx);
+            assert_eq!(
+                tela.nota_dos_contatos(),
+                ("As conversas do WhatsApp não carregaram.".into(), true)
+            );
+            assert!(tela.contatos().is_empty());
+        });
+    }
+
+    #[test]
+    fn o_mesmo_numero_escrito_de_dois_jeitos() {
+        assert!(mesmo_numero("5547999998888", "(47) 99999-8888"));
+        assert!(
+            mesmo_numero("554799998888", "47 99999-8888"),
+            "sem o nono dígito"
+        );
+        assert!(!mesmo_numero("5547999998888", "5547999990000"));
+        assert!(!mesmo_numero("5547999998888", ""));
+        assert!(!mesmo_numero("", ""));
+    }
+
+    #[test]
+    fn a_linha_do_contato_diz_quanto_resta() {
+        let agora = chrono::DateTime::parse_from_rfc3339("2026-10-10T15:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let maria = Contato {
+            id: "5547999998888".into(),
+            nome: "Maria Souza".into(),
+            ultima_entrada: Some(agora - chrono::Duration::minutes(160)),
+        };
+        assert_eq!(
+            titulo_do_contato(&maria, true, agora),
+            "Maria Souza (da sessão) · 5547999998888 · resta 21h 20min"
+        );
+        // Sem nome no WhatsApp, o número não aparece duas vezes.
+        let sem_nome = Contato {
+            id: "5547988881234".into(),
+            nome: "5547988881234".into(),
+            ultima_entrada: Some(agora - chrono::Duration::hours(23)),
+        };
+        assert_eq!(
+            titulo_do_contato(&sem_nome, false, agora),
+            "5547988881234 · resta 1h"
+        );
     }
 }

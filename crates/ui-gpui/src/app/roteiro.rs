@@ -355,7 +355,35 @@ impl Aplicativo {
                     // O botão "Exportar" da sessão: as fotos da grade dela.
                     ["abrir_da_sessao"] => {
                         let ids = self.detalhe.read(cx).a_exportar();
-                        self.exportar_da_sessao(&ids, cx);
+                        self.exportar_da_sessao(&ids, None, cx);
+                    }
+                    // 💬 O "Enviar por WhatsApp…" do menu das fotos.
+                    ["abrir_para_o_whatsapp"] => {
+                        let ids = self.detalhe.read(cx).a_exportar();
+                        self.exportar_da_sessao(
+                            &ids,
+                            Some(crate::exportacao::tela::Destino::WhatsApp),
+                            cx,
+                        );
+                    }
+                    ["destino", qual] => {
+                        let destino = if qual == "whatsapp" {
+                            crate::exportacao::tela::Destino::WhatsApp
+                        } else {
+                            crate::exportacao::tela::Destino::Pasta
+                        };
+                        self.exportacao
+                            .update(cx, |tela, cx| tela.escolher_destino(destino, cx));
+                    }
+                    ["contato", id] => {
+                        let id = id.to_string();
+                        self.exportacao
+                            .update(cx, |tela, cx| tela.escolher_contato(Some(id), cx));
+                    }
+                    ["legenda", texto] => {
+                        let texto = texto.to_string();
+                        self.exportacao
+                            .update(cx, |tela, cx| tela.definir_legenda(texto, cx));
                     }
                     ["pasta", pasta] => {
                         let pasta = PathBuf::from(pasta);
@@ -387,10 +415,13 @@ impl Aplicativo {
                     ["estado"] => {
                         let tela = self.exportacao.read(cx);
                         eprintln!(
-                            "[roteiro] exportacao: {} · {:?} · falhas {:?}",
+                            "[roteiro] exportacao: {} · {:?} · falhas {:?} · destino {:?} · contato {:?} · contatos {:?}",
                             tela.resumo(),
                             tela.progresso(),
-                            tela.falhas()
+                            tela.falhas(),
+                            tela.destino(),
+                            tela.contato(),
+                            tela.contatos()
                         );
                     }
                     _ => eprintln!("[roteiro] exportacao: gesto desconhecido {gesto}"),

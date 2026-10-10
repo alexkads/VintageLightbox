@@ -16,7 +16,7 @@
 //!
 //! # O que difere do site, e por quê
 //!
-//! - **O teto do anexo é o da API** (5 MB a foto, 16 MB o resto), e não os
+//! - **O teto do anexo é o da API** (5 MB a foto, 20 MB o documento, 16 MB o resto), e não os
 //!   4 MB do site: aquele número é da Vercel, por onde o arquivo do site passa
 //!   e o do app não.
 //! - **O app não grava áudio pelo microfone** — manda arquivo de áudio. O
@@ -258,8 +258,10 @@ pub fn formatar_tamanho(bytes: u64) -> String {
 
 /// A maior foto: o teto da Cloud API para imagem.
 pub const TETO_DA_FOTO: u64 = 5 * 1024 * 1024;
-/// O maior áudio, vídeo ou documento: o teto do backend.
+/// O maior áudio ou vídeo: o teto do backend.
 pub const TETO_DO_ARQUIVO: u64 = 16 * 1024 * 1024;
+/// O maior documento: o teto do backend, que cobre o fotolivro (20 MB).
+pub const TETO_DO_DOCUMENTO: u64 = 20 * 1024 * 1024;
 
 /// Como o anexo sai — a escolha que o WhatsApp dá ao anexar (dono,
 /// 2026-10-10: *"tem que ter as mesmas opções do whatsapp de enviar como
@@ -393,7 +395,7 @@ pub fn recusa_do_anexo(nome: &str, tamanho: u64) -> Option<String> {
         ClasseDoAnexo::Foto => (TETO_DA_FOTO, "A foto"),
         ClasseDoAnexo::Video => (TETO_DO_ARQUIVO, "O vídeo"),
         ClasseDoAnexo::Audio => (TETO_DO_ARQUIVO, "O áudio"),
-        ClasseDoAnexo::Documento => (TETO_DO_ARQUIVO, "O arquivo"),
+        ClasseDoAnexo::Documento => (TETO_DO_DOCUMENTO, "O arquivo"),
     };
     (tamanho > teto).then(|| {
         format!(
@@ -645,9 +647,9 @@ mod testes {
             Some("A foto tem 5 MB; o limite é 5 MB.")
         );
         assert!(
-            recusa_do_anexo("contrato.pdf", TETO_DO_ARQUIVO + 1024 * 1024)
+            recusa_do_anexo("contrato.pdf", TETO_DO_DOCUMENTO + 1024 * 1024)
                 .unwrap()
-                .starts_with("O arquivo tem 17 MB")
+                .starts_with("O arquivo tem 21 MB")
         );
     }
 
