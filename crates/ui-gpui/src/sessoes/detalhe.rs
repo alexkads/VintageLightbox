@@ -134,6 +134,11 @@ const DURACAO_DA_TROCA: Duration = Duration::from_millis(280);
 const SO_A_LEVADA_SE_NEGOCIA: &str =
     "Só a foto levada se negocia: sinalize com P antes de negociar.";
 
+/// A largura do menu do seletor de estúdio do cabeçalho. O `Select` do kit dá
+/// ao menu a largura do campo (200 px na barra densa), e "Nome — Cidade" não
+/// cabe nela.
+const LARGURA_DO_MENU_DE_ESTUDIOS: f32 = 280.0;
+
 /// O respiro entre as células da grade, nas duas direções.
 const VAO_DA_GRADE: f32 = 8.0;
 /// O respiro entre as miniaturas da tira.
@@ -796,9 +801,18 @@ pub struct Detalhe {
     /// O seletor da **faixa da próxima leva**, na barra de envio (site:
     /// `envio.tsx`). Criado no primeiro render, porque `nova` não tem `window`.
     escolha_da_leva: Option<Entity<SelectState<SearchableVec<OpcaoDaFaixa>>>>,
+    /// O rótulo do "Padrão da galeria" que o seletor da leva está mostrando:
+    /// quando a galeria (ou o catálogo) muda o que ele diria, as opções são
+    /// refeitas.
+    padrao_no_seletor: Option<SharedString>,
     /// O seletor do **estúdio da sessão**, no cabeçalho (site:
     /// `estudio-da-galeria.tsx`).
     escolha_do_estudio: Option<Entity<SelectState<SearchableVec<OpcaoDaFaixa>>>>,
+    /// 🏠 O estúdio que a galeria tinha antes da troca que está indo ao site
+    /// (`Some` só enquanto ela vai): é para ele que o seletor volta se o site
+    /// recusar, e é o que o desliga até a resposta — o `disabled={salvando}`
+    /// do site.
+    estudio_de_antes: Option<Option<String>>,
     /// As assinaturas dos dois — sem elas o `Confirm` não chega a lugar nenhum.
     _escolhas_da_barra: Vec<gpui_kit::Subscription>,
     /// Quem grava a foto **no catálogo local** — o SQLite desta máquina.
@@ -1117,7 +1131,9 @@ impl Detalhe {
             reveladas_avisadas: Vec::new(),
             presets_dos_parametros: Vec::new(),
             escolha_da_leva: None,
+            padrao_no_seletor: None,
             escolha_do_estudio: None,
+            estudio_de_antes: None,
             _escolhas_da_barra: Vec::new(),
             importador,
             andamentos: channel(),
@@ -1190,6 +1206,7 @@ impl Detalhe {
         self.da_sessao = channel();
         self.pedindo_link = false;
         self.avisando = false;
+        self.estudio_de_antes = None;
         self.aberta = None;
         self.do_site.clear();
         self.locais.clear();
@@ -3458,6 +3475,12 @@ impl Detalhe {
                     if mesma_galeria {
                         if let Some(atual) = self.aberta.as_ref() {
                             ordenar_como_antes(&mut aberta.fotos, &atual.fotos);
+                            // 🏠 Troca de estúdio ainda indo ao site: esta
+                            // releitura pode ter saído antes dela, e o seletor
+                            // voltaria sozinho ao estúdio antigo.
+                            if self.estudio_de_antes.is_some() {
+                                aberta.galeria.estudio_id = atual.galeria.estudio_id.clone();
+                            }
                         }
                     }
 
@@ -3657,6 +3680,9 @@ impl Detalhe {
                                 .abrir_galeria(sessao, id, self.da_sessao.0.clone());
                             self.carregando = true;
                         }
+                    } else if self.estudio_de_antes.take().is_some() {
+                        // 🏠 O `toast.success` do `EstudioDaGaleria` do site.
+                        self.avisar_sucesso("Estúdio gravado.", cx);
                     }
                 }
                 Recado::GaleriaNaoAtualizada(frase)
@@ -3668,6 +3694,15 @@ impl Detalhe {
                         .update(cx, |gaveta, cx| gaveta.recusado(frase, cx));
                 }
                 Recado::GaleriaNaoAtualizada(frase) => {
+                    // 🏠 O estúdio volta ao que era: deixar a escolha na tela
+                    // faria o operador acreditar num valor que o banco não tem.
+                    if self.gravando_dados.is_none() {
+                        if let Some(antes) = self.estudio_de_antes.take() {
+                            if let Some(aberta) = self.aberta.as_mut() {
+                                aberta.galeria.estudio_id = antes;
+                            }
+                        }
+                    }
                     self.gravando_dados = None;
                     match self.dados_do_cliente.aberto_mut() {
                         Some(formulario) => {
@@ -5279,9 +5314,18 @@ impl Detalhe {
             ))
             // 🏠 **O estúdio da sessão**, como no cabeçalho do site.
             .children(self.escolha_do_estudio.as_ref().map(|escolha| {
-                div().w(px(200.)).child(estilo::campo_pequeno(
-                    Select::new(escolha).xsmall().placeholder("Estúdio…"),
-                ))
+                div()
+                    .w(px(200.))
+                    .debug_selector(|| "sessao-estudio".into())
+                    .child(estilo::campo_pequeno(
+                        Select::new(escolha)
+                            .xsmall()
+                            .placeholder(self.estudio_ausente())
+                            // O menu não herda os 200 px do campo: nele
+                            // "Centro Gramado — Gramado" saía cortado.
+                            .menu_width(px(LARGURA_DO_MENU_DE_ESTUDIOS))
+                            .disabled(self.estudio_de_antes.is_some()),
+                    ))
             }))
             .child(estilo::desligado(
                 estilo::botao_contorno_pequeno("sessao-editar-cliente", cx)
@@ -6401,6 +6445,27 @@ impl Detalhe {
             .unwrap_or_else(|| "Padrão da galeria".to_string())
     }
 
+    /// A primeira opção do seletor da leva: a faixa que a galeria aberta tem.
+    fn padrao_da_leva(&self) -> SharedString {
+        SharedString::from(format!(
+            "Padrão da galeria ({})",
+            self.nome_da_faixa(&self.produto_padrao_da_galeria())
+        ))
+    }
+
+    /// As opções do seletor da leva: o padrão da galeria e as faixas do catálogo.
+    fn opcoes_da_leva(&self, padrao: SharedString) -> Vec<OpcaoDaFaixa> {
+        let mut opcoes = vec![OpcaoDaFaixa {
+            id: String::new(),
+            titulo: padrao,
+        }];
+        opcoes.extend(self.produtos.iter().map(|p| OpcaoDaFaixa {
+            id: p.id.clone(),
+            titulo: SharedString::from(self.nome_da_faixa(&p.id)),
+        }));
+        opcoes
+    }
+
     /// O painel da direita: o que se sabe e o que se muda **nesta** foto.
     /// Monta os seletores da barra e do cabeçalho quando o catálogo chega.
     ///
@@ -6411,24 +6476,16 @@ impl Detalhe {
         if self.produtos.is_empty() && self.estudios.is_empty() {
             return;
         }
+        let padrao = self.padrao_da_leva();
         if self.escolha_da_leva.is_none() && !self.produtos.is_empty() {
-            let mut opcoes = vec![OpcaoDaFaixa {
-                id: String::new(),
-                titulo: SharedString::from(format!(
-                    "Padrão da galeria ({})",
-                    self.nome_da_faixa(&self.produto_padrao_da_galeria())
-                )),
-            }];
-            opcoes.extend(self.produtos.iter().map(|p| OpcaoDaFaixa {
-                id: p.id.clone(),
-                titulo: SharedString::from(self.nome_da_faixa(&p.id)),
-            }));
+            let opcoes = self.opcoes_da_leva(padrao.clone());
             let escolha =
                 cx.new(|cx| SelectState::new(SearchableVec::new(opcoes), None, window, cx));
             let atual = self.faixa.clone().unwrap_or_default();
             escolha.update(cx, |estado, cx| {
                 estado.set_selected_value(&atual, window, cx);
             });
+            self.padrao_no_seletor = Some(padrao.clone());
             self._escolhas_da_barra.push(cx.subscribe_in(
                 &escolha,
                 window,
@@ -6439,6 +6496,21 @@ impl Detalhe {
                 },
             ));
             self.escolha_da_leva = Some(escolha);
+        }
+        // 🧾 **A primeira opção diz a faixa desta galeria.** O rótulo era
+        // escrito uma vez, ao nascer: com o catálogo chegando antes da galeria
+        // saía "Padrão da galeria (Padrão da galeria)", e na sessão seguinte
+        // ficava o nome e o preço da faixa da anterior.
+        if let Some(escolha) = self.escolha_da_leva.clone() {
+            if self.padrao_no_seletor.as_ref() != Some(&padrao) {
+                let opcoes = self.opcoes_da_leva(padrao.clone());
+                let atual = self.faixa.clone().unwrap_or_default();
+                escolha.update(cx, |estado, cx| {
+                    estado.set_items(SearchableVec::new(opcoes), window, cx);
+                    estado.set_selected_value(&atual, window, cx);
+                });
+                self.padrao_no_seletor = Some(padrao);
+            }
         }
         if self.escolha_do_estudio.is_none() && !self.estudios.is_empty() {
             let opcoes: Vec<OpcaoDaFaixa> = self
@@ -6468,6 +6540,19 @@ impl Detalhe {
                 },
             ));
             self.escolha_do_estudio = Some(escolha);
+        }
+        // 🏠 **O seletor acompanha a galeria**, a cada desenho, como o do Caixa.
+        // Ele recebia o estúdio uma vez só, ao nascer: os estúdios chegam antes
+        // da galeria, então nascia vazio ("Estúdio…") e assim ficava — e, na
+        // sessão seguinte, continuava com o estúdio da anterior.
+        if let Some(escolha) = self.escolha_do_estudio.clone() {
+            let atual = self.estudio_no_cadastro();
+            if escolha.read(cx).selected_value() != atual.as_ref() {
+                escolha.update(cx, |estado, cx| match &atual {
+                    Some(id) => estado.set_selected_value(id, window, cx),
+                    None => estado.set_selected_index(None, window, cx),
+                });
+            }
         }
     }
 
@@ -7423,11 +7508,43 @@ impl Detalhe {
             .unwrap_or_default()
     }
 
+    /// O estúdio da sessão **se o seletor o tem**: o que ele deve mostrar.
+    /// Estúdio que saiu do cadastro não está na lista, e fica no rótulo
+    /// ([`Self::estudio_ausente`]).
+    fn estudio_no_cadastro(&self) -> Option<String> {
+        let id = self.estudio_da_galeria();
+        self.estudios.iter().any(|e| e.id == id).then_some(id)
+    }
+
+    /// O que o seletor diz quando não há estúdio para mostrar — as duas opções
+    /// extras do `EstudioDaGaleria` do site.
+    fn estudio_ausente(&self) -> &'static str {
+        if self.aberta.is_none() {
+            "Estúdio…"
+        } else if self.estudio_da_galeria().is_empty() {
+            "Estúdio não informado"
+        } else {
+            "Estúdio fora do cadastro"
+        }
+    }
+
     /// Troca o estúdio da sessão — o `EstudioDaGaleria` do site.
+    ///
+    /// Otimista, como lá: a galeria da tela já fica com a escolha (é dela que
+    /// o seletor lê), e o `estudio_de_antes` guarda a volta. Sem isso a tela
+    /// continuava com o estúdio antigo depois de gravar, e escolher de novo o
+    /// original era ignorado como "o mesmo".
     fn mudar_estudio(&mut self, estudio_id: String, cx: &mut Context<Self>) {
-        if estudio_id.trim().is_empty() || estudio_id == self.estudio_da_galeria() {
+        if estudio_id.trim().is_empty()
+            || estudio_id == self.estudio_da_galeria()
+            || self.estudio_de_antes.is_some()
+        {
             return;
         }
+        let Some(aberta) = self.aberta.as_mut() else {
+            return;
+        };
+        self.estudio_de_antes = Some(aberta.galeria.estudio_id.replace(estudio_id.clone()));
         let mudanca = MudancaDaGaleria {
             estudio_id: Some(Some(estudio_id)),
             ..Default::default()
@@ -12574,6 +12691,225 @@ mod testes {
             mudancas[0].1.titulo.is_none() && mudancas[0].1.email.is_none(),
             "ausente não é nulo: o PATCH leva só o que mudou"
         );
+    }
+
+    /// O publicador com três estúdios no cadastro e três sessões: "g1" no
+    /// "e1", "g2" no "e2" e "g3" sem estúdio.
+    fn publicador_com_estudios(demorada: bool) -> Arc<PublicadorDeMentira> {
+        let mut publicador = publicador_com(
+            vec![foto("f1", EstadoDaFotoNoSite::Disponivel, None)],
+            demorada,
+        );
+        let de_mentira = Arc::get_mut(&mut publicador).expect("ainda só deste teste");
+        de_mentira.estudios = [
+            ("e1", "Centro Gramado", "Gramado"),
+            ("e2", "Canela", "Canela"),
+            ("e3", "WebOldFotos", "Canela"),
+        ]
+        .into_iter()
+        .map(|(id, nome, cidade)| Estudio {
+            id: id.into(),
+            nome: nome.into(),
+            cidade: cidade.into(),
+            foto: None,
+        })
+        .collect();
+        {
+            let mut galerias = de_mentira.galerias.lock().unwrap();
+            galerias[0].estudio_id = Some("e1".into());
+            let mut outra = galerias[0].clone();
+            outra.id = "g2".into();
+            outra.estudio_id = Some("e2".into());
+            let mut sem_estudio = galerias[0].clone();
+            sem_estudio.id = "g3".into();
+            sem_estudio.estudio_id = None;
+            galerias.extend([outra, sem_estudio]);
+        }
+        publicador
+    }
+
+    /// O que o seletor de estúdio do cabeçalho mostra, depois de um desenho:
+    /// o estúdio escolhido e o rótulo de quando não há nenhum.
+    fn estudio_no_seletor(
+        cx: &mut TestAppContext,
+        janela: &gpui_kit::WindowHandle<Detalhe>,
+    ) -> (Option<String>, &'static str) {
+        for _ in 0..3 {
+            janela
+                .update(cx, |_tela, _window, cx| cx.notify())
+                .expect("a janela deve estar aberta");
+            cx.run_until_parked();
+        }
+        janela
+            .update(cx, |tela, _window, cx| {
+                let escolha = tela
+                    .escolha_do_estudio
+                    .as_ref()
+                    .expect("o seletor nasce quando os estúdios chegam");
+                (
+                    escolha.read(cx).selected_value().cloned(),
+                    tela.estudio_ausente(),
+                )
+            })
+            .expect("a janela deve estar aberta")
+    }
+
+    /// 🏠 **O seletor do cabeçalho mostra o estúdio da sessão** (dono,
+    /// 10/out/2026: o campo dizia "Estúdio…" numa sessão que tinha estúdio).
+    ///
+    /// Ele recebia o valor uma vez só, ao nascer — e nasce quando os estúdios
+    /// chegam, antes da galeria. Ficava vazio na primeira sessão e, nas
+    /// seguintes, com o estúdio da primeira.
+    #[gpui_kit::test]
+    fn o_seletor_de_estudio_acompanha_a_galeria(cx: &mut TestAppContext) {
+        let publicador = publicador_com_estudios(false);
+        let janela = janela_com(
+            cx,
+            publicador.clone(),
+            Arc::new(SeletorDeMentira::default()),
+        );
+        let entrar_em = |cx: &mut TestAppContext, galeria: &str| {
+            janela
+                .update(cx, |tela, _window, cx| tela.entrar(galeria.into(), cx))
+                .expect("a janela deve estar aberta");
+            colher_ate_parar(cx, &janela);
+        };
+
+        entrar_em(cx, "g1");
+        assert_eq!(estudio_no_seletor(cx, &janela).0.as_deref(), Some("e1"));
+
+        // Outra sessão: o estúdio dela, e não o da anterior.
+        entrar_em(cx, "g2");
+        assert_eq!(estudio_no_seletor(cx, &janela).0.as_deref(), Some("e2"));
+
+        // Sessão antiga, sem estúdio: vazio, e o campo diz o que falta.
+        entrar_em(cx, "g3");
+        assert_eq!(
+            estudio_no_seletor(cx, &janela),
+            (None, "Estúdio não informado")
+        );
+
+        // 🔁 Trocar e destrocar: as duas vão ao site. A tela ficava com o
+        // estúdio antigo depois de gravar, e a volta era ignorada como "o
+        // mesmo" — o site com um estúdio e o campo mostrando outro.
+        entrar_em(cx, "g1");
+        for (novo, quantas) in [("e2", 1), ("e1", 2)] {
+            janela
+                .update(cx, |tela, _window, cx| tela.mudar_estudio(novo.into(), cx))
+                .expect("a janela deve estar aberta");
+            colher_ate_parar(cx, &janela);
+            assert_eq!(estudio_no_seletor(cx, &janela).0.as_deref(), Some(novo));
+            let mudancas = publicador.atualizacoes();
+            assert_eq!(mudancas.len(), quantas);
+            assert_eq!(
+                mudancas[quantas - 1].1.estudio_id,
+                Some(Some(novo.to_string()))
+            );
+            janela
+                .update(cx, |tela, _window, _cx| {
+                    assert_eq!(
+                        tela.avisos_dados.last(),
+                        Some(&("Estúdio gravado.".to_string(), false))
+                    );
+                    assert!(tela.estudio_de_antes.is_none(), "gravou: o seletor religa");
+                })
+                .expect("a janela deve estar aberta");
+        }
+    }
+
+    /// 🧾 **O "Padrão da galeria" do seletor da leva é o da sessão aberta.**
+    ///
+    /// Visto na conferência do seletor de estúdio (10/out/2026): o rótulo era
+    /// escrito quando o seletor nascia. Com o catálogo chegando antes da
+    /// galeria saía "Padrão da galeria (Padrão da galeria)", e ao trocar de
+    /// sessão ficava a faixa — e o preço — da anterior.
+    #[gpui_kit::test]
+    fn o_padrao_da_leva_e_o_da_sessao_aberta(cx: &mut TestAppContext) {
+        let mut publicador = publicador_com_estudios(false);
+        {
+            let de_mentira = Arc::get_mut(&mut publicador).expect("ainda só deste teste");
+            de_mentira.produtos = [("p1", "Digital", "30.00"), ("p2", "Impressa", "50.00")]
+                .into_iter()
+                .map(|(id, nome, preco)| Produto {
+                    id: id.into(),
+                    nome: nome.into(),
+                    preco: preco.into(),
+                    inativo: true,
+                })
+                .collect();
+            de_mentira.galerias.lock().unwrap()[1].produto_id = "p2".into();
+        }
+        let janela = janela_com(
+            cx,
+            publicador.clone(),
+            Arc::new(SeletorDeMentira::default()),
+        );
+        for (galeria, faixa) in [("g1", "Digital"), ("g2", "Impressa")] {
+            janela
+                .update(cx, |tela, _window, cx| tela.entrar(galeria.into(), cx))
+                .expect("a janela deve estar aberta");
+            colher_ate_parar(cx, &janela);
+            // Um desenho: é nele que os seletores se acertam.
+            let _ = estudio_no_seletor(cx, &janela);
+            janela
+                .update(cx, |tela, _window, _cx| {
+                    assert!(tela.escolha_da_leva.is_some());
+                    let padrao = tela.padrao_no_seletor.clone().unwrap_or_default();
+                    assert!(
+                        padrao.starts_with(&format!("Padrão da galeria ({faixa} — R$")),
+                        "{galeria}: o seletor diz {padrao:?}"
+                    );
+                })
+                .expect("a janela deve estar aberta");
+        }
+    }
+
+    /// 🏠 **A troca de estúdio que o site recusa volta ao que era**, como o
+    /// `setEscolhido(anterior)` do site: a escolha na tela faria o operador
+    /// acreditar num estúdio que o banco não tem.
+    #[gpui_kit::test]
+    fn a_troca_de_estudio_recusada_volta_ao_que_era(cx: &mut TestAppContext) {
+        // Demorada: a resposta boa do publicador de mentira nunca sai, e a
+        // recusa entra pelo canal da sessão, como a rede a traria.
+        let publicador = publicador_com_estudios(true);
+        let janela = janela_com(
+            cx,
+            publicador.clone(),
+            Arc::new(SeletorDeMentira::default()),
+        );
+        entrar_demorado(cx, &janela, &publicador);
+        assert_eq!(estudio_no_seletor(cx, &janela).0.as_deref(), Some("e1"));
+
+        janela
+            .update(cx, |tela, _window, cx| tela.mudar_estudio("e2".into(), cx))
+            .expect("a janela deve estar aberta");
+        // Enquanto vai: a escolha na tela, e o seletor desligado.
+        assert_eq!(estudio_no_seletor(cx, &janela).0.as_deref(), Some("e2"));
+        janela
+            .update(cx, |tela, _window, cx| {
+                assert!(tela.estudio_de_antes.is_some());
+                // Outra troca no meio não sai: a resposta não diria de qual é.
+                tela.mudar_estudio("e3".into(), cx);
+                assert_eq!(tela.estudio_da_galeria(), "e2");
+                tela.da_sessao
+                    .0
+                    .send(Recado::GaleriaNaoAtualizada("o site recusou".into()))
+                    .expect("o canal da sessão");
+            })
+            .expect("a janela deve estar aberta");
+        colher_ate_parar(cx, &janela);
+
+        assert_eq!(estudio_no_seletor(cx, &janela).0.as_deref(), Some("e1"));
+        assert_eq!(publicador.atualizacoes().len(), 1);
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert!(tela.estudio_de_antes.is_none(), "recusou: o seletor religa");
+                assert_eq!(
+                    tela.avisos_dados.last(),
+                    Some(&("o site recusou".to_string(), true))
+                );
+            })
+            .expect("a janela deve estar aberta");
     }
 
     /// 🧾 **A faixa e o preço de venda se mudam no painel, como no site.**
