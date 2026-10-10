@@ -488,6 +488,11 @@ mod a_moldura_manda {
             "a moldura é o retângulo que `encaixar` calculou para o papel",
         ),
         (
+            "pdf/tela.rs",
+            "a moldura da página sai da proporção da própria folha \
+             (`folhas::posicoes`): a imagem desenhada tem a mesma",
+        ),
+        (
             "backup/tela.rs",
             "a prévia mede a moldura com `cabe_em(janela, foto) * zoom` — ela já \
              tem a proporção da foto, como em `cliente.rs`",

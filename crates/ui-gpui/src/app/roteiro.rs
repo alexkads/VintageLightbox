@@ -396,6 +396,40 @@ impl Aplicativo {
                     _ => eprintln!("[roteiro] exportacao: gesto desconhecido {gesto}"),
                 }
             }
+            Passo::Pdf(gesto) => {
+                let partes: Vec<&str> = gesto.splitn(2, ' ').collect();
+                match (
+                    partes[..].first().copied(),
+                    partes.get(1).copied(),
+                    self.pdf.clone(),
+                ) {
+                    (Some("abrir"), Some(arquivo), _) => self.abrir_pdf(PathBuf::from(arquivo), cx),
+                    (Some("fechar"), _, _) => self.fechar_pdf(window, cx),
+                    (Some("pagina"), Some(n), Some(pdf)) => {
+                        let pagina = n.parse::<usize>().unwrap_or(1).saturating_sub(1);
+                        pdf.update(cx, |tela, cx| tela.ir_para(pagina, cx));
+                    }
+                    (Some("zoom"), Some(qual), Some(pdf)) => {
+                        pdf.update(cx, |tela, cx| match qual {
+                            "+" => tela.aproximar(cx),
+                            "-" => tela.afastar(cx),
+                            _ => tela.ajustar(cx),
+                        })
+                    }
+                    (Some("estado"), _, Some(pdf)) => {
+                        let tela = pdf.read(cx);
+                        eprintln!(
+                            "[roteiro] pdf: {:?} · página {} de {} · zoom {} · {} desenhadas",
+                            tela.estado(),
+                            tela.pagina_atual() + 1,
+                            tela.paginas(),
+                            tela.zoom(),
+                            tela.desenhadas()
+                        );
+                    }
+                    _ => eprintln!("[roteiro] pdf: gesto desconhecido ou sem PDF aberto: {gesto}"),
+                }
+            }
             Passo::Predefinicoes(gesto) => {
                 let gesto = gesto.clone();
                 self.revelacao.update(cx, |tela, cx| {

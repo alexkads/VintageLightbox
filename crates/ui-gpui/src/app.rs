@@ -535,6 +535,10 @@ pub struct Aplicativo {
     exportacao: Entity<Exportacao>,
     _pedido_da_exportacao: gpui_kit::Subscription,
     exportando: bool,
+    /// 📖 O PDF aberto no visualizador (`crate::pdf`) — o fotolivro que a
+    /// exportação acabou de gravar. Com ele aberto, o diálogo da exportação
+    /// sai da frente e volta, como estava, quando ele fecha.
+    pdf: Option<Entity<crate::pdf::VisualizadorDePdf>>,
     /// O modal do pós-venda — o único caminho do app até o site.
     /// O balcão: o que o cliente acertou ao levar a foto na hora.
     pub(crate) balcao: Entity<Balcao>,
@@ -1376,6 +1380,7 @@ impl Aplicativo {
             window,
             |raiz, _, pedido: &PedidoDaExportacao, window, cx| match pedido {
                 PedidoDaExportacao::Fechar => raiz.fechar_exportacao(window, cx),
+                PedidoDaExportacao::VerLivro(arquivo) => raiz.abrir_pdf(arquivo.clone(), cx),
                 PedidoDaExportacao::Terminou { texto, falhou } => {
                     // 🔊 Exportar leva minutos: o fim avisa com som, com o
                     // modal aberto ou não. A falha é o som de falha.
@@ -1415,6 +1420,7 @@ impl Aplicativo {
             exportacao,
             _pedido_da_exportacao: pedido_da_exportacao,
             exportando: false,
+            pdf: None,
             entrada,
             sessao: None,
             _escolha: escolha,
@@ -5508,6 +5514,23 @@ impl Aplicativo {
         self.exportando
     }
 
+    /// 📖 Abre um PDF no visualizador, por cima do que estiver na tela.
+    pub fn abrir_pdf(&mut self, arquivo: std::path::PathBuf, cx: &mut Context<Self>) {
+        self.pdf = Some(cx.new(|cx| crate::pdf::VisualizadorDePdf::abrir(arquivo, cx)));
+        cx.notify();
+    }
+
+    pub fn fechar_pdf(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.pdf = None;
+        window.focus(&self.foco, cx);
+        cx.notify();
+    }
+
+    /// O PDF aberto no visualizador, se houver.
+    pub fn pdf(&self) -> Option<&Entity<crate::pdf::VisualizadorDePdf>> {
+        self.pdf.as_ref()
+    }
+
     /// **Salvar na galeria e sair** — o botão do editor, no fluxo do site.
     ///
     /// 🚨 **Não abre modal nenhum, e é essa a correção.** Até 7/set/2026 este
@@ -6672,6 +6695,38 @@ impl Aplicativo {
         )
     }
 
+    /// 📖 O visualizador de PDF, no `Dialog` do gpui-kit: largo, do tamanho
+    /// que a janela dá ([`crate::pdf::tela::largura_do_dialogo`]), com o nome
+    /// do arquivo no alto. `Esc`, o X e o clique fora fecham.
+    ///
+    /// ⚠️ O X é o do cabeçalho, e não o do kit (`x: false`): com os dois, a
+    /// caixa mostrava dois X um em cima do outro.
+    fn modal_do_pdf(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let pdf = self.pdf.clone()?;
+        let titulo = pdf.read(cx).titulo();
+        let miolo = v_flex()
+            .gap(px(12.))
+            .child(crate::dialogo::cabecalho_com_x(
+                "fechar-pdf",
+                titulo,
+                cx.listener(|este, _, window, cx| este.fechar_pdf(window, cx)),
+                cx,
+            ))
+            .child(pdf)
+            .into_any_element();
+        crate::dialogo::desenhar_conteudo(
+            Some(miolo),
+            None,
+            crate::dialogo::Jeito {
+                x: false,
+                ..crate::dialogo::Jeito::dialogo(crate::pdf::tela::largura_do_dialogo(window))
+            },
+            |este, window, cx| este.fechar_pdf(window, cx),
+            window,
+            cx,
+        )
+    }
+
     /// O diálogo da negociação — véu, caixa e botões são dele
     /// (`balcao/tela.rs`), como o `NegociacaoDialog` do site.
     fn modal_do_balcao(&self, _cx: &mut Context<Self>) -> impl IntoElement {
@@ -6757,8 +6812,9 @@ impl Render for Aplicativo {
             .importando
             .then(|| self.modal_de_importacao(window, cx))
             .flatten();
-        let modal_de_exportacao = self
-            .exportando
+        // 📖 Um diálogo por vez: com o PDF aberto, a exportação espera atrás.
+        let modal_do_pdf = self.modal_do_pdf(window, cx);
+        let modal_de_exportacao = (self.exportando && modal_do_pdf.is_none())
             .then(|| self.modal_de_exportacao(window, cx))
             .flatten();
         let aviso_de_apagar = self
@@ -7024,6 +7080,7 @@ impl Render for Aplicativo {
             .children(self.canto_dos_envios(window, cx))
             .children(modal_de_importacao)
             .children(modal_de_exportacao)
+            .children(modal_do_pdf)
             .when(self.no_balcao.esta_aberto(), |raiz| {
                 raiz.child(self.modal_do_balcao(cx))
             })

@@ -110,6 +110,9 @@ pub enum Passo {
     /// previa|entrega` · `exportacao exportar` · `exportacao parar` ·
     /// `exportacao estado` (uma linha no stderr) — o modal de exportação.
     Exportacao(String),
+    /// `pdf abrir <arquivo>` · `pdf pagina 3` · `pdf zoom +|-|1` · `pdf
+    /// fechar` · `pdf estado` (uma linha no stderr) — o visualizador de PDF.
+    Pdf(String),
     /// `tira recorte classificadas` · `tira altura 200` · `tira marcar 2` ·
     /// `tira faixa 4` · `tira abrir 3` · `tira rolar 300` · `tira menu 2` — a
     /// tira da Revelação aberta (a posição é a da tira, contando de 0). O
@@ -308,6 +311,7 @@ pub fn ler_roteiro(texto: &str) -> Result<Vec<Passo>, String> {
             "revelacao" => Passo::Revelacao(argumentos.join(" ")),
             "predefinicoes" => Passo::Predefinicoes(argumentos.join(" ")),
             "exportacao" => Passo::Exportacao(argumentos.join(" ")),
+            "pdf" => Passo::Pdf(argumentos.join(" ")),
             "tira" => Passo::Tira(argumentos.join(" ")),
             "sessao_tira" => Passo::SessaoTira(argumentos.join(" ")),
             "editor" => Passo::Editor(argumentos.join(" ")),

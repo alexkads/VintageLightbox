@@ -220,7 +220,7 @@ impl GravadorDoBanco {
             .map_or(0, |d| d.as_micros() as i64);
         // ⚠️ `compare_exchange_weak` à mão, e não `fetch_update`: o Rust 1.99 o
         // deprecou em favor de `try_update`, que não existe na 1.98 — e os
-        // balcões compilam com o Rust que tiverem (piso 1.89 no instalador).
+        // balcões compilam com o Rust que tiverem (piso 1.92 no instalador).
         let mut atual = self.versao_do_historico.load(Ordering::SeqCst);
         loop {
             let nova = agora.max(atual + 1);

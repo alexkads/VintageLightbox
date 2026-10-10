@@ -229,7 +229,7 @@ curl -fsSL https://raw.githubusercontent.com/alexkads/VintageLightbox/main/scrip
 | `a libclang continua faltando` | No Windows, no terminal do MSYS2: `pacman -S mingw-w64-x86_64-clang`. No Linux: instalar `clang` e `libclang-dev` (ou os equivalentes). Depois repetir |
 | `não reconheci o gerenciador de pacotes` (Linux) | Instalar à mão os pacotes listados na mensagem e repetir |
 | `a instalação dos pacotes falhou` (Linux) | Esta conta não pode instalar programas: pedir a quem administra a máquina para rodar o comando mostrado logo acima, e repetir |
-| `o Rust continua ausente ou anterior ao 1.89` | Rodar `rustup update stable` e repetir |
+| `o Rust continua ausente ou anterior ao 1.92` | Rodar `rustup update stable` e repetir |
 | A janela não abre (Linux) | Falta um driver Vulkan: instalar `mesa-vulkan-drivers` (ou o da sua placa de vídeo) |
 | A compilação morre por falta de memória (`SIGKILL`) | Fechar outros programas e repetir; o instalador já compila só o binário do app |
 | A compilação para por falta de espaço | Liberar alguns GiB e repetir |

@@ -80,8 +80,10 @@ $Alvo = "x86_64-pc-windows-gnu"
 #    Visual Studio, que a máquina do balcão não tem. A toolchain `-gnu` traz o
 #    próprio ligador, e o Visual Studio deixa de ser preciso.
 $Toolchain = "stable-$Alvo"
-# A menor versão que as dependências aceitam (`rust-version` do `notify-rust`).
-$RustMinimo = [version]"1.89"
+# A menor versão que as dependências aceitam: a `rust-version` do `hayro`, que
+# desenha o fotolivro no visualizador de PDF (10/out/2026). Antes era 1.89, do
+# `notify-rust`. Quem está abaixo é atualizado aqui mesmo, pelo rustup.
+$RustMinimo = [version]"1.92"
 
 function Diga($t)  { Write-Host "`n> $t" -ForegroundColor Cyan }
 function Erro($t)  { Write-Host "X $t" -ForegroundColor Red }
@@ -839,8 +841,10 @@ for f in curl tar; do
   command -v "$f" >/dev/null 2>&1 || { erro "falta '$f'."; exit 1; }
 done
 
-# A menor versão que as dependências aceitam (`rust-version` do `notify-rust`).
-RUST_MINIMO_MAIOR=1; RUST_MINIMO_MENOR=89
+# A menor versão que as dependências aceitam: a `rust-version` do `hayro`, que
+# desenha o fotolivro no visualizador de PDF (10/out/2026). Antes era 1.89, do
+# `notify-rust`. Quem está abaixo é atualizado aqui mesmo, pelo rustup.
+RUST_MINIMO_MAIOR=1; RUST_MINIMO_MENOR=92
 
 rust_serve() {
   command -v rustc >/dev/null 2>&1 || return 1

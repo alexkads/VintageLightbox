@@ -242,6 +242,11 @@ sem saber para que serve. O primeiro uso é o `crates/preenchimento` (PatchMatch
 Uma tarefa nova de IA declara o seu `Modelo` ali e não leva o ONNX Runtime para o `editor-core` nem para o
 `revelacao-core` (wasm). Ver `docs/editor-em-camadas/17-PREENCHIMENTO.md`.
 
+🖨️ **O PDF na tela mora em `crates/visualizador-pdf`** (10/out/2026): abre o arquivo, mede as folhas, lê
+os links e desenha cada página em pixels numa thread própria, com o `hayro` (o rasterizador que o PdfCraft
+usa; é ele que pede Rust 1.92 — o piso do instalador). A tela é `ui-gpui/src/pdf`, aberta pelo "Ver o
+fotolivro" do fim da exportação. Tetos de tamanho e fila vêm do PdfCraft, copiados e adaptados.
+
 ⚠️ **`biblioteca-web` é motor, não tela** — como o `revelacao-web`. Em 5/set/2026 ele desenhou a
 galeria inteira do site em egui, a pedido do dono, e no mesmo dia o dono reverteu ("deveria usar as
 tecnologias de revelacao-web"). O registro, com a lista do que não refazer, está em

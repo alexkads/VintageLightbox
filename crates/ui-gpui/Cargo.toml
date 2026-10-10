@@ -88,6 +88,8 @@ rfd = "0.17.2"
 printpdf = { version = "0.12", default-features = false }
 # 📖 O fotolivro da exportação — o mesmo livro que a galeria do cliente gera.
 fotolivro = { path = "../fotolivro" }
+# 🖨️ O fotolivro visto no app: as páginas do PDF em pixels (`src/pdf`).
+visualizador-pdf = { path = "../visualizador-pdf" }
 foto-codec = { path = "../foto-codec" }
 
 # O motor de revelação (`revelacao/processador.rs`). Nas mesmas versões do

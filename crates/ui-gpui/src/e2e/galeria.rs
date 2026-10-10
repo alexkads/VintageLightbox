@@ -1435,6 +1435,81 @@ fn exportar_pelo_botao_da_barra(cx: &mut TestAppContext) {
     });
 }
 
+/// 🎬 **Ver o fotolivro**: o livro pronto abre no visualizador de PDF pelo
+/// botão do rodapé, a exportação sai da frente e volta, como estava, quando o
+/// visualizador fecha.
+#[gpui_kit::test]
+fn ver_o_fotolivro_abre_o_visualizador_de_pdf(cx: &mut TestAppContext) {
+    use crate::exportacao::tela::Modo;
+
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    let pasta = tempfile::TempDir::new().expect("pasta de destino");
+
+    e.detalhe(cx, |tela, _w, cx| {
+        tela.marcar_ids(&["id-DSC_101.jpg".into(), "b".into()], cx)
+    });
+    clicar(&e, cx, "detalhe-exportar");
+    e.app(cx, |app, _w, cx| {
+        let destino = pasta.path().to_path_buf();
+        app.exportacao_para_teste().update(cx, |tela, cx| {
+            tela.escolher_pasta_para_teste(destino, cx);
+            tela.escolher_modo(Modo::Fotolivro, cx);
+            tela.escolher_so_levadas(false, cx);
+        });
+    });
+    // Antes do livro existir, não há o que ver.
+    {
+        let mut visual = super::chatbot::quadro_novo(&e, cx);
+        assert!(
+            visual.debug_bounds("exportacao-ver-livro").is_none(),
+            "\"Ver o fotolivro\" antes de o livro ser gerado"
+        );
+    }
+    clicar(&e, cx, "exportacao-exportar");
+    e.esperar(cx);
+    let livro = e.app(cx, |app, _w, cx| {
+        let tela = app.exportacao_para_teste();
+        // Deixa o padrão como estava para quem roda depois.
+        tela.update(cx, |tela, cx| tela.escolher_modo(Modo::Arquivos, cx));
+        tela.read(cx)
+            .arquivo_do_livro()
+            .cloned()
+            .expect("o lote do livro terminou sem o arquivo")
+    });
+    assert!(livro.starts_with(pasta.path()));
+
+    clicar(&e, cx, "exportacao-ver-livro");
+    e.app(cx, |app, _w, cx| {
+        let pdf = app.pdf().expect("o visualizador não abriu");
+        assert_eq!(pdf.read(cx).arquivo(), livro.as_path());
+        assert!(app.exportando(), "a exportação foi fechada, e não guardada");
+    });
+    {
+        let mut visual = super::chatbot::quadro_novo(&e, cx);
+        assert!(
+            visual.debug_bounds("pdf-palco").is_some(),
+            "o visualizador não está desenhado"
+        );
+        assert!(
+            visual.debug_bounds("pdf-barra").is_some(),
+            "a barra do visualizador não está desenhada"
+        );
+        assert!(
+            visual.debug_bounds("exportacao-rodape").is_none(),
+            "dois diálogos ao mesmo tempo: a exportação ficou por baixo do PDF"
+        );
+    }
+
+    // Fechar o visualizador devolve a exportação, no fim do lote.
+    clicar(&e, cx, "fechar-pdf");
+    e.app(cx, |app, _w, _cx| {
+        assert!(app.pdf().is_none(), "o X não fechou o visualizador");
+        assert!(app.exportando());
+    });
+    clicar(&e, cx, "exportacao-concluir");
+    e.app(cx, |app, _w, _cx| assert!(!app.exportando()));
+}
+
 /// 🎬 **O fim da sessão**: editar os dados do cliente, copiar o link (que vai
 /// para a área de transferência) e avisar o cliente.
 #[gpui_kit::test]

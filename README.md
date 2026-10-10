@@ -346,7 +346,7 @@ removidos à parte.
 | `não reconheci o gerenciador de pacotes` (Linux) | Instale à mão os pacotes que a mensagem lista e repita. |
 | `a instalação dos pacotes falhou ou não há 'sudo'` (Linux) | Peça a quem administra a máquina para rodar o comando mostrado, e repita. |
 | `Unable to find libclang` (Linux) | Instale `clang` e `libclang-dev` (Fedora: `clang` e `clang-devel`) e repita. |
-| `o Rust continua ausente ou anterior ao 1.89` | `rustup update stable` e repita. |
+| `o Rust continua ausente ou anterior ao 1.92` | `rustup update stable` e repita. |
 | Falta de espaço no meio da compilação | Libere alguns GiB e repita. |
 | `signal: 9` ou `SIGKILL` no meio da compilação | Faltou memória: feche outros programas e repita com `CARGO_BUILD_JOBS=1` (veja **Opções**). |
 | O app não muda depois de atualizar | O antigo continuava aberto: saia pela bandeja (**Sair**) e abra de novo. |

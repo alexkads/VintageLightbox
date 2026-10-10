@@ -233,6 +233,8 @@ pub enum PedidoDaExportacao {
     Fechar,
     /// O lote terminou — a raiz avisa em toast se o modal já estiver fechado.
     Terminou { texto: String, falhou: bool },
+    /// "Ver o fotolivro": a raiz abre o visualizador com o livro gravado.
+    VerLivro(PathBuf),
 }
 
 impl EventEmitter<PedidoDaExportacao> for Exportacao {}
@@ -896,6 +898,17 @@ impl Exportacao {
                     .into_any_element()
             }
             Some(p) => faixa
+                // 📖 O livro pronto se vê aqui mesmo, antes de ir ao cliente.
+                .when_some(self.arquivo_do_livro.clone(), |f, livro| {
+                    f.child(
+                        estilo::botao_contorno("exportacao-ver-livro", cx)
+                            .debug_selector(|| "exportacao-ver-livro".into())
+                            .label("Ver o fotolivro")
+                            .on_click(cx.listener(move |_, _, _, cx| {
+                                cx.emit(PedidoDaExportacao::VerLivro(livro.clone()));
+                            })),
+                    )
+                })
                 .when(p.feitas > 0, |f| {
                     f.child(
                         estilo::botao_contorno("exportacao-mostrar", cx)
@@ -1122,11 +1135,7 @@ impl Exportacao {
                     .text_xs()
                     .text_color(tema.warning)
                     .when(!livro_vazio, |d| d.invisible())
-                    .child(
-                        Icon::new(Icone::TriangleAlert)
-                            .size(px(14.))
-                            .flex_none(),
-                    )
+                    .child(Icon::new(Icone::TriangleAlert).size(px(14.)).flex_none())
                     .child("Nenhuma das fotos escolhidas foi levada: o livro sairia vazio."),
             )
     }
@@ -1216,61 +1225,51 @@ impl Exportacao {
             .gap(px(8.))
             .child(Self::rotulo_de_secao("Salvar em"))
             .child(
-                div()
-                    .debug_selector(|| "exportacao-destino".into())
-                    .child(
-                        GroupBox::new()
-                            .outline()
-                            .content_style(
-                                StyleRefinement::default()
-                                    .pl(px(12.))
-                                    .pr(px(8.))
-                                    .py(px(8.)),
-                            )
-                            .child(
-                                h_flex()
-                                    .gap(px(8.))
-                                    .child(
-                                        Icon::new(Icone::FolderOpen)
-                                            .size(px(16.))
-                                            .flex_none()
-                                            .text_color(tema.muted_foreground),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .min_w(px(0.))
-                                            .truncate()
-                                            .text_sm()
-                                            .when(sem_pasta, |d| {
-                                                d.text_color(tema.muted_foreground)
-                                            })
-                                            .child(pasta),
-                                    )
-                                    .when(!nos_downloads, |d| {
-                                        d.child(
-                                            estilo::botao_icone_pequeno(
-                                                "exportacao-limpar-pasta",
-                                                Icone::RotateCcw,
-                                            )
-                                            .tooltip("Voltar a salvar na pasta Downloads")
-                                            .on_click(cx.listener(|tela, _, _, cx| {
+                div().debug_selector(|| "exportacao-destino".into()).child(
+                    GroupBox::new()
+                        .outline()
+                        .content_style(StyleRefinement::default().pl(px(12.)).pr(px(8.)).py(px(8.)))
+                        .child(
+                            h_flex()
+                                .gap(px(8.))
+                                .child(
+                                    Icon::new(Icone::FolderOpen)
+                                        .size(px(16.))
+                                        .flex_none()
+                                        .text_color(tema.muted_foreground),
+                                )
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w(px(0.))
+                                        .truncate()
+                                        .text_sm()
+                                        .when(sem_pasta, |d| d.text_color(tema.muted_foreground))
+                                        .child(pasta),
+                                )
+                                .when(!nos_downloads, |d| {
+                                    d.child(
+                                        estilo::botao_icone_pequeno(
+                                            "exportacao-limpar-pasta",
+                                            Icone::RotateCcw,
+                                        )
+                                        .tooltip("Voltar a salvar na pasta Downloads")
+                                        .on_click(
+                                            cx.listener(|tela, _, _, cx| {
                                                 tela.voltar_aos_downloads(cx)
-                                            })),
-                                        )
-                                    })
-                                    .child(
-                                        estilo::botao_contorno_pequeno(
-                                            "exportacao-escolher-pasta",
-                                            cx,
-                                        )
+                                            }),
+                                        ),
+                                    )
+                                })
+                                .child(
+                                    estilo::botao_contorno_pequeno("exportacao-escolher-pasta", cx)
                                         .label("Trocar…")
-                                        .on_click(cx.listener(|tela, _, _, cx| {
-                                            tela.escolher_pasta(cx)
-                                        })),
-                                    ),
-                            ),
-                    ),
+                                        .on_click(
+                                            cx.listener(|tela, _, _, cx| tela.escolher_pasta(cx)),
+                                        ),
+                                ),
+                        ),
+                ),
             )
     }
 

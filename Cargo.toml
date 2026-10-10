@@ -25,6 +25,10 @@ members = [
     "crates/fotolivro",
     # O mesmo, compilado para a galeria do cliente (wasm-bindgen).
     "crates/fotolivro-web",
+    # 🖨️ As páginas de um PDF em pixels (2026-10-10): o app mostra o fotolivro
+    # que acabou de gerar sem sair dele. O desenho é do `hayro`, como no
+    # PdfCraft (github.com/storytold/pdfcraft), de onde vêm os tetos e a fila.
+    "crates/visualizador-pdf",
     # O motor de revelação sem nada em volta (2026-09-04): o que o navegador
     # precisa e o `infrastructure` não consegue dar, porque puxa sqlx, reqwest e
     # LibRaw — nada disso compila para wasm32.
