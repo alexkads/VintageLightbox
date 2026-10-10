@@ -147,30 +147,7 @@ pub trait RevelaDoSite: Send + Sync + 'static {
 
     /// 💧 A prévia com a marca d'água do sistema — a da foto não levada.
     fn previa_marcada(&self, sessao: Sessao, foto_no_site: String) -> Pronta;
-
-    /// 📖 A galeria como o site a tem agora — as fotos do fotolivro que vai ao
-    /// cliente no fechamento da venda.
-    fn galeria(&self, _sessao: Sessao, _galeria_id: String) -> PromessaDaGaleria {
-        Box::pin(async { Err("sem acesso à galeria do site".to_string()) })
-    }
-
-    /// 📖 Entrega o fotolivro ao site, que o guarda e o manda ao cliente.
-    fn enviar_fotolivro(
-        &self,
-        _sessao: Sessao,
-        _galeria_id: String,
-        _pdf: Vec<u8>,
-    ) -> PromessaDoEnvio {
-        Box::pin(async { Err("sem acesso ao site".to_string()) })
-    }
 }
-
-pub type PromessaDaGaleria = Pin<
-    Box<dyn Future<Output = Result<domain::services::pos_venda::GaleriaAberta, String>> + Send>,
->;
-pub type PromessaDoEnvio = Pin<
-    Box<dyn Future<Output = Result<domain::services::pos_venda::EnvioDoFotolivro, String>> + Send>,
->;
 
 /// Quem exporta a foto do catálogo para um arquivo.
 pub trait ExportaDoCatalogo: Send + Sync + 'static {
@@ -231,60 +208,6 @@ pub trait Exportador: Send + Sync + 'static {
         cancelar: Arc<AtomicBool>,
         canal: Sender<Andamento>,
     );
-
-    /// 📖 O fotolivro da galeria, montado e mandado ao cliente — o gesto do
-    /// fechamento da venda no caixa (dono, 2026-10-09). A resposta é a frase
-    /// do balcão e se ela é de erro.
-    fn fotolivro_ao_cliente(
-        &self,
-        galeria_id: String,
-        site: String,
-        sessao: Sessao,
-        resposta: Sender<(String, bool)>,
-    );
-}
-
-/// As fotos do fotolivro a partir da galeria do site: na ordem, sem as
-/// rejeitadas nem as apagadas, com a revelação que o site guarda e a LEVADA
-/// decidindo a marca.
-pub fn fotos_do_livro_da_galeria(
-    aberta: &domain::services::pos_venda::GaleriaAberta,
-    site: &str,
-) -> Vec<FotoDoLivro> {
-    use domain::services::pos_venda::EstadoDaFotoNoSite;
-    let mut fotos: Vec<_> = aberta
-        .fotos
-        .iter()
-        .filter(|f| !f.rejeitada && !f.apagada)
-        .collect();
-    fotos.sort_by_key(|f| f.ordem);
-    fotos
-        .into_iter()
-        .map(|f| {
-            let (ajustes, corte) = f
-                .ajustes
-                .as_ref()
-                .map(crate::revelacao::persistencia::de_json)
-                .unwrap_or_default();
-            FotoDoLivro {
-                origem: Origem::Site {
-                    foto_no_site: f.id.clone(),
-                    ajustes,
-                    corte: crate::revelacao::persistencia::para_crop_settings(&corte),
-                    original_local: None,
-                    levada: matches!(
-                        f.estado,
-                        EstadoDaFotoNoSite::LevadaNoBalcao | EstadoDaFotoNoSite::Comprada
-                    ),
-                },
-                nome: f.arquivo.clone(),
-                link: Some(format!(
-                    "{site}/meus-ensaios/{}?foto={}",
-                    aberta.galeria.id, f.id
-                )),
-            }
-        })
-        .collect()
 }
 
 pub struct ExportadorDoBanco {
@@ -338,78 +261,6 @@ impl Exportador for ExportadorDoBanco {
             fotos, capa, destino, sessao, cancelar, canal, catalogo, site,
         ));
     }
-
-    fn fotolivro_ao_cliente(
-        &self,
-        galeria_id: String,
-        endereco: String,
-        sessao: Sessao,
-        resposta: Sender<(String, bool)>,
-    ) {
-        let catalogo = self.catalogo.clone();
-        let site = self.site.clone();
-        self.tokio.spawn(async move {
-            let feito = mandar_o_fotolivro(galeria_id, endereco, sessao, catalogo, site).await;
-            let _ = resposta.send(match feito {
-                Ok(envio) => envio.frase(),
-                Err(erro) => (format!("O fotolivro não saiu para o cliente: {erro}"), true),
-            });
-        });
-    }
-}
-
-/// 📖 Monta o fotolivro da galeria num arquivo temporário e o entrega ao
-/// site. O livro é o de vender: as levadas limpas, as outras marcadas.
-async fn mandar_o_fotolivro(
-    galeria_id: String,
-    endereco: String,
-    sessao: Sessao,
-    catalogo: Arc<dyn ExportaDoCatalogo>,
-    site: Arc<dyn RevelaDoSite>,
-) -> Result<domain::services::pos_venda::EnvioDoFotolivro, String> {
-    let aberta = site.galeria(sessao.clone(), galeria_id.clone()).await?;
-    let fotos = fotos_do_livro_da_galeria(&aberta, &endereco);
-    if fotos.is_empty() {
-        return Err("a sessão não tem fotos".to_string());
-    }
-    let capa = fotolivro::Capa {
-        titulo: aberta.galeria.titulo.clone(),
-        lugar_e_data: crate::exportacao::tela::data_por_extenso(&aberta.galeria.criada_em_iso),
-        galeria: Some(format!("{endereco}/meus-ensaios/{galeria_id}")),
-        agendar: Some(format!("{endereco}/agendar")),
-        site: endereco
-            .trim_start_matches("https://")
-            .trim_start_matches("http://")
-            .to_string(),
-    };
-    let pasta = tempfile::tempdir().map_err(|e| format!("sem pasta temporária: {e}"))?;
-    let destino = pasta.path().join("fotolivro.pdf");
-    let (canal, recebe) = std::sync::mpsc::channel();
-    montar_fotolivro(
-        fotos,
-        capa,
-        destino.clone(),
-        Some(sessao.clone()),
-        Arc::new(AtomicBool::new(false)),
-        canal,
-        catalogo,
-        site.clone(),
-    )
-    .await;
-    let falhas: Vec<String> = recebe
-        .try_iter()
-        .filter_map(|a| match a {
-            Andamento::Falhou { erro, .. } => Some(erro),
-            _ => None,
-        })
-        .collect();
-    let pdf = tokio::fs::read(&destino).await.map_err(|_| {
-        falhas
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "o livro não foi gerado".into())
-    })?;
-    site.enviar_fotolivro(sessao, galeria_id, pdf).await
 }
 
 /// O lado maior das fotos levadas no fotolivro: o mesmo que o livro usa
@@ -768,8 +619,6 @@ pub mod mentira {
         pub segurado: Mutex<Option<LoteSegurado>>,
         /// Os fotolivros pedidos: as fotos, a capa e o arquivo.
         pub livros: Mutex<Vec<(Vec<FotoDoLivro>, fotolivro::Capa, PathBuf)>>,
-        /// As galerias cujo fotolivro foi mandado ao cliente.
-        pub ao_cliente: Mutex<Vec<String>>,
     }
 
     impl ExportadorDeMentira {
@@ -840,17 +689,6 @@ pub mod mentira {
                 return;
             }
             self.responder(saidas, &cancelar, &canal);
-        }
-
-        fn fotolivro_ao_cliente(
-            &self,
-            galeria_id: String,
-            _site: String,
-            _sessao: Sessao,
-            resposta: Sender<(String, bool)>,
-        ) {
-            self.ao_cliente.lock().expect("os envios").push(galeria_id);
-            let _ = resposta.send(("Fotolivro enviado ao cliente por e-mail".into(), false));
         }
 
         fn fotolivro(
@@ -1132,55 +970,6 @@ mod testes {
         let pdf = std::fs::read(&destino).unwrap();
         assert!(pdf.starts_with(b"%PDF"));
         assert!(!pasta.path().join("Ensaio.pdf.part").exists());
-    }
-
-    /// 📖 O livro do fechamento da venda sai da galeria do site: na ordem,
-    /// sem as rejeitadas nem as apagadas, e a LEVADA decide a marca.
-    #[test]
-    fn as_fotos_do_livro_saem_da_galeria_do_site() {
-        use domain::services::pos_venda::{
-            EstadoDaFotoNoSite, FotoDaGaleria, GaleriaAberta, GaleriaDoPainel,
-        };
-        let foto = |id: &str, ordem: i32, estado| FotoDaGaleria {
-            id: id.into(),
-            arquivo: format!("{id}.jpg"),
-            ordem,
-            estado,
-            ..Default::default()
-        };
-        let aberta = GaleriaAberta {
-            galeria: GaleriaDoPainel {
-                id: "g1".into(),
-                ..Default::default()
-            },
-            fotos: vec![
-                foto("b", 2, EstadoDaFotoNoSite::Disponivel),
-                foto("a", 1, EstadoDaFotoNoSite::LevadaNoBalcao),
-                FotoDaGaleria {
-                    rejeitada: true,
-                    ..foto("x", 3, EstadoDaFotoNoSite::Disponivel)
-                },
-                FotoDaGaleria {
-                    apagada: true,
-                    ..foto("y", 4, EstadoDaFotoNoSite::Comprada)
-                },
-            ],
-            vence_venda: None,
-            vence_download: None,
-            faixas: Vec::new(),
-            avisos: Vec::new(),
-            resumos: Default::default(),
-            conflitos: Vec::new(),
-        };
-        let livro = fotos_do_livro_da_galeria(&aberta, "https://site");
-        let nomes: Vec<_> = livro.iter().map(|f| f.nome.as_str()).collect();
-        assert_eq!(nomes, ["a.jpg", "b.jpg"]);
-        assert!(livro[0].levada());
-        assert!(!livro[1].levada());
-        assert_eq!(
-            livro[1].link.as_deref(),
-            Some("https://site/meus-ensaios/g1?foto=b")
-        );
     }
 
     /// A do catálogo continua pelo controller, no mesmo lote.

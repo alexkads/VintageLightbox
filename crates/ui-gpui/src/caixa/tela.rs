@@ -174,9 +174,6 @@ pub fn init(cx: &mut App) {
 pub enum PedidoDoCaixa {
     /// "Abrir sessão": a galeria da sessão escolhida, com a volta para cá.
     AbrirSessao(String),
-    /// 📖 A venda gravou, com o recebimento: a raiz manda o fotolivro da
-    /// galeria ao cliente (dono, 2026-10-09).
-    VendaFechada(String),
 }
 
 impl EventEmitter<PedidoDoCaixa> for Caixa {}

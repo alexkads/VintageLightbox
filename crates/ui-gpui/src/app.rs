@@ -556,7 +556,6 @@ pub struct Aplicativo {
     /// a captura começa ou para.
     _desempenho_mudou: gpui_kit::Subscription,
     _pedido_do_caixa: gpui_kit::Subscription,
-    _pedido_do_caixa_flutuante: gpui_kit::Subscription,
     /// A galeria foi aberta pelo caixa: a volta dela é para o caixa.
     veio_do_caixa: bool,
     /// A retenção do pós-venda.
@@ -1249,16 +1248,6 @@ impl Aplicativo {
                     raiz.veio_do_caixa = true;
                     window.focus(&raiz.foco, cx);
                 }
-                PedidoDoCaixa::VendaFechada(id) => raiz.fotolivro_ao_cliente(id.clone(), cx),
-            },
-        );
-        // 📖 O painel flutuante também fecha venda — e o livro sai igual.
-        let pedido_do_caixa_flutuante = cx.subscribe(
-            &caixa_flutuante,
-            |raiz, _tela, pedido: &PedidoDoCaixa, cx| {
-                if let PedidoDoCaixa::VendaFechada(id) = pedido {
-                    raiz.fotolivro_ao_cliente(id.clone(), cx);
-                }
             },
         );
         let nova_sessao = cx.new(|cx| NovaSessao::nova(portas_da_nova, window, cx));
@@ -1406,18 +1395,6 @@ impl Aplicativo {
                         crate::estilo::mostrar_toast(nota, window, cx);
                     }
                 }
-                PedidoDaExportacao::LivroAoCliente { texto, falhou } => {
-                    if *falhou {
-                        crate::sons::soar(crate::sons::Evento::Falha, "Fotolivro", texto, cx);
-                    }
-                    let tipo = if *falhou {
-                        crate::estilo::Toast::Erro
-                    } else {
-                        crate::estilo::Toast::Sucesso
-                    };
-                    let nota = crate::estilo::toast(texto.clone(), tipo, cx);
-                    crate::estilo::mostrar_toast(nota, window, cx);
-                }
             },
         );
 
@@ -1454,7 +1431,6 @@ impl Aplicativo {
                 |_, _, _: &crate::desempenho::painel::MudouOEstado, cx| cx.notify(),
             ),
             _pedido_do_caixa: pedido_do_caixa,
-            _pedido_do_caixa_flutuante: pedido_do_caixa_flutuante,
             veio_do_caixa: false,
             retencao,
             backup,
@@ -5398,15 +5374,6 @@ impl Aplicativo {
         };
 
         self.abrir_a_exportacao(fotos, cx);
-    }
-
-    /// 📖 O fechamento da venda no caixa: o fotolivro da galeria vai ao
-    /// cliente, por e-mail e WhatsApp, junto do link de sempre.
-    fn fotolivro_ao_cliente(&mut self, galeria_id: String, cx: &mut Context<Self>) {
-        let sessao = self.sessao().cloned();
-        self.exportacao.update(cx, |tela, cx| {
-            tela.fotolivro_ao_cliente(galeria_id, sessao, cx)
-        });
     }
 
     /// Abre a exportação com as fotos que a grade da sessão mandou — as
