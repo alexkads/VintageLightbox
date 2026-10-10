@@ -347,7 +347,7 @@ impl Exportacao {
         let levadas = self
             .fotos
             .iter()
-            .filter(|f| f.comprada || !persistencia::so_existe_no_site(f))
+            .filter(|f| f.comprada || f.pos_venda_foto_id.is_none())
             .count();
         (levadas, self.fotos.len() - levadas)
     }
@@ -422,8 +422,20 @@ impl Exportacao {
     /// 🚨 **A foto que só existe no site não tem linha no catálogo** — o id
     /// dela é `site:<uuid>`. Mandá-la ao catálogo foi o "Photo ID inválido"
     /// do print. Ela sai pelo site, com a revelação que a grade tem para ela.
+    ///
+    /// 💧 **E a foto que está no site e não foi levada sai marcada, esteja
+    /// onde estiver o bruto.** A que subiu deste computador também existe no
+    /// catálogo, e ia por ele — limpa (09/10/2026, achado no roteiro do app
+    /// real). Só a levada, ou a que nunca subiu, sai pelo catálogo.
     fn origem_de(&self, foto: &PhotoViewModel) -> Origem {
         match foto.pos_venda_foto_id.as_ref() {
+            Some(no_site) if !foto.comprada => Origem::Site {
+                foto_no_site: no_site.clone(),
+                ajustes: persistencia::da_foto(foto),
+                corte: persistencia::para_crop_settings(&persistencia::corte_da_foto(foto)),
+                original_local: self.copias_locais.get(no_site).cloned(),
+                levada: false,
+            },
             Some(no_site) if persistencia::so_existe_no_site(foto) => Origem::Site {
                 foto_no_site: no_site.clone(),
                 ajustes: persistencia::da_foto(foto),
@@ -1336,6 +1348,57 @@ mod testes {
         }
         assert!(matches!(&lote[1].origem,
             Origem::Site { original_local: Some(p), .. } if *p == local));
+    }
+
+    /// 💧 A foto que subiu daqui (está no catálogo **e** no site) e não foi
+    /// levada sai marcada, pelo site — e não limpa, pelo catálogo.
+    #[gpui_kit::test]
+    fn a_nao_levada_que_subiu_daqui_sai_marcada(cx: &mut TestAppContext) {
+        let exportador = Arc::new(ExportadorDeMentira::default());
+        let tela = montar(
+            cx,
+            exportador.clone(),
+            Arc::new(SeletorDeMentira::default()),
+        );
+        let pasta = tempfile::tempdir().unwrap();
+        let daqui = |id: &str, comprada: bool| PhotoViewModel {
+            id: format!("uuid-{id}"),
+            name: format!("{id}.jpg"),
+            path: format!("/cartao/{id}.jpg"),
+            pos_venda_foto_id: Some(id.into()),
+            comprada,
+            ..Default::default()
+        };
+        let solta = PhotoViewModel {
+            id: "uuid-solta".into(),
+            name: "solta.jpg".into(),
+            path: "/cartao/solta.jpg".into(),
+            ..Default::default()
+        };
+        tela.update(cx, |tela, cx| {
+            tela.abrir_para(
+                vec![daqui("a", false), daqui("b", true), solta],
+                None,
+                HashMap::new(),
+                cx,
+            );
+            assert_eq!(tela.contagem(), (2, 1));
+            tela.escolher_pasta_para_teste(pasta.path().to_path_buf(), cx);
+            tela.escolher_modo(Modo::Arquivos, cx);
+            tela.exportar(cx);
+        });
+        let lote = &exportador.pedidos()[0];
+        assert!(
+            matches!(&lote[0].origem, Origem::Site { levada: false, foto_no_site, .. } if foto_no_site == "a")
+        );
+        assert!(
+            matches!(&lote[1].origem, Origem::Catalogo { .. }),
+            "a levada daqui vai pelo catálogo, limpa"
+        );
+        assert!(
+            matches!(&lote[2].origem, Origem::Catalogo { .. }),
+            "a que nunca subiu também"
+        );
     }
 
     /// O formato escolhido muda a extensão e chega à porta.

@@ -352,6 +352,11 @@ impl Aplicativo {
                 let partes: Vec<&str> = gesto.splitn(2, ' ').collect();
                 match partes[..] {
                     ["abrir"] => self.exportar(cx),
+                    // O botão "Exportar" da sessão: as fotos da grade dela.
+                    ["abrir_da_sessao"] => {
+                        let ids = self.detalhe.read(cx).a_exportar();
+                        self.exportar_da_sessao(&ids, cx);
+                    }
                     ["pasta", pasta] => {
                         let pasta = PathBuf::from(pasta);
                         self.exportacao
