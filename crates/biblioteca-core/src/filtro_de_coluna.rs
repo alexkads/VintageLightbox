@@ -26,7 +26,8 @@
 //! até 24/set/2026 — punha em "Balcão ≥ 100" quem vendeu R$ 1,00.
 
 use crate::sessoes::{
-    dia_da_criacao, estado_do_fotolivro, normalizar, SessaoFotografica, Situacao,
+    dia_da_criacao, estado_do_fotolivro, normalizar, primeiro_envio_do_fotolivro,
+    SessaoFotografica, Situacao,
 };
 
 /// As colunas da lista que o desktop desenha, na ordem da tela.
@@ -43,6 +44,8 @@ pub enum Coluna {
     PosVenda,
     /// 📖 O fotolivro foi ao cliente, e ele abriu?
     Fotolivro,
+    /// 📖 Quando o livro foi ao cliente — o primeiro envio.
+    FotolivroEnviadoEm,
     Criada,
 }
 
@@ -56,7 +59,7 @@ pub enum Tipo {
 }
 
 impl Coluna {
-    pub const TODAS: [Coluna; 11] = [
+    pub const TODAS: [Coluna; 12] = [
         Coluna::Galeria,
         Coluna::Contato,
         Coluna::Situacao,
@@ -67,6 +70,7 @@ impl Coluna {
         Coluna::Caixa,
         Coluna::PosVenda,
         Coluna::Fotolivro,
+        Coluna::FotolivroEnviadoEm,
         Coluna::Criada,
     ];
 
@@ -76,7 +80,7 @@ impl Coluna {
             Coluna::Situacao | Coluna::Fotolivro => Tipo::Escolha,
             Coluna::Levadas | Coluna::AVenda | Coluna::Compradas => Tipo::Numero,
             Coluna::Balcao | Coluna::Caixa | Coluna::PosVenda => Tipo::Dinheiro,
-            Coluna::Criada => Tipo::Data,
+            Coluna::Criada | Coluna::FotolivroEnviadoEm => Tipo::Data,
         }
     }
 }
@@ -194,6 +198,9 @@ fn valor(coluna: Coluna, sessao: &SessaoFotografica, agora: i64) -> Option<Valor
             estado_do_fotolivro(sessao.fotolivro.as_ref(), sessao.caixa.as_ref()).como_texto()?,
         ),
         Coluna::Criada => Valor::Dia(dia_da_criacao(&sessao.criada_em_iso)),
+        Coluna::FotolivroEnviadoEm => Valor::Dia(dia_da_criacao(primeiro_envio_do_fotolivro(
+            sessao.fotolivro.as_ref(),
+        )?)),
     })
 }
 
@@ -284,6 +291,34 @@ mod testes {
 
     fn titulos(v: &[&SessaoFotografica]) -> Vec<String> {
         v.iter().map(|s| s.titulo.clone()).collect()
+    }
+
+    /// 📖 "Fotolivro enviado em" filtra pelo dia do primeiro envio, no fuso do
+    /// estúdio; quem não recebeu não passa.
+    #[test]
+    fn o_filtro_do_enviado_em_e_pelo_dia() {
+        use crate::sessoes::ResumoDoFotolivro;
+        let enviada = SessaoFotografica {
+            fotolivro: Some(ResumoDoFotolivro {
+                whatsapp_enviado_em: Some("2026-10-10T02:00:00Z".into()),
+                ..Default::default()
+            }),
+            ..sessao("Ensaio")
+        };
+        let dia_9 = FiltroDeColuna::Data {
+            de: Some("2026-10-09".into()),
+            ate: Some("2026-10-09".into()),
+        };
+        assert!(
+            passa(Coluna::FotolivroEnviadoEm, &dia_9, &enviada, 0),
+            "23h em Gramado é dia 9"
+        );
+        assert!(!passa(
+            Coluna::FotolivroEnviadoEm,
+            &dia_9,
+            &sessao("Ensaio"),
+            0
+        ));
     }
 
     /// 📖 O filtro "não enviado" acha o passivo: cobrada no caixa, sem livro.

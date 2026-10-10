@@ -25,9 +25,9 @@ use biblioteca_core::dinheiro;
 use biblioteca_core::exclusao;
 use biblioteca_core::filtro_de_coluna::{self, Coluna};
 use biblioteca_core::sessoes::{
-    self, estado_do_fotolivro, estado_no_caixa, ContagemDeFotos, Criterio, EstadoDoFotolivro,
-    EstadoNoCaixa, FaixaDeDatas, PagoNoCaixa, ResumoDoFotolivro, SessaoFotografica, Situacao,
-    Totais,
+    self, estado_do_fotolivro, estado_no_caixa, primeiro_envio_do_fotolivro, ContagemDeFotos,
+    Criterio, EstadoDoFotolivro, EstadoNoCaixa, FaixaDeDatas, PagoNoCaixa, ResumoDoFotolivro,
+    SessaoFotografica, Situacao, Totais,
 };
 use domain::services::pos_venda::{Estudio, GaleriaDoPainel, NovaGaleria, Produto, Sessao};
 
@@ -3167,7 +3167,7 @@ impl Sessoes {
         // à direita como no site.
         // 💵 A do caixa é mais larga: ela pode trazer o "Fechar venda" em vez
         // de um número (dono, 20/set/2026).
-        const LARGURAS: [f32; 8] = [84., 84., 104., 112., 124., 112., 136., 150.];
+        const LARGURAS: [f32; 9] = [84., 84., 104., 112., 124., 112., 136., 150., 150.];
         // 🧊 **Galeria e Contato ficam congeladas** (dono, 03/out/2026): com o
         // grid rolando na horizontal, o nome da sessão não pode sair da tela. É
         // o `Column::fixed(ColumnFixed::Left)` do `DataTable` do gpui-kit, feito
@@ -3235,6 +3235,7 @@ impl Sessoes {
             .child(titulo_da_coluna("Caixa (PDV)", LARGURAS[4]))
             .child(titulo_da_coluna("Pós-venda", LARGURAS[5]))
             .child(titulo_da_coluna("Fotolivro", LARGURAS[7]))
+            .child(titulo_da_coluna("Fotolivro enviado em", LARGURAS[8]))
             .child(titulo_da_coluna("Criada", LARGURAS[6]))
             .when(com_lixeira, |c| c.child(div().w(px(LIXEIRA)).flex_none()));
 
@@ -3275,6 +3276,7 @@ impl Sessoes {
                 .child(campo(LARGURAS[4], Coluna::Caixa))
                 .child(campo(LARGURAS[5], Coluna::PosVenda))
                 .child(campo(LARGURAS[7], Coluna::Fotolivro))
+                .child(campo(LARGURAS[8], Coluna::FotolivroEnviadoEm))
                 .child(campo(LARGURAS[6], Coluna::Criada))
                 .when(com_lixeira, |c| c.child(div().w(px(LIXEIRA)).flex_none()))
         });
@@ -3407,6 +3409,18 @@ impl Sessoes {
                         sessao.caixa.as_ref(),
                         apagado,
                     )))
+                    // 📖 Quando o livro foi ao cliente: o primeiro envio.
+                    .child(
+                        numero(LARGURAS[8])
+                            .text_xs()
+                            .whitespace_nowrap()
+                            .text_color(apagado)
+                            .child(
+                                primeiro_envio_do_fotolivro(sessao.fotolivro.as_ref())
+                                    .map(data_hora_br)
+                                    .unwrap_or_else(|| "—".into()),
+                            ),
+                    )
                     .child(
                         numero(LARGURAS[6])
                             .text_xs()

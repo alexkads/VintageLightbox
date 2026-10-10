@@ -210,6 +210,28 @@ impl EstadoDoFotolivro {
     ];
 }
 
+/// 📖 Quando o fotolivro foi ao cliente pela primeira vez — a coluna "Fotolivro
+/// enviado em" (dono, 2026-10-10): o WhatsApp sai na hora da venda e o e-mail
+/// 6 h depois; o primeiro dos dois. Devolve o RFC 3339 como veio.
+///
+/// ⚠️ O site tem a mesma conta (`primeiroEnvioDoFotolivro`, em
+/// `fotolivro-na-lista.ts`).
+pub fn primeiro_envio_do_fotolivro(fotolivro: Option<&ResumoDoFotolivro>) -> Option<&str> {
+    let livro = fotolivro?;
+    [&livro.email_enviado_em, &livro.whatsapp_enviado_em]
+        .into_iter()
+        .flatten()
+        .filter_map(|iso| Some((instante_em_minutos(iso)?, iso.as_str())))
+        .min_by_key(|(minutos, _)| *minutos)
+        .map(|(_, iso)| iso)
+}
+
+/// Minutos desde a época de um RFC 3339 — só para comparar dois instantes.
+fn instante_em_minutos(iso: &str) -> Option<i64> {
+    let (dia, hora) = iso.split_once('T')?;
+    Some(dia_civil(dia)? * 24 * 60 + minutos_em_utc(hora)?)
+}
+
 /// A decisão da coluna do fotolivro. Ver [`EstadoDoFotolivro`].
 pub fn estado_do_fotolivro(
     fotolivro: Option<&ResumoDoFotolivro>,
@@ -852,6 +874,34 @@ pub fn dia_curto(chave: &str) -> String {
 mod testes {
     /// 📖 A coluna do fotolivro — a mesma tabela do teste do site
     /// (`fotolivro-na-lista.test.ts`).
+    #[test]
+    fn o_primeiro_envio_do_fotolivro() {
+        let livro = ResumoDoFotolivro {
+            email_enviado_em: Some("2026-10-10T00:00:00Z".into()),
+            whatsapp_enviado_em: Some("2026-10-09T18:00:00Z".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            primeiro_envio_do_fotolivro(Some(&livro)),
+            Some("2026-10-09T18:00:00Z")
+        );
+        let so_email = ResumoDoFotolivro {
+            email_enviado_em: Some("2026-10-10T02:30:00Z".into()),
+            ..Default::default()
+        };
+        let envio = primeiro_envio_do_fotolivro(Some(&so_email)).unwrap();
+        assert_eq!(
+            dia_da_criacao(envio),
+            "2026-10-09",
+            "23h30 em Gramado ainda é dia 9"
+        );
+        assert_eq!(
+            primeiro_envio_do_fotolivro(Some(&ResumoDoFotolivro::default())),
+            None
+        );
+        assert_eq!(primeiro_envio_do_fotolivro(None), None);
+    }
+
     #[test]
     fn a_coluna_do_fotolivro() {
         let caixa = |vendas| PagoNoCaixa {

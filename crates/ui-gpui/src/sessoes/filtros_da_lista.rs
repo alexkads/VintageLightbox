@@ -62,8 +62,9 @@ pub struct FiltrosDaLista {
     situacao: Lista,
     /// 📖 "não enviado" separa o passivo do fotolivro.
     fotolivro: Lista,
-    de: Entity<InputState>,
-    ate: Entity<InputState>,
+    /// O "de" e o "até" de cada coluna de data — um par por coluna: com a
+    /// "Fotolivro enviado em", a "Criada" deixou de ser a única.
+    datas: HashMap<Coluna, (Entity<InputState>, Entity<InputState>)>,
 }
 
 fn simbolo(operador: Operador) -> String {
@@ -74,6 +75,7 @@ impl FiltrosDaLista {
     pub fn novos<T: 'static>(window: &mut Window, cx: &mut gpui_kit::Context<T>) -> Self {
         let mut textos = HashMap::new();
         let mut operadores = HashMap::new();
+        let mut datas = HashMap::new();
         for coluna in Coluna::TODAS {
             match coluna.tipo() {
                 Tipo::Texto => {
@@ -98,7 +100,16 @@ impl FiltrosDaLista {
                     });
                     operadores.insert(coluna, lista);
                 }
-                Tipo::Data | Tipo::Escolha => {}
+                Tipo::Data => {
+                    datas.insert(
+                        coluna,
+                        (
+                            cx.new(|cx| InputState::new(window, cx).placeholder("de dd/mm/aaaa")),
+                            cx.new(|cx| InputState::new(window, cx).placeholder("até dd/mm/aaaa")),
+                        ),
+                    );
+                }
+                Tipo::Escolha => {}
             }
         }
         let mut opcoes = vec![Opcao {
@@ -136,8 +147,7 @@ impl FiltrosDaLista {
             operadores,
             situacao,
             fotolivro,
-            de: cx.new(|cx| InputState::new(window, cx).placeholder("de dd/mm/aaaa")),
-            ate: cx.new(|cx| InputState::new(window, cx).placeholder("até dd/mm/aaaa")),
+            datas,
         }
     }
 
@@ -185,8 +195,9 @@ impl FiltrosDaLista {
                         FiltroDeColuna::Numero { operador, valor }
                     }
                     Tipo::Data => {
-                        let de = ler_dia(self.de.read(cx).value().as_ref());
-                        let ate = ler_dia(self.ate.read(cx).value().as_ref());
+                        let (de, ate) = &self.datas[&coluna];
+                        let de = ler_dia(de.read(cx).value().as_ref());
+                        let ate = ler_dia(ate.read(cx).value().as_ref());
                         if de.is_none() && ate.is_none() {
                             return None;
                         }
@@ -214,7 +225,11 @@ impl FiltrosDaLista {
 
     /// O × ao lado de "Filtros": todos os campos em branco.
     pub fn limpar<T: 'static>(&self, window: &mut Window, cx: &mut gpui_kit::Context<T>) {
-        for campo in self.textos.values().chain([&self.de, &self.ate]) {
+        for campo in self
+            .textos
+            .values()
+            .chain(self.datas.values().flat_map(|(de, ate)| [de, ate]))
+        {
             campo.update(cx, |estado, cx| estado.trocar_valor("", window, cx));
         }
         for lista in self.operadores.values() {
@@ -263,8 +278,8 @@ impl FiltrosDaLista {
                 .flex_col()
                 .gap(px(2.))
                 .debug_selector(seletor)
-                .child(Input::new(&self.de).xsmall())
-                .child(Input::new(&self.ate).xsmall())
+                .child(Input::new(&self.datas[&coluna].0).xsmall())
+                .child(Input::new(&self.datas[&coluna].1).xsmall())
                 .into_any_element(),
             Tipo::Escolha => gpui_kit::div()
                 .w_full()
@@ -292,7 +307,7 @@ impl FiltrosDaLista {
     ) {
         let texto = texto.to_string();
         let campo = match coluna.tipo() {
-            Tipo::Data => &self.de,
+            Tipo::Data => &self.datas[&coluna].0,
             _ => &self.textos[&coluna],
         };
         campo.update(cx, |estado, cx| estado.trocar_valor(texto, window, cx));
