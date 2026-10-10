@@ -252,6 +252,19 @@ impl PosVendaController {
         self.api.original(sessao, foto_id).await.map_err(frase)
     }
 
+    /// 📖 Manda o fotolivro ao cliente — ver [`PosVendaApi::enviar_fotolivro`].
+    pub async fn enviar_fotolivro(
+        &self,
+        sessao: &Sessao,
+        galeria_id: &str,
+        pdf: Vec<u8>,
+    ) -> Result<domain::services::pos_venda::EnvioDoFotolivro, String> {
+        self.api
+            .enviar_fotolivro(sessao, galeria_id, pdf)
+            .await
+            .map_err(frase)
+    }
+
     /// 💧 A prévia com a marca d'água do sistema — ver
     /// [`PosVendaApi::previa_marcada`].
     pub async fn previa_marcada(&self, sessao: &Sessao, foto_id: &str) -> Result<Vec<u8>, String> {

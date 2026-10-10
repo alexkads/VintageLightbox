@@ -544,6 +544,29 @@ impl crate::exportacao::porta::RevelaDoSite for RevelacaoDoSite {
         let controlador = self.controlador.clone();
         Box::pin(async move { controlador.previa_marcada(&sessao, &foto_no_site).await })
     }
+
+    fn galeria(
+        &self,
+        sessao: Sessao,
+        galeria_id: String,
+    ) -> crate::exportacao::porta::PromessaDaGaleria {
+        let controlador = self.controlador.clone();
+        Box::pin(async move { controlador.abrir_galeria(&sessao, &galeria_id).await })
+    }
+
+    fn enviar_fotolivro(
+        &self,
+        sessao: Sessao,
+        galeria_id: String,
+        pdf: Vec<u8>,
+    ) -> crate::exportacao::porta::PromessaDoEnvio {
+        let controlador = self.controlador.clone();
+        Box::pin(async move {
+            controlador
+                .enviar_fotolivro(&sessao, &galeria_id, pdf)
+                .await
+        })
+    }
 }
 
 /// De onde a porta tira a imagem editada de uma foto do site.

@@ -698,6 +698,14 @@ mod tests {
         async fn original(&self, _: &Sessao, _: &str) -> DomainResult<Vec<u8>> {
             unreachable!("quem baixa o original é a porta do app, que tem o motor de GPU")
         }
+        async fn enviar_fotolivro(
+            &self,
+            _: &Sessao,
+            _: &str,
+            _: Vec<u8>,
+        ) -> DomainResult<domain::services::pos_venda::EnvioDoFotolivro> {
+            unreachable!("o fotolivro é do caixa, não da publicação")
+        }
         async fn previa_marcada(&self, _: &Sessao, _: &str) -> DomainResult<Vec<u8>> {
             unreachable!("a prévia marcada é da exportação, não da publicação")
         }

@@ -1488,6 +1488,9 @@ impl Caixa {
                                     dinheiro::formatar(venda.troco)
                                 ));
                             }
+                            cx.emit(super::tela::PedidoDoCaixa::VendaFechada(
+                                venda.galeria_id.clone(),
+                            ));
                             self.ultima_venda = Some(venda);
                             self.avisar_por(frase, TipoDeRecado::Sucesso, oito, cx);
                         }

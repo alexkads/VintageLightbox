@@ -488,7 +488,8 @@ pub struct FaixaDaGaleria {
 /// Um e-mail que saiu para o cliente, e o que o provedor contou dele depois.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AvisoDaGaleria {
-    /// `fotos_prontas`, `vencimento_venda` ou `vencimento_download`.
+    /// `fotos_prontas`, `vencimento_venda`, `vencimento_download` ou
+    /// `fotolivro`.
     pub tipo: String,
     pub destino: String,
     pub enviado_em: i64,
@@ -664,6 +665,59 @@ impl EstadoNoBalcao {
         } else {
             Self::Disponivel
         }
+    }
+}
+
+/// 📖 O que o site fez com o fotolivro, canal a canal: `enviado`,
+/// `sem_contato`, `nao_configurado` ou `falhou` (com o porquê).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnvioDoFotolivro {
+    pub email: (String, Option<String>),
+    pub whatsapp: (String, Option<String>),
+}
+
+impl EnvioDoFotolivro {
+    /// A frase do balcão: "Fotolivro enviado por e-mail e WhatsApp".
+    pub fn frase(&self) -> (String, bool) {
+        let enviado = |c: &(String, Option<String>)| c.0 == "enviado";
+        let falhou = |c: &(String, Option<String>)| c.0 == "falhou";
+        let canais: Vec<&str> = [
+            (enviado(&self.email), "e-mail"),
+            (enviado(&self.whatsapp), "WhatsApp"),
+        ]
+        .into_iter()
+        .filter(|(sim, _)| *sim)
+        .map(|(_, nome)| nome)
+        .collect();
+        let mut frase = match canais.as_slice() {
+            [] => "O fotolivro foi guardado, mas não saiu para o cliente".to_string(),
+            [um] => format!("Fotolivro enviado ao cliente por {um}"),
+            _ => "Fotolivro enviado ao cliente por e-mail e WhatsApp".to_string(),
+        };
+        for (nome, canal) in [("e-mail", &self.email), ("WhatsApp", &self.whatsapp)] {
+            match canal.0.as_str() {
+                "falhou" => frase.push_str(&format!(
+                    " · o {nome} falhou{}",
+                    canal
+                        .1
+                        .as_deref()
+                        .map(|d| format!(": {d}"))
+                        .unwrap_or_default()
+                )),
+                "sem_contato" if canais.is_empty() => {
+                    frase.push_str(&format!(" · a sessão não tem {nome}"))
+                }
+                "nao_configurado" if nome == "WhatsApp" && !canais.is_empty() => {}
+                "nao_configurado" => {
+                    frase.push_str(&format!(" · o envio por {nome} não está ligado no site"))
+                }
+                _ => {}
+            }
+        }
+        (
+            frase,
+            canais.is_empty() || falhou(&self.email) || falhou(&self.whatsapp),
+        )
     }
 }
 
@@ -887,6 +941,15 @@ pub trait PosVendaApi: Send + Sync {
     /// fotos que não foram levadas: a marca é a do site, e não um logotipo.
     async fn previa_marcada(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<Vec<u8>>;
 
+    /// 📖 Manda o fotolivro da galeria ao cliente — o site guarda o PDF e o
+    /// envia por e-mail (com o link da galeria) e pelo WhatsApp.
+    async fn enviar_fotolivro(
+        &self,
+        sessao: &Sessao,
+        galeria_id: &str,
+        pdf: Vec<u8>,
+    ) -> DomainResult<EnvioDoFotolivro>;
+
     /// O bilhete que autoriza **substituir o original** desta foto pelo revelado.
     ///
     /// 🔑 É a porta de saída do editor, e ela é a mesma do site: o painel emite
@@ -940,6 +1003,38 @@ pub trait PosVendaApi: Send + Sync {
 
 #[cfg(test)]
 mod tests {
+    /// 📖 A frase do balcão diz por onde o fotolivro saiu e o que faltou.
+    #[test]
+    fn a_frase_do_envio_do_fotolivro() {
+        let canal = |d: &str| (d.to_string(), None);
+        let envio = |e: &str, w: &str| EnvioDoFotolivro {
+            email: canal(e),
+            whatsapp: canal(w),
+        };
+        assert_eq!(
+            envio("enviado", "enviado").frase(),
+            (
+                "Fotolivro enviado ao cliente por e-mail e WhatsApp".into(),
+                false
+            )
+        );
+        assert_eq!(
+            envio("enviado", "nao_configurado").frase(),
+            ("Fotolivro enviado ao cliente por e-mail".into(), false)
+        );
+        let (frase, erro) = envio("sem_contato", "sem_contato").frase();
+        assert!(erro && frase.contains("não saiu"), "{frase}");
+        let (frase, erro) = EnvioDoFotolivro {
+            email: canal("enviado"),
+            whatsapp: ("falhou".into(), Some("modelo recusado".into())),
+        }
+        .frase();
+        assert!(
+            erro && frase.contains("WhatsApp falhou: modelo recusado"),
+            "{frase}"
+        );
+    }
+
     use super::*;
 
     #[test]

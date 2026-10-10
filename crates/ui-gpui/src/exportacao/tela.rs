@@ -173,6 +173,9 @@ pub enum PedidoDaExportacao {
     Fechar,
     /// O lote terminou — a raiz avisa em toast se o modal já estiver fechado.
     Terminou { texto: String, falhou: bool },
+    /// 📖 O fotolivro do fechamento da venda saiu (ou não) para o cliente —
+    /// a raiz avisa em toast sempre: o caixa nunca abre este modal.
+    LivroAoCliente { texto: String, falhou: bool },
 }
 
 impl EventEmitter<PedidoDaExportacao> for Exportacao {}
@@ -212,6 +215,10 @@ pub struct Exportacao {
     cancelar: Arc<AtomicBool>,
     andamentos: (Sender<Andamento>, Receiver<Andamento>),
     recados: (Sender<Recado>, Receiver<Recado>),
+    /// 📖 As respostas dos fotolivros mandados ao cliente pelo caixa.
+    ao_cliente: (Sender<(String, bool)>, Receiver<(String, bool)>),
+    /// Quantos fotolivros ainda não responderam.
+    mandando: usize,
     esperando_pasta: bool,
     colhendo: bool,
     _colheita: Option<Task<()>>,
@@ -265,6 +272,8 @@ impl Exportacao {
             cancelar: Arc::new(AtomicBool::new(false)),
             andamentos: channel(),
             recados: channel(),
+            ao_cliente: channel(),
+            mandando: 0,
             esperando_pasta: false,
             colhendo: false,
             _colheita: None,
@@ -476,6 +485,28 @@ impl Exportacao {
         self.mandar(saidas, cx);
     }
 
+    /// 📖 Manda o fotolivro da galeria ao cliente — o fechamento da venda no
+    /// caixa. Corre por fora do modal: não mexe no lote nem na tela, e a
+    /// resposta vira um toast na raiz.
+    pub fn fotolivro_ao_cliente(
+        &mut self,
+        galeria_id: String,
+        sessao: Option<Sessao>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(sessao) = sessao else {
+            return;
+        };
+        self.mandando += 1;
+        self.exportador.fotolivro_ao_cliente(
+            galeria_id,
+            self.site(),
+            sessao,
+            self.ao_cliente.0.clone(),
+        );
+        self.acompanhar(cx);
+    }
+
     /// O endereço do site, sem barra no fim.
     fn site(&self) -> String {
         crate::pos_venda::config::ler()
@@ -667,6 +698,11 @@ impl Exportacao {
             }
         }
 
+        while let Ok((texto, falhou)) = self.ao_cliente.1.try_recv() {
+            self.mandando = self.mandando.saturating_sub(1);
+            cx.emit(PedidoDaExportacao::LivroAoCliente { texto, falhou });
+        }
+
         let estava_correndo = self.correndo();
         while let Ok(andamento) = self.andamentos.1.try_recv() {
             mudou = true;
@@ -684,7 +720,7 @@ impl Exportacao {
             cx.notify();
         }
 
-        let continua = self.esperando_pasta || self.correndo();
+        let continua = self.esperando_pasta || self.correndo() || self.mandando > 0;
         if !continua {
             self.colhendo = false;
         }
@@ -1331,6 +1367,49 @@ mod testes {
         );
         let opcoes = exportador.opcoes.lock().unwrap().clone().unwrap();
         assert_eq!(opcoes.formato(), FormatoDeSaida::Tiff);
+    }
+
+    /// 📖 O fotolivro do caixa vai pela porta e volta como pedido de toast —
+    /// sem mexer no lote do modal.
+    #[gpui_kit::test]
+    fn o_fotolivro_ao_cliente_volta_como_toast(cx: &mut TestAppContext) {
+        let exportador = Arc::new(ExportadorDeMentira::default());
+        let tela = montar(
+            cx,
+            exportador.clone(),
+            Arc::new(SeletorDeMentira::default()),
+        );
+        let pedidos = Arc::new(std::sync::Mutex::new(Vec::new()));
+        cx.update({
+            let pedidos = pedidos.clone();
+            |cx| {
+                cx.subscribe(&tela, move |_, pedido: &PedidoDaExportacao, _| {
+                    pedidos.lock().unwrap().push(pedido.clone());
+                })
+                .detach()
+            }
+        });
+        let sessao = Sessao {
+            access_token: "t".into(),
+            refresh_token: "r".into(),
+            access_vence_em: 4_102_444_800,
+            refresh_vence_em: 4_102_444_800,
+        };
+        tela.update(cx, |tela, cx| {
+            tela.fotolivro_ao_cliente("g1".into(), None, cx);
+            tela.fotolivro_ao_cliente("g1".into(), Some(sessao), cx);
+            tela.colher(cx);
+            assert!(tela.progresso().is_none(), "o lote do modal não é tocado");
+        });
+        assert_eq!(
+            *exportador.ao_cliente.lock().unwrap(),
+            ["g1"],
+            "sem conta não sai"
+        );
+        assert!(matches!(
+            pedidos.lock().unwrap().as_slice(),
+            [PedidoDaExportacao::LivroAoCliente { falhou: false, .. }]
+        ));
     }
 
     /// A contagem diz quantas saem limpas e quantas com a marca, e o dia vira

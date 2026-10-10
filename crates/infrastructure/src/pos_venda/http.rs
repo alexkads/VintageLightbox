@@ -870,6 +870,39 @@ impl PosVendaApi for PosVendaApiHttp {
             .await
     }
 
+    async fn enviar_fotolivro(
+        &self,
+        sessao: &Sessao,
+        galeria_id: &str,
+        pdf: Vec<u8>,
+    ) -> DomainResult<domain::services::pos_venda::EnvioDoFotolivro> {
+        #[derive(serde::Deserialize)]
+        struct Canal {
+            desfecho: String,
+            #[serde(default)]
+            detalhe: Option<String>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Resposta {
+            email: Canal,
+            whatsapp: Canal,
+        }
+        let resposta = self
+            .client
+            .post(self.url(&format!("/pos-venda/galerias/{galeria_id}/fotolivro")))
+            .bearer_auth(self.token(sessao).await?)
+            .header(reqwest::header::CONTENT_TYPE, "application/pdf")
+            .body(pdf)
+            .send()
+            .await
+            .map_err(rede)?;
+        let r: Resposta = ler(resposta).await?;
+        Ok(domain::services::pos_venda::EnvioDoFotolivro {
+            email: (r.email.desfecho, r.email.detalhe),
+            whatsapp: (r.whatsapp.desfecho, r.whatsapp.detalhe),
+        })
+    }
+
     async fn previa_marcada(&self, sessao: &Sessao, foto_id: &str) -> DomainResult<Vec<u8>> {
         self.bytes_da_imagem(
             sessao,
