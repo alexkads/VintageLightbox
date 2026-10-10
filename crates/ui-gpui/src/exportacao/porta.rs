@@ -365,9 +365,10 @@ pub async fn montar_fotolivro(
 ) {
     let total = fotos.len();
     let _ = canal.send(Andamento::Comecou { total });
-    // 🔗 Os links entram sem senha quando o site assina. Sem assinatura
-    // (sessão sem e-mail, e-mail de conta administradora) ficam os da rota da
-    // galeria, que pede o login: o livro sai do mesmo jeito.
+    // 🔗 Os links entram sem senha quando o site assina; sessão sem e-mail
+    // leva o link que pede o e-mail ao cliente. Sem assinatura (e-mail de
+    // conta administradora, site fora do ar) ficam os da rota da galeria, que
+    // pede o login: o livro sai do mesmo jeito.
     if let (Some(galeria), Some(sessao)) = (galeria, sessao.clone()) {
         if let Ok(link) = site.link_da_galeria(sessao, galeria).await {
             assinar_os_links(&mut fotos, &mut capa, &link);

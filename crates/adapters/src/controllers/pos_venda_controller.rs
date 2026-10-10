@@ -350,6 +350,19 @@ impl PosVendaController {
             .await
             .map_err(recusa_do_fim)
     }
+
+    /// 📖 O link de dentro do fotolivro — sessão sem e-mail não recusa: leva
+    /// o link que pede o e-mail ao cliente.
+    pub async fn link_do_livro(
+        &self,
+        sessao: &Sessao,
+        galeria_id: &str,
+    ) -> Result<LinkDeAcesso, RecusaDoFimDaSessao> {
+        self.api
+            .link_do_livro(sessao, galeria_id)
+            .await
+            .map_err(recusa_do_fim)
+    }
 }
 
 fn frase(erro: DomainError) -> String {

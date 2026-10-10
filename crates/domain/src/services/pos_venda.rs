@@ -877,6 +877,14 @@ pub trait PosVendaApi: Send + Sync {
         galeria_id: &str,
     ) -> DomainResult<LinkDeAcesso>;
 
+    /// 📖 O link de **dentro do fotolivro**. Com e-mail, é o mesmo de
+    /// [`Self::link_da_galeria`]; sem e-mail, o site devolve o link da
+    /// galeria, que pede o e-mail ao cliente — em vez de recusar, porque
+    /// dentro do PDF não há operador para perguntar.
+    async fn link_do_livro(&self, sessao: &Sessao, galeria_id: &str) -> DomainResult<LinkDeAcesso> {
+        self.link_da_galeria(sessao, galeria_id).await
+    }
+
     /// Muda título, e-mail ou WhatsApp da sessão — só o que veio. Ver
     /// [`MudancaDaGaleria`].
     async fn atualizar_galeria(

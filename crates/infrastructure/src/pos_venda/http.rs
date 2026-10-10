@@ -698,6 +698,23 @@ impl PosVendaApi for PosVendaApiHttp {
         })
     }
 
+    async fn link_do_livro(&self, sessao: &Sessao, galeria_id: &str) -> DomainResult<LinkDeAcesso> {
+        let resposta = self
+            .client
+            .post(self.url(&format!("/pos-venda/galerias/{galeria_id}/link?para=livro")))
+            .bearer_auth(self.token(sessao).await?)
+            .json(&json!({}))
+            .send()
+            .await
+            .map_err(rede)?;
+
+        let link: LinkDaApi = ler(resposta).await?;
+        Ok(LinkDeAcesso {
+            url: link.link,
+            validade_em_segundos: link.validade_em_segundos,
+        })
+    }
+
     async fn atualizar_galeria(
         &self,
         sessao: &Sessao,
@@ -2255,6 +2272,28 @@ mod tests {
             api.fonte_para_revelar(&sessao, "f1").await.unwrap(),
             vec![0xFF, 0xD8, 7]
         );
+    }
+
+    /// 📖 O link de dentro do livro diz ao site para quem é (`para=livro`):
+    /// sessão sem e-mail volta com o link que pede o e-mail ao cliente, e
+    /// não com a recusa do "Copiar link".
+    #[tokio::test]
+    async fn o_link_do_livro_pede_ao_site_o_que_serve_a_sessao_sem_email() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v2/pos-venda/galerias/g1/link"))
+            .and(wiremock::matchers::query_param("para", "livro"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "link": "https://site/entrar/galeria?token=abc",
+                "validade_em_segundos": null
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let api = PosVendaApiHttp::nova(server.uri());
+        let link = api.link_do_livro(&sessao_valida(), "g1").await.unwrap();
+        assert_eq!(link.url, "https://site/entrar/galeria?token=abc");
     }
 
     /// 🚨 O link vem do backend, e não é montado aqui.

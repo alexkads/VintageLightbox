@@ -566,7 +566,8 @@ impl crate::exportacao::porta::RevelaDoSite for RevelacaoDoSite {
     ) -> crate::exportacao::porta::LinkPronto {
         let controlador = self.controlador.clone();
         Box::pin(async move {
-            match controlador.link_da_galeria(&sessao, &galeria_id).await {
+            // 📖 Esta porta é a do fotolivro: o link de dentro do PDF.
+            match controlador.link_do_livro(&sessao, &galeria_id).await {
                 Ok(link) => Ok(link.url),
                 Err(RecusaDoFimDaSessao::FaltaEmail(frase))
                 | Err(RecusaDoFimDaSessao::Outra(frase)) => Err(frase),
