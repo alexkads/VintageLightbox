@@ -25,6 +25,31 @@
 //! outra sai com a marca d'água do site (ver [`super::porta`]). O que se
 //! escolhe é a forma — **arquivos** soltos ou o **fotolivro** em PDF, o mesmo
 //! livro que a galeria do cliente gera (crate `fotolivro`).
+//!
+//! ## O desenho (10/10/2026)
+//!
+//! *"O design dessa tela tá muito confuso para o usuário! Precisa usar o GPUI
+//! Kit e deixar bem lindo e limpo!"* (dono, com o print). Eram cinco textos do
+//! mesmo peso empilhados — a frase do alto, a explicação do uso, a contagem, a
+//! caixa de seleção com travessão e o "Salvar em" com dois botões sem moldura
+//! — e nada dizia o que era escolha e o que era aviso. Agora a tela tem três
+//! blocos, cada um uma peça do kit:
+//!
+//! 1. **o uso**, num `TabBar` segmentado de ponta a ponta, com uma linha só
+//!    dizendo o que ele entrega;
+//! 2. **o que sai**, num `GroupBox`: uma linha para as levadas, outra para as
+//!    à venda, e o que cada uma leva;
+//! 3. **a opção do uso**: o formato dos arquivos (outro `TabBar` segmentado —
+//!    eram quatro `Radio` com uma legenda cada) ou, no fotolivro, o `Switch`
+//!    "Só as fotos levadas";
+//! 4. **para onde**, com a pasta num `GroupBox` próprio e o "Trocar…" de
+//!    contorno.
+//!
+//! 📐 **A caixa não muda de tamanho** (dono, no mesmo dia: *"Eu não gosto
+//! quando a tela muda de tamanho com uma ação!"*). Trocar de uso, de formato,
+//! ligar a chave, o aviso do livro vazio e a passagem para o lote: tudo que se
+//! alterna divide o mesmo lugar ([`estilo::mesmo_lugar`]), e a caixa tem
+//! sempre a altura do maior estado.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -34,15 +59,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use adapters::view_models::PhotoViewModel;
-use gpui_kit::component::button::ButtonGroup;
-use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::group_box::{GroupBox, GroupBoxVariants as _};
 use gpui_kit::component::progress::Progress;
-use gpui_kit::component::radio::Radio;
 use gpui_kit::component::slider::{SliderEvent, SliderState};
-use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Disableable, Icon, Selectable, Sizable};
+use gpui_kit::component::switch::Switch;
+use gpui_kit::component::tab::{Tab, TabBar};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Disableable, Icon};
 use gpui_kit::{
     div, prelude::*, px, AnyElement, Context, Entity, EventEmitter, FontWeight, SharedString,
-    Subscription, Task, Window,
+    StyleRefinement, Subscription, Task, Window,
 };
 
 use domain::services::pos_venda::Sessao;
@@ -80,13 +105,13 @@ impl Modo {
         }
     }
 
+    /// O que o uso entrega, em uma linha — o que cada foto leva está no
+    /// bloco "o que sai", e não aqui.
     pub fn explicacao(self) -> &'static str {
         match self {
-            Modo::Arquivos => {
-                "Um arquivo por foto. As levadas saem inteiras, no formato escolhido; as outras, com a marca d'água do site."
-            }
+            Modo::Arquivos => "Um arquivo por foto, com os ajustes e o corte aplicados.",
             Modo::Fotolivro => {
-                "Um livro diagramado para mandar ao cliente: as levadas limpas, as outras com a marca d'água, e cada foto com o link para baixar ou comprar."
+                "Um PDF diagramado para mandar ao cliente, com o link de cada foto na galeria."
             }
         }
     }
@@ -130,13 +155,48 @@ pub fn data_por_extenso(iso: &str) -> String {
     }
 }
 
-/// O que cada formato é, com as palavras do site (`exportar.ts`).
+/// O que cada formato é, com as palavras do site (`exportar.ts`): o nome da
+/// aba e a legenda que aparece quando ele é o escolhido.
 fn detalhe_do_formato(formato: FormatoDeSaida) -> (&'static str, &'static str) {
     match formato {
-        FormatoDeSaida::Jpeg => ("JPEG", "o de sempre — menor arquivo"),
-        FormatoDeSaida::Png => ("PNG", "sem perda, para reeditar"),
-        FormatoDeSaida::Tiff => ("TIFF", "sem perda, o que o lab aceita"),
-        FormatoDeSaida::Webp => ("WebP", "sem perda, para web"),
+        FormatoDeSaida::Jpeg => ("JPEG", "O de sempre: o menor arquivo."),
+        FormatoDeSaida::Png => ("PNG", "Sem perda, para reeditar."),
+        FormatoDeSaida::Tiff => ("TIFF", "Sem perda, o que o laboratório aceita."),
+        FormatoDeSaida::Webp => ("WebP", "Sem perda, para a web."),
+    }
+}
+
+/// "1 levada", "5 levadas".
+fn quantas_levadas(n: usize) -> String {
+    match n {
+        1 => "1 levada".into(),
+        n => format!("{n} levadas"),
+    }
+}
+
+/// O que o bloco "o que sai" diz de cada grupo, à direita da contagem.
+///
+/// 💧 A não levada é a prévia marcada do site, sempre em JPEG — por isso o
+/// formato só aparece nela quando o operador escolheu outro para as levadas.
+fn o_que_sai(modo: Modo, formato: FormatoDeSaida, so_levadas: bool) -> (String, String) {
+    let nome = detalhe_do_formato(formato).0;
+    match modo {
+        Modo::Arquivos => (
+            format!("sem marca d'água, em {nome}"),
+            if formato == FormatoDeSaida::Jpeg {
+                "com a marca d'água do site".into()
+            } else {
+                "com a marca d'água, em JPEG".into()
+            },
+        ),
+        Modo::Fotolivro => (
+            "sem marca d'água".into(),
+            if so_levadas {
+                "ficam fora do livro".into()
+            } else {
+                "com a marca d'água e o link para comprar".into()
+            },
+        ),
     }
 }
 
@@ -893,199 +953,340 @@ impl Exportacao {
         div().text_sm().font_weight(FontWeight::MEDIUM).child(texto)
     }
 
-    /// Uma caixa de "onde": ícone, rótulo, o caminho e os botões — o
-    /// "Salvar em" do site.
-    fn caixa_de_caminho(
-        icone: Icone,
-        rotulo: &'static str,
-        valor: SharedString,
-        apagado: bool,
+    /// Uma linha do bloco "o que sai": o ícone, a contagem e, à direita, o
+    /// que aquelas fotos levam.
+    fn linha_do_que_sai(
+        icone: Icon,
+        quantas: String,
+        leva: String,
+        apagada: bool,
         cx: &Context<Self>,
     ) -> gpui_kit::Div {
-        let tema = cx.theme();
         h_flex()
             .gap(px(8.))
-            .px(px(10.))
-            .py(px(6.))
-            .rounded(crate::tema::canto(8.))
-            .border_1()
-            .border_color(tema.border)
-            .bg(tema.muted.opacity(0.4))
-            .text_xs()
+            .when(apagada, |d| d.opacity(0.5))
+            .child(icone.size(px(16.)).flex_none())
             .child(
-                Icon::new(icone)
-                    .size(px(16.))
-                    .text_color(tema.muted_foreground),
+                div()
+                    .flex_none()
+                    .text_sm()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(quantas),
             )
             .child(
                 div()
                     .flex_1()
                     .min_w(px(0.))
                     .truncate()
+                    .text_xs()
+                    .text_right()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(leva),
+            )
+    }
+
+    /// O respiro de um `GroupBox` de linhas: o do kit (16) é o de um
+    /// formulário, e aqui o bloco tem duas ou três linhas curtas.
+    fn miolo_da_caixa() -> StyleRefinement {
+        StyleRefinement::default().p(px(12.)).gap(px(10.))
+    }
+
+    /// 🗂️ O uso: arquivos soltos ou o fotolivro — uma escolha só, de ponta a
+    /// ponta, com o que ela entrega logo embaixo.
+    fn render_uso(&self, cx: &mut Context<Self>) -> gpui_kit::Div {
+        let usos = [Modo::Arquivos, Modo::Fotolivro];
+        v_flex()
+            .gap(px(8.))
+            .child(
+                TabBar::new("exportacao-uso")
+                    .segmented()
+                    .w_full()
+                    .selected_index(usos.iter().position(|m| *m == self.modo).unwrap_or(0))
+                    .children(usos.map(|modo| {
+                        let id = match modo {
+                            Modo::Arquivos => "exportacao-modo-arquivos",
+                            Modo::Fotolivro => "exportacao-modo-fotolivro",
+                        };
+                        Tab::new()
+                            .label(modo.rotulo())
+                            .flex_1()
+                            .debug_selector(move || id.to_string())
+                    }))
+                    .on_click(cx.listener(move |tela, i: &usize, _, cx| {
+                        if let Some(modo) = usos.get(*i) {
+                            tela.escolher_modo(*modo, cx);
+                        }
+                    })),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .child(self.modo.explicacao()),
+            )
+    }
+
+    /// 📦 O que sai: as levadas, as à venda e o que cada grupo leva.
+    ///
+    /// 📐 Sempre as duas linhas, mesmo com zero de um lado (apagada): a caixa
+    /// não muda de altura de uma seleção para a outra.
+    fn render_o_que_sai(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let tema = cx.theme().clone();
+        let (levadas, a_venda) = self.contagem();
+        let no_livro = self.modo == Modo::Fotolivro;
+        let (leva_a_levada, leva_a_venda) = o_que_sai(self.modo, self.formato(), self.so_levadas);
+
+        div()
+            .debug_selector(|| "exportacao-o-que-sai".into())
+            .child(
+                GroupBox::new()
+                    .outline()
+                    .content_style(Self::miolo_da_caixa())
+                    .child(Self::linha_do_que_sai(
+                        Icon::new(Icone::CircleCheck).text_color(tema.success),
+                        quantas_levadas(levadas),
+                        leva_a_levada,
+                        levadas == 0,
+                        cx,
+                    ))
+                    .child(Self::linha_do_que_sai(
+                        Icon::new(Icone::Droplet).text_color(tema.muted_foreground),
+                        format!("{a_venda} à venda"),
+                        leva_a_venda,
+                        a_venda == 0 || (no_livro && self.so_levadas),
+                        cx,
+                    )),
+            )
+    }
+
+    /// 📖 A opção do fotolivro: o do cliente, só com as dele, ou o de vender.
+    ///
+    /// 📐 A linha do aviso existe sempre (invisível sem aviso): o livro vazio
+    /// não empurra o "Salvar em" para baixo.
+    fn render_livro(&self, cx: &mut Context<Self>) -> gpui_kit::Div {
+        let tema = cx.theme().clone();
+        let (levadas, _) = self.contagem();
+        // O livro só das levadas, sem nenhuma levada: o botão fica desligado,
+        // e a tela diz por quê.
+        let livro_vazio = self.so_levadas && levadas == 0;
+
+        v_flex()
+            .gap(px(8.))
+            .child(Self::rotulo_de_secao("Conteúdo do livro"))
+            .child(
+                GroupBox::new()
+                    .outline()
+                    .content_style(Self::miolo_da_caixa())
                     .child(
-                        gpui_kit::div()
-                            .text_color(tema.muted_foreground)
-                            .child(rotulo),
+                        h_flex()
+                            .gap(px(12.))
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w(px(0.))
+                                    .gap(px(2.))
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .child("Só as fotos levadas"),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(tema.muted_foreground)
+                                            .child("O livro do cliente, sem as fotos à venda."),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .debug_selector(|| "exportacao-so-levadas".into())
+                                    .child(
+                                        Switch::new("exportacao-so-levadas")
+                                            .checked(self.so_levadas)
+                                            .accessibility_label("Só as fotos levadas")
+                                            .on_change(cx.listener(
+                                                |tela, marcado: &bool, _, cx| {
+                                                    tela.escolher_so_levadas(*marcado, cx)
+                                                },
+                                            )),
+                                    ),
+                            ),
+                    ),
+            )
+            .child(
+                h_flex()
+                    .debug_selector(|| "exportacao-livro-vazio".into())
+                    .gap(px(6.))
+                    .text_xs()
+                    .text_color(tema.warning)
+                    .when(!livro_vazio, |d| d.invisible())
+                    .child(
+                        Icon::new(Icone::TriangleAlert)
+                            .size(px(14.))
+                            .flex_none(),
                     )
+                    .child("Nenhuma das fotos escolhidas foi levada: o livro sairia vazio."),
+            )
+    }
+
+    /// 🖼️ O formato das levadas e, no JPEG, a qualidade: os do site.
+    fn render_formato(&self, cx: &mut Context<Self>) -> gpui_kit::Div {
+        let tema = cx.theme().clone();
+        let formatos = FormatoDeSaida::TODOS;
+        let formato_atual = self.formato();
+        let sem_perda = formato_atual.sem_perda();
+        // 📐 A qualidade (JPEG) e a nota do tamanho (sem perda) dividem a
+        // mesma linha: trocar de formato não mexe na altura.
+        let qualidade = h_flex()
+            .gap(px(12.))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(tema.muted_foreground)
+                    .child("Qualidade"),
+            )
+            .child(div().flex_1().child(estilo::slider(&self.qualidade)))
+            .child(
+                div()
+                    .w(px(28.))
+                    .text_xs()
+                    .text_right()
+                    .child(self.qualidade(cx).to_string()),
+            );
+        let nota = div()
+            .text_xs()
+            .text_color(tema.muted_foreground)
+            .child("O arquivo fica grande: uma foto de 24 MP passa de 70 MB.");
+
+        v_flex()
+            .gap(px(8.))
+            .child(Self::rotulo_de_secao("Formato"))
+            .child(
+                TabBar::new("exportacao-formato")
+                    .segmented()
+                    .w_full()
+                    .selected_index(
+                        formatos
+                            .iter()
+                            .position(|f| *f == formato_atual)
+                            .unwrap_or(0),
+                    )
+                    .children(formatos.map(|formato| {
+                        let id = format!("exportacao-formato-{}", formato.extensao());
+                        Tab::new()
+                            .label(detalhe_do_formato(formato).0)
+                            .flex_1()
+                            .debug_selector(move || id.clone())
+                    }))
+                    .on_click(cx.listener(move |tela, i: &usize, _, cx| {
+                        if let Some(formato) = formatos.get(*i) {
+                            tela.escolher_formato(*formato, cx);
+                        }
+                    })),
+            )
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(tema.muted_foreground)
+                    .child(detalhe_do_formato(formato_atual).1),
+            )
+            .child(estilo::mesmo_lugar([
+                (!sem_perda, qualidade.into_any_element()),
+                (sem_perda, nota.into_any_element()),
+            ]))
+    }
+
+    /// 📁 Para onde: a pasta à vista, o "Trocar…" e a volta aos Downloads —
+    /// o "Salvar em" do site.
+    fn render_destino(&self, cx: &mut Context<Self>) -> gpui_kit::Div {
+        let tema = cx.theme().clone();
+        let downloads = preferencias::pasta_dos_downloads();
+        let nos_downloads = self.pasta.as_deref() == Some(downloads.as_path());
+        let sem_pasta = self.pasta.is_none();
+        let pasta: SharedString = self
+            .pasta
+            .as_deref()
+            .map(curto)
+            .unwrap_or_else(|| "Escolha uma pasta".into())
+            .into();
+
+        v_flex()
+            .gap(px(8.))
+            .child(Self::rotulo_de_secao("Salvar em"))
+            .child(
+                div()
+                    .debug_selector(|| "exportacao-destino".into())
                     .child(
-                        div()
-                            .when(apagado, |d| d.text_color(tema.muted_foreground))
-                            .when(!apagado, |d| d.text_color(tema.foreground))
-                            .child(valor),
+                        GroupBox::new()
+                            .outline()
+                            .content_style(
+                                StyleRefinement::default()
+                                    .pl(px(12.))
+                                    .pr(px(8.))
+                                    .py(px(8.)),
+                            )
+                            .child(
+                                h_flex()
+                                    .gap(px(8.))
+                                    .child(
+                                        Icon::new(Icone::FolderOpen)
+                                            .size(px(16.))
+                                            .flex_none()
+                                            .text_color(tema.muted_foreground),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w(px(0.))
+                                            .truncate()
+                                            .text_sm()
+                                            .when(sem_pasta, |d| {
+                                                d.text_color(tema.muted_foreground)
+                                            })
+                                            .child(pasta),
+                                    )
+                                    .when(!nos_downloads, |d| {
+                                        d.child(
+                                            estilo::botao_icone_pequeno(
+                                                "exportacao-limpar-pasta",
+                                                Icone::RotateCcw,
+                                            )
+                                            .tooltip("Voltar a salvar na pasta Downloads")
+                                            .on_click(cx.listener(|tela, _, _, cx| {
+                                                tela.voltar_aos_downloads(cx)
+                                            })),
+                                        )
+                                    })
+                                    .child(
+                                        estilo::botao_contorno_pequeno(
+                                            "exportacao-escolher-pasta",
+                                            cx,
+                                        )
+                                        .label("Trocar…")
+                                        .on_click(cx.listener(|tela, _, _, cx| {
+                                            tela.escolher_pasta(cx)
+                                        })),
+                                    ),
+                            ),
                     ),
             )
     }
 
     fn render_configuracao(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let tema = cx.theme().clone();
-        let downloads = preferencias::pasta_dos_downloads();
-        let pasta: SharedString = self
-            .pasta
-            .as_deref()
-            .map(curto)
-            .unwrap_or_else(|| "escolha uma pasta".into())
-            .into();
-        let nos_downloads = self.pasta.as_deref() == Some(downloads.as_path());
-        let formato_atual = self.formato();
-        let qualidade = self.qualidade(cx);
-        let (levadas, marcadas) = self.contagem();
-        let contagem = frase_da_contagem(levadas, marcadas);
-
+        let arquivos = self.modo == Modo::Arquivos;
         v_flex()
             .gap(px(16.))
-            // Uso: entregar ou mostrar.
-            .child(
-                v_flex()
-                    .gap(px(6.))
-                    .child(Self::rotulo_de_secao("Uso"))
-                    .child(
-                        ButtonGroup::new("exportacao-uso")
-                            .outline()
-                            .xsmall()
-                            .children([Modo::Arquivos, Modo::Fotolivro].map(|modo| {
-                                estilo::botao_contorno_pequeno(
-                                    match modo {
-                                        Modo::Arquivos => "exportacao-modo-arquivos",
-                                        Modo::Fotolivro => "exportacao-modo-fotolivro",
-                                    },
-                                    cx,
-                                )
-                                .label(modo.rotulo())
-                                .selected(self.modo == modo)
-                            }))
-                            .on_click(cx.listener(|tela, cliques: &Vec<usize>, _, cx| {
-                                let modo = if cliques.contains(&1) {
-                                    Modo::Fotolivro
-                                } else {
-                                    Modo::Arquivos
-                                };
-                                tela.escolher_modo(modo, cx);
-                            })),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(tema.muted_foreground)
-                            .child(self.modo.explicacao()),
-                    )
-                    .child(
-                        div()
-                            .debug_selector(|| "exportacao-contagem".into())
-                            .text_xs()
-                            .child(contagem),
-                    ),
-            )
-            // 📖 O fotolivro: o do cliente, só com as dele, ou o de vender.
-            .when(self.modo == Modo::Fotolivro, |raiz| {
-                raiz.child(
-                    Checkbox::new("exportacao-so-levadas")
-                        .label("Só as fotos levadas — o livro do cliente, sem as à venda")
-                        .checked(self.so_levadas)
-                        .on_click(cx.listener(|tela, marcado: &bool, _, cx| {
-                            tela.escolher_so_levadas(*marcado, cx)
-                        })),
-                )
-            })
-            // Formato e qualidade das levadas: os do site.
-            .when(self.modo == Modo::Arquivos, |raiz| raiz.child(
-                v_flex()
-                    .gap(px(6.))
-                    .child(Self::rotulo_de_secao("Formato"))
-                    .children(FormatoDeSaida::TODOS.map(|formato| {
-                        let (rotulo, detalhe) = detalhe_do_formato(formato);
-                        h_flex()
-                            .gap(px(8.))
-                            .child(
-                                Radio::new(("exportacao-formato", formato as usize))
-                                    .label(rotulo)
-                                    .checked(formato_atual == formato)
-                                    .on_click(cx.listener(move |tela, _: &bool, _, cx| {
-                                        tela.escolher_formato(formato, cx);
-                                    })),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(tema.muted_foreground)
-                                    .child(detalhe),
-                            )
-                    }))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(tema.muted_foreground)
-                            .child("O formato vale para as levadas; as outras saem em JPEG, como o site as guarda."),
-                    )
-                    .when(!formato_atual.sem_perda(), |d| {
-                        d.child(
-                            h_flex()
-                                .gap(px(12.))
-                                .pt(px(4.))
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(tema.muted_foreground)
-                                        .child("Qualidade"),
-                                )
-                                .child(div().flex_1().child(estilo::slider(&self.qualidade)))
-                                .child(
-                                    div()
-                                        .w(px(28.))
-                                        .text_xs()
-                                        .text_right()
-                                        .child(qualidade.to_string()),
-                                ),
-                        )
-                    })
-                    .when(formato_atual.sem_perda(), |d| {
-                        d.child(
-                            div()
-                                .text_xs()
-                                .text_color(tema.muted_foreground)
-                                .child("Sem perda: o arquivo fica grande — uma foto de 24 MP passa de 70 MB."),
-                        )
-                    }),
-            ))
-            // Para onde.
-            .child(
-                Self::caixa_de_caminho(Icone::FolderOpen, "Salvar em: ", pasta, false, cx)
-                    .debug_selector(|| "exportacao-destino".into())
-                    .child(
-                        estilo::botao_fantasma_pequeno("exportacao-escolher-pasta", cx)
-                            .label("Trocar…")
-                            .on_click(cx.listener(|tela, _, _, cx| tela.escolher_pasta(cx))),
-                    )
-                    .when(!nos_downloads, |d| {
-                        d.child(
-                            estilo::botao_fantasma_pequeno("exportacao-limpar-pasta", cx)
-                                .label("Limpar")
-                                .tooltip("Voltar a salvar na pasta Downloads")
-                                .on_click(cx.listener(|tela, _, _, cx| {
-                                    tela.voltar_aos_downloads(cx)
-                                })),
-                        )
-                    }),
-            )
+            .child(self.render_uso(cx))
+            .child(self.render_o_que_sai(cx))
+            // 📐 A opção de cada uso, no mesmo lugar: trocar de aba não muda a
+            // altura da caixa.
+            .child(estilo::mesmo_lugar([
+                (arquivos, self.render_formato(cx).into_any_element()),
+                (!arquivos, self.render_livro(cx).into_any_element()),
+            ]))
+            .child(self.render_destino(cx))
             .into_any_element()
     }
 
@@ -1187,24 +1388,6 @@ impl Exportacao {
     }
 }
 
-/// "3 levadas saem limpas · 5 com a marca d'água do site".
-pub fn frase_da_contagem(levadas: usize, marcadas: usize) -> String {
-    let limpas = match levadas {
-        0 => None,
-        1 => Some("1 levada sai limpa".to_string()),
-        n => Some(format!("{n} levadas saem limpas")),
-    };
-    let com_marca = match marcadas {
-        0 => None,
-        n => Some(format!("{n} com a marca d'água do site")),
-    };
-    [limpas, com_marca]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join(" · ")
-}
-
 /// O caminho como se lê: a pasta pessoal vira `~`.
 fn curto(caminho: &Path) -> String {
     let texto = caminho.to_string_lossy().to_string();
@@ -1227,19 +1410,24 @@ fn nome(caminho: &Path) -> String {
 
 impl gpui_kit::Render for Exportacao {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let corpo = match self.progresso {
-            Some(p) => self.render_lote(p, cx),
-            None => self.render_configuracao(cx),
-        };
-        v_flex()
-            .gap(px(16.))
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Os arquivos saem com os ajustes e o corte aplicados."),
-            )
-            .child(corpo)
+        // 🧹 Sem frase solta no alto: o que o uso entrega está embaixo das
+        // abas, e durante o lote a barra já diz o que está acontecendo.
+        //
+        // 📐 O lote divide o lugar com a configuração (invisível por baixo):
+        // apertar "Exportar" não encolhe a caixa. Ele fica no meio dela.
+        let lote = self.progresso.map(|p| {
+            v_flex()
+                .flex_1()
+                .justify_center()
+                .child(self.render_lote(p, cx))
+                .into_any_element()
+        });
+        let configurando = lote.is_none();
+        estilo::mesmo_lugar(
+            [(configurando, self.render_configuracao(cx))]
+                .into_iter()
+                .chain(lote.map(|lote| (true, lote))),
+        )
     }
 }
 
@@ -1400,13 +1588,26 @@ mod testes {
     /// A contagem diz quantas saem limpas e quantas com a marca, e o dia vira
     /// a data por extenso da capa.
     #[test]
-    fn a_contagem_e_a_data_por_extenso() {
+    fn o_que_sai_e_a_data_por_extenso() {
+        assert_eq!(quantas_levadas(1), "1 levada");
+        assert_eq!(quantas_levadas(5), "5 levadas");
+        // 💧 A à venda é sempre JPEG: o formato só aparece nela quando o das
+        // levadas é outro.
         assert_eq!(
-            frase_da_contagem(3, 5),
-            "3 levadas saem limpas · 5 com a marca d'água do site"
+            o_que_sai(Modo::Arquivos, FormatoDeSaida::Jpeg, false),
+            (
+                "sem marca d'água, em JPEG".to_string(),
+                "com a marca d'água do site".to_string()
+            )
         );
-        assert_eq!(frase_da_contagem(1, 0), "1 levada sai limpa");
-        assert_eq!(frase_da_contagem(0, 2), "2 com a marca d'água do site");
+        assert_eq!(
+            o_que_sai(Modo::Arquivos, FormatoDeSaida::Tiff, false).1,
+            "com a marca d'água, em JPEG"
+        );
+        assert_eq!(
+            o_que_sai(Modo::Fotolivro, FormatoDeSaida::Jpeg, true).1,
+            "ficam fora do livro"
+        );
         assert_eq!(data_por_extenso("2026-10-09"), "9 de outubro de 2026");
         assert_eq!(
             data_por_extenso("2026-10-09T12:00:00Z"),

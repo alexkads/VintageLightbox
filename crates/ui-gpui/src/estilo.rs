@@ -580,6 +580,32 @@ pub fn opcao_do_dialogo(id: impl Into<SharedString>, cx: &App) -> Stateful<Div> 
         .hover(move |s| s.bg(acento))
 }
 
+/// 📐 **Várias vistas no mesmo lugar**: todas entram na conta do tamanho e só a
+/// da vez aparece — a caixa fica sempre do tamanho da maior.
+///
+/// Dono, 10/10/2026: *"Eu não gosto quando a tela muda de tamanho com uma
+/// ação!"* — o diálogo de exportação crescia ao trocar de aba e ao aparecer um
+/// aviso. É uma grade de uma célula só; a vista que não é a da vez fica
+/// `invisible`: ocupa o lugar, não é pintada e não recebe clique (as visíveis
+/// vão por último, por cima).
+pub fn mesmo_lugar(vistas: impl IntoIterator<Item = (bool, gpui_kit::AnyElement)>) -> Div {
+    let mut vistas: Vec<_> = vistas.into_iter().collect();
+    vistas.sort_by_key(|(da_vez, _)| *da_vez);
+    div()
+        .grid()
+        .grid_cols(1)
+        .children(vistas.into_iter().map(|(da_vez, vista)| {
+            // Coluna flex: a vista ocupa a largura toda, e uma vista com
+            // `flex_1` (o lote no meio da caixa) ganha a altura da célula.
+            v_flex()
+                .col_start(1)
+                .row_start(1)
+                .min_w(px(0.))
+                .when(!da_vez, |d| d.invisible())
+                .child(vista)
+        }))
+}
+
 /// A linha dos botões do fim do diálogo (`DialogFooter`): à direita, 8 px entre
 /// eles.
 pub fn rodape_do_dialogo() -> Div {
