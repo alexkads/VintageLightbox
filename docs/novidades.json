@@ -1,11 +1,13 @@
 {
-  "versao": "0.1.141",
-  "titulo": "Fotolivro: os links funcionam mesmo quando a sessão não tem e-mail cadastrado.",
+  "versao": "0.1.142",
+  "titulo": "Exportar agora manda as fotos e o fotolivro direto para o WhatsApp do cliente.",
   "importante": false,
   "novidades": [
-    "Fotolivro (PDF): em sessão sem e-mail cadastrado, os links do livro — cada foto, \"Baixar todas as minhas fotos\", \"Comprar as disponíveis\" e \"Abrir minha galeria\" — agora abrem uma tela que pede o e-mail do cliente uma única vez e segue direto para as fotos. Antes caíam no login do site e a galeria não abria.",
-    "Depois que o cliente informa o e-mail pelo livro, ele passa a ser o e-mail da sessão: aparece aqui na sessão e o cliente começa a receber os avisos por e-mail.",
-    "O \"Copiar link\" continua pedindo o e-mail no balcão quando a sessão não tem um."
+    "Exportar: novo destino \"WhatsApp\", ao lado de \"Pasta\". Escolha a conversa em \"Enviar para\" — só aparece quem escreveu nas últimas 24 horas, com o tempo que resta, e o WhatsApp da sessão já vem escolhido — escreva uma legenda se quiser e clique em Enviar.",
+    "Vai o mesmo que a exportação gravaria: a foto levada sai limpa, a que está à venda sai com a marca d'água, e o fotolivro vai como um PDF só. O andamento, o \"Parar\" e o \"Tentar de novo\" são os de sempre.",
+    "Galeria da sessão: o botão direito numa foto agora abre o mesmo menu da tira de baixo (Revelar, Nota, Exportar, Levada no balcão, Rejeitar, Excluir).",
+    "Esse menu ganhou \"Enviar por WhatsApp…\", que abre a exportação já no destino WhatsApp.",
+    "O \"Exportar\" continua abrindo na pasta: o WhatsApp só entra quando você escolhe."
   ],
-  "por_que_atualizar": "Sem esta versão, o fotolivro exportado de uma sessão sem e-mail sai com links que o cliente não consegue abrir."
+  "por_que_atualizar": "Para mandar fotos e o fotolivro ao cliente pelo WhatsApp sem sair da sessão — sem exportar para uma pasta e anexar uma a uma no chatbot."
 }
