@@ -128,31 +128,3 @@ fim
 
 Para comparar máquinas basta salvar em cada uma: a aba **Comparar** lê o servidor. **Exportar** e
 **Importar** continuam para quem mede sem conta (ou para levar a sessão a outro lugar).
-
-## Comparar as APIs gráficas
-
-O botão **Comparar APIs gráficas** da janela Desempenho (pedido do dono em 9/out/2026, 0.1.128)
-revela a mesma foto sintética de 6000×4000 em **cada API da máquina** (DX12, Vulkan e OpenGL no
-Windows; Vulkan e OpenGL no Linux; Metal no Mac), em toda placa que cada uma enxerga, nos três
-tamanhos que a Revelação pede (rascunho do arrasto, 2560 ao soltar, a foto inteira). No Windows mede
-também a **subida ao DirectX 11** da janela, do jeito que o atlas do GPUI faz, e soma: motor + BGRA
-+ subida = um quadro do slider. A captura do Iniciar/Parar mede só a API em que o motor abriu.
-
-- Roda num **processo filho** do app (`--comparar-apis <arquivo>`): abrir uma API que o app não usa
-  carrega o driver dela, e um driver ruim derruba quem o carregou. O filho grava o resultado a cada
-  passo; se cair, o app salva o que veio e diz em que passo foi.
-- A sessão vai ao banco sozinha (computador e servidor), com `origem = comparar_apis`, uma métrica
-  por API × placa × tamanho (`revelacao_<tamanho>`) e por subida (`subida_dx11_<tamanho>`); o
-  resultado inteiro fica em `revelacoes_json`, e a aba Sessões refaz o relatório dele.
-- O código: `crates/revelacao-core/src/comparacao_de_apis.rs` (a medição) e
-  `crates/ui-gpui/src/desempenho/comparacao.rs` (o filho e a sessão).
-
-Para uma máquina sem o app, o mesmo em binário, que grava `medir-gpu-<data>.txt` ao lado:
-
-```bash
-cargo run --release -p revelacao-core --bin medir-gpu -- foto.jpg
-# o .exe para Windows, feito no Mac (o GPUI não entra, então o fxc não é preciso):
-cargo build --profile carga --target x86_64-pc-windows-gnu -p revelacao-core --bin medir-gpu
-```
-
-No Mac (M2 Pro, 9/out/2026): o quadro do rascunho em 3,6 ms, a foto inteira em 8,6 ms (`--release`).

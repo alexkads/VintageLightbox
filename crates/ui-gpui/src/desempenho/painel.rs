@@ -90,8 +90,6 @@ pub struct PainelDeDesempenho {
     comparacao: Vec<LinhaDeComparacao>,
     ja_importou: bool,
     tique: Option<Task<()>>,
-    /// A comparação das APIs gráficas em andamento, com o passo atual.
-    comparando: Option<String>,
 }
 
 impl Default for PainelDeDesempenho {
@@ -119,7 +117,6 @@ impl PainelDeDesempenho {
             comparacao: Vec::new(),
             ja_importou: false,
             tique: None,
-            comparando: None,
         }
     }
 
@@ -279,14 +276,7 @@ impl PainelDeDesempenho {
     // ── Banco ──
 
     fn salvar(&mut self, cx: &mut Context<Self>) {
-        if let Some(sessao) = self.sessao.clone() {
-            self.salvar_sessao(sessao, cx);
-        }
-    }
-
-    /// Grava uma sessão — a da captura, ou a de uma comparação das APIs.
-    fn salvar_sessao(&mut self, sessao: Arc<SessaoDeDesempenho>, cx: &mut Context<Self>) {
-        let Some(deposito) = deposito() else {
+        let (Some(sessao), Some(deposito)) = (self.sessao.clone(), deposito()) else {
             return;
         };
         let recebe = deposito.salvar(sessao.clone());
@@ -296,12 +286,7 @@ impl PainelDeDesempenho {
             let _ = painel.update(cx, |p, cx| {
                 match resposta {
                     Ok(destino) => {
-                        if p.sessao
-                            .as_ref()
-                            .is_some_and(|s| s.cabecalho.id == sessao.cabecalho.id)
-                        {
-                            p.salva = true;
-                        }
+                        p.salva = true;
                         // A fotografia do vigia desta sessão virou redundante.
                         if let Some(pasta) = super::vigia::pasta_dos_pendentes() {
                             let _ = std::fs::remove_file(
@@ -504,96 +489,6 @@ impl PainelDeDesempenho {
                 ),
                 Err(e) => p.avisar(format!("Não exportou: {e}"), true, cx),
             });
-        })
-        .detach();
-    }
-
-    /// **Comparar APIs gráficas**: a mesma revelação em cada API da máquina,
-    /// num processo filho (`comparacao`), e a sessão vai ao banco sozinha —
-    /// pedido do dono, 9/out/2026: *"Dentro do app"*, para o resultado do
-    /// balcão Windows chegar sem arquivo nenhum.
-    pub fn comparar_apis(&mut self, cx: &mut Context<Self>) {
-        if self.comparando.is_some() || super::ativa() {
-            return;
-        }
-        enum Recado {
-            Passo(String),
-            Fim(Result<Box<SessaoDeDesempenho>, String>),
-        }
-        let (envia, recebe) = std::sync::mpsc::channel::<Recado>();
-        let lancou = std::thread::Builder::new()
-            .name("desempenho: comparar APIs".into())
-            .spawn(move || {
-                let iniciada_em = chrono::Utc::now();
-                let comeco = std::time::Instant::now();
-                let passos = envia.clone();
-                let resultado = super::comparacao::rodar_no_filho(|passo| {
-                    let _ = passos.send(Recado::Passo(passo.to_string()));
-                });
-                let maquina = maquina::esperar(Duration::from_secs(5));
-                let fim = resultado.map(|r| {
-                    Box::new(super::comparacao::sessao(
-                        &r,
-                        iniciada_em,
-                        comeco.elapsed(),
-                        maquina.as_deref(),
-                    ))
-                });
-                let _ = envia.send(Recado::Fim(fim));
-            });
-        if let Err(erro) = lancou {
-            self.avisar(format!("A comparação não começou: {erro}"), true, cx);
-            return;
-        }
-        self.comparando = Some("começando".into());
-        self.avisar(
-            "Comparando as APIs gráficas (1 a 5 min). Deixe a Revelação parada enquanto isso: \
-             a GPU é a mesma.",
-            false,
-            cx,
-        );
-        cx.emit(MudouOEstado);
-        cx.spawn(async move |painel, cx| loop {
-            cx.background_executor()
-                .timer(Duration::from_millis(300))
-                .await;
-            let mut passo = None;
-            let mut fim = None;
-            while let Ok(recado) = recebe.try_recv() {
-                match recado {
-                    Recado::Passo(p) => passo = Some(p),
-                    Recado::Fim(f) => fim = Some(f),
-                }
-            }
-            let vivo = painel.update(cx, |p, cx| {
-                if let Some(passo) = passo {
-                    p.comparando = Some(passo);
-                    cx.notify();
-                }
-                match fim.take() {
-                    None => false,
-                    Some(Ok(sessao)) => {
-                        p.comparando = None;
-                        let sessao: Arc<SessaoDeDesempenho> = Arc::from(sessao);
-                        p.vendo = Some(sessao.clone());
-                        p.aba = Aba::Sessoes;
-                        p.salvar_sessao(sessao, cx);
-                        cx.emit(MudouOEstado);
-                        cx.notify();
-                        true
-                    }
-                    Some(Err(erro)) => {
-                        p.comparando = None;
-                        p.avisar(format!("A comparação não rodou: {erro}"), true, cx);
-                        cx.emit(MudouOEstado);
-                        true
-                    }
-                }
-            });
-            // `Err`: a janela do painel morreu; `Ok(true)`: terminou.
-            if !matches!(vivo, Ok(false)) {
-                break;
-            }
         })
         .detach();
     }
@@ -1097,24 +992,17 @@ impl PainelDeDesempenho {
                             .overflow_hidden()
                             .child(format!("{} · {}", c.gpu_nome, c.gpu_backend)),
                     )
-                    // A comparação das APIs não tem quadros: FPS e p95 dela
-                    // seriam zeros que parecem medida.
-                    .when(c.origem == super::comparacao::ORIGEM, |d| {
-                        d.child(div().w(px(240.)).child("comparação das APIs gráficas"))
-                    })
-                    .when(c.origem != super::comparacao::ORIGEM, |d| {
-                        d.child(
-                            div()
-                                .w(px(70.))
-                                .child(format!("{:.1} FPS", c.fps_interacao)),
-                        )
-                        .child(div().w(px(80.)).child(format!("p95 {}", ms(c.p95_ms))))
-                        .child(
-                            div()
-                                .w(px(70.))
-                                .child(format!("{} acima", c.acima_do_orcamento)),
-                        )
-                    })
+                    .child(
+                        div()
+                            .w(px(70.))
+                            .child(format!("{:.1} FPS", c.fps_interacao)),
+                    )
+                    .child(div().w(px(80.)).child(format!("p95 {}", ms(c.p95_ms))))
+                    .child(
+                        div()
+                            .w(px(70.))
+                            .child(format!("{} acima", c.acima_do_orcamento)),
+                    )
                     .child(
                         div()
                             .text_color(t.muted_foreground)
@@ -1308,9 +1196,7 @@ impl Render for PainelDeDesempenho {
                 ))
         });
 
-        let estado = if let Some(passo) = &self.comparando {
-            format!("Comparando APIs · {passo}")
-        } else if ativa {
+        let estado = if ativa {
             format!(
                 "● Gravando {}",
                 duracao_legivel(super::duracao().map_or(0.0, |d| d.as_secs_f64() * 1000.0))
@@ -1377,17 +1263,6 @@ impl Render for PainelDeDesempenho {
                     .on_click(cx.listener(|p, _, _, cx| p.copiar(cx))),
             )
             .child(
-                crate::estilo::botao_contorno("desempenho-comparar-apis", cx)
-                    .child(Icon::new(Icone::Layers).size(px(14.)))
-                    .label("Comparar APIs gráficas")
-                    .tooltip(
-                        "Revela a mesma foto em cada API gráfica desta máquina (no Windows: \
-                         DX12, Vulkan, OpenGL e a subida ao DX11 da janela) e salva no banco",
-                    )
-                    .disabled(ativa || self.comparando.is_some())
-                    .on_click(cx.listener(|p, _, _, cx| p.comparar_apis(cx))),
-            )
-            .child(
                 crate::estilo::botao_fantasma("desempenho-exportar", cx)
                     .child(Icon::new(Icone::Download).size(px(14.)))
                     .label("Exportar")
@@ -1432,12 +1307,7 @@ impl Render for PainelDeDesempenho {
                             .rounded(crate::tema::canto(10.))
                             .text_xs()
                             .when(ativa, |d| d.bg(t.danger.opacity(0.2)).text_color(t.danger))
-                            .when(!ativa && self.comparando.is_some(), |d| {
-                                d.bg(t.primary.opacity(0.2)).text_color(t.primary)
-                            })
-                            .when(!ativa && self.comparando.is_none(), |d| {
-                                d.bg(t.muted).text_color(t.muted_foreground)
-                            })
+                            .when(!ativa, |d| d.bg(t.muted).text_color(t.muted_foreground))
                             .child(estado),
                     )
                     .child(div().flex_1())

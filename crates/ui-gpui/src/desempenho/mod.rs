@@ -49,7 +49,6 @@
 //! ([`porta`]).
 
 pub mod coletor;
-pub mod comparacao;
 pub mod maquina;
 pub mod painel;
 pub mod porta;

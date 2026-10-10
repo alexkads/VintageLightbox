@@ -1,9 +1,9 @@
 {
-  "versao": "0.1.128",
-  "titulo": "Desempenho: comparar as APIs gráficas desta máquina com um clique.",
+  "versao": "0.1.127",
+  "titulo": "Exportar da sessão leva só as fotos marcadas.",
   "importante": false,
   "novidades": [
-    "Desempenho (rodapé): botão \"Comparar APIs gráficas\". Ele revela a mesma foto em cada API gráfica do computador (no Windows: DirectX 12, Vulkan e OpenGL, e também a subida da foto para a janela) e salva o resultado no banco sozinho. Leva de 1 a 5 minutos; deixe a Revelação parada enquanto isso."
+    "Sessão: o Exportar (botão e menu da foto) leva só as fotos marcadas na grade; sem marca, leva as do filtro em vigor. Antes ele abria com todas as fotos da sessão."
   ],
-  "por_que_atualizar": "Para medir, no próprio balcão, se a Revelação ficaria mais rápida em outra API gráfica."
+  "por_que_atualizar": "Para exportar exatamente as fotos que você marcou."
 }
