@@ -1,11 +1,12 @@
 {
-  "versao": "0.1.137",
-  "titulo": "Revelação: o \"Baixar JPEG\" virou \"Baixar como…\" e abre a exportação.",
+  "versao": "0.1.138",
+  "titulo": "Chatbot: a foto, o documento e o áudio que o cliente manda pelo WhatsApp aparecem na conversa, e o clipe anexa arquivo na resposta.",
   "importante": false,
   "novidades": [
-    "Revelação: o botão \"Baixar JPEG\" da barra agora se chama \"Baixar como…\" e abre a exportação já com a foto aberta — dá para escolher o formato (JPEG, PNG, TIFF ou WebP), a qualidade e a pasta, gerar o fotolivro e usar o \"Mostrar na pasta\". Antes ele gravava um JPEG direto na pasta Downloads, sem escolha nenhuma.",
-    "Revelação: a foto baixada por ali segue a regra da exportação — a levada sai inteira e limpa, com o que está na tela, mesmo sem salvar; a que não foi levada sai com a marca d'água do site, como está na galeria.",
-    "Revelação: o aviso \"o arquivo sai como está na galeria\" só aparece para a foto não levada que tem revelação ainda não salva."
+    "Chatbot: a foto que o cliente manda pelo WhatsApp aparece dentro da conversa. Documento (um PDF de comprovante, por exemplo), áudio e vídeo aparecem como um cartão com o nome e o tamanho. Um clique abre o arquivo no programa do computador. Antes essas mensagens nem chegavam ao painel.",
+    "Chatbot: o áudio mostra embaixo o que foi dito (a transcrição), para ler sem precisar ouvir. O áudio que ainda não tem texto traz o botão \"Transcrever\". A transcrição depende do serviço estar ligado no site; sem ele, o botão avisa.",
+    "Chatbot: o clipe ao lado do campo de mensagem anexa foto (JPG ou PNG), áudio, PDF, Word, Excel, PowerPoint ou texto na conversa do WhatsApp. O que estiver escrito vai como legenda; áudio vai sem legenda, e o texto fica no campo para a próxima mensagem.",
+    "Chatbot: o anexo segue a janela de 24 horas do WhatsApp, como o texto: com a janela fechada o campo e o clipe saem da tela e o motivo aparece no lugar."
   ],
-  "por_que_atualizar": "Quem baixava a foto pela Revelação recebia sempre um JPEG na pasta Downloads, e a foto não levada saía sem a marca d'água."
+  "por_que_atualizar": "Sem esta versão, a foto, o comprovante e o áudio que o cliente manda pelo WhatsApp aparecem só como uma linha de texto (\"📷 Foto\"), sem abrir, e não há como anexar arquivo na resposta."
 }
