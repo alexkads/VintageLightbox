@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.134",
+    "data": "2026-10-10",
+    "titulo": "Revelação: a caixa do \"Sincronizar\" ficou mais clara.",
+    "importante": false,
+    "novidades": [
+      "Revelação › Sincronizar N: a caixa foi redesenhada. Cada grupo de ajustes virou um cartão com caixa de seleção e uma linha dizendo o que ele leva, em duas colunas — o que vai fica aceso.",
+      "O Enquadramento fica à parte, embaixo, e avisa quando ligado que o recorte desta foto vale para todas.",
+      "A caixa mostra quantos grupos estão marcados e tem o botão \"Marcar tudo\" / \"Desmarcar tudo\". Sem nada marcado, o \"Sincronizar N\" fica desligado."
+    ],
+    "por_que_atualizar": "Para escolher o que sincronizar com mais clareza e menos chance de levar o que não devia."
+  },
+  {
     "versao": "0.1.133",
     "data": "2026-10-10",
     "titulo": "Fotolivro: o botão de baixar mostra quantas fotos são do cliente.",
