@@ -79,6 +79,11 @@ pub struct Midia {
     pub com_legenda: bool,
     /// 🎤 `None` é "ainda não transcrito"; `Some("")` é áudio sem fala.
     pub transcricao: Option<String>,
+    /// O arquivo já está no armazenamento do site. Sem isso o balão **não** o
+    /// pede sozinho: cada pedido vira um pedido à Meta com o token de todos
+    /// os canais, e uma conversa com dez fotos recusadas virava dez recusas a
+    /// cada releitura (2026-10-10). O clique em "abrir" ainda tenta.
+    pub guardada: bool,
 }
 
 impl Midia {
@@ -97,6 +102,7 @@ impl Midia {
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
             transcricao: texto("transcricao"),
+            guardada: texto("chave").is_some_and(|chave| !chave.trim().is_empty()),
         })
     }
 
@@ -107,11 +113,17 @@ impl Midia {
             .unwrap_or_else(|| self.tipo.rotulo().to_string())
     }
 
-    /// A segunda linha do cartão: `"1,2 MB · abrir"`.
+    /// A segunda linha do cartão: `"1,2 MB · abrir"` — ou, enquanto a Meta
+    /// não entregou o arquivo, `"ainda não baixado · tentar abrir"`.
     pub fn detalhe(&self) -> String {
+        let gesto = if self.guardada {
+            "abrir"
+        } else {
+            "ainda não baixado · tentar abrir"
+        };
         match self.tamanho {
-            Some(tamanho) => format!("{} · abrir", formatar_tamanho(tamanho)),
-            None => "abrir".to_string(),
+            Some(tamanho) => format!("{} · {gesto}", formatar_tamanho(tamanho)),
+            None => gesto.to_string(),
         }
     }
 
@@ -401,6 +413,14 @@ mod testes {
         assert_eq!(midia.transcricao, None);
         assert_eq!(midia.titulo(), "Foto");
         assert_eq!(midia.detalhe(), "117 kB · abrir");
+        assert!(midia.guardada);
+
+        // 🚨 Sem `chave` a Meta ainda não entregou o arquivo: o cartão diz
+        // isso, e o balão não pede a foto sozinho.
+        let pendente = json!({ "midia": { "tipo": "image", "chave": null } });
+        let pendente = Midia::da_mensagem(&pendente).unwrap();
+        assert!(!pendente.guardada);
+        assert_eq!(pendente.detalhe(), "ainda não baixado · tentar abrir");
 
         let audio = json!({ "midia": {
             "tipo": "audio", "mime": "audio/ogg; codecs=opus", "transcricao": ""
@@ -445,6 +465,7 @@ mod testes {
             tamanho: None,
             com_legenda: false,
             transcricao: None,
+            guardada: true,
         };
         assert_eq!(
             documento.nome_para_abrir("0199aaaa-bbbb", None),
@@ -466,6 +487,7 @@ mod testes {
             tamanho: None,
             com_legenda: false,
             transcricao: None,
+            guardada: true,
         };
         assert_eq!(
             audio.nome_para_abrir("0199aaaa-bbbb", Some("audio/ogg; codecs=opus")),

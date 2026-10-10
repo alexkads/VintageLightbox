@@ -24,6 +24,7 @@ use gpui_kit::{
     div, prelude::*, px, rgb, AnyElement, Context, FontWeight, Hsla, SharedString, Window,
 };
 
+use super::formatacao;
 use super::midia::{self, Midia, TipoDeMidia};
 use super::modelo::{self, Canal, Conversa, FiltroDeCanal, Mensagem, Status, Urgencia};
 use super::tela::{Chatbot, Dialogo, Miniatura, Pendente};
@@ -606,7 +607,16 @@ impl Chatbot {
                                 div()
                                     .truncate()
                                     .text_color(apagado)
-                                    .child(conversa.previa.clone().unwrap_or_else(|| "—".into())),
+                                    // ✍️ Sem as marcas do WhatsApp: a prévia é uma
+                                    // linha, e `*Até 2 pessoas:*` com os
+                                    // asteriscos não é o que o cliente leu.
+                                    .child(match (&conversa.previa, conversa.chave.canal) {
+                                        (Some(previa), Canal::WhatsApp) => {
+                                            formatacao::sem_marcas(previa)
+                                        }
+                                        (Some(previa), _) => previa.clone(),
+                                        (None, _) => "—".into(),
+                                    }),
                             )
                             .child(
                                 h_flex()
@@ -857,7 +867,7 @@ impl Chatbot {
                 }
             }
             let midia = self.midia_do_balao(mensagem, cx);
-            linhas.push(balao(mensagem, canal, midia).into_any_element());
+            linhas.push(balao(mensagem, canal, midia, (muted, apagado)).into_any_element());
             anterior = Some(mensagem);
         }
         for pendente in pendentes {
@@ -915,7 +925,9 @@ impl Chatbot {
         };
         let id = mensagem.id.clone();
 
-        if midia.tipo.aparece_no_balao() {
+        // A foto só aparece dentro do balão depois de guardada; antes disso é
+        // o cartão, e abrir é um gesto de quem atende.
+        if midia.tipo.aparece_no_balao() && midia.guardada {
             let lado = if midia.tipo == TipoDeMidia::Figurinha {
                 112.
             } else {
@@ -1156,7 +1168,12 @@ impl Chatbot {
             .content(
                 BubbleContent::new().when(!falhou, |c| c.bg(cor_do_canal(canal).opacity(0.15))),
             )
-            .child(pendente.texto.clone())
+            .child(texto_formatado(
+                format!("chatbot-texto-pendente-{id}"),
+                &pendente.texto,
+                canal,
+                (cx.theme().muted, cx.theme().muted_foreground),
+            ))
             .when_some(pendente.erro.clone(), |d, erro| {
                 d.child(
                     h_flex()
@@ -1670,7 +1687,81 @@ impl Chatbot {
 
 /// Um balão do histórico: do cliente à esquerda, do estúdio à direita, com a
 /// hora e — no WhatsApp — o selo de automática.
-fn balao(mensagem: &Mensagem, canal: Canal, midia: Option<AnyElement>) -> impl IntoElement {
+/// ✍️ O texto de um balão com a formatação do WhatsApp aplicada — negrito,
+/// itálico, riscado, código, lista, citação — e os links clicáveis.
+///
+/// Pedido do dono em 2026-10-10: *"o WhatsApp bot não obedece o padrão de
+/// formatação das mensagens"*. O painel mostrava `👥 *Até 2 pessoas:*` com os
+/// asteriscos; o cliente, no telefone, via em negrito. As regras moram em
+/// [`formatacao`], e são as mesmas do site.
+///
+/// Os outros canais não têm a marcação: neles só o link é reconhecido — e o
+/// link passa a abrir com um clique em todos, que antes era texto morto aqui.
+///
+/// `cores` é (o fundo do código, a cor da citação).
+fn texto_formatado(id: String, texto: &str, canal: Canal, cores: (Hsla, Hsla)) -> AnyElement {
+    let formatado = formatacao::formatar(texto, canal == Canal::WhatsApp);
+    if formatado.trechos.is_empty() {
+        return div().child(formatado.texto).into_any_element();
+    }
+    // O fundo do código sai da cor apagada, translúcida: o `muted` do tema
+    // some sobre o balão tingido do estúdio (visto na janela de verdade).
+    let (_, cor_da_citacao) = cores;
+    let fundo_do_codigo = cor_da_citacao.opacity(0.25);
+
+    let destaques: Vec<_> = formatado
+        .trechos
+        .iter()
+        .map(|trecho| {
+            let estilo = trecho.estilo;
+            (
+                trecho.faixa.clone(),
+                gpui_kit::HighlightStyle {
+                    font_weight: estilo.negrito.then_some(FontWeight::BOLD),
+                    font_style: (estilo.italico || estilo.citacao)
+                        .then_some(gpui_kit::FontStyle::Italic),
+                    strikethrough: estilo.riscado.then(|| gpui_kit::StrikethroughStyle {
+                        thickness: px(1.),
+                        ..Default::default()
+                    }),
+                    // O realce não troca a fonte: o código se distingue pelo
+                    // fundo, como um trecho marcado.
+                    background_color: estilo.mono.then_some(fundo_do_codigo),
+                    color: estilo.citacao.then_some(cor_da_citacao),
+                    underline: trecho.link.as_ref().map(|_| gpui_kit::UnderlineStyle {
+                        thickness: px(1.),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            )
+        })
+        .collect();
+    let (faixas, enderecos): (Vec<_>, Vec<_>) = formatado
+        .trechos
+        .iter()
+        .filter_map(|trecho| Some((trecho.faixa.clone(), trecho.link.clone()?)))
+        .unzip();
+
+    let estilizado = gpui_kit::StyledText::new(formatado.texto).with_highlights(destaques);
+    if enderecos.is_empty() {
+        return estilizado.into_any_element();
+    }
+    gpui_kit::InteractiveText::new(SharedString::from(id), estilizado)
+        .on_click(faixas, move |qual, _window, cx| {
+            if let Some(endereco) = enderecos.get(qual) {
+                cx.open_url(endereco);
+            }
+        })
+        .into_any_element()
+}
+
+fn balao(
+    mensagem: &Mensagem,
+    canal: Canal,
+    midia: Option<AnyElement>,
+    cores: (Hsla, Hsla),
+) -> impl IntoElement {
     let hora = mensagem.quando.map(modelo::hora).unwrap_or_default();
     let automacao = mensagem.rotulo_da_automacao();
     let saida = mensagem.saida;
@@ -1699,8 +1790,13 @@ fn balao(mensagem: &Mensagem, canal: Canal, midia: Option<AnyElement>) -> impl I
                     // só aparece quando é legenda de verdade: o rótulo
                     // ("📷 Foto") debaixo da própria foto é ruído.
                     .when_some(midia, |b, midia| b.child(midia))
-                    .when_some(mensagem.texto_do_balao().map(str::to_string), |b, texto| {
-                        b.child(texto)
+                    .when_some(mensagem.texto_do_balao(), |b, texto| {
+                        b.child(texto_formatado(
+                            format!("chatbot-texto-{}", mensagem.id),
+                            texto,
+                            canal,
+                            cores,
+                        ))
                     }),
             ),
         )

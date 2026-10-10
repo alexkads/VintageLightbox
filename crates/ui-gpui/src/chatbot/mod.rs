@@ -7,12 +7,14 @@
 //! | Peça | Papel |
 //! |---|---|
 //! | [`modelo`] | as regras do site em funções puras (lista, janela de 24 h, textos) |
+//! | [`formatacao`] | o negrito, o itálico, o riscado, o código e o link do WhatsApp |
 //! | [`midia`] | a foto, o documento e o áudio das conversas, e o anexo que sai daqui |
 //! | [`pedidos`] | cada gesto como pedido à API, com o caminho e o corpo do site |
 //! | [`tela`] | o estado, o tempo real e os gestos |
 //! | [`desenho`] | a tela |
 
 pub mod desenho;
+pub mod formatacao;
 pub mod midia;
 pub mod modelo;
 pub mod pedidos;

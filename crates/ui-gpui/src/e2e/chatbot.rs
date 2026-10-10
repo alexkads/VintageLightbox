@@ -1419,10 +1419,41 @@ fn a_foto_do_cliente_e_buscada_pelo_id_da_mensagem_e_aparece_no_balao(cx: &mut T
         assert_eq!(documento.texto_do_balao(), Some("segue o comprovante"));
     });
 
+    // 🚨 A foto que a Meta ainda não entregou (sem `chave`) **não** é pedida
+    // sozinha: fica o cartão, e o pedido só sai no clique.
+    let mut sem_arquivo = mensagens_com_midia();
+    sem_arquivo[0]["id"] = json!("m-pendente");
+    sem_arquivo[0]["midia"]["chave"] = Value::Null;
+    e.site.responder_json(
+        "wa-conversas",
+        Ok(pagina(vec![conversa_da_ana(false)], sem_arquivo, 1)),
+    );
+    chatbot(&e, cx, |t, _w, cx| t.recarregar(cx));
+    e.esperar(cx);
+    assert!(
+        !crus(&e).iter().any(|p| p.caminho.contains("m-pendente")),
+        "a foto pendente não é pedida sozinha"
+    );
+    assert!(desenhado(&e, cx, "chatbot-midia-m-pendente"));
+    clicar(&e, cx, "chatbot-midia-m-pendente");
+    e.esperar(cx);
+    assert!(crus(&e)
+        .iter()
+        .any(|p| p.caminho == "/whatsapp/messages/m-pendente/midia"));
+    e.site.responder_json(
+        "wa-conversas",
+        Ok(pagina(
+            vec![conversa_da_ana(false)],
+            mensagens_com_midia(),
+            1,
+        )),
+    );
+    let pedidas = crus(&e).len();
+
     // Reler a conversa não baixa a mesma foto de novo.
     chatbot(&e, cx, |t, _w, cx| t.recarregar(cx));
     e.esperar(cx);
-    assert_eq!(crus(&e).len(), 1);
+    assert_eq!(crus(&e).len(), pedidas);
 }
 
 /// O clique no cartão baixa o arquivo, grava com o nome que escolhe o

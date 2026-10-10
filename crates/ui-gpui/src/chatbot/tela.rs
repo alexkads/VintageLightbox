@@ -1297,7 +1297,9 @@ impl Chatbot {
             .filter(|m| {
                 m.midia
                     .as_ref()
-                    .is_some_and(|midia| midia.tipo.aparece_no_balao())
+                    // Só a que já está guardada: a que a Meta ainda não
+                    // entregou espera o clique — ver `Midia::guardada`.
+                    .is_some_and(|midia| midia.tipo.aparece_no_balao() && midia.guardada)
                     && !self.miniaturas.contains_key(&m.id)
             })
             .map(|m| m.id)
