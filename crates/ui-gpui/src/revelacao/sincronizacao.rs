@@ -132,23 +132,25 @@ impl Grupo {
         }
     }
 
-    /// O que ele descreve, em uma linha — some quando for óbvio.
-    pub fn detalhe(self) -> Option<&'static str> {
+    /// O que ele leva, em uma linha.
+    ///
+    /// 📏 Todo grupo tem a sua: na caixa eles são cartões numa grade, e um
+    /// cartão sem a segunda linha ficava mais baixo que o vizinho.
+    pub fn detalhe(self) -> &'static str {
         match self {
-            Grupo::CurvaPorPonto => Some("os quatro canais"),
-            Grupo::Painel(Painel::Hsl) => Some("cor, luminância e matiz das oito faixas"),
+            Grupo::Painel(Painel::Basico) => "balanço de branco, tom e presença",
+            Grupo::Painel(Painel::CurvaDeTons) => "realces, claros, escuros e sombras",
+            Grupo::CurvaPorPonto => "os quatro canais",
+            Grupo::Painel(Painel::Hsl) => "cor, luminância e matiz das oito faixas",
             Grupo::PretoEBranco | Grupo::Painel(Painel::PretoEBranco) => {
-                Some("conversão e mixer por cor")
+                "conversão e mixer por cor"
             }
-            Grupo::Painel(Painel::Detalhe) => Some("ruído e nitidez"),
-            Grupo::Painel(Painel::Lente) => Some("distorção e vinheta"),
-            Grupo::Calibracao | Grupo::Painel(Painel::Calibracao) => Some("os primários da câmera"),
-            Grupo::Painel(Painel::Tonalizacao) => Some("a cor das sombras e a das altas luzes"),
-            Grupo::Painel(Painel::Efeitos) => {
-                Some("as vinhetas pós-corte e do darktable, e o grão")
-            }
-            Grupo::Enquadramento => Some("giro, espelho, endireitar, perspectiva e recorte"),
-            Grupo::Painel(Painel::Basico) | Grupo::Painel(Painel::CurvaDeTons) => None,
+            Grupo::Painel(Painel::Detalhe) => "ruído e nitidez",
+            Grupo::Painel(Painel::Lente) => "distorção e vinheta",
+            Grupo::Calibracao | Grupo::Painel(Painel::Calibracao) => "os primários da câmera",
+            Grupo::Painel(Painel::Tonalizacao) => "a cor das sombras e a das altas luzes",
+            Grupo::Painel(Painel::Efeitos) => "as vinhetas pós-corte e do darktable, e o grão",
+            Grupo::Enquadramento => "giro, espelho, endireitar, perspectiva e recorte",
         }
     }
 

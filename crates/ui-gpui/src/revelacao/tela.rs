@@ -24,7 +24,7 @@ use gpui_kit::component::input::{InputEvent, InputState};
 use gpui_kit::component::select::{SelectEvent, SelectState};
 use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::{ActiveTheme, Disableable, Selectable, Sizable, WindowExt};
+use gpui_kit::component::{ActiveTheme, Disableable, Selectable, Sizable};
 use gpui_kit::AnimationExt;
 use gpui_kit::{
     canvas, div, prelude::*, px, AnyElement, Bounds, Context, Entity, MouseButton, MouseMoveEvent,
@@ -48,7 +48,7 @@ use super::persistencia::{self, Corte, Gravador};
 use super::presets::GuardaDePresets;
 use super::processador::{Ajustes, Pedido, Processador};
 use super::reposicao::APor;
-use super::sincronizacao::{self, Escolha, Grupo};
+use super::sincronizacao::{self, Escolha};
 use infrastructure::gpu_adjustments::ParametrosLocais;
 use infrastructure::transformacao;
 
@@ -68,6 +68,8 @@ mod perspectiva;
 mod predefinicoes;
 /// O bruto em resolução cheia quando o zoom passa da cópia.
 mod resolucao;
+// 🔁 A caixa do "Sincronizar N": as flags, em cartões.
+mod sincronizar;
 pub use local::Ferramenta;
 #[cfg(test)]
 pub use local::VistaLocal;
@@ -1268,127 +1270,6 @@ impl Revelacao {
             }
         }
         cx.notify();
-    }
-
-    /// A caixa do "Sincronizar N" — as flags do Lightroom, como no site
-    /// (`sincronizar-dialogo.tsx`, pedido do dono de 2026-09-05: *"coloque
-    /// flags, escolhe tudo e desmarcar algumas coisas"*).
-    ///
-    /// ⚠️ O diálogo é do `gpui-component`, e depende do `Root` na primeira
-    /// camada da janela — o mesmo aviso do diálogo de salvar preset.
-    pub fn abrir_sincronizacao(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let quantas = self.alvos_da_sincronizacao().len();
-        if quantas < 2 {
-            return;
-        }
-        // A escolha da última vez, lida do disco uma vez por abertura do app.
-        if self.escolha.is_none() {
-            self.escolha = Some(sincronizacao::ler());
-        }
-        let esta = cx.entity();
-
-        // O `AlertDialog` do gpui-kit 0.6 é o que o `Dialog::confirm()` do 0.5
-        // fazia: OK e Cancelar, sem o botão de fechar e sem fechar pelo véu.
-        window.open_alert_dialog(cx, move |dialogo, _window, cx| {
-            let escolha = esta.read(cx).escolha_da_sincronizacao();
-            let tudo = escolha.tudo();
-            let para_tudo = esta.clone();
-            let para_ok = esta.clone();
-
-            dialogo
-                .confirm()
-                // 🚨 O kit não tem português e escrevia "OK" e "Cancel" no meio
-                // de uma caixa toda em português (visto rodando o app,
-                // 27/set/2026). O botão diz o que faz, como no site.
-                .button_props(
-                    gpui_kit::component::dialog::DialogButtonProps::default()
-                        .ok_text(SharedString::from(format!("Sincronizar {quantas}")))
-                        .cancel_text("Cancelar")
-                        // 🚨 As propriedades entram inteiras, e o padrão delas
-                        // esconde o cancelar que o `confirm()` tinha ligado.
-                        .show_cancel(true),
-                )
-                .title(SharedString::from(format!("Sincronizar {quantas} fotos")))
-                .child(
-                    div().text_xs().child(
-                        "O que estiver marcado vai desta foto para as outras escolhidas na tira. \
-                         O resto fica como está em cada uma.",
-                    ),
-                )
-                .child(
-                    div()
-                        .id("sincronizar-tudo")
-                        .pt(px(8.))
-                        .cursor_pointer()
-                        .text_xs()
-                        .child(if tudo { "Desmarcar tudo" } else { "Marcar tudo" })
-                        .on_click(move |_ev, _window, cx| {
-                            para_tudo.update(cx, |tela, cx| {
-                                tela.escolha_mut().marcar_tudo(!tudo);
-                                cx.notify();
-                            });
-                        }),
-                )
-                .children(Grupo::TODOS.into_iter().map(|grupo| {
-                    let ligado = escolha.ligado(grupo);
-                    let para_alternar = esta.clone();
-                    div()
-                        .id(SharedString::from(format!("sincronizar-{}", grupo.chave())))
-                        .pt(px(4.))
-                        .cursor_pointer()
-                        .text_sm()
-                        .child(SharedString::from(format!(
-                            "{} {}",
-                            if ligado { "☑" } else { "☐" },
-                            grupo.rotulo()
-                        )))
-                        .children(grupo.detalhe().map(|detalhe| {
-                            div().pl(px(18.)).text_xs().child(detalhe)
-                        }))
-                        // 🚨 O único que costuma estar errado no destino, e a
-                        // caixa diz isso quando ele é ligado.
-                        .when(grupo == Grupo::Enquadramento && ligado, |item| {
-                            item.child(div().pl(px(18.)).text_xs().child(
-                                "O recorte desta foto vale para todas — confira se a composição é a mesma.",
-                            ))
-                        })
-                        .on_click(move |_ev, _window, cx| {
-                            para_alternar.update(cx, |tela, cx| {
-                                tela.escolha_mut().alternar(grupo);
-                                cx.notify();
-                            });
-                        })
-                }))
-                .child(div().pt(px(8.)).text_xs().child(
-                    // O texto do site (`sincronizar-dialogo.tsx`): sincronizar
-                    // copia a revelação, e quem leva à galeria é o "Salvar".
-                    "A revelação vai para cada foto marcada. Elas sobem para a galeria \
-                     quando você salvar.",
-                ))
-                // 🚨 **Fecha na hora, e devolve `false`.** Deixado à biblioteca,
-                // o gpui-kit 0.6 fecha com animação e só devolve o foco depois
-                // dela — nesse meio tempo o foco fica num diálogo que já saiu da
-                // tela, e a rede da raiz o apanha (o `sincronizar_e_zerar` acusou).
-                // O `close_dialog` direto devolve o foco no mesmo quadro.
-                .on_ok(move |_ev, window, cx| {
-                    para_ok.update(cx, |tela, cx| {
-                        let escolha = tela.escolha_da_sincronizacao();
-                        // Nada marcado é nada a fazer — o site desliga o botão;
-                        // aqui a caixa fecha sem sincronizar.
-                        if !escolha.tem_algo() {
-                            return;
-                        }
-                        sincronizacao::gravar(&escolha);
-                        cx.emit(PedidoDaRevelacao::Sincronizar);
-                    });
-                    window.close_dialog(cx);
-                    false
-                })
-                .on_cancel(|_ev, window, cx| {
-                    window.close_dialog(cx);
-                    false
-                })
-        });
     }
 
     fn mostrar_a_posicao(&mut self, window: &mut Window, cx: &mut Context<Self>) {

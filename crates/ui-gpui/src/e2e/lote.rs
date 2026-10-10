@@ -127,6 +127,109 @@ fn sincronizar_e_zerar_as_marcadas(cx: &mut TestAppContext) {
     assert_eq!(a.2.largura, Some(1.0), "o corte inteiro vai escrito");
 }
 
+/// 🪟 **A caixa do "Sincronizar N" em cartões** (dono, 10/out/2026: *"mais
+/// caprichado, usando o GPUI KIT"*): os grupos em duas colunas de cartões da
+/// mesma altura, o enquadramento de ponta a ponta, a caixa do mesmo tamanho
+/// com o alerta dele aceso, e o confirmar desligado sem nada marcado.
+#[gpui_kit::test]
+fn a_caixa_do_sincronizar_em_cartoes(cx: &mut TestAppContext) {
+    use super::chatbot::{clicar, quadro_novo};
+    use crate::revelacao::sincronizacao::Grupo;
+    use gpui_kit::component::WindowExt as _;
+
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    e.revelar_a_do_site(cx, "a");
+    e.revelacao(cx, |tela, _w, cx| tela.arrastar_slider(0, 1.0, cx));
+    e.esperar(cx);
+    e.teclar(cx, "cmd-a");
+    e.revelacao(cx, |tela, window, cx| tela.abrir_sincronizacao(window, cx));
+    // A caixa do kit desce animada: só depois dela as medidas valem.
+    e.esperar(cx);
+
+    let medir = |e: &super::Estudio, cx: &mut TestAppContext, alvo: &str| {
+        let alvo: &'static str = Box::leak(alvo.to_string().into_boxed_str());
+        quadro_novo(e, cx)
+            .debug_bounds(alvo)
+            .unwrap_or_else(|| panic!("{alvo} não está desenhado na caixa"))
+    };
+    let cartao = |grupo: Grupo| format!("sincronizar-{}", grupo.chave());
+    let ajustes: Vec<Grupo> = Grupo::TODOS
+        .into_iter()
+        .filter(|g| *g != Grupo::Enquadramento)
+        .collect();
+
+    // Duas colunas, na ordem do site lida em linha, e todo cartão da mesma
+    // altura e largura.
+    let primeiro = medir(&e, cx, &cartao(ajustes[0]));
+    for (i, grupo) in ajustes.iter().enumerate() {
+        let este = medir(&e, cx, &cartao(*grupo));
+        assert_eq!(este.size, primeiro.size, "{}", grupo.rotulo());
+        let par = medir(&e, cx, &cartao(ajustes[i - i % 2]));
+        assert_eq!(este.top(), par.top(), "{} na linha do par", grupo.rotulo());
+        assert_eq!(
+            este.left() > primeiro.left(),
+            i % 2 == 1,
+            "{} na coluna certa",
+            grupo.rotulo()
+        );
+    }
+    let ultimo = medir(&e, cx, &cartao(ajustes[ajustes.len() - 1]));
+    let enquadramento = medir(&e, cx, &cartao(Grupo::Enquadramento));
+    assert!(
+        enquadramento.top() > ultimo.bottom(),
+        "o enquadramento vem à parte"
+    );
+    assert_eq!(enquadramento.left(), primeiro.left());
+    assert_eq!(enquadramento.right(), ultimo.right(), "de ponta a ponta");
+
+    // 📏 Ligar o enquadramento acende o alerta sem a caixa mudar de tamanho.
+    let caixa = medir(&e, cx, "dialog-0");
+    assert!(!e.revelacao(cx, |tela, _w, _cx| tela
+        .escolha_da_sincronizacao()
+        .enquadramento));
+    clicar(&e, cx, &cartao(Grupo::Enquadramento));
+    assert!(e.revelacao(cx, |tela, _w, _cx| tela
+        .escolha_da_sincronizacao()
+        .enquadramento));
+    assert_eq!(
+        medir(&e, cx, "dialog-0"),
+        caixa,
+        "a caixa não muda de tamanho"
+    );
+
+    // Tudo marcado: o atalho desmarca, e sem nada marcado nem o botão nem o
+    // Enter sincronizam — a caixa fica.
+    clicar(&e, cx, "sincronizar-tudo");
+    assert!(!e.revelacao(cx, |tela, _w, _cx| tela
+        .escolha_da_sincronizacao()
+        .tem_algo()));
+    assert_eq!(medir(&e, cx, "dialog-0"), caixa, "nem ao desmarcar tudo");
+    let antes = e.gravador.gravado().len();
+    clicar(&e, cx, "sincronizar-confirmar");
+    e.teclar(cx, "enter");
+    e.esperar(cx);
+    assert!(e.app(cx, |_app, window, cx| window.has_active_dialog(cx)));
+    assert_eq!(
+        e.gravador.gravado().len(),
+        antes,
+        "nada marcado, nada gravado"
+    );
+
+    // Só o Básico, e o botão da caixa sincroniza e fecha.
+    clicar(&e, cx, &cartao(ajustes[0]));
+    clicar(&e, cx, "sincronizar-confirmar");
+    e.esperar(cx);
+    assert!(!e.app(cx, |_app, window, cx| window.has_active_dialog(cx)));
+    assert!(
+        e.gravador
+            .gravado()
+            .iter()
+            .any(|(id, ajustes, _)| id == "site:b" && ajustes.exposure == 1.0),
+        "a exposição desta foto foi para a b"
+    );
+    e.teclas_vivas(cx);
+}
+
 /// 🎬 **A comprada não se revela**: abre, mostra, e nada dela vai ao banco
 /// nem ao site — nem pelo Enquadrar do teclado, nem pelo Salvar.
 #[gpui_kit::test]
