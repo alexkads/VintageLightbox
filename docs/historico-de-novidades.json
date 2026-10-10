@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.141",
+    "data": "2026-10-10",
+    "titulo": "Fotolivro: os links funcionam mesmo quando a sessão não tem e-mail cadastrado.",
+    "importante": false,
+    "novidades": [
+      "Fotolivro (PDF): em sessão sem e-mail cadastrado, os links do livro — cada foto, \"Baixar todas as minhas fotos\", \"Comprar as disponíveis\" e \"Abrir minha galeria\" — agora abrem uma tela que pede o e-mail do cliente uma única vez e segue direto para as fotos. Antes caíam no login do site e a galeria não abria.",
+      "Depois que o cliente informa o e-mail pelo livro, ele passa a ser o e-mail da sessão: aparece aqui na sessão e o cliente começa a receber os avisos por e-mail.",
+      "O \"Copiar link\" continua pedindo o e-mail no balcão quando a sessão não tem um."
+    ],
+    "por_que_atualizar": "Sem esta versão, o fotolivro exportado de uma sessão sem e-mail sai com links que o cliente não consegue abrir."
+  },
+  {
     "versao": "0.1.140",
     "data": "2026-10-10",
     "titulo": "Chatbot: o áudio do WhatsApp toca no balcão, o vídeo aparece pela capa, e o anexo sai como foto, vídeo ou documento.",

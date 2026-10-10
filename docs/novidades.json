@@ -1,12 +1,11 @@
 {
-  "versao": "0.1.140",
-  "titulo": "Chatbot: o áudio do WhatsApp toca no balcão, o vídeo aparece pela capa, e o anexo sai como foto, vídeo ou documento.",
+  "versao": "0.1.141",
+  "titulo": "Fotolivro: os links funcionam mesmo quando a sessão não tem e-mail cadastrado.",
   "importante": false,
   "novidades": [
-    "Chatbot: o áudio que o cliente manda pelo WhatsApp toca aqui mesmo, pelo ▶ ao lado do cartão (■ para parar). O cartão continua abrindo o arquivo no programa do sistema.",
-    "Chatbot: o vídeo recebido aparece na conversa pela capa, com o ▶ por cima; o clique abre o vídeo no programa do sistema. O clipe também anexa vídeo (MP4 ou 3GP).",
-    "Chatbot: ao anexar foto ou vídeo, a tira oferece \"Enviar como\" — foto/vídeo (dentro da conversa, recomprimido pela Meta) ou documento (o arquivo original, com o nome e sem perder qualidade) —, como no WhatsApp do telefone.",
-    "Chatbot: o PDF do fotolivro enviado ao cliente pelo pós-venda passa a aparecer no histórico da conversa."
+    "Fotolivro (PDF): em sessão sem e-mail cadastrado, os links do livro — cada foto, \"Baixar todas as minhas fotos\", \"Comprar as disponíveis\" e \"Abrir minha galeria\" — agora abrem uma tela que pede o e-mail do cliente uma única vez e segue direto para as fotos. Antes caíam no login do site e a galeria não abria.",
+    "Depois que o cliente informa o e-mail pelo livro, ele passa a ser o e-mail da sessão: aparece aqui na sessão e o cliente começa a receber os avisos por e-mail.",
+    "O \"Copiar link\" continua pedindo o e-mail no balcão quando a sessão não tem um."
   ],
-  "por_que_atualizar": "Sem esta versão, o áudio e o vídeo do cliente não têm prévia no balcão, e a foto só sai recomprimida."
+  "por_que_atualizar": "Sem esta versão, o fotolivro exportado de uma sessão sem e-mail sai com links que o cliente não consegue abrir."
 }
