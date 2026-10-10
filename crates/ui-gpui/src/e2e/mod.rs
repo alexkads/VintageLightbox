@@ -377,6 +377,8 @@ pub(super) struct Estudio {
     pub acervo: Arc<AcervoDeMentira>,
     pub importador: Arc<ImportadorDeMentira>,
     pub seletor_de_fotos: Arc<SeletorDeFotosDeMentira>,
+    /// O seletor de arquivo do sistema — a marca d'água e o anexo do chatbot.
+    pub seletor: Arc<SeletorDeMentira>,
     pub exportador: Arc<ExportadorDeMentira>,
     pub folha: Arc<FolhaDeMentira>,
     pub guarda: Arc<GuardaDeMentira>,
@@ -463,6 +465,7 @@ pub(super) fn abrir_o_app(cx: &mut TestAppContext, cenario: Cenario) -> Estudio 
     } else {
         ImportadorDeMentira::default()
     });
+    let seletor = Arc::new(SeletorDeMentira::default());
     let seletor_de_fotos = Arc::new(SeletorDeFotosDeMentira::escolhe(&[
         "/cartao/DSC_201.jpg",
         "/cartao/DSC_202.jpg",
@@ -489,7 +492,7 @@ pub(super) fn abrir_o_app(cx: &mut TestAppContext, cenario: Cenario) -> Estudio 
         escolha_de_presets: escolha,
         explorador: Arc::new(ExploradorDeMentira::default()),
         importador: importador.clone(),
-        seletor: Arc::new(SeletorDeMentira::default()),
+        seletor: seletor.clone(),
         seletor_de_fotos: seletor_de_fotos.clone(),
         atualizador: Arc::new(AtualizadorDeMentira::default()),
         acervo_de_arquivos: Arc::new(
@@ -533,6 +536,7 @@ pub(super) fn abrir_o_app(cx: &mut TestAppContext, cenario: Cenario) -> Estudio 
         acervo,
         importador,
         seletor_de_fotos,
+        seletor,
         exportador,
         folha,
         guarda,

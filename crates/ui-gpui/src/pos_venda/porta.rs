@@ -152,6 +152,12 @@ pub enum Recado {
         rotulo: &'static str,
         resultado: Result<serde_json::Value, String>,
     },
+    /// A resposta de [`Publicador::pedir_cru`]: os bytes e o tipo que o site
+    /// declarou para eles.
+    Cru {
+        rotulo: &'static str,
+        resultado: Result<domain::services::pos_venda::RespostaDoPedido, String>,
+    },
 }
 
 impl Recado {
@@ -198,6 +204,27 @@ impl PedidoJson {
             metodo,
             caminho: caminho.into(),
             corpo: Some(corpo),
+        }
+    }
+}
+
+/// Um pedido à API cujo corpo ou cuja resposta não é JSON — baixar a mídia de
+/// uma conversa, subir um anexo. O irmão de [`PedidoJson`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct PedidoCru {
+    pub rotulo: &'static str,
+    pub metodo: &'static str,
+    pub caminho: String,
+    pub corpo: Option<domain::services::pos_venda::CorpoDoPedido>,
+}
+
+impl PedidoCru {
+    pub fn baixar(rotulo: &'static str, caminho: impl Into<String>) -> Self {
+        Self {
+            rotulo,
+            metodo: "GET",
+            caminho: caminho.into(),
+            corpo: None,
         }
     }
 }
@@ -298,6 +325,16 @@ pub trait Publicador: Send + Sync + 'static {
         let _ = canal.send(Recado::Json {
             rotulo: pedido.rotulo,
             resultado: Err("este publicador não atende pedido JSON".into()),
+        });
+    }
+
+    /// Um pedido de arquivo em nome da conta — baixar ou subir. Responde
+    /// [`Recado::Cru`] com o mesmo `rotulo`.
+    fn pedir_cru(&self, sessao: Sessao, pedido: PedidoCru, canal: Sender<Recado>) {
+        let _ = sessao;
+        let _ = canal.send(Recado::Cru {
+            rotulo: pedido.rotulo,
+            resultado: Err("esta montagem não atende pedido de arquivo".into()),
         });
     }
 
@@ -771,6 +808,19 @@ impl Publicador for PublicadorDaApi {
                 .pedir_json(&sessao, pedido.metodo, &pedido.caminho, pedido.corpo)
                 .await;
             let _ = canal.send(Recado::Json {
+                rotulo: pedido.rotulo,
+                resultado,
+            });
+        });
+    }
+
+    fn pedir_cru(&self, sessao: Sessao, pedido: PedidoCru, canal: Sender<Recado>) {
+        let controlador = self.controlador.clone();
+        self.tokio.spawn(async move {
+            let resultado = controlador
+                .pedir_cru(&sessao, pedido.metodo, &pedido.caminho, pedido.corpo)
+                .await;
+            let _ = canal.send(Recado::Cru {
                 rotulo: pedido.rotulo,
                 resultado,
             });
@@ -1277,6 +1327,15 @@ pub mod mentira {
         /// A resposta de cada rótulo; sem resposta, o pedido falha com "sem rede".
         pub respostas_json:
             Mutex<std::collections::HashMap<&'static str, Result<serde_json::Value, String>>>,
+        /// Os pedidos de arquivo feitos, na ordem.
+        pub pedidos_crus: Mutex<Vec<PedidoCru>>,
+        /// A resposta de cada rótulo de arquivo; sem resposta, "sem rede".
+        pub respostas_cruas: Mutex<
+            std::collections::HashMap<
+                &'static str,
+                Result<domain::services::pos_venda::RespostaDoPedido, String>,
+            >,
+        >,
         /// O bruto que `original` devolve — `None` é "indisponível", como o
         /// padrão da porta.
         pub bruto: Mutex<Option<Vec<u8>>>,
@@ -1334,6 +1393,21 @@ pub mod mentira {
 
         pub fn pedidos_json(&self) -> Vec<PedidoJson> {
             self.pedidos_json.lock().expect("os pedidos").clone()
+        }
+
+        pub fn responder_cru(
+            &self,
+            rotulo: &'static str,
+            resposta: Result<domain::services::pos_venda::RespostaDoPedido, String>,
+        ) {
+            self.respostas_cruas
+                .lock()
+                .expect("as respostas")
+                .insert(rotulo, resposta);
+        }
+
+        pub fn pedidos_crus(&self) -> Vec<PedidoCru> {
+            self.pedidos_crus.lock().expect("os pedidos").clone()
         }
 
         pub fn links(&self) -> Vec<String> {
@@ -1516,6 +1590,19 @@ pub mod mentira {
     }
 
     impl Publicador for PublicadorDeMentira {
+        fn pedir_cru(&self, _sessao: Sessao, pedido: PedidoCru, canal: Sender<Recado>) {
+            let resultado = self
+                .respostas_cruas
+                .lock()
+                .expect("as respostas")
+                .get(pedido.rotulo)
+                .cloned()
+                .unwrap_or_else(|| Err("sem rede".into()));
+            let rotulo = pedido.rotulo;
+            self.pedidos_crus.lock().expect("os pedidos").push(pedido);
+            self.responder_ou_guardar(canal, Recado::Cru { rotulo, resultado });
+        }
+
         fn pedir_json(&self, _sessao: Sessao, pedido: PedidoJson, canal: Sender<Recado>) {
             let resultado = self
                 .respostas_json

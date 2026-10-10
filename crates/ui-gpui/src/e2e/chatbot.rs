@@ -18,9 +18,11 @@ use super::{abrir_o_app, Cenario, Estudio};
 use crate::app::Tela;
 use crate::chatbot::modelo::{Canal, Chave, FiltroDeCanal, Janela};
 use crate::chatbot::tela::Dialogo;
+use crate::chatbot::tela::Miniatura;
 use crate::chatbot::Chatbot;
-use crate::pos_venda::porta::PedidoJson;
+use crate::pos_venda::porta::{PedidoCru, PedidoJson};
 use crate::tempo_real::{Aviso, EstadoDaConexao, Sinal};
+use domain::services::pos_venda::RespostaDoPedido;
 
 const ANA: &str = "5554999991234";
 const CAIO: &str = "5554888880000";
@@ -1278,4 +1280,444 @@ fn sair_da_conta_fecha_os_fluxos_e_esquece_as_conversas(cx: &mut TestAppContext)
     e.app(cx, |app, _w, cx| app.entrar_na_conta(super::sessao(), cx));
     e.esperar(cx);
     assert_eq!(e.escuta.abertas(), 4, "entrou de novo: mais duas");
+}
+
+// ── 📎 A mídia das conversas ───────────────────────────────────────────────
+
+/// A conversa da Ana com uma foto, um documento com legenda, um áudio já
+/// transcrito e um por transcrever — o `midia` como a API o serializa.
+fn mensagens_com_midia() -> Vec<Value> {
+    let base = |id: &str, texto: &str, minutos: i64, midia: Value| {
+        json!({
+            "id": id, "recipient_id": ANA, "event": "received", "profile_name": "Ana",
+            "message_id": format!("wamid.{id}"), "message": texto, "timestamp": ha(minutos),
+            "is_edited": false, "is_automated": false, "automation_type": null,
+            "created_at": ha(minutos), "midia": midia
+        })
+    };
+    vec![
+        base(
+            "m-foto",
+            "📷 Foto",
+            50,
+            json!({
+                "tipo": "image", "id_na_meta": "1", "mime": "image/png", "nome": null,
+                "tamanho": 2048, "chave": "whatsapp/midia/x/m-foto.png", "com_legenda": false,
+                "transcricao": null
+            }),
+        ),
+        base(
+            "m-doc",
+            "segue o comprovante",
+            40,
+            json!({
+                "tipo": "document", "id_na_meta": "2", "mime": "application/pdf",
+                "nome": "comprovante do pix.pdf", "tamanho": 44441,
+                "chave": "whatsapp/midia/x/m-doc.pdf", "com_legenda": true, "transcricao": null
+            }),
+        ),
+        base(
+            "m-voz",
+            "🎤 Áudio",
+            30,
+            json!({
+                "tipo": "audio", "id_na_meta": "3", "mime": "audio/ogg; codecs=opus", "nome": null,
+                "tamanho": 10931, "chave": "whatsapp/midia/x/m-voz.ogg", "com_legenda": false,
+                "transcricao": "Oi, dá para remarcar para sábado?"
+            }),
+        ),
+        base(
+            "m-mudo",
+            "🎤 Áudio",
+            20,
+            json!({
+                "tipo": "audio", "id_na_meta": "4", "mime": "audio/ogg; codecs=opus", "nome": null,
+                "tamanho": 900, "chave": "whatsapp/midia/x/m-mudo.ogg", "com_legenda": false,
+                "transcricao": null
+            }),
+        ),
+    ]
+}
+
+/// Um PNG de verdade, pequeno — o que a rota de mídia devolveria.
+fn png_de_teste() -> Vec<u8> {
+    let imagem = image::RgbImage::from_pixel(8, 6, image::Rgb([200, 80, 40]));
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgb8(imagem)
+        .write_to(&mut bytes, image::ImageFormat::Png)
+        .expect("o PNG de teste");
+    bytes.into_inner()
+}
+
+fn abrir_a_conversa_com_midia(cx: &mut TestAppContext) -> Estudio {
+    let e = abrir_o_chatbot(cx);
+    e.site.responder_json(
+        "wa-conversas",
+        Ok(pagina(
+            vec![conversa_da_ana(false)],
+            mensagens_com_midia(),
+            1,
+        )),
+    );
+    e.site.responder_cru(
+        "midia",
+        Ok(RespostaDoPedido {
+            tipo: Some("image/png".into()),
+            bytes: png_de_teste(),
+        }),
+    );
+    chatbot(&e, cx, |t, _w, cx| t.recarregar(cx));
+    e.esperar(cx);
+    clicar(&e, cx, "chatbot-conversa-0");
+    e.esperar(cx);
+    e
+}
+
+fn crus(e: &Estudio) -> Vec<PedidoCru> {
+    e.site.pedidos_crus()
+}
+
+/// 🚨 O pedido do dono: *"quando o cliente envia uma imagem ou documento e não
+/// consigo visualizar"*. A foto é buscada pelo id da mensagem e aparece no
+/// balão; o rótulo "📷 Foto" some de debaixo dela.
+#[gpui_kit::test]
+fn a_foto_do_cliente_e_buscada_pelo_id_da_mensagem_e_aparece_no_balao(cx: &mut TestAppContext) {
+    let e = abrir_a_conversa_com_midia(cx);
+
+    let baixadas: Vec<String> = crus(&e).into_iter().map(|p| p.caminho).collect();
+    assert_eq!(
+        baixadas,
+        ["/whatsapp/messages/m-foto/midia"],
+        "só a foto é baixada sozinha — documento e áudio esperam o clique"
+    );
+
+    // A foto é decodificada fora da thread da interface: o relógio de teste
+    // não a apressa, então o cenário espera por ela de verdade.
+    let mut pronta = false;
+    for _ in 0..200 {
+        passo(cx);
+        pronta = chatbot(&e, cx, |t, _w, _cx| {
+            matches!(t.miniaturas.get("m-foto"), Some(Miniatura::Pronta(_)))
+        });
+        if pronta {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(pronta, "a foto do balão ficou pronta");
+    assert!(desenhado(&e, cx, "chatbot-foto-m-foto"));
+
+    chatbot(&e, cx, |t, _w, _cx| {
+        let (mensagens, _) = t.mensagens_da_aberta();
+        let foto = mensagens.iter().find(|m| m.id == "m-foto").unwrap();
+        assert_eq!(
+            foto.texto_do_balao(),
+            None,
+            "o rótulo some de debaixo da foto"
+        );
+        let documento = mensagens.iter().find(|m| m.id == "m-doc").unwrap();
+        assert_eq!(documento.texto_do_balao(), Some("segue o comprovante"));
+    });
+
+    // Reler a conversa não baixa a mesma foto de novo.
+    chatbot(&e, cx, |t, _w, cx| t.recarregar(cx));
+    e.esperar(cx);
+    assert_eq!(crus(&e).len(), 1);
+}
+
+/// O clique no cartão baixa o arquivo, grava com o nome que escolhe o
+/// programa e o entrega ao sistema.
+#[gpui_kit::test]
+fn o_documento_abre_no_programa_do_sistema_com_o_nome_dele(cx: &mut TestAppContext) {
+    let e = abrir_a_conversa_com_midia(cx);
+    e.site.responder_cru(
+        "midia",
+        Ok(RespostaDoPedido {
+            tipo: Some("application/pdf".into()),
+            bytes: b"%PDF-teste".to_vec(),
+        }),
+    );
+    clicar(&e, cx, "chatbot-midia-m-doc");
+    chatbot(&e, cx, |t, _w, _cx| {
+        assert!(t.abrindo.contains("m-doc"), "o cartão diz 'abrindo…'")
+    });
+    e.esperar(cx);
+
+    assert!(crus(&e)
+        .iter()
+        .any(|p| p.metodo == "GET" && p.caminho == "/whatsapp/messages/m-doc/midia"));
+    let aberto = chatbot(&e, cx, |t, _w, _cx| {
+        assert!(t.abrindo.is_empty());
+        t.abertos
+            .last()
+            .cloned()
+            .expect("um arquivo foi entregue ao sistema")
+    });
+    assert_eq!(
+        aberto.file_name().unwrap().to_string_lossy(),
+        "comprovante do pix.pdf"
+    );
+    assert_eq!(std::fs::read(&aberto).unwrap(), b"%PDF-teste");
+
+    // Sem rede: o toast diz, e nada fica "abrindo" para sempre.
+    e.site.responder_cru(
+        "midia",
+        Err("o site respondeu 503: a Meta não respondeu".into()),
+    );
+    clicar(&e, cx, "chatbot-midia-m-voz");
+    e.esperar(cx);
+    chatbot(&e, cx, |t, _w, _cx| assert!(t.abrindo.is_empty()));
+    assert!(toasts(&e, cx)
+        .iter()
+        .any(|(texto, erro)| *erro && texto == "a Meta não respondeu"));
+}
+
+/// 🎤 O áudio transcrito mostra o texto; o que não foi, o botão — que pede a
+/// transcrição pelo id da mensagem e relê a conversa.
+#[gpui_kit::test]
+fn o_audio_mostra_a_transcricao_ou_o_botao_que_a_pede(cx: &mut TestAppContext) {
+    let e = abrir_a_conversa_com_midia(cx);
+    chatbot(&e, cx, |t, _w, _cx| {
+        let (mensagens, _) = t.mensagens_da_aberta();
+        let voz = mensagens.iter().find(|m| m.id == "m-voz").unwrap();
+        assert_eq!(
+            voz.midia.as_ref().unwrap().transcricao.as_deref(),
+            Some("Oi, dá para remarcar para sábado?")
+        );
+    });
+    assert!(desenhado(&e, cx, "chatbot-transcrever-m-mudo"));
+
+    e.site
+        .responder_json("transcrita", Ok(json!({"transcricao": "pode ser às 15h?"})));
+    let antes = leituras_da_lista(&e);
+    clicar(&e, cx, "chatbot-transcrever-m-mudo");
+    chatbot(&e, cx, |t, _w, _cx| {
+        assert!(
+            t.transcrevendo.contains("m-mudo"),
+            "o botão vira 'Transcrevendo…'"
+        )
+    });
+    e.esperar(cx);
+
+    assert!(caminhos(&e)
+        .iter()
+        .any(|c| c == "POST /whatsapp/messages/m-mudo/transcricao"));
+    chatbot(&e, cx, |t, _w, _cx| assert!(t.transcrevendo.is_empty()));
+    assert_eq!(
+        leituras_da_lista(&e),
+        antes + 1,
+        "o texto chega com a releitura da conversa"
+    );
+
+    // Sem a chave do serviço: a frase do servidor vai inteira para o toast.
+    e.site.responder_json(
+        "transcrita",
+        Err(
+            "o site respondeu 503: A transcrição ainda não foi ligada: falta a chave do serviço."
+                .into(),
+        ),
+    );
+    clicar(&e, cx, "chatbot-transcrever-m-mudo");
+    e.esperar(cx);
+    assert!(toasts(&e, cx).iter().any(|(texto, erro)| *erro
+        && texto == "A transcrição ainda não foi ligada: falta a chave do serviço."));
+}
+
+/// 📎 O pedido do dono: *"enviar anexo para o cliente pelo bot do whatsapp"*.
+/// O clipe abre o seletor, a tira mostra o arquivo, e o "Enviar" sobe em
+/// multipart com o que estava escrito como legenda.
+#[gpui_kit::test]
+fn o_clipe_anexa_e_o_envio_sobe_em_multipart_com_a_legenda(cx: &mut TestAppContext) {
+    let e = abrir_o_chatbot(cx);
+    clicar(&e, cx, "chatbot-conversa-0");
+    let pasta = tempfile::tempdir().unwrap();
+    let arquivo = pasta.path().join("orçamento do ensaio.pdf");
+    std::fs::write(&arquivo, b"%PDF-orcamento").unwrap();
+    *e.seletor.escolha.lock().unwrap() = Some(arquivo.to_string_lossy().to_string());
+
+    clicar(&e, cx, "chatbot-clipe");
+    passo(cx);
+    chatbot(&e, cx, |t, _w, _cx| {
+        let anexo = t.anexo.as_ref().expect("o arquivo escolhido fica à vista");
+        assert_eq!(anexo.nome, "orçamento do ensaio.pdf");
+    });
+    assert!(desenhado(&e, cx, "chatbot-anexo"));
+
+    e.site.responder_cru(
+        "anexo-enviado",
+        Ok(RespostaDoPedido {
+            tipo: Some("application/json".into()),
+            bytes: br#"{"message_id":"wamid.doc"}"#.to_vec(),
+        }),
+    );
+    escrever(&e, cx, "segue o orçamento");
+    clicar(&e, cx, "chatbot-enviar");
+    chatbot(&e, cx, |t, _w, cx| {
+        assert!(t.anexo.is_none(), "a tira some: o anexo saiu");
+        assert_eq!(t.compositor.read(cx).value().as_ref(), "");
+        let pendentes = t.pendentes_da_aberta();
+        assert_eq!(pendentes.len(), 1);
+        assert_eq!(pendentes[0].texto, "segue o orçamento");
+    });
+    let antes = leituras_da_lista(&e);
+    e.esperar(cx);
+
+    let envio = crus(&e)
+        .into_iter()
+        .find(|p| p.caminho == "/whatsapp/messages/send-media")
+        .expect("o anexo subiu");
+    assert_eq!(envio.metodo, "POST");
+    let corpo = envio.corpo.expect("leva o arquivo");
+    assert!(corpo.tipo.starts_with("multipart/form-data; boundary="));
+    let texto = String::from_utf8_lossy(&corpo.bytes).to_string();
+    assert!(texto.contains(&format!("name=\"contact_id\"\r\n\r\n{ANA}")));
+    assert!(texto.contains("name=\"caption\"\r\n\r\nsegue o orçamento"));
+    assert!(texto.contains("filename=\"orçamento do ensaio.pdf\""));
+    assert!(texto.contains("%PDF-orcamento"));
+    assert!(
+        !caminhos(&e)
+            .iter()
+            .any(|c| c == "POST /whatsapp/messages/send"),
+        "a legenda vai com o arquivo, e não como outra mensagem"
+    );
+    chatbot(&e, cx, |t, _w, _cx| {
+        assert!(t.pendentes_da_aberta().is_empty())
+    });
+    assert_eq!(
+        leituras_da_lista(&e),
+        antes + 1,
+        "a conversa relê depois de enviar"
+    );
+}
+
+/// 🎤 Áudio não leva legenda: ele sai sozinho, e o que estava escrito fica no
+/// campo para a próxima mensagem.
+#[gpui_kit::test]
+fn o_audio_anexado_sai_sem_legenda_e_o_texto_fica_no_campo(cx: &mut TestAppContext) {
+    let e = abrir_o_chatbot(cx);
+    clicar(&e, cx, "chatbot-conversa-0");
+    let pasta = tempfile::tempdir().unwrap();
+    let arquivo = pasta.path().join("recado.ogg");
+    std::fs::write(&arquivo, b"OggS-voz").unwrap();
+    *e.seletor.escolha.lock().unwrap() = Some(arquivo.to_string_lossy().to_string());
+    clicar(&e, cx, "chatbot-clipe");
+    passo(cx);
+
+    escrever(&e, cx, "depois eu mando o texto");
+    // Recusado de propósito: o balão fica, e dá para conferir o que ele leva.
+    e.site.responder_cru(
+        "anexo-enviado",
+        Err("o site respondeu 409: Janela de 24h fechada".into()),
+    );
+    clicar(&e, cx, "chatbot-enviar");
+    e.esperar(cx);
+
+    chatbot(&e, cx, |t, _w, cx| {
+        assert_eq!(
+            t.compositor.read(cx).value().as_ref(),
+            "depois eu mando o texto"
+        );
+        let pendentes = t.pendentes_da_aberta();
+        assert_eq!(pendentes[0].texto, "🎤 Áudio");
+        // 🔑 A recusa da janela vem do servidor e fica no balão, com o motivo.
+        assert_eq!(pendentes[0].erro.as_deref(), Some("Janela de 24h fechada"));
+    });
+    let corpo = crus(&e)
+        .into_iter()
+        .find(|p| p.caminho == "/whatsapp/messages/send-media")
+        .and_then(|p| p.corpo)
+        .expect("o áudio subiu");
+    let texto = String::from_utf8_lossy(&corpo.bytes).to_string();
+    assert!(!texto.contains("caption"));
+    assert!(texto.contains("Content-Type: audio/ogg"));
+
+    // "Tentar de novo" manda o mesmo arquivo, sem abrir o seletor.
+    *e.seletor.escolha.lock().unwrap() = None;
+    e.site.responder_cru(
+        "anexo-enviado",
+        Ok(RespostaDoPedido {
+            tipo: None,
+            bytes: b"{}".to_vec(),
+        }),
+    );
+    clicar(&e, cx, "chatbot-tentar-1");
+    e.esperar(cx);
+    assert_eq!(
+        crus(&e)
+            .iter()
+            .filter(|p| p.caminho == "/whatsapp/messages/send-media")
+            .count(),
+        2
+    );
+    chatbot(&e, cx, |t, _w, _cx| {
+        assert!(t.pendentes_da_aberta().is_empty())
+    });
+}
+
+/// O que o WhatsApp não leva é recusado ao escolher, com o motivo — e a
+/// desistência do seletor não é erro.
+#[gpui_kit::test]
+fn arquivo_que_o_whatsapp_nao_leva_e_recusado_ao_escolher(cx: &mut TestAppContext) {
+    let e = abrir_o_chatbot(cx);
+    clicar(&e, cx, "chatbot-conversa-0");
+    let pasta = tempfile::tempdir().unwrap();
+    let arquivo = pasta.path().join("pagina.html");
+    std::fs::write(&arquivo, b"<html>").unwrap();
+    *e.seletor.escolha.lock().unwrap() = Some(arquivo.to_string_lossy().to_string());
+    clicar(&e, cx, "chatbot-clipe");
+    passo(cx);
+    chatbot(&e, cx, |t, _w, _cx| assert!(t.anexo.is_none()));
+    assert!(toasts(&e, cx)
+        .iter()
+        .any(|(texto, erro)| *erro && texto.contains("não vai pelo WhatsApp")));
+
+    let antes = toasts(&e, cx).len();
+    *e.seletor.escolha.lock().unwrap() = None;
+    clicar(&e, cx, "chatbot-clipe");
+    passo(cx);
+    chatbot(&e, cx, |t, _w, _cx| assert!(t.anexo.is_none()));
+    assert_eq!(toasts(&e, cx).len(), antes, "desistir não avisa nada");
+    assert!(crus(&e).is_empty(), "nada subiu");
+}
+
+/// 🕐 *"respeitando a minha janela"*: só o WhatsApp anexa, e com a janela de
+/// 24 h fechada o gesto não abre nem o seletor.
+#[gpui_kit::test]
+fn so_o_whatsapp_anexa_e_so_com_a_janela_aberta(cx: &mut TestAppContext) {
+    let e = abrir_o_chatbot(cx);
+    let pasta = tempfile::tempdir().unwrap();
+    let arquivo = pasta.path().join("foto.jpg");
+    std::fs::write(&arquivo, b"jpeg").unwrap();
+    *e.seletor.escolha.lock().unwrap() = Some(arquivo.to_string_lossy().to_string());
+
+    // O Instagram não tem rota de mídia: o gesto não faz nada.
+    clicar(&e, cx, "chatbot-conversa-1");
+    e.esperar(cx);
+    chatbot(&e, cx, |t, _w, cx| t.anexar(cx));
+    passo(cx);
+    chatbot(&e, cx, |t, _w, _cx| assert!(t.anexo.is_none()));
+
+    // O WhatsApp com a última mensagem do cliente há mais de 24 h.
+    let mut antiga = conversa_da_ana(false);
+    antiga["ultima_entrada"] = json!(ha(60 * 30));
+    e.site.responder_json(
+        "wa-conversas",
+        Ok(pagina(vec![antiga], mensagens_da_ana(2), 1)),
+    );
+    chatbot(&e, cx, |t, _w, cx| t.recarregar(cx));
+    e.esperar(cx);
+    clicar(&e, cx, "chatbot-conversa-0");
+    e.esperar(cx);
+    chatbot(&e, cx, |t, _w, cx| {
+        assert!(matches!(
+            t.janela_da_aberta(chrono::Utc::now()),
+            Janela::Fechada { .. }
+        ));
+        t.anexar(cx);
+    });
+    passo(cx);
+    chatbot(&e, cx, |t, _w, _cx| {
+        assert!(t.anexo.is_none(), "janela fechada: o seletor nem abre")
+    });
+    assert!(crus(&e).is_empty());
 }

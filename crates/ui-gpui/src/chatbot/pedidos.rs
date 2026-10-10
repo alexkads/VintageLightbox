@@ -9,8 +9,9 @@
 
 use serde_json::json;
 
+use super::midia;
 use super::modelo::{Canal, Chave, Status};
-use crate::pos_venda::porta::PedidoJson;
+use crate::pos_venda::porta::{PedidoCru, PedidoJson};
 
 /// Conversas por página do WhatsApp — o `POR_PAGINA` do site.
 pub const POR_PAGINA: u32 = 15;
@@ -156,6 +157,43 @@ pub fn enviar(chave: &Chave, texto: &str) -> PedidoJson {
             json!({ "contato": chave.id, "texto": texto }),
         ),
     }
+}
+
+/// 📎 "Enviar" com anexo — só o WhatsApp tem a rota. `multipart/form-data`
+/// com `contact_id`, `caption` (quando há) e `file`.
+///
+/// 🔑 A janela de 24 h é conferida **no servidor**, antes de o arquivo subir
+/// para a Meta, pela mesma função do texto; fechada, a resposta é `409` com o
+/// motivo. Aqui o compositor inteiro já some com a janela fechada.
+pub fn enviar_anexo(contato: &str, legenda: &str, nome: &str, bytes: &[u8]) -> PedidoCru {
+    PedidoCru {
+        rotulo: "anexo-enviado",
+        metodo: "POST",
+        caminho: "/whatsapp/messages/send-media".into(),
+        corpo: Some(midia::multipart(
+            contato,
+            legenda,
+            nome,
+            bytes,
+            &midia::limite_do_multipart(bytes),
+        )),
+    }
+}
+
+/// 📎 O arquivo de uma mensagem (`GET /whatsapp/messages/{id}/midia`).
+pub fn baixar_midia(mensagem_id: &str) -> PedidoCru {
+    PedidoCru::baixar("midia", midia::caminho_da_midia(mensagem_id))
+}
+
+/// 🎤 "Transcrever" (`POST /whatsapp/messages/{id}/transcricao`). O áudio que
+/// o cliente manda já chega transcrito; o botão cobre o que ficou sem texto.
+pub fn transcrever(mensagem_id: &str) -> PedidoJson {
+    PedidoJson::gravar(
+        "transcrita",
+        "POST",
+        format!("/whatsapp/messages/{}/transcricao", codificar(mensagem_id)),
+        json!({}),
+    )
 }
 
 /// A resposta rápida conta um uso depois de sair.
@@ -422,5 +460,35 @@ mod testes {
             cadastros(&["1".into()]).corpo.unwrap(),
             json!({"numeros": ["1"]})
         );
+    }
+
+    #[test]
+    fn a_midia_e_a_transcricao_saem_do_id_da_mensagem() {
+        let baixar = baixar_midia("m-1");
+        assert_eq!(
+            (baixar.metodo, baixar.caminho.as_str()),
+            ("GET", "/whatsapp/messages/m-1/midia")
+        );
+        assert_eq!(baixar.corpo, None);
+
+        let pedido = transcrever("m/1");
+        assert_eq!(pedido.metodo, "POST");
+        assert_eq!(pedido.caminho, "/whatsapp/messages/m%2F1/transcricao");
+    }
+
+    #[test]
+    fn o_anexo_sobe_em_multipart_para_a_rota_de_midia() {
+        let pedido = enviar_anexo("5554999", "segue", "orcamento.pdf", b"%PDF");
+        assert_eq!(
+            (pedido.metodo, pedido.caminho.as_str()),
+            ("POST", "/whatsapp/messages/send-media")
+        );
+        let corpo = pedido.corpo.expect("leva o arquivo");
+        assert!(corpo.tipo.starts_with("multipart/form-data; boundary="));
+        let texto = String::from_utf8_lossy(&corpo.bytes).to_string();
+        assert!(texto.contains("name=\"contact_id\"\r\n\r\n5554999"));
+        assert!(texto.contains("name=\"caption\"\r\n\r\nsegue"));
+        assert!(texto.contains("filename=\"orcamento.pdf\""));
+        assert!(texto.contains("%PDF"));
     }
 }

@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use domain::services::pos_venda::{
-    EstadoNoBalcao, Estudio, Galeria, GaleriaAberta, GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto,
-    MudancaDaGaleria, NovaGaleria, PosVendaApi, Produto, Sessao,
+    CorpoDoPedido, EstadoNoBalcao, Estudio, Galeria, GaleriaAberta, GaleriaDoPainel, LinkDeAcesso,
+    MudancaDaFoto, MudancaDaGaleria, NovaGaleria, PosVendaApi, Produto, RespostaDoPedido, Sessao,
 };
 use domain::value_objects::PhotoId;
 use domain::DomainError;
@@ -71,6 +71,21 @@ impl PosVendaController {
     ) -> Result<serde_json::Value, String> {
         self.api
             .pedir_json(sessao, metodo, caminho, corpo)
+            .await
+            .map_err(frase)
+    }
+
+    /// Baixar ou subir um arquivo em nome da conta — ver
+    /// [`PosVendaApi::pedir_cru`].
+    pub async fn pedir_cru(
+        &self,
+        sessao: &Sessao,
+        metodo: &str,
+        caminho: &str,
+        corpo: Option<CorpoDoPedido>,
+    ) -> Result<RespostaDoPedido, String> {
+        self.api
+            .pedir_cru(sessao, metodo, caminho, corpo)
             .await
             .map_err(frase)
     }

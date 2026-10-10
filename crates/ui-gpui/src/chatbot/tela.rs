@@ -21,8 +21,8 @@
 
 use crate::campo::TrocarValor as _;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -32,12 +32,15 @@ use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::{prelude::*, Context, Entity, EventEmitter, SharedString, Task, Window};
 use serde_json::Value;
 
+use super::midia::{self, ClasseDoAnexo, Midia};
 use super::modelo::{
     self, Cadastro, Canal, Chave, Conversa, EventoDoChatbot, FiltroDeCanal, Mensagem,
     PaginaDoWhatsApp, Status, Urgencia, Voucher,
 };
 use super::pedidos::{self, MudancaDaUrgencia};
-use crate::pos_venda::porta::{PedidoJson, Publicador, Recado};
+use crate::importacao::estado::Recado as RecadoDoSeletor;
+use crate::importacao::explorador::SeletorDePasta;
+use crate::pos_venda::porta::{PedidoCru, PedidoJson, Publicador, Recado};
 use crate::tempo_real::preferencias::{self, Preferencias};
 use crate::tempo_real::{Aviso, Escuta, EstadoDaConexao, Guarda, Sinal};
 
@@ -113,6 +116,82 @@ pub struct Pendente {
     pub texto: String,
     pub resposta: Option<String>,
     pub erro: Option<String>,
+    /// 📎 O anexo em voo. Fica aqui para o "Tentar de novo" mandar o **mesmo**
+    /// arquivo, sem pedir o seletor de novo.
+    pub anexo: Option<Anexo>,
+}
+
+/// 📎 O arquivo que o operador escolheu para mandar pela conversa.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Anexo {
+    pub nome: String,
+    pub bytes: Arc<Vec<u8>>,
+    /// O que vai como legenda — vazio até o "Enviar", e sempre vazio no áudio.
+    pub legenda: String,
+}
+
+/// A foto de um balão: a caminho, na tela, ou sem conseguir.
+#[derive(Clone)]
+pub enum Miniatura {
+    Baixando,
+    Pronta(Arc<gpui_kit::RenderImage>),
+    Falhou,
+}
+
+/// Para que o arquivo de uma mensagem está sendo baixado.
+#[derive(Debug, Clone)]
+enum Baixa {
+    /// A foto que aparece dentro do balão.
+    Miniatura,
+    /// O clique: gravar e entregar ao programa do sistema.
+    Abrir(Midia),
+}
+
+/// O lado maior da foto do balão, em pixels. O balão a desenha com metade
+/// disto; o dobro é para a tela de alta densidade.
+const LADO_DA_MINIATURA: u32 = 480;
+
+/// A foto do balão, a partir do arquivo que a API devolveu. Roda fora da
+/// thread da interface: decodificar um JPEG de 5 MB custa dezenas de
+/// milissegundos.
+///
+/// 🔑 **Sai quadrada, cortada pelo meio.** O balão reserva um quadro fixo
+/// antes de a foto chegar; com a proporção de cada foto, a conversa crescia
+/// quando ela chegava e o fim do histórico saía da tela (visto no app de
+/// verdade em 10/out/2026, com uma foto em pé). O clique abre a foto inteira.
+fn miniatura_de(bytes: &[u8]) -> Option<Arc<gpui_kit::RenderImage>> {
+    let imagem = image::load_from_memory(bytes).ok()?;
+    Some(crate::imagem::para_gpui(imagem.resize_to_fill(
+        LADO_DA_MINIATURA,
+        LADO_DA_MINIATURA,
+        image::imageops::FilterType::Triangle,
+    )))
+}
+
+/// Grava o arquivo numa pasta temporária do app e o entrega ao programa do
+/// sistema. Devolve onde ficou.
+fn gravar_e_abrir(nome: &str, bytes: &[u8]) -> Result<PathBuf, String> {
+    let pasta = std::env::temp_dir().join("vintagelightbox-midia");
+    std::fs::create_dir_all(&pasta)
+        .map_err(|e| format!("Não foi possível guardar o arquivo: {e}"))?;
+    let caminho = pasta.join(nome);
+    std::fs::write(&caminho, bytes)
+        .map_err(|e| format!("Não foi possível guardar o arquivo: {e}"))?;
+    abrir_no_sistema(&caminho)?;
+    Ok(caminho)
+}
+
+/// O programa padrão do sistema para aquele arquivo — o do duplo clique.
+#[cfg(not(test))]
+fn abrir_no_sistema(caminho: &Path) -> Result<(), String> {
+    open::that_detached(caminho).map_err(|e| format!("O sistema não abriu o arquivo: {e}"))
+}
+
+/// Nos testes nada abre: o que se confere é o que foi **gravado** e entregue
+/// (`Chatbot::abertos`).
+#[cfg(test)]
+fn abrir_no_sistema(_caminho: &Path) -> Result<(), String> {
+    Ok(())
 }
 
 /// O que está aberto por cima do painel.
@@ -134,15 +213,22 @@ pub enum Dialogo {
 #[derive(Debug, Clone, PartialEq)]
 enum Acao {
     Envio(u64),
-    Alternar { chave: Chave, atender: bool },
+    Alternar {
+        chave: Chave,
+        atender: bool,
+    },
     Urgencia(MudancaDaUrgencia),
     ApagarHistorico,
     ContarUso,
+    /// 🎤 "Transcrever", com o id da mensagem.
+    Transcricao(String),
 }
 
 pub struct Chatbot {
     publicador: Arc<dyn Publicador>,
     escuta: Arc<dyn Escuta>,
+    /// O seletor de arquivo do sistema — o mesmo da importação.
+    seletor: Arc<dyn SeletorDePasta>,
     pub(crate) sessao: Option<Sessao>,
     guarda: Option<Guarda>,
     sinais: (Sender<Sinal>, Receiver<Sinal>),
@@ -193,6 +279,24 @@ pub struct Chatbot {
     pub(crate) rolagem: gpui_kit::ScrollHandle,
     pub(crate) rolagem_vista: Option<(Chave, usize, usize)>,
 
+    // ── 📎 A mídia da conversa aberta ──
+    /// O arquivo escolhido, esperando o "Enviar".
+    pub(crate) anexo: Option<Anexo>,
+    /// O seletor do sistema está aberto.
+    escolha: Option<Receiver<RecadoDoSeletor>>,
+    /// A foto de cada balão, pelo id da mensagem.
+    pub(crate) miniaturas: HashMap<String, Miniatura>,
+    /// Há balão novo para conferir se falta foto.
+    conferir_miniaturas: bool,
+    baixas: Vec<(String, Baixa, Receiver<Recado>)>,
+    decodificando: Vec<(String, Receiver<Option<Arc<gpui_kit::RenderImage>>>)>,
+    /// As mensagens cujo arquivo está sendo baixado para abrir.
+    pub(crate) abrindo: HashSet<String>,
+    /// 🎤 Os áudios com a transcrição pedida.
+    pub(crate) transcrevendo: HashSet<String>,
+    /// O que foi entregue ao programa do sistema, na ordem.
+    pub(crate) abertos: Vec<PathBuf>,
+
     // ── Diálogos ──
     /// No contrato de [`Modal`]: "Quem assume", "Resolver" e "Excluir"
     /// têm campo, e fechar com o foco nele matava as teclas da tela.
@@ -229,6 +333,7 @@ impl Chatbot {
     pub fn novo(
         publicador: Arc<dyn Publicador>,
         escuta: Arc<dyn Escuta>,
+        seletor: Arc<dyn SeletorDePasta>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -260,6 +365,7 @@ impl Chatbot {
         Self {
             publicador,
             escuta,
+            seletor,
             sessao: None,
             guarda: None,
             sinais: channel(),
@@ -293,6 +399,15 @@ impl Chatbot {
             limpar_compositor: false,
             rolagem: gpui_kit::ScrollHandle::new(),
             rolagem_vista: None,
+            anexo: None,
+            escolha: None,
+            miniaturas: HashMap::new(),
+            conferir_miniaturas: false,
+            baixas: Vec::new(),
+            decodificando: Vec::new(),
+            abrindo: HashSet::new(),
+            transcrevendo: HashSet::new(),
+            abertos: Vec::new(),
             dialogo: Modal::default(),
             notas,
             nome_do_atendente,
@@ -359,6 +474,7 @@ impl Chatbot {
         self.historico = None;
         self.acoes.clear();
         self.carregando = 0;
+        self.largar_a_midia();
         cx.notify();
     }
 
@@ -436,6 +552,11 @@ impl Chatbot {
         let mut mudou = self.colher_sinais(agora, cx);
         mudou |= self.colher_cliques(cx);
         mudou |= self.colher_respostas(cx);
+        mudou |= self.colher_escolha(cx);
+        mudou |= self.colher_a_midia(cx);
+        if std::mem::take(&mut self.conferir_miniaturas) {
+            self.pedir_miniaturas();
+        }
 
         if self.visivel {
             let vencida = self.releitura_em.is_some_and(|em| em <= agora);
@@ -653,6 +774,15 @@ impl Chatbot {
                 prontas.push((acao.clone(), resultado));
                 false
             }
+            // 📎 O envio de anexo sobe em multipart e a resposta vem crua: é
+            // o mesmo JSON do envio de texto, só por outro caminho.
+            Ok(Recado::Cru { resultado, .. }) => {
+                prontas.push((
+                    acao.clone(),
+                    resultado.map(|r| serde_json::from_slice(&r.bytes).unwrap_or(Value::Null)),
+                ));
+                false
+            }
             Ok(_) => true,
             Err(std::sync::mpsc::TryRecvError::Empty) => true,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => false,
@@ -661,6 +791,8 @@ impl Chatbot {
             mudou = true;
             self.concluir(acao, resultado, cx);
         }
+        // O que chegou pode ter trazido balão com foto.
+        self.conferir_miniaturas |= mudou;
         mudou
     }
 
@@ -927,7 +1059,11 @@ impl Chatbot {
             self.historico_aberto.clear();
             self.fora_da_pagina = PaginaDoWhatsApp::default();
             self.limpar_compositor = true;
+            // O anexo escolhido era para a outra conversa, e as fotos dela
+            // não precisam ficar na memória.
+            self.largar_a_midia();
         }
+        self.conferir_miniaturas = true;
         self.aberta = Some(chave.clone());
         if chave.canal == Canal::WhatsApp {
             self.historico = None;
@@ -944,6 +1080,7 @@ impl Chatbot {
 
     pub fn carregar_anteriores(&mut self, cx: &mut Context<Self>) {
         self.tudo = true;
+        self.conferir_miniaturas = true;
         cx.notify();
     }
 
@@ -955,7 +1092,21 @@ impl Chatbot {
     /// O Enter do compositor, e o botão "Enviar".
     pub fn enviar_o_escrito(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let texto = self.compositor.read(cx).value().trim().to_string();
-        if texto.is_empty() || self.bloqueado_pela_janela() {
+        if self.bloqueado_pela_janela() {
+            return;
+        }
+        if let Some(mut anexo) = self.anexo.take() {
+            // 🎤 Áudio não leva legenda (a Cloud API não tem o campo): ele sai
+            // sozinho, e o que estava escrito fica no campo para a próxima.
+            if midia::classe_do_anexo(&anexo.nome) != Some(ClasseDoAnexo::Audio) {
+                anexo.legenda = texto;
+                self.compositor
+                    .update(cx, |campo, cx| campo.trocar_valor("", window, cx));
+            }
+            self.despachar_anexo(anexo, cx);
+            return;
+        }
+        if texto.is_empty() {
             return;
         }
         // O campo esvazia na hora: o balão pendente já está na conversa.
@@ -989,6 +1140,25 @@ impl Chatbot {
             texto,
             resposta,
             erro: None,
+            anexo: None,
+        };
+        self.mandar(&pendente);
+        self.pendentes.push(pendente);
+        cx.notify();
+    }
+
+    fn despachar_anexo(&mut self, anexo: Anexo, cx: &mut Context<Self>) {
+        let Some(chave) = self.aberta.clone() else {
+            return;
+        };
+        self.proximo_pendente += 1;
+        let pendente = Pendente {
+            id: self.proximo_pendente,
+            chave,
+            texto: midia::texto_do_anexo_em_voo(&anexo.nome, &anexo.legenda),
+            resposta: None,
+            erro: None,
+            anexo: Some(anexo),
         };
         self.mandar(&pendente);
         self.pendentes.push(pendente);
@@ -997,8 +1167,241 @@ impl Chatbot {
 
     fn mandar(&mut self, pendente: &Pendente) {
         let (envia, recebe) = channel();
-        self.pedir(pedidos::enviar(&pendente.chave, &pendente.texto), &envia);
+        match &pendente.anexo {
+            Some(anexo) => self.pedir_cru(
+                pedidos::enviar_anexo(
+                    &pendente.chave.id,
+                    &anexo.legenda,
+                    &anexo.nome,
+                    &anexo.bytes,
+                ),
+                &envia,
+            ),
+            None => self.pedir(pedidos::enviar(&pendente.chave, &pendente.texto), &envia),
+        }
         self.acoes.push((Acao::Envio(pendente.id), recebe));
+    }
+
+    // ── 📎 A mídia ─────────────────────────────────────────────────────────
+
+    fn pedir_cru(&self, pedido: PedidoCru, canal: &Sender<Recado>) {
+        if let Some(sessao) = self.sessao.clone() {
+            self.publicador.pedir_cru(sessao, pedido, canal.clone());
+        }
+    }
+
+    /// Esquece o anexo escolhido e as fotos da conversa que saiu da frente.
+    fn largar_a_midia(&mut self) {
+        self.anexo = None;
+        self.escolha = None;
+        self.miniaturas.clear();
+        self.baixas.clear();
+        self.decodificando.clear();
+        self.abrindo.clear();
+        self.transcrevendo.clear();
+    }
+
+    /// O clipe: abre o seletor de arquivo do sistema.
+    ///
+    /// 🔑 Só o WhatsApp anexa, e só com a janela de 24 h aberta — anexo é
+    /// mensagem de sessão como o texto. O servidor confere de novo antes de
+    /// subir o arquivo para a Meta.
+    pub fn anexar(&mut self, cx: &mut Context<Self>) {
+        let no_whatsapp = self
+            .aberta
+            .as_ref()
+            .is_some_and(|chave| chave.canal == Canal::WhatsApp);
+        if !no_whatsapp || self.bloqueado_pela_janela() || self.escolha.is_some() {
+            return;
+        }
+        let (envia, recebe) = channel();
+        self.seletor.escolher_arquivo(envia, cx);
+        self.escolha = Some(recebe);
+    }
+
+    /// O "x" da tira do anexo.
+    pub fn tirar_anexo(&mut self, cx: &mut Context<Self>) {
+        self.anexo = None;
+        cx.notify();
+    }
+
+    fn colher_escolha(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(escolha) = &self.escolha else {
+            return false;
+        };
+        let recado = match escolha.try_recv() {
+            Ok(recado) => recado,
+            Err(TryRecvError::Empty) => return false,
+            Err(TryRecvError::Disconnected) => {
+                self.escolha = None;
+                return false;
+            }
+        };
+        self.escolha = None;
+        match recado {
+            RecadoDoSeletor::ArquivoEscolhido(caminho) => {
+                self.receber_o_escolhido(Path::new(&caminho), cx)
+            }
+            RecadoDoSeletor::Falhou(erro) => self.toast(erro, true, cx),
+            // Desistir do seletor não é erro.
+            _ => {}
+        }
+        true
+    }
+
+    /// Confere e carrega o arquivo escolhido. O que não serve é recusado com
+    /// o motivo, **antes** de ler o arquivo inteiro para a memória.
+    fn receber_o_escolhido(&mut self, caminho: &Path, cx: &mut Context<Self>) {
+        let nome = caminho
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let tamanho = std::fs::metadata(caminho).map(|m| m.len()).unwrap_or(0);
+        if let Some(recusa) = midia::recusa_do_anexo(&nome, tamanho) {
+            self.toast(recusa, true, cx);
+            return;
+        }
+        match std::fs::read(caminho) {
+            Ok(bytes) => {
+                self.anexo = Some(Anexo {
+                    nome,
+                    bytes: Arc::new(bytes),
+                    legenda: String::new(),
+                })
+            }
+            Err(erro) => self.toast(format!("Não foi possível ler o arquivo: {erro}"), true, cx),
+        }
+    }
+
+    /// A mídia de uma mensagem da conversa aberta.
+    fn midia_da_mensagem(&self, mensagem_id: &str) -> Option<Midia> {
+        self.mensagens_da_aberta()
+            .0
+            .into_iter()
+            .find(|m| m.id == mensagem_id)
+            .and_then(|m| m.midia)
+    }
+
+    fn baixar(&mut self, mensagem_id: &str, baixa: Baixa) {
+        let (envia, recebe) = channel();
+        self.pedir_cru(pedidos::baixar_midia(mensagem_id), &envia);
+        self.baixas.push((mensagem_id.to_string(), baixa, recebe));
+    }
+
+    /// Pede a foto de cada balão da conversa aberta que ainda não a tem.
+    fn pedir_miniaturas(&mut self) {
+        let faltam: Vec<String> = self
+            .mensagens_da_aberta()
+            .0
+            .into_iter()
+            .filter(|m| {
+                m.midia
+                    .as_ref()
+                    .is_some_and(|midia| midia.tipo.aparece_no_balao())
+                    && !self.miniaturas.contains_key(&m.id)
+            })
+            .map(|m| m.id)
+            .collect();
+        for id in faltam {
+            self.miniaturas.insert(id.clone(), Miniatura::Baixando);
+            self.baixar(&id, Baixa::Miniatura);
+        }
+    }
+
+    /// O clique na foto ou no cartão do arquivo: baixa e abre no programa do
+    /// sistema — o leitor de PDF, o tocador de áudio, o visualizador de fotos.
+    pub fn abrir_midia(&mut self, mensagem_id: &str, cx: &mut Context<Self>) {
+        if self.abrindo.contains(mensagem_id) {
+            return;
+        }
+        let Some(midia) = self.midia_da_mensagem(mensagem_id) else {
+            return;
+        };
+        self.abrindo.insert(mensagem_id.to_string());
+        self.baixar(mensagem_id, Baixa::Abrir(midia));
+        cx.notify();
+    }
+
+    /// 🎤 "Transcrever", no áudio que ainda não tem texto.
+    pub fn transcrever(&mut self, mensagem_id: &str, cx: &mut Context<Self>) {
+        if !self.transcrevendo.insert(mensagem_id.to_string()) {
+            return;
+        }
+        let (envia, recebe) = channel();
+        self.pedir(pedidos::transcrever(mensagem_id), &envia);
+        self.acoes
+            .push((Acao::Transcricao(mensagem_id.to_string()), recebe));
+        cx.notify();
+    }
+
+    fn colher_a_midia(&mut self, cx: &mut Context<Self>) -> bool {
+        let mut baixadas = Vec::new();
+        self.baixas
+            .retain(|(id, baixa, canal)| match canal.try_recv() {
+                Ok(Recado::Cru { resultado, .. }) => {
+                    baixadas.push((id.clone(), baixa.clone(), resultado));
+                    false
+                }
+                Ok(_) | Err(TryRecvError::Empty) => true,
+                Err(TryRecvError::Disconnected) => {
+                    baixadas.push((id.clone(), baixa.clone(), Err("sem resposta".into())));
+                    false
+                }
+            });
+        let mut mudou = !baixadas.is_empty();
+        for (id, baixa, resultado) in baixadas {
+            match (baixa, resultado) {
+                (Baixa::Miniatura, Ok(resposta)) => {
+                    let (envia, recebe) = channel();
+                    std::thread::spawn(move || {
+                        let _ = envia.send(miniatura_de(&resposta.bytes));
+                    });
+                    self.decodificando.push((id, recebe));
+                }
+                (Baixa::Miniatura, Err(erro)) => {
+                    // Sem toast: a foto que não veio vira o cartão de arquivo,
+                    // e é o clique nele que diz o motivo.
+                    crate::telemetria::avisar!("⚠️ [Chatbot] foto do balão: {erro}");
+                    self.miniaturas.insert(id, Miniatura::Falhou);
+                }
+                (Baixa::Abrir(midia), Ok(resposta)) => {
+                    self.abrindo.remove(&id);
+                    let nome = midia.nome_para_abrir(&id, resposta.tipo.as_deref());
+                    match gravar_e_abrir(&nome, &resposta.bytes) {
+                        Ok(caminho) => self.abertos.push(caminho),
+                        Err(erro) => self.toast(erro, true, cx),
+                    }
+                }
+                (Baixa::Abrir(_), Err(erro)) => {
+                    self.abrindo.remove(&id);
+                    self.toast(
+                        modelo::explicar(&erro, "Não foi possível abrir o arquivo."),
+                        true,
+                        cx,
+                    );
+                }
+            }
+        }
+
+        let mut decodificadas = Vec::new();
+        self.decodificando
+            .retain(|(id, canal)| match canal.try_recv() {
+                Ok(imagem) => {
+                    decodificadas.push((id.clone(), imagem));
+                    false
+                }
+                Err(TryRecvError::Empty) => true,
+                Err(TryRecvError::Disconnected) => {
+                    decodificadas.push((id.clone(), None));
+                    false
+                }
+            });
+        mudou |= !decodificadas.is_empty();
+        for (id, imagem) in decodificadas {
+            self.miniaturas
+                .insert(id, imagem.map_or(Miniatura::Falhou, Miniatura::Pronta));
+        }
+        mudou
     }
 
     /// "Tentar de novo" no balão que não foi.
@@ -1274,6 +1677,18 @@ impl Chatbot {
                     }
                 }
             },
+            Acao::Transcricao(id) => {
+                self.transcrevendo.remove(&id);
+                match resultado {
+                    // O texto chega com a releitura, no `midia` da mensagem.
+                    Ok(_) => self.recarregar(cx),
+                    Err(erro) => self.toast(
+                        modelo::explicar(&erro, "Não foi possível transcrever o áudio."),
+                        true,
+                        cx,
+                    ),
+                }
+            }
             Acao::Alternar { chave, atender } => match resultado {
                 Ok(_) => {
                     self.toast(

@@ -78,6 +78,11 @@ anyhow = "1.0"
 # trocou o `egui_file` por ele. Janela do sistema, e não do framework: é o que
 # evita disputa de camada com o modal (a razão está registrada no STATUS).
 rfd = "0.17.2"
+# 📎 Abrir no programa do sistema o arquivo que o cliente mandou pelo WhatsApp
+# (`chatbot/tela.rs`). A mesma versão e a mesma feature do `infrastructure`,
+# que já o usa para o navegador: no Windows é a `ShellExecuteExW`, a do duplo
+# clique, e não o `explorer.exe`.
+open = { version = "5", features = ["shellexecute-on-windows"] }
 
 # A folha de impressão vira PDF. 🔑 O leiaute já é calculado em milímetros
 # (`impressao/pagina.rs`), que é a unidade nativa do PDF — gerar é colocar cada

@@ -732,6 +732,22 @@ pub struct FotoEnviada {
     pub id: String,
 }
 
+/// O corpo de um [`PosVendaApi::pedir_cru`], com o tipo dele
+/// (`multipart/form-data; boundary=…`, por exemplo).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CorpoDoPedido {
+    pub tipo: String,
+    pub bytes: Vec<u8>,
+}
+
+/// O que um [`PosVendaApi::pedir_cru`] devolve: os bytes e o `Content-Type`
+/// que o site declarou para eles.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RespostaDoPedido {
+    pub tipo: Option<String>,
+    pub bytes: Vec<u8>,
+}
+
 #[async_trait]
 pub trait PosVendaApi: Send + Sync {
     /// Autoriza este computador **pelo navegador**, e devolve a sessão.
@@ -781,6 +797,26 @@ pub trait PosVendaApi: Send + Sync {
         let _ = (sessao, metodo, caminho, corpo);
         Err(crate::DomainError::InvalidOperation(
             "esta API não atende pedido JSON".into(),
+        ))
+    }
+
+    /// Um pedido em nome da conta cujo corpo ou cuja resposta **não é JSON**:
+    /// baixar um arquivo (a foto ou o áudio de uma conversa) e subir um
+    /// (`multipart/form-data`, o anexo que o operador manda).
+    ///
+    /// É o irmão de [`Self::pedir_json`] para o que ele não carrega — a mesma
+    /// conta, o mesmo `caminho` relativo a `/api/v2`, e a mesma regra: fora de
+    /// `2xx` vira erro, com a frase do envelope do site.
+    async fn pedir_cru(
+        &self,
+        sessao: &Sessao,
+        metodo: &str,
+        caminho: &str,
+        corpo: Option<CorpoDoPedido>,
+    ) -> DomainResult<RespostaDoPedido> {
+        let _ = (sessao, metodo, caminho, corpo);
+        Err(crate::DomainError::InvalidOperation(
+            "esta API não atende pedido de arquivo".into(),
         ))
     }
 

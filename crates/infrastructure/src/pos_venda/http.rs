@@ -27,11 +27,11 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use domain::services::pos_venda::{
-    AvisoDaGaleria, CofreDeSessao, ConflitoDePagamento, ContagemDeFotos, EntregaNoCanal,
-    EstadoDaFotoNoSite, Estudio, FaixaDaGaleria, FotoDaGaleria, FotoEnviada, FotoParaEnviar,
-    Galeria, GaleriaAberta, GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto, MudancaDaGaleria,
-    NovaGaleria, PagoNoCaixa, PosVendaApi, Produto, ResumoSimples, ResumosDoAtendimento, Sessao,
-    TotaisDaGaleria,
+    AvisoDaGaleria, CofreDeSessao, ConflitoDePagamento, ContagemDeFotos, CorpoDoPedido,
+    EntregaNoCanal, EstadoDaFotoNoSite, Estudio, FaixaDaGaleria, FotoDaGaleria, FotoEnviada,
+    FotoParaEnviar, Galeria, GaleriaAberta, GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto,
+    MudancaDaGaleria, NovaGaleria, PagoNoCaixa, PosVendaApi, Produto, RespostaDoPedido,
+    ResumoSimples, ResumosDoAtendimento, Sessao, TotaisDaGaleria,
 };
 use domain::{DomainError, DomainResult};
 use serde::Deserialize;
@@ -291,6 +291,27 @@ async fn ler<T: for<'de> Deserialize<'de>>(resposta: reqwest::Response) -> Domai
         .map_err(|e| DomainError::InfrastructureError(format!("resposta ilegível: {e}")))
 }
 
+/// A recusa de uma [`RespostaCrua`]: fora de `2xx` vira erro, com a frase do
+/// envelope do site — ou o começo do corpo, quando não é o envelope.
+fn recusa_da_crua(resposta: &RespostaCrua) -> DomainResult<()> {
+    if (200..300).contains(&resposta.status) {
+        return Ok(());
+    }
+    if resposta.status == 401 {
+        return Err(DomainError::AcessoRecusado);
+    }
+    let texto = String::from_utf8_lossy(&resposta.bytes);
+    let mensagem = serde_json::from_str::<EnvelopeDeErro>(&texto)
+        .ok()
+        .and_then(|e| e.error)
+        .and_then(|e| e.message)
+        .unwrap_or_else(|| texto.chars().take(200).collect());
+    Err(DomainError::InfrastructureError(format!(
+        "o site respondeu {}: {mensagem}",
+        resposta.status
+    )))
+}
+
 #[async_trait]
 impl PosVendaApi for PosVendaApiHttp {
     async fn pedir_json(
@@ -305,26 +326,31 @@ impl PosVendaApi for PosVendaApiHttp {
             bytes: valor.to_string().into_bytes(),
         });
         let resposta = self.chamar(Some(sessao), metodo, caminho, corpo).await?;
-        let texto = String::from_utf8_lossy(&resposta.bytes);
-        if !(200..300).contains(&resposta.status) {
-            if resposta.status == 401 {
-                return Err(DomainError::AcessoRecusado);
-            }
-            let mensagem = serde_json::from_str::<EnvelopeDeErro>(&texto)
-                .ok()
-                .and_then(|e| e.error)
-                .and_then(|e| e.message)
-                .unwrap_or_else(|| texto.chars().take(200).collect());
-            return Err(DomainError::InfrastructureError(format!(
-                "o site respondeu {}: {mensagem}",
-                resposta.status
-            )));
-        }
+        recusa_da_crua(&resposta)?;
         if resposta.bytes.is_empty() {
             return Ok(serde_json::Value::Null);
         }
         serde_json::from_slice(&resposta.bytes)
             .map_err(|e| DomainError::InfrastructureError(format!("resposta ilegível: {e}")))
+    }
+
+    async fn pedir_cru(
+        &self,
+        sessao: &Sessao,
+        metodo: &str,
+        caminho: &str,
+        corpo: Option<CorpoDoPedido>,
+    ) -> DomainResult<RespostaDoPedido> {
+        let corpo = corpo.map(|corpo| CorpoCru {
+            tipo: corpo.tipo,
+            bytes: corpo.bytes,
+        });
+        let resposta = self.chamar(Some(sessao), metodo, caminho, corpo).await?;
+        recusa_da_crua(&resposta)?;
+        Ok(RespostaDoPedido {
+            tipo: resposta.tipo,
+            bytes: resposta.bytes,
+        })
     }
 
     async fn autorizar_pelo_navegador(&self) -> DomainResult<Sessao> {

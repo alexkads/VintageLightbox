@@ -24,8 +24,9 @@ use gpui_kit::{
     div, prelude::*, px, rgb, AnyElement, Context, FontWeight, Hsla, SharedString, Window,
 };
 
+use super::midia::{self, Midia, TipoDeMidia};
 use super::modelo::{self, Canal, Conversa, FiltroDeCanal, Mensagem, Status, Urgencia};
-use super::tela::{Chatbot, Dialogo, Pendente};
+use super::tela::{Chatbot, Dialogo, Miniatura, Pendente};
 use super::EnviarMensagem;
 use crate::estilo;
 use crate::recursos::Icone;
@@ -855,7 +856,8 @@ impl Chatbot {
                     );
                 }
             }
-            linhas.push(balao(mensagem, canal).into_any_element());
+            let midia = self.midia_do_balao(mensagem, cx);
+            linhas.push(balao(mensagem, canal, midia).into_any_element());
             anterior = Some(mensagem);
         }
         for pendente in pendentes {
@@ -895,6 +897,167 @@ impl Chatbot {
                         .child("Carregando…"),
                 )
             })
+    }
+
+    /// 📎 A foto, o documento ou o áudio de um balão.
+    ///
+    /// A foto e a figurinha aparecem dentro do balão; o resto é um cartão.
+    /// Nos dois, o clique baixa o arquivo e o entrega ao programa do sistema —
+    /// o visualizador de fotos, o leitor de PDF, o tocador de áudio.
+    ///
+    /// 🚨 O arquivo é sempre pedido à API pelo **id da mensagem**
+    /// (`midia::caminho_da_midia`), nunca por endereço que veio no conteúdo.
+    fn midia_do_balao(&self, mensagem: &Mensagem, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let midia = mensagem.midia.as_ref()?;
+        let (apagado, muted, borda) = {
+            let tema = cx.theme();
+            (tema.muted_foreground, tema.muted, tema.border)
+        };
+        let id = mensagem.id.clone();
+
+        if midia.tipo.aparece_no_balao() {
+            let lado = if midia.tipo == TipoDeMidia::Figurinha {
+                112.
+            } else {
+                240.
+            };
+            return Some(match self.miniaturas.get(&mensagem.id) {
+                Some(Miniatura::Pronta(imagem)) => {
+                    let nome = format!("chatbot-foto-{id}");
+                    div()
+                        .id(SharedString::from(nome.clone()))
+                        .debug_selector(move || nome.clone())
+                        .cursor_pointer()
+                        // A miniatura já vem quadrada (`tela::miniatura_de`),
+                        // do tamanho do quadro que estava reservado para ela.
+                        .child(
+                            gpui_kit::img(imagem.clone())
+                                .w(px(lado))
+                                .h(px(lado))
+                                .rounded(px(8.)),
+                        )
+                        .on_click(cx.listener(move |tela, _, _, cx| tela.abrir_midia(&id, cx)))
+                        .into_any_element()
+                }
+                // A foto que não veio vira o cartão: o clique tenta de novo e
+                // diz o motivo quando não dá.
+                Some(Miniatura::Falhou) => self.cartao_do_arquivo(&mensagem.id, midia, cx),
+                // Do tamanho da foto que vem: o histórico não pula quando ela
+                // chega.
+                _ => div()
+                    .w(px(lado))
+                    .h(px(lado))
+                    .rounded(px(8.))
+                    .bg(muted)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_xs()
+                    .text_color(apagado)
+                    .child("Carregando a foto…")
+                    .into_any_element(),
+            });
+        }
+
+        let cartao = self.cartao_do_arquivo(&mensagem.id, midia, cx);
+        if midia.tipo != TipoDeMidia::Audio {
+            return Some(cartao);
+        }
+
+        // 🎤 Debaixo do áudio, o que foi dito — ou o botão que pede a
+        // transcrição. O áudio que o cliente manda já chega transcrito; o
+        // botão cobre o que ficou sem texto.
+        let transcricao = match &midia.transcricao {
+            Some(texto) => div()
+                .max_w(px(280.))
+                .pl(px(8.))
+                .border_l_2()
+                .border_color(borda)
+                .italic()
+                .text_sm()
+                .child(if texto.trim().is_empty() {
+                    "(áudio sem fala)".to_string()
+                } else {
+                    texto.clone()
+                })
+                .into_any_element(),
+            None => {
+                let transcrevendo = self.transcrevendo.contains(&mensagem.id);
+                let nome = format!("chatbot-transcrever-{id}");
+                h_flex()
+                    .child(estilo::desligado(
+                        marcado(estilo::botao_fantasma_pequeno(nome.clone(), cx), nome)
+                            .child(if transcrevendo {
+                                "Transcrevendo…"
+                            } else {
+                                "Transcrever"
+                            })
+                            .on_click(cx.listener(move |tela, _, _, cx| tela.transcrever(&id, cx))),
+                        transcrevendo,
+                    ))
+                    .into_any_element()
+            }
+        };
+        Some(
+            v_flex()
+                .gap(px(4.))
+                .child(cartao)
+                .child(transcricao)
+                .into_any_element(),
+        )
+    }
+
+    /// O cartão de um arquivo: o nome (ou o tipo), o tamanho e "abrir".
+    fn cartao_do_arquivo(
+        &self,
+        mensagem_id: &str,
+        midia: &Midia,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let (apagado, muted) = {
+            let tema = cx.theme();
+            (tema.muted_foreground, tema.muted)
+        };
+        let abrindo = self.abrindo.contains(mensagem_id);
+        let id = mensagem_id.to_string();
+        let nome = format!("chatbot-midia-{id}");
+        h_flex()
+            .id(SharedString::from(nome.clone()))
+            .debug_selector(move || nome.clone())
+            .gap(px(8.))
+            .px(px(8.))
+            .py(px(6.))
+            .min_w(px(180.))
+            .max_w(px(280.))
+            .rounded(px(8.))
+            .bg(muted)
+            .cursor_pointer()
+            .hover(|estilo| estilo.opacity(0.8))
+            .child(Icon::new(Icone::File).size(px(20.)))
+            .child(
+                v_flex()
+                    .min_w(px(0.))
+                    .child(
+                        div()
+                            .truncate()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(midia.titulo()),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(apagado)
+                            // A mesma linha nos dois estados: o cartão não
+                            // muda de tamanho enquanto o arquivo baixa.
+                            .child(if abrindo {
+                                "abrindo…".to_string()
+                            } else {
+                                midia.detalhe()
+                            }),
+                    ),
+            )
+            .on_click(cx.listener(move |tela, _, _, cx| tela.abrir_midia(&id, cx)))
+            .into_any_element()
     }
 
     fn painel_de_respostas(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1081,10 +1244,58 @@ impl Chatbot {
                 .into_any_element();
         }
         let vazio = self.compositor.read(cx).value().trim().is_empty();
+        // 📎 Só o WhatsApp anexa: é o único canal com rota de mídia na API. O
+        // clipe mora no compositor, que some inteiro com a janela de 24 h
+        // fechada (o `motivo` acima) — anexo é mensagem de sessão como o texto.
+        let pode_anexar = conversa.chave.canal == Canal::WhatsApp;
+        let anexo = self.anexo.clone();
+        let tem_anexo = anexo.is_some();
         v_flex()
             .flex_none()
             .border_t_1()
             .border_color(borda)
+            // O arquivo escolhido fica à vista até sair: nome, tamanho e como
+            // tirar. O que se escrever embaixo vira a legenda dele.
+            .when_some(anexo, |d, anexo| {
+                d.child(
+                    h_flex()
+                        .debug_selector(|| "chatbot-anexo".into())
+                        .px(px(12.))
+                        .py(px(4.))
+                        .gap(px(8.))
+                        .items_center()
+                        .text_xs()
+                        .bg(muted.opacity(0.4))
+                        .child(
+                            Icon::new(Icone::Paperclip)
+                                .size(px(14.))
+                                .text_color(apagado),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w(px(0.))
+                                .truncate()
+                                .font_weight(FontWeight::MEDIUM)
+                                .child(anexo.nome.clone()),
+                        )
+                        .child(
+                            div()
+                                .flex_none()
+                                .text_color(apagado)
+                                .child(midia::formatar_tamanho(anexo.bytes.len() as u64)),
+                        )
+                        .child(
+                            marcado(
+                                estilo::botao_fantasma_pequeno("chatbot-tirar-anexo", cx),
+                                "chatbot-tirar-anexo",
+                            )
+                            .child(Icon::new(Icone::X).size(px(12.)))
+                            .tooltip("Tirar o anexo")
+                            .on_click(cx.listener(|tela, _, _, cx| tela.tirar_anexo(cx))),
+                        ),
+                )
+            })
             .when_some(decisao.aviso, |d, aviso| {
                 d.child(
                     div()
@@ -1116,6 +1327,19 @@ impl Chatbot {
                             .tooltip("Respostas rápidas")
                             .on_click(cx.listener(|tela, _, _, cx| tela.alternar_respostas(cx)))
                     })
+                    .when(pode_anexar, |d| {
+                        let botao = if tem_anexo {
+                            marcado(estilo::botao_primario("chatbot-clipe", cx), "chatbot-clipe")
+                        } else {
+                            marcado(estilo::botao_fantasma("chatbot-clipe", cx), "chatbot-clipe")
+                        };
+                        d.child(
+                            botao
+                                .child(Icon::new(Icone::Paperclip).size(px(16.)))
+                                .tooltip("Anexar foto, áudio ou documento")
+                                .on_click(cx.listener(|tela, _, _, cx| tela.anexar(cx))),
+                        )
+                    })
                     .child(div().flex_1().child(Textarea::new(&self.compositor)))
                     .child(estilo::desligado(
                         marcado(
@@ -1127,7 +1351,8 @@ impl Chatbot {
                         .on_click(
                             cx.listener(|tela, _, window, cx| tela.enviar_o_escrito(window, cx)),
                         ),
-                        vazio,
+                        // Com anexo, o texto é a legenda — e pode ir vazio.
+                        vazio && !tem_anexo,
                     )),
             )
             .into_any_element()
@@ -1445,7 +1670,7 @@ impl Chatbot {
 
 /// Um balão do histórico: do cliente à esquerda, do estúdio à direita, com a
 /// hora e — no WhatsApp — o selo de automática.
-fn balao(mensagem: &Mensagem, canal: Canal) -> impl IntoElement {
+fn balao(mensagem: &Mensagem, canal: Canal, midia: Option<AnyElement>) -> impl IntoElement {
     let hora = mensagem.quando.map(modelo::hora).unwrap_or_default();
     let automacao = mensagem.rotulo_da_automacao();
     let saida = mensagem.saida;
@@ -1470,7 +1695,13 @@ fn balao(mensagem: &Mensagem, canal: Canal) -> impl IntoElement {
                         BubbleContent::new()
                             .when(saida, |c| c.bg(cor_do_canal(canal).opacity(0.15))),
                     )
-                    .child(mensagem.texto.clone()),
+                    // 📎 A mídia vem antes do texto, como no WhatsApp. O texto
+                    // só aparece quando é legenda de verdade: o rótulo
+                    // ("📷 Foto") debaixo da própria foto é ruído.
+                    .when_some(midia, |b, midia| b.child(midia))
+                    .when_some(mensagem.texto_do_balao().map(str::to_string), |b, texto| {
+                        b.child(texto)
+                    }),
             ),
         )
         .footer(

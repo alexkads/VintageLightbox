@@ -496,9 +496,21 @@ pub struct Mensagem {
     pub saida: bool,
     pub automatica: bool,
     pub tipo_da_automacao: Option<String>,
+    /// 📎 A foto, o documento ou o áudio da mensagem — só o WhatsApp tem.
+    pub midia: Option<super::midia::Midia>,
 }
 
 impl Mensagem {
+    /// O texto que o balão mostra. Mídia sem legenda grava o rótulo
+    /// ("📷 Foto") no lugar do texto, para a lista de conversas ter o que
+    /// mostrar; debaixo da própria foto ele é ruído, e some — como no site.
+    pub fn texto_do_balao(&self) -> Option<&str> {
+        match &self.midia {
+            Some(midia) if !midia.com_legenda => None,
+            _ => Some(self.texto.as_str()),
+        }
+    }
+
     /// "resposta do bot", "lembrete de voucher"… (`rotuloDaAutomacao`).
     pub fn rotulo_da_automacao(&self) -> Option<String> {
         if !self.automatica {
@@ -529,6 +541,7 @@ fn mensagem_do_whatsapp(m: &Value) -> Option<Mensagem> {
             .and_then(Value::as_bool)
             .unwrap_or(false),
         tipo_da_automacao: texto(m, "automation_type"),
+        midia: super::midia::Midia::da_mensagem(m),
     })
 }
 
@@ -549,6 +562,7 @@ pub fn mensagens_do_canal(valor: &Value) -> Vec<Mensagem> {
                             .is_some_and(|d| d.eq_ignore_ascii_case("OUTBOUND")),
                         automatica: false,
                         tipo_da_automacao: None,
+                        midia: None,
                     })
                 })
                 .collect()
@@ -1159,6 +1173,7 @@ mod testes {
             saida: false,
             automatica: false,
             tipo_da_automacao: None,
+            midia: None,
         }
     }
 

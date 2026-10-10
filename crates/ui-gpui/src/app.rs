@@ -1302,7 +1302,8 @@ impl Aplicativo {
         });
         let chatbot = {
             let escuta = portas.escuta.clone();
-            cx.new(|cx| Chatbot::novo(publicador_do_chatbot, escuta, window, cx))
+            let seletor = portas.seletor.clone();
+            cx.new(|cx| Chatbot::novo(publicador_do_chatbot, escuta, seletor, window, cx))
         };
         let pedido_do_chatbot = cx.subscribe_in(
             &chatbot,
