@@ -1,5 +1,18 @@
 [
   {
+    "versao": "0.1.136",
+    "data": "2026-10-10",
+    "titulo": "Exportar: diálogo novo, e o fotolivro visto dentro do app.",
+    "importante": false,
+    "novidades": [
+      "Exportar: o diálogo foi redesenhado. O uso (Arquivos individuais ou Fotolivro) e o formato viraram abas de ponta a ponta, um quadro mostra quantas fotos são levadas e quantas estão à venda e o que cada grupo leva, e a caixa não muda mais de tamanho quando você troca uma opção.",
+      "Fotolivro (PDF): quando o livro fica pronto, o botão \"Ver o fotolivro\" abre o livro dentro do app, com página anterior e próxima, zoom e \"Mostrar na pasta\".",
+      "Fotolivro (PDF): os links do livro funcionam no visualizador. \"Abrir minha galeria\" e a foto abrem no navegador; \"Folhear o álbum\" e \"Galeria\" pulam para a página.",
+      "Atualização: esta versão pede o Rust 1.92 ou mais novo. O atualizador cuida disso sozinho; no balcão que estiver com um Rust mais antigo, esta atualização demora mais, porque recompila tudo."
+    ],
+    "por_que_atualizar": "Para conferir o fotolivro no próprio app antes de mandar ao cliente."
+  },
+  {
     "versao": "0.1.135",
     "data": "2026-10-10",
     "titulo": "Sessão: o campo do estúdio mostra o estúdio da sessão.",
