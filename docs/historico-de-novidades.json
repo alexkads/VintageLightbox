@@ -1,5 +1,18 @@
 [
   {
+    "versao": "0.1.135",
+    "data": "2026-10-10",
+    "titulo": "Sessão: o campo do estúdio mostra o estúdio da sessão.",
+    "importante": false,
+    "novidades": [
+      "Sessão: o campo do estúdio, no alto da tela, mostra o estúdio em que a sessão foi feita. Antes ele ficava em \"Estúdio…\" ou com o estúdio da sessão aberta antes.",
+      "Sessão: a lista de estúdios abre mais larga e mostra o nome inteiro (\"Centro Gramado — Gramado\"), com o estúdio da sessão marcado.",
+      "Sessão: ao trocar o estúdio aparece \"Estúdio gravado.\"; se o site recusar a troca, o campo volta ao estúdio de antes.",
+      "Sessão: na barra de importação, a opção \"Padrão da galeria\" da faixa mostra a faixa e o preço da sessão aberta, e não os da sessão anterior."
+    ],
+    "por_que_atualizar": "O campo do estúdio podia ficar vazio ou mostrar o estúdio de outra sessão. Atualize para ver, e corrigir, o estúdio certo."
+  },
+  {
     "versao": "0.1.134",
     "data": "2026-10-10",
     "titulo": "Revelação: a caixa do \"Sincronizar\" ficou mais clara.",

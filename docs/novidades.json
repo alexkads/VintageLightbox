@@ -1,11 +1,12 @@
 {
-  "versao": "0.1.134",
-  "titulo": "Revelação: a caixa do \"Sincronizar\" ficou mais clara.",
+  "versao": "0.1.135",
+  "titulo": "Sessão: o campo do estúdio mostra o estúdio da sessão.",
   "importante": false,
   "novidades": [
-    "Revelação › Sincronizar N: a caixa foi redesenhada. Cada grupo de ajustes virou um cartão com caixa de seleção e uma linha dizendo o que ele leva, em duas colunas — o que vai fica aceso.",
-    "O Enquadramento fica à parte, embaixo, e avisa quando ligado que o recorte desta foto vale para todas.",
-    "A caixa mostra quantos grupos estão marcados e tem o botão \"Marcar tudo\" / \"Desmarcar tudo\". Sem nada marcado, o \"Sincronizar N\" fica desligado."
+    "Sessão: o campo do estúdio, no alto da tela, mostra o estúdio em que a sessão foi feita. Antes ele ficava em \"Estúdio…\" ou com o estúdio da sessão aberta antes.",
+    "Sessão: a lista de estúdios abre mais larga e mostra o nome inteiro (\"Centro Gramado — Gramado\"), com o estúdio da sessão marcado.",
+    "Sessão: ao trocar o estúdio aparece \"Estúdio gravado.\"; se o site recusar a troca, o campo volta ao estúdio de antes.",
+    "Sessão: na barra de importação, a opção \"Padrão da galeria\" da faixa mostra a faixa e o preço da sessão aberta, e não os da sessão anterior."
   ],
-  "por_que_atualizar": "Para escolher o que sincronizar com mais clareza e menos chance de levar o que não devia."
+  "por_que_atualizar": "O campo do estúdio podia ficar vazio ou mostrar o estúdio de outra sessão. Atualize para ver, e corrigir, o estúdio certo."
 }
