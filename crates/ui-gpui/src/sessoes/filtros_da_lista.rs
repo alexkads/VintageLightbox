@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use biblioteca_core::filtro_de_coluna::{
     ler_dia, ler_numero, Coluna, FiltroDeColuna, Operador, Tipo,
 };
-use biblioteca_core::sessoes::Situacao;
+use biblioteca_core::sessoes::{EstadoDoFotolivro, Situacao};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::select::{SearchableVec, Select, SelectItem, SelectState};
 use gpui_kit::component::Sizable;
@@ -60,6 +60,8 @@ pub struct FiltrosDaLista {
     textos: HashMap<Coluna, Entity<InputState>>,
     operadores: HashMap<Coluna, Lista>,
     situacao: Lista,
+    /// 📖 "não enviado" separa o passivo do fotolivro.
+    fotolivro: Lista,
     de: Entity<InputState>,
     ate: Entity<InputState>,
 }
@@ -111,11 +113,29 @@ impl FiltrosDaLista {
         situacao.update(cx, |estado, cx| {
             estado.set_selected_value(&String::new(), window, cx)
         });
+        let mut opcoes_do_livro = vec![Opcao {
+            valor: String::new(),
+            titulo: "todas".into(),
+        }];
+        opcoes_do_livro.extend(
+            EstadoDoFotolivro::ESCOLHAS
+                .iter()
+                .map(|(valor, rotulo)| Opcao {
+                    valor: valor.to_string(),
+                    titulo: (*rotulo).into(),
+                }),
+        );
+        let fotolivro =
+            cx.new(|cx| SelectState::new(SearchableVec::new(opcoes_do_livro), None, window, cx));
+        fotolivro.update(cx, |estado, cx| {
+            estado.set_selected_value(&String::new(), window, cx)
+        });
         Self {
             ligada: false,
             textos,
             operadores,
             situacao,
+            fotolivro,
             de: cx.new(|cx| InputState::new(window, cx).placeholder("de dd/mm/aaaa")),
             ate: cx.new(|cx| InputState::new(window, cx).placeholder("até dd/mm/aaaa")),
         }
@@ -172,6 +192,13 @@ impl FiltrosDaLista {
                         }
                         FiltroDeColuna::Data { de, ate }
                     }
+                    Tipo::Escolha if coluna == Coluna::Fotolivro => {
+                        let escolhida = self.fotolivro.read(cx).selected_value().cloned()?;
+                        let (valor, _) = EstadoDoFotolivro::ESCOLHAS
+                            .into_iter()
+                            .find(|(v, _)| *v == escolhida)?;
+                        FiltroDeColuna::Fotolivro(valor)
+                    }
                     Tipo::Escolha => {
                         let escolhida = self.situacao.read(cx).selected_value().cloned()?;
                         let situacao = Situacao::TODAS
@@ -195,9 +222,11 @@ impl FiltrosDaLista {
                 estado.set_selected_value(&simbolo(Operador::MaiorIgual), window, cx)
             });
         }
-        self.situacao.update(cx, |estado, cx| {
-            estado.set_selected_value(&String::new(), window, cx)
-        });
+        for lista in [&self.situacao, &self.fotolivro] {
+            lista.update(cx, |estado, cx| {
+                estado.set_selected_value(&String::new(), window, cx)
+            });
+        }
     }
 
     /// O campo da coluna, para a linha sob o cabeçalho.
@@ -240,7 +269,14 @@ impl FiltrosDaLista {
             Tipo::Escolha => gpui_kit::div()
                 .w_full()
                 .debug_selector(seletor)
-                .child(Select::new(&self.situacao).xsmall())
+                .child(
+                    Select::new(if coluna == Coluna::Fotolivro {
+                        &self.fotolivro
+                    } else {
+                        &self.situacao
+                    })
+                    .xsmall(),
+                )
                 .into_any_element(),
         }
     }

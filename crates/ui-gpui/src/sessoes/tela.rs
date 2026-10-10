@@ -25,8 +25,9 @@ use biblioteca_core::dinheiro;
 use biblioteca_core::exclusao;
 use biblioteca_core::filtro_de_coluna::{self, Coluna};
 use biblioteca_core::sessoes::{
-    self, estado_no_caixa, ContagemDeFotos, Criterio, EstadoNoCaixa, FaixaDeDatas, PagoNoCaixa,
-    SessaoFotografica, Situacao, Totais,
+    self, estado_do_fotolivro, estado_no_caixa, ContagemDeFotos, Criterio, EstadoDoFotolivro,
+    EstadoNoCaixa, FaixaDeDatas, PagoNoCaixa, ResumoDoFotolivro, SessaoFotografica, Situacao,
+    Totais,
 };
 use domain::services::pos_venda::{Estudio, GaleriaDoPainel, NovaGaleria, Produto, Sessao};
 
@@ -794,6 +795,11 @@ impl Sessoes {
                 }),
                 // 💵 O caixa já vem em centavos — não passa pelo leitor de
                 // decimal acima, e é essa a diferença entre as duas colunas.
+                fotolivro: g.fotolivro.as_ref().map(|f| ResumoDoFotolivro {
+                    email_enviado_em: f.email_enviado_em.clone(),
+                    email_aberto_em: f.email_aberto_em.clone(),
+                    whatsapp_enviado_em: f.whatsapp_enviado_em.clone(),
+                }),
                 caixa: g.caixa.as_ref().map(|c| PagoNoCaixa {
                     vendas: c.vendas,
                     bruto_centavos: c.bruto_centavos,
@@ -3161,7 +3167,7 @@ impl Sessoes {
         // à direita como no site.
         // 💵 A do caixa é mais larga: ela pode trazer o "Fechar venda" em vez
         // de um número (dono, 20/set/2026).
-        const LARGURAS: [f32; 7] = [84., 84., 104., 112., 124., 112., 136.];
+        const LARGURAS: [f32; 8] = [84., 84., 104., 112., 124., 112., 136., 150.];
         // 🧊 **Galeria e Contato ficam congeladas** (dono, 03/out/2026): com o
         // grid rolando na horizontal, o nome da sessão não pode sair da tela. É
         // o `Column::fixed(ColumnFixed::Left)` do `DataTable` do gpui-kit, feito
@@ -3228,6 +3234,7 @@ impl Sessoes {
             .child(titulo_da_coluna("Balcão", LARGURAS[3]))
             .child(titulo_da_coluna("Caixa (PDV)", LARGURAS[4]))
             .child(titulo_da_coluna("Pós-venda", LARGURAS[5]))
+            .child(titulo_da_coluna("Fotolivro", LARGURAS[7]))
             .child(titulo_da_coluna("Criada", LARGURAS[6]))
             .when(com_lixeira, |c| c.child(div().w(px(LIXEIRA)).flex_none()));
 
@@ -3267,6 +3274,7 @@ impl Sessoes {
                 .child(campo(LARGURAS[3], Coluna::Balcao))
                 .child(campo(LARGURAS[4], Coluna::Caixa))
                 .child(campo(LARGURAS[5], Coluna::PosVenda))
+                .child(campo(LARGURAS[7], Coluna::Fotolivro))
                 .child(campo(LARGURAS[6], Coluna::Criada))
                 .when(com_lixeira, |c| c.child(div().w(px(LIXEIRA)).flex_none()))
         });
@@ -3394,6 +3402,11 @@ impl Sessoes {
                         cx,
                     )))
                     .child(numero(LARGURAS[5]).child(valor_ou_traco(pos_venda)))
+                    .child(numero(LARGURAS[7]).child(celula_do_fotolivro(
+                        sessao.fotolivro.as_ref(),
+                        sessao.caixa.as_ref(),
+                        apagado,
+                    )))
                     .child(
                         numero(LARGURAS[6])
                             .text_xs()
@@ -3545,6 +3558,75 @@ fn lixeira(sessao: &SessaoFotografica, apagado: Hsla, cx: &Context<Sessoes>) -> 
         }))
         .child(Icon::new(Icone::Trash2).size(px(16.)))
         .into_any_element()
+}
+
+/// 📖 A célula da coluna "Fotolivro" — a mesma tabela do `NoFotolivro` do
+/// site: `?`, `—`, "Não enviado" (o passivo, em âmbar), "E-mail dd/mm · não
+/// aberto" e "Aberto dd/mm", com "· WhatsApp" quando ele saiu.
+fn celula_do_fotolivro(
+    fotolivro: Option<&ResumoDoFotolivro>,
+    caixa: Option<&PagoNoCaixa>,
+    apagado: Hsla,
+) -> AnyElement {
+    let dia = |iso: &str| {
+        let partes: Vec<&str> = iso.get(..10).unwrap_or("").split('-').collect();
+        match partes.as_slice() {
+            [_, mes, dia] => format!("{dia}/{mes}"),
+            _ => String::new(),
+        }
+    };
+    let com_whatsapp = |linha: gpui_kit::Div, whatsapp: &Option<String>| {
+        linha.when(whatsapp.is_some(), |l| {
+            l.child(div().text_color(apagado).child("· WhatsApp"))
+        })
+    };
+    match estado_do_fotolivro(fotolivro, caixa) {
+        EstadoDoFotolivro::NaoSei => div().text_color(apagado).child("?").into_any_element(),
+        EstadoDoFotolivro::SemVenda => div().text_color(apagado).child("—").into_any_element(),
+        EstadoDoFotolivro::NaoEnviado => {
+            crate::estilo::selo_colorido(crate::tema::cores::selo_ambar())
+                .child("Não enviado")
+                .into_any_element()
+        }
+        EstadoDoFotolivro::Enviado {
+            email_em,
+            whatsapp_em,
+        } => {
+            let linha = div().flex().gap(px(4.)).text_xs().whitespace_nowrap();
+            let linha = match &email_em {
+                Some(em) => linha
+                    .child(format!("E-mail {}", dia(em)))
+                    .child(div().text_color(apagado).child("· não aberto")),
+                None => linha.child(format!(
+                    "WhatsApp {}",
+                    whatsapp_em.as_deref().map(dia).unwrap_or_default()
+                )),
+            };
+            if email_em.is_some() {
+                com_whatsapp(linha, &whatsapp_em).into_any_element()
+            } else {
+                linha.into_any_element()
+            }
+        }
+        EstadoDoFotolivro::Aberto {
+            aberto_em,
+            whatsapp_em,
+        } => com_whatsapp(
+            div()
+                .flex()
+                .gap(px(4.))
+                .text_xs()
+                .whitespace_nowrap()
+                .child(
+                    div()
+                        .text_color(crate::tema::cores::selo_esmeralda().2)
+                        .font_weight(gpui_kit::FontWeight::MEDIUM)
+                        .child(format!("Aberto {}", dia(&aberto_em))),
+                ),
+            &whatsapp_em,
+        )
+        .into_any_element(),
+    }
 }
 
 /// 💵 A célula da coluna "Caixa (PDV)" — o que o PDV cobrou, ou o caminho

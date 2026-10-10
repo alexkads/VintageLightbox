@@ -209,6 +209,9 @@ pub struct GaleriaDoPainel {
     /// O que o caixa cobrou desta sessão (2026-09-20). `None` = a API não
     /// soube dizer; `Some` com `vendas: 0` = não passou pelo caixa.
     pub caixa: Option<PagoNoCaixa>,
+    /// 📖 O fotolivro já foi ao cliente, e ele abriu o e-mail? `None` = a API
+    /// não soube dizer (ou é anterior ao campo).
+    pub fotolivro: Option<ResumoDoFotolivro>,
     /// A **revelação padrão** da sessão: a predefinição escolhida na etapa 2 do
     /// assistente (`sistema:<chave>` ou o id do banco).
     ///
@@ -266,6 +269,16 @@ pub struct TotaisDaGaleria {
 /// fala centavos em toda parte e os totais vêm de `Decimal`. Converter um dos
 /// dois no caminho esconderia a diferença até alguém somá-los.
 ///
+/// 📖 O fotolivro de uma sessão, como a lista do site o manda: RFC 3339 de
+/// quando o e-mail saiu, de quando o cliente o abriu e de quando o WhatsApp
+/// saiu. Tudo `None` = nada saiu ainda.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ResumoDoFotolivro {
+    pub email_enviado_em: Option<String>,
+    pub email_aberto_em: Option<String>,
+    pub whatsapp_enviado_em: Option<String>,
+}
+
 /// 🔑 **`vendas: 0` é um fato**: a sessão não passou pelo caixa, e é dele que
 /// sai o "Fechar venda" da lista. Quem não sabe é o `Option` de fora.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

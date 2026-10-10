@@ -1377,6 +1377,9 @@ struct GaleriaDoPainelDaApi {
     /// e o objeto com `vendas: 0` é "não passou pelo caixa".
     #[serde(default)]
     caixa: Option<PagoNoCaixaDaApi>,
+    /// 📖 `null` e ausente são "não sei"; o objeto vazio é "nada saiu".
+    #[serde(default)]
+    fotolivro: Option<FotolivroDaApi>,
     #[serde(default)]
     preset_padrao_id: Option<String>,
     #[serde(default)]
@@ -1395,6 +1398,16 @@ struct GaleriaDoPainelDaApi {
     como_conheceu_detalhe: Option<String>,
     #[serde(default)]
     parceiro_id: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+struct FotolivroDaApi {
+    #[serde(default)]
+    email_enviado_em: Option<String>,
+    #[serde(default)]
+    email_aberto_em: Option<String>,
+    #[serde(default)]
+    whatsapp_enviado_em: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -1473,6 +1486,13 @@ impl From<GaleriaDoPainelDaApi> for GaleriaDoPainel {
                 liquido_centavos: c.liquido_centavos,
                 por_forma: c.por_forma,
             }),
+            fotolivro: g
+                .fotolivro
+                .map(|f| domain::services::pos_venda::ResumoDoFotolivro {
+                    email_enviado_em: f.email_enviado_em,
+                    email_aberto_em: f.email_aberto_em,
+                    whatsapp_enviado_em: f.whatsapp_enviado_em,
+                }),
             preset_padrao_id: g.preset_padrao_id,
             proporcao_padrao: g.proporcao_padrao,
             estudio_id: g.estudio_id,

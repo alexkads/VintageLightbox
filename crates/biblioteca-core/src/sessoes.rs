@@ -157,6 +157,86 @@ pub fn estado_no_caixa(caixa: Option<&PagoNoCaixa>, levadas_no_balcao: u32) -> E
     }
 }
 
+/// 📖 O fotolivro de uma sessão: quando o e-mail saiu, quando o cliente o
+/// abriu e quando o WhatsApp saiu (RFC 3339).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ResumoDoFotolivro {
+    pub email_enviado_em: Option<String>,
+    pub email_aberto_em: Option<String>,
+    pub whatsapp_enviado_em: Option<String>,
+}
+
+/// 📖 O que a coluna "Fotolivro" diz de uma sessão (dono, 2026-10-09: *"existe
+/// um passivo de pessoas que provavelmente não receberam o fotolivro"*).
+///
+/// 🚨 **"Não enviado" só com venda no caixa** — o livro só sai com o
+/// pagamento no balcão. Sem venda é `SemVenda`, e sem resposta é `NaoSei`:
+/// nenhum dos dois pode virar passivo.
+///
+/// ⚠️ **O site tem esta mesma regra em TypeScript**
+/// (`sessoes-fotograficas/fotolivro-na-lista.ts`). Ao mudar uma, mudar a outra.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EstadoDoFotolivro {
+    NaoSei,
+    SemVenda,
+    /// O passivo: cobrada no caixa, e nada saiu.
+    NaoEnviado,
+    Enviado {
+        email_em: Option<String>,
+        whatsapp_em: Option<String>,
+    },
+    Aberto {
+        aberto_em: String,
+        whatsapp_em: Option<String>,
+    },
+}
+
+impl EstadoDoFotolivro {
+    /// O valor do filtro — os mesmos do site. `None` = não entra em filtro.
+    pub fn como_texto(&self) -> Option<&'static str> {
+        match self {
+            Self::NaoSei | Self::SemVenda => None,
+            Self::NaoEnviado => Some("nao_enviado"),
+            Self::Enviado { .. } => Some("enviado"),
+            Self::Aberto { .. } => Some("aberto"),
+        }
+    }
+
+    /// As escolhas do filtro, com o rótulo do site.
+    pub const ESCOLHAS: [(&'static str, &'static str); 3] = [
+        ("nao_enviado", "não enviado"),
+        ("enviado", "enviado, não aberto"),
+        ("aberto", "aberto"),
+    ];
+}
+
+/// A decisão da coluna do fotolivro. Ver [`EstadoDoFotolivro`].
+pub fn estado_do_fotolivro(
+    fotolivro: Option<&ResumoDoFotolivro>,
+    caixa: Option<&PagoNoCaixa>,
+) -> EstadoDoFotolivro {
+    let Some(livro) = fotolivro else {
+        return EstadoDoFotolivro::NaoSei;
+    };
+    if let Some(aberto) = &livro.email_aberto_em {
+        return EstadoDoFotolivro::Aberto {
+            aberto_em: aberto.clone(),
+            whatsapp_em: livro.whatsapp_enviado_em.clone(),
+        };
+    }
+    if livro.email_enviado_em.is_some() || livro.whatsapp_enviado_em.is_some() {
+        return EstadoDoFotolivro::Enviado {
+            email_em: livro.email_enviado_em.clone(),
+            whatsapp_em: livro.whatsapp_enviado_em.clone(),
+        };
+    }
+    match caixa {
+        None => EstadoDoFotolivro::NaoSei,
+        Some(pago) if pago.vendas > 0 => EstadoDoFotolivro::NaoEnviado,
+        Some(_) => EstadoDoFotolivro::SemVenda,
+    }
+}
+
 /// Uma sessão fotográfica como a lista precisa vê-la.
 ///
 /// 🔑 O nome é `SessaoFotografica` e não `Sessao` de propósito: no desktop já
@@ -182,6 +262,8 @@ pub struct SessaoFotografica {
     /// não se sabe; `Some` com `vendas: 0` = não passou pelo caixa, e a lista
     /// mostra o caminho para fechar a venda.
     pub caixa: Option<PagoNoCaixa>,
+    /// 📖 O fotolivro: enviado, aberto? `None` = não se sabe.
+    pub fotolivro: Option<ResumoDoFotolivro>,
     /// 🏢 **A sessão não tem estúdio definido.**
     ///
     /// 🚨 **A grade precisa mostrar isso** (dono, 18/set/2026: *"tem sessões
@@ -768,6 +850,52 @@ pub fn dia_curto(chave: &str) -> String {
 
 #[cfg(test)]
 mod testes {
+    /// 📖 A coluna do fotolivro — a mesma tabela do teste do site
+    /// (`fotolivro-na-lista.test.ts`).
+    #[test]
+    fn a_coluna_do_fotolivro() {
+        let caixa = |vendas| PagoNoCaixa {
+            vendas,
+            ..Default::default()
+        };
+        let nada = ResumoDoFotolivro::default();
+        assert_eq!(
+            estado_do_fotolivro(Some(&nada), Some(&caixa(1))),
+            EstadoDoFotolivro::NaoEnviado,
+            "o passivo"
+        );
+        assert_eq!(
+            estado_do_fotolivro(Some(&nada), Some(&caixa(0))),
+            EstadoDoFotolivro::SemVenda
+        );
+        assert_eq!(
+            estado_do_fotolivro(None, Some(&caixa(1))),
+            EstadoDoFotolivro::NaoSei
+        );
+        assert_eq!(
+            estado_do_fotolivro(Some(&nada), None),
+            EstadoDoFotolivro::NaoSei
+        );
+        let zap = ResumoDoFotolivro {
+            whatsapp_enviado_em: Some("2026-10-09T18:00:00Z".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            estado_do_fotolivro(Some(&zap), Some(&caixa(1))).como_texto(),
+            Some("enviado")
+        );
+        let aberto = ResumoDoFotolivro {
+            email_enviado_em: Some("2026-10-10T00:00:00Z".into()),
+            email_aberto_em: Some("2026-10-10T01:00:00Z".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            estado_do_fotolivro(Some(&aberto), None).como_texto(),
+            Some("aberto"),
+            "aberto vale mesmo sem saber do caixa"
+        );
+    }
+
     use super::*;
 
     /// 📈 Trinta dias até o fim, o dia vazio em zero, e a sessão fora da
@@ -826,6 +954,7 @@ mod testes {
     fn sessao(titulo: &str) -> SessaoFotografica {
         SessaoFotografica {
             sem_estudio: false,
+            fotolivro: None,
             id: titulo.to_string(),
             titulo: titulo.to_string(),
             email: None,
@@ -1227,6 +1356,7 @@ mod testes_do_periodo {
     fn sessao(id: &str, criada_em_iso: &str) -> SessaoFotografica {
         SessaoFotografica {
             sem_estudio: false,
+            fotolivro: None,
             id: id.into(),
             titulo: format!("Ensaio {id}"),
             email: None,

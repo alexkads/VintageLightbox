@@ -25,7 +25,9 @@
 //! centavos. Comparar o número digitado com os centavos — como o site fazia
 //! até 24/set/2026 — punha em "Balcão ≥ 100" quem vendeu R$ 1,00.
 
-use crate::sessoes::{dia_da_criacao, normalizar, SessaoFotografica, Situacao};
+use crate::sessoes::{
+    dia_da_criacao, estado_do_fotolivro, normalizar, SessaoFotografica, Situacao,
+};
 
 /// As colunas da lista que o desktop desenha, na ordem da tela.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -39,6 +41,8 @@ pub enum Coluna {
     Balcao,
     Caixa,
     PosVenda,
+    /// 📖 O fotolivro foi ao cliente, e ele abriu?
+    Fotolivro,
     Criada,
 }
 
@@ -52,7 +56,7 @@ pub enum Tipo {
 }
 
 impl Coluna {
-    pub const TODAS: [Coluna; 10] = [
+    pub const TODAS: [Coluna; 11] = [
         Coluna::Galeria,
         Coluna::Contato,
         Coluna::Situacao,
@@ -62,13 +66,14 @@ impl Coluna {
         Coluna::Balcao,
         Coluna::Caixa,
         Coluna::PosVenda,
+        Coluna::Fotolivro,
         Coluna::Criada,
     ];
 
     pub fn tipo(self) -> Tipo {
         match self {
             Coluna::Galeria | Coluna::Contato => Tipo::Texto,
-            Coluna::Situacao => Tipo::Escolha,
+            Coluna::Situacao | Coluna::Fotolivro => Tipo::Escolha,
             Coluna::Levadas | Coluna::AVenda | Coluna::Compradas => Tipo::Numero,
             Coluna::Balcao | Coluna::Caixa | Coluna::PosVenda => Tipo::Dinheiro,
             Coluna::Criada => Tipo::Data,
@@ -121,6 +126,8 @@ pub enum FiltroDeColuna {
         ate: Option<String>,
     },
     Situacao(Situacao),
+    /// 📖 `nao_enviado`, `enviado` ou `aberto` — os valores do site.
+    Fotolivro(&'static str),
 }
 
 /// Um número como se digita no balcão: `19,90`, `1.234,50`, `R$ 100`.
@@ -166,6 +173,7 @@ enum Valor<'a> {
     Numero(f64),
     Dia(std::borrow::Cow<'a, str>),
     Situacao(Situacao),
+    Fotolivro(&'static str),
 }
 
 fn valor(coluna: Coluna, sessao: &SessaoFotografica, agora: i64) -> Option<Valor<'_>> {
@@ -182,6 +190,9 @@ fn valor(coluna: Coluna, sessao: &SessaoFotografica, agora: i64) -> Option<Valor
         Coluna::Balcao => centavos(sessao.totais?.balcao),
         Coluna::PosVenda => centavos(sessao.totais?.pos_venda),
         Coluna::Caixa => centavos(sessao.caixa.as_ref()?.liquido_centavos),
+        Coluna::Fotolivro => Valor::Fotolivro(
+            estado_do_fotolivro(sessao.fotolivro.as_ref(), sessao.caixa.as_ref()).como_texto()?,
+        ),
         Coluna::Criada => Valor::Dia(dia_da_criacao(&sessao.criada_em_iso)),
     })
 }
@@ -221,6 +232,7 @@ pub fn passa(
             de.as_deref().is_none_or(|de| dia >= de) && ate.as_deref().is_none_or(|ate| dia <= ate)
         }
         (FiltroDeColuna::Situacao(querida), Valor::Situacao(s)) => *querida == s,
+        (FiltroDeColuna::Fotolivro(querido), Valor::Fotolivro(f)) => *querido == f,
         // Filtro de um tipo numa coluna de outro: quem montou errou, e a
         // coluna não filtra — esconder a lista inteira seria pior.
         _ => true,
@@ -265,12 +277,42 @@ mod testes {
             },
             totais: None,
             caixa: None,
+            fotolivro: None,
             sem_estudio: false,
         }
     }
 
     fn titulos(v: &[&SessaoFotografica]) -> Vec<String> {
         v.iter().map(|s| s.titulo.clone()).collect()
+    }
+
+    /// 📖 O filtro "não enviado" acha o passivo: cobrada no caixa, sem livro.
+    #[test]
+    fn o_filtro_do_fotolivro_acha_o_passivo() {
+        use crate::sessoes::{PagoNoCaixa, ResumoDoFotolivro};
+        let cobrada = SessaoFotografica {
+            caixa: Some(PagoNoCaixa {
+                vendas: 1,
+                ..Default::default()
+            }),
+            fotolivro: Some(ResumoDoFotolivro::default()),
+            ..sessao("Ensaio")
+        };
+        let sem_venda = SessaoFotografica {
+            caixa: Some(PagoNoCaixa::default()),
+            fotolivro: Some(ResumoDoFotolivro::default()),
+            ..sessao("Ensaio")
+        };
+        let filtro = FiltroDeColuna::Fotolivro("nao_enviado");
+        assert!(passa(Coluna::Fotolivro, &filtro, &cobrada, 0));
+        assert!(
+            !passa(Coluna::Fotolivro, &filtro, &sem_venda, 0),
+            "sem venda não é passivo"
+        );
+        assert!(
+            !passa(Coluna::Fotolivro, &filtro, &sessao("Ensaio"), 0),
+            "sem saber não passa"
+        );
     }
 
     #[test]
