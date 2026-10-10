@@ -544,6 +544,20 @@ impl crate::exportacao::porta::RevelaDoSite for RevelacaoDoSite {
         let controlador = self.controlador.clone();
         Box::pin(async move { controlador.previa_marcada(&sessao, &foto_no_site).await })
     }
+    fn link_da_galeria(
+        &self,
+        sessao: Sessao,
+        galeria_id: String,
+    ) -> crate::exportacao::porta::LinkPronto {
+        let controlador = self.controlador.clone();
+        Box::pin(async move {
+            match controlador.link_da_galeria(&sessao, &galeria_id).await {
+                Ok(link) => Ok(link.url),
+                Err(RecusaDoFimDaSessao::FaltaEmail(frase))
+                | Err(RecusaDoFimDaSessao::Outra(frase)) => Err(frase),
+            }
+        })
+    }
 }
 
 /// De onde a porta tira a imagem editada de uma foto do site.

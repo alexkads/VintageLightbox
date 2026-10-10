@@ -12639,6 +12639,11 @@ mod testes {
             .agendar
             .as_deref()
             .is_some_and(|a| a.ends_with("/agendar")));
+        // 🔗 A galeria vai junto: é com ela que a porta pede o link assinado.
+        assert_eq!(
+            exportador.galerias.lock().unwrap()[0].as_deref(),
+            Some("g1")
+        );
         let (so_dele, _, _) = &livros[1];
         assert_eq!(so_dele.len(), 1, "só as levadas");
         assert!(so_dele[0].levada());

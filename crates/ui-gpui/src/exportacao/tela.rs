@@ -562,6 +562,7 @@ impl Exportacao {
         self.exportador.fotolivro(
             fotos,
             self.capa_do_livro(),
+            self.livro.galeria_id.clone(),
             destino,
             self.sessao.clone(),
             self.cancelar.clone(),

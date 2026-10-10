@@ -147,7 +147,14 @@ pub trait RevelaDoSite: Send + Sync + 'static {
 
     /// 💧 A prévia com a marca d'água do sistema — a da foto não levada.
     fn previa_marcada(&self, sessao: Sessao, foto_no_site: String) -> Pronta;
+
+    /// 🔗 O link que abre a galeria **sem senha**, assinado pelo site — o
+    /// mesmo do "Copiar link". É dele que saem os links do fotolivro.
+    fn link_da_galeria(&self, sessao: Sessao, galeria_id: String) -> LinkPronto;
 }
+
+/// O link assinado da galeria, ou a frase de por que ele não saiu.
+pub type LinkPronto = Pin<Box<dyn Future<Output = Result<String, String>> + Send>>;
 
 /// Quem exporta a foto do catálogo para um arquivo.
 pub trait ExportaDoCatalogo: Send + Sync + 'static {
@@ -199,10 +206,15 @@ pub trait Exportador: Send + Sync + 'static {
     /// 📖 O fotolivro: as fotos, na ordem, num PDF só em `destino`. O
     /// andamento conta as fotos (uma `Feita` por foto pronta, com o nome dela)
     /// e termina com [`Andamento::Livro`].
+    ///
+    /// 🔗 `galeria` é a sessão no site: com ela, os links do livro saem
+    /// assinados (ver [`assinar_os_links`]).
+    #[allow(clippy::too_many_arguments)]
     fn fotolivro(
         &self,
         fotos: Vec<FotoDoLivro>,
         capa: fotolivro::Capa,
+        galeria: Option<String>,
         destino: PathBuf,
         sessao: Option<Sessao>,
         cancelar: Arc<AtomicBool>,
@@ -250,6 +262,7 @@ impl Exportador for ExportadorDoBanco {
         &self,
         fotos: Vec<FotoDoLivro>,
         capa: fotolivro::Capa,
+        galeria: Option<String>,
         destino: PathBuf,
         sessao: Option<Sessao>,
         cancelar: Arc<AtomicBool>,
@@ -258,7 +271,7 @@ impl Exportador for ExportadorDoBanco {
         let catalogo = self.catalogo.clone();
         let site = self.site.clone();
         self.tokio.spawn(montar_fotolivro(
-            fotos, capa, destino, sessao, cancelar, canal, catalogo, site,
+            fotos, capa, galeria, destino, sessao, cancelar, canal, catalogo, site,
         ));
     }
 }
@@ -316,13 +329,33 @@ async fn bytes_da_foto(
     }
 }
 
+/// 🔗 Troca os links do livro pelo **link assinado** da galeria.
+///
+/// `/meus-ensaios/{id}` cru exige sessão, e o cliente do balcão não tem conta:
+/// ele tocava na foto ou em "Baixar todas as minhas fotos" e caía no login
+/// (dono, 10/out/2026: *"gerei um PDF manual e o link não abriu"*). O link
+/// assinado é o do "Copiar link" — entra sem senha, não expira —, e o gesto vai
+/// ao lado do token: `&foto=<id>` aqui, `&acao=…` nos botões do fim, que o
+/// livro monta a partir do link da capa ([`fotolivro::com_acao`]). O site leva
+/// o gesto até a galeria depois de entrar.
+pub fn assinar_os_links(fotos: &mut [FotoDoLivro], capa: &mut fotolivro::Capa, link: &str) {
+    let separador = if link.contains('?') { '&' } else { '?' };
+    for foto in fotos.iter_mut() {
+        if let (Origem::Site { foto_no_site, .. }, Some(_)) = (&foto.origem, &foto.link) {
+            foto.link = Some(format!("{link}{separador}foto={foto_no_site}"));
+        }
+    }
+    capa.galeria = Some(link.to_string());
+}
+
 /// O fotolivro inteiro: as fotos com até [`AO_MESMO_TEMPO`] andando juntas, o
 /// livro diagramado e o PDF gravado de uma vez (o nome final só aparece com o
 /// arquivo inteiro, como na exportação).
 #[allow(clippy::too_many_arguments)]
 pub async fn montar_fotolivro(
-    fotos: Vec<FotoDoLivro>,
-    capa: fotolivro::Capa,
+    mut fotos: Vec<FotoDoLivro>,
+    mut capa: fotolivro::Capa,
+    galeria: Option<String>,
     destino: PathBuf,
     sessao: Option<Sessao>,
     cancelar: Arc<AtomicBool>,
@@ -332,6 +365,14 @@ pub async fn montar_fotolivro(
 ) {
     let total = fotos.len();
     let _ = canal.send(Andamento::Comecou { total });
+    // 🔗 Os links entram sem senha quando o site assina. Sem assinatura
+    // (sessão sem e-mail, e-mail de conta administradora) ficam os da rota da
+    // galeria, que pede o login: o livro sai do mesmo jeito.
+    if let (Some(galeria), Some(sessao)) = (galeria, sessao.clone()) {
+        if let Ok(link) = site.link_da_galeria(sessao, galeria).await {
+            assinar_os_links(&mut fotos, &mut capa, &link);
+        }
+    }
     let opcoes = ExportOptions::default()
         .with_quality(92)
         .with_longest_edge(LADO_NO_LIVRO);
@@ -618,6 +659,8 @@ pub mod mentira {
         pub segurado: Mutex<Option<LoteSegurado>>,
         /// Os fotolivros pedidos: as fotos, a capa e o arquivo.
         pub livros: Mutex<Vec<(Vec<FotoDoLivro>, fotolivro::Capa, PathBuf)>>,
+        /// A galeria que cada fotolivro levou — é dela que o link é assinado.
+        pub galerias: Mutex<Vec<Option<String>>>,
     }
 
     impl ExportadorDeMentira {
@@ -694,12 +737,14 @@ pub mod mentira {
             &self,
             fotos: Vec<FotoDoLivro>,
             capa: fotolivro::Capa,
+            galeria: Option<String>,
             destino: PathBuf,
             sessao: Option<Sessao>,
             _cancelar: Arc<AtomicBool>,
             canal: Sender<Andamento>,
         ) {
             self.sessoes.lock().expect("as sessões").push(sessao);
+            self.galerias.lock().expect("as galerias").push(galeria);
             let total = fotos.len();
             let _ = canal.send(Andamento::Comecou { total });
             for foto in &fotos {
@@ -754,6 +799,10 @@ mod testes {
         fn previa_marcada(&self, _sessao: Sessao, foto_no_site: String) -> Pronta {
             self.marcadas.lock().unwrap().push(foto_no_site.clone());
             Box::pin(async move { Ok(format!("marcada de {foto_no_site}").into_bytes()) })
+        }
+
+        fn link_da_galeria(&self, _sessao: Sessao, _galeria_id: String) -> LinkPronto {
+            Box::pin(async { Err("sem link no teste".to_string()) })
         }
     }
 
@@ -899,7 +948,8 @@ mod testes {
     /// último recado aponta o arquivo.
     #[test]
     fn o_fotolivro_vira_um_pdf() {
-        struct SiteDeFotos;
+        /// `Some` = o site assina o link da galeria; `None` = recusa.
+        struct SiteDeFotos(Option<&'static str>);
         impl RevelaDoSite for SiteDeFotos {
             fn revelar(
                 &self,
@@ -915,6 +965,11 @@ mod testes {
             fn previa_marcada(&self, _: Sessao, _: String) -> Pronta {
                 Box::pin(async { Ok(jpeg(30, 40)) })
             }
+            fn link_da_galeria(&self, _: Sessao, galeria_id: String) -> LinkPronto {
+                assert_eq!(galeria_id, "g", "o link é o desta galeria");
+                let link = self.0.map(str::to_string);
+                Box::pin(async move { link.ok_or_else(|| "sem e-mail".to_string()) })
+            }
         }
         fn jpeg(l: u32, a: u32) -> Vec<u8> {
             let mut bytes = Vec::new();
@@ -926,42 +981,55 @@ mod testes {
                 .unwrap();
             bytes
         }
+        let fotos = || -> Vec<FotoDoLivro> {
+            ["a", "b"]
+                .iter()
+                .enumerate()
+                .map(|(i, id)| FotoDoLivro {
+                    origem: Origem::Site {
+                        foto_no_site: id.to_string(),
+                        ajustes: Ajustes::default(),
+                        corte: CropSettings::default(),
+                        original_local: None,
+                        levada: i == 0,
+                    },
+                    nome: format!("{id}.jpg"),
+                    link: Some(format!("https://site/meus-ensaios/g?foto={id}")),
+                })
+                .collect()
+        };
+        let montar = |site: SiteDeFotos, destino: &Path| {
+            let (canal, recebe) = std::sync::mpsc::channel();
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(montar_fotolivro(
+                    fotos(),
+                    fotolivro::Capa {
+                        titulo: "Ensaio".into(),
+                        galeria: Some("https://site/meus-ensaios/g".into()),
+                        ..Default::default()
+                    },
+                    Some("g".into()),
+                    destino.to_path_buf(),
+                    Some(sessao()),
+                    Arc::new(AtomicBool::new(false)),
+                    canal,
+                    Arc::new(CatalogoDeMentira),
+                    Arc::new(site),
+                ));
+            recebe.try_iter().collect::<Vec<_>>()
+        };
+        let tem = |pdf: &[u8], trecho: &str| {
+            pdf.windows(trecho.len())
+                .any(|janela| janela == trecho.as_bytes())
+        };
+
         let pasta = tempfile::tempdir().unwrap();
         let destino = pasta.path().join("Ensaio.pdf");
-        let fotos: Vec<_> = ["a", "b"]
-            .iter()
-            .enumerate()
-            .map(|(i, id)| FotoDoLivro {
-                origem: Origem::Site {
-                    foto_no_site: id.to_string(),
-                    ajustes: Ajustes::default(),
-                    corte: CropSettings::default(),
-                    original_local: None,
-                    levada: i == 0,
-                },
-                nome: format!("{id}.jpg"),
-                link: Some(format!("https://site/meus-ensaios/g?foto={id}")),
-            })
-            .collect();
-        let (canal, recebe) = std::sync::mpsc::channel();
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(montar_fotolivro(
-                fotos,
-                fotolivro::Capa {
-                    titulo: "Ensaio".into(),
-                    ..Default::default()
-                },
-                destino.clone(),
-                Some(sessao()),
-                Arc::new(AtomicBool::new(false)),
-                canal,
-                Arc::new(CatalogoDeMentira),
-                Arc::new(SiteDeFotos),
-            ));
-        let andamentos: Vec<_> = recebe.try_iter().collect();
+        let assinado = "https://site/entrar/fast-link?token=abc.def.ghi";
+        let andamentos = montar(SiteDeFotos(Some(assinado)), &destino);
         assert_eq!(terminou(&andamentos), (2, 0, 0));
         assert!(andamentos
             .iter()
@@ -969,6 +1037,31 @@ mod testes {
         let pdf = std::fs::read(&destino).unwrap();
         assert!(pdf.starts_with(b"%PDF"));
         assert!(!pasta.path().join("Ensaio.pdf.part").exists());
+
+        // 🔗 Todo link do livro entra sem senha: a foto, os dois botões do fim
+        // e "Abrir minha galeria" — e nenhum sobra na rota que pede o login.
+        for gesto in [
+            "&foto=a",
+            "&foto=b",
+            "&acao=baixar-todas",
+            "&acao=comprar-todas",
+        ] {
+            assert!(
+                tem(&pdf, &format!("{assinado}{gesto}")),
+                "falta {gesto} no link assinado"
+            );
+        }
+        assert!(tem(&pdf, &format!("{assinado})")), "a galeria, sem gesto");
+        assert!(!tem(&pdf, "/meus-ensaios/"), "sobrou link que pede o login");
+
+        // Sem assinatura (sessão sem e-mail) o livro sai, com a rota da galeria.
+        let sem_email = pasta.path().join("Sem e-mail.pdf");
+        let andamentos = montar(SiteDeFotos(None), &sem_email);
+        assert_eq!(terminou(&andamentos), (2, 0, 0));
+        let pdf = std::fs::read(&sem_email).unwrap();
+        assert!(tem(&pdf, "https://site/meus-ensaios/g?foto=a"));
+        assert!(tem(&pdf, "https://site/meus-ensaios/g?acao=baixar-todas"));
+        assert!(!tem(&pdf, "fast-link"));
     }
 
     /// A do catálogo continua pelo controller, no mesmo lote.
