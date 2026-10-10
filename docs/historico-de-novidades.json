@@ -1,5 +1,16 @@
 [
   {
+    "versao": "0.1.132",
+    "data": "2026-10-10",
+    "titulo": "Fotolivro: os links do livro abrem sem pedir senha.",
+    "importante": true,
+    "novidades": [
+      "Fotolivro (PDF): tocar numa foto, em \"Baixar todas as minhas fotos\", em \"Comprar as disponíveis\" ou em \"Abrir minha galeria\" leva o cliente direto para a galeria dele, sem login — o mesmo link do \"Copiar link\". Antes, quem não tinha conta no site caía na tela de login.",
+      "Fotolivro (PDF): a sessão precisa ter o e-mail do cliente para os links entrarem sem senha. Sem e-mail o livro sai, mas os links pedem login."
+    ],
+    "por_que_atualizar": "Os fotolivros gerados antes desta versão têm links que pedem login. Atualize antes de mandar o próximo ao cliente."
+  },
+  {
     "versao": "0.1.131",
     "data": "2026-10-10",
     "titulo": "Fotolivro mais leve: pequeno para mandar e abrir no celular.",
