@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.139",
+    "data": "2026-10-10",
+    "titulo": "Chatbot: as mensagens aparecem com a formatação do WhatsApp (negrito, itálico, riscado) e os links abrem com um clique.",
+    "importante": false,
+    "novidades": [
+      "Chatbot: as mensagens do WhatsApp aparecem como o cliente as vê no telefone — negrito, itálico, riscado, código, lista e citação —, sem os asteriscos e os sublinhados da marcação. A prévia na lista de conversas também sai limpa.",
+      "Chatbot: os links das mensagens abrem no navegador com um clique, em todos os canais.",
+      "Chatbot: a foto que ainda não foi baixada do WhatsApp aparece como um cartão \"ainda não baixado · tentar abrir\", em vez de ficar carregando."
+    ],
+    "por_que_atualizar": "Sem esta versão, as mensagens do bot aparecem com os asteriscos da formatação (*assim*) e os links não abrem."
+  },
+  {
     "versao": "0.1.138",
     "data": "2026-10-10",
     "titulo": "Chatbot: a foto, o documento e o áudio que o cliente manda pelo WhatsApp aparecem na conversa, e o clipe anexa arquivo na resposta.",
