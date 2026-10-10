@@ -264,9 +264,8 @@ impl Exportador for ExportadorDoBanco {
 }
 
 /// O lado maior das fotos levadas no fotolivro: o mesmo que o livro usa
-/// (`fotolivro::gerar` reduz a 1800 px) — revelar maior seria trabalho jogado
-/// fora.
-const LADO_NO_LIVRO: u32 = 1800;
+/// ([`fotolivro::LADO_NA_FOLHA`]) — revelar maior seria trabalho jogado fora.
+const LADO_NO_LIVRO: u32 = fotolivro::LADO_NA_FOLHA;
 
 /// Os bytes de uma foto do lote, já com a decisão da marca tomada.
 async fn bytes_da_foto(
@@ -408,7 +407,7 @@ pub async fn montar_fotolivro(
     if !prontas.is_empty() && !parado {
         let folhas: Vec<_> = prontas.into_iter().map(|(_, f)| f).collect();
         let gravado = async {
-            let pdf = tokio::task::spawn_blocking(move || fotolivro::gerar(&capa, &folhas))
+            let pdf = tokio::task::spawn_blocking(move || fotolivro::gerar(&capa, folhas))
                 .await
                 .map_err(|e| format!("o livro não terminou: {e}"))??;
             if let Some(pasta) = destino.parent() {
