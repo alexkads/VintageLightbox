@@ -1,5 +1,15 @@
 [
   {
+    "versao": "0.1.130",
+    "data": "2026-10-10",
+    "titulo": "Sessões: a coluna \"Fotolivro enviado em\".",
+    "importante": false,
+    "novidades": [
+      "Sessões: coluna \"Fotolivro enviado em\", com a data e a hora em que o fotolivro foi ao cliente pela primeira vez (WhatsApp ou e-mail). Dá para ordenar e filtrar por período, como a coluna \"Criada\"."
+    ],
+    "por_que_atualizar": "Para ver na lista quando cada cliente recebeu o fotolivro."
+  },
+  {
     "versao": "0.1.129",
     "data": "2026-10-09",
     "titulo": "Fotolivro: a exportação vira um álbum em PDF, e a lista de sessões mostra quem já recebeu.",
