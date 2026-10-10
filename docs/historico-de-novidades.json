@@ -1,5 +1,16 @@
 [
   {
+    "versao": "0.1.133",
+    "data": "2026-10-10",
+    "titulo": "Fotolivro: o botão de baixar mostra quantas fotos são do cliente.",
+    "importante": false,
+    "novidades": [
+      "Fotolivro (PDF): o botão \"Baixar a minha foto\" passa a mostrar a quantidade também quando o cliente levou uma foto só — \"Baixar a minha foto (1)\".",
+      "No site, quem toca nesse botão vê um aviso com o andamento do download assim que a galeria abre, e pode baixar de novo se o navegador segurar o arquivo."
+    ],
+    "por_que_atualizar": "Para o fotolivro dizer ao cliente quantas fotos ele vai baixar."
+  },
+  {
     "versao": "0.1.132",
     "data": "2026-10-10",
     "titulo": "Fotolivro: os links do livro abrem sem pedir senha.",

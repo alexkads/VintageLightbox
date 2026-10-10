@@ -1,10 +1,10 @@
 {
-  "versao": "0.1.132",
-  "titulo": "Fotolivro: os links do livro abrem sem pedir senha.",
-  "importante": true,
+  "versao": "0.1.133",
+  "titulo": "Fotolivro: o botão de baixar mostra quantas fotos são do cliente.",
+  "importante": false,
   "novidades": [
-    "Fotolivro (PDF): tocar numa foto, em \"Baixar todas as minhas fotos\", em \"Comprar as disponíveis\" ou em \"Abrir minha galeria\" leva o cliente direto para a galeria dele, sem login — o mesmo link do \"Copiar link\". Antes, quem não tinha conta no site caía na tela de login.",
-    "Fotolivro (PDF): a sessão precisa ter o e-mail do cliente para os links entrarem sem senha. Sem e-mail o livro sai, mas os links pedem login."
+    "Fotolivro (PDF): o botão \"Baixar a minha foto\" passa a mostrar a quantidade também quando o cliente levou uma foto só — \"Baixar a minha foto (1)\".",
+    "No site, quem toca nesse botão vê um aviso com o andamento do download assim que a galeria abre, e pode baixar de novo se o navegador segurar o arquivo."
   ],
-  "por_que_atualizar": "Os fotolivros gerados antes desta versão têm links que pedem login. Atualize antes de mandar o próximo ao cliente."
+  "por_que_atualizar": "Para o fotolivro dizer ao cliente quantas fotos ele vai baixar."
 }
