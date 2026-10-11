@@ -5099,8 +5099,9 @@ impl Render for Detalhe {
         let cabecalho =
             (!pular("cabecalho")).then(|| self.cabecalho(window, cx).into_any_element());
         let envio = (!pular("envio")).then(|| self.envio(cx).into_any_element());
-        let barra = (!pular("barra")).then(|| self.barra_da_grade(cx).into_any_element());
         let tira_aberta = self.docas.as_ref().is_none_or(|d| d.tira_aberta());
+        let barra =
+            (!pular("barra")).then(|| self.barra_da_grade(!tira_aberta, cx).into_any_element());
         let tira_el = (!pular("tira") && tira_aberta).then(|| self.tira(cx).into_any_element());
         let area = self.docas.as_ref().map(|d| d.area.clone());
         let coluna_aberta = !self.paineis.coluna_recolhida();
@@ -5820,14 +5821,58 @@ impl Detalhe {
             )
     }
 
-    /// A barra da grade: recortes · zoom · Revelar · Tela do cliente · seleção.
-    fn barra_da_grade(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// As fichas dos recortes, com a conta de cada um.
+    fn fichas_de_recorte(&self, cx: &mut Context<Self>) -> Vec<gpui_kit::AnyElement> {
+        let contagens = self.contagens();
+        let ativo = self.filtro();
+        FILTROS
+            .into_iter()
+            .filter_map(|(rotulo, filtro)| {
+                let quantas = contagens.de(filtro);
+                // 🔑 O recorte vazio some — **menos** quando é o escolhido:
+                // sumir o filtro ativo tiraria o caminho de volta.
+                let mostrar = filtro == Filtro::Todas || quantas > 0 || ativo == filtro;
+                mostrar.then(|| {
+                    crate::estilo::ficha(
+                        SharedString::from(format!("sessao-filtro-{rotulo}")),
+                        rotulo,
+                        Some(quantas),
+                        ativo == filtro,
+                        cx,
+                    )
+                    .on_click(
+                        cx.listener(move |tela, _ev: &bool, _window, cx| tela.filtrar(filtro, cx)),
+                    )
+                    .into_any_element()
+                })
+            })
+            .collect()
+    }
+
+    /// A barra dos recortes, colada em cima da tira — no mesmo lugar da
+    /// Revelação (`revelacao/tela/tira.rs`), para o filtro ficar junto do que
+    /// ele filtra (dono, 11/out/2026).
+    fn barra_de_recortes(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_none()
+            .flex_wrap()
+            .items_center()
+            .gap(px(6.))
+            .px(px(12.))
+            .py(px(6.))
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .children(self.fichas_de_recorte(cx))
+    }
+
+    /// A barra da grade: zoom · Revelar · Tela do cliente · seleção — e os
+    /// recortes, quando a tira (onde eles moram) está escondida.
+    fn barra_da_grade(&self, com_recortes: bool, cx: &mut Context<Self>) -> impl IntoElement {
         use crate::estilo;
         use crate::recursos::Icone;
         use gpui_kit::component::Icon;
 
-        let contagens = self.contagens();
-        let ativo = self.filtro();
         let visiveis = self.acervo.total_visivel();
         let marcadas = self.quantas_marcadas();
         let todas_marcadas = visiveis > 0 && marcadas == visiveis;
@@ -5845,22 +5890,9 @@ impl Detalhe {
             .py(px(6.))
             .border_b_1()
             .border_color(borda)
-            .children(FILTROS.into_iter().filter_map(|(rotulo, filtro)| {
-                let quantas = contagens.de(filtro);
-                // 🔑 O recorte vazio some — **menos** quando é o escolhido:
-                // sumir o filtro ativo tiraria o caminho de volta.
-                let mostrar = filtro == Filtro::Todas || quantas > 0 || ativo == filtro;
-                mostrar.then(|| {
-                    estilo::ficha(
-                        SharedString::from(format!("sessao-filtro-{rotulo}")),
-                        rotulo,
-                        Some(quantas),
-                        ativo == filtro,
-                        cx,
-                    )
-                    .on_click(cx.listener(move |tela, _ev: &bool, _window, cx| tela.filtrar(filtro, cx)))
-                })
-            }))
+            // 🔑 Os recortes moram em cima da tira; aqui só quando ela está
+            // escondida — sem isto, fechar a tira levava os filtros junto.
+            .when(com_recortes, |barra| barra.children(self.fichas_de_recorte(cx)))
             // 📌 **O aviso de pendência, e o atalho para ela** — o da web
             // (`grade.tsx`). Some quando não há nenhuma; o clique marca as
             // pendentes e foca a primeira.
@@ -9377,6 +9409,7 @@ impl Detalhe {
             .flex()
             .flex_col()
             .flex_none()
+            .child(self.barra_de_recortes(cx))
             .child(self.puxador(cx))
             .child(
                 div()
