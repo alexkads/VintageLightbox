@@ -25,12 +25,14 @@ use std::time::Duration;
 
 use adapters::view_models::PhotoViewModel;
 use biblioteca_core::comparar::Lado;
+use biblioteca_core::grade_do_cliente as conta;
 use domain::value_objects::CropSettings;
 use gpui_kit::component::InteractiveElementExt as _;
 use gpui_kit::{
     actions, div, ease_in_out, img, point, prelude::*, px, size, Animation, AnimationExt, Bounds,
     Context, FocusHandle, Pixels, RenderImage, SharedString, Size, Task, Window,
 };
+use infrastructure::cache::preview_manager::PreviewManager;
 use infrastructure::transformacao;
 
 use crate::revelacao::processador::{Ajustes, Pedido, Processador};
@@ -78,6 +80,50 @@ struct ParNoCliente {
     direita: MetadeNoCliente,
     ativa: Lado,
 }
+
+/// Uma foto na grade da segunda tela.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ItemDaGrade {
+    /// O número embaixo da foto: a posição dela no recorte do operador,
+    /// contando de 1 — o mesmo "7 / 25" do rodapé da foto única.
+    pub numero: usize,
+    /// A chave da imagem no cache de previews — a mesma que a galeria do
+    /// operador desenha (a prévia local não salva vence a do site).
+    pub chave: String,
+    /// O cliente já disse que leva esta.
+    pub escolhida: bool,
+}
+
+/// A grade que a raiz manda à segunda tela: as fotos do recorte do operador
+/// que o cliente vê, qual está em foco e quantas vão por linha.
+///
+/// 🔑 **O número vem pronto da raiz**, e não é contado aqui: a rejeitada e a
+/// apagada ficam de fora e o número delas fica vago — a "12" do cliente é a
+/// "12" do balconista (`biblioteca_core::grade_do_cliente`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct GradeParaOCliente {
+    pub itens: Vec<ItemDaGrade>,
+    /// O índice, em `itens`, da foto em foco do operador.
+    pub foco: Option<usize>,
+    pub por_linha: usize,
+}
+
+/// A faixa do pé da grade: quais fotos e qual página estão no ar.
+const PE_DA_GRADE: f32 = 30.;
+
+/// A borda da foto em foco na grade — a âmbar do Comparar.
+const BORDA_DA_GRADE: f32 = 4.;
+
+/// Acima deste lado, em pixels do dispositivo, a célula pede a prévia grande:
+/// é o lado da miniatura do cache (`sessoes::detalhe::LADO_DA_MINIATURA`).
+const LADO_DA_MINIATURA: f32 = 320.;
+
+/// Quantas prévias grandes a grade decodifica por quadro. As outras entram
+/// com a miniatura e trocam no quadro seguinte.
+const GRANDES_POR_QUADRO: usize = 4;
+
+/// Quanto dura a entrada de uma página da grade.
+const ENTRADA_DA_PAGINA: Duration = Duration::from_millis(350);
 
 /// Quanto dura o cruzamento entre uma foto e a seguinte.
 ///
@@ -307,6 +353,12 @@ pub struct Lembranca {
     /// Posição e tamanho no modo janela: `[x, y, largura, altura]`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub janela: Option<[f32; 4]>,
+    /// A tela mostra a grade (várias fotos numeradas), e não a foto em foco.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub grade: bool,
+    /// Quantas fotos por linha na grade. `None` é o padrão.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub por_linha: Option<usize>,
 }
 
 impl Lembranca {
@@ -335,6 +387,12 @@ impl Lembranca {
             origin: point(px(x), px(y)),
             size: size(px(largura), px(altura)),
         })
+    }
+
+    /// As fotos por linha da grade, dentro da faixa — arquivo mexido à mão
+    /// não põe 40 por linha.
+    pub fn fotos_por_linha(&self) -> usize {
+        conta::por_linha_valido(self.por_linha.unwrap_or(conta::POR_LINHA_PADRAO))
     }
 
     pub fn lembrar_limites(&mut self, limites: Bounds<Pixels>) {
@@ -539,6 +597,20 @@ pub struct Cliente {
     /// conferem.
     arquivo: Option<std::path::PathBuf>,
     _limites: Option<gpui_kit::Subscription>,
+    /// A grade (várias fotos, cada uma com o número embaixo), quando é ela
+    /// que está no ar. `None` é a foto única ou o Comparar.
+    grade: Option<GradeParaOCliente>,
+    /// O cache de previews do app, de onde saem as imagens da grade. `None`
+    /// nos testes que não a desenham.
+    previews: Option<Arc<PreviewManager>>,
+    /// As imagens da página no ar, por chave — e se é a prévia grande.
+    imagens_da_grade: std::collections::HashMap<String, (bool, Arc<RenderImage>)>,
+    /// As chaves que o cache não tinha, para não perguntar ao disco a cada
+    /// quadro. Esvazia quando a raiz reenvia a grade ou avisa de imagem nova.
+    sem_imagem: std::collections::HashSet<String>,
+    /// A raiz avisou que alguma imagem mudou: a página é relida por cima do
+    /// que está na tela, sem um quadro vazio no meio.
+    reler_a_grade: bool,
 }
 
 impl Cliente {
@@ -578,7 +650,18 @@ impl Cliente {
             foco,
             arquivo,
             _limites: limites,
+            grade: None,
+            previews: None,
+            imagens_da_grade: std::collections::HashMap::new(),
+            sem_imagem: std::collections::HashSet::new(),
+            reler_a_grade: false,
         }
+    }
+
+    /// Com o cache de previews do app — é dele que a grade tira as imagens.
+    pub fn com_previews(mut self, previews: Arc<PreviewManager>) -> Self {
+        self.previews = Some(previews);
+        self
     }
 
     /// Grava o monitor onde ela está, o estado e, em janela, a posição e o
@@ -638,6 +721,7 @@ impl Cliente {
         ativa: Lado,
         cx: &mut Context<Self>,
     ) {
+        self.grade = None;
         let anterior = self.par.take();
         let unica = self
             .foto
@@ -765,7 +849,12 @@ impl Cliente {
                             self.soltar_a_proxima_do_par(cx);
                             cx.notify();
                         }
-                        None => self.mostrar(Some(foto), Some(imagem), posicao, cx),
+                        // 🔑 A grade só sai quando a foto está pronta: até
+                        // lá ela fica no ar, e não a foto de antes dela.
+                        None => {
+                            self.grade = None;
+                            self.mostrar(Some(foto), Some(imagem), posicao, cx)
+                        }
                     }
                 } else {
                     if crate::depuracao::vigia::ligado() {
@@ -874,6 +963,18 @@ impl Cliente {
     /// do balcão. Depois da primeira resposta vira a confirmação de que deu
     /// certo e o resto é no celular. O mesmo desenho da tela do cliente do site.
     fn qr_na_tela(&self) -> Option<gpui_kit::AnyElement> {
+        Some(
+            self.cartao_do_qr()?
+                .absolute()
+                .right(px(24.))
+                .bottom(px(24.))
+                .into_any_element(),
+        )
+    }
+
+    /// O cartão do QR, sem lugar: por cima do palco (foto única e Comparar) ou
+    /// na coluna dele (grade).
+    fn cartao_do_qr(&self) -> Option<gpui_kit::Div> {
         use crate::sessoes::qr_do_bot::EstadoDoBot;
         // 🔑 **Só o balconista tira o QR daqui** (o botão "QR do bot" e o `I`
         // da sessão): nem o `I` desta janela, que é do rodapé, nem o cadastro
@@ -941,9 +1042,6 @@ impl Cliente {
             .children(andamento);
         Some(
             div()
-                .absolute()
-                .right(px(24.))
-                .bottom(px(24.))
                 .w(px(256.))
                 .p(px(16.))
                 .rounded(crate::tema::canto(12.))
@@ -951,8 +1049,7 @@ impl Cliente {
                 .flex()
                 .flex_col()
                 .items_center()
-                .child(corpo)
-                .into_any_element(),
+                .child(corpo),
         )
     }
 
@@ -1145,9 +1242,17 @@ impl Render for Cliente {
             janela.height = (janela.height - px(ALTURA_DA_BARRA)).max(px(0.));
         }
 
+        if self.grade.is_some() {
+            if self.preparar_a_grade(janela, window.scale_factor()) {
+                window.request_animation_frame();
+            }
+            let grade = self.palco_da_grade(janela, cx);
+            return self.moldura(grade, barra, false, window, cx);
+        }
+
         if let Some(par) = self.par.as_ref() {
             let comparacao = Self::palco_do_comparar(par, self.mostrar_info, janela);
-            return self.moldura(comparacao.into_any_element(), barra, window, cx);
+            return self.moldura(comparacao.into_any_element(), barra, true, window, cx);
         }
 
         let palco =
@@ -1274,7 +1379,7 @@ impl Render for Cliente {
                         })),
                 );
 
-        self.moldura(palco.into_any_element(), barra, window, cx)
+        self.moldura(palco.into_any_element(), barra, true, window, cx)
     }
 }
 
@@ -1284,6 +1389,7 @@ impl Cliente {
         &self,
         palco: gpui_kit::AnyElement,
         barra: bool,
+        qr_por_cima: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui_kit::AnyElement {
@@ -1329,7 +1435,9 @@ impl Cliente {
                     .w_full()
                     .flex()
                     .child(palco)
-                    .children(self.qr_na_tela()),
+                    // 🚨 Na grade o QR tem coluna própria, dentro do palco:
+                    // por cima, ele taparia fotos (dono, 11/out/2026).
+                    .children(qr_por_cima.then(|| self.qr_na_tela()).flatten()),
             )
             .into_any_element()
     }
@@ -1422,6 +1530,324 @@ impl Cliente {
             .p(px(VAO))
             .child(metade(&par.esquerda, par.ativa == Lado::Esquerda))
             .child(metade(&par.direita, par.ativa == Lado::Direita))
+    }
+}
+
+/// O que a grade desenha agora: o arranjo, a página e os itens dela.
+pub struct DesenhoDaGrade {
+    pub arranjo: conta::Arranjo,
+    /// A página no ar, contando de zero, e quantas há.
+    pub pagina: usize,
+    pub paginas: usize,
+    /// Os índices, em `GradeParaOCliente::itens`, das fotos desta página.
+    pub faixa: std::ops::Range<usize>,
+}
+
+impl Cliente {
+    /// Põe a grade no ar: várias fotos por página, cada uma com o número dela.
+    ///
+    /// 🔑 **A raiz reenvia a cada mudança** (o foco andou, uma foto foi levada
+    /// ou rejeitada, o recorte mudou, as fotos por linha mudaram): aqui só se
+    /// guarda e se desenha. As imagens já lidas ficam — a chave é a mesma.
+    pub fn mostrar_grade(&mut self, grade: GradeParaOCliente, cx: &mut Context<Self>) {
+        self.par = None;
+        self.fila_do_par.clear();
+        // Uma chave que o cache não tinha pode ter chegado desde então.
+        self.sem_imagem.clear();
+        self.grade = Some(grade);
+        cx.notify();
+    }
+
+    /// A grade que está no ar, se é ela.
+    pub fn grade_mostrada(&self) -> Option<&GradeParaOCliente> {
+        self.grade.as_ref()
+    }
+
+    /// Alguma imagem do cache mudou (a miniatura chegou, a revelada foi
+    /// regravada): a página é relida no próximo quadro.
+    pub fn reler_as_imagens_da_grade(&mut self, cx: &mut Context<Self>) {
+        if self.grade.is_some() {
+            self.reler_a_grade = true;
+            self.sem_imagem.clear();
+            cx.notify();
+        }
+    }
+
+    /// A conta da grade para este tamanho de palco.
+    ///
+    /// 🚨 **O QR ligado reserva a coluna dele** — é a conta que garante que
+    /// nenhuma célula fica debaixo do cartão.
+    pub fn desenho_da_grade(&self, palco: Size<Pixels>) -> Option<DesenhoDaGrade> {
+        let grade = self.grade.as_ref()?;
+        let arranjo = conta::arranjo(
+            f32::from(palco.width),
+            (f32::from(palco.height) - PE_DA_GRADE).max(0.),
+            grade.por_linha,
+            self.convite.is_some(),
+            1.0,
+        );
+        let por_pagina = arranjo.por_pagina();
+        let pagina = grade
+            .foco
+            .map_or(0, |foco| conta::pagina_de(foco, por_pagina));
+        let paginas = conta::paginas(grade.itens.len(), por_pagina);
+        // O foco além do fim (a lista encolheu) cai na última página.
+        let pagina = pagina.min(paginas - 1);
+        Some(DesenhoDaGrade {
+            arranjo,
+            pagina,
+            paginas,
+            faixa: conta::faixa_da_pagina(pagina, por_pagina, grade.itens.len()),
+        })
+    }
+
+    /// Lê do cache as imagens da página no ar. Devolve se ficou alguma prévia
+    /// grande para o próximo quadro.
+    ///
+    /// 🔑 **Antes do `render`, e não dentro da célula** — a lição da grade da
+    /// sessão: decodificar por célula, por quadro, é o que trava a tela.
+    fn preparar_a_grade(&mut self, palco: Size<Pixels>, escala: f32) -> bool {
+        let Some(desenho) = self.desenho_da_grade(palco) else {
+            return false;
+        };
+        let (Some(grade), Some(previews)) = (self.grade.as_ref(), self.previews.clone()) else {
+            return false;
+        };
+        let a = desenho.arranjo;
+        let quer_grande =
+            a.largura_da_celula.max(a.altura_da_foto) * escala.max(1.0) > LADO_DA_MINIATURA;
+        let reler = std::mem::take(&mut self.reler_a_grade);
+        let chaves: Vec<String> = grade.itens[desenho.faixa.clone()]
+            .iter()
+            .map(|item| item.chave.clone())
+            .collect();
+        let mut grandes = 0;
+        let mut faltou = false;
+        for chave in &chaves {
+            let tem = self.imagens_da_grade.get(chave).map(|(grande, _)| *grande);
+            if !reler && (tem == Some(quer_grande) || tem == Some(true)) {
+                continue;
+            }
+            if self.sem_imagem.contains(chave) {
+                continue;
+            }
+            let pode_grande = quer_grande && (reler || grandes < GRANDES_POR_QUADRO);
+            let lida = if pode_grande {
+                grandes += 1;
+                previews
+                    .get_preview(chave)
+                    .map(|imagem| (true, imagem))
+                    .or_else(|| previews.get_thumbnail(chave).map(|i| (true, i)))
+            } else if tem.is_some() && !reler {
+                // Já tem a miniatura; a grande fica para o próximo quadro.
+                faltou = true;
+                continue;
+            } else {
+                faltou |= quer_grande;
+                previews
+                    .get_thumbnail(chave)
+                    .map(|imagem| (false, imagem))
+                    .or_else(|| previews.get_preview(chave).map(|i| (true, i)))
+            };
+            match lida {
+                Some((grande, imagem)) => {
+                    self.imagens_da_grade
+                        .insert(chave.clone(), (grande, crate::imagem::para_gpui(imagem)));
+                }
+                None => {
+                    // Sem nada no cache: se havia imagem, ela fica.
+                    self.sem_imagem.insert(chave.clone());
+                }
+            }
+        }
+        // Só a página no ar fica na memória.
+        self.imagens_da_grade
+            .retain(|chave, _| chaves.iter().any(|c| c == chave));
+        faltou
+    }
+
+    /// Uma célula da grade: a foto inteira em cima, o número embaixo.
+    fn celula_da_grade(
+        &self,
+        item: &ItemDaGrade,
+        i: usize,
+        em_foco: bool,
+        a: &conta::Arranjo,
+    ) -> gpui_kit::AnyElement {
+        let lugar = a.celula(i);
+        let ambar = gpui_kit::rgb(0xfbbf24);
+        let caixa = size(
+            px((lugar.w - 2. * BORDA_DA_GRADE).max(1.)),
+            px((a.altura_da_foto - 2. * BORDA_DA_GRADE).max(1.)),
+        );
+        let imagem = self
+            .imagens_da_grade
+            .get(&item.chave)
+            .map(|(_, i)| i.clone());
+        // 🔑 A moldura nasce do tamanho da foto ([`crate::imagem::cabe_em`]):
+        // `size_full` numa caixa de outra proporção corta a foto — a armadilha
+        // do `Img` que já cortou esta tela (17/set/2026).
+        let base = match &imagem {
+            Some(imagem) => crate::imagem::cabe_em(caixa, imagem.size(0)),
+            // Ainda sem imagem: o lugar dela, para a página não dançar.
+            None => caixa,
+        };
+        let selo = (a.letra_do_numero * 0.5).clamp(11., 22.);
+
+        div()
+            .absolute()
+            .left(px(lugar.x))
+            .top(px(lugar.y))
+            .w(px(lugar.w))
+            .h(px(lugar.h))
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .w_full()
+                    .h(px(a.altura_da_foto))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        // A borda e o selo são **da foto**, e não da caixa: em
+                        // volta da caixa, a foto em pé ganharia duas tarjas
+                        // pretas dentro da moldura do foco.
+                        div()
+                            .relative()
+                            .w(base.width + px(2. * BORDA_DA_GRADE))
+                            .h(base.height + px(2. * BORDA_DA_GRADE))
+                            .rounded(crate::tema::canto(6.))
+                            .border(px(BORDA_DA_GRADE))
+                            .border_color(if em_foco {
+                                ambar.into()
+                            } else {
+                                gpui_kit::transparent_black()
+                            })
+                            .when(imagem.is_none(), |quadro| {
+                                quadro.bg(gpui_kit::rgb(0x141414))
+                            })
+                            .children(imagem.map(|imagem| img(imagem).size_full()))
+                            .when(item.escolhida, |quadro| {
+                                quadro.child(
+                                    div()
+                                        .absolute()
+                                        .top(px(6.))
+                                        .right(px(6.))
+                                        .px(px(selo * 0.6))
+                                        .rounded(px(999.))
+                                        .bg(ambar)
+                                        .text_size(px(selo))
+                                        .text_color(gpui_kit::black())
+                                        .child("Escolhida"),
+                                )
+                            }),
+                    ),
+            )
+            // 🔑 A linha do número é reservada: do mesmo tamanho em toda
+            // célula, com ou sem foto, e a foto nunca desce sobre ela.
+            .child(
+                div()
+                    .w_full()
+                    .h(px(a.altura_do_numero))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_size(px(a.letra_do_numero))
+                    .line_height(px(a.altura_do_numero))
+                    .font_weight(gpui_kit::FontWeight::BOLD)
+                    .text_color(if em_foco {
+                        ambar
+                    } else {
+                        gpui_kit::rgb(0xf5f5f5)
+                    })
+                    .child(SharedString::from(item.numero.to_string())),
+            )
+            .into_any_element()
+    }
+
+    /// A grade: as células da página, o pé com a página e, se o QR está
+    /// ligado, a coluna dele ao lado — nunca por cima.
+    fn palco_da_grade(&self, palco: Size<Pixels>, cx: &mut Context<Self>) -> gpui_kit::AnyElement {
+        let (Some(grade), Some(desenho)) = (self.grade.as_ref(), self.desenho_da_grade(palco))
+        else {
+            return div().into_any_element();
+        };
+        let a = desenho.arranjo;
+        let itens = &grade.itens[desenho.faixa.clone()];
+        let pe = match (itens.first(), itens.last()) {
+            (Some(de), Some(ate)) => format!(
+                "Fotos {} a {}  ·  página {} de {}",
+                de.numero,
+                ate.numero,
+                desenho.pagina + 1,
+                desenho.paginas
+            ),
+            _ => "Nenhuma foto para mostrar".to_string(),
+        };
+        let celulas: Vec<gpui_kit::AnyElement> = itens
+            .iter()
+            .enumerate()
+            .map(|(i, item)| {
+                let em_foco = grade.foco == Some(desenho.faixa.start + i);
+                self.celula_da_grade(item, i, em_foco, &a)
+            })
+            .collect();
+
+        div()
+            .id("palco-do-cliente")
+            .on_double_click(
+                cx.listener(|cliente, _, window, cx| cliente.alternar_tela_cheia(window, cx)),
+            )
+            .flex_1()
+            .w_full()
+            .bg(gpui_kit::black())
+            .flex()
+            .child(
+                div()
+                    .w(px(a.largura_das_fotos))
+                    .h_full()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        // A página que entra aparece suave; o id com a página
+                        // é o que reinicia a animação a cada troca.
+                        div()
+                            .relative()
+                            .flex_1()
+                            .w_full()
+                            .children(celulas)
+                            .with_animation(
+                                ("pagina-da-grade", desenho.pagina),
+                                Animation::new(ENTRADA_DA_PAGINA).with_easing(ease_in_out),
+                                |pagina, delta| pagina.opacity(delta),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .h(px(PE_DA_GRADE))
+                            .w_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_sm()
+                            .text_color(gpui_kit::rgb(0x8a8a8a))
+                            .child(SharedString::from(pe)),
+                    ),
+            )
+            .when(a.coluna_do_qr > 0., |tela| {
+                tela.child(
+                    div()
+                        .w(px(a.coluna_do_qr))
+                        .h_full()
+                        .flex()
+                        .items_end()
+                        .justify_center()
+                        .pb(px(24.))
+                        .children(self.cartao_do_qr()),
+                )
+            })
+            .into_any_element()
     }
 }
 
@@ -1978,6 +2404,295 @@ mod testes {
                 assert!(cliente.qr_na_tela().is_none(), "o balconista desligou");
             })
             .unwrap();
+    }
+
+    fn grade_de(quantas: usize, foco: Option<usize>, por_linha: usize) -> GradeParaOCliente {
+        GradeParaOCliente {
+            itens: (0..quantas)
+                .map(|i| ItemDaGrade {
+                    numero: i + 1,
+                    chave: format!("site:f{i}"),
+                    escolhida: i == 2,
+                })
+                .collect(),
+            foco,
+            por_linha,
+        }
+    }
+
+    fn full_hd() -> Size<Pixels> {
+        size(px(1920.), px(1080.))
+    }
+
+    fn convite_de_teste() -> crate::sessoes::qr_do_bot::ConviteNaTela {
+        crate::sessoes::qr_do_bot::ConviteNaTela {
+            codigo: "RF-ABC234".into(),
+            qr: Arc::new(vec![vec![true, false], vec![false, true]]),
+            estado: crate::sessoes::qr_do_bot::EstadoDoBot::Aguardando,
+            quem: None,
+        }
+    }
+
+    /// 🖼️ A grade entra no ar, e a página é a que tem a foto em foco.
+    #[gpui_kit::test]
+    fn na_grade_a_pagina_e_a_da_foto_em_foco(cx: &mut TestAppContext) {
+        let janela = cx.add_window(|window, cx| Cliente::novo(None, window, cx));
+        janela
+            .update(cx, |cliente, _w, cx| {
+                assert!(cliente.grade_mostrada().is_none());
+                assert!(cliente.desenho_da_grade(full_hd()).is_none());
+
+                cliente.mostrar_grade(grade_de(25, Some(0), 4), cx);
+                let d = cliente.desenho_da_grade(full_hd()).expect("a grade");
+                assert_eq!(d.arranjo.por_pagina(), 8, "Full HD, quatro por linha");
+                assert_eq!((d.pagina, d.paginas, d.faixa), (0, 4, 0..8));
+
+                cliente.mostrar_grade(grade_de(25, Some(10), 4), cx);
+                let d = cliente.desenho_da_grade(full_hd()).expect("a grade");
+                assert_eq!((d.pagina, d.faixa), (1, 8..16), "a 11 está na 2ª página");
+
+                cliente.mostrar_grade(grade_de(25, Some(24), 4), cx);
+                let d = cliente.desenho_da_grade(full_hd()).expect("a grade");
+                assert_eq!((d.pagina, d.faixa), (3, 24..25), "a última página, com uma");
+
+                // Mais por linha: outra página, os mesmos números.
+                cliente.mostrar_grade(grade_de(25, Some(10), 8), cx);
+                let d = cliente.desenho_da_grade(full_hd()).expect("a grade");
+                assert_eq!(d.arranjo.por_linha, 8);
+                assert!(d.faixa.contains(&10));
+                let numeros: Vec<usize> = cliente.grade_mostrada().unwrap().itens[d.faixa]
+                    .iter()
+                    .map(|i| i.numero)
+                    .collect();
+                assert!(numeros.contains(&11));
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// Grade vazia, sem foco, ou com o foco além do fim: nada derruba, e a
+    /// página é uma que existe.
+    #[gpui_kit::test]
+    fn a_grade_vazia_ou_com_foco_perdido_nao_derruba(cx: &mut TestAppContext) {
+        let janela = cx.add_window(|window, cx| Cliente::novo(None, window, cx));
+        janela
+            .update(cx, |cliente, _w, cx| {
+                cliente.mostrar_grade(grade_de(0, None, 4), cx);
+                let d = cliente.desenho_da_grade(full_hd()).expect("a grade");
+                assert_eq!((d.pagina, d.paginas, d.faixa), (0, 1, 0..0));
+
+                cliente.mostrar_grade(grade_de(5, None, 4), cx);
+                let d = cliente.desenho_da_grade(full_hd()).expect("a grade");
+                assert_eq!(
+                    (d.pagina, d.faixa),
+                    (0, 0..5),
+                    "sem foco, a primeira página"
+                );
+
+                cliente.mostrar_grade(grade_de(5, Some(400), 4), cx);
+                let d = cliente.desenho_da_grade(full_hd()).expect("a grade");
+                assert_eq!((d.pagina, d.faixa), (0, 0..5), "foco além do fim: a última");
+
+                // Janela de tamanho zero (o primeiro quadro) e fotos por linha
+                // fora da faixa.
+                cliente.mostrar_grade(grade_de(5, Some(1), 0), cx);
+                let d = cliente
+                    .desenho_da_grade(size(px(0.), px(0.)))
+                    .expect("a grade");
+                assert_eq!(d.arranjo.por_linha, conta::MENOS_POR_LINHA);
+                assert!(d.arranjo.linhas >= 1);
+            })
+            .expect("a janela deve estar aberta");
+        // E desenha assim mesmo.
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_keystrokes("i");
+    }
+
+    /// 🚨 O pedido do dono (11/out/2026): na grade o QR tem coluna própria, e
+    /// nenhuma célula fica debaixo dele. Fora da grade ele continua por cima.
+    #[gpui_kit::test]
+    fn na_grade_o_qr_fica_em_coluna_propria(cx: &mut TestAppContext) {
+        let janela = cx.add_window(|window, cx| Cliente::novo(None, window, cx));
+        janela
+            .update(cx, |cliente, _w, cx| {
+                cliente.mostrar_grade(grade_de(25, Some(0), 4), cx);
+                let sem = cliente
+                    .desenho_da_grade(full_hd())
+                    .expect("a grade")
+                    .arranjo;
+                assert_eq!(sem.coluna_do_qr, 0., "sem QR, a tela é das fotos");
+                assert_eq!(sem.largura_das_fotos, 1920.);
+
+                cliente.definir_convite(Some(convite_de_teste()), cx);
+                for por_linha in conta::MENOS_POR_LINHA..=conta::MAIS_POR_LINHA {
+                    cliente.mostrar_grade(grade_de(25, Some(0), por_linha), cx);
+                    let a = cliente
+                        .desenho_da_grade(full_hd())
+                        .expect("a grade")
+                        .arranjo;
+                    assert_eq!(a.coluna_do_qr, conta::COLUNA_DO_QR);
+                    for i in 0..a.por_pagina() {
+                        let c = a.celula(i);
+                        assert!(
+                            c.x + c.w <= 1920. - conta::COLUNA_DO_QR + 0.01,
+                            "{por_linha} por linha: a célula {i} está debaixo do QR"
+                        );
+                    }
+                }
+                assert!(
+                    cliente.cartao_do_qr().is_some(),
+                    "o cartão existe para a coluna"
+                );
+
+                // Janela estreita demais: o QR sai, em vez de espremer as fotos.
+                let estreita = cliente
+                    .desenho_da_grade(size(px(700.), px(500.)))
+                    .expect("a grade")
+                    .arranjo;
+                assert_eq!(estreita.coluna_do_qr, 0.);
+            })
+            .expect("a janela deve estar aberta");
+        // Desenha com o QR na coluna.
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        visual.simulate_keystrokes("i");
+    }
+
+    /// As imagens da grade vêm do cache de previews, só as da página no ar; o
+    /// que o cache não tem vira célula vazia com o número — e não derruba.
+    #[gpui_kit::test]
+    fn a_grade_le_do_cache_so_a_pagina_no_ar(cx: &mut TestAppContext) {
+        use image::{DynamicImage, RgbaImage};
+        let pasta = tempfile::tempdir().expect("pasta temporária");
+        let previews = Arc::new(PreviewManager::new_with_path(pasta.path().to_path_buf()));
+        let foto = |l, a| DynamicImage::ImageRgba8(RgbaImage::new(l, a));
+        // 25 fotos; a `f3` não tem imagem nenhuma, a `f5` só a grande.
+        for i in (0..25).filter(|i| *i != 3) {
+            let chave = format!("site:f{i}");
+            if i != 5 {
+                previews
+                    .save_thumbnail(&chave, &foto(32, 24))
+                    .expect("gravar a miniatura");
+            }
+            previews
+                .save_preview(&chave, &foto(64, 48))
+                .expect("gravar a prévia");
+        }
+        cx.update(init);
+        let janela =
+            cx.add_window(move |window, cx| Cliente::novo(None, window, cx).com_previews(previews));
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+
+        janela
+            .update(&mut visual, |cliente, _w, cx| {
+                cliente.mostrar_grade(grade_de(25, Some(0), 8), cx)
+            })
+            .unwrap();
+        visual.simulate_keystrokes("i");
+        visual.run_until_parked();
+        let pagina = janela
+            .update(&mut visual, |cliente, window, _cx| {
+                let d = cliente
+                    .desenho_da_grade(window.viewport_size())
+                    .expect("a grade");
+                for i in d.faixa.clone() {
+                    let chave = format!("site:f{i}");
+                    if i == 3 {
+                        assert!(cliente.sem_imagem.contains(&chave), "a f3 não tem imagem");
+                        assert!(!cliente.imagens_da_grade.contains_key(&chave));
+                    } else {
+                        assert!(
+                            cliente.imagens_da_grade.contains_key(&chave),
+                            "a foto {i} da página foi lida"
+                        );
+                    }
+                }
+                assert!(
+                    cliente.imagens_da_grade.len() <= d.faixa.len(),
+                    "só a página no ar fica na memória"
+                );
+                d.faixa
+            })
+            .unwrap();
+
+        // O foco vai para a última foto: a página muda, e a memória com ela.
+        if pagina.end < 25 {
+            janela
+                .update(&mut visual, |cliente, _w, cx| {
+                    cliente.mostrar_grade(grade_de(25, Some(24), 8), cx)
+                })
+                .unwrap();
+            visual.simulate_keystrokes("i");
+            visual.run_until_parked();
+            janela
+                .update(&mut visual, |cliente, window, _cx| {
+                    let d = cliente
+                        .desenho_da_grade(window.viewport_size())
+                        .expect("a grade");
+                    assert!(d.faixa.contains(&24));
+                    assert!(cliente.imagens_da_grade.contains_key("site:f24"));
+                    assert!(
+                        !cliente.imagens_da_grade.contains_key("site:f0"),
+                        "a página que saiu não fica na memória"
+                    );
+                })
+                .unwrap();
+        }
+
+        // A raiz avisa de imagem nova: relê no quadro seguinte, e a que
+        // faltava é procurada de novo.
+        janela
+            .update(&mut visual, |cliente, _w, cx| {
+                cliente.mostrar_grade(grade_de(25, Some(0), 8), cx);
+                cliente.reler_as_imagens_da_grade(cx);
+                assert!(cliente.reler_a_grade);
+                assert!(cliente.sem_imagem.is_empty());
+            })
+            .unwrap();
+        visual.simulate_keystrokes("i");
+        visual.run_until_parked();
+        janela
+            .update(&mut visual, |cliente, _w, _cx| {
+                assert!(!cliente.reler_a_grade, "a releitura foi feita");
+            })
+            .unwrap();
+    }
+
+    /// Fora da grade, `reler` não liga nada — a foto única não tem página.
+    #[gpui_kit::test]
+    fn reler_sem_grade_nao_faz_nada(cx: &mut TestAppContext) {
+        let janela = cx.add_window(|window, cx| Cliente::novo(None, window, cx));
+        janela
+            .update(cx, |cliente, _w, cx| {
+                cliente.reler_as_imagens_da_grade(cx);
+                assert!(!cliente.reler_a_grade);
+            })
+            .unwrap();
+    }
+
+    /// A lembrança guarda o modo e as fotos por linha — e o arquivo de antes,
+    /// sem os campos, é a foto única com o padrão.
+    #[test]
+    fn a_lembranca_guarda_a_grade_e_as_fotos_por_linha() {
+        let pasta = tempfile::tempdir().expect("pasta temporária");
+        let arquivo = pasta.path().join("tela-do-cliente.json");
+        std::fs::write(&arquivo, r#"{"estado":"janela","monitor":"hdmi"}"#).expect("gravar");
+
+        let mut lembranca = Lembranca::ler(&arquivo);
+        assert!(!lembranca.grade, "o arquivo de antes é a foto única");
+        assert_eq!(lembranca.fotos_por_linha(), conta::POR_LINHA_PADRAO);
+
+        lembranca.grade = true;
+        lembranca.por_linha = Some(6);
+        lembranca.gravar(&arquivo);
+        let relida = Lembranca::ler(&arquivo);
+        assert_eq!(relida, lembranca);
+        assert_eq!(relida.monitor.as_deref(), Some("hdmi"), "o resto fica");
+        assert_eq!(relida.fotos_por_linha(), 6);
+
+        // Arquivo mexido à mão não põe 40 por linha, nem zero.
+        lembranca.por_linha = Some(40);
+        assert_eq!(lembranca.fotos_por_linha(), conta::MAIS_POR_LINHA);
+        lembranca.por_linha = Some(0);
+        assert_eq!(lembranca.fotos_por_linha(), conta::MENOS_POR_LINHA);
     }
 
     #[gpui_kit::test]

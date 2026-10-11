@@ -83,3 +83,181 @@ fn a_tela_do_cliente_acompanha_a_galeria_e_a_revelacao(cx: &mut TestAppContext) 
         assert!(!app.cliente_aberto(), "e o mesmo botão fecha")
     });
 }
+
+/// Os números, o foco, as fotos por linha e as escolhidas da grade que a tela
+/// do cliente recebeu por último.
+#[allow(clippy::type_complexity)]
+fn grade_no_cliente(
+    e: &super::Estudio,
+    cx: &mut TestAppContext,
+) -> Option<(Vec<usize>, Option<usize>, usize, Vec<bool>)> {
+    e.app(cx, |app, _w, _cx| {
+        app.grade_no_cliente().map(|g| {
+            (
+                g.itens.iter().map(|i| i.numero).collect(),
+                g.foco,
+                g.por_linha,
+                g.itens.iter().map(|i| i.escolhida).collect(),
+            )
+        })
+    })
+}
+
+/// O recorte do operador agora: os ids na ordem da grade dele e quais estão
+/// levadas no balcão.
+fn recorte(e: &super::Estudio, cx: &mut TestAppContext) -> (Vec<String>, Vec<bool>) {
+    e.detalhe(cx, |tela, _w, _cx| {
+        let ids = tela.ids_visiveis();
+        let levadas = ids
+            .iter()
+            .map(|id| {
+                tela.como_esta(id).map(|(estado, ..)| estado)
+                    == Some(biblioteca_core::Estado::LevadaNoBalcao)
+            })
+            .collect();
+        (ids, levadas)
+    })
+}
+
+/// 🎬 **A tela do cliente em grade**: o operador escolhe o modo e as fotos
+/// por linha no menu da galeria; cada foto leva o número da posição dela no
+/// recorte — o mesmo dos dois lados do balcão —, o foco acompanha, a
+/// revelação volta à foto única e a galeria devolve a grade.
+#[gpui_kit::test]
+fn a_tela_do_cliente_em_grade_numera_as_fotos_do_recorte(cx: &mut TestAppContext) {
+    use biblioteca_core::Filtro;
+    let e = abrir_o_ensaio(cx, Cenario::default());
+
+    e.app(cx, |app, _w, _cx| {
+        assert_eq!(app.modo_do_cliente(), (false, 4), "nasce na foto única")
+    });
+    e.detalhe(cx, |tela, _w, cx| {
+        tela.focar_foto("a", cx);
+        cx.emit(Pedido::ModoDoCliente {
+            grade: true,
+            por_linha: 4,
+        });
+    });
+    assert_eq!(
+        grade_no_cliente(&e, cx),
+        None,
+        "sem a janela aberta, nada é mandado"
+    );
+    e.detalhe(cx, |tela, _w, cx| {
+        assert_eq!(tela.modo_do_cliente(), (true, 4), "o menu marca a grade");
+        cx.emit(Pedido::TelaDoCliente);
+    });
+    e.app(cx, |app, _w, _cx| assert!(app.cliente_aberto()));
+
+    // As fotos do ensaio, numeradas pela ordem do recorte do operador; as
+    // levadas no balcão vão como escolhidas.
+    let (ids, levadas) = recorte(&e, cx);
+    let todas: Vec<usize> = (1..=ids.len()).collect();
+    let posicao = |id: &str| ids.iter().position(|i| i == id);
+    assert!(ids.len() >= 4 && levadas.iter().any(|l| *l));
+    assert_eq!(
+        grade_no_cliente(&e, cx),
+        Some((todas.clone(), posicao("a"), 4, levadas.clone()))
+    );
+    assert_eq!(no_cliente(&e, cx), None, "na grade não vai foto única");
+
+    // A janela desenha a grade, com a página do foco.
+    let janela = e
+        .app(cx, |app, _w, _cx| app.janela_do_cliente_para_teste())
+        .expect("a janela do cliente");
+    janela
+        .update(cx, |cliente, window, _cx| {
+            let grade = cliente.grade_mostrada().expect("a grade está no ar");
+            assert_eq!(grade.itens.len(), ids.len());
+            let desenho = cliente
+                .desenho_da_grade(window.viewport_size())
+                .expect("o desenho");
+            assert_eq!(desenho.pagina, 0);
+            assert!(desenho.faixa.contains(&posicao("a").unwrap()));
+            assert_eq!(desenho.arranjo.por_linha, 4);
+        })
+        .expect("a janela está aberta");
+    cx.run_until_parked();
+
+    // O foco anda: o número em foco acompanha, os números não mudam.
+    e.detalhe(cx, |tela, _w, cx| tela.focar_foto("d", cx));
+    let (numeros, foco, ..) = grade_no_cliente(&e, cx).expect("a grade");
+    assert_eq!((numeros, foco), (todas.clone(), posicao("d")));
+
+    // As fotos por linha mudam a página, nunca o número; fora da faixa, o
+    // limite.
+    e.detalhe(cx, |_t, _w, cx| {
+        cx.emit(Pedido::ModoDoCliente {
+            grade: true,
+            por_linha: 6,
+        })
+    });
+    let (numeros, foco, por_linha, _) = grade_no_cliente(&e, cx).expect("a grade");
+    assert_eq!((numeros, foco, por_linha), (todas.clone(), posicao("d"), 6));
+    e.detalhe(cx, |_t, _w, cx| {
+        cx.emit(Pedido::ModoDoCliente {
+            grade: true,
+            por_linha: 99,
+        })
+    });
+    assert_eq!(grade_no_cliente(&e, cx).map(|g| g.2), Some(8));
+    e.detalhe(cx, |tela, _w, _cx| {
+        assert_eq!(tela.modo_do_cliente(), (true, 8))
+    });
+
+    // O recorte do operador muda: a grade do cliente é a do recorte, e conta
+    // como a do operador.
+    let visiveis = e.detalhe(cx, |tela, _w, cx| {
+        tela.filtrar(
+            Filtro::Situacao(biblioteca_core::Estado::LevadaNoBalcao),
+            cx,
+        );
+        tela.ids_visiveis().len()
+    });
+    let (numeros, ..) = grade_no_cliente(&e, cx).expect("a grade");
+    assert_eq!(numeros, (1..=visiveis).collect::<Vec<_>>());
+    assert!(visiveis < ids.len(), "o recorte encolheu");
+    e.detalhe(cx, |tela, _w, cx| tela.filtrar(Filtro::Todas, cx));
+    assert_eq!(grade_no_cliente(&e, cx).map(|g| g.0), Some(todas.clone()));
+
+    // Na revelação o cliente vê a foto, ao vivo — e a galeria devolve a grade.
+    e.revelar_a_do_site(cx, "a");
+    assert_eq!(grade_no_cliente(&e, cx), None, "na revelação, a foto");
+    assert_eq!(no_cliente(&e, cx).map(|c| c.0).as_deref(), Some("site:a"));
+    e.esperar(cx);
+    e.teclar(cx, "escape");
+    e.app(cx, |app, _w, _cx| assert_eq!(app.tela(), Tela::Sessao));
+    assert!(
+        grade_no_cliente(&e, cx).is_some(),
+        "de volta à galeria, a grade volta"
+    );
+
+    // "Uma foto" no menu: a tela volta à foto em foco, na hora.
+    e.detalhe(cx, |tela, _w, cx| {
+        tela.focar_foto("b", cx);
+        cx.emit(Pedido::ModoDoCliente {
+            grade: false,
+            por_linha: 8,
+        });
+    });
+    assert_eq!(grade_no_cliente(&e, cx), None);
+    assert_eq!(no_cliente(&e, cx).map(|c| c.0).as_deref(), Some("site:b"));
+
+    // De volta à grade, fechar e reabrir: o modo fica.
+    e.detalhe(cx, |_t, _w, cx| {
+        cx.emit(Pedido::ModoDoCliente {
+            grade: true,
+            por_linha: 3,
+        })
+    });
+    assert_eq!(grade_no_cliente(&e, cx).map(|g| g.2), Some(3));
+    e.detalhe(cx, |_tela, _w, cx| cx.emit(Pedido::TelaDoCliente));
+    e.app(cx, |app, _w, _cx| assert!(!app.cliente_aberto()));
+    assert_eq!(grade_no_cliente(&e, cx), None, "fechada, nada no ar");
+    e.detalhe(cx, |_tela, _w, cx| cx.emit(Pedido::TelaDoCliente));
+    assert_eq!(
+        grade_no_cliente(&e, cx).map(|g| (g.0, g.2)),
+        Some((todas, 3)),
+        "reaberta, a grade volta como estava"
+    );
+}

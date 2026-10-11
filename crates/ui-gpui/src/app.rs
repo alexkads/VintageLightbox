@@ -893,6 +893,11 @@ pub struct Aplicativo {
     /// O par que a segunda tela mostra no Comparar (`⇧C`): as duas revelações e
     /// a escolhida. É o `no_cliente` das duas metades.
     par_no_cliente: Option<ChaveDoPar>,
+    /// O que a segunda tela mostra na galeria da sessão: `(grade, fotos por
+    /// linha)`. Preferência desta máquina, guardada com a lembrança da janela.
+    modo_do_cliente: (bool, usize),
+    /// A grade que a segunda tela recebeu por último — o `no_cliente` dela.
+    grade_no_cliente: Option<crate::cliente::GradeParaOCliente>,
     /// Os pixels sem marca das fotos que a segunda tela mostra, guardados para
     /// a edição ao vivo não decodificar a foto a cada gesto.
     ///
@@ -1404,6 +1409,15 @@ impl Aplicativo {
             },
         );
 
+        // 🖼️ O modo da segunda tela (foto ou grade) volta como ficou.
+        let modo_do_cliente = {
+            let lembranca = Lembranca::ler(&caminho_do_modo_do_cliente());
+            (lembranca.grade, lembranca.fotos_por_linha())
+        };
+        detalhe.update(cx, |tela, cx| {
+            tela.definir_modo_do_cliente(modo_do_cliente.0, modo_do_cliente.1, cx)
+        });
+
         Self {
             biblioteca,
             revelacao,
@@ -1532,6 +1546,8 @@ impl Aplicativo {
             _cliente_na_revelacao: cliente_na_revelacao,
             no_cliente: None,
             par_no_cliente: None,
+            modo_do_cliente,
+            grade_no_cliente: None,
             bruto_do_cliente: Vec::new(),
             cliente_pedindo: None,
             lote_no_ar: None,
@@ -2899,6 +2915,9 @@ impl Aplicativo {
                 self.revelar_da_sessao(fotos, *inicial, window, cx);
             }
             DetalhePedido::TelaDoCliente => self.alternar_cliente(cx),
+            DetalhePedido::ModoDoCliente { grade, por_linha } => {
+                self.definir_modo_do_cliente(*grade, *por_linha, cx)
+            }
             DetalhePedido::PoliticaDeRetencao => self.ir_para(Tela::Retencao, window, cx),
             DetalhePedido::Exportar(ids) => self.exportar_da_sessao(ids, None, cx),
             DetalhePedido::EnviarPorWhatsApp(ids) => {
@@ -2939,6 +2958,7 @@ impl Aplicativo {
             }
             DetalhePedido::MiniaturaPronta(chave) => {
                 let chave = chave.clone();
+                self.reler_a_grade_do_cliente(cx);
                 self.biblioteca
                     .update(cx, |tela, cx| tela.esquecer_miniatura(&chave, cx));
                 // 🚨 **A tira da Revelação desenha as mesmas fotos, com memória
@@ -4662,6 +4682,12 @@ impl Aplicativo {
             .update(cx, |tela, _| tela.revelada_chegou(&na_grade));
         self.nova_sessao
             .update(cx, |tela, _| tela.revelada_chegou(&na_grade));
+        // A grade da segunda tela desenha a mesma imagem: relê, e reenvia se a
+        // chave mudou (a prévia local passou a existir).
+        if self.grade_no_cliente.is_some() {
+            self.reler_a_grade_do_cliente(cx);
+            self.atualizar_o_cliente(false, cx);
+        }
     }
 
     /// Abre ou fecha a segunda tela — a janela que se vira para o cliente.
@@ -4682,6 +4708,7 @@ impl Aplicativo {
             // dela chegou primeiro), o `update` devolve erro e não há o que
             // fazer além de esquecer o handle — que é o que o `take` já fez.
             let _ = janela.update(cx, |_cliente, window, _cx| window.remove_window());
+            self.grade_no_cliente = None;
             self.detalhe
                 .update(cx, |tela, cx| tela.definir_cliente_aberta(false, cx));
             return;
@@ -4815,8 +4842,9 @@ impl Aplicativo {
             ..Default::default()
         };
 
+        let previews = self.previews.clone();
         match cx.open_window(opcoes, |window, cx| {
-            cx.new(|cx| Cliente::novo(Some(arquivo), window, cx))
+            cx.new(|cx| Cliente::novo(Some(arquivo), window, cx).com_previews(previews))
         }) {
             Ok(janela) => {
                 if let Ok(entidade) = janela.update(cx, |_cliente, _window, cx| cx.entity()) {
@@ -4839,6 +4867,7 @@ impl Aplicativo {
                 // 📸 A janela nova ainda não tem o QR: o próximo `render` manda.
                 self.convite_entregue = None;
                 self.no_cliente = None;
+                self.grade_no_cliente = None;
                 self.atualizar_o_cliente(true, cx);
             }
             // Abrir janela é pedido ao sistema, e ele pode recusar. Sem monitor
@@ -4862,9 +4891,91 @@ impl Aplicativo {
         }
         self.cliente = None;
         self.no_cliente = None;
+        self.grade_no_cliente = None;
         self.detalhe
             .update(cx, |tela, cx| tela.definir_cliente_aberta(false, cx));
         cx.notify();
+    }
+
+    /// O operador escolheu o que a segunda tela mostra na galeria: a foto em
+    /// foco ou a grade numerada, e quantas fotos por linha.
+    ///
+    /// 🔑 **Guardado com a lembrança da janela** (`tela-do-cliente.json`): é
+    /// preferência de quem opera aquela máquina, e volta na próxima abertura.
+    pub(crate) fn definir_modo_do_cliente(
+        &mut self,
+        grade: bool,
+        por_linha: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let por_linha = biblioteca_core::grade_do_cliente::por_linha_valido(por_linha);
+        if self.modo_do_cliente == (grade, por_linha) {
+            return;
+        }
+        self.modo_do_cliente = (grade, por_linha);
+        let arquivo = caminho_do_modo_do_cliente();
+        let mut lembranca = Lembranca::ler(&arquivo);
+        lembranca.grade = grade;
+        lembranca.por_linha = Some(por_linha);
+        lembranca.gravar(&arquivo);
+        self.detalhe.update(cx, |tela, cx| {
+            tela.definir_modo_do_cliente(grade, por_linha, cx)
+        });
+        self.atualizar_o_cliente(true, cx);
+        cx.notify();
+    }
+
+    /// `(grade, fotos por linha)` — o modo da segunda tela na galeria.
+    #[cfg(test)]
+    pub(crate) fn modo_do_cliente(&self) -> (bool, usize) {
+        self.modo_do_cliente
+    }
+
+    /// A grade que a segunda tela recebeu por último — é o que os cenários de
+    /// ponta a ponta conferem.
+    #[cfg(test)]
+    pub(crate) fn grade_no_cliente(&self) -> Option<&crate::cliente::GradeParaOCliente> {
+        self.grade_no_cliente.as_ref()
+    }
+
+    /// Uma imagem do cache mudou: a grade da segunda tela relê a página.
+    fn reler_a_grade_do_cliente(&mut self, cx: &mut Context<Self>) {
+        let (Some(janela), true) = (self.cliente, self.grade_no_cliente.is_some()) else {
+            return;
+        };
+        // ⚠️ Adiado: a janela do cliente é outra, e pode estar no meio do
+        // próprio quadro.
+        cx.defer(move |cx| {
+            let _ = janela.update(cx, |cliente, _w, cx| cliente.reler_as_imagens_da_grade(cx));
+        });
+    }
+
+    /// Leva a grade da galeria à segunda tela — se ela mudou (ou se `forcar`).
+    fn grade_para_o_cliente(
+        &mut self,
+        janela: gpui_kit::WindowHandle<Cliente>,
+        forcar: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let grade = self
+            .detalhe
+            .update(cx, |tela, _| tela.grade_para_o_cliente());
+        if !forcar && self.grade_no_cliente.as_ref() == Some(&grade) {
+            return;
+        }
+        self.grade_no_cliente = Some(grade.clone());
+        self.no_cliente = None;
+        self.par_no_cliente = None;
+        if janela
+            .update(cx, |cliente, _window, cx| cliente.mostrar_grade(grade, cx))
+            .is_err()
+        {
+            self.cliente = None;
+            self.grade_no_cliente = None;
+            self.detalhe
+                .update(cx, |tela, cx| tela.definir_cliente_aberta(false, cx));
+            cx.notify();
+        }
     }
 
     pub fn cliente_aberto(&self) -> bool {
@@ -4969,8 +5080,16 @@ impl Aplicativo {
                 return;
             }
         }
-        // Saiu do Comparar: a foto única vai de novo, mesmo que seja a mesma.
-        let forcar = forcar || self.par_no_cliente.take().is_some();
+        // 🖼️ Na galeria da sessão, com o modo grade: a página numerada. Na
+        // revelação a tela volta à foto, para o cliente ver a edição ao vivo.
+        if self.tela == Tela::Sessao && self.modo_do_cliente.0 {
+            self.grade_para_o_cliente(janela, forcar, cx);
+            return;
+        }
+        // Saiu do Comparar ou da grade: a foto única vai de novo, mesmo que
+        // seja a mesma.
+        let saiu_da_grade = self.grade_no_cliente.take().is_some();
+        let forcar = forcar || self.par_no_cliente.take().is_some() || saiu_da_grade;
         let _inicio = std::time::Instant::now();
         let _cronometro = CronometroAoSair("atualizar_o_cliente", _inicio);
         let Some((foto, posicao)) = self.foto_para_o_cliente(cx) else {
@@ -5124,6 +5243,7 @@ impl Aplicativo {
         }
         self.par_no_cliente = Some(chave);
         self.no_cliente = None;
+        self.grade_no_cliente = None;
         let direita = pedidos.pop();
         let esquerda = pedidos.pop();
         let (Some(esquerda), Some(direita)) = (esquerda, direita) else {

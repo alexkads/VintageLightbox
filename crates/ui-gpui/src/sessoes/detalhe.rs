@@ -109,6 +109,22 @@ const GRANDES_GUARDADAS: usize = 12;
 /// custa dezenas de milissegundos, e o quadro seguinte busca as que faltam.
 const GRANDES_POR_QUADRO: usize = 2;
 
+/// O número da foto na grade da tela do cliente, numa pílula sobre a
+/// miniatura. Escura por cima da foto nos dois temas: o contraste é com a
+/// imagem.
+fn numero_do_cliente(numero: usize) -> gpui_kit::Div {
+    div()
+        .absolute()
+        .px(px(6.))
+        .rounded_full()
+        .bg(gpui_kit::rgba(0x000000c0))
+        .text_color(gpui_kit::white())
+        .text_size(crate::tema::letra::em(11.))
+        .line_height(px(18.))
+        .font_weight(gpui_kit::FontWeight::BOLD)
+        .child(SharedString::from(numero.to_string()))
+}
+
 /// A base do nome do arquivo, sem extensão e sem caixa: `DSC_2700.JPG`,
 /// `DSC_2700.NEF` e `DSC_2700.jpg` dão o mesmo `dsc_2700`.
 ///
@@ -327,6 +343,9 @@ pub enum Pedido {
     PreviaLocalVencida(String),
     /// Abrir (ou fechar) a segunda tela, a do cliente.
     TelaDoCliente,
+    /// O que a segunda tela mostra: a foto em foco ou a grade numerada, e
+    /// quantas fotos por linha a grade tem.
+    ModoDoCliente { grade: bool, por_linha: usize },
     /// O "política de retenção" dos detalhes da galeria — o link do site para
     /// `/dashboard/sessoes-fotograficas/configuracoes`.
     PoliticaDeRetencao,
@@ -552,6 +571,10 @@ pub struct Detalhe {
     /// qual dos dois ia acontecer. Quem sabe a resposta é a raiz, que é dona da
     /// janela — daí vir de fora, por `definir_cliente_aberta`.
     cliente_aberta: bool,
+    /// A segunda tela mostra a grade numerada (e não a foto em foco), e com
+    /// quantas fotos por linha. Vem da raiz, que guarda a preferência.
+    grade_no_cliente: bool,
+    por_linha_no_cliente: usize,
     /// Quem abre a janela **do sistema** para escolher as fotos.
     seletor: Arc<dyn SeletorDeFotos>,
     /// Por onde os caminhos escolhidos voltam.
@@ -1104,6 +1127,8 @@ impl Detalhe {
             avisando: false,
             pedindo_link: false,
             cliente_aberta: false,
+            grade_no_cliente: false,
+            por_linha_no_cliente: biblioteca_core::grade_do_cliente::POR_LINHA_PADRAO,
             do_site: Vec::new(),
             locais: Vec::new(),
             ids_locais: std::collections::HashSet::new(),
@@ -2218,6 +2243,74 @@ impl Detalhe {
                 self.definir_o_qr(true, cx);
             }
             cx.notify();
+        }
+    }
+
+    /// A raiz diz o que a segunda tela mostra — é o que o menu ao lado do
+    /// botão marca, e o que liga o número nas células daqui.
+    pub fn definir_modo_do_cliente(
+        &mut self,
+        grade: bool,
+        por_linha: usize,
+        cx: &mut Context<Self>,
+    ) {
+        if (self.grade_no_cliente, self.por_linha_no_cliente) != (grade, por_linha) {
+            self.grade_no_cliente = grade;
+            self.por_linha_no_cliente = por_linha;
+            cx.notify();
+        }
+    }
+
+    /// `(grade, fotos por linha)` da segunda tela.
+    pub fn modo_do_cliente(&self) -> (bool, usize) {
+        (self.grade_no_cliente, self.por_linha_no_cliente)
+    }
+
+    /// O cliente está vendo a grade numerada agora? É quando as células daqui
+    /// mostram o mesmo número.
+    fn numerando_para_o_cliente(&self) -> bool {
+        self.cliente_aberta && self.grade_no_cliente
+    }
+
+    /// As fotos do recorte que o cliente vê na grade, com o número de cada
+    /// uma, e o índice da que está em foco.
+    ///
+    /// 🔑 **O número é a posição no recorte, contando de 1** — o mesmo do
+    /// rodapé da foto única. A rejeitada e a apagada ficam de fora e o número
+    /// delas fica vago (`biblioteca_core::grade_do_cliente`).
+    pub fn grade_para_o_cliente(&mut self) -> crate::cliente::GradeParaOCliente {
+        use biblioteca_core::grade_do_cliente as conta;
+        let total = self.acervo.total_visivel();
+        let fotos: Vec<(String, bool, bool)> = (0..total)
+            .filter_map(|p| self.acervo.visivel(p))
+            .map(|f| {
+                (
+                    f.id.clone(),
+                    f.rejeitada || f.apagada,
+                    f.estado == acervo::Estado::LevadaNoBalcao,
+                )
+            })
+            .collect();
+        let oculta: Vec<bool> = fotos.iter().map(|(_, oculta, _)| *oculta).collect();
+        let visiveis = conta::itens(&oculta);
+        let itens = visiveis
+            .iter()
+            .map(|item| {
+                let (id, _, escolhida) = &fotos[item.posicao];
+                // A revelada local vence: a mesma imagem da célula do operador.
+                self.resolver_revelada(id);
+                crate::cliente::ItemDaGrade {
+                    numero: item.numero,
+                    chave: self.chave_da_foto(id),
+                    escolhida: *escolhida,
+                }
+            })
+            .collect();
+        let foco = conta::indice_do_foco(&visiveis, self.selecao.foco().unwrap_or(0));
+        crate::cliente::GradeParaOCliente {
+            itens,
+            foco,
+            por_linha: self.por_linha_no_cliente,
         }
     }
 
@@ -5853,6 +5946,56 @@ impl Detalhe {
                         cx.listener(|_tela, _ev, _window, cx| cx.emit(Pedido::TelaDoCliente)),
                     ),
             )
+            // 🖼️ O que a tela do cliente mostra: a foto em foco ou a grade
+            // numerada, e quantas por linha (dono, 11/out/2026). No mesmo
+            // molde do botão do bot: o estado escrito, as opções no menu.
+            .child({
+                use biblioteca_core::grade_do_cliente as conta;
+                let esta = cx.entity().downgrade();
+                let (grade, por_linha) = (self.grade_no_cliente, self.por_linha_no_cliente);
+                estilo::botao_contorno_pequeno("sessao-modo-do-cliente", cx)
+                    .debug_selector(|| "sessao-modo-do-cliente".into())
+                    .when(grade, |b| b.bg(acento))
+                    .child(Icon::new(Icone::Grid3x3).size(px(14.)))
+                    .child(if grade {
+                        format!("Grade · {por_linha} por linha")
+                    } else {
+                        "Uma foto".to_string()
+                    })
+                    .child(Icon::new(Icone::ChevronDown).size(px(12.)))
+                    .tooltip("O que a tela do cliente mostra: a foto em foco, ou a grade com o número de cada foto")
+                    .dropdown_menu(move |menu, _window, _cx| {
+                        let pedir = |grade: bool, por_linha: usize| {
+                            let esta = esta.clone();
+                            move |_: &gpui_kit::ClickEvent, _: &mut Window, cx: &mut App| {
+                                esta.update(cx, |_tela, cx| {
+                                    cx.emit(Pedido::ModoDoCliente { grade, por_linha })
+                                })
+                                .ok();
+                            }
+                        };
+                        let mut menu = menu
+                            .item(
+                                PopupMenuItem::new("Uma foto — a que está em foco")
+                                    .checked(!grade)
+                                    .on_click(pedir(false, por_linha)),
+                            )
+                            .item(
+                                PopupMenuItem::new("Grade — várias fotos, com o número de cada uma")
+                                    .checked(grade)
+                                    .on_click(pedir(true, por_linha)),
+                            )
+                            .separator();
+                        for n in conta::MENOS_POR_LINHA..=conta::MAIS_POR_LINHA {
+                            menu = menu.item(
+                                PopupMenuItem::new(format!("{n} fotos por linha"))
+                                    .checked(grade && n == por_linha)
+                                    .on_click(pedir(true, n)),
+                            );
+                        }
+                        menu
+                    })
+            })
             // 📸 O bot da sessão num botão só, com os três comandos no menu
             // (dono, 30/set/2026: primeiro *"comandos diretos para o atendente
             // saber o que está fazendo"*, depois *"ficou com muito botão"*). O
@@ -6280,6 +6423,12 @@ impl Detalhe {
                         gpui_kit::transparent_black()
                     })
                     .children(miniatura)
+                    // 🔢 O número que o cliente vê embaixo desta foto, enquanto
+                    // a grade está na tela dele: ele diz "a 12", e o
+                    // balconista acha a 12 aqui.
+                    .when(self.numerando_para_o_cliente(), |quadro| {
+                        quadro.child(numero_do_cliente(posicao + 1).top(px(4.)).right(px(4.)))
+                    })
                     // O selo do estado, no canto — como na tela do site, e
                     // agora com a cor do que ele diz (`crate::selos`).
                     // 🚨 A importada não é "à venda": ela nem chegou ao
@@ -9875,6 +10024,83 @@ mod testes {
             ajustes: None,
             ..Default::default()
         }
+    }
+
+    /// 🔢 A grade da tela do cliente: o número é a posição no recorte do
+    /// operador; a rejeitada e a apagada ficam de fora **sem renumerar
+    /// ninguém**, e o foco numa delas vale a vizinha de antes.
+    #[gpui_kit::test]
+    fn a_grade_do_cliente_pula_a_rejeitada_sem_renumerar(cx: &mut TestAppContext) {
+        let (janela, _) = janela(
+            cx,
+            vec![
+                FotoDaGaleria {
+                    ordem: 0,
+                    ..foto("a", EstadoDaFotoNoSite::Disponivel, Some(4))
+                },
+                FotoDaGaleria {
+                    ordem: 1,
+                    rejeitada: true,
+                    ..foto("b", EstadoDaFotoNoSite::Disponivel, Some(3))
+                },
+                FotoDaGaleria {
+                    ordem: 2,
+                    ..foto("c", EstadoDaFotoNoSite::LevadaNoBalcao, Some(5))
+                },
+                FotoDaGaleria {
+                    ordem: 3,
+                    apagada: true,
+                    ..foto("d", EstadoDaFotoNoSite::Disponivel, Some(2))
+                },
+                FotoDaGaleria {
+                    ordem: 4,
+                    ..foto("e", EstadoDaFotoNoSite::Comprada, Some(5))
+                },
+            ],
+        );
+        entrar(cx, &janela);
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.filtrar(Filtro::Todas, cx);
+                let ids = tela.ids_visiveis();
+                let numero_de = |id: &str| ids.iter().position(|i| i == id).unwrap() + 1;
+                tela.definir_modo_do_cliente(true, 6, cx);
+                assert_eq!(tela.modo_do_cliente(), (true, 6));
+                assert!(!tela.numerando_para_o_cliente(), "só com a tela aberta");
+                tela.definir_cliente_aberta(true, cx);
+                assert!(tela.numerando_para_o_cliente());
+
+                tela.focar_foto("a", cx);
+                let grade = tela.grade_para_o_cliente();
+                assert_eq!(grade.por_linha, 6);
+                let numeros: Vec<usize> = grade.itens.iter().map(|i| i.numero).collect();
+                let esperados: Vec<usize> = ["a", "c", "e"]
+                    .into_iter()
+                    .filter(|id| ids.iter().any(|i| i == id))
+                    .map(numero_de)
+                    .collect();
+                assert_eq!(
+                    numeros, esperados,
+                    "a rejeitada e a apagada saem, e cada foto fica com o número dela"
+                );
+                assert!(numeros.windows(2).all(|p| p[0] < p[1]));
+                let escolhidas: Vec<bool> = grade.itens.iter().map(|i| i.escolhida).collect();
+                assert_eq!(escolhidas.iter().filter(|e| **e).count(), 1, "só a levada");
+                assert_eq!(grade.foco, Some(0));
+                assert!(grade.itens.iter().all(|i| i.chave.starts_with("site:")));
+
+                // O foco na rejeitada: vale a de antes, e não some.
+                tela.focar_foto("b", cx);
+                let grade = tela.grade_para_o_cliente();
+                assert!(grade.foco.is_some());
+                assert!(grade.itens[grade.foco.unwrap()].numero <= numero_de("b"));
+
+                // De volta à foto única: as células param de numerar.
+                tela.definir_modo_do_cliente(false, 6, cx);
+                assert!(!tela.numerando_para_o_cliente());
+            })
+            .unwrap();
     }
 
     fn janela(
