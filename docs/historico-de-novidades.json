@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.144",
+    "data": "2026-10-11",
+    "titulo": "Conta com acesso a um estúdio só não escolhe estúdio: ele já vem selecionado.",
+    "importante": false,
+    "novidades": [
+      "Quem tem perfil de acesso com um único estúdio não vê mais a pergunta \"Em qual estúdio você está?\" ao entrar: o estúdio do perfil já fica selecionado.",
+      "Para essa conta, a barra das sessões, o caixa, a nova sessão e o cabeçalho da sessão mostram só o nome do estúdio, sem seletor para trocar.",
+      "Quem tem dois ou mais estúdios no perfil, ou é administrador, continua escolhendo como antes."
+    ],
+    "por_que_atualizar": "Para o balcão de um estúdio só abrir direto no estúdio dele, sem tela de escolha."
+  },
+  {
     "versao": "0.1.143",
     "data": "2026-10-11",
     "titulo": "Perfis de acesso: cada conta vê só o que o perfil dela libera, e só os estúdios dela.",
