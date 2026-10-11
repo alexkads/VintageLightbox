@@ -230,6 +230,40 @@ class CasosDoInstalador:
         self.assertIn("--profile instalador", linha)
         self.assertTrue((self.casa / f"target-{self.app}/instalador" / self.info["bin"]).exists())
 
+    def test_faxina_do_cache_apaga_versoes_antigas_dos_crates_da_casa(self):
+        """🚨 Mac do dono, 11/out/2026: 22 GiB em `deps`, 47 cópias de cada crate
+        da casa — cada versão deixa um jogo novo e o cargo não apaga o velho."""
+        deps = self.casa / f"target-{self.app}/instalador/deps"
+        deps.mkdir(parents=True)
+        casa = self.info["crate"].replace("-", "_")
+        nomes = {}
+        for i in range(4):
+            h = f"{i:016x}"
+            nomes[i] = [f"lib{casa}-{h}.rlib", f"lib{casa}-{h}.rmeta", f"{casa}-{h}", f"libgpui-{h}.rlib"]
+            for nome in nomes[i]:
+                (deps / nome).write_text("x")
+                os.utime(deps / nome, (1700000000 + i * 1000, 1700000000 + i * 1000))
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stdout)
+        ficaram = {p.name for p in deps.iterdir()}
+        # Os dois jogos mais novos da casa ficam; os de fora, todos.
+        for i in (2, 3):
+            self.assertLessEqual(set(nomes[i]), ficaram, result.stdout)
+        for i in (0, 1):
+            self.assertEqual(ficaram & set(nomes[i]), {f"libgpui-{i:016x}.rlib"}, result.stdout)
+        self.assertIn("cache enxuto: 6 arquivos", result.stdout)
+
+    def test_build_falha_nao_faz_faxina(self):
+        deps = self.casa / f"target-{self.app}/instalador/deps"
+        deps.mkdir(parents=True)
+        casa = self.info["crate"].replace("-", "_")
+        for i in range(4):
+            (deps / f"lib{casa}-{i:016x}.rlib").write_text("x")
+        self.env["TEST_BUILD_EXIT"] = "42"
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 42, result.stdout)
+        self.assertEqual(len(list(deps.iterdir())), 4)
+
     def test_info_plist_do_app(self):
         result = self.run_installer()
         self.assertEqual(result.returncode, 0, result.stdout)

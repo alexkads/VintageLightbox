@@ -496,6 +496,35 @@ if ($codigoVersao -ne 0 -or -not "$resposta".Trim()) {
 }
 Ok "o app novo responde a versao $("$resposta".Trim())"
 
+# ── Faxina do cache ──────────────────────────────────────────────────────────
+# 🚨 **O cache crescia a cada atualizacao** (Mac do dono, 11/out/2026: 22 GiB
+#    em `deps`, 47 copias de cada crate da casa). A versao entra no nome do
+#    arquivo que o cargo gera (`libui_gpui-<hash>.rlib`), entao cada versao nova
+#    deixa um jogo inteiro ao lado do anterior, e o cargo nunca apaga o velho.
+#
+# 🔑 **So os crates da pasta `crates/`, e ficam os dois jogos mais novos** — o
+#    desta compilacao e o anterior. As dependencias de fora (gpui, wgpu,
+#    LibRaw) ficam como estao: sao elas o cache que poupa a compilacao longa.
+#    So depois de o app novo provar que abre, e uma faxina que falha nao
+#    derruba a instalacao.
+$deps = Join-Path $env:CARGO_TARGET_DIR "$Alvo\instalador\deps"
+try {
+    if ((Test-Path $deps) -and (Test-Path (Join-Path $Fonte "crates"))) {
+        $locais = @(Get-ChildItem (Join-Path $Fonte "crates") -Directory | ForEach-Object { $_.Name -replace '-', '_' })
+        $velhos = @(Get-ChildItem $deps -File |
+            Where-Object { $_.Name -match '^(lib)?(.+?)-[0-9a-f]{16}(\..*)?$' -and $locais -contains $Matches[2] } |
+            Group-Object { $_.Name -replace '-[0-9a-f]{16}', '' } |
+            ForEach-Object { $_.Group | Sort-Object LastWriteTime -Descending | Select-Object -Skip 2 })
+        if ($velhos.Count -gt 0) {
+            $gib = [math]::Round((($velhos | Measure-Object Length -Sum).Sum) / 1GB, 1)
+            $velhos | Remove-Item -Force -ErrorAction SilentlyContinue
+            Ok "cache enxuto: $($velhos.Count) arquivos de versoes antigas apagados ($gib GiB)"
+        }
+    }
+} catch {
+    Aviso "nao deu para enxugar o cache em $deps (segue a instalacao): $_"
+}
+
 # ── Instalar ─────────────────────────────────────────────────────────────────
 Diga "instalando em $Destino"
 New-Item -ItemType Directory -Force -Path $Destino | Out-Null
@@ -1216,6 +1245,42 @@ if [ "$SECO" -eq 0 ]; then
     exit 1
   fi
   echo "   o app novo responde a versão $RESPOSTA"
+fi
+
+# ── Faxina do cache ───────────────────────────────────────────────────────────
+# 🚨 **O cache crescia a cada atualização** (Mac do dono, 11/out/2026: 22 GiB em
+#    `target-gpui/instalador/deps`, 47 cópias de cada crate da casa). A
+#    versão entra no nome do arquivo que o cargo gera (`libui_gpui-<hash>.rlib`),
+#    então cada versão nova deixa um jogo inteiro ao lado do anterior, e o cargo
+#    nunca apaga o velho.
+#
+# 🔑 **Só os crates da pasta `crates/`, e ficam os dois jogos mais novos** — o
+#    desta compilação e o anterior. As dependências de fora (gpui, wgpu, LibRaw)
+#    não mudam de versão a cada lançamento e ficam como estão: são elas o
+#    cache que poupa os 15 a 40 minutos. Só depois de o app novo provar que
+#    abre, e uma faxina que falha não derruba a instalação.
+DEPS="$CARGO_TARGET_DIR/instalador/deps"
+if [ "$SECO" -eq 0 ] && [ -d "$DEPS" ] && [ -d "$FONTE/crates" ]; then
+  LOCAIS=""
+  for LOCAL in "$FONTE"/crates/*/; do
+    LOCAIS="$LOCAIS $(basename "$LOCAL" | tr '-' '_')"
+  done
+  VELHOS="$( (cd "$DEPS" && ls -t) 2>/dev/null | awk -v locais="$LOCAIS" '
+    BEGIN {
+      n = split(locais, lista, " "); for (i = 1; i <= n; i++) local[lista[i]] = 1
+      hash = "-"; for (i = 0; i < 16; i++) hash = hash "[0-9a-f]"
+    }
+    {
+      if (!match($0, hash)) next
+      crate = substr($0, 1, RSTART - 1); sub(/^lib/, "", crate)
+      if (!(crate in local)) next
+      jogo = substr($0, 1, RSTART - 1) substr($0, RSTART + RLENGTH)
+      if (++visto[jogo] > 2) print
+    }')" || VELHOS=""
+  if [ -n "$VELHOS" ]; then
+    printf '%s\n' "$VELHOS" | while IFS= read -r VELHO; do rm -rf "${DEPS:?}/$VELHO"; done || true
+    ok "cache enxuto: $(printf '%s\n' "$VELHOS" | wc -l | tr -d ' ') arquivos de versões antigas apagados ($(du -sh "$CARGO_TARGET_DIR" 2>/dev/null | cut -f1 || true) agora)"
+  fi
 fi
 
 # ── Instalar ──────────────────────────────────────────────────────────────────
