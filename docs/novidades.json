@@ -1,11 +1,9 @@
 {
   "versao": "0.1.144",
-  "titulo": "Conta com acesso a um estúdio só não escolhe estúdio: ele já vem selecionado.",
+  "titulo": "Correções internas de estabilidade.",
   "importante": false,
   "novidades": [
-    "Quem tem perfil de acesso com um único estúdio não vê mais a pergunta \"Em qual estúdio você está?\" ao entrar: o estúdio do perfil já fica selecionado.",
-    "Para essa conta, a barra das sessões, o caixa, a nova sessão e o cabeçalho da sessão mostram só o nome do estúdio, sem seletor para trocar.",
-    "Quem tem dois ou mais estúdios no perfil, ou é administrador, continua escolhendo como antes."
+    "Correções internas de estabilidade."
   ],
-  "por_que_atualizar": "Para o balcão de um estúdio só abrir direto no estúdio dele, sem tela de escolha."
+  "por_que_atualizar": "Para manter o aplicativo estável e em dia com o site."
 }

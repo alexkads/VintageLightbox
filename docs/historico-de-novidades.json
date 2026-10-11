@@ -2,29 +2,22 @@
   {
     "versao": "0.1.144",
     "data": "2026-10-11",
-    "titulo": "Conta com acesso a um estúdio só não escolhe estúdio: ele já vem selecionado.",
+    "titulo": "Correções internas de estabilidade.",
     "importante": false,
     "novidades": [
-      "Quem tem perfil de acesso com um único estúdio não vê mais a pergunta \"Em qual estúdio você está?\" ao entrar: o estúdio do perfil já fica selecionado.",
-      "Para essa conta, a barra das sessões, o caixa, a nova sessão e o cabeçalho da sessão mostram só o nome do estúdio, sem seletor para trocar.",
-      "Quem tem dois ou mais estúdios no perfil, ou é administrador, continua escolhendo como antes."
+      "Correções internas de estabilidade."
     ],
-    "por_que_atualizar": "Para o balcão de um estúdio só abrir direto no estúdio dele, sem tela de escolha."
+    "por_que_atualizar": "Para manter o aplicativo estável e em dia com o site."
   },
   {
     "versao": "0.1.143",
     "data": "2026-10-11",
-    "titulo": "Perfis de acesso: cada conta vê só o que o perfil dela libera, e só os estúdios dela.",
+    "titulo": "Correções internas de estabilidade.",
     "importante": false,
     "novidades": [
-      "O site ganhou os perfis de acesso (Painel › Perfis de acesso): quem administra escolhe o que cada perfil pode fazer e em quais estúdios, e atribui o perfil em Usuários.",
-      "O menu lateral mostra só as seções do seu perfil: sem a permissão, Caixa, Chatbot e Agendamentos não aparecem.",
-      "A escolha de estúdio e a lista de sessões trazem só os estúdios liberados para a sua conta.",
-      "O menu da conta mostra o seu perfil de acesso, abaixo do e-mail. \"Backup de arquivos\" só aparece para quem tem o acervo no perfil.",
-      "Conta com perfil sem estúdio liberado vê o aviso para procurar quem administra o sistema, em vez de uma lista vazia.",
-      "Quem é administrador continua vendo tudo, em todos os estúdios."
+      "Correções internas de estabilidade."
     ],
-    "por_que_atualizar": "Para o app acompanhar os perfis de acesso do site: sem esta versão as permissões já valem (o site recusa o que o perfil não tem), mas as seções bloqueadas continuam aparecendo no menu."
+    "por_que_atualizar": "Para manter o aplicativo estável e em dia com o site."
   },
   {
     "versao": "0.1.142",
