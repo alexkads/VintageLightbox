@@ -137,7 +137,7 @@ pub fn faixa(selos: &Selos, cx: &App) -> impl IntoElement {
         })
 }
 
-/// As cinco estrelas — as acesas em ouro, as apagadas quase invisíveis.
+/// As cinco estrelas — as acesas em ouro, as apagadas esmaecidas.
 ///
 /// 🔑 **As apagadas ficam, e é o que faz a nota ser legível de relance**: com
 /// só as acesas desenhadas, distinguir 3 de 4 exige contar; com a régua inteira,
@@ -146,14 +146,28 @@ pub fn estrelas(nota: i32, cx: &App) -> impl IntoElement {
     estrelas_em(
         nota,
         cores::nota(),
-        cx.theme().muted_foreground.opacity(0.25),
+        cx.theme().muted_foreground.opacity(APAGADA),
     )
 }
 
-/// ⭐ As estrelas numa tinta só — a acesa cheia, a apagada a 25% —, para
+/// ⭐ As estrelas numa tinta só — a acesa cheia, a apagada esmaecida —, para
 /// quando o fundo muda de claro para escuro (a célula em foco do Lightroom).
 pub fn estrelas_na_tinta(nota: i32, tinta: Hsla) -> impl IntoElement {
-    estrelas_em(nota, tinta, tinta.opacity(0.25))
+    estrelas_em(nota, tinta, tinta.opacity(APAGADA))
+}
+
+/// Quanto da tinta sobra na estrela apagada (a mesma da Biblioteca).
+const APAGADA: f32 = 0.4;
+
+const ENTRE_ESTRELAS: &str = "\u{200A}";
+const CINCO_ESTRELAS: &str = "★\u{200A}★\u{200A}★\u{200A}★\u{200A}★";
+
+/// Até onde, no texto das cinco estrelas, vão as acesas.
+fn trecho_das_acesas(nota: i32) -> std::ops::Range<usize> {
+    match nota.clamp(0, 5) as usize {
+        0 => 0..0,
+        n => 0..n * "★".len() + (n - 1) * ENTRE_ESTRELAS.len(),
+    }
 }
 
 fn estrelas_em(nota: i32, acesa: Hsla, apagada: Hsla) -> impl IntoElement {
@@ -162,28 +176,31 @@ fn estrelas_em(nota: i32, acesa: Hsla, apagada: Hsla) -> impl IntoElement {
     // **por célula**, e a grade da sessão desenha dezenas de células por
     // quadro (`estresse_a_grade_da_sessao`).
     // O espaço fino (U+200A) entre elas faz o papel do vão de 1 px.
-    const ENTRE: &str = "\u{200A}";
-    const TODAS: &str = "★\u{200A}★\u{200A}★\u{200A}★\u{200A}★";
-    let acesas = nota.clamp(0, 5) as usize;
-    let corte = match acesas {
-        0 => 0,
-        n => n * "★".len() + (n - 1) * ENTRE.len(),
-    };
-    let cor = |cor: Hsla| gpui_kit::HighlightStyle {
-        color: Some(cor),
-        ..Default::default()
-    };
-    let mut trechos = Vec::with_capacity(2);
-    if corte > 0 {
-        trechos.push((0..corte, cor(acesa)));
-    }
-    if corte < TODAS.len() {
-        trechos.push((corte..TODAS.len(), cor(apagada)));
+    //
+    // 🐛 **A apagada é a cor do texto, e só a acesa é destaque** (dono,
+    // 11/out/2026: no tema Lightroom não dava para ver a nota). O GPUI
+    // **mistura** a cor de um destaque translúcido com a cor do texto
+    // (`TextStyle::highlight`), em vez de pintá-la translúcida: a apagada a 25%
+    // saía 75% da cor da letra da célula, opaca. No Lightroom a letra é
+    // cinza-claro e a estrela acesa é branca — as cinco ficavam iguais; e na
+    // célula em foco, tinta sobre a mesma tinta, idênticas. Um destaque opaco
+    // substitui a cor inteira, e a cor do texto guarda a transparência.
+    let acesas = trecho_das_acesas(nota);
+    let mut trechos = Vec::with_capacity(1);
+    if !acesas.is_empty() {
+        trechos.push((
+            acesas,
+            gpui_kit::HighlightStyle {
+                color: Some(acesa.alpha(1.0)),
+                ..Default::default()
+            },
+        ));
     }
     div()
         .flex_none()
         .text_xs()
-        .child(gpui_kit::StyledText::new(TODAS).with_highlights(trechos))
+        .text_color(apagada)
+        .child(gpui_kit::StyledText::new(CINCO_ESTRELAS).with_highlights(trechos))
 }
 
 /// "levada" — o selo do balcão, na família âmbar.
@@ -325,6 +342,21 @@ pub fn selo_de_so_no_disco(cx: &App) -> gpui_kit::Div {
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    /// 🐛 Dono, 11/out/2026: no tema Lightroom as cinco estrelas saíam iguais.
+    /// As acesas são o começo do texto, estrela por estrela, sem o vão final.
+    #[test]
+    fn o_trecho_das_acesas_acompanha_a_nota() {
+        assert!(trecho_das_acesas(0).is_empty());
+        assert!(trecho_das_acesas(-3).is_empty());
+        for nota in 1..=5 {
+            let trecho = trecho_das_acesas(nota);
+            let acesas = &CINCO_ESTRELAS[trecho];
+            assert_eq!(acesas.matches('★').count(), nota as usize);
+            assert!(acesas.ends_with('★'));
+        }
+        assert_eq!(trecho_das_acesas(9), 0..CINCO_ESTRELAS.len());
+    }
 
     fn foto() -> PhotoViewModel {
         PhotoViewModel::default()
