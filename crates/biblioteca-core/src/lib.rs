@@ -40,6 +40,7 @@
 //! uma fonte aqui pesaria no `.wasm` e daria um texto pior que o dos dois.
 
 pub mod acervo;
+pub mod acesso;
 pub mod caixa;
 pub mod comparar;
 pub mod dados_do_cliente;

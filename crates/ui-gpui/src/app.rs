@@ -12891,6 +12891,7 @@ mod testes {
                 email: CONTA_DA_RETOMADA.into(),
                 papel: None,
                 avatar: None,
+                acesso: None,
             });
             app.detalhe
                 .update(cx, |tela, _cx| tela.definir_sessao(sessao_de_teste()));

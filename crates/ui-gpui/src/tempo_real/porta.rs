@@ -226,7 +226,12 @@ async fn manter_aberto(
                 return;
             }
             Err(erro) if erro.to_string().contains("respondeu 403") => {
-                crate::telemetria::avisar!("⚠️ [Tempo real] {fonte}: {erro}");
+                // 🔐 Com os perfis de acesso do site (11/out/2026) o `403` é
+                // resposta esperada: a conta não tem a capacidade deste canal
+                // (conversas, agenda). Fica dito no terminal, e **não** vira
+                // ocorrência relatada — senão todo balcão sem chatbot
+                // relataria cinco erros a cada abertura.
+                eprintln!("🔐 [Tempo real] {fonte}: fora do perfil de acesso ({erro})");
                 let _ = canal.send(Sinal::Conexao {
                     fonte,
                     estado: EstadoDaConexao::Recusado,

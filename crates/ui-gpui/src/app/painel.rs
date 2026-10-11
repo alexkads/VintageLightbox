@@ -17,6 +17,7 @@
 //! 🔑 **O que não está pronto no app não aparece nele**: o menu tem só as
 //! seções que o app já atende, e nenhuma a mais.
 
+use biblioteca_core::acesso::Acesso;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::sidebar::{
@@ -54,6 +55,44 @@ pub struct Conta {
     /// A foto do perfil (a do Google, para quem entra por ele) — a coluna
     /// `avatar` de `users`, a mesma que o menu do site mostra.
     pub avatar: Option<String>,
+    /// 🔐 O que a conta pode e em quais estúdios — o `acesso` do `/auth/me`,
+    /// dos perfis de acesso cadastrados no site (11/out/2026). `None` na API de
+    /// antes deles: aí nada se esconde. Só desenho; quem autoriza é o backend.
+    pub acesso: Option<Acesso>,
+}
+
+/// O `acesso` do `/auth/me`. Sem o campo `permissoes`, não é um acesso: é a
+/// API de antes dos perfis, e a tela segue como era.
+fn acesso_da_resposta(usuario: &serde_json::Value) -> Option<Acesso> {
+    let acesso = usuario.get("acesso")?;
+    let textos = |v: &serde_json::Value| -> Vec<String> {
+        v.as_array()
+            .map(|lista| {
+                lista
+                    .iter()
+                    .filter_map(|i| i.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let perfil = acesso.get("perfil").filter(|p| !p.is_null());
+    Some(Acesso {
+        admin: acesso
+            .get("admin")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        perfil: perfil
+            .and_then(|p| p.get("nome"))
+            .and_then(|n| n.as_str())
+            .map(str::to_string),
+        perfil_ativo: perfil
+            .and_then(|p| p.get("ativo"))
+            .and_then(|a| a.as_bool())
+            .unwrap_or(true),
+        permissoes: textos(acesso.get("permissoes")?),
+        // `null` é "todos os estúdios"; uma lista é o perfil de alguns.
+        estudios: acesso.get("estudios").filter(|e| e.is_array()).map(textos),
+    })
 }
 
 impl Conta {
@@ -86,7 +125,14 @@ impl Conta {
             email,
             papel,
             avatar,
+            acesso: acesso_da_resposta(usuario),
         })
+    }
+
+    /// 🔐 A conta tem esta capacidade (`biblioteca_core::acesso`)? Sem o
+    /// `acesso` na resposta, tem: quem recusa é o backend.
+    pub fn pode(&self, permissao: &str) -> bool {
+        biblioteca_core::acesso::pode(self.acesso.as_ref(), permissao)
     }
 
     /// 🗑️ É o SuperAdmin — o único que exclui e restaura sessão?
@@ -114,6 +160,10 @@ struct ItemDoMenu {
     tela: Tela,
     titulo: &'static str,
     icone: Icone,
+    /// 🔐 A capacidade que a seção pede (`biblioteca_core::acesso`), a mesma do
+    /// item do menu do site. `None` = não é do site: a ferramenta é desta
+    /// máquina (recuperar cartão).
+    exige: Option<&'static str>,
 }
 
 /// 🧭 Uma seção desenhada no `Sidebar` do gpui-kit: o `SidebarMenuItem` do
@@ -196,11 +246,13 @@ const MENU: [ItemDoMenu; 5] = [
         tela: Tela::Sessoes,
         titulo: "Sessões fotográficas",
         icone: Icone::Camera,
+        exige: Some(biblioteca_core::acesso::OPERAR_O_BALCAO),
     },
     ItemDoMenu {
         tela: Tela::Caixa,
         titulo: "Caixa",
         icone: Icone::Calculator,
+        exige: Some(biblioteca_core::acesso::CAIXA),
     },
     // 💬 O bot de atendimento — `/dashboard/chatbot`, com o nome e o ícone do
     // menu do site (`navegacao.ts`).
@@ -208,12 +260,14 @@ const MENU: [ItemDoMenu; 5] = [
         tela: Tela::Chatbot,
         titulo: "Chatbot",
         icone: Icone::Inbox,
+        exige: Some(biblioteca_core::acesso::CONVERSAS),
     },
     // 📅 A agenda — `/dashboard/agendamentos`, o nome e o ícone do site.
     ItemDoMenu {
         tela: Tela::Agenda,
         titulo: "Agendamentos",
         icone: Icone::CalendarDays,
+        exige: Some(biblioteca_core::acesso::AGENDA),
     },
     // 💾 O cartão formatado ou apagado sem querer (dono, 29/set/2026: *"é um
     // problema recorrente no meu estúdio e não quero mais depender de software
@@ -222,6 +276,7 @@ const MENU: [ItemDoMenu; 5] = [
         tela: Tela::Recuperacao,
         titulo: "Recuperar cartão",
         icone: Icone::HardDrive,
+        exige: None,
     },
 ];
 
@@ -254,6 +309,12 @@ impl Aplicativo {
     /// não passam por aqui.
     pub fn ir_para(&mut self, tela: Tela, window: &mut Window, cx: &mut Context<Self>) {
         self.menu_da_conta = None;
+        // 🔐 A seção não é do perfil de acesso da conta: o menu já não a
+        // mostra, e o atalho de teclado não leva a uma tela em que tudo
+        // responderia "sem permissão".
+        if self.tela_fechada(tela) {
+            return;
+        }
         // 💬 O chatbot só relê com a tela na frente; escondido, ele só acende
         // as novidades e avisa.
         if (self.tela == Tela::Chatbot) != (tela == Tela::Chatbot) {
@@ -473,6 +534,13 @@ impl Aplicativo {
                         let pode = self.conta.as_ref().is_some_and(Conta::e_super_admin);
                         self.sessoes
                             .update(cx, |t, cx| t.definir_super_admin(pode, cx));
+                        // 🔐 E os estúdios do perfil de acesso dela.
+                        let acesso = self.conta.as_ref().and_then(|c| c.acesso.clone());
+                        let (restritos, nenhum) = acesso
+                            .map(|a| (a.estudios_restritos(), a.sem_estudio()))
+                            .unwrap_or_default();
+                        self.sessoes
+                            .update(cx, |t, cx| t.definir_acesso(restritos, nenhum, cx));
                         // 🗂️ As guias da última abertura voltam, se forem
                         // desta conta — só agora se sabe quem entrou.
                         self.repor_guias();
@@ -498,6 +566,26 @@ impl Aplicativo {
         }
     }
 
+    /// 🔐 A conta logada tem a capacidade que a seção pede? `None` = a seção
+    /// não pede nenhuma. Sem conta carregada, tem — quem recusa é o backend.
+    pub(crate) fn pode(&self, exige: Option<&str>) -> bool {
+        match (exige, &self.conta) {
+            (Some(permissao), Some(conta)) => conta.pode(permissao),
+            _ => true,
+        }
+    }
+
+    /// A seção do menu que mostra esta tela está fechada para a conta?
+    pub(crate) fn tela_fechada(&self, tela: Tela) -> bool {
+        // 📦 O backup mora no menu da conta, e não no lateral.
+        if tela == Tela::Backup {
+            return !self.pode(Some(biblioteca_core::acesso::ACERVO));
+        }
+        MENU.iter()
+            .find(|item| item.tela == tela.secao())
+            .is_some_and(|item| !self.pode(item.exige))
+    }
+
     /// O menu lateral, aberto (256 px) ou recolhido em ícones (48 px).
     pub(super) fn menu_lateral(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let aberto = self.menu_aberto;
@@ -506,6 +594,10 @@ impl Aplicativo {
         let itens: Vec<SecaoDoMenu> = MENU
             .iter()
             .filter(|item| item.tela != Tela::Recuperacao || self.recuperacao.is_some())
+            // 🔐 Só as seções que o perfil de acesso da conta abre. Antes de o
+            // `/auth/me` responder (`conta` vazia) o menu vem inteiro: a tela
+            // não pisca escondendo e mostrando a cada abertura.
+            .filter(|item| self.pode(item.exige))
             .enumerate()
             .map(|(posicao, item)| {
                 let destino = item.tela;
@@ -935,6 +1027,13 @@ impl Aplicativo {
             .map(Conta::inicial)
             .unwrap_or_else(|| "·".into())
             .into();
+        let perfil: Option<SharedString> = self
+            .conta
+            .as_ref()
+            .and_then(|c| c.acesso.as_ref())
+            .and_then(|a| a.rotulo())
+            .map(Into::into);
+        let com_backup = !self.tela_fechada(Tela::Backup);
         let antes = window.focused(cx);
         let menu = PopupMenu::build(window, cx, move |menu, _window, cx| {
             let tema = cx.theme();
@@ -958,11 +1057,12 @@ impl Aplicativo {
                         let _ = raiz.update(cx, |raiz, cx| raiz.escolher_tema(valor, window, cx));
                     })
             };
-            let (nome, email, retrato, inicial) = (
+            let (nome, email, retrato, inicial, perfil) = (
                 nome.clone(),
                 email.clone(),
                 retrato.clone(),
                 inicial.clone(),
+                perfil.clone(),
             );
             let menu = match antes.clone() {
                 Some(antes) => menu.action_context(antes),
@@ -1018,7 +1118,20 @@ impl Aplicativo {
                                             .text_color(apagado)
                                             .truncate()
                                             .child(email.clone()),
-                                    ),
+                                    )
+                                    // 🔐 O perfil de acesso da conta (ou
+                                    // "Administrador"): diz por que uma
+                                    // seção não está no menu.
+                                    .when_some(perfil.clone(), |d, perfil| {
+                                        d.child(
+                                            div()
+                                                .debug_selector(|| "conta-perfil-de-acesso".into())
+                                                .text_xs()
+                                                .text_color(apagado)
+                                                .truncate()
+                                                .child(perfil),
+                                        )
+                                    }),
                             )
                     })
                     .disabled(true),
@@ -1033,17 +1146,20 @@ impl Aplicativo {
                 // 📦 O acervo de arquivos no R2 — `/dashboard/backup` no
                 // site, portado do `file-manager` do legado em 2026-09-18.
                 // Aqui, e não no menu lateral: é de uso de vez em quando.
-                .item(
-                    estilo::item_de_menu_com_icone(
-                        "conta-backup",
-                        Icone::FolderOpen,
-                        "Backup de arquivos",
-                        None,
+                // 🔐 Só para quem tem o acervo no perfil de acesso.
+                .when(com_backup, |menu| {
+                    menu.item(
+                        estilo::item_de_menu_com_icone(
+                            "conta-backup",
+                            Icone::FolderOpen,
+                            "Backup de arquivos",
+                            None,
+                        )
+                        .on_click(agir(|raiz, window, cx| {
+                            raiz.ir_para(Tela::Backup, window, cx)
+                        })),
                     )
-                    .on_click(agir(|raiz, window, cx| {
-                        raiz.ir_para(Tela::Backup, window, cx)
-                    })),
-                )
+                })
                 // ⚙️ As Configurações, abertas nos avisos sonoros (dono,
                 // 03/out/2026: *"Deveria ficar aqui!"*) — o "Espaço" do
                 // cabeçalho das sessões abre a mesma janela no cache.
@@ -1344,6 +1460,47 @@ fn retrato_de(endereco: &str) -> Option<std::sync::Arc<gpui_kit::RenderImage>> {
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    /// 🔐 O `acesso` dos perfis de acesso do site chega com a conta.
+    #[test]
+    fn o_acesso_da_conta_sai_do_auth_me() {
+        let do_balcao = serde_json::json!({
+            "email": "balcao@ex.com", "role": "USER",
+            "acesso": {
+                "admin": false,
+                "perfil": {"id": "p1", "nome": "Balcão de Gramado", "ativo": true},
+                "permissoes": ["OperateCounter"],
+                "estudios": ["estudio-gramado"]
+            }
+        });
+        let conta = Conta::da_resposta(&do_balcao).unwrap();
+        let acesso = conta.acesso.as_ref().unwrap();
+        assert_eq!(acesso.perfil.as_deref(), Some("Balcão de Gramado"));
+        assert_eq!(
+            acesso.estudios.as_deref(),
+            Some(&["estudio-gramado".to_string()][..])
+        );
+        assert!(conta.pode(biblioteca_core::acesso::OPERAR_O_BALCAO));
+        assert!(!conta.pode(biblioteca_core::acesso::CAIXA));
+
+        // `estudios: null` é "todos": o administrador.
+        let dono = serde_json::json!({
+            "email": "dono@ex.com", "role": "ADMIN",
+            "acesso": {"admin": true, "perfil": null, "permissoes": [], "estudios": null}
+        });
+        let conta = Conta::da_resposta(&dono).unwrap();
+        assert!(conta.pode(biblioteca_core::acesso::CAIXA));
+        assert!(!conta.acesso.as_ref().unwrap().estudios_restritos());
+    }
+
+    /// A API de antes dos perfis não manda `acesso`: nada some da tela.
+    #[test]
+    fn sem_acesso_na_resposta_a_conta_pode_tudo_na_tela() {
+        let antiga = serde_json::json!({"email": "a@b.c", "role": "ADMIN"});
+        let conta = Conta::da_resposta(&antiga).unwrap();
+        assert_eq!(conta.acesso, None);
+        assert!(conta.pode(biblioteca_core::acesso::CAIXA));
+    }
 
     #[test]
     fn a_conta_sai_do_auth_me_em_qualquer_envelope() {

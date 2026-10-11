@@ -244,6 +244,13 @@ pub struct Sessoes {
     /// 🗑️ Quem entrou é o SuperAdmin? Só ele vê a lixeira — o backend confere
     /// de novo, e é ele quem vale.
     super_admin: bool,
+    /// 🔐 O perfil de acesso da conta é de **alguns** estúdios (site, 11/out/
+    /// 2026): ela não vê os outros nem as sessões sem estúdio, e "todos os
+    /// estúdios" vira "todos os meus".
+    estudios_restritos: bool,
+    /// 🔐 …e de **nenhum**: a lista vazia vira o aviso de procurar quem
+    /// administra o sistema.
+    sem_estudio_liberado: bool,
     /// 🧊 A rolagem das duas metades do grid (a congelada e a que rola): a
     /// vertical é uma só, e a horizontal é a da metade da direita.
     rolagem_vertical: gpui_kit::ScrollHandle,
@@ -442,6 +449,8 @@ impl Sessoes {
             erro: None,
             erro_visto: None,
             super_admin: false,
+            estudios_restritos: false,
+            sem_estudio_liberado: false,
             rolagem_vertical: gpui_kit::ScrollHandle::new(),
             rolagem_horizontal: gpui_kit::ScrollHandle::new(),
             linha_sob_o_mouse: None,
@@ -468,6 +477,24 @@ impl Sessoes {
     pub fn definir_super_admin(&mut self, sim: bool, cx: &mut Context<Self>) {
         if self.super_admin != sim {
             self.super_admin = sim;
+            cx.notify();
+        }
+    }
+
+    /// 🔐 A raiz diz o que a conta alcança, depois do `/auth/me` — os estúdios
+    /// do perfil de acesso (`biblioteca_core::acesso`). Só desenho: a lista já
+    /// chega do site recortada.
+    pub fn definir_acesso(
+        &mut self,
+        estudios_restritos: bool,
+        sem_estudio_liberado: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if (self.estudios_restritos, self.sem_estudio_liberado)
+            != (estudios_restritos, sem_estudio_liberado)
+        {
+            self.estudios_restritos = estudios_restritos;
+            self.sem_estudio_liberado = sem_estudio_liberado;
             cx.notify();
         }
     }
@@ -1759,17 +1786,20 @@ impl Sessoes {
                                 gpui_kit::component::v_flex()
                                     .gap(px(2.))
                                     .items_start()
-                                    .child(
-                                        div()
-                                            .font_weight(gpui_kit::FontWeight::MEDIUM)
-                                            .child("Todos os estúdios"),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(apagado)
-                                            .child("Inclusive as sessões sem estúdio definido"),
-                                    ),
+                                    .child(div().font_weight(gpui_kit::FontWeight::MEDIUM).child(
+                                        if self.estudios_restritos {
+                                            "Todos os meus estúdios"
+                                        } else {
+                                            "Todos os estúdios"
+                                        },
+                                    ))
+                                    .child(div().text_xs().text_color(apagado).child(
+                                        if self.estudios_restritos {
+                                            "Os estúdios liberados no seu perfil de acesso"
+                                        } else {
+                                            "Inclusive as sessões sem estúdio definido"
+                                        },
+                                    )),
                             )
                             .on_click(cx.listener(
                                 move |tela, _ev, _window, cx| tela.escolher_todos_os_estudios(cx),
@@ -3146,7 +3176,12 @@ impl Sessoes {
         // com ela tiraria os campos de onde se desfaz o filtro.
         let com_filtros = self.filtros.visivel(cx);
         if visiveis.is_empty() && !com_filtros {
-            let frase = if self.galerias.is_empty() {
+            let frase = if self.sem_estudio_liberado {
+                // 🔐 A lista está vazia porque o perfil não alcança estúdio
+                // nenhum — "Nova sessão" também seria recusada.
+                "O seu perfil de acesso ainda não tem estúdio liberado. Fale com quem administra \
+                 o sistema."
+            } else if self.galerias.is_empty() {
                 "Nenhuma galeria ainda. A primeira nasce no botão \"Nova sessão\"."
             } else {
                 "Nenhuma sessão com esse nome ou nessa situação."
