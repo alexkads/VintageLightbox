@@ -1668,6 +1668,18 @@ impl Aplicativo {
                 .timer(std::time::Duration::from_secs(1))
                 .await;
             segundos = segundos.wrapping_add(1);
+            // 🔒 O servidor encerrou a sessão desta conta: sai agora.
+            if let Some(motivo) = crate::telemetria::tomar_encerramento() {
+                if raiz
+                    .update(cx, |raiz, cx| {
+                        raiz.sessao_encerrada_pelo_servidor(&motivo, cx)
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+                continue;
+            }
             let anuncio = crate::telemetria::tomar_anuncio();
             let de_hora = segundos.is_multiple_of(A_CADA_HORA);
             if anuncio.is_none() && !de_hora {
@@ -13094,5 +13106,40 @@ mod testes {
             })
             .expect("a janela deve estar aberta");
         assert!(!arquivo.exists(), "a próxima entrada começa na lista");
+    }
+
+    /// O servidor encerrou a sessão (mexeram no perfil, no papel ou na senha da
+    /// conta): o app sai como no "Sair", e a entrada diz por quê.
+    #[gpui_kit::test]
+    fn sessao_encerrada_pelo_servidor_sai_da_conta_e_diz_por_que(cx: &mut TestAppContext) {
+        let (_pasta, arquivo) = arquivo_da_retomada();
+        escrever_onde_estavamos(
+            &arquivo,
+            serde_json::json!({
+                "conta": CONTA_DA_RETOMADA, "versao": "0.1.77", "gravado_em": 0,
+                "tela": "agenda"
+            }),
+        );
+        let (janela, _dir) =
+            abertura_para_retomar(cx, &arquivo, Arc::new(GravadorDeMentira::default()));
+        retomar(cx, &janela);
+        janela
+            .update(cx, |app, _window, cx| {
+                assert!(app.sessao.is_some(), "a conta está dentro");
+                app.sessao_encerrada_pelo_servidor("perfil_de_acesso", cx);
+                assert!(app.sessao.is_none(), "o app saiu da conta");
+                assert!(app.conta.is_none());
+                assert_eq!(app.tela, Tela::Sessoes);
+                let frase = app.entrada.read(cx).erro().map(|e| e.to_string());
+                assert!(
+                    frase.is_some_and(|f| f.contains("perfil de acesso")),
+                    "a entrada explica por que pede login de novo"
+                );
+                // Um segundo aviso, já fora da conta, não faz nada.
+                app.sessao_encerrada_pelo_servidor("papel", cx);
+                let frase = app.entrada.read(cx).erro().map(|e| e.to_string());
+                assert!(frase.is_some_and(|f| f.contains("perfil de acesso")));
+            })
+            .expect("a janela deve estar aberta");
     }
 }

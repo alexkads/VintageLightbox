@@ -64,6 +64,10 @@ struct Telemetria {
     tarefas: Mutex<Vec<tokio::task::JoinHandle<()>>>,
     /// A versão que o servidor anunciou e a tela ainda não recolheu.
     anuncio: Mutex<Option<crate::atualizacao::novidades::Novidades>>,
+    /// O servidor encerrou a sessão desta conta e a tela ainda não saiu: o
+    /// motivo, como veio (`sessao_encerrada`), ou vazio quando o app só
+    /// descobriu ao reabrir o fluxo.
+    encerramento: Mutex<Option<String>>,
     /// Acorda o envio quando entra relato novo.
     novo_relato: tokio::sync::Notify,
     repetidos: Mutex<HashMap<(String, String), Instant>>,
@@ -91,6 +95,7 @@ pub fn ligar(api: Arc<PosVendaApiHttp>, tokio: tokio::runtime::Handle) {
         sessao: Mutex::new(None),
         tarefas: Mutex::new(Vec::new()),
         anuncio: Mutex::new(None),
+        encerramento: Mutex::new(None),
         novo_relato: tokio::sync::Notify::new(),
         repetidos: Mutex::new(HashMap::new()),
         erros_na_hora: AtomicU32::new(0),
@@ -271,6 +276,49 @@ pub fn tomar_anuncio() -> Option<crate::atualizacao::novidades::Novidades> {
         .take()
 }
 
+/// O servidor encerrou a sessão desta conta desde a última vez que a tela
+/// olhou — o motivo, para a frase da entrada ([`frase_do_encerramento`]).
+pub fn tomar_encerramento() -> Option<String> {
+    TELEMETRIA
+        .get()?
+        .encerramento
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take()
+}
+
+/// O motivo, se o evento é o `sessao_encerrada` do servidor
+/// (`handlers/app_desktop.rs`: `data: {"tipo": "sessao_encerrada", "motivo": …}`).
+/// Evento sem motivo legível ainda encerra — com o motivo vazio.
+pub fn motivo_do_encerramento(evento: &crate::tempo_real::sse::EventoSse) -> Option<String> {
+    if evento.nome != "sessao_encerrada" {
+        return None;
+    }
+    Some(
+        serde_json::from_str::<serde_json::Value>(&evento.dados)
+            .ok()
+            .and_then(|dados| dados.get("motivo")?.as_str().map(str::to_string))
+            .unwrap_or_default(),
+    )
+}
+
+/// O que a entrada diz a quem foi posto para fora.
+pub fn frase_do_encerramento(motivo: &str) -> &'static str {
+    match motivo {
+        "perfil_de_acesso" => "O perfil de acesso desta conta mudou. Entre de novo para continuar.",
+        "papel" => "O papel desta conta mudou. Entre de novo para continuar.",
+        "senha" => "A senha desta conta foi trocada. Entre de novo para continuar.",
+        "administrador" => "Um administrador encerrou esta sessão. Entre de novo para continuar.",
+        "seguranca_do_google" => {
+            "O Google avisou de um problema na sua conta Google. Entre de novo para continuar."
+        }
+        "reuso_de_token" => {
+            "Esta sessão foi encerrada por segurança. Entre de novo para continuar."
+        }
+        _ => "Sua sessão neste computador terminou. Entre de novo para continuar.",
+    }
+}
+
 // ── A conta ────────────────────────────────────────────────────────────────
 
 /// A conta entrou: abre o fluxo e começa a esvaziar o depósito.
@@ -279,6 +327,8 @@ pub fn conta_entrou(sessao: Sessao) {
         return;
     };
     conta_saiu();
+    // O encerramento que sobrou era da conta de antes.
+    *t.encerramento.lock().unwrap_or_else(|e| e.into_inner()) = None;
     *t.sessao.lock().unwrap_or_else(|e| e.into_inner()) = Some(sessao.clone());
     let fluxo = t.tokio.spawn(manter_o_fluxo(sessao));
     let envio = t.tokio.spawn(esvaziar_sempre());
@@ -312,6 +362,7 @@ async fn manter_o_fluxo(sessao: Sessao) {
     loop {
         let mut leitor = LeitorSse::default();
         let mut abriu = false;
+        let mut encerrada: Option<String> = None;
         let resultado = t
             .api
             .escutar(&sessao, &caminho, SILENCIO_MAXIMO, |pedaco| {
@@ -326,6 +377,9 @@ async fn manter_o_fluxo(sessao: Sessao) {
                             if let Some(versao) = anuncio_do_evento(&evento) {
                                 *t.anuncio.lock().unwrap_or_else(|e| e.into_inner()) = Some(versao);
                             }
+                            if let Some(motivo) = motivo_do_encerramento(&evento) {
+                                encerrada = Some(motivo);
+                            }
                         }
                     }
                 }
@@ -334,10 +388,31 @@ async fn manter_o_fluxo(sessao: Sessao) {
         if abriu {
             tentativa = 0;
         }
+        // 🔒 O servidor encerrou a sessão desta conta (mexeram no perfil de
+        // acesso, no papel ou na senha): a tela sai e pede login de novo. O
+        // fluxo não reabre — o token daqui já não vale.
+        if let Some(motivo) = encerrada {
+            *t.encerramento.lock().unwrap_or_else(|e| e.into_inner()) = Some(motivo);
+            return;
+        }
         match resultado {
-            // Permissão não se cura reconectando: a conta sem acesso ao
-            // pós-venda não tem fluxo, e o app segue sem ele.
-            Err(DomainError::AcessoRecusado) => return,
+            // O servidor recusou o token. Pode ser o aviso que se perdeu (o app
+            // estava sem rede quando a sessão foi encerrada): uma chamada
+            // qualquer tira a dúvida, porque ela renova antes de desistir.
+            Err(DomainError::AcessoRecusado) => {
+                match t.api.chamar(Some(&sessao), "GET", "/auth/me", None).await {
+                    // Renovou e passou: foi piscada, o fluxo reabre.
+                    Ok(resposta) if resposta.status != 401 => {}
+                    // Nem renovando: a sessão acabou.
+                    Ok(_) | Err(DomainError::AcessoRecusado) => {
+                        *t.encerramento.lock().unwrap_or_else(|e| e.into_inner()) =
+                            Some(String::new());
+                        return;
+                    }
+                    // Sem rede não se conclui nada: tenta de novo adiante.
+                    Err(_) => {}
+                }
+            }
             Err(erro) if erro.to_string().contains("respondeu 403") => return,
             Err(erro) => {
                 eprintln!("⚠️ [Telemetria] o fluxo do servidor caiu: {erro}")
@@ -488,5 +563,26 @@ mod testes {
         super::reagir("0.1.19", "exibida", None);
         assert_eq!(super::tomar_anuncio(), None);
         super::conta_saiu();
+    }
+
+    #[test]
+    fn o_evento_de_sessao_encerrada_traz_o_motivo() {
+        let mut leitor = LeitorSse::default();
+        let eventos = leitor.ler(
+            b"event: pronto\ndata: 1\n\nevent: sessao_encerrada\ndata: {\"tipo\":\"sessao_encerrada\",\"motivo\":\"perfil_de_acesso\"}\n\n",
+        );
+        assert_eq!(super::motivo_do_encerramento(&eventos[0]), None);
+        assert_eq!(
+            super::motivo_do_encerramento(&eventos[1]).as_deref(),
+            Some("perfil_de_acesso")
+        );
+        assert!(super::frase_do_encerramento("perfil_de_acesso").contains("perfil de acesso"));
+
+        // Sem motivo legível o evento ainda encerra, com a frase genérica.
+        let mut leitor = LeitorSse::default();
+        let cru = leitor.ler(b"event: sessao_encerrada\ndata: {}\n\n");
+        assert_eq!(super::motivo_do_encerramento(&cru[0]).as_deref(), Some(""));
+        assert!(super::frase_do_encerramento("").contains("terminou"));
+        assert!(super::frase_do_encerramento("motivo_do_futuro").contains("terminou"));
     }
 }

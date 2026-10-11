@@ -136,6 +136,13 @@ impl Entrada {
     /// `Sender` dela falando para um `Receiver` que já morreu — o `send` falha
     /// em silêncio, como já falha hoje quando a tela fecha. Sem isso, uma
     /// autorização abandonada entraria no app cinco minutos depois, sozinha.
+    /// Uma frase na tela de entrada, vinda de fora — hoje, o motivo de a sessão
+    /// ter sido encerrada pelo servidor. Some no próximo "Entrar".
+    pub fn avisar(&mut self, texto: impl Into<SharedString>, cx: &mut Context<Self>) {
+        self.erro = Some(texto.into());
+        cx.notify();
+    }
+
     pub fn desistir(&mut self, cx: &mut Context<Self>) {
         if !self.no_navegador {
             return;

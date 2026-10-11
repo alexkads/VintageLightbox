@@ -409,8 +409,21 @@ impl PosVendaApi for PosVendaApiHttp {
     }
 
     async fn sair(&self) {
-        *self.viva.lock().await = None;
+        let de_saida = self.viva.lock().await.take();
         self.cofre.esquecer();
+        // Avisa o servidor, para a sessão deixar de constar como aberta. É
+        // cortesia: sem rede, ou com a sessão já encerrada por lá, o app sai do
+        // mesmo jeito — e o pedido não segura o "Sair" na tela.
+        if let Some(sessao) = de_saida.filter(|s| s.acesso_utilizavel(agora())) {
+            let pedido = self
+                .client
+                .post(self.url("/app-desktop/sessao/sair"))
+                .bearer_auth(sessao.access_token)
+                .timeout(Duration::from_secs(5));
+            tokio::spawn(async move {
+                let _ = pedido.send().await;
+            });
+        }
     }
 
     async fn produtos(&self, sessao: &Sessao) -> DomainResult<Vec<Produto>> {

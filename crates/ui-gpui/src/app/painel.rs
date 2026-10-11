@@ -467,6 +467,20 @@ impl Aplicativo {
         cx.notify();
     }
 
+    /// O servidor encerrou a sessão desta conta — mexeram no perfil de acesso,
+    /// no papel ou na senha dela, ou um administrador a encerrou pela ficha. O
+    /// app sai como no "Sair" e a entrada diz por quê.
+    pub fn sessao_encerrada_pelo_servidor(&mut self, motivo: &str, cx: &mut Context<Self>) {
+        if self.sessao.is_none() {
+            return;
+        }
+        eprintln!("🔒 [Conta] o servidor encerrou a sessão ({motivo}): saindo");
+        self.sair_da_conta(cx);
+        let frase = crate::telemetria::frase_do_encerramento(motivo);
+        self.entrada
+            .update(cx, |entrada, cx| entrada.avisar(frase, cx));
+    }
+
     pub fn conta(&self) -> Option<&Conta> {
         self.conta.as_ref()
     }
