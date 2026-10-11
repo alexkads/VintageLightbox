@@ -5317,7 +5317,18 @@ impl Detalhe {
                 sem_galeria,
             ))
             // 🏠 **O estúdio da sessão**, como no cabeçalho do site.
-            .children(self.escolha_do_estudio.as_ref().map(|escolha| {
+            // 🔐 Conta de um estúdio só (perfil de acesso): a sessão é desse
+            // estúdio e não há outro para onde mandá-la — o nome, sem seletor.
+            .children(self.estudio_fixo().map(|nome| {
+                h_flex()
+                    .debug_selector(|| "sessao-estudio-fixo".into())
+                    .items_center()
+                    .gap(px(6.))
+                    .text_sm()
+                    .child(Icon::new(Icone::Building2).size(px(14.)))
+                    .child(SharedString::from(nome))
+            }))
+            .children(self.escolha_do_estudio.as_ref().filter(|_| self.estudio_fixo().is_none()).map(|escolha| {
                 div()
                     .w(px(200.))
                     .debug_selector(|| "sessao-estudio".into())
@@ -7522,6 +7533,13 @@ impl Detalhe {
             .as_ref()
             .and_then(|a| a.galeria.estudio_id.clone())
             .unwrap_or_default()
+    }
+
+    /// 🔐 O nome do estúdio quando ele é **o único** do perfil de acesso da
+    /// conta e é o da sessão aberta: o cabeçalho o diz, sem seletor.
+    fn estudio_fixo(&self) -> Option<String> {
+        let unico = crate::acesso_da_conta::estudio_unico(&self.estudios)?;
+        (unico.id == self.estudio_da_galeria()).then(|| unico.nome.clone())
     }
 
     /// O estúdio da sessão **se o seletor o tem**: o que ele deve mostrar.

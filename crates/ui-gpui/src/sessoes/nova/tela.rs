@@ -637,7 +637,13 @@ impl NovaSessao {
     /// ele trava o "Avançar" até alguém escolher (dono, 2026-10-03).
     fn sugerir(&mut self) {
         let lembrado = lembranca::ler();
+        // 🔐 Conta de um estúdio só (perfil de acesso): a sessão nasce nele,
+        // mesmo que o rascunho ou a lembrança digam outro — o site recusaria.
+        let unico = crate::acesso_da_conta::estudio_unico(&self.estudios).map(|e| e.id.clone());
         let f = &mut self.rascunho.formulario;
+        if let Some(unico) = unico {
+            f.estudio_id = unico;
+        }
         if f.estudio_id.is_empty() {
             if let Some(estudio) = lembrado
                 .estudio_id

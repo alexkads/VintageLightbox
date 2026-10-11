@@ -432,6 +432,10 @@ impl Aplicativo {
     /// O "Sair" do menu da conta: esquece a sessão e volta para a capa.
     pub fn sair_da_conta(&mut self, cx: &mut Context<Self>) {
         self.menu_da_conta = None;
+        // 🔐 O perfil de acesso é da conta que sai.
+        crate::acesso_da_conta::definir_estudios_restritos(false);
+        self.sessoes
+            .update(cx, |t, cx| t.definir_acesso(false, false, cx));
         self.largar_a_revelacao(cx);
         if self.sessao_aberta.is_some() {
             self.sair_da_sessao(cx);
@@ -539,6 +543,8 @@ impl Aplicativo {
                         let (restritos, nenhum) = acesso
                             .map(|a| (a.estudios_restritos(), a.sem_estudio()))
                             .unwrap_or_default();
+                        // As telas com seletor de estúdio leem daqui.
+                        crate::acesso_da_conta::definir_estudios_restritos(restritos);
                         self.sessoes
                             .update(cx, |t, cx| t.definir_acesso(restritos, nenhum, cx));
                         // 🗂️ As guias da última abertura voltam, se forem

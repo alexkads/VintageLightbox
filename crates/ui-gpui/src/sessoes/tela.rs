@@ -495,8 +495,37 @@ impl Sessoes {
         {
             self.estudios_restritos = estudios_restritos;
             self.sem_estudio_liberado = sem_estudio_liberado;
+            // A lista de estúdios pode ter chegado antes da conta.
+            self.fixar_o_estudio_unico();
             cx.notify();
         }
+    }
+
+    /// 🔐 **O estúdio único** do perfil de acesso da conta
+    /// (`biblioteca_core::acesso::estudio_unico`): com ele não há pergunta na
+    /// entrada nem troca pela barra.
+    fn estudio_unico(&self) -> Option<&Estudio> {
+        biblioteca_core::acesso::estudio_unico(&self.estudios, self.estudios_restritos)
+    }
+
+    /// Com estúdio único, ele vira o estúdio de trabalho desta máquina — e a
+    /// pergunta, se estava na tela, sai. Devolve se havia estúdio único.
+    ///
+    /// Grava a lembrança (só quando ela é outra) porque é por ela que o caixa
+    /// sabe em que estúdio abrir ([`estudio_de_trabalho_guardado`]).
+    fn fixar_o_estudio_unico(&mut self) -> bool {
+        let Some(id) = self.estudio_unico().map(|e| e.id.clone()) else {
+            return false;
+        };
+        let guardada = lembranca(&self.lembranca);
+        if guardada.ver_todos || guardada.estudio_id.as_deref() != Some(id.as_str()) {
+            lembrar_estudio(&self.lembranca, &id);
+        }
+        self.escolhendo_estudio = false;
+        if let Some(nova) = self.nova.as_mut() {
+            nova.estudio_id = Some(id);
+        }
+        true
     }
 
     /// 🗑️ A lixeira da linha: abre o diálogo de excluir.
@@ -1194,7 +1223,10 @@ impl Sessoes {
                     // diálogo sem opção e sem saída é pior que a ausência dele.
                     // 🔑 **"Todos" também é resposta**: quem escolheu ver tudo
                     // não pode levar a pergunta de novo a cada abertura.
-                    if !ja_respondeu(&self.lembranca)
+                    // 🔐 Conta de um estúdio só: é esse, e não se pergunta.
+                    if self.fixar_o_estudio_unico() {
+                        // nada a perguntar
+                    } else if !ja_respondeu(&self.lembranca)
                         && self.estudio_de_trabalho().is_none()
                         && !self.estudios.is_empty()
                     {
@@ -1581,7 +1613,8 @@ impl Sessoes {
 
     /// Abre a pergunta — é o clique no chip do estúdio.
     pub fn trocar_de_estudio(&mut self, cx: &mut Context<Self>) {
-        if self.estudios.is_empty() {
+        // 🔐 Conta de um estúdio só não tem para onde trocar.
+        if self.estudios.is_empty() || self.estudio_unico().is_some() {
             return;
         }
         self.escolhendo_estudio = true;
@@ -2455,6 +2488,21 @@ impl Sessoes {
                     self.estudio_de_trabalho().map(|e| e.nome.clone())
                 },
                 |barra, nome| {
+                    // 🔐 Conta de um estúdio só: o nome dele, sem clique —
+                    // não há outro para escolher.
+                    if self.estudio_unico().is_some() {
+                        return barra.child(
+                            gpui_kit::component::h_flex()
+                                .debug_selector(|| "sessoes-estudio-fixo".into())
+                                .items_center()
+                                .gap(px(6.))
+                                .px(px(8.))
+                                .text_sm()
+                                .text_color(apagado)
+                                .child(Icon::new(Icone::Building2).size(px(14.)))
+                                .child(SharedString::from(nome)),
+                        );
+                    }
                     barra.child(
                         estilo::botao_contorno("sessoes-estudio-de-trabalho", cx)
                             .child(Icon::new(Icone::Building2).size(px(14.)))
@@ -4169,6 +4217,55 @@ mod testes {
                 );
 
                 // O chip abre a mesma pergunta de novo — é a saída da decisão.
+                tela.trocar_de_estudio(cx);
+                assert!(tela.perguntando_o_estudio());
+                let _ = std::fs::remove_file(&tela.lembranca);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🔐 **Conta de um estúdio só não escolhe estúdio** (dono, 11/out/2026:
+    /// *"se o usuário tiver acesso somente a um estúdio não pode aparecer tela
+    /// de seleção e nem combo de seleção, pois deve ficar selecionado único
+    /// estúdio que tem"*). O perfil de acesso do site libera um estúdio: ele
+    /// vira o estúdio de trabalho, a pergunta não aparece e a barra não troca.
+    #[gpui_kit::test]
+    fn conta_de_um_estudio_so_nao_e_perguntada_nem_troca(cx: &mut TestAppContext) {
+        let publicador = Arc::new(PublicadorDeMentira {
+            estudios: vec![estudio()],
+            ..Default::default()
+        });
+        let janela = janela(cx, publicador);
+        com_sessao(cx, &janela);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                // A lista chegou antes da conta: a pergunta está na tela…
+                assert!(tela.perguntando_o_estudio());
+                // …e sai quando o `/auth/me` diz que o perfil é desse estúdio.
+                tela.definir_acesso(true, false, cx);
+                assert!(!tela.perguntando_o_estudio());
+                assert_eq!(
+                    tela.estudio_de_trabalho().map(|e| e.id.as_str()),
+                    Some("s1"),
+                    "o único estúdio do perfil é o de trabalho"
+                );
+                assert!(!tela.vendo_todos_os_estudios());
+
+                // A sessão nova nasce nele.
+                tela.comecar_nova(window, cx);
+                assert_eq!(
+                    tela.nova.as_ref().and_then(|n| n.estudio_id.as_deref()),
+                    Some("s1")
+                );
+
+                // E a barra não reabre a pergunta: não há para onde trocar.
+                tela.trocar_de_estudio(cx);
+                assert!(!tela.perguntando_o_estudio());
+
+                // Com o perfil de volta a "todos" (ou um administrador), a
+                // troca volta a existir.
+                tela.definir_acesso(false, false, cx);
                 tela.trocar_de_estudio(cx);
                 assert!(tela.perguntando_o_estudio());
                 let _ = std::fs::remove_file(&tela.lembranca);

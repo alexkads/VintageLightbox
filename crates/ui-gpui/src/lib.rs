@@ -5,6 +5,7 @@
 //! `docs/10-MIGRACAO-GPUI.md`. Hoje é a única interface, e o alvo deixou de ser
 //! o app antigo: é o Lightroom (`docs/00-OBJETIVO.md`).
 
+pub mod acesso_da_conta;
 pub mod agenda;
 pub mod app;
 /// A atualização automática — o app não passa por loja e se atualiza sozinho.

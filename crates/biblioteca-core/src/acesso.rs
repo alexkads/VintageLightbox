@@ -76,6 +76,21 @@ impl Acesso {
     }
 }
 
+/// 🔐 **O estúdio único** da conta: o perfil de acesso dela é de alguns
+/// estúdios, e só um chegou na lista. Aí não há o que escolher — nem a
+/// pergunta da entrada, nem seletor: fica esse (dono, 11/out/2026: *"se o
+/// usuário tiver acesso somente a um estúdio não pode aparecer tela de seleção
+/// e nem combo de seleção"*). É o `estudioUnico` do site.
+///
+/// Administrador e perfil de "todos os estúdios" **não** entram, mesmo com um
+/// estúdio só no cadastro: para eles "todos" ainda mostra a sessão sem estúdio.
+pub fn estudio_unico<E>(estudios: &[E], estudios_restritos: bool) -> Option<&E> {
+    match estudios {
+        [unico] if estudios_restritos => Some(unico),
+        _ => None,
+    }
+}
+
 /// A conta pode isto? Sem `acesso` (API de antes dos perfis), pode: quem
 /// recusa é o backend.
 pub fn pode(acesso: Option<&Acesso>, permissao: &str) -> bool {
@@ -141,6 +156,16 @@ mod testes {
             acesso.rotulo().as_deref(),
             Some("Balcão de Gramado (desativado)")
         );
+    }
+
+    #[test]
+    fn so_o_perfil_de_um_estudio_fixa_o_estudio() {
+        assert_eq!(estudio_unico(&["gramado"], true), Some(&"gramado"));
+        // Dois no perfil: a escolha continua.
+        assert_eq!(estudio_unico(&["gramado", "canela"], true), None);
+        // Administrador ou perfil de todos, com um só no cadastro: escolhe.
+        assert_eq!(estudio_unico(&["gramado"], false), None);
+        assert_eq!(estudio_unico::<&str>(&[], true), None);
     }
 
     /// A API de antes dos perfis não manda `acesso`: nada some da tela.

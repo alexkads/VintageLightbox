@@ -1381,9 +1381,16 @@ impl Caixa {
         } else {
             com_tecla(estilo::botao_primario("caixa-f8", cx), "Abrir caixa", "F8")
         };
+        // 🔐 Conta de um estúdio só (perfil de acesso): o caixa é desse
+        // estúdio — o nome já está no cabeçalho, e o seletor não aparece.
+        let estudio_fixo = self
+            .vista
+            .as_ref()
+            .is_some_and(|v| crate::acesso_da_conta::estudio_unico(&v.estudios).is_some());
+        let seletor = (!estudio_fixo).then(|| self.seletor_de_estudio(window, cx));
         let acoes = h_flex()
             .gap(px(8.))
-            .child(self.seletor_de_estudio(window, cx))
+            .children(seletor)
             .child(
                 com_tecla(
                     estilo::botao_contorno("caixa-f6", cx),

@@ -1207,14 +1207,24 @@ impl NovaSessao {
                         v_flex().flex_1().min_w(px(0.)).child(campo(
                             "Estúdio",
                             true,
-                            div()
-                                .w_full()
-                                .debug_selector(|| "nova-estudio".into())
-                                .child(
-                                    crate::estilo::campo(Select::new(&self.escolha_do_estudio))
-                                        .placeholder("Escolha…")
-                                        .w_full(),
-                                ),
+                            // 🔐 Conta de um estúdio só (perfil de acesso): o
+                            // estúdio já está escolhido, e a tela só o diz.
+                            match crate::acesso_da_conta::estudio_unico(&self.estudios) {
+                                Some(unico) => div()
+                                    .w_full()
+                                    .debug_selector(|| "nova-estudio-fixo".into())
+                                    .text_sm()
+                                    .py(px(6.))
+                                    .child(SharedString::from(unico.nome.clone())),
+                                None => div()
+                                    .w_full()
+                                    .debug_selector(|| "nova-estudio".into())
+                                    .child(
+                                        crate::estilo::campo(Select::new(&self.escolha_do_estudio))
+                                            .placeholder("Escolha…")
+                                            .w_full(),
+                                    ),
+                            },
                             self.erro_de(estado::FALTA_ESTUDIO),
                             None,
                             cx,
