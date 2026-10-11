@@ -1,14 +1,11 @@
 {
-  "versao": "0.1.146",
-  "titulo": "Tela do cliente em grade: várias fotos de uma vez, cada uma com o seu número.",
+  "versao": "0.1.147",
+  "titulo": "Na sessão, os filtros das fotos ficam em cima da tira, como na Revelação.",
   "importante": false,
   "novidades": [
-    "A tela do cliente ganhou o modo Grade: várias fotos por página, cada uma com o número embaixo. O cliente diz \"quero a 12\" e você acha a 12 na galeria.",
-    "Ao lado do botão \"Tela do cliente\", na galeria da sessão, escolha \"Uma foto\" ou \"Grade\" e quantas fotos por linha (de 2 a 8). A escolha fica guardada neste computador.",
-    "Com a grade no ar, cada foto da sua galeria mostra o mesmo número que o cliente está vendo. Foto rejeitada não aparece para o cliente, e as outras não mudam de número.",
-    "A grade acompanha a foto em foco: ao andar pela galeria, a página do cliente troca sozinha, e a foto em foco fica com a borda âmbar. As levadas aparecem como \"Escolhida\".",
-    "Na grade, o QR do bot fica numa coluna só dele, ao lado das fotos, sem cobrir nenhuma.",
-    "Ao abrir Revelar ou o Comparar, a tela do cliente volta a mostrar a foto grande; de volta à galeria, a grade retorna."
+    "Na tela da sessão, os filtros (Todas, Classificadas, Sinalizadas, À venda, Sem nota…) saíram da barra de cima e passaram a ficar logo acima da tira de fotos, no mesmo lugar em que ficam na Revelação.",
+    "A barra de cima da galeria ficou só com o zoom e os botões (Revelar, Tela do cliente, Bot, Negociação, Imprimir).",
+    "Com a tira escondida, os filtros voltam para a barra de cima, para continuarem à mão."
   ],
-  "por_que_atualizar": "Para mostrar várias fotos de uma vez ao cliente e combinar a escolha pelo número de cada uma."
+  "por_que_atualizar": "Para ter a tela da sessão mais organizada, com os filtros no mesmo lugar da Revelação."
 }

@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.147",
+    "data": "2026-10-11",
+    "titulo": "Na sessão, os filtros das fotos ficam em cima da tira, como na Revelação.",
+    "importante": false,
+    "novidades": [
+      "Na tela da sessão, os filtros (Todas, Classificadas, Sinalizadas, À venda, Sem nota…) saíram da barra de cima e passaram a ficar logo acima da tira de fotos, no mesmo lugar em que ficam na Revelação.",
+      "A barra de cima da galeria ficou só com o zoom e os botões (Revelar, Tela do cliente, Bot, Negociação, Imprimir).",
+      "Com a tira escondida, os filtros voltam para a barra de cima, para continuarem à mão."
+    ],
+    "por_que_atualizar": "Para ter a tela da sessão mais organizada, com os filtros no mesmo lugar da Revelação."
+  },
+  {
     "versao": "0.1.146",
     "data": "2026-10-11",
     "titulo": "Tela do cliente em grade: várias fotos de uma vez, cada uma com o seu número.",
