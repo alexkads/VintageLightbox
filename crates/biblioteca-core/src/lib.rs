@@ -13,6 +13,7 @@
 //! | módulo | o que decide |
 //! |---|---|
 //! | [`grade`] | onde cada foto fica, o que está visível, para onde o foco vai |
+//! | [`grade_do_cliente`] | a grade da tela do cliente: páginas, número de cada foto, a coluna do QR |
 //! | [`selecao`] | clique, Shift, Ctrl, arrasto e teclado |
 //! | [`comparar`] | o `⇧C`: duas fotos lado a lado, a ativa e a candidata |
 //! | [`acervo`] | o recorte da barra, as contagens e o que ainda pode mudar |
@@ -48,6 +49,7 @@ pub mod dinheiro;
 pub mod exclusao;
 pub mod filtro_de_coluna;
 pub mod grade;
+pub mod grade_do_cliente;
 pub mod miniaturas;
 pub mod negociacao;
 pub mod preco_de_venda;
