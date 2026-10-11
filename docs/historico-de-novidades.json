@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.149",
+    "data": "2026-10-11",
+    "titulo": "No tema Lightroom, a nota da foto volta a aparecer nas estrelas.",
+    "importante": false,
+    "novidades": [
+      "No tema Lightroom, as estrelas da nota ficavam todas da mesma cor e não dava para ver quantas a foto tinha. Agora as acesas são brancas e as que faltam ficam apagadas, na grade da sessão e também na foto em foco.",
+      "Nos outros temas, as estrelas que faltam ficaram mais discretas, para a nota saltar à vista.",
+      "A atualização do app passou a apagar os arquivos de compilação das versões antigas, que iam se acumulando no disco (chegaram a 22 GB num dos computadores). A limpeza acontece sozinha, nesta atualização e nas próximas."
+    ],
+    "por_que_atualizar": "Para enxergar a nota das fotos no tema Lightroom e recuperar o espaço em disco que as atualizações antigas ocupavam."
+  },
+  {
     "versao": "0.1.148",
     "data": "2026-10-11",
     "titulo": "Na Revelação, os filtros, os atalhos e a tira de fotos são os mesmos da sessão.",

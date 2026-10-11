@@ -1,12 +1,11 @@
 {
-  "versao": "0.1.148",
-  "titulo": "Na Revelação, os filtros, os atalhos e a tira de fotos são os mesmos da sessão.",
+  "versao": "0.1.149",
+  "titulo": "No tema Lightroom, a nota da foto volta a aparecer nas estrelas.",
   "importante": false,
   "novidades": [
-    "A tira de fotos da Revelação passou a ser a mesma da tela da sessão: os mesmos filtros (Todas, Classificadas, Sinalizadas, À venda, Sem nota), do mesmo tamanho, a mesma borda na foto da vez e nas marcadas, as mesmas estrelas e o mesmo ponto da foto levada no balcão.",
-    "A Revelação ganhou a linha de atalhos em cima da tira (setas, 1 a 5, 0, P, marcar várias) e as setas ‹ › para ir à foto anterior e à próxima. Em janela baixa a linha some, para sobrar espaço para as predefinições.",
-    "Na tela da sessão, as pontas da tira ganharam uma seta que rola as fotos quando há mais fora da vista, como já era na Revelação.",
-    "As marcas que só existem na Revelação continuam: o ponto de foto revelada, o de alteração não salva e o lápis da foto editada."
+    "No tema Lightroom, as estrelas da nota ficavam todas da mesma cor e não dava para ver quantas a foto tinha. Agora as acesas são brancas e as que faltam ficam apagadas, na grade da sessão e também na foto em foco.",
+    "Nos outros temas, as estrelas que faltam ficaram mais discretas, para a nota saltar à vista.",
+    "A atualização do app passou a apagar os arquivos de compilação das versões antigas, que iam se acumulando no disco (chegaram a 22 GB num dos computadores). A limpeza acontece sozinha, nesta atualização e nas próximas."
   ],
-  "por_que_atualizar": "Para trabalhar com a mesma tira de fotos nas duas telas, sem ter de reaprender onde cada coisa fica."
+  "por_que_atualizar": "Para enxergar a nota das fotos no tema Lightroom e recuperar o espaço em disco que as atualizações antigas ocupavam."
 }
