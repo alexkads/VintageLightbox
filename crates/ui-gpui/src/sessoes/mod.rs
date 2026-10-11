@@ -34,3 +34,5 @@ pub mod quadro_de_importacao;
 pub mod retencao;
 pub mod revelacao_padrao;
 pub mod tela;
+/// O desenho da tira de fotos, comum à sessão e à Revelação.
+pub mod tira_de_fotos;

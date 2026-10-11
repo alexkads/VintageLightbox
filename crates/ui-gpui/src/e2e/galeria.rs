@@ -1897,3 +1897,45 @@ fn o_botao_direito_na_tira_abre_o_menu_e_age_na_selecao(cx: &mut TestAppContext)
     e.detalhe(cx, |tela, _, _| assert_eq!(tela.marcadas(), ["a", "b"]));
     assert!(menu_aberto(&e, cx));
 }
+
+/// 🎞️ **A tira da Revelação é a da sessão** (dono, 11/out/2026: *"o conjunto
+/// filtro, atalhos e filmstrip da sessão de fotos deveria ser o mesmo em
+/// revelação"*): a mesma linha de atalhos, da mesma altura, com as mesmas
+/// setas — e a seta, clicada de verdade, anda na tira das duas telas.
+#[gpui_kit::test]
+fn a_tira_da_revelacao_e_a_da_sessao(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    // O caixa flutuante cobre o canto de baixo, onde ficam as setas.
+    e.teclar(cx, "f9");
+    let linha = |cx: &mut TestAppContext| {
+        let mut visual = super::chatbot::quadro_novo(&e, cx);
+        visual
+            .debug_bounds("tira-atalhos")
+            .expect("a linha de atalhos está desenhada")
+    };
+
+    let na_sessao = linha(cx);
+    let antes = e.detalhe(cx, |tela, _w, _cx| tela.posicao_em_foco());
+    clicar(&e, cx, "tira-proxima");
+    e.detalhe(cx, |tela, _w, _cx| {
+        assert_ne!(tela.posicao_em_foco(), antes, "a seta anda na sessão");
+    });
+
+    e.revelar_a_do_site(cx, "a");
+    let na_revelacao = linha(cx);
+    assert_eq!(
+        na_revelacao.size.height, na_sessao.size.height,
+        "a linha de atalhos tem a mesma altura nas duas telas"
+    );
+    let (aberta, vizinha) = e.revelacao(cx, |tela, _w, _cx| {
+        let tira = tela.na_tira();
+        let i = tela.posicao_na_tira().0;
+        (tela.posicao(), tira[i + 1])
+    });
+    clicar(&e, cx, "tira-proxima");
+    e.esperar(cx);
+    e.revelacao(cx, |tela, _w, _cx| {
+        assert_ne!(tela.posicao(), aberta);
+        assert_eq!(tela.posicao(), vizinha, "a seta anda sobre a tira");
+    });
+}

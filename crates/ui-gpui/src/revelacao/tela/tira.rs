@@ -23,28 +23,38 @@ use gpui_kit::component::menu::{ContextMenuExt, PopupMenuItem};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme, Icon, WindowExt};
 use gpui_kit::{
-    canvas, div, img, prelude::*, px, AnyElement, Context, MouseButton, Pixels, SharedString,
-    Window,
+    canvas, div, prelude::*, px, AnyElement, Context, MouseButton, Pixels, SharedString, Window,
 };
 
 use crate::biblioteca::miniaturas::Miniatura;
 use crate::imagem::para_gpui;
 use crate::recursos::Icone;
 use crate::sessoes::altura_da_tira;
+use crate::sessoes::tira_de_fotos::{self, Destaque};
 use crate::tema;
 
 use super::super::persistencia;
 use super::super::sincronizacao;
 use super::{Aberta, PedidoDaRevelacao, Revelacao, MINIATURAS_DA_TIRA};
 
-/// O vão entre duas miniaturas, e entre a primeira e a borda — o `gap-2 px-2`.
-const VAO: f32 = 8.0;
+/// O vão entre duas miniaturas e o recuo da faixa — os da tira da sessão.
+const VAO: f32 = tira_de_fotos::VAO;
+const RECUO: f32 = tira_de_fotos::RECUO;
 
 /// Onde a altura fica guardada — o `qual` do site.
 const QUAL: &str = "revelacao";
 
-/// A altura com que a tira nasce: a do site (`alturaGuardada("revelacao", 110)`).
-pub const ALTURA_PADRAO: f32 = 110.0;
+/// A altura com que a tira nasce: a da tira da sessão, que é a mesma peça.
+pub const ALTURA_PADRAO: f32 = altura_da_tira::ALTURA_PADRAO;
+
+/// Abaixo desta altura de janela a linha de atalhos não é desenhada.
+///
+/// 🚨 **Na janela mais baixa que o app atende (1280×720) cada linha da tira
+/// sai da coluna das predefinições**, e as "Minhas" iam para baixo da dobra
+/// (dono, 29/09/2026: *"precisa aparecer os presets criados por mim"*). A
+/// linha é ajuda; a predefinição é trabalho. É a mesma conta que recolhe o
+/// Histórico nessa janela.
+const JANELA_COM_ATALHOS: f32 = 800.0;
 
 /// Os recortes da tira, na ordem do site (`FILTROS_DA_TIRA`, `recorte.ts`).
 ///
@@ -279,7 +289,7 @@ pub fn faixa_desenhada(total: usize, passo: f32, deslocamento: f32, vista: f32) 
         return (0, total);
     }
     let vista = vista.max(0.);
-    let de = ((deslocamento - VAO - vista) / passo).floor().max(0.) as usize;
+    let de = ((deslocamento - RECUO - vista) / passo).floor().max(0.) as usize;
     let ate = ((deslocamento + 2. * vista) / passo).ceil().max(0.) as usize + 1;
     let de = de.min(total);
     (de, ate.clamp(de, total))
@@ -861,89 +871,45 @@ impl Revelacao {
         chips
     }
 
-    /// A barra dos recortes, colada na tira (`editor.tsx`).
+    /// A barra dos recortes, colada na tira (`editor.tsx`) — as fichas e a
+    /// barra da sessão ([`tira_de_fotos`]).
     ///
     /// O chip com zero some, como na galeria — menos o aceso, que é o caminho
     /// de volta.
     fn barra_de_recortes(&self, cx: &mut Context<Self>) -> AnyElement {
         let contagens = contar(&self.acervo);
-        let tema = cx.theme();
-        let (borda, apagado, texto, muted) = (
-            tema.border,
-            tema.muted_foreground,
-            tema.foreground,
-            tema.muted,
-        );
         let ativo = self.tira.recorte;
-
-        div()
-            .flex()
-            .flex_none()
-            .flex_wrap()
-            .items_center()
-            .gap(px(4.))
-            .px(px(8.))
-            .pt(px(6.))
-            .border_t_1()
-            .border_color(borda)
-            .children(
-                self.recortes_da_barra()
-                    .into_iter()
-                    .filter_map(|(rotulo, filtro)| {
-                        let quantas = contagens.de(filtro);
-                        let aceso = filtro == ativo;
-                        if filtro != Filtro::Todas && quantas == 0 && !aceso {
-                            return None;
-                        }
-                        // O que veio da galeria sem chip aqui: o clique volta a "Todas".
-                        let destino = if FILTROS_DA_TIRA.iter().any(|(_, f)| *f == filtro) {
-                            filtro
-                        } else {
-                            Filtro::Todas
-                        };
-                        Some(
-                            div()
-                                .id(SharedString::from(format!("tira-recorte-{rotulo}")))
-                                .flex()
-                                .flex_none()
-                                .items_center()
-                                .gap(px(6.))
-                                .h(px(24.))
-                                .px(px(8.))
-                                // 🎞️ Pílula no site; retângulo no Lightroom.
-                                .map(|chip| {
-                                    if tema::cantos_retos() {
-                                        chip.rounded(tema::canto(2.))
-                                    } else {
-                                        chip.rounded_full()
-                                    }
-                                })
-                                .border_1()
-                                .text_size(crate::tema::letra::em(11.))
-                                .cursor_pointer()
-                                .when(aceso, |chip| {
-                                    chip.border_color(tema::cores::aceso())
-                                        .bg(tema::cores::aceso())
-                                        .text_color(tema::cores::sobre_aceso())
-                                })
-                                .when(!aceso, |chip| {
-                                    chip.border_color(borda)
-                                        .text_color(apagado)
-                                        .hover(move |s| s.bg(muted).text_color(texto))
-                                })
-                                .child(rotulo)
-                                .child(
-                                    div()
-                                        .opacity(0.7)
-                                        .child(SharedString::from(quantas.to_string())),
-                                )
-                                .on_click(cx.listener(move |tela, _ev, _window, cx| {
-                                    tela.recortar(destino, cx)
-                                })),
+        let fichas =
+            self.recortes_da_barra()
+                .into_iter()
+                .filter_map(|(rotulo, filtro)| {
+                    let quantas = contagens.de(filtro);
+                    let aceso = filtro == ativo;
+                    if filtro != Filtro::Todas && quantas == 0 && !aceso {
+                        return None;
+                    }
+                    // O que veio da galeria sem chip aqui: o clique volta a "Todas".
+                    let destino = if FILTROS_DA_TIRA.iter().any(|(_, f)| *f == filtro) {
+                        filtro
+                    } else {
+                        Filtro::Todas
+                    };
+                    Some(
+                        crate::estilo::ficha(
+                            SharedString::from(format!("tira-recorte-{rotulo}")),
+                            rotulo,
+                            Some(quantas),
+                            aceso,
+                            cx,
                         )
-                    }),
-            )
-            .into_any_element()
+                        .on_click(cx.listener(move |tela, _ev: &bool, _window, cx| {
+                            tela.recortar(destino, cx)
+                        }))
+                        .into_any_element(),
+                    )
+                })
+                .collect();
+        tira_de_fotos::barra_de_recortes(fichas, cx).into_any_element()
     }
 
     /// A barra que arrasta a altura da tira — **e a altura é o zoom**.
@@ -956,34 +922,11 @@ impl Revelacao {
         // 0.6 acusa isso como vazamento nos testes).
         let ouvinte = cx.entity().downgrade();
         let arrastando = self.tira.arrasto.is_some();
-        let tema = cx.theme();
-        let (fundo, hover, traco) = (tema.background, tema.muted, tema.muted_foreground);
 
-        div()
-            .id("tira-da-revelacao-puxador")
-            .group("puxador-da-revelacao")
-            .h(px(6.))
-            .w_full()
-            .flex()
-            .flex_none()
-            .items_center()
-            .justify_center()
-            .border_t_1()
-            .border_color(tema.border)
-            .bg(fundo)
-            .hover(move |s| s.bg(hover))
-            .cursor(gpui_kit::CursorStyle::ResizeUpDown)
+        tira_de_fotos::puxador("tira-da-revelacao-puxador", cx)
             .tooltip(|window, cx| {
                 Tooltip::new("Arraste para mudar o tamanho das miniaturas").build(window, cx)
             })
-            .child(
-                div()
-                    .h(px(2.))
-                    .w(px(32.))
-                    .rounded_full()
-                    .bg(traco.opacity(0.4))
-                    .group_hover("puxador-da-revelacao", move |s| s.bg(traco)),
-            )
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|tela, evento: &gpui_kit::MouseDownEvent, _w, cx| {
@@ -1085,243 +1028,137 @@ impl Revelacao {
         };
         let texto_da_dica = SharedString::from(dica(foto, numero, escolhida, marcada, nao_salva));
 
-        let tema = cx.theme();
-        // `border-amber-500 dark:border-amber-400` (ou o aceso do tema), e a
-        // marcada a 40%.
-        let cor_acesa = tema::cores::aceso_em_borda();
-        let (fundo, borda, apagado) = (tema.muted, tema.border, tema.muted_foreground);
+        let apagado = cx.theme().muted_foreground;
 
-        div()
-            .id(SharedString::from(format!("tira-revelacao-{}", foto.id)))
-            .relative()
-            .w(px(largura))
-            .h(px(lado))
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_center()
-            .overflow_hidden()
-            .rounded(crate::tema::canto(4.))
-            .bg(fundo)
-            .border_2()
-            .cursor_pointer()
-            .when(escolhida, |t| t.border_color(cor_acesa))
-            .when(candidata, |t| t.border_color(gpui_kit::rgb(0x38bdf8)))
-            .when(!escolhida && !candidata && marcada, |t| {
-                t.border_color(cor_acesa.opacity(0.4))
-            })
-            .when(!escolhida && !candidata && !marcada, |t| {
-                t.border_color(gpui_kit::transparent_black())
-                    .hover(move |s| s.border_color(borda))
-            })
-            .tooltip(move |window, cx| Tooltip::new(texto_da_dica.clone()).build(window, cx))
-            .map(|t| match miniatura {
-                Some(imagem) => t.child(
-                    img(imagem)
-                        // 🚨 **`max_*`, e nunca `size_full`.** O `Img` do GPUI
-                        // grava `style.aspect_ratio` com a proporção da foto em
-                        // todo layout: com os dois lados em 100% o taffy tira a
-                        // altura da largura, o elemento fica mais alto que a
-                        // miniatura e o `overflow_hidden` daqui vira **corte** —
-                        // que só aparece no retrato, porque a miniatura é
-                        // paisagem (`PROPORCAO`). É a armadilha que já cortou a
-                        // tela do cliente e a grade da sessão (17 e 18/set/2026,
-                        // `crate::imagem::cabe_em`), e a tira tinha ficado de
-                        // fora das duas vezes.
-                        .max_w_full()
-                        .max_h_full()
-                        // `object-contain`: o recorte da foto enquadrada fica inteiro.
-                        .object_fit(gpui_kit::ObjectFit::Contain)
-                        // A apagada desbota, como na tira da galeria.
-                        .when(c.apagada, |i| i.opacity(0.4)),
-                ),
-                None => t.child(
-                    div()
-                        .size_full()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .text_size(crate::tema::letra::em(10.))
-                        .text_color(apagado.opacity(0.6))
-                        .child("sem prévia"),
-                ),
-            })
-            // 🔑 Em cima, o que o cliente decidiu (nota e sinalização); embaixo,
-            // o que o operador fez aqui (revelada, não salva).
-            .when(nota > 0, |t| {
-                t.child(
-                    div()
-                        .absolute()
-                        .top(px(2.))
-                        .left(px(4.))
-                        .text_size(crate::tema::letra::em(10.))
-                        .line_height(px(10.))
-                        .text_color(tema::cores::nota())
-                        .child(SharedString::from("★".repeat(nota.min(5)))),
-                )
-            })
-            .when(levada, |t| {
-                t.child(
-                    div()
-                        .absolute()
-                        .top(px(4.))
-                        .right(px(4.))
-                        .size(px(8.))
-                        .rounded_full()
-                        .bg(gpui_kit::rgb(0x00d492))
-                        .border_1()
-                        .border_color(gpui_kit::black().opacity(0.4)),
-                )
-            })
-            .when(nao_salva, |t| {
-                t.child(
-                    div()
-                        .absolute()
-                        .bottom(px(4.))
-                        .right(px(4.))
-                        .size(px(8.))
-                        .rounded_full()
-                        .border_2()
-                        .border_color(tema::cores::quente()),
-                )
-            })
-            .when(revelada, |t| {
-                t.child(
-                    div()
-                        .absolute()
-                        .bottom(px(4.))
-                        .right(px(4.))
-                        .size(px(8.))
-                        .rounded_full()
-                        .bg(tema::cores::quente()),
-                )
-            })
-            // 🖌️ O selo "Editada": um lápis no canto de baixo à esquerda (os de
-            // cima são do cliente; o ponto de baixo à direita é da revelação).
-            .when(editada, |t| {
-                t.child(
-                    div()
-                        .id(("selo-editada", posicao))
-                        .debug_selector(move || format!("selo-editada-{posicao}"))
-                        .absolute()
-                        .bottom(px(3.))
-                        .left(px(3.))
-                        .size(px(16.))
-                        .rounded_full()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .bg(gpui_kit::black().opacity(0.65))
-                        .child(
-                            Icon::new(Icone::Pencil)
-                                .size(px(10.))
-                                .text_color(gpui_kit::white()),
-                        )
-                        .tooltip(|window, cx| {
-                            Tooltip::new("Editada — botão direito → Excluir a edição")
-                                .build(window, cx)
-                        }),
-                )
-            })
-            // 🚨 Fixa nos dois temas: a faixa se lê contra a foto.
-            .when(!editavel, |t| {
-                t.child(
-                    div()
-                        .absolute()
-                        .bottom_0()
-                        .left_0()
-                        .right_0()
-                        .py(px(2.))
-                        .text_center()
-                        .text_size(crate::tema::letra::em(10.))
-                        .bg(gpui_kit::black().opacity(0.7))
-                        .text_color(gpui_kit::rgb(0xd4d4d4))
-                        .child(if c.apagada { "apagada" } else { "comprada" }),
-                )
-            })
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(move |tela, _ev: &gpui_kit::MouseDownEvent, _w, _cx| {
-                    tela.tira.menu = Some(posicao);
-                }),
-            )
-            .on_click(
-                cx.listener(move |tela, evento: &gpui_kit::ClickEvent, window, cx| {
-                    let m = evento.modifiers();
-                    // 🚨 Ctrl **e** Cmd acrescentam, como na web (`ctrlKey ||
-                    // metaKey`): no macOS o Ctrl+clique chega com `control`.
-                    tela.clicar_na_tira(
-                        posicao,
-                        Modificadores {
-                            aditivo: m.secondary() || m.control,
-                            faixa: m.shift,
-                        },
-                        window,
-                        cx,
-                    );
-                }),
-            )
-            .into_any_element()
-    }
-
-    /// Rola a faixa um passo de tela (`andar` do site): 80% da largura, ou 200.
-    fn rolar_a_tira(&mut self, direcao: f32, cx: &mut Context<Self>) {
-        let largura = f32::from(self.rolagem_da_tira.bounds().size.width);
-        let passo = (largura * 0.8).max(200.0);
-        let maximo = self.rolagem_da_tira.max_offset().x;
-        let atual = self.rolagem_da_tira.offset();
-        let x = (atual.x - px(direcao * passo)).min(px(0.)).max(-maximo);
-        self.rolagem_da_tira.set_offset(gpui_kit::point(x, atual.y));
-        cx.notify();
-    }
-
-    /// Uma seta da ponta — só quando há o que rolar para aquele lado.
-    fn seta_da_tira(&self, esquerda: bool, cx: &mut Context<Self>) -> AnyElement {
-        let tema = cx.theme();
-        let (fundo, texto) = (tema.background, tema.foreground);
-        div()
-            .id(if esquerda {
-                "tira-revelacao-seta-esquerda"
+        tira_de_fotos::celula(
+            SharedString::from(format!("tira-revelacao-{}", foto.id)),
+            largura,
+            lado,
+            if escolhida {
+                Destaque::EmFoco
+            } else if marcada {
+                Destaque::Marcada
             } else {
-                "tira-revelacao-seta-direita"
-            })
-            .absolute()
-            .top_0()
-            .bottom_0()
-            .w(px(40.))
-            .when(esquerda, |s| s.left_0())
-            .when(!esquerda, |s| s.right_0())
-            .flex()
-            .items_center()
-            .justify_center()
-            .cursor_pointer()
-            .bg(gpui_kit::linear_gradient(
-                if esquerda { 90.0 } else { 270.0 },
-                gpui_kit::linear_color_stop(fundo, 0.0),
-                gpui_kit::linear_color_stop(fundo.opacity(0.0), 1.0),
-            ))
-            .text_color(texto.opacity(0.9))
-            .hover(move |s| s.text_color(texto))
-            .tooltip(move |window, cx| {
-                Tooltip::new(if esquerda {
-                    "Rolar a tira para a esquerda"
-                } else {
-                    "Rolar a tira para a direita"
-                })
-                .build(window, cx)
-            })
-            .child(
-                Icon::new(if esquerda {
-                    Icone::ChevronLeft
-                } else {
-                    Icone::ChevronRight
-                })
-                .size(px(20.)),
+                Destaque::Nenhum
+            },
+            cx,
+        )
+        // No Comparar, a candidata leva o azul — só existe aqui.
+        .when(candidata, |t| t.border_color(gpui_kit::rgb(0x38bdf8)))
+        .tooltip(move |window, cx| Tooltip::new(texto_da_dica.clone()).build(window, cx))
+        .map(|t| match miniatura {
+            Some(imagem) => t.child(tira_de_fotos::foto(
+                imagem.clone(),
+                largura,
+                lado,
+                c.apagada,
+            )),
+            None => t.child(
+                div()
+                    .size_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_size(crate::tema::letra::em(10.))
+                    .text_color(apagado.opacity(0.6))
+                    .child("sem prévia"),
+            ),
+        })
+        // 🔑 Em cima, o que o cliente decidiu (nota e sinalização); embaixo,
+        // o que o operador fez aqui (revelada, não salva).
+        .when(nota > 0, |t| t.child(tira_de_fotos::estrelas(nota)))
+        .when(levada, |t| t.child(tira_de_fotos::ponto_da_levada()))
+        .when(nao_salva, |t| {
+            t.child(
+                div()
+                    .absolute()
+                    .bottom(px(4.))
+                    .right(px(4.))
+                    .size(px(8.))
+                    .rounded_full()
+                    .border_2()
+                    .border_color(tema::cores::quente()),
             )
-            .on_click(cx.listener(move |tela, _ev, _window, cx| {
-                tela.rolar_a_tira(if esquerda { -1.0 } else { 1.0 }, cx)
-            }))
-            .into_any_element()
+        })
+        .when(revelada, |t| {
+            t.child(
+                div()
+                    .absolute()
+                    .bottom(px(4.))
+                    .right(px(4.))
+                    .size(px(8.))
+                    .rounded_full()
+                    .bg(tema::cores::quente()),
+            )
+        })
+        // 🖌️ O selo "Editada": um lápis no canto de baixo à esquerda (os de
+        // cima são do cliente; o ponto de baixo à direita é da revelação).
+        .when(editada, |t| {
+            t.child(
+                div()
+                    .id(("selo-editada", posicao))
+                    .debug_selector(move || format!("selo-editada-{posicao}"))
+                    .absolute()
+                    .bottom(px(3.))
+                    .left(px(3.))
+                    .size(px(16.))
+                    .rounded_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(gpui_kit::black().opacity(0.65))
+                    .child(
+                        Icon::new(Icone::Pencil)
+                            .size(px(10.))
+                            .text_color(gpui_kit::white()),
+                    )
+                    .tooltip(|window, cx| {
+                        Tooltip::new("Editada — botão direito → Excluir a edição").build(window, cx)
+                    }),
+            )
+        })
+        .when(!editavel && !c.apagada, |t| {
+            t.child(tira_de_fotos::tarja_da_comprada(cx))
+        })
+        // 🚨 Fixa nos dois temas: a faixa se lê contra a foto.
+        .when(c.apagada, |t| {
+            t.child(
+                div()
+                    .absolute()
+                    .bottom_0()
+                    .left_0()
+                    .right_0()
+                    .py(px(1.))
+                    .text_center()
+                    .text_xs()
+                    .bg(gpui_kit::black().opacity(0.7))
+                    .text_color(gpui_kit::rgb(0xd4d4d4))
+                    .child("apagada"),
+            )
+        })
+        .on_mouse_down(
+            MouseButton::Right,
+            cx.listener(move |tela, _ev: &gpui_kit::MouseDownEvent, _w, _cx| {
+                tela.tira.menu = Some(posicao);
+            }),
+        )
+        .on_click(
+            cx.listener(move |tela, evento: &gpui_kit::ClickEvent, window, cx| {
+                let m = evento.modifiers();
+                // 🚨 Ctrl **e** Cmd acrescentam, como na web (`ctrlKey ||
+                // metaKey`): no macOS o Ctrl+clique chega com `control`.
+                tela.clicar_na_tira(
+                    posicao,
+                    Modificadores {
+                        aditivo: m.secondary() || m.control,
+                        faixa: m.shift,
+                    },
+                    window,
+                    cx,
+                );
+            }),
+        )
+        .into_any_element()
     }
 
     /// Traz a aberta **para o meio** da faixa (`inline: "center"` do site).
@@ -1347,8 +1184,8 @@ impl Revelacao {
         if caixa.size.width > px(0.) {
             // 🔑 **Por conta, e não pelo leiaute**: o item pode nem ter virado
             // elemento (ver `faixa_desenhada`). A largura é fixa, e o centro
-            // dele fica a `VAO + i·passo + largura/2` do começo da faixa.
-            let centro = VAO + indice as f32 * (largura + VAO) + largura / 2.;
+            // dele fica a `RECUO + i·passo + largura/2` do começo da faixa.
+            let centro = RECUO + indice as f32 * (largura + VAO) + largura / 2.;
             let alvo = px(f32::from(caixa.size.width) / 2. - centro);
             let maximo = self.rolagem_da_tira.max_offset().x;
             let x = alvo.min(px(0.)).max(-maximo);
@@ -1403,13 +1240,7 @@ impl Revelacao {
             vista,
         );
         self.tira.primeira_desenhada = de;
-        let espacador = |itens: usize| {
-            div()
-                .flex_none()
-                .w(px(itens as f32 * passo - VAO))
-                .h(px(1.))
-                .into_any_element()
-        };
+        let espacador = |itens: usize| tira_de_fotos::espacador(itens, largura);
         let mut itens: Vec<AnyElement> = Vec::with_capacity(ate - de + 2);
         if de > 0 {
             itens.push(espacador(de));
@@ -1423,45 +1254,66 @@ impl Revelacao {
             itens.push(espacador(tira.len() - ate));
         }
 
-        let deslocamento = -self.rolagem_da_tira.offset().x;
-        let maximo = self.rolagem_da_tira.max_offset().x;
-        let tem_antes = deslocamento > px(4.);
-        let tem_depois = maximo > px(4.) && deslocamento < maximo - px(4.);
+        let (tem_antes, tem_depois) = tira_de_fotos::tem_fora_da_vista(&self.rolagem_da_tira);
 
         let esta = cx.entity().downgrade();
+        let ao_rolar: tira_de_fotos::AoAndar = std::sync::Arc::new({
+            let esta = esta.clone();
+            move |direcao, _window, cx| {
+                let _ = esta.update(cx, |tela, cx| {
+                    tira_de_fotos::rolar(&tela.rolagem_da_tira, direcao);
+                    cx.notify();
+                });
+            }
+        });
+        // A linha de cima: onde se está **na tira** e os atalhos.
+        let com_atalhos = f32::from(window.viewport_size().height) >= JANELA_COM_ATALHOS;
+        let (atual, total) = self.posicao_na_tira();
+        let atalhos = tira_de_fotos::linha_de_atalhos(
+            SharedString::from(format!("{} / {total}", atual + 1)),
+            // 🚨 Aqui não há fileira para `↑`/`↓`, e o `⌫` é do retoque e da
+            // máscara: a linha só anuncia o que a tecla faz nesta tela.
+            tira_de_fotos::Atalhos {
+                fileiras: false,
+                exclui: false,
+            },
+            total > 0,
+            std::sync::Arc::new({
+                let esta = esta.clone();
+                move |passo, window, cx| {
+                    let _ = esta.update(cx, |tela, cx| tela.andar(passo, window, cx));
+                }
+            }),
+            cx,
+        );
         let faixa = div()
             .relative()
             .flex_none()
             .child(
-                div()
-                    .id("faixa-da-revelacao")
+                tira_de_fotos::faixa("faixa-da-revelacao", lado)
                     .track_scroll(&self.rolagem_da_tira)
-                    .flex()
-                    .items_center()
-                    .gap(px(VAO))
-                    .px(px(VAO))
-                    .h(px(lado + 12.0))
-                    .overflow_x_scroll()
                     // 🔑 A roda vertical rola na horizontal — o `wheel` com
                     // `passive: false` do site.
                     .on_scroll_wheel(cx.listener(
                         |tela, evento: &gpui_kit::ScrollWheelEvent, window, cx| {
-                            let delta = evento.delta.pixel_delta(window.line_height());
-                            if delta.y.abs() <= delta.x.abs() {
-                                return;
+                            if tira_de_fotos::rolar_com_a_roda(
+                                &tela.rolagem_da_tira,
+                                evento,
+                                window,
+                            ) {
+                                cx.stop_propagation();
+                                cx.notify();
                             }
-                            let maximo = tela.rolagem_da_tira.max_offset().x;
-                            let atual = tela.rolagem_da_tira.offset();
-                            let x = (atual.x + delta.y).min(px(0.)).max(-maximo);
-                            tela.rolagem_da_tira.set_offset(gpui_kit::point(x, atual.y));
-                            cx.stop_propagation();
-                            cx.notify();
                         },
                     ))
                     .children(itens),
             )
-            .when(tem_antes, |f| f.child(self.seta_da_tira(true, cx)))
-            .when(tem_depois, |f| f.child(self.seta_da_tira(false, cx)))
+            .when(tem_antes, |f| {
+                f.child(tira_de_fotos::seta(true, ao_rolar.clone(), cx))
+            })
+            .when(tem_depois, |f| {
+                f.child(tira_de_fotos::seta(false, ao_rolar.clone(), cx))
+            })
             // 🔑 **Um menu para a faixa inteira.** A miniatura do botão direito
             // anota quem foi clicada; o menu é montado depois do evento, e lê.
             // No vão entre duas, não há alvo e o menu não abre.
@@ -1498,6 +1350,7 @@ impl Revelacao {
                 .flex_none()
                 .child(self.barra_de_recortes(cx))
                 .child(self.puxador_da_tira(cx))
+                .when(com_atalhos, |tira| tira.child(atalhos))
                 .child(faixa)
                 .children(self.tira.menu_do_roteiro.as_ref().map(|(menu, ponto)| {
                     gpui_kit::deferred(gpui_kit::anchored().position(*ponto).child(menu.clone()))

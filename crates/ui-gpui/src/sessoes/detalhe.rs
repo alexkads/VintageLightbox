@@ -61,6 +61,7 @@ use gpui_kit::{
 use infrastructure::cache::preview_manager::PreviewManager;
 
 use super::altura_da_tira;
+use super::tira_de_fotos::{self, tecla, MODIFICADOR};
 
 mod menu_da_tira;
 use super::arquivos::SeletorDeFotos;
@@ -158,9 +159,9 @@ const LARGURA_DO_MENU_DE_ESTUDIOS: f32 = 280.0;
 /// O respiro entre as células da grade, nas duas direções.
 const VAO_DA_GRADE: f32 = 8.0;
 /// O respiro entre as miniaturas da tira.
-const VAO_DA_TIRA: f32 = 6.0;
-/// O recuo da tira à esquerda — o `px(10.)` dela.
-const RECUO_DA_TIRA: f32 = 10.0;
+const VAO_DA_TIRA: f32 = tira_de_fotos::VAO;
+/// O recuo da tira à esquerda.
+const RECUO_DA_TIRA: f32 = tira_de_fotos::RECUO;
 /// O `p(px(12.))` da tela, dos dois lados.
 const MARGEM_DA_GRADE: f32 = 24.0;
 /// Quanto tempo de um quadro pode ir para carregar miniatura **fora** da vista.
@@ -190,21 +191,6 @@ struct MedidaDaGrade {
 /// classifica. A sem nota está à venda e sobe com marca d'água (dono,
 /// 2026-09-21), mas vender **no balcão** pede nota e `P` — é aqui que se acha o
 /// que ainda falta classificar.
-/// O modificador do sistema, como o `useTeclaDeAtalho` do site: `⌘` no Mac,
-/// `Ctrl` no resto. A dica que mostra a tecla errada ensina o gesto errado.
-#[cfg(target_os = "macos")]
-const MODIFICADOR: &str = "⌘";
-#[cfg(not(target_os = "macos"))]
-const MODIFICADOR: &str = "Ctrl";
-#[cfg(target_os = "macos")]
-const MODIFICADOR_A: &str = "⌘+A";
-#[cfg(not(target_os = "macos"))]
-const MODIFICADOR_A: &str = "Ctrl+A";
-#[cfg(target_os = "macos")]
-const MODIFICADOR_D: &str = "⌘+D";
-#[cfg(not(target_os = "macos"))]
-const MODIFICADOR_D: &str = "Ctrl+D";
-
 pub(crate) const FILTROS: [(&str, Filtro); 8] = [
     ("Todas", Filtro::Todas),
     // 🔑 **Os dois passos do balcão, na ordem em que acontecem**: classificar
@@ -5853,17 +5839,7 @@ impl Detalhe {
     /// Revelação (`revelacao/tela/tira.rs`), para o filtro ficar junto do que
     /// ele filtra (dono, 11/out/2026).
     fn barra_de_recortes(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .flex()
-            .flex_none()
-            .flex_wrap()
-            .items_center()
-            .gap(px(6.))
-            .px(px(12.))
-            .py(px(6.))
-            .border_t_1()
-            .border_color(cx.theme().border)
-            .children(self.fichas_de_recorte(cx))
+        tira_de_fotos::barra_de_recortes(self.fichas_de_recorte(cx), cx)
     }
 
     /// A barra da grade: zoom · Revelar · Tela do cliente · seleção — e os
@@ -9375,17 +9351,10 @@ impl Detalhe {
 
         // Só o pedaço à vista vira elemento; o resto são dois espaçadores do
         // mesmo tamanho, e a rolagem não percebe a diferença.
-        let passo = largura + VAO_DA_TIRA;
         let (de, ate) = self.tira_desenhada;
         let ate = ate.min(total);
         let de = de.min(ate);
-        let espacador = |itens: usize| {
-            div()
-                .flex_none()
-                .w(px(itens as f32 * passo - VAO_DA_TIRA))
-                .h(px(1.))
-                .into_any_element()
-        };
+        let espacador = |itens: usize| tira_de_fotos::espacador(itens, largura);
         let mut itens: Vec<gpui_kit::AnyElement> = Vec::with_capacity(ate - de + 2);
         if de > 0 {
             itens.push(espacador(de));
@@ -9399,11 +9368,18 @@ impl Detalhe {
             itens.push(espacador(total - ate));
         }
 
-        // As pontas: só há sombra onde ainda há foto fora da vista.
-        let deslocamento = -self.rolagem_da_tira.offset().x;
-        let maximo = self.rolagem_da_tira.max_offset().x;
-        let tem_antes = deslocamento > px(4.);
-        let tem_depois = maximo - deslocamento > px(4.);
+        // As pontas: só há seta onde ainda há foto fora da vista.
+        let (tem_antes, tem_depois) = tira_de_fotos::tem_fora_da_vista(&self.rolagem_da_tira);
+        let esta = cx.entity().downgrade();
+        let ao_rolar: tira_de_fotos::AoAndar = Arc::new({
+            let esta = esta.clone();
+            move |direcao, _window, cx| {
+                let _ = esta.update(cx, |tela, cx| {
+                    tira_de_fotos::rolar(&tela.rolagem_da_tira, direcao);
+                    cx.notify();
+                });
+            }
+        });
 
         div()
             .flex()
@@ -9411,100 +9387,41 @@ impl Detalhe {
             .flex_none()
             .child(self.barra_de_recortes(cx))
             .child(self.puxador(cx))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.))
-                    .px(px(10.))
-                    .pt(px(3.))
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(SharedString::from(if atual > 0 {
-                        format!("{atual} / {total}")
-                    } else {
-                        format!("{total} foto(s)")
-                    }))
-                    .child(tecla("←", cx))
-                    .child(tecla("→", cx))
-                    .child("andam ·")
-                    .child(tecla("↑", cx))
-                    .child(tecla("↓", cx))
-                    .child("mudam de fileira ·")
-                    .child(tecla("1", cx))
-                    .child("–")
-                    .child(tecla("5", cx))
-                    .child("nota ·")
-                    // 🔑 **O `0` estava faltando**, e ele é metade do gesto: a
-                    // nota sobe a foto, e tirá-la a traz de volta (C20–C22). A
-                    // linha do site o traz desde sempre.
-                    .child(tecla("0", cx))
-                    .child("tira a nota ·")
-                    .child(tecla("P", cx))
-                    .child("levada no balcão ·")
-                    .child(tecla("⌫", cx))
-                    .child("exclui ·")
-                    // ⌘ no Mac, Ctrl no resto — o `useTeclaDeAtalho` do site.
-                    .child(tecla(MODIFICADOR, cx))
-                    .child("ou")
-                    .child(tecla("Shift", cx))
-                    .child("no clique marcam várias ·")
-                    .child(tecla(MODIFICADOR_A, cx))
-                    .child("marca tudo,")
-                    .child(tecla(MODIFICADOR_D, cx))
-                    .child("desmarca")
-                    // As setas ficam na ponta direita, como no site.
-                    .child(
-                        div()
-                            .ml_auto()
-                            .flex()
-                            .gap(px(2.))
-                            .child(
-                                Button::new("tira-anterior")
-                                    .label("‹")
-                                    .xsmall()
-                                    .ghost()
-                                    .disabled(total == 0)
-                                    .on_click(cx.listener(|tela, _ev, _w, cx| tela.andar(-1, cx))),
-                            )
-                            .child(
-                                Button::new("tira-proxima")
-                                    .label("›")
-                                    .xsmall()
-                                    .ghost()
-                                    .disabled(total == 0)
-                                    .on_click(cx.listener(|tela, _ev, _w, cx| tela.andar(1, cx))),
-                            ),
-                    ),
-            )
+            .child(tira_de_fotos::linha_de_atalhos(
+                SharedString::from(if atual > 0 {
+                    format!("{atual} / {total}")
+                } else {
+                    format!("{total} foto(s)")
+                }),
+                tira_de_fotos::Atalhos {
+                    fileiras: true,
+                    exclui: true,
+                },
+                total > 0,
+                Arc::new(move |passo, _window, cx| {
+                    let _ = esta.update(cx, |tela, cx| tela.andar(passo, cx));
+                }),
+                cx,
+            ))
             .child(
                 div()
                     .relative()
                     .flex_none()
                     .child(
-                        div()
-                            .id("tira-da-sessao")
+                        tira_de_fotos::faixa("tira-da-sessao", lado)
                             .track_scroll(&self.rolagem_da_tira)
-                            .flex()
-                            .items_center()
-                            .gap(px(VAO_DA_TIRA))
-                            .px(px(RECUO_DA_TIRA))
-                            .pb(px(6.))
-                            .h(px(lado + 8.0))
-                            .overflow_x_scroll()
                             // 🔑 A roda vertical rola na horizontal: é o gesto
                             // que a mão faz sobre uma faixa, e o mesmo que o
                             // site escuta com `passive: false`.
                             .on_scroll_wheel(cx.listener(
                                 move |tela, evento: &gpui_kit::ScrollWheelEvent, window, cx| {
-                                    let delta = evento.delta.pixel_delta(window.line_height());
-                                    if delta.y.abs() <= delta.x.abs() {
-                                        return;
+                                    if tira_de_fotos::rolar_com_a_roda(
+                                        &tela.rolagem_da_tira,
+                                        evento,
+                                        window,
+                                    ) {
+                                        cx.notify();
                                     }
-                                    let atual = tela.rolagem_da_tira.offset();
-                                    tela.rolagem_da_tira
-                                        .set_offset(gpui_kit::point(atual.x + delta.y, atual.y));
-                                    cx.notify();
                                 },
                             ))
                             .children(itens)
@@ -9514,8 +9431,12 @@ impl Detalhe {
                             // depois. No vão entre duas, não abre.
                             .context_menu(menu_da_tira::ao_abrir(cx.entity().downgrade())),
                     )
-                    .when(tem_antes, |moldura| moldura.child(sombra(true, cx)))
-                    .when(tem_depois, |moldura| moldura.child(sombra(false, cx))),
+                    .when(tem_antes, |moldura| {
+                        moldura.child(tira_de_fotos::seta(true, ao_rolar.clone(), cx))
+                    })
+                    .when(tem_depois, |moldura| {
+                        moldura.child(tira_de_fotos::seta(false, ao_rolar.clone(), cx))
+                    }),
             )
             .children(self.menu_do_roteiro.as_ref().map(|(menu, ponto)| {
                 gpui_kit::deferred(gpui_kit::anchored().position(*ponto).child(menu.clone()))
@@ -9547,132 +9468,69 @@ impl Detalhe {
             // A mesma lembrança da grade: a tira não fica preta na subida.
             _ => self.imagens_vistas.get(&foto.id).cloned(),
         });
-        // O miolo da célula, dentro da borda de 2px.
-        let miolo = gpui_kit::size(px(largura - 4.0), px(lado - 4.0));
         let nota = foto.nota.unwrap_or(0).min(5) as usize;
         let levada = foto.estado == acervo::Estado::LevadaNoBalcao && !foto.apagada;
         let comprada = !foto.editavel() && !foto.apagada;
 
-        div()
-            .id(SharedString::from(format!("tira-{}", foto.id)))
-            .debug_selector({
-                let id = foto.id.clone();
-                move || format!("tira-{id}")
-            })
-            .relative()
-            .w(px(largura))
-            .h(px(lado))
-            .flex_none()
-            .flex()
-            .items_center()
-            .justify_center()
-            .overflow_hidden()
-            .rounded(cx.theme().radius)
-            .bg(cx.theme().muted)
-            // 🔑 **Borda de 2px, e três estados** — como no site: cheia no foco,
-            // esmaecida na marcada, invisível no resto. Antes eram dois estados
-            // numa borda de 1px, e a tira ficava igual com uma ou dez marcadas.
-            .border_2()
-            .border_color(if em_foco {
-                cx.theme().primary
+        tira_de_fotos::celula(
+            SharedString::from(format!("tira-{}", foto.id)),
+            largura,
+            lado,
+            if em_foco {
+                tira_de_fotos::Destaque::EmFoco
             } else if marcada {
-                cx.theme().primary.opacity(0.5)
+                tira_de_fotos::Destaque::Marcada
             } else {
-                gpui_kit::transparent_black()
-            })
-            .cursor_pointer()
-            .when_some(miniatura, |celula, imagem| {
-                // 🔑 **A foto enche a célula**, como no site (dono, 28/set/2026:
-                // *"a tira da WEB preenche todo o espaço vertical"*). Com só
-                // `max_w_full`/`max_h_full` ela ficava no tamanho natural da
-                // miniatura — 320 px — e a tira alta sobrava em volta.
-                // 🚨 E **nunca `size_full`**: o `Img` do GPUI grava
-                // `style.aspect_ratio` com a proporção da foto, o taffy tira a
-                // altura da largura e o `overflow_hidden` daqui vira **corte**
-                // no retrato (17 e 18/set/2026). A conta vem pronta.
-                let encaixe = crate::imagem::cabe_em(miolo, imagem.size(0));
-                let id = foto.id.clone();
-                celula.child(
-                    img(imagem)
-                        .debug_selector(move || format!("tira-foto-{id}"))
-                        .w(encaixe.width)
-                        .h(encaixe.height)
-                        // 🚨 `Contain`, e não `Cover`. Preencher o retângulo
-                        // custa **cortar**, e numa foto que já foi
-                        // **enquadrada** isso corta o que o operador escolheu
-                        // manter: a mesma foto aparecia com um pedaço a menos
-                        // aqui e inteira no editor e na tela do cliente (o
-                        // dono, 2026-09-11). É a mesma decisão que a
-                        // Biblioteca já tinha tomado ao lado — *"num estúdio
-                        // de retrato o recorte centralizado tira a cabeça
-                        // primeiro"* —, e as duas tarjas de fundo são o preço.
-                        .object_fit(gpui_kit::ObjectFit::Contain)
-                        .when(foto.apagada, |imagem| imagem.opacity(0.4)),
-                )
-            })
-            .when(nota > 0, |celula| {
-                celula.child(
-                    div()
-                        .absolute()
-                        .top(px(1.))
-                        .left(px(3.))
-                        .text_xs()
-                        .text_color(cores::nota())
-                        .child(SharedString::from("★".repeat(nota))),
-                )
-            })
-            .when(levada, |celula| {
-                celula.child(
-                    div()
-                        .absolute()
-                        .top(px(3.))
-                        .right(px(3.))
-                        .size(px(7.))
-                        .rounded_full()
-                        .bg(cores::quente()),
-                )
-            })
-            .when(comprada, |celula| {
-                celula.child(
-                    div()
-                        .absolute()
-                        .bottom_0()
-                        .left_0()
-                        .right_0()
-                        .py(px(1.))
-                        .text_center()
-                        .text_xs()
-                        .bg(gpui_kit::black().opacity(0.7))
-                        .text_color(cx.theme().foreground)
-                        .child("comprada"),
-                )
-            })
-            .on_mouse_down(
-                gpui_kit::MouseButton::Right,
-                cx.listener(move |tela, _ev: &gpui_kit::MouseDownEvent, _w, cx| {
-                    tela.apontar_o_menu(posicao, cx)
-                }),
+                tira_de_fotos::Destaque::Nenhum
+            },
+            cx,
+        )
+        .debug_selector({
+            let id = foto.id.clone();
+            move || format!("tira-{id}")
+        })
+        .when_some(miniatura, |celula, imagem| {
+            let id = foto.id.clone();
+            celula.child(
+                tira_de_fotos::foto(imagem, largura, lado, foto.apagada)
+                    .debug_selector(move || format!("tira-foto-{id}")),
             )
-            .on_click(
-                cx.listener(move |tela, evento: &gpui_kit::ClickEvent, _window, cx| {
-                    if evento.click_count() >= 2 {
-                        tela.selecao
-                            .clicar(posicao, false, Modificadores::default());
-                        tela.revelar_a_do_foco(cx);
-                        return;
-                    }
-                    let m = evento.modifiers();
-                    tela.clicar(
-                        posicao,
-                        Modificadores {
-                            aditivo: m.secondary(),
-                            faixa: m.shift,
-                        },
-                        cx,
-                    )
-                }),
-            )
-            .into_any_element()
+        })
+        .when(nota > 0, |celula| {
+            celula.child(tira_de_fotos::estrelas(nota))
+        })
+        .when(levada, |celula| {
+            celula.child(tira_de_fotos::ponto_da_levada())
+        })
+        .when(comprada, |celula| {
+            celula.child(tira_de_fotos::tarja_da_comprada(cx))
+        })
+        .on_mouse_down(
+            gpui_kit::MouseButton::Right,
+            cx.listener(move |tela, _ev: &gpui_kit::MouseDownEvent, _w, cx| {
+                tela.apontar_o_menu(posicao, cx)
+            }),
+        )
+        .on_click(
+            cx.listener(move |tela, evento: &gpui_kit::ClickEvent, _window, cx| {
+                if evento.click_count() >= 2 {
+                    tela.selecao
+                        .clicar(posicao, false, Modificadores::default());
+                    tela.revelar_a_do_foco(cx);
+                    return;
+                }
+                let m = evento.modifiers();
+                tela.clicar(
+                    posicao,
+                    Modificadores {
+                        aditivo: m.secondary(),
+                        faixa: m.shift,
+                    },
+                    cx,
+                )
+            }),
+        )
+        .into_any_element()
     }
 
     /// A barra que arrasta a altura da tira — **e a altura é o zoom**.
@@ -9687,25 +9545,7 @@ impl Detalhe {
         let ouvinte = cx.entity();
         let arrastando = self.arrasto_da_tira.is_some();
 
-        div()
-            .id("puxador-da-tira")
-            .relative()
-            .h(px(6.))
-            .flex()
-            .flex_none()
-            .items_center()
-            .justify_center()
-            .border_t_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().muted)
-            .cursor(gpui_kit::CursorStyle::ResizeUpDown)
-            .child(
-                div()
-                    .h(px(2.))
-                    .w(px(32.))
-                    .rounded_full()
-                    .bg(cx.theme().border),
-            )
+        tira_de_fotos::puxador("puxador-da-tira", cx)
             .on_mouse_down(
                 gpui_kit::MouseButton::Left,
                 cx.listener(|tela, evento: &gpui_kit::MouseDownEvent, _w, cx| {
@@ -9794,33 +9634,6 @@ fn selo_do_lugar(lugar: Lugar) -> gpui_kit::Div {
                 redondo(Icone::HardDrive, cores::quente(), 0x000000b3)
             })
         })
-}
-
-/// Uma tecla escrita, como os `<kbd>` do site.
-fn tecla(rotulo: &str, cx: &App) -> impl IntoElement {
-    div()
-        .px(px(3.))
-        .rounded(cx.theme().radius)
-        .border_1()
-        .border_color(cx.theme().border)
-        .child(SharedString::from(rotulo.to_string()))
-}
-
-/// A sombra de uma ponta: diz que há foto fora da vista.
-fn sombra(esquerda: bool, cx: &App) -> impl IntoElement {
-    let fundo = cx.theme().background;
-    div()
-        .absolute()
-        .top_0()
-        .bottom_0()
-        .w(px(28.))
-        .when(esquerda, |lado| lado.left_0())
-        .when(!esquerda, |lado| lado.right_0())
-        .bg(gpui_kit::linear_gradient(
-            if esquerda { 90.0 } else { 270.0 },
-            gpui_kit::linear_color_stop(fundo, 0.0),
-            gpui_kit::linear_color_stop(fundo.opacity(0.0), 1.0),
-        ))
 }
 
 /// Põe `novas` na ordem em que `antigas` já estavam.
