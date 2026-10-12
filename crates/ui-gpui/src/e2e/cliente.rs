@@ -120,8 +120,8 @@ fn recorte(e: &super::Estudio, cx: &mut TestAppContext) -> (Vec<String>, Vec<boo
 }
 
 /// 🎬 **A tela do cliente em grade**: o operador escolhe o modo e as fotos
-/// por linha no menu da galeria; cada foto leva o número da posição dela no
-/// recorte — o mesmo dos dois lados do balcão —, o foco acompanha, a
+/// por linha no menu da galeria; cada foto leva o número da posição dela na
+/// sessão — o mesmo dos dois lados do balcão, com ou sem filtro —, o foco acompanha, a
 /// revelação volta à foto única e a galeria devolve a grade.
 #[gpui_kit::test]
 fn a_tela_do_cliente_em_grade_numera_as_fotos_do_recorte(cx: &mut TestAppContext) {
@@ -205,17 +205,28 @@ fn a_tela_do_cliente_em_grade_numera_as_fotos_do_recorte(cx: &mut TestAppContext
         assert_eq!(tela.modo_do_cliente(), (true, 8))
     });
 
-    // O recorte do operador muda: a grade do cliente é a do recorte, e conta
-    // como a do operador.
-    let visiveis = e.detalhe(cx, |tela, _w, cx| {
+    // 🚨 O recorte do operador muda: a grade do cliente mostra só as do
+    // recorte, e **cada uma com o número que já tinha** (dono, 11/out/2026:
+    // o filtro não pode renumerar, o cliente já disse "quero a 3").
+    let filtradas = e.detalhe(cx, |tela, _w, cx| {
         tela.filtrar(
             Filtro::Situacao(biblioteca_core::Estado::LevadaNoBalcao),
             cx,
         );
-        tela.ids_visiveis().len()
+        tela.ids_visiveis()
     });
+    let visiveis = filtradas.len();
+    let os_de_antes: Vec<usize> = filtradas
+        .iter()
+        .map(|id| posicao(id).expect("estava em Todas") + 1)
+        .collect();
     let (numeros, ..) = grade_no_cliente(&e, cx).expect("a grade");
-    assert_eq!(numeros, (1..=visiveis).collect::<Vec<_>>());
+    assert_eq!(numeros, os_de_antes);
+    assert_ne!(
+        numeros,
+        (1..=visiveis).collect::<Vec<_>>(),
+        "senão o teste não distingue a renumeração"
+    );
     assert!(visiveis < ids.len(), "o recorte encolheu");
     e.detalhe(cx, |tela, _w, cx| tela.filtrar(Filtro::Todas, cx));
     assert_eq!(grade_no_cliente(&e, cx).map(|g| g.0), Some(todas.clone()));

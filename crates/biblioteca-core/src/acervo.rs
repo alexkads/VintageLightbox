@@ -299,6 +299,15 @@ impl Acervo {
         self.visiveis.get(n).and_then(|i| self.fotos.get(*i))
     }
 
+    /// Onde a foto da posição `n` do recorte está **no acervo inteiro**.
+    ///
+    /// 🔢 É de onde sai o número que o cliente vê na grade dele: o recorte
+    /// esconde fotos, mas não renumera as que ficam
+    /// (`grade_do_cliente::itens_do_recorte`).
+    pub fn posicao_no_acervo(&self, n: usize) -> Option<usize> {
+        self.visiveis.get(n).copied()
+    }
+
     pub fn visiveis(&self) -> impl Iterator<Item = &Foto> {
         self.visiveis.iter().filter_map(|i| self.fotos.get(*i))
     }

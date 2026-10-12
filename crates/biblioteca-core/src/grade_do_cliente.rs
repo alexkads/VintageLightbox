@@ -3,10 +3,16 @@
 //!
 //! # O número é a identidade
 //!
-//! 🔑 **O número de uma foto é a posição dela no recorte do operador, contando
-//! de 1** — o mesmo "7 / 25" do rodapé da foto única. O cliente diz *"quero a
-//! 12"* e o balconista procura a 12 do lado dele: as duas telas tiram o número
-//! da mesma conta, e por isso não discordam.
+//! 🔑 **O número de uma foto é a posição dela na sessão inteira, contando de
+//! 1** — o que o recorte "Todas" mostra. O cliente diz *"quero a 12"* e o
+//! balconista procura a 12 do lado dele: as duas telas tiram o número da mesma
+//! conta, e por isso não discordam.
+//!
+//! 🚨 **O recorte não renumera** (dono, 11/out/2026: *"o número não pode mudar
+//! em função do filtro, pois deixa o cliente confuso no momento da escolha"*).
+//! Até ali o número era a posição no recorte: o operador trocava de "Todas"
+//! para "Sinalizadas" e a "4" do cliente virava a "2". Agora o filtro só
+//! esconde, e os números ficam vagos (1, 4, 5, 6, 10).
 //!
 //! 🚨 **Foto que sai da grade do cliente não renumera ninguém.** A rejeitada e
 //! a apagada somem daqui, e o número delas fica vago (1, 2, 4, 5…). Fechar o
@@ -166,20 +172,32 @@ pub fn arranjo(
 pub struct Item {
     /// A posição no recorte do operador, contando de zero.
     pub posicao: usize,
-    /// O número na tela: `posicao + 1`, sempre.
+    /// O número na tela: a posição na sessão inteira, mais um — a mesma em
+    /// qualquer recorte.
     pub numero: usize,
 }
 
-/// As fotos que o cliente vê, na ordem do operador. `oculta[p]` diz se a foto
-/// da posição `p` fica de fora (rejeitada, apagada).
+/// As fotos que o cliente vê, na ordem do operador, com a sessão inteira no
+/// recorte. `oculta[p]` diz se a foto da posição `p` fica de fora (rejeitada,
+/// apagada).
 pub fn itens(oculta: &[bool]) -> Vec<Item> {
-    oculta
+    let recorte: Vec<(usize, bool)> = oculta.iter().copied().enumerate().collect();
+    itens_do_recorte(&recorte)
+}
+
+/// As fotos que o cliente vê quando o operador filtrou. Cada entrada é uma
+/// foto do recorte: `(posição dela na sessão inteira, fica de fora?)`.
+///
+/// 🔑 **O número sai da posição na sessão, e não da posição no recorte**: a
+/// mesma foto tem o mesmo número em "Todas", em "Sinalizadas" e em "À venda".
+pub fn itens_do_recorte(recorte: &[(usize, bool)]) -> Vec<Item> {
+    recorte
         .iter()
         .enumerate()
-        .filter(|(_, oculta)| !**oculta)
-        .map(|(posicao, _)| Item {
+        .filter(|(_, (_, oculta))| !*oculta)
+        .map(|(posicao, (na_sessao, _))| Item {
             posicao,
-            numero: posicao + 1,
+            numero: na_sessao + 1,
         })
         .collect()
 }
@@ -440,6 +458,33 @@ mod testes {
             assert_eq!(era.numero, item.numero, "a foto {item:?} mudou de número");
         }
         assert!(itens(&[true; 5]).is_empty(), "todas ocultas: grade vazia");
+    }
+
+    /// 🚨 **O filtro não renumera** (dono, 11/out/2026). Onze fotos; o
+    /// operador passa de "Todas" para "Sinalizadas" (1, 4, 5, 6, 10): cada
+    /// foto continua com o número que o cliente já tinha visto.
+    #[test]
+    fn o_recorte_do_operador_nao_muda_o_numero_de_ninguem() {
+        let todas = itens(&[false; 11]);
+        let sinalizadas = [0usize, 3, 4, 5, 9];
+        let recorte: Vec<(usize, bool)> = sinalizadas.iter().map(|p| (*p, false)).collect();
+        let filtradas = itens_do_recorte(&recorte);
+
+        let numeros: Vec<usize> = filtradas.iter().map(|i| i.numero).collect();
+        assert_eq!(numeros, [1, 4, 5, 6, 10], "e não 1, 2, 3, 4, 5");
+        for (item, na_sessao) in filtradas.iter().zip(sinalizadas) {
+            assert_eq!(item.numero, todas[na_sessao].numero);
+        }
+        // A posição continua sendo a do recorte: é por ela que o foco do
+        // operador acha a página.
+        let posicoes: Vec<usize> = filtradas.iter().map(|i| i.posicao).collect();
+        assert_eq!(posicoes, [0, 1, 2, 3, 4]);
+        assert_eq!(indice_do_foco(&filtradas, 3), Some(3));
+
+        // Oculta dentro do recorte: some, e as outras ficam como estavam.
+        let com_rejeitada = itens_do_recorte(&[(0, false), (3, true), (4, false)]);
+        let numeros: Vec<usize> = com_rejeitada.iter().map(|i| i.numero).collect();
+        assert_eq!(numeros, [1, 5]);
     }
 
     /// Varredura: qualquer combinação de ocultas dá números únicos, crescentes
