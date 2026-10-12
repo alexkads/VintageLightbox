@@ -1,5 +1,16 @@
 [
   {
+    "versao": "0.1.156",
+    "data": "2026-10-12",
+    "titulo": "A barra da sessão fica organizada em monitores menores.",
+    "importante": false,
+    "novidades": [
+      "Em monitores com resolução menor, a barra da sessão (Importar, Exportar, zoom, Revelar, bot, seleção) ficava desalinhada, com a caixa \"Selecionar as visíveis\" caindo sozinha para a linha de baixo. Agora os botões encurtam o texto conforme a largura da janela e continuam numa linha só.",
+      "Os botões que ficam só com o ícone (Exportar, Imprimir, Revelar na tela mais estreita) mostram o nome ao passar o mouse."
+    ],
+    "por_que_atualizar": "Para a barra da sessão ficar arrumada em qualquer tamanho de monitor."
+  },
+  {
     "versao": "0.1.155",
     "data": "2026-10-12",
     "titulo": "Na tela do cliente em grade: o filtro da Revelação passa a valer e as estrelas da nota aparecem.",
