@@ -52,6 +52,12 @@ impl LibraryController {
                     date,
                     camera,
                     exposure,
+                    captura: crate::view_models::Captura {
+                        iso: metadata.and_then(|m| m.iso),
+                        focal: metadata.and_then(|m| m.focal_length),
+                        abertura: metadata.and_then(|m| m.aperture),
+                        velocidade: metadata.and_then(|m| m.shutter_speed.clone()),
+                    },
                     rating,
                     color_label: photo.color_label().map(|c| c.to_string()),
                     flag: photo.flag().map(|f| f.as_code()),

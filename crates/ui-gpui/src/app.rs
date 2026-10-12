@@ -3069,6 +3069,15 @@ impl Aplicativo {
         }
         let sessao_id = self.sessao_aberta.clone();
         let do_catalogo = self.biblioteca.read(cx).todas_as_fotos();
+        let capturas_do_catalogo: std::collections::HashMap<&str, &adapters::view_models::Captura> =
+            do_catalogo
+                .iter()
+                // 🔑 Só a linha do catálogo: a mesma foto está na lista duas
+                // vezes (a do disco e a do site), e a do site, sem EXIF,
+                // apagaria a outra do mapa.
+                .filter(|f| !f.path.is_empty())
+                .filter_map(|f| Some((f.pos_venda_foto_id.as_deref()?, &f.captura)))
+                .collect();
         let acervo: Vec<PhotoViewModel> = fotos
             .iter()
             .map(|foto| {
@@ -3082,7 +3091,8 @@ impl Aplicativo {
                     }
                 }
                 let id = format!("{}{}", persistencia::PREFIXO_DO_SITE, foto.id);
-                self.fotos_do_site
+                let mut do_site = self
+                    .fotos_do_site
                     .iter()
                     .find(|da_grade| da_grade.id == id)
                     .cloned()
@@ -3092,7 +3102,15 @@ impl Aplicativo {
                         pos_venda_foto_id: Some(foto.id.clone()),
                         sessao_id: sessao_id.clone(),
                         ..Default::default()
-                    })
+                    });
+                // 📷 A foto que já subiu vem do site, que não guarda o EXIF;
+                // quando ela foi importada neste computador, os dados da
+                // captura (ISO, abertura…) estão na linha do catálogo — é o
+                // que a linha sob o histograma mostra.
+                if let Some(captura) = capturas_do_catalogo.get(foto.id.as_str()) {
+                    do_site.captura = (*captura).clone();
+                }
+                do_site
             })
             .collect();
         if acervo.is_empty() {

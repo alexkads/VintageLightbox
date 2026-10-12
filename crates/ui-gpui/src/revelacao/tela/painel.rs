@@ -479,6 +479,10 @@ impl Revelacao {
     pub fn seguir_o_roteiro_do_painel(&mut self, pedido: &str, cx: &mut Context<Self>) {
         let (comando, resto) = pedido.split_once(' ').unwrap_or((pedido, ""));
         match comando {
+            // O histograma não é um `Painel` dos controles: tem chave própria.
+            "abrir" | "fechar" if resto == "Histograma" => self
+                .estado_do_painel
+                .definir(CHAVE_DO_HISTOGRAMA, comando == "abrir"),
             "abrir" | "fechar" => match Painel::TODOS.into_iter().find(|p| p.rotulo() == resto) {
                 Some(painel) => self
                     .estado_do_painel
@@ -1348,54 +1352,156 @@ impl Revelacao {
             .into_any_element()
     }
 
-    /// O histograma, desenhado com `paint_quad` dentro de um `canvas`.
+    /// O histograma, desenhado com `paint_quad` dentro de um `canvas`, e os
+    /// dados da captura embaixo dele — como no Lightroom (dono, 12/out/2026).
     ///
     /// 🔑 **256 colunas × 3 canais não podem ser 768 `div`s.**
+    ///
+    /// 🎨 **As cores são as do Lightroom, opacas**: onde os três canais se
+    /// sobrepõem, cinza claro; onde dois, a soma deles (amarelo, ciano,
+    /// magenta); onde um só, a cor dele. Antes eram três barras translúcidas
+    /// empilhadas, e a sobreposição dava um marrom que não dizia qual canal
+    /// estava ali.
     fn histograma(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        const ALTURA: f32 = 70.0;
+        const ALTURA: f32 = 96.0;
 
-        let barras: Vec<(f32, f32, f32)> = match self.histograma.as_ref() {
-            Some(histograma) => histograma.alturas().collect(),
-            None => Vec::new(),
+        let (barras, sombras, luzes) = match self.histograma.as_ref() {
+            Some(h) => (
+                h.alturas_do_desenho(),
+                h.estouro_nas_sombras(),
+                h.estouro_nas_luzes(),
+            ),
+            None => (Vec::new(), false, false),
         };
-        let fundo = cx.theme().background;
+        let tema = cx.theme();
+        let (fundo, borda, apagado, texto) = (
+            tema.background,
+            tema.border,
+            tema.muted_foreground,
+            tema.foreground,
+        );
+        let rotulos = self
+            .foto()
+            .map(|foto| foto.captura.rotulos())
+            .unwrap_or_default();
+        let tem_foto = self.foto().is_some();
 
-        div().h(px(ALTURA)).w_full().flex_none().child(
-            canvas(
-                |_bounds, _window, _cx| {},
-                move |bounds, _prepaint, window, _cx| {
-                    window.paint_quad(gpui_kit::fill(bounds, fundo));
-                    if barras.is_empty() {
-                        return;
-                    }
-                    let largura = f32::from(bounds.size.width) / barras.len() as f32;
-                    let base = f32::from(bounds.origin.y) + f32::from(bounds.size.height);
-                    for (i, (r, g, b)) in barras.iter().enumerate() {
-                        let x = f32::from(bounds.origin.x) + i as f32 * largura;
-                        // Os três canais somam luz onde se sobrepõem.
-                        for (altura, cor) in [
-                            (r, gpui_kit::rgba(0xff000064)),
-                            (g, gpui_kit::rgba(0x00ff0064)),
-                            (b, gpui_kit::rgba(0x0000ff64)),
-                        ] {
-                            let alta = (altura * ALTURA).min(ALTURA);
-                            if alta <= 0.0 {
-                                continue;
-                            }
-                            window.paint_quad(gpui_kit::fill(
-                                Bounds {
-                                    origin: gpui_kit::point(px(x), px(base - alta)),
-                                    size: gpui_kit::size(px(largura.max(1.0)), px(alta)),
-                                },
-                                cor,
-                            ));
-                        }
-                    }
-                },
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .child(
+                div()
+                    .h(px(ALTURA))
+                    .w_full()
+                    .flex_none()
+                    .border_1()
+                    .border_color(borda)
+                    .debug_selector(|| "revelacao-histograma".into())
+                    .child(
+                        canvas(
+                            |_bounds, _window, _cx| {},
+                            move |bounds, _prepaint, window, _cx| {
+                                window.paint_quad(gpui_kit::fill(bounds, fundo));
+                                let (x0, y0) =
+                                    (f32::from(bounds.origin.x), f32::from(bounds.origin.y));
+                                let (largura, altura) =
+                                    (f32::from(bounds.size.width), f32::from(bounds.size.height));
+                                let quadro = |x: f32, y: f32, l: f32, a: f32| Bounds {
+                                    origin: gpui_kit::point(px(x), px(y)),
+                                    size: gpui_kit::size(px(l), px(a)),
+                                };
+                                // As quatro divisões das cinco zonas (pretos,
+                                // sombras, exposição, realces, brancos).
+                                for parte in 1..5 {
+                                    let x = x0 + largura * parte as f32 / 5.0;
+                                    window.paint_quad(gpui_kit::fill(
+                                        quadro(x.round(), y0, 1.0, altura),
+                                        borda.opacity(0.5),
+                                    ));
+                                }
+                                if !barras.is_empty() {
+                                    let passo = largura / barras.len() as f32;
+                                    let base = y0 + altura;
+                                    for (i, (r, g, b)) in barras.iter().enumerate() {
+                                        let x = x0 + i as f32 * passo;
+                                        let coluna = (passo.ceil()).max(1.0);
+                                        let mut de = 0.0;
+                                        for (ate, cor) in faixas_da_coluna(*r, *g, *b) {
+                                            let (baixo, alto) = (de * altura, ate * altura);
+                                            de = ate;
+                                            if alto - baixo <= 0.0 {
+                                                continue;
+                                            }
+                                            window.paint_quad(gpui_kit::fill(
+                                                quadro(x, base - alto, coluna, alto - baixo),
+                                                gpui_kit::rgb(cor),
+                                            ));
+                                        }
+                                    }
+                                }
+                                // 🔺 Os triângulos de estouro, nos cantos de
+                                // cima: acesos quando há preto ou branco puro.
+                                for (aceso, x) in
+                                    [(sombras, x0 + 4.0), (luzes, x0 + largura - 15.0)]
+                                {
+                                    let cor = if aceso { texto } else { apagado.opacity(0.35) };
+                                    for linha in 0..6 {
+                                        let meia = linha as f32;
+                                        window.paint_quad(gpui_kit::fill(
+                                            quadro(
+                                                x + 5.0 - meia,
+                                                y0 + 4.0 + linha as f32,
+                                                meia * 2.0 + 1.0,
+                                                1.0,
+                                            ),
+                                            cor,
+                                        ));
+                                    }
+                                }
+                            },
+                        )
+                        .size_full(),
+                    ),
             )
-            .size_full(),
-        )
+            // 📷 ISO · distância focal · abertura · velocidade, espalhados na
+            // largura como no Lightroom. A linha tem altura reservada: trocar
+            // de foto não empurra o Básico.
+            .child(
+                h_flex()
+                    .h(px(16.))
+                    .flex_none()
+                    .justify_between()
+                    .text_xs()
+                    .text_color(apagado)
+                    .debug_selector(|| "revelacao-captura".into())
+                    .when(rotulos.is_empty() && tem_foto, |linha| {
+                        linha.justify_center().child("Sem dados da câmera")
+                    })
+                    .children(
+                        rotulos
+                            .into_iter()
+                            .map(|rotulo| div().flex_none().child(SharedString::from(rotulo))),
+                    ),
+            )
     }
+}
+
+/// As faixas de uma coluna do histograma, de baixo para cima: até onde vai
+/// cada uma (0 a 1) e a cor dela.
+///
+/// Onde os três canais chegam, cinza claro; acima disso, onde só dois chegam,
+/// a soma deles; no topo, o canal que sobra.
+fn faixas_da_coluna(r: f32, g: f32, b: f32) -> [(f32, u32); 3] {
+    const CINZA: u32 = 0xc8c8c8;
+    // Índices: 0 = vermelho, 1 = verde, 2 = azul.
+    const SOZINHO: [u32; 3] = [0xd9483b, 0x4caf50, 0x3f73d6];
+    // A soma dos dois que ficam quando o canal do índice sai.
+    const SEM: [u32; 3] = [0x3fb8c8, 0xb85cc4, 0xd1c53f];
+    let mut canais = [(r, 0usize), (g, 1), (b, 2)];
+    canais.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let [(menor, fora), (meio, _), (maior, topo)] = canais;
+    [(menor, CINZA), (meio, SEM[fora]), (maior, SOZINHO[topo])]
 }
 
 /// 🧪 Os gestos da coluna para os cenários de ponta a ponta (`crate::e2e`) —
@@ -1526,6 +1632,21 @@ mod testes {
     }
 
     use super::*;
+
+    /// As cores da coluna do histograma: cinza onde os três chegam, a soma
+    /// onde dois, e o canal sozinho no topo.
+    #[test]
+    fn a_coluna_do_histograma_soma_os_canais_como_o_lightroom() {
+        // Azul mais alto, verde no meio, vermelho embaixo.
+        let faixas = faixas_da_coluna(0.2, 0.5, 0.9);
+        assert_eq!(faixas[0], (0.2, 0xc8c8c8), "os três: cinza");
+        assert_eq!(faixas[1], (0.5, 0x3fb8c8), "verde + azul: ciano");
+        assert_eq!(faixas[2], (0.9, 0x3f73d6), "só o azul");
+        // Vermelho e verde empatados acima do azul: amarelo até o topo.
+        let faixas = faixas_da_coluna(0.8, 0.8, 0.1);
+        assert_eq!(faixas[0], (0.1, 0xc8c8c8));
+        assert_eq!(faixas[1], (0.8, 0xd1c53f), "vermelho + verde: amarelo");
+    }
 
     fn quadro() -> Bounds<Pixels> {
         Bounds {

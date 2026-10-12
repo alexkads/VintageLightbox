@@ -9,6 +9,10 @@ pub struct PhotoViewModel {
     pub date: String,
     pub camera: String,
     pub exposure: String,
+    /// Como a foto foi tirada, campo a campo — a linha embaixo do histograma
+    /// da Revelação. Vazia na foto que só existe no site (sem EXIF aqui).
+    #[serde(default)]
+    pub captura: Captura,
     pub rating: i32,
     pub color_label: Option<String>,
     pub flag: Option<i32>,
@@ -140,6 +144,96 @@ impl PhotoViewModel {
         self.edit_crop_perspectiva = (!p.e_neutra()).then_some(p);
         self.edit_crop_restringir =
             (!domain::value_objects::perspectiva::restringir_de_json(parametros)).then_some(false);
+    }
+}
+
+/// Os dados da captura que a câmera grava no EXIF: ISO, distância focal,
+/// abertura e velocidade — os quatro que o Lightroom mostra sob o histograma.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Captura {
+    pub iso: Option<u32>,
+    /// Em milímetros.
+    pub focal: Option<f64>,
+    /// O número f.
+    pub abertura: Option<f64>,
+    /// Como o EXIF a escreve: "1/160", "0.5", "2".
+    pub velocidade: Option<String>,
+}
+
+impl Captura {
+    /// Os rótulos na ordem do Lightroom — ISO, distância focal, abertura e
+    /// velocidade —, só os que a foto tem. Sem nenhum, a lista vem vazia.
+    pub fn rotulos(&self) -> Vec<String> {
+        let mut rotulos = Vec::with_capacity(4);
+        if let Some(iso) = self.iso.filter(|iso| *iso > 0) {
+            rotulos.push(format!("ISO {iso}"));
+        }
+        if let Some(focal) = self.focal.filter(|f| f.is_finite() && *f > 0.0) {
+            rotulos.push(format!("{} mm", sem_zero_no_fim(focal)));
+        }
+        if let Some(abertura) = self.abertura.filter(|f| f.is_finite() && *f > 0.0) {
+            rotulos.push(format!("f/{}", sem_zero_no_fim(abertura)));
+        }
+        if let Some(velocidade) = self
+            .velocidade
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            // O EXIF às vezes já traz a unidade ("1/160 s").
+            let numero = velocidade.trim_end_matches('s').trim();
+            rotulos.push(format!("{numero} s"));
+        }
+        rotulos
+    }
+}
+
+/// Uma casa decimal, e nenhuma quando ela é zero: `f/11`, `f/2.8`, `27 mm`.
+fn sem_zero_no_fim(valor: f64) -> String {
+    let texto = format!("{valor:.1}");
+    texto
+        .strip_suffix(".0")
+        .map(str::to_string)
+        .unwrap_or(texto)
+}
+
+#[cfg(test)]
+mod testes_da_captura {
+    use super::Captura;
+
+    #[test]
+    fn os_quatro_rotulos_na_ordem_do_lightroom() {
+        let captura = Captura {
+            iso: Some(1000),
+            focal: Some(27.0),
+            abertura: Some(11.0),
+            velocidade: Some("1/160".into()),
+        };
+        assert_eq!(captura.rotulos(), ["ISO 1000", "27 mm", "f/11", "1/160 s"]);
+    }
+
+    #[test]
+    fn a_decimal_fica_quando_nao_e_zero_e_a_unidade_nao_dobra() {
+        let captura = Captura {
+            iso: None,
+            focal: Some(52.5),
+            abertura: Some(2.8),
+            velocidade: Some("1/60 s".into()),
+        };
+        assert_eq!(captura.rotulos(), ["52.5 mm", "f/2.8", "1/60 s"]);
+    }
+
+    #[test]
+    fn sem_exif_nao_ha_rotulo() {
+        assert!(Captura::default().rotulos().is_empty());
+        // O zero que a câmera grava quando não sabe não vira "ISO 0".
+        let zerada = Captura {
+            iso: Some(0),
+            focal: Some(0.0),
+            abertura: Some(0.0),
+            velocidade: Some("  ".into()),
+        };
+        assert!(zerada.rotulos().is_empty());
     }
 }
 

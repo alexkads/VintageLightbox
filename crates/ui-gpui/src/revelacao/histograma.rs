@@ -47,6 +47,10 @@ pub struct Histograma {
 /// exata onde ela é barata.
 const AMOSTRAS: usize = 250_000;
 
+/// A partir de que parte da foto num extremo o triângulo acende: 0,1 %.
+/// Menos que isso é um reflexo ou um pixel de ruído, e não um estouro.
+const ESTOURO: f32 = 0.001;
+
 impl Histograma {
     pub fn da_imagem(imagem: &DynamicImage) -> Self {
         let mut vermelho = [0u32; NIVEIS];
@@ -91,6 +95,70 @@ impl Histograma {
         }
     }
 
+    /// As alturas **para o desenho**, de 0 a 1, com o teto medido sem os dois
+    /// extremos e um alisamento de três níveis.
+    ///
+    /// ⚠️ **O teto ignora o nível 0 e o 255.** Brancos estourados (ou um fundo
+    /// preto) empilham num nível só, e normalizado por ele o resto do
+    /// histograma virava uma linha rente ao chão. O Lightroom faz o mesmo: o
+    /// pico da ponta é cortado no teto, e quem avisa do estouro é o triângulo
+    /// do canto ([`Self::estouro_nas_sombras`], [`Self::estouro_nas_luzes`]).
+    ///
+    /// O alisamento tira o "pente" que a revelação em 8 bits deixa (níveis
+    /// vazios entre níveis cheios depois de esticar o contraste).
+    pub fn alturas_do_desenho(&self) -> Vec<(f32, f32, f32)> {
+        let miolo = |canal: &[u32; NIVEIS]| canal[1..NIVEIS - 1].iter().copied().max().unwrap_or(0);
+        let teto = miolo(&self.vermelho)
+            .max(miolo(&self.verde))
+            .max(miolo(&self.azul));
+        let teto = if teto > 0 { teto } else { self.maximo } as f32;
+        let alisado = |canal: &[u32; NIVEIS], i: usize| {
+            let antes = canal[i.saturating_sub(1)] as f32;
+            let depois = canal[(i + 1).min(NIVEIS - 1)] as f32;
+            // Os extremos não se alisam: o estouro é um nível só, e espalhá-lo
+            // o esconderia.
+            let valor = if i == 0 || i == NIVEIS - 1 {
+                canal[i] as f32
+            } else {
+                (antes + 2.0 * canal[i] as f32 + depois) / 4.0
+            };
+            (valor / teto).min(1.0)
+        };
+        (0..NIVEIS)
+            .map(|i| {
+                (
+                    alisado(&self.vermelho, i),
+                    alisado(&self.verde, i),
+                    alisado(&self.azul, i),
+                )
+            })
+            .collect()
+    }
+
+    /// A parte das amostras que algum canal tem num nível.
+    fn parte_no_nivel(&self, nivel: usize) -> f32 {
+        let total: u32 = self.vermelho.iter().sum();
+        if total == 0 {
+            return 0.0;
+        }
+        let la = self.vermelho[nivel]
+            .max(self.verde[nivel])
+            .max(self.azul[nivel]);
+        la as f32 / total as f32
+    }
+
+    /// Há sombra entupida — algum canal com mais de [`ESTOURO`] da foto no
+    /// preto puro? É o triângulo da esquerda do Lightroom.
+    pub fn estouro_nas_sombras(&self) -> bool {
+        self.parte_no_nivel(0) > ESTOURO
+    }
+
+    /// Há luz estourada — algum canal com mais de [`ESTOURO`] da foto no
+    /// branco puro? É o triângulo da direita.
+    pub fn estouro_nas_luzes(&self) -> bool {
+        self.parte_no_nivel(NIVEIS - 1) > ESTOURO
+    }
+
     /// A altura de cada nível, de 0 a 1, canal a canal.
     pub fn alturas(&self) -> impl Iterator<Item = (f32, f32, f32)> + '_ {
         (0..NIVEIS).map(move |i| {
@@ -131,6 +199,41 @@ mod testes {
             histograma.vermelho[200], 0,
             "o balde do outro canal fica vazio"
         );
+    }
+
+    /// 🚨 O branco estourado não achata o resto: o teto do desenho é medido
+    /// sem os extremos, o pico da ponta é cortado em 1 e o triângulo acende.
+    #[test]
+    fn o_estouro_nao_achata_o_desenho_e_acende_o_triangulo() {
+        // 3/4 da foto no branco puro, 1/4 num cinza médio.
+        let mut img = RgbaImage::new(4, 4);
+        for (i, pixel) in img.pixels_mut().enumerate() {
+            *pixel = if i < 12 {
+                Rgba([255, 255, 255, 255])
+            } else {
+                Rgba([120, 120, 120, 255])
+            };
+        }
+        let histograma = Histograma::da_imagem(&DynamicImage::ImageRgba8(img));
+        let desenho = histograma.alturas_do_desenho();
+
+        assert_eq!(desenho.len(), NIVEIS);
+        assert_eq!(desenho[255].0, 1.0, "o pico da ponta é cortado no teto");
+        assert!(
+            desenho[120].0 >= 0.5,
+            "o cinza médio continua visível: {}",
+            desenho[120].0
+        );
+        assert!(histograma.estouro_nas_luzes());
+        assert!(!histograma.estouro_nas_sombras());
+    }
+
+    /// Uma foto sem nada nos extremos não acende triângulo nenhum.
+    #[test]
+    fn sem_extremo_nao_ha_estouro() {
+        let histograma = Histograma::da_imagem(&chapada(4, [10, 200, 250, 255]));
+        assert!(!histograma.estouro_nas_sombras());
+        assert!(!histograma.estouro_nas_luzes());
     }
 
     /// 🚨 A altura é normalizada pelo **maior dos três canais**, e não por canal.
