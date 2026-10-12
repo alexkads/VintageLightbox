@@ -2483,19 +2483,34 @@ impl Caixa {
                             )),
                     )
                 })
-                .when(forma != FormaDePagamento::Dinheiro, |d| {
-                    d.child(rotulado(
-                        forma.dica_do_detalhe(),
-                        crate::estilo::campo(Input::new(&form.detalhe)),
-                    ))
-                })
+                // O detalhe e o "Lançar" na mesma linha: com a bandeira do
+                // cartão, o painel empurrava o "Concluir venda" para fora de
+                // uma janela pequena.
                 .child(
-                    com_tecla(
-                        estilo::botao_primario("caixa-lancar", cx).w_full(),
-                        "Lançar",
-                        "Enter",
-                    )
-                    .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.lancar(w, cx))),
+                    h_flex()
+                        .items_end()
+                        .gap(px(8.))
+                        .when(forma != FormaDePagamento::Dinheiro, |d| {
+                            d.child(
+                                rotulado(
+                                    forma.dica_do_detalhe(),
+                                    crate::estilo::campo(Input::new(&form.detalhe)),
+                                )
+                                .flex_1()
+                                .min_w(px(0.)),
+                            )
+                        })
+                        .child(
+                            com_tecla(
+                                estilo::botao_primario("caixa-lancar", cx)
+                                    .when(forma == FormaDePagamento::Dinheiro, |b| b.w_full()),
+                                "Lançar",
+                                "Enter",
+                            )
+                            .flex_none()
+                            .when(forma == FormaDePagamento::Dinheiro, |b| b.flex_1())
+                            .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.lancar(w, cx))),
+                        ),
                 )
         });
 

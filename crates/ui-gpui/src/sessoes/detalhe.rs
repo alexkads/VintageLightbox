@@ -5089,10 +5089,16 @@ impl Render for Detalhe {
         let pular = |_: &str| false;
         let cabecalho =
             (!pular("cabecalho")).then(|| self.cabecalho(window, cx).into_any_element());
-        let envio = (!pular("envio")).then(|| self.envio(cx).into_any_element());
         let tira_aberta = self.docas.as_ref().is_none_or(|d| d.tira_aberta());
         let barra =
             (!pular("barra")).then(|| self.barra_da_grade(!tira_aberta, cx).into_any_element());
+        // A barra da grade mora dentro da de importação; sozinha, só quando o
+        // teste desliga a de importação.
+        let (envio, barra) = if pular("envio") {
+            (None, barra)
+        } else {
+            (Some(self.envio(barra, cx).into_any_element()), None)
+        };
         let tira_el = (!pular("tira") && tira_aberta).then(|| self.tira(cx).into_any_element());
         let area = self.docas.as_ref().map(|d| d.area.clone());
         let coluna_aberta = !self.paineis.coluna_recolhida();
@@ -5655,7 +5661,17 @@ impl Detalhe {
     ///
     /// 🔑 **A leva é escolhida antes dos arquivos**, e o padrão é **sem
     /// marcação** — ver o campo [`Self::leva`].
-    fn envio(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    ///
+    /// 📏 **Uma linha só** (dono, 11/out/2026): as ações da grade (zoom,
+    /// Revelar, bot, seleção) vêm no fim desta mesma barra, em `barra`. Saíram
+    /// daqui o "Entram como" — toda foto entra **sem marcação**, e a marcação
+    /// de verdade nasce no balcão — e a frase "Arraste as fotos…": soltar as
+    /// fotos na barra continua valendo, só não é mais anunciado.
+    fn envio(
+        &self,
+        barra: Option<gpui_kit::AnyElement>,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         use crate::estilo;
         use crate::recursos::Icone;
         use gpui_kit::component::Icon;
@@ -5663,7 +5679,6 @@ impl Detalhe {
         let lote = self.importacao;
         let ocupado = self.importando();
         let sem_sessao = self.aberta.is_none();
-        let leva = self.leva;
         let visiveis = self.acervo.total_visivel();
         let tema = cx.theme();
         let (borda, apagado, primaria, acento) = (
@@ -5672,22 +5687,6 @@ impl Detalhe {
             tema.primary,
             tema.accent,
         );
-
-        // "Entram como": as fichas do site, a escolhida em âmbar.
-        let ficha =
-            |rotulo: &'static str, valor: Option<EstadoNoBalcao>, cx: &mut Context<Self>| {
-                estilo::ficha(
-                    SharedString::from(format!("detalhe-leva-{rotulo}")),
-                    rotulo,
-                    None,
-                    leva == valor,
-                    cx,
-                )
-                .disabled(ocupado)
-                .on_click(
-                    cx.listener(move |tela, _ev: &bool, _window, cx| tela.escolher_leva(valor, cx)),
-                )
-            };
 
         let andamento = match lote {
             // 🔑 **O número inteiro, e não só o que já foi.** Quem mandou 500
@@ -5698,25 +5697,19 @@ impl Detalhe {
                 } else {
                     String::new()
                 };
-                format!("importando… {} de {}{falhas}", l.prontas(), l.total)
+                Some(format!(
+                    "importando… {} de {}{falhas}",
+                    l.prontas(),
+                    l.total
+                ))
             }
             // ⚠️ **"importadas", e não "subiram"** — nada sobe no passo 1.
-            Some(l) if l.falhas > 0 => {
-                format!("{} importadas · {} não entraram", l.feitas, l.falhas)
-            }
-            Some(l) => format!("{} importadas", l.feitas),
-            None => match leva {
-                None => "Arraste as fotos (ou a pasta) para cá. Sem marcação vai para o \
-                         acervo à venda; a marcação de verdade nasce no balcão."
-                    .to_string(),
-                Some(EstadoNoBalcao::Disponivel) => {
-                    "À venda: o cliente vê com marca d'água e pode comprar pela galeria."
-                        .to_string()
-                }
-                Some(EstadoNoBalcao::LevadaNoBalcao) => {
-                    "Levadas: o cliente já pagou na hora e baixa o original.".to_string()
-                }
-            },
+            Some(l) if l.falhas > 0 => Some(format!(
+                "{} importadas · {} não entraram",
+                l.feitas, l.falhas
+            )),
+            Some(l) => Some(format!("{} importadas", l.feitas)),
+            None => None,
         };
 
         div()
@@ -5775,41 +5768,41 @@ impl Detalhe {
                     }),
                 sem_sessao || visiveis == 0,
             ))
-            .child(div().text_xs().text_color(apagado).child("Entram como"))
-            .child(ficha("sem marcação", None, cx))
-            .child(ficha("à venda", Some(EstadoNoBalcao::Disponivel), cx))
-            .child(ficha("levadas", Some(EstadoNoBalcao::LevadaNoBalcao), cx))
             // 🧾 **A faixa da próxima leva** — a segunda escolha antes dos
             // arquivos, como no site: a sessão mista sobe em levas, e sem ela
             // toda foto nascia na faixa da galeria.
             .children(self.escolha_da_leva.as_ref().map(|escolha| {
-                div().w(px(232.)).child(estilo::campo_pequeno(
+                div().w(px(216.)).flex_none().child(estilo::campo_pequeno(
                     Select::new(escolha).xsmall().placeholder("Faixa…"),
                 ))
             }))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_w(px(200.))
-                    .gap(px(4.))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(apagado)
-                            .truncate()
-                            .child(andamento),
-                    )
-                    // 🔑 **A barra só existe enquanto o lote corre.**
-                    .when_some(lote.filter(|l| !l.terminou()), |linha, l| {
-                        linha.child(
-                            Progress::new("progresso-do-lote")
-                                .value(l.porcento())
-                                .h(px(4.)),
+            // O andamento só aparece com lote: parado, a barra não diz nada.
+            .when_some(andamento, |barra, andamento| {
+                barra.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_none()
+                        .w(px(200.))
+                        .gap(px(4.))
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(apagado)
+                                .truncate()
+                                .child(andamento),
                         )
-                    }),
-            )
+                        // 🔑 **A barra só existe enquanto o lote corre.**
+                        .when_some(lote.filter(|l| !l.terminou()), |linha, l| {
+                            linha.child(
+                                Progress::new("progresso-do-lote")
+                                    .value(l.porcento())
+                                    .h(px(4.)),
+                            )
+                        }),
+                )
+            })
+            .children(barra)
     }
 
     /// As fichas dos recortes, com a conta de cada um.
@@ -5959,19 +5952,18 @@ impl Detalhe {
         let marcadas = self.quantas_marcadas();
         let todas_marcadas = visiveis > 0 && marcadas == visiveis;
         let tema = cx.theme();
-        let (borda, apagado, acento) = (tema.border, tema.muted_foreground, tema.accent);
+        let (apagado, acento) = (tema.muted_foreground, tema.accent);
         let pode_revelar = self.tem_o_que_revelar();
 
+        // 📏 Sem faixa própria desde 11/out/2026: é o fim da barra de
+        // importação (`envio`), para tudo caber numa linha.
         div()
             .flex()
-            .flex_none()
+            .flex_1()
             .flex_wrap()
             .items_center()
+            .justify_end()
             .gap(px(6.))
-            .px(px(12.))
-            .py(px(6.))
-            .border_b_1()
-            .border_color(borda)
             // 🔑 A tela do cliente e os recortes moram em cima da tira; aqui só
             // quando ela está escondida — sem isto, fechar a tira os levava
             // junto.
