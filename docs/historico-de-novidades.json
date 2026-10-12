@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.150",
+    "data": "2026-10-11",
+    "titulo": "Na tela do cliente em grade, o número de cada foto não muda mais quando você filtra.",
+    "importante": false,
+    "novidades": [
+      "Na tela do cliente em grade, o número embaixo de cada foto agora é sempre o mesmo, com ou sem filtro. Antes, ao passar de \"Todas\" para \"Sinalizadas\", as fotos eram numeradas de novo (a 4 virava a 2), e o cliente se confundia na hora de escolher. Agora o filtro só esconde fotos: a 4 continua sendo a 4.",
+      "Os botões \"Tela do cliente\" e \"Uma foto / Grade\" foram para junto dos filtros (Todas, Classificadas, Sinalizadas…), em cima da tira de fotos, como no Lightroom. Aceso quer dizer ligado.",
+      "Com dois monitores, a pergunta \"Em qual monitor abrir a tela do cliente?\" agora mostra também o nome de cada monitor (por exemplo, \"Monitor 2 · LG FULL HD · 1920 × 1080\"), para não haver dúvida quando os dois têm o mesmo tamanho."
+    ],
+    "por_que_atualizar": "Para o cliente escolher as fotos pelo número sem confusão, mesmo quando você filtra a grade."
+  },
+  {
     "versao": "0.1.149",
     "data": "2026-10-11",
     "titulo": "No tema Lightroom, a nota da foto volta a aparecer nas estrelas.",
