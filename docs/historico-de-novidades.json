@@ -1,5 +1,16 @@
 [
   {
+    "versao": "0.1.152",
+    "data": "2026-10-11",
+    "titulo": "Na Revelação, \"Tela do cliente\" fica junto dos filtros, em cima da tira de fotos.",
+    "importante": false,
+    "novidades": [
+      "Na Revelação, os botões \"Tela do cliente\" e \"Uma foto / Grade\" foram para junto dos filtros (Todas, Classificadas, Sinalizadas…), em cima da tira de fotos — no mesmo lugar e com a mesma aparência da tela da sessão. O botão \"Tela do cliente\" saiu da barra de cima.",
+      "Na Revelação o cliente continua vendo a foto aberta; o modo escolhido ali (uma foto ou grade) vale quando você volta para a galeria."
+    ],
+    "por_que_atualizar": "Para achar a tela do cliente no mesmo lugar na sessão e na Revelação."
+  },
+  {
     "versao": "0.1.151",
     "data": "2026-10-11",
     "titulo": "Desconto no total direto na tela de pagamento, e a barra da sessão numa linha só.",
