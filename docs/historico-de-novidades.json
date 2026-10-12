@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.153",
+    "data": "2026-10-12",
+    "titulo": "Na Revelação, a tela do cliente continua em grade e mostra a foto sendo revelada.",
+    "importante": false,
+    "novidades": [
+      "Com a tela do cliente em \"Grade\", entrar na Revelação não muda mais para \"Uma foto\": a grade continua na tela do cliente, com os mesmos números, e a foto que você está revelando aparece no lugar dela, mudando a cada ajuste.",
+      "O destaque (a moldura amarela) acompanha a foto aberta na Revelação quando você anda pela tira.",
+      "Em \"Uma foto\" nada muda: o cliente vê a foto aberta em tela inteira, como antes."
+    ],
+    "por_que_atualizar": "Para o cliente continuar vendo a grade numerada enquanto você revela uma das fotos."
+  },
+  {
     "versao": "0.1.152",
     "data": "2026-10-11",
     "titulo": "Na Revelação, \"Tela do cliente\" fica junto dos filtros, em cima da tira de fotos.",

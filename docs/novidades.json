@@ -1,10 +1,11 @@
 {
-  "versao": "0.1.152",
-  "titulo": "Na Revelação, \"Tela do cliente\" fica junto dos filtros, em cima da tira de fotos.",
+  "versao": "0.1.153",
+  "titulo": "Na Revelação, a tela do cliente continua em grade e mostra a foto sendo revelada.",
   "importante": false,
   "novidades": [
-    "Na Revelação, os botões \"Tela do cliente\" e \"Uma foto / Grade\" foram para junto dos filtros (Todas, Classificadas, Sinalizadas…), em cima da tira de fotos — no mesmo lugar e com a mesma aparência da tela da sessão. O botão \"Tela do cliente\" saiu da barra de cima.",
-    "Na Revelação o cliente continua vendo a foto aberta; o modo escolhido ali (uma foto ou grade) vale quando você volta para a galeria."
+    "Com a tela do cliente em \"Grade\", entrar na Revelação não muda mais para \"Uma foto\": a grade continua na tela do cliente, com os mesmos números, e a foto que você está revelando aparece no lugar dela, mudando a cada ajuste.",
+    "O destaque (a moldura amarela) acompanha a foto aberta na Revelação quando você anda pela tira.",
+    "Em \"Uma foto\" nada muda: o cliente vê a foto aberta em tela inteira, como antes."
   ],
-  "por_que_atualizar": "Para achar a tela do cliente no mesmo lugar na sessão e na Revelação."
+  "por_que_atualizar": "Para o cliente continuar vendo a grade numerada enquanto você revela uma das fotos."
 }
