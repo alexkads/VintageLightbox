@@ -1,9 +1,11 @@
 {
-  "versao": "0.1.154",
-  "titulo": "Na Revelação, a miniatura da foto aberta não perde mais o corte.",
+  "versao": "0.1.155",
+  "titulo": "Na tela do cliente em grade: o filtro da Revelação passa a valer e as estrelas da nota aparecem.",
   "importante": false,
   "novidades": [
-    "Na Revelação, ao clicar numa foto da tira, a miniatura dela trocava para a foto inteira, sem o corte e o giro que você tinha feito. Agora a miniatura continua mostrando a foto enquadrada, igual ao que aparece no palco."
+    "Na Revelação, os filtros da tira (Todas, Classificadas, Sinalizadas, À venda, Sem nota) agora filtram também a grade da tela do cliente. Antes, com \"Sinalizadas\" aceso, o cliente continuava vendo todas as fotos. A foto que você está revelando fica sempre na grade, mesmo fora do filtro.",
+    "Na grade da tela do cliente, cada foto mostra as estrelas da nota, no canto de cima.",
+    "A pergunta \"Em qual monitor abrir a tela do cliente?\" ficou mais clara: cada monitor aparece desenhado como uma tela, no tamanho e na ordem em que estão na mesa, com o nome e a resolução embaixo. O que vai receber a tela do cliente fica em destaque."
   ],
-  "por_que_atualizar": "Para a tira da Revelação mostrar as fotos com o corte que você fez."
+  "por_que_atualizar": "Para o cliente ver na grade só as fotos do filtro que você escolheu na Revelação, com a nota de cada uma."
 }
