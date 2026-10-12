@@ -765,6 +765,30 @@ pub fn ficha(
         }))
 }
 
+/// Um botão no molde da [`ficha`], para morar na mesma barra que elas: a
+/// mesma altura e o mesmo canto, e o aceso do tema quando `acesa`.
+///
+/// É `Button` (e não `Toggle`) porque o kit só abre menu a partir de botão.
+pub fn ficha_de_acao(id: impl Into<SharedString>, acesa: bool, cx: &App) -> Button {
+    let controle = m().botao_pequeno;
+    botao_contorno_pequeno(id, cx)
+        .flex_none()
+        .h(px(controle.altura))
+        .px(px(controle.lados))
+        .map(|f| {
+            if crate::tema::cantos_retos() {
+                f.rounded(crate::tema::canto(2.))
+            } else {
+                f.rounded_full()
+            }
+        })
+        .when(acesa, |f| {
+            f.bg(crate::tema::cores::aceso())
+                .border_color(crate::tema::cores::aceso())
+                .text_color(crate::tema::cores::sobre_aceso())
+        })
+}
+
 /// Um botão de ligar e desligar (o `Toggle` do site): contorno apagado, e o
 /// aceso do tema quando ligado (o âmbar do site, o cinza do Lightroom).
 pub fn alternador(id: impl Into<SharedString>, ligado: bool, cx: &App) -> Button {
