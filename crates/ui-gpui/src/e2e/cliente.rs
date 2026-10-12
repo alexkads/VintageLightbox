@@ -271,6 +271,35 @@ fn a_tela_do_cliente_em_grade_numera_as_fotos_do_recorte(cx: &mut TestAppContext
             )
         })
         .expect("a janela está aberta");
+
+    // 🚨 **O filtro da tira da Revelação filtra a grade do cliente** (dono,
+    // 12/out/2026: com "Sinalizadas" aceso, a tela do cliente seguia com
+    // todas). Ficam as sinalizadas e a foto aberta — como na tira —, cada uma
+    // com o número de sempre.
+    e.revelacao(cx, |tela, _w, cx| {
+        tela.recortar(
+            Filtro::Situacao(biblioteca_core::Estado::LevadaNoBalcao),
+            cx,
+        )
+    });
+    let esperados: Vec<usize> = ids
+        .iter()
+        .zip(&levadas)
+        .enumerate()
+        .filter(|(_, (id, levada))| **levada || id.as_str() == "a")
+        .map(|(i, _)| i + 1)
+        .collect();
+    let (numeros, foco, ..) = grade_no_cliente(&e, cx).expect("a grade");
+    assert_eq!(numeros, esperados, "só as do filtro da tira, e a aberta");
+    assert!(numeros.len() < todas.len(), "o filtro encolheu a grade");
+    assert_eq!(
+        foco.map(|f| numeros[f]),
+        posicao("a").map(|p| p + 1),
+        "o foco continua na foto aberta"
+    );
+    e.revelacao(cx, |tela, _w, cx| tela.recortar(Filtro::Todas, cx));
+    assert_eq!(grade_no_cliente(&e, cx).map(|g| g.0), Some(todas.clone()));
+
     e.teclar(cx, "escape");
     e.app(cx, |app, _w, _cx| assert_eq!(app.tela(), Tela::Sessao));
     assert!(

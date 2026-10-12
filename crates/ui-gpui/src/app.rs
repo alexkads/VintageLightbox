@@ -4999,9 +4999,11 @@ impl Aplicativo {
         let do_site = aberta
             .as_deref()
             .map(|id| id.strip_prefix(persistencia::PREFIXO_DO_SITE).unwrap_or(id));
-        let (grade, chave) = self
-            .detalhe
-            .update(cx, |tela, _| tela.grade_para_o_cliente_com(do_site));
+        // O recorte é o da tira da Revelação — é lá que o operador filtra.
+        let recorte = self.revelacao.read(cx).recorte();
+        let (grade, chave) = self.detalhe.update(cx, |tela, _| {
+            tela.grade_para_o_cliente_com(do_site, Some(recorte))
+        });
         let saiu_do_par = self.par_no_cliente.take().is_some();
         if forcar || saiu_do_par || self.grade_no_cliente.as_ref() != Some(&grade) {
             self.grade_no_cliente = Some(grade.clone());

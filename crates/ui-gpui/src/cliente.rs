@@ -94,6 +94,10 @@ pub struct ItemDaGrade {
     pub chave: String,
     /// O cliente já disse que leva esta.
     pub escolhida: bool,
+    /// ⭐ A nota de 1 a 5 — zero é sem nota. Vai em estrelas sobre a foto
+    /// (dono, 12/out/2026: *"preciso que apareça as estrelinhas da
+    /// classificação"*).
+    pub nota: u8,
 }
 
 /// A grade que a raiz manda à segunda tela: as fotos do recorte do operador
@@ -1812,6 +1816,27 @@ impl Cliente {
                                 quadro.bg(gpui_kit::rgb(0x141414))
                             })
                             .children(imagem.map(|imagem| img(imagem).size_full()))
+                            // ⭐ A nota, no canto de cima à esquerda — o
+                            // mesmo lugar das estrelas na tira do operador.
+                            // Sobre um fundo escuro: a foto por baixo pode
+                            // ser clara, e a estrela âmbar sumiria nela.
+                            .when(item.nota > 0, |quadro| {
+                                quadro.child(
+                                    div()
+                                        .debug_selector(|| "grade-do-cliente-nota".into())
+                                        .absolute()
+                                        .top(px(6.))
+                                        .left(px(6.))
+                                        .px(px(selo * 0.4))
+                                        .rounded(px(999.))
+                                        .bg(gpui_kit::black().opacity(0.55))
+                                        .text_size(px(selo))
+                                        .text_color(ambar)
+                                        .child(SharedString::from(
+                                            "★".repeat(usize::from(item.nota.min(5))),
+                                        )),
+                                )
+                            })
                             .when(item.escolhida, |quadro| {
                                 quadro.child(
                                     div()
@@ -2516,6 +2541,7 @@ mod testes {
                     numero: i + 1,
                     chave: format!("site:f{i}"),
                     escolhida: i == 2,
+                    nota: 0,
                 })
                 .collect(),
             foco,

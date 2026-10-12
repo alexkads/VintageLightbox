@@ -2266,7 +2266,7 @@ impl Detalhe {
     /// apagada ficam de fora e o número delas fica vago
     /// (`biblioteca_core::grade_do_cliente`).
     pub fn grade_para_o_cliente(&mut self) -> crate::cliente::GradeParaOCliente {
-        self.grade_para_o_cliente_com(None).0
+        self.grade_para_o_cliente_com(None, None).0
     }
 
     /// A grade com o foco na foto `aberta` (o id do site, sem prefixo) — a que
@@ -2275,38 +2275,60 @@ impl Detalhe {
     ///
     /// 🔑 **Na Revelação o foco é a foto aberta, e não o da galeria**: o
     /// operador anda pela tira de lá, e a galeria fica parada onde estava.
+    ///
+    /// 🚨 **`recorte_da_tira`: na Revelação quem filtra é a tira de lá** (dono,
+    /// 12/out/2026: com "Sinalizadas" aceso na tira, a tela do cliente seguia
+    /// mostrando as 30). A galeria fica parada no recorte em que estava, e o
+    /// operador filtra onde está olhando. Como na tira, a foto aberta fica
+    /// mesmo fora do recorte — é nela que ele está trabalhando.
     pub fn grade_para_o_cliente_com(
         &mut self,
         aberta: Option<&str>,
+        recorte_da_tira: Option<Filtro>,
     ) -> (crate::cliente::GradeParaOCliente, Option<String>) {
         use biblioteca_core::grade_do_cliente as conta;
-        let total = self.acervo.total_visivel();
-        let fotos: Vec<(String, bool, bool)> = (0..total)
-            .filter_map(|p| self.acervo.visivel(p))
-            .map(|f| {
+        // (posição na sessão inteira, foto): o recorte da galeria, ou o da
+        // tira da Revelação sobre a sessão inteira.
+        let do_recorte: Vec<(usize, &acervo::Foto)> = match recorte_da_tira {
+            Some(filtro) => self
+                .acervo
+                .todas()
+                .iter()
+                .enumerate()
+                .filter(|(_, f)| filtro.bate(f) || aberta == Some(f.id.as_str()))
+                .collect(),
+            None => (0..self.acervo.total_visivel())
+                .filter_map(|p| Some((self.acervo.posicao_no_acervo(p)?, self.acervo.visivel(p)?)))
+                .collect(),
+        };
+        let fotos: Vec<(String, bool, bool, u8)> = do_recorte
+            .iter()
+            .map(|(_, f)| {
                 (
                     f.id.clone(),
                     f.rejeitada || f.apagada,
                     f.estado == acervo::Estado::LevadaNoBalcao,
+                    f.nota.unwrap_or(0).min(5) as u8,
                 )
             })
             .collect();
-        let recorte: Vec<(usize, bool)> = fotos
+        let recorte: Vec<(usize, bool)> = do_recorte
             .iter()
-            .enumerate()
-            .map(|(p, (_, oculta, _))| (self.acervo.posicao_no_acervo(p).unwrap_or(p), *oculta))
+            .zip(&fotos)
+            .map(|((na_sessao, _), (_, oculta, ..))| (*na_sessao, *oculta))
             .collect();
         let visiveis = conta::itens_do_recorte(&recorte);
         let itens: Vec<crate::cliente::ItemDaGrade> = visiveis
             .iter()
             .map(|item| {
-                let (id, _, escolhida) = &fotos[item.posicao];
+                let (id, _, escolhida, nota) = &fotos[item.posicao];
                 // A revelada local vence: a mesma imagem da célula do operador.
                 self.resolver_revelada(id);
                 crate::cliente::ItemDaGrade {
                     numero: item.numero,
                     chave: self.chave_da_foto(id),
                     escolhida: *escolhida,
+                    nota: *nota,
                 }
             })
             .collect();
@@ -9900,6 +9922,9 @@ mod testes {
                 tela.focar_foto("a", cx);
                 let grade = tela.grade_para_o_cliente();
                 assert_eq!(grade.por_linha, 6);
+                // ⭐ Cada foto leva a nota dela, para as estrelas da célula.
+                let notas: Vec<u8> = grade.itens.iter().map(|i| i.nota).collect();
+                assert_eq!(notas, [4, 5, 5], "a, c e e, na ordem");
                 let numeros: Vec<usize> = grade.itens.iter().map(|i| i.numero).collect();
                 let esperados: Vec<usize> = ["a", "c", "e"]
                     .into_iter()

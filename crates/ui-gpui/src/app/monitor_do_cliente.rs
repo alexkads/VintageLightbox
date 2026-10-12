@@ -133,70 +133,259 @@ impl Aplicativo {
 
         let escolha = Escolha::ler(window, cx);
         let do_app = escolha.do_app;
-        let botoes = escolha.todos.iter().enumerate().fold(
-            crate::dialogo::rodape_da_pergunta(cx).flex_wrap(),
-            |rodape, (i, monitor)| {
+        let tema = cx.theme();
+        let (borda, apagado, primaria, sobre_primaria, fundo, cartao) = (
+            tema.border,
+            tema.muted_foreground,
+            tema.primary,
+            tema.primary_foreground,
+            tema.background,
+            tema.muted,
+        );
+
+        // 🖥️ **Cada monitor desenhado como uma tela** (dono, 12/out/2026:
+        // *"deixe esse modal mais bonito, com um desenho de uma tela"*), na
+        // ordem e na proporção em que estão na mesa: o operador reconhece o
+        // monitor pela forma antes de ler o nome. A maior tela dá a escala, e
+        // as outras saem proporcionais a ela.
+        const MAIOR_TELA: f32 = 184.;
+        let maior = escolha
+            .todos
+            .iter()
+            .map(|m| f32::from(m.limites.size.width).max(f32::from(m.limites.size.height)))
+            .fold(1.0_f32, f32::max);
+        let telas = escolha.todos.iter().enumerate().fold(
+            gpui_kit::div()
+                .flex()
+                .flex_wrap()
+                .items_end()
+                .justify_center()
+                .gap(px(20.))
+                .pt(px(8.)),
+            |linha, (i, monitor)| {
                 let id = monitor.id;
-                let nome = format!("escolher-monitor-{}", i + 1);
-                let botao = if Some(id) == escolha.sugerido {
-                    estilo::botao_primario(nome, cx)
-                } else {
-                    estilo::botao_contorno(nome, cx)
-                };
-                rodape.child(
-                    botao
-                        .child(cliente::rotulo(i + 1, monitor, do_app))
+                let destacado = Some(id) == escolha.sugerido;
+                let e_o_do_app = do_app == Some(id);
+                let tamanho = monitor.limites.size;
+                let (largura, altura) = (
+                    f32::from(tamanho.width) / maior * MAIOR_TELA,
+                    f32::from(tamanho.height) / maior * MAIOR_TELA,
+                );
+                let contorno = if destacado { primaria } else { borda };
+                let seletor = format!("escolher-monitor-{}", i + 1);
+                let dica = cliente::rotulo(i + 1, monitor, do_app);
+                linha.child(
+                    v_flex()
+                        .id(gpui_kit::SharedString::from(seletor.clone()))
+                        .debug_selector(move || seletor)
+                        .items_center()
+                        .gap(px(10.))
+                        .p(px(12.))
+                        .min_w(px(168.))
+                        .rounded(crate::tema::canto(12.))
+                        .border_1()
+                        .border_color(if destacado {
+                            primaria.opacity(0.6)
+                        } else {
+                            gpui_kit::transparent_black()
+                        })
+                        .when(destacado, |c| c.bg(primaria.opacity(0.08)))
+                        .hover(|c| c.bg(cartao))
+                        .cursor_pointer()
+                        .tooltip(move |window, cx| {
+                            gpui_kit::component::tooltip::Tooltip::new(dica.clone())
+                                .build(window, cx)
+                        })
                         .on_click(
                             cx.listener(move |app, _, _, cx| app.abrir_cliente_em(id, do_app, cx)),
+                        )
+                        // A tela, o pescoço e o pé.
+                        .child(
+                            v_flex()
+                                .items_center()
+                                .child(
+                                    gpui_kit::div()
+                                        .relative()
+                                        .w(px(largura))
+                                        .h(px(altura))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .rounded(crate::tema::canto(6.))
+                                        .border_2()
+                                        .border_color(contorno)
+                                        .bg(if destacado {
+                                            primaria.opacity(0.18)
+                                        } else {
+                                            fundo
+                                        })
+                                        // O número, grande: é o que as teclas
+                                        // 1–4 escolhem.
+                                        .child(
+                                            gpui_kit::div()
+                                                .text_size(px((altura * 0.42).clamp(18., 44.)))
+                                                .font_weight(gpui_kit::FontWeight::BOLD)
+                                                .text_color(if destacado {
+                                                    primaria
+                                                } else {
+                                                    apagado
+                                                })
+                                                .child((i + 1).to_string()),
+                                        )
+                                        // Uma janelinha no canto: é nesta
+                                        // tela que o app está aberto.
+                                        .when(e_o_do_app, |tela| {
+                                            tela.child(
+                                                gpui_kit::div()
+                                                    .absolute()
+                                                    .left(px(8.))
+                                                    .bottom(px(8.))
+                                                    .w(px(largura * 0.3))
+                                                    .h(px(altura * 0.3))
+                                                    .rounded(crate::tema::canto(3.))
+                                                    .border_1()
+                                                    .border_color(apagado)
+                                                    .bg(cartao)
+                                                    .child(
+                                                        gpui_kit::div()
+                                                            .h(px(4.))
+                                                            .rounded_t(crate::tema::canto(2.))
+                                                            .bg(apagado),
+                                                    ),
+                                            )
+                                        }),
+                                )
+                                .child(gpui_kit::div().w(px(14.)).h(px(8.)).bg(contorno))
+                                .child(
+                                    gpui_kit::div()
+                                        .w(px(56.))
+                                        .h(px(4.))
+                                        .rounded(px(2.))
+                                        .bg(contorno),
+                                ),
+                        )
+                        // O nome como o sistema o chama, e o tamanho.
+                        .child(
+                            v_flex()
+                                .items_center()
+                                .gap(px(2.))
+                                .child(
+                                    gpui_kit::div()
+                                        .text_sm()
+                                        .font_weight(gpui_kit::FontWeight::MEDIUM)
+                                        .child(
+                                            monitor
+                                                .nome
+                                                .clone()
+                                                .unwrap_or_else(|| format!("Monitor {}", i + 1)),
+                                        ),
+                                )
+                                .child(gpui_kit::div().text_xs().text_color(apagado).child(
+                                    format!(
+                                        "{} × {}",
+                                        f32::from(tamanho.width).round() as i32,
+                                        f32::from(tamanho.height).round() as i32,
+                                    ),
+                                )),
+                        )
+                        // Para que serve cada uma, numa pílula.
+                        .child(
+                            gpui_kit::div()
+                                .px(px(8.))
+                                .py(px(2.))
+                                .rounded(px(999.))
+                                .text_xs()
+                                .when(destacado, |p| p.bg(primaria).text_color(sobre_primaria))
+                                .when(!destacado, |p| {
+                                    p.border_1().border_color(borda).text_color(apagado)
+                                })
+                                .child(match (destacado, e_o_do_app) {
+                                    (true, true) => "Abre aqui · onde está o app",
+                                    (true, false) => "Abre aqui",
+                                    (false, true) => "Onde está o app",
+                                    (false, false) => "Disponível",
+                                }),
                         ),
                 )
             },
         );
 
-        let miolo =
-            v_flex()
-                .id("escolha-de-monitor")
-                .key_context(CONTEXTO)
-                .track_focus(&self.foco_da_escolha)
-                .on_action(cx.listener(|app, _: &ConfirmarMonitor, window, cx| {
-                    app.confirmar_monitor(window, cx)
-                }))
-                .on_action(
-                    cx.listener(|app, _: &CancelarEscolhaDeMonitor, window, cx| {
-                        app.cancelar_escolha_de_monitor(window, cx)
-                    }),
-                )
-                .on_action(cx.listener(|app, _: &PrimeiroMonitor, window, cx| {
-                    app.escolher_monitor(0, window, cx)
-                }))
-                .on_action(cx.listener(|app, _: &SegundoMonitor, window, cx| {
-                    app.escolher_monitor(1, window, cx)
-                }))
-                .on_action(cx.listener(|app, _: &TerceiroMonitor, window, cx| {
-                    app.escolher_monitor(2, window, cx)
-                }))
-                .on_action(cx.listener(|app, _: &QuartoMonitor, window, cx| {
+        // O rodapé: as teclas à esquerda, o botão do destacado à direita.
+        let nome_do_destacado = escolha
+            .todos
+            .iter()
+            .enumerate()
+            .find(|(_, m)| Some(m.id) == escolha.sugerido)
+            .map(|(i, m)| {
+                m.nome
+                    .clone()
+                    .unwrap_or_else(|| format!("Monitor {}", i + 1))
+            });
+        let rodape = crate::dialogo::rodape_da_pergunta(cx)
+            .justify_between()
+            .items_center()
+            .child(
+                gpui_kit::component::h_flex()
+                    .flex_wrap()
+                    .gap(px(4.))
+                    .text_xs()
+                    .text_color(apagado)
+                    .child(estilo::tecla("1"))
+                    .child("–")
+                    .child(estilo::tecla("4"))
+                    .child("escolhem ·")
+                    .child(estilo::tecla("F"))
+                    .child("tela cheia ou janela ·")
+                    .child(estilo::tecla("Esc"))
+                    .child("cancela"),
+            )
+            .children(nome_do_destacado.map(|nome| {
+                estilo::botao_primario("abrir-no-monitor-destacado", cx)
+                    .child(format!("Abrir em {nome}"))
+                    .child(estilo::tecla("Enter"))
+                    .on_click(cx.listener(|app, _, window, cx| app.confirmar_monitor(window, cx)))
+            }));
+
+        let miolo = v_flex()
+            .id("escolha-de-monitor")
+            .key_context(CONTEXTO)
+            .track_focus(&self.foco_da_escolha)
+            .on_action(cx.listener(|app, _: &ConfirmarMonitor, window, cx| {
+                app.confirmar_monitor(window, cx)
+            }))
+            .on_action(
+                cx.listener(|app, _: &CancelarEscolhaDeMonitor, window, cx| {
+                    app.cancelar_escolha_de_monitor(window, cx)
+                }),
+            )
+            .on_action(cx.listener(|app, _: &PrimeiroMonitor, window, cx| {
+                app.escolher_monitor(0, window, cx)
+            }))
+            .on_action(cx.listener(|app, _: &SegundoMonitor, window, cx| {
+                app.escolher_monitor(1, window, cx)
+            }))
+            .on_action(cx.listener(|app, _: &TerceiroMonitor, window, cx| {
+                app.escolher_monitor(2, window, cx)
+            }))
+            .on_action(
+                cx.listener(|app, _: &QuartoMonitor, window, cx| {
                     app.escolher_monitor(3, window, cx)
-                }))
-                .gap(px(8.))
-                .child(crate::dialogo::miolo_da_pergunta(
-                    "pergunta-do-monitor",
-                    "Em qual monitor abrir a tela do cliente?",
-                    "No monitor do cliente ela abre em tela cheia; F alterna para janela.",
-                    cx,
-                ))
-                .child(
-                    gpui_kit::div()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child("Enter abre no destacado · 1–4 escolhem da esquerda para a direita"),
-                )
-                .into_any_element();
+                }),
+            )
+            .gap(px(12.))
+            .child(crate::dialogo::miolo_da_pergunta(
+                "pergunta-do-monitor",
+                "Em qual monitor abrir a tela do cliente?",
+                "Escolha a tela que fica virada para o cliente. Nela a foto abre em tela cheia.",
+                cx,
+            ))
+            .child(telas)
+            .into_any_element();
 
         crate::dialogo::desenhar_conteudo(
             Some(miolo),
-            Some(botoes.into_any_element()),
-            crate::dialogo::Jeito::dialogo(560.),
+            Some(rodape.into_any_element()),
+            crate::dialogo::Jeito::dialogo(640.),
             |app, window, cx| app.cancelar_escolha_de_monitor(window, cx),
             window,
             cx,
