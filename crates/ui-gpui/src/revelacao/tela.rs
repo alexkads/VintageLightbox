@@ -4421,6 +4421,59 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
+    /// 🚨 **A miniatura da foto aberta sai enquadrada** (dono, 12/out/2026:
+    /// *"quando eu clico na foto do filmstrip em revelação parece outra
+    /// visualização, como se perdesse o corte"*). O motor devolve a foto
+    /// inteira; a tira recebia isso cru, e a miniatura cortada virava a foto
+    /// sem corte assim que a foto era aberta.
+    #[gpui_kit::test]
+    fn a_miniatura_da_foto_aberta_leva_o_enquadramento(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let janela = janela(cx, previews.clone());
+        let lados = |tela: &Revelacao| match tela.miniaturas_da_tira.espiar("id-retrato.jpg") {
+            Some(Miniatura::Pronta(imagem)) => {
+                let t = imagem.size(0);
+                (t.width.0, t.height.0)
+            }
+            _ => panic!("a célula da tira não recebeu a foto revelada"),
+        };
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+                // Deitada, 4 por 1.
+                if let Some(aberta) = tela.aberta.as_mut() {
+                    aberta.revelada = Some(DynamicImage::ImageRgba8(RgbaImage::new(800, 200)));
+                }
+                let corte = |x: f32, largura: f32| persistencia::Corte {
+                    x: Some(x),
+                    y: Some(0.0),
+                    largura: Some(largura),
+                    altura: Some(1.0),
+                    rotacao: Some(0),
+                    angulo: Some(0.0),
+                    ..Default::default()
+                };
+                tela.corte = corte(0.0, 1.0);
+                tela.atualizar_a_tira_com_o_revelado();
+                let (l, a) = lados(tela);
+                assert!(l > a * 3, "sem corte, a foto inteira: {l}×{a}");
+
+                // O operador ficou só com o quarto do meio: um quadrado.
+                tela.corte = corte(0.25, 0.25);
+                tela.atualizar_a_tira_com_o_revelado();
+                let (l, a) = lados(tela);
+                assert!(
+                    l.abs_diff(a) <= 2,
+                    "a miniatura é o que foi enquadrado, e não a foto inteira: {l}×{a}"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
     /// 🚨 **Esquecer uma miniatura sem mandar reler deixa "sem prévia" na
     /// tela** (dono, 18/set/2026, logo depois de clicar em "Sincronizar 22":
     /// *"ficou sem prévia nas miniaturas do filmstrip, e só atualiza quando eu

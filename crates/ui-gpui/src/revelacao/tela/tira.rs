@@ -698,7 +698,14 @@ impl Revelacao {
         // Convertida no tamanho em que se desenha (o dobro, pela tela retina).
         let lado = altura_da_tira::lado_da_miniatura(self.tira.altura);
         let largura = (lado * altura_da_tira::PROPORCAO * 2.0) as u32;
-        let pequena = revelada.thumbnail(largura, (lado * 2.0) as u32);
+        // 🚨 **Com o enquadramento.** O `revelada` é a foto inteira — o corte
+        // e o giro só entram na exibição —, e ir à tira assim trocava a
+        // miniatura enquadrada pela foto sem corte no instante em que ela era
+        // aberta (dono, 12/out/2026: *"como se perdesse o corte"*). É a mesma
+        // conta de `gravar_a_revelada`, que é o que a tira lê do cache.
+        let enquadrada =
+            infrastructure::transformacao::aplicar(revelada, &self.enquadramento(), true);
+        let pequena = enquadrada.thumbnail(largura, (lado * 2.0) as u32);
         let id = foto.id.clone();
         self.miniaturas_da_tira
             .guardar(&id, Miniatura::Pronta(para_gpui(pequena)));
