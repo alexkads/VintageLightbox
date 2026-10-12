@@ -37,6 +37,8 @@ use infrastructure::transformacao;
 
 use crate::revelacao::processador::{Ajustes, Pedido, Processador};
 
+pub mod nome_do_monitor;
+
 /// O que a raiz manda revelar na segunda tela: a foto **sem marca** e a
 /// revelação dela.
 ///
@@ -429,6 +431,9 @@ pub struct Monitor<T> {
     pub id: T,
     /// O `uuid` do sistema — o que a [`Lembranca`] guarda.
     pub uuid: Option<String>,
+    /// Como o sistema o chama (`DELL U2720Q`), se disser — ver
+    /// [`nome_do_monitor`].
+    pub nome: Option<String>,
     pub limites: Bounds<Pixels>,
 }
 
@@ -463,18 +468,25 @@ pub fn monitor_sugerido<T: Copy + PartialEq>(
     monitor_lembrado(&pares, lembrado).or_else(|| monitor_do_cliente(&ids, do_app))
 }
 
-/// O texto do botão: `Monitor 2 · 3840 × 2160 · onde está o app`.
+/// O texto do botão: `Monitor 2 · DELL U2720Q · 3840 × 2160 · onde está o app`.
+///
+/// O nome é o que distingue dois monitores do mesmo tamanho; sem ele (o
+/// sistema não disse) o botão fica só com o número e o tamanho.
 ///
 /// O tamanho é o que o sistema informa — em pontos, e não em pixels do
 /// dispositivo: um 4K em escala 2 aparece como 1920 × 1080, que é o mesmo
 /// número que as configurações de tela do sistema mostram.
 pub fn rotulo<T: PartialEq>(numero: usize, monitor: &Monitor<T>, do_app: Option<T>) -> String {
     let tamanho = monitor.limites.size;
-    let mut texto = format!(
-        "Monitor {numero} · {} × {}",
+    let mut texto = format!("Monitor {numero}");
+    if let Some(nome) = &monitor.nome {
+        texto.push_str(&format!(" · {nome}"));
+    }
+    texto.push_str(&format!(
+        " · {} × {}",
         f32::from(tamanho.width).round() as i32,
         f32::from(tamanho.height).round() as i32,
-    );
+    ));
     if do_app.as_ref() == Some(&monitor.id) {
         texto.push_str(" · onde está o app");
     }
@@ -2055,6 +2067,7 @@ mod testes {
         Monitor {
             id,
             uuid: Some(uuid.into()),
+            nome: None,
             limites: Bounds {
                 origin: point(px(x), px(0.)),
                 size: size(px(largura), px(altura)),
@@ -2110,6 +2123,24 @@ mod testes {
         assert_eq!(
             rotulo(2, &tela, Some(2)),
             "Monitor 2 · 3840 × 2160 · onde está o app"
+        );
+    }
+
+    /// Dois monitores do mesmo tamanho só se distinguem pelo nome (dono,
+    /// 11/out/2026).
+    #[test]
+    fn o_botao_diz_o_nome_do_monitor_quando_o_sistema_o_da() {
+        let tela = Monitor {
+            nome: Some("DELL U2720Q".into()),
+            ..monitor(2, "hdmi", 1920., 3840., 2160.)
+        };
+        assert_eq!(
+            rotulo(2, &tela, Some(1)),
+            "Monitor 2 · DELL U2720Q · 3840 × 2160"
+        );
+        assert_eq!(
+            rotulo(2, &tela, Some(2)),
+            "Monitor 2 · DELL U2720Q · 3840 × 2160 · onde está o app"
         );
     }
 

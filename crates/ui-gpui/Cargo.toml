@@ -114,7 +114,9 @@ serde_json.workspace = true
 # SQLite na árvore falando com o mesmo arquivo.
 sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "sqlite", "migrate"] }
 chrono.workspace = true
-uuid.workspace = true
+# `v5` é do nome do monitor no Linux (`cliente/nome_do_monitor.rs`): o GPUI faz
+# o `uuid` do monitor assim, a partir do nome do conector.
+uuid = { workspace = true, features = ["v5"] }
 # O nome e o sistema do computador, para o painel dos balcões (`telemetria`).
 sysinfo = "0.36.1"
 
@@ -170,7 +172,9 @@ raw-window-handle = "0.6"
 # A janela minimizada e a volta da bandeja no Windows (`segundo_plano/janela.rs`).
 [target.'cfg(target_os = "windows")'.dependencies]
 raw-window-handle = "0.6"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+# `Win32_Graphics_Gdi` e `Win32_Devices_Display` são do nome do monitor na
+# escolha da tela do cliente (`cliente/nome_do_monitor.rs`).
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_Devices_Display"] }
 
 # No Linux o ícone da bandeja mora numa thread com o laço do GTK, que o GPUI não
 # roda (`src/bandeja.rs`). A mesma versão que o `tray-icon` traz.

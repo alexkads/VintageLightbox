@@ -67,10 +67,17 @@ impl Escolha {
         let todos = cliente::em_ordem(
             cx.displays()
                 .iter()
-                .map(|tela| Monitor {
-                    id: tela.id(),
-                    uuid: tela.uuid().ok().map(|uuid| uuid.to_string()),
-                    limites: tela.bounds(),
+                .map(|tela| {
+                    let uuid = tela.uuid().ok().map(|uuid| uuid.to_string());
+                    Monitor {
+                        id: tela.id(),
+                        nome: cliente::nome_do_monitor::do_sistema(
+                            tela.id().into(),
+                            uuid.as_deref(),
+                        ),
+                        uuid,
+                        limites: tela.bounds(),
+                    }
                 })
                 .collect(),
         );
