@@ -1,5 +1,18 @@
 [
   {
+    "versao": "0.1.151",
+    "data": "2026-10-11",
+    "titulo": "Desconto no total direto na tela de pagamento, e a barra da sessão numa linha só.",
+    "importante": false,
+    "novidades": [
+      "Finalizar pagamento: o desconto no total agora pode ser dado na própria tela, em reais ou em percentual (tecla D leva ao campo; escrever \"10%\" já vale como percentual). O total, o que falta e o troco mudam na hora.",
+      "A tela de pagamento foi reorganizada: o resumo mostra subtotal, desconto e total, com o que falta (ou o troco) em destaque, e o botão \"Concluir venda\" ficou mais visível. O campo do cartão ficou mais compacto, para a tela caber em monitores menores.",
+      "Em \"Quem fotografou, quem atendeu e quem auxiliou\", escolher o último nome da lista fechava a janela sem guardar a escolha. Corrigido, e o mesmo vale para as outras janelas com lista.",
+      "Na sessão, \"Importar fotos\", \"Exportar\", o zoom, \"Revelar\" e o bot ficaram numa linha só. As fotos entram sempre sem marcação, e a frase \"Arraste as fotos…\" saiu da barra (arrastar continua funcionando)."
+    ],
+    "por_que_atualizar": "Para dar desconto na hora de cobrar sem sair da tela de pagamento, e para a lista de funcionários não fechar a janela sozinha."
+  },
+  {
     "versao": "0.1.150",
     "data": "2026-10-11",
     "titulo": "Na tela do cliente em grade, o número de cada foto não muda mais quando você filtra.",
