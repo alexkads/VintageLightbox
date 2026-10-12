@@ -1646,6 +1646,7 @@ impl Caixa {
             .and_then(|f| cupom.itens.iter().find(|i| i.foto_id == f))
             .cloned();
 
+        let cabe_a_tela_cheia = self.painel_ref().is_some_and(|p| p.cabe);
         let botao_de_icone = |id: &'static str, icone: Icone, dica: &'static str| {
             crate::estilo::botao_icone(id, icone, 28., 16.)
                 .rounded(crate::tema::canto(6.))
@@ -1654,50 +1655,64 @@ impl Caixa {
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         };
 
-        let barra =
-            self.alca("caixa-alca", cx)
-                .gap(px(8.))
-                .px(px(12.))
-                .py(px(6.))
-                .border_b_1()
-                .border_color(borda)
-                .bg(realce.opacity(0.6))
-                .child(
-                    Icon::new(Icone::GripVertical)
-                        .size(px(16.))
-                        .text_color(apagado),
-                )
-                .child(Icon::new(Icone::ShoppingCart).size(px(16.)))
-                .child(
-                    div()
-                        .font_family(mono.clone())
-                        .text_sm()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child("CAIXA"),
-                )
-                .child(
-                    h_flex()
-                        .gap(px(6.))
-                        .text_xs()
-                        .text_color(apagado)
-                        .child(div().size(px(8.)).rounded_full().bg(cor))
-                        .child(situacao),
-                )
-                .child(div().flex_1())
-                .child(
-                    botao_de_icone("caixa-painel-atalhos", Icone::Keyboard, "Atalhos (F1)")
-                        .on_click(cx.listener(|t, _: &ClickEvent, w, cx| {
-                            t.abrir_dialogo(TipoDeDialogo::Atalhos, w, cx)
-                        })),
-                )
-                .child(
+        let barra = self
+            .alca("caixa-alca", cx)
+            .gap(px(8.))
+            .px(px(12.))
+            .py(px(6.))
+            .border_b_1()
+            .border_color(borda)
+            .bg(realce.opacity(0.6))
+            .child(
+                Icon::new(Icone::GripVertical)
+                    .size(px(16.))
+                    .text_color(apagado),
+            )
+            .child(Icon::new(Icone::ShoppingCart).size(px(16.)))
+            .child(
+                div()
+                    .font_family(mono.clone())
+                    .text_sm()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("CAIXA"),
+            )
+            .child(
+                h_flex()
+                    .gap(px(6.))
+                    .text_xs()
+                    .text_color(apagado)
+                    .child(div().size(px(8.)).rounded_full().bg(cor))
+                    .child(situacao),
+            )
+            .child(div().flex_1())
+            .child(
+                botao_de_icone("caixa-painel-atalhos", Icone::Keyboard, "Atalhos (F1)").on_click(
+                    cx.listener(|t, _: &ClickEvent, w, cx| {
+                        t.abrir_dialogo(TipoDeDialogo::Atalhos, w, cx)
+                    }),
+                ),
+            )
+            // 🖥️ A tela cheia se oferece aqui, ao lado do minimizar (dono,
+            // 12/out/2026: *"esse F10 deveria aparecer nessa tela com
+            // ícone"*) — só onde as colunas dela cabem.
+            .when(cabe_a_tela_cheia, |barra| {
+                barra.child(
                     botao_de_icone(
-                        "caixa-minimizar",
-                        Icone::Minimize2,
-                        "Minimizar — o total continua à vista (F9)",
+                        "caixa-tela-cheia",
+                        Icone::Maximize2,
+                        "Tela cheia — a venda inteira à vista (F10)",
                     )
-                    .on_click(cx.listener(|t, _: &ClickEvent, _, cx| t.alternar_painel(cx))),
-                );
+                    .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.alternar_tela_cheia(w, cx))),
+                )
+            })
+            .child(
+                botao_de_icone(
+                    "caixa-minimizar",
+                    Icone::Minimize2,
+                    "Minimizar — o total continua à vista (F9)",
+                )
+                .on_click(cx.listener(|t, _: &ClickEvent, _, cx| t.alternar_painel(cx))),
+            );
 
         let visor_texto = |titulo: String, detalhe: String, valor: String| {
             h_flex()

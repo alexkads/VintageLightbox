@@ -896,3 +896,26 @@ fn com_estorno_no_palco_o_cupom_espera_e_o_voltar_o_devolve(cx: &mut TestAppCont
         assert!(t.tela_cheia());
     });
 }
+
+#[gpui_kit::test]
+fn o_painel_pequeno_oferece_a_tela_cheia_ao_lado_do_minimizar(cx: &mut TestAppContext) {
+    let m = aberto(cx);
+    let mut ve = gpui_kit::VisualTestContext::from_window(m.raiz.into(), cx);
+    ve.run_until_parked();
+    // O ícone da barra, entre os atalhos e o minimizar.
+    let tela_cheia = ve
+        .debug_bounds("caixa-tela-cheia")
+        .expect("o botão de tela cheia na barra do painel");
+    let minimizar = ve
+        .debug_bounds("caixa-minimizar")
+        .expect("o minimizar da barra");
+    let atalhos = ve
+        .debug_bounds("caixa-painel-atalhos")
+        .expect("os atalhos da barra");
+    assert!(atalhos.right() <= tela_cheia.left() && tela_cheia.right() <= minimizar.left());
+    // O clique entra na tela cheia.
+    ve.simulate_mouse_move(tela_cheia.center(), None, gpui_kit::Modifiers::none());
+    ve.simulate_click(tela_cheia.center(), gpui_kit::Modifiers::none());
+    ve.run_until_parked();
+    na_janela(cx, &m, |t, _, _| assert!(t.tela_cheia()));
+}
