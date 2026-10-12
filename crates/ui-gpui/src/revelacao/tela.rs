@@ -324,6 +324,9 @@ pub struct Revelacao {
     parametros_ao_abrir: Option<Estado>,
     /// A tela do cliente está aberta? O botão fica âmbar, como no site.
     cliente_aberto: bool,
+    /// `(grade, fotos por linha)` da segunda tela na galeria — só para a ficha
+    /// da tira dizer o que está escolhido; quem guarda é a raiz.
+    modo_do_cliente: (bool, usize),
     /// "Gerando o JPEG…" no botão de baixar.
     /// O histograma da foto **como ela está na tela**. Recalculado junto com a
     /// exibição, e `None` enquanto não há foto.
@@ -779,6 +782,7 @@ impl Revelacao {
             aberta_no_deposito: false,
             parametros_ao_abrir: None,
             cliente_aberto: false,
+            modo_do_cliente: (false, biblioteca_core::grade_do_cliente::POR_LINHA_PADRAO),
             histograma: None,
             angulo,
             persp_vertical,
@@ -1217,6 +1221,13 @@ impl Revelacao {
             rotulo: "Salvar na galeria e sair".to_string(),
             dica,
             habilitado: self.tem_pixels() && ha,
+        }
+    }
+
+    pub fn definir_modo_do_cliente(&mut self, modo: (bool, usize), cx: &mut Context<Self>) {
+        if self.modo_do_cliente != modo {
+            self.modo_do_cliente = modo;
+            cx.notify();
         }
     }
 
@@ -2876,6 +2887,8 @@ pub enum PedidoDaRevelacao {
     Sair,
     /// "Tela do cliente" do site: abre ou fecha a tela do segundo monitor.
     TelaDoCliente,
+    /// O que a segunda tela mostra na galeria: a foto em foco ou a grade.
+    ModoDoCliente { grade: bool, por_linha: usize },
     /// "Salvar na galeria e sair" do site: o revelado entra no lugar do
     /// original, na foto que já é da galeria aberta.
     SalvarNaGaleria,
@@ -3363,35 +3376,8 @@ impl Revelacao {
                     }))
                 }),
             )
-            .child(
-                pilula("revelacao-tela-do-cliente", self.cliente_aberto, false, cx)
-                    .child(
-                        Icon::new(if self.cliente_aberto {
-                            Icone::MonitorOff
-                        } else {
-                            Icone::Monitor
-                        })
-                        .size(px(14.)),
-                    )
-                    .child("Tela do cliente")
-                    .when(self.cliente_aberto, |b| {
-                        b.child(crate::cliente::tecla_da_tela_cheia())
-                    })
-                    .tooltip(if self.cliente_aberto {
-                        format!(
-                            "Fechar a tela do cliente · {} põe e tira a tela cheia",
-                            crate::cliente::texto_da_tela_cheia()
-                        )
-                    } else {
-                        format!(
-                            "Abrir a tela do cliente no outro monitor: ela mostra esta foto, revelada, enquanto você ajusta · depois, {} põe e tira a tela cheia",
-                            crate::cliente::texto_da_tela_cheia()
-                        )
-                    })
-                    .on_click(cx.listener(|_tela, _ev, _window, cx| {
-                        cx.emit(PedidoDaRevelacao::TelaDoCliente);
-                    })),
-            )
+            // 🖥️ A "Tela do cliente" saiu daqui em 11/out/2026: mora em cima
+            // da tira, junto dos recortes, como na sessão (`tela/tira.rs`).
             // "Sincronizar N": só aparece quando há lote — um botão que quase
             // sempre está desligado vira ruído numa barra que já tem sete
             // controles. É o do site, no mesmo lugar.

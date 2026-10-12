@@ -42,6 +42,116 @@ const MODIFICADOR_D: &str = "⌘+D";
 #[cfg(not(target_os = "macos"))]
 const MODIFICADOR_D: &str = "Ctrl+D";
 
+/// O que a tela pede quando o operador mexe nas fichas da tela do cliente.
+pub type AoAlternarOCliente = Arc<dyn Fn(&mut gpui_kit::Window, &mut App)>;
+/// `(grade, fotos por linha)`.
+pub type AoMudarOModoDoCliente = Arc<dyn Fn(bool, usize, &mut gpui_kit::Window, &mut App)>;
+
+/// 🖥️ **A tela do cliente e o que ela mostra, junto dos recortes** (dono,
+/// 11/out/2026): no Lightroom os botões do segundo monitor moram no cabeçalho
+/// da tira, ao lado dos filtros. As mesmas fichas na sessão e na Revelação —
+/// *"deveria ter feito a mesma coisa na filmstrip da revelação"*.
+///
+/// No molde das fichas — acesa é ligada —, com um traço separando o que liga
+/// a outra tela do que recorta a lista. `prefixo` é o da tela (`sessao`,
+/// `revelacao`): os seletores ficam `<prefixo>-tela-do-cliente` e
+/// `<prefixo>-modo-do-cliente`.
+///
+/// `na_revelacao`: lá a segunda tela mostra sempre a foto aberta, e o modo
+/// escolhido vale quando se volta à galeria — a dica diz isso.
+pub fn fichas_do_cliente(
+    prefixo: &'static str,
+    aberta: bool,
+    (grade, por_linha): (bool, usize),
+    na_revelacao: bool,
+    ao_alternar: AoAlternarOCliente,
+    ao_mudar_o_modo: AoMudarOModoDoCliente,
+    cx: &App,
+) -> Vec<AnyElement> {
+    use biblioteca_core::grade_do_cliente as conta;
+    use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
+
+    let tela_do_cliente =
+        crate::estilo::ficha_de_acao(format!("{prefixo}-tela-do-cliente"), aberta, cx)
+            .child(Icon::new(Icone::Monitor).size(px(14.)))
+            .child("Tela do cliente")
+            // O atalho da tela cheia, à vista enquanto ela está aberta
+            // (dono, 22/set/2026).
+            .when(aberta, |b| b.child(crate::cliente::tecla_da_tela_cheia()))
+            .tooltip(if aberta {
+                format!(
+                    "Fechar a tela do cliente · {} põe e tira a tela cheia",
+                    crate::cliente::texto_da_tela_cheia()
+                )
+            } else if na_revelacao {
+                format!(
+                    "Abrir a tela do cliente no outro monitor: ela mostra esta foto, revelada, enquanto você ajusta · depois, {} põe e tira a tela cheia",
+                    crate::cliente::texto_da_tela_cheia()
+                )
+            } else {
+                format!(
+                    "Abrir a tela do cliente · depois, {} põe e tira a tela cheia",
+                    crate::cliente::texto_da_tela_cheia()
+                )
+            })
+            .on_click(move |_, window, cx| ao_alternar(window, cx));
+    // 🖼️ O que a tela do cliente mostra: a foto em foco ou a grade numerada,
+    // e quantas por linha (dono, 11/out/2026). No mesmo molde do botão do
+    // bot: o estado escrito, as opções no menu.
+    let modo = crate::estilo::ficha_de_acao(format!("{prefixo}-modo-do-cliente"), grade, cx)
+        .child(Icon::new(Icone::Grid3x3).size(px(14.)))
+        .child(if grade {
+            format!("Grade · {por_linha} por linha")
+        } else {
+            "Uma foto".to_string()
+        })
+        .child(Icon::new(Icone::ChevronDown).size(px(12.)))
+        .tooltip(if na_revelacao {
+            "O que a tela do cliente mostra na galeria: a foto em foco, ou a grade com o número de cada foto. Aqui na Revelação ela mostra sempre a foto aberta."
+        } else {
+            "O que a tela do cliente mostra: a foto em foco, ou a grade com o número de cada foto"
+        })
+        .dropdown_menu(move |menu, _window, _cx| {
+            let pedir = |grade: bool, por_linha: usize| {
+                let ao_mudar = ao_mudar_o_modo.clone();
+                move |_: &gpui_kit::ClickEvent, window: &mut gpui_kit::Window, cx: &mut App| {
+                    ao_mudar(grade, por_linha, window, cx)
+                }
+            };
+            let mut menu = menu
+                .item(
+                    PopupMenuItem::new("Uma foto — a que está em foco")
+                        .checked(!grade)
+                        .on_click(pedir(false, por_linha)),
+                )
+                .item(
+                    PopupMenuItem::new("Grade — várias fotos, com o número de cada uma")
+                        .checked(grade)
+                        .on_click(pedir(true, por_linha)),
+                )
+                .separator();
+            for n in conta::MENOS_POR_LINHA..=conta::MAIS_POR_LINHA {
+                menu = menu.item(
+                    PopupMenuItem::new(format!("{n} fotos por linha"))
+                        .checked(grade && n == por_linha)
+                        .on_click(pedir(true, n)),
+                );
+            }
+            menu
+        });
+    vec![
+        tela_do_cliente.into_any_element(),
+        modo.into_any_element(),
+        div()
+            .flex_none()
+            .w(px(1.))
+            .h(px(16.))
+            .mx(px(4.))
+            .bg(cx.theme().border)
+            .into_any_element(),
+    ]
+}
+
 /// A barra dos recortes, colada em cima da tira: o filtro fica junto do que
 /// ele filtra. As fichas são [`crate::estilo::ficha`], nas duas telas.
 pub fn barra_de_recortes(fichas: Vec<AnyElement>, cx: &App) -> Div {

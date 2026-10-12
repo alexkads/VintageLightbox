@@ -5840,91 +5840,26 @@ impl Detalhe {
     /// No molde das fichas — acesa é ligada —, com um traço separando o que
     /// liga a outra tela do que recorta a lista.
     fn fichas_do_cliente(&self, cx: &mut Context<Self>) -> Vec<gpui_kit::AnyElement> {
-        use crate::estilo;
-        use crate::recursos::Icone;
-        use gpui_kit::component::Icon;
-
-        let tela_do_cliente =
-            estilo::ficha_de_acao("sessao-tela-do-cliente", self.cliente_aberta, cx)
-                .child(Icon::new(Icone::Monitor).size(px(14.)))
-                .child("Tela do cliente")
-                // O atalho da tela cheia, à vista enquanto ela está aberta
-                // (dono, 22/set/2026).
-                .when(self.cliente_aberta, |b| {
-                    b.child(crate::cliente::tecla_da_tela_cheia())
-                })
-                .tooltip(if self.cliente_aberta {
-                    format!(
-                        "Fechar a tela do cliente · {} põe e tira a tela cheia",
-                        crate::cliente::texto_da_tela_cheia()
-                    )
-                } else {
-                    format!(
-                        "Abrir a tela do cliente · depois, {} põe e tira a tela cheia",
-                        crate::cliente::texto_da_tela_cheia()
-                    )
-                })
-                .on_click(cx.listener(|_tela, _ev, _window, cx| cx.emit(Pedido::TelaDoCliente)));
-        // 🖼️ O que a tela do cliente mostra: a foto em foco ou a grade
-        // numerada, e quantas por linha (dono, 11/out/2026). No mesmo
-        // molde do botão do bot: o estado escrito, as opções no menu.
-        let modo = {
-            use biblioteca_core::grade_do_cliente as conta;
-            let esta = cx.entity().downgrade();
-            let (grade, por_linha) = (self.grade_no_cliente, self.por_linha_no_cliente);
-            estilo::ficha_de_acao("sessao-modo-do-cliente", grade, cx)
-                .debug_selector(|| "sessao-modo-do-cliente".into())
-                .child(Icon::new(Icone::Grid3x3).size(px(14.)))
-                .child(if grade {
-                    format!("Grade · {por_linha} por linha")
-                } else {
-                    "Uma foto".to_string()
-                })
-                .child(Icon::new(Icone::ChevronDown).size(px(12.)))
-                .tooltip("O que a tela do cliente mostra: a foto em foco, ou a grade com o número de cada foto")
-                .dropdown_menu(move |menu, _window, _cx| {
-                    let pedir = |grade: bool, por_linha: usize| {
-                        let esta = esta.clone();
-                        move |_: &gpui_kit::ClickEvent, _: &mut Window, cx: &mut App| {
-                            esta.update(cx, |_tela, cx| {
-                                cx.emit(Pedido::ModoDoCliente { grade, por_linha })
-                            })
-                            .ok();
-                        }
-                    };
-                    let mut menu = menu
-                        .item(
-                            PopupMenuItem::new("Uma foto — a que está em foco")
-                                .checked(!grade)
-                                .on_click(pedir(false, por_linha)),
-                        )
-                        .item(
-                            PopupMenuItem::new("Grade — várias fotos, com o número de cada uma")
-                                .checked(grade)
-                                .on_click(pedir(true, por_linha)),
-                        )
-                        .separator();
-                    for n in conta::MENOS_POR_LINHA..=conta::MAIS_POR_LINHA {
-                        menu = menu.item(
-                            PopupMenuItem::new(format!("{n} fotos por linha"))
-                                .checked(grade && n == por_linha)
-                                .on_click(pedir(true, n)),
-                        );
-                    }
-                    menu
-                })
-        };
-        vec![
-            tela_do_cliente.into_any_element(),
-            modo.into_any_element(),
-            div()
-                .flex_none()
-                .w(px(1.))
-                .h(px(16.))
-                .mx(px(4.))
-                .bg(cx.theme().border)
-                .into_any_element(),
-        ]
+        let (alternar, mudar) = (cx.entity().downgrade(), cx.entity().downgrade());
+        tira_de_fotos::fichas_do_cliente(
+            "sessao",
+            self.cliente_aberta,
+            (self.grade_no_cliente, self.por_linha_no_cliente),
+            false,
+            Arc::new(move |_window, cx| {
+                alternar
+                    .update(cx, |_tela, cx| cx.emit(Pedido::TelaDoCliente))
+                    .ok();
+            }),
+            Arc::new(move |grade, por_linha, _window, cx| {
+                mudar
+                    .update(cx, |_tela, cx| {
+                        cx.emit(Pedido::ModoDoCliente { grade, por_linha })
+                    })
+                    .ok();
+            }),
+            cx,
+        )
     }
 
     /// As fichas da barra: a tela do cliente, o traço e os recortes.

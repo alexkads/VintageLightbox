@@ -879,7 +879,29 @@ impl Revelacao {
     fn barra_de_recortes(&self, cx: &mut Context<Self>) -> AnyElement {
         let contagens = contar(&self.acervo);
         let ativo = self.tira.recorte;
-        let fichas =
+        // 🖥️ A tela do cliente e o modo dela, antes dos recortes — as mesmas
+        // fichas da tira da sessão (dono, 11/out/2026).
+        let (alternar, mudar) = (cx.entity().downgrade(), cx.entity().downgrade());
+        let mut fichas = tira_de_fotos::fichas_do_cliente(
+            "revelacao",
+            self.cliente_aberto,
+            self.modo_do_cliente,
+            true,
+            std::sync::Arc::new(move |_window, cx| {
+                alternar
+                    .update(cx, |_tela, cx| cx.emit(PedidoDaRevelacao::TelaDoCliente))
+                    .ok();
+            }),
+            std::sync::Arc::new(move |grade, por_linha, _window, cx| {
+                mudar
+                    .update(cx, |_tela, cx| {
+                        cx.emit(PedidoDaRevelacao::ModoDoCliente { grade, por_linha })
+                    })
+                    .ok();
+            }),
+            cx,
+        );
+        fichas.extend(
             self.recortes_da_barra()
                 .into_iter()
                 .filter_map(|(rotulo, filtro)| {
@@ -907,8 +929,8 @@ impl Revelacao {
                         }))
                         .into_any_element(),
                     )
-                })
-                .collect();
+                }),
+        );
         tira_de_fotos::barra_de_recortes(fichas, cx).into_any_element()
     }
 

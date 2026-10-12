@@ -4377,6 +4377,9 @@ impl Aplicativo {
         match pedido {
             PedidoDaRevelacao::Sair => self.voltar_para_biblioteca(window, cx),
             PedidoDaRevelacao::TelaDoCliente => self.alternar_cliente(cx),
+            PedidoDaRevelacao::ModoDoCliente { grade, por_linha } => {
+                self.definir_modo_do_cliente(grade, por_linha, cx)
+            }
             PedidoDaRevelacao::SalvarNaGaleria => self.salvar_na_galeria(window, cx),
             PedidoDaRevelacao::Sincronizar => self.sincronizar_revelacao(window, cx),
             PedidoDaRevelacao::ZerarAsMarcadas => self.zerar_as_marcadas(cx),
@@ -6913,8 +6916,10 @@ impl Render for Aplicativo {
         self.caixa_flutuante
             .update(cx, |caixa, _| caixa.definir_visivel(com_caixa));
         let cliente_aberto = self.cliente_aberto();
+        let modo_do_cliente = self.modo_do_cliente;
         self.revelacao.update(cx, |tela, cx| {
-            tela.definir_cliente_aberto(cliente_aberto, cx)
+            tela.definir_cliente_aberto(cliente_aberto, cx);
+            tela.definir_modo_do_cliente(modo_do_cliente, cx);
         });
 
         // A moldura da janela não recebe o clique do conteúdo — senão, com a

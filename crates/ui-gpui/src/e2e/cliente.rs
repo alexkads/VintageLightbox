@@ -272,3 +272,36 @@ fn a_tela_do_cliente_em_grade_numera_as_fotos_do_recorte(cx: &mut TestAppContext
         "reaberta, a grade volta como estava"
     );
 }
+
+/// 🖥️ **Na Revelação, a tela do cliente abre pela ficha em cima da tira** —
+/// a mesma da sessão, junto dos recortes (dono, 11/out/2026: *"deveria ter
+/// feito a mesma coisa na filmstrip da revelação"*). O clique é o do dedo, na
+/// ficha desenhada; e o modo escolhido ali é o que a galeria passa a usar.
+#[gpui_kit::test]
+fn na_revelacao_a_tela_do_cliente_abre_pela_ficha_da_tira(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    e.revelar_a_do_site(cx, "a");
+    e.esperar(cx);
+    e.app(cx, |app, _w, _cx| {
+        assert_eq!(app.tela(), Tela::Revelacao);
+        assert!(!app.cliente_aberto());
+    });
+
+    super::chatbot::clicar(&e, cx, "revelacao-tela-do-cliente");
+    e.app(cx, |app, _w, _cx| assert!(app.cliente_aberto()));
+    assert_eq!(no_cliente(&e, cx).map(|c| c.0).as_deref(), Some("site:a"));
+
+    // A ficha do modo está ao lado, na mesma linha.
+    let mut visual = super::chatbot::quadro_novo(&e, cx);
+    let (tela, modo) = (
+        visual.debug_bounds("revelacao-tela-do-cliente").unwrap(),
+        visual
+            .debug_bounds("revelacao-modo-do-cliente")
+            .expect("a ficha do modo está na tira da Revelação"),
+    );
+    assert_eq!(tela.origin.y, modo.origin.y, "as duas na mesma linha");
+    assert!(modo.origin.x > tela.origin.x);
+
+    super::chatbot::clicar(&e, cx, "revelacao-tela-do-cliente");
+    e.app(cx, |app, _w, _cx| assert!(!app.cliente_aberto()));
+}
