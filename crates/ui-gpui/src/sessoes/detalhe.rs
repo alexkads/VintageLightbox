@@ -2344,7 +2344,7 @@ impl Detalhe {
                     f.id.clone(),
                     f.rejeitada || f.apagada,
                     f.estado == acervo::Estado::LevadaNoBalcao,
-                    f.nota.unwrap_or(0).min(5) as u8,
+                    f.nota.unwrap_or(0).min(5),
                 )
             })
             .collect();
@@ -5328,6 +5328,11 @@ impl Detalhe {
         let tema = cx.theme();
         let (borda, apagado, texto) = (tema.border, tema.muted_foreground, tema.foreground);
         let sem_galeria = self.aberta.is_none();
+        // 📏 Em janela estreita os rótulos da direita encolhem, como os da
+        // barra de baixo ([`Densidade`]): por extenso, "Avisar cliente" saía
+        // cortado na borda. O que perde o texto ganha dica.
+        let estreita =
+            Densidade::da_largura(f32::from(window.viewport_size().width)) == Densidade::Minima;
 
         // Os selos são a `Tag` do gpui-kit (`estilo::selo_colorido`).
         let selo = |cores: (gpui_kit::Hsla, gpui_kit::Hsla, gpui_kit::Hsla),
@@ -5503,7 +5508,8 @@ impl Detalhe {
                 estilo::botao_contorno_pequeno("sessao-editar-cliente", cx)
                     .debug_selector(|| "sessao-editar-cliente".into())
                     .child(Icon::new(Icone::ClipboardList).size(px(14.)))
-                    .child("Dados do cliente")
+                    .child(if estreita { "Cliente" } else { "Dados do cliente" })
+                    .when(estreita, |b| b.tooltip("Dados do cliente"))
                     .when(!sem_galeria, |b| {
                         b.on_click(
                             cx.listener(|tela, _ev, _window, cx| tela.editar_dados_do_cliente(cx)),
@@ -5542,11 +5548,12 @@ impl Detalhe {
             .child(ButtonGroup::new("sessao-grupo-entrega").child(estilo::desligado(
                 estilo::botao_contorno_pequeno("sessao-link", cx)
                     .child(Icon::new(Icone::Link2).size(px(14.)))
-                    .child(if self.link.is_some() {
-                        "Copiar de novo"
-                    } else {
-                        "Copiar link"
+                    .child(match (estreita, self.link.is_some()) {
+                        (true, _) => "Link",
+                        (false, true) => "Copiar de novo",
+                        (false, false) => "Copiar link",
                     })
+                    .when(estreita, |b| b.tooltip("Copiar o link da galeria"))
                     .when(!sem_galeria, |b| {
                         b.on_click(cx.listener(|tela, _ev, _window, cx| tela.pedir_o_link(cx)))
                     }),
@@ -5558,11 +5565,12 @@ impl Detalhe {
                 grupo.child(estilo::desligado(
                     estilo::botao_contorno_pequeno("sessao-avisar", cx)
                         .child(Icon::new(Icone::Send).size(px(14.)))
-                        .child(if self.avisando {
-                            "Avisando…"
-                        } else {
-                            "Avisar cliente"
+                        .child(match (self.avisando, estreita) {
+                            (true, _) => "Avisando…",
+                            (false, true) => "Avisar",
+                            (false, false) => "Avisar cliente",
                         })
+                        .when(estreita, |b| b.tooltip("Avisar o cliente"))
                         .when(!self.avisando, |b| {
                             b.on_click(cx.listener(|tela, _ev, _window, cx| tela.avisar(cx)))
                         }),
@@ -6215,6 +6223,9 @@ impl Detalhe {
                 estilo::campo_pequeno(
                     h_flex()
                         .flex_none()
+                        // A largura do rótulo mais comprido ("Desmarcar…",
+                        // "Nenhuma"): marcar tudo não empurra a barra.
+                        .min_w(px(if larga { 184. } else { 112. }))
                         .debug_selector(|| "sessao-selecionar-visiveis".into()),
                 )
                 .child(

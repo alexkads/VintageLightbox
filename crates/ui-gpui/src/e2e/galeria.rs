@@ -1982,5 +1982,13 @@ fn a_barra_da_sessao_cabe_numa_linha_em_janela_estreita(cx: &mut TestAppContext)
                 "a {largura} pt, {alvo} passa da borda da janela: {onde:?}"
             );
         }
+        // O cabeçalho também: o último botão da direita não sai da janela.
+        for alvo in ["sessao-editar-cliente", "sessao-link", "sessao-avisar"] {
+            let onde = lugar(alvo);
+            assert!(
+                f32::from(onde.origin.x + onde.size.width) <= largura,
+                "a {largura} pt, {alvo} passa da borda da janela: {onde:?}"
+            );
+        }
     }
 }
