@@ -1,5 +1,18 @@
 [
   {
+    "versao": "0.1.158",
+    "data": "2026-10-12",
+    "titulo": "Histograma novo na Revelação, com os dados da câmera.",
+    "importante": false,
+    "novidades": [
+      "O histograma da Revelação foi redesenhado no estilo do Lightroom: cores nítidas para cada canal (cinza onde os três se encontram, amarelo, ciano e magenta onde dois se somam), mais alto e com as divisões das cinco zonas de tom.",
+      "Os dois triângulos nos cantos de cima acendem quando há preto puro (sombras entupidas) ou branco puro (luzes estouradas) na foto.",
+      "Um branco estourado não achata mais o resto do gráfico: o desenho continua legível em foto muito clara ou muito escura.",
+      "Embaixo do histograma aparecem os dados da foto: ISO, distância focal, abertura e velocidade. Valem para as fotos importadas neste computador; nas que vieram só do site aparece \"Sem dados da câmera\"."
+    ],
+    "por_que_atualizar": "Para ler a exposição da foto com mais clareza e ver como ela foi tirada sem sair da Revelação."
+  },
+  {
     "versao": "0.1.157",
     "data": "2026-10-12",
     "titulo": "Os botões da sessão agora ficam em grupos.",

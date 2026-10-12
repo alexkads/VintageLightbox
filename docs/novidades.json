@@ -1,11 +1,12 @@
 {
-  "versao": "0.1.157",
-  "titulo": "Os botões da sessão agora ficam em grupos.",
+  "versao": "0.1.158",
+  "titulo": "Histograma novo na Revelação, com os dados da câmera.",
   "importante": false,
   "novidades": [
-    "Na tela da sessão, os botões do alto ficaram agrupados por assunto, com um traço fino entre os grupos: Atendimento e Dados do cliente juntos, o estúdio no meio, e Copiar link e Avisar cliente juntos.",
-    "Na barra das fotos, Negociação e Imprimir ficam sempre no mesmo lugar. Sem foto marcada eles aparecem apagados, em vez de sumir, e os botões ao lado não mudam mais de posição a cada clique.",
-    "Em janela estreita, os botões do alto encurtam o texto (Cliente, Link, Avisar) para nenhum ficar cortado na borda; o nome completo aparece ao passar o mouse."
+    "O histograma da Revelação foi redesenhado no estilo do Lightroom: cores nítidas para cada canal (cinza onde os três se encontram, amarelo, ciano e magenta onde dois se somam), mais alto e com as divisões das cinco zonas de tom.",
+    "Os dois triângulos nos cantos de cima acendem quando há preto puro (sombras entupidas) ou branco puro (luzes estouradas) na foto.",
+    "Um branco estourado não achata mais o resto do gráfico: o desenho continua legível em foto muito clara ou muito escura.",
+    "Embaixo do histograma aparecem os dados da foto: ISO, distância focal, abertura e velocidade. Valem para as fotos importadas neste computador; nas que vieram só do site aparece \"Sem dados da câmera\"."
   ],
-  "por_que_atualizar": "Para achar os botões da sessão mais rápido, sempre no mesmo lugar."
+  "por_que_atualizar": "Para ler a exposição da foto com mais clareza e ver como ela foi tirada sem sair da Revelação."
 }
