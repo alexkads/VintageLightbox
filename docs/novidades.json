@@ -1,12 +1,11 @@
 {
-  "versao": "0.1.158",
-  "titulo": "Histograma novo na Revelação, com os dados da câmera.",
+  "versao": "0.1.159",
+  "titulo": "Os dados da câmera aparecem em qualquer computador.",
   "importante": false,
   "novidades": [
-    "O histograma da Revelação foi redesenhado no estilo do Lightroom: cores nítidas para cada canal (cinza onde os três se encontram, amarelo, ciano e magenta onde dois se somam), mais alto e com as divisões das cinco zonas de tom.",
-    "Os dois triângulos nos cantos de cima acendem quando há preto puro (sombras entupidas) ou branco puro (luzes estouradas) na foto.",
-    "Um branco estourado não achata mais o resto do gráfico: o desenho continua legível em foto muito clara ou muito escura.",
-    "Embaixo do histograma aparecem os dados da foto: ISO, distância focal, abertura e velocidade. Valem para as fotos importadas neste computador; nas que vieram só do site aparece \"Sem dados da câmera\"."
+    "Na Revelação, a linha embaixo do histograma (ISO, distância focal, abertura e velocidade) agora aparece também nas fotos importadas em outro computador ou em outro estúdio.",
+    "Para as sessões antigas aparecerem com esses dados, basta o computador que importou as fotos atualizar e abrir a sessão uma vez: ele envia os dados sozinho.",
+    "No painel de detalhes da sessão, o fotolivro mandado pelo WhatsApp aparece com o nome certo no último aviso."
   ],
-  "por_que_atualizar": "Para ler a exposição da foto com mais clareza e ver como ela foi tirada sem sair da Revelação."
+  "por_que_atualizar": "Para ver como cada foto foi tirada, não importa em qual computador ela foi importada."
 }

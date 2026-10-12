@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.159",
+    "data": "2026-10-12",
+    "titulo": "Os dados da câmera aparecem em qualquer computador.",
+    "importante": false,
+    "novidades": [
+      "Na Revelação, a linha embaixo do histograma (ISO, distância focal, abertura e velocidade) agora aparece também nas fotos importadas em outro computador ou em outro estúdio.",
+      "Para as sessões antigas aparecerem com esses dados, basta o computador que importou as fotos atualizar e abrir a sessão uma vez: ele envia os dados sozinho.",
+      "No painel de detalhes da sessão, o fotolivro mandado pelo WhatsApp aparece com o nome certo no último aviso."
+    ],
+    "por_que_atualizar": "Para ver como cada foto foi tirada, não importa em qual computador ela foi importada."
+  },
+  {
     "versao": "0.1.158",
     "data": "2026-10-12",
     "titulo": "Histograma novo na Revelação, com os dados da câmera.",
