@@ -1,5 +1,15 @@
 [
   {
+    "versao": "0.1.154",
+    "data": "2026-10-12",
+    "titulo": "Na Revelação, a miniatura da foto aberta não perde mais o corte.",
+    "importante": false,
+    "novidades": [
+      "Na Revelação, ao clicar numa foto da tira, a miniatura dela trocava para a foto inteira, sem o corte e o giro que você tinha feito. Agora a miniatura continua mostrando a foto enquadrada, igual ao que aparece no palco."
+    ],
+    "por_que_atualizar": "Para a tira da Revelação mostrar as fotos com o corte que você fez."
+  },
+  {
     "versao": "0.1.153",
     "data": "2026-10-12",
     "titulo": "Na Revelação, a tela do cliente continua em grade e mostra a foto sendo revelada.",
