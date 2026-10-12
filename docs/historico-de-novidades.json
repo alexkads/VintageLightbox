@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.157",
+    "data": "2026-10-12",
+    "titulo": "Os botões da sessão agora ficam em grupos.",
+    "importante": false,
+    "novidades": [
+      "Na tela da sessão, os botões do alto ficaram agrupados por assunto, com um traço fino entre os grupos: Atendimento e Dados do cliente juntos, o estúdio no meio, e Copiar link e Avisar cliente juntos.",
+      "Na barra das fotos, Negociação e Imprimir ficam sempre no mesmo lugar. Sem foto marcada eles aparecem apagados, em vez de sumir, e os botões ao lado não mudam mais de posição a cada clique.",
+      "Em janela estreita, os botões do alto encurtam o texto (Cliente, Link, Avisar) para nenhum ficar cortado na borda; o nome completo aparece ao passar o mouse."
+    ],
+    "por_que_atualizar": "Para achar os botões da sessão mais rápido, sempre no mesmo lugar."
+  },
+  {
     "versao": "0.1.156",
     "data": "2026-10-12",
     "titulo": "A barra da sessão fica organizada em monitores menores.",
