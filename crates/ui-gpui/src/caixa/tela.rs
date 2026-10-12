@@ -86,6 +86,7 @@ gpui_kit::actions!(
         Forma7,
         Forma8,
         TirarUltimo,
+        FocarDesconto,
         EmReais,
         EmPercentual,
         Sangria,
@@ -140,6 +141,13 @@ pub fn init(cx: &mut App) {
         KeyBinding::new(
             "delete",
             TirarUltimo,
+            Some("CaixaDialogo && Pagamento && !Input"),
+        ),
+        // 🏷️ No pagamento, `D` leva ao desconto no total; fora de campo, para
+        // não roubar a letra de quem digita o motivo ou o código do voucher.
+        KeyBinding::new(
+            "d",
+            FocarDesconto,
             Some("CaixaDialogo && Pagamento && !Input"),
         ),
         // No desconto, `%` troca para percentual **mesmo no campo** (é o que se

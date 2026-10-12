@@ -22,7 +22,7 @@ use biblioteca_core::dinheiro;
 use biblioteca_core::negociacao::{self, Negociacao, Tipo, PARCEIROS};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
-use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon, Selectable as _, Sizable};
 use gpui_kit::{
@@ -34,8 +34,8 @@ use serde_json::json;
 use super::dados::{self, CaixaDoBalcao, Conferencia};
 use super::tela::{
     codificar, com_tecla, Caixa, ConcluirVenda, ConfirmarDialogo, DescontoNoTotal, EmPercentual,
-    EmReais, FecharDialogo, Forma1, Forma2, Forma3, Forma4, Forma5, Forma6, Forma7, Forma8,
-    Sangria, Suprimento, TipoDeRecado, TirarUltimo, DIALOGO,
+    EmReais, FecharDialogo, FocarDesconto, Forma1, Forma2, Forma3, Forma4, Forma5, Forma6, Forma7,
+    Forma8, Sangria, Suprimento, TipoDeRecado, TirarUltimo, DIALOGO,
 };
 use crate::estilo;
 use crate::recursos::Icone;
@@ -122,8 +122,15 @@ pub(super) struct FormPagamento {
     valor: Entity<InputState>,
     detalhe: Entity<InputState>,
     bandeira: Option<&'static str>,
+    /// 🏷️ **O desconto no total, dado aqui mesmo** (dono, 11/out/2026): é na
+    /// hora de cobrar que o cliente pede. Os três espelham o
+    /// [`DescontoNoTotal`] da tela — o mesmo do `F2` —, que é quem faz a conta.
+    desconto_modo: ModoDoDesconto,
+    desconto: Entity<InputState>,
+    motivo: Entity<InputState>,
     erro: Option<String>,
     enviando: bool,
+    _assinaturas: Vec<Subscription>,
 }
 
 pub(super) struct FormMovimento {
@@ -331,19 +338,44 @@ impl Caixa {
                 let foco = form.escolhas[0].read(cx).focus_handle(cx);
                 (Dialogo::Pessoas(Box::new(form)), Some(foco))
             }
-            TipoDeDialogo::Pagamento => (
-                Dialogo::Pagamento(FormPagamento {
-                    chave: uuid::Uuid::new_v4().to_string(),
-                    lancados: Vec::new(),
-                    forma: None,
-                    valor: campo(window, cx, "0,00"),
-                    detalhe: campo(window, cx, ""),
-                    bandeira: None,
-                    erro: None,
-                    enviando: false,
-                }),
-                None,
-            ),
+            TipoDeDialogo::Pagamento => {
+                // O desconto que o `F2` já deu chega escrito nos campos.
+                let DescontoNoTotal {
+                    modo,
+                    texto,
+                    motivo,
+                } = self.desconto.clone();
+                let desconto = campo(window, cx, "0");
+                escrever(&desconto, texto, window, cx);
+                let campo_motivo = campo(window, cx, "Motivo (opcional)");
+                escrever(&campo_motivo, motivo, window, cx);
+                let assinaturas = [&desconto, &campo_motivo]
+                    .map(|c| {
+                        cx.subscribe_in(c, window, |tela, _, evento: &InputEvent, _, cx| {
+                            if let InputEvent::Change = evento {
+                                tela.guardar_o_desconto_do_pagamento(cx);
+                            }
+                        })
+                    })
+                    .into();
+                (
+                    Dialogo::Pagamento(FormPagamento {
+                        chave: uuid::Uuid::new_v4().to_string(),
+                        lancados: Vec::new(),
+                        forma: None,
+                        valor: campo(window, cx, "0,00"),
+                        detalhe: campo(window, cx, ""),
+                        bandeira: None,
+                        desconto_modo: modo,
+                        desconto,
+                        motivo: campo_motivo,
+                        erro: None,
+                        enviando: false,
+                        _assinaturas: assinaturas,
+                    }),
+                    None,
+                )
+            }
             TipoDeDialogo::Movimento => {
                 let valor = campo(window, cx, "0,00");
                 let foco = valor.read(cx).focus_handle(cx);
@@ -705,6 +737,8 @@ impl Caixa {
             (Some(Dialogo::Movimento(f)), "valor") => f.valor.clone(),
             (Some(Dialogo::Movimento(f)), "motivo") => f.motivo.clone(),
             (Some(Dialogo::Pagamento(f)), "valor") => f.valor.clone(),
+            (Some(Dialogo::Pagamento(f)), "desconto") => f.desconto.clone(),
+            (Some(Dialogo::Pagamento(f)), "motivo") => f.motivo.clone(),
             (Some(Dialogo::Estorno(f)), "motivo") => f.motivo.clone(),
             (Some(Dialogo::Estorno(f)), "valor") => f.valor.clone(),
             (Some(Dialogo::Fechar(f)), forma) => f
@@ -776,7 +810,15 @@ impl Caixa {
                 }
             }
             Some(Dialogo::Pagamento(form)) => {
-                if form.forma.is_some() {
+                // O `Enter` no desconto só o confirma: o foco volta ao
+                // diálogo, onde `1`–`8` escolhem a forma. Sem isto ele tentava
+                // concluir a venda e respondia "Falta R$ …".
+                let no_desconto = [&form.desconto, &form.motivo]
+                    .iter()
+                    .any(|c| c.read(cx).focus_handle(cx).is_focused(window));
+                if no_desconto {
+                    window.focus(&self.foco_do_dialogo, cx);
+                } else if form.forma.is_some() {
                     self.lancar(window, cx);
                 } else {
                     self.concluir_venda(window, cx);
@@ -811,10 +853,64 @@ impl Caixa {
     }
 
     pub(super) fn mudar_modo(&mut self, modo: ModoDoDesconto, cx: &mut Context<Self>) {
-        if let Some(Dialogo::Desconto(form)) = self.dialogo.as_mut() {
-            form.modo = modo;
+        match self.dialogo.as_mut() {
+            Some(Dialogo::Desconto(form)) => form.modo = modo,
+            Some(Dialogo::Pagamento(form)) => {
+                form.desconto_modo = modo;
+                self.guardar_o_desconto_do_pagamento(cx);
+            }
+            _ => return,
+        }
+        cx.notify();
+    }
+
+    /// O desconto escrito no pagamento vira o desconto da venda, a cada
+    /// tecla: o total, o que falta e o troco acompanham na hora.
+    ///
+    /// Texto que não é desconto vale zero (`desconto_no_total`) e aparece como
+    /// erro embaixo do campo; o `concluir_venda` não deixa passar.
+    fn guardar_o_desconto_do_pagamento(&mut self, cx: &mut Context<Self>) {
+        let Some(Dialogo::Pagamento(form)) = self.dialogo.as_mut() else {
+            return;
+        };
+        // "10%" digitado em reais é percentual: o operador escreve como fala.
+        let texto = form.desconto.read(cx).value().to_string();
+        if texto.trim_end().ends_with('%') {
+            form.desconto_modo = ModoDoDesconto::Percentual;
+        }
+        let desconto = DescontoNoTotal {
+            modo: form.desconto_modo,
+            texto,
+            motivo: form.motivo.read(cx).value().to_string(),
+        };
+        form.erro = None;
+        if self.desconto != desconto {
+            self.desconto = desconto;
             cx.notify();
         }
+    }
+
+    /// `D` no pagamento: o foco vai ao desconto, com o que estiver escrito
+    /// selecionado.
+    pub(super) fn focar_o_desconto(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(Dialogo::Pagamento(form)) = self.dialogo.as_ref() {
+            let campo = form.desconto.clone();
+            let foco = campo.read(cx).focus_handle(cx);
+            window.focus(&foco, cx);
+            campo.update(cx, |campo, cx| campo.select_all(window, cx));
+        }
+    }
+
+    /// O desconto sai, e os campos do pagamento ficam em branco.
+    fn remover_o_desconto_do_pagamento(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(Dialogo::Pagamento(form)) = self.dialogo.as_ref() else {
+            return;
+        };
+        let (desconto, motivo) = (form.desconto.clone(), form.motivo.clone());
+        escrever(&desconto, String::new(), window, cx);
+        escrever(&motivo, String::new(), window, cx);
+        window.focus(&self.foco_do_dialogo, cx);
+        cx.notify();
     }
 
     pub(super) fn mudar_tipo(&mut self, tipo: TipoDeMovimento, cx: &mut Context<Self>) {
@@ -1052,6 +1148,15 @@ impl Caixa {
         };
         let conta = regras::conta_do_pagamento(total, &form.lancados);
         if form.enviando {
+            return;
+        }
+        // 🏷️ O desconto escrito errado valeria zero na conta: a venda sairia
+        // cheia com o operador achando que deu o desconto.
+        if let Err(erro) =
+            regras::ler_desconto(&self.desconto.texto, self.desconto.modo, cupom.total)
+        {
+            form.erro = Some(format!("Desconto: {erro}"));
+            cx.notify();
             return;
         }
         // 😕 **O Enter de concluir não fica calado** (03/out/2026). Com o
@@ -1757,7 +1862,7 @@ impl Caixa {
                 Dialogo::Pagamento(_) => (
                     "Finalizar pagamento".into(),
                     Some(texto(self.resumo_do_pagamento())),
-                    672.,
+                    760.,
                     self.corpo_pagamento(cx),
                 ),
                 Dialogo::Movimento(_) => (
@@ -1899,6 +2004,7 @@ impl Caixa {
             .on_action(cx.listener(|t, _: &Forma7, w, cx| t.escolher_forma(7, w, cx)))
             .on_action(cx.listener(|t, _: &Forma8, w, cx| t.escolher_forma(8, w, cx)))
             .on_action(cx.listener(|t, _: &TirarUltimo, _, cx| t.tirar_ultimo(cx)))
+            .on_action(cx.listener(|t, _: &FocarDesconto, w, cx| t.focar_o_desconto(w, cx)))
             .on_action(cx.listener(|t, _: &EmReais, _, cx| t.mudar_modo(ModoDoDesconto::Valor, cx)))
             .on_action(cx.listener(|t, _: &EmPercentual, _, cx| {
                 t.mudar_modo(ModoDoDesconto::Percentual, cx)
@@ -2225,19 +2331,92 @@ impl Caixa {
             return div().into_any_element();
         };
         let total = self.a_receber();
+        let subtotal = self.cupom().total;
         let conta = regras::conta_do_pagamento(total, &form.lancados);
+        let desconto_lido =
+            regras::ler_desconto(&self.desconto.texto, self.desconto.modo, subtotal);
+        let desconto = desconto_lido.clone().unwrap_or(0);
         let tema = cx.theme();
-        let (borda, apagado, frente, fundo, secundario, sobre_secundario) = (
+        let (borda, apagado, frente, cartao, perigo) = (
             tema.border,
             tema.muted_foreground,
             tema.foreground,
-            tema.background,
-            tema.secondary,
-            tema.secondary_foreground,
+            tema.muted,
+            tema.danger,
         );
         let mono = tema.mono_font_family.clone();
+        let titulo_do_bloco = |texto: &str| {
+            div()
+                .text_xs()
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(apagado)
+                .child(texto.to_uppercase())
+        };
 
-        let formas = div().grid().grid_cols(2).gap(px(6.)).children(
+        // 🏷️ O desconto no total: reais ou percentual, o campo e o motivo numa
+        // linha só. O motivo só aparece com desconto — sem ele é ruído.
+        let modo = form.desconto_modo;
+        let tem_desconto = !self.desconto.texto.trim().is_empty();
+        let bloco_do_desconto = v_flex()
+            .gap(px(8.))
+            .child(
+                h_flex()
+                    .gap(px(8.))
+                    .child(titulo_do_bloco("Desconto no total"))
+                    .child(estilo::tecla("D"))
+                    .child(div().flex_1())
+                    .when(tem_desconto, |d| {
+                        d.child(
+                            estilo::botao_fantasma_pequeno("caixa-pagamento-sem-desconto", cx)
+                                .child("Remover")
+                                .on_click(cx.listener(|t, _: &ClickEvent, w, cx| {
+                                    t.remover_o_desconto_do_pagamento(w, cx)
+                                })),
+                        )
+                    }),
+            )
+            .child(
+                h_flex()
+                    .gap(px(8.))
+                    .child(h_flex().flex_none().gap(px(4.)).children(
+                        [ModoDoDesconto::Valor, ModoDoDesconto::Percentual].map(|m| {
+                            let rotulo = if m == ModoDoDesconto::Valor {
+                                "R$"
+                            } else {
+                                "%"
+                            };
+                            alternavel(
+                                SharedString::from(format!("caixa-pagamento-desconto-{rotulo}")),
+                                modo == m,
+                                cx,
+                            )
+                            .w(px(44.))
+                            .child(rotulo)
+                            .on_click(
+                                cx.listener(move |t, _: &ClickEvent, _, cx| t.mudar_modo(m, cx)),
+                            )
+                        }),
+                    ))
+                    .child(
+                        div()
+                            .debug_selector(|| "caixa-campo-desconto-no-total".into())
+                            .w(px(112.))
+                            .flex_none()
+                            .font_family(mono.clone())
+                            .child(crate::estilo::campo(Input::new(&form.desconto))),
+                    )
+                    .when(tem_desconto, |d| {
+                        d.child(
+                            div()
+                                .flex_1()
+                                .min_w(px(0.))
+                                .child(crate::estilo::campo(Input::new(&form.motivo))),
+                        )
+                    }),
+            )
+            .children(desconto_lido.clone().err().map(|e| erro_do_form(e, cx)));
+
+        let formas = div().grid().grid_cols(2).gap(px(8.)).children(
             FormaDePagamento::TODAS
                 .into_iter()
                 .enumerate()
@@ -2249,7 +2428,7 @@ impl Caixa {
                     )
                     .justify_start()
                     .child(estilo::tecla((i + 1).to_string()))
-                    .child(f.rotulo())
+                    .child(div().flex_1().child(f.rotulo()))
                     .on_click(cx.listener(move |t, _: &ClickEvent, w, cx| {
                         t.escolher_forma_de_pagamento(f, w, cx)
                     }))
@@ -2369,10 +2548,12 @@ impl Caixa {
             .gap(px(4.))
             .text_xs()
             .text_color(apagado)
+            .child(estilo::tecla("D"))
+            .child("desconto ·")
             .child(estilo::tecla("1"))
             .child("–")
             .child(estilo::tecla("8"))
-            .child("escolhe a forma ·")
+            .child("forma ·")
             .child(estilo::tecla("Enter"))
             .child("lança ·")
             .child(estilo::tecla("⌫"))
@@ -2382,51 +2563,101 @@ impl Caixa {
             .child(estilo::tecla("Esc"))
             .child("volta");
 
-        let linha = |rotulo: &str, valor: String, destaque: bool| {
+        // 🧾 O resumo: de onde vem o total (subtotal e desconto), o que já
+        // entrou e, em destaque, o que o operador precisa saber agora — quanto
+        // falta, ou o troco.
+        let linha = |rotulo: &str, valor: String| {
             h_flex()
-                .items_baseline()
                 .justify_between()
                 .gap(px(8.))
-                .child(div().text_xs().opacity(0.8).child(rotulo.to_uppercase()))
+                .text_sm()
+                .child(div().text_color(apagado).child(rotulo.to_string()))
+                .child(div().font_family(mono.clone()).child(valor))
+        };
+        let destaque = |rotulo: &str, valor: String, cor: gpui_kit::Hsla| {
+            v_flex()
+                .gap(px(2.))
                 .child(
                     div()
-                        .when(destaque, |d| {
-                            d.text_size(crate::tema::letra::em(24.))
-                                .font_weight(FontWeight::BOLD)
-                        })
-                        .when(!destaque, |d| d.text_base())
+                        .text_xs()
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(apagado)
+                        .child(rotulo.to_uppercase()),
+                )
+                .child(
+                    div()
+                        .font_family(mono.clone())
+                        .text_size(crate::tema::letra::em(28.))
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(cor)
                         .child(valor),
                 )
         };
         let enviando = form.enviando;
         let painel = v_flex()
-            .w(px(224.))
+            .w(px(256.))
             .flex_none()
             .gap(px(8.))
-            .p(px(12.))
+            .p(px(16.))
             .rounded(crate::tema::canto(10.))
-            .bg(frente)
-            .text_color(fundo)
-            .font_family(mono)
-            .child(linha("Total", dinheiro::formatar(total), false))
-            .child(linha("Recebido", dinheiro::formatar(conta.recebido), false))
+            .border_1()
+            .border_color(borda)
+            .bg(cartao)
+            .when(desconto > 0, |d| {
+                d.child(linha("Subtotal", dinheiro::formatar(subtotal)))
+                    .child(
+                        linha(
+                            &if modo == ModoDoDesconto::Percentual {
+                                format!(
+                                    "Desconto ({}%)",
+                                    self.desconto.texto.trim().trim_end_matches('%')
+                                )
+                            } else {
+                                "Desconto".to_string()
+                            },
+                            format!("− {}", dinheiro::formatar(desconto)),
+                        )
+                        .text_color(cores::sucesso()),
+                    )
+            })
+            .child(
+                h_flex()
+                    .items_baseline()
+                    .justify_between()
+                    .gap(px(8.))
+                    .child(div().font_weight(FontWeight::MEDIUM).child("Total"))
+                    .child(
+                        div()
+                            .debug_selector(|| "caixa-pagamento-total".into())
+                            .font_family(mono.clone())
+                            .text_size(crate::tema::letra::em(18.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(dinheiro::formatar(total)),
+                    ),
+            )
+            .child(linha("Recebido", dinheiro::formatar(conta.recebido)))
+            .child(div().h(px(1.)).my(px(4.)).bg(borda))
             .when(conta.falta > 0, |d| {
-                d.child(linha("Falta", dinheiro::formatar(conta.falta), true))
+                d.child(destaque("Falta", dinheiro::formatar(conta.falta), frente))
             })
             .when(conta.excedente_fora_do_dinheiro > 0, |d| {
-                d.child(div().text_xs().text_color(cores::quente()).child(format!(
+                d.child(div().text_xs().text_color(perigo).child(format!(
                     "Cartão, PIX e as outras formas não dão troco: passou {} do total.",
                     dinheiro::formatar(conta.excedente_fora_do_dinheiro)
                 )))
             })
             .when(conta.pronto, |d| {
-                d.child(linha("Troco", dinheiro::formatar(conta.troco), true))
+                d.child(destaque(
+                    "Troco",
+                    dinheiro::formatar(conta.troco),
+                    cores::sucesso(),
+                ))
             })
-            .child(div().flex_1())
+            .child(div().flex_1().min_h(px(8.)))
             .child(
                 com_tecla(
                     estilo::desligado(
-                        botao_secundario("caixa-concluir", secundario, sobre_secundario, cx),
+                        estilo::botao_primario("caixa-concluir", cx).w_full(),
                         !conta.pronto || enviando,
                     ),
                     if enviando {
@@ -2441,12 +2672,15 @@ impl Caixa {
 
         div()
             .flex()
-            .gap(px(16.))
+            .gap(px(20.))
             .child(
                 v_flex()
                     .flex_1()
                     .min_w(px(0.))
                     .gap(px(12.))
+                    .child(bloco_do_desconto)
+                    .child(div().h(px(1.)).bg(borda))
+                    .child(titulo_do_bloco("Forma de pagamento"))
                     .child(formas)
                     .children(painel_da_forma)
                     .children(form.erro.clone().map(|e| erro_do_form(e, cx)))
@@ -3272,24 +3506,6 @@ fn alternavel(
     } else {
         estilo::botao_contorno(id, cx)
     }
-}
-
-/// `Button variant="secondary"` — o "Concluir venda" sobre o painel escuro:
-/// o `Button` do gpui-kit com as cores do painel.
-fn botao_secundario(
-    id: &'static str,
-    fundo: gpui_kit::Hsla,
-    texto: gpui_kit::Hsla,
-    cx: &gpui_kit::App,
-) -> gpui_kit::component::button::Button {
-    use gpui_kit::component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
-    Button::new(id).custom(
-        ButtonCustomVariant::new(cx)
-            .color(fundo)
-            .foreground(texto)
-            .hover(fundo.opacity(0.8))
-            .active(fundo),
-    )
 }
 
 /// O quadradinho de marcar (`role="checkbox"` do site).

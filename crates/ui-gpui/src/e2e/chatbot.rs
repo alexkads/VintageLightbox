@@ -1237,6 +1237,31 @@ fn o_veu_fecha_o_dialogo_e_a_caixa_nao(cx: &mut TestAppContext) {
     chatbot(&e, cx, |t, _w, _cx| {
         assert_eq!(t.dialogo.aberto().cloned(), Some(Dialogo::Urgencias))
     });
+    // 🚨 Com uma lista do kit aberta (um `Select` cujo último item passa da
+    // borda da caixa), o clique fora é da lista, e o diálogo fica (dono,
+    // 11/out/2026: escolher o último nome de "Quem auxiliou" fechava o
+    // diálogo sem guardar a escolha).
+    let lista_aberta = e.app(cx, |_app, _w, cx| {
+        gpui_kit::component::GlobalState::register_deferred_popover(cx)
+    });
+    let mut visual = quadro_novo(&e, cx);
+    let fechar = visual.debug_bounds("urgencias-fechar").unwrap();
+    visual.simulate_click(
+        gpui_kit::point(
+            fechar.center().x,
+            fechar.origin.y + fechar.size.height + gpui_kit::px(60.),
+        ),
+        Modifiers::none(),
+    );
+    visual.run_until_parked();
+    chatbot(&e, cx, |t, _w, _cx| {
+        assert_eq!(
+            t.dialogo.aberto().cloned(),
+            Some(Dialogo::Urgencias),
+            "com a lista aberta, o clique fora não cancela o diálogo"
+        )
+    });
+    drop(lista_aberta);
     // Abaixo da caixa ainda é o véu (ele cobre a área do chatbot; o menu
     // lateral fica fora, como nas outras telas do app).
     let mut visual = quadro_novo(&e, cx);

@@ -222,6 +222,15 @@ pub fn desenhar_conteudo<T: 'static>(
                 if area_do_rodape.is_some_and(|area| area.contains(&evento.position)) {
                     return;
                 }
+                // 🚨 **Com uma lista aberta, o clique é dela.** A lista de um
+                // `Select` passa da borda da caixa, e o item que caía fora
+                // contava como clique fora: o diálogo cancelava antes de o
+                // item receber o clique, e a escolha se perdia (dono,
+                // 11/out/2026: o último nome de "Quem auxiliou"). Fora da
+                // lista, o primeiro clique só a fecha — como em todo combo.
+                if gpui_kit::component::GlobalState::is_in_deferred_context(cx) {
+                    return;
+                }
                 pedir_cancelar(window, cx)
             })
         });

@@ -495,6 +495,77 @@ fn f4_pede_os_nomes_antes_e_a_venda_sai_como_o_backend_espera(cx: &mut TestAppCo
     });
 }
 
+/// 🏷️ **O desconto no total, dado na própria tela de pagamento** (dono,
+/// 11/out/2026): o total acompanha o que se digita, "10%" vira percentual, o
+/// desconto escrito errado não deixa concluir, e a venda sai com ele e com o
+/// motivo — como se tivesse vindo do `F2`.
+#[gpui_kit::test]
+fn o_desconto_dado_no_pagamento_muda_o_total_e_vai_na_venda(cx: &mut TestAppContext) {
+    let publicador = Arc::new(PublicadorDoCaixa::default());
+    let j = aberta_na_sessao(cx, &publicador);
+    // Cada gesto na sua volta: o campo avisa a tela pela assinatura, que só
+    // corre quando a volta acaba — como entre duas teclas do operador.
+    let preencher = |cx: &mut TestAppContext, nome: &str, texto: &str| {
+        com(cx, &j, |t, w, cx| t.preencher(nome, texto, w, cx))
+    };
+    let a_receber = |cx: &mut TestAppContext| com(cx, &j, |t, _, _| t.a_receber());
+    com(cx, &j, |t, w, cx| {
+        t.pessoas = Pessoas {
+            fotografo: Some("f1".into()),
+            atendente: Some("f1".into()),
+            auxiliar: Some("f1".into()),
+        };
+        assert_eq!(t.a_receber(), 2500);
+        t.finalizar(w, cx);
+        assert_eq!(t.dialogo_aberto(), Some("Pagamento"));
+    });
+
+    // Em reais.
+    preencher(cx, "desconto", "5,00");
+    assert_eq!(a_receber(cx), 2000);
+    // "10%" escrito no campo passa o modo para percentual.
+    preencher(cx, "desconto", "10%");
+    assert_eq!(a_receber(cx), 2250);
+    com(cx, &j, |t, _, _| {
+        assert_eq!(t.desconto.modo, ModoDoDesconto::Percentual)
+    });
+    preencher(cx, "motivo", " fidelidade ");
+
+    // Desconto que não é desconto: vale zero na conta e trava o concluir,
+    // mesmo com o total inteiro pago.
+    preencher(cx, "desconto", "abc");
+    assert_eq!(a_receber(cx), 2500);
+    com(cx, &j, |t, w, cx| {
+        t.escolher_forma_de_pagamento(FormaDePagamento::Dinheiro, w, cx);
+        t.preencher("valor", "25,00", w, cx);
+        t.lancar(w, cx);
+        t.concluir_venda(w, cx);
+    });
+    assert!(
+        publicador.gravacoes().is_empty(),
+        "desconto inválido não sai"
+    );
+    com(cx, &j, |t, _, _| {
+        assert!(t
+            .erro_no_dialogo()
+            .is_some_and(|e| e.starts_with("Desconto:")));
+    });
+    // Corrigido: o que já entrou (R$ 25,00) vira troco sobre R$ 22,50.
+    preencher(cx, "desconto", "10");
+    assert_eq!(a_receber(cx), 2250);
+    com(cx, &j, |t, w, cx| t.concluir_venda(w, cx));
+    colher(cx, &j);
+    let gravadas = publicador.gravacoes();
+    assert_eq!(gravadas.len(), 1, "{gravadas:?}");
+    let corpo = gravadas[0].corpo.clone().unwrap();
+    assert_eq!(corpo["desconto_no_total_centavos"], 250);
+    assert_eq!(corpo["motivo_do_desconto"], "fidelidade");
+    assert_eq!(
+        corpo["pagamentos"],
+        json!([{ "forma": "dinheiro", "valor_centavos": 2500, "detalhe": null }])
+    );
+}
+
 #[gpui_kit::test]
 fn a_sangria_confere_e_grava(cx: &mut TestAppContext) {
     let publicador = Arc::new(PublicadorDoCaixa::default());
