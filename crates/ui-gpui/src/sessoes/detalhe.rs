@@ -44,7 +44,7 @@ use domain::services::pos_venda::{
     MudancaDaGaleria, Produto, Sessao,
 };
 use domain::services::PreviewType;
-use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::collapsible::Collapsible;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -52,6 +52,7 @@ use gpui_kit::component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMen
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectItem, SelectState};
+use gpui_kit::component::separator::Separator;
 use gpui_kit::component::slider::{SliderEvent, SliderState};
 use gpui_kit::component::{h_flex, ActiveTheme, Disableable, Sizable, WindowExt as _};
 use gpui_kit::{
@@ -212,6 +213,12 @@ impl Densidade {
             Densidade::Minima
         }
     }
+}
+
+/// O traço entre dois grupos de comandos das barras da sessão: o `Separator`
+/// do kit, mais baixo que os botões para separar sem virar grade.
+fn divisor_de_grupo() -> Separator {
+    Separator::vertical().h(px(16.)).flex_none()
 }
 
 /// Os recortes da barra, na ordem da web.
@@ -5474,7 +5481,11 @@ impl Detalhe {
             // 📋 **Atendimento** — o que o assistente coletou nas sete etapas.
             // No site é uma gaveta ao lado do "Dados do cliente", e é onde se
             // corrige um voucher errado sem recriar a sessão.
-            .child(estilo::desligado(
+            // 🧩 **Os comandos em grupos** (proposta de 12/out/2026): o que é do
+            // cliente fica colado num `ButtonGroup` do kit, o estúdio no meio
+            // e a entrega (link e aviso) no fim, com um traço entre os
+            // assuntos — em vez de seis botões soltos em fila.
+            .child(ButtonGroup::new("sessao-grupo-cliente").child(estilo::desligado(
                 estilo::botao_contorno_pequeno("sessao-atendimento", cx)
                     .child(Icon::new(Icone::ClipboardList).size(px(14.)))
                     .child(SharedString::from(match self.quantas_associacoes() {
@@ -5488,6 +5499,19 @@ impl Detalhe {
                     }),
                 sem_galeria,
             ))
+            .child(estilo::desligado(
+                estilo::botao_contorno_pequeno("sessao-editar-cliente", cx)
+                    .debug_selector(|| "sessao-editar-cliente".into())
+                    .child(Icon::new(Icone::ClipboardList).size(px(14.)))
+                    .child("Dados do cliente")
+                    .when(!sem_galeria, |b| {
+                        b.on_click(
+                            cx.listener(|tela, _ev, _window, cx| tela.editar_dados_do_cliente(cx)),
+                        )
+                    }),
+                sem_galeria,
+            )))
+            .child(divisor_de_grupo())
             // 🏠 **O estúdio da sessão**, como no cabeçalho do site.
             // 🔐 Conta de um estúdio só (perfil de acesso): a sessão é desse
             // estúdio e não há outro para onde mandá-la — o nome, sem seletor.
@@ -5514,19 +5538,8 @@ impl Detalhe {
                             .disabled(self.estudio_de_antes.is_some()),
                     ))
             }))
-            .child(estilo::desligado(
-                estilo::botao_contorno_pequeno("sessao-editar-cliente", cx)
-                    .debug_selector(|| "sessao-editar-cliente".into())
-                    .child(Icon::new(Icone::ClipboardList).size(px(14.)))
-                    .child("Dados do cliente")
-                    .when(!sem_galeria, |b| {
-                        b.on_click(
-                            cx.listener(|tela, _ev, _window, cx| tela.editar_dados_do_cliente(cx)),
-                        )
-                    }),
-                sem_galeria,
-            ))
-            .child(estilo::desligado(
+            .child(divisor_de_grupo())
+            .child(ButtonGroup::new("sessao-grupo-entrega").child(estilo::desligado(
                 estilo::botao_contorno_pequeno("sessao-link", cx)
                     .child(Icon::new(Icone::Link2).size(px(14.)))
                     .child(if self.link.is_some() {
@@ -5541,8 +5554,8 @@ impl Detalhe {
             ))
             // 📧 O aviso sai por e-mail; sem contato nenhum ele aparece e pede o
             // contato — o mesmo gesto da web. Só com WhatsApp, sem botão.
-            .when(email.is_some() || sem_email, |cabecalho| {
-                cabecalho.child(estilo::desligado(
+            .when(email.is_some() || sem_email, |grupo| {
+                grupo.child(estilo::desligado(
                     estilo::botao_contorno_pequeno("sessao-avisar", cx)
                         .child(Icon::new(Icone::Send).size(px(14.)))
                         .child(if self.avisando {
@@ -5555,7 +5568,7 @@ impl Detalhe {
                         }),
                     self.avisando,
                 ))
-            })
+            }))
             // 🪟 A tela da sessão não tem o cabeçalho do app: no Linux os botões
             // de janela têm de morar aqui, ou não existem enquanto ela estiver
             // aberta — que é onde o operador passa o dia.
@@ -6063,6 +6076,7 @@ impl Detalhe {
                     )
                     .child(Icon::new(Icone::ZoomIn).size(px(14.))),
             )
+            .child(divisor_de_grupo())
             // 🔑 **Sem exigir foco**, como o botão da barra do site: entra no
             // modo e a tira faz o resto.
             .child(estilo::desligado(
@@ -6146,31 +6160,56 @@ impl Detalhe {
             })
             // 🖨️ O que se faz **com as marcadas**: a negociação do balcão (o
             // "Negociação…" do site) e a folha de impressão, que só o desktop tem.
-            .when(marcadas > 0, |barra| {
-                barra
-                    .child(
+            //
+            // 📌 **Sempre no lugar** (proposta de 12/out/2026): sem foto
+            // marcada os dois ficam apagados, em vez de sumir — aparecendo e
+            // sumindo, eles empurravam os vizinhos a cada clique na grade.
+            .child(divisor_de_grupo())
+            .child(
+                ButtonGroup::new("sessao-grupo-marcadas")
+                    .child(estilo::desligado(
                         estilo::botao_contorno_pequeno("sessao-negociar", cx)
                             .child(Icon::new(Icone::ShoppingCart).size(px(14.)))
-                            .child(if larga {
-                                format!("Negociação… ({marcadas})")
+                            .when(larga, |b| b.child("Negociação…"))
+                            // A conta tem largura reservada: de "(0)" a
+                            // "(99)" o botão não muda de tamanho, e o que
+                            // está à esquerda dele não anda.
+                            .child(
+                                div()
+                                    .min_w(px(30.))
+                                    .text_center()
+                                    .child(format!("({marcadas})")),
+                            )
+                            .tooltip(if marcadas > 0 {
+                                "Negociação das fotos marcadas"
                             } else {
-                                format!("({marcadas})")
+                                "Negociação: marque as fotos primeiro"
                             })
-                            .tooltip("Negociação das fotos marcadas")
-                            .on_click(cx.listener(|tela, _ev, _window, cx| {
-                                tela.pedir_negociacao(tela.marcadas(), false, cx)
-                            })),
-                    )
-                    .child(
+                            .when(marcadas > 0, |b| {
+                                b.on_click(cx.listener(|tela, _ev, _window, cx| {
+                                    tela.pedir_negociacao(tela.marcadas(), false, cx)
+                                }))
+                            }),
+                        marcadas == 0,
+                    ))
+                    .child(estilo::desligado(
                         estilo::botao_contorno_pequeno("sessao-imprimir", cx)
                             .child(Icon::new(Icone::Printer).size(px(14.)))
                             .when(larga, |b| b.child("Imprimir…"))
-                            .tooltip("Imprimir as fotos marcadas")
-                            .on_click(cx.listener(|tela, _ev, _window, cx| {
-                                cx.emit(Pedido::Imprimir(tela.marcadas()))
-                            })),
-                    )
-            })
+                            .tooltip(if marcadas > 0 {
+                                "Imprimir as fotos marcadas"
+                            } else {
+                                "Imprimir: marque as fotos primeiro"
+                            })
+                            .when(marcadas > 0, |b| {
+                                b.on_click(cx.listener(|tela, _ev, _window, cx| {
+                                    cx.emit(Pedido::Imprimir(tela.marcadas()))
+                                }))
+                            }),
+                        marcadas == 0,
+                    )),
+            )
+            .child(divisor_de_grupo())
             // ☑️ O `Checkbox` do gpui-kit, na altura dos botões da barra.
             .child(
                 estilo::campo_pequeno(
