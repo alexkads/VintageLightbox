@@ -610,3 +610,289 @@ fn o_cupom_acompanha_o_p_da_grade_mesmo_com_o_patch_demorado(cx: &mut TestAppCon
     colher(cx, &m);
     assert_eq!(ids_no_cupom(cx, &m), vec!["b", "d", "c"]);
 }
+
+// ── 🖥️ A tela cheia (`tela_cheia.rs`) ──────────────────────────────────────
+
+fn com_as_pessoas(t: &mut Caixa) {
+    t.pessoas = regras::Pessoas {
+        fotografo: Some("f1".into()),
+        atendente: Some("f1".into()),
+        auxiliar: Some("f1".into()),
+    };
+}
+
+/// `F10` e os formulários que o desenho seguinte monta.
+fn entrar_na_tela_cheia(t: &mut Caixa, w: &mut Window, cx: &mut Context<Caixa>) {
+    assert!(t.teclar_no_painel("f10", false, false, None, false, false, w, cx));
+    assert!(t.tela_cheia());
+    t.montar(w, cx);
+}
+
+#[gpui_kit::test]
+fn f10_entra_e_sai_da_tela_cheia_e_a_escolha_fica_lembrada(cx: &mut TestAppContext) {
+    let m = aberto(cx);
+    na_janela(cx, &m, |t, w, cx| {
+        assert!(!t.tela_cheia(), "o painel nasce compacto");
+        entrar_na_tela_cheia(t, w, cx);
+        // Pessoas, pagamento e gaveta montados juntos — sem diálogo.
+        assert_eq!(
+            t.formularios_montados(),
+            vec!["Movimento", "Pagamento", "Pessoas"]
+        );
+        let lembrado = std::fs::read_to_string(&t.painel_ref().unwrap().lembranca).unwrap();
+        assert!(lembrado.contains("\"tela_cheia\":true"), "{lembrado}");
+        // Na volta ao painel nada da tela cheia vira diálogo aberto.
+        assert!(t.teclar_no_painel("f10", false, false, None, false, false, w, cx));
+        assert!(!t.tela_cheia());
+        assert_eq!(t.dialogo_aberto(), None);
+    });
+}
+
+#[test]
+fn o_arquivo_de_antes_da_tela_cheia_abre_o_painel_compacto() {
+    let antigo: Guardado = serde_json::from_str(r#"{"x":-10.0,"y":0.0,"minimizado":false}"#)
+        .expect("o arquivo antigo ainda se lê");
+    assert!(!antigo.tela_cheia);
+}
+
+#[gpui_kit::test]
+fn na_tela_cheia_a_venda_sai_inteira_sem_dialogo(cx: &mut TestAppContext) {
+    let m = aberto(cx);
+    m.publicador.responder_json("venda", Ok(json!({})));
+    na_janela(cx, &m, |t, w, cx| {
+        com_as_pessoas(t);
+        entrar_na_tela_cheia(t, w, cx);
+        // F4 leva ao pagamento, que já estava na tela.
+        t.tecla(4, w, cx);
+        assert_eq!(t.dialogo_aberto(), Some("Pagamento"));
+        assert!(!t.cupom_parado(), "sem valor lançado o cupom segue livre");
+        assert!(t.teclar_no_painel("2", false, true, Some("Pagamento"), false, false, w, cx));
+        t.lancar(w, cx);
+        assert_eq!(t.lancados()[0].valor, 12000);
+        // Um valor lançado não trava o cupom: tirar uma foto refaz a conta.
+        assert!(!t.cupom_parado());
+        t.concluir_venda(w, cx);
+        assert!(t.cupom_parado(), "com a venda gravando o cupom espera");
+    });
+    colher(cx, &m);
+    let vendas: Vec<PedidoJson> = gravacoes(&m)
+        .into_iter()
+        .filter(|p| p.rotulo == "venda")
+        .collect();
+    assert_eq!(vendas.len(), 1, "uma venda, uma gravação");
+    na_janela(cx, &m, |t, w, cx| {
+        // O pagamento concluído some, e o desenho seguinte monta outro em branco.
+        t.montar(w, cx);
+        assert!(t.ativar("Pagamento"));
+        assert!(t.lancados().is_empty());
+        assert!(!t.cupom_parado());
+        assert!(t.tela_cheia(), "a venda não tira o caixa da tela cheia");
+    });
+}
+
+#[gpui_kit::test]
+fn na_tela_cheia_a_venda_nao_sai_sem_as_pessoas(cx: &mut TestAppContext) {
+    let m = aberto(cx);
+    na_janela(cx, &m, |t, w, cx| {
+        entrar_na_tela_cheia(t, w, cx);
+        assert!(t.ativar("Pagamento"));
+        assert!(t.teclar_no_painel("1", false, true, Some("Pagamento"), false, false, w, cx));
+        t.lancar(w, cx);
+        t.concluir_venda(w, cx);
+        let erro = t.erro_no_dialogo().expect("a recusa aparece no pagamento");
+        assert!(erro.contains("quem fotografou"), "{erro}");
+    });
+    colher(cx, &m);
+    assert!(gravacoes(&m).is_empty());
+}
+
+#[gpui_kit::test]
+fn na_tela_cheia_as_teclas_f_levam_a_regiao_e_o_cupom_segue_livre(cx: &mut TestAppContext) {
+    let m = aberto(cx);
+    na_janela(cx, &m, |t, w, cx| {
+        com_as_pessoas(t);
+        entrar_na_tela_cheia(t, w, cx);
+        for (tecla, vez) in [(3, "Pessoas"), (6, "Movimento"), (2, "Pagamento")] {
+            t.tecla(tecla, w, cx);
+            assert_eq!(t.dialogo_aberto(), Some(vez), "F{tecla}");
+            assert_eq!(t.formularios_montados().len(), 3, "F{tecla} não abre nada");
+        }
+        // F7 leva às vendas, que não são formulário: ninguém perde a vez.
+        t.tecla(7, w, cx);
+        assert_eq!(t.formularios_montados().len(), 3);
+        // Com os formulários à vista, as setas do cupom continuam valendo.
+        assert!(no_cupom(t, "down", false, w, cx));
+        assert_eq!(t.painel_ref().unwrap().em_foco.as_deref(), Some("a"));
+    });
+}
+
+#[gpui_kit::test]
+fn na_tela_cheia_a_negociacao_nao_derruba_o_pagamento(cx: &mut TestAppContext) {
+    let m = aberto(cx);
+    na_janela(cx, &m, |t, w, cx| {
+        com_as_pessoas(t);
+        entrar_na_tela_cheia(t, w, cx);
+        assert!(t.ativar("Pagamento"));
+        assert!(no_cupom(t, "down", false, w, cx));
+        assert!(no_cupom(t, "n", false, w, cx));
+        assert_eq!(t.dialogo_aberto(), Some("Negociacao"));
+        assert_eq!(
+            t.formularios_montados(),
+            vec!["Movimento", "Negociacao", "Pagamento", "Pessoas"]
+        );
+        assert!(t.cupom_parado(), "negociando, o cupom espera");
+        // Esc fecha só a negociação.
+        t.fechar_dialogo(w, cx);
+        assert_eq!(
+            t.formularios_montados(),
+            vec!["Movimento", "Pagamento", "Pessoas"]
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn na_tela_cheia_a_resposta_da_venda_acha_o_pagamento_fora_da_vez(cx: &mut TestAppContext) {
+    let m = aberto(cx);
+    m.publicador.responder_json("venda", Ok(json!({})));
+    na_janela(cx, &m, |t, w, cx| {
+        com_as_pessoas(t);
+        entrar_na_tela_cheia(t, w, cx);
+        assert!(t.ativar("Pagamento"));
+        assert!(t.teclar_no_painel("2", false, true, Some("Pagamento"), false, false, w, cx));
+        t.lancar(w, cx);
+        t.concluir_venda(w, cx);
+        // Enquanto a venda grava, o operador vai à gaveta.
+        t.tecla(6, w, cx);
+        assert_eq!(t.dialogo_aberto(), Some("Movimento"));
+    });
+    colher(cx, &m);
+    na_janela(cx, &m, |t, w, cx| {
+        // A venda entrou: o pagamento recomeça em branco, e a gaveta, que
+        // estava na vez, continua montada.
+        t.montar(w, cx);
+        assert_eq!(
+            t.formularios_montados(),
+            vec!["Movimento", "Pagamento", "Pessoas"]
+        );
+        assert!(t.ativar("Pagamento"));
+        assert!(t.lancados().is_empty(), "o lançado saiu com a venda");
+    });
+}
+
+#[gpui_kit::test]
+fn minimizar_a_tela_cheia_nao_deixa_dialogo_no_painel(cx: &mut TestAppContext) {
+    let m = aberto(cx);
+    na_janela(cx, &m, |t, w, cx| {
+        entrar_na_tela_cheia(t, w, cx);
+        assert!(t.teclar_no_painel("f9", false, false, None, false, false, w, cx));
+        assert!(t.minimizado() && !t.tela_cheia());
+        assert_eq!(t.dialogo_aberto(), None);
+        // F9 de novo devolve a tela cheia: é o desenho escolhido.
+        assert!(t.teclar_no_painel("f9", false, false, None, false, false, w, cx));
+        assert!(t.tela_cheia());
+    });
+}
+
+#[gpui_kit::test]
+fn na_tela_cheia_o_cupom_vazio_nao_vira_venda(cx: &mut TestAppContext) {
+    let p = publicador();
+    p.responder_json("galeria", Ok(galeria_com(&[])));
+    p.responder_json("galeria-viva", Ok(galeria_com(&[])));
+    let m = aberto_com(cx, p);
+    na_janela(cx, &m, |t, w, cx| {
+        com_as_pessoas(t);
+        entrar_na_tela_cheia(t, w, cx);
+        assert!(t.ativar("Pagamento"));
+        t.concluir_venda(w, cx);
+        let erro = t.erro_no_dialogo().expect("a recusa aparece no pagamento");
+        assert!(erro.contains("Nenhuma foto"), "{erro}");
+    });
+    colher(cx, &m);
+    assert!(gravacoes(&m).is_empty());
+}
+
+#[gpui_kit::test]
+fn ir_a_galeria_no_meio_da_venda_nao_perde_o_pagamento_lancado(cx: &mut TestAppContext) {
+    let m = aberto(cx);
+    na_janela(cx, &m, |t, w, cx| {
+        com_as_pessoas(t);
+        entrar_na_tela_cheia(t, w, cx);
+        assert!(t.ativar("Pagamento"));
+        assert!(t.teclar_no_painel("2", false, true, Some("Pagamento"), false, false, w, cx));
+        t.lancar(w, cx);
+        // F10: a galeria. O pagamento não vira diálogo, e não some.
+        assert!(t.teclar_no_painel("f10", false, false, None, false, false, w, cx));
+        assert!(!t.tela_cheia());
+        assert_eq!(t.dialogo_aberto(), None);
+        // F10 de novo: está tudo onde ficou.
+        entrar_na_tela_cheia(t, w, cx);
+        assert!(t.ativar("Pagamento"));
+        assert_eq!(t.lancados().len(), 1);
+        assert_eq!(t.lancados()[0].valor, 12000);
+    });
+    assert!(gravacoes(&m).is_empty());
+}
+
+#[gpui_kit::test]
+fn na_tela_cheia_o_p_poe_e_tira_a_foto_do_cupom_sem_voltar_a_galeria(cx: &mut TestAppContext) {
+    let m = aberto_com(cx, publicador_com(true));
+    na_janela(cx, &m, entrar_na_tela_cheia);
+    assert_eq!(ids_no_cupom(cx, &m), vec!["a", "b", "c"]);
+
+    // O balconista clica em `d` na fila da sessão: a foto fica em foco…
+    let detalhe = m.detalhe.clone();
+    cx.update(|cx| {
+        detalhe.update(cx, |d, cx| {
+            assert!(d.so_esta("d", cx));
+        })
+    });
+    colher(cx, &m);
+    // …e o `P`, com o teclado no cupom, a leva ao balcão.
+    na_janela(cx, &m, |t, w, cx| {
+        assert_eq!(t.painel_ref().unwrap().em_foco.as_deref(), Some("d"));
+        assert!(no_cupom(t, "p", false, w, cx));
+    });
+    m.publicador.responder();
+    m.publicador
+        .responder_json("galeria-viva", Ok(galeria_com(&["a", "b", "d", "c"])));
+    colher(cx, &m);
+    assert_eq!(ids_no_cupom(cx, &m), vec!["a", "b", "d", "c"]);
+
+    // O mesmo `P` num item do cupom o tira.
+    na_janela(cx, &m, |t, w, cx| {
+        assert!(no_cupom(t, "p", false, w, cx));
+    });
+    m.publicador.responder();
+    m.publicador
+        .responder_json("galeria-viva", Ok(galeria_com(&["a", "b", "c"])));
+    colher(cx, &m);
+    assert_eq!(ids_no_cupom(cx, &m), vec!["a", "b", "c"]);
+}
+
+#[gpui_kit::test]
+fn o_caixa_ve_todas_as_fotos_da_sessao_e_o_que_cada_uma_e(cx: &mut TestAppContext) {
+    let m = aberto(cx);
+    let fotos = cx.update(|cx| m.detalhe.read(cx).fotos_para_o_caixa());
+    let ids: Vec<&str> = fotos.iter().map(|f| f.id.as_str()).collect();
+    assert_eq!(ids, vec!["a", "b", "d", "c"], "na ordem da grade");
+    let d = fotos.iter().find(|f| f.id == "d").unwrap();
+    assert_eq!(d.estado, EstadoDaFotoNoSite::Disponivel);
+    assert_eq!(d.nota, Some(4));
+}
+
+#[gpui_kit::test]
+fn com_estorno_no_palco_o_cupom_espera_e_o_voltar_o_devolve(cx: &mut TestAppContext) {
+    let m = aberto(cx);
+    na_janela(cx, &m, |t, w, cx| {
+        entrar_na_tela_cheia(t, w, cx);
+        t.tecla(8, w, cx);
+        assert!(t.formularios_montados().contains(&"Fechamento"));
+        assert!(t.cupom_parado());
+        // O "Voltar" do palco (e o Esc): só o fechamento sai.
+        assert!(t.ativar("Fechamento"));
+        t.fechar_dialogo(w, cx);
+        assert!(!t.formularios_montados().contains(&"Fechamento"));
+        assert!(!t.cupom_parado());
+        assert!(t.tela_cheia());
+    });
+}

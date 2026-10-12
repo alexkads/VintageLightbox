@@ -27,7 +27,7 @@ use gpui_kit::component::select::{SearchableVec, Select, SelectEvent, SelectItem
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon, Selectable as _, Sizable};
 use gpui_kit::{
     div, prelude::*, px, AnyElement, ClickEvent, Context, Div, Entity, FocusHandle, Focusable,
-    FontWeight, KeyContext, SharedString, Subscription, Window,
+    FontWeight, KeyContext, SharedString, Stateful, Subscription, Window,
 };
 use serde_json::json;
 
@@ -220,7 +220,7 @@ pub enum Dialogo {
 }
 
 impl Dialogo {
-    fn contexto(&self) -> &'static str {
+    pub(super) fn contexto(&self) -> &'static str {
         match self {
             Dialogo::Atalhos => "Atalhos",
             Dialogo::Abrir(_) => "Abrir",
@@ -233,6 +233,68 @@ impl Dialogo {
             Dialogo::Fechar(_) => "Fechamento",
             Dialogo::Negociacao(_) => "Negociacao",
         }
+    }
+}
+
+// 🖥️ O que a tela cheia pergunta a um formulário sem abrir os campos dele.
+impl Dialogo {
+    /// Com este formulário à vista o cupom não aceita tecla: a venda está
+    /// sendo gravada, ou o estorno, o fechamento ou a negociação ocupam o
+    /// lugar da foto (o `Esc` e o "Voltar" deles devolvem o cupom).
+    ///
+    /// 🔑 Um pagamento **lançado** não trava: o total muda, e a conta do que
+    /// falta ou do troco se refaz na hora. Travar ali era um curral — para
+    /// tirar uma foto o balconista teria de desfazer o pagamento primeiro.
+    pub(super) fn para_o_cupom(&self) -> bool {
+        match self {
+            Dialogo::Pagamento(form) => form.enviando,
+            Dialogo::Pessoas(form) => form.cadastro.is_some(),
+            Dialogo::Atalhos
+            | Dialogo::Estorno(_)
+            | Dialogo::Fechar(_)
+            | Dialogo::Negociacao(_) => true,
+            Dialogo::Abrir(_) | Dialogo::Desconto(_) | Dialogo::Movimento(_) | Dialogo::Vendas => {
+                false
+            }
+        }
+    }
+
+    /// O que ainda abre por cima de tudo na tela cheia: os atalhos, o cadastro
+    /// de funcionário e a pergunta de remover a negociação.
+    pub(super) fn ainda_e_dialogo(&self) -> bool {
+        match self {
+            Dialogo::Atalhos => true,
+            Dialogo::Pessoas(form) => form.cadastro.is_some(),
+            Dialogo::Negociacao(form) => form.confirmando,
+            _ => false,
+        }
+    }
+
+    /// O campo que recebe o foco quando a tecla F leva à região.
+    pub(super) fn foco_inicial(&self, cx: &gpui_kit::App) -> Option<FocusHandle> {
+        match self {
+            Dialogo::Abrir(form) => Some(form.fundo.read(cx).focus_handle(cx)),
+            Dialogo::Pessoas(form) => Some(form.escolhas[0].read(cx).focus_handle(cx)),
+            Dialogo::Movimento(form) => Some(form.valor.read(cx).focus_handle(cx)),
+            Dialogo::Fechar(form) if form.conferencia.is_none() && form.resultado.is_none() => form
+                .campos
+                .first()
+                .map(|(_, campo)| campo.read(cx).focus_handle(cx)),
+            _ => None,
+        }
+    }
+
+    /// O trio escolhido nas pessoas, como está na tela.
+    pub(super) fn pessoas_escolhidas(&self) -> Option<Pessoas> {
+        let Dialogo::Pessoas(form) = self else {
+            return None;
+        };
+        let [fotografo, atendente, auxiliar] = form.valores.clone();
+        Some(Pessoas {
+            fotografo,
+            atendente,
+            auxiliar,
+        })
     }
 }
 
@@ -289,7 +351,23 @@ impl Caixa {
         cx: &mut Context<Self>,
     ) {
         self.depois_das_pessoas = false;
-        let (dialogo, foco): (Dialogo, Option<FocusHandle>) = match tipo {
+        let (dialogo, foco) = self.novo_dialogo(tipo, window, cx);
+        self.lembrar_foco(window, cx);
+        self.por_dialogo(dialogo);
+        let foco = foco.unwrap_or_else(|| self.foco_do_form());
+        window.focus(&foco, cx);
+        cx.notify();
+    }
+
+    /// O formulário de um diálogo, pronto, e o campo que recebe o foco — sem
+    /// abrir nada: a tela cheia monta os dela com isto.
+    pub(super) fn novo_dialogo(
+        &mut self,
+        tipo: TipoDeDialogo,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> (Dialogo, Option<FocusHandle>) {
+        match tipo {
             TipoDeDialogo::Atalhos => (Dialogo::Atalhos, None),
             TipoDeDialogo::Vendas => (Dialogo::Vendas, None),
             TipoDeDialogo::Abrir => {
@@ -410,11 +488,7 @@ impl Caixa {
                     Some(foco),
                 )
             }
-        };
-        self.lembrar_foco(window, cx);
-        self.dialogo = Some(dialogo);
-        window.focus(&foco.unwrap_or_else(|| self.foco_do_dialogo.clone()), cx);
-        cx.notify();
+        }
     }
 
     /// Quem tinha o foco antes do primeiro diálogo — é para lá que ele volta.
@@ -475,7 +549,7 @@ impl Caixa {
             },
         );
         self.lembrar_foco(window, cx);
-        self.dialogo = Some(Dialogo::Negociacao(Box::new(FormNegociacao {
+        let negociacao = Dialogo::Negociacao(Box::new(FormNegociacao {
             ids,
             titulo,
             tipo: inicial.tipo,
@@ -490,7 +564,8 @@ impl Caixa {
             erro: None,
             enviando: false,
             _assinatura: assinatura,
-        })));
+        }));
+        self.por_dialogo(negociacao);
         window.focus(&foco, cx);
         cx.notify();
     }
@@ -541,7 +616,8 @@ impl Caixa {
             return;
         }
         form.confirmando = true;
-        window.focus(&self.foco_do_dialogo, cx);
+        let foco = self.foco_do_form();
+        window.focus(&foco, cx);
         cx.notify();
     }
 
@@ -602,7 +678,11 @@ impl Caixa {
         cx.notify();
     }
 
-    fn form_de_pessoas(&mut self, window: &mut Window, cx: &mut Context<Self>) -> FormPessoas {
+    pub(super) fn form_de_pessoas(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> FormPessoas {
         let opcoes: Vec<OpcaoDeFuncionario> = self
             .todos_os_funcionarios()
             .into_iter()
@@ -630,11 +710,15 @@ impl Caixa {
                 window,
                 move |tela, _, evento: &SelectEvent<SearchableVec<OpcaoDeFuncionario>>, _, cx| {
                     let SelectEvent::Confirm(valor) = evento;
+                    tela.ativar("Pessoas");
                     if let Some(Dialogo::Pessoas(form)) = tela.dialogo.as_mut() {
                         form.valores[papel] = valor.clone();
                         form.erro = None;
                         cx.notify();
                     }
+                    // 🖥️ Na tela cheia não há "Confirmar": a escolha vale na
+                    // hora, assim que o trio fecha a conta.
+                    tela.guardar_pessoas_da_tela_cheia();
                 },
             ));
             escolha
@@ -670,6 +754,14 @@ impl Caixa {
         }
         self.dialogo = None;
         self.depois_das_pessoas = false;
+        // 🖥️ Na tela cheia o formulário não "fecha": some, e o próximo desenho
+        // monta outro em branco. O teclado volta ao cupom.
+        if self.em_tela_cheia() {
+            self.foco_antes.esquecer();
+            self.focar_o_cupom(window, cx);
+            cx.notify();
+            return;
+        }
         if self.foco_antes.guardado() {
             self.foco_antes.devolver(window, cx);
         } else {
@@ -817,7 +909,8 @@ impl Caixa {
                     .iter()
                     .any(|c| c.read(cx).focus_handle(cx).is_focused(window));
                 if no_desconto {
-                    window.focus(&self.foco_do_dialogo, cx);
+                    let foco = self.foco_do_form();
+                    window.focus(&foco, cx);
                 } else if form.forma.is_some() {
                     self.lancar(window, cx);
                 } else {
@@ -870,6 +963,7 @@ impl Caixa {
     /// Texto que não é desconto vale zero (`desconto_no_total`) e aparece como
     /// erro embaixo do campo; o `concluir_venda` não deixa passar.
     fn guardar_o_desconto_do_pagamento(&mut self, cx: &mut Context<Self>) {
+        self.ativar("Pagamento");
         let Some(Dialogo::Pagamento(form)) = self.dialogo.as_mut() else {
             return;
         };
@@ -909,7 +1003,8 @@ impl Caixa {
         let (desconto, motivo) = (form.desconto.clone(), form.motivo.clone());
         escrever(&desconto, String::new(), window, cx);
         escrever(&motivo, String::new(), window, cx);
-        window.focus(&self.foco_do_dialogo, cx);
+        let foco = self.foco_do_form();
+        window.focus(&foco, cx);
         cx.notify();
     }
 
@@ -1004,6 +1099,11 @@ impl Caixa {
         }
         let seguir = self.depois_das_pessoas;
         self.guardar_pessoas(pessoas);
+        // 🖥️ Na tela cheia as pessoas ficam à vista: gravar não fecha nada.
+        if self.em_tela_cheia() {
+            cx.notify();
+            return;
+        }
         self.fechar_dialogo(window, cx);
         // O F4 que pediu os nomes continua para o pagamento.
         if seguir {
@@ -1011,7 +1111,12 @@ impl Caixa {
         }
     }
 
-    fn abrir_cadastro(&mut self, papel: usize, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn abrir_cadastro(
+        &mut self,
+        papel: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let nome = campo(window, cx, "");
         let whatsapp = campo(window, cx, "");
         let email = campo(window, cx, "");
@@ -1101,7 +1206,7 @@ impl Caixa {
 
     pub(super) fn lancar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let total = self.a_receber();
-        let foco_do_dialogo = self.foco_do_dialogo.clone();
+        let foco_do_dialogo = self.foco_do_form();
         let Some(Dialogo::Pagamento(form)) = self.dialogo.as_mut() else {
             return;
         };
@@ -1143,11 +1248,25 @@ impl Caixa {
             .as_ref()
             .and_then(|v| v.sessao.as_ref())
             .map(|s| s.id.clone());
+        let na_tela_cheia = self.em_tela_cheia();
+        self.ativar("Pagamento");
         let Some(Dialogo::Pagamento(form)) = self.dialogo.as_mut() else {
             return;
         };
         let conta = regras::conta_do_pagamento(total, &form.lancados);
         if form.enviando {
+            return;
+        }
+        // 🖥️ O diálogo só abre com as pessoas escolhidas (`regras::finalizar`);
+        // na tela cheia o pagamento está sempre à mão, e a conferência é aqui.
+        if na_tela_cheia && cupom.itens.is_empty() {
+            form.erro = Some("Nenhuma foto sinalizada para cobrar.".into());
+            cx.notify();
+            return;
+        }
+        if na_tela_cheia && !pessoas.completas() {
+            form.erro = Some("Escolha quem fotografou, quem atendeu e quem auxiliou (F3).".into());
+            cx.notify();
             return;
         }
         // 🏷️ O desconto escrito errado valeria zero na conta: a venda sairia
@@ -1264,7 +1383,7 @@ impl Caixa {
         escrever(&valor, escrito.clone(), window, cx);
         let forma = venda.forma_principal();
         self.lembrar_foco(window, cx);
-        self.dialogo = Some(Dialogo::Estorno(Box::new(FormEstorno {
+        let estorno = Dialogo::Estorno(Box::new(FormEstorno {
             chave: uuid::Uuid::new_v4().to_string(),
             venda,
             escolhidas,
@@ -1276,8 +1395,10 @@ impl Caixa {
             des_sinalizar: true,
             erro: None,
             enviando: false,
-        })));
-        window.focus(&self.foco_do_dialogo, cx);
+        }));
+        self.por_dialogo(estorno);
+        let foco = self.foco_do_form();
+        window.focus(&foco, cx);
         cx.notify();
     }
 
@@ -1393,6 +1514,7 @@ impl Caixa {
                 cx,
             );
         }
+        self.ativar("Estorno");
         if matches!(self.dialogo, Some(Dialogo::Estorno(_))) {
             self.fechar_dialogo_depois(cx);
         }
@@ -1512,6 +1634,18 @@ impl Caixa {
         resultado: Result<serde_json::Value, String>,
         cx: &mut Context<Self>,
     ) {
+        // 🖥️ Na tela cheia a resposta pode chegar com outro formulário na vez.
+        if let Some(contexto) = match rotulo {
+            "abrir" => Some("Abrir"),
+            "movimento" => Some("Movimento"),
+            "venda" => Some("Pagamento"),
+            "estorno" => Some("Estorno"),
+            "conferir" | "fechar" => Some("Fechamento"),
+            "cadastrar" => Some("Pessoas"),
+            _ => None,
+        } {
+            self.ativar(contexto);
+        }
         match rotulo {
             "abrir" => {
                 let pedido = self.tirar_em_curso(|e| matches!(e, EmCurso::Abrir { .. }));
@@ -1602,6 +1736,10 @@ impl Caixa {
                     }
                     self.desconto = DescontoNoTotal::default();
                     self.fechar_se(|d| matches!(d, Dialogo::Pagamento(_)), cx);
+                    // O pagamento que a tela cheia guardou para a volta era
+                    // desta venda: não sobra para a próxima.
+                    self.estacionados
+                        .retain(|d| !matches!(d, Dialogo::Pagamento(_)));
                     self.recarregar(cx);
                 }
                 Err(erro) => {
@@ -1792,6 +1930,11 @@ impl Caixa {
     /// sumiu, e as teclas da galeria morriam.
     pub(super) fn fechar_dialogo_depois(&mut self, cx: &mut gpui_kit::App) {
         self.dialogo = None;
+        if self.em_tela_cheia() {
+            self.foco_antes.esquecer();
+            self.foco_no_cupom_depois = true;
+            return;
+        }
         if self.foco_antes.guardado() {
             self.foco_antes.devolver_depois(cx);
         } else {
@@ -1811,10 +1954,18 @@ impl Caixa {
             window.focus(&foco, cx);
         }
         if std::mem::take(&mut self.foco_no_dialogo) {
-            window.focus(&self.foco_do_dialogo, cx);
+            let foco = self.foco_do_form();
+            window.focus(&foco, cx);
+        }
+        // 🖥️ Na tela cheia os formulários estão desenhados na própria tela; em
+        // diálogo só sobra o que é por cima de tudo (`tela_cheia.rs`).
+        let tela_cheia = self.em_tela_cheia();
+        if tela_cheia && !self.ativar_o_que_ainda_e_dialogo() {
+            return None;
         }
         let dialogo = self.dialogo.as_ref()?;
         let contexto = dialogo.contexto();
+        let so_a_pergunta = tela_cheia && matches!(dialogo, Dialogo::Negociacao(_));
         let (titulo, descricao, largura, corpo): (String, Option<AnyElement>, f32, AnyElement) =
             match dialogo {
                 Dialogo::Atalhos => ("Atalhos do caixa".into(), None, 448., self.corpo_atalhos(cx)),
@@ -1936,8 +2087,9 @@ impl Caixa {
             self.dialogo.as_ref(),
             Some(Dialogo::Negociacao(form)) if form.confirmando
         );
+        let principal = (!so_a_pergunta).then_some(miolo);
         let principal = crate::dialogo::desenhar_conteudo(
-            Some(miolo),
+            principal,
             None,
             // O X é o do cabeçalho daqui (`caixa-dialogo-fechar`); com a
             // pergunta à vista, o clique fora não fecha o de baixo.
@@ -1950,7 +2102,10 @@ impl Caixa {
             |tela, window, cx| tela.fechar_dialogo(window, cx),
             window,
             cx,
-        )?;
+        );
+        if principal.is_none() && !so_a_pergunta {
+            return None;
+        }
         let (pergunta, rodape) = self.pergunta_de_remover_negociacao(cx).unzip();
         let pergunta = crate::dialogo::desenhar_conteudo(
             pergunta,
@@ -1960,33 +2115,18 @@ impl Caixa {
             window,
             cx,
         );
-        Some(div().child(principal).children(pergunta).into_any_element())
+        Some(
+            div()
+                .children(principal)
+                .children(pergunta)
+                .into_any_element(),
+        )
     }
 
-    fn casca(
-        &self,
-        contexto: &str,
-        titulo: String,
-        descricao: Option<AnyElement>,
-        corpo: AnyElement,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let tema = cx.theme();
-        let (apagado, acento) = (tema.muted_foreground, tema.accent);
-        // O painel da galeria marca os dele: o interceptador de teclas dele só
-        // cuida do que é seu.
-        let flutuante = if self.flutuante() { " Flutuante" } else { "" };
-        let chave =
-            KeyContext::parse(&format!("{DIALOGO} {contexto}{flutuante}")).unwrap_or_default();
-
-        // 🪟 O miolo: véu, caixa e canto são do `Dialog` do gpui-kit
-        // (`crate::dialogo`, em `render_dialogo`). O cabeçalho do site — título
-        // `text-base font-medium` — e o X são daqui.
-        v_flex()
-            .id("caixa-dialogo")
-            .key_context(chave)
-            .track_focus(&self.foco_do_dialogo)
-            .on_action(cx.listener(|t, _: &FecharDialogo, w, cx| t.fechar_dialogo(w, cx)))
+    /// As ações de teclado de um formulário do caixa — do diálogo e de cada
+    /// região da tela cheia, que são o mesmo formulário noutro lugar.
+    pub(super) fn acoes_do_form(el: Stateful<Div>, cx: &mut Context<Self>) -> Stateful<Div> {
+        el.on_action(cx.listener(|t, _: &FecharDialogo, w, cx| t.fechar_dialogo(w, cx)))
             .on_action(cx.listener(|t, _: &ConfirmarDialogo, w, cx| t.confirmar(w, cx)))
             .on_action(cx.listener(|t, _: &ConcluirVenda, w, cx| {
                 if matches!(t.dialogo, Some(Dialogo::Pagamento(_))) {
@@ -2017,6 +2157,32 @@ impl Caixa {
                     t.mudar_tipo(TipoDeMovimento::Suprimento, cx)
                 }),
             )
+    }
+
+    pub(super) fn casca(
+        &self,
+        contexto: &str,
+        titulo: String,
+        descricao: Option<AnyElement>,
+        corpo: AnyElement,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let tema = cx.theme();
+        let (apagado, acento) = (tema.muted_foreground, tema.accent);
+        // O painel da galeria marca os dele: o interceptador de teclas dele só
+        // cuida do que é seu.
+        let flutuante = if self.flutuante() { " Flutuante" } else { "" };
+        let chave =
+            KeyContext::parse(&format!("{DIALOGO} {contexto}{flutuante}")).unwrap_or_default();
+
+        // 🪟 O miolo: véu, caixa e canto são do `Dialog` do gpui-kit
+        // (`crate::dialogo`, em `render_dialogo`). O cabeçalho do site — título
+        // `text-base font-medium` — e o X são daqui.
+        v_flex()
+            .id("caixa-dialogo")
+            .key_context(chave)
+            .track_focus(&self.foco_do_dialogo)
+            .map(|d| Self::acoes_do_form(d, cx))
             .relative()
             .gap(px(16.))
             .child(
@@ -2054,7 +2220,7 @@ impl Caixa {
             .into_any_element()
     }
 
-    fn corpo_atalhos(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn corpo_atalhos(&self, cx: &mut Context<Self>) -> AnyElement {
         let apagado = cx.theme().muted_foreground;
         // O F9 e as teclas do cupom são do painel da galeria; a rota não as tem.
         let painel: &[(&str, &str)] = if self.flutuante() {
@@ -2094,7 +2260,7 @@ impl Caixa {
             .into_any_element()
     }
 
-    fn corpo_abrir(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn corpo_abrir(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(Dialogo::Abrir(form)) = self.dialogo.as_ref() else {
             return div().into_any_element();
         };
@@ -2123,7 +2289,7 @@ impl Caixa {
             .into_any_element()
     }
 
-    fn corpo_desconto(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn corpo_desconto(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(Dialogo::Desconto(form)) = self.dialogo.as_ref() else {
             return div().into_any_element();
         };
@@ -2207,7 +2373,7 @@ impl Caixa {
             .into_any_element()
     }
 
-    fn corpo_pessoas(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn corpo_pessoas(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(Dialogo::Pessoas(form)) = self.dialogo.as_ref() else {
             return div().into_any_element();
         };
@@ -2216,12 +2382,30 @@ impl Caixa {
             ("Quem atendeu", "Buscar quem atendeu…"),
             ("Quem auxiliou", "Buscar quem auxiliou…"),
         ];
+        // 🖥️ Na tela cheia o trio cabe em três linhas: o rótulo ao lado do
+        // campo e o "Cadastrar" só com o ícone — a altura é do pagamento.
+        let compacto = self.em_tela_cheia();
         let linhas: Vec<AnyElement> = papeis
             .iter()
             .enumerate()
             .map(|(papel, (rotulo, dica))| {
-                rotulado(
-                    rotulo,
+                let moldura = |campos: Div| {
+                    if compacto {
+                        h_flex()
+                            .gap(px(8.))
+                            .child(
+                                div()
+                                    .w(px(112.))
+                                    .flex_none()
+                                    .text_sm()
+                                    .child(rotulo.to_string()),
+                            )
+                            .child(campos.flex_1().min_w(px(0.)))
+                    } else {
+                        rotulado(rotulo, campos)
+                    }
+                };
+                moldura(
                     h_flex()
                         .gap(px(8.))
                         .child(
@@ -2244,7 +2428,8 @@ impl Caixa {
                                 cx,
                             )
                             .child(Icon::new(Icone::UserPlus).size(px(16.)))
-                            .child("Cadastrar")
+                            .when(!compacto, |b| b.child("Cadastrar"))
+                            .when(compacto, |b| b.tooltip("Cadastrar funcionário"))
                             .on_click(cx.listener(
                                 move |t, _: &ClickEvent, w, cx| t.abrir_cadastro(papel, w, cx),
                             )),
@@ -2254,23 +2439,26 @@ impl Caixa {
             })
             .collect();
         v_flex()
-            .gap(px(16.))
+            .gap(px(if compacto { 8. } else { 16. }))
             .children(linhas)
             .children(form.erro.clone().map(|e| erro_do_form(e, cx)))
-            .child(
-                rodape().child(
-                    com_tecla(
-                        estilo::botao_primario("caixa-pessoas-confirmar", cx),
-                        "Confirmar",
-                        "Enter",
-                    )
-                    .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.salvar_pessoas(w, cx))),
-                ),
-            )
+            // 🖥️ Na tela cheia a escolha vale na hora: não há o que confirmar.
+            .when(!self.em_tela_cheia(), |d| {
+                d.child(
+                    rodape().child(
+                        com_tecla(
+                            estilo::botao_primario("caixa-pessoas-confirmar", cx),
+                            "Confirmar",
+                            "Enter",
+                        )
+                        .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.salvar_pessoas(w, cx))),
+                    ),
+                )
+            })
             .into_any_element()
     }
 
-    fn corpo_cadastro(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn corpo_cadastro(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(Dialogo::Pessoas(form)) = self.dialogo.as_ref() else {
             return div().into_any_element();
         };
@@ -2310,7 +2498,7 @@ impl Caixa {
             .into_any_element()
     }
 
-    fn resumo_do_pagamento(&self) -> String {
+    pub(super) fn resumo_do_pagamento(&self) -> String {
         let n = self.cupom().itens.len();
         let p = self.pessoas_validas();
         let nome = |id: &Option<String>| {
@@ -2326,7 +2514,7 @@ impl Caixa {
         )
     }
 
-    fn corpo_pagamento(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn corpo_pagamento(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(Dialogo::Pagamento(form)) = self.dialogo.as_ref() else {
             return div().into_any_element();
         };
@@ -2609,15 +2797,11 @@ impl Caixa {
                 )
         };
         let enviando = form.enviando;
-        let painel = v_flex()
-            .w(px(256.))
-            .flex_none()
+        // 🖥️ Na tela cheia o pagamento é uma coluna: o resumo vai embaixo, da
+        // largura dela, e não ao lado.
+        let em_coluna = self.em_tela_cheia();
+        let resumo_em_linhas = v_flex()
             .gap(px(8.))
-            .p(px(16.))
-            .rounded(crate::tema::canto(10.))
-            .border_1()
-            .border_color(borda)
-            .bg(cartao)
             .when(desconto > 0, |d| {
                 d.child(linha("Subtotal", dinheiro::formatar(subtotal)))
                     .child(
@@ -2650,8 +2834,9 @@ impl Caixa {
                             .child(dinheiro::formatar(total)),
                     ),
             )
-            .child(linha("Recebido", dinheiro::formatar(conta.recebido)))
-            .child(div().h(px(1.)).my(px(4.)).bg(borda))
+            .child(linha("Recebido", dinheiro::formatar(conta.recebido)));
+        let resumo_em_destaque = v_flex()
+            .gap(px(8.))
             .when(conta.falta > 0, |d| {
                 d.child(destaque("Falta", dinheiro::formatar(conta.falta), frente))
             })
@@ -2667,30 +2852,58 @@ impl Caixa {
                     dinheiro::formatar(conta.troco),
                     cores::sucesso(),
                 ))
+            });
+        let concluir = com_tecla(
+            estilo::desligado(
+                estilo::botao_primario("caixa-concluir", cx).w_full(),
+                // Na tela cheia o pagamento está à vista mesmo sem
+                // cupom: sem item não há o que concluir.
+                !conta.pronto || enviando || (em_coluna && self.cupom().itens.is_empty()),
+            ),
+            if enviando {
+                "Registrando…"
+            } else {
+                "Concluir venda"
+            },
+            "F4",
+        )
+        .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.concluir_venda(w, cx)));
+        let painel = v_flex()
+            .map(|d| if em_coluna { d.w_full() } else { d.w(px(256.)) })
+            .flex_none()
+            .gap(px(8.))
+            .p(px(16.))
+            .rounded(crate::tema::canto(10.))
+            .border_1()
+            .border_color(borda)
+            .bg(cartao)
+            .map(|d| {
+                // 🖥️ Na coluna da tela cheia as linhas e o destaque dividem a
+                // largura: o "Concluir" não pode ficar abaixo da dobra.
+                if em_coluna {
+                    d.child(
+                        h_flex()
+                            .items_end()
+                            .gap(px(16.))
+                            .child(resumo_em_linhas.flex_1().min_w(px(0.)))
+                            .child(resumo_em_destaque.flex_none().items_end()),
+                    )
+                } else {
+                    d.child(resumo_em_linhas)
+                        .child(div().h(px(1.)).my(px(4.)).bg(borda))
+                        .child(resumo_em_destaque)
+                        .child(div().flex_1().min_h(px(8.)))
+                }
             })
-            .child(div().flex_1().min_h(px(8.)))
-            .child(
-                com_tecla(
-                    estilo::desligado(
-                        estilo::botao_primario("caixa-concluir", cx).w_full(),
-                        !conta.pronto || enviando,
-                    ),
-                    if enviando {
-                        "Registrando…"
-                    } else {
-                        "Concluir venda"
-                    },
-                    "F4",
-                )
-                .on_click(cx.listener(|t, _: &ClickEvent, w, cx| t.concluir_venda(w, cx))),
-            );
+            .child(concluir);
 
         div()
             .flex()
+            .when(em_coluna, |d| d.flex_col())
             .gap(px(20.))
             .child(
                 v_flex()
-                    .flex_1()
+                    .map(|d| if em_coluna { d } else { d.flex_1() })
                     .min_w(px(0.))
                     .gap(px(12.))
                     .child(bloco_do_desconto)
@@ -2700,13 +2913,15 @@ impl Caixa {
                     .children(painel_da_forma)
                     .children(form.erro.clone().map(|e| erro_do_form(e, cx)))
                     .children(lancados)
-                    .child(dica),
+                    // Na coluna da tela cheia a altura é do resumo e do
+                    // "Concluir": as teclas estão no F1.
+                    .when(!em_coluna, |d| d.child(dica)),
             )
             .child(painel)
             .into_any_element()
     }
 
-    fn corpo_movimento(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn corpo_movimento(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(Dialogo::Movimento(form)) = self.dialogo.as_ref() else {
             return div().into_any_element();
         };
@@ -2727,14 +2942,34 @@ impl Caixa {
             }),
         );
         let enviando = form.enviando;
+        // 🖥️ Na faixa de baixo da tela cheia o valor e o motivo dividem a linha.
+        let campos = if self.em_tela_cheia() {
+            h_flex()
+                .items_start()
+                .gap(px(12.))
+                .child(div().w(px(132.)).flex_none().child(campo_de_valor(
+                    "Valor",
+                    &form.valor,
+                    cx,
+                )))
+                .child(
+                    rotulado("Motivo", crate::estilo::campo(Input::new(&form.motivo)))
+                        .flex_1()
+                        .min_w(px(0.)),
+                )
+        } else {
+            v_flex()
+                .gap(px(16.))
+                .child(campo_de_valor("Valor", &form.valor, cx))
+                .child(rotulado(
+                    "Motivo",
+                    crate::estilo::campo(Input::new(&form.motivo)),
+                ))
+        };
         v_flex()
-            .gap(px(16.))
+            .gap(px(if self.em_tela_cheia() { 10. } else { 16. }))
             .child(tipos)
-            .child(campo_de_valor("Valor", &form.valor, cx))
-            .child(rotulado(
-                "Motivo",
-                crate::estilo::campo(Input::new(&form.motivo)),
-            ))
+            .child(campos)
             .children(form.erro.clone().map(|e| erro_do_form(e, cx)))
             .child(
                 rodape().child(
@@ -2756,7 +2991,7 @@ impl Caixa {
             .into_any_element()
     }
 
-    fn corpo_vendas(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn corpo_vendas(&self, cx: &mut Context<Self>) -> AnyElement {
         let tema = cx.theme();
         let (borda, apagado) = (tema.border, tema.muted_foreground);
         let mono = tema.mono_font_family.clone();
@@ -2947,7 +3182,7 @@ impl Caixa {
             .into_any_element()
     }
 
-    fn corpo_estorno(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn corpo_estorno(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(Dialogo::Estorno(form)) = self.dialogo.as_ref() else {
             return div().into_any_element();
         };
@@ -3124,7 +3359,7 @@ impl Caixa {
             .into_any_element()
     }
 
-    fn corpo_fechamento(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn corpo_fechamento(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(Dialogo::Fechar(form)) = self.dialogo.as_ref() else {
             return div().into_any_element();
         };
@@ -3246,7 +3481,7 @@ impl Caixa {
 }
 
 impl Caixa {
-    fn corpo_negociacao(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn corpo_negociacao(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(Dialogo::Negociacao(form)) = self.dialogo.as_ref() else {
             return div().into_any_element();
         };
@@ -3402,7 +3637,7 @@ impl Caixa {
     /// cima do diálogo: o miolo e o rodapé cinza de ponta a ponta (no espaço
     /// de rodapé do `Dialog` do kit). O clique fora não fecha nada, como no
     /// site.
-    fn pergunta_de_remover_negociacao(
+    pub(super) fn pergunta_de_remover_negociacao(
         &self,
         cx: &mut Context<Self>,
     ) -> Option<(AnyElement, AnyElement)> {

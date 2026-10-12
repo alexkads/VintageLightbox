@@ -358,6 +358,10 @@ pub struct Caixa {
     pub(super) cadastrados: Vec<Funcionario>,
     pub(super) ultima_venda: Option<Venda>,
     pub(super) dialogo: Option<Dialogo>,
+    /// 🖥️ Os formulários da tela cheia que não estão na vez: lá o pagamento,
+    /// as pessoas e a gaveta ficam montados juntos, e [`Self::dialogo`] é só o
+    /// que recebeu o último gesto (`caixa/tela_cheia.rs`). Vazio fora dela.
+    pub(super) estacionados: Vec<Dialogo>,
     /// F4 sem os nomes abre as pessoas antes; ao confirmar, segue para o pagamento.
     pub(super) depois_das_pessoas: bool,
     pub(super) recados: Vec<RecadoNaTela>,
@@ -372,6 +376,9 @@ pub struct Caixa {
     /// formulário dá lugar a um resumo sem campos (o caixa fechado) e o campo
     /// que tinha o foco some.
     pub(super) foco_no_dialogo: bool,
+    /// 🖥️ Um formulário da tela cheia saiu por uma resposta da rede (não há
+    /// janela ali): o cupom recebe o foco no próximo desenho.
+    pub(super) foco_no_cupom_depois: bool,
     /// A rota inteira, ou o painel flutuante da galeria.
     pub(super) modo: Modo,
     /// Uma mudança de faixa ou de negociação em várias fotos, no ar.
@@ -473,6 +480,7 @@ impl Caixa {
             cadastrados: Vec::new(),
             ultima_venda: None,
             dialogo: None,
+            estacionados: Vec::new(),
             depois_das_pessoas: false,
             recados: Vec::new(),
             proximo_recado: 0,
@@ -480,6 +488,7 @@ impl Caixa {
             des_sinalizacao: None,
             foco_pendente: None,
             foco_no_dialogo: false,
+            foco_no_cupom_depois: false,
             modo,
             lote: None,
             leituras_soltas: 0,
@@ -965,6 +974,10 @@ impl Caixa {
             }
             outro => outro,
         };
+        if self.em_tela_cheia() {
+            self.resolver_na_tela_cheia(desfecho, seguir, window, cx);
+            return;
+        }
         match desfecho {
             Desfecho::Seguir => self.abrir_dialogo(seguir, window, cx),
             Desfecho::AbrirCaixa => self.abrir_dialogo(TipoDeDialogo::Abrir, window, cx),
@@ -1013,9 +1026,37 @@ impl Caixa {
     }
 
     pub(super) fn tecla(&mut self, tecla: u8, window: &mut Window, cx: &mut Context<Self>) {
-        // 🔑 Com diálogo aberto as teclas F esperam — menos o F4 do pagamento,
-        // que conclui a venda mesmo com o foco fora do formulário.
-        if let Some(dialogo) = &self.dialogo {
+        // 🖥️ `F10`: o caixa em tela cheia, e a volta dele. Só no painel da
+        // galeria, e só onde as colunas cabem.
+        if tecla == 10 {
+            let livre = if self.em_tela_cheia() {
+                !self
+                    .dialogo
+                    .iter()
+                    .chain(self.estacionados.iter())
+                    .any(Dialogo::ainda_e_dialogo)
+            } else {
+                self.dialogo.is_none()
+            };
+            if self.flutuante() && livre {
+                self.alternar_tela_cheia(window, cx);
+            }
+            return;
+        }
+        let cheia = self.em_tela_cheia();
+        if cheia {
+            // Com um diálogo por cima (atalhos, cadastro) as teclas F esperam.
+            if self
+                .dialogo
+                .iter()
+                .chain(self.estacionados.iter())
+                .any(Dialogo::ainda_e_dialogo)
+            {
+                return;
+            }
+        } else if let Some(dialogo) = &self.dialogo {
+            // 🔑 Com diálogo aberto as teclas F esperam — menos o F4 do
+            // pagamento, que conclui a venda mesmo com o foco fora do formulário.
             if tecla == 4 && matches!(dialogo, Dialogo::Pagamento(_)) {
                 self.concluir_venda(window, cx);
             }
@@ -1024,9 +1065,13 @@ impl Caixa {
         match tecla {
             1 => self.abrir_dialogo(TipoDeDialogo::Atalhos, window, cx),
             2 => self.com_caixa(TipoDeDialogo::Desconto, window, cx),
+            // Na tela cheia as pessoas e as vendas já estão na tela: a tecla
+            // leva o foco até elas.
+            3 if cheia => self.focar_regiao("Pessoas", window, cx),
             3 => self.abrir_dialogo(TipoDeDialogo::Pessoas, window, cx),
             4 => self.finalizar(window, cx),
             6 => self.com_caixa(TipoDeDialogo::Movimento, window, cx),
+            7 if cheia => self.focar_regiao("Vendas", window, cx),
             7 => self.abrir_dialogo(TipoDeDialogo::Vendas, window, cx),
             8 => self.abrir_ou_fechar(window, cx),
             9 => self.alternar_painel(cx),

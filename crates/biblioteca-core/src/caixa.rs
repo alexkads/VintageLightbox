@@ -1072,8 +1072,12 @@ pub const ATALHOS: [(&str, &str); 7] = [
 
 /// As teclas que só o painel flutuante da galeria tem (`ATALHOS_DO_PDV` do
 /// site, depois do F8).
-pub const ATALHOS_DO_PAINEL: [(&str, &str); 10] = [
+pub const ATALHOS_DO_PAINEL: [(&str, &str); 11] = [
     ("F9", "Minimizar ou abrir o painel"),
+    (
+        "F10",
+        "Caixa em tela cheia, com a venda inteira à vista — e a volta ao painel",
+    ),
     ("↑ ↓", "No cupom: troca de item"),
     (
         "E",

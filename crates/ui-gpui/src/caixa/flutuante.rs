@@ -97,12 +97,28 @@ pub(super) struct EdicaoRapida {
     tipos_abertos: bool,
 }
 
+impl Painel {
+    /// De que foto é a barra de ajuste aberta.
+    pub(super) fn editando_em(&self) -> Option<&str> {
+        self.editando.as_ref().map(|e| e.foto_id.as_str())
+    }
+}
+
 pub(super) struct Painel {
-    detalhe: Entity<Detalhe>,
+    pub(super) detalhe: Entity<Detalhe>,
     janela: AnyWindowHandle,
     /// A raiz o mostra agora (galeria ou revelação).
     visivel: bool,
-    minimizado: bool,
+    pub(super) minimizado: bool,
+    /// 🖥️ O caixa ocupa a tela inteira, com tudo à vista (`tela_cheia.rs`).
+    /// Opcional: `F10` e o botão da barra entram e saem.
+    pub(super) tela_cheia: bool,
+    /// O foco de cada região da tela cheia, pelo contexto do formulário dela.
+    pub(super) focos: std::collections::HashMap<&'static str, FocusHandle>,
+    /// A janela tem largura para a tela cheia (visto no último desenho).
+    pub(super) cabe: bool,
+    /// A galeria já sabe que o caixa a cobre (ou que deixou de cobrir).
+    cobrindo: bool,
     /// O deslocamento a partir do canto inferior direito: `(0, 0)` é o canto,
     /// negativo leva para a esquerda e para cima (`limitesDoCaixa` do site).
     posicao: (f32, f32),
@@ -110,16 +126,16 @@ pub(super) struct Painel {
     arrasto: Option<((f32, f32), (f32, f32))>,
     /// O tamanho do painel no último quadro — o limite do arrasto.
     tamanho: Rc<Cell<(f32, f32)>>,
-    foco_do_cupom: FocusHandle,
+    pub(super) foco_do_cupom: FocusHandle,
     /// A quem o cupom devolve o foco quando o clique cai fora dele — a raiz.
     devolver_a: Option<FocusHandle>,
     rolagem: ScrollHandle,
-    editando: Option<EdicaoRapida>,
+    pub(super) editando: Option<EdicaoRapida>,
     /// ☑️ Os itens marcados — Ctrl/⌘, Shift e a caixinha de cada linha (dono,
     /// 2026-09-26). Com dois ou mais, o ajuste rápido e o `N` agem neles.
     selecao: regras::SelecaoDoCupom,
     /// A foto em foco na grade — o visor mostra o item dela.
-    em_foco: Option<String>,
+    pub(super) em_foco: Option<String>,
     ultimo_foco: Option<String>,
     galeria_id: Option<String>,
     /// O retrato das fotos da galeria no último quadro, para saber se mudou.
@@ -164,6 +180,9 @@ struct Guardado {
     x: f32,
     y: f32,
     minimizado: bool,
+    /// Ausente no arquivo de antes da tela cheia: abre compacto, como era.
+    #[serde(default)]
+    tela_cheia: bool,
 }
 
 #[cfg(not(test))]
@@ -195,6 +214,8 @@ fn retrato_das_fotos(detalhe: &Detalhe) -> u64 {
     let mut h = DefaultHasher::new();
     if let Some(aberta) = detalhe.aberta() {
         aberta.galeria.id.hash(&mut h);
+        // O estúdio é de quem é o caixa: trocá-lo relê o painel.
+        aberta.galeria.estudio_id.hash(&mut h);
         for f in &aberta.fotos {
             f.id.hash(&mut h);
             format!("{:?}", f.estado).hash(&mut h);
@@ -236,6 +257,13 @@ impl Caixa {
             janela: window.window_handle(),
             visivel: false,
             minimizado: guardado.minimizado,
+            tela_cheia: guardado.tela_cheia,
+            focos: super::tela_cheia::CONTEXTOS
+                .iter()
+                .map(|c| (*c, cx.focus_handle()))
+                .collect(),
+            cabe: true,
+            cobrindo: false,
             posicao: (guardado.x.min(0.), guardado.y.min(0.)),
             arrasto: None,
             tamanho: Rc::new(Cell::new((0., 0.))),
@@ -255,14 +283,14 @@ impl Caixa {
         Self::construir(publicador, Modo::Flutuante(Box::new(painel)), window, cx)
     }
 
-    fn painel_ref(&self) -> Option<&Painel> {
+    pub(super) fn painel_ref(&self) -> Option<&Painel> {
         match &self.modo {
             Modo::Flutuante(p) => Some(p),
             Modo::Rota => None,
         }
     }
 
-    fn painel_mut(&mut self) -> Option<&mut Painel> {
+    pub(super) fn painel_mut(&mut self) -> Option<&mut Painel> {
         match &mut self.modo {
             Modo::Flutuante(p) => Some(p),
             Modo::Rota => None,
@@ -319,7 +347,8 @@ impl Caixa {
     /// da foto, eles tomam o foco em seguida, como no navegador. Com um diálogo
     /// do caixa aberto, nada muda — ele fica fora do painel e é modal.
     fn clique_fora(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.dialogo.is_some() {
+        // Na tela cheia não há "fora": ela cobre a galeria.
+        if self.dialogo.is_some() || self.em_tela_cheia() {
             return;
         }
         let Some(p) = self.painel_ref() else {
@@ -344,6 +373,10 @@ impl Caixa {
 
     /// F9, o duplo clique na alça e os botões de minimizar e abrir.
     pub fn alternar_painel(&mut self, cx: &mut Context<Self>) {
+        // Minimizar a tela cheia guarda os formulários dela para a volta.
+        if self.em_tela_cheia() {
+            self.estacionar_tudo();
+        }
         if let Some(p) = self.painel_mut() {
             p.minimizado = !p.minimizado;
             guardar(p);
@@ -378,6 +411,7 @@ impl Caixa {
             p.desatualizado = false;
             p.editando = None;
             self.dialogo = None;
+            self.estacionados.clear();
             self.desconto = Default::default();
             self.ultima_venda = None;
             match galeria {
@@ -497,7 +531,8 @@ impl Caixa {
             && evento.keystroke.key == "a"
             && contexto(CUPOM)
             && !contexto("Input")
-            && self.dialogo.is_none()
+            && !contexto("CaixaDialogo")
+            && !self.cupom_parado()
         {
             self.marcar_todos_no_cupom(cx);
             cx.stop_propagation();
@@ -507,7 +542,15 @@ impl Caixa {
             return;
         }
         let no_dialogo = contexto("CaixaDialogo") && contexto("Flutuante");
-        let no_cupom = contexto(CUPOM);
+        // 🖥️ Na tela cheia a região com o foco é o formulário da vez: as
+        // teclas e as ações dele (`Enter`, `Esc`) agem nela.
+        if no_dialogo {
+            if let Some(c) = super::tela_cheia::CONTEXTOS.iter().find(|c| contexto(c)) {
+                self.ativar(c);
+            }
+        }
+        // Lá as regiões ficam dentro do painel: o foco numa delas não é o cupom.
+        let no_cupom = contexto(CUPOM) && !no_dialogo;
         let no_campo = contexto("Input");
         let tipo = [
             "Pagamento",
@@ -550,7 +593,7 @@ impl Caixa {
         if let Some(n) = tecla
             .strip_prefix('f')
             .and_then(|n| n.parse::<u8>().ok())
-            .filter(|n| (1..=9).contains(n) && *n != 5)
+            .filter(|n| (1..=10).contains(n) && *n != 5)
         {
             self.tecla(n, window, cx);
             return true;
@@ -592,7 +635,7 @@ impl Caixa {
             return uma_tecla;
         }
 
-        if !no_cupom || self.dialogo.is_some() {
+        if !no_cupom || self.cupom_parado() {
             return false;
         }
 
@@ -615,7 +658,23 @@ impl Caixa {
             };
         }
         match tecla {
-            "escape" if editando.is_some() => {
+            // Na tela cheia o ajuste do item fica sempre aberto, ao lado.
+            "e" if self.em_tela_cheia() => return true,
+            // 🖥️ E a galeria está coberta: o `P` e a nota da foto em foco
+            // valem daqui, para o balconista não precisar voltar a ela.
+            "p" if self.em_tela_cheia() => {
+                self.levar_ou_devolver_a_foto_em_foco(cx);
+                return true;
+            }
+            "1" | "2" | "3" | "4" | "5"
+                if self.em_tela_cheia() && self.foco_no_cupom().is_none() =>
+            {
+                if let Ok(nota) = tecla.parse::<u8>() {
+                    self.dar_nota_a_foto_em_foco(nota, cx);
+                }
+                return true;
+            }
+            "escape" if editando.is_some() && !self.em_tela_cheia() => {
                 self.fechar_edicao(window, cx);
                 return true;
             }
@@ -625,6 +684,11 @@ impl Caixa {
                     p.selecao.desmarcar();
                 }
                 cx.notify();
+                return true;
+            }
+            // 🖥️ Sem nada aberto nem marcado, o `Esc` devolve a galeria.
+            "escape" if self.em_tela_cheia() => {
+                self.alternar_tela_cheia(window, cx);
                 return true;
             }
             "up" | "down" => {
@@ -670,7 +734,7 @@ impl Caixa {
 
     // ── O cupom ─────────────────────────────────────────────────────────────
 
-    fn foco_no_cupom(&self) -> Option<String> {
+    pub(super) fn foco_no_cupom(&self) -> Option<String> {
         let foco = self.painel_ref()?.em_foco.clone()?;
         self.cupom()
             .itens
@@ -831,10 +895,23 @@ impl Caixa {
             .and_then(|p| p.editando.as_ref())
             .is_some_and(|e| e.foto_id == foto)
         {
-            self.fechar_edicao(window, cx);
+            // 🖥️ Na tela cheia o ajuste não fecha: é a coluna do meio.
+            if !self.em_tela_cheia() {
+                self.fechar_edicao(window, cx);
+            }
             return;
         }
         self.focar_item(&foto, false, window, cx);
+        self.nova_edicao(foto, window, cx);
+    }
+
+    /// A barra de ajuste do item, aberta — sem mexer no foco.
+    pub(super) fn nova_edicao(
+        &mut self,
+        foto: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let item = self.cupom().itens.into_iter().find(|i| i.foto_id == foto);
         let valor_inicial = item
             .filter(|i| i.tipo == Some(Tipo::Desconto))
@@ -871,7 +948,7 @@ impl Caixa {
         cx.notify();
     }
 
-    fn item_editado(&self) -> Option<ItemDoCupom> {
+    pub(super) fn item_editado(&self) -> Option<ItemDoCupom> {
         let id = self.painel_ref()?.editando.as_ref()?.foto_id.clone();
         self.cupom().itens.into_iter().find(|i| i.foto_id == id)
     }
@@ -1339,6 +1416,16 @@ impl Caixa {
         let rodape = crate::app::rodape::ALTURA_DO_RODAPE;
         let janela = window.viewport_size();
         let janela = (f32::from(janela.width), f32::from(janela.height) - rodape);
+        // 🖥️ Sem largura para as colunas, a tela cheia dá lugar ao painel.
+        let cabe = janela.0 >= super::tela_cheia::LARGURA_MINIMA;
+        if self.painel_ref().is_some_and(|p| p.cabe != cabe) {
+            if self.em_tela_cheia() {
+                self.estacionar_tudo();
+            }
+            if let Some(p) = self.painel_mut() {
+                p.cabe = cabe;
+            }
+        }
         let Some(p) = self.painel_ref() else {
             return div().into_any_element();
         };
@@ -1363,6 +1450,18 @@ impl Caixa {
         }
 
         let visivel = self.vista.is_some() && self.escolhida.is_some();
+        let cheia = visivel && !minimizado && self.em_tela_cheia();
+        // O que a galeria desenha por cima de tudo (o painel do bot) sai da
+        // frente enquanto o caixa a cobre.
+        if let Some(p) = self.painel_mut().filter(|p| p.cobrindo != cheia) {
+            p.cobrindo = cheia;
+            // Depois do desenho: avisar outra tela no meio dele se perde.
+            let detalhe = p.detalhe.clone();
+            cx.defer(move |cx| detalhe.update(cx, |d, cx| d.cobrir_com_o_caixa(cheia, cx)));
+        }
+        if cheia {
+            return self.render_tela_cheia(janela, window, cx);
+        }
         let conteudo = if minimizado {
             self.painel_minimizado(cx).into_any_element()
         } else {
@@ -1449,7 +1548,7 @@ impl Caixa {
             .into_any_element()
     }
 
-    fn situacao_do_painel(&self, cx: &Context<Self>) -> (String, Hsla) {
+    pub(super) fn situacao_do_painel(&self, cx: &Context<Self>) -> (String, Hsla) {
         let Some(v) = self.vista.as_ref() else {
             return ("Carregando…".into(), cx.theme().muted_foreground);
         };
@@ -1470,7 +1569,7 @@ impl Caixa {
         }
     }
 
-    fn alca(&self, id: &'static str, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(super) fn alca(&self, id: &'static str, cx: &mut Context<Self>) -> Stateful<Div> {
         h_flex().id(id).cursor_move().on_mouse_down(
             MouseButton::Left,
             cx.listener(|t, e: &MouseDownEvent, _, cx| t.comecar_arrasto(e, cx)),
@@ -1536,13 +1635,7 @@ impl Caixa {
 
     fn painel_aberto(&self, janela: (f32, f32), cx: &mut Context<Self>) -> Div {
         let tema = cx.theme();
-        let (borda, apagado, realce, frente, fundo) = (
-            tema.border,
-            tema.muted_foreground,
-            tema.muted,
-            tema.foreground,
-            tema.background,
-        );
+        let (borda, apagado, realce) = (tema.border, tema.muted_foreground, tema.muted);
         let mono = tema.mono_font_family.clone();
         let cupom = self.cupom();
         let n = cupom.itens.len();
@@ -1691,95 +1784,7 @@ impl Caixa {
         let cabecalho_da_selecao = (n > 0).then(|| self.cabecalho_da_selecao(&cupom, cx));
         let lista = self.itens_do_cupom(&cupom, em_foco.as_deref(), cx);
 
-        let linha = |rotulo: String, valor: String| {
-            h_flex()
-                .justify_between()
-                .gap(px(12.))
-                .child(div().text_color(apagado).child(rotulo.to_uppercase()))
-                .child(div().truncate().child(valor))
-        };
-        let desconto_no_total = self.desconto_no_total();
-        let pessoas = self.pessoas_validas();
-        let nome = |id: &Option<String>| {
-            self.nome_do_funcionario(id.as_deref())
-                .unwrap_or_else(|| "?".into())
-        };
-        let resumo = v_flex()
-            .gap(px(2.))
-            .px(px(12.))
-            .py(px(8.))
-            .font_family(mono.clone())
-            .text_xs()
-            .child(linha(
-                format!("Subtotal ({})", regras::itens(n)),
-                dinheiro::formatar(cupom.subtotal),
-            ))
-            .when(cupom.descontos > 0, |d| {
-                d.child(linha(
-                    "Descontos nos itens".into(),
-                    format!("− {}", dinheiro::formatar(cupom.descontos)),
-                ))
-            })
-            .when(cupom.descontos < 0, |d| {
-                d.child(linha(
-                    "Acréscimos".into(),
-                    format!("+ {}", dinheiro::formatar(-cupom.descontos)),
-                ))
-            })
-            .when(cupom.pago_em_parceiro > 0, |d| {
-                d.child(linha(
-                    "Pago em site parceiro".into(),
-                    format!("− {}", dinheiro::formatar(cupom.pago_em_parceiro)),
-                ))
-            })
-            .when(desconto_no_total > 0, |d| {
-                let rotulo = if self.desconto.modo == regras::ModoDoDesconto::Percentual {
-                    format!("Desconto no total ({}%)", self.desconto.texto)
-                } else {
-                    "Desconto no total".into()
-                };
-                d.child(linha(
-                    rotulo,
-                    format!("− {}", dinheiro::formatar(desconto_no_total)),
-                ))
-            })
-            .child(linha(
-                "Fotografou · atendeu · auxiliou".into(),
-                if pessoas.alguma() {
-                    format!(
-                        "{} · {} · {}",
-                        nome(&pessoas.fotografo),
-                        nome(&pessoas.atendente),
-                        nome(&pessoas.auxiliar)
-                    )
-                } else {
-                    "F3 escolhe".into()
-                },
-            ));
-
-        let total = h_flex()
-            .items_end()
-            .justify_between()
-            .gap(px(12.))
-            .px(px(16.))
-            .py(px(12.))
-            .bg(frente)
-            .text_color(fundo)
-            .font_family(mono.clone())
-            .child(
-                div()
-                    .text_sm()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child("TOTAL A RECEBER"),
-            )
-            .child(
-                div()
-                    .text_size(crate::tema::letra::em(36.))
-                    .line_height(px(36.))
-                    .font_weight(FontWeight::BOLD)
-                    .child(dinheiro::formatar(self.a_receber())),
-            );
-
+        let (resumo, total) = self.resumo_e_total(&cupom, cx);
         let aberto = self.vista.as_ref().is_some_and(|v| v.caixa.is_some());
         let atalho = |id: &'static str, tecla: &'static str, rotulo: String, destaque: bool| {
             Button::new(id)
@@ -1906,7 +1911,106 @@ impl Caixa {
             .child(rodape)
     }
 
-    fn itens_do_cupom(
+    /// O resumo do cupom e a faixa do total — os mesmos no painel e na tela
+    /// cheia.
+    pub(super) fn resumo_e_total(&self, cupom: &regras::Cupom, cx: &Context<Self>) -> (Div, Div) {
+        let tema = cx.theme();
+        let (apagado, frente, fundo) = (tema.muted_foreground, tema.foreground, tema.background);
+        let mono = tema.mono_font_family.clone();
+        let n = cupom.itens.len();
+        let linha = |rotulo: String, valor: String| {
+            h_flex()
+                .justify_between()
+                .gap(px(12.))
+                .child(div().text_color(apagado).child(rotulo.to_uppercase()))
+                .child(div().truncate().child(valor))
+        };
+        let desconto_no_total = self.desconto_no_total();
+        let pessoas = self.pessoas_validas();
+        let nome = |id: &Option<String>| {
+            self.nome_do_funcionario(id.as_deref())
+                .unwrap_or_else(|| "?".into())
+        };
+        let resumo = v_flex()
+            .gap(px(2.))
+            .px(px(12.))
+            .py(px(8.))
+            .font_family(mono.clone())
+            .text_xs()
+            .child(linha(
+                format!("Subtotal ({})", regras::itens(n)),
+                dinheiro::formatar(cupom.subtotal),
+            ))
+            .when(cupom.descontos > 0, |d| {
+                d.child(linha(
+                    "Descontos nos itens".into(),
+                    format!("− {}", dinheiro::formatar(cupom.descontos)),
+                ))
+            })
+            .when(cupom.descontos < 0, |d| {
+                d.child(linha(
+                    "Acréscimos".into(),
+                    format!("+ {}", dinheiro::formatar(-cupom.descontos)),
+                ))
+            })
+            .when(cupom.pago_em_parceiro > 0, |d| {
+                d.child(linha(
+                    "Pago em site parceiro".into(),
+                    format!("− {}", dinheiro::formatar(cupom.pago_em_parceiro)),
+                ))
+            })
+            .when(desconto_no_total > 0, |d| {
+                let rotulo = if self.desconto.modo == regras::ModoDoDesconto::Percentual {
+                    format!("Desconto no total ({}%)", self.desconto.texto)
+                } else {
+                    "Desconto no total".into()
+                };
+                d.child(linha(
+                    rotulo,
+                    format!("− {}", dinheiro::formatar(desconto_no_total)),
+                ))
+            })
+            .child(linha(
+                "Fotografou · atendeu · auxiliou".into(),
+                if pessoas.alguma() {
+                    format!(
+                        "{} · {} · {}",
+                        nome(&pessoas.fotografo),
+                        nome(&pessoas.atendente),
+                        nome(&pessoas.auxiliar)
+                    )
+                } else {
+                    "F3 escolhe".into()
+                },
+            ));
+
+        let total = h_flex()
+            .items_end()
+            .justify_between()
+            .gap(px(12.))
+            .px(px(16.))
+            .py(px(12.))
+            .bg(frente)
+            .text_color(fundo)
+            .font_family(mono.clone())
+            .child(
+                div()
+                    .text_sm()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("TOTAL A RECEBER"),
+            )
+            .child(
+                div()
+                    .text_size(crate::tema::letra::em(36.))
+                    .line_height(px(36.))
+                    .font_weight(FontWeight::BOLD)
+                    .child(dinheiro::formatar(self.a_receber())),
+            );
+
+        (resumo, total)
+    }
+
+    pub(super) fn itens_do_cupom(
         &self,
         cupom: &regras::Cupom,
         em_foco: Option<&str>,
@@ -2054,6 +2158,23 @@ impl Caixa {
                     .child(
                         h_flex()
                             .gap(px(8.))
+                            // 🖥️ Na tela cheia cada linha traz a foto dela.
+                            .children(self.em_tela_cheia().then(|| {
+                                let imagem = self
+                                    .painel_ref()
+                                    .and_then(|p| p.detalhe.read(cx).imagem_vista(&i.foto_id));
+                                div()
+                                    .size(px(32.))
+                                    .flex_none()
+                                    .rounded(crate::tema::canto(4.))
+                                    .overflow_hidden()
+                                    .bg(realce)
+                                    .children(imagem.map(|imagem| {
+                                        gpui_kit::img(imagem)
+                                            .size_full()
+                                            .object_fit(gpui_kit::ObjectFit::Cover)
+                                    }))
+                            }))
                             .child(
                                 div()
                                     .w(px(36.))
@@ -2097,6 +2218,8 @@ impl Caixa {
                     .child(
                         h_flex()
                             .id(SharedString::from(format!("caixa-ajustar-{}", i.foto_id)))
+                            // Na tela cheia o ajuste está sempre aberto, ao lado.
+                            .when(self.em_tela_cheia(), |d| d.invisible())
                             .absolute()
                             .right(px(12.))
                             .bottom(px(6.))
@@ -2143,11 +2266,14 @@ impl Caixa {
                     );
                 v_flex()
                     .child(linha)
-                    .when(aberto && e_o_foco, |d| d.child(self.edicao_rapida(i, cx)))
+                    // Na tela cheia o ajuste do item fica na coluna do meio.
+                    .when(aberto && e_o_foco && !self.em_tela_cheia(), |d| {
+                        d.child(self.edicao_rapida(i, cx))
+                    })
             }))
     }
 
-    fn edicao_rapida(&self, item: &ItemDoCupom, cx: &mut Context<Self>) -> Div {
+    pub(super) fn edicao_rapida(&self, item: &ItemDoCupom, cx: &mut Context<Self>) -> Div {
         let tema = cx.theme();
         let (borda, apagado, realce, cartao, fundo, frente) = (
             tema.border,
@@ -2556,14 +2682,16 @@ impl Caixa {
                             .text_color(apagado)
                             .child(arquivo),
                     )
-                    .child(
-                        crate::estilo::botao_icone("caixa-rapido-fechar", Icone::X, 24., 14.)
-                            .rounded(crate::tema::canto(6.))
-                            .text_color(apagado)
-                            .on_click(
-                                cx.listener(|t, _: &ClickEvent, w, cx| t.fechar_edicao(w, cx)),
-                            ),
-                    ),
+                    .when(!self.em_tela_cheia(), |d| {
+                        d.child(
+                            crate::estilo::botao_icone("caixa-rapido-fechar", Icone::X, 24., 14.)
+                                .rounded(crate::tema::canto(6.))
+                                .text_color(apagado)
+                                .on_click(
+                                    cx.listener(|t, _: &ClickEvent, w, cx| t.fechar_edicao(w, cx)),
+                                ),
+                        )
+                    }),
             )
             .child(
                 v_flex()
@@ -2625,9 +2753,12 @@ impl Caixa {
                     .text_color(apagado)
                     .when(lote, |d| d.child("C, D, S e ⌫ valem para os marcados ·"))
                     .child(crate::estilo::tecla("Shift"))
-                    .child("+ tecla aplica a todos os itens ·")
-                    .child(crate::estilo::tecla("Esc"))
-                    .child("fecha"),
+                    .child("+ tecla aplica a todos os itens")
+                    .when(!self.em_tela_cheia(), |d| {
+                        d.child("·")
+                            .child(crate::estilo::tecla("Esc"))
+                            .child("fecha")
+                    }),
             )
     }
 }
@@ -2635,7 +2766,11 @@ impl Caixa {
 impl Caixa {
     /// A linha de cima do cupom: marcar todos, quantos estão marcados e quanto
     /// eles somam, e — com dois ou mais — o ajuste do lote e o "desmarcar".
-    fn cabecalho_da_selecao(&self, cupom: &regras::Cupom, cx: &mut Context<Self>) -> Div {
+    pub(super) fn cabecalho_da_selecao(
+        &self,
+        cupom: &regras::Cupom,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let tema = cx.theme();
         let (borda, apagado, frente) = (tema.border, tema.muted_foreground, tema.foreground);
         let marcados = self
@@ -2750,11 +2885,12 @@ fn corpo_da_negociacao(preco: Option<i64>, observacao: Option<String>) -> Value 
     })
 }
 
-fn guardar(p: &Painel) {
+pub(super) fn guardar(p: &Painel) {
     let g = Guardado {
         x: p.posicao.0,
         y: p.posicao.1,
         minimizado: p.minimizado,
+        tela_cheia: p.tela_cheia,
     };
     if let Ok(texto) = serde_json::to_string(&g) {
         if let Some(pasta) = p.lembranca.parent() {

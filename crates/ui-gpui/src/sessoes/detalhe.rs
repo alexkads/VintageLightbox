@@ -935,6 +935,9 @@ pub struct Detalhe {
     da_sessao: (Sender<Recado>, Receiver<Recado>),
     colhendo: bool,
     _colheita: Option<Task<()>>,
+    /// 🖥️ O caixa em tela cheia cobre esta tela: o painel do bot, que fica
+    /// por cima de tudo, sai da frente dele.
+    coberta_pelo_caixa: bool,
     /// 📸 O QR do bot da sessão (`super::qr_do_bot`).
     bot: super::qr_do_bot::EstadoDoQr,
     /// O tempo real — a raiz entrega (`com_escuta`); sem ele, o cartão só
@@ -1211,6 +1214,7 @@ impl Detalhe {
             _colheita: None,
             bot: Default::default(),
             escuta: None,
+            coberta_pelo_caixa: false,
             posicao_do_painel_do_bot: super::qr_do_bot::POSICAO_PADRAO,
             qr_no_painel: true,
             tamanho_do_painel_do_bot: Default::default(),
@@ -1322,6 +1326,12 @@ impl Detalhe {
     /// fica sozinha marcada e em foco, como o `focar` da grade do site. A foto
     /// fora do recorte fica onde está: trocar o recorte por baixo do operador
     /// seria pior que não seguir.
+    /// A imagem que a grade já mostrou desta foto — a miniatura do cupom e a
+    /// foto em foco do caixa em tela cheia. `None` até a foto passar pela vista.
+    pub fn imagem_vista(&self, id: &str) -> Option<Arc<gpui_kit::RenderImage>> {
+        self.imagens_vistas.get(id).cloned()
+    }
+
     pub fn focar_foto(&mut self, id: &str, cx: &mut Context<Self>) {
         if let Some(p) = self.acervo.posicao_de(id) {
             self.selecao.clicar(p, false, Modificadores::default());
@@ -4454,6 +4464,16 @@ fn reduzir(imagem: &image::DynamicImage, lado: u32) -> image::DynamicImage {
     imagem.thumbnail(lado, lado)
 }
 
+/// Uma foto da sessão como o caixa em tela cheia a mostra na fila dele.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FotoParaOCaixa {
+    pub id: String,
+    pub arquivo: String,
+    pub estado: EstadoDaFotoNoSite,
+    pub nota: Option<u8>,
+    pub rejeitada: bool,
+}
+
 /// 📸 O QR do bot da sessão — ver `super::qr_do_bot`.
 impl Detalhe {
     /// O e-mail da sessão, para o resumo do "Avisar".
@@ -4651,6 +4671,91 @@ impl Detalhe {
         );
     }
 
+    // ── 🖥️ O que o caixa em tela cheia faz na galeria sem sair dele ─────────
+    //
+    // Lá a galeria está coberta. Tudo que o balconista precisaria voltar aqui
+    // para resolver — sinalizar mais uma foto, tirar uma do cupom, dar a nota
+    // que falta, escolher o estúdio — o caixa pede por estes gestos, que são
+    // os mesmos da grade (`P`, `1`–`5`, o seletor do cabeçalho).
+
+    /// As fotos da sessão no site, na ordem da grade: id, arquivo, estado,
+    /// nota e se está rejeitada.
+    pub fn fotos_para_o_caixa(&self) -> Vec<FotoParaOCaixa> {
+        let Some(aberta) = self.aberta.as_ref() else {
+            return Vec::new();
+        };
+        let mut fotos: Vec<&FotoDaGaleria> = aberta.fotos.iter().filter(|f| !f.apagada).collect();
+        fotos.sort_by_key(|f| f.ordem);
+        fotos
+            .into_iter()
+            .map(|f| FotoParaOCaixa {
+                id: f.id.clone(),
+                arquivo: f.arquivo.clone(),
+                estado: f.estado,
+                nota: f.nota,
+                rejeitada: f.rejeitada,
+            })
+            .collect()
+    }
+
+    /// Põe só esta foto na vez, mesmo que o recorte da grade a esconda.
+    pub fn so_esta(&mut self, id: &str, cx: &mut Context<Self>) -> bool {
+        if self.acervo.posicao_de(id).is_none() {
+            self.filtrar(Filtro::Todas, cx);
+        }
+        let Some(p) = self.acervo.posicao_de(id) else {
+            return false;
+        };
+        self.selecao.limpar_tudo();
+        self.selecao.clicar(p, false, Modificadores::default());
+        cx.notify();
+        true
+    }
+
+    /// O `P` da grade nesta foto: vai ao cupom, ou volta a "à venda".
+    pub fn levar_ou_devolver(&mut self, id: &str, cx: &mut Context<Self>) {
+        if self.so_esta(id, cx) {
+            self.alternar_levada(cx);
+        }
+    }
+
+    /// A nota desta foto — sem ela a foto não vai ao balcão.
+    pub fn dar_nota_a(&mut self, id: &str, nota: u8, cx: &mut Context<Self>) {
+        if self.so_esta(id, cx) {
+            self.dar_nota(nota, cx);
+        }
+    }
+
+    /// Tira a rejeição desta foto (o `X` da grade), para ela poder ir ao balcão.
+    pub fn tirar_a_rejeicao_de(&mut self, id: &str, cx: &mut Context<Self>) {
+        let rejeitada = self.do_site(id).is_some_and(|f| f.rejeitada);
+        if rejeitada && self.so_esta(id, cx) {
+            self.alternar_rejeicao(cx);
+        }
+    }
+
+    /// Os estúdios que a conta pode escolher para a sessão: id e nome.
+    pub fn estudios_para_escolher(&self) -> Vec<(String, String)> {
+        self.estudios
+            .iter()
+            .map(|e| (e.id.clone(), e.nome.clone()))
+            .collect()
+    }
+
+    /// O seletor de estúdio do cabeçalho, pelo caixa.
+    pub fn escolher_estudio(&mut self, estudio_id: String, cx: &mut Context<Self>) {
+        self.mudar_estudio(estudio_id, cx);
+    }
+
+    /// O caixa em tela cheia entrou na frente (ou saiu): o painel do bot, que
+    /// é desenhado por cima de tudo, espera a galeria voltar.
+    pub fn cobrir_com_o_caixa(&mut self, coberta: bool, cx: &mut Context<Self>) {
+        if self.coberta_pelo_caixa != coberta {
+            self.coberta_pelo_caixa = coberta;
+            cx.notify();
+        }
+    }
+
     /// Abre e fecha o painel do bot — só o do atendente.
     pub fn alternar_o_painel_do_bot(&mut self, cx: &mut Context<Self>) {
         self.bot.painel_aberto = !self.bot.painel_aberto;
@@ -4727,7 +4832,7 @@ impl Detalhe {
     ) -> Option<gpui_kit::AnyElement> {
         use super::qr_do_bot::{nome_do_canal, quem_e, rotulo_do_passo};
         use crate::recursos::Icone;
-        if !self.bot.painel_aberto {
+        if !self.bot.painel_aberto || self.coberta_pelo_caixa {
             return None;
         }
         let situacao = self.bot.situacao.as_ref()?;
