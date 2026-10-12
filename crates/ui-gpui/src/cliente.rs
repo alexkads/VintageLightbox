@@ -623,6 +623,13 @@ pub struct Cliente {
     /// A raiz avisou que alguma imagem mudou: a página é relida por cima do
     /// que está na tela, sem um quadro vazio no meio.
     reler_a_grade: bool,
+    /// 🎛️ **A célula que mostra a revelação acontecendo** (dono, 12/out/2026):
+    /// com a grade no ar e o operador na Revelação, a foto aberta aparece na
+    /// célula dela como está na tela dele, a cada gesto — a chave do item e a
+    /// imagem que o motor desta janela devolveu por último.
+    ao_vivo: Option<(String, Arc<RenderImage>)>,
+    /// A chave da célula a que pertence o pedido que está no motor.
+    revelando_na_grade: Option<String>,
 }
 
 impl Cliente {
@@ -667,6 +674,8 @@ impl Cliente {
             imagens_da_grade: std::collections::HashMap::new(),
             sem_imagem: std::collections::HashSet::new(),
             reler_a_grade: false,
+            ao_vivo: None,
+            revelando_na_grade: None,
         }
     }
 
@@ -717,6 +726,18 @@ impl Cliente {
         // Uma foto de novo: o Comparar acabou.
         self.par = None;
         self.fila_do_par.clear();
+        self.revelando_na_grade = None;
+        self.revelar_para(pedido, None, cx);
+    }
+
+    /// Revela esta foto **para a célula dela na grade** — a de chave `chave`.
+    ///
+    /// 🔑 A grade continua no ar: o resultado do motor troca só a imagem
+    /// daquela célula, e as outras ficam com a do cache.
+    pub fn revelar_na_grade(&mut self, pedido: ParaRevelar, chave: String, cx: &mut Context<Self>) {
+        self.par = None;
+        self.fila_do_par.clear();
+        self.revelando_na_grade = Some(chave);
         self.revelar_para(pedido, None, cx);
     }
 
@@ -863,10 +884,19 @@ impl Cliente {
                         }
                         // 🔑 A grade só sai quando a foto está pronta: até
                         // lá ela fica no ar, e não a foto de antes dela.
-                        None => {
-                            self.grade = None;
-                            self.mostrar(Some(foto), Some(imagem), posicao, cx)
-                        }
+                        None => match self.revelando_na_grade.take() {
+                            // 🎛️ Para a célula da grade: ela fica no ar, e
+                            // só aquela foto muda.
+                            Some(chave) if self.grade.is_some() => {
+                                self.ao_vivo = Some((chave, imagem));
+                                cx.notify();
+                            }
+                            _ => {
+                                self.grade = None;
+                                self.ao_vivo = None;
+                                self.mostrar(Some(foto), Some(imagem), posicao, cx)
+                            }
+                        },
                     }
                 } else {
                     if crate::depuracao::vigia::ligado() {
@@ -1562,12 +1592,47 @@ impl Cliente {
     /// ou rejeitada, o recorte mudou, as fotos por linha mudaram): aqui só se
     /// guarda e se desenha. As imagens já lidas ficam — a chave é a mesma.
     pub fn mostrar_grade(&mut self, grade: GradeParaOCliente, cx: &mut Context<Self>) {
+        self.mostrar_grade_com(grade, None, cx)
+    }
+
+    /// A grade com uma célula ao vivo — a de chave `ao_vivo`, a foto que o
+    /// operador está revelando. Sem ela (a galeria), toda célula vem do cache.
+    ///
+    /// A imagem ao vivo que já está na tela fica enquanto a célula for a
+    /// mesma: a grade é reenviada a cada mudança, e a foto não pode piscar.
+    pub fn mostrar_grade_com(
+        &mut self,
+        grade: GradeParaOCliente,
+        ao_vivo: Option<&str>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.ao_vivo.as_ref().map(|(chave, _)| chave.as_str()) != ao_vivo {
+            self.ao_vivo = None;
+        }
+        if self.revelando_na_grade.as_deref() != ao_vivo {
+            self.revelando_na_grade = None;
+        }
         self.par = None;
         self.fila_do_par.clear();
         // Uma chave que o cache não tinha pode ter chegado desde então.
         self.sem_imagem.clear();
         self.grade = Some(grade);
         cx.notify();
+    }
+
+    /// A chave da célula que está (ou vai ficar) ao vivo — só os testes.
+    #[cfg(test)]
+    pub fn celula_ao_vivo(&self) -> Option<&str> {
+        self.ao_vivo
+            .as_ref()
+            .map(|(chave, _)| chave.as_str())
+            .or(self.revelando_na_grade.as_deref())
+    }
+
+    /// O motor já devolveu a imagem da célula ao vivo? — só os testes.
+    #[cfg(test)]
+    pub fn imagem_ao_vivo_chegou(&self) -> bool {
+        self.ao_vivo.is_some()
     }
 
     /// A grade que está no ar, se é ela.
@@ -1692,10 +1757,17 @@ impl Cliente {
             px((lugar.w - 2. * BORDA_DA_GRADE).max(1.)),
             px((a.altura_da_foto - 2. * BORDA_DA_GRADE).max(1.)),
         );
+        // 🎛️ A célula ao vivo mostra o que o motor devolveu; as outras, o cache.
         let imagem = self
-            .imagens_da_grade
-            .get(&item.chave)
-            .map(|(_, i)| i.clone());
+            .ao_vivo
+            .as_ref()
+            .filter(|(chave, _)| *chave == item.chave)
+            .map(|(_, imagem)| imagem.clone())
+            .or_else(|| {
+                self.imagens_da_grade
+                    .get(&item.chave)
+                    .map(|(_, i)| i.clone())
+            });
         // 🔑 A moldura nasce do tamanho da foto ([`crate::imagem::cabe_em`]):
         // `size_full` numa caixa de outra proporção corta a foto — a armadilha
         // do `Img` que já cortou esta tela (17/set/2026).

@@ -2266,6 +2266,19 @@ impl Detalhe {
     /// apagada ficam de fora e o número delas fica vago
     /// (`biblioteca_core::grade_do_cliente`).
     pub fn grade_para_o_cliente(&mut self) -> crate::cliente::GradeParaOCliente {
+        self.grade_para_o_cliente_com(None).0
+    }
+
+    /// A grade com o foco na foto `aberta` (o id do site, sem prefixo) — a que
+    /// está na Revelação. Devolve também a chave da célula dela, se ela está
+    /// na grade: é nessa célula que o cliente vê a revelação acontecendo.
+    ///
+    /// 🔑 **Na Revelação o foco é a foto aberta, e não o da galeria**: o
+    /// operador anda pela tira de lá, e a galeria fica parada onde estava.
+    pub fn grade_para_o_cliente_com(
+        &mut self,
+        aberta: Option<&str>,
+    ) -> (crate::cliente::GradeParaOCliente, Option<String>) {
         use biblioteca_core::grade_do_cliente as conta;
         let total = self.acervo.total_visivel();
         let fotos: Vec<(String, bool, bool)> = (0..total)
@@ -2284,7 +2297,7 @@ impl Detalhe {
             .map(|(p, (_, oculta, _))| (self.acervo.posicao_no_acervo(p).unwrap_or(p), *oculta))
             .collect();
         let visiveis = conta::itens_do_recorte(&recorte);
-        let itens = visiveis
+        let itens: Vec<crate::cliente::ItemDaGrade> = visiveis
             .iter()
             .map(|item| {
                 let (id, _, escolhida) = &fotos[item.posicao];
@@ -2297,12 +2310,23 @@ impl Detalhe {
                 }
             })
             .collect();
-        let foco = conta::indice_do_foco(&visiveis, self.selecao.foco().unwrap_or(0));
-        crate::cliente::GradeParaOCliente {
-            itens,
-            foco,
-            por_linha: self.por_linha_no_cliente,
-        }
+        // A célula da foto aberta na Revelação, se o recorte a mostra.
+        let da_aberta = aberta.and_then(|aberta| {
+            visiveis
+                .iter()
+                .position(|item| fotos[item.posicao].0 == aberta)
+        });
+        let foco = da_aberta
+            .or_else(|| conta::indice_do_foco(&visiveis, self.selecao.foco().unwrap_or(0)));
+        let chave_da_aberta = da_aberta.map(|i| itens[i].chave.clone());
+        (
+            crate::cliente::GradeParaOCliente {
+                itens,
+                foco,
+                por_linha: self.por_linha_no_cliente,
+            },
+            chave_da_aberta,
+        )
     }
 
     pub fn limpar_selecao(&mut self, cx: &mut Context<Self>) {

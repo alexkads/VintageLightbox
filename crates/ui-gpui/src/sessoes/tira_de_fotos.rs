@@ -57,8 +57,8 @@ pub type AoMudarOModoDoCliente = Arc<dyn Fn(bool, usize, &mut gpui_kit::Window, 
 /// `revelacao`): os seletores ficam `<prefixo>-tela-do-cliente` e
 /// `<prefixo>-modo-do-cliente`.
 ///
-/// `na_revelacao`: lá a segunda tela mostra sempre a foto aberta, e o modo
-/// escolhido vale quando se volta à galeria — a dica diz isso.
+/// `na_revelacao` só muda as dicas: lá a segunda tela mostra a foto aberta
+/// com a revelação de agora — sozinha, ou na célula dela da grade.
 pub fn fichas_do_cliente(
     prefixo: &'static str,
     aberta: bool,
@@ -107,7 +107,7 @@ pub fn fichas_do_cliente(
         })
         .child(Icon::new(Icone::ChevronDown).size(px(12.)))
         .tooltip(if na_revelacao {
-            "O que a tela do cliente mostra na galeria: a foto em foco, ou a grade com o número de cada foto. Aqui na Revelação ela mostra sempre a foto aberta."
+            "O que a tela do cliente mostra: a foto aberta, ou a grade com o número de cada foto — e, na grade, a foto aberta aparece na célula dela com a revelação de agora"
         } else {
             "O que a tela do cliente mostra: a foto em foco, ou a grade com o número de cada foto"
         })

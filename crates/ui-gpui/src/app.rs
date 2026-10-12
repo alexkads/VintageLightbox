@@ -898,6 +898,9 @@ pub struct Aplicativo {
     modo_do_cliente: (bool, usize),
     /// A grade que a segunda tela recebeu por último — o `no_cliente` dela.
     grade_no_cliente: Option<crate::cliente::GradeParaOCliente>,
+    /// A célula da grade que está mostrando a revelação ao vivo (a chave do
+    /// item) — a foto aberta na Revelação, com a segunda tela em grade.
+    celula_ao_vivo: Option<String>,
     /// Os pixels sem marca das fotos que a segunda tela mostra, guardados para
     /// a edição ao vivo não decodificar a foto a cada gesto.
     ///
@@ -1548,6 +1551,7 @@ impl Aplicativo {
             par_no_cliente: None,
             modo_do_cliente,
             grade_no_cliente: None,
+            celula_ao_vivo: None,
             bruto_do_cliente: Vec::new(),
             cliente_pedindo: None,
             lote_no_ar: None,
@@ -4968,6 +4972,7 @@ impl Aplicativo {
         }
         self.grade_no_cliente = Some(grade.clone());
         self.no_cliente = None;
+        self.celula_ao_vivo = None;
         self.par_no_cliente = None;
         if janela
             .update(cx, |cliente, _window, cx| cliente.mostrar_grade(grade, cx))
@@ -4979,6 +4984,49 @@ impl Aplicativo {
                 .update(cx, |tela, cx| tela.definir_cliente_aberta(false, cx));
             cx.notify();
         }
+    }
+
+    /// A grade na segunda tela **com o operador na Revelação**: a mesma da
+    /// galeria, com o foco na foto aberta. Devolve a chave da célula dela —
+    /// `None` se a aberta não está na grade, ou se a janela já fechou.
+    fn grade_da_revelacao_para_o_cliente(
+        &mut self,
+        janela: gpui_kit::WindowHandle<Cliente>,
+        forcar: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<String> {
+        let aberta = self.revelacao.read(cx).foto_aberta().map(|f| f.id.clone());
+        let do_site = aberta
+            .as_deref()
+            .map(|id| id.strip_prefix(persistencia::PREFIXO_DO_SITE).unwrap_or(id));
+        let (grade, chave) = self
+            .detalhe
+            .update(cx, |tela, _| tela.grade_para_o_cliente_com(do_site));
+        let saiu_do_par = self.par_no_cliente.take().is_some();
+        if forcar || saiu_do_par || self.grade_no_cliente.as_ref() != Some(&grade) {
+            self.grade_no_cliente = Some(grade.clone());
+            // A célula mudou de dona, ou a tela vinha do Comparar: a revelação
+            // vai de novo.
+            if saiu_do_par || self.celula_ao_vivo != chave {
+                self.no_cliente = None;
+            }
+            self.celula_ao_vivo = chave.clone();
+            let ao_vivo = chave.clone();
+            if janela
+                .update(cx, |cliente, _window, cx| {
+                    cliente.mostrar_grade_com(grade, ao_vivo.as_deref(), cx)
+                })
+                .is_err()
+            {
+                self.cliente = None;
+                self.grade_no_cliente = None;
+                self.detalhe
+                    .update(cx, |tela, cx| tela.definir_cliente_aberta(false, cx));
+                cx.notify();
+                return None;
+            }
+        }
+        chave
     }
 
     pub fn cliente_aberto(&self) -> bool {
@@ -5083,15 +5131,33 @@ impl Aplicativo {
                 return;
             }
         }
-        // 🖼️ Na galeria da sessão, com o modo grade: a página numerada. Na
-        // revelação a tela volta à foto, para o cliente ver a edição ao vivo.
+        // 🖼️ Na galeria da sessão, com o modo grade: a página numerada.
         if self.tela == Tela::Sessao && self.modo_do_cliente.0 {
             self.grade_para_o_cliente(janela, forcar, cx);
             return;
         }
+        // 🎛️ **Na Revelação a grade continua** (dono, 12/out/2026: *"se
+        // estiver em grade o cliente precisa ver a foto sendo editada na
+        // grade"*). Até ali a tela voltava à foto única ao entrar na
+        // Revelação. Agora a página fica, com o foco na foto aberta, e a
+        // célula dela mostra a revelação a cada gesto — o resto do caminho
+        // abaixo é o mesmo da foto única, só o destino muda.
+        let na_grade = if self.tela == Tela::Revelacao && self.modo_do_cliente.0 {
+            match self.grade_da_revelacao_para_o_cliente(janela, forcar, cx) {
+                Some(chave) => Some(chave),
+                // A aberta não está na grade (o recorte a escondeu): não há
+                // célula para ela, e a página fica como está.
+                None => return,
+            }
+        } else {
+            None
+        };
         // Saiu do Comparar ou da grade: a foto única vai de novo, mesmo que
         // seja a mesma.
-        let saiu_da_grade = self.grade_no_cliente.take().is_some();
+        let saiu_da_grade = na_grade.is_none() && self.grade_no_cliente.take().is_some();
+        if na_grade.is_none() {
+            self.celula_ao_vivo = None;
+        }
         let forcar = forcar || self.par_no_cliente.take().is_some() || saiu_da_grade;
         let _inicio = std::time::Instant::now();
         let _cronometro = CronometroAoSair("atualizar_o_cliente", _inicio);
@@ -5148,7 +5214,10 @@ impl Aplicativo {
         };
         // 🚨 O `update` falha quando a janela **já foi fechada** — pelo `Esc` de
         // dentro dela, que a raiz não tem como saber que aconteceu.
-        let resposta = janela.update(cx, |cliente, _window, cx| cliente.revelar(pedido, cx));
+        let resposta = janela.update(cx, |cliente, _window, cx| match na_grade {
+            Some(chave) => cliente.revelar_na_grade(pedido, chave, cx),
+            None => cliente.revelar(pedido, cx),
+        });
         if let Err(erro) = &resposta {
             if crate::depuracao::vigia::ligado() {
                 eprintln!("[cliente] ESQUECIDA: o update da janela falhou — {erro:#}");

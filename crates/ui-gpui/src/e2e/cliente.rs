@@ -231,11 +231,46 @@ fn a_tela_do_cliente_em_grade_numera_as_fotos_do_recorte(cx: &mut TestAppContext
     e.detalhe(cx, |tela, _w, cx| tela.filtrar(Filtro::Todas, cx));
     assert_eq!(grade_no_cliente(&e, cx).map(|g| g.0), Some(todas.clone()));
 
-    // Na revelação o cliente vê a foto, ao vivo — e a galeria devolve a grade.
+    // 🎛️ Na revelação a grade **continua** (dono, 12/out/2026: *"se estiver
+    // em grade o cliente precisa ver a foto sendo editada na grade"*): os
+    // mesmos números, o foco na foto aberta, e a revelação dela indo para a
+    // célula dela — e não para a tela inteira.
     e.revelar_a_do_site(cx, "a");
-    assert_eq!(grade_no_cliente(&e, cx), None, "na revelação, a foto");
+    let (numeros, foco, ..) = grade_no_cliente(&e, cx).expect("a grade fica na revelação");
+    assert_eq!((numeros, foco), (todas.clone(), posicao("a")));
     assert_eq!(no_cliente(&e, cx).map(|c| c.0).as_deref(), Some("site:a"));
-    e.esperar(cx);
+    janela
+        .update(cx, |cliente, _window, _cx| {
+            let grade = cliente.grade_mostrada().expect("a grade está no ar");
+            let da_aberta = &grade.itens[grade.foco.expect("a aberta é o foco")].chave;
+            assert_eq!(
+                cliente.celula_ao_vivo(),
+                Some(da_aberta.as_str()),
+                "a revelação vai para a célula da foto aberta"
+            );
+        })
+        .expect("a janela está aberta");
+    // O motor é uma thread de verdade: espera-se por ele, com teto.
+    let mut chegou = false;
+    for _ in 0..100 {
+        e.esperar(cx);
+        chegou = janela
+            .update(cx, |cliente, _window, _cx| cliente.imagem_ao_vivo_chegou())
+            .expect("a janela está aberta");
+        if chegou {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(chegou, "a célula da foto aberta recebe a revelada do motor");
+    janela
+        .update(cx, |cliente, _window, _cx| {
+            assert!(
+                cliente.grade_mostrada().is_some(),
+                "o resultado do motor não derruba a grade"
+            )
+        })
+        .expect("a janela está aberta");
     e.teclar(cx, "escape");
     e.app(cx, |app, _w, _cx| assert_eq!(app.tela(), Tela::Sessao));
     assert!(
