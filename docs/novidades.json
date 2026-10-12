@@ -1,14 +1,9 @@
 {
-  "versao": "0.1.160",
-  "titulo": "O caixa em tela cheia: a venda inteira à vista, sem janelas por cima.",
+  "versao": "0.1.161",
+  "titulo": "O botão da tela cheia na barra do caixa.",
   "importante": false,
   "novidades": [
-    "No caixa da sessão, a tecla F10 (ou o botão novo na barra do caixa) abre o caixa na tela inteira. F10 de novo, ou Esc, volta à galeria. É opcional: quem prefere o caixa pequeno continua com ele, e o app lembra a sua escolha.",
-    "Na tela cheia fica tudo à vista ao mesmo tempo: o cupom com a foto de cada item, quem fotografou, atendeu e auxiliou, o desconto, o pagamento, as vendas da sessão, a sangria e o fechamento do caixa. As teclas F levam direto a cada parte, sem abrir janela.",
-    "Dá para montar o cupom sem sair do caixa: uma fila mostra todas as fotos da sessão. Clique na foto e aperte P (ou \"Pôr no cupom\") para cobrar, e P de novo para tirar. Se a foto ainda não tem nota, as estrelas estão ali mesmo.",
-    "Estornar uma venda e fechar o caixa abrem no lugar da foto, com o botão Voltar sempre visível.",
-    "Se precisar ir à galeria no meio de uma venda, o pagamento que já foi lançado fica guardado e volta quando você abrir o caixa de novo.",
-    "A sessão que ainda não tem estúdio escolhe o estúdio no próprio caixa, e quando o caixa não responde há um botão para tentar de novo."
+    "O caixa da sessão ganhou um botão na barra, entre os atalhos e o minimizar, que abre o caixa na tela inteira. É o mesmo que a tecla F10."
   ],
-  "por_que_atualizar": "Para fechar a venda inteira numa tela só, sem abrir e fechar janelas com o cliente esperando."
+  "por_que_atualizar": "Para abrir o caixa em tela cheia com um clique, sem precisar lembrar da tecla."
 }
