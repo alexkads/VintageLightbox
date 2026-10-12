@@ -1939,3 +1939,48 @@ fn a_tira_da_revelacao_e_a_da_sessao(cx: &mut TestAppContext) {
         assert_eq!(tela.posicao(), vizinha, "a seta anda sobre a tira");
     });
 }
+
+/// 📏 **A barra da sessão é uma linha só também em monitor menor** (dono,
+/// 12/out/2026: *"ficou desorganizado em monitores com resolução menor"*).
+/// Por extenso ela não cabia: o grupo da direita quebrava por dentro, a caixa
+/// de seleção caía sozinha numa segunda linha e os botões desalinhavam dos da
+/// importação. Agora os rótulos encolhem com a janela, e de 1024 a 1920 pt o
+/// primeiro e o último controle ficam na mesma altura, dentro da janela.
+#[gpui_kit::test]
+fn a_barra_da_sessao_cabe_numa_linha_em_janela_estreita(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    // Com fotos marcadas, que é a barra mais cheia: entram "Negociação" e
+    // "Imprimir".
+    e.detalhe(cx, |tela, _w, cx| tela.selecionar_tudo(cx));
+    for largura in [1024., 1280., 1920.] {
+        VisualTestContext::from_window(e.raiz.into(), cx)
+            .simulate_resize(gpui_kit::size(gpui_kit::px(largura), gpui_kit::px(800.)));
+        e.esperar(cx);
+        let mut visual = super::chatbot::quadro_novo(&e, cx);
+        let mut lugar = |alvo: &'static str| {
+            visual
+                .debug_bounds(alvo)
+                .unwrap_or_else(|| panic!("{alvo} não está na barra a {largura} pt"))
+        };
+        let importar = lugar("detalhe-importar");
+        let meio = f32::from(importar.center().y);
+        for alvo in [
+            "detalhe-exportar",
+            "sessao-revelar",
+            "sessao-bot",
+            "sessao-negociar",
+            "sessao-imprimir",
+            "sessao-selecionar-visiveis",
+        ] {
+            let onde = lugar(alvo);
+            assert!(
+                (f32::from(onde.center().y) - meio).abs() < 4.,
+                "a {largura} pt, {alvo} saiu da linha do Importar: {onde:?} × {importar:?}"
+            );
+            assert!(
+                f32::from(onde.origin.x + onde.size.width) <= largura,
+                "a {largura} pt, {alvo} passa da borda da janela: {onde:?}"
+            );
+        }
+    }
+}

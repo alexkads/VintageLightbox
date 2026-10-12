@@ -185,6 +185,35 @@ struct MedidaDaGrade {
     coluna: f32,
 }
 
+/// 📏 Quanto a barra da sessão escreve, conforme a largura da janela.
+///
+/// A barra é uma linha só (importar, exportar, faixa, zoom, revelar, bot,
+/// seleção), e por extenso ela pede ~1500 pt. Num monitor menor os rótulos
+/// encolhem antes de a linha quebrar (dono, 12/out/2026: *"ficou
+/// desorganizado em monitores com resolução menor"*); o que perde o texto
+/// ganha dica.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Densidade {
+    /// Tudo por extenso.
+    Larga,
+    /// Rótulos curtos: "Exportar" e "Imprimir" só com o ícone, "Bot".
+    Compacta,
+    /// O mínimo: "Importar", "Revelar" só com o ícone.
+    Minima,
+}
+
+impl Densidade {
+    fn da_largura(largura: f32) -> Self {
+        if largura >= 1500. {
+            Densidade::Larga
+        } else if largura >= 1180. {
+            Densidade::Compacta
+        } else {
+            Densidade::Minima
+        }
+    }
+}
+
 /// Os recortes da barra, na ordem da web.
 ///
 /// 🚨 **"Sem nota" é o último de propósito**: é o recorte de onde se
@@ -5136,14 +5165,20 @@ impl Render for Detalhe {
         let cabecalho =
             (!pular("cabecalho")).then(|| self.cabecalho(window, cx).into_any_element());
         let tira_aberta = self.docas.as_ref().is_none_or(|d| d.tira_aberta());
-        let barra =
-            (!pular("barra")).then(|| self.barra_da_grade(!tira_aberta, cx).into_any_element());
+        let densidade = Densidade::da_largura(f32::from(window.viewport_size().width));
+        let barra = (!pular("barra")).then(|| {
+            self.barra_da_grade(!tira_aberta, densidade, cx)
+                .into_any_element()
+        });
         // A barra da grade mora dentro da de importação; sozinha, só quando o
         // teste desliga a de importação.
         let (envio, barra) = if pular("envio") {
             (None, barra)
         } else {
-            (Some(self.envio(barra, cx).into_any_element()), None)
+            (
+                Some(self.envio(barra, densidade, cx).into_any_element()),
+                None,
+            )
         };
         let tira_el = (!pular("tira") && tira_aberta).then(|| self.tira(cx).into_any_element());
         let area = self.docas.as_ref().map(|d| d.area.clone());
@@ -5716,6 +5751,7 @@ impl Detalhe {
     fn envio(
         &self,
         barra: Option<gpui_kit::AnyElement>,
+        densidade: Densidade,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         use crate::estilo;
@@ -5792,7 +5828,11 @@ impl Detalhe {
                 estilo::botao_primario_pequeno("detalhe-importar", cx)
                     .debug_selector(|| "detalhe-importar".into())
                     .child(Icon::new(Icone::Upload).size(px(14.)))
-                    .child("Importar fotos")
+                    .child(if densidade == Densidade::Minima {
+                        "Importar"
+                    } else {
+                        "Importar fotos"
+                    })
                     .when(!(ocupado || sem_sessao), |b| {
                         b.on_click(
                             cx.listener(|tela, _ev, _window, cx| tela.abrir_a_importacao(cx)),
@@ -5806,7 +5846,8 @@ impl Detalhe {
                 estilo::botao_contorno_pequeno("detalhe-exportar", cx)
                     .debug_selector(|| "detalhe-exportar".into())
                     .child(Icon::new(Icone::FolderInput).size(px(14.)))
-                    .child("Exportar")
+                    .when(densidade == Densidade::Larga, |b| b.child("Exportar"))
+                    .tooltip("Exportar as fotos marcadas — ou as que a grade mostra")
                     .when(!(sem_sessao || visiveis == 0), |b| {
                         b.on_click(cx.listener(|tela, _ev, _window, cx| {
                             cx.emit(Pedido::Exportar(tela.a_exportar()))
@@ -5818,9 +5859,16 @@ impl Detalhe {
             // arquivos, como no site: a sessão mista sobe em levas, e sem ela
             // toda foto nascia na faixa da galeria.
             .children(self.escolha_da_leva.as_ref().map(|escolha| {
-                div().w(px(216.)).flex_none().child(estilo::campo_pequeno(
-                    Select::new(escolha).xsmall().placeholder("Faixa…"),
-                ))
+                div()
+                    .w(px(match densidade {
+                        Densidade::Larga => 216.,
+                        Densidade::Compacta => 160.,
+                        Densidade::Minima => 128.,
+                    }))
+                    .flex_none()
+                    .child(estilo::campo_pequeno(
+                        Select::new(escolha).xsmall().placeholder("Faixa…"),
+                    ))
             }))
             // O andamento só aparece com lote: parado, a barra não diz nada.
             .when_some(andamento, |barra, andamento| {
@@ -5829,7 +5877,11 @@ impl Detalhe {
                         .flex()
                         .flex_col()
                         .flex_none()
-                        .w(px(200.))
+                        .w(px(if densidade == Densidade::Larga {
+                            200.
+                        } else {
+                            120.
+                        }))
                         .gap(px(4.))
                         .child(
                             div()
@@ -5924,7 +5976,12 @@ impl Detalhe {
 
     /// A barra da grade: zoom · Revelar · bot · seleção — e a tela do cliente
     /// com os recortes, quando a tira (onde eles moram) está escondida.
-    fn barra_da_grade(&self, com_recortes: bool, cx: &mut Context<Self>) -> impl IntoElement {
+    fn barra_da_grade(
+        &self,
+        com_recortes: bool,
+        densidade: Densidade,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         use crate::estilo;
         use crate::recursos::Icone;
         use gpui_kit::component::Icon;
@@ -5938,13 +5995,21 @@ impl Detalhe {
 
         // 📏 Sem faixa própria desde 11/out/2026: é o fim da barra de
         // importação (`envio`), para tudo caber numa linha.
+        //
+        // 🚨 **Este grupo não quebra por dentro.** Quebrando, a caixa de
+        // seleção caía sozinha numa segunda linha e os botões desalinhavam
+        // dos da importação (dono, 12/out/2026, num monitor menor). Em tela
+        // estreita os rótulos encolhem ([`Densidade`]); se ainda assim não
+        // couber, o grupo desce inteiro, alinhado à direita.
+        let larga = densidade == Densidade::Larga;
         div()
             .flex()
-            .flex_1()
-            .flex_wrap()
+            .flex_grow(1.)
+            .flex_shrink_0()
             .items_center()
             .justify_end()
             .gap(px(6.))
+            .when(com_recortes, |barra| barra.flex_wrap().flex_shrink(1.))
             // 🔑 A tela do cliente e os recortes moram em cima da tira; aqui só
             // quando ela está escondida — sem isto, fechar a tira os levava
             // junto.
@@ -5962,10 +6027,11 @@ impl Detalhe {
                         .debug_selector(|| "sessao-nao-salvas".into())
                         .rounded_full()
                         .child(div().size(px(6.)).rounded_full().bg(ambar))
-                        .child(if quantas == 1 {
-                            "1 revelação não salva".to_string()
-                        } else {
-                            format!("{quantas} revelações não salvas")
+                        .child(match (larga, quantas) {
+                            (true, 1) => "1 revelação não salva".to_string(),
+                            (true, _) => format!("{quantas} revelações não salvas"),
+                            (false, 1) => "1 não salva".to_string(),
+                            (false, _) => format!("{quantas} não salvas"),
                         })
                         .tooltip(if quantas == 1 {
                             "Uma revelação está só neste computador. Clique para ir até ela — ela chega ao cliente quando você salvar na galeria."
@@ -5988,7 +6054,11 @@ impl Detalhe {
                     .child(Icon::new(Icone::ZoomOut).size(px(14.)))
                     .child(
                         div()
-                            .w(px(112.))
+                            .w(px(match densidade {
+                                Densidade::Larga => 112.,
+                                Densidade::Compacta => 80.,
+                                Densidade::Minima => 64.,
+                            }))
                             .child(crate::estilo::slider(&self.zoom_slider)),
                     )
                     .child(Icon::new(Icone::ZoomIn).size(px(14.))),
@@ -5999,7 +6069,8 @@ impl Detalhe {
                 // `variante="secondary"`, como o `AbrirRevelacao` da grade do site.
                 estilo::botao_secundario_pequeno("sessao-revelar", cx)
                     .child(Icon::new(Icone::SlidersHorizontal).size(px(14.)))
-                    .child("Revelar")
+                    .when(densidade != Densidade::Minima, |b| b.child("Revelar"))
+                    .tooltip("Revelar as fotos da sessão")
                     .when(pode_revelar, |b| {
                         b.on_click(cx.listener(|tela, _ev, _window, cx| tela.revelar_todas(cx)))
                     }),
@@ -6023,7 +6094,18 @@ impl Detalhe {
                     .child(Icon::new(Icone::Bot).size(px(14.)))
                     // O estado por escrito: o QR mora na outra tela, e a cor
                     // sozinha não diz ao atendente o que está lá.
-                    .child(if ligado { "Bot · QR ligado" } else { "Bot · QR desligado" })
+                    // Em tela estreita fica "Bot": aceso é QR ligado, e a
+                    // dica diz por extenso.
+                    .child(match (larga, ligado) {
+                        (true, true) => "Bot · QR ligado",
+                        (true, false) => "Bot · QR desligado",
+                        (false, _) => "Bot",
+                    })
+                    .tooltip(if ligado {
+                        "Bot da sessão · o QR está na tela do cliente"
+                    } else {
+                        "Bot da sessão · o QR não está na tela do cliente"
+                    })
                     .child(Icon::new(Icone::ChevronDown).size(px(12.)))
                     .dropdown_menu(move |menu, _window, _cx| {
                         let (a, b, c, d) =
@@ -6069,7 +6151,12 @@ impl Detalhe {
                     .child(
                         estilo::botao_contorno_pequeno("sessao-negociar", cx)
                             .child(Icon::new(Icone::ShoppingCart).size(px(14.)))
-                            .child(format!("Negociação… ({marcadas})"))
+                            .child(if larga {
+                                format!("Negociação… ({marcadas})")
+                            } else {
+                                format!("({marcadas})")
+                            })
+                            .tooltip("Negociação das fotos marcadas")
                             .on_click(cx.listener(|tela, _ev, _window, cx| {
                                 tela.pedir_negociacao(tela.marcadas(), false, cx)
                             })),
@@ -6077,7 +6164,8 @@ impl Detalhe {
                     .child(
                         estilo::botao_contorno_pequeno("sessao-imprimir", cx)
                             .child(Icon::new(Icone::Printer).size(px(14.)))
-                            .child("Imprimir…")
+                            .when(larga, |b| b.child("Imprimir…"))
+                            .tooltip("Imprimir as fotos marcadas")
                             .on_click(cx.listener(|tela, _ev, _window, cx| {
                                 cx.emit(Pedido::Imprimir(tela.marcadas()))
                             })),
@@ -6085,19 +6173,22 @@ impl Detalhe {
             })
             // ☑️ O `Checkbox` do gpui-kit, na altura dos botões da barra.
             .child(
-                estilo::campo_pequeno(h_flex().flex_none()).child(
+                estilo::campo_pequeno(
+                    h_flex()
+                        .flex_none()
+                        .debug_selector(|| "sessao-selecionar-visiveis".into()),
+                )
+                .child(
                     Checkbox::new("sessao-selecionar-visiveis")
                         .xsmall()
                         .checked(todas_marcadas)
                         .disabled(visiveis == 0)
-                        .label(format!(
-                            "{} as {visiveis} visíveis",
-                            if todas_marcadas {
-                                "Desmarcar"
-                            } else {
-                                "Selecionar"
-                            }
-                        ))
+                        .label(match (larga, todas_marcadas) {
+                            (true, true) => format!("Desmarcar as {visiveis} visíveis"),
+                            (true, false) => format!("Selecionar as {visiveis} visíveis"),
+                            (false, true) => format!("Nenhuma ({visiveis})"),
+                            (false, false) => format!("Todas ({visiveis})"),
+                        })
                         .on_click(cx.listener(|tela, _ev: &bool, _window, cx| {
                             tela.alternar_todas(cx)
                         })),
