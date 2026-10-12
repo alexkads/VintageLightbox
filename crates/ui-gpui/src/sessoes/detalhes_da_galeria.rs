@@ -99,6 +99,7 @@ pub fn tipo_de_aviso(tipo: &str) -> &str {
         "vencimento_venda" => "Vencimento da venda",
         "vencimento_download" => "Vencimento do download",
         "fotolivro" => "Fotolivro",
+        "fotolivro_whatsapp" => "Fotolivro (WhatsApp)",
         outro => outro,
     }
 }

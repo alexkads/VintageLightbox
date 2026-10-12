@@ -16,6 +16,7 @@ mod atalhos_da_revelacao;
 mod avisos;
 mod barra_do_pe;
 mod canto_dos_envios;
+mod capturas;
 /// 🖌️ A janela do editor em camadas, aberta pela tira da Revelação.
 mod editor;
 mod favoritas;
@@ -598,6 +599,11 @@ pub struct Aplicativo {
     _retrato: Option<gpui_kit::Task<()>>,
     recados_da_conta: (Sender<PosVendaRecado>, Receiver<PosVendaRecado>),
     _conta: Option<gpui_kit::Task<()>>,
+    /// 📷 Os dados da captura das fotos, entre os balcões (`app/capturas.rs`).
+    recados_das_capturas: (Sender<PosVendaRecado>, Receiver<PosVendaRecado>),
+    _capturas: Option<gpui_kit::Task<()>>,
+    capturas_a_caminho: usize,
+    capturas: capturas::CapturasDoSite,
     /// 💛 As favoritas da Revelação no perfil da API (`app/favoritas.rs`).
     recados_das_favoritas: (Sender<PosVendaRecado>, Receiver<PosVendaRecado>),
     _favoritas: Option<gpui_kit::Task<()>>,
@@ -1475,6 +1481,10 @@ impl Aplicativo {
             _retrato: None,
             recados_da_conta: channel(),
             _conta: None,
+            recados_das_capturas: channel(),
+            _capturas: None,
+            capturas_a_caminho: 0,
+            capturas: Default::default(),
             recados_das_favoritas: channel(),
             _favoritas: None,
             favoritas_a_caminho: 0,
@@ -2110,6 +2120,8 @@ impl Aplicativo {
                     // site entrarem na lista: a partir daí não dá mais para
                     // separar quem é quem.
                     raiz.mostrar_as_locais_na_sessao(&fotos, cx);
+                    // 📷 E o que o catálogo sabe da captura delas vai ao site.
+                    raiz.capturas_do_catalogo_relido(&fotos, cx);
                     // 🔑 As do site entram na mesma lista — a grade é uma só.
                     let mut todas = fotos;
                     todas.extend(raiz.fotos_do_site.iter().cloned());
@@ -2982,6 +2994,8 @@ impl Aplicativo {
                     .collect();
                 self.lembrar_o_que_o_site_tem(&convertidas);
                 self.absorver_as_do_site(convertidas, cx);
+                // 📷 Os dados da câmera vão e vêm pelo site (`app/capturas.rs`).
+                self.sincronizar_capturas(cx);
                 // As pendentes são contadas sobre as fotos desta sessão: com
                 // elas na mão, a grade já abre dizendo quais não foram salvas.
                 self.recontar_o_que_falta_subir(cx);
@@ -3109,6 +3123,9 @@ impl Aplicativo {
                 // que a linha sob o histograma mostra.
                 if let Some(captura) = capturas_do_catalogo.get(foto.id.as_str()) {
                     do_site.captura = (*captura).clone();
+                } else if let Some(captura) = self.captura_do_site(&foto.id) {
+                    // Importada em outro balcão: o que o site guardou dela.
+                    do_site.captura = captura.clone();
                 }
                 do_site
             })

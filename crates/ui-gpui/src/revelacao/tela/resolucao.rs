@@ -64,6 +64,26 @@ impl Revelacao {
         }
     }
 
+    /// 📷 Os dados da captura que o site guarda (ISO, abertura…) entram na
+    /// foto aberta, para a linha sob o histograma.
+    ///
+    /// 🔑 Só preenchem o que está vazio: a foto do catálogo local já traz os
+    /// dela, lidos na importação.
+    pub fn definir_captura(
+        &mut self,
+        foto_id: &str,
+        captura: adapters::view_models::Captura,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(aberta) = self.aberta.as_mut().filter(|a| a.foto.id == foto_id) else {
+            return;
+        };
+        if aberta.foto.captura.rotulos().is_empty() && !captura.rotulos().is_empty() {
+            aberta.foto.captura = captura;
+            cx.notify();
+        }
+    }
+
     /// Foto nova: tudo recomeça na cópia.
     pub(super) fn esquecer_a_resolucao(&mut self) {
         self.resolucao = Resolucao::default();
