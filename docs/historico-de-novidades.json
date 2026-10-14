@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.163",
+    "data": "2026-10-14",
+    "titulo": "Chatbot: anexe vários arquivos de uma vez para o cliente pelo WhatsApp.",
+    "importante": false,
+    "novidades": [
+      "No chatbot, o clipe agora deixa escolher vários arquivos de uma vez (até 10) — fotos, vídeos, áudios e documentos. Clicar no clipe de novo acrescenta mais.",
+      "Cada arquivo aparece numa linha, com o \"Enviar como\" e o \"x\" para tirar só aquele.",
+      "No \"Enviar\", cada arquivo sai como uma mensagem, na ordem da lista. O texto escrito vai como legenda do primeiro. Se um não for, ele fica com \"Tentar de novo\" e os outros seguem."
+    ],
+    "por_que_atualizar": "Para mandar as fotos do ensaio ao cliente de uma vez só, em vez de anexar uma por uma."
+  },
+  {
     "versao": "0.1.162",
     "data": "2026-10-14",
     "titulo": "Aviso no rodapé quando o WhatsApp para de entregar as mensagens.",
