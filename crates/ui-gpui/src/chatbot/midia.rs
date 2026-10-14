@@ -257,6 +257,10 @@ pub fn formatar_tamanho(bytes: u64) -> String {
 // ── O anexo que sai daqui ──────────────────────────────────────────────────
 
 /// A maior foto: o teto da Cloud API para imagem.
+/// 📎 Quantos arquivos um envio leva — o mesmo número do painel do site.
+/// Cada um sai como uma mensagem, em ordem.
+pub const ANEXOS_POR_ENVIO: usize = 10;
+
 pub const TETO_DA_FOTO: u64 = 5 * 1024 * 1024;
 /// O maior áudio ou vídeo: o teto do backend.
 pub const TETO_DO_ARQUIVO: u64 = 16 * 1024 * 1024;
@@ -380,6 +384,15 @@ pub fn classe_do_anexo(nome: &str) -> Option<ClasseDoAnexo> {
 
 /// O que impede o envio, ou `None` quando o arquivo serve. As frases são as
 /// do site, com os tetos daqui.
+/// Qual dos anexos leva a legenda: o primeiro que aceita uma — áudio não tem
+/// o campo na Cloud API. `None` quando são todos áudios, e o texto fica no
+/// campo para a próxima mensagem.
+pub fn quem_leva_a_legenda<'a>(nomes: impl IntoIterator<Item = &'a str>) -> Option<usize> {
+    nomes
+        .into_iter()
+        .position(|nome| classe_do_anexo(nome) != Some(ClasseDoAnexo::Audio))
+}
+
 pub fn recusa_do_anexo(nome: &str, tamanho: u64) -> Option<String> {
     let Some(classe) = classe_do_anexo(nome) else {
         return Some(
@@ -747,5 +760,15 @@ mod testes {
         assert_eq!(m(TipoDeMidia::Video).previa(), Some(Previa::Quadro));
         assert_eq!(m(TipoDeMidia::Imagem).previa(), None);
         assert_eq!(m(TipoDeMidia::Documento).previa(), None);
+    }
+
+    #[test]
+    fn a_legenda_vai_no_primeiro_que_aceita_uma() {
+        assert_eq!(
+            quem_leva_a_legenda(["recado.ogg", "a.jpg", "b.pdf"]),
+            Some(1)
+        );
+        assert_eq!(quem_leva_a_legenda(["a.jpg", "b.jpg"]), Some(0));
+        assert_eq!(quem_leva_a_legenda(["recado.ogg", "outro.mp3"]), None);
     }
 }

@@ -158,6 +158,10 @@ pub trait SeletorDePasta: Send + Sync + 'static {
     /// 🚨 A marca d'água usava `escolher`, que só deixa apontar pasta: o
     /// logotipo nunca podia ser escolhido, e a "Prévia da galeria" nunca saía.
     fn escolher_arquivo(&self, canal: Sender<Recado>, cx: &mut gpui_kit::App);
+
+    /// Vários **arquivos** de uma vez — os anexos do chatbot.
+    /// Responde `ArquivosEscolhidos` ou `SemEscolha`.
+    fn escolher_arquivos(&self, canal: Sender<Recado>, cx: &mut gpui_kit::App);
 }
 
 /// O seletor do sistema, pelo diálogo do próprio GPUI.
@@ -219,10 +223,31 @@ impl SeletorNativo {
         como: fn(String) -> Recado,
         cx: &mut gpui_kit::App,
     ) {
+        Self::pedir_caminhos(
+            rotulo,
+            arquivo,
+            false,
+            canal,
+            move |caminhos| match caminhos.into_iter().next() {
+                Some(caminho) => como(caminho),
+                None => Recado::SemEscolha,
+            },
+            cx,
+        );
+    }
+
+    fn pedir_caminhos(
+        rotulo: &'static str,
+        arquivo: bool,
+        varios: bool,
+        canal: Sender<Recado>,
+        como: impl FnOnce(Vec<String>) -> Recado + Send + 'static,
+        cx: &mut gpui_kit::App,
+    ) {
         let escolha = cx.prompt_for_paths(gpui_kit::PathPromptOptions {
             files: arquivo,
             directories: !arquivo,
-            multiple: false,
+            multiple: varios,
             prompt: Some(rotulo.into()),
         });
 
@@ -232,10 +257,13 @@ impl SeletorNativo {
             // pode ter fechado. Nenhum deles pode virar silêncio — ver o
             // contrato do trait.
             let recado = match escolha.await {
-                Ok(Ok(Some(pastas))) => match pastas.into_iter().next() {
-                    Some(pasta) => como(pasta.to_string_lossy().to_string()),
-                    None => Recado::SemEscolha,
-                },
+                Ok(Ok(Some(pastas))) if !pastas.is_empty() => como(
+                    pastas
+                        .iter()
+                        .map(|pasta| pasta.to_string_lossy().to_string())
+                        .collect(),
+                ),
+                Ok(Ok(Some(_))) => Recado::SemEscolha,
                 Ok(Ok(None)) => Recado::SemEscolha,
                 Ok(Err(erro)) => Recado::Falhou(format!("O seletor de pasta não abriu: {erro}")),
                 // O oneshot morreu sem resposta — a janela fechou no meio.
@@ -258,6 +286,17 @@ impl SeletorDePasta for SeletorNativo {
 
     fn escolher_arquivo(&self, canal: Sender<Recado>, cx: &mut gpui_kit::App) {
         Self::pedir_caminho("Escolher", true, canal, Recado::ArquivoEscolhido, cx);
+    }
+
+    fn escolher_arquivos(&self, canal: Sender<Recado>, cx: &mut gpui_kit::App) {
+        Self::pedir_caminhos(
+            "Escolher",
+            true,
+            true,
+            canal,
+            Recado::ArquivosEscolhidos,
+            cx,
+        );
     }
 }
 
@@ -679,12 +718,16 @@ pub mod mentira {
     #[derive(Default)]
     pub struct SeletorDeMentira {
         pub escolha: Mutex<Option<String>>,
+        /// O que a escolha de vários devolve; vazio cai na `escolha`, como
+        /// quem aponta um arquivo só no seletor de vários.
+        pub escolhas: Mutex<Vec<String>>,
     }
 
     impl SeletorDeMentira {
         pub fn escolhe(caminho: &str) -> Self {
             Self {
                 escolha: Mutex::new(Some(caminho.to_string())),
+                ..Self::default()
             }
         }
     }
@@ -710,6 +753,19 @@ pub mod mentira {
             let recado = match self.escolha.lock().expect("a escolha").clone() {
                 Some(caminho) => Recado::ArquivoEscolhido(caminho),
                 None => Recado::SemEscolha,
+            };
+            let _ = canal.send(recado);
+        }
+
+        fn escolher_arquivos(&self, canal: Sender<Recado>, _cx: &mut gpui_kit::App) {
+            let mut escolhas = self.escolhas.lock().expect("as escolhas").clone();
+            if escolhas.is_empty() {
+                escolhas.extend(self.escolha.lock().expect("a escolha").clone());
+            }
+            let recado = if escolhas.is_empty() {
+                Recado::SemEscolha
+            } else {
+                Recado::ArquivosEscolhidos(escolhas)
             };
             let _ = canal.send(recado);
         }

@@ -124,6 +124,8 @@ pub enum Recado {
     DestinoEscolhido(String),
     /// O arquivo que o seletor devolveu (a marca d'água da exportação).
     ArquivoEscolhido(String),
+    /// Os arquivos que o seletor de vários devolveu (os anexos do chatbot).
+    ArquivosEscolhidos(Vec<String>),
     /// As miniaturas destes caminhos acabaram de ser gravadas no cache.
     MiniaturasProntas(Vec<String>),
     /// O seletor fechou sem escolha.
@@ -483,7 +485,7 @@ pub fn aplicar(estado: &mut Estado, recado: Recado) -> Option<Seguimento> {
         Recado::MiniaturasProntas(_) => None,
 
         // A importação nunca pede arquivo: é o seletor da marca d'água.
-        Recado::ArquivoEscolhido(_) => None,
+        Recado::ArquivoEscolhido(_) | Recado::ArquivosEscolhidos(_) => None,
 
         Recado::SemEscolha => None,
 

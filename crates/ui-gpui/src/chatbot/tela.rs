@@ -33,7 +33,7 @@ use gpui_kit::component::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::{prelude::*, Context, Entity, EventEmitter, SharedString, Task, Window};
 use serde_json::Value;
 
-use super::midia::{self, ClasseDoAnexo, ComoEnviar, Midia, Previa, TipoDeMidia};
+use super::midia::{self, ComoEnviar, Midia, Previa, TipoDeMidia};
 use super::modelo::{
     self, Cadastro, Canal, Chave, Conversa, EventoDoChatbot, FiltroDeCanal, Mensagem,
     PaginaDoWhatsApp, Status, Urgencia, Voucher,
@@ -120,6 +120,9 @@ pub struct Pendente {
     /// 📎 O anexo em voo. Fica aqui para o "Tentar de novo" mandar o **mesmo**
     /// arquivo, sem pedir o seletor de novo.
     pub anexo: Option<Anexo>,
+    /// 📎 Esperando o anexo de antes subir: vários arquivos saem um de cada
+    /// vez, na ordem da tira, para chegarem ao cliente nessa ordem.
+    pub na_fila: bool,
 }
 
 /// 📎 O arquivo que o operador escolheu para mandar pela conversa.
@@ -321,8 +324,9 @@ pub struct Chatbot {
     pub(crate) rolagem_vista: Option<(Chave, usize, usize)>,
 
     // ── 📎 A mídia da conversa aberta ──
-    /// O arquivo escolhido, esperando o "Enviar".
-    pub(crate) anexo: Option<Anexo>,
+    /// Os arquivos escolhidos, esperando o "Enviar" — até
+    /// [`midia::ANEXOS_POR_ENVIO`].
+    pub(crate) anexos: Vec<Anexo>,
     /// O seletor do sistema está aberto.
     escolha: Option<Receiver<RecadoDoSeletor>>,
     /// A foto de cada balão, pelo id da mensagem.
@@ -446,7 +450,7 @@ impl Chatbot {
             limpar_compositor: false,
             rolagem: gpui_kit::ScrollHandle::new(),
             rolagem_vista: None,
-            anexo: None,
+            anexos: Vec::new(),
             escolha: None,
             miniaturas: HashMap::new(),
             conferir_miniaturas: false,
@@ -1146,15 +1150,19 @@ impl Chatbot {
         if self.bloqueado_pela_janela() {
             return;
         }
-        if let Some(mut anexo) = self.anexo.take() {
-            // 🎤 Áudio não leva legenda (a Cloud API não tem o campo): ele sai
-            // sozinho, e o que estava escrito fica no campo para a próxima.
-            if midia::classe_do_anexo(&anexo.nome) != Some(ClasseDoAnexo::Audio) {
-                anexo.legenda = texto;
+        if !self.anexos.is_empty() {
+            let mut anexos = std::mem::take(&mut self.anexos);
+            // O texto vira a legenda do primeiro que aceita uma. 🎤 Áudio não
+            // leva legenda (a Cloud API não tem o campo): só áudios, e o que
+            // estava escrito fica no campo para a próxima.
+            if let Some(i) = midia::quem_leva_a_legenda(anexos.iter().map(|a| a.nome.as_str())) {
+                anexos[i].legenda = texto;
                 self.compositor
                     .update(cx, |campo, cx| campo.trocar_valor("", window, cx));
             }
-            self.despachar_anexo(anexo, cx);
+            for anexo in anexos {
+                self.despachar_anexo(anexo, cx);
+            }
             return;
         }
         if texto.is_empty() {
@@ -1192,6 +1200,7 @@ impl Chatbot {
             resposta,
             erro: None,
             anexo: None,
+            na_fila: false,
         };
         self.mandar(&pendente);
         self.pendentes.push(pendente);
@@ -1203,6 +1212,9 @@ impl Chatbot {
             return;
         };
         self.proximo_pendente += 1;
+        // Um anexo subindo segura os outros: o segundo arquivo não pode chegar
+        // ao cliente antes do primeiro.
+        let na_fila = self.subindo_anexo();
         let pendente = Pendente {
             id: self.proximo_pendente,
             chave,
@@ -1210,10 +1222,36 @@ impl Chatbot {
             resposta: None,
             erro: None,
             anexo: Some(anexo),
+            na_fila,
         };
-        self.mandar(&pendente);
+        if !na_fila {
+            self.mandar(&pendente);
+        }
         self.pendentes.push(pendente);
         cx.notify();
+    }
+
+    /// Há anexo em voo — subindo agora, ou esperando a vez.
+    fn subindo_anexo(&self) -> bool {
+        self.pendentes
+            .iter()
+            .any(|p| p.anexo.is_some() && p.erro.is_none())
+    }
+
+    /// O anexo de antes terminou (subiu ou falhou): o próximo da fila sobe.
+    fn mandar_o_proximo_anexo(&mut self) {
+        let subindo = self
+            .pendentes
+            .iter()
+            .any(|p| p.anexo.is_some() && p.erro.is_none() && !p.na_fila);
+        if subindo {
+            return;
+        }
+        if let Some(proximo) = self.pendentes.iter_mut().find(|p| p.na_fila) {
+            proximo.na_fila = false;
+            let proximo = proximo.clone();
+            self.mandar(&proximo);
+        }
     }
 
     fn mandar(&mut self, pendente: &Pendente) {
@@ -1244,7 +1282,7 @@ impl Chatbot {
 
     /// Esquece o anexo escolhido e as fotos da conversa que saiu da frente.
     fn largar_a_midia(&mut self) {
-        self.anexo = None;
+        self.anexos.clear();
         self.escolha = None;
         self.miniaturas.clear();
         self.baixas.clear();
@@ -1300,9 +1338,9 @@ impl Chatbot {
         mudou
     }
 
-    /// A escolha da tira: como o anexo sai.
-    pub fn escolher_como(&mut self, como: ComoEnviar, cx: &mut Context<Self>) {
-        if let Some(anexo) = &mut self.anexo {
+    /// A escolha da tira: como aquele anexo sai.
+    pub fn escolher_como(&mut self, indice: usize, como: ComoEnviar, cx: &mut Context<Self>) {
+        if let Some(anexo) = self.anexos.get_mut(indice) {
             anexo.como = Some(como);
         }
         cx.notify();
@@ -1322,13 +1360,16 @@ impl Chatbot {
             return;
         }
         let (envia, recebe) = channel();
-        self.seletor.escolher_arquivo(envia, cx);
+        // Vários de uma vez, como no WhatsApp; o clipe de novo acrescenta.
+        self.seletor.escolher_arquivos(envia, cx);
         self.escolha = Some(recebe);
     }
 
-    /// O "x" da tira do anexo.
-    pub fn tirar_anexo(&mut self, cx: &mut Context<Self>) {
-        self.anexo = None;
+    /// O "x" de um arquivo da tira.
+    pub fn tirar_anexo(&mut self, indice: usize, cx: &mut Context<Self>) {
+        if indice < self.anexos.len() {
+            self.anexos.remove(indice);
+        }
         cx.notify();
     }
 
@@ -1346,14 +1387,37 @@ impl Chatbot {
         };
         self.escolha = None;
         match recado {
+            RecadoDoSeletor::ArquivosEscolhidos(caminhos) => {
+                self.receber_os_escolhidos(&caminhos, cx)
+            }
             RecadoDoSeletor::ArquivoEscolhido(caminho) => {
-                self.receber_o_escolhido(Path::new(&caminho), cx)
+                self.receber_os_escolhidos(&[caminho], cx)
             }
             RecadoDoSeletor::Falhou(erro) => self.toast(erro, true, cx),
             // Desistir do seletor não é erro.
             _ => {}
         }
         true
+    }
+
+    /// Acrescenta os escolhidos à tira, até o teto do envio. O que passa do
+    /// teto fica de fora, com aviso — os primeiros, na ordem do seletor, ficam.
+    pub(crate) fn receber_os_escolhidos(&mut self, caminhos: &[String], cx: &mut Context<Self>) {
+        let cabem = midia::ANEXOS_POR_ENVIO.saturating_sub(self.anexos.len());
+        for caminho in caminhos.iter().take(cabem) {
+            self.receber_o_escolhido(Path::new(caminho), cx);
+        }
+        if caminhos.len() > cabem {
+            self.toast(
+                format!(
+                    "Vão até {} arquivos por envio; {} ficaram de fora.",
+                    midia::ANEXOS_POR_ENVIO,
+                    caminhos.len() - cabem
+                ),
+                true,
+                cx,
+            );
+        }
     }
 
     /// Confere e carrega o arquivo escolhido. O que não serve é recusado com
@@ -1371,7 +1435,7 @@ impl Chatbot {
         match std::fs::read(caminho) {
             Ok(bytes) => {
                 let como = ComoEnviar::opcoes(&nome).first().copied();
-                self.anexo = Some(Anexo {
+                self.anexos.push(Anexo {
                     nome,
                     bytes: Arc::new(bytes),
                     legenda: String::new(),
@@ -1553,7 +1617,19 @@ impl Chatbot {
         };
         pendente.erro = None;
         let pendente = pendente.clone();
-        self.mandar(&pendente);
+        // O anexo de novo entra na fila de quem ainda está subindo.
+        let na_fila = pendente.anexo.is_some()
+            && self
+                .pendentes
+                .iter()
+                .any(|p| p.id != id && p.anexo.is_some() && p.erro.is_none());
+        if na_fila {
+            if let Some(p) = self.pendentes.iter_mut().find(|p| p.id == id) {
+                p.na_fila = true;
+            }
+        } else {
+            self.mandar(&pendente);
+        }
         cx.notify();
     }
 
@@ -1808,6 +1884,7 @@ impl Chatbot {
                         self.pedir(pedidos::contar_uso(&resposta), &envia);
                         self.acoes.push((Acao::ContarUso, recebe));
                     }
+                    self.mandar_o_proximo_anexo();
                     self.recarregar(cx);
                 }
                 Err(erro) => {
@@ -1817,6 +1894,8 @@ impl Chatbot {
                             "Não foi possível enviar a mensagem.",
                         ));
                     }
+                    // O que falhou fica com "Tentar de novo"; os de trás seguem.
+                    self.mandar_o_proximo_anexo();
                 }
             },
             Acao::Transcricao(id) => {

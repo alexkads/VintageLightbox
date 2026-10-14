@@ -46,6 +46,9 @@ pub enum Passo {
     ConferirSelecao(usize),
     /// `conversa 1` — abre a N-ésima conversa da lista do chatbot.
     Conversa(usize),
+    /// `anexar /a.jpg /b.pdf` — o que o seletor do sistema devolveria ao
+    /// clipe do chatbot (caminhos sem espaço).
+    Anexar(Vec<String>),
     /// `conferir_chatbot 1` — falha se a lista do chatbot tiver menos de N
     /// conversas lidas da API.
     ConferirChatbot(usize),
@@ -278,6 +281,7 @@ pub fn ler_roteiro(texto: &str) -> Result<Vec<Passo>, String> {
             "conferir_conta" => Passo::ConferirConta,
             "conferir_selecao" => Passo::ConferirSelecao(numero(0)? as usize),
             "conversa" => Passo::Conversa(numero(0)? as usize),
+            "anexar" => Passo::Anexar(argumentos.iter().map(|a| a.to_string()).collect()),
             "conferir_chatbot" => Passo::ConferirChatbot(numero(0)? as usize),
             "conferir_novidades" => Passo::ConferirNovidades(numero(0)? as usize),
             "conferir_agenda" => Passo::ConferirAgenda(numero(0)? as usize),

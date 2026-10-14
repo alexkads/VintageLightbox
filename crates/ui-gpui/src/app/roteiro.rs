@@ -179,6 +179,9 @@ impl Aplicativo {
                     None => eprintln!("[roteiro] o chatbot não tem a conversa {posicao}"),
                 }
             }
+            Passo::Anexar(caminhos) => self
+                .chatbot
+                .update(cx, |t, cx| t.receber_os_escolhidos(caminhos, cx)),
             Passo::ConferirChatbot(minimo) => {
                 let lidas = self.chatbot.read(cx).visiveis().len();
                 assert!(

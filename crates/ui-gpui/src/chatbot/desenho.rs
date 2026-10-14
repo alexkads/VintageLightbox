@@ -27,7 +27,7 @@ use gpui_kit::{
 use super::formatacao;
 use super::midia::{self, ComoEnviar, Midia, TipoDeMidia};
 use super::modelo::{self, Canal, Conversa, FiltroDeCanal, Mensagem, Status, Urgencia};
-use super::tela::{Chatbot, Dialogo, Miniatura, Pendente};
+use super::tela::{Anexo, Chatbot, Dialogo, Miniatura, Pendente};
 use super::EnviarMensagem;
 use crate::estilo;
 use crate::recursos::Icone;
@@ -1310,6 +1310,83 @@ impl Chatbot {
             )
     }
 
+    /// Uma linha da tira de anexos: nome, tamanho, "Enviar como" e o "x".
+    fn linha_do_anexo(&self, i: usize, anexo: &Anexo, cx: &mut Context<Self>) -> AnyElement {
+        let apagado = cx.theme().muted_foreground;
+        h_flex()
+            .debug_selector(move || format!("chatbot-anexo-{i}"))
+            .px(px(12.))
+            .py(px(4.))
+            .gap(px(8.))
+            .items_center()
+            .text_xs()
+            .child(
+                Icon::new(Icone::Paperclip)
+                    .size(px(14.))
+                    .text_color(apagado),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .truncate()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(anexo.nome.clone()),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .text_color(apagado)
+                    .child(midia::formatar_tamanho(anexo.bytes.len() as u64)),
+            )
+            // "Enviar como": foto e vídeo podem ir como documento (o
+            // original, sem a recompressão da Meta). Com um jeito só, a
+            // linha não pergunta.
+            .when(ComoEnviar::opcoes(&anexo.nome).len() > 1, |d| {
+                let opcoes = ComoEnviar::opcoes(&anexo.nome);
+                let atual = anexo.como.unwrap_or(opcoes[0]);
+                let tela = cx.entity().downgrade();
+                let nome = format!("chatbot-como-enviar-{i}");
+                d.child(
+                    marcado(estilo::botao_contorno_pequeno(nome.clone(), cx), nome)
+                        .child(format!("Enviar como {}", atual.rotulo()))
+                        .tooltip("Como o arquivo chega ao cliente")
+                        .dropdown_menu_with_anchor(
+                            gpui_kit::Anchor::BottomLeft,
+                            move |menu, _window, _cx| {
+                                let mut menu = menu.min_w(px(160.));
+                                for opcao in opcoes.clone() {
+                                    let tela = tela.clone();
+                                    menu = menu.item(
+                                        estilo::item_de_menu(
+                                            opcao.id_do_item(),
+                                            opcao.rotulo(),
+                                            None,
+                                        )
+                                        .on_click(
+                                            move |_, _, cx| {
+                                                let _ = tela.update(cx, |tela, cx| {
+                                                    tela.escolher_como(i, opcao, cx)
+                                                });
+                                            },
+                                        ),
+                                    );
+                                }
+                                menu
+                            },
+                        ),
+                )
+            })
+            .child({
+                let nome = format!("chatbot-tirar-anexo-{i}");
+                marcado(estilo::botao_fantasma_pequeno(nome.clone(), cx), nome)
+                    .child(Icon::new(Icone::X).size(px(12.)))
+                    .tooltip("Tirar o anexo")
+                    .on_click(cx.listener(move |tela, _, _, cx| tela.tirar_anexo(i, cx)))
+            })
+            .into_any_element()
+    }
+
     fn rodape(&self, conversa: &Conversa, cx: &mut Context<Self>) -> impl IntoElement {
         let tema = cx.theme();
         let (borda, apagado, muted) = (tema.border, tema.muted_foreground, tema.muted);
@@ -1338,90 +1415,29 @@ impl Chatbot {
         // clipe mora no compositor, que some inteiro com a janela de 24 h
         // fechada (o `motivo` acima) — anexo é mensagem de sessão como o texto.
         let pode_anexar = conversa.chave.canal == Canal::WhatsApp;
-        let anexo = self.anexo.clone();
-        let tem_anexo = anexo.is_some();
+        let tem_anexo = !self.anexos.is_empty();
+        let linhas: Vec<AnyElement> = self
+            .anexos
+            .iter()
+            .enumerate()
+            .map(|(i, anexo)| self.linha_do_anexo(i, anexo, cx))
+            .collect();
         v_flex()
             .flex_none()
             .border_t_1()
             .border_color(borda)
-            // O arquivo escolhido fica à vista até sair: nome, tamanho e como
-            // tirar. O que se escrever embaixo vira a legenda dele.
-            .when_some(anexo, |d, anexo| {
+            // Os arquivos escolhidos ficam à vista até sair: nome, tamanho e
+            // como tirar, um por linha. O que se escrever embaixo vira a
+            // legenda do primeiro que aceita uma.
+            .when(tem_anexo, |d| {
                 d.child(
-                    h_flex()
-                        .debug_selector(|| "chatbot-anexo".into())
-                        .px(px(12.))
-                        .py(px(4.))
-                        .gap(px(8.))
-                        .items_center()
-                        .text_xs()
+                    v_flex()
+                        .id("chatbot-anexos")
+                        .debug_selector(|| "chatbot-anexos".into())
+                        .max_h(px(168.))
+                        .overflow_y_scroll()
                         .bg(muted.opacity(0.4))
-                        .child(
-                            Icon::new(Icone::Paperclip)
-                                .size(px(14.))
-                                .text_color(apagado),
-                        )
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w(px(0.))
-                                .truncate()
-                                .font_weight(FontWeight::MEDIUM)
-                                .child(anexo.nome.clone()),
-                        )
-                        .child(
-                            div()
-                                .flex_none()
-                                .text_color(apagado)
-                                .child(midia::formatar_tamanho(anexo.bytes.len() as u64)),
-                        )
-                        // "Enviar como": foto e vídeo podem ir como documento
-                        // (o original, sem a recompressão da Meta). Com um
-                        // jeito só, a tira não pergunta.
-                        .when(ComoEnviar::opcoes(&anexo.nome).len() > 1, |d| {
-                            let opcoes = ComoEnviar::opcoes(&anexo.nome);
-                            let atual = anexo.como.unwrap_or(opcoes[0]);
-                            let tela = cx.entity().downgrade();
-                            d.child(
-                                marcado(
-                                    estilo::botao_contorno_pequeno("chatbot-como-enviar", cx),
-                                    "chatbot-como-enviar",
-                                )
-                                .child(format!("Enviar como {}", atual.rotulo()))
-                                .tooltip("Como o arquivo chega ao cliente")
-                                .dropdown_menu_with_anchor(
-                                    gpui_kit::Anchor::BottomLeft,
-                                    move |menu, _window, _cx| {
-                                        let mut menu = menu.min_w(px(160.));
-                                        for opcao in opcoes.clone() {
-                                            let tela = tela.clone();
-                                            menu = menu.item(
-                                                estilo::item_de_menu(
-                                                    opcao.id_do_item(),
-                                                    opcao.rotulo(),
-                                                    None,
-                                                )
-                                                .on_click(move |_, _, cx| {
-                                                    let _ = tela.update(cx, |tela, cx| {
-                                                        tela.escolher_como(opcao, cx)
-                                                    });
-                                                }),
-                                            );
-                                        }
-                                        menu
-                                    },
-                                ),
-                            )
-                        })
-                        .child(
-                            marcado(
-                                estilo::botao_fantasma_pequeno("chatbot-tirar-anexo", cx),
-                                "chatbot-tirar-anexo",
-                            )
-                            .child(Icon::new(Icone::X).size(px(12.)))
-                            .tooltip("Tirar o anexo")
-                            .on_click(cx.listener(|tela, _, _, cx| tela.tirar_anexo(cx))),
-                        ),
+                        .children(linhas),
                 )
             })
             .when_some(decisao.aviso, |d, aviso| {
@@ -1464,7 +1480,7 @@ impl Chatbot {
                         d.child(
                             botao
                                 .child(Icon::new(Icone::Paperclip).size(px(16.)))
-                                .tooltip("Anexar foto, áudio ou documento")
+                                .tooltip("Anexar fotos, áudios ou documentos")
                                 .on_click(cx.listener(|tela, _, _, cx| tela.anexar(cx))),
                         )
                     })
@@ -1479,7 +1495,7 @@ impl Chatbot {
                         .on_click(
                             cx.listener(|tela, _, window, cx| tela.enviar_o_escrito(window, cx)),
                         ),
-                        // Com anexo, o texto é a legenda — e pode ir vazio.
+                        // Com anexos, o texto é a legenda — e pode ir vazio.
                         vazio && !tem_anexo,
                     )),
             )

@@ -1640,10 +1640,10 @@ fn o_clipe_anexa_e_o_envio_sobe_em_multipart_com_a_legenda(cx: &mut TestAppConte
     clicar(&e, cx, "chatbot-clipe");
     passo(cx);
     chatbot(&e, cx, |t, _w, _cx| {
-        let anexo = t.anexo.as_ref().expect("o arquivo escolhido fica à vista");
+        let anexo = t.anexos.first().expect("o arquivo escolhido fica à vista");
         assert_eq!(anexo.nome, "orçamento do ensaio.pdf");
     });
-    assert!(desenhado(&e, cx, "chatbot-anexo"));
+    assert!(desenhado(&e, cx, "chatbot-anexo-0"));
 
     e.site.responder_cru(
         "anexo-enviado",
@@ -1655,7 +1655,7 @@ fn o_clipe_anexa_e_o_envio_sobe_em_multipart_com_a_legenda(cx: &mut TestAppConte
     escrever(&e, cx, "segue o orçamento");
     clicar(&e, cx, "chatbot-enviar");
     chatbot(&e, cx, |t, _w, cx| {
-        assert!(t.anexo.is_none(), "a tira some: o anexo saiu");
+        assert!(t.anexos.is_empty(), "a tira some: o anexo saiu");
         assert_eq!(t.compositor.read(cx).value().as_ref(), "");
         let pendentes = t.pendentes_da_aberta();
         assert_eq!(pendentes.len(), 1);
@@ -1692,6 +1692,139 @@ fn o_clipe_anexa_e_o_envio_sobe_em_multipart_com_a_legenda(cx: &mut TestAppConte
         antes + 1,
         "a conversa relê depois de enviar"
     );
+}
+
+/// 📎 O pedido do dono (14/10): *"a função de anexar arquivos deveria
+/// permitir anexar vários"*. O seletor devolve vários, a tira mostra um por
+/// linha, o "x" tira só aquele, e o "Enviar" manda um por mensagem, **em
+/// ordem** — o segundo só sobe quando o primeiro terminou. A legenda vai no
+/// primeiro que aceita uma (o áudio não tem o campo).
+#[gpui_kit::test]
+fn varios_anexos_saem_um_por_mensagem_na_ordem_da_tira(cx: &mut TestAppContext) {
+    let e = abrir_o_chatbot(cx);
+    clicar(&e, cx, "chatbot-conversa-0");
+    let pasta = tempfile::tempdir().unwrap();
+    let nomes = ["recado.ogg", "ensaio 1.jpg", "fora.pdf", "ensaio 2.jpg"];
+    let caminhos: Vec<String> = nomes
+        .iter()
+        .map(|nome| {
+            let caminho = pasta.path().join(nome);
+            std::fs::write(&caminho, nome.as_bytes()).unwrap();
+            caminho.to_string_lossy().to_string()
+        })
+        .collect();
+    *e.seletor.escolhas.lock().unwrap() = caminhos;
+
+    clicar(&e, cx, "chatbot-clipe");
+    passo(cx);
+    for i in 0..4 {
+        assert!(desenhado(&e, cx, &format!("chatbot-anexo-{i}")));
+    }
+    // O "x" tira só aquele arquivo.
+    clicar(&e, cx, "chatbot-tirar-anexo-2");
+    chatbot(&e, cx, |t, _w, _cx| {
+        let ficaram: Vec<&str> = t.anexos.iter().map(|a| a.nome.as_str()).collect();
+        assert_eq!(ficaram, ["recado.ogg", "ensaio 1.jpg", "ensaio 2.jpg"]);
+    });
+
+    e.site.responder_cru(
+        "anexo-enviado",
+        Ok(RespostaDoPedido {
+            tipo: None,
+            bytes: b"{}".to_vec(),
+        }),
+    );
+    escrever(&e, cx, "as duas do ensaio");
+    clicar(&e, cx, "chatbot-enviar");
+    chatbot(&e, cx, |t, _w, cx| {
+        assert!(t.anexos.is_empty(), "a tira some inteira");
+        assert_eq!(t.compositor.read(cx).value().as_ref(), "");
+        let textos: Vec<String> = t
+            .pendentes_da_aberta()
+            .into_iter()
+            .map(|p| p.texto)
+            .collect();
+        assert_eq!(textos, ["🎤 Áudio", "as duas do ensaio", "📎 ensaio 2.jpg"]);
+    });
+    assert_eq!(
+        crus(&e)
+            .iter()
+            .filter(|p| p.caminho == "/whatsapp/messages/send-media")
+            .count(),
+        1,
+        "um sobe de cada vez: os outros esperam a vez"
+    );
+    e.esperar(cx);
+
+    let corpos: Vec<String> = crus(&e)
+        .into_iter()
+        .filter(|p| p.caminho == "/whatsapp/messages/send-media")
+        .map(|p| String::from_utf8_lossy(&p.corpo.expect("leva o arquivo").bytes).to_string())
+        .collect();
+    assert_eq!(corpos.len(), 3, "um por mensagem");
+    for (corpo, nome) in corpos
+        .iter()
+        .zip(["recado.ogg", "ensaio 1.jpg", "ensaio 2.jpg"])
+    {
+        assert!(
+            corpo.contains(&format!("filename=\"{nome}\"")),
+            "a ordem da tira"
+        );
+    }
+    assert!(!corpos[0].contains("caption"), "o áudio não leva legenda");
+    assert!(corpos[1].contains("name=\"caption\"\r\n\r\nas duas do ensaio"));
+    assert!(!corpos[2].contains("caption"), "a legenda vai uma vez só");
+    chatbot(&e, cx, |t, _w, _cx| {
+        assert!(t.pendentes_da_aberta().is_empty())
+    });
+}
+
+/// 📎 Um que falha não segura a fila: ele fica com "Tentar de novo", e os de
+/// trás sobem. E o envio leva até 10 arquivos — o que passa fica de fora,
+/// com aviso.
+#[gpui_kit::test]
+fn a_fila_de_anexos_segue_depois_de_uma_falha_e_tem_teto(cx: &mut TestAppContext) {
+    let e = abrir_o_chatbot(cx);
+    clicar(&e, cx, "chatbot-conversa-0");
+    let pasta = tempfile::tempdir().unwrap();
+    let caminhos: Vec<String> = (1..=12)
+        .map(|n| {
+            let caminho = pasta.path().join(format!("foto {n:02}.jpg"));
+            std::fs::write(&caminho, b"jpeg").unwrap();
+            caminho.to_string_lossy().to_string()
+        })
+        .collect();
+    *e.seletor.escolhas.lock().unwrap() = caminhos;
+    clicar(&e, cx, "chatbot-clipe");
+    passo(cx);
+    chatbot(&e, cx, |t, _w, _cx| assert_eq!(t.anexos.len(), 10));
+    assert!(
+        toasts(&e, cx)
+            .iter()
+            .any(|(texto, erro)| *erro
+                && texto == "Vão até 10 arquivos por envio; 2 ficaram de fora.")
+    );
+
+    // A Meta recusa tudo: cada um vira um balão com "Tentar de novo", e
+    // todos chegaram a subir.
+    e.site.responder_cru(
+        "anexo-enviado",
+        Err("o site respondeu 422: A Meta recusou o arquivo".into()),
+    );
+    clicar(&e, cx, "chatbot-enviar");
+    e.esperar(cx);
+    assert_eq!(
+        crus(&e)
+            .iter()
+            .filter(|p| p.caminho == "/whatsapp/messages/send-media")
+            .count(),
+        10
+    );
+    chatbot(&e, cx, |t, _w, _cx| {
+        let pendentes = t.pendentes_da_aberta();
+        assert_eq!(pendentes.len(), 10);
+        assert!(pendentes.iter().all(|p| p.erro.is_some() && !p.na_fila));
+    });
 }
 
 /// 🎤 Áudio não leva legenda: ele sai sozinho, e o que estava escrito fica no
@@ -1770,7 +1903,7 @@ fn arquivo_que_o_whatsapp_nao_leva_e_recusado_ao_escolher(cx: &mut TestAppContex
     *e.seletor.escolha.lock().unwrap() = Some(arquivo.to_string_lossy().to_string());
     clicar(&e, cx, "chatbot-clipe");
     passo(cx);
-    chatbot(&e, cx, |t, _w, _cx| assert!(t.anexo.is_none()));
+    chatbot(&e, cx, |t, _w, _cx| assert!(t.anexos.is_empty()));
     assert!(toasts(&e, cx)
         .iter()
         .any(|(texto, erro)| *erro && texto.contains("não vai pelo WhatsApp")));
@@ -1779,7 +1912,7 @@ fn arquivo_que_o_whatsapp_nao_leva_e_recusado_ao_escolher(cx: &mut TestAppContex
     *e.seletor.escolha.lock().unwrap() = None;
     clicar(&e, cx, "chatbot-clipe");
     passo(cx);
-    chatbot(&e, cx, |t, _w, _cx| assert!(t.anexo.is_none()));
+    chatbot(&e, cx, |t, _w, _cx| assert!(t.anexos.is_empty()));
     assert_eq!(toasts(&e, cx).len(), antes, "desistir não avisa nada");
     assert!(crus(&e).is_empty(), "nada subiu");
 }
@@ -1799,7 +1932,7 @@ fn so_o_whatsapp_anexa_e_so_com_a_janela_aberta(cx: &mut TestAppContext) {
     e.esperar(cx);
     chatbot(&e, cx, |t, _w, cx| t.anexar(cx));
     passo(cx);
-    chatbot(&e, cx, |t, _w, _cx| assert!(t.anexo.is_none()));
+    chatbot(&e, cx, |t, _w, _cx| assert!(t.anexos.is_empty()));
 
     // O WhatsApp com a última mensagem do cliente há mais de 24 h.
     let mut antiga = conversa_da_ana(false);
@@ -1821,7 +1954,7 @@ fn so_o_whatsapp_anexa_e_so_com_a_janela_aberta(cx: &mut TestAppContext) {
     });
     passo(cx);
     chatbot(&e, cx, |t, _w, _cx| {
-        assert!(t.anexo.is_none(), "janela fechada: o seletor nem abre")
+        assert!(t.anexos.is_empty(), "janela fechada: o seletor nem abre")
     });
     assert!(crus(&e).is_empty());
 }
@@ -1841,15 +1974,15 @@ fn a_foto_anexada_pode_ir_como_documento(cx: &mut TestAppContext) {
     passo(cx);
     chatbot(&e, cx, |t, _w, _cx| {
         assert_eq!(
-            t.anexo.as_ref().unwrap().como,
+            t.anexos[0].como,
             Some(crate::chatbot::midia::ComoEnviar::Foto),
             "começa no jeito natural"
         );
     });
-    assert!(desenhado(&e, cx, "chatbot-como-enviar"));
+    assert!(desenhado(&e, cx, "chatbot-como-enviar-0"));
 
     chatbot(&e, cx, |t, _w, cx| {
-        t.escolher_como(crate::chatbot::midia::ComoEnviar::Documento, cx)
+        t.escolher_como(0, crate::chatbot::midia::ComoEnviar::Documento, cx)
     });
     e.site.responder_cru(
         "anexo-enviado",
