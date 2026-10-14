@@ -15,6 +15,7 @@
 //! |---|---|---|
 //! | versão | `VintageLightbox` e `versão 0.1.22` | as novidades desta versão |
 //! | envios | subindo, recusados, ou "tudo no site" | os recusados abrem os motivos |
+//! | WhatsApp | só quando a Meta recusa as mensagens da casa ([`super::whatsapp_bloqueado`]) | o que parou e onde pagar |
 //! | meio | a faixa de atualização, quando há aviso ([`faixa`]) | os botões dela |
 //! | tela | o recorte, quantas fotos e quantas selecionadas | — |
 //! | servidor | o site em que o app está; âmbar fora da produção | abre o site |
@@ -282,6 +283,11 @@ impl Aplicativo {
             );
         }
 
+        // ── O WhatsApp parado ─────────────────────────────────────────────
+        // 🚨 A Meta recusando as mensagens da casa (cobrança em aberto…): o
+        // que aparece como enviado não chega ao cliente.
+        let whatsapp = self.trecho_do_whatsapp(cx);
+
         // ── A faixa de atualização ────────────────────────────────────────
         let agir = cx.listener(|raiz, pedido: &PedidoDeAtualizacao, _window, cx| {
             raiz.atender(*pedido, cx);
@@ -367,6 +373,9 @@ impl Aplicativo {
             .child(versao)
             .child(separador())
             .child(trecho_dos_envios)
+            .when_some(whatsapp, |rodape, whatsapp| {
+                rodape.child(separador()).child(whatsapp)
+            })
             .child(
                 // O meio cresce e encolhe: a frase da faixa se corta antes de
                 // empurrar os trechos das pontas para fora.

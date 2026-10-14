@@ -29,6 +29,7 @@ mod resolucao_cheia;
 mod retomada;
 pub mod rodape;
 mod roteiro;
+pub mod whatsapp_bloqueado;
 /// O que a raiz conta à bandeja (`crate::segundo_plano`).
 mod segundo_plano;
 pub use segundo_plano::Saida;
@@ -599,6 +600,13 @@ pub struct Aplicativo {
     _retrato: Option<gpui_kit::Task<()>>,
     recados_da_conta: (Sender<PosVendaRecado>, Receiver<PosVendaRecado>),
     _conta: Option<gpui_kit::Task<()>>,
+    /// 🚨 A Meta está recusando as mensagens da casa (cobrança em aberto…): o
+    /// trecho vermelho do rodapé (`app/whatsapp_bloqueado.rs`).
+    whatsapp_bloqueado: Option<whatsapp_bloqueado::WhatsAppBloqueado>,
+    /// Os detalhes do aviso, abertos sobre o rodapé.
+    vendo_o_whatsapp: bool,
+    recados_do_whatsapp: (Sender<PosVendaRecado>, Receiver<PosVendaRecado>),
+    _whatsapp: Option<gpui_kit::Task<()>>,
     /// 📷 Os dados da captura das fotos, entre os balcões (`app/capturas.rs`).
     recados_das_capturas: (Sender<PosVendaRecado>, Receiver<PosVendaRecado>),
     _capturas: Option<gpui_kit::Task<()>>,
@@ -1481,6 +1489,10 @@ impl Aplicativo {
             _retrato: None,
             recados_da_conta: channel(),
             _conta: None,
+            whatsapp_bloqueado: None,
+            vendo_o_whatsapp: false,
+            recados_do_whatsapp: channel(),
+            _whatsapp: None,
             recados_das_capturas: channel(),
             _capturas: None,
             capturas_a_caminho: 0,
@@ -6417,6 +6429,8 @@ impl Aplicativo {
         self.sessao = Some(sessao);
         self.carregar_conta(cx);
         self.carregar_favoritas(cx);
+        // 🚨 A Meta recusando as mensagens da casa: o rodapé avisa.
+        self.vigiar_o_whatsapp(cx);
         cx.notify();
     }
 

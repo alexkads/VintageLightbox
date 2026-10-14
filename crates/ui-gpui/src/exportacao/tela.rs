@@ -348,6 +348,10 @@ pub struct Exportacao {
     /// A lista de contatos pedida e ainda sem resposta.
     contatos_a_caminho: Option<Receiver<Result<Vec<Contato>, String>>>,
     erro_dos_contatos: Option<String>,
+    /// 🚨 A Meta está recusando as mensagens da casa (cobrança em aberto…):
+    /// a frase que avisa, no lugar da nota do combo. Não trava o envio — é a
+    /// primeira mensagem que chega que apaga o aviso.
+    bloqueio_do_whatsapp: Option<String>,
     /// O contato escolhido no combo (o número da conversa).
     contato: Option<String>,
     /// O WhatsApp da sessão aberta: vem escolhido quando está na lista.
@@ -421,6 +425,7 @@ impl Exportacao {
             contatos: Vec::new(),
             contatos_a_caminho: None,
             erro_dos_contatos: None,
+            bloqueio_do_whatsapp: None,
             contato: None,
             contato_sugerido: None,
             legenda: String::new(),
@@ -508,6 +513,15 @@ impl Exportacao {
         self.contato_sugerido = sugerido.filter(|n| !algarismos(n).is_empty());
         if let Some(destino) = destino {
             self.escolher_destino(destino, cx);
+        }
+    }
+
+    /// 🚨 A Meta parou de entregar (ou voltou): a nota do combo "Enviar para"
+    /// diz isso a quem está prestes a mandar as fotos.
+    pub fn definir_bloqueio_do_whatsapp(&mut self, frase: Option<String>, cx: &mut Context<Self>) {
+        if self.bloqueio_do_whatsapp != frase {
+            self.bloqueio_do_whatsapp = frase;
+            cx.notify();
         }
     }
 
@@ -616,6 +630,9 @@ impl Exportacao {
         }
         if let Some(erro) = &self.erro_dos_contatos {
             return (erro.clone(), true);
+        }
+        if let Some(bloqueio) = &self.bloqueio_do_whatsapp {
+            return (bloqueio.clone(), true);
         }
         if self.contatos_a_caminho.is_some() {
             return (

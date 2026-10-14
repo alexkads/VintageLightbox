@@ -226,6 +226,9 @@ fn pedidos(e: &Estudio) -> Vec<PedidoJson> {
             ]
             .iter()
             .any(|raiz| p.caminho.starts_with(raiz))
+            // 🚨 A saúde do envio é do rodapé, de minuto em minuto, e não
+            // uma leitura do chatbot (`app/whatsapp_bloqueado.rs`).
+            && p.caminho != "/whatsapp/saude-do-envio"
         })
         .collect()
 }
@@ -315,6 +318,49 @@ fn a_conta_entra_e_o_chatbot_escuta_os_cinco_canais_sem_ler_nada(cx: &mut TestAp
     );
     assert!(pedidos(&e).is_empty(), "nada lido: {:?}", caminhos(&e));
     e.app(cx, |app, _w, _cx| assert_eq!(app.tela(), Tela::Sessoes));
+}
+
+/// 🚨 A Meta recusando as mensagens da casa (13/out/2026, cobrança em aberto):
+/// o app pergunta ao site logo depois de a conta entrar, acende o trecho
+/// vermelho do rodapé, e o clique abre o que parou e o que fazer.
+#[gpui_kit::test]
+fn whatsapp_bloqueado_pela_meta_acende_o_rodape(cx: &mut TestAppContext) {
+    let e = abrir_o_app(cx, Cenario::default());
+    preparar_o_site(&e);
+    e.site.responder_json(
+        "saude-do-whatsapp",
+        Ok(json!({
+            "bloqueado": true,
+            "motivo": {
+                "codigo": 131042,
+                "titulo": "Pagamento pendente na conta do WhatsApp Business",
+                "o_que_fazer": "A Meta só volta a entregar depois que a cobrança for paga.",
+                "link": "https://business.facebook.com/billing_hub/",
+                "da_meta": "131042: Business eligibility payment issue",
+            },
+            "desde": "2026-10-13T18:40:00Z",
+            "mensagens_perdidas": 3,
+            "contatos_afetados": 2,
+        })),
+    );
+    e.entrar_na_conta(cx);
+    for _ in 0..3 {
+        e.esperar(cx);
+    }
+
+    assert!(
+        e.site
+            .pedidos_json()
+            .iter()
+            .any(|p| p.caminho == "/whatsapp/saude-do-envio"),
+        "o app perguntou ao site"
+    );
+    assert!(desenhado(&e, cx, "rodape-whatsapp"), "o trecho vermelho");
+    assert!(!desenhado(&e, cx, "detalhes-do-whatsapp"));
+
+    clicar(&e, cx, "rodape-whatsapp");
+    e.esperar(cx);
+    assert!(desenhado(&e, cx, "detalhes-do-whatsapp"), "o clique abre");
 }
 
 /// Pelo menu: os cinco canais, as respostas e as urgências numa leva, o
