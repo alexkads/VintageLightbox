@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.162",
+    "data": "2026-10-14",
+    "titulo": "Aviso no rodapé quando o WhatsApp para de entregar as mensagens.",
+    "importante": false,
+    "novidades": [
+      "Quando a Meta para de entregar as mensagens do estúdio — por exemplo, por pagamento pendente na conta do WhatsApp Business —, o rodapé mostra em vermelho \"WhatsApp não está entregando\". O clique diz o motivo, quantas mensagens não chegaram, desde quando e o que fazer.",
+      "Para quem administra a conta, o aviso traz o botão \"Pagar na Meta\", que abre a página de pagamento.",
+      "No Exportar › WhatsApp, a nota embaixo do \"Enviar para\" avisa quando o que for enviado não vai chegar ao cliente. O aviso some sozinho quando as mensagens voltam a chegar."
+    ],
+    "por_que_atualizar": "Para saber na hora quando as fotos e mensagens pelo WhatsApp não estão chegando ao cliente, em vez de reenviar sem resultado."
+  },
+  {
     "versao": "0.1.161",
     "data": "2026-10-12",
     "titulo": "O botão da tela cheia na barra do caixa.",
