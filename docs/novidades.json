@@ -1,9 +1,12 @@
 {
-  "versao": "0.1.168",
-  "titulo": "Mudanças internas.",
+  "versao": "0.1.169",
+  "titulo": "Lista de sessões: colunas que se ajustam e ordem pelo cabeçalho.",
   "importante": false,
   "novidades": [
-    "Mudanças internas."
+    "A lista de sessões agora é uma tabela em que dá para arrastar a borda de uma coluna para alargá-la ou estreitá-la.",
+    "Clique no ícone ao lado do título de uma coluna (Galeria, Situação, Levadas, À venda, Compradas, Balcão, Pós-venda, Fotolivro enviado em, Criada) para ordenar; o segundo clique inverte e o terceiro volta à ordem de sempre.",
+    "Galeria e Contato continuam paradas à esquerda quando a tabela rola para o lado, e o clique na linha continua abrindo a sessão.",
+    "Os filtros por coluna saíram. A busca, a situação, o período e o local continuam na barra de cima."
   ],
-  "por_que_atualizar": "Para manter o balcão na mesma versão do site."
+  "por_que_atualizar": "Para achar a sessão mais rápido, ordenando a lista pela coluna que interessa."
 }
