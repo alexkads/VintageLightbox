@@ -20,6 +20,7 @@
 //! na etapa 2.
 
 use crate::campo::TrocarValor as _;
+use biblioteca_core::local::LocalDaSessao;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -271,6 +272,8 @@ pub struct NovaSessao {
     pub(super) detalhe: Entity<InputState>,
     pub(super) escolha_do_produto: Entity<Escolha>,
     pub(super) escolha_do_estudio: Entity<Escolha>,
+    /// 📍 O local da sessão (18/out/2026).
+    pub(super) escolha_do_local: Entity<Escolha>,
     /// Os erros por campo só aparecem depois da primeira tentativa.
     pub(super) tentou: bool,
     pub(super) fase: Option<Fase>,
@@ -371,6 +374,19 @@ fn opcoes_de_produto(produtos: &[Produto], atual: &str) -> Vec<Opcao> {
     opcoes
 }
 
+/// 📍 Os locais que a conta pode escolher: os dois, menos o que o perfil
+/// esconde — a não ser que seja o escolhido.
+fn opcoes_de_local(atual: LocalDaSessao) -> Vec<Opcao> {
+    LocalDaSessao::TODOS
+        .into_iter()
+        .filter(|l| *l == atual || crate::acesso_da_conta::mostra_local(*l))
+        .map(|l| Opcao {
+            id: l.como_texto().to_string(),
+            titulo: l.rotulo().into(),
+        })
+        .collect()
+}
+
 fn opcoes_de_estudio(estudios: &[Estudio], atual: &str) -> Vec<Opcao> {
     let mut opcoes: Vec<Opcao> = estudios
         .iter()
@@ -405,6 +421,8 @@ impl NovaSessao {
         let escolha_do_produto =
             cx.new(|cx| SelectState::new(SearchableVec::new(Vec::new()), None, window, cx));
         let escolha_do_estudio =
+            cx.new(|cx| SelectState::new(SearchableVec::new(Vec::new()), None, window, cx));
+        let escolha_do_local =
             cx.new(|cx| SelectState::new(SearchableVec::new(Vec::new()), None, window, cx));
         let origem = cx.new(|cx| OrigemDasFotos::nova(portas.origem.clone(), cx));
 
@@ -467,6 +485,20 @@ impl NovaSessao {
                 cx.notify();
             },
         ));
+        assinaturas.push(cx.subscribe_in(
+            &escolha_do_local,
+            window,
+            |tela, _, evento: &SelectEvent<SearchableVec<Opcao>>, _, cx| {
+                let SelectEvent::Confirm(valor) = evento;
+                // 📍 Só o texto que o tipo reconhece entra no formulário.
+                tela.rascunho.formulario.local = valor
+                    .as_deref()
+                    .and_then(LocalDaSessao::ler)
+                    .map(|l| l.como_texto().to_string());
+                tela.guardar();
+                cx.notify();
+            },
+        ));
         // O componente desenha dentro desta tela: o que muda nele muda aqui.
         assinaturas.push(cx.observe(&origem, |_, _, cx| cx.notify()));
         assinaturas.push(cx.subscribe_in(
@@ -514,6 +546,7 @@ impl NovaSessao {
             detalhe,
             escolha_do_produto,
             escolha_do_estudio,
+            escolha_do_local,
             tentou: false,
             fase: None,
             erro: None,
@@ -705,6 +738,11 @@ impl NovaSessao {
         let produtos = opcoes_de_produto(&self.produtos, &f.produto_id);
         let estudios = opcoes_de_estudio(&self.estudios, &f.estudio_id);
         let (produto, estudio) = (f.produto_id.clone(), f.estudio_id.clone());
+        let local = self.local_escolhido();
+        self.escolha_do_local.update(cx, |estado, cx| {
+            estado.set_items(SearchableVec::new(opcoes_de_local(local)), window, cx);
+            estado.set_selected_value(&local.como_texto().to_string(), window, cx);
+        });
         self.escolha_do_produto.update(cx, |estado, cx| {
             estado.set_items(SearchableVec::new(produtos), window, cx);
             if produto.is_empty() {
@@ -721,6 +759,16 @@ impl NovaSessao {
                 estado.set_selected_value(&estudio, window, cx);
             }
         });
+    }
+
+    /// 📍 O local da sessão: o escolhido, ou o padrão do perfil.
+    pub(super) fn local_escolhido(&self) -> LocalDaSessao {
+        self.rascunho
+            .formulario
+            .local
+            .as_deref()
+            .and_then(LocalDaSessao::ler)
+            .unwrap_or_else(crate::acesso_da_conta::local_padrao)
     }
 
     /// Grava o rascunho — a cada mudança, como o site.

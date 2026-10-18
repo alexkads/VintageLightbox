@@ -293,6 +293,9 @@ pub struct SessaoFotografica {
     /// de caixa"*): sem estúdio, a venda não entra no caixa de lugar nenhum, e
     /// a sessão só aparece em "Todos os estúdios" — onde ninguém a procura.
     pub sem_estudio: bool,
+    /// 📍 Onde a sessão foi feita (18/out/2026). Mudança interna — nunca sai
+    /// para o cliente.
+    pub local: crate::local::LocalDaSessao,
 }
 
 impl SessaoFotografica {
@@ -582,6 +585,19 @@ pub struct Soma {
     /// 💵 O que o **caixa (PDV)** registrou no recorte — o cartão "Vendido no
     /// caixa".
     pub caixa: SomaDoCaixa,
+    /// 📍 Os mesmos dois números separados pelo local **de hoje** de cada
+    /// sessão (dono, 18/out/2026): corrigido o local, o total muda de lado. Na
+    /// ordem de [`crate::local::LocalDaSessao::TODOS`], só os que têm sessão.
+    pub por_local: Vec<SomaDoLocal>,
+}
+
+/// 📍 O recorte de um local: quantas sessões, o líquido do caixa e o pós-venda.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SomaDoLocal {
+    pub local: crate::local::LocalDaSessao,
+    pub sessoes: usize,
+    pub caixa_centavos: i64,
+    pub pos_venda: i64,
 }
 
 /// O caixa do recorte: o que o PDV cobrou, o que voltou, e por qual forma.
@@ -640,7 +656,17 @@ pub fn rotulo_da_forma(chave: &str) -> &str {
 pub fn somar_totais(sessoes: &[&SessaoFotografica]) -> Soma {
     let mut soma = Soma::default();
     let mut formas: BTreeMap<String, i64> = BTreeMap::new();
+    let mut por_local: BTreeMap<crate::local::LocalDaSessao, SomaDoLocal> = BTreeMap::new();
     for sessao in sessoes {
+        let do_local = por_local.entry(sessao.local).or_insert(SomaDoLocal {
+            local: sessao.local,
+            sessoes: 0,
+            caixa_centavos: 0,
+            pos_venda: 0,
+        });
+        do_local.sessoes += 1;
+        do_local.caixa_centavos += sessao.caixa.as_ref().map_or(0, |c| c.liquido_centavos);
+        do_local.pos_venda += sessao.totais.map_or(0, |t| t.pos_venda);
         match sessao.totais {
             Some(totais) => {
                 soma.balcao += totais.balcao;
@@ -674,6 +700,7 @@ pub fn somar_totais(sessoes: &[&SessaoFotografica]) -> Soma {
     let mut por_forma: Vec<(String, i64)> = formas.into_iter().collect();
     por_forma.sort_by_key(|(chave, _)| posicao(chave));
     soma.caixa.por_forma = por_forma;
+    soma.por_local = por_local.into_values().collect();
     soma
 }
 
@@ -1003,6 +1030,7 @@ mod testes {
 
     fn sessao(titulo: &str) -> SessaoFotografica {
         SessaoFotografica {
+            local: Default::default(),
             sem_estudio: false,
             fotolivro: None,
             id: titulo.to_string(),
@@ -1322,6 +1350,42 @@ mod testes {
         assert_eq!(somar_totais(&[]), Soma::default(), "lista vazia é zero");
     }
 
+    /// 📍 Os totais por local somam pelo local de **hoje** de cada sessão, e as
+    /// partes fecham com o total.
+    #[test]
+    fn somar_separa_o_caixa_e_o_pos_venda_por_local() {
+        use crate::local::LocalDaSessao::{Estudio, Externo};
+        let no_estudio = SessaoFotografica {
+            totais: Some(Totais {
+                balcao: 0,
+                pos_venda: 1_000,
+            }),
+            ..sessao("a")
+        };
+        let fora = SessaoFotografica {
+            local: Externo,
+            totais: Some(Totais {
+                balcao: 0,
+                pos_venda: 500,
+            }),
+            ..sessao("b")
+        };
+        let soma = somar_totais(&[&no_estudio, &fora]);
+        assert_eq!(
+            soma.por_local
+                .iter()
+                .map(|l| (l.local, l.sessoes, l.pos_venda))
+                .collect::<Vec<_>>(),
+            vec![(Estudio, 1, 1_000), (Externo, 1, 500)]
+        );
+        assert_eq!(
+            soma.por_local.iter().map(|l| l.pos_venda).sum::<i64>(),
+            soma.pos_venda
+        );
+        // Só o local que tem sessão aparece.
+        assert_eq!(somar_totais(&[&no_estudio]).por_local.len(), 1);
+    }
+
     #[test]
     fn o_grafico_agrupa_por_dia_quando_a_historia_e_curta() {
         let a = SessaoFotografica {
@@ -1405,6 +1469,7 @@ mod testes_do_periodo {
 
     fn sessao(id: &str, criada_em_iso: &str) -> SessaoFotografica {
         SessaoFotografica {
+            local: Default::default(),
             sem_estudio: false,
             fotolivro: None,
             id: id.into(),

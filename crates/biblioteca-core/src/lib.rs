@@ -50,6 +50,7 @@ pub mod exclusao;
 pub mod filtro_de_coluna;
 pub mod grade;
 pub mod grade_do_cliente;
+pub mod local;
 pub mod miniaturas;
 pub mod negociacao;
 pub mod preco_de_venda;

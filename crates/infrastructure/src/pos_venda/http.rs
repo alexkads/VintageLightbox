@@ -1454,6 +1454,9 @@ struct GaleriaDoPainelDaApi {
     como_conheceu_detalhe: Option<String>,
     #[serde(default)]
     parceiro_id: Option<String>,
+    /// 📍 `ESTUDIO` ou `EXTERNO` (18/out/2026). Ausente na API de antes.
+    #[serde(default)]
+    local: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -1558,6 +1561,7 @@ impl From<GaleriaDoPainelDaApi> for GaleriaDoPainel {
             como_conheceu: g.como_conheceu,
             como_conheceu_detalhe: g.como_conheceu_detalhe,
             parceiro_id: g.parceiro_id,
+            local: g.local,
         }
     }
 }

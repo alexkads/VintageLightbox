@@ -42,6 +42,16 @@ pub struct Acesso {
     pub permissoes: Vec<String>,
     /// Os estúdios que a conta alcança. **`None` = todos.**
     pub estudios: Option<Vec<String>>,
+    /// 📍 Em qual local a sessão nasce (18/out/2026).
+    pub local_padrao: crate::local::LocalDaSessao,
+    /// 📍 Pode escolher outro local e corrigir o local depois.
+    pub pode_mudar_local: bool,
+    /// 📍 Os locais cujo rótulo a tela não mostra a esta conta.
+    pub locais_ocultos: Vec<crate::local::LocalDaSessao>,
+    /// 📍 Os caixas que a conta pode ter abertos em cada estúdio.
+    pub caixas: Vec<crate::local::LocalDoCaixa>,
+    /// 📍 Em qual desses caixas cai a venda da sessão de cada local.
+    pub caixa_de_cada_local: crate::local::CaixaDeCadaLocal,
 }
 
 impl Acesso {
@@ -60,6 +70,11 @@ impl Acesso {
     /// administra o sistema.
     pub fn sem_estudio(&self) -> bool {
         self.estudios_restritos() && self.estudios.as_ref().is_some_and(Vec::is_empty)
+    }
+
+    /// 📍 Esta conta vê o rótulo deste local?
+    pub fn mostra_local(&self, local: crate::local::LocalDaSessao) -> bool {
+        !self.locais_ocultos.contains(&local)
     }
 
     /// A linha do menu da conta: `Balcão de Gramado` / `Administrador`.
@@ -108,6 +123,7 @@ mod testes {
             perfil_ativo: true,
             permissoes: vec![OPERAR_O_BALCAO.into()],
             estudios: estudios.map(|e| e.iter().map(|s| s.to_string()).collect()),
+            ..Acesso::default()
         }
     }
 

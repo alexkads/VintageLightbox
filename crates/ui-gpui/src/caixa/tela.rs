@@ -20,6 +20,7 @@
 //!
 //! Depois de cada gravação a carga se repete, como o `revalidatePath` do site.
 
+use biblioteca_core::local::{self, LocalDaSessao, LocalDoCaixa};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -32,6 +33,7 @@ use biblioteca_core::caixa::{
 };
 use biblioteca_core::dinheiro;
 use domain::services::pos_venda::Sessao;
+use gpui_kit::component::button::ButtonGroup;
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::resizable::{
     h_resizable, resizable_panel, ResizablePanelEvent, ResizableState,
@@ -205,6 +207,8 @@ pub(super) struct SessaoNoCaixa {
 pub(super) struct Vista {
     pub estudios: Vec<EstudioDoCaixa>,
     pub estudio_id: Option<String>,
+    /// 📍 Qual dos caixas do operador no estúdio está na tela.
+    pub local_do_caixa: LocalDoCaixa,
     pub caixa: Option<CaixaDoBalcao>,
     /// A API não respondeu: não dá para saber se o caixa está aberto.
     pub indisponivel: bool,
@@ -260,6 +264,9 @@ impl Vista {
 #[derive(Default)]
 struct Carga {
     estudio_pedido: Option<String>,
+    local_pedido: Option<LocalDoCaixa>,
+    /// 📍 Decidido junto com o estúdio.
+    local_do_caixa: Option<LocalDoCaixa>,
     sessao_pedida: Option<String>,
     estudios: Option<Vec<EstudioDoCaixa>>,
     galerias: Option<Option<Vec<SessaoDaLista>>>,
@@ -328,6 +335,9 @@ pub struct Caixa {
     pub(super) escolhida: Option<String>,
     /// O estúdio pedido (o `?estudio=`). `None` = o da sessão, ou o primeiro.
     pub(super) estudio_pedido: Option<String>,
+    /// 📍 O caixa escolhido no cabeçalho (o `?local=` do site). A sessão
+    /// escolhida manda mais: a venda dela cai no caixa do local dela.
+    pub(super) local_pedido: Option<LocalDoCaixa>,
     pub(super) vista: Option<Vista>,
     carga: Option<Carga>,
     leituras: (Sender<Recado>, Receiver<Recado>),
@@ -458,6 +468,7 @@ impl Caixa {
             sessao: None,
             escolhida: None,
             estudio_pedido: None,
+            local_pedido: None,
             vista: None,
             carga: None,
             leituras: channel(),
@@ -543,6 +554,19 @@ impl Caixa {
         self.vista.as_ref()?.estudio_id.as_deref()
     }
 
+    /// 📍 O caixa (o local) na tela — o do estúdio enquanto não carregou.
+    pub fn local_do_caixa(&self) -> LocalDoCaixa {
+        self.vista
+            .as_ref()
+            .map_or(Some(LocalDaSessao::Estudio), |v| v.local_do_caixa)
+    }
+
+    /// 📍 O cabeçalho escolheu outro caixa: mesma tela, outra gaveta.
+    pub(super) fn escolher_o_caixa(&mut self, local: LocalDoCaixa, cx: &mut Context<Self>) {
+        self.local_pedido = Some(local);
+        self.navegar(self.estudio_pedido.clone(), None, cx);
+    }
+
     /// A tela ainda está buscando o que mostra.
     pub fn carregando(&self) -> bool {
         self.carga.is_some()
@@ -573,6 +597,7 @@ impl Caixa {
         self.carga = Some(Carga {
             estudio_pedido: estudio,
             sessao_pedida: sessao.clone(),
+            local_pedido: self.local_pedido,
             ..Carga::default()
         });
         let pedir = |pedido: PedidoJson| {
@@ -765,22 +790,40 @@ impl Caixa {
                 da_maquina.as_deref(),
             )
         };
+        // 📍 O caixa do local: o da sessão escolhida manda (a venda dela cai
+        // no caixa do local dela); senão o escolhido no cabeçalho; senão o
+        // primeiro que a conta tem.
+        let caixas = crate::acesso_da_conta::caixas();
+        let local = carga
+            .galeria
+            .as_ref()
+            .and_then(|g| g.as_ref())
+            .map(|g| crate::acesso_da_conta::caixa_da_sessao(g.local))
+            .or(carga.local_pedido.filter(|l| caixas.contains(l)))
+            .or_else(|| caixas.first().copied())
+            .unwrap_or(Some(LocalDaSessao::Estudio));
         if let (Some(id), Some(conta)) = (&estudio, self.sessao.clone()) {
             self.publicador.pedir_json(
                 conta,
                 PedidoJson::ler(
                     "caixa",
-                    format!("/pos-venda/caixa?estudio_id={}", codificar(id)),
+                    format!(
+                        "/pos-venda/caixa?estudio_id={}&local={}",
+                        codificar(id),
+                        local::texto_do_caixa(local)
+                    ),
                 ),
                 self.leituras.0.clone(),
             );
         }
+        carga.local_do_caixa = Some(local);
         carga.estudio_id = Some(estudio);
     }
 
     fn montar_vista(&self, carga: Carga) -> Vista {
         let estudios = carga.estudios.unwrap_or_default();
         let estudio_id = carga.estudio_id.flatten();
+        let local_do_caixa = carga.local_do_caixa.unwrap_or(Some(LocalDaSessao::Estudio));
         let (caixa, indisponivel) = match (&estudio_id, carga.caixa) {
             (Some(_), Some(Some(caixa))) => (caixa, false),
             (Some(_), _) => (None, true),
@@ -795,6 +838,8 @@ impl Caixa {
             .unwrap_or_default()
             .into_iter()
             .filter(|g| estudio_id.is_some() && g.estudio_id == estudio_id)
+            // 📍 Só as sessões cuja venda cai **neste** caixa.
+            .filter(|g| crate::acesso_da_conta::caixa_da_sessao(g.local) == local_do_caixa)
             .map(|g| g.sessao)
             .collect();
         regras::ordenar_sessoes(&mut sessoes);
@@ -866,6 +911,7 @@ impl Caixa {
         Vista {
             estudios,
             estudio_id,
+            local_do_caixa,
             caixa,
             indisponivel,
             sessoes,
@@ -1394,10 +1440,14 @@ impl Caixa {
         let (descricao, situacao, cor) = match &self.vista {
             None if self.sessao.is_none() => (
                 "Esta tela precisa da conta do site. Feche e abra o app para entrar.".to_string(),
-                "Caixa indisponível",
+                "Caixa indisponível".to_string(),
                 cx.theme().danger,
             ),
-            None => ("Carregando o caixa…".to_string(), "Caixa fechado", apagado),
+            None => (
+                "Carregando o caixa…".to_string(),
+                "Caixa fechado".to_string(),
+                apagado,
+            ),
             Some(v) => {
                 let descricao = match (v.estudio(), &v.caixa) {
                     (None, _) => "Nenhum estúdio ativo no cadastro.".to_string(),
@@ -1413,12 +1463,14 @@ impl Caixa {
                         e.nome
                     ),
                 };
+                // 📍 "Caixa Externo aberto" — só "Caixa" para quem tem um só.
+                let nome = crate::acesso_da_conta::nome_do_caixa(v.local_do_caixa);
                 let (situacao, cor) = if v.indisponivel {
-                    ("Caixa indisponível", cx.theme().danger)
+                    (format!("{nome} indisponível"), cx.theme().danger)
                 } else if v.caixa.is_some() {
-                    ("Caixa aberto", esmeralda_500())
+                    (format!("{nome} aberto"), esmeralda_500())
                 } else {
-                    ("Caixa fechado", apagado)
+                    (format!("{nome} fechado"), apagado)
                 };
                 (descricao, situacao, cor)
             }
@@ -1441,9 +1493,37 @@ impl Caixa {
             .as_ref()
             .is_some_and(|v| crate::acesso_da_conta::estudio_unico(&v.estudios).is_some());
         let seletor = (!estudio_fixo).then(|| self.seletor_de_estudio(window, cx));
+        // 📍 Os caixas da conta neste estúdio, um botão cada — só com mais de
+        // um, e só na tela do caixa (o painel da galeria é o da sessão).
+        let caixas = crate::acesso_da_conta::caixas();
+        let local_na_tela = self.local_do_caixa();
+        let seletor_de_caixa = (caixas.len() > 1 && !self.flutuante()).then(|| {
+            ButtonGroup::new("caixa-local").children(caixas.into_iter().map(|local| {
+                let ativo = local == local_na_tela;
+                let botao = if ativo {
+                    estilo::botao_primario(
+                        SharedString::from(format!("caixa-local-{}", local::texto_do_caixa(local))),
+                        cx,
+                    )
+                } else {
+                    estilo::botao_contorno(
+                        SharedString::from(format!("caixa-local-{}", local::texto_do_caixa(local))),
+                        cx,
+                    )
+                };
+                botao
+                    .child(crate::acesso_da_conta::nome_do_caixa(local))
+                    .when(!ativo, |b| {
+                        b.on_click(cx.listener(move |t, _: &ClickEvent, _w, cx| {
+                            t.escolher_o_caixa(local, cx)
+                        }))
+                    })
+            }))
+        });
         let acoes = h_flex()
             .gap(px(8.))
             .children(seletor)
+            .children(seletor_de_caixa)
             .child(
                 com_tecla(
                     estilo::botao_contorno("caixa-f6", cx),

@@ -269,6 +269,7 @@ mod testes {
 
     fn sessao(titulo: &str) -> SessaoFotografica {
         SessaoFotografica {
+            local: Default::default(),
             id: titulo.into(),
             titulo: titulo.into(),
             email: None,

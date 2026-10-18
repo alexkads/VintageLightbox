@@ -10,6 +10,7 @@
 //! (`auxiliar`, `primeira_contagem`, `estudio_id` da galeria) entra com o padrão,
 //! em vez de derrubar a tela inteira — a armadilha nº 33 do site.
 
+use biblioteca_core::local::LocalDaSessao;
 use std::collections::HashSet;
 
 use biblioteca_core::acervo::Estado;
@@ -190,6 +191,8 @@ pub fn novo_funcionario_json(nome: &str, whatsapp: &str, email: &str) -> Value {
 pub struct SessaoDaLista {
     pub sessao: SessaoACobrar,
     pub estudio_id: Option<String>,
+    /// 📍 O local da sessão — o caixa que recebe a venda dela depende dele.
+    pub local: LocalDaSessao,
 }
 
 #[derive(Deserialize)]
@@ -211,6 +214,9 @@ struct GaleriaDaLista {
     #[serde(default)]
     criada_em: String,
     fotos: ContagemDaLista,
+    /// 📍 `ESTUDIO` ou `EXTERNO`; ausente na API de antes.
+    #[serde(default)]
+    local: Option<String>,
 }
 
 /// `GET /pos-venda/galerias`.
@@ -229,6 +235,11 @@ pub fn ler_galerias(valor: Value) -> Result<Vec<SessaoDaLista>, String> {
                 sinalizadas: g.fotos.levadas_no_balcao,
             },
             estudio_id: g.estudio_id,
+            local: g
+                .local
+                .as_deref()
+                .and_then(LocalDaSessao::ler)
+                .unwrap_or_default(),
         })
         .collect())
 }
@@ -332,6 +343,8 @@ struct CabecaDaGaleria {
     titulo: String,
     #[serde(default)]
     estudio_id: Option<String>,
+    #[serde(default)]
+    local: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -349,6 +362,8 @@ pub struct GaleriaDoCaixa {
     pub id: String,
     pub titulo: String,
     pub estudio_id: Option<String>,
+    /// 📍 O local da sessão — decide qual caixa a recebe.
+    pub local: LocalDaSessao,
     pub fotos: Vec<FotoDoCupom>,
     /// O produto padrão, a preço de balcão.
     pub padrao: Faixa,
@@ -372,6 +387,12 @@ pub fn ler_galeria(valor: Value) -> Result<GaleriaDoCaixa, String> {
         id: g.galeria.id,
         titulo: g.galeria.titulo,
         estudio_id: g.galeria.estudio_id,
+        local: g
+            .galeria
+            .local
+            .as_deref()
+            .and_then(LocalDaSessao::ler)
+            .unwrap_or_default(),
         fotos: g
             .fotos
             .into_iter()

@@ -1231,6 +1231,35 @@ impl NovaSessao {
                         )),
                     ),
             )
+            // 📍 O local (18/out/2026): quem não pode mudar vê o padrão escrito;
+            // quem tem o local escondido no perfil não vê o campo.
+            .when(
+                crate::acesso_da_conta::mostra_local(self.local_escolhido()),
+                |etapa| {
+                    etapa.child(h_flex().items_start().gap(px(16.)).child(
+                        v_flex().flex_1().min_w(px(0.)).child(campo(
+                            "Local",
+                            false,
+                            if crate::acesso_da_conta::pode_mudar_local() {
+                                div().w_full().debug_selector(|| "nova-local".into()).child(
+                                    crate::estilo::campo(Select::new(&self.escolha_do_local))
+                                        .w_full(),
+                                )
+                            } else {
+                                div()
+                                    .w_full()
+                                    .debug_selector(|| "nova-local-fixo".into())
+                                    .text_sm()
+                                    .py(px(6.))
+                                    .child(self.local_escolhido().rotulo())
+                            },
+                            None,
+                            None,
+                            cx,
+                        )),
+                    ))
+                },
+            )
             .child(
                 h_flex()
                     .items_start()
@@ -1751,7 +1780,7 @@ impl NovaSessao {
                 t
             })
             .unwrap_or_default();
-        let linhas: Vec<(&str, usize, String)> = vec![
+        let mut linhas: Vec<(&str, usize, String)> = vec![
             ("Título", 3, f.titulo.trim().to_string()),
             (
                 "Contato",
@@ -1772,6 +1801,15 @@ impl NovaSessao {
             ),
             ("Preço por foto", 3, produto),
             ("Estúdio", 3, estudio),
+            (
+                "Local",
+                3,
+                if crate::acesso_da_conta::mostra_local(self.local_escolhido()) {
+                    self.local_escolhido().rotulo().to_string()
+                } else {
+                    String::new()
+                },
+            ),
             ("Preset padrão", 2, parametros),
             (
                 "Agendamento",
@@ -1804,6 +1842,8 @@ impl NovaSessao {
                     .unwrap_or_default(),
             ),
         ];
+        // 📍 O local escondido no perfil não vira uma linha vazia no resumo.
+        linhas.retain(|(rotulo, _, valor)| *rotulo != "Local" || !valor.is_empty());
         v_flex()
             .p(px(20.))
             .gap(px(10.))

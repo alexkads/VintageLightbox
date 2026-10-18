@@ -38,6 +38,7 @@ use biblioteca_core::dados_do_cliente::{self, DadosDoCliente};
 use biblioteca_core::dinheiro;
 use biblioteca_core::exclusao;
 use biblioteca_core::grade::{colunas_que_cabem, linhas_necessarias};
+use biblioteca_core::local::LocalDaSessao;
 use biblioteca_core::selecao::{Modificadores, Selecao};
 use domain::services::pos_venda::{
     EstadoDaFotoNoSite, EstadoNoBalcao, Estudio, FotoDaGaleria, GaleriaAberta, LinkDeAcesso,
@@ -905,6 +906,8 @@ pub struct Detalhe {
     /// gesto) e os dados conferidos (para aplicar à sessão aberta). Fora do
     /// formulário de propósito — fechá-lo no meio não perde a resposta.
     gravando_dados: Option<(MotivoDoFormulario, DadosDoCliente)>,
+    /// 📍 A correção do local da sessão, quando aberta — ver [`CorrecaoDoLocal`].
+    correcao_do_local: Modal<CorrecaoDoLocal>,
     /// 🔁 A foto em que a Revelação estava quando o app fechou, e desde quando
     /// se espera por ela — ver [`Detalhe::revelar_ao_carregar`].
     revelar_lembrada: Option<(String, std::time::Instant)>,
@@ -984,6 +987,21 @@ struct FormularioDoCliente {
     /// como no site. `None` = a frase é do formulário todo (a do site).
     campo_do_erro: Option<dados_do_cliente::Campo>,
 }
+
+/// 📍 **A correção do local** (dono, 18/out/2026: *"Caso seja definido
+/// erroneamente, deverá ter um recurso de correção de local"*). O
+/// `LocalDaGaleria` do site: com dois locais, o certo é sempre o outro — o
+/// diálogo diz de onde para onde e pede o motivo, que fica na trilha.
+struct CorrecaoDoLocal {
+    para: LocalDaSessao,
+    /// `None` até a primeira pintura com janela, como os dados do cliente.
+    motivo: Option<Entity<InputState>>,
+    erro: Option<SharedString>,
+    gravando: bool,
+}
+
+/// O rótulo do pedido de correção, para a colheita achar a resposta dele.
+const PEDIDO_DA_CORRECAO_DO_LOCAL: &str = "corrigir-local";
 
 struct CamposDoCliente {
     titulo: Entity<InputState>,
@@ -1201,6 +1219,7 @@ impl Detalhe {
             link: None,
             dados_do_cliente: Modal::default(),
             gravando_dados: None,
+            correcao_do_local: Modal::default(),
             revelar_lembrada: None,
             carregando: false,
             erro: None,
@@ -1278,6 +1297,7 @@ impl Detalhe {
         // Largado, sem devolver: a troca de sessão foca a tela nova.
         self.dados_do_cliente.largar();
         self.gravando_dados = None;
+        self.correcao_do_local.largar();
         // A gaveta de outra sessão também: largada, como o formulário.
         self.atendimento_aberto = false;
         self.atendimento_gravando.clear();
@@ -3177,6 +3197,241 @@ impl Detalhe {
         cx.notify();
     }
 
+    /// 📍 O local da sessão aberta; o estúdio quando a API não diz.
+    fn local_da_galeria(&self) -> LocalDaSessao {
+        self.aberta
+            .as_ref()
+            .and_then(|a| a.galeria.local.as_deref())
+            .and_then(LocalDaSessao::ler)
+            .unwrap_or_default()
+    }
+
+    /// 📍 "Corrigir o local": abre o diálogo com o outro local como destino.
+    pub fn abrir_correcao_do_local(&mut self, cx: &mut Context<Self>) {
+        if self.aberta.is_none() || !crate::acesso_da_conta::pode_mudar_local() {
+            return;
+        }
+        let atual = self.local_da_galeria();
+        let Some(para) = LocalDaSessao::TODOS.into_iter().find(|l| *l != atual) else {
+            return;
+        };
+        if self.correcao_do_local.aberto().is_none() {
+            self.correcao_do_local.abrir_sem_janela(CorrecaoDoLocal {
+                para,
+                motivo: None,
+                erro: None,
+                gravando: false,
+            });
+        }
+        cx.notify();
+    }
+
+    pub fn fechar_correcao_do_local(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.correcao_do_local.aberto().is_some_and(|c| c.gravando) {
+            return;
+        }
+        self.correcao_do_local.fechar(window, cx);
+        cx.notify();
+    }
+
+    /// O campo do motivo nasce na primeira pintura — sem janela não há
+    /// `InputState`.
+    fn preparar_correcao_do_local(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self
+            .correcao_do_local
+            .aberto()
+            .is_some_and(|c| c.motivo.is_none())
+        {
+            return;
+        }
+        let motivo = campo_preenchido(
+            "",
+            "Sessão feita na praça, marcada como estúdio",
+            window,
+            cx,
+        );
+        if window
+            .root::<gpui_kit::component::Root>()
+            .flatten()
+            .is_some()
+        {
+            let foco = motivo.read(cx).focus_handle(cx);
+            self.correcao_do_local.focar(&foco, window, cx);
+        }
+        if let Some(c) = self.correcao_do_local.aberto_mut() {
+            c.motivo = Some(motivo);
+        }
+    }
+
+    /// 📍 Grava a correção — `PATCH /pos-venda/galerias/{id}/local`.
+    pub fn gravar_correcao_do_local(&mut self, cx: &mut Context<Self>) {
+        let (Some(sessao), Some(galeria_id)) = (self.sessao.clone(), self.galeria_id.clone())
+        else {
+            return;
+        };
+        let Some(correcao) = self.correcao_do_local.aberto_mut() else {
+            return;
+        };
+        if correcao.gravando {
+            return;
+        }
+        let motivo = correcao
+            .motivo
+            .as_ref()
+            .map(|m| m.read(cx).value().trim().to_string())
+            .unwrap_or_default();
+        if motivo.is_empty() {
+            correcao.erro = Some("Diga por que o local estava errado.".into());
+            cx.notify();
+            return;
+        }
+        correcao.erro = None;
+        correcao.gravando = true;
+        let para = correcao.para;
+        self.publicador.pedir_json(
+            sessao,
+            crate::pos_venda::porta::PedidoJson::gravar(
+                PEDIDO_DA_CORRECAO_DO_LOCAL,
+                "PATCH",
+                format!("/pos-venda/galerias/{galeria_id}/local"),
+                serde_json::json!({ "local": para.como_texto(), "motivo": motivo }),
+            ),
+            self.da_sessao.0.clone(),
+        );
+        self.acompanhar(cx);
+        cx.notify();
+    }
+
+    /// A resposta da correção, pela colheita.
+    fn chegou_a_correcao_do_local(
+        &mut self,
+        resultado: Result<serde_json::Value, String>,
+        cx: &mut Context<Self>,
+    ) {
+        match resultado {
+            Ok(feito) => {
+                let para = feito["para"]
+                    .as_str()
+                    .and_then(LocalDaSessao::ler)
+                    .or_else(|| self.correcao_do_local.aberto().map(|c| c.para))
+                    .unwrap_or_default();
+                if let Some(aberta) = self.aberta.as_mut() {
+                    aberta.galeria.local = Some(para.como_texto().to_string());
+                }
+                if let Some(c) = self.correcao_do_local.aberto_mut() {
+                    c.gravando = false;
+                }
+                self.correcao_do_local.fechar_depois(cx);
+                let movidas = feito["vendas_movidas"].as_u64().unwrap_or(0);
+                let mantidas = feito["vendas_mantidas"].as_u64().unwrap_or(0);
+                let mut frase = format!("Local corrigido para {}.", para.rotulo());
+                if movidas > 0 {
+                    frase.push_str(&format!(
+                        " {movidas} venda(s) passaram ao caixa do local novo."
+                    ));
+                }
+                if mantidas > 0 {
+                    frase.push_str(&format!(
+                        " {mantidas} venda(s) de caixa já fechado ficaram onde foram contadas."
+                    ));
+                }
+                self.avisar_sucesso(frase, cx);
+            }
+            Err(erro) => {
+                if let Some(c) = self.correcao_do_local.aberto_mut() {
+                    c.gravando = false;
+                    c.erro = Some(erro.into());
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// 📍 O diálogo da correção — o `CorrecaoDoLocal` do site.
+    fn dialogo_do_local(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui_kit::AnyElement> {
+        use crate::estilo;
+        let correcao = self.correcao_do_local.aberto()?;
+        let motivo = correcao.motivo.as_ref()?;
+        let atual = self.local_da_galeria();
+        let gravando = correcao.gravando;
+        let perigo = cx.theme().danger;
+        let dica = format!(
+            "De {} para {}. A lista de sessões passa a somar no local novo; a venda em \
+             caixa aberto vai para o caixa do local novo, e a de caixa já fechado fica \
+             onde foi contada.",
+            atual.rotulo(),
+            correcao.para.rotulo()
+        );
+        Some(
+            gpui_kit::component::v_flex()
+                .gap(px(16.))
+                .debug_selector(|| "correcao-do-local".into())
+                .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
+                    cx.stop_propagation()
+                })
+                .child(estilo::cabecalho_do_dialogo(
+                    "Corrigir o local da sessão",
+                    SharedString::from(dica),
+                    None,
+                    cx,
+                ))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(6.))
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(gpui_kit::FontWeight::MEDIUM)
+                                .child("Por que estava errado"),
+                        )
+                        .child(estilo::campo(Input::new(motivo))),
+                )
+                // Linha reservada: a recusa aparece sem o diálogo mudar de tamanho.
+                .child(
+                    div()
+                        .min_h(px(20.))
+                        .text_sm()
+                        .text_color(perigo)
+                        .children(correcao.erro.clone()),
+                )
+                .child(
+                    estilo::rodape_do_dialogo()
+                        .child(estilo::desligado(
+                            estilo::botao_fantasma("sessao-local-cancelar", cx)
+                                .child("Cancelar")
+                                .when(!gravando, |b| {
+                                    b.on_click(cx.listener(|tela, _ev, window, cx| {
+                                        tela.fechar_correcao_do_local(window, cx)
+                                    }))
+                                }),
+                            gravando,
+                        ))
+                        .child(estilo::desligado(
+                            estilo::botao_primario("sessao-local-corrigir", cx)
+                                .debug_selector(|| "sessao-local-corrigir".into())
+                                .child(if gravando {
+                                    "Corrigindo…"
+                                } else {
+                                    "Corrigir"
+                                })
+                                .when(!gravando, |b| {
+                                    b.on_click(cx.listener(|tela, _ev, _w, cx| {
+                                        tela.gravar_correcao_do_local(cx)
+                                    }))
+                                }),
+                            gravando,
+                        )),
+                )
+                .into_any_element(),
+        )
+    }
+
     fn dados_atuais(&self) -> Option<DadosDoCliente> {
         let galeria = &self.aberta.as_ref()?.galeria;
         Some(DadosDoCliente {
@@ -3908,6 +4163,9 @@ impl Detalhe {
                 {
                     self.chegou_o_bot(resultado, cx);
                 }
+                Recado::Json { rotulo, resultado } if rotulo == PEDIDO_DA_CORRECAO_DO_LOCAL => {
+                    self.chegou_a_correcao_do_local(resultado, cx);
+                }
                 Recado::Json { rotulo, resultado }
                     if rotulo == super::qr_do_bot::PEDIDO_DO_NOVO_QR =>
                 {
@@ -3953,6 +4211,7 @@ impl Detalhe {
             || self.avisando
             || self.pedindo_link
             || self.gravando_dados.is_some()
+            || self.correcao_do_local.aberto().is_some_and(|c| c.gravando)
             || self.bot.lendo
             || self.bot.trocando;
         if !continua {
@@ -5195,6 +5454,7 @@ impl Render for Detalhe {
             cx.on_next_frame(window, |_tela, _window, cx| cx.notify());
         }
         self.preparar_formulario_do_cliente(window, cx);
+        self.preparar_correcao_do_local(window, cx);
         self.preparar_painel(window, cx);
         self.preparar_lote(window, cx);
         // 🔑 Depois das preparações: os campos dos dados do cliente nascem em
@@ -5260,6 +5520,19 @@ impl Render for Detalhe {
                         tela.fechar_formulario_do_cliente(window, cx)
                     }
                 },
+                window,
+                cx,
+            )
+        };
+        // 📍 A correção do local: Esc e o clique fora fecham, menos gravando.
+        let dialogo_do_local = {
+            let quer = self.correcao_do_local.aberto().is_some();
+            crate::dialogo::desenhar(
+                self,
+                quer,
+                crate::dialogo::Jeito::dialogo(440.),
+                Self::dialogo_do_local,
+                |tela, window, cx| tela.fechar_correcao_do_local(window, cx),
                 window,
                 cx,
             )
@@ -5384,6 +5657,7 @@ impl Render for Detalhe {
             .children(dialogo_de_exclusao)
             .children(dialogo_de_descartar)
             .children(formulario_do_cliente)
+            .children(dialogo_do_local)
             // 📸 O painel do bot, na posição que o atendente escolheu.
             .children(painel_do_bot)
     }
@@ -5649,6 +5923,25 @@ impl Detalhe {
                             .disabled(self.estudio_de_antes.is_some()),
                     ))
             }))
+            // 📍 O local da sessão (18/out/2026), e a correção dele para quem
+            // pode. Some para quem tem o local escondido no perfil.
+            .children(
+                (self.aberta.is_some()
+                    && crate::acesso_da_conta::mostra_local(self.local_da_galeria()))
+                .then(|| {
+                    let local = self.local_da_galeria();
+                    let corrige = crate::acesso_da_conta::pode_mudar_local();
+                    estilo::botao_fantasma("sessao-local", cx)
+                        .debug_selector(|| "sessao-local".into())
+                        .child(Icon::new(Icone::MapPin).size(px(14.)))
+                        .child(local.rotulo())
+                        .when(corrige, |b| {
+                            b.tooltip("Corrigir o local da sessão").on_click(cx.listener(
+                                |tela, _ev, _window, cx| tela.abrir_correcao_do_local(cx),
+                            ))
+                        })
+                }),
+            )
             .child(divisor_de_grupo())
             .child(ButtonGroup::new("sessao-grupo-entrega").child(estilo::desligado(
                 estilo::botao_contorno_pequeno("sessao-link", cx)
@@ -13165,6 +13458,96 @@ mod testes {
                 })
                 .expect("a janela deve estar aberta");
         }
+    }
+
+    /// 📍 **Corrigir o local** (dono, 18/out/2026): sem motivo o diálogo
+    /// recusa sem ir ao site; com ele, o `PATCH /local` vai com o outro local,
+    /// e a resposta põe a sessão no local novo, fecha o diálogo e diz quantas
+    /// vendas acompanharam.
+    #[gpui_kit::test]
+    fn corrigir_o_local_manda_o_patch_e_a_sessao_muda_de_local(cx: &mut TestAppContext) {
+        crate::acesso_da_conta::definir_acesso(Some(biblioteca_core::acesso::Acesso {
+            admin: true,
+            ..Default::default()
+        }));
+        let publicador = publicador_com(vec![], false);
+        publicador.responder_json(
+            PEDIDO_DA_CORRECAO_DO_LOCAL,
+            Ok(serde_json::json!({
+                "de": "ESTUDIO", "para": "EXTERNO", "vendas_movidas": 1, "vendas_mantidas": 0
+            })),
+        );
+        let janela = janela_com(
+            cx,
+            publicador.clone(),
+            Arc::new(SeletorDeMentira::default()),
+        );
+        entrar(cx, &janela);
+        let pedidos_da_correcao = |publicador: &PublicadorDeMentira| {
+            publicador
+                .pedidos_json()
+                .into_iter()
+                .filter(|p| p.rotulo == PEDIDO_DA_CORRECAO_DO_LOCAL)
+                .collect::<Vec<_>>()
+        };
+
+        janela
+            .update(cx, |tela, window, cx| {
+                assert_eq!(tela.local_da_galeria(), LocalDaSessao::Estudio);
+                tela.abrir_correcao_do_local(cx);
+                tela.preparar_correcao_do_local(window, cx);
+                assert_eq!(
+                    tela.correcao_do_local.aberto().map(|c| c.para),
+                    Some(LocalDaSessao::Externo),
+                    "com dois locais, o certo é o outro"
+                );
+                // Sem motivo: a recusa é daqui, e nada vai ao site.
+                tela.gravar_correcao_do_local(cx);
+                assert!(tela
+                    .correcao_do_local
+                    .aberto()
+                    .is_some_and(|c| c.erro.is_some()));
+            })
+            .unwrap();
+        assert!(pedidos_da_correcao(&publicador).is_empty());
+
+        janela
+            .update(cx, |tela, window, cx| {
+                let motivo = tela
+                    .correcao_do_local
+                    .aberto()
+                    .and_then(|c| c.motivo.clone())
+                    .expect("o campo do motivo");
+                motivo.update(cx, |c, cx| {
+                    c.trocar_valor("foi na praça".to_string(), window, cx)
+                });
+                tela.gravar_correcao_do_local(cx);
+            })
+            .unwrap();
+        colher_ate_parar(cx, &janela);
+
+        let pedidos = pedidos_da_correcao(&publicador);
+        assert_eq!(pedidos.len(), 1, "um pedido só");
+        assert_eq!(pedidos[0].metodo, "PATCH");
+        assert_eq!(pedidos[0].caminho, "/pos-venda/galerias/g1/local");
+        let corpo = pedidos[0].corpo.clone().expect("o corpo");
+        assert_eq!(corpo["local"], "EXTERNO");
+        assert_eq!(corpo["motivo"], "foi na praça");
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert_eq!(tela.local_da_galeria(), LocalDaSessao::Externo);
+                assert!(tela.correcao_do_local.aberto().is_none(), "o diálogo fecha");
+                assert_eq!(
+                    tela.avisos_dados.last(),
+                    Some(&(
+                        "Local corrigido para Externo. 1 venda(s) passaram ao caixa do local novo."
+                            .to_string(),
+                        false
+                    ))
+                );
+            })
+            .unwrap();
+        crate::acesso_da_conta::definir_acesso(None);
     }
 
     /// 🧾 **O "Padrão da galeria" do seletor da leva é o da sessão aberta.**

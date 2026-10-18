@@ -1049,7 +1049,12 @@ impl Caixa {
             "abrir",
             "POST",
             "/pos-venda/caixa".into(),
-            json!({ "estudio_id": estudio, "fundo_de_troco_centavos": fundo, "chave": chave }),
+            json!({
+                "estudio_id": estudio,
+                "fundo_de_troco_centavos": fundo,
+                "chave": chave,
+                "local": biblioteca_core::local::texto_do_caixa(self.local_do_caixa()),
+            }),
             cx,
         );
         cx.notify();
@@ -1357,6 +1362,7 @@ impl Caixa {
                 "valor_centavos": valor,
                 "motivo": motivo,
                 "chave": chave,
+                "local": biblioteca_core::local::texto_do_caixa(self.local_do_caixa()),
             }),
             cx,
         );
@@ -1568,7 +1574,11 @@ impl Caixa {
             "conferir",
             "POST",
             "/pos-venda/caixa/conferir".into(),
-            json!({ "estudio_id": estudio, "contado": dados::contado_json(&contado) }),
+            json!({
+                "estudio_id": estudio,
+                "contado": dados::contado_json(&contado),
+                "local": biblioteca_core::local::texto_do_caixa(self.local_do_caixa()),
+            }),
             cx,
         );
         cx.notify();
@@ -1588,6 +1598,7 @@ impl Caixa {
 
     fn fechar_caixa(&mut self, cx: &mut Context<Self>) {
         let estudio = self.estudio_do_caixa().map(str::to_string);
+        let local_do_caixa = self.local_do_caixa();
         let Some(Dialogo::Fechar(form)) = self.dialogo.as_mut() else {
             return;
         };
@@ -1609,6 +1620,7 @@ impl Caixa {
             "contado": dados::contado_json(&conferencia.contado),
             "observacao": (!observacao.is_empty()).then_some(observacao),
             "chave": form.chave,
+            "local": biblioteca_core::local::texto_do_caixa(local_do_caixa),
         });
         form.enviando = true;
         self.gravar(

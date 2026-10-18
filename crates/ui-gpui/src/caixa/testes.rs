@@ -415,7 +415,7 @@ fn f8_com_o_caixa_fechado_abre_e_grava_o_fundo(cx: &mut TestAppContext) {
     assert_eq!(gravadas[0].caminho, "/pos-venda/caixa");
     assert_eq!(
         sem_a_chave(&gravadas[0].corpo),
-        Some(json!({ "estudio_id": "e1", "fundo_de_troco_centavos": 20000 }))
+        Some(json!({ "estudio_id": "e1", "fundo_de_troco_centavos": 20000, "local": "ESTUDIO" }))
     );
     com(cx, &j, |t, _, _| {
         assert_eq!(t.dialogo_aberto(), None);
@@ -585,7 +585,8 @@ fn a_sangria_confere_e_grava(cx: &mut TestAppContext) {
     assert_eq!(
         sem_a_chave(&publicador.gravacoes()[0].corpo),
         Some(json!({
-            "estudio_id": "e1", "tipo": "sangria", "valor_centavos": 3000, "motivo": "depósito"
+            "estudio_id": "e1", "tipo": "sangria", "valor_centavos": 3000, "motivo": "depósito",
+            "local": "ESTUDIO"
         }))
     );
     com(cx, &j, |t, _, _| {
@@ -663,7 +664,7 @@ fn o_fechamento_conta_as_cegas_confere_e_so_depois_fecha(cx: &mut TestAppContext
     assert_eq!(gravadas[0].caminho, "/pos-venda/caixa/conferir");
     assert_eq!(
         gravadas[0].corpo,
-        Some(json!({ "estudio_id": "e1", "contado": { "dinheiro": 10000 } }))
+        Some(json!({ "estudio_id": "e1", "contado": { "dinheiro": 10000 }, "local": "ESTUDIO" }))
     );
     com(cx, &j, |t, w, cx| t.confirmar(w, cx));
     colher(cx, &j);
@@ -672,7 +673,10 @@ fn o_fechamento_conta_as_cegas_confere_e_so_depois_fecha(cx: &mut TestAppContext
     assert_eq!(gravadas[1].caminho, "/pos-venda/caixa/fechar");
     assert_eq!(
         sem_a_chave(&gravadas[1].corpo),
-        Some(json!({ "estudio_id": "e1", "contado": { "dinheiro": 10000 }, "observacao": null }))
+        Some(json!({
+            "estudio_id": "e1", "contado": { "dinheiro": 10000 }, "observacao": null,
+            "local": "ESTUDIO"
+        }))
     );
     // O resultado fica na tela; outro Enter não grava de novo.
     com(cx, &j, |t, w, cx| {

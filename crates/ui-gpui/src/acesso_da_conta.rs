@@ -9,10 +9,73 @@
 //! `thread_local`, e não global: a interface inteira roda na thread principal,
 //! e cada teste roda na sua — um não enxerga o perfil que o outro ligou.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+
+use biblioteca_core::acesso::Acesso;
+use biblioteca_core::local::{LocalDaSessao, LocalDoCaixa};
 
 thread_local! {
     static ESTUDIOS_RESTRITOS: Cell<bool> = const { Cell::new(false) };
+    /// 📍 O acesso inteiro — o que as telas do local leem (18/out/2026).
+    static ACESSO: RefCell<Option<Acesso>> = const { RefCell::new(None) };
+}
+
+/// A raiz guarda o acesso da conta que entrou; na saída, `None`.
+pub fn definir_acesso(acesso: Option<Acesso>) {
+    ACESSO.with(|a| *a.borrow_mut() = acesso);
+}
+
+fn com_acesso<T>(f: impl FnOnce(Option<&Acesso>) -> T) -> T {
+    ACESSO.with(|a| f(a.borrow().as_ref()))
+}
+
+/// 📍 Em qual local a sessão nasce.
+pub fn local_padrao() -> LocalDaSessao {
+    com_acesso(|a| a.map(|a| a.local_padrao).unwrap_or_default())
+}
+
+/// 📍 Pode escolher outro local ao criar e corrigir o local depois? O
+/// administrador sempre pode.
+pub fn pode_mudar_local() -> bool {
+    com_acesso(|a| a.is_some_and(|a| a.admin || a.pode_mudar_local))
+}
+
+/// 📍 Esta conta vê o rótulo deste local?
+pub fn mostra_local(local: LocalDaSessao) -> bool {
+    com_acesso(|a| a.is_none_or(|a| a.mostra_local(local)))
+}
+
+/// 📍 Vê os dois locais — e então a lista mostra a coluna e os totais por local.
+pub fn mostra_os_locais() -> bool {
+    LocalDaSessao::TODOS.into_iter().all(mostra_local)
+}
+
+/// 📍 Os locais que esta conta não vê.
+pub fn locais_ocultos() -> Vec<LocalDaSessao> {
+    com_acesso(|a| a.map(|a| a.locais_ocultos.clone()).unwrap_or_default())
+}
+
+/// 📍 Os caixas que a conta pode ter abertos em cada estúdio.
+pub fn caixas() -> Vec<LocalDoCaixa> {
+    com_acesso(|a| {
+        a.map(|a| a.caixas.clone())
+            .filter(|c| !c.is_empty())
+            .unwrap_or_else(|| vec![Some(LocalDaSessao::Estudio)])
+    })
+}
+
+/// 📍 O caixa que recebe a venda de uma sessão neste local.
+pub fn caixa_da_sessao(local: LocalDaSessao) -> LocalDoCaixa {
+    com_acesso(|a| {
+        a.map(|a| a.caixa_de_cada_local)
+            .unwrap_or_default()
+            .da_sessao(local)
+    })
+}
+
+/// 📍 "Caixa Externo", "Caixa Geral" — ou só "Caixa" para quem tem um só.
+pub fn nome_do_caixa(local: LocalDoCaixa) -> String {
+    biblioteca_core::local::nome_do_caixa(local, &caixas(), &locais_ocultos())
 }
 
 /// A raiz diz se o perfil de acesso da conta é de **alguns** estúdios. Na

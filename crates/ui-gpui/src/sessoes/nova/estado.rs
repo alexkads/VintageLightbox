@@ -54,6 +54,11 @@ pub struct Formulario {
     pub como_conheceu: Option<String>,
     pub como_conheceu_detalhe: String,
     pub parceiro: Option<ParceiroEscolhido>,
+    /// 📍 O local escolhido (18/out/2026), como a API o escreve (`ESTUDIO`,
+    /// `EXTERNO`). `None` = o padrão do perfil de quem cria — quem decide é a
+    /// API. Texto, e não o tipo do core, porque o formulário vai ao rascunho.
+    #[serde(default)]
+    pub local: Option<String>,
 }
 
 pub const ETAPAS: [&str; 7] = [
@@ -290,6 +295,7 @@ pub fn para_envio(f: &Formulario) -> Value {
         "parceiro_id": if como == Some("parceiro") { f.parceiro.as_ref().map(|p| p.id.clone()) } else { None },
         "preset_padrao_id": f.preset_id,
         "proporcao_padrao": f.proporcao,
+        "local": f.local.as_deref().and_then(biblioteca_core::local::LocalDaSessao::ler).map(|l| l.como_texto()),
     })
 }
 

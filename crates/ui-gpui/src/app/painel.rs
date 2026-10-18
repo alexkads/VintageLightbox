@@ -18,6 +18,7 @@
 //! seções que o app já atende, e nenhuma a mais.
 
 use biblioteca_core::acesso::Acesso;
+use biblioteca_core::local::{self, CaixaDeCadaLocal, LocalDaSessao};
 use gpui_kit::component::button::Button;
 use gpui_kit::component::menu::{PopupMenu, PopupMenuItem};
 use gpui_kit::component::sidebar::{
@@ -92,6 +93,44 @@ fn acesso_da_resposta(usuario: &serde_json::Value) -> Option<Acesso> {
         permissoes: textos(acesso.get("permissoes")?),
         // `null` é "todos os estúdios"; uma lista é o perfil de alguns.
         estudios: acesso.get("estudios").filter(|e| e.is_array()).map(textos),
+        // 📍 O local da sessão (18/out/2026). Ausente (API anterior), o
+        // padrão: estúdio, caixa separado, nada escondido.
+        local_padrao: acesso
+            .get("local_padrao")
+            .and_then(|v| v.as_str())
+            .and_then(LocalDaSessao::ler)
+            .unwrap_or_default(),
+        pode_mudar_local: acesso
+            .get("pode_mudar_local")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        locais_ocultos: acesso
+            .get("locais_ocultos")
+            .map(textos)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|t| LocalDaSessao::ler(t))
+            .collect(),
+        caixas: acesso
+            .get("caixas")
+            .map(textos)
+            .map(|lista| lista.iter().filter_map(|t| local::ler_caixa(t)).collect())
+            .unwrap_or_else(|| vec![Some(LocalDaSessao::Estudio), Some(LocalDaSessao::Externo)]),
+        caixa_de_cada_local: acesso
+            .get("caixa_de_cada_local")
+            .map(|mapa| {
+                let de = |chave: &str, padrao| {
+                    mapa.get(chave)
+                        .and_then(|v| v.as_str())
+                        .and_then(local::ler_caixa)
+                        .unwrap_or(padrao)
+                };
+                CaixaDeCadaLocal {
+                    estudio: de("estudio", Some(LocalDaSessao::Estudio)),
+                    externo: de("externo", Some(LocalDaSessao::Externo)),
+                }
+            })
+            .unwrap_or_default(),
     })
 }
 
@@ -434,6 +473,7 @@ impl Aplicativo {
         self.menu_da_conta = None;
         // 🔐 O perfil de acesso é da conta que sai.
         crate::acesso_da_conta::definir_estudios_restritos(false);
+        crate::acesso_da_conta::definir_acesso(None);
         self.sessoes
             .update(cx, |t, cx| t.definir_acesso(false, false, cx));
         self.largar_a_revelacao(cx);
@@ -554,6 +594,8 @@ impl Aplicativo {
                             .update(cx, |t, cx| t.definir_super_admin(pode, cx));
                         // 🔐 E os estúdios do perfil de acesso dela.
                         let acesso = self.conta.as_ref().and_then(|c| c.acesso.clone());
+                        // 📍 O local da sessão e os caixas leem daqui.
+                        crate::acesso_da_conta::definir_acesso(acesso.clone());
                         let (restritos, nenhum) = acesso
                             .map(|a| (a.estudios_restritos(), a.sem_estudio()))
                             .unwrap_or_default();

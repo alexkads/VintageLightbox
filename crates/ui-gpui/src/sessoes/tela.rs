@@ -24,6 +24,7 @@ use biblioteca_core::dados_do_cliente;
 use biblioteca_core::dinheiro;
 use biblioteca_core::exclusao;
 use biblioteca_core::filtro_de_coluna::{self, Coluna};
+use biblioteca_core::local::LocalDaSessao;
 use biblioteca_core::sessoes::{
     self, estado_do_fotolivro, estado_no_caixa, primeiro_envio_do_fotolivro, ContagemDeFotos,
     Criterio, EstadoDoFotolivro, EstadoNoCaixa, FaixaDeDatas, PagoNoCaixa, ResumoDoFotolivro,
@@ -829,6 +830,12 @@ impl Sessoes {
                 // 🏢 A sessão sem estúdio é marcada na grade: ela não entra em
                 // caixa nenhum enquanto ninguém a corrigir.
                 sem_estudio: g.estudio_id.is_none(),
+                // 📍 O local de hoje; texto desconhecido ou ausente é o estúdio.
+                local: g
+                    .local
+                    .as_deref()
+                    .and_then(LocalDaSessao::ler)
+                    .unwrap_or_default(),
                 id: g.id.clone(),
                 titulo: g.titulo.clone(),
                 email: g.email.clone(),
@@ -2903,6 +2910,20 @@ impl Sessoes {
                 format!("{} sessões por fechar", caixa.a_fechar)
             });
         }
+        // 📍 Os totais por local (dono, 18/out/2026) — só para quem vê os dois:
+        // com um escondido no perfil, a parte do outro diria quanto o
+        // escondido rendeu. Pelo local de hoje: corrigido, o total muda de lado.
+        let por_local = |valor: fn(&sessoes::SomaDoLocal) -> i64| -> Option<String> {
+            (crate::acesso_da_conta::mostra_os_locais() && !soma.por_local.is_empty()).then(|| {
+                soma.por_local
+                    .iter()
+                    .map(|l| format!("{} {}", l.local.rotulo(), dinheiro::formatar(valor(l))))
+                    .collect::<Vec<_>>()
+                    .join(" · ")
+            })
+        };
+        let caixa_por_local = por_local(|l| l.caixa_centavos);
+        let pos_venda_por_local = por_local(|l| l.pos_venda);
         let abertas = self.formas_abertas;
         let formas = div()
             .flex()
@@ -2983,6 +3004,7 @@ impl Sessoes {
             )
             .child(valor_do_cartao(dinheiro::formatar(caixa.liquido_centavos)))
             .child(div().text_xs().text_color(apagado).child(nota.join(" · ")))
+            .children(caixa_por_local.map(|linha| div().text_xs().child(linha)))
             .when(abertas, |c| c.child(formas));
 
         let cartao_do_pos_venda = div()
@@ -3006,7 +3028,8 @@ impl Sessoes {
                     .text_xs()
                     .text_color(apagado)
                     .child("fotos que o cliente voltou e comprou pela galeria"),
-            );
+            )
+            .children(pos_venda_por_local.map(|linha| div().text_xs().child(linha)));
 
         let buscando = !self.busca.read(cx).value().trim().is_empty();
         div()
@@ -3473,7 +3496,22 @@ impl Sessoes {
                                     crate::estilo::selo_colorido(crate::tema::cores::selo_ambar())
                                         .child("Sem estúdio"),
                                 )
-                            }),
+                            })
+                            // 📍 O local (18/out/2026): o estúdio é o padrão e
+                            // não ganha selo; o externo, sim — e some para
+                            // quem tem o local escondido no perfil.
+                            .when(
+                                sessao.local == LocalDaSessao::Externo
+                                    && crate::acesso_da_conta::mostra_local(sessao.local),
+                                |c| {
+                                    c.child(
+                                        crate::estilo::selo_colorido(
+                                            crate::tema::cores::selo_ambar(),
+                                        )
+                                        .child(sessao.local.rotulo()),
+                                    )
+                                },
+                            ),
                     )
                     .child(numero(LARGURAS[0]).child(sessao.fotos.levadas_no_balcao.to_string()))
                     .child(numero(LARGURAS[1]).child(sessao.fotos.disponiveis.to_string()))

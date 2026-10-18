@@ -238,6 +238,10 @@ pub struct GaleriaDoPainel {
     pub como_conheceu: Option<String>,
     pub como_conheceu_detalhe: Option<String>,
     pub parceiro_id: Option<String>,
+    /// 📍 Onde a sessão foi feita — `ESTUDIO` ou `EXTERNO`, como o site
+    /// escreve (18/out/2026). `None` = API anterior ao campo: vale o estúdio.
+    /// Quem lê para o tipo é `biblioteca_core::local`.
+    pub local: Option<String>,
 }
 
 /// Quantas fotos a galeria tem, por estado.
