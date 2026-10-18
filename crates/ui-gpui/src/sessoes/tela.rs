@@ -33,7 +33,7 @@ use biblioteca_core::sessoes::{
 use domain::services::pos_venda::{Estudio, GaleriaDoPainel, NovaGaleria, Produto, Sessao};
 
 use super::periodo;
-use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{ActiveTheme, Disableable, Selectable, Sizable};
 use gpui_kit::{
@@ -245,6 +245,9 @@ pub struct Sessoes {
     /// 🗑️ Quem entrou é o SuperAdmin? Só ele vê a lixeira — o backend confere
     /// de novo, e é ele quem vale.
     super_admin: bool,
+    /// 📍 O local escolhido na barra. `None` = o padrão do perfil — é onde a
+    /// lista abre (ver [`Self::local_da_lista`]).
+    local_escolhido: Option<LocalDaSessao>,
     /// 🔐 O perfil de acesso da conta é de **alguns** estúdios (site, 11/out/
     /// 2026): ela não vê os outros nem as sessões sem estúdio, e "todos os
     /// estúdios" vira "todos os meus".
@@ -450,6 +453,7 @@ impl Sessoes {
             erro: None,
             erro_visto: None,
             super_admin: false,
+            local_escolhido: None,
             estudios_restritos: false,
             sem_estudio_liberado: false,
             rolagem_vertical: gpui_kit::ScrollHandle::new(),
@@ -806,6 +810,25 @@ impl Sessoes {
         }
     }
 
+    /// 📍 **O local da lista** (dono, 18/out/2026: *"nunca poderá mostrar
+    /// todos juntos, deve respeitar o padrão e as definições do perfil"*).
+    /// Abre no padrão do perfil; troca só quem pode mudar o local e não tem
+    /// local escondido.
+    pub fn local_da_lista(&self) -> LocalDaSessao {
+        if local_preso_ao_padrao() {
+            crate::acesso_da_conta::local_padrao()
+        } else {
+            self.local_escolhido
+                .unwrap_or_else(crate::acesso_da_conta::local_padrao)
+        }
+    }
+
+    /// 📍 A barra escolheu outro local.
+    pub fn escolher_local(&mut self, local: LocalDaSessao, cx: &mut Context<Self>) {
+        self.local_escolhido = Some(local);
+        cx.notify();
+    }
+
     /// As sessões como o core as entende — a tradução acontece num lugar só.
     /// As galerias que a lista mostra — **as do estúdio desta máquina**.
     ///
@@ -820,22 +843,20 @@ impl Sessoes {
     /// cabeçalho da galeria serve para dizer de quem são.
     fn para_o_core(&self) -> Vec<SessaoFotografica> {
         let meu = self.estudio_do_recorte().map(|e| e.id.clone());
+        let local = self.local_da_lista();
         self.galerias
             .iter()
             .filter(|g| match (&meu, &g.estudio_id) {
                 (Some(meu), Some(dela)) => meu == dela,
                 _ => true,
             })
+            // 📍 **Um local só, nunca os dois** (dono, 18/out/2026).
+            .filter(|g| local_da_galeria(g) == local)
             .map(|g| SessaoFotografica {
                 // 🏢 A sessão sem estúdio é marcada na grade: ela não entra em
                 // caixa nenhum enquanto ninguém a corrigir.
                 sem_estudio: g.estudio_id.is_none(),
-                // 📍 O local de hoje; texto desconhecido ou ausente é o estúdio.
-                local: g
-                    .local
-                    .as_deref()
-                    .and_then(LocalDaSessao::ler)
-                    .unwrap_or_default(),
+                local: local_da_galeria(g),
                 id: g.id.clone(),
                 titulo: g.titulo.clone(),
                 email: g.email.clone(),
@@ -1489,6 +1510,21 @@ impl Render for Sessoes {
             .children(dialogo_dos_graficos)
             .children(self.popover_do_periodo(cx))
     }
+}
+
+/// 📍 O local de hoje da galeria; texto desconhecido ou ausente é o estúdio.
+fn local_da_galeria(g: &GaleriaDoPainel) -> LocalDaSessao {
+    g.local
+        .as_deref()
+        .and_then(LocalDaSessao::ler)
+        .unwrap_or_default()
+}
+
+/// 📍 A conta fica no local padrão, sem escolher: não pode mudar o local, ou
+/// tem um local escondido no perfil.
+fn local_preso_ao_padrao() -> bool {
+    !crate::acesso_da_conta::pode_mudar_local()
+        || !crate::acesso_da_conta::locais_ocultos().is_empty()
 }
 
 /// O selo de situação, com as cores de `COR_DA_SITUACAO` do site.
@@ -2410,6 +2446,27 @@ impl Sessoes {
                     )))
                     .on_click(cx.listener(|tela, _ev, _window, cx| tela.alternar_calendario(cx))),
             )
+            // 📍 O local da lista — nunca "todos". Sem seletor para quem o
+            // perfil prende ao padrão.
+            .when(!local_preso_ao_padrao(), |barra| {
+                let atual = self.local_da_lista();
+                barra.child(ButtonGroup::new("sessoes-local").children(
+                    LocalDaSessao::TODOS.into_iter().map(|local| {
+                        let id =
+                            SharedString::from(format!("sessoes-local-{}", local.como_texto()));
+                        let botao = if local == atual {
+                            estilo::botao_primario(id, cx)
+                        } else {
+                            estilo::botao_contorno(id, cx)
+                        };
+                        botao.child(local.rotulo()).on_click(
+                            cx.listener(move |tela, _ev, _window, cx| {
+                                tela.escolher_local(local, cx)
+                            }),
+                        )
+                    }),
+                ))
+            })
             .child(
                 pilula(
                     "sessoes-todas".into(),
@@ -2910,20 +2967,14 @@ impl Sessoes {
                 format!("{} sessões por fechar", caixa.a_fechar)
             });
         }
-        // 📍 Os totais por local (dono, 18/out/2026) — só para quem vê os dois:
-        // com um escondido no perfil, a parte do outro diria quanto o
-        // escondido rendeu. Pelo local de hoje: corrigido, o total muda de lado.
-        let por_local = |valor: fn(&sessoes::SomaDoLocal) -> i64| -> Option<String> {
-            (crate::acesso_da_conta::mostra_os_locais() && !soma.por_local.is_empty()).then(|| {
-                soma.por_local
-                    .iter()
-                    .map(|l| format!("{} {}", l.local.rotulo(), dinheiro::formatar(valor(l))))
-                    .collect::<Vec<_>>()
-                    .join(" · ")
-            })
+        // 📍 O total é do local da lista, e o rótulo diz qual — menos o local
+        // que o perfil esconde.
+        let local = self.local_da_lista();
+        let do_qual_local = if crate::acesso_da_conta::mostra_local(local) {
+            format!(" · {}", local.rotulo())
+        } else {
+            String::new()
         };
-        let caixa_por_local = por_local(|l| l.caixa_centavos);
-        let pos_venda_por_local = por_local(|l| l.pos_venda);
         let abertas = self.formas_abertas;
         let formas = div()
             .flex()
@@ -2975,11 +3026,14 @@ impl Sessoes {
                     .flex()
                     .justify_between()
                     .items_center()
-                    .child(rotulo_do_cartao(if filtrando {
-                        "Caixa, no recorte".into()
-                    } else {
-                        "Vendido no caixa".into()
-                    }))
+                    .child(rotulo_do_cartao(format!(
+                        "{}{do_qual_local}",
+                        if filtrando {
+                            "Caixa, no recorte"
+                        } else {
+                            "Vendido no caixa"
+                        }
+                    )))
                     .child(
                         div()
                             .flex()
@@ -3004,7 +3058,6 @@ impl Sessoes {
             )
             .child(valor_do_cartao(dinheiro::formatar(caixa.liquido_centavos)))
             .child(div().text_xs().text_color(apagado).child(nota.join(" · ")))
-            .children(caixa_por_local.map(|linha| div().text_xs().child(linha)))
             .when(abertas, |c| c.child(formas));
 
         let cartao_do_pos_venda = div()
@@ -3017,19 +3070,21 @@ impl Sessoes {
             .border_1()
             .border_color(borda_boa)
             .bg(fundo_bom)
-            .child(rotulo_do_cartao(if filtrando {
-                "Pós-venda, no recorte".into()
-            } else {
-                "Pago no pós-venda".to_string()
-            }))
+            .child(rotulo_do_cartao(format!(
+                "{}{do_qual_local}",
+                if filtrando {
+                    "Pós-venda, no recorte"
+                } else {
+                    "Pago no pós-venda"
+                }
+            )))
             .child(valor_do_cartao(dinheiro::formatar(soma.pos_venda)).text_color(texto_bom))
             .child(
                 div()
                     .text_xs()
                     .text_color(apagado)
                     .child("fotos que o cliente voltou e comprou pela galeria"),
-            )
-            .children(pos_venda_por_local.map(|linha| div().text_xs().child(linha)));
+            );
 
         let buscando = !self.busca.read(cx).value().trim().is_empty();
         div()
@@ -3247,15 +3302,25 @@ impl Sessoes {
         // com ela tiraria os campos de onde se desfaz o filtro.
         let com_filtros = self.filtros.visivel(cx);
         if visiveis.is_empty() && !com_filtros {
-            let frase = if self.sem_estudio_liberado {
+            let local = self.local_da_lista();
+            let frase: SharedString = if self.sem_estudio_liberado {
                 // 🔐 A lista está vazia porque o perfil não alcança estúdio
                 // nenhum — "Nova sessão" também seria recusada.
                 "O seu perfil de acesso ainda não tem estúdio liberado. Fale com quem administra \
                  o sistema."
+                    .into()
             } else if self.galerias.is_empty() {
-                "Nenhuma galeria ainda. A primeira nasce no botão \"Nova sessão\"."
+                "Nenhuma galeria ainda. A primeira nasce no botão \"Nova sessão\".".into()
+            } else if self.para_o_core().is_empty() {
+                // 📍 Há sessões, mas nenhuma neste local: a frase diz qual —
+                // "com esse nome" mandaria procurar um erro de digitação.
+                if crate::acesso_da_conta::mostra_local(local) {
+                    format!("Ainda não há sessão no local {}.", local.rotulo()).into()
+                } else {
+                    "Nenhuma galeria ainda. A primeira nasce no botão \"Nova sessão\".".into()
+                }
             } else {
-                "Nenhuma sessão com esse nome ou nessa situação."
+                "Nenhuma sessão com esse nome ou nessa situação.".into()
             };
             return crate::estilo::cartao(cx)
                 .flex()
@@ -3496,22 +3561,7 @@ impl Sessoes {
                                     crate::estilo::selo_colorido(crate::tema::cores::selo_ambar())
                                         .child("Sem estúdio"),
                                 )
-                            })
-                            // 📍 O local (18/out/2026): o estúdio é o padrão e
-                            // não ganha selo; o externo, sim — e some para
-                            // quem tem o local escondido no perfil.
-                            .when(
-                                sessao.local == LocalDaSessao::Externo
-                                    && crate::acesso_da_conta::mostra_local(sessao.local),
-                                |c| {
-                                    c.child(
-                                        crate::estilo::selo_colorido(
-                                            crate::tema::cores::selo_ambar(),
-                                        )
-                                        .child(sessao.local.rotulo()),
-                                    )
-                                },
-                            ),
+                            }),
                     )
                     .child(numero(LARGURAS[0]).child(sessao.fotos.levadas_no_balcao.to_string()))
                     .child(numero(LARGURAS[1]).child(sessao.fotos.disponiveis.to_string()))
@@ -4075,6 +4125,71 @@ mod testes {
                 assert!(tela.filtros_para_teste().ativos(cx).is_empty());
             })
             .expect("a janela deve estar aberta");
+    }
+
+    /// 📍 **A lista é de um local só** (dono, 18/out/2026: *"nunca poderá
+    /// mostrar todos juntos, deve respeitar o padrão e as definições do
+    /// perfil"*): abre no padrão; o seletor troca para quem pode; quem não
+    /// pode mudar o local fica no padrão, sem seletor.
+    #[gpui_kit::test]
+    fn a_lista_mostra_um_local_so_e_respeita_o_perfil(cx: &mut TestAppContext) {
+        use biblioteca_core::acesso::Acesso;
+        use biblioteca_core::local::LocalDaSessao;
+        crate::acesso_da_conta::definir_acesso(Some(Acesso {
+            admin: true,
+            ..Default::default()
+        }));
+        let mut externa = galeria("g2", "Casamento na praça", Some("maria@outro.com"));
+        externa.local = Some("EXTERNO".into());
+        let publicador = Arc::new(PublicadorDeMentira {
+            galerias: Mutex::new(vec![
+                galeria("g1", "Ensaio no estúdio", Some("joao@exemplo.com")),
+                externa,
+            ]),
+            ..Default::default()
+        });
+        let janela = janela(cx, publicador);
+        com_sessao(cx, &janela);
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.escolher_periodo_para_teste(None, cx);
+                assert_eq!(
+                    tela.titulos_visiveis(cx),
+                    ["Ensaio no estúdio"],
+                    "abre no padrão"
+                );
+            })
+            .expect("a janela deve estar aberta");
+
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        visual.run_until_parked();
+        let externo = visual
+            .debug_bounds("sessoes-local-EXTERNO")
+            .expect("quem pode mudar o local tem o seletor");
+        visual.simulate_click(externo.center(), gpui_kit::Modifiers::none());
+        visual.run_until_parked();
+        janela
+            .update(cx, |tela, _window, cx| {
+                assert_eq!(tela.titulos_visiveis(cx), ["Casamento na praça"]);
+            })
+            .expect("a janela deve estar aberta");
+
+        // Perfil que nasce externo e não muda o local: fica no padrão, sem
+        // seletor — mesmo com uma escolha de antes.
+        crate::acesso_da_conta::definir_acesso(Some(Acesso {
+            local_padrao: LocalDaSessao::Externo,
+            permissoes: vec!["OperateCounter".into()],
+            ..Default::default()
+        }));
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.escolher_local(LocalDaSessao::Estudio, cx);
+                assert_eq!(tela.titulos_visiveis(cx), ["Casamento na praça"]);
+            })
+            .expect("a janela deve estar aberta");
+        visual.run_until_parked();
+        assert!(visual.debug_bounds("sessoes-local-EXTERNO").is_none());
+        crate::acesso_da_conta::definir_acesso(None);
     }
 
     /// 🔚 **Só o título é obrigatório** (dono, 2026-09-13): sem contato a
