@@ -256,9 +256,6 @@ impl Aplicativo {
                     .update(cx, |tela, cx| tela.mudar_tipo(tipo, window, cx));
                 eprintln!("[roteiro] negociação: {}", self.balcao.read(cx).titulo());
             }
-            Passo::Filtros => self
-                .sessoes
-                .update(cx, |tela, cx| tela.alternar_filtros(cx)),
             Passo::Graficos => self.sessoes.update(cx, |tela, cx| tela.abrir_graficos(cx)),
             Passo::FormasDoCaixa => self.sessoes.update(cx, |tela, cx| tela.alternar_formas(cx)),
             Passo::Buscar(texto) => self

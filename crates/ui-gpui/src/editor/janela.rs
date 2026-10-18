@@ -106,7 +106,7 @@ use super::{
 use crate::campo::TrocarValor as _;
 use crate::recursos::Icone;
 use crate::revelacao::zoom::{self, Cena, EstadoDoZoom, Medidas as MedidasDaCena, Nivel, Ponto};
-use crate::sessoes::filtros_da_lista::Opcao;
+use crate::sessoes::opcao::Opcao;
 use crate::tema;
 
 /// O maior lado da vista reduzida, em pixels: o dobro de uma tela de ~1000 pt,

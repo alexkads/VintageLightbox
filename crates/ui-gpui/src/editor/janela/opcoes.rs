@@ -154,7 +154,7 @@ impl EditorDeFoto {
         seletor: &'static str,
         largura: f32,
         estado: &Entity<
-            gpui_kit::component::select::SelectState<Vec<crate::sessoes::filtros_da_lista::Opcao>>,
+            gpui_kit::component::select::SelectState<Vec<crate::sessoes::opcao::Opcao>>,
         >,
     ) -> AnyElement {
         div()

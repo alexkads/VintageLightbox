@@ -93,7 +93,7 @@ use crate::importacao::estado::Recado;
 use crate::importacao::explorador::SeletorDePasta;
 use crate::recursos::Icone;
 use crate::revelacao::persistencia;
-use crate::sessoes::filtros_da_lista::Opcao;
+use crate::sessoes::opcao::Opcao;
 
 use super::destino::Destinos;
 use super::porta::{Andamento, Contato, Entrega, Exportador, FotoDoLivro, Origem, Saida};

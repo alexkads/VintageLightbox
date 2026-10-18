@@ -17,10 +17,10 @@ pub mod atendimento;
 pub mod detalhe;
 /// O texto dos detalhes da galeria (o `DetalhesDaGaleria` do site).
 pub mod detalhes_da_galeria;
-/// O "Filtros" da lista: um campo por coluna, sob o cabeçalho.
-pub mod filtros_da_lista;
 /// O assistente de sete etapas da nova sessão (a rota `nova` do site).
 pub mod nova;
+/// Uma opção de lista (`Select`): valor e rótulo.
+pub mod opcao;
 /// "Do cartão ou pasta…": o menu e a janela de escolher, das duas portas.
 pub mod origem_das_fotos;
 /// A coluna da direita da galeria: aberta ou recolhida, lembrado.
@@ -33,6 +33,8 @@ pub mod quadro_de_importacao;
 /// A política de retenção do pós-venda (a rota `configuracoes` do site).
 pub mod retencao;
 pub mod revelacao_padrao;
+/// A lista de sessões no `DataTable` do gpui-kit.
+pub mod tabela_de_sessoes;
 pub mod tela;
 /// O desenho da tira de fotos, comum à sessão e à Revelação.
 pub mod tira_de_fotos;

@@ -60,8 +60,6 @@ pub enum Passo {
     ConferirAgenda(usize),
     /// `menu` — abre ou recolhe o menu lateral.
     Menu,
-    /// Liga ou desliga a linha de filtros por coluna da lista de sessões.
-    Filtros,
     /// `graficos` — abre o diálogo dos gráficos da lista de sessões.
     Graficos,
     /// `formas_do_caixa` — abre ou fecha as formas no cartão do caixa.
@@ -286,7 +284,6 @@ pub fn ler_roteiro(texto: &str) -> Result<Vec<Passo>, String> {
             "conferir_novidades" => Passo::ConferirNovidades(numero(0)? as usize),
             "conferir_agenda" => Passo::ConferirAgenda(numero(0)? as usize),
             "menu" => Passo::Menu,
-            "filtros" => Passo::Filtros,
             "graficos" => Passo::Graficos,
             "formas_do_caixa" => Passo::FormasDoCaixa,
             "buscar" => Passo::Buscar(argumentos.join(" ")),

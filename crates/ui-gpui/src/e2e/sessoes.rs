@@ -533,104 +533,101 @@ fn a_guia_se_arrasta_se_renomeia_ganha_cor_e_fecha_as_outras(cx: &mut TestAppCon
     });
 }
 
-/// 🧊 **Galeria e Contato congeladas** (dono, 03/out/2026): numa janela estreita
-/// o grid rola na horizontal, mas a metade da esquerda não sai do lugar — e as
-/// duas metades de cada sessão ficam na mesma altura, rolando juntas.
+/// 🧊 **Galeria e Contato congeladas** (dono, 03/out/2026), agora pelo
+/// `DataTable` do gpui-kit: numa janela estreita o grid rola na horizontal, a
+/// Galeria não sai do lugar e segue na altura da sua linha; o ícone do
+/// cabeçalho ordena, e o clique na linha abre a sessão.
 #[gpui_kit::test]
 fn as_duas_primeiras_colunas_ficam_congeladas_na_rolagem_horizontal(cx: &mut TestAppContext) {
     let e = abrir_o_app(cx, Cenario::default());
     e.entrar_na_conta(cx);
-    // Estreita o bastante para a parte que rola não caber.
+    // Estreita o bastante para as colunas não caberem.
     let visual = VisualTestContext::from_window(e.raiz.into(), cx);
     visual.simulate_resize(gpui_kit::size(gpui_kit::px(1000.), gpui_kit::px(800.)));
     e.app(cx, |app, _window, cx| {
-        app.sessoes.update(cx, |tela, cx| {
-            tela.escolher_periodo_para_teste(None, cx);
-            // 🔎 Com a linha de filtros: as duas metades também se alinham ali.
-            tela.alternar_filtros(cx);
-        });
+        app.sessoes
+            .update(cx, |tela, cx| tela.escolher_periodo_para_teste(None, cx));
     });
     e.esperar(cx);
     let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
     visual.update(|window, _| window.refresh());
     visual.run_until_parked();
 
-    // Os campos mais altos (data, dois empilhados) cabem na linha de filtros,
-    // e o campo de texto da esquerda começa na mesma altura que os da direita.
-    let data = visual
-        .debug_bounds("filtro-Criada")
-        .expect("o filtro de data");
-    let galeria = visual
-        .debug_bounds("filtro-Galeria")
-        .expect("o filtro da galeria");
-    let levadas = visual
-        .debug_bounds("filtro-Levadas")
-        .expect("o filtro de levadas");
-    assert_eq!(
-        galeria.top(),
-        levadas.top(),
-        "filtros das duas metades alinhados"
-    );
-    assert!(
-        data.size.height <= gpui_kit::px(58.),
-        "a data cabe na linha: {data:?}"
-    );
-
     // O seletor do GPUI é `&'static str`; o vazamento é só deste teste.
-    let seletor_esq: &'static str = Box::leak(format!("sessao-{GALERIA}").into_boxed_str());
-    let seletor_dir: &'static str = Box::leak(format!("sessao-dados-{GALERIA}").into_boxed_str());
-    let congelada = |visual: &mut VisualTestContext| {
+    let seletor = |nome: String| -> &'static str { Box::leak(nome.into_boxed_str()) };
+    let galeria = seletor(format!("sessao-galeria-{GALERIA}"));
+    let situacao = seletor(format!("sessao-situacao-{GALERIA}"));
+    let medir = |visual: &mut VisualTestContext, s: &'static str| {
         visual
-            .debug_bounds(seletor_esq)
-            .expect("a metade congelada da sessão está desenhada")
-    };
-    let que_rola = |visual: &mut VisualTestContext| {
-        visual
-            .debug_bounds(seletor_dir)
-            .expect("a metade que rola da sessão está desenhada")
+            .debug_bounds(s)
+            .unwrap_or_else(|| panic!("{s} está desenhado"))
     };
 
-    let (antes_esq, antes_dir) = (congelada(&mut visual), que_rola(&mut visual));
+    let (antes_g, antes_l) = (medir(&mut visual, galeria), medir(&mut visual, situacao));
     assert_eq!(
-        antes_esq.top(),
-        antes_dir.top(),
-        "as duas metades na mesma altura"
-    );
-    assert_eq!(
-        antes_esq.size.height, antes_dir.size.height,
-        "e com a mesma altura"
+        antes_g.center().y,
+        antes_l.center().y,
+        "as células da mesma sessão na mesma altura"
     );
     assert!(
-        antes_dir.left() >= antes_esq.right(),
-        "a metade que rola começa depois da congelada ({antes_esq:?} / {antes_dir:?})"
+        antes_l.left() >= antes_g.right(),
+        "a Situação vem depois da Galeria"
     );
 
-    // 🖱️ A roda horizontal sobre a parte que rola.
-    // A linha é mais larga que a janela: o ponto tem de estar na parte visível.
-    let sobre = gpui_kit::point(antes_dir.left() + gpui_kit::px(100.), antes_dir.center().y);
+    // 🖱️ A roda horizontal sobre a parte que rola — pouco, para a Situação
+    // seguir à vista (o kit só desenha as colunas visíveis).
+    let sobre = gpui_kit::point(antes_l.center().x, antes_l.center().y);
     visual.simulate_mouse_move(sobre, None, gpui_kit::Modifiers::default());
     visual.simulate_event(gpui_kit::ScrollWheelEvent {
         position: sobre,
         delta: gpui_kit::ScrollDelta::Pixels(gpui_kit::point(
-            gpui_kit::px(-300.),
+            gpui_kit::px(-60.),
             gpui_kit::px(0.),
         )),
         ..Default::default()
     });
     visual.run_until_parked();
 
-    let (depois_esq, depois_dir) = (congelada(&mut visual), que_rola(&mut visual));
+    let (depois_g, depois_l) = (medir(&mut visual, galeria), medir(&mut visual, situacao));
     assert!(
-        depois_dir.left() < antes_dir.left(),
-        "a parte que rola andou ({antes_dir:?} → {depois_dir:?})"
+        depois_l.left() < antes_l.left(),
+        "a parte que rola andou ({antes_l:?} → {depois_l:?})"
     );
     assert_eq!(
-        depois_esq, antes_esq,
-        "a metade congelada não sai do lugar na rolagem horizontal"
+        depois_g, antes_g,
+        "a Galeria não sai do lugar na rolagem horizontal"
     );
-    assert_eq!(
-        depois_esq.top(),
-        depois_dir.top(),
-        "e segue alinhada com a outra metade"
-    );
+
+    // ↕️ O ícone de ordenar fica logo à direita do título "Galeria": um
+    // clique ordena de Z a A, e o segundo de A a Z.
+    let cabecalho = medir(&mut visual, "cabecalho-Galeria");
+    let icone = gpui_kit::point(cabecalho.right() + gpui_kit::px(8.), cabecalho.center().y);
+    let titulos = |e: &super::Estudio, cx: &mut TestAppContext| {
+        e.app(cx, |app, _w, cx| app.sessoes.read(cx).titulos_na_tabela(cx))
+    };
+    let do_site = titulos(&e, cx);
+    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    visual.simulate_click(icone, gpui_kit::Modifiers::none());
+    visual.run_until_parked();
+    let mut z_a = do_site.clone();
+    z_a.sort_by_key(|t| std::cmp::Reverse(t.to_lowercase()));
+    assert_eq!(titulos(&e, cx), z_a, "o primeiro clique ordena de Z a A");
+    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    visual.simulate_click(icone, gpui_kit::Modifiers::none());
+    visual.run_until_parked();
+    let mut a_z = z_a.clone();
+    a_z.reverse();
+    assert_eq!(titulos(&e, cx), a_z, "o segundo, de A a Z");
+
+    // 🖱️ O clique na linha abre a sessão, como antes.
+    let mut visual = VisualTestContext::from_window(e.raiz.into(), cx);
+    let linha = medir(&mut visual, galeria);
+    visual.simulate_click(linha.center(), gpui_kit::Modifiers::none());
+    visual.run_until_parked();
+    e.esperar(cx);
+    e.app(cx, |app, _w, _cx| {
+        assert_eq!(app.sessao_aberta_para_teste(), Some(GALERIA));
+        // 🪟 A tabela sumiu com o clique: o foco não pode ter ido com ela.
+        assert_eq!(app.focos_perdidos, 0, "o foco não caiu com a tabela");
+    });
 }

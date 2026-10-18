@@ -23,18 +23,19 @@ use std::time::Duration;
 use biblioteca_core::dados_do_cliente;
 use biblioteca_core::dinheiro;
 use biblioteca_core::exclusao;
-use biblioteca_core::filtro_de_coluna::{self, Coluna};
 use biblioteca_core::local::LocalDaSessao;
 use biblioteca_core::sessoes::{
-    self, estado_do_fotolivro, estado_no_caixa, primeiro_envio_do_fotolivro, ContagemDeFotos,
-    Criterio, EstadoDoFotolivro, EstadoNoCaixa, FaixaDeDatas, PagoNoCaixa, ResumoDoFotolivro,
-    SessaoFotografica, Situacao, Totais,
+    self, estado_do_fotolivro, estado_no_caixa, ContagemDeFotos, Criterio, EstadoDoFotolivro,
+    EstadoNoCaixa, FaixaDeDatas, PagoNoCaixa, ResumoDoFotolivro, SessaoFotografica, Situacao,
+    Totais,
 };
 use domain::services::pos_venda::{Estudio, GaleriaDoPainel, NovaGaleria, Produto, Sessao};
 
 use super::periodo;
+use super::tabela_de_sessoes::{SessoesNaTabela, ALTURA_DA_LINHA};
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::table::{DataTable, TableState};
 use gpui_kit::component::{ActiveTheme, Disableable, Selectable, Sizable};
 use gpui_kit::{
     div, prelude::*, px, AnyElement, App, Context, EventEmitter, Hsla, MouseButton, SharedString,
@@ -236,8 +237,6 @@ pub struct Sessoes {
     /// 📈 O diálogo dos gráficos aberto.
     graficos_abertos: bool,
     situacao: Option<Situacao>,
-    /// O "Filtros" do site: um campo por coluna, sob o cabeçalho.
-    filtros: super::filtros_da_lista::FiltrosDaLista,
     carregando: bool,
     erro: Option<SharedString>,
     /// O último erro que virou toast (ver `estilo::toast_quando_mudar`).
@@ -255,12 +254,8 @@ pub struct Sessoes {
     /// 🔐 …e de **nenhum**: a lista vazia vira o aviso de procurar quem
     /// administra o sistema.
     sem_estudio_liberado: bool,
-    /// 🧊 A rolagem das duas metades do grid (a congelada e a que rola): a
-    /// vertical é uma só, e a horizontal é a da metade da direita.
-    rolagem_vertical: gpui_kit::ScrollHandle,
-    rolagem_horizontal: gpui_kit::ScrollHandle,
-    /// A sessão sob o mouse, para a linha acender inteira nas duas metades.
-    linha_sob_o_mouse: Option<String>,
+    /// 📋 A lista, no `DataTable` do gpui-kit (ver `sessoes::tabela_de_sessoes`).
+    tabela: gpui_kit::Entity<TableState<SessoesNaTabela>>,
     /// 🗑️ O diálogo de excluir, quando aparece.
     exclusao: Option<Exclusao>,
     /// Quantos pedidos do relato das máquinas estão no ar. A resposta não diz
@@ -430,6 +425,17 @@ impl Sessoes {
         // 📅 **A lista abre em hoje** (dono, 2026-09-18), como no site: o balcão
         // trabalha o dia, e a lista inteira é o arquivo.
         let hoje = hoje_no_estudio();
+        // 📋 A seleção de linha do kit fica desligada: as setas a moveriam, e
+        // a linha abre a sessão pelo clique (`SessoesNaTabela::render_tr`).
+        // A ordem das colunas é fixa — a mesma do site.
+        let tela = cx.entity().downgrade();
+        let tabela = cx.new(|cx| {
+            TableState::new(SessoesNaTabela::nova(tela), window, cx)
+                .row_selectable(false)
+                .col_selectable(false)
+                .col_movable(false)
+                .sortable(true)
+        });
         Self {
             publicador,
             calendario: None,
@@ -448,7 +454,6 @@ impl Sessoes {
             formas_abertas: false,
             graficos_abertos: false,
             situacao: None,
-            filtros: super::filtros_da_lista::FiltrosDaLista::novos(window, cx),
             carregando: false,
             erro: None,
             erro_visto: None,
@@ -456,9 +461,7 @@ impl Sessoes {
             local_escolhido: None,
             estudios_restritos: false,
             sem_estudio_liberado: false,
-            rolagem_vertical: gpui_kit::ScrollHandle::new(),
-            rolagem_horizontal: gpui_kit::ScrollHandle::new(),
-            linha_sob_o_mouse: None,
+            tabela,
             exclusao: None,
             sobras_em_voo: 0,
             reler_sobras: false,
@@ -911,7 +914,6 @@ impl Sessoes {
         !self.busca.read(cx).value().trim().is_empty()
             || self.situacao.is_some()
             || self.faixa.is_some()
-            || !self.filtros.ativos(cx).is_empty()
     }
 
     /// Abre ou fecha o calendário do período.
@@ -988,26 +990,18 @@ impl Sessoes {
         let hoje = hoje_no_estudio();
         self.faixa = Some(FaixaDeDatas::no_dia(hoje.format("%Y-%m-%d").to_string()));
         self.calendario = None;
-        self.filtros.limpar(window, cx);
         cx.notify();
     }
 
-    /// As sessões que a tabela mostra: a busca, a situação, o período e os
-    /// filtros de coluna — **todos** somam.
+    /// As sessões que a tabela mostra: a busca, a situação e o período —
+    /// **todos** somam.
     fn visiveis<'a>(
         &self,
         todas: &'a [SessaoFotografica],
         agora: i64,
         cx: &Context<Self>,
     ) -> Vec<&'a SessaoFotografica> {
-        let recorte = sessoes::filtrar(todas, &self.criterio(cx), agora);
-        filtro_de_coluna::filtrar_por_coluna(recorte, &self.filtros.ativos(cx), agora)
-    }
-
-    /// O botão "Filtros": liga ou desliga a linha de campos.
-    pub fn alternar_filtros(&mut self, cx: &mut Context<Self>) {
-        self.filtros.alternar();
-        cx.notify();
+        sessoes::filtrar(todas, &self.criterio(cx), agora)
     }
 
     pub fn filtrar_por(&mut self, situacao: Option<Situacao>, cx: &mut Context<Self>) {
@@ -1200,10 +1194,10 @@ impl Sessoes {
             .collect()
     }
 
-    /// 🧪 A linha de filtros por coluna.
+    /// 🧪 Os títulos na ordem da tabela — a do cabeçalho, quando há.
     #[cfg(test)]
-    pub(crate) fn filtros_para_teste(&self) -> &super::filtros_da_lista::FiltrosDaLista {
-        &self.filtros
+    pub(crate) fn titulos_na_tabela(&self, cx: &App) -> Vec<String> {
+        self.tabela.read(cx).delegate().titulos()
     }
 
     /// 🧪 A frase de erro da tela.
@@ -1530,7 +1524,7 @@ fn local_preso_ao_padrao() -> bool {
 }
 
 /// O selo de situação, com as cores de `COR_DA_SITUACAO` do site.
-fn selo_da_situacao(situacao: Situacao, cx: &App) -> impl IntoElement {
+pub(super) fn selo_da_situacao(situacao: Situacao, cx: &App) -> impl IntoElement {
     use crate::tema::cores;
     let tema = cx.theme();
     let cores = match situacao {
@@ -1544,7 +1538,7 @@ fn selo_da_situacao(situacao: Situacao, cx: &App) -> impl IntoElement {
 
 /// `2026-09-16T13:04:09Z` → `16/09/2026 10:04:09`, no fuso do estúdio. Sem hora
 /// no texto (só `YYYY-MM-DD`), mostra só o dia: não se inventa `00:00:00`.
-fn data_hora_br(iso: &str) -> String {
+pub(super) fn data_hora_br(iso: &str) -> String {
     let brasilia = chrono::FixedOffset::west_opt(3 * 3600).expect("fuso fixo");
     chrono::DateTime::parse_from_rfc3339(iso)
         .map(|d| {
@@ -2497,39 +2491,6 @@ impl Sessoes {
                     })),
                 )
             }))
-            // 🔎 **"Filtros"**: liga a linha de campos sob o cabeçalho, e diz
-            // quantos estão valendo; o × ao lado apaga só eles.
-            .child({
-                let quantos = self.filtros.ativos(cx).len();
-                let acesa = self.filtros.ligada() || quantos > 0;
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(2.))
-                    .child(
-                        pilula(
-                            "sessoes-filtros".into(),
-                            "Filtros",
-                            (quantos > 0).then_some(quantos),
-                            acesa,
-                        )
-                        .debug_selector(|| "sessoes-filtros".into())
-                        .on_click(cx.listener(|tela, _ev, _window, cx| {
-                            tela.alternar_filtros(cx);
-                        })),
-                    )
-                    .when(quantos > 0, |d| {
-                        d.child(
-                            estilo::botao_fantasma("sessoes-filtros-limpar", cx)
-                                .text_color(apagado)
-                                .child(Icon::new(Icone::X).size(px(14.)))
-                                .on_click(cx.listener(|tela, _ev, window, cx| {
-                                    tela.filtros.limpar(window, cx);
-                                    cx.notify();
-                                })),
-                        )
-                    })
-            })
             .when(filtrando, |barra| {
                 barra.child(
                     estilo::botao_fantasma("sessoes-limpar", cx)
@@ -2678,16 +2639,12 @@ impl Sessoes {
             sessoes::DIAS_DO_GRAFICO
         );
 
-        // A janela: a busca, a situação e os filtros de coluna, sem o período.
+        // A janela: a busca e a situação, sem o período.
         let criterio = Criterio {
             periodo: None,
             ..self.criterio(cx)
         };
-        let sem_periodo = filtro_de_coluna::filtrar_por_coluna(
-            sessoes::filtrar(todas, &criterio, agora),
-            &self.filtros.ativos(cx),
-            agora,
-        );
+        let sem_periodo = sessoes::filtrar(todas, &criterio, agora);
         let fim = self
             .faixa
             .as_ref()
@@ -3293,17 +3250,8 @@ impl Sessoes {
         agora: i64,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let tema = cx.theme();
-        let (borda, apagado, realce, fundo) = (
-            tema.border,
-            tema.muted_foreground,
-            tema.muted,
-            tema.background,
-        );
-        // 🔎 Com a linha de filtros na tela, a tabela fica mesmo vazia: sumir
-        // com ela tiraria os campos de onde se desfaz o filtro.
-        let com_filtros = self.filtros.visivel(cx);
-        if visiveis.is_empty() && !com_filtros {
+        let apagado = cx.theme().muted_foreground;
+        if visiveis.is_empty() {
             let local = self.local_da_lista();
             let frase: SharedString = if self.sem_estudio_liberado {
                 // 🔐 A lista está vazia porque o perfil não alcança estúdio
@@ -3335,362 +3283,43 @@ impl Sessoes {
                 .into_any_element();
         }
 
-        // As colunas do site que o app tem (as de "máquinas" são do relato do
-        // navegador, e não existem aqui). Largura fixa nos números, alinhados
-        // à direita como no site.
-        // 💵 A do caixa é mais larga: ela pode trazer o "Fechar venda" em vez
-        // de um número (dono, 20/set/2026).
-        const LARGURAS: [f32; 9] = [84., 84., 104., 112., 124., 112., 136., 150., 150.];
-        // 🧊 **Galeria e Contato ficam congeladas** (dono, 03/out/2026): com o
-        // grid rolando na horizontal, o nome da sessão não pode sair da tela. É
-        // o `Column::fixed(ColumnFixed::Left)` do `DataTable` do gpui-kit, feito
-        // à mão porque o `DataTable` não tem linha de filtros sob o cabeçalho
-        // nem linha de 52px com o contato em duas linhas.
-        //
-        // 🔑 **Dois painéis lado a lado**: o da esquerda é fixo, o da direita
-        // rola na horizontal. Cada um tem a sua rolagem vertical, mas as duas
-        // seguem o **mesmo** `ScrollHandle` — rolar uma rola a outra, e a linha
-        // da esquerda fica sempre ao lado da sua par.
-        // 🚨 Por isso a altura da linha e a da linha de filtros são **fixas**:
-        // com `min_h`, uma linha mais alta num painel desalinharia o outro.
-        const GALERIA: f32 = 200.;
-        const CONTATO: f32 = 220.;
-        const SITUACAO: f32 = 160.;
-        const VAO: f32 = 16.;
-        const RECUO: f32 = 8.;
-        const ALTURA_DA_LINHA: f32 = 52.;
-        // Cabe os dois campos de data empilhados, que são os mais altos.
-        const ALTURA_DOS_FILTROS: f32 = 62.;
-        // 🗑️ A lixeira: só para o SuperAdmin, como o `podeExcluir` do site.
-        const LIXEIRA: f32 = 28.;
+        // 📋 O `DataTable` do gpui-kit: colunas congeladas, largura ajustável e
+        // ordem pelo cabeçalho vêm dele; as células são as de
+        // `sessoes::tabela_de_sessoes`.
         let com_lixeira = self.super_admin;
-        let largura_congelada = RECUO + GALERIA + VAO + CONTATO + VAO;
-        // ↔️ A parte que rola não encolhe abaixo disto; "Situação" é quem
-        // absorve a folga quando a janela é larga.
-        let largura_minima = {
-            let fixas: f32 = LARGURAS.iter().sum();
-            let colunas = 1 + LARGURAS.len() + usize::from(com_lixeira);
-            let lixeira = if com_lixeira { LIXEIRA } else { 0. };
-            SITUACAO + fixas + lixeira + VAO * (colunas - 1) as f32 + RECUO
-        };
-        let numero = |largura: f32| div().w(px(largura)).flex_none().flex().justify_end();
-        let titulo_da_coluna = |texto: &'static str, largura: f32| numero(largura).child(texto);
-        let flexivel = |minima: f32| div().flex_1().min_w(px(minima));
-        let valor_ou_traco = |centavos: Option<i64>| match centavos {
-            Some(c) if c > 0 => dinheiro::formatar(c),
-            _ => "—".to_string(),
-        };
-
-        let cabecalho = || {
-            div()
-                .flex()
-                .items_center()
-                .flex_none()
-                .gap(px(VAO))
-                .h(px(40.))
-                .border_b_1()
-                .border_color(borda)
-                .text_sm()
-                .font_weight(gpui_kit::FontWeight::MEDIUM)
-        };
-        let cabecalho_congelado = cabecalho()
-            .pl(px(RECUO))
-            .pr(px(VAO))
-            .child(div().w(px(GALERIA)).flex_none().child("Galeria"))
-            .child(div().w(px(CONTATO)).flex_none().child("Contato"));
-        let cabecalho_que_rola = cabecalho()
-            .pr(px(RECUO))
-            .child(flexivel(SITUACAO).child("Situação"))
-            .child(titulo_da_coluna("Levadas", LARGURAS[0]))
-            .child(titulo_da_coluna("À venda", LARGURAS[1]))
-            .child(titulo_da_coluna("Compradas", LARGURAS[2]))
-            .child(titulo_da_coluna("Balcão", LARGURAS[3]))
-            .child(titulo_da_coluna("Caixa (PDV)", LARGURAS[4]))
-            .child(titulo_da_coluna("Pós-venda", LARGURAS[5]))
-            .child(titulo_da_coluna("Fotolivro", LARGURAS[7]))
-            .child(titulo_da_coluna("Fotolivro enviado em", LARGURAS[8]))
-            .child(titulo_da_coluna("Criada", LARGURAS[6]))
-            .when(com_lixeira, |c| c.child(div().w(px(LIXEIRA)).flex_none()));
-
-        // 🔎 A linha de filtros, com as larguras do cabeçalho: cada campo fica
-        // sob a sua coluna, como no site.
-        let filtros = || {
-            div()
-                .flex()
-                .items_start()
-                .flex_none()
-                .gap(px(VAO))
-                .h(px(ALTURA_DOS_FILTROS))
-                .py(px(4.))
-                .border_b_1()
-                .border_color(borda)
-        };
-        let campo = |largura: f32, coluna: Coluna| {
-            div()
-                .w(px(largura))
-                .flex_none()
-                .child(self.filtros.campo(coluna))
-        };
-        let filtros_congelados = com_filtros.then(|| {
-            filtros()
-                .pl(px(RECUO))
-                .pr(px(VAO))
-                .child(campo(GALERIA, Coluna::Galeria))
-                .child(campo(CONTATO, Coluna::Contato))
-        });
-        let filtros_que_rolam = com_filtros.then(|| {
-            filtros()
-                .pr(px(RECUO))
-                .child(flexivel(SITUACAO).child(self.filtros.campo(Coluna::Situacao)))
-                .child(campo(LARGURAS[0], Coluna::Levadas))
-                .child(campo(LARGURAS[1], Coluna::AVenda))
-                .child(campo(LARGURAS[2], Coluna::Compradas))
-                .child(campo(LARGURAS[3], Coluna::Balcao))
-                .child(campo(LARGURAS[4], Coluna::Caixa))
-                .child(campo(LARGURAS[5], Coluna::PosVenda))
-                .child(campo(LARGURAS[7], Coluna::Fotolivro))
-                .child(campo(LARGURAS[8], Coluna::FotolivroEnviadoEm))
-                .child(campo(LARGURAS[6], Coluna::Criada))
-                .when(com_lixeira, |c| c.child(div().w(px(LIXEIRA)).flex_none()))
-        });
-        let nenhuma = visiveis.is_empty().then(|| {
-            div()
-                .p(px(24.))
-                .text_sm()
-                .text_color(apagado)
-                .flex()
-                .justify_center()
-                .child(
-                    "Nenhuma galeria passa por estes filtros. Apague o que está nos campos \
-                     acima, ou use o × ao lado de \"Filtros\".",
-                )
-        });
-
-        // 🖱️ O realce da linha vale para as duas metades: o mouse está numa, e
-        // a outra acende junto.
-        let moldura_da_linha = |sessao: &SessaoFotografica, lado: &'static str| {
-            let id = sessao.id.clone();
-            let id_do_hover = sessao.id.clone();
-            let realcada = self.aberta.as_deref() == Some(sessao.id.as_str())
-                || self.linha_sob_o_mouse.as_deref() == Some(sessao.id.as_str());
-            div()
-                .id(SharedString::from(format!("{lado}-{}", sessao.id)))
-                .flex()
-                .items_center()
-                .flex_none()
-                .gap(px(VAO))
-                .h(px(ALTURA_DA_LINHA))
-                .py(px(6.))
-                .border_b_1()
-                .border_color(borda)
-                .text_sm()
-                .cursor_pointer()
-                .when(realcada, |linha| linha.bg(realce.opacity(0.5)))
-                .on_hover(cx.listener(move |tela, sobre: &bool, _window, cx| {
-                    if *sobre {
-                        tela.linha_sob_o_mouse = Some(id_do_hover.clone());
-                        cx.notify();
-                    } else if tela.linha_sob_o_mouse.as_deref() == Some(id_do_hover.as_str()) {
-                        tela.linha_sob_o_mouse = None;
-                        cx.notify();
-                    }
-                }))
-                .on_click(cx.listener(move |tela, _ev, _window, cx| tela.abrir(id.clone(), cx)))
-        };
-
-        let mut linhas_congeladas = Vec::with_capacity(visiveis.len());
-        let mut linhas_que_rolam = Vec::with_capacity(visiveis.len());
-        for sessao in visiveis {
-            let (balcao, pos_venda) = match &sessao.totais {
-                Some(t) => (Some(t.balcao), Some(t.pos_venda)),
-                None => (None, None),
-            };
-            linhas_congeladas.push(
-                moldura_da_linha(sessao, "congelada")
-                    // O e2e do ciclo de vida abre a sessão pela linha, como o operador.
-                    .debug_selector({
-                        let id = sessao.id.clone();
-                        move || format!("sessao-{id}")
-                    })
-                    .pl(px(RECUO))
-                    .pr(px(VAO))
-                    .child(
-                        div()
-                            .w(px(GALERIA))
-                            .flex_none()
-                            .font_weight(gpui_kit::FontWeight::MEDIUM)
-                            .truncate()
-                            .child(sessao.titulo.clone()),
-                    )
-                    .child(
-                        div()
-                            .w(px(CONTATO))
-                            .flex_none()
-                            .flex()
-                            .flex_col()
-                            .text_xs()
-                            .text_color(apagado)
-                            .when(sessao.email.is_none() && sessao.whatsapp.is_none(), |d| {
-                                d.child("—")
-                            })
-                            .children(sessao.email.clone().map(|e| div().truncate().child(e)))
-                            .children(sessao.whatsapp.clone().map(|w| div().truncate().child(w))),
-                    ),
+        let aberta = self.aberta.clone();
+        self.tabela.update(cx, |tabela, cx| {
+            let (mudou, colunas_mudaram) = tabela.delegate_mut().trocar_linhas(
+                visiveis,
+                agora,
+                com_lixeira,
+                aberta.as_deref(),
             );
-            linhas_que_rolam.push(
-                moldura_da_linha(sessao, "rolante")
-                    // 🧪 Para o teste de janela conferir o alinhamento com a metade
-                    // congelada (`sessao-{id}`).
-                    .debug_selector({
-                        let id = sessao.id.clone();
-                        move || format!("sessao-dados-{id}")
-                    })
-                    .pr(px(RECUO))
-                    .child(
-                        flexivel(SITUACAO)
-                            .flex()
-                            .gap(px(6.))
-                            .items_center()
-                            .child(selo_da_situacao(sessao.situacao(agora), cx))
-                            // 🏢 **A sessão sem estúdio é marcada aqui** (dono,
-                            // 18/set/2026: *"talvez alguma indicação no grid quando
-                            // a sessão estiver com esse problema, pois atrapalha
-                            // até o fechamento de caixa"*). Ela não entra em caixa
-                            // nenhum enquanto ninguém a corrigir, e é o cabeçalho
-                            // da galeria que corrige.
-                            .when(sessao.sem_estudio, |c| {
-                                c.child(
-                                    crate::estilo::selo_colorido(crate::tema::cores::selo_ambar())
-                                        .child("Sem estúdio"),
-                                )
-                            }),
-                    )
-                    .child(numero(LARGURAS[0]).child(sessao.fotos.levadas_no_balcao.to_string()))
-                    .child(numero(LARGURAS[1]).child(sessao.fotos.disponiveis.to_string()))
-                    .child(numero(LARGURAS[2]).child(sessao.fotos.compradas.to_string()))
-                    .child(numero(LARGURAS[3]).child(valor_ou_traco(balcao)))
-                    .child(numero(LARGURAS[4]).child(celula_do_caixa(
-                        sessao.caixa.as_ref(),
-                        sessao.fotos.levadas_no_balcao,
-                        sessao.id.clone(),
-                        apagado,
-                        cx,
-                    )))
-                    .child(numero(LARGURAS[5]).child(valor_ou_traco(pos_venda)))
-                    .child(numero(LARGURAS[7]).child(celula_do_fotolivro(
-                        sessao.fotolivro.as_ref(),
-                        sessao.caixa.as_ref(),
-                        apagado,
-                    )))
-                    // 📖 Quando o livro foi ao cliente: o primeiro envio.
-                    .child(
-                        numero(LARGURAS[8])
-                            .text_xs()
-                            .whitespace_nowrap()
-                            .text_color(apagado)
-                            .child(
-                                primeiro_envio_do_fotolivro(sessao.fotolivro.as_ref())
-                                    .map(data_hora_br)
-                                    .unwrap_or_else(|| "—".into()),
-                            ),
-                    )
-                    .child(
-                        numero(LARGURAS[6])
-                            .text_xs()
-                            .whitespace_nowrap()
-                            .text_color(apagado)
-                            .child(data_hora_br(&sessao.criada_em_iso)),
-                    )
-                    .when(com_lixeira, |linha| {
-                        linha.child(
-                            div()
-                                .w(px(LIXEIRA))
-                                .flex_none()
-                                .child(lixeira(sessao, apagado, cx)),
-                        )
-                    }),
-            );
-        }
-
-        // ↕️ As duas rolagens verticais compartilham o `ScrollHandle`: o offset
-        // é um só, e as duas metades andam juntas.
-        let rolagem_vertical = |id: &'static str| {
-            div()
-                .id(id)
-                .flex()
-                .flex_col()
-                .flex_1()
-                .min_h(px(0.))
-                .overflow_y_scroll()
-                .track_scroll(&self.rolagem_vertical)
-        };
-
-        // 🧊 O painel congelado. A roda horizontal sobre ele (trackpad) rola o
-        // painel da direita: o painel em si não tem o que rolar nessa direção.
-        let congelado = div()
-            .flex()
-            .flex_col()
-            .flex_none()
-            .w(px(largura_congelada))
-            .min_h(px(0.))
-            .border_r_1()
-            .border_color(borda)
-            .on_scroll_wheel(
-                cx.listener(|tela, ev: &gpui_kit::ScrollWheelEvent, window, cx| {
-                    let delta = ev.delta.pixel_delta(window.line_height());
-                    if delta.x != px(0.) {
-                        let rolagem = &tela.rolagem_horizontal;
-                        let mut posicao = rolagem.offset();
-                        posicao.x = (posicao.x + delta.x).clamp(-rolagem.max_offset().x, px(0.));
-                        rolagem.set_offset(posicao);
-                        cx.notify();
-                    }
-                }),
-            )
-            .child(cabecalho_congelado)
-            .children(filtros_congelados)
-            .child(
-                rolagem_vertical("sessoes-linhas-congeladas")
-                    .children(nenhuma)
-                    .children(linhas_congeladas),
-            );
-
-        // ↔️ Duas rolagens encaixadas: a de fora é só horizontal e leva o
-        // cabeçalho junto com as linhas; a de dentro é só vertical, e o
-        // cabeçalho fica parado em cima dela.
-        // 🚨 `restrict_scroll_to_axis` na de fora é o que impede a roda
-        // vertical de rolar as duas ao mesmo tempo — sem ele o GPUI converte o
-        // `delta.y` em horizontal em quem só rola em x.
-        let mut rolagem_horizontal = div()
-            .id("sessoes-tabela")
-            .flex()
-            .flex_col()
-            .flex_1()
-            .min_w(px(0.))
-            .min_h(px(0.))
-            .overflow_x_scroll()
-            .track_scroll(&self.rolagem_horizontal);
-        rolagem_horizontal.style().restrict_scroll_to_axis = Some(true);
-
+            if colunas_mudaram {
+                tabela.refresh(cx);
+            }
+            if mudou {
+                cx.notify();
+            }
+        });
         crate::estilo::cartao(cx)
             .flex()
-            .flex_row()
+            .flex_col()
             .flex_1()
             .min_h(px(0.))
-            .bg(fundo)
-            .child(congelado)
+            .overflow_hidden()
+            .text_sm()
+            // 🪟 **A tabela não toma o foco no clique**, como a lista de antes:
+            // o clique na linha abre a sessão e a tabela some, e o foco iria
+            // junto com ela — o operador perderia os atalhos até clicar de
+            // novo (o e2e do ciclo pegou, 18/out/2026). O `prevent_default` na
+            // captura é o que o GPUI respeita para não transferir o foco; o
+            // clique, a rolagem e a ordenação seguem.
+            .capture_any_mouse_down(|_, window, _| window.prevent_default())
             .child(
-                rolagem_horizontal.child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .flex_1()
-                        .min_h(px(0.))
-                        .min_w(px(largura_minima))
-                        .child(cabecalho_que_rola)
-                        .children(filtros_que_rolam)
-                        .child(rolagem_vertical("sessoes-linhas").children(linhas_que_rolam)),
-                ),
+                DataTable::new(&self.tabela)
+                    .bordered(false)
+                    .with_size(gpui_kit::component::Size::Size(px(ALTURA_DA_LINHA))),
             )
             .into_any_element()
     }
@@ -3704,7 +3333,12 @@ impl Sessoes {
 ///
 /// ⚠️ `stop_propagation`: a linha inteira abre a sessão, e excluir não pode ser
 /// efeito colateral de abrir a galeria.
-fn lixeira(sessao: &SessaoFotografica, apagado: Hsla, cx: &Context<Sessoes>) -> AnyElement {
+pub(super) fn lixeira(
+    sessao: &SessaoFotografica,
+    apagado: Hsla,
+    tela: gpui_kit::WeakEntity<Sessoes>,
+    cx: &App,
+) -> AnyElement {
     use crate::recursos::Icone;
     use gpui_kit::component::Icon;
 
@@ -3739,10 +3373,10 @@ fn lixeira(sessao: &SessaoFotografica, apagado: Hsla, cx: &Context<Sessoes>) -> 
         .tooltip(|window, cx| {
             gpui_kit::component::tooltip::Tooltip::new("Excluir esta sessão").build(window, cx)
         })
-        .on_click(cx.listener(move |tela, _ev, window, cx| {
+        .on_click(move |_ev, window, cx| {
             cx.stop_propagation();
-            tela.pedir_exclusao(&id, window, cx);
-        }))
+            let _ = tela.update(cx, |tela, cx| tela.pedir_exclusao(&id, window, cx));
+        })
         .child(Icon::new(Icone::Trash2).size(px(16.)))
         .into_any_element()
 }
@@ -3750,7 +3384,7 @@ fn lixeira(sessao: &SessaoFotografica, apagado: Hsla, cx: &Context<Sessoes>) -> 
 /// 📖 A célula da coluna "Fotolivro" — a mesma tabela do `NoFotolivro` do
 /// site: `?`, `—`, "Não enviado" (o passivo, em âmbar), "E-mail dd/mm · não
 /// aberto" e "Aberto dd/mm", com "· WhatsApp" quando ele saiu.
-fn celula_do_fotolivro(
+pub(super) fn celula_do_fotolivro(
     fotolivro: Option<&ResumoDoFotolivro>,
     caixa: Option<&PagoNoCaixa>,
     apagado: Hsla,
@@ -3832,12 +3466,12 @@ fn celula_do_fotolivro(
 ///
 /// ⚠️ **`stop_propagation` não é detalhe**: a linha inteira abre a sessão, e
 /// sem ele o clique em "Fechar venda" abriria a sessão em vez do caixa.
-fn celula_do_caixa(
+pub(super) fn celula_do_caixa(
     caixa: Option<&PagoNoCaixa>,
     levadas: u32,
     sessao_id: String,
     apagado: Hsla,
-    cx: &Context<Sessoes>,
+    tela: gpui_kit::WeakEntity<Sessoes>,
 ) -> AnyElement {
     match estado_no_caixa(caixa, levadas) {
         EstadoNoCaixa::NaoSei => div().text_color(apagado).child("?").into_any_element(),
@@ -3858,10 +3492,12 @@ fn celula_do_caixa(
                 .font_weight(gpui_kit::FontWeight::MEDIUM)
                 .cursor_pointer()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .on_click(cx.listener(move |_tela, _ev, _window, cx| {
+                .on_click(move |_ev, _window, cx| {
                     cx.stop_propagation();
-                    cx.emit(FecharVendaPedida(sessao_id.clone()));
-                }))
+                    let _ = tela.update(cx, |_tela, cx| {
+                        cx.emit(FecharVendaPedida(sessao_id.clone()))
+                    });
+                })
                 .child("Fechar venda")
                 .into_any_element()
         }
@@ -4023,10 +3659,6 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
-    /// 🔎 **Os filtros de coluna do site** (dono, 24/set/2026). O botão
-    /// "Filtros", clicado de verdade, liga a linha; texto acha sem acento,
-    /// número pergunta "quanto" com o operador escolhido, e o "Limpar" da barra
-    /// apaga os campos junto com o resto.
     /// 📈 Os gráficos moram num diálogo: o botão da barra abre, o X fecha, e
     /// a página não os carrega. 💳 O cartão do caixa abre as formas no clique.
     #[gpui_kit::test]
@@ -4067,64 +3699,6 @@ mod testes {
         janela
             .update(cx, |tela, _window, _cx| {
                 assert!(tela.formas_abertas, "o clique abre as formas de pagamento");
-            })
-            .expect("a janela deve estar aberta");
-    }
-
-    #[gpui_kit::test]
-    fn os_filtros_de_coluna_recortam_a_lista_como_no_site(cx: &mut TestAppContext) {
-        use biblioteca_core::filtro_de_coluna::{Coluna, Operador};
-        let publicador = Arc::new(PublicadorDeMentira {
-            galerias: Mutex::new(vec![
-                galeria("g1", "Ensaio do João", Some("joao@exemplo.com")),
-                galeria("g2", "Casamento da Maria", Some("maria@outro.com")),
-            ]),
-            ..Default::default()
-        });
-        let janela = janela(cx, publicador);
-        com_sessao(cx, &janela);
-        janela
-            .update(cx, |tela, _window, cx| {
-                tela.escolher_periodo_para_teste(None, cx);
-                assert!(!tela.filtros_para_teste().visivel(cx), "nasce desligada");
-            })
-            .expect("a janela deve estar aberta");
-
-        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
-        visual.run_until_parked();
-        let botao = visual
-            .debug_bounds("sessoes-filtros")
-            .expect("o botão Filtros está na barra");
-        visual.simulate_click(botao.center(), gpui_kit::Modifiers::none());
-        visual.run_until_parked();
-        assert!(
-            visual.debug_bounds("filtro-Galeria").is_some(),
-            "a linha de campos aparece sob o cabeçalho"
-        );
-
-        janela
-            .update(cx, |tela, window, cx| {
-                assert!(tela.filtros_para_teste().ligada());
-                tela.filtros_para_teste()
-                    .escrever(Coluna::Galeria, "MARIA", window, cx);
-                assert_eq!(tela.titulos_visiveis(cx), ["Casamento da Maria"]);
-                assert!(tela.filtrando(cx), "filtro de coluna é recorte");
-
-                tela.filtros_para_teste()
-                    .escrever(Coluna::Galeria, "", window, cx);
-                tela.filtros_para_teste()
-                    .escrever(Coluna::AVenda, "4", window, cx);
-                assert!(tela.titulos_visiveis(cx).is_empty(), "3 à venda não é ≥ 4");
-                tela.filtros_para_teste().escolher_operador(
-                    Coluna::AVenda,
-                    Operador::MenorIgual,
-                    window,
-                    cx,
-                );
-                assert_eq!(tela.titulos_visiveis(cx).len(), 2);
-
-                tela.limpar_filtros(window, cx);
-                assert!(tela.filtros_para_teste().ativos(cx).is_empty());
             })
             .expect("a janela deve estar aberta");
     }

@@ -19,7 +19,7 @@ use gpui_kit::{
 };
 
 use super::{Embutido, Evento, Modo, Preferencias, Sons};
-use crate::sessoes::filtros_da_lista::Opcao;
+use crate::sessoes::opcao::Opcao;
 
 type Lista = SelectState<Vec<Opcao>>;
 

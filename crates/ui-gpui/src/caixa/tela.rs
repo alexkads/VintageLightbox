@@ -55,7 +55,7 @@ use super::flutuante::{Lote, Modo};
 use crate::estilo;
 use crate::pos_venda::porta::{PedidoJson, Publicador, Recado};
 use crate::recursos::Icone;
-use crate::sessoes::filtros_da_lista::Opcao;
+use crate::sessoes::opcao::Opcao;
 use crate::tema::cores;
 
 /// De quanto em quanto a tela pergunta se o site respondeu.
