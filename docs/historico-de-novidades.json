@@ -1,5 +1,15 @@
 [
   {
+    "versao": "0.1.166",
+    "data": "2026-10-18",
+    "titulo": "Mudanças internas.",
+    "importante": false,
+    "novidades": [
+      "Mudanças internas."
+    ],
+    "por_que_atualizar": "Para manter o balcão na mesma versão do site."
+  },
+  {
     "versao": "0.1.165",
     "data": "2026-10-18",
     "titulo": "Mudanças internas.",
