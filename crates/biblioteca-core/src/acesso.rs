@@ -46,6 +46,10 @@ pub struct Acesso {
     pub local_padrao: crate::local::LocalDaSessao,
     /// 📍 Pode escolher outro local e corrigir o local depois.
     pub pode_mudar_local: bool,
+    /// 📍 A lista de sessões fica no local padrão, sem o seletor de local — o
+    /// perfil manda, a conta não muda o local, ou esconde um local (o backend
+    /// junta as três razões).
+    pub lista_no_local_padrao: bool,
     /// 📍 Os locais cujo rótulo a tela não mostra a esta conta.
     pub locais_ocultos: Vec<crate::local::LocalDaSessao>,
     /// 📍 Os caixas que a conta pode ter abertos em cada estúdio.

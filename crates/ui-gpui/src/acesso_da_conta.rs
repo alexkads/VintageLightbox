@@ -40,6 +40,11 @@ pub fn pode_mudar_local() -> bool {
     com_acesso(|a| a.is_some_and(|a| a.admin || a.pode_mudar_local))
 }
 
+/// 📍 O perfil prende a lista de sessões ao local padrão, sem o seletor?
+pub fn lista_no_local_padrao() -> bool {
+    com_acesso(|a| a.is_some_and(|a| a.lista_no_local_padrao))
+}
+
 /// 📍 Esta conta vê o rótulo deste local?
 pub fn mostra_local(local: LocalDaSessao) -> bool {
     com_acesso(|a| a.is_none_or(|a| a.mostra_local(local)))

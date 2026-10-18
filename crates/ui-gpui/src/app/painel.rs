@@ -104,6 +104,11 @@ fn acesso_da_resposta(usuario: &serde_json::Value) -> Option<Acesso> {
             .get("pode_mudar_local")
             .and_then(|v| v.as_bool())
             .unwrap_or(false),
+        // 📍 Ausente (API anterior): solta — as outras razões a tela confere.
+        lista_no_local_padrao: acesso
+            .get("lista_no_local_padrao")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
         locais_ocultos: acesso
             .get("locais_ocultos")
             .map(textos)

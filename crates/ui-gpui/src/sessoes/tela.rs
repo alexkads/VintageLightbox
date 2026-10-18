@@ -1520,10 +1520,12 @@ fn local_da_galeria(g: &GaleriaDoPainel) -> LocalDaSessao {
         .unwrap_or_default()
 }
 
-/// 📍 A conta fica no local padrão, sem escolher: não pode mudar o local, ou
-/// tem um local escondido no perfil.
+/// 📍 A conta fica no local padrão, sem escolher: o perfil prende a lista ao
+/// padrão (dono, 18/out/2026), a conta não pode mudar o local, ou tem um
+/// local escondido no perfil.
 fn local_preso_ao_padrao() -> bool {
-    !crate::acesso_da_conta::pode_mudar_local()
+    crate::acesso_da_conta::lista_no_local_padrao()
+        || !crate::acesso_da_conta::pode_mudar_local()
         || !crate::acesso_da_conta::locais_ocultos().is_empty()
 }
 
@@ -4189,6 +4191,23 @@ mod testes {
             .expect("a janela deve estar aberta");
         visual.run_until_parked();
         assert!(visual.debug_bounds("sessoes-local-EXTERNO").is_none());
+
+        // Pode mudar o local, mas o perfil prende a lista ao padrão (dono,
+        // 18/out/2026): sem seletor, e a escolha de antes não vale.
+        crate::acesso_da_conta::definir_acesso(Some(Acesso {
+            permissoes: vec!["OperateCounter".into(), "ChangeSessionLocation".into()],
+            pode_mudar_local: true,
+            lista_no_local_padrao: true,
+            ..Default::default()
+        }));
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.escolher_local(LocalDaSessao::Externo, cx);
+                assert_eq!(tela.titulos_visiveis(cx), ["Ensaio no estúdio"]);
+            })
+            .expect("a janela deve estar aberta");
+        visual.run_until_parked();
+        assert!(visual.debug_bounds("sessoes-local-ESTUDIO").is_none());
         crate::acesso_da_conta::definir_acesso(None);
     }
 

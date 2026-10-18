@@ -3358,7 +3358,10 @@ impl Detalhe {
             Err(erro) => {
                 if let Some(c) = self.correcao_do_local.aberto_mut() {
                     c.gravando = false;
-                    c.erro = Some(erro.into());
+                    // Sem o "Erro de infraestrutura: o site respondeu 409":
+                    // a recusa do caixa fechado é a frase do site, que diz o
+                    // que fazer (dono, 18/out/2026).
+                    c.erro = Some(crate::erro_da_api::legivel(&erro).into());
                 }
             }
         }
@@ -13559,6 +13562,60 @@ mod testes {
                         false
                     ))
                 );
+            })
+            .unwrap();
+        crate::acesso_da_conta::definir_acesso(None);
+    }
+
+    /// 📍 **A recusa do caixa fechado chega como frase** (dono, 18/out/2026):
+    /// o diálogo mostrava "Erro de infraestrutura: o site respondeu 409: …",
+    /// que parecia o sistema quebrado. Fica só a frase do site, que diz o que
+    /// fazer, e o diálogo continua aberto com o motivo digitado.
+    #[gpui_kit::test]
+    fn a_recusa_do_caixa_fechado_mostra_so_o_que_fazer(cx: &mut TestAppContext) {
+        crate::acesso_da_conta::definir_acesso(Some(biblioteca_core::acesso::Acesso {
+            admin: true,
+            ..Default::default()
+        }));
+        let frase = "O caixa Externo de canela@exemplo.com está fechado. Abra-o na tela \
+                     Caixa e corrija o local de novo: a venda do caixa aberto vai junto para ele.";
+        let publicador = publicador_com(vec![], false);
+        publicador.responder_json(
+            PEDIDO_DA_CORRECAO_DO_LOCAL,
+            Err(format!(
+                "Erro de infraestrutura: o site respondeu 409: {frase}"
+            )),
+        );
+        let janela = janela_com(
+            cx,
+            publicador.clone(),
+            Arc::new(SeletorDeMentira::default()),
+        );
+        entrar(cx, &janela);
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir_correcao_do_local(cx);
+                tela.preparar_correcao_do_local(window, cx);
+                let motivo = tela
+                    .correcao_do_local
+                    .aberto()
+                    .and_then(|c| c.motivo.clone())
+                    .expect("o campo do motivo");
+                motivo.update(cx, |c, cx| {
+                    c.trocar_valor("foi na praça".to_string(), window, cx)
+                });
+                tela.gravar_correcao_do_local(cx);
+            })
+            .unwrap();
+        colher_ate_parar(cx, &janela);
+        janela
+            .update(cx, |tela, _window, _cx| {
+                let correcao = tela
+                    .correcao_do_local
+                    .aberto()
+                    .expect("o diálogo fica aberto");
+                assert_eq!(correcao.erro.as_deref(), Some(frase));
+                assert!(!correcao.gravando);
             })
             .unwrap();
         crate::acesso_da_conta::definir_acesso(None);
