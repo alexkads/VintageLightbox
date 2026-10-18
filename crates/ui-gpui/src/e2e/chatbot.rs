@@ -304,7 +304,11 @@ fn escrever(e: &Estudio, cx: &mut TestAppContext, texto: &str) {
 #[gpui_kit::test]
 fn a_conta_entra_e_o_chatbot_escuta_os_cinco_canais_sem_ler_nada(cx: &mut TestAppContext) {
     let e = entrar(cx);
-    assert_eq!(e.escuta.abertas(), 2, "a do chatbot e a da agenda");
+    assert_eq!(
+        e.escuta.abertas(),
+        3,
+        "a do chatbot, a da agenda e a da lista de sessões"
+    );
     assert_eq!(
         e.escuta.caminhos_da_fonte("wa"),
         vec![
@@ -1339,8 +1343,8 @@ fn sair_da_conta_fecha_os_fluxos_e_esquece_as_conversas(cx: &mut TestAppContext)
     e.esperar(cx);
     assert_eq!(
         e.escuta.largadas.load(std::sync::atomic::Ordering::SeqCst),
-        2,
-        "as guardas do chatbot e da agenda caíram"
+        3,
+        "as guardas do chatbot, da agenda e da lista de sessões caíram"
     );
     chatbot(&e, cx, |t, _w, _cx| {
         assert!(t.todas().is_empty());
@@ -1350,7 +1354,7 @@ fn sair_da_conta_fecha_os_fluxos_e_esquece_as_conversas(cx: &mut TestAppContext)
     });
     e.app(cx, |app, _w, cx| app.entrar_na_conta(super::sessao(), cx));
     e.esperar(cx);
-    assert_eq!(e.escuta.abertas(), 4, "entrou de novo: mais duas");
+    assert_eq!(e.escuta.abertas(), 6, "entrou de novo: mais três");
 }
 
 // ── 📎 A mídia das conversas ───────────────────────────────────────────────

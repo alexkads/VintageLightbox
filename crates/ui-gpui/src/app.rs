@@ -29,9 +29,9 @@ mod resolucao_cheia;
 mod retomada;
 pub mod rodape;
 mod roteiro;
-pub mod whatsapp_bloqueado;
 /// O que a raiz conta à bandeja (`crate::segundo_plano`).
 mod segundo_plano;
+pub mod whatsapp_bloqueado;
 pub use segundo_plano::Saida;
 
 pub use painel::Conta;
@@ -1219,7 +1219,12 @@ impl Aplicativo {
                 raiz.fechar_balcao(window, cx);
             },
         );
-        let sessoes = cx.new(|cx| Sessoes::nova(publicador_das_sessoes, window, cx));
+        let sessoes = cx.new(|cx| {
+            let mut tela = Sessoes::nova(publicador_das_sessoes, window, cx);
+            // 📡 A lista se atualiza sozinha pelo fluxo das galerias.
+            tela.com_escuta(portas.escuta.clone());
+            tela
+        });
         let sessao_escolhida = cx.subscribe(&sessoes, |raiz, _tela, evento: &Escolhida, cx| {
             raiz.entrar_na_sessao(evento.0.clone(), cx);
         });

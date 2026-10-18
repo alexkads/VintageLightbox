@@ -164,7 +164,11 @@ fn periodo(visao: Visao, dia: NaiveDate) -> String {
 #[gpui_kit::test]
 fn a_conta_entra_e_a_agenda_escuta_sem_ler(cx: &mut TestAppContext) {
     let e = entrar(cx);
-    assert_eq!(e.escuta.abertas(), 2, "o chatbot e a agenda");
+    assert_eq!(
+        e.escuta.abertas(),
+        3,
+        "o chatbot, a agenda e a lista de sessões"
+    );
     assert_eq!(
         e.escuta.caminhos_da_fonte("agenda"),
         vec!["/bookings/agenda/eventos"]
@@ -663,8 +667,8 @@ fn sair_da_conta_fecha_a_agenda(cx: &mut TestAppContext) {
     e.esperar(cx);
     assert_eq!(
         e.escuta.largadas.load(std::sync::atomic::Ordering::SeqCst),
-        2,
-        "chatbot e agenda"
+        3,
+        "chatbot, agenda e lista de sessões"
     );
     agenda(&e, cx, |t, _w, _cx| {
         assert!(t.ensaios.is_empty() && t.de_hoje.is_empty());

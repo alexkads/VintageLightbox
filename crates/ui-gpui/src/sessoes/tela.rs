@@ -18,7 +18,7 @@
 use crate::campo::TrocarValor as _;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use biblioteca_core::dados_do_cliente;
 use biblioteca_core::dinheiro;
@@ -46,9 +46,30 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 use crate::pos_venda::porta::{PedidoJson, Publicador, Recado};
+use crate::tempo_real::{Escuta, EstadoDaConexao, Guarda, Sinal};
 
 /// De quanto em quanto a tela pergunta se o site respondeu.
 const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(100);
+
+// ── 📡 O tempo real da lista (dono, 2026-10-18) ──────────────────────────────
+//
+// *"A listagem de Sessões fotográficas precisa ser em tempo real utilizando
+// SSE, não necessitando utilizar o botão Recarregar."* O fluxo é o
+// `/pos-venda/galerias/eventos`, e os tempos são os da Agenda e do site
+// (`components/tempo-real/politica.ts`): uma rajada de eventos (200 fotos
+// subindo) vira uma releitura a cada 2 s no máximo.
+
+/// O rótulo do fluxo da lista na porta do tempo real.
+pub const FONTE: &str = "lista";
+/// O caminho do fluxo, na API.
+pub const CAMINHO_DO_FLUXO: &str = "/pos-venda/galerias/eventos";
+const PASSO_DA_VIGIA: Duration = Duration::from_millis(100);
+const ESPERA_DO_EVENTO: Duration = Duration::from_millis(400);
+const TETO_DA_ESPERA: Duration = Duration::from_secs(2);
+/// A reconciliação com o fluxo de pé: a rede de segurança do evento perdido.
+const RELEITURA_CONECTADO: Duration = Duration::from_secs(300);
+/// Sem fluxo (caiu, recusado), a lista volta a se ler sozinha neste ritmo.
+const RELEITURA_SEM_CONEXAO: Duration = Duration::from_secs(15);
 
 /// Hoje, **no fuso do estúdio** — a data que o balcão chama de hoje.
 ///
@@ -275,6 +296,28 @@ pub struct Sessoes {
     recados: (Sender<Recado>, Receiver<Recado>),
     colhendo: bool,
     _colheita: Option<Task<()>>,
+
+    // ── 📡 O tempo real ──
+    /// A porta do SSE. `None` nos testes que não a ligam: a lista funciona,
+    /// só não se atualiza sozinha.
+    escuta: Option<Arc<dyn Escuta>>,
+    /// Enquanto viva, o fluxo fica aberto. Largá-la fecha.
+    guarda: Option<Guarda>,
+    sinais: (Sender<Sinal>, Receiver<Sinal>),
+    conexao: EstadoDaConexao,
+    /// O primeiro `pronto` é a abertura; os seguintes são reconexões, e o que
+    /// aconteceu no intervalo se perdeu.
+    ja_abriu: bool,
+    /// Quando reler, agrupando a rajada.
+    releitura_em: Option<Instant>,
+    primeira_pendente: Option<Instant>,
+    /// 🔑 **A releitura sai no próximo desenho**, e não na hora: com a lista
+    /// escondida (o operador dentro de uma sessão, subindo 200 fotos), cada
+    /// foto pediria a lista inteira à API sem ninguém olhando. Escondida, ela
+    /// não é desenhada, e a releitura espera a volta.
+    reler_ao_desenhar: bool,
+    ultima_carga: Option<Instant>,
+    _vigia: Option<Task<()>>,
 }
 
 /// Os campos de abrir uma sessão nova.
@@ -395,6 +438,22 @@ fn lembrar_todos(caminho: &Path) {
     );
 }
 
+/// 📡 O tipo e a galeria de um `EventoDaGaleria` (`domain::pos_venda` do
+/// site): `{"tipo": "foto_chegou", "galeria_id": "…", "em": "…"}`.
+fn evento_da_lista(dados: &serde_json::Value) -> Option<(String, String)> {
+    let tipo = dados.get("tipo")?.as_str()?.to_string();
+    let galeria_id = dados.get("galeria_id")?.as_str()?.to_string();
+    Some((tipo, galeria_id))
+}
+
+/// Vale reler? Sim quando a galeria está na lista, ou quando uma galeria mudou
+/// por inteiro — é o evento da sessão **nova** (ou restaurada), que ainda não
+/// está nela. Foto de uma sessão que a lista não mostra (outro estúdio, no
+/// perfil restrito) não muda nada aqui.
+fn evento_relevante(tipo: &str, galeria_id: &str, galerias: &[GaleriaDoPainel]) -> bool {
+    tipo == "galeria_mudou" || galerias.iter().any(|g| g.id == galeria_id)
+}
+
 fn gravar_lembranca(caminho: &Path, lembranca: Lembranca) {
     let Ok(texto) = serde_json::to_string_pretty(&lembranca) else {
         return;
@@ -472,13 +531,160 @@ impl Sessoes {
             recados: channel(),
             colhendo: false,
             _colheita: None,
+            escuta: None,
+            guarda: None,
+            sinais: channel(),
+            conexao: EstadoDaConexao::Conectando,
+            ja_abriu: false,
+            releitura_em: None,
+            primeira_pendente: None,
+            reler_ao_desenhar: false,
+            ultima_carga: None,
+            _vigia: None,
         }
+    }
+
+    /// 📡 Liga a porta do tempo real. Chamado pela raiz, onde a tela nasce.
+    pub fn com_escuta(&mut self, escuta: Arc<dyn Escuta>) {
+        self.escuta = Some(escuta);
     }
 
     /// A sessão do site chegou da porta do app: dá para listar.
     pub fn definir_sessao(&mut self, sessao: Sessao, cx: &mut Context<Self>) {
-        self.sessao = Some(sessao);
+        self.sessao = Some(sessao.clone());
+        if let Some(escuta) = &self.escuta {
+            let (envia, recebe) = channel();
+            self.sinais = (envia.clone(), recebe);
+            self.conexao = EstadoDaConexao::Conectando;
+            self.ja_abriu = false;
+            self.guarda =
+                Some(escuta.escutar(sessao, vec![(FONTE, CAMINHO_DO_FLUXO.to_string())], envia));
+            self.vigiar(cx);
+        }
         self.recarregar(cx);
+    }
+
+    /// A conta saiu: o fluxo era dela.
+    pub fn sair(&mut self, cx: &mut Context<Self>) {
+        self.guarda = None;
+        self._vigia = None;
+        self.sessao = None;
+        self.releitura_em = None;
+        self.primeira_pendente = None;
+        self.reler_ao_desenhar = false;
+        self.conexao = EstadoDaConexao::Conectando;
+        cx.notify();
+    }
+
+    // ── 📡 O laço do tempo real ────────────────────────────────────────────
+
+    fn vigiar(&mut self, cx: &mut Context<Self>) {
+        if self._vigia.is_some() {
+            return;
+        }
+        self._vigia = Some(cx.spawn(async move |tela, cx| loop {
+            cx.background_executor().timer(PASSO_DA_VIGIA).await;
+            let continua = tela.update(cx, |tela, cx| tela.passo(cx)).unwrap_or(false);
+            if !continua {
+                break;
+            }
+        }));
+    }
+
+    /// Uma volta da vigia: junta os sinais e, vencida a espera, pede a
+    /// releitura ao próximo desenho. Devolve se vale continuar.
+    pub(crate) fn passo(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.sessao.is_none() {
+            self._vigia = None;
+            return false;
+        }
+        let agora = cx.background_executor().now();
+        let mut mudou = self.colher_sinais(agora);
+        let vencida = self.releitura_em.is_some_and(|em| em <= agora);
+        let intervalo = if self.conexao == EstadoDaConexao::Conectado {
+            RELEITURA_CONECTADO
+        } else {
+            RELEITURA_SEM_CONEXAO
+        };
+        let periodica = self
+            .ultima_carga
+            .is_some_and(|u| agora.duration_since(u) >= intervalo);
+        if (vencida || periodica) && !self.reler_ao_desenhar {
+            self.releitura_em = None;
+            self.primeira_pendente = None;
+            self.reler_ao_desenhar = true;
+            mudou = true;
+        }
+        if mudou {
+            cx.notify();
+        }
+        true
+    }
+
+    fn marcar_para_reler(&mut self, agora: Instant, ja: bool) {
+        let primeira = *self.primeira_pendente.get_or_insert(agora);
+        self.releitura_em = Some(if ja {
+            agora
+        } else {
+            (agora + ESPERA_DO_EVENTO).min(primeira + TETO_DA_ESPERA)
+        });
+    }
+
+    fn colher_sinais(&mut self, agora: Instant) -> bool {
+        let mut mudou = false;
+        while let Ok(sinal) = self.sinais.1.try_recv() {
+            mudou = true;
+            match sinal {
+                Sinal::Conexao { estado, .. } => self.conexao = estado,
+                Sinal::Pronto { .. } => {
+                    // A reconexão perdeu o que houve no intervalo: relê.
+                    if self.ja_abriu {
+                        self.marcar_para_reler(agora, true);
+                    }
+                    self.ja_abriu = true;
+                }
+                Sinal::Sincronizar { .. } => self.marcar_para_reler(agora, true),
+                Sinal::Evento { dados, .. } => match evento_da_lista(&dados) {
+                    Some((tipo, galeria_id)) => {
+                        if evento_relevante(&tipo, &galeria_id, &self.galerias) {
+                            self.marcar_para_reler(agora, false);
+                        }
+                    }
+                    None => {
+                        crate::telemetria::avisar!("⚠️ [Sessões] evento ilegível: {dados}");
+                        self.marcar_para_reler(agora, false);
+                    }
+                },
+            }
+        }
+        mudou
+    }
+
+    /// 📡 A releitura do tempo real: só o que o evento pode ter mudado — as
+    /// sessões e as excluídas —, **sem** o "Lendo…" e sem limpar o que está na
+    /// tela. Estúdios e produtos ficam como a abertura os leu.
+    fn reler(&mut self, cx: &mut Context<Self>) {
+        let Some(sessao) = self.sessao.clone() else {
+            return;
+        };
+        if self.carregando {
+            return;
+        }
+        self.ultima_carga = Some(cx.background_executor().now());
+        self.publicador
+            .galerias(sessao.clone(), self.recados.0.clone());
+        self.publicador.pedir_json(
+            sessao,
+            PedidoJson::ler("excluidas", "/pos-venda/galerias/excluidas"),
+            self.recados.0.clone(),
+        );
+        self.acompanhar(cx);
+    }
+
+    /// 🧪 O estado do fluxo, para os testes.
+    #[cfg(test)]
+    pub(crate) fn conexao_para_teste(&self) -> EstadoDaConexao {
+        self.conexao
     }
 
     /// 🗑️ A raiz diz quem entrou, depois do `/auth/me`.
@@ -718,6 +924,7 @@ impl Sessoes {
         };
         self.carregando = true;
         self.erro = None;
+        self.ultima_carga = Some(cx.background_executor().now());
         self.publicador
             .galerias(sessao.clone(), self.recados.0.clone());
         self.publicador
@@ -1230,6 +1437,9 @@ impl Sessoes {
             match recado {
                 Recado::Galerias(lista) => {
                     self.carregando = false;
+                    // A releitura do tempo real não limpa o erro antes de
+                    // pedir; a lista que chegou é a prova de que ele passou.
+                    self.erro = None;
                     self.galerias = lista;
                 }
                 Recado::Produtos(lista) => self.produtos = lista,
@@ -1394,6 +1604,11 @@ fn nao_vazio(texto: &str) -> Option<String> {
 
 impl Render for Sessoes {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 📡 Desenhada é visível: a releitura que o tempo real pediu sai agora.
+        if self.reler_ao_desenhar && !self.carregando {
+            self.reler_ao_desenhar = false;
+            cx.defer_in(window, |tela, _window, cx| tela.reler(cx));
+        }
         crate::estilo::toast_quando_mudar(
             &mut self.erro_visto,
             self.erro.clone(),
@@ -1949,7 +2164,7 @@ impl Sessoes {
                 .gap(px(12.))
                 .child(aviso)
                 .child(crate::estilo::aviso(
-                    "Não foi possível carregar as sessões excluídas. Use o Recarregar.",
+                    "Não foi possível carregar as sessões excluídas. A lista tenta de novo sozinha.",
                     true,
                     cx,
                 ))
@@ -2549,16 +2764,23 @@ impl Sessoes {
                     .child("Gráficos")
                     .on_click(cx.listener(|tela, _ev, _window, cx| tela.abrir_graficos(cx))),
             )
-            .child(estilo::desligado(
-                estilo::botao_contorno("sessoes-recarregar", cx)
-                    .child(if self.carregando {
-                        "Lendo…"
-                    } else {
-                        "Recarregar"
-                    })
-                    .on_click(cx.listener(|tela, _ev, _window, cx| tela.recarregar(cx))),
-                self.sessao.is_none() || self.carregando,
-            ))
+            // 📡 **No lugar do Recarregar**, o estado do fluxo (dono,
+            // 2026-10-18): a lista se atualiza sozinha, e quem olha precisa
+            // saber se ela está ao vivo ou relendo de 15 em 15 segundos.
+            .when(self.escuta.is_some() && self.sessao.is_some(), |barra| {
+                let cor: Hsla = match self.conexao {
+                    EstadoDaConexao::Conectado => gpui_kit::rgb(0x16a34a).into(),
+                    EstadoDaConexao::Recusado => gpui_kit::rgb(0xef4444).into(),
+                    _ => gpui_kit::rgb(0xf59e0b).into(),
+                };
+                barra.child(
+                    div().debug_selector(|| "sessoes-conexao".into()).child(
+                        estilo::selo_contorno(cx)
+                            .child(div().size(px(8.)).rounded_full().bg(cor))
+                            .child(self.conexao.rotulo()),
+                    ),
+                )
+            })
     }
 
     /// 📈 Abre o diálogo dos gráficos.
@@ -3612,6 +3834,92 @@ mod testes {
             })
             .expect("a janela deve estar aberta");
         colher(cx, janela);
+    }
+
+    /// 📡 Avança o relógio, deixa a vigia andar, desenha e colhe as respostas.
+    fn andar(cx: &mut TestAppContext, janela: &gpui_kit::WindowHandle<Sessoes>, quanto: Duration) {
+        cx.executor().advance_clock(quanto);
+        cx.run_until_parked();
+        // A releitura sai no desenho: a janela do teste está na frente.
+        let visual = gpui_kit::VisualTestContext::from_window((*janela).into(), cx);
+        visual.run_until_parked();
+        colher(cx, janela);
+    }
+
+    /// 📡 **A lista se atualiza sozinha** (dono, 2026-10-18): o fluxo
+    /// `/pos-venda/galerias/eventos` faz a lista reler, sem o Recarregar.
+    #[gpui_kit::test]
+    fn a_lista_se_atualiza_sozinha_pelo_fluxo_das_galerias(cx: &mut TestAppContext) {
+        use crate::tempo_real::porta::mentira::EscutaDeMentira;
+        let publicador = Arc::new(PublicadorDeMentira {
+            galerias: Mutex::new(vec![galeria("g1", "Ensaio do João", None)]),
+            ..Default::default()
+        });
+        let escuta = Arc::new(EscutaDeMentira::default());
+        let janela = janela(cx, publicador.clone());
+        janela
+            .update(cx, |tela, _w, _cx| tela.com_escuta(escuta.clone()))
+            .unwrap();
+        com_sessao(cx, &janela);
+        assert_eq!(escuta.caminhos_da_fonte(FONTE), vec![CAMINHO_DO_FLUXO]);
+        let quantas =
+            |cx: &mut TestAppContext| janela.update(cx, |t, _w, _cx| t.quantas()).unwrap();
+        assert_eq!(quantas(cx), 1);
+
+        let evento = |tipo: &str, galeria: &str| Sinal::Evento {
+            fonte: FONTE,
+            dados: serde_json::json!({ "tipo": tipo, "galeria_id": galeria, "em": "x" }),
+        };
+        let nova = |id: &str| galeria(id, id, None);
+        escuta.mandar(Sinal::Conexao {
+            fonte: FONTE,
+            estado: EstadoDaConexao::Conectado,
+        });
+        escuta.mandar(Sinal::Pronto { fonte: FONTE });
+        andar(cx, &janela, Duration::from_millis(200));
+        assert_eq!(
+            janela
+                .update(cx, |t, _w, _cx| t.conexao_para_teste())
+                .unwrap(),
+            EstadoDaConexao::Conectado
+        );
+        assert_eq!(
+            quantas(cx),
+            1,
+            "a abertura do fluxo não relê: a lista acabou de chegar"
+        );
+
+        // Outro balcão abriu uma sessão: ela ainda não está na lista, e entra.
+        publicador.galerias.lock().unwrap().push(nova("g2"));
+        escuta.mandar(evento("galeria_mudou", "g2"));
+        andar(cx, &janela, Duration::from_millis(600));
+        assert_eq!(quantas(cx), 2, "a sessão nova apareceu sem Recarregar");
+
+        // Foto de uma sessão que esta lista não mostra (outro estúdio): nada.
+        publicador.galerias.lock().unwrap().push(nova("g3"));
+        escuta.mandar(evento("foto_mudou", "g9"));
+        andar(cx, &janela, Duration::from_secs(3));
+        assert_eq!(quantas(cx), 2, "evento de galeria alheia não relê");
+
+        // Foto chegando numa sessão da lista: relê (e acha a g3 também).
+        escuta.mandar(evento("foto_chegou", "g1"));
+        andar(cx, &janela, Duration::from_millis(600));
+        assert_eq!(quantas(cx), 3);
+
+        // O fluxo caiu e voltou: o que houve no intervalo se perdeu, relê.
+        publicador.galerias.lock().unwrap().push(nova("g4"));
+        escuta.mandar(Sinal::Pronto { fonte: FONTE });
+        andar(cx, &janela, Duration::from_millis(200));
+        assert_eq!(quantas(cx), 4, "a reconexão relê");
+
+        // Sair da conta fecha o fluxo.
+        janela.update(cx, |t, _w, cx| t.sair(cx)).unwrap();
+        cx.run_until_parked();
+        assert_eq!(
+            escuta.largadas.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "o fluxo era da conta que saiu"
+        );
     }
 
     /// 🚨 A lista chega e a busca acha — pela **mesma conta do site**.

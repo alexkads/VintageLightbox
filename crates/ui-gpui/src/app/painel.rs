@@ -502,6 +502,8 @@ impl Aplicativo {
             t.mostrar(false, cx);
             t.sair(cx);
         });
+        // 📡 O fluxo da lista de sessões também.
+        self.sessoes.update(cx, |t, cx| t.sair(cx));
         self.sessao = None;
         self.conta = None;
         self.retrato = None;
