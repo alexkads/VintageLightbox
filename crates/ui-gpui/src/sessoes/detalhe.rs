@@ -86,6 +86,13 @@ const ZOOM_MAXIMO: f32 = 320.0;
 const ZOOM_PADRAO: f32 = 160.0;
 const PASSO_DO_ZOOM: f32 = 35.0;
 
+/// 📍 O aviso de quem clica no local sem poder corrigi-lo — o mesmo texto do
+/// site (`LOCAL_SEM_PERMISSAO` em `lib/local-da-sessao.ts`), com o nome da
+/// permissão como a tela de perfis a mostra.
+const LOCAL_SEM_PERMISSAO: &str = "O seu perfil de acesso não permite corrigir o local da \
+     sessão. Peça a quem administra o sistema para liberar “Mudar o local da sessão” no \
+     seu perfil.";
+
 /// O lado da miniatura da sessão, em pixels.
 ///
 /// 🔑 **É o `ZOOM_MAXIMO`**, e não um número à parte: no zoom cheio a célula tem
@@ -3206,6 +3213,17 @@ impl Detalhe {
             .unwrap_or_default()
     }
 
+    /// 📍 O clique no local do cabeçalho: abre a correção, ou — sem a
+    /// permissão — avisa o que pedir (dono, 18/out/2026: o selo mudo fazia o
+    /// balconista achar que a correção estava quebrada).
+    pub fn clicar_no_local(&mut self, cx: &mut Context<Self>) {
+        if crate::acesso_da_conta::pode_mudar_local() {
+            self.abrir_correcao_do_local(cx);
+        } else {
+            self.avisar_do_gesto(LOCAL_SEM_PERMISSAO, false, cx);
+        }
+    }
+
     /// 📍 "Corrigir o local": abre o diálogo com o outro local como destino.
     pub fn abrir_correcao_do_local(&mut self, cx: &mut Context<Self>) {
         if self.aberta.is_none() || !crate::acesso_da_conta::pode_mudar_local() {
@@ -5930,16 +5948,12 @@ impl Detalhe {
                     && crate::acesso_da_conta::mostra_local(self.local_da_galeria()))
                 .then(|| {
                     let local = self.local_da_galeria();
-                    let corrige = crate::acesso_da_conta::pode_mudar_local();
                     estilo::botao_fantasma("sessao-local", cx)
                         .debug_selector(|| "sessao-local".into())
                         .child(Icon::new(Icone::MapPin).size(px(14.)))
                         .child(local.rotulo())
-                        .when(corrige, |b| {
-                            b.tooltip("Corrigir o local da sessão").on_click(cx.listener(
-                                |tela, _ev, _window, cx| tela.abrir_correcao_do_local(cx),
-                            ))
-                        })
+                        .tooltip("Corrigir o local da sessão")
+                        .on_click(cx.listener(|tela, _ev, _window, cx| tela.clicar_no_local(cx)))
                 }),
             )
             .child(divisor_de_grupo())
@@ -13547,6 +13561,56 @@ mod testes {
                 );
             })
             .unwrap();
+        crate::acesso_da_conta::definir_acesso(None);
+    }
+
+    /// 📍 **O clique no local sempre responde** (dono, 18/out/2026: *"nem
+    /// aparece popup"*): sem a permissão ele avisa o que pedir e não abre a
+    /// correção; com ela, o diálogo abre. Pelo clique de verdade no selo do
+    /// cabeçalho, e não pelo método.
+    #[gpui_kit::test]
+    fn o_clique_no_local_sem_permissao_avisa_o_que_pedir(cx: &mut TestAppContext) {
+        crate::acesso_da_conta::definir_acesso(Some(biblioteca_core::acesso::Acesso {
+            permissoes: vec!["OperateCounter".into()],
+            ..Default::default()
+        }));
+        let janela = janela_com(
+            cx,
+            publicador_com(vec![], false),
+            Arc::new(SeletorDeMentira::default()),
+        );
+        entrar(cx, &janela);
+        let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
+        visual.run_until_parked();
+        let selo = visual
+            .debug_bounds("sessao-local")
+            .expect("o local aparece no cabeçalho")
+            .center();
+        // O primeiro evento de ponteiro da janela de teste se perde.
+        visual.simulate_mouse_move(selo, None, gpui_kit::Modifiers::none());
+        visual.simulate_click(selo, gpui_kit::Modifiers::none());
+        visual.run_until_parked();
+        janela
+            .update(cx, |tela, _window, _cx| {
+                assert!(
+                    tela.correcao_do_local.aberto().is_none(),
+                    "sem permissão não abre"
+                );
+                assert_eq!(tela.ultimo_aviso(), Some(LOCAL_SEM_PERMISSAO));
+            })
+            .unwrap();
+
+        crate::acesso_da_conta::definir_acesso(Some(biblioteca_core::acesso::Acesso {
+            permissoes: vec!["OperateCounter".into(), "ChangeSessionLocation".into()],
+            pode_mudar_local: true,
+            ..Default::default()
+        }));
+        visual.simulate_click(selo, gpui_kit::Modifiers::none());
+        visual.run_until_parked();
+        assert!(
+            visual.debug_bounds("correcao-do-local").is_some(),
+            "com a permissão o diálogo aparece"
+        );
         crate::acesso_da_conta::definir_acesso(None);
     }
 
