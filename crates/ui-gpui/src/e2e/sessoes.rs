@@ -580,10 +580,7 @@ fn as_duas_primeiras_colunas_ficam_congeladas_na_rolagem_horizontal(cx: &mut Tes
     visual.simulate_mouse_move(sobre, None, gpui_kit::Modifiers::default());
     visual.simulate_event(gpui_kit::ScrollWheelEvent {
         position: sobre,
-        delta: gpui_kit::ScrollDelta::Pixels(gpui_kit::point(
-            gpui_kit::px(-60.),
-            gpui_kit::px(0.),
-        )),
+        delta: gpui_kit::ScrollDelta::Pixels(gpui_kit::point(gpui_kit::px(-60.), gpui_kit::px(0.))),
         ..Default::default()
     });
     visual.run_until_parked();
