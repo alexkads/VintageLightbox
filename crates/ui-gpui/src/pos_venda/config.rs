@@ -6,9 +6,11 @@
 //! deixá-la em todo backup do catálogo. Onde a sessão dorme é o chaveiro do
 //! sistema — ver `infrastructure::pos_venda::cofre`.
 //!
-//! ⚠️ **O `email` saiu daqui em 2026-09-06.** Ele existia para preencher o campo
-//! da tela de login, e essa tela deixou de ter campo: quem autentica agora é o
-//! navegador, e o e-mail de quem entrou o site já sabe.
+//! ⚠️ **O `email` saiu daqui em 2026-09-06 e voltou em 2026-10-18**, como
+//! `email_lembrado`: a entrada ganhou de novo e-mail e senha, link no e-mail e
+//! Google Authenticator (o operador leigo se perdia no navegador), e o campo
+//! já vem preenchido com quem entrou da última vez. Junto, `ultima_porta`: a
+//! tela abre na aba que funcionou. A senha continua fora daqui.
 //!
 //! Mesmo molde de `biblioteca/arranjo.rs`: ler nunca derruba (toda falha é o
 //! padrão), gravar falha só imprime.
@@ -44,6 +46,26 @@ pub struct Configuracao {
     /// código foi assinado com o segredo de um servidor e apresentado a outro.
     #[serde(default)]
     pub site_url: Option<String>,
+    /// Por onde a última entrada deu certo — a aba que a tela abre.
+    #[serde(default)]
+    pub ultima_porta: Option<PortaDeEntrada>,
+    /// O e-mail da última entrada sem navegador, para o campo já vir cheio.
+    #[serde(default)]
+    pub email_lembrado: Option<String>,
+}
+
+/// As quatro portas da tela de entrada (2026-10-18).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PortaDeEntrada {
+    /// E-mail e senha.
+    Credencial,
+    /// Link no e-mail.
+    Link,
+    /// Google Authenticator.
+    Autenticador,
+    /// A autorização pelo navegador — a de sempre.
+    Navegador,
 }
 
 // 📌 Havia um `produto_id` aqui: o modal de publicação lembrava o produto da
@@ -103,6 +125,8 @@ impl Default for Configuracao {
         Self {
             base_url: base_padrao(),
             site_url: None,
+            ultima_porta: None,
+            email_lembrado: None,
         }
     }
 }
@@ -124,6 +148,8 @@ pub fn ler() -> Configuracao {
         return Configuracao {
             base_url: SENTINELA_DOS_TESTES.to_string(),
             site_url: Some(SENTINELA_DOS_TESTES.to_string()),
+            ultima_porta: None,
+            email_lembrado: None,
         };
     }
     let mut config = ler_de(&caminho()).unwrap_or_default();
@@ -184,6 +210,8 @@ mod testes {
         let config = Configuracao {
             base_url: "http://localhost:8080".into(),
             site_url: None,
+            ultima_porta: Some(PortaDeEntrada::Autenticador),
+            email_lembrado: Some("balcao@recordarfotos.com.br".into()),
         };
         gravar_em(&arquivo, &config);
         assert_eq!(ler_de(&arquivo), Some(config));
@@ -198,6 +226,17 @@ mod testes {
     fn o_arquivo_nao_tem_onde_guardar_senha() {
         let texto = serde_json::to_string(&Configuracao::default()).unwrap();
         assert!(!texto.contains("senha") && !texto.contains("token"));
+        // Nem com a última entrada lembrada: a porta e o e-mail, nada mais.
+        let lembrada = Configuracao {
+            ultima_porta: Some(PortaDeEntrada::Credencial),
+            email_lembrado: Some("balcao@recordarfotos.com.br".into()),
+            ..Default::default()
+        };
+        let texto = serde_json::to_string(&lembrada).unwrap();
+        assert!(
+            !texto.contains("senha") && !texto.contains("token"),
+            "{texto}"
+        );
     }
 
     /// 🚨 O defeito de 6/set/2026: API local com site de produção. O código
@@ -223,8 +262,11 @@ mod testes {
     #[test]
     fn o_site_escrito_vence_a_deducao() {
         let config = Configuracao {
-            base_url: "http://localhost:8080".into(),
             site_url: Some("http://localhost:3000/".into()),
+            ..Configuracao {
+                base_url: "http://localhost:8080".into(),
+                ..Default::default()
+            }
         };
         assert_eq!(config.site(), "http://localhost:3000");
     }

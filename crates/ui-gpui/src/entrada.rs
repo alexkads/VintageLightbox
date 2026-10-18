@@ -34,17 +34,59 @@
 //! A senha do estúdio deixou de existir dentro deste processo, e isso é metade
 //! do ganho — ver `infrastructure::pos_venda::autorizacao` para a outra metade,
 //! que é o código de dois minutos não valer nada sem o verificador.
+//!
+//! # Quatro portas, desde 2026-10-18
+//!
+//! *"Às vezes o usuário leigo não entende muito bem"* a ida e volta do
+//! navegador (dono, 2026-10-18). A tela ganhou abas: **E-mail e senha**,
+//! **Link no e-mail** (toca no link, até no celular, e o app entra sozinho) e
+//! **Authenticator** (os seis dígitos do celular), além do **Navegador** de
+//! sempre — o único para quem só entra pelo Google. As três novas abrem a mesma
+//! sessão de quinze dias, no chaveiro, renovada por baixo
+//! (`application::auth::entrar_no_app`, no backend): os dois motivos que
+//! tiraram a senha daqui em setembro não voltam com ela. A senha digitada vai
+//! ao site e some do campo; só a porta e o e-mail ficam lembrados
+//! (`pos_venda::config`).
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
 use domain::services::pos_venda::Sessao;
+use gpui_kit::component::input::{InputEvent, InputState, OtpEvent, OtpState};
 use gpui_kit::component::ActiveTheme;
-use gpui_kit::{div, prelude::*, px, Context, EventEmitter, SharedString, Task, Window};
+use gpui_kit::{
+    div, prelude::*, px, Context, Entity, EventEmitter, SharedString, Subscription, Task, Window,
+};
 
-use crate::pos_venda::config::Configuracao;
+use crate::pos_venda::config::{Configuracao, PortaDeEntrada};
 use crate::pos_venda::porta::{Publicador, Recado};
+
+/// O contexto de teclado da entrada.
+const CONTEXTO: &str = "Entrada";
+
+gpui_kit::actions!(entrada, [EnviarEntrada]);
+
+/// ⏎ envia a aba da vez. 🚨 **Consumido por ação**, e não só ouvido pelo
+/// `PressEnter` do campo: o `InputState` de uma linha propaga a tecla, e o
+/// `\n` de volta num campo de uma linha derrubava o app (o mesmo arranjo da
+/// negociação do balcão).
+pub fn init(cx: &mut gpui_kit::App) {
+    cx.bind_keys([gpui_kit::KeyBinding::new(
+        "enter",
+        EnviarEntrada,
+        Some(CONTEXTO),
+    )]);
+}
+
+/// As abas, na ordem da tela.
+const ABAS: [PortaDeEntrada; 4] = [
+    PortaDeEntrada::Credencial,
+    PortaDeEntrada::Link,
+    PortaDeEntrada::Autenticador,
+    PortaDeEntrada::Navegador,
+];
 
 /// De quanto em quanto a tela pergunta se o site respondeu.
 const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(100);
@@ -67,17 +109,65 @@ pub struct Entrada {
     recados: (Sender<Recado>, Receiver<Recado>),
     colhendo: bool,
     _colheita: Option<Task<()>>,
+    /// A aba da vez.
+    aba: PortaDeEntrada,
+    email: Entity<InputState>,
+    senha: Entity<InputState>,
+    codigo: Entity<OtpState>,
+    recuperacao: Entity<InputState>,
+    /// A aba do Authenticator está pedindo um código de recuperação.
+    usando_recuperacao: bool,
+    /// O link saiu e a tela espera o toque no e-mail.
+    esperando_link: bool,
+    /// Liga para a espera do link parar — o "Cancelar e voltar".
+    cancelar_link: Option<Arc<AtomicBool>>,
+    /// Uma frase neutra (não é erro): "mandamos o link", "mandamos o e-mail".
+    aviso: Option<SharedString>,
+    /// A porta que está no ar, para lembrar a que deu certo.
+    porta_em_curso: Option<PortaDeEntrada>,
+    _assinaturas: Vec<Subscription>,
 }
 
 impl Entrada {
     pub fn nova(
         publicador: Arc<dyn Publicador>,
         config: Configuracao,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let lembrado = config.email_lembrado.clone().unwrap_or_default();
+        let email = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("seu e-mail do estúdio")
+                .default_value(lembrado)
+        });
+        let senha = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("senha")
+                .masked(true)
+        });
+        let codigo = cx.new(|cx| OtpState::new(6, window, cx));
+        let recuperacao =
+            cx.new(|cx| InputState::new(window, cx).placeholder("código de recuperação"));
+
+        // Os seis dígitos completos já entram — sem precisar do Enter.
+        let assinaturas = vec![
+            cx.subscribe_in(&codigo, window, |tela, _, evento: &OtpEvent, window, cx| {
+                if matches!(evento, OtpEvent::Complete) {
+                    tela.entrar_com_codigo(window, cx);
+                }
+            }),
+            cx.subscribe_in(&email, window, |tela, _, evento: &InputEvent, _, cx| {
+                if matches!(evento, InputEvent::Change) && tela.erro.is_some() {
+                    tela.erro = None;
+                    cx.notify();
+                }
+            }),
+        ];
+
         let mut tela = Self {
             publicador,
+            aba: config.ultima_porta.unwrap_or(PortaDeEntrada::Credencial),
             config,
             entrando: false,
             no_navegador: false,
@@ -85,6 +175,16 @@ impl Entrada {
             recados: channel(),
             colhendo: false,
             _colheita: None,
+            email,
+            senha,
+            codigo,
+            recuperacao,
+            usando_recuperacao: false,
+            esperando_link: false,
+            cancelar_link: None,
+            aviso: None,
+            porta_em_curso: None,
+            _assinaturas: assinaturas,
         };
 
         // 🔑 A retomada é a primeira coisa que acontece, antes de qualquer
@@ -112,8 +212,154 @@ impl Entrada {
         self.entrando = true;
         self.no_navegador = true;
         self.erro = None;
+        self.aviso = None;
+        self.porta_em_curso = Some(PortaDeEntrada::Navegador);
         self.publicador.autorizar(self.recados.0.clone());
         self.acompanhar(cx);
+        cx.notify();
+    }
+
+    /// Troca de aba. Durante uma espera não troca: a espera tem a saída dela.
+    pub fn escolher(&mut self, aba: PortaDeEntrada, window: &mut Window, cx: &mut Context<Self>) {
+        if self.entrando || self.aba == aba {
+            return;
+        }
+        self.aba = aba;
+        self.erro = None;
+        self.aviso = None;
+        self.focar(window, cx);
+        cx.notify();
+    }
+
+    /// O cursor no campo que a aba pede primeiro.
+    fn focar(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let email_vazio = self.email_digitado(cx).is_empty();
+        match self.aba {
+            PortaDeEntrada::Navegador => {}
+            _ if email_vazio => self.email.update(cx, |e, cx| e.focus(window, cx)),
+            PortaDeEntrada::Credencial => self.senha.update(cx, |e, cx| e.focus(window, cx)),
+            PortaDeEntrada::Autenticador if self.usando_recuperacao => {
+                self.recuperacao.update(cx, |e, cx| e.focus(window, cx))
+            }
+            PortaDeEntrada::Autenticador => self.codigo.update(cx, |e, cx| e.focus(window, cx)),
+            PortaDeEntrada::Link => self.email.update(cx, |e, cx| e.focus(window, cx)),
+        }
+    }
+
+    fn email_digitado(&self, cx: &gpui_kit::App) -> String {
+        self.email.read(cx).value().trim().to_string()
+    }
+
+    /// O ⏎ da tela: o gesto principal da aba da vez.
+    fn enviar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.aba {
+            PortaDeEntrada::Credencial => self.entrar_com_senha(window, cx),
+            PortaDeEntrada::Link => self.pedir_link(cx),
+            PortaDeEntrada::Autenticador => self.entrar_com_codigo(window, cx),
+            PortaDeEntrada::Navegador => self.entrar(cx),
+        }
+    }
+
+    /// Começa uma entrada sem navegador: confere o e-mail e põe a tela em espera.
+    fn comecar(&mut self, porta: PortaDeEntrada, cx: &mut Context<Self>) -> Option<String> {
+        if self.entrando {
+            return None;
+        }
+        let email = self.email_digitado(cx);
+        if !email.contains('@') {
+            self.erro = Some("Digite o seu e-mail do estúdio.".into());
+            cx.notify();
+            return None;
+        }
+        self.entrando = true;
+        self.erro = None;
+        self.aviso = None;
+        self.porta_em_curso = Some(porta);
+        Some(email)
+    }
+
+    /// **E-mail e senha.** A senha sai do campo assim que vai ao site.
+    pub fn entrar_com_senha(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let senha = self.senha.read(cx).value().to_string();
+        if senha.is_empty() && !self.entrando {
+            self.erro = Some("Digite a senha.".into());
+            self.senha.update(cx, |e, cx| e.focus(window, cx));
+            cx.notify();
+            return;
+        }
+        let Some(email) = self.comecar(PortaDeEntrada::Credencial, cx) else {
+            return;
+        };
+        self.senha.update(cx, |e, cx| e.set_value("", window, cx));
+        self.publicador
+            .entrar_com_senha(email, senha, self.recados.0.clone());
+        self.acompanhar(cx);
+        cx.notify();
+    }
+
+    /// **Google Authenticator** — os seis dígitos, ou um código de recuperação.
+    pub fn entrar_com_codigo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let codigo = if self.usando_recuperacao {
+            self.recuperacao.read(cx).value().trim().to_string()
+        } else {
+            self.codigo.read(cx).value().to_string()
+        };
+        if codigo.is_empty() || (!self.usando_recuperacao && codigo.len() != 6) {
+            if !self.entrando {
+                self.erro = Some(if self.usando_recuperacao {
+                    "Digite um dos códigos de recuperação.".into()
+                } else {
+                    "Digite os seis dígitos do Authenticator.".into()
+                });
+                cx.notify();
+            }
+            return;
+        }
+        let Some(email) = self.comecar(PortaDeEntrada::Autenticador, cx) else {
+            return;
+        };
+        self.codigo.update(cx, |e, cx| e.set_value("", window, cx));
+        self.recuperacao
+            .update(cx, |e, cx| e.set_value("", window, cx));
+        self.publicador
+            .entrar_com_autenticador(email, codigo, self.recados.0.clone());
+        self.acompanhar(cx);
+        cx.notify();
+    }
+
+    /// **Link no e-mail.** A tela espera o toque até o link vencer.
+    pub fn pedir_link(&mut self, cx: &mut Context<Self>) {
+        let Some(email) = self.comecar(PortaDeEntrada::Link, cx) else {
+            return;
+        };
+        let cancelar = Arc::new(AtomicBool::new(false));
+        self.cancelar_link = Some(cancelar.clone());
+        self.publicador
+            .entrar_pelo_link(email, cancelar, self.recados.0.clone());
+        self.acompanhar(cx);
+        cx.notify();
+    }
+
+    /// "Criar ou trocar a senha" — o e-mail do site com o link de escolher.
+    pub fn pedir_troca_de_senha(&mut self, cx: &mut Context<Self>) {
+        let Some(email) = self.comecar(PortaDeEntrada::Credencial, cx) else {
+            return;
+        };
+        self.porta_em_curso = None;
+        self.publicador
+            .pedir_troca_de_senha(email, self.recados.0.clone());
+        self.acompanhar(cx);
+        cx.notify();
+    }
+
+    /// Troca o código do celular pelo de recuperação, e volta.
+    pub fn alternar_recuperacao(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.entrando {
+            return;
+        }
+        self.usando_recuperacao = !self.usando_recuperacao;
+        self.erro = None;
+        self.focar(window, cx);
         cx.notify();
     }
 
@@ -144,14 +390,37 @@ impl Entrada {
     }
 
     pub fn desistir(&mut self, cx: &mut Context<Self>) {
-        if !self.no_navegador {
+        if !self.no_navegador && !self.esperando_link {
             return;
+        }
+        // A espera do link pergunta ao site a cada três segundos: desligá-la é
+        // parar as perguntas, e não só deixar de ouvir a resposta.
+        if let Some(cancelar) = self.cancelar_link.take() {
+            cancelar.store(true, Ordering::Relaxed);
         }
         self.recados = channel();
         self.entrando = false;
         self.no_navegador = false;
+        self.esperando_link = false;
+        self.porta_em_curso = None;
         self.erro = None;
+        self.aviso = None;
         cx.notify();
+    }
+
+    /// Lembra por onde entrou e com que e-mail — a próxima abertura já vem na
+    /// aba certa. Nos testes não grava: o arquivo é o do app de verdade.
+    fn lembrar(&mut self, cx: &mut Context<Self>) {
+        let Some(porta) = self.porta_em_curso.take() else {
+            return;
+        };
+        self.config.ultima_porta = Some(porta);
+        if porta != PortaDeEntrada::Navegador {
+            self.config.email_lembrado = Some(self.email_digitado(cx));
+        }
+        if !cfg!(test) {
+            crate::pos_venda::config::gravar(&self.config);
+        }
     }
 
     fn acompanhar(&mut self, cx: &mut Context<Self>) {
@@ -179,6 +448,9 @@ impl Entrada {
                 Recado::Entrou(sessao) => {
                     self.entrando = false;
                     self.no_navegador = false;
+                    self.esperando_link = false;
+                    self.cancelar_link = None;
+                    self.lembrar(cx);
                     cx.emit(Entrou(sessao));
                 }
                 // Primeira abertura, ou os quinze dias venceram: o convite a
@@ -187,9 +459,38 @@ impl Entrada {
                     self.entrando = false;
                     self.no_navegador = false;
                 }
+                // O link saiu: a tela segue esperando, agora o toque no e-mail.
+                Recado::LinkEnviado { expira_em } => {
+                    self.esperando_link = true;
+                    let minutos = (expira_em / 60).max(1);
+                    self.aviso = Some(
+                        format!(
+                            "Mandamos o link para {}. Abra o e-mail — pode ser no celular — e \
+                             toque em “Entrar no VintageLightbox”. O app entra sozinho. Vale \
+                             {minutos} minutos.",
+                            self.email_digitado(cx)
+                        )
+                        .into(),
+                    );
+                }
+                Recado::SenhaPedida => {
+                    self.entrando = false;
+                    self.aviso = Some(
+                        format!(
+                            "Se {} tiver conta, chegou um e-mail com o link para criar ou \
+                             trocar a senha. Depois volte aqui e entre com ela.",
+                            self.email_digitado(cx)
+                        )
+                        .into(),
+                    );
+                }
                 Recado::Falhou(erro) => {
                     self.entrando = false;
                     self.no_navegador = false;
+                    self.esperando_link = false;
+                    self.cancelar_link = None;
+                    self.porta_em_curso = None;
+                    self.aviso = None;
                     self.erro = Some(erro.into());
                 }
                 // Nenhum dos outros nasce daqui: esta tela só entra.
@@ -212,6 +513,18 @@ impl Entrada {
 
     pub fn erro(&self) -> Option<&SharedString> {
         self.erro.as_ref()
+    }
+
+    pub fn aviso(&self) -> Option<&SharedString> {
+        self.aviso.as_ref()
+    }
+
+    pub fn aba(&self) -> PortaDeEntrada {
+        self.aba
+    }
+
+    pub fn esperando_link(&self) -> bool {
+        self.esperando_link
     }
 }
 
@@ -269,8 +582,10 @@ impl Render for Entrada {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         use capa::cor;
         use gpui_kit::component::button::{Button, ButtonVariants};
+        use gpui_kit::component::input::{Input, OtpInput};
         use gpui_kit::component::spinner::Spinner;
-        use gpui_kit::component::{h_flex, v_flex, Icon, Sizable};
+        use gpui_kit::component::tab::{Tab, TabBar};
+        use gpui_kit::component::{h_flex, v_flex, Disableable, Icon, Sizable};
         use gpui_kit::{
             img, linear_color_stop, linear_gradient, relative, Animation, AnimationExt, FontWeight,
             ObjectFit, StyledImage,
@@ -280,7 +595,7 @@ impl Render for Entrada {
 
         let rotulo = if self.no_navegador {
             "Confirme no navegador…"
-        } else if self.entrando {
+        } else if self.entrando && self.aba == PortaDeEntrada::Navegador {
             "Verificando…"
         } else {
             "Entrar com a conta RecordarFotos"
@@ -291,43 +606,260 @@ impl Render for Entrada {
                 .to_string()
         } else {
             format!(
-                "O navegador abre para você confirmar a conta em {}. Depois é só voltar para cá.",
+                "O navegador abre para você confirmar a conta em {}. É o caminho de quem \
+                 entra pelo Google.",
                 self.config.site().trim_start_matches("https://")
             )
         };
         let ocupado = self.entrando;
 
-        let botao = h_flex()
-            .id("entrada-entrar")
-            .h(px(56.))
-            .px(px(32.))
-            .gap(px(12.))
-            .rounded_full()
-            .bg(linear_gradient(
-                180.,
-                linear_color_stop(cor(capa::BOTAO_CIMA), 0.),
-                linear_color_stop(cor(capa::BOTAO_BAIXO), 1.),
-            ))
-            .shadow_lg()
-            .text_color(cor(capa::SOBRE_O_BOTAO))
-            .text_size(crate::tema::letra::em(16.))
-            .font_weight(FontWeight::SEMIBOLD)
-            .when(!ocupado, |b| {
-                b.cursor_pointer()
-                    .hover(|s| s.opacity(0.92))
-                    .on_click(cx.listener(|tela, _ev, _window, cx| tela.entrar(cx)))
+        // O botão dourado da capa, para o gesto principal de cada aba.
+        let dourado = |id: &'static str, rotulo: &'static str, giro: bool| {
+            h_flex()
+                .id(id)
+                .h(px(52.))
+                .px(px(30.))
+                .gap(px(12.))
+                .rounded_full()
+                .bg(linear_gradient(
+                    180.,
+                    linear_color_stop(cor(capa::BOTAO_CIMA), 0.),
+                    linear_color_stop(cor(capa::BOTAO_BAIXO), 1.),
+                ))
+                .shadow_lg()
+                .text_color(cor(capa::SOBRE_O_BOTAO))
+                .text_size(crate::tema::letra::em(16.))
+                .font_weight(FontWeight::SEMIBOLD)
+                .when(!ocupado, |b| b.cursor_pointer().hover(|s| s.opacity(0.92)))
+                .when(ocupado, |b| {
+                    b.cursor_default().opacity(if giro { 1. } else { 0.6 })
+                })
+                .when(ocupado && giro, |b| {
+                    b.child(
+                        Spinner::new()
+                            .with_size(px(18.))
+                            .color(cor(capa::SOBRE_O_BOTAO)),
+                    )
+                })
+                .child(rotulo)
+                .when(!ocupado, |b| {
+                    b.child(Icon::new(Icone::ArrowRight).size(px(20.)))
+                })
+        };
+        let texto_da_capa = |t: String| {
+            div()
+                .max_w(px(448.))
+                .text_sm()
+                .text_color(cor(capa::PARAGRAFO).opacity(0.7))
+                .child(t)
+        };
+        let ligacao = |id: &'static str, rotulo: &'static str| {
+            Button::new(id)
+                .link()
+                .text_sm()
+                .text_color(cor(capa::OURO).opacity(0.9))
+                .child(rotulo)
+        };
+
+        let botao = dourado(
+            "entrada-entrar",
+            rotulo,
+            self.aba == PortaDeEntrada::Navegador,
+        )
+        .when(!ocupado, |b| {
+            b.on_click(cx.listener(|tela, _ev, _window, cx| tela.entrar(cx)))
+        });
+
+        // 🗂️ As abas. Durante uma espera ficam paradas: a espera tem a saída
+        // dela ("Cancelar e voltar"), e trocar de aba no meio deixaria a
+        // resposta chegar numa aba que já não é a dela.
+        let tela = cx.entity().downgrade();
+        let abas = TabBar::new("abas-da-entrada")
+            .segmented()
+            .selected_index(ABAS.iter().position(|a| *a == self.aba).unwrap_or(0))
+            .on_click(move |indice, window, cx| {
+                let aba = ABAS[*indice];
+                let _ = tela.update(cx, |tela, cx| tela.escolher(aba, window, cx));
             })
-            .when(ocupado, |b| {
-                b.cursor_default().child(
-                    Spinner::new()
-                        .with_size(px(18.))
-                        .color(cor(capa::SOBRE_O_BOTAO)),
+            .child(
+                Tab::new()
+                    .debug_selector(|| "aba-credencial".into())
+                    .label("E-mail e senha"),
+            )
+            .child(
+                Tab::new()
+                    .debug_selector(|| "aba-link".into())
+                    .label("Link no e-mail"),
+            )
+            .child(
+                Tab::new()
+                    .debug_selector(|| "aba-autenticador".into())
+                    .label("Authenticator"),
+            )
+            .child(
+                Tab::new()
+                    .debug_selector(|| "aba-navegador".into())
+                    .label("Navegador"),
+            );
+
+        let campo_do_email = v_flex()
+            .gap(px(6.))
+            .when(self.aba == PortaDeEntrada::Navegador, |d| d.invisible())
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(cor(capa::OURO).opacity(0.85))
+                    .child("E-MAIL"),
+            )
+            .child(crate::estilo::campo(
+                Input::new(&self.email).disabled(ocupado),
+            ));
+
+        let painel_da_senha = v_flex()
+            .gap(px(14.))
+            .child(
+                v_flex()
+                    .gap(px(6.))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cor(capa::OURO).opacity(0.85))
+                            .child("SENHA"),
+                    )
+                    .child(crate::estilo::campo(
+                        Input::new(&self.senha).mask_toggle().disabled(ocupado),
+                    )),
+            )
+            .child(
+                h_flex()
+                    .gap(px(20.))
+                    .child(
+                        dourado(
+                            "entrada-senha",
+                            if ocupado { "Entrando…" } else { "Entrar" },
+                            true,
+                        )
+                        .when(!ocupado, |b| {
+                            b.on_click(cx.listener(|tela, _ev, window, cx| {
+                                tela.entrar_com_senha(window, cx)
+                            }))
+                        }),
+                    )
+                    .child(
+                        ligacao("entrada-trocar-senha", "Criar ou trocar a senha").on_click(
+                            cx.listener(|tela, _ev, _window, cx| tela.pedir_troca_de_senha(cx)),
+                        ),
+                    ),
+            );
+
+        let painel_do_link = v_flex()
+            .gap(px(14.))
+            .child(texto_da_capa(if self.esperando_link {
+                "Esperando o toque no e-mail…".to_string()
+            } else {
+                "Mandamos um link para o seu e-mail. Toque nele — no computador ou no \
+                 celular — e o app entra sozinho, sem senha."
+                    .to_string()
+            }))
+            .child(
+                dourado(
+                    "entrada-link",
+                    if self.esperando_link {
+                        "Esperando o toque…"
+                    } else {
+                        "Mandar o link"
+                    },
+                    true,
                 )
-            })
-            .child(rotulo)
-            .when(!ocupado, |b| {
-                b.child(Icon::new(Icone::ArrowRight).size(px(20.)))
-            });
+                .when(!ocupado, |b| {
+                    b.on_click(cx.listener(|tela, _ev, _window, cx| tela.pedir_link(cx)))
+                }),
+            );
+
+        let campo_do_codigo = if self.usando_recuperacao {
+            crate::estilo::campo(Input::new(&self.recuperacao).disabled(ocupado)).into_any_element()
+        } else {
+            OtpInput::new(&self.codigo)
+                .groups(2)
+                .disabled(ocupado)
+                .into_any_element()
+        };
+        let painel_do_codigo = v_flex()
+            .gap(px(14.))
+            .child(
+                v_flex()
+                    .gap(px(6.))
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(cor(capa::OURO).opacity(0.85))
+                            .child(if self.usando_recuperacao {
+                                "CÓDIGO DE RECUPERAÇÃO"
+                            } else {
+                                "CÓDIGO DO GOOGLE AUTHENTICATOR"
+                            }),
+                    )
+                    .child(campo_do_codigo),
+            )
+            .child(
+                h_flex()
+                    .gap(px(20.))
+                    .child(
+                        dourado(
+                            "entrada-codigo",
+                            if ocupado { "Entrando…" } else { "Entrar" },
+                            true,
+                        )
+                        .when(!ocupado, |b| {
+                            b.on_click(cx.listener(|tela, _ev, window, cx| {
+                                tela.entrar_com_codigo(window, cx)
+                            }))
+                        }),
+                    )
+                    .child(
+                        ligacao(
+                            "entrada-recuperacao",
+                            if self.usando_recuperacao {
+                                "Usar o código do celular"
+                            } else {
+                                "Usar um código de recuperação"
+                            },
+                        )
+                        .on_click(cx.listener(|tela, _ev, window, cx| {
+                            tela.alternar_recuperacao(window, cx)
+                        })),
+                    ),
+            )
+            .child(texto_da_capa(
+                "Abra o Google Authenticator no celular. Para cadastrar o celular, entre \
+                 de outro jeito e vá em Configurações › Conta."
+                    .to_string(),
+            ));
+
+        let painel_do_navegador = v_flex()
+            .gap(px(14.))
+            .items_start()
+            .child(botao)
+            .child(texto_da_capa(dica));
+
+        let paineis = crate::estilo::mesmo_lugar([
+            (
+                self.aba == PortaDeEntrada::Credencial,
+                painel_da_senha.into_any_element(),
+            ),
+            (
+                self.aba == PortaDeEntrada::Link,
+                painel_do_link.into_any_element(),
+            ),
+            (
+                self.aba == PortaDeEntrada::Autenticador,
+                painel_do_codigo.into_any_element(),
+            ),
+            (
+                self.aba == PortaDeEntrada::Navegador,
+                painel_do_navegador.into_any_element(),
+            ),
+        ]);
 
         let conteudo = v_flex()
             .max_w(px(576.))
@@ -392,46 +924,62 @@ impl Render for Entrada {
             )
             .child(
                 v_flex()
-                    .mt(px(40.))
-                    .items_start()
-                    .child(botao)
+                    .mt(px(32.))
+                    .w(px(448.))
+                    .gap(px(18.))
+                    .child(div().flex().child(abas))
+                    .child(campo_do_email)
+                    .child(paineis)
+                    // 🚪 A saída das esperas — a do navegador e a do link. Só
+                    // aparece enquanto elas duram.
+                    .child(
+                        div().h(px(20.)).when(self.no_navegador || self.esperando_link, |d| {
+                            d.child(
+                                Button::new("entrada-desistir")
+                                    .link()
+                                    .text_sm()
+                                    .text_color(cor(capa::OURO).opacity(0.85))
+                                    .child("Cancelar e voltar")
+                                    .on_click(
+                                        cx.listener(|tela, _ev, _window, cx| tela.desistir(cx)),
+                                    ),
+                            )
+                        }),
+                    )
+                    // A linha das frases: o aviso neutro ou o erro. Reservada,
+                    // para a capa não pular quando uma delas aparece.
                     .child(
                         div()
-                            .mt(px(16.))
-                            .max_w(px(448.))
-                            .text_sm()
-                            .text_color(cor(capa::PARAGRAFO).opacity(0.6))
-                            .child(dica),
-                    )
-                    // 🚪 A saída da espera. Só aparece enquanto ela dura, e é
-                    // a única coisa clicável da tela nesse estado.
-                    .when(self.no_navegador, |d| {
-                        d.child(
-                            Button::new("entrada-desistir")
-                                .link()
-                                .mt(px(12.))
-                                .text_sm()
-                                .text_color(cor(capa::OURO).opacity(0.85))
-                                .child("Cancelar e voltar")
-                                .on_click(cx.listener(|tela, _ev, _window, cx| tela.desistir(cx))),
-                        )
-                    })
-                    .when_some(self.erro.clone(), |d, erro| {
-                        d.child(
-                            div()
-                                .mt(px(16.))
-                                .max_w(px(448.))
-                                .px(px(12.))
-                                .py(px(8.))
-                                .rounded(crate::tema::canto(8.))
-                                .bg(cx.theme().danger.opacity(0.2))
-                                .border_1()
-                                .border_color(cx.theme().danger.opacity(0.6))
-                                .text_sm()
-                                .text_color(cor(capa::TEXTO))
-                                .child(crate::erro_da_api::legivel(&erro)),
-                        )
-                    }),
+                            .min_h(px(64.))
+                            .when_some(self.aviso.clone(), |d, aviso| {
+                                d.child(
+                                    div()
+                                        .px(px(12.))
+                                        .py(px(8.))
+                                        .rounded(crate::tema::canto(8.))
+                                        .bg(cor(capa::OURO).opacity(0.12))
+                                        .border_1()
+                                        .border_color(cor(capa::OURO).opacity(0.4))
+                                        .text_sm()
+                                        .text_color(cor(capa::TEXTO))
+                                        .child(aviso),
+                                )
+                            })
+                            .when_some(self.erro.clone(), |d, erro| {
+                                d.child(
+                                    div()
+                                        .px(px(12.))
+                                        .py(px(8.))
+                                        .rounded(crate::tema::canto(8.))
+                                        .bg(cx.theme().danger.opacity(0.2))
+                                        .border_1()
+                                        .border_color(cx.theme().danger.opacity(0.6))
+                                        .text_sm()
+                                        .text_color(cor(capa::TEXTO))
+                                        .child(crate::erro_da_api::legivel(&erro)),
+                                )
+                            }),
+                    ),
             )
             .with_animation(
                 "entrada-surgir",
@@ -441,6 +989,8 @@ impl Render for Entrada {
             );
 
         div()
+            .key_context(CONTEXTO)
+            .on_action(cx.listener(|tela, _: &EnviarEntrada, window, cx| tela.enviar(window, cx)))
             .relative()
             .size_full()
             .overflow_hidden()
@@ -644,6 +1194,266 @@ mod testes {
                     !tela.entrando(),
                     "a resposta atrasada não pode reabrir a espera"
                 );
+            })
+            .expect("a janela de teste");
+    }
+
+    // ── As portas sem navegador (2026-10-18) ───────────────────────────────
+
+    fn com_config(
+        publicador: Arc<PublicadorDeMentira>,
+        config: Configuracao,
+        cx: &mut TestAppContext,
+    ) -> gpui_kit::WindowHandle<Entrada> {
+        cx.update(gpui_kit::init);
+        let janela = cx.add_window(|window, cx| Entrada::nova(publicador, config, window, cx));
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.colher(cx);
+            })
+            .expect("a janela de teste");
+        janela
+    }
+
+    fn digitar(
+        campo: &Entity<InputState>,
+        texto: &str,
+        window: &mut Window,
+        cx: &mut Context<Entrada>,
+    ) {
+        campo.update(cx, |c, cx| c.set_value(texto.to_string(), window, cx));
+    }
+
+    #[gpui_kit::test]
+    fn email_e_senha_certos_entram_e_a_porta_fica_lembrada(cx: &mut TestAppContext) {
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        let janela = tela(publicador.clone(), cx);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                assert_eq!(
+                    tela.aba(),
+                    PortaDeEntrada::Credencial,
+                    "a primeira vez abre na senha"
+                );
+                digitar(
+                    &tela.email.clone(),
+                    "balcao@recordarfotos.com.br",
+                    window,
+                    cx,
+                );
+                digitar(&tela.senha.clone(), "senha-certa", window, cx);
+                tela.entrar_com_senha(window, cx);
+                assert!(
+                    tela.senha.read(cx).value().is_empty(),
+                    "a senha sai do campo assim que vai ao site"
+                );
+                tela.colher(cx);
+                assert!(!tela.entrando(), "entrou");
+                assert!(tela.erro().is_none());
+                assert_eq!(tela.config.ultima_porta, Some(PortaDeEntrada::Credencial));
+                assert_eq!(
+                    tela.config.email_lembrado.as_deref(),
+                    Some("balcao@recordarfotos.com.br")
+                );
+            })
+            .expect("a janela de teste");
+
+        let entradas = publicador.entradas.lock().unwrap().clone();
+        assert_eq!(
+            entradas,
+            vec![(
+                "senha",
+                "balcao@recordarfotos.com.br".to_string(),
+                "senha-certa".to_string()
+            )]
+        );
+    }
+
+    #[gpui_kit::test]
+    fn senha_errada_mostra_a_frase_do_site_e_nao_lembra_nada(cx: &mut TestAppContext) {
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        let janela = tela(publicador.clone(), cx);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                digitar(
+                    &tela.email.clone(),
+                    "balcao@recordarfotos.com.br",
+                    window,
+                    cx,
+                );
+                digitar(&tela.senha.clone(), "errada", window, cx);
+                tela.entrar_com_senha(window, cx);
+                tela.colher(cx);
+                assert!(!tela.entrando());
+                assert_eq!(
+                    tela.erro().map(|e| e.to_string()).as_deref(),
+                    Some("e-mail ou senha incorretos.")
+                );
+                assert_eq!(
+                    tela.config.ultima_porta, None,
+                    "só a entrada que deu certo é lembrada"
+                );
+            })
+            .expect("a janela de teste");
+    }
+
+    #[gpui_kit::test]
+    fn sem_email_nada_sai_para_o_site(cx: &mut TestAppContext) {
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        let janela = tela(publicador.clone(), cx);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                digitar(&tela.senha.clone(), "senha-certa", window, cx);
+                tela.entrar_com_senha(window, cx);
+                assert!(!tela.entrando());
+                assert!(tela.erro().is_some_and(|e| e.contains("e-mail")));
+            })
+            .expect("a janela de teste");
+        assert!(publicador.entradas.lock().unwrap().is_empty());
+    }
+
+    /// O link saiu: a tela espera o toque, diz para onde foi, e a saída desliga
+    /// a espera — o toque que vier depois não entra.
+    #[gpui_kit::test]
+    fn o_link_espera_o_toque_e_desistir_desliga_a_espera(cx: &mut TestAppContext) {
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        let janela = tela(publicador.clone(), cx);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.escolher(PortaDeEntrada::Link, window, cx);
+                digitar(
+                    &tela.email.clone(),
+                    "balcao@recordarfotos.com.br",
+                    window,
+                    cx,
+                );
+                tela.pedir_link(cx);
+                tela.colher(cx);
+                assert!(tela.entrando(), "esperando o toque no e-mail");
+                assert!(tela.esperando_link());
+                assert!(tela
+                    .aviso()
+                    .is_some_and(|a| a.contains("balcao@recordarfotos.com.br")));
+
+                tela.desistir(cx);
+                assert!(!tela.entrando());
+                assert!(!tela.esperando_link());
+                assert!(tela.aviso().is_none() && tela.erro().is_none());
+            })
+            .expect("a janela de teste");
+
+        // A pessoa toca no link depois de o operador ter desistido.
+        publicador.responder();
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.colher(cx);
+                assert!(!tela.entrando(), "o toque atrasado não reabre a espera");
+                assert_eq!(tela.config.ultima_porta, None, "e não entrou");
+            })
+            .expect("a janela de teste");
+    }
+
+    #[gpui_kit::test]
+    fn o_toque_no_link_entra_sozinho(cx: &mut TestAppContext) {
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        let janela = tela(publicador.clone(), cx);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.escolher(PortaDeEntrada::Link, window, cx);
+                digitar(
+                    &tela.email.clone(),
+                    "balcao@recordarfotos.com.br",
+                    window,
+                    cx,
+                );
+                tela.pedir_link(cx);
+                tela.colher(cx);
+            })
+            .expect("a janela de teste");
+        publicador.responder();
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.colher(cx);
+                assert!(!tela.entrando(), "entrou");
+                assert_eq!(tela.config.ultima_porta, Some(PortaDeEntrada::Link));
+            })
+            .expect("a janela de teste");
+    }
+
+    #[gpui_kit::test]
+    fn o_codigo_do_authenticator_entra_e_o_errado_avisa(cx: &mut TestAppContext) {
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        let janela = tela(publicador.clone(), cx);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.escolher(PortaDeEntrada::Autenticador, window, cx);
+                digitar(
+                    &tela.email.clone(),
+                    "balcao@recordarfotos.com.br",
+                    window,
+                    cx,
+                );
+
+                tela.codigo
+                    .update(cx, |c, cx| c.set_value("000000", window, cx));
+                tela.entrar_com_codigo(window, cx);
+                tela.colher(cx);
+                assert!(tela.erro().is_some_and(|e| e.contains("código")));
+                assert!(
+                    tela.codigo.read(cx).value().is_empty(),
+                    "o código errado sai do campo"
+                );
+
+                tela.codigo
+                    .update(cx, |c, cx| c.set_value("123456", window, cx));
+                tela.entrar_com_codigo(window, cx);
+                tela.colher(cx);
+                assert!(tela.erro().is_none());
+                assert_eq!(tela.config.ultima_porta, Some(PortaDeEntrada::Autenticador));
+            })
+            .expect("a janela de teste");
+    }
+
+    #[gpui_kit::test]
+    fn a_tela_abre_na_aba_que_funcionou_com_o_email_preenchido(cx: &mut TestAppContext) {
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        let config = Configuracao {
+            ultima_porta: Some(PortaDeEntrada::Autenticador),
+            email_lembrado: Some("balcao@recordarfotos.com.br".into()),
+            ..Configuracao::default()
+        };
+        let janela = com_config(publicador, config, cx);
+        janela
+            .update(cx, |tela, _window, cx| {
+                assert_eq!(tela.aba(), PortaDeEntrada::Autenticador);
+                assert_eq!(tela.email_digitado(cx), "balcao@recordarfotos.com.br");
+            })
+            .expect("a janela de teste");
+    }
+
+    #[gpui_kit::test]
+    fn criar_ou_trocar_a_senha_avisa_que_o_email_saiu(cx: &mut TestAppContext) {
+        let publicador = Arc::new(PublicadorDeMentira::default());
+        let janela = tela(publicador.clone(), cx);
+        janela
+            .update(cx, |tela, window, cx| {
+                digitar(
+                    &tela.email.clone(),
+                    "balcao@recordarfotos.com.br",
+                    window,
+                    cx,
+                );
+                tela.pedir_troca_de_senha(cx);
+                tela.colher(cx);
+                assert!(!tela.entrando());
+                assert!(tela.aviso().is_some_and(|a| a.contains("criar ou")));
+                assert_eq!(tela.config.ultima_porta, None, "pedir a senha não é entrar");
             })
             .expect("a janela de teste");
     }

@@ -1,5 +1,6 @@
-//! Configurações: os avisos sonoros (`crate::sons::tela`) e o cache — o que
-//! ele tem dentro, e como esvaziá-lo. Uma aba para cada.
+//! Configurações: os avisos sonoros (`crate::sons::tela`), o cache — o que
+//! ele tem dentro, e como esvaziá-lo — e a conta (o Google Authenticator,
+//! `crate::autenticador_da_conta`, desde 2026-10-18). Uma aba para cada.
 //!
 //! É o `settings_dialog.rs` do legado, sem a seção de leiaute — ela existe lá
 //! para desfazer um arranjo de painéis que este app não tem
@@ -19,7 +20,10 @@ use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{ActiveTheme, Disableable, Sizable};
 use gpui_kit::{div, prelude::*, px, App, Context, Entity, SharedString, Window};
 
+use crate::autenticador_da_conta::AutenticadorDaConta;
+use crate::pos_venda::porta::Publicador;
 use crate::sons::tela::AvisosSonoros;
+use domain::services::pos_venda::Sessao;
 use infrastructure::cache::preview_manager::{CacheStats, PreviewManager};
 
 /// Tamanho em bytes, do jeito que se lê.
@@ -56,11 +60,13 @@ pub struct Configuracoes {
     estatisticas: Option<CacheStats>,
     /// O que a última limpeza fez, para a tela poder dizer.
     ultima_limpeza: Option<SharedString>,
-    /// A aba aberta: 0 é "Avisos sonoros", 1 é "Cache".
+    /// A aba aberta: 0 é "Avisos sonoros", 1 é "Cache", 2 é "Conta".
     aba: usize,
     /// A aba dos sons, criada na primeira abertura — os campos dela pedem a
     /// janela, que o `nova` não tem.
     sons: Option<Entity<AvisosSonoros>>,
+    /// A aba da conta, criada na primeira abertura com a sessão da vez.
+    conta: Option<Entity<AutenticadorDaConta>>,
 }
 
 impl Configuracoes {
@@ -71,6 +77,25 @@ impl Configuracoes {
             ultima_limpeza: None,
             aba: 0,
             sons: None,
+            conta: None,
+        }
+    }
+
+    /// Liga a aba da conta à sessão da vez. Chamado ao abrir: quem entrou pode
+    /// ter mudado desde a última abertura.
+    pub fn ligar_conta(
+        &mut self,
+        publicador: Arc<dyn Publicador>,
+        sessao: Option<Sessao>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match &self.conta {
+            Some(conta) => conta.update(cx, |conta, cx| conta.trocar_sessao(sessao, cx)),
+            None => {
+                self.conta =
+                    Some(cx.new(|cx| AutenticadorDaConta::nova(publicador, sessao, window, cx)))
+            }
         }
     }
 
@@ -85,9 +110,9 @@ impl Configuracoes {
         self.aba
     }
 
-    /// 0 é "Avisos sonoros", 1 é "Cache".
+    /// 0 é "Avisos sonoros", 1 é "Cache", 2 é "Conta".
     pub fn ir_para_a_aba(&mut self, aba: usize, cx: &mut Context<Self>) {
-        self.aba = aba.min(1);
+        self.aba = aba.min(2);
         cx.notify();
     }
 
@@ -168,10 +193,19 @@ impl Render for Configuracoes {
                 Tab::new()
                     .debug_selector(|| "aba-cache".into())
                     .label("Cache"),
+            )
+            .child(
+                Tab::new()
+                    .debug_selector(|| "aba-conta".into())
+                    .label("Conta"),
             );
         let miolo = match (self.aba, &self.sons) {
             (0, Some(sons)) => sons.clone().into_any_element(),
             (0, None) => div().into_any_element(),
+            (2, _) => match &self.conta {
+                Some(conta) => conta.clone().into_any_element(),
+                None => div().into_any_element(),
+            },
             _ => self.cache(cx).into_any_element(),
         };
         div()

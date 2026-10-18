@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use domain::services::pos_venda::{
     CorpoDoPedido, EstadoNoBalcao, Estudio, Galeria, GaleriaAberta, GaleriaDoPainel, LinkDeAcesso,
-    MudancaDaFoto, MudancaDaGaleria, NovaGaleria, PosVendaApi, Produto, RespostaDoPedido, Sessao,
+    MudancaDaFoto, MudancaDaGaleria, NovaGaleria, PedidoDeLink, PosVendaApi, Produto,
+    RespostaDoPedido, Sessao,
 };
 use domain::value_objects::PhotoId;
 use domain::DomainError;
@@ -49,6 +50,45 @@ impl PosVendaController {
     /// frases diferentes — é o que a variante do domínio existe para permitir.
     pub async fn autorizar(&self) -> Result<Sessao, String> {
         self.api.autorizar_pelo_navegador().await.map_err(frase)
+    }
+
+    /// E-mail e senha, sem navegador.
+    pub async fn entrar_com_senha(&self, email: &str, senha: &str) -> Result<Sessao, String> {
+        self.api.entrar_com_senha(email, senha).await.map_err(frase)
+    }
+
+    /// E-mail e o código do Google Authenticator (ou de recuperação).
+    pub async fn entrar_com_autenticador(
+        &self,
+        email: &str,
+        codigo: &str,
+    ) -> Result<Sessao, String> {
+        self.api
+            .entrar_com_autenticador(email, codigo)
+            .await
+            .map_err(frase)
+    }
+
+    /// Pede o link no e-mail.
+    pub async fn pedir_link(&self, email: &str) -> Result<PedidoDeLink, String> {
+        self.api.pedir_link(email).await.map_err(frase)
+    }
+
+    /// Espera a pessoa tocar no link do e-mail, até vencer ou `cancelado` ligar.
+    pub async fn aguardar_link(
+        &self,
+        pedido: &PedidoDeLink,
+        cancelado: Arc<std::sync::atomic::AtomicBool>,
+    ) -> Result<Sessao, String> {
+        self.api
+            .aguardar_link(pedido, cancelado)
+            .await
+            .map_err(frase)
+    }
+
+    /// "Criar ou trocar a senha" — o e-mail com o link de escolher senha.
+    pub async fn pedir_troca_de_senha(&self, email: &str) -> Result<(), String> {
+        self.api.pedir_troca_de_senha(email).await.map_err(frase)
     }
 
     /// A sessão de ontem, se ainda valer. `Ok(None)` é "precisa autorizar".

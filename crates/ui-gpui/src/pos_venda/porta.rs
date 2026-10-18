@@ -143,6 +143,13 @@ pub enum Recado {
     /// autorizar. **Não é falha** — é o estado normal da primeira abertura, e
     /// tratá-lo como erro pintaria de vermelho um app recém-instalado.
     SemSessao,
+    /// O link de entrar saiu para o e-mail; a espera começou e vale
+    /// `expira_em` segundos (2026-10-18).
+    LinkEnviado {
+        expira_em: i64,
+    },
+    /// O e-mail de criar ou trocar a senha saiu.
+    SenhaPedida,
     /// Uma frase para a tela — autorização recusada, rede caída, galeria
     /// recusada.
     Falhou(String),
@@ -316,6 +323,44 @@ pub trait Publicador: Send + Sync + 'static {
     /// A sessão de ontem, do chaveiro. Responde `Entrou` se ainda valer, e
     /// `SemSessao` se for preciso autorizar.
     fn retomar(&self, canal: Sender<Recado>);
+
+    /// E-mail e senha, sem navegador. Responde `Entrou` ou `Falhou`.
+    fn entrar_com_senha(&self, email: String, senha: String, canal: Sender<Recado>) {
+        let _ = (email, senha);
+        let _ = canal.send(Recado::Falhou(
+            "esta forma de entrar não está disponível".into(),
+        ));
+    }
+
+    /// E-mail e o código do Google Authenticator. Responde `Entrou` ou `Falhou`.
+    fn entrar_com_autenticador(&self, email: String, codigo: String, canal: Sender<Recado>) {
+        let _ = (email, codigo);
+        let _ = canal.send(Recado::Falhou(
+            "esta forma de entrar não está disponível".into(),
+        ));
+    }
+
+    /// Pede o link no e-mail e espera o toque. Responde `LinkEnviado` logo,
+    /// e depois `Entrou` ou `Falhou`. A espera para quando `cancelado` liga.
+    fn entrar_pelo_link(
+        &self,
+        email: String,
+        cancelado: Arc<std::sync::atomic::AtomicBool>,
+        canal: Sender<Recado>,
+    ) {
+        let _ = (email, cancelado);
+        let _ = canal.send(Recado::Falhou(
+            "esta forma de entrar não está disponível".into(),
+        ));
+    }
+
+    /// "Criar ou trocar a senha". Responde `SenhaPedida` ou `Falhou`.
+    fn pedir_troca_de_senha(&self, email: String, canal: Sender<Recado>) {
+        let _ = email;
+        let _ = canal.send(Recado::Falhou(
+            "esta forma de entrar não está disponível".into(),
+        ));
+    }
 
     /// Um pedido JSON em nome da conta (`caminho` relativo a `/api/v2`), para
     /// as telas que só repassam JSON, como no site: a conta, o caixa e a
@@ -837,6 +882,65 @@ impl Publicador for PublicadorDaApi {
         });
     }
 
+    fn entrar_com_senha(&self, email: String, senha: String, canal: Sender<Recado>) {
+        let controlador = self.controlador.clone();
+        self.tokio.spawn(async move {
+            let recado = match controlador.entrar_com_senha(&email, &senha).await {
+                Ok(sessao) => Recado::Entrou(sessao),
+                Err(erro) => Recado::Falhou(erro),
+            };
+            let _ = canal.send(recado);
+        });
+    }
+
+    fn entrar_com_autenticador(&self, email: String, codigo: String, canal: Sender<Recado>) {
+        let controlador = self.controlador.clone();
+        self.tokio.spawn(async move {
+            let recado = match controlador.entrar_com_autenticador(&email, &codigo).await {
+                Ok(sessao) => Recado::Entrou(sessao),
+                Err(erro) => Recado::Falhou(erro),
+            };
+            let _ = canal.send(recado);
+        });
+    }
+
+    fn entrar_pelo_link(
+        &self,
+        email: String,
+        cancelado: Arc<std::sync::atomic::AtomicBool>,
+        canal: Sender<Recado>,
+    ) {
+        let controlador = self.controlador.clone();
+        self.tokio.spawn(async move {
+            let pedido = match controlador.pedir_link(&email).await {
+                Ok(pedido) => pedido,
+                Err(erro) => {
+                    let _ = canal.send(Recado::Falhou(erro));
+                    return;
+                }
+            };
+            let _ = canal.send(Recado::LinkEnviado {
+                expira_em: pedido.expira_em,
+            });
+            let recado = match controlador.aguardar_link(&pedido, cancelado).await {
+                Ok(sessao) => Recado::Entrou(sessao),
+                Err(erro) => Recado::Falhou(erro),
+            };
+            let _ = canal.send(recado);
+        });
+    }
+
+    fn pedir_troca_de_senha(&self, email: String, canal: Sender<Recado>) {
+        let controlador = self.controlador.clone();
+        self.tokio.spawn(async move {
+            let recado = match controlador.pedir_troca_de_senha(&email).await {
+                Ok(()) => Recado::SenhaPedida,
+                Err(erro) => Recado::Falhou(erro),
+            };
+            let _ = canal.send(recado);
+        });
+    }
+
     fn retomar(&self, canal: Sender<Recado>) {
         let controlador = self.controlador.clone();
         self.tokio.spawn(async move {
@@ -1308,6 +1412,13 @@ pub mod mentira {
         pub recusa_autorizacao: bool,
         /// Quantas vezes o navegador foi aberto.
         pub autorizacoes: Mutex<Vec<()>>,
+        /// `(porta, email, segredo)` de cada entrada sem navegador — `senha`,
+        /// `autenticador`, `link` ou `troca-de-senha`. A senha certa é
+        /// `senha-certa`, o código certo é `123456`.
+        pub entradas: Mutex<Vec<(&'static str, String, String)>>,
+        /// A espera do link entra sozinha logo depois do `LinkEnviado` —
+        /// desligado, ela fica pendurada como a de verdade antes do toque.
+        pub link_confirma_sozinho: bool,
         /// O que o chaveiro devolve na retomada.
         pub sessao_guardada: Mutex<Option<Sessao>>,
         /// De quais galerias o link foi pedido.
@@ -1647,6 +1758,16 @@ pub mod mentira {
         }
     }
 
+    /// A sessão que toda entrada de mentira devolve.
+    fn sessao_de_mentira() -> Sessao {
+        Sessao {
+            access_token: "tok-de-mentira".into(),
+            refresh_token: "ref-de-mentira".into(),
+            access_vence_em: i64::MAX,
+            refresh_vence_em: i64::MAX,
+        }
+    }
+
     impl Publicador for PublicadorDeMentira {
         fn pedir_cru(&self, _sessao: Sessao, pedido: PedidoCru, canal: Sender<Recado>) {
             let resultado = self
@@ -1692,6 +1813,65 @@ pub mod mentira {
                 Recado::Falhou("o site recusou a autorização".into())
             };
             self.responder_ou_guardar(canal, recado);
+        }
+
+        fn entrar_com_senha(&self, email: String, senha: String, canal: Sender<Recado>) {
+            self.entradas
+                .lock()
+                .expect("as entradas")
+                .push(("senha", email, senha.clone()));
+            let recado = if senha == "senha-certa" {
+                Recado::Entrou(sessao_de_mentira())
+            } else {
+                Recado::Falhou("e-mail ou senha incorretos.".into())
+            };
+            self.responder_ou_guardar(canal, recado);
+        }
+
+        fn entrar_com_autenticador(&self, email: String, codigo: String, canal: Sender<Recado>) {
+            self.entradas.lock().expect("as entradas").push((
+                "autenticador",
+                email,
+                codigo.clone(),
+            ));
+            let recado = if codigo == "123456" {
+                Recado::Entrou(sessao_de_mentira())
+            } else {
+                Recado::Falhou("e-mail ou código incorretos.".into())
+            };
+            self.responder_ou_guardar(canal, recado);
+        }
+
+        fn entrar_pelo_link(
+            &self,
+            email: String,
+            _cancelado: Arc<std::sync::atomic::AtomicBool>,
+            canal: Sender<Recado>,
+        ) {
+            self.entradas
+                .lock()
+                .expect("as entradas")
+                .push(("link", email, String::new()));
+            let _ = canal.send(Recado::LinkEnviado { expira_em: 900 });
+            // O toque no e-mail é a resposta guardada: sai quando o teste
+            // chama `responder()`, como a de verdade sai quando a pessoa toca.
+            if self.link_confirma_sozinho {
+                let _ = canal.send(Recado::Entrou(sessao_de_mentira()));
+            } else {
+                self.guardados
+                    .lock()
+                    .expect("os guardados")
+                    .push((canal, Recado::Entrou(sessao_de_mentira())));
+            }
+        }
+
+        fn pedir_troca_de_senha(&self, email: String, canal: Sender<Recado>) {
+            self.entradas.lock().expect("as entradas").push((
+                "troca-de-senha",
+                email,
+                String::new(),
+            ));
+            self.responder_ou_guardar(canal, Recado::SenhaPedida);
         }
 
         fn retomar(&self, canal: Sender<Recado>) {

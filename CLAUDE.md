@@ -18,7 +18,9 @@ conta do site para ser usado — *"eu preciso autenticar na web para conseguir u
 VintageLightbox"*. A primeira versão da reversão guardou uma saída, o botão **"trabalhar offline"**,
 e a saída **caiu no mesmo dia**, com o motivo que decide: *"o propósito dele é integração com o
 pós-venda da RecordarFotos"*. O app abre pedindo a conta (`crates/ui-gpui/src/entrada.rs`), e não há
-outro jeito de abrir.
+outro jeito de abrir. A conta entra por quatro portas desde 18/out/2026 — e-mail e senha, link no
+e-mail, Google Authenticator e o navegador de sempre —, todas com a mesma sessão de quinze dias no
+chaveiro (`application::auth::entrar_no_app`, no backend).
 
 🚨 **Trabalhar sem rede não foi descartado — foi adiado com forma própria: sincronização.** O app vai
 guardar o que foi feito sem internet e conciliar quando ela voltar. Um botão que só desliga o site é

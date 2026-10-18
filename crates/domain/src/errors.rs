@@ -53,6 +53,13 @@ pub enum DomainError {
     #[error("{0}")]
     FaltaEmail(String),
 
+    /// O site recusou, e a frase já é a da tela — a senha errada, a conta que
+    /// não opera o balcão, o link que venceu. Variante própria porque
+    /// [`Self::AcessoRecusado`] fala do navegador, e as entradas sem navegador
+    /// (2026-10-18) precisam dizer exatamente o que errou.
+    #[error("{0}")]
+    Recusado(String),
+
     #[error("Collection não encontrada")]
     CollectionNotFound,
 

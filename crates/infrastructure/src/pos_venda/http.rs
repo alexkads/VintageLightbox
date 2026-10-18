@@ -30,8 +30,8 @@ use domain::services::pos_venda::{
     AvisoDaGaleria, CofreDeSessao, ConflitoDePagamento, ContagemDeFotos, CorpoDoPedido,
     EntregaNoCanal, EstadoDaFotoNoSite, Estudio, FaixaDaGaleria, FotoDaGaleria, FotoEnviada,
     FotoParaEnviar, Galeria, GaleriaAberta, GaleriaDoPainel, LinkDeAcesso, MudancaDaFoto,
-    MudancaDaGaleria, NovaGaleria, PagoNoCaixa, PosVendaApi, Produto, RespostaDoPedido,
-    ResumoSimples, ResumosDoAtendimento, Sessao, TotaisDaGaleria,
+    MudancaDaGaleria, NovaGaleria, PagoNoCaixa, PedidoDeLink, PosVendaApi, Produto,
+    RespostaDoPedido, ResumoSimples, ResumosDoAtendimento, Sessao, TotaisDaGaleria,
 };
 use domain::{DomainError, DomainResult};
 use serde::Deserialize;
@@ -79,6 +79,10 @@ pub struct PosVendaApiHttp {
     /// do navegador — e, de quebra, o fluxo inteiro passa a ser exercitável,
     /// incluindo a costura entre a URL anunciada e a porta que está escutando.
     abridor: Arc<dyn Fn(&str) + Send + Sync>,
+    /// O nome deste computador, para o e-mail do link dizer quem pediu.
+    aparelho: Option<String>,
+    /// De quanto em quanto a espera do link pergunta ao site.
+    intervalo_do_link: Duration,
 }
 
 impl PosVendaApiHttp {
@@ -106,7 +110,21 @@ impl PosVendaApiHttp {
                     eprintln!("⚠️  Não foi possível abrir o navegador. Abra este endereço:\n{url}");
                 }
             }),
+            aparelho: None,
+            intervalo_do_link: INTERVALO_DO_LINK,
         }
+    }
+
+    /// O nome deste computador, que vai no pedido do link no e-mail.
+    pub fn com_aparelho(mut self, nome: impl Into<String>) -> Self {
+        self.aparelho = Some(nome.into()).filter(|n: &String| !n.trim().is_empty());
+        self
+    }
+
+    /// Encurta a espera entre perguntas do link — só o teste precisa.
+    pub fn com_intervalo_do_link(mut self, intervalo: Duration) -> Self {
+        self.intervalo_do_link = intervalo;
+        self
     }
 
     /// Troca quem leva o operador à tela — ver [`PosVendaApiHttp::abridor`].
@@ -239,6 +257,25 @@ fn rede(e: reqwest::Error) -> DomainError {
 }
 
 const SEM_RESPOSTA: &str = "sem resposta do site";
+
+/// De quanto em quanto o app pergunta se o link do e-mail foi confirmado.
+/// Três segundos: quem tocou no celular vê o app abrir logo, e quinze minutos
+/// de espera são trezentas perguntas — folgado para o balde do site (60/min).
+const INTERVALO_DO_LINK: Duration = Duration::from_secs(3);
+
+/// A frase de cada recusa das entradas sem navegador (2026-10-18). O site
+/// responde igual para conta inexistente e segredo errado; a tela também.
+fn recusa_da_entrada(status: u16, errou: &str) -> Option<DomainError> {
+    let frase = match status {
+        401 => errou.to_string(),
+        403 => "esta conta não opera o pós-venda. Entre com a conta do estúdio.".to_string(),
+        429 => "muitas tentativas seguidas. Espere um minuto e tente de novo.".to_string(),
+        503 => "esta forma de entrar está desligada no site agora. Use outra, ou o navegador."
+            .to_string(),
+        _ => return None,
+    };
+    Some(DomainError::Recusado(frase))
+}
 
 /// 🌪️ **A falha passa sozinha?** A rede que não respondeu e o site que
 /// respondeu 5xx (o proxy caído, o servidor reiniciando) são piscadas: repetir
@@ -390,6 +427,154 @@ impl PosVendaApi for PosVendaApiHttp {
         let sessao = par.em_sessao(agora());
         self.adotar(sessao.clone()).await;
         Ok(sessao)
+    }
+
+    async fn entrar_com_senha(&self, email: &str, senha: &str) -> DomainResult<Sessao> {
+        let resposta = self
+            .client
+            .post(self.url("/auth/app/login"))
+            .json(&json!({ "email": email.trim(), "senha": senha }))
+            .send()
+            .await
+            .map_err(rede)?;
+        if let Some(erro) =
+            recusa_da_entrada(resposta.status().as_u16(), "e-mail ou senha incorretos.")
+        {
+            return Err(erro);
+        }
+        let par: TokenPair = ler(resposta).await?;
+        let sessao = par.em_sessao(agora());
+        self.adotar(sessao.clone()).await;
+        Ok(sessao)
+    }
+
+    async fn entrar_com_autenticador(&self, email: &str, codigo: &str) -> DomainResult<Sessao> {
+        let resposta = self
+            .client
+            .post(self.url("/auth/app/autenticador"))
+            .json(&json!({ "email": email.trim(), "codigo": codigo.trim() }))
+            .send()
+            .await
+            .map_err(rede)?;
+        if let Some(erro) = recusa_da_entrada(
+            resposta.status().as_u16(),
+            "e-mail ou código incorretos. Confira se é o código atual do Authenticator.",
+        ) {
+            return Err(erro);
+        }
+        let par: TokenPair = ler(resposta).await?;
+        let sessao = par.em_sessao(agora());
+        self.adotar(sessao.clone()).await;
+        Ok(sessao)
+    }
+
+    async fn pedir_link(&self, email: &str) -> DomainResult<PedidoDeLink> {
+        let verificador = crate::pos_venda::autorizacao::sortear();
+        let desafio = crate::pos_venda::autorizacao::desafio_de(&verificador);
+        let resposta = self
+            .client
+            .post(self.url("/auth/app/link"))
+            .json(&json!({
+                "email": email.trim(),
+                "desafio": desafio,
+                "aparelho": self.aparelho,
+            }))
+            .send()
+            .await
+            .map_err(rede)?;
+        if let Some(erro) = recusa_da_entrada(resposta.status().as_u16(), "") {
+            return Err(erro);
+        }
+
+        #[derive(Deserialize)]
+        struct Pedido {
+            pedido: String,
+            expira_em: i64,
+        }
+        let pedido: Pedido = ler(resposta).await?;
+        Ok(PedidoDeLink {
+            pedido: pedido.pedido,
+            verificador,
+            expira_em: pedido.expira_em,
+        })
+    }
+
+    async fn aguardar_link(
+        &self,
+        pedido: &PedidoDeLink,
+        cancelado: Arc<std::sync::atomic::AtomicBool>,
+    ) -> DomainResult<Sessao> {
+        use std::sync::atomic::Ordering;
+
+        let prazo = std::time::Instant::now()
+            + Duration::from_secs(pedido.expira_em.max(0) as u64)
+            + Duration::from_secs(5);
+        loop {
+            if cancelado.load(Ordering::Relaxed) {
+                return Err(DomainError::Recusado(
+                    "a espera do link foi cancelada.".into(),
+                ));
+            }
+            if std::time::Instant::now() > prazo {
+                return Err(DomainError::Recusado(
+                    "o link venceu sem ser confirmado. Peça outro.".into(),
+                ));
+            }
+
+            let resposta = self
+                .client
+                .post(self.url("/auth/app/link/aguardar"))
+                .json(&json!({ "pedido": pedido.pedido, "verificador": pedido.verificador }))
+                .send()
+                .await;
+            match resposta {
+                Ok(r) if r.status() == reqwest::StatusCode::OK => {
+                    let par: TokenPair = ler(r).await?;
+                    let sessao = par.em_sessao(agora());
+                    self.adotar(sessao.clone()).await;
+                    return Ok(sessao);
+                }
+                // 202: ainda não tocaram no link. 429 e rede piscando: tenta
+                // de novo na próxima volta, sem assustar ninguém.
+                Ok(r) if r.status() == reqwest::StatusCode::ACCEPTED => {}
+                Ok(r) if r.status() == reqwest::StatusCode::TOO_MANY_REQUESTS => {}
+                Ok(r) if r.status() == reqwest::StatusCode::BAD_REQUEST => {
+                    return Err(DomainError::Recusado(
+                        "o link venceu ou já foi usado. Peça outro.".into(),
+                    ));
+                }
+                Ok(r) => {
+                    if let Some(erro) = recusa_da_entrada(r.status().as_u16(), "") {
+                        return Err(erro);
+                    }
+                    if !r.status().is_server_error() {
+                        return Err(recusa(r).await);
+                    }
+                }
+                Err(_) => {}
+            }
+            tokio::time::sleep(self.intervalo_do_link).await;
+        }
+    }
+
+    async fn pedir_troca_de_senha(&self, email: &str) -> DomainResult<()> {
+        let resposta = self
+            .client
+            .post(self.url("/auth/password/forgot"))
+            .json(&json!({ "email": email.trim() }))
+            .send()
+            .await
+            .map_err(rede)?;
+        if let Some(erro) = recusa_da_entrada(resposta.status().as_u16(), "") {
+            return Err(erro);
+        }
+        if resposta.status() == reqwest::StatusCode::UNPROCESSABLE_ENTITY {
+            return Err(DomainError::Recusado("confira o e-mail digitado.".into()));
+        }
+        if !resposta.status().is_success() {
+            return Err(recusa(resposta).await);
+        }
+        Ok(())
     }
 
     async fn retomar_sessao(&self) -> DomainResult<Option<Sessao>> {

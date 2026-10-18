@@ -63,6 +63,9 @@ domain = { path = "../domain" }
 # compilariam, mas `DynamicImage` de uma **não é** o tipo da outra, e a ponte de
 # imagem (§3.1) atravessa exatamente essa fronteira.
 image = "0.25"
+# O QR code do Google Authenticator chega do site como PNG em base64
+# (`autenticador_da_conta`). A mesma versão do `infrastructure`.
+base64 = "0.22"
 directories = "6.0.0"
 # `RenderImage::new` recebe `SmallVec<[Frame; 1]>`, e o `gpui` não reexporta o
 # `smallvec` — quem constrói o argumento precisa da mesma versão que ele usa.

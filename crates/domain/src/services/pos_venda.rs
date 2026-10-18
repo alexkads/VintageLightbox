@@ -52,6 +52,16 @@ use serde_json::Value;
 use crate::entities::Photo;
 use crate::DomainResult;
 
+/// O pedido do link no e-mail, do lado do app: o `pedido` que o site devolveu
+/// e o verificador PKCE, que nunca saiu daqui.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PedidoDeLink {
+    pub pedido: String,
+    pub verificador: String,
+    /// Quanto o link vale, em segundos — a espera desiste depois disso.
+    pub expira_em: i64,
+}
+
 /// O que fica de uma autorização: o par de tokens e quando o de acesso vence.
 ///
 /// # Por que o de renovação passou a caber aqui
@@ -772,6 +782,55 @@ pub trait PosVendaApi: Send + Sync {
     /// [`crate::DomainError::AcessoRecusado`], e não erro de infraestrutura: a
     /// tela precisa dizer "não autorizado" e não "sem rede".
     async fn autorizar_pelo_navegador(&self) -> DomainResult<Sessao>;
+
+    /// **E-mail e senha**, sem navegador (dono, 2026-10-18: o operador leigo
+    /// se perdia na ida e volta do navegador). A sessão é a mesma dos quinze
+    /// dias, guardada e renovada igual; a senha não fica em lugar nenhum.
+    ///
+    /// Senha errada, conta sem balcão e excesso de tentativas chegam como
+    /// [`crate::DomainError::Recusado`], já na frase da tela.
+    async fn entrar_com_senha(&self, _email: &str, _senha: &str) -> DomainResult<Sessao> {
+        Err(crate::DomainError::Recusado(
+            "esta forma de entrar não está disponível".into(),
+        ))
+    }
+
+    /// **Google Authenticator**: o e-mail e os seis dígitos do celular (ou um
+    /// código de recuperação).
+    async fn entrar_com_autenticador(&self, _email: &str, _codigo: &str) -> DomainResult<Sessao> {
+        Err(crate::DomainError::Recusado(
+            "esta forma de entrar não está disponível".into(),
+        ))
+    }
+
+    /// **Link no e-mail**, primeira metade: pede o link e devolve o que é
+    /// preciso para esperar por ele. O verificador (PKCE) nasce e fica aqui.
+    async fn pedir_link(&self, _email: &str) -> DomainResult<PedidoDeLink> {
+        Err(crate::DomainError::Recusado(
+            "esta forma de entrar não está disponível".into(),
+        ))
+    }
+
+    /// **Link no e-mail**, segunda metade: pergunta ao site até a pessoa tocar
+    /// em "Sim, sou eu" (no computador ou no celular), o link vencer, ou
+    /// `cancelado` ligar — o "Cancelar e voltar" da tela.
+    async fn aguardar_link(
+        &self,
+        _pedido: &PedidoDeLink,
+        _cancelado: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ) -> DomainResult<Sessao> {
+        Err(crate::DomainError::Recusado(
+            "esta forma de entrar não está disponível".into(),
+        ))
+    }
+
+    /// "Criar ou trocar a senha": o site manda ao e-mail o link de escolher
+    /// senha. Responde igual para e-mail com e sem conta.
+    async fn pedir_troca_de_senha(&self, _email: &str) -> DomainResult<()> {
+        Err(crate::DomainError::Recusado(
+            "esta forma de entrar não está disponível".into(),
+        ))
+    }
 
     /// A sessão de ontem, se o chaveiro ainda a tiver e ela ainda valer.
     ///

@@ -273,6 +273,7 @@ const SEM_CAMPO_DE_TEXTO: &str = "Aplicativo && !Input";
 
 pub fn init(cx: &mut gpui_kit::App) {
     crate::editor::init(cx);
+    crate::entrada::init(cx);
     monitor_do_cliente::init(cx);
     cx.bind_keys([
         gpui_kit::KeyBinding::new("f11", AlternarTelaCheiaDoApp, Some(CONTEXTO)),
@@ -5459,8 +5460,11 @@ impl Aplicativo {
         cx: &mut Context<Self>,
     ) {
         self.configurando = true;
+        let publicador = self.publicador.clone();
+        let sessao = self.sessao().cloned();
         self.configuracoes.update(cx, |tela, cx| {
             tela.preparar(window, cx);
+            tela.ligar_conta(publicador, sessao, window, cx);
             tela.ir_para_a_aba(aba, cx);
             tela.atualizar(cx);
         });

@@ -279,13 +279,13 @@ fn e_endereco_web(url: &str) -> bool {
 }
 
 /// 32 bytes de aleatório em base64url — 43 caracteres, o piso da RFC 7636.
-fn sortear() -> String {
+pub(crate) fn sortear() -> String {
     let mut bytes = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut bytes);
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
-fn desafio_de(verificador: &str) -> String {
+pub(crate) fn desafio_de(verificador: &str) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(Sha256::digest(verificador.as_bytes()))
 }
 

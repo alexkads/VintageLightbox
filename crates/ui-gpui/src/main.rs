@@ -129,7 +129,9 @@ async fn main() {
         Arc::new(
             infrastructure::PosVendaApiHttp::nova(config.base_url.clone())
                 .com_site(config.site())
-                .com_cofre(cofre_da_sessao(local)),
+                .com_cofre(cofre_da_sessao(local))
+                // O e-mail do link de entrar diz de que computador veio o pedido.
+                .com_aparelho(ui_gpui::telemetria::maquina::deste().nome.clone()),
         )
     };
     let ui_gpui::montagem::Montagem {
