@@ -86,6 +86,33 @@ const ZOOM_MAXIMO: f32 = 320.0;
 const ZOOM_PADRAO: f32 = 160.0;
 const PASSO_DO_ZOOM: f32 = 35.0;
 
+/// 📍 O aviso de sucesso da correção de local — o mesmo texto do site
+/// (`fraseDaCorrecao` em `lib/local-da-sessao.ts`): quantas vendas mudaram de
+/// caixa e qual caixa abriu sozinho para recebê-las (dono, 18/out/2026).
+fn frase_da_correcao(para: LocalDaSessao, feito: &serde_json::Value) -> String {
+    let movidas = feito["vendas_movidas"].as_u64().unwrap_or(0);
+    let mantidas = feito["vendas_mantidas"].as_u64().unwrap_or(0);
+    let mut partes = vec![format!("Local corrigido para {}.", para.rotulo())];
+    if movidas > 0 {
+        partes.push(format!(
+            "{movidas} venda(s) passaram ao caixa do local novo."
+        ));
+    }
+    for aberto in feito["caixas_abertos"].as_array().into_iter().flatten() {
+        partes.push(format!(
+            "O caixa {} de {} estava fechado e foi aberto, com fundo de troco zero.",
+            aberto["caixa"].as_str().unwrap_or_default(),
+            aberto["operador"].as_str().unwrap_or_default()
+        ));
+    }
+    if mantidas > 0 {
+        partes.push(format!(
+            "{mantidas} venda(s) de caixa já fechado ficaram onde foram contadas."
+        ));
+    }
+    partes.join(" ")
+}
+
 /// 📍 O aviso de quem clica no local sem poder corrigi-lo — o mesmo texto do
 /// site (`LOCAL_SEM_PERMISSAO` em `lib/local-da-sessao.ts`), com o nome da
 /// permissão como a tela de perfis a mostra.
@@ -3340,20 +3367,7 @@ impl Detalhe {
                     c.gravando = false;
                 }
                 self.correcao_do_local.fechar_depois(cx);
-                let movidas = feito["vendas_movidas"].as_u64().unwrap_or(0);
-                let mantidas = feito["vendas_mantidas"].as_u64().unwrap_or(0);
-                let mut frase = format!("Local corrigido para {}.", para.rotulo());
-                if movidas > 0 {
-                    frase.push_str(&format!(
-                        " {movidas} venda(s) passaram ao caixa do local novo."
-                    ));
-                }
-                if mantidas > 0 {
-                    frase.push_str(&format!(
-                        " {mantidas} venda(s) de caixa já fechado ficaram onde foram contadas."
-                    ));
-                }
-                self.avisar_sucesso(frase, cx);
+                self.avisar_sucesso(frase_da_correcao(para, &feito), cx);
             }
             Err(erro) => {
                 if let Some(c) = self.correcao_do_local.aberto_mut() {
@@ -3382,8 +3396,9 @@ impl Detalhe {
         let perigo = cx.theme().danger;
         let dica = format!(
             "De {} para {}. A lista de sessões passa a somar no local novo; a venda em \
-             caixa aberto vai para o caixa do local novo, e a de caixa já fechado fica \
-             onde foi contada.",
+             caixa aberto vai para o caixa do local novo — que abre sozinho, com fundo de \
+             troco zero, se estiver fechado —, e a de caixa já fechado fica onde foi \
+             contada.",
             atual.rotulo(),
             correcao.para.rotulo()
         );
@@ -13491,7 +13506,8 @@ mod testes {
         publicador.responder_json(
             PEDIDO_DA_CORRECAO_DO_LOCAL,
             Ok(serde_json::json!({
-                "de": "ESTUDIO", "para": "EXTERNO", "vendas_movidas": 1, "vendas_mantidas": 0
+                "de": "ESTUDIO", "para": "EXTERNO", "vendas_movidas": 1, "vendas_mantidas": 0,
+                "caixas_abertos": [{ "caixa": "Externo", "operador": "canela@exemplo.com" }]
             })),
         );
         let janela = janela_com(
@@ -13557,7 +13573,9 @@ mod testes {
                 assert_eq!(
                     tela.avisos_dados.last(),
                     Some(&(
-                        "Local corrigido para Externo. 1 venda(s) passaram ao caixa do local novo."
+                        "Local corrigido para Externo. 1 venda(s) passaram ao caixa do local novo. \
+                         O caixa Externo de canela@exemplo.com estava fechado e foi aberto, com \
+                         fundo de troco zero."
                             .to_string(),
                         false
                     ))
