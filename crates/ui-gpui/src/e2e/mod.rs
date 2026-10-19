@@ -654,7 +654,10 @@ impl Estudio {
             use gpui_kit::component::WindowExt as _;
             let sobreposicao = window.has_active_dialog(cx) || window.has_active_sheet(cx);
             assert!(
-                sobreposicao || app.foco_da_raiz().contains_focused(window, cx),
+                sobreposicao
+                    || app.foco_da_raiz().contains_focused(window, cx)
+                    // Na porta, o cursor fica no campo de e-mail (2026-10-18).
+                    || app.foco_na_porta(window, cx),
                 "nada desenhado tem o foco: as teclas não chegam a ninguém"
             );
         });

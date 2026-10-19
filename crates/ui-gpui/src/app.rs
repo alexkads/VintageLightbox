@@ -970,6 +970,9 @@ pub struct Aplicativo {
     /// Quantas vezes a rede apanhou um foco caído. Em teste é defeito: alguma
     /// sobreposição fechou sem passar pelo [`crate::modal::Modal`].
     pub(crate) focos_perdidos: usize,
+    /// A conta acabou de entrar: o próximo desenho põe o foco na raiz. A
+    /// entrada deixa o cursor no campo de e-mail, e a tela dela some.
+    foco_ao_entrar: bool,
     /// Quem relê o catálogo quando a importação termina.
     acervo: Arc<dyn Acervo>,
     /// Quem grava — aqui usado pelo colar, que escreve em N fotos de uma vez.
@@ -1595,6 +1598,7 @@ impl Aplicativo {
             foco,
             _rede_do_foco: rede_do_foco,
             focos_perdidos: 0,
+            foco_ao_entrar: false,
             acervo: portas.acervo,
             gravador: gravador_para_colar,
             area_de_transferencia: None,
@@ -3712,6 +3716,12 @@ impl Aplicativo {
         );
         let foco = self.foco_da_tela(cx);
         window.focus(&foco, cx);
+    }
+
+    /// Antes de a conta entrar, o foco mora num campo da porta.
+    #[cfg(test)]
+    pub(crate) fn foco_na_porta(&self, window: &Window, cx: &App) -> bool {
+        self.sessao.is_none() && self.entrada.read(cx).tem_foco(window, cx)
     }
 
     /// O foco da raiz — tudo o que a janela principal desenha está dentro dele.
@@ -6406,6 +6416,10 @@ impl Aplicativo {
         sessao: domain::services::pos_venda::Sessao,
         cx: &mut Context<Self>,
     ) {
+        // 🪟 A entrada deixa o cursor no campo de e-mail; a tela dela some
+        // agora, e o foco vai para a raiz no próximo desenho (aqui não há
+        // janela) — e não cai num campo que deixou de existir.
+        self.foco_ao_entrar = true;
         // A lista já pede as sessões: quem entrou vai querer ver em qual
         // galeria está trabalhando antes de qualquer outra coisa.
         self.sessoes
@@ -6975,6 +6989,12 @@ impl Aplicativo {
 impl Render for Aplicativo {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _t = crate::regua::trecho("raiz: render");
+        if self.foco_ao_entrar {
+            self.foco_ao_entrar = false;
+            // A raiz, e não a tela da vez: ela está sempre desenhada, e é
+            // onde o foco estava antes de a entrada pedir o campo de e-mail.
+            window.focus(&self.foco, cx);
+        }
         // ⏱️ O começo do quadro, para a ferramenta de desempenho (uma leitura
         // atômica com ela desligada). O fim é o sentinela, lá embaixo.
         crate::desempenho::quadro_comecou();

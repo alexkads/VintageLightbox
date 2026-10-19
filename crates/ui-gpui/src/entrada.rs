@@ -125,6 +125,9 @@ pub struct Entrada {
     aviso: Option<SharedString>,
     /// A porta que está no ar, para lembrar a que deu certo.
     porta_em_curso: Option<PortaDeEntrada>,
+    /// O cursor ainda não foi posto no campo da aba: quem abre o app começa
+    /// a digitar sem clicar (o primeiro desenho é o primeiro com janela).
+    focar_ao_abrir: bool,
     _assinaturas: Vec<Subscription>,
 }
 
@@ -184,6 +187,7 @@ impl Entrada {
             cancelar_link: None,
             aviso: None,
             porta_em_curso: None,
+            focar_ao_abrir: true,
             _assinaturas: assinaturas,
         };
 
@@ -465,9 +469,8 @@ impl Entrada {
                     let minutos = (expira_em / 60).max(1);
                     self.aviso = Some(
                         format!(
-                            "Mandamos o link para {}. Abra o e-mail — pode ser no celular — e \
-                             toque em “Entrar no VintageLightbox”. O app entra sozinho. Vale \
-                             {minutos} minutos.",
+                            "Mandamos o link para {}. Toque nele — pode ser no celular — e o \
+                             app entra sozinho. Vale {minutos} minutos.",
                             self.email_digitado(cx)
                         )
                         .into(),
@@ -526,6 +529,20 @@ impl Entrada {
     pub fn esperando_link(&self) -> bool {
         self.esperando_link
     }
+
+    /// Um dos campos da entrada tem o foco — o cursor que ela põe ao abrir.
+    #[cfg(test)]
+    pub fn tem_foco(&self, window: &Window, cx: &gpui_kit::App) -> bool {
+        use gpui_kit::Focusable as _;
+        [
+            self.email.focus_handle(cx),
+            self.senha.focus_handle(cx),
+            self.recuperacao.focus_handle(cx),
+            self.codigo.focus_handle(cx),
+        ]
+        .iter()
+        .any(|foco| foco.contains_focused(window, cx))
+    }
 }
 
 /// A capa do estúdio, com as cores e as medidas de
@@ -575,6 +592,73 @@ impl Entrada {
                 gpui_kit::linear_color_stop(capa::veu(alfa_de), 0.),
                 gpui_kit::linear_color_stop(capa::veu(alfa_ate), 1.),
             ))
+    }
+}
+
+impl Entrada {
+    /// A saída da espera (navegador ou link), o aviso neutro e o erro — o que
+    /// a tela diz depois do gesto. Com altura mínima, para a capa não pular
+    /// quando uma frase aparece.
+    fn frases(&self, cx: &mut Context<Self>) -> gpui_kit::Div {
+        use gpui_kit::component::button::{Button, ButtonVariants};
+        use gpui_kit::component::v_flex;
+
+        let caixa = |fundo: gpui_kit::Hsla, borda: gpui_kit::Hsla, texto: String| {
+            div()
+                .px(px(12.))
+                .py(px(8.))
+                .rounded(crate::tema::canto(8.))
+                .bg(fundo)
+                .border_1()
+                .border_color(borda)
+                .text_sm()
+                .text_color(capa::cor(capa::TEXTO))
+                .child(maiuscula(&texto))
+        };
+        v_flex()
+            .items_start()
+            .min_h(px(80.))
+            .gap(px(8.))
+            .when(self.no_navegador || self.esperando_link, |d| {
+                d.child(
+                    div().child(
+                        Button::new("entrada-desistir")
+                            .link()
+                            .text_sm()
+                            .text_color(capa::cor(capa::OURO).opacity(0.85))
+                            .child("Cancelar e voltar")
+                            .on_click(cx.listener(|tela, _ev, _window, cx| tela.desistir(cx))),
+                    ),
+                )
+            })
+            // O aviso do link já está no texto do painel dele.
+            .when_some(
+                self.aviso.clone().filter(|_| !self.esperando_link),
+                |d, aviso| {
+                    d.child(caixa(
+                        capa::cor(capa::OURO).opacity(0.12),
+                        capa::cor(capa::OURO).opacity(0.4),
+                        aviso.to_string(),
+                    ))
+                },
+            )
+            .when_some(self.erro.clone(), |d, erro| {
+                d.child(caixa(
+                    cx.theme().danger.opacity(0.2),
+                    cx.theme().danger.opacity(0.6),
+                    crate::erro_da_api::legivel(&erro),
+                ))
+            })
+    }
+}
+
+/// A frase começa com maiúscula — as recusas do site chegam no meio da frase
+/// ("e-mail ou senha incorretos.").
+fn maiuscula(texto: &str) -> String {
+    let mut letras = texto.chars();
+    match letras.next() {
+        Some(primeira) => primeira.to_uppercase().chain(letras).collect(),
+        None => String::new(),
     }
 }
 
@@ -752,15 +836,21 @@ impl Render for Entrada {
                     ),
             );
 
+        // Durante a espera, o texto do painel **é** o aviso (para onde o link
+        // foi): uma frase só, no lugar da explicação, com a altura reservada —
+        // a capa não sobe quando o link sai.
         let painel_do_link = v_flex()
             .gap(px(14.))
-            .child(texto_da_capa(if self.esperando_link {
-                "Esperando o toque no e-mail…".to_string()
-            } else {
-                "Mandamos um link para o seu e-mail. Toque nele — no computador ou no \
-                 celular — e o app entra sozinho, sem senha."
-                    .to_string()
-            }))
+            .items_start()
+            .child(
+                texto_da_capa(match (&self.aviso, self.esperando_link) {
+                    (Some(aviso), true) => aviso.to_string(),
+                    _ => "Mandamos um link para o seu e-mail. Toque nele — no computador ou \
+                          no celular — e o app entra sozinho, sem senha."
+                        .to_string(),
+                })
+                .min_h(px(60.)),
+            )
             .child(
                 dourado(
                     "entrada-link",
@@ -779,9 +869,9 @@ impl Render for Entrada {
         let campo_do_codigo = if self.usando_recuperacao {
             crate::estilo::campo(Input::new(&self.recuperacao).disabled(ocupado)).into_any_element()
         } else {
-            OtpInput::new(&self.codigo)
-                .groups(2)
-                .disabled(ocupado)
+            div()
+                .flex()
+                .child(OtpInput::new(&self.codigo).groups(2).disabled(ocupado))
                 .into_any_element()
         };
         let painel_do_codigo = v_flex()
@@ -842,34 +932,51 @@ impl Render for Entrada {
             .child(botao)
             .child(texto_da_capa(dica));
 
+        // As frases vão **dentro** de cada painel, logo abaixo do botão: com
+        // uma linha só embaixo de todos, a mensagem caía longe do gesto, na
+        // altura do painel mais alto (o do Authenticator).
         let paineis = crate::estilo::mesmo_lugar([
             (
                 self.aba == PortaDeEntrada::Credencial,
-                painel_da_senha.into_any_element(),
+                painel_da_senha.child(self.frases(cx)).into_any_element(),
             ),
             (
                 self.aba == PortaDeEntrada::Link,
-                painel_do_link.into_any_element(),
+                painel_do_link.child(self.frases(cx)).into_any_element(),
             ),
             (
                 self.aba == PortaDeEntrada::Autenticador,
-                painel_do_codigo.into_any_element(),
+                painel_do_codigo.child(self.frases(cx)).into_any_element(),
             ),
             (
                 self.aba == PortaDeEntrada::Navegador,
-                painel_do_navegador.into_any_element(),
+                painel_do_navegador
+                    .child(self.frases(cx))
+                    .into_any_element(),
             ),
         ]);
 
+        // 📐 **Janela baixa, capa compacta.** Com as abas, os campos e a linha
+        // das frases, a capa inteira passa de 900 pt — e num notebook de
+        // 768 linhas (a janela de 1100×753 do roteiro) o selo saía cortado em
+        // cima e o "Entrar" encostava no rodapé. Abaixo de 940 pt o selo e o
+        // parágrafo saem e o título encolhe; o gesto fica todo à vista.
+        let compacta = window.viewport_size().height < px(940.);
+        if self.focar_ao_abrir && !self.entrando {
+            self.focar_ao_abrir = false;
+            self.focar(window, cx);
+        }
         let conteudo = v_flex()
             .max_w(px(576.))
-            .child(
-                img("imagens/selo.png")
-                    .w(px(208.))
-                    .h(px(167.))
-                    .object_fit(ObjectFit::Contain)
-                    .mb(px(32.)),
-            )
+            .when(!compacta, |d| {
+                d.child(
+                    img("imagens/selo.png")
+                        .w(px(208.))
+                        .h(px(167.))
+                        .object_fit(ObjectFit::Contain)
+                        .mb(px(32.)),
+                )
+            })
             .child(
                 h_flex()
                     .mb(px(16.))
@@ -890,7 +997,7 @@ impl Render for Entrada {
             .child(
                 div()
                     .font_family(capa::SERIFADA)
-                    .text_size(crate::tema::letra::em(72.))
+                    .text_size(crate::tema::letra::em(if compacta { 56. } else { 72. }))
                     .line_height(relative(1.05))
                     .font_weight(FontWeight::BOLD)
                     .text_color(cor(capa::TITULO))
@@ -899,7 +1006,7 @@ impl Render for Entrada {
             )
             .child(
                 h_flex()
-                    .my(px(28.))
+                    .my(px(if compacta { 16. } else { 28. }))
                     .gap(px(12.))
                     .child(div().w(px(64.)).h(px(1.)).bg(cor(capa::OURO).opacity(0.6)))
                     .child(
@@ -910,76 +1017,28 @@ impl Render for Entrada {
                     )
                     .child(div().w(px(64.)).h(px(1.)).bg(cor(capa::OURO).opacity(0.6))),
             )
-            .child(
-                div()
-                    .max_w(px(448.))
-                    .font_family(capa::SERIFADA)
-                    .text_size(crate::tema::letra::em(18.))
-                    .line_height(relative(1.6))
-                    .text_color(cor(capa::PARAGRAFO).opacity(0.9))
-                    .child(
-                        "Do cartão da câmera à galeria do cliente: as fotos do ensaio reveladas, \
-                         escolhidas e vendidas ali mesmo, no balcão.",
-                    ),
-            )
+            .when(!compacta, |d| {
+                d.child(
+                    div()
+                        .max_w(px(448.))
+                        .font_family(capa::SERIFADA)
+                        .text_size(crate::tema::letra::em(18.))
+                        .line_height(relative(1.6))
+                        .text_color(cor(capa::PARAGRAFO).opacity(0.9))
+                        .child(
+                            "Do cartão da câmera à galeria do cliente: as fotos do ensaio \
+                             reveladas, escolhidas e vendidas ali mesmo, no balcão.",
+                        ),
+                )
+            })
             .child(
                 v_flex()
-                    .mt(px(32.))
+                    .mt(px(if compacta { 16. } else { 32. }))
                     .w(px(448.))
                     .gap(px(18.))
                     .child(div().flex().child(abas))
                     .child(campo_do_email)
                     .child(paineis)
-                    // 🚪 A saída das esperas — a do navegador e a do link. Só
-                    // aparece enquanto elas duram.
-                    .child(
-                        div().h(px(20.)).when(self.no_navegador || self.esperando_link, |d| {
-                            d.child(
-                                Button::new("entrada-desistir")
-                                    .link()
-                                    .text_sm()
-                                    .text_color(cor(capa::OURO).opacity(0.85))
-                                    .child("Cancelar e voltar")
-                                    .on_click(
-                                        cx.listener(|tela, _ev, _window, cx| tela.desistir(cx)),
-                                    ),
-                            )
-                        }),
-                    )
-                    // A linha das frases: o aviso neutro ou o erro. Reservada,
-                    // para a capa não pular quando uma delas aparece.
-                    .child(
-                        div()
-                            .min_h(px(64.))
-                            .when_some(self.aviso.clone(), |d, aviso| {
-                                d.child(
-                                    div()
-                                        .px(px(12.))
-                                        .py(px(8.))
-                                        .rounded(crate::tema::canto(8.))
-                                        .bg(cor(capa::OURO).opacity(0.12))
-                                        .border_1()
-                                        .border_color(cor(capa::OURO).opacity(0.4))
-                                        .text_sm()
-                                        .text_color(cor(capa::TEXTO))
-                                        .child(aviso),
-                                )
-                            })
-                            .when_some(self.erro.clone(), |d, erro| {
-                                d.child(
-                                    div()
-                                        .px(px(12.))
-                                        .py(px(8.))
-                                        .rounded(crate::tema::canto(8.))
-                                        .bg(cx.theme().danger.opacity(0.2))
-                                        .border_1()
-                                        .border_color(cx.theme().danger.opacity(0.6))
-                                        .text_sm()
-                                        .text_color(cor(capa::TEXTO))
-                                        .child(crate::erro_da_api::legivel(&erro)),
-                                )
-                            }),
-                    ),
             )
             .with_animation(
                 "entrada-surgir",
@@ -1047,15 +1106,23 @@ impl Render for Entrada {
                     )),
             )
             .child(
+                // Rola se ainda assim não couber: nada da entrada fica fora
+                // do alcance, em janela nenhuma.
                 div()
+                    .id("entrada-coluna")
                     .absolute()
                     .inset_0()
-                    .flex()
-                    .flex_col()
-                    .justify_center()
-                    .px(px(96.))
-                    .py(px(48.))
-                    .child(conteudo),
+                    .overflow_y_scroll()
+                    .child(
+                        div()
+                            .min_h_full()
+                            .flex()
+                            .flex_col()
+                            .justify_center()
+                            .px(px(96.))
+                            .py(px(if compacta { 40. } else { 48. }))
+                            .child(conteudo),
+                    ),
             )
             // 🪟 **A barra de janela desta tela.** Ela não tem o cabeçalho de
             // 56 px do app, e no GNOME não há barra do sistema: sem esta faixa a
@@ -1088,7 +1155,9 @@ impl Render for Entrada {
                     .justify_between()
                     .text_xs()
                     .text_color(cor(capa::PARAGRAFO).opacity(0.45))
-                    .child("G R A M A D O   ·   C A N E L A")
+                    // Na capa compacta o rodapé da esquerda cairia em cima
+                    // dos botões, que ocupam a mesma coluna.
+                    .child(div().when(!compacta, |d| d.child("G R A M A D O   ·   C A N E L A")))
                     .child(
                         div()
                             .font_family(capa::SERIFADA)

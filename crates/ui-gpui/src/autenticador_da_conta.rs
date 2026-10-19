@@ -257,7 +257,12 @@ fn legivel(erro: &str) -> String {
 fn situacao_lida(v: &serde_json::Value) -> Situacao {
     if v["ligado"].as_bool().unwrap_or(false) {
         Situacao::Ligado {
-            desde: v["desde"].as_str().map(|d| d.chars().take(10).collect()),
+            // `2026-10-18T…` vira `18/10/2026`, como o resto do app escreve data.
+            desde: v["desde"].as_str().and_then(|d| {
+                let (ano, resto) = d.get(..10)?.split_once('-')?;
+                let (mes, dia) = resto.split_once('-')?;
+                Some(format!("{dia}/{mes}/{ano}"))
+            }),
             restantes: v["recuperacoes_restantes"].as_u64().unwrap_or(0),
         }
     } else {
@@ -296,6 +301,7 @@ impl Render for AutenticadorDaConta {
             Situacao::Indisponivel(motivo) => v_flex().child(explicacao(&motivo)),
             Situacao::Desligado => v_flex()
                 .gap(px(10.))
+                .items_start()
                 .child(explicacao(
                     "Com o Google Authenticator (ou Microsoft Authenticator, 1Password, Authy), \
                      a tela de entrada pede só o seu e-mail e os seis dígitos que o celular mostra.",
@@ -308,6 +314,7 @@ impl Render for AutenticadorDaConta {
                 ),
             Situacao::Cadastrando { qr, segredo } => v_flex()
                 .gap(px(10.))
+                .items_start()
                 .child(explicacao(
                     "No Google Authenticator, toque em “+” e em “Ler QR code”. Depois digite o \
                      código de seis dígitos que aparecer.",
@@ -365,14 +372,17 @@ impl Render for AutenticadorDaConta {
                 ),
             Situacao::Ligado { desde, restantes } => v_flex()
                 .gap(px(10.))
+                .items_start()
                 .child(explicacao(&format!(
                     "Ligado{}. Restam {restantes} códigos de recuperação. Para desligar, digite um \
                      código do celular ou de recuperação.",
                     desde.map(|d| format!(" desde {d}")).unwrap_or_default()
                 )))
-                .child(crate::estilo::campo(
-                    Input::new(&self.para_desligar).disabled(ocupado),
-                ))
+                .child(
+                    div().w(px(340.)).child(crate::estilo::campo(
+                        Input::new(&self.para_desligar).disabled(ocupado),
+                    )),
+                )
                 .child(
                     crate::estilo::botao_secundario("autenticador-desligar", cx)
                         .label(if ocupado { "Desligando…" } else { "Desligar o Authenticator" })
