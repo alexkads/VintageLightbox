@@ -1,5 +1,15 @@
 [
   {
+    "versao": "0.1.171",
+    "data": "2026-10-18",
+    "titulo": "Correções internas de estabilidade.",
+    "importante": false,
+    "novidades": [
+      "Correções internas de estabilidade."
+    ],
+    "por_que_atualizar": "Para manter o aplicativo estável e em dia com o site."
+  },
+  {
     "versao": "0.1.170",
     "data": "2026-10-18",
     "titulo": "A lista de sessões se atualiza sozinha.",

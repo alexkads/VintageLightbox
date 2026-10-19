@@ -1,11 +1,9 @@
 {
-  "versao": "0.1.170",
-  "titulo": "A lista de sessões se atualiza sozinha.",
+  "versao": "0.1.171",
+  "titulo": "Correções internas de estabilidade.",
   "importante": false,
   "novidades": [
-    "A lista de Sessões fotográficas agora se atualiza sozinha: sessão aberta em outro balcão ou no site, fotos que subiram, cliente que abriu a galeria, pagamento aprovado e venda no caixa aparecem sem precisar recarregar.",
-    "O botão Recarregar saiu. No lugar dele, um selo mostra se a lista está em tempo real; se a conexão cair, ela continua se atualizando a cada 15 segundos até voltar.",
-    "Com a lista escondida (dentro de uma sessão, por exemplo), ela espera você voltar para se atualizar, sem pesar no envio das fotos."
+    "Correções internas de estabilidade."
   ],
-  "por_que_atualizar": "Para ver na hora o que acontece nas sessões em outros balcões e com os clientes."
+  "por_que_atualizar": "Para manter o aplicativo estável e em dia com o site."
 }
