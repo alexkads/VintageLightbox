@@ -2068,7 +2068,10 @@ mod testes {
 
         let bytes = std::fs::read(&destino).expect("o zip existe");
         let mut lido = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("zip legível");
-        let mut nomes: Vec<String> = lido.file_names().map(str::to_string).collect();
+        let mut nomes: Vec<String> = lido
+            .file_names()
+            .map(|n| n.expect("nome").into_owned())
+            .collect();
         nomes.sort();
         assert_eq!(nomes, ["capa.jpg", "ensaio/DSC_01.NEF"]);
 

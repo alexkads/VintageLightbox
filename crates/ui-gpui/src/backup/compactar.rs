@@ -118,7 +118,10 @@ mod testes {
 
         let mut lido = zip::ZipArchive::new(Cursor::new(bytes)).expect("zip legível");
         assert_eq!(lido.len(), 2);
-        let nomes: Vec<String> = lido.file_names().map(str::to_string).collect();
+        let nomes: Vec<String> = lido
+            .file_names()
+            .map(|n| n.expect("nome").into_owned())
+            .collect();
         assert!(nomes.contains(&"dia-1/DSC_01.NEF".to_string()));
 
         let mut dentro = lido.by_name("capa.jpg").expect("a foto está lá");

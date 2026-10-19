@@ -5,37 +5,6 @@ members = [
     "crates/use-cases",
     "crates/adapters",
     "crates/infrastructure",
-    # 📸 O codificador de foto, sozinho (2026-09-12). Ele era um módulo do
-    # `revelacao-core` e saiu de lá para poder virar wasm **sem GPU**: o
-    # download do cliente converte WebP em JPEG no navegador dele, e o
-    # `revelacao-core` traz o `wgpu` a reboque.
-    "crates/foto-codec",
-    # 📷 O RAW da câmera e o DNG do Lightroom (2026-09-30): Rust puro, para abrir
-    # os dois também no navegador — e o DNG com perdas, que a LibRaw do
-    # `rsraw-sys` recusa. Usa o rawler vendorizado em `vendor/rawler`.
-    "crates/raw-codec",
-    # O mesmo, compilado para a importação do site (wasm-bindgen, sem GPU).
-    # Separado do `revelacao-web` para só descer quando a leva tem RAW.
-    "crates/raw-web",
-    # O mesmo codificador compilado para o navegador do **cliente** — sem GPU,
-    # só para converter o WebP guardado no JPEG que ele leva ao laboratório.
-    "crates/conversao-web",
-    # 📖 O fotolivro virtual do ensaio (2026-10-09): o PDF diagramado que o
-    # balcão exporta e que o cliente gera na galeria dele — sem tela e sem GPU.
-    "crates/fotolivro",
-    # O mesmo, compilado para a galeria do cliente (wasm-bindgen).
-    "crates/fotolivro-web",
-    # 🖨️ As páginas de um PDF em pixels (2026-10-10): o app mostra o fotolivro
-    # que acabou de gerar sem sair dele. O desenho é do `hayro`, como no
-    # PdfCraft (github.com/storytold/pdfcraft), de onde vêm os tetos e a fila.
-    "crates/visualizador-pdf",
-    # O motor de revelação sem nada em volta (2026-09-04): o que o navegador
-    # precisa e o `infrastructure` não consegue dar, porque puxa sqlx, reqwest e
-    # LibRaw — nada disso compila para wasm32.
-    "crates/revelacao-core",
-    # O mesmo motor compilado para o navegador (wasm-bindgen + wgpu). É o que o
-    # `scripts/construir-web.sh` entrega ao `recordarfotos-e-commerce`.
-    "crates/revelacao-web",
     # A biblioteca de fotos sem tela (2026-09-05): a geometria da grade, a
     # seleção, o recorte da barra e a política das miniaturas. Existiam três
     # cópias das mesmas contas — as duas grades do site e a Biblioteca daqui —,
@@ -44,11 +13,6 @@ members = [
     # A mesma biblioteca desenhada no navegador (wgpu + wasm-bindgen), entregue
     # em `frontend/public/biblioteca/` pelo `scripts/construir-biblioteca.sh`.
     "crates/biblioteca-web",
-    # A tela do cliente do balcão (2026-09-11, decisão do dono registrada em
-    # STATUS §2.88): a foto revelada sobre preto no segundo monitor, e o
-    # cruzamento entre uma foto e a seguinte. O único caso em que a tela **é** o
-    # canvas — ela não tem interface nenhuma para divergir do site.
-    "crates/tela-do-cliente-web",
     # A interface, em GPUI. O `crates/ui` (egui) saiu daqui em 17/ago/2026, com a
     # lista de paridade zerada (docs/PARIDADE-UI.md) — é a fase 5 do plano.
     #
@@ -56,24 +20,11 @@ members = [
     # paridade. O rollback agora é `git revert` do commit que o removeu, que é
     # um comando e traz os 21.352 LOC de volta inteiros; a referência de
     # paridade virou documento, e o código continua no histórico.
-    # 🖌️ O editor em camadas sem janela (2026-09-27): documento, tiles, pincel,
-    # histórico, composição e a gravação do projeto. A janela mora no `ui-gpui`;
-    # o contrato com a Revelação está em docs/editor-em-camadas/.
-    "crates/editor-core",
-    # 🧠 A IA local (2026-10-06): modelos ONNX baixados pelo operador, backends
-    # e sessões — comum a toda tarefa de IA do app, sem saber para que serve.
-    "crates/ia-local",
-    # Os motores do Preenchimento sensível ao conteúdo: PatchMatch e LaMa.
-    "crates/preenchimento",
-    # 💾 Recuperar as fotos de um cartão formatado (2026-09-29): varre os
-    # setores atrás de JPEG e RAW, sem janela e sem dispositivo — a leitura do
-    # cartão de verdade mora no `infrastructure`.
-    "crates/recuperacao-core",
     "crates/ui-gpui",
 ]
-# Os crates vendorizados são dependência, não membro: sem isto os testes, benches
-# e lints deles entrariam no workspace.
-exclude = ["vendor/rawler", "vendor/gpui-pre-linux"]
+# O crate vendorizado é dependência, não membro: sem isto os testes, benches e
+# lints dele entrariam no workspace.
+exclude = ["vendor/gpui-pre-linux"]
 
 # 🖥️ O Wayland do GPUI ignorava o `display_id` de uma janela comum, e a Tela do
 # cliente nascia no monitor que o GNOME quisesse (2026-10-03). O patch é de
@@ -88,6 +39,27 @@ authors = ["VintageLightbox Team"]
 license = "MIT"
 
 [workspace.dependencies]
+# 📸 O motor da foto mora no **núcleo da foto** desde 18/out/2026
+# (github.com/alexkads/nucleo-da-foto, em ~/Projects/PhotoKads/nucleo-da-foto),
+# compartilhado com o PhotoKads: codificador, RAW (com o rawler vendorizado),
+# revelação, editor em camadas, recuperação do cartão, fotolivro, visualizador
+# de PDF, IA local, preenchimento e os wrappers wasm dos sites.
+#
+# 🔑 **Sempre pela mesma tag em todos.** Duas tags são duas cópias do motor no
+# mesmo binário — e o `Ajustes` de uma não é o tipo do outro. Para mexer no
+# núcleo e ver aqui sem lançar tag, um `[patch]` local em `.cargo/config.toml`
+# (fora do git) apontando para `../../PhotoKads/nucleo-da-foto/crates/<crate>`;
+# ver o README do núcleo.
+foto-codec = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.1" }
+raw-codec = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.1" }
+revelacao-core = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.1" }
+editor-core = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.1" }
+recuperacao-core = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.1" }
+fotolivro = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.1" }
+visualizador-pdf = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.1" }
+ia-local = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.1" }
+preenchimento = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.1" }
+
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -232,9 +204,11 @@ opt-level = 1
 # revelação no passar do mouse sobre "Revelar". O que não se paga uma vez é o
 # codificador: ele roda a cada foto salva, e o lote do balcão tem trinta.
 #
-# ⚠️ O `+simd128` é passado por `RUSTFLAGS` em `construir-web.sh`, e não aqui:
-# ele vale para o motor de revelação, que só roda em tela de operador. SIMD em
-# wasm pede Chrome 91+ ou Safari 16.4+.
+# 📸 Desde 18/out/2026 os motores do site (revelação, RAW, conversão, fotolivro,
+# tela do cliente) compilam no núcleo da foto, com o mesmo perfil de lá; este
+# fica para o `biblioteca-web`. O `+simd128` é passado por `RUSTFLAGS` no
+# `construir-web.sh` do núcleo: ele vale para o motor de revelação, que só roda
+# em tela de operador. SIMD em wasm pede Chrome 91+ ou Safari 16.4+.
 [profile.release-web]
 inherits = "release"
 opt-level = 3

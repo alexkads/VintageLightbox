@@ -126,9 +126,13 @@ cargo run --release -p ui-gpui
 #    (17/set/2026). Antes: `make up` no recordarfotos-e-commerce.
 crates/ui-gpui/rodar-local.sh     # o app, contra a pilha local
 
-# O motor de revelação para o navegador (entrega ao recordarfotos-e-commerce)
-scripts/construir-web.sh [caminho/do/frontend]
-cargo clippy -p revelacao-web --target wasm32-unknown-unknown -- -D warnings
+# Os motores do site (entrega ao recordarfotos-e-commerce): compilados pelo
+# núcleo da foto, na tag do Cargo.toml (ou NUCLEO_DA_FOTO=<checkout local>)
+scripts/construir-web.sh [caminho/do/frontend]        # revelação
+scripts/construir-raw.sh [caminho/do/frontend]        # RAW da importação
+scripts/construir-conversao.sh [caminho/do/frontend]  # WebP → JPEG do cliente
+scripts/construir-fotolivro.sh [caminho/do/frontend]  # fotolivro da galeria
+scripts/construir-tela-do-cliente.sh [caminho/do/frontend]
 
 # A grade da biblioteca para o navegador — só o motor; a tela é React lá
 scripts/construir-biblioteca.sh [caminho/do/frontend]
@@ -218,7 +222,7 @@ VintageLightbox follows **Clean Architecture** with 4 layers as separate crates:
 │    do revelacao-core + leitura da entidade          │
 │  - migrations/: SQL migration files                 │
 ├─────────────────────────────────────────────────────┤
-│  revelacao-core (sem domain, sem janela, sem banco) │
+│  revelacao-core (núcleo da foto, tag no Cargo.toml) │
 │  - ajustes.rs: os 46, por nome e por posição        │
 │  - shaders/: corpo.wgsl + 2 entradas (compute/frag) │
 │  - motor.rs, transformacao.rs (Corte), jpeg.rs      │
@@ -238,13 +242,22 @@ VintageLightbox follows **Clean Architecture** with 4 layers as separate crates:
 └─────────────────────────────────────────────────────┘
 ```
 
-🧠 **A IA local mora em `crates/ia-local`** (07/out/2026): modelos ONNX baixados pelo operador (hash
+📸 **O motor da foto mora no núcleo da foto** (18/out/2026): `foto-codec`, `raw-codec` (com o rawler
+vendorizado), `revelacao-core`, `editor-core`, `recuperacao-core`, `fotolivro`, `visualizador-pdf`,
+`ia-local`, `preenchimento` e os wrappers wasm dos sites vêm de github.com/alexkads/nucleo-da-foto
+(`~/Projects/PhotoKads/nucleo-da-foto`), compartilhado com o PhotoKads, por **tag** em
+`[workspace.dependencies]` — a mesma tag em todos. Mudança no motor se faz lá: para ver aqui antes de
+lançar a tag, um `[patch."https://github.com/alexkads/nucleo-da-foto"]` em `.cargo/config.toml` (ignorado
+pelo git) com `path = "../../PhotoKads/nucleo-da-foto/crates/<crate>"`; lançada a tag, troca-se a tag no
+`Cargo.toml` e o `[patch]` sai. Ver o README do núcleo.
+
+🧠 **A IA local mora em `ia-local`, no núcleo** (07/out/2026): modelos ONNX baixados pelo operador (hash
 conferido, pasta de dados do app), backends (CPU, CoreML, DirectML, CUDA opcional) e a sessão reaproveitada —
-sem saber para que serve. O primeiro uso é o `crates/preenchimento` (PatchMatch e LaMa, o contrato `Motor`).
+sem saber para que serve. O primeiro uso é o `preenchimento` (PatchMatch e LaMa, o contrato `Motor`).
 Uma tarefa nova de IA declara o seu `Modelo` ali e não leva o ONNX Runtime para o `editor-core` nem para o
 `revelacao-core` (wasm). Ver `docs/editor-em-camadas/17-PREENCHIMENTO.md`.
 
-🖨️ **O PDF na tela mora em `crates/visualizador-pdf`** (10/out/2026): abre o arquivo, mede as folhas, lê
+🖨️ **O PDF na tela mora em `visualizador-pdf`, no núcleo** (10/out/2026): abre o arquivo, mede as folhas, lê
 os links e desenha cada página em pixels numa thread própria, com o `hayro` (o rasterizador que o PdfCraft
 usa; é ele que pede Rust 1.92 — o piso do instalador). A tela é `ui-gpui/src/pdf`, aberta pelo "Ver o
 fotolivro" do fim da exportação. Tetos de tamanho e fila vêm do PdfCraft, copiados e adaptados.

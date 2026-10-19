@@ -315,7 +315,10 @@ pub fn abrir_pacote(bytes: &[u8]) -> Option<Vec<Arquivo>> {
         if entrada.is_dir() {
             continue;
         }
-        let caminho = entrada.name().to_string();
+        // Desde o zip 9, um nome que não é UTF-8 é erro, e não texto torto.
+        let Ok(caminho) = entrada.name().map(|n| n.into_owned()) else {
+            continue;
+        };
         let nome = caminho.rsplit('/').next().unwrap_or(&caminho).to_string();
         let extensao = nome.rsplit_once('.').map(|(_, e)| e.to_lowercase());
         let serve = extensao.is_some_and(|e| DENTRO_DO_PACOTE.contains(&e.as_str()));
@@ -507,7 +510,13 @@ mod testes {
 
         let mut zip = zip::ZipArchive::new(Cursor::new(&bytes)).expect("zip legível");
         let nomes: Vec<String> = (0..zip.len())
-            .map(|i| zip.by_index(i).expect("entrada").name().to_string())
+            .map(|i| {
+                zip.by_index(i)
+                    .expect("entrada")
+                    .name()
+                    .expect("nome")
+                    .into_owned()
+            })
             .collect();
         assert_eq!(
             nomes,

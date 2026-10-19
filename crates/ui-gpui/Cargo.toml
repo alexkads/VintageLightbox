@@ -44,14 +44,14 @@ gpui_platform = { package = "gpui-pre-platform", version = "=0.3.7", optional = 
 infrastructure = { path = "../infrastructure" }
 # A Revelação local mexe na receita (`locais`) e na conta do quadro à foto
 # (`transformacao::do_quadro_para_a_foto`) direto do motor.
-revelacao-core = { path = "../revelacao-core" }
+revelacao-core = { workspace = true }
 # 🖌️ O editor em camadas sem janela (docs/editor-em-camadas/): a janela dele
 # mora em `src/editor/`, e a Revelação resolve a imagem editada como fonte.
-editor-core = { path = "../editor-core" }
+editor-core = { workspace = true }
 # Os motores do Preenchimento sensível ao conteúdo (PatchMatch e LaMa local)
 # e a IA local comum (modelos, backends, sessões).
-preenchimento = { path = "../preenchimento" }
-ia-local = { path = "../ia-local" }
+preenchimento = { workspace = true }
+ia-local = { workspace = true }
 # A grade da Biblioteca: a mesma aritmética que o site usa (2026-09-05). Sem
 # GPU e sem janela dentro — ver `biblioteca/grade.rs`.
 biblioteca-core = { path = "../biblioteca-core" }
@@ -70,9 +70,9 @@ directories = "6.0.0"
 # `RenderImage::new` recebe `SmallVec<[Frame; 1]>`, e o `gpui` não reexporta o
 # `smallvec` — quem constrói o argumento precisa da mesma versão que ele usa.
 smallvec = "1"
-# O mesmo `lru` que o `crates/ui` usa — um cache de imagem por crate ja e
+# O mesmo `lru` do `infrastructure` e do núcleo — um cache de imagem por crate ja e
 # suficiente; duas politicas de descarte diferentes para a mesma coisa nao.
-lru = "0.16.2"
+lru = "0.18.2"
 tokio.workspace = true
 # A configuração do pós-venda (`pos_venda/config.rs`) é um JSON ao lado do catálogo.
 serde.workspace = true
@@ -95,10 +95,10 @@ open = { version = "5", features = ["shellexecute-on-windows"] }
 # HTML, e aqui não há texto nenhum — só imagens em retângulos.
 printpdf = { version = "0.12", default-features = false }
 # 📖 O fotolivro da exportação — o mesmo livro que a galeria do cliente gera.
-fotolivro = { path = "../fotolivro" }
+fotolivro = { workspace = true }
 # 🖨️ O fotolivro visto no app: as páginas do PDF em pixels (`src/pdf`).
-visualizador-pdf = { path = "../visualizador-pdf" }
-foto-codec = { path = "../foto-codec" }
+visualizador-pdf = { workspace = true }
+foto-codec = { workspace = true }
 
 # O motor de revelação (`revelacao/processador.rs`). Nas mesmas versões do
 # `crates/ui`: o critério de saída da fase 2 é igualdade de pixel, e wgpu é
@@ -161,7 +161,7 @@ rodio = { version = "0.22", default-features = false, features = ["playback", "w
 # pacote exportado é texto, que encolhe, e o `.zip` de predefinições do
 # Lightroom vem em deflate. O `flate2` (com o `miniz_oxide`) já estava na
 # árvore. O backup continua *store*, escolhido arquivo a arquivo.
-zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2"] }
+zip = { version = "9.0.5", default-features = false, features = ["deflate-flate2"] }
 tempfile = "3.8"
 
 # A foto da própria janela, nas ferramentas de depuração (`src/depuracao.rs`):
