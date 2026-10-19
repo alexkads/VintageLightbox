@@ -628,6 +628,29 @@ impl Aplicativo {
                     (Some("desta"), _) => Some(Pedido::VerEstaVersao),
                     (Some("ver"), Some(indice)) => Some(Pedido::VerVersao(indice)),
                     (Some("fechar"), _) => Some(Pedido::FecharNovidades),
+                    // 🧑‍💼 A versão que vai compilar sozinha, esperando o
+                    // balcão parar — só pinta: a vigia não roda no roteiro
+                    // antes de dez minutos sem gesto.
+                    (Some("esperando"), _) => {
+                        use crate::atualizacao::porta::{Aviso, JeitoDeAtualizar, VersaoNova};
+                        let versao = "9.9.9".to_string();
+                        let novidades = crate::atualizacao::novidades::Novidades::do_anuncio(
+                            versao.clone(),
+                            "Lista de sessões em tempo real".into(),
+                            false,
+                        );
+                        let _ = self.atualizacao.receber(Aviso::Disponivel {
+                            versao: VersaoNova {
+                                versao,
+                                notas: None,
+                                jeito: JeitoDeAtualizar::Compilar,
+                                novidades: Some(novidades),
+                            },
+                            automatico: true,
+                        });
+                        cx.notify();
+                        None
+                    }
                     // A faixa vermelha da versão importante compilando — só
                     // pinta: o `true` de "comece a compilar" fica ignorado.
                     (Some("compilando"), _) => {
@@ -647,6 +670,10 @@ impl Aplicativo {
                             },
                             automatico: true,
                         });
+                        // A espera do balcão parado é da vigia; aqui o
+                        // desenho é o da compilação já no ar.
+                        self.atualizacao.instalando = true;
+                        self.atualizacao.esperando_o_balcao = false;
                         self.atualizacao.receber(Aviso::Progresso(
                             "compilando (15 a 40 minutos na primeira vez)".into(),
                         ));
@@ -657,7 +684,7 @@ impl Aplicativo {
                 };
                 match pedido {
                     Some(pedido) => self.atender(pedido, cx),
-                    None if acao == "compilando" => {}
+                    None if acao == "compilando" || acao == "esperando" => {}
                     None => eprintln!("[roteiro] novidades: não entendi '{acao}'"),
                 }
             }

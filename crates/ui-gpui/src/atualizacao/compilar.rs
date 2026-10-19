@@ -39,6 +39,9 @@ use serde::{Deserialize, Serialize};
 use super::novidades::{self, JeitoDaInstalacao, Novidades};
 use super::porta::{JeitoDeAtualizar, VersaoNova};
 
+/// O "erro" de [`rodar_travado`] quando o balcão pediu a máquina de volta.
+const INTERROMPIDA: &str = "interrompida: o balcão voltou ao trabalho";
+
 /// Quanto esperar para tentar de novo, sozinho, uma versão que falhou.
 pub const ESPERA_DEPOIS_DE_FALHAR: Duration = Duration::from_secs(24 * 3600);
 /// Uma trava mais velha que isto é de um instalador que morreu sem apagá-la.
@@ -137,7 +140,10 @@ pub fn motivo(
         Decisao::Avisar {
             versao,
             automatico: true,
-        } => format!("avisou a {} e a compilação começa sozinha", versao.versao),
+        } => format!(
+            "avisou a {} e a compilação começa sozinha quando o balcão ficar parado",
+            versao.versao
+        ),
         Decisao::Avisar { versao, .. } => {
             let porque = if ocupado {
                 "outra atualização está compilando nesta máquina".to_string()
@@ -314,6 +320,68 @@ pub enum Andamento {
     Etapa(String),
     Instalada(String),
     Falhou(String),
+    /// O balcão voltou ao trabalho e a compilação automática foi parada
+    /// ([`interromper`]). **Não é falha**: nada foi trocado, e a próxima
+    /// tentativa reaproveita o que o `cargo` já compilou em `target-gpui`.
+    Interrompida,
+}
+
+// ── 🧑‍💼 O balcão em primeiro lugar (dono, 19/out/2026) ─────────────────────
+//
+// Em 18/10 saíram sete versões, e os dois balcões Windows do Canela passaram o
+// dia compilando: das 09:56 às 17:53, cada compilação de 40 min a 2h18, por
+// cima da importação e da seleção com o cliente. A funcionária anotou as fotos
+// escolhidas num caderno. Em 10/10, com o balcão parado, a mesma compilação
+// levava de 18 a 34 min. A prioridade baixa do processo não basta: cada `rustc`
+// grande passa de 2 GiB, e é a memória (e o disco) que o balcão perde.
+//
+// Por isso a compilação **automática** só começa com o balcão parado (a raiz
+// decide, `app.rs`) e é **interrompida** quando o trabalho volta — e só nas
+// etapas em que parar não estraga nada: baixar o código e compilar. Conferir o
+// app novo e trocar o binário vão até o fim.
+
+static PEDIDO_DE_INTERRUPCAO: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Pede à compilação em curso que pare na próxima olhada (meio segundo). Sem
+/// compilação, ou numa etapa que não se interrompe, o pedido espera — e é
+/// esquecido quando a próxima compilação começa.
+pub fn interromper() {
+    PEDIDO_DE_INTERRUPCAO.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// As etapas em que parar o instalador não deixa nada pela metade: o código
+/// baixado vai para uma pasta à parte, e o `cargo` guarda o que já compilou.
+/// Os textos são os do `Diga`/`diga` do instalador (Windows e Unix).
+pub fn etapa_interrompivel(etapa: &str) -> bool {
+    let etapa = etapa.trim_start();
+    etapa.starts_with("baixando o c") || etapa.starts_with("compilando")
+}
+
+/// Encerra o instalador **e o que ele abriu** (o PowerShell, o `cargo`, cada
+/// `rustc`). Sozinho, matar o primeiro processo deixaria o `cargo` órfão,
+/// comendo a máquina do mesmo jeito.
+fn encerrar_a_arvore(filho: &mut std::process::Child) {
+    let pid = filho.id().to_string();
+    if cfg!(windows) {
+        let mut taskkill = std::process::Command::new("taskkill");
+        taskkill.args(["/T", "/F", "/PID", &pid]);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            // CREATE_NO_WINDOW: sem piscar um console no balcão.
+            taskkill.creation_flags(0x0800_0000);
+        }
+        let _ = taskkill.output();
+    } else {
+        // `desanexar` pôs o instalador num grupo próprio, com o pid dele:
+        // o sinal ao grupo alcança o `sh`, o `cargo` e cada `rustc`.
+        let _ = std::process::Command::new("kill")
+            .args(["-TERM", &format!("-{pid}")])
+            .output();
+    }
+    let _ = filho.kill();
+    let _ = filho.wait();
 }
 
 /// Baixa o instalador, roda, acompanha o registro e confere o resultado.
@@ -331,10 +399,16 @@ pub fn rodar(versao_esperada: &str, avisar: &dyn Fn(Andamento)) {
     let memoria_arquivo = casa.join("atualizacao.json");
     let _ = std::fs::write(&trava, agora().to_string());
     let registro = registros.join(format!("atualizacao-{}.log", agora()));
+    // Um pedido que sobrou de antes (o trabalho voltou sem compilação no ar)
+    // não pode parar esta.
+    PEDIDO_DE_INTERRUPCAO.store(false, std::sync::atomic::Ordering::SeqCst);
 
     let desfecho = rodar_travado(versao_esperada, &casa, &registro, avisar);
     let _ = std::fs::remove_file(&trava);
     match desfecho {
+        // Parada a pedido: nada de "falhou" na memória, que faria a próxima
+        // tentativa sozinha esperar 24 h.
+        Err(motivo) if motivo == INTERROMPIDA => avisar(Andamento::Interrompida),
         Ok(instalada) => {
             guardar_memoria(&memoria_arquivo, &Memoria::default());
             avisar(Andamento::Instalada(instalada));
@@ -397,15 +471,23 @@ fn rodar_travado(
     // Acompanha o registro enquanto o instalador roda: cada etapa anunciada
     // vira a frase da faixa.
     let mut lidas = 0usize;
+    let mut etapa_atual = String::new();
     let codigo = loop {
         if let Ok(texto) = std::fs::read_to_string(registro) {
             let linhas: Vec<&str> = texto.lines().collect();
             for linha in &linhas[lidas.min(linhas.len())..] {
                 if let Some(e) = etapa(linha) {
+                    etapa_atual = e.clone();
                     avisar(Andamento::Etapa(e));
                 }
             }
             lidas = linhas.len();
+        }
+        if etapa_interrompivel(&etapa_atual)
+            && PEDIDO_DE_INTERRUPCAO.swap(false, std::sync::atomic::Ordering::SeqCst)
+        {
+            encerrar_a_arvore(&mut filho);
+            return Err(INTERROMPIDA.into());
         }
         match filho.try_wait() {
             Ok(Some(status)) => break status,
@@ -547,7 +629,7 @@ mod testes {
         );
         assert_eq!(
             decide(main("0.1.45"), &Memoria::default(), false),
-            "avisou a 0.1.45 e a compilação começa sozinha"
+            "avisou a 0.1.45 e a compilação começa sozinha quando o balcão ficar parado"
         );
         let falhou = Memoria {
             falhou: Some("0.1.45".into()),
@@ -833,5 +915,74 @@ mod testes {
         } else {
             assert!(caminho.ends_with(".local/bin/vintagelightbox-gpui"));
         }
+    }
+
+    /// 🧑‍💼 Parar só onde nada fica pela metade: baixar o código e compilar.
+    /// Os textos são os do instalador, com e sem acento (o PowerShell escreve
+    /// sem).
+    #[test]
+    fn so_baixar_o_codigo_e_compilar_se_interrompem() {
+        for etapa in [
+            "baixando o código de main",
+            "baixando o codigo de 0.1.172",
+            "compilando (15 a 40 minutos na primeira vez)",
+        ] {
+            assert!(etapa_interrompivel(etapa), "{etapa}");
+        }
+        for etapa in [
+            "",
+            "conferindo o que esta máquina tem",
+            "conferindo o app novo",
+            "montando VintageLightbox.app",
+            "instalando em /Applications",
+        ] {
+            assert!(!etapa_interrompivel(etapa), "{etapa}");
+        }
+    }
+
+    /// 🧑‍💼 Parar o instalador para também o que ele abriu: sozinho, o
+    /// primeiro processo morreria e o `cargo` seguiria comendo a máquina.
+    #[cfg(unix)]
+    #[test]
+    fn interromper_encerra_o_instalador_e_os_filhos_dele() {
+        let pasta = tempfile::tempdir().unwrap();
+        let marca = pasta.path().join("filho.pid");
+        let mut processo = std::process::Command::new("sh");
+        processo.args([
+            "-c",
+            &format!("sleep 60 & echo $! > '{}'; wait", marca.display()),
+        ]);
+        desanexar(&mut processo);
+        let mut filho = processo.spawn().unwrap();
+        let mut neto = None;
+        for _ in 0..100 {
+            if let Some(pid) = std::fs::read_to_string(&marca)
+                .ok()
+                .and_then(|t| t.trim().parse::<u32>().ok())
+            {
+                neto = Some(pid);
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let neto = neto.expect("o sh não abriu o filho");
+
+        encerrar_a_arvore(&mut filho);
+
+        let vivo = |pid: u32| {
+            std::process::Command::new("kill")
+                .args(["-0", &pid.to_string()])
+                .status()
+                .is_ok_and(|s| s.success())
+        };
+        let mut ainda = vivo(neto);
+        for _ in 0..50 {
+            if !ainda {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+            ainda = vivo(neto);
+        }
+        assert!(!ainda, "o neto ({neto}) sobreviveu ao instalador");
     }
 }

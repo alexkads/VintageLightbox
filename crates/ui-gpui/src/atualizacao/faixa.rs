@@ -69,6 +69,9 @@ pub struct Estado {
     /// A versão cuja faixa já foi contada ao servidor como `exibida` — a
     /// mesma faixa volta a cada procura, e contar de novo inflaria o painel.
     pub relatada: Option<String>,
+    /// 🧑‍💼 A compilação é automática, mas espera o balcão ficar parado — quem
+    /// decide a hora é a raiz (`app.rs`, `vigiar_o_balcao`).
+    pub esperando_o_balcao: bool,
 }
 
 impl Estado {
@@ -87,12 +90,24 @@ impl Estado {
                 let compilar = automatico && versao.jeito == JeitoDeAtualizar::Compilar;
                 self.versao = Some(versao.clone());
                 self.aviso = Some(Aviso::Disponivel { versao, automatico });
-                self.instalando = compilar;
+                // 🧑‍💼 Não começa aqui: espera o balcão parar (a raiz chama
+                // `comecar_a_compilar` quando ele para).
+                self.instalando = false;
+                self.esperando_o_balcao = compilar;
                 self.etapa = None;
                 compilar
             }
+            // O balcão voltou ao trabalho: a versão segue anunciada, e a
+            // compilação volta a esperar.
+            Aviso::Interrompida => {
+                self.instalando = false;
+                self.esperando_o_balcao = true;
+                self.etapa = None;
+                false
+            }
             fim @ (Aviso::Instalada(_) | Aviso::Falhou(_)) => {
                 self.instalando = false;
+                self.esperando_o_balcao = false;
                 self.aviso = Some(fim);
                 false
             }
@@ -222,6 +237,21 @@ impl Estado {
             Aviso::Disponivel { versao, .. } if self.instalando => {
                 format!("Baixando a versão {}…", versao.versao)
             }
+            Aviso::Disponivel { versao, .. } if self.esperando_o_balcao => {
+                // Curta de propósito: a faixa mora no rodapé, e o fim da frase
+                // (o "quando") é o que não pode sumir no corte.
+                if self.importante() {
+                    format!(
+                        "Atualização importante {}: instala sozinha com o balcão parado",
+                        versao.versao
+                    )
+                } else {
+                    format!(
+                        "Versão {}: instala sozinha com o balcão parado",
+                        versao.versao
+                    )
+                }
+            }
             Aviso::Disponivel { versao, .. } => {
                 let abertura = if self.importante() {
                     format!("Atualização importante: versão {}", versao.versao)
@@ -250,7 +280,7 @@ impl Estado {
             Aviso::SemResposta(motivo) => {
                 format!("Não consegui verificar se há versão nova: {motivo}")
             }
-            Aviso::Progresso(_) => return None,
+            Aviso::Progresso(_) | Aviso::Interrompida => return None,
         })
     }
 }
@@ -326,7 +356,12 @@ pub fn botoes(estado: &Estado) -> Vec<(&'static str, &'static str, bool, Pedido)
             }
         }
         Aviso::Disponivel { .. } => {
-            lista.push(("atualizar-agora", "Atualizar", true, Pedido::Instalar));
+            let rotulo = if estado.esperando_o_balcao {
+                "Atualizar agora"
+            } else {
+                "Atualizar"
+            };
+            lista.push(("atualizar-agora", rotulo, true, Pedido::Instalar));
             if estado.tem_novidades() {
                 lista.push(novidades);
             }
@@ -365,7 +400,7 @@ pub fn botoes(estado: &Estado) -> Vec<(&'static str, &'static str, bool, Pedido)
             ));
             lista.push(("atualizar-fechar", "Fechar", false, Pedido::Dispensar));
         }
-        Aviso::Progresso(_) => {}
+        Aviso::Progresso(_) | Aviso::Interrompida => {}
     }
     lista
 }
@@ -967,8 +1002,9 @@ mod testes {
         assert_eq!(rotulos(&estado), ["Fechar"]);
     }
 
-    /// 🔑 **Tudo automático**: a versão que compila começa sozinha, e a faixa
-    /// conta a etapa que o instalador anunciou.
+    /// 🔑 **Tudo automático**: a versão que compila começa sozinha — quando a
+    /// raiz vê o balcão parado (`comecar_a_compilar`) —, e a faixa conta a
+    /// etapa que o instalador anunciou.
     #[test]
     fn a_compilacao_automatica_comeca_sozinha_e_conta_a_etapa() {
         let mut estado = Estado::default();
@@ -976,7 +1012,9 @@ mod testes {
             estado.receber(para_compilar("0.1.13", true, true)),
             "começa sozinha"
         );
-        assert!(estado.instalando);
+        // O que `comecar_a_compilar` faz na raiz.
+        estado.instalando = true;
+        estado.esperando_o_balcao = false;
         assert_eq!(
             estado.texto().as_deref(),
             Some("Atualizando para a versão 0.1.13 em segundo plano — começando. O app continua funcionando.")
@@ -1111,5 +1149,44 @@ mod testes {
         let mut estado = Estado::default();
         estado.receber(Aviso::Progresso("compilando".into()));
         assert_eq!(estado.texto(), None);
+    }
+
+    /// 🧑‍💼 A versão que compila sozinha **espera o balcão parar**: o aviso não
+    /// começa nada, diz que vai esperar e oferece "Atualizar agora". Parada
+    /// porque o balcão voltou, ela volta a esperar — e não é falha.
+    #[test]
+    fn a_compilacao_automatica_espera_o_balcao_e_a_interrompida_volta_a_esperar() {
+        let mut e = Estado::default();
+        assert!(
+            e.receber(para_compilar("0.1.13", false, true)),
+            "é automática"
+        );
+        assert!(!e.instalando, "mas não começa no anúncio");
+        assert!(e.esperando_o_balcao);
+        let texto = e.texto().unwrap();
+        assert!(
+            texto == "Versão 0.1.13: instala sozinha com o balcão parado",
+            "{texto}"
+        );
+        assert_eq!(botoes(&e)[0].1, "Atualizar agora");
+
+        // A raiz começa (`comecar_a_compilar`), e o balcão volta ao trabalho.
+        e.instalando = true;
+        e.esperando_o_balcao = false;
+        e.receber(Aviso::Progresso("compilando".into()));
+        assert!(!e.receber(Aviso::Interrompida));
+        assert!(!e.instalando);
+        assert!(e.esperando_o_balcao, "volta a esperar");
+        assert!(
+            matches!(e.aviso, Some(Aviso::Disponivel { .. })),
+            "e não vira falha"
+        );
+        assert!(e.etapa.is_none());
+
+        // A pedida no clique, sem o automático, não espera nada.
+        let mut manual = Estado::default();
+        assert!(!manual.receber(para_compilar("0.1.13", false, false)));
+        assert!(!manual.esperando_o_balcao);
+        assert_eq!(botoes(&manual)[0].1, "Atualizar");
     }
 }

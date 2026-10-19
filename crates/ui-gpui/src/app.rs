@@ -245,6 +245,12 @@ const RESPIRO_DA_RELEITURA: std::time::Duration = std::time::Duration::from_mill
 /// Quantos toasts cabem empilhados antes de os antigos caírem.
 const MAXIMO_DE_TOASTS: usize = 3;
 
+/// 🧑‍💼 Quanto tempo sem tecla nem clique (e sem nada em curso) faz o balcão
+/// contar como parado — é quando a atualização automática pode compilar
+/// (dono, 19/out/2026: a importação e a seleção com o cliente travavam
+/// enquanto o balcão compilava a versão nova).
+pub(crate) const BALCAO_PARADO: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
 /// O `id` dos avisos da raiz na lista de notificações do kit: com ele, a raiz
 /// tira o mais antigo quando passa de [`MAXIMO_DE_TOASTS`].
 struct AvisoDaRaiz;
@@ -1016,6 +1022,15 @@ pub struct Aplicativo {
     atualizador: Arc<dyn Atualizador>,
     /// O que a faixa do rodapé mostra sobre a atualização.
     atualizacao: faixa::Estado,
+    /// 🧑‍💼 A última tecla ou clique do operador — é por ela que se sabe se o
+    /// balcão está parado (ver [`BALCAO_PARADO`]).
+    ultima_atividade: std::time::Instant,
+    /// A compilação no ar começou sozinha (e não por clique): só ela é
+    /// interrompida quando o balcão volta ao trabalho.
+    compilacao_automatica: bool,
+    /// O pedido de interrupção já saiu — um por compilação.
+    interrupcao_pedida: bool,
+    _atividade_no_teclado: gpui_kit::Subscription,
     /// O canal por onde o resultado da procura e o da instalação voltam.
     avisos_de_versao: (Sender<Aviso>, Receiver<Aviso>),
     /// A rolagem da lista de versões do diálogo das novidades: "Mais antiga"
@@ -1058,6 +1073,11 @@ impl Aplicativo {
         );
         let atualizacao = Self::esperar_aviso(cx);
         let anuncios_do_servidor = Self::ouvir_os_anuncios(cx);
+        // 🧑‍💼 Tecla em **qualquer** janela do app (a raiz, o editor, a tela
+        // do cliente) é o balcão trabalhando. O clique da janela principal vem
+        // pela raiz (`capture_any_mouse_down`, no `render`).
+        let atividade_no_teclado =
+            cx.observe_keystrokes(|raiz, _evento, _window, cx| raiz.marcar_atividade(cx));
 
         // O mesmo cache de previews da Biblioteca: a importação grava miniatura
         // com a chave `import::` na mesma tabela, e dois `PreviewManager` para o
@@ -1610,6 +1630,10 @@ impl Aplicativo {
             _fim_da_importacao: fim_da_importacao,
             atualizador: portas.atualizador,
             atualizacao: faixa::Estado::default(),
+            ultima_atividade: cx.background_executor().now(),
+            compilacao_automatica: false,
+            interrupcao_pedida: false,
+            _atividade_no_teclado: atividade_no_teclado,
             avisos_de_versao,
             rolagem_das_novidades: gpui_kit::ScrollHandle::new(),
             _atualizacao: Some(atualizacao),
@@ -1645,18 +1669,10 @@ impl Aplicativo {
                                 cx,
                             );
                         }
-                        // 🔑 **Tudo automático**: a versão que compila começa
-                        // sozinha, sem clique.
-                        if raiz.atualizacao.receber(aviso) {
-                            if let Some(v) = &raiz.atualizacao.versao {
-                                crate::telemetria::reagir(
-                                    &v.versao,
-                                    "atualizar",
-                                    Some("a compilação começou sozinha".into()),
-                                );
-                            }
-                            raiz.comecar_a_compilar();
-                        }
+                        // 🔑 **Tudo automático**, mas com o balcão parado:
+                        // a faixa passa a esperar, e quem começa a compilação
+                        // é a vigia do balcão (`vigiar_o_balcao`).
+                        raiz.atualizacao.receber(aviso);
                     }
                     if chegou {
                         cx.notify();
@@ -1720,6 +1736,13 @@ impl Aplicativo {
                 .timer(std::time::Duration::from_secs(1))
                 .await;
             segundos = segundos.wrapping_add(1);
+            // 🧑‍💼 A compilação automática só com o balcão parado.
+            if raiz
+                .update(cx, |raiz, cx| raiz.vigiar_o_balcao(cx))
+                .is_err()
+            {
+                break;
+            }
             // 🔒 O servidor encerrou a sessão desta conta: sai agora.
             if let Some(motivo) = crate::telemetria::tomar_encerramento() {
                 if raiz
@@ -1782,6 +1805,15 @@ impl Aplicativo {
                 crate::telemetria::reagir(&versao.versao, "exibida", None);
             }
             Aviso::Instalada(versao) => crate::telemetria::reagir(versao, "instalada", None),
+            Aviso::Interrompida => {
+                if let Some(v) = &self.atualizacao.versao {
+                    crate::telemetria::reagir(
+                        &v.versao,
+                        "depois",
+                        Some("compilação interrompida: o balcão voltou ao trabalho".into()),
+                    );
+                }
+            }
             Aviso::Falhou(motivo) => {
                 let versao = self
                     .atualizacao
@@ -1822,11 +1854,74 @@ impl Aplicativo {
     }
 
     /// Roda o instalador para a versão anunciada.
+    /// 🧑‍💼 O operador mexeu: tecla ou clique.
+    fn marcar_atividade(&mut self, cx: &mut Context<Self>) {
+        self.ultima_atividade = cx.background_executor().now();
+    }
+
+    /// O balcão está no meio de alguma coisa, mexa o operador ou não: cópia de
+    /// fotos, envio ao site, revelação das importadas ou o editor aberto.
+    ///
+    /// ⚠️ **A tela do cliente não entra**: ela fica aberta o dia inteiro em
+    /// alguns balcões (a retomada a reabre), e contá-la seguraria a versão nova
+    /// para sempre. O atendimento com o cliente na frente é tecla e clique, e
+    /// isso a inatividade já pega.
+    pub(crate) fn trabalho_em_curso(&self, cx: &gpui_kit::App) -> bool {
+        self.importando
+            || self.copia_da_barra_do_pe(cx).is_some()
+            || self.sincronias_pendentes > 0
+            || self._reveladas.is_some()
+            || self.editores.algum_aberto()
+    }
+
+    /// 🧑‍💼 **Parado** = nada em curso e [`BALCAO_PARADO`] sem tecla nem clique.
+    pub(crate) fn balcao_parado(&self, cx: &gpui_kit::App) -> bool {
+        let agora = cx.background_executor().now();
+        !self.trabalho_em_curso(cx)
+            && agora.saturating_duration_since(self.ultima_atividade) >= BALCAO_PARADO
+    }
+
+    /// 🧑‍💼 A vigia da compilação automática, uma vez por segundo
+    /// (`ouvir_os_anuncios`): começa quando o balcão para, e interrompe quando
+    /// ele volta ao trabalho. A compilação pedida no botão segue até o fim — o
+    /// operador escolheu a hora.
+    ///
+    /// Em 18/10 a compilação começava no anúncio, no meio do expediente, e os
+    /// balcões do Canela compilaram o dia inteiro por cima da importação.
+    pub(crate) fn vigiar_o_balcao(&mut self, cx: &mut Context<Self>) {
+        if !self.atualizacao.instalando {
+            self.compilacao_automatica = false;
+            self.interrupcao_pedida = false;
+        }
+        let parado = self.balcao_parado(cx);
+        if self.atualizacao.esperando_o_balcao && !self.atualizacao.instalando && parado {
+            if let Some(v) = &self.atualizacao.versao {
+                crate::telemetria::reagir(
+                    &v.versao,
+                    "atualizar",
+                    Some("a compilação começou sozinha: o balcão estava parado".into()),
+                );
+            }
+            self.compilacao_automatica = true;
+            self.comecar_a_compilar();
+            self._atualizacao = Some(Self::esperar_aviso(cx));
+            cx.notify();
+        } else if self.atualizacao.instalando
+            && self.compilacao_automatica
+            && !self.interrupcao_pedida
+            && !parado
+        {
+            self.interrupcao_pedida = true;
+            self.atualizador.interromper();
+        }
+    }
+
     fn comecar_a_compilar(&mut self) {
         let Some(versao) = self.atualizacao.versao.clone() else {
             return;
         };
         self.atualizacao.instalando = true;
+        self.atualizacao.esperando_o_balcao = false;
         self.atualizacao.etapa = None;
         self.atualizacao.aviso = Some(Aviso::Disponivel {
             versao: versao.clone(),
@@ -1848,6 +1943,8 @@ impl Aplicativo {
                     crate::telemetria::reagir(&v.versao, "atualizar", Some("clicou".into()));
                 }
                 self.atualizacao.novidades_abertas = false;
+                // O clique escolheu a hora: esta não se interrompe.
+                self.compilacao_automatica = false;
                 self.comecar_a_compilar();
                 self._atualizacao = Some(Self::esperar_aviso(cx));
             }
@@ -7078,6 +7175,9 @@ impl Render for Aplicativo {
             .key_context(CONTEXTO)
             .relative()
             .track_focus(&self.foco)
+            // 🧑‍💼 Fase de captura: marca antes de qualquer filho, sem parar o
+            // clique.
+            .capture_any_mouse_down(cx.listener(|raiz, _, _, cx| raiz.marcar_atividade(cx)))
             .map(|raiz| self.ouvir_atalhos_da_revelacao(raiz, window, cx))
             .on_action(cx.listener(Self::ao_voltar))
             .on_action(cx.listener(Self::ao_desfazer))
@@ -10753,6 +10853,21 @@ mod testes {
         }
     }
 
+    /// 🧑‍💼 Uma volta da vigia do balcão — nos testes a telemetria não liga, e
+    /// o laço de um segundo que a chama (`ouvir_os_anuncios`) não existe.
+    fn vigiar(cx: &mut TestAppContext, janela: &gpui_kit::WindowHandle<Aplicativo>) {
+        janela
+            .update(cx, |app, _window, cx| app.vigiar_o_balcao(cx))
+            .unwrap();
+        deixar_o_relogio_andar(cx);
+    }
+
+    /// O balcão fica [`BALCAO_PARADO`] sem tecla nem clique, e a vigia olha.
+    fn parar_o_balcao(cx: &mut TestAppContext, janela: &gpui_kit::WindowHandle<Aplicativo>) {
+        cx.executor().advance_clock(BALCAO_PARADO);
+        vigiar(cx, janela);
+    }
+
     /// 📚 **O diálogo navega pelo histórico**: abre na versão anunciada, lista
     /// as do meio (que vêm do histórico do `main`) e a aberta, e o clique numa
     /// versão da lista troca o que ele mostra.
@@ -10852,8 +10967,9 @@ mod testes {
             .unwrap();
     }
 
-    /// 🔑 **Tudo automático**: a versão do `main` começa a compilar sem clique,
-    /// a faixa conta a etapa, e no fim diz que ela entra na próxima abertura.
+    /// 🔑 **Tudo automático**: a versão do `main` começa a compilar sem clique
+    /// — com o balcão parado —, a faixa conta a etapa, e no fim diz que ela
+    /// entra na próxima abertura.
     #[gpui_kit::test]
     fn a_versao_do_main_compila_sozinha_e_avisa_o_fim(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
@@ -10869,6 +10985,7 @@ mod testes {
             Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas, window, cx)
         });
         deixar_o_relogio_andar(cx);
+        parar_o_balcao(cx, &janela);
         assert_eq!(
             *atualizador.compilacoes.lock().unwrap(),
             vec!["0.1.13".to_string()],
@@ -10905,6 +11022,7 @@ mod testes {
             Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas, window, cx)
         });
         deixar_o_relogio_andar(cx);
+        parar_o_balcao(cx, &janela);
         janela
             .update(cx, |app, _window, cx| {
                 let texto = app.atualizacao.texto().unwrap();
@@ -10926,6 +11044,124 @@ mod testes {
                     .unwrap()
                     .starts_with("Versão 0.1.13 instalada."));
             })
+            .unwrap();
+    }
+
+    /// 🧑‍💼 **O balcão em primeiro lugar** (dono, 19/out/2026). Em 18/10 os
+    /// dois balcões do Canela compilaram o dia inteiro por cima da importação
+    /// e da seleção com o cliente — a funcionária anotou as fotos num caderno.
+    /// A compilação automática espera o balcão ficar parado (nada em curso e
+    /// dez minutos sem tecla nem clique) e para quando ele volta ao trabalho;
+    /// com ele parado de novo, recomeça.
+    #[gpui_kit::test]
+    fn a_compilacao_automatica_espera_o_balcao_parar_e_para_quando_ele_volta(
+        cx: &mut TestAppContext,
+    ) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_kit::init);
+        let (portas, atualizador) = portas_com_versao_do_main(
+            true,
+            vec![Aviso::Progresso(
+                "compilando (15 a 40 minutos na primeira vez)".into(),
+            )],
+        );
+        let janela = cx.add_window(|window, cx| {
+            Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas, window, cx)
+        });
+        deixar_o_relogio_andar(cx);
+        let compilacoes = || atualizador.compilacoes.lock().unwrap().len();
+
+        // Acabou de abrir: o anúncio chega e a compilação espera.
+        vigiar(cx, &janela);
+        assert_eq!(compilacoes(), 0, "o anúncio não compila na hora");
+        janela
+            .update(cx, |app, _window, _cx| {
+                assert!(app.atualizacao.esperando_o_balcao);
+                let texto = app.atualizacao.texto().unwrap();
+                assert!(
+                    texto.ends_with("instala sozinha com o balcão parado"),
+                    "{texto}"
+                );
+                let botoes = faixa::botoes(&app.atualizacao);
+                assert_eq!(botoes[0].1, "Atualizar agora", "o clique continua valendo");
+            })
+            .unwrap();
+
+        // Nove minutos parado ainda não é parado.
+        cx.executor()
+            .advance_clock(BALCAO_PARADO - std::time::Duration::from_secs(60));
+        vigiar(cx, &janela);
+        assert_eq!(compilacoes(), 0);
+
+        // Fotos copiando seguram a compilação, mesmo sem ninguém mexer.
+        janela
+            .update(cx, |app, _window, _cx| app.sincronias_pendentes = 3)
+            .unwrap();
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(120));
+        vigiar(cx, &janela);
+        assert_eq!(compilacoes(), 0, "subindo foto não é balcão parado");
+
+        // Acabou o envio: agora sim.
+        janela
+            .update(cx, |app, _window, _cx| app.sincronias_pendentes = 0)
+            .unwrap();
+        vigiar(cx, &janela);
+        assert_eq!(compilacoes(), 1, "balcão parado: compila");
+        janela
+            .update(cx, |app, _window, _cx| {
+                assert!(app.atualizacao.instalando);
+                assert!(!app.atualizacao.esperando_o_balcao);
+            })
+            .unwrap();
+
+        // O operador volta: um clique para a compilação.
+        janela
+            .update(cx, |app, _window, cx| app.marcar_atividade(cx))
+            .unwrap();
+        vigiar(cx, &janela);
+        assert_eq!(*atualizador.interrupcoes.lock().unwrap(), 1);
+        janela
+            .update(cx, |app, _window, _cx| {
+                assert!(!app.atualizacao.instalando, "parou");
+                assert!(app.atualizacao.esperando_o_balcao, "e volta a esperar");
+                assert!(
+                    !matches!(app.atualizacao.aviso, Some(Aviso::Falhou(_))),
+                    "interromper não é falhar"
+                );
+            })
+            .unwrap();
+
+        // Trabalhando, não recomeça; parado de novo, recomeça.
+        vigiar(cx, &janela);
+        assert_eq!(compilacoes(), 1);
+        parar_o_balcao(cx, &janela);
+        assert_eq!(compilacoes(), 2, "recomeça com o balcão parado");
+    }
+
+    /// 🧑‍💼 A compilação pedida no botão é escolha do operador: o trabalho
+    /// voltar não a interrompe.
+    #[gpui_kit::test]
+    fn a_compilacao_pedida_no_botao_nao_se_interrompe(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        cx.update(gpui_kit::init);
+        let (portas, atualizador) =
+            portas_com_versao_do_main(true, vec![Aviso::Progresso("compilando".into())]);
+        let janela = cx.add_window(|window, cx| {
+            Aplicativo::ja_dentro(acervo(), previews, Vec::new(), portas, window, cx)
+        });
+        deixar_o_relogio_andar(cx);
+        janela
+            .update(cx, |app, _window, cx| {
+                app.atender(PedidoDeAtualizacao::Instalar, cx);
+                app.marcar_atividade(cx);
+            })
+            .unwrap();
+        vigiar(cx, &janela);
+        assert_eq!(atualizador.compilacoes.lock().unwrap().len(), 1);
+        assert_eq!(*atualizador.interrupcoes.lock().unwrap(), 0);
+        janela
+            .update(cx, |app, _window, _cx| assert!(app.atualizacao.instalando))
             .unwrap();
     }
 

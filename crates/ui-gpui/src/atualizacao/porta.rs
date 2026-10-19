@@ -102,6 +102,9 @@ pub enum Aviso {
     Progresso(String),
     /// A instalação terminou; falta reabrir o app.
     Instalada(String),
+    /// 🧑‍💼 A compilação automática parou porque o balcão voltou ao trabalho.
+    /// Recomeça sozinha quando ele parar de novo ([`super::compilar::interromper`]).
+    Interrompida,
     /// Não deu — e a tela mostra isso **sem** derrubar nada.
     Falhou(String),
     /// A procura **pedida** não achou nada: esta é a versão mais recente.
@@ -149,6 +152,10 @@ pub trait Atualizador: Send + Sync + 'static {
     /// Roda o instalador, que compila o `main` nesta máquina. As etapas
     /// chegam como [`Aviso::Progresso`]; o fim, como `Instalada` ou `Falhou`.
     fn compilar(&self, versao: String, canal: Sender<Aviso>);
+
+    /// 🧑‍💼 Para a compilação em curso, se ela estiver numa etapa que se pode
+    /// parar. O desfecho chega pelo canal como [`Aviso::Interrompida`].
+    fn interromper(&self) {}
 
     /// 📚 O histórico de novidades do `main` — as versões entre a instalada e
     /// a anunciada. Vazio quando não deu para buscar. **Bloqueia**: chamar
@@ -390,6 +397,7 @@ mod real {
                         Andamento::Etapa(etapa) => Aviso::Progresso(etapa),
                         Andamento::Instalada(versao) => Aviso::Instalada(versao),
                         Andamento::Falhou(motivo) => Aviso::Falhou(motivo),
+                        Andamento::Interrompida => Aviso::Interrompida,
                     };
                     let _ = canal.send(aviso);
                 });
@@ -398,6 +406,10 @@ mod real {
 
         fn historico(&self) -> Vec<super::super::novidades::Novidades> {
             super::super::novidades::buscar_historico()
+        }
+
+        fn interromper(&self) {
+            super::super::compilar::interromper();
         }
     }
 
@@ -488,6 +500,10 @@ pub mod mentira {
         pub historico_do_main: Mutex<Vec<crate::atualizacao::novidades::Novidades>>,
         /// Quantas vezes o histórico foi buscado.
         pub historicos: Mutex<usize>,
+        /// 🧑‍💼 Quantas vezes a raiz pediu para parar a compilação.
+        pub interrupcoes: Mutex<usize>,
+        /// O canal da última compilação: é por ele que a interrupção responde.
+        pub canal_da_compilacao: Mutex<Option<Sender<Aviso>>>,
     }
 
     impl AtualizadorDeMentira {
@@ -552,11 +568,19 @@ pub mod mentira {
             self.historico_do_main.lock().expect("o histórico").clone()
         }
 
+        fn interromper(&self) {
+            *self.interrupcoes.lock().expect("as interrupções") += 1;
+            if let Some(canal) = self.canal_da_compilacao.lock().expect("o canal").take() {
+                let _ = canal.send(Aviso::Interrompida);
+            }
+        }
+
         fn compilar(&self, versao: String, canal: Sender<Aviso>) {
             self.compilacoes
                 .lock()
                 .expect("as compilações")
                 .push(versao);
+            *self.canal_da_compilacao.lock().expect("o canal") = Some(canal.clone());
             for aviso in self
                 .andamento_da_compilacao
                 .lock()

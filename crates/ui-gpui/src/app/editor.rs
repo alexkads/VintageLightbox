@@ -34,6 +34,13 @@ pub(super) struct Editores {
     assinaturas: HashMap<String, Vec<Subscription>>,
 }
 
+impl Editores {
+    /// Há foto aberta no editor — o operador está trabalhando nela.
+    pub(super) fn algum_aberto(&self) -> bool {
+        !self.abertas.is_empty()
+    }
+}
+
 impl Aplicativo {
     /// "Editar Foto": a foto que o menu da tira mandou — a clicada.
     pub(super) fn editar_a_foto_pedida(&mut self, cx: &mut Context<Self>) {
