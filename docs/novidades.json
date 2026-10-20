@@ -1,11 +1,12 @@
 {
-  "versao": "0.1.173",
-  "titulo": "A atualização não atrapalha mais o atendimento.",
+  "versao": "0.1.174",
+  "titulo": "A Edição ficou mais rápida, com a mesma foto no fim.",
   "importante": false,
   "novidades": [
-    "A versão nova agora só se instala sozinha quando o balcão fica parado: nada copiando, subindo ou revelando, e dez minutos sem uso. Importar fotos e escolher com o cliente não ficam mais lentos por causa dela.",
-    "Se você voltar a usar o app no meio da instalação, ela para e recomeça depois, de onde estava, quando o balcão parar de novo.",
-    "Quem quiser atualizar na hora continua tendo o botão \"Atualizar agora\" no rodapé."
+    "Na Edição, arrastar uma camada, transformar (⌘T), mexer na opacidade, nos Níveis ou na prévia de um filtro responde bem mais rápido: durante o gesto a tela mostra uma prévia leve, e ao soltar a foto aparece exata.",
+    "Salvar a edição e usar a varinha mágica ficam cerca de três vezes mais rápidos em fotos grandes.",
+    "Abrir fotos RAW e gerar os JPEG ficou mais leve para a máquina.",
+    "Nada muda na foto que sai: o resultado é o mesmo de antes, só chega mais cedo."
   ],
-  "por_que_atualizar": "Para a importação e a seleção com o cliente nunca mais disputarem a máquina com a atualização."
+  "por_que_atualizar": "Para editar e exportar sem esperar a tela acompanhar o mouse."
 }

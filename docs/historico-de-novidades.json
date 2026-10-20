@@ -1,5 +1,18 @@
 [
   {
+    "versao": "0.1.174",
+    "data": "2026-10-19",
+    "titulo": "A Edição ficou mais rápida, com a mesma foto no fim.",
+    "importante": false,
+    "novidades": [
+      "Na Edição, arrastar uma camada, transformar (⌘T), mexer na opacidade, nos Níveis ou na prévia de um filtro responde bem mais rápido: durante o gesto a tela mostra uma prévia leve, e ao soltar a foto aparece exata.",
+      "Salvar a edição e usar a varinha mágica ficam cerca de três vezes mais rápidos em fotos grandes.",
+      "Abrir fotos RAW e gerar os JPEG ficou mais leve para a máquina.",
+      "Nada muda na foto que sai: o resultado é o mesmo de antes, só chega mais cedo."
+    ],
+    "por_que_atualizar": "Para editar e exportar sem esperar a tela acompanhar o mouse."
+  },
+  {
     "versao": "0.1.173",
     "data": "2026-10-19",
     "titulo": "A atualização não atrapalha mais o atendimento.",
