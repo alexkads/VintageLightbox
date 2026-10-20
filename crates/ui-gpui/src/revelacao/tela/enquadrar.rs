@@ -81,11 +81,28 @@ pub(super) struct Edicao {
     pub aviso: Option<SharedString>,
     /// A perspectiva guiada ([`super::perspectiva`]).
     pub guias: super::perspectiva::EdicaoDasGuias,
+    /// A trava espera os pixels da foto para ser medida: o Enquadrar reaberto
+    /// na troca de foto nasce antes de a cópia de trabalho do site chegar.
+    pub trava_a_medir: bool,
     /// O giro por fora em curso: arrastar fora do retângulo.
     pub giro: Option<GiroPorFora>,
     /// Onde o ponteiro está sobre o palco, em pontos da janela. É o que põe o
     /// sinal de girar junto dele e o ângulo ao lado durante o giro.
     pub ponteiro: Option<Point<Pixels>>,
+}
+
+/// O que o Enquadrar de uma foto guarda além do corte gravado nela.
+///
+/// O resto — giro, espelhos, ângulo, perspectiva, guias, "restringir" — já é
+/// da foto (o `CropSettings`, gravado), e volta com ela sem precisar disto.
+#[derive(Debug, Clone)]
+pub(super) struct Memoria {
+    /// O corte como estava ao sair. 🔑 Se ele mudou por fora da ferramenta
+    /// (sincronização, predefinição, `⌘Z` com ela fechada), a memória não vale:
+    /// o retângulo pedido seria de outro corte.
+    corte: CropSettings,
+    proporcao: Option<f32>,
+    desejado: Option<Retangulo>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -226,32 +243,94 @@ impl Revelacao {
         if self.tamanho_da_foto().is_none() {
             return;
         }
+        // ✂️ **O Enquadrar larga a Revelação local** (achado na segunda
+        // rodada, 03/out/2026): a ferramenta seguia na mão, e o círculo, os
+        // alfinetes e os contornos ficavam por cima do retângulo do corte.
+        self.sair_da_revelacao_local(cx);
+        self.montar_o_enquadrar(window, cx);
+        self.atualizar_exibicao();
+        self.revelar_de_novo_se_a_vinheta_segue_o_corte(cx);
+        cx.notify();
+    }
+
+    /// O Enquadrar aberto **do zero na foto aberta**: o slider no ângulo dela,
+    /// a trava na proporção do corte dela, nenhum gesto em curso.
+    ///
+    /// É também o que a troca de foto usa para manter a ferramenta ligada
+    /// (`mostrar`): nada do Enquadrar da foto que saiu atravessa para a outra.
+    pub(super) fn montar_o_enquadrar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // O slider nasce no ângulo da foto: numa foto já endireitada, uma barra
         // no meio diria que ela está reta.
         let graus = self.corte_atual().angle();
         self.angulo
             .update(cx, |estado, cx| estado.set_value(graus, window, cx));
         self.sincronizar_sliders_da_perspectiva(window, cx);
-        // 🔑 **A trava abre na proporção que o corte já tem** — a sessão
-        // importada em 4:3 abre travada em 4:3. Ver `proporcao_do_retangulo`.
-        let proporcao = self.espaco().and_then(|espaco| {
+        let atual = self.corte_atual();
+        let lembrada = self
+            .aberta
+            .as_ref()
+            .and_then(|a| self.memoria_do_enquadrar.get(&a.foto.id))
+            .filter(|m| m.corte == atual)
+            .cloned();
+        self.edicao = Some(match lembrada {
+            // A foto volta com a proporção que o operador deixou nela — até
+            // "Livre" num corte que por acaso é 4:3.
+            Some(m) => Edicao {
+                proporcao: m.proporcao,
+                desejado: m.desejado,
+                ..Edicao::default()
+            },
+            None => Edicao {
+                proporcao: self.trava_do_corte(),
+                trava_a_medir: self.espaco().is_none(),
+                ..Edicao::default()
+            },
+        });
+    }
+
+    /// Guarda o que o Enquadrar da foto aberta escolheu, para ela voltar assim
+    /// — ao trocar de foto e ao sair da ferramenta.
+    pub(super) fn guardar_o_enquadrar(&mut self) {
+        let (Some(edicao), Some(aberta)) = (self.edicao.as_ref(), self.aberta.as_ref()) else {
+            return;
+        };
+        if edicao.trava_a_medir {
+            // Os pixels nem chegaram: não há escolha nenhuma a lembrar.
+            return;
+        }
+        let memoria = Memoria {
+            corte: self.corte_atual(),
+            proporcao: edicao.proporcao,
+            desejado: edicao.desejado,
+        };
+        self.memoria_do_enquadrar
+            .insert(aberta.foto.id.clone(), memoria);
+    }
+
+    /// 🔑 **A trava abre na proporção que o corte já tem** — a sessão
+    /// importada em 4:3 abre travada em 4:3. Ver `proporcao_do_retangulo`.
+    fn trava_do_corte(&self) -> Option<f32> {
+        self.espaco().and_then(|espaco| {
             corte::proporcao_do_retangulo(corte::retangulo_de(&self.corte_atual(), espaco))
-        });
-        // ✂️ **O Enquadrar larga a Revelação local** (achado na segunda
-        // rodada, 03/out/2026): a ferramenta seguia na mão, e o círculo, os
-        // alfinetes e os contornos ficavam por cima do retângulo do corte.
-        self.sair_da_revelacao_local(cx);
-        self.edicao = Some(Edicao {
-            proporcao,
-            ..Edicao::default()
-        });
-        self.atualizar_exibicao();
-        self.revelar_de_novo_se_a_vinheta_segue_o_corte(cx);
-        cx.notify();
+        })
+    }
+
+    /// Os pixels da foto chegaram: o Enquadrar que esperava por eles mede a
+    /// trava agora.
+    pub(super) fn medir_a_trava_que_faltava(&mut self) {
+        if !self.edicao.as_ref().is_some_and(|e| e.trava_a_medir) || self.espaco().is_none() {
+            return;
+        }
+        let proporcao = self.trava_do_corte();
+        if let Some(edicao) = self.edicao.as_mut() {
+            edicao.proporcao = proporcao;
+            edicao.trava_a_medir = false;
+        }
     }
 
     /// Sai da ferramenta. O que foi feito nela já é da foto.
     pub fn sair_do_corte(&mut self, cx: &mut Context<Self>) {
+        self.guardar_o_enquadrar();
         if self.edicao.take().is_none() {
             return;
         }

@@ -307,6 +307,12 @@ pub struct Revelacao {
     /// O corte em edição. `None` é "fora do modo de corte" — e é a diferença
     /// entre a foto com overlay por cima e a foto sozinha.
     edicao: Option<Edicao>,
+    /// ✂️ O que o Enquadrar de cada foto escolheu e não cabe no corte gravado
+    /// — a proporção travada e o retângulo pedido —, por id. É o que faz a
+    /// foto voltar com a ferramenta como foi deixada (dono, 20/out/2026: *"guardar
+    /// o estado individual ... de todas as funcionalidades do botão
+    /// enquadramento"*). Vale enquanto a sessão está aberta.
+    memoria_do_enquadrar: HashMap<String, enquadrar::Memoria>,
     /// Se a tela está mostrando o "antes" — a foto sem nenhum ajuste, no mesmo
     /// enquadramento. É o `\\` do legado.
     mostrando_original: bool,
@@ -777,6 +783,7 @@ impl Revelacao {
             varredura: 0,
             mistura: 0,
             edicao: None,
+            memoria_do_enquadrar: HashMap::new(),
             mostrando_original: false,
             nao_salvas: 0,
             aberta_no_deposito: false,
@@ -1323,6 +1330,9 @@ impl Revelacao {
         // revelação de uma foto gravada na outra. É a mesma ordem do legado
         // ("Check if we need to save the CURRENT photo before switching").
         self.gravar_o_que_estiver_pendente();
+        // ✂️ E o Enquadrar da que sai fica lembrado, com o corte dela — mais
+        // abaixo o corte já é o da foto nova.
+        self.guardar_o_enquadrar();
         // O olho apertado não atravessa a troca de foto: a prévia da próxima
         // sai com tudo, e a miniatura da que sai também.
         self.estado_do_painel.ver_sem = None;
@@ -1419,11 +1429,16 @@ impl Revelacao {
                 self.locais_ilegiveis = Some(erro);
             }
         }
-        // 🚨 O modo de corte fecha aqui. O retângulo que está na tela é da foto
-        // que sai; mantê-lo aberto aplicaria, no clique seguinte, o enquadramento
-        // de uma foto na outra — o mesmo defeito que a cópia da seleção e o
-        // histórico por foto já impedem nas outras pontas.
-        self.edicao = None;
+        // 🚨 O Enquadrar da foto que sai fecha aqui. O retângulo, a trava e o
+        // gesto em curso são dela; mantê-los aplicaria, no clique seguinte, o
+        // enquadramento de uma foto na outra — o mesmo defeito que a cópia da
+        // seleção e o histórico por foto já impedem nas outras pontas.
+        //
+        // ✂️ **Mas a ferramenta continua ligada** (dono, 20/out/2026, como no
+        // Lightroom e como já era no site): quem endireita a sessão foto a
+        // foto anda pela tira com ela aberta. Ela reabre do zero na foto nova,
+        // logo abaixo, quando esta já é a aberta.
+        let enquadrando = self.edicao.take().is_some();
         // Histórico novo, começando no que está gravado: o passo zero é o estado
         // da abertura, e é o que faz o **primeiro** `Cmd+Z` ter para onde voltar.
         // No legado não tem — lá o histórico começa depois da primeira mudança, e
@@ -1479,6 +1494,9 @@ impl Revelacao {
             espera,
             desenhada: None,
         });
+        if enquadrando {
+            self.montar_o_enquadrar(window, cx);
+        }
         self.atualizar_exibicao();
         // 📜 Depois de a foto ser a aberta: a leitura é pelo id dela.
         self.ler_o_historico_gravado(cx);
@@ -1601,6 +1619,7 @@ impl Revelacao {
             self.miniaturas_da_tira.esquecer(foto_id);
         }
 
+        self.medir_a_trava_que_faltava();
         if neutra {
             self.cruzar = true;
             self.atualizar_exibicao();
@@ -7973,13 +7992,13 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
-    /// 🚨 Trocar de foto no meio do corte fecha o modo.
+    /// ✂️ Trocar de foto no Enquadrar **mantém a ferramenta ligada** (dono,
+    /// 20/out/2026, como no Lightroom), mas o retângulo é o da foto nova.
     ///
-    /// O retângulo é da foto que estava na tela. Mantê-lo aberto aplicaria, no
-    /// clique seguinte, o enquadramento de uma foto na outra — o mesmo defeito
-    /// que a cópia da seleção e o histórico por foto já impedem nas outras pontas.
+    /// O da foto que estava na tela não atravessa: aplicá-lo na outra seria o
+    /// mesmo defeito que a cópia da seleção e o histórico por foto já impedem.
     #[gpui_kit::test]
-    fn trocar_de_foto_fecha_o_modo_de_corte(cx: &mut TestAppContext) {
+    fn trocar_de_foto_mantem_o_enquadrar_com_o_corte_da_nova(cx: &mut TestAppContext) {
         let (previews, _dir) = previews_descartaveis();
         for id in ["id-a.jpg", "id-b.jpg"] {
             previews.save_preview(id, &foto_cinza()).expect("gravar");
@@ -7991,9 +8010,32 @@ mod testes {
                 tela.abrir(foto("a.jpg"), window, cx);
                 tela.alternar_corte(window, cx);
                 assert!(tela.cortando());
+                tela.arrastar_no_corte(Some(corte::Alca::Esquerda), 10., 0., window, cx);
+                tela.travar_proporcao(Some(1.), cx);
+                assert!(
+                    tela.corte_na_ferramenta().crop_width() < 1.,
+                    "a foto a foi recortada"
+                );
 
                 tela.abrir(foto("b.jpg"), window, cx);
-                assert!(!tela.cortando(), "o retângulo era da foto a");
+                assert!(tela.cortando(), "o Enquadrar segue ligado na foto b");
+                let c = tela.corte_na_ferramenta();
+                assert_eq!(
+                    (c.crop_x(), c.crop_width(), c.angle()),
+                    (0., 1., 0.),
+                    "o retângulo é o da foto b, e não o da a"
+                );
+                // Na b, "Livre"; de volta à a, a 1:1 que ficou nela.
+                tela.travar_proporcao(None, cx);
+                tela.abrir(foto("a.jpg"), window, cx);
+                assert!(tela.cortando());
+                assert_eq!(tela.proporcao_travada(), Some(1.), "a foto a lembra a 1:1");
+                tela.abrir(foto("b.jpg"), window, cx);
+                assert_eq!(
+                    tela.proporcao_travada(),
+                    None,
+                    "a foto b lembra o Livre, num corte que é 1:1"
+                );
             })
             .expect("a janela deve estar aberta");
     }

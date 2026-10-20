@@ -252,3 +252,81 @@ fn arrastar_fora_do_retangulo_gira_a_foto(cx: &mut TestAppContext) {
         assert!(perto(c.crop_width(), largura_antes));
     });
 }
+
+/// 🎬 **Trocar de foto pela tira não desliga o Enquadrar, e cada foto volta
+/// como foi deixada** (dono, 20/10/2026: *"faça exatamente como o Lightroom
+/// faz ao mudar de foto"*). Na "a": recorte, 1:1 e 6° de endireitar. Na "b":
+/// a ferramenta segue aberta, com o corte e a proporção da "b", e lá fica
+/// "Livre". De volta à "a", o corte, o ângulo e a 1:1 dela — e o endireitar
+/// voltando a zero ainda cresce até o retângulo que ela pediu.
+#[gpui_kit::test]
+fn trocar_de_foto_mantem_o_enquadrar_e_o_estado_de_cada_foto(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    e.revelar_a_do_site(cx, "a");
+    e.teclar(cx, "r");
+    let ir = |e: &super::Estudio, cx: &mut TestAppContext, id: &str| {
+        let alvo = format!("site:{id}");
+        e.revelacao(cx, |tela, window, cx| {
+            let posicao = tela
+                .acervo()
+                .iter()
+                .position(|f| f.id == alvo)
+                .expect("a foto está na tira");
+            tela.ir_para(posicao, window, cx);
+        });
+        e.esperar(cx);
+    };
+
+    let pedido_da_a = e.revelacao(cx, |tela, window, cx| {
+        tela.travar_proporcao(None, cx);
+        tela.arrastar_no_corte(Some(Alca::Esquerda), 40., 0., window, cx);
+        tela.travar_proporcao(Some(1.), cx);
+        tela.corte_na_ferramenta()
+    });
+    e.revelacao(cx, |tela, _w, cx| tela.arrastar_angulo(6., cx));
+    e.esperar(cx);
+    let a = e.revelacao(cx, |tela, _w, _cx| tela.corte_na_ferramenta());
+    assert!(perto(a.angle(), 6.) && a.crop_width() < pedido_da_a.crop_width());
+
+    ir(&e, cx, "b");
+    e.revelacao(cx, |tela, _w, cx| {
+        assert!(tela.cortando(), "o Enquadrar segue ligado na foto b");
+        let b = tela.corte_na_ferramenta();
+        assert!(
+            perto(b.crop_width(), 1.) && perto(b.angle(), 0.),
+            "o retângulo é o da b"
+        );
+        assert_eq!(
+            tela.proporcao_travada(),
+            Some(4. / 3.),
+            "a trava da b é a dela"
+        );
+        tela.travar_proporcao(None, cx);
+    });
+
+    ir(&e, cx, "a");
+    e.revelacao(cx, |tela, _w, _cx| {
+        assert!(tela.cortando());
+        let volta = tela.corte_na_ferramenta();
+        assert!(perto(volta.angle(), 6.), "o ângulo da a: {}", volta.angle());
+        assert!(perto(volta.crop_width(), a.crop_width()), "o corte da a");
+        assert_eq!(tela.proporcao_travada(), Some(1.), "a a lembra a 1:1");
+    });
+    // O retângulo pedido também voltou: endireitar de volta a zero cresce até ele.
+    e.revelacao(cx, |tela, _w, cx| tela.arrastar_angulo(0., cx));
+    e.esperar(cx);
+    e.revelacao(cx, |tela, _w, _cx| {
+        let c = tela.corte_na_ferramenta();
+        assert!(
+            perto(c.crop_width(), pedido_da_a.crop_width()),
+            "cresceu de volta ao pedido: {} × {}",
+            c.crop_width(),
+            pedido_da_a.crop_width()
+        );
+    });
+
+    ir(&e, cx, "b");
+    e.revelacao(cx, |tela, _w, _cx| {
+        assert_eq!(tela.proporcao_travada(), None, "a b lembra o Livre");
+    });
+}
