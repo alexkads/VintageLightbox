@@ -450,6 +450,11 @@ pub struct Venda {
     /// As fotos que continuam vendidas: os itens menos os estornados.
     pub fotos_vendidas: Vec<String>,
     pub estornos: Vec<Estorno>,
+    /// 📴 A venda feita sem internet que ainda não chegou ao site — sem número.
+    pub guardada_sem_rede: bool,
+    /// 📴 A venda sem internet que, ao subir, encontrou a foto já vendida por
+    /// outro caminho: o que ficou em duplicidade, para estornar uma.
+    pub conflito_sem_rede: Option<String>,
 }
 
 impl Venda {
@@ -1389,6 +1394,8 @@ mod testes {
             estornavel: 3601,
             fotos_vendidas: vec!["a".into(), "b".into()],
             estornos: vec![],
+            guardada_sem_rede: false,
+            conflito_sem_rede: None,
         }
     }
 

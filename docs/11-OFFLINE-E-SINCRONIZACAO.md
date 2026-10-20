@@ -29,6 +29,83 @@ e é recente do lado do desktop: a nuvem já guardava
 `pos-venda/<uuid-galeria>/originais/<uuid>.jpg` desde o começo, e o desktop
 alcançou isso na migration 022.
 
+## 📴 Offline first no balcão (20/out/2026)
+
+> *"Hoje ficamos sem internet no estúdio, com isso descobrimos o que já era
+> certo, o sistema não trabalha offline. Precisamos preparar o sistema e
+> deixá-lo offline first."* — dono, 20/out/2026. Escopo: **só o VintageLightbox**.
+
+O app abria (a sessão vem do chaveiro), mas toda tela de trabalho lia e gravava
+direto na API. Agora o balcão trabalha sem internet e concilia quando ela volta.
+Código em `crates/ui-gpui/src/sincronizacao/` e
+`crates/infrastructure/src/pos_venda/espelho.rs`.
+
+### As três peças
+
+| Peça | Onde | O que faz |
+|---|---|---|
+| **Espelho** | `infrastructure::pos_venda::espelho` (disco, `<catálogo>/Espelho do site/<api>/`) | guarda a última resposta de cada `GET` com conta; sem rede ou com `5xx`, devolve ela. O original e a fonte da revelação ficam de fora (30 MB cada). Faxina de 30 dias na abertura |
+| **Fila** | tabela `fila_de_sincronizacao` (migration 029) + `Sincronizacao` | o gesto que não chegou, na ordem, com a hora do balcão (`ocorrido_em`) e uma chave UUID |
+| **Porta local-primeiro** | `sincronizacao::porta::PublicadorLocalPrimeiro`, montada em `montagem.rs` por fora do `PublicadorDaApi` | as telas falam com ela como falavam com a API; ela decide se o gesto vai já ou se fica na fila |
+
+### As regras
+
+1. **Com rede e fila vazia, nada muda**: o gesto vai direto e a recusa de regra
+   chega na hora.
+2. **Sem rede, o gesto vai para a fila e a tela segue** — a nota, o `B`, o `X`
+   (na foto que já está no site, como `PATCH`), a negociação, a faixa em lote do
+   caixa, a edição da sessão, a sessão nova, a foto classificada, o "Salvar na
+   galeria", o "Avisar cliente" e o caixa (abrir, vender, sangria e suprimento).
+3. **A ordem é uma só**: com gesto na fila, o novo entra atrás dele mesmo com a
+   rede de volta.
+4. **A leitura soma a fila por cima do espelho**: a nota dada sem rede continua
+   na grade ao reabrir; a sessão criada sem rede abre vazia; o caixa aberto sem
+   rede aparece aberto, com a venda guardada.
+5. **A rede caída nunca gasta o gesto**: o trabalhador espera (2 s a 30 s,
+   dobrando). Só a recusa de regra (4xx) tira o gesto da vez — vira **conflito**,
+   com a frase do site, na lista do selo do rodapé ("Tentar de novo",
+   "Descartar").
+6. **O id nasce no app**: a sessão criada sem rede ganha UUID aqui, e o site
+   aceita esse id (`POST /pos-venda/galerias` com `id`, idempotente). Se um site
+   antigo der outro id, a fila e as fotos do catálogo seguem o de lá.
+7. **O caixa sem rede aceita todas as formas** — todas já são registro manual.
+   A venda sobe com a hora do balcão; se a foto foi vendida por outro caminho no
+   meio-tempo, o site **grava assim mesmo** e marca a duplicidade
+   (`caixa_vendas.conflito_sem_rede`), que o caixa mostra para estornar uma.
+   A abertura que esperou a rede e encontra o caixa aberto vale o aberto.
+8. **Só com internet**, com frase na tela: o link do cliente (é o site que
+   assina), estorno, conferência e fechamento do caixa, tirar da nuvem a foto
+   que só existe lá, agenda, chatbot e o resto que grava.
+9. **Primeira entrada pede internet**; depois, o app abre sem rede dentro dos 15
+   dias do refresh, e a renovação que falha por rede não derruba a conta.
+10. **Várias máquinas sem rede trabalham cada uma por si**; na volta vale a ordem
+    em que cada fila chega, e a recusa vira conflito.
+
+### O que o operador vê
+
+- O selo do rodapé: **"Sem internet · 12 alterações guardadas"**, "Enviando 3
+  alterações guardadas" ou "1 recusada na volta"; o clique abre a lista.
+- Um aviso (com som) quando a rede cai e quando volta.
+- No caixa, a venda guardada aparece como "sem internet" (sem número — o número é
+  do site) e a frase diz que ela sobe quando a rede voltar.
+
+### O bot da sessão (o QR)
+
+O QR vem do site (`GET /pos-venda/galerias/{id}/bot`) e passa pelo espelho: a
+sessão que este computador abriu (ou pré-carregou) mostra o QR sem internet.
+O cliente o lê com o celular dele, e o bot roda no site e na Meta — a conversa
+acontece mesmo com o estúdio sem rede. O que espera é o aviso "o cliente
+entrou": o tempo real volta com a rede e relê o cartão. A sessão criada sem
+rede só tem QR depois de chegar ao site (o convite é de lá); a tela o pede
+sozinha quando a fila a leva. "Novo QR" precisa de internet.
+
+### Pré-carga
+
+Com rede, a lista de sessões leva ao espelho as de ontem e de hoje (até seis,
+uma vez por abertura): a galeria, o QR do bot e as miniaturas. A sessão do dia abre com a
+grade cheia depois de a internet cair, mesmo que ninguém a tenha aberto naquele
+computador. A cópia de trabalho entra no espelho quando a foto é aberta.
+
 ## 🚨 O problema: a chave da sincronização é o nome do arquivo
 
 O banco de produção tem esta linha, desde `20260901000000_create_pos_venda.sql`:

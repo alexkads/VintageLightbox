@@ -283,6 +283,11 @@ impl Aplicativo {
             );
         }
 
+        // ── 📴 A fila de sincronização ────────────────────────────────────
+        // Só aparece quando há o que dizer: sem internet, gesto esperando ou
+        // gesto recusado na volta.
+        let fila = self.selo_da_fila(cx);
+
         // ── O WhatsApp parado ─────────────────────────────────────────────
         // 🚨 A Meta recusando as mensagens da casa (cobrança em aberto…): o
         // que aparece como enviado não chega ao cliente.
@@ -373,6 +378,7 @@ impl Aplicativo {
             .child(versao)
             .child(separador())
             .child(trecho_dos_envios)
+            .when_some(fila, |rodape, fila| rodape.child(separador()).child(fila))
             .when_some(whatsapp, |rodape, whatsapp| {
                 rodape.child(separador()).child(whatsapp)
             })
@@ -498,9 +504,271 @@ impl Aplicativo {
     }
 }
 
+/// 📴 As frases do selo da fila. `None` = nada a dizer (rede boa, fila vazia).
+pub fn frase_da_fila(situacao: crate::sincronizacao::Situacao) -> Option<(String, bool)> {
+    let guardadas = || {
+        plural(
+            situacao.pendentes,
+            "alteração guardada",
+            "alterações guardadas",
+        )
+    };
+    if situacao.conflitos > 0 {
+        return Some((
+            format!(
+                "{} na volta",
+                plural(situacao.conflitos, "recusada", "recusadas")
+            ),
+            true,
+        ));
+    }
+    match (situacao.sem_rede_desde.is_some(), situacao.pendentes) {
+        (true, 0) => Some(("Sem internet".into(), false)),
+        (true, _) => Some((format!("Sem internet · {}", guardadas()), false)),
+        (false, 0) => None,
+        (false, _) => Some((format!("Enviando {}", guardadas()), false)),
+    }
+}
+
+impl Aplicativo {
+    /// 📴 O selo da fila de sincronização, com a lista num `Popover`.
+    fn selo_da_fila(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        // 🪟 Com a lista aberta, o selo fica mesmo que a fila esvazie: sumir
+        // com ele aberto deixaria o foco num elemento que não existe mais.
+        let (texto, recusa) = match frase_da_fila(self.situacao_da_fila) {
+            Some(frase) => frase,
+            None if self.vendo_a_fila => ("Sincronização em dia".to_string(), false),
+            None => return None,
+        };
+        let tema = cx.theme();
+        let cor = if recusa { tema.danger } else { tema.warning };
+        let raiz = cx.entity().downgrade();
+        let do_conteudo = raiz.clone();
+        Some(
+            Popover::new("rodape-fila")
+                .anchor(gpui_kit::Anchor::BottomLeft)
+                .appearance(false)
+                .open(self.vendo_a_fila)
+                .on_open_change(move |aberto, _window, cx| {
+                    let aberto = *aberto;
+                    let _ = raiz.update(cx, |raiz, cx| {
+                        raiz.vendo_a_fila = aberto;
+                        cx.notify();
+                    });
+                })
+                .content(move |_, _window, cx| {
+                    do_conteudo
+                        .upgrade()
+                        .map(|raiz| raiz.update(cx, |raiz, cx| raiz.lista_da_fila(cx)))
+                        .unwrap_or_else(|| div().into_any_element())
+                })
+                .trigger(
+                    estilo::botao_raso("rodape-fila")
+                        .debug_selector(|| "rodape-fila".into())
+                        .flex_none()
+                        .text_color(cor)
+                        .font_weight(FontWeight::MEDIUM)
+                        .child(
+                            Icon::new(if recusa {
+                                Icone::TriangleAlert
+                            } else {
+                                Icone::RefreshCw
+                            })
+                            .size(px(12.)),
+                        )
+                        .child(texto)
+                        .tooltip("O que foi feito sem internet e ainda não chegou ao site"),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// 📴 A lista da fila: o estado da rede, o que espera e o que o site
+    /// recusou, com "Tentar de novo" e "Descartar".
+    fn lista_da_fila(&self, cx: &mut Context<Self>) -> AnyElement {
+        let tema = cx.theme();
+        let (borda, fundo, apagado, perigo) = (
+            tema.border,
+            tema.popover,
+            tema.muted_foreground,
+            tema.danger,
+        );
+        let Some(fila) = crate::sincronizacao::a_do_app() else {
+            return div().into_any_element();
+        };
+        let situacao = fila.situacao();
+        let agora = chrono::Utc::now().timestamp();
+        let rede = match situacao.sem_rede_desde {
+            Some(desde) => format!(
+                "Sem internet {}. O trabalho continua: cada alteração fica guardada neste \
+                 computador e sobe sozinha, na ordem, quando a rede voltar.",
+                ha_quanto(agora - desde)
+            ),
+            None => "A internet está funcionando.".to_string(),
+        };
+        let pendentes = fila.pendentes();
+        let conflitos = fila.conflitos();
+        let linha = || {
+            h_flex()
+                .items_start()
+                .gap(px(8.))
+                .py(px(4.))
+                .border_b_1()
+                .border_color(borda)
+                .text_xs()
+        };
+        let mut lista = v_flex()
+            .id("lista-da-fila-linhas")
+            .flex_1()
+            .min_h(px(0.))
+            .overflow_y_scroll();
+        for conflito in conflitos {
+            let id = conflito.id;
+            lista = lista.child(
+                linha()
+                    .child(
+                        Icon::new(Icone::TriangleAlert)
+                            .size(px(12.))
+                            .text_color(perigo),
+                    )
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .child(conflito.gesto.descricao())
+                            .child(
+                                div()
+                                    .text_color(perigo)
+                                    .child(crate::erro_da_api::legivel(&conflito.frase)),
+                            ),
+                    )
+                    .child(
+                        estilo::botao_secundario_pequeno(format!("fila-refazer-{id}"), cx)
+                            .label("Tentar de novo")
+                            .on_click(cx.listener(move |_raiz, _, _window, cx| {
+                                if let Some(fila) = crate::sincronizacao::a_do_app() {
+                                    fila.refazer(id);
+                                }
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        estilo::botao_fantasma_pequeno(format!("fila-descartar-{id}"), cx)
+                            .label("Descartar")
+                            .on_click(cx.listener(move |_raiz, _, _window, cx| {
+                                if let Some(fila) = crate::sincronizacao::a_do_app() {
+                                    fila.descartar(id);
+                                }
+                                cx.notify();
+                            })),
+                    ),
+            );
+        }
+        let total = pendentes.len();
+        for gesto in pendentes.iter().take(RECUSAS_A_VISTA) {
+            lista = lista.child(
+                linha()
+                    .child(
+                        Icon::new(Icone::RefreshCw)
+                            .size(px(12.))
+                            .text_color(apagado),
+                    )
+                    .child(div().flex_1().min_w(px(0.)).child(gesto.descricao())),
+            );
+        }
+        if total > RECUSAS_A_VISTA {
+            lista = lista.child(
+                div()
+                    .py(px(4.))
+                    .text_xs()
+                    .text_color(apagado)
+                    .child(format!("e mais {}", total - RECUSAS_A_VISTA)),
+            );
+        }
+        v_flex()
+            .id("lista-da-fila")
+            .debug_selector(|| "lista-da-fila".into())
+            .mb(px(6.))
+            .w(px(460.))
+            .max_h(px(400.))
+            .p(px(12.))
+            .gap(px(8.))
+            .rounded(crate::tema::canto(10.))
+            .border_1()
+            .border_color(borda)
+            .bg(fundo)
+            .shadow_lg()
+            .child(
+                div()
+                    .text_sm()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("Sincronização"),
+            )
+            .child(div().text_xs().text_color(apagado).child(rede))
+            .child(lista)
+            .child(
+                h_flex()
+                    .justify_end()
+                    .gap(px(6.))
+                    .child(
+                        estilo::botao_fantasma_pequeno("fila-tentar-agora", cx)
+                            .label("Tentar agora")
+                            // Fecha a lista: o operador volta ao que fazia, e o
+                            // selo conta o que ainda falta.
+                            .on_click(cx.listener(|raiz, _, _window, cx| {
+                                if let Some(fila) = crate::sincronizacao::a_do_app() {
+                                    fila.tentar_agora();
+                                }
+                                raiz.vendo_a_fila = false;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        estilo::botao_secundario_pequeno("fila-fechar", cx)
+                            .label("Fechar")
+                            .on_click(cx.listener(|raiz, _, _window, cx| {
+                                raiz.vendo_a_fila = false;
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .into_any_element()
+    }
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    #[test]
+    fn o_selo_da_fila_so_fala_quando_ha_o_que_dizer() {
+        use crate::sincronizacao::Situacao;
+        assert_eq!(frase_da_fila(Situacao::default()), None);
+        assert_eq!(
+            frase_da_fila(Situacao {
+                pendentes: 3,
+                conflitos: 0,
+                sem_rede_desde: Some(1),
+            }),
+            Some(("Sem internet · 3 alterações guardadas".into(), false))
+        );
+        assert_eq!(
+            frase_da_fila(Situacao {
+                pendentes: 1,
+                conflitos: 0,
+                sem_rede_desde: None,
+            }),
+            Some(("Enviando 1 alteração guardada".into(), false))
+        );
+        assert_eq!(
+            frase_da_fila(Situacao {
+                pendentes: 0,
+                conflitos: 2,
+                sem_rede_desde: None,
+            }),
+            Some(("2 recusadas na volta".into(), true))
+        );
+    }
 
     #[test]
     fn o_endereco_sai_sem_esquema_e_sem_barra() {

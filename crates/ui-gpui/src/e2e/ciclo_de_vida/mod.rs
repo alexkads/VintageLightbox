@@ -26,6 +26,7 @@
 //! | este (`o_ciclo_de_vida_da_sessao`) | o caminho feliz, todo pela tela: clique, tecla e digitação |
 //! | [`triste`] | o erro do operador ou do cliente é recusado com clareza e corrigido |
 //! | [`operacional`] | o tortuoso: a rede piscando, lenta ou sumindo na subida, na classificação, na revelação; o app fechando no meio; o cliente pagando online a foto do balcão |
+//! | [`sem_internet`] | 📴 a internet cai no expediente: a tela segue, a fila guarda e tudo sobe quando ela volta; o app fecha sem rede e a fila sobrevive |
 //! | [`tenebroso`] | a API grava e a resposta se perde na venda, sangria, estorno, abertura e fechamento; o token vencido no pagamento; o PIX pago depois da reserva vencer, para a foto já vendida no balcão (vira "a estornar") |
 //!
 //! 🌩️ As falhas saem do **proxy de falhas** do `servidor-do-ciclo`
@@ -62,6 +63,7 @@ use crate::revelacao::tela::Revelacao;
 use crate::sessoes::detalhe::Detalhe;
 
 mod operacional;
+mod sem_internet;
 mod tenebroso;
 mod triste;
 
@@ -516,7 +518,13 @@ fn abrir_o_balcao_no_catalogo(
         .enable_all()
         .build()
         .expect("o tokio das portas");
-    let api = Arc::new(infrastructure::PosVendaApiHttp::nova(servidor.api.clone()));
+    // 📴 O espelho em disco, no catálogo do cenário — como o `main.rs`: o app
+    // que reabre sem rede lê o que o de antes guardou.
+    let api = Arc::new(
+        infrastructure::PosVendaApiHttp::nova(servidor.api.clone()).com_espelho(Arc::new(
+            infrastructure::pos_venda::EspelhoEmDisco::novo(catalogo.join("Espelho do site")),
+        )),
+    );
     let mut montagem = tokio.block_on(crate::montagem::montar(crate::montagem::Ambiente {
         catalogo: catalogo.clone(),
         banco: catalogo.join("vintage_lightbox.db"),

@@ -530,6 +530,10 @@ struct VendaDaApi {
     fotos_vendidas: Vec<String>,
     #[serde(default)]
     estornos: Vec<EstornoDaApi>,
+    #[serde(default)]
+    guardada_sem_rede: bool,
+    #[serde(default)]
+    conflito_sem_rede: Option<String>,
 }
 
 impl From<VendaDaApi> for Venda {
@@ -558,6 +562,8 @@ impl From<VendaDaApi> for Venda {
             estornado: v.estornado_centavos,
             estornavel: v.estornavel_centavos,
             fotos_vendidas: v.fotos_vendidas,
+            guardada_sem_rede: v.guardada_sem_rede,
+            conflito_sem_rede: v.conflito_sem_rede,
             estornos: v.estornos.into_iter().map(Into::into).collect(),
         }
     }

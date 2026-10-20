@@ -121,12 +121,16 @@ fn a_api_lenta_com_o_operador_rapido_nao_perde_gesto(cx: &mut TestAppContext) {
     c.b.ato_limpo(cx, "a API lenta com o operador rápido");
 }
 
-/// 🌪️ **A rede some de vez durante a classificação**: o balcão tenta por
-/// alguns segundos, desiste, **avisa e desfaz** na grade — não mente que a
-/// foto foi levada. Com a rede de volta, o operador refaz e o cupom cobra certo.
+/// 📴 **A rede some de vez durante a classificação** (contrato de 20/out/2026,
+/// offline first): a nota **fica** na grade e vai para a fila — o selo do
+/// rodapé conta o que espera, e nada é desfeito. Com a rede de volta, ela
+/// chega ao site sem o operador refazer, e o cupom cobra a levada.
+///
+/// 🔄 Até 20/out o contrato era o contrário: o balcão desistia, avisava e
+/// desfazia a nota. Era honesto, e parava o atendimento a cada queda.
 #[gpui_kit::test]
 #[ignore = "precisa da API de teste: rode `make e2e-ciclo`"]
-fn a_rede_some_na_classificacao_e_o_balcao_avisa_sem_mentir(cx: &mut TestAppContext) {
+fn a_rede_some_na_classificacao_e_a_nota_fica_guardada(cx: &mut TestAppContext) {
     let c = preparar(cx, "operacional-sem-rede", 2);
     let (galeria, fotos) = criar_a_sessao(
         cx,
@@ -139,21 +143,37 @@ fn a_rede_some_na_classificacao_e_o_balcao_avisa_sem_mentir(cx: &mut TestAppCont
     }));
     c.b.ir_na_grade(cx, &fotos[0]);
     c.b.teclar(cx, "5");
-    c.b.ate(cx, "o balcão desiste, avisa e desfaz a nota", |b, cx| {
+    c.b.teclar(cx, "b");
+    c.b.ate(cx, "a nota e a levada ficam guardadas na grade", |b, cx| {
         b.app(cx, |app, _w, cx| {
-            let nota = app.detalhe.read(cx).como_esta(&fotos[0]).and_then(|c| c.1);
-            nota.is_none() && app.avisos_dados_para_teste().iter().any(|(_, erro)| *erro)
+            let como = app.detalhe.read(cx).como_esta(&fotos[0]);
+            como.is_some_and(|(estado, nota, _)| {
+                nota == Some(5) && estado == Estado::LevadaNoBalcao
+            }) && app.situacao_da_fila.pendentes > 0
         })
     });
     let no_site = foto_no_painel(&c.site, &galeria, &fotos[0]).expect("a foto");
     assert!(
         no_site["nota"].is_null(),
-        "o site não tem a nota: {no_site}"
+        "o site ainda não tem a nota: {no_site}"
     );
 
-    // A rede volta; o operador refaz.
+    // A rede volta; ninguém refaz nada.
     c.falhas.limpar();
-    levar(cx, &c, &galeria, &fotos[..1]);
+    c.b.ate(cx, "o selo da fila aparece no rodapé", |b, cx| {
+        b.desenhado(cx, "rodape-fila")
+    });
+    c.b.clicar(cx, "rodape-fila");
+    c.b.ate(cx, "a lista da fila abre", |b, cx| {
+        b.desenhado(cx, "lista-da-fila")
+    });
+    c.b.clicar(cx, "fila-tentar-agora");
+    c.b.ate_na_api(cx, "a nota e a levada chegam ao site", || {
+        let f = foto_no_painel(&c.site, &galeria, &fotos[0]).ok_or("sumiu")?;
+        (f["nota"] == 5 && f["estado"] == "levada_no_balcao")
+            .then_some(())
+            .ok_or(format!("{f}"))
+    });
     abrir_o_caixa(cx, &c, &galeria, "0,00");
     c.b.ate(cx, "o cupom cobra a levada", |b, cx| {
         b.caixa(cx, |caixa, _w, _cx| {

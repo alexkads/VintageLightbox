@@ -38,6 +38,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::pos_venda::autorizacao::{abrir_no_navegador, PedidoDeAutorizacao};
+use crate::pos_venda::espelho::{espelhavel, Espelho, EspelhoEmMemoria, EstadoDaRede, Lembranca};
 
 /// O teto de uma chamada. Um original de 30 MB numa subida de estúdio leva
 /// dezenas de segundos; o padrão do `reqwest` (nenhum) deixaria uma conexão
@@ -83,6 +84,11 @@ pub struct PosVendaApiHttp {
     aparelho: Option<String>,
     /// De quanto em quanto a espera do link pergunta ao site.
     intervalo_do_link: Duration,
+    /// 📴 O que o site mandou da última vez, por rota — devolvido quando ele
+    /// não responde (ver `espelho.rs`).
+    espelho: Arc<dyn Espelho>,
+    /// 📶 Se o site está respondendo agora.
+    rede: Arc<EstadoDaRede>,
 }
 
 impl PosVendaApiHttp {
@@ -112,7 +118,22 @@ impl PosVendaApiHttp {
             }),
             aparelho: None,
             intervalo_do_link: INTERVALO_DO_LINK,
+            espelho: Arc::new(EspelhoEmMemoria::default()),
+            rede: Arc::new(EstadoDaRede::default()),
         }
+    }
+
+    /// 📴 Liga o espelho em disco — o balcão o liga na pasta do catálogo. Sem
+    /// isto ele vive na memória e morre com o processo (o teste).
+    pub fn com_espelho(mut self, espelho: Arc<dyn Espelho>) -> Self {
+        self.espelho = espelho;
+        self
+    }
+
+    /// 📶 O estado da rede que este cliente vê — o selo do rodapé e a fila de
+    /// sincronização olham o mesmo.
+    pub fn rede(&self) -> Arc<EstadoDaRede> {
+        self.rede.clone()
     }
 
     /// O nome deste computador, que vai no pedido do link no e-mail.
@@ -347,6 +368,32 @@ fn recusa_da_crua(resposta: &RespostaCrua) -> DomainResult<()> {
         "o site respondeu {}: {mensagem}",
         resposta.status
     )))
+}
+
+/// A recusa de uma [`RespostaCrua`] com a mesma tradução de [`recusa`] — o
+/// `404` e o `422` como variantes próprias. É a das leituras tipadas que
+/// passaram a ir pela porta crua (o espelho mora lá).
+fn recusa_tipada(resposta: &RespostaCrua) -> DomainResult<()> {
+    if (200..300).contains(&resposta.status) {
+        return Ok(());
+    }
+    let texto = String::from_utf8_lossy(&resposta.bytes);
+    let mensagem = serde_json::from_str::<EnvelopeDeErro>(&texto)
+        .ok()
+        .and_then(|e| e.error)
+        .and_then(|e| e.message)
+        .unwrap_or_else(|| texto.chars().take(200).collect());
+    Err(match resposta.status {
+        401 => DomainError::AcessoRecusado,
+        404 => DomainError::NaoEncontradoNoSite(mensagem),
+        422 => DomainError::FaltaEmail(mensagem),
+        status => {
+            let status = reqwest::StatusCode::from_u16(status)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|_| status.to_string());
+            DomainError::InfrastructureError(format!("o site respondeu {status}: {mensagem}"))
+        }
+    })
 }
 
 #[async_trait]
@@ -612,15 +659,9 @@ impl PosVendaApi for PosVendaApiHttp {
     }
 
     async fn produtos(&self, sessao: &Sessao) -> DomainResult<Vec<Produto>> {
-        let resposta = self
-            .client
-            .get(self.url("/products/admin?limit=200&offset=0"))
-            .bearer_auth(self.token(sessao).await?)
-            .send()
-            .await
-            .map_err(rede)?;
-
-        let lista: Vec<ProdutoComCategoria> = ler(resposta).await?;
+        let lista: Vec<ProdutoComCategoria> = self
+            .ler_do_site(sessao, "/products/admin?limit=200&offset=0")
+            .await?;
         Ok(lista
             .into_iter()
             .map(|p| p.product)
@@ -641,15 +682,7 @@ impl PosVendaApi for PosVendaApiHttp {
     }
 
     async fn estudios(&self, sessao: &Sessao) -> DomainResult<Vec<Estudio>> {
-        let resposta = self
-            .client
-            .get(self.url("/bookings/studios"))
-            .bearer_auth(self.token(sessao).await?)
-            .send()
-            .await
-            .map_err(rede)?;
-
-        let lista: Vec<EstudioDaApi> = ler(resposta).await?;
+        let lista: Vec<EstudioDaApi> = self.ler_do_site(sessao, "/bookings/studios").await?;
         Ok(lista
             .into_iter()
             .filter(|e| e.is_active)
@@ -683,13 +716,7 @@ impl PosVendaApi for PosVendaApiHttp {
             .client
             .post(self.url("/pos-venda/galerias"))
             .bearer_auth(self.token(sessao).await?)
-            .json(&json!({
-                "titulo": nova.titulo,
-                "email": nova.email,
-                "whatsapp": nova.whatsapp,
-                "produto_id": nova.produto_id,
-                "estudio_id": nova.estudio_id,
-            }))
+            .json(&nova.corpo())
             .send()
             .await
             .map_err(rede)?;
@@ -791,15 +818,8 @@ impl PosVendaApi for PosVendaApiHttp {
     }
 
     async fn galerias(&self, sessao: &Sessao) -> DomainResult<Vec<GaleriaDoPainel>> {
-        let resposta = self
-            .client
-            .get(self.url("/pos-venda/galerias"))
-            .bearer_auth(self.token(sessao).await?)
-            .send()
-            .await
-            .map_err(rede)?;
-
-        let lista: Vec<GaleriaDoPainelDaApi> = ler(resposta).await?;
+        let lista: Vec<GaleriaDoPainelDaApi> =
+            self.ler_do_site(sessao, "/pos-venda/galerias").await?;
         Ok(lista.into_iter().map(GaleriaDoPainel::from).collect())
     }
 
@@ -815,41 +835,12 @@ impl PosVendaApi for PosVendaApiHttp {
             return Ok(());
         }
 
-        let mut corpo = serde_json::Map::new();
-        if let Some(estado) = mudanca.estado {
-            corpo.insert("estado".into(), json!(estado.como_texto()));
-        }
-        // 🔑 Os três estados de cada campo sobrevivem à serialização: ausente do
-        // mapa é "não mexer", `null` no mapa é "apagar". Um `Option` comum
-        // achataria os dois em ausente.
-        if let Some(preco) = &mudanca.preco_negociado {
-            corpo.insert("preco_negociado".into(), json!(preco));
-        }
-        if let Some(observacao) = &mudanca.observacao_da_negociacao {
-            corpo.insert("observacao_da_negociacao".into(), json!(observacao));
-        }
-        if let Some(nota) = &mudanca.nota {
-            corpo.insert("nota".into(), json!(nota));
-        }
-        if let Some(produto) = &mudanca.produto_id {
-            corpo.insert("produto_id".into(), json!(produto));
-        }
-        if let Some(preco) = &mudanca.preco_de_venda {
-            corpo.insert("preco_de_venda".into(), json!(preco));
-        }
-        // 🔄 A rejeição — a tecla `X` (contrato C21). Booleano simples, e não
-        // `Option<Option<_>>`: não há "apagar a rejeição", há desfazê-la, que é
-        // `false`. O site aplica este campo por último quando ele vem junto com
-        // a nota, porque a rejeição é a palavra final sobre a foto aparecer.
-        if let Some(rejeitada) = mudanca.rejeitada {
-            corpo.insert("rejeitada".into(), json!(rejeitada));
-        }
-
         let resposta = self
             .client
             .patch(self.url(&format!("/pos-venda/fotos/{foto_id}")))
             .bearer_auth(self.token(sessao).await?)
-            .json(&serde_json::Value::Object(corpo))
+            // Os três estados de cada campo: ver `MudancaDaFoto::corpo`.
+            .json(&mudanca.corpo())
             .send()
             .await
             .map_err(rede)?;
@@ -924,41 +915,12 @@ impl PosVendaApi for PosVendaApiHttp {
             return Ok(());
         }
 
-        // 🔑 Ausente do mapa é "não mexer", `null` no mapa é "apagar" — é o que
-        // deixa apagar o último contato (armadilha nº 26 do site).
-        let mut corpo = serde_json::Map::new();
-        if let Some(titulo) = &mudanca.titulo {
-            corpo.insert("titulo".into(), json!(titulo));
-        }
-        if let Some(email) = &mudanca.email {
-            corpo.insert("email".into(), json!(email));
-        }
-        if let Some(whatsapp) = &mudanca.whatsapp {
-            corpo.insert("whatsapp".into(), json!(whatsapp));
-        }
-        // 🔑 Os três estados de cada campo, como no `PATCH` da foto: ausente do
-        // mapa é "não mexer", `null` é "desassociar".
-        for (campo, valor) in [
-            ("estudio_id", &mudanca.estudio_id),
-            ("ensaio_id", &mudanca.ensaio_id),
-            ("voucher_id", &mudanca.voucher_id),
-            ("pedido_id", &mudanca.pedido_id),
-            ("como_conheceu", &mudanca.como_conheceu),
-            ("como_conheceu_detalhe", &mudanca.como_conheceu_detalhe),
-            ("parceiro_id", &mudanca.parceiro_id),
-            ("preset_padrao_id", &mudanca.preset_padrao_id),
-            ("proporcao_padrao", &mudanca.proporcao_padrao),
-        ] {
-            if let Some(valor) = valor {
-                corpo.insert(campo.into(), json!(valor));
-            }
-        }
-
         let resposta = self
             .client
             .patch(self.url(&format!("/pos-venda/galerias/{galeria_id}")))
             .bearer_auth(self.token(sessao).await?)
-            .json(&serde_json::Value::Object(corpo))
+            // Ausente é "não mexer", `null` é "apagar": `MudancaDaGaleria::corpo`.
+            .json(&mudanca.corpo())
             .send()
             .await
             .map_err(rede)?;
@@ -970,15 +932,9 @@ impl PosVendaApi for PosVendaApiHttp {
     }
 
     async fn abrir_galeria(&self, sessao: &Sessao, id: &str) -> DomainResult<GaleriaAberta> {
-        let resposta = self
-            .client
-            .get(self.url(&format!("/pos-venda/galerias/{id}")))
-            .bearer_auth(self.token(sessao).await?)
-            .send()
-            .await
-            .map_err(rede)?;
-
-        let aberta: GaleriaAbertaDaApi = ler(resposta).await?;
+        let aberta: GaleriaAbertaDaApi = self
+            .ler_do_site(sessao, &format!("/pos-venda/galerias/{id}"))
+            .await?;
         Ok(GaleriaAberta {
             galeria: GaleriaDoPainel::from(aberta.galeria),
             fotos: aberta
@@ -1316,7 +1272,52 @@ impl PosVendaApiHttp {
     /// 🔒 `caminho` é sempre relativo a `/api/v2` desta API. Um endereço
     /// completo, ou que tente subir de pasta, é recusado. Sem `sessao`, o
     /// pedido vai sem token (rota pública).
+    ///
+    /// 📴 **A leitura (`GET` com sessão) passa pelo espelho** (20/10/2026): a
+    /// resposta boa é guardada, e sem rede — ou com o site em `5xx` — volta a
+    /// última guardada, como se fosse do site. O resto (gravar, rota pública)
+    /// segue como estava: quem guarda o gesto sem rede é a fila do app.
     pub async fn chamar(
+        &self,
+        sessao: Option<&Sessao>,
+        metodo: &str,
+        caminho: &str,
+        corpo: Option<CorpoCru>,
+    ) -> DomainResult<RespostaCrua> {
+        let leitura = metodo.eq_ignore_ascii_case("GET") && sessao.is_some() && espelhavel(caminho);
+        let resultado = self.chamar_na_rede(sessao, metodo, caminho, corpo).await;
+        let faltou_rede = match &resultado {
+            Ok(resposta) if resposta.status >= 500 => true,
+            Ok(resposta) => {
+                self.rede.marcar_com_rede();
+                if leitura && (200..300).contains(&resposta.status) {
+                    self.espelho
+                        .guardar(caminho, &resposta.bytes, resposta.tipo.as_deref());
+                }
+                false
+            }
+            Err(erro) => erro_passageiro(&erro.to_string()),
+        };
+        if faltou_rede {
+            self.rede.marcar_sem_rede();
+            if let Some(lembranca) = leitura.then(|| self.espelho.ler(caminho)).flatten() {
+                return Ok(self.lembrada(lembranca));
+            }
+        }
+        resultado
+    }
+
+    /// A leitura guardada, no lugar da resposta que não veio.
+    fn lembrada(&self, lembranca: Lembranca) -> RespostaCrua {
+        self.rede.lembrou(lembranca.visto_em);
+        RespostaCrua {
+            status: 200,
+            tipo: lembranca.tipo,
+            bytes: lembranca.bytes,
+        }
+    }
+
+    async fn chamar_na_rede(
         &self,
         sessao: Option<&Sessao>,
         metodo: &str,
@@ -1556,23 +1557,25 @@ impl PosVendaApiHttp {
     /// 🔑 Passar por `ler` desserializaria e falharia com "resposta ilegível"
     /// num corpo perfeitamente legível — o tipo de erro que manda procurar
     /// defeito no site.
+    /// 📴 Pela porta crua, e não direto: é ela que guarda no espelho e o
+    /// devolve sem rede (a miniatura e a cópia de trabalho; o original não).
     async fn bytes_da_imagem(&self, sessao: &Sessao, caminho: &str) -> DomainResult<Vec<u8>> {
-        let resposta = self
-            .client
-            .get(self.url(caminho))
-            .bearer_auth(self.token(sessao).await?)
-            .send()
-            .await
-            .map_err(rede)?;
+        let resposta = self.chamar(Some(sessao), "GET", caminho, None).await?;
+        recusa_tipada(&resposta)?;
+        Ok(resposta.bytes)
+    }
 
-        if !resposta.status().is_success() {
-            return Err(recusa(resposta).await);
-        }
-        resposta
-            .bytes()
-            .await
-            .map(|b| b.to_vec())
-            .map_err(|e| DomainError::InfrastructureError(format!("imagem incompleta: {e}")))
+    /// Uma leitura JSON tipada, pela porta crua — com o espelho, e com a
+    /// renovação do `401` de graça.
+    async fn ler_do_site<T: for<'de> Deserialize<'de>>(
+        &self,
+        sessao: &Sessao,
+        caminho: &str,
+    ) -> DomainResult<T> {
+        let resposta = self.chamar(Some(sessao), "GET", caminho, None).await?;
+        recusa_tipada(&resposta)?;
+        serde_json::from_slice(&resposta.bytes)
+            .map_err(|e| DomainError::InfrastructureError(format!("resposta ilegível: {e}")))
     }
 }
 
@@ -1974,6 +1977,41 @@ mod tests {
         assert!(cofre.ler().is_none());
     }
 
+    /// 📴 O app aberto de manhã **sem internet**, com o acesso de quinze minutos
+    /// vencido: a renovação não tem a quem pedir, e isso não é conta recusada.
+    /// O chaveiro fica, a leitura vem do espelho e a falha é "sem rede".
+    #[tokio::test]
+    async fn sem_rede_a_renovacao_que_falha_nao_derruba_a_conta() {
+        let espelho: Arc<dyn Espelho> = Arc::new(EspelhoEmMemoria::default());
+        espelho.guardar(
+            "/pos-venda/galerias",
+            br#"[{"id":"g1","titulo":"Ana","produto_id":"p1","criada_em":"2026-10-20T12:00:00Z"}]"#,
+            Some("application/json"),
+        );
+        let cofre = Arc::new(CofreEmMemoria::default());
+        let de_ontem = Sessao {
+            access_token: "tok-velho".into(),
+            refresh_token: "ref".into(),
+            access_vence_em: agora() - 3_600,
+            refresh_vence_em: agora() + 10 * 86_400,
+        };
+        cofre.guardar(&de_ontem);
+        let api = PosVendaApiHttp::nova("http://127.0.0.1:9")
+            .com_cofre(cofre.clone())
+            .com_espelho(espelho);
+
+        let sessao = api
+            .retomar_sessao()
+            .await
+            .unwrap()
+            .expect("o chaveiro abre sem rede");
+        assert_eq!(api.galerias(&sessao).await.unwrap()[0].titulo, "Ana");
+        let falha = api.estudios(&sessao).await.unwrap_err();
+        assert!(!matches!(falha, DomainError::AcessoRecusado), "{falha:?}");
+        assert!(erro_passageiro(&falha.to_string()), "{falha}");
+        assert_eq!(cofre.ler(), Some(de_ontem), "a conta continua no chaveiro");
+    }
+
     /// 🔑 O coração da entrega: token de acesso vencido **não** deixa a sessão
     /// morrer — o cliente renova sozinho e a chamada segue.
     #[tokio::test]
@@ -2203,6 +2241,7 @@ mod tests {
             whatsapp: None,
             produto_id: produto.into(),
             estudio_id: None,
+            id: None,
         };
 
         let erro = api
@@ -2224,6 +2263,84 @@ mod tests {
     /// 🔑 O contato é o que identifica o cliente no balcão: duas galerias com o
     /// mesmo título e clientes diferentes é o caso comum de um estúdio, e
     /// escolher a errada manda as fotos de um cliente para outro.
+    /// 📴 O balcão sem internet (20/10/2026): o que o site mandou da última vez
+    /// volta quando ele some, a rede fica marcada como caída e volta a ficar
+    /// boa na resposta seguinte. O original não é lembrado.
+    #[tokio::test]
+    async fn sem_rede_a_leitura_volta_do_espelho_e_o_original_nao() {
+        let servidor = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/pos-venda/galerias"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                { "id": "g1", "titulo": "Ana", "produto_id": "p1", "criada_em": "2026-09-06T12:00:00Z" }
+            ])))
+            .mount(&servidor)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/pos-venda/fotos/f1/miniatura"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![1u8, 2, 3]))
+            .mount(&servidor)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/pos-venda/fotos/f1/original"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![9u8; 4]))
+            .mount(&servidor)
+            .await;
+
+        let pasta = tempfile::tempdir().unwrap();
+        let espelho: Arc<dyn Espelho> = Arc::new(crate::pos_venda::espelho::EspelhoEmDisco::novo(
+            pasta.path(),
+        ));
+        let api = PosVendaApiHttp::nova(servidor.uri()).com_espelho(espelho.clone());
+        let sessao = sessao_valida();
+        assert_eq!(api.galerias(&sessao).await.unwrap().len(), 1);
+        assert_eq!(api.miniatura(&sessao, "f1").await.unwrap(), vec![1, 2, 3]);
+        assert_eq!(api.original(&sessao, "f1").await.unwrap(), vec![9; 4]);
+        assert!(api.rede().com_rede());
+
+        // A internet cai: o mesmo espelho, num endereço que não responde (o
+        // `MockServer` largado volta ao reservatório do wiremock e segue no ar).
+        let sem_rede = PosVendaApiHttp::nova("http://127.0.0.1:9").com_espelho(espelho);
+        let galerias = sem_rede.galerias(&sessao).await.unwrap();
+        assert_eq!(galerias[0].titulo, "Ana");
+        assert_eq!(
+            sem_rede.miniatura(&sessao, "f1").await.unwrap(),
+            vec![1, 2, 3]
+        );
+        assert!(sem_rede.original(&sessao, "f1").await.is_err());
+        assert!(sem_rede.rede().sem_rede_desde().is_some());
+        assert!(sem_rede.rede().ultima_lembranca().is_some());
+        // O que nunca foi lido não se inventa.
+        assert!(sem_rede
+            .abrir_galeria(&sessao, "g-nunca-aberta")
+            .await
+            .is_err());
+    }
+
+    /// O `5xx` do site (o Fly reiniciando) é como a rede caída: vale o espelho.
+    #[tokio::test]
+    async fn o_site_em_5xx_tambem_devolve_o_espelho() {
+        let servidor = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/bookings/studios"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+                { "id": "s1", "name": "Gramado", "city": "Gramado" }
+            ])))
+            .up_to_n_times(1)
+            .mount(&servidor)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v2/bookings/studios"))
+            .respond_with(ResponseTemplate::new(502))
+            .mount(&servidor)
+            .await;
+        let api = PosVendaApiHttp::nova(servidor.uri());
+        let sessao = sessao_valida();
+        assert_eq!(api.estudios(&sessao).await.unwrap()[0].nome, "Gramado");
+        assert_eq!(api.estudios(&sessao).await.unwrap()[0].nome, "Gramado");
+        assert!(!api.rede().com_rede());
+    }
+
     #[tokio::test]
     async fn galerias_lista_as_que_existem_com_o_contato() {
         let servidor = MockServer::start().await;
@@ -2638,6 +2755,7 @@ mod tests {
                 whatsapp: None,
                 produto_id: "p1".into(),
                 estudio_id: Some("s1".into()),
+                id: None,
             },
         )
         .await

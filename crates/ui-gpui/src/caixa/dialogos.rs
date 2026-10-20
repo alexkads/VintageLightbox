@@ -1646,6 +1646,18 @@ impl Caixa {
         resultado: Result<serde_json::Value, String>,
         cx: &mut Context<Self>,
     ) {
+        // 📴 A gravação ficou na fila de sincronização (sem internet): a tela
+        // segue, e a frase diz que ela sobe depois.
+        let sem_rede = resultado.as_ref().is_ok_and(|v| {
+            v.get("guardada_sem_rede")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+        });
+        let depois = if sem_rede {
+            " Sem internet: fica guardado e sobe quando a rede voltar."
+        } else {
+            ""
+        };
         // 🖥️ Na tela cheia a resposta pode chegar com outro formulário na vez.
         if let Some(contexto) = match rotulo {
             "abrir" => Some("Abrir"),
@@ -1669,7 +1681,7 @@ impl Caixa {
                         };
                         self.avisar(
                             format!(
-                                "Caixa aberto com {} de fundo de troco.",
+                                "Caixa aberto com {} de fundo de troco.{depois}",
                                 dinheiro::formatar(fundo)
                             ),
                             TipoDeRecado::Sucesso,
@@ -1697,7 +1709,7 @@ impl Caixa {
                         if let Some(EmCurso::Movimento { tipo, valor }) = pedido {
                             self.avisar(
                                 format!(
-                                    "{} de {} registrado.",
+                                    "{} de {} registrado.{depois}",
                                     tipo.rotulo(),
                                     dinheiro::formatar(valor)
                                 ),
@@ -1728,17 +1740,24 @@ impl Caixa {
                     let oito = std::time::Duration::from_secs(8);
                     match dados::ler_venda(valor) {
                         Ok(venda) => {
-                            let mut frase = format!(
-                                "Venda #{} registrada · {}",
-                                venda.numero,
-                                dinheiro::formatar(venda.total)
-                            );
+                            // O número é do site: a venda guardada sem rede
+                            // ainda não tem.
+                            let mut frase = if sem_rede {
+                                format!("Venda registrada · {}", dinheiro::formatar(venda.total))
+                            } else {
+                                format!(
+                                    "Venda #{} registrada · {}",
+                                    venda.numero,
+                                    dinheiro::formatar(venda.total)
+                                )
+                            };
                             if venda.troco > 0 {
                                 frase.push_str(&format!(
                                     " · troco {}",
                                     dinheiro::formatar(venda.troco)
                                 ));
                             }
+                            frase.push_str(depois);
                             self.ultima_venda = Some(venda);
                             self.avisar_por(frase, TipoDeRecado::Sucesso, oito, cx);
                         }

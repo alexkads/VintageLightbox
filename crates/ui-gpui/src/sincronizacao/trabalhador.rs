@@ -1,0 +1,267 @@
+//! 📤 O trabalhador da fila: leva ao site, na ordem, o que o balcão fez sem
+//! rede.
+//!
+//! 🔑 **Um gesto por vez, sempre o mais velho.** É a ordem em que o operador
+//! trabalhou, e é ela que dá ao site o mesmo final que a tela mostra: a nota 5
+//! e depois a 3 chegam nessa ordem.
+//!
+//! 🔑 **A rede caída nunca gasta o gesto.** Sem resposta (ou `5xx`), ele fica
+//! onde está e o trabalhador espera — de 2 s a 30 s, dobrando. Só a recusa de
+//! regra (`4xx`) tira o gesto da vez: ele vira **conflito**, com a frase do
+//! site, e espera o operador na tela "Sincronização". Uma fila travada atrás de
+//! uma recusa seria a internet de volta e nada subindo.
+
+use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use domain::services::pos_venda::Sessao;
+
+use super::{e_falta_de_rede, Gesto, Sincronizacao};
+use crate::pos_venda::porta::{FotoClassificada, Publicador, Recado};
+
+const ESPERA_INICIAL: Duration = Duration::from_secs(2);
+const ESPERA_MAXIMA: Duration = Duration::from_secs(30);
+/// Sem nada na fila, ele dorme até ser acordado — ou até isto, por garantia.
+const COCHILO: Duration = Duration::from_secs(60);
+/// Sem rede e sem fila, de quanto em quanto ele pergunta se ela voltou.
+const SONDA: Duration = Duration::from_secs(15);
+/// O teto de um gesto: a foto grande subindo numa rede lenta.
+const TETO_DO_GESTO: Duration = Duration::from_secs(15 * 60);
+
+/// O que o site fez com o gesto.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Desfecho {
+    Chegou(Recado),
+    /// Sem rede, ou sem a conta: o gesto espera.
+    Esperar(String),
+    /// Recusa de regra: vira conflito.
+    Recusado(String),
+}
+
+/// Lê a resposta do site a um gesto.
+pub fn desfecho(recado: Recado) -> Desfecho {
+    let frase = match &recado {
+        Recado::Falhou(f)
+        | Recado::GaleriaNaoAtualizada(f)
+        | Recado::EnvioFalhou { frase: f, .. }
+        | Recado::Negociou { erro: Some(f), .. } => f.clone(),
+        Recado::Json {
+            resultado: Err(f), ..
+        } => f.clone(),
+        Recado::FaltaEmail { frase, .. } => {
+            return Desfecho::Recusado(format!("a sessão não tem e-mail: {frase}"))
+        }
+        _ => return Desfecho::Chegou(recado),
+    };
+    // A conta vencida não é recusa do gesto: entrar de novo resolve, e o gesto
+    // continua valendo.
+    if e_falta_de_rede(&frase) || frase.contains("recusou o acesso") {
+        Desfecho::Esperar(frase)
+    } else {
+        Desfecho::Recusado(frase)
+    }
+}
+
+/// Manda o gesto pela porta do site e espera a resposta.
+fn executar(publicador: &dyn Publicador, sessao: Sessao, gesto: Gesto, canal: Sender<Recado>) {
+    match gesto {
+        Gesto::CriarGaleria(nova) => publicador.criar_galeria(sessao, nova, canal),
+        Gesto::AtualizarGaleria {
+            galeria_id,
+            mudanca,
+        } => publicador.atualizar_galeria(sessao, galeria_id, mudanca, canal),
+        Gesto::MudarFoto { foto_id, mudanca } => {
+            publicador.negociar(sessao, foto_id, mudanca, canal)
+        }
+        // 🔑 **A nota vai do catálogo, e não da fila.** A da fila é a do
+        // instante em que o gesto foi guardado; o operador pode ter dado outra
+        // depois, sem rede, e a subida que só sai agora tem de levar a última.
+        // Sem nota explícita, o caso de uso lê a do catálogo (`publicar::subir`).
+        Gesto::SubirClassificada { galeria_id, foto } => publicador.subir_classificada(
+            sessao,
+            galeria_id,
+            FotoClassificada { nota: None, ..foto },
+            canal,
+        ),
+        Gesto::SalvarRevelacao {
+            foto_no_site,
+            parametros,
+        } => {
+            let (ajustes, corte) = crate::revelacao::persistencia::de_json(&parametros);
+            let corte = crate::revelacao::persistencia::para_crop_settings(&corte);
+            publicador.salvar_revelacao(sessao, foto_no_site, ajustes, corte, canal)
+        }
+        Gesto::Avisar { galeria_id } => publicador.avisar(sessao, galeria_id, canal),
+        Gesto::PedidoJson {
+            metodo,
+            caminho,
+            corpo,
+        } => publicador.pedir_json(
+            sessao,
+            crate::pos_venda::porta::PedidoJson {
+                rotulo: "fila",
+                metodo: super::caixa::metodo_estatico(&metodo),
+                caminho,
+                corpo: Some(corpo),
+            },
+            canal,
+        ),
+    }
+}
+
+/// Quem mais precisa saber de uma sessão que trocou de id: as fotos do
+/// catálogo que apontam para ela (`photos.sessao_id`).
+pub type AoTrocarGaleria = Arc<dyn Fn(String, String) + Send + Sync>;
+
+/// O trabalhador montado.
+pub struct Trabalhador {
+    pub sinc: Arc<Sincronizacao>,
+    /// A porta que fala com o site — **a de dentro**, nunca a local-primeiro:
+    /// a falha de rede aqui é para o trabalhador, e não para voltar à fila.
+    pub site: Arc<dyn Publicador>,
+    pub sessao: Arc<Mutex<Option<Sessao>>>,
+    pub ao_trocar_galeria: AoTrocarGaleria,
+}
+
+impl Trabalhador {
+    /// Liga o laço no tokio. Vive enquanto o app viver.
+    pub fn ligar(self) {
+        let tokio = self.sinc.tokio().clone();
+        tokio.spawn(async move { self.laco().await });
+    }
+
+    async fn laco(self) {
+        let mut espera = ESPERA_INICIAL;
+        loop {
+            match self.uma_volta().await {
+                Volta::Andou => espera = ESPERA_INICIAL,
+                Volta::Vazia if !self.sinc.rede().com_rede() => {
+                    espera = ESPERA_INICIAL;
+                    let _ = tokio::time::timeout(SONDA, self.sinc.acordar.notified()).await;
+                    self.sondar().await;
+                }
+                Volta::Vazia => {
+                    espera = ESPERA_INICIAL;
+                    let _ = tokio::time::timeout(COCHILO, self.sinc.acordar.notified()).await;
+                }
+                Volta::Esperar => {
+                    let _ = tokio::time::timeout(espera, self.sinc.acordar.notified()).await;
+                    espera = (espera * 2).min(ESPERA_MAXIMA);
+                }
+            }
+        }
+    }
+
+    /// 📶 A sonda: a lista de estúdios, que é pequena e passa pelo espelho
+    /// (`chamar`) — a resposta que vier marca a rede como de volta.
+    async fn sondar(&self) {
+        let Some(sessao) = self.sessao.lock().ok().and_then(|s| s.clone()) else {
+            return;
+        };
+        let (canal, resposta) = std::sync::mpsc::channel();
+        self.site.estudios(sessao, canal);
+        let _ = tokio::task::spawn_blocking(move || resposta.recv_timeout(Duration::from_secs(30)))
+            .await;
+    }
+
+    async fn uma_volta(&self) -> Volta {
+        let pendentes = match self.sinc.fila().pendentes().await {
+            Ok(p) => p,
+            Err(erro) => {
+                crate::telemetria::avisar!("⚠️ [Sincronização] a fila não leu: {erro}");
+                return Volta::Esperar;
+            }
+        };
+        let Some(guardado) = pendentes.into_iter().next() else {
+            return Volta::Vazia;
+        };
+        let Some(sessao) = self.sessao.lock().ok().and_then(|s| s.clone()) else {
+            // Ninguém entrou ainda nesta abertura do app: a conta vem com o
+            // primeiro pedido da tela.
+            return Volta::Esperar;
+        };
+        let fila = self.sinc.fila();
+        let Some(gesto) = Gesto::do_guardado(&guardado) else {
+            let _ = fila
+                .conflito(
+                    guardado.id,
+                    "gesto gravado por outra versão do app — atualize o VintageLightbox",
+                )
+                .await;
+            self.sinc.esquecer(&guardado.chave);
+            return Volta::Andou;
+        };
+
+        let (canal, resposta) = std::sync::mpsc::channel();
+        executar(self.site.as_ref(), sessao, gesto.clone(), canal);
+        let recado = tokio::task::spawn_blocking(move || resposta.recv_timeout(TETO_DO_GESTO))
+            .await
+            .ok()
+            .and_then(Result::ok);
+        let Some(recado) = recado else {
+            let _ = fila.tentou(guardado.id).await;
+            return Volta::Esperar;
+        };
+
+        match desfecho(recado) {
+            Desfecho::Chegou(recado) => {
+                self.sinc.rede().marcar_com_rede();
+                // 🔁 A sessão criada aqui ganhou outro id no site (um backend
+                // anterior ao id do app): os gestos e as fotos seguem o de lá.
+                let do_site = match &recado {
+                    Recado::Criada(criada) => Some(criada.id.clone()),
+                    Recado::Json {
+                        resultado: Ok(valor),
+                        ..
+                    } => valor
+                        .get("id")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string),
+                    _ => None,
+                };
+                if let (Some(nova), Some(do_site)) = (super::nova_do_gesto(&gesto), do_site) {
+                    if let Some(daqui) = nova.id.as_deref().filter(|d| *d != do_site) {
+                        let _ = fila.trocar_galeria(daqui, &do_site).await;
+                        self.sinc.trocar_galeria_na_memoria(daqui, &do_site);
+                        (self.ao_trocar_galeria)(daqui.to_string(), do_site);
+                    }
+                }
+                let _ = fila.concluir(guardado.id).await;
+                self.sinc.esquecer(&guardado.chave);
+                self.sinc.ecoar(recado);
+                Volta::Andou
+            }
+            Desfecho::Esperar(frase) => {
+                if e_falta_de_rede(&frase) {
+                    self.sinc.rede().marcar_sem_rede();
+                }
+                let _ = fila.tentou(guardado.id).await;
+                Volta::Esperar
+            }
+            Desfecho::Recusado(frase) => {
+                self.sinc.rede().marcar_com_rede();
+                crate::telemetria::avisar!(
+                    "⚠️ [Sincronização] o site recusou \"{}\": {frase}",
+                    gesto.descricao()
+                );
+                let _ = fila.conflito(guardado.id, &frase).await;
+                self.sinc.esquecer(&guardado.chave);
+                self.sinc.registrar_conflito(super::Conflito {
+                    id: guardado.id,
+                    chave: guardado.chave.clone(),
+                    gesto,
+                    frase,
+                    ocorrido_em: guardado.ocorrido_em.clone(),
+                });
+                Volta::Andou
+            }
+        }
+    }
+}
+
+enum Volta {
+    Andou,
+    Vazia,
+    Esperar,
+}

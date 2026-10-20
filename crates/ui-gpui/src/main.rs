@@ -126,8 +126,21 @@ async fn main() {
         let config = ui_gpui::pos_venda::config::ler();
         let local =
             config.base_url.contains("://localhost") || config.base_url.contains("://127.0.0.1");
+        // 📴 O espelho do site, ao lado do catálogo e **por endereço da API**:
+        // a pilha local e a produção nunca se misturam na mesma pasta.
+        let espelho = infrastructure::pos_venda::EspelhoEmDisco::novo(
+            catalogo
+                .join("Espelho do site")
+                .join(ui_gpui::sincronizacao::pasta_do_endereco(&config.base_url)),
+        );
+        // O que não foi relido em 30 dias sai — sem prender a abertura.
+        let faxina = espelho.pasta().to_path_buf();
+        std::thread::spawn(move || {
+            infrastructure::pos_venda::EspelhoEmDisco::novo(faxina).faxina(30);
+        });
         Arc::new(
             infrastructure::PosVendaApiHttp::nova(config.base_url.clone())
+                .com_espelho(Arc::new(espelho))
                 .com_site(config.site())
                 .com_cofre(cofre_da_sessao(local))
                 // O e-mail do link de entrar diz de que computador veio o pedido.

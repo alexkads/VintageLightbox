@@ -2123,7 +2123,7 @@ impl Caixa {
     /// vista, e o fechamento conta às cegas antes de conferir.
     fn movimento_do_caixa(&self, cx: &mut Context<Self>) -> Div {
         let tema = cx.theme();
-        let (borda, apagado) = (tema.border, tema.muted_foreground);
+        let (borda, apagado, perigo) = (tema.border, tema.muted_foreground, tema.danger);
         let mono = tema.mono_font_family.clone();
         let caixa = self.vista.as_ref().and_then(|v| v.caixa.as_ref());
         let indisponivel = self.vista.as_ref().is_some_and(|v| v.indisponivel);
@@ -2160,6 +2160,13 @@ impl Caixa {
                                         dinheiro::formatar(v.estornado)
                                     ));
                                 }
+                                // 📴 A venda guardada sem internet ainda não
+                                // tem número: o site dá quando ela chegar.
+                                let numero = if v.guardada_sem_rede {
+                                    "sem internet".to_string()
+                                } else {
+                                    format!("#{}", v.numero)
+                                };
                                 v_flex()
                                     .py(px(6.))
                                     .when(i > 0, |d| d.border_t_1().border_color(borda))
@@ -2169,8 +2176,7 @@ impl Caixa {
                                             .gap(px(8.))
                                             .font_family(mono.clone())
                                             .child(format!(
-                                                "#{} · {}",
-                                                v.numero,
+                                                "{numero} · {}",
                                                 dados::hora_br(&v.criada_em)
                                             ))
                                             .child(dinheiro::formatar(v.total)),
@@ -2182,6 +2188,12 @@ impl Caixa {
                                             .text_color(apagado)
                                             .child(formas),
                                     )
+                                    .when_some(v.conflito_sem_rede.clone(), |d, conflito| {
+                                        d.child(div().text_xs().text_color(perigo).child(format!(
+                                            "Duplicidade da venda sem internet — {conflito}. \
+                                                     Estorne uma das vendas."
+                                        )))
+                                    })
                             }))
                             .into_any_element(),
                     );

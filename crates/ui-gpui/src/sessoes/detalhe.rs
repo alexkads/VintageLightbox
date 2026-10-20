@@ -4061,6 +4061,15 @@ impl Detalhe {
                         self.avisar_do_gesto(falha, false, cx);
                     }
                 }
+                // 📴 Sem internet: o aviso ao cliente ficou na fila e sai
+                // sozinho quando a rede voltar.
+                Recado::GuardadoParaDepois { .. } if self.avisando => {
+                    self.avisando = false;
+                    self.avisar_sucesso(
+                        "Sem internet: o aviso ao cliente fica guardado e sai quando a rede voltar.",
+                        cx,
+                    );
+                }
                 Recado::Negociou { foto_id, erro } => {
                     self.no_ar.remove(&foto_id);
                     let segue = self.na_vez.contains_key(&foto_id);
@@ -4825,6 +4834,14 @@ impl Detalhe {
 
     /// Pede ao site a situação do bot. Com uma leitura no ar, marca outra
     /// para depois — dois eventos seguidos não viram duas idas simultâneas.
+    /// 📴 A sessão criada sem internet chegou ao site: agora ela tem convite, e
+    /// o QR aparece sem o operador sair e entrar de novo.
+    pub(crate) fn sessao_chegou_ao_site(&mut self, galeria_id: &str, cx: &mut Context<Self>) {
+        if self.galeria_id.as_deref() == Some(galeria_id) {
+            self.ler_o_bot(cx);
+        }
+    }
+
     fn ler_o_bot(&mut self, cx: &mut Context<Self>) {
         let (Some(sessao), Some(id)) = (self.sessao.clone(), self.galeria_id.clone()) else {
             return;

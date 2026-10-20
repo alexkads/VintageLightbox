@@ -153,6 +153,16 @@ pub enum Recado {
     /// Uma frase para a tela — autorização recusada, rede caída, galeria
     /// recusada.
     Falhou(String),
+    /// 📴 **O site não respondeu, e o gesto ficou guardado** na fila de
+    /// sincronização (20/10/2026): sobe sozinho quando a rede voltar.
+    ///
+    /// 🔑 **Não é falha, e não é sucesso.** A foto ainda não está no site — a
+    /// grade continua dizendo "No disco" —, mas o operador não perdeu nada e
+    /// não precisa repetir o gesto. Quem espera um envio (a esteira) abre a
+    /// vaga; quem esperava o aviso diz que ele sai depois.
+    GuardadoParaDepois {
+        alvo: String,
+    },
     /// A resposta de [`Publicador::pedir_json`]. O `rotulo` é o que a tela
     /// escolheu para saber a qual pedido ela responde.
     Json {
@@ -243,7 +253,7 @@ impl PedidoCru {
 /// levou. Soltos, viravam quatro posições seguidas em que trocar duas de lugar
 /// compila — `ordem` e `nota` são ambos numéricos e opcionais o bastante para
 /// isso passar batido numa revisão.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FotoClassificada {
     pub foto_id: String,
     pub ordem: u32,

@@ -1345,6 +1345,9 @@ impl Sessoes {
                 whatsapp,
                 produto_id,
                 estudio_id: Some(estudio_id),
+                // 📴 O id nasce aqui: a sessão aberta sem internet já tem por
+                // onde ser chamada, e repetir a criação não a duplica.
+                id: Some(uuid::Uuid::new_v4().to_string()),
             },
             self.recados.0.clone(),
         );

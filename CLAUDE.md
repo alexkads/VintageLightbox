@@ -22,11 +22,14 @@ outro jeito de abrir. A conta entra por quatro portas desde 18/out/2026 — e-ma
 e-mail, Google Authenticator e o navegador de sempre —, todas com a mesma sessão de quinze dias no
 chaveiro (`application::auth::entrar_no_app`, no backend).
 
-🚨 **Trabalhar sem rede não foi descartado — foi adiado com forma própria: sincronização.** O app vai
-guardar o que foi feito sem internet e conciliar quando ela voltar. Um botão que só desliga o site é
-o contrário disso: ele deixa o operador triar 200 fotos e descobrir no balcão que nada subiu, e não
-guarda nada para conciliar depois. **Enquanto a sincronização não existe, sem rede não se trabalha** —
-e é preferível a um app que mente sobre o que salvou.
+📴 **Trabalhar sem rede é a sincronização, e ela existe desde 20/out/2026** (offline first, a
+pedido do dono depois de o estúdio ficar sem internet). O espelho guarda o que o site mandou, a fila
+(`crates/ui-gpui/src/sincronizacao/`) guarda o gesto feito sem rede e o leva ao site, na ordem, quando
+ela volta; a tela segue e o selo do rodapé diz o que espera. O botão que "só desliga o site" continua
+fora pelo motivo de sempre: ele não guardaria nada para conciliar. As regras estão em
+[`docs/11-OFFLINE-E-SINCRONIZACAO.md`](docs/11-OFFLINE-E-SINCRONIZACAO.md), seção "Offline first".
+Gesto novo que grava no site **nasce sabendo o que faz sem rede**: entra na fila (`sincronizacao::Gesto`)
+ou diz na tela que precisa de internet — nunca o erro cru da conexão.
 
 ⚠️ **Este objetivo substituiu outro em 17/ago/2026**, e a diferença importa no dia a dia. O anterior
 era migrar a interface de egui para GPUI **com paridade**; ele foi **alcançado** (`8c7df32`, o

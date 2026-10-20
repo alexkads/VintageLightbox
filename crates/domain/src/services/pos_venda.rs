@@ -175,6 +175,44 @@ pub struct NovaGaleria {
     /// Em qual estúdio a sessão foi feita (`studios.id`). A tela do desktop o
     /// exige (dono, 2026-09-13); a API o aceita ausente por compatibilidade.
     pub estudio_id: Option<String>,
+    /// 📴 O id que a sessão terá no site, **escolhido aqui** (20/10/2026).
+    ///
+    /// 🔑 A sessão aberta sem internet precisa de id antes de o site saber dela:
+    /// é por ele que a tela entra nela, que as fotos sobem e que o caixa vende.
+    /// O site aceita o id do app e, se ele já existir com o mesmo dono, devolve
+    /// a sessão que está lá — a fila pode repetir a criação sem duplicar.
+    /// `None` deixa o site escolher, como antes.
+    pub id: Option<String>,
+}
+
+impl NovaGaleria {
+    /// O corpo do `POST /pos-venda/galerias`.
+    pub fn corpo(&self) -> Value {
+        let mut corpo = serde_json::json!({
+            "titulo": self.titulo,
+            "email": self.email,
+            "whatsapp": self.whatsapp,
+            "produto_id": self.produto_id,
+            "estudio_id": self.estudio_id,
+        });
+        if let Some(id) = &self.id {
+            corpo["id"] = Value::from(id.clone());
+        }
+        corpo
+    }
+
+    /// O contrário de [`NovaGaleria::corpo`]. `None` se faltar o essencial.
+    pub fn do_corpo(corpo: &Value) -> Option<Self> {
+        let texto = |nome: &str| corpo.get(nome).and_then(Value::as_str).map(str::to_string);
+        Some(Self {
+            titulo: texto("titulo")?,
+            email: texto("email"),
+            whatsapp: texto("whatsapp"),
+            produto_id: texto("produto_id")?,
+            estudio_id: texto("estudio_id"),
+            id: texto("id"),
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -474,6 +512,86 @@ pub struct GaleriaAberta {
     pub conflitos: Vec<ConflitoDePagamento>,
 }
 
+impl GaleriaAberta {
+    /// 📴 Aplica sobre a galeria, **como o site aplicaria**, uma mudança que
+    /// ainda não chegou lá — o gesto feito sem rede (20/10/2026).
+    ///
+    /// 🔑 É o que faz a nota dada sem internet continuar na grade ao reabrir a
+    /// sessão: o espelho guarda a galeria como o site a mandou da última vez, e
+    /// a fila guarda o que mudou depois. A tela vê os dois somados.
+    ///
+    /// ⚠️ A foto comprada não muda de estado — o site recusaria, e a recusa
+    /// chega pela fila como conflito. Fingir aqui que ela mudou mentiria até lá.
+    pub fn aplicar(&mut self, foto_id: &str, mudanca: &MudancaDaFoto) {
+        let Some(foto) = self.fotos.iter_mut().find(|f| f.id == foto_id) else {
+            return;
+        };
+        if let Some(estado) = mudanca.estado {
+            if foto.estado != EstadoDaFotoNoSite::Comprada {
+                foto.estado = match estado {
+                    EstadoNoBalcao::LevadaNoBalcao => EstadoDaFotoNoSite::LevadaNoBalcao,
+                    EstadoNoBalcao::Disponivel => EstadoDaFotoNoSite::Disponivel,
+                };
+            }
+        }
+        if let Some(preco) = &mudanca.preco_negociado {
+            foto.preco_negociado = preco.clone();
+        }
+        if let Some(observacao) = &mudanca.observacao_da_negociacao {
+            foto.observacao_da_negociacao = observacao.clone();
+        }
+        if let Some(nota) = mudanca.nota {
+            foto.nota = nota.and_then(|n| u8::try_from(n).ok());
+        }
+        if let Some(rejeitada) = mudanca.rejeitada {
+            foto.rejeitada = rejeitada;
+        }
+        if let Some(produto) = &mudanca.produto_id {
+            foto.produto_id = produto.clone();
+            foto.produto_efetivo = produto
+                .clone()
+                .unwrap_or_else(|| self.galeria.produto_id.clone());
+        }
+        if let Some(preco) = &mudanca.preco_de_venda {
+            foto.preco_de_venda = preco.clone();
+        }
+    }
+
+    /// 📴 A edição da sessão feita sem rede, aplicada como o site aplicaria.
+    pub fn aplicar_na_galeria(&mut self, mudanca: &MudancaDaGaleria) {
+        self.galeria.aplicar(mudanca);
+    }
+}
+
+impl GaleriaDoPainel {
+    /// 📴 Ver [`GaleriaAberta::aplicar_na_galeria`].
+    pub fn aplicar(&mut self, mudanca: &MudancaDaGaleria) {
+        if let Some(titulo) = &mudanca.titulo {
+            self.titulo = titulo.clone();
+        }
+        for (destino, origem) in [
+            (&mut self.email, &mudanca.email),
+            (&mut self.whatsapp, &mudanca.whatsapp),
+            (&mut self.estudio_id, &mudanca.estudio_id),
+            (&mut self.ensaio_id, &mudanca.ensaio_id),
+            (&mut self.voucher_id, &mudanca.voucher_id),
+            (&mut self.pedido_id, &mudanca.pedido_id),
+            (&mut self.como_conheceu, &mudanca.como_conheceu),
+            (
+                &mut self.como_conheceu_detalhe,
+                &mudanca.como_conheceu_detalhe,
+            ),
+            (&mut self.parceiro_id, &mudanca.parceiro_id),
+            (&mut self.preset_padrao_id, &mudanca.preset_padrao_id),
+            (&mut self.proporcao_padrao, &mudanca.proporcao_padrao),
+        ] {
+            if let Some(valor) = origem {
+                *destino = valor.clone();
+            }
+        }
+    }
+}
+
 /// Um pagamento online a estornar — ver [`GaleriaAberta::conflitos`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConflitoDePagamento {
@@ -613,6 +731,108 @@ impl MudancaDaFoto {
             // chegaria à rede — o gesto morreria calado no cliente HTTP.
             && self.rejeitada.is_none()
     }
+
+    /// O corpo do `PATCH /pos-venda/fotos/{id}`.
+    ///
+    /// 🔑 Os três estados de cada campo sobrevivem à serialização: ausente do
+    /// mapa é "não mexer", `null` no mapa é "apagar". Um `Option` comum
+    /// achataria os dois em ausente.
+    ///
+    /// 📴 **Mora aqui, e não no cliente HTTP, por causa da fila do balcão sem
+    /// rede** (20/10/2026): o gesto guardado é este mesmo corpo, e
+    /// [`MudancaDaFoto::do_corpo`] o desfaz na volta — uma ida e volta só, sem
+    /// uma segunda tradução que pudesse divergir.
+    pub fn corpo(&self) -> Value {
+        let mut corpo = serde_json::Map::new();
+        if let Some(estado) = self.estado {
+            corpo.insert("estado".into(), Value::from(estado.como_texto()));
+        }
+        campo_triplo(&mut corpo, "preco_negociado", &self.preco_negociado);
+        campo_triplo(
+            &mut corpo,
+            "observacao_da_negociacao",
+            &self.observacao_da_negociacao,
+        );
+        if let Some(nota) = self.nota {
+            corpo.insert("nota".into(), nota.map(Value::from).unwrap_or(Value::Null));
+        }
+        campo_triplo(&mut corpo, "produto_id", &self.produto_id);
+        campo_triplo(&mut corpo, "preco_de_venda", &self.preco_de_venda);
+        // 🔄 A rejeição — a tecla `X` (contrato C21). Booleano simples: não há
+        // "apagar a rejeição", há desfazê-la, que é `false`.
+        if let Some(rejeitada) = self.rejeitada {
+            corpo.insert("rejeitada".into(), Value::from(rejeitada));
+        }
+        Value::Object(corpo)
+    }
+
+    /// O contrário de [`MudancaDaFoto::corpo`].
+    pub fn do_corpo(corpo: &Value) -> Self {
+        let Some(mapa) = corpo.as_object() else {
+            return Self::default();
+        };
+        Self {
+            estado: mapa
+                .get("estado")
+                .and_then(Value::as_str)
+                .and_then(EstadoNoBalcao::do_texto),
+            preco_negociado: ler_triplo(mapa, "preco_negociado"),
+            observacao_da_negociacao: ler_triplo(mapa, "observacao_da_negociacao"),
+            nota: mapa
+                .get("nota")
+                .map(|v| v.as_i64().and_then(|n| i16::try_from(n).ok())),
+            rejeitada: mapa.get("rejeitada").and_then(Value::as_bool),
+            produto_id: ler_triplo(mapa, "produto_id"),
+            preco_de_venda: ler_triplo(mapa, "preco_de_venda"),
+        }
+    }
+
+    /// Junta a mudança `depois` sobre esta: o campo que ela menciona vale, o
+    /// que ela não menciona fica. É o que a fila sem rede faz com dois gestos
+    /// na mesma foto — a nota 5 e depois a 3 viram um `PATCH` com a 3.
+    pub fn somar(&mut self, depois: &MudancaDaFoto) {
+        if depois.estado.is_some() {
+            self.estado = depois.estado;
+        }
+        if depois.preco_negociado.is_some() {
+            self.preco_negociado = depois.preco_negociado.clone();
+        }
+        if depois.observacao_da_negociacao.is_some() {
+            self.observacao_da_negociacao = depois.observacao_da_negociacao.clone();
+        }
+        if depois.nota.is_some() {
+            self.nota = depois.nota;
+        }
+        if depois.rejeitada.is_some() {
+            self.rejeitada = depois.rejeitada;
+        }
+        if depois.produto_id.is_some() {
+            self.produto_id = depois.produto_id.clone();
+        }
+        if depois.preco_de_venda.is_some() {
+            self.preco_de_venda = depois.preco_de_venda.clone();
+        }
+    }
+}
+
+/// Um campo `Option<Option<String>>` no corpo de um `PATCH`: ausente, `null` ou
+/// o valor.
+fn campo_triplo(
+    corpo: &mut serde_json::Map<String, Value>,
+    nome: &str,
+    campo: &Option<Option<String>>,
+) {
+    if let Some(valor) = campo {
+        corpo.insert(
+            nome.into(),
+            valor.clone().map(Value::from).unwrap_or(Value::Null),
+        );
+    }
+}
+
+/// O contrário de [`campo_triplo`]: ausente é `None`, `null` é `Some(None)`.
+fn ler_triplo(mapa: &serde_json::Map<String, Value>, nome: &str) -> Option<Option<String>> {
+    mapa.get(nome).map(|v| v.as_str().map(str::to_string))
 }
 
 /// O que muda nos dados do cliente de uma sessão que já existe — o
@@ -664,6 +884,61 @@ impl MudancaDaGaleria {
             && self.preset_padrao_id.is_none()
             && self.proporcao_padrao.is_none()
     }
+
+    /// Os campos que se apagam com `null`, na ordem do corpo.
+    fn triplos(&self) -> [(&'static str, &Option<Option<String>>); 11] {
+        [
+            ("email", &self.email),
+            ("whatsapp", &self.whatsapp),
+            ("estudio_id", &self.estudio_id),
+            ("ensaio_id", &self.ensaio_id),
+            ("voucher_id", &self.voucher_id),
+            ("pedido_id", &self.pedido_id),
+            ("como_conheceu", &self.como_conheceu),
+            ("como_conheceu_detalhe", &self.como_conheceu_detalhe),
+            ("parceiro_id", &self.parceiro_id),
+            ("preset_padrao_id", &self.preset_padrao_id),
+            ("proporcao_padrao", &self.proporcao_padrao),
+        ]
+    }
+
+    /// O corpo do `PATCH /pos-venda/galerias/{id}` — ausente do mapa é "não
+    /// mexer", `null` é "apagar" (armadilha nº 26 do site). Mora aqui pelo
+    /// mesmo motivo de [`MudancaDaFoto::corpo`]: a fila sem rede o guarda.
+    pub fn corpo(&self) -> Value {
+        let mut corpo = serde_json::Map::new();
+        if let Some(titulo) = &self.titulo {
+            corpo.insert("titulo".into(), Value::from(titulo.clone()));
+        }
+        for (nome, campo) in self.triplos() {
+            campo_triplo(&mut corpo, nome, campo);
+        }
+        Value::Object(corpo)
+    }
+
+    /// O contrário de [`MudancaDaGaleria::corpo`].
+    pub fn do_corpo(corpo: &Value) -> Self {
+        let Some(mapa) = corpo.as_object() else {
+            return Self::default();
+        };
+        Self {
+            titulo: mapa
+                .get("titulo")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            email: ler_triplo(mapa, "email"),
+            whatsapp: ler_triplo(mapa, "whatsapp"),
+            estudio_id: ler_triplo(mapa, "estudio_id"),
+            ensaio_id: ler_triplo(mapa, "ensaio_id"),
+            voucher_id: ler_triplo(mapa, "voucher_id"),
+            pedido_id: ler_triplo(mapa, "pedido_id"),
+            como_conheceu: ler_triplo(mapa, "como_conheceu"),
+            como_conheceu_detalhe: ler_triplo(mapa, "como_conheceu_detalhe"),
+            parceiro_id: ler_triplo(mapa, "parceiro_id"),
+            preset_padrao_id: ler_triplo(mapa, "preset_padrao_id"),
+            proporcao_padrao: ler_triplo(mapa, "proporcao_padrao"),
+        }
+    }
 }
 
 /// O que o cliente decidiu no balcão — os dois estados que uma foto pode ter
@@ -680,6 +955,15 @@ impl EstadoNoBalcao {
         match self {
             Self::LevadaNoBalcao => "levada_no_balcao",
             Self::Disponivel => "disponivel",
+        }
+    }
+
+    /// O contrário de [`EstadoNoBalcao::como_texto`].
+    pub fn do_texto(texto: &str) -> Option<Self> {
+        match texto {
+            "levada_no_balcao" => Some(Self::LevadaNoBalcao),
+            "disponivel" => Some(Self::Disponivel),
+            _ => None,
         }
     }
 
@@ -1081,5 +1365,128 @@ mod tests {
             "levada_no_balcao"
         );
         assert_eq!(EstadoNoBalcao::Disponivel.como_texto(), "disponivel");
+    }
+
+    /// 📴 O gesto guardado na fila sem rede volta igual: ausente, `null` e
+    /// valor são três coisas, e a ida e volta não pode achatar nenhuma.
+    #[test]
+    fn a_mudanca_da_foto_vai_e_volta_pelo_corpo_sem_perder_o_null() {
+        let mudanca = MudancaDaFoto {
+            estado: Some(EstadoNoBalcao::LevadaNoBalcao),
+            preco_negociado: Some(None),
+            observacao_da_negociacao: Some(Some("Cortesia — aniversário".into())),
+            nota: Some(None),
+            rejeitada: Some(false),
+            produto_id: None,
+            preco_de_venda: Some(Some("19.90".into())),
+        };
+        let corpo = mudanca.corpo();
+        assert_eq!(
+            corpo,
+            serde_json::json!({
+                "estado": "levada_no_balcao",
+                "preco_negociado": null,
+                "observacao_da_negociacao": "Cortesia — aniversário",
+                "nota": null,
+                "rejeitada": false,
+                "preco_de_venda": "19.90",
+            })
+        );
+        assert_eq!(MudancaDaFoto::do_corpo(&corpo), mudanca);
+        let so_nota = MudancaDaFoto {
+            nota: Some(Some(4)),
+            ..Default::default()
+        };
+        assert_eq!(MudancaDaFoto::do_corpo(&so_nota.corpo()), so_nota);
+    }
+
+    #[test]
+    fn a_mudanca_da_galeria_e_a_nova_vao_e_voltam_pelo_corpo() {
+        let mudanca = MudancaDaGaleria {
+            titulo: Some("Ensaio da Maria".into()),
+            email: Some(None),
+            whatsapp: Some(Some("5554999990000".into())),
+            parceiro_id: Some(None),
+            ..Default::default()
+        };
+        assert_eq!(MudancaDaGaleria::do_corpo(&mudanca.corpo()), mudanca);
+
+        let nova = NovaGaleria {
+            titulo: "Ensaio".into(),
+            email: None,
+            whatsapp: Some("5554".into()),
+            produto_id: "p1".into(),
+            estudio_id: Some("e1".into()),
+            id: Some("2f1c0b8e-0000-4000-8000-000000000001".into()),
+        };
+        assert_eq!(NovaGaleria::do_corpo(&nova.corpo()), Some(nova));
+    }
+
+    /// Dois gestos na mesma foto viram um: o de depois vale no que ele toca.
+    #[test]
+    fn somar_guarda_o_ultimo_de_cada_campo() {
+        let mut primeiro = MudancaDaFoto {
+            nota: Some(Some(5)),
+            estado: Some(EstadoNoBalcao::LevadaNoBalcao),
+            ..Default::default()
+        };
+        primeiro.somar(&MudancaDaFoto {
+            nota: Some(Some(3)),
+            rejeitada: Some(true),
+            ..Default::default()
+        });
+        assert_eq!(primeiro.nota, Some(Some(3)));
+        assert_eq!(primeiro.estado, Some(EstadoNoBalcao::LevadaNoBalcao));
+        assert_eq!(primeiro.rejeitada, Some(true));
+    }
+
+    /// 📴 A grade da sessão aberta sem rede mostra o que a fila guardou.
+    #[test]
+    fn aplicar_poe_o_gesto_guardado_na_galeria_e_poupa_a_comprada() {
+        let mut aberta = GaleriaAberta {
+            galeria: GaleriaDoPainel {
+                id: "g".into(),
+                produto_id: "faixa-da-galeria".into(),
+                ..Default::default()
+            },
+            fotos: vec![
+                FotoDaGaleria {
+                    id: "a".into(),
+                    ..Default::default()
+                },
+                FotoDaGaleria {
+                    id: "b".into(),
+                    estado: EstadoDaFotoNoSite::Comprada,
+                    ..Default::default()
+                },
+            ],
+            vence_venda: None,
+            vence_download: None,
+            faixas: Vec::new(),
+            avisos: Vec::new(),
+            resumos: ResumosDoAtendimento::default(),
+            conflitos: Vec::new(),
+        };
+        let levar = MudancaDaFoto {
+            estado: Some(EstadoNoBalcao::LevadaNoBalcao),
+            nota: Some(Some(5)),
+            produto_id: Some(None),
+            ..Default::default()
+        };
+        aberta.aplicar("a", &levar);
+        aberta.aplicar("b", &levar);
+        aberta.aplicar("nao-existe", &levar);
+        assert_eq!(aberta.fotos[0].estado, EstadoDaFotoNoSite::LevadaNoBalcao);
+        assert_eq!(aberta.fotos[0].nota, Some(5));
+        assert_eq!(aberta.fotos[0].produto_efetivo, "faixa-da-galeria");
+        assert_eq!(aberta.fotos[1].estado, EstadoDaFotoNoSite::Comprada);
+
+        aberta.aplicar_na_galeria(&MudancaDaGaleria {
+            titulo: Some("Novo".into()),
+            email: Some(Some("a@b.c".into())),
+            ..Default::default()
+        });
+        assert_eq!(aberta.galeria.titulo, "Novo");
+        assert_eq!(aberta.galeria.email.as_deref(), Some("a@b.c"));
     }
 }

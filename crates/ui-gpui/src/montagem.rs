@@ -289,7 +289,51 @@ pub async fn montar(ambiente: Ambiente) -> Montagem {
         Arc::new(publicador_da_api.revelacao_do_site()),
         tokio::runtime::Handle::current(),
     ));
-    let publicador: Arc<dyn Publicador> = Arc::new(publicador_da_api);
+    let publicador_do_site: Arc<dyn Publicador> = Arc::new(publicador_da_api);
+    // 📴 **O balcão sem internet** (20/10/2026): a fila do catálogo, o
+    // trabalhador que a leva ao site e a porta que decide entre ir já e
+    // guardar. As telas recebem a porta local-primeiro; o trabalhador fala com
+    // a de dentro.
+    let sincronizacao = crate::sincronizacao::Sincronizacao::abrir(
+        infrastructure::database::FilaDeSincronizacao::new(pool.clone()),
+        api_do_site.rede(),
+        tokio::runtime::Handle::current(),
+    )
+    .await;
+    crate::sincronizacao::definir_a_do_app(sincronizacao.clone());
+    let conta_do_site = Arc::new(std::sync::Mutex::new(None));
+    crate::sincronizacao::trabalhador::Trabalhador {
+        sinc: sincronizacao.clone(),
+        site: publicador_do_site.clone(),
+        sessao: conta_do_site.clone(),
+        // 🔁 A sessão que o site renomeou leva junto as fotos importadas nela.
+        ao_trocar_galeria: {
+            let pool = pool.clone();
+            Arc::new(move |de: String, para: String| {
+                let pool = pool.clone();
+                tokio::spawn(async move {
+                    if let Err(erro) =
+                        sqlx::query("UPDATE photos SET sessao_id = ? WHERE sessao_id = ?")
+                            .bind(&para)
+                            .bind(&de)
+                            .execute(&pool)
+                            .await
+                    {
+                        crate::telemetria::avisar!(
+                            "⚠️ [Sincronização] as fotos da sessão {de} não seguiram para {para}: {erro}"
+                        );
+                    }
+                });
+            })
+        },
+    }
+    .ligar();
+    let publicador: Arc<dyn Publicador> =
+        Arc::new(crate::sincronizacao::porta::PublicadorLocalPrimeiro::novo(
+            publicador_do_site,
+            sincronizacao,
+            conta_do_site,
+        ));
 
     // 📦 O acervo de arquivos de `/dashboard/backup`: lista pastas, pede a URL
     // assinada e sobe o arquivo direto no R2. Mesmo cliente, mesmo token.

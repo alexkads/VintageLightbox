@@ -33,34 +33,27 @@ fn a_venda_gravada_com_a_resposta_perdida_nao_cobra_duas_vezes(cx: &mut TestAppC
         let n = vendas_da_galeria(&c, &galeria).len();
         (n == 1).then_some(()).ok_or(format!("{n} vendas"))
     });
-    // O balcão diz que não conseguiu — e continua no pagamento, com o PIX
-    // lançado: é de lá que o operador tenta de novo.
+    // 📴 Desde 20/out/2026 (offline first) a resposta que não veio é "sem
+    // rede": a venda fica guardada, o balcão segue, e a fila repete o mesmo
+    // pedido — com a mesma chave — até ouvir a resposta. O operador não
+    // precisa tentar de novo, e o site não cobra duas vezes.
     c.b.ate(
         cx,
-        "o balcão mostra a falha e segura o pagamento",
+        "o balcão registra a venda e diz que ela sobe depois",
         |b, cx| {
             b.caixa(cx, |caixa, _w, _cx| {
-                caixa.dialogo_do_caixa() == Some("Pagamento")
-                    && caixa.pagamentos_lancados() == 1
+                caixa.ultima_venda_para_teste().is_some()
+                    && caixa.dialogo_do_caixa().is_none()
                     && caixa
                         .avisos_passageiros()
                         .iter()
-                        .any(|a| a.contains("Não foi possível registrar"))
+                        .any(|a| a.contains("Sem internet"))
             })
         },
     );
-
-    // 🔁 O operador tenta de novo, como faria: Enter.
-    c.b.teclar(cx, "enter");
-    c.b.ate(
-        cx,
-        "a segunda tentativa conclui a venda já gravada",
-        |b, cx| {
-            b.caixa(cx, |caixa, _w, _cx| {
-                caixa.ultima_venda_para_teste().is_some() && caixa.dialogo_do_caixa().is_none()
-            })
-        },
-    );
+    c.b.ate(cx, "a fila repete e esvazia", |b, cx| {
+        b.app(cx, |app, _w, _cx| app.situacao_da_fila.pendentes == 0)
+    });
 
     // 🔑 A garantia: uma venda só, cobrada uma vez.
     let vendas = vendas_da_galeria(&c, &galeria);
@@ -69,14 +62,7 @@ fn a_venda_gravada_com_a_resposta_perdida_nao_cobra_duas_vezes(cx: &mut TestAppC
     assert_eq!(
         c.falhas.quantas_vezes("POST", "/pos-venda/caixa/vendas"),
         2,
-        "a primeira tentativa (a resposta perdida) e a segunda"
-    );
-    let numero =
-        c.b.caixa(cx, |caixa, _w, _cx| caixa.ultima_venda_para_teste());
-    assert_eq!(
-        numero.map(serde_json::Value::from),
-        Some(vendas[0]["numero"].clone()),
-        "o balcão mostra a venda que o servidor gravou"
+        "a primeira tentativa (a resposta perdida) e a repetição da fila"
     );
     let caixa = c
         .site
@@ -125,10 +111,18 @@ fn a_sangria_com_a_resposta_perdida_sai_uma_vez(cx: &mut TestAppContext) {
             .map_or(0, Vec::len);
         (n == 1).then_some(()).ok_or(format!("{n} movimentos"))
     });
-    tentar_de_novo(cx, &c, "Movimento");
+    // 📴 A sangria fica guardada e a fila a repete com a mesma chave.
     c.b.ate(cx, "a sangria termina no balcão", |b, cx| {
         b.caixa(cx, |caixa, _w, _cx| caixa.dialogo_do_caixa().is_none())
     });
+    c.b.ate(cx, "a fila repete e esvazia", |b, cx| {
+        b.app(cx, |app, _w, _cx| app.situacao_da_fila.pendentes == 0)
+    });
+    assert_eq!(
+        c.falhas
+            .quantas_vezes("POST", "/pos-venda/caixa/movimentos"),
+        2
+    );
     let movimentos = caixa_por_id(&c, &caixa_id)["movimentos"].clone();
     assert_eq!(
         movimentos.as_array().map_or(0, Vec::len),
@@ -235,7 +229,8 @@ fn a_abertura_com_a_resposta_perdida_abre_uma_vez(cx: &mut TestAppContext) {
             .then_some(())
             .ok_or("nenhum aberto".to_string())
     });
-    tentar_de_novo(cx, &c, "Abrir");
+    // 📴 A abertura fica guardada (o caixa já aparece aberto) e a fila a
+    // repete com a mesma chave: o site devolve o caixa que já abriu.
     c.b.ate(cx, "o balcão termina com o caixa aberto", |b, cx| {
         b.caixa(cx, |caixa, _w, _cx| {
             caixa.caixa_do_estudio_aberto() && caixa.dialogo_do_caixa().is_none()

@@ -633,6 +633,8 @@ pub struct Aplicativo {
     /// "N envios recusados".
     recusas: Vec<String>,
     vendo_recusas: bool,
+    /// 📴 A lista da fila de sincronização, aberta pelo selo do rodapé.
+    pub(crate) vendo_a_fila: bool,
     /// Onde o canto dos envios foi largado — ver `app/canto_dos_envios.rs`.
     canto: canto_dos_envios::CantoDosEnvios,
     /// Quando (segundos unix) o site respondeu bem pela última vez — a linha
@@ -671,6 +673,12 @@ pub struct Aplicativo {
     publicador: Arc<dyn Publicador>,
     /// Por onde volta o resultado de subir/tirar uma foto classificada.
     sincronias: (Sender<PosVendaRecado>, Receiver<PosVendaRecado>),
+    /// 📴 As respostas dos gestos que a fila de sincronização levou ao site
+    /// depois — colhidas pelo mesmo caminho das de agora.
+    ecos_da_fila: (Sender<PosVendaRecado>, Receiver<PosVendaRecado>),
+    /// 📴 O que a fila tem, como o rodapé mostrou da última vez.
+    pub(crate) situacao_da_fila: crate::sincronizacao::Situacao,
+    _vigia_da_fila: Option<gpui_kit::Task<()>>,
     /// 🚨 A `Task` que espera o site responder. **Descartá-la a cancela**, e o
     /// sintoma seria a grade nunca reler o catálogo depois de uma foto subir —
     /// o id remoto estaria gravado no banco e ausente da tela.
@@ -1402,6 +1410,9 @@ impl Aplicativo {
 
         // O roteiro de depuração começa depois de a raiz existir.
         cx.defer_in(window, |raiz, window, cx| raiz.ligar_o_roteiro(window, cx));
+        // 📴 E a vigia da fila de sincronização: o selo do rodapé e as
+        // respostas do que subiu depois.
+        cx.defer_in(window, |raiz, _window, cx| raiz.vigiar_a_fila(cx));
 
         let importacao = cx.new(|cx| {
             Importacao::nova(
@@ -1535,6 +1546,7 @@ impl Aplicativo {
             _aparencia: aparencia,
             recusas: Vec::new(),
             vendo_recusas: false,
+            vendo_a_fila: false,
             canto: canto_dos_envios::CantoDosEnvios::lembrado(),
             ultimo_envio: None,
             _roteiro: None,
@@ -1549,6 +1561,9 @@ impl Aplicativo {
             fotos_do_site: Vec::new(),
             publicador: publicador_da_raiz,
             sincronias: channel(),
+            ecos_da_fila: channel(),
+            situacao_da_fila: Default::default(),
+            _vigia_da_fila: None,
             _sincronia: None,
             sincronias_pendentes: 0,
             a_subir: Vec::new(),
@@ -3889,6 +3904,107 @@ impl Aplicativo {
         }));
     }
 
+    /// 📴 **A vigia da fila de sincronização**, a cada segundo enquanto o app
+    /// estiver aberto: passa à colheita as respostas do que a fila levou ao
+    /// site, e acende o selo do rodapé quando a rede cai ou a fila muda.
+    ///
+    /// 🔑 Um segundo, e não um quadro: o selo é aviso, e o que sobe pela fila
+    /// não tem pressa de tela — tem pressa de não se perder.
+    fn vigiar_a_fila(&mut self, cx: &mut Context<Self>) {
+        let Some(fila) = crate::sincronizacao::a_do_app() else {
+            return;
+        };
+        fila.mandar_ecos_para(self.ecos_da_fila.0.clone());
+        self._vigia_da_fila = Some(cx.spawn(async move |raiz, cx| loop {
+            cx.background_executor()
+                .timer(std::time::Duration::from_secs(1))
+                .await;
+            if raiz.update(cx, |raiz, cx| raiz.olhar_a_fila(cx)).is_err() {
+                return;
+            }
+        }));
+    }
+
+    fn olhar_a_fila(&mut self, cx: &mut Context<Self>) {
+        // As respostas entram pelo canal de sempre, e a conta cresce junto:
+        // sem isso a colheita contaria um eco como a resposta de um pedido
+        // de agora, e pararia antes dela.
+        let mut chegaram = 0;
+        while let Ok(recado) = self.ecos_da_fila.1.try_recv() {
+            // 📸 A sessão criada sem rede chegou ao site: o QR do bot já existe.
+            let criada = match &recado {
+                PosVendaRecado::Criada(galeria) => Some(galeria.id.clone()),
+                PosVendaRecado::Json {
+                    rotulo: "fila",
+                    resultado: Ok(valor),
+                } => valor
+                    .get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string),
+                _ => None,
+            };
+            if let Some(id) = criada {
+                self.detalhe
+                    .update(cx, |tela, cx| tela.sessao_chegou_ao_site(&id, cx));
+            }
+            let _ = self.sincronias.0.send(recado);
+            chegaram += 1;
+        }
+        if chegaram > 0 {
+            self.esperar_a_sincronia(chegaram, cx);
+        }
+        let Some(fila) = crate::sincronizacao::a_do_app() else {
+            return;
+        };
+        let agora = fila.situacao();
+        let antes = self.situacao_da_fila;
+        if agora == antes {
+            return;
+        }
+        // A rede caiu, ou voltou: um aviso só, na transição.
+        match (
+            antes.sem_rede_desde.is_some(),
+            agora.sem_rede_desde.is_some(),
+        ) {
+            (false, true) => {
+                crate::sons::soar(
+                    crate::sons::Evento::Falha,
+                    "Sem internet",
+                    "o trabalho continua e fica guardado",
+                    cx,
+                );
+                self.avisar_em_toast(
+                    "Sem internet: o trabalho continua. Tudo fica guardado e sobe quando a rede voltar."
+                        .into(),
+                    false,
+                    cx,
+                );
+            }
+            (true, false) => {
+                let texto = if agora.pendentes > 0 {
+                    format!(
+                        "A internet voltou: enviando {} alteração(ões) guardadas.",
+                        agora.pendentes
+                    )
+                } else {
+                    "A internet voltou.".to_string()
+                };
+                self.avisar_em_toast(texto, false, cx);
+            }
+            _ => {}
+        }
+        if agora.conflitos > antes.conflitos {
+            self.avisar_em_toast(
+                "O site recusou uma alteração guardada sem internet — veja em Sincronização, no rodapé."
+                    .into(),
+                true,
+                cx,
+            );
+        }
+        self.situacao_da_fila = agora;
+        cx.notify();
+    }
+
     /// Drena o que o site respondeu. Devolve se não há mais o que esperar.
     pub(crate) fn colher_sincronia(&mut self, cx: &mut Context<Self>) -> bool {
         let _t = crate::regua::trecho("raiz: respostas do site");
@@ -3912,6 +4028,9 @@ impl Aplicativo {
                 PosVendaRecado::RevelacaoSalva { foto_no_site } => {
                     self.esteira.respondeu(foto_no_site, false)
                 }
+                // 📴 O site não respondeu e o envio ficou na fila: a vaga da
+                // esteira abre, sem falha — quem repete agora é a fila.
+                PosVendaRecado::GuardadoParaDepois { alvo } => self.esteira.respondeu(alvo, false),
                 // A foto foi tirada do site por uma rejeição: não há o que
                 // repetir — ver `largar_o_que_ia_para`.
                 PosVendaRecado::EnvioFalhou { alvo, .. } if self.tiradas_do_site.contains(alvo) => {
@@ -4061,6 +4180,16 @@ impl Aplicativo {
                     crate::telemetria::avisar!("⚠️ [Envio] recusado — {recusa}");
                     self.recusas.push(recusa.clone());
                     self.avisar_falha(recusa, cx);
+                }
+                // 📴 Guardado para depois: nada falhou e nada subiu. A foto
+                // segue "No disco", a revelação segue no depósito, e o selo do
+                // rodapé conta o que espera a rede.
+                PosVendaRecado::GuardadoParaDepois { alvo } => {
+                    self.parametros_no_ar.remove(&alvo);
+                    self.subindo_sozinhas.remove(&alvo);
+                    self.tirar_do_lote_do_salvar(cx);
+                    self.recontar_o_que_falta_subir(cx);
+                    mudou = true;
                 }
                 PosVendaRecado::Falhou(erro) => {
                     self.contar_o_salvar(true, cx);
