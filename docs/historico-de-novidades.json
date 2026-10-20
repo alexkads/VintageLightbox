@@ -1,5 +1,18 @@
 [
   {
+    "versao": "0.1.175",
+    "data": "2026-10-20",
+    "titulo": "No Enquadrar, arrastar fora do retângulo gira a foto, como no Lightroom.",
+    "importante": false,
+    "novidades": [
+      "No Enquadrar, aperte em qualquer lugar fora do retângulo e arraste em volta dele: a foto gira, e o retângulo diminui sozinho para não mostrar cantos vazios.",
+      "Junto da seta aparece o sinal de girar, e enquanto gira o ângulo fica ao lado do ponteiro e a grade fica mais fina, para acertar o horizonte.",
+      "Pegar uma alça ficou mais fácil: apertar logo ao lado dela ainda redimensiona.",
+      "Soltar vira um passo do histórico, como o transferidor; ⌘Z desfaz."
+    ],
+    "por_que_atualizar": "Para endireitar a foto com o mouse onde o olho está, sem ir ao slider."
+  },
+  {
     "versao": "0.1.174",
     "data": "2026-10-19",
     "titulo": "A Edição ficou mais rápida, com a mesma foto no fim.",
