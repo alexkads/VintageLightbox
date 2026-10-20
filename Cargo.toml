@@ -50,15 +50,15 @@ license = "MIT"
 # núcleo e ver aqui sem lançar tag, um `[patch]` local em `.cargo/config.toml`
 # (fora do git) apontando para `../../PhotoKads/nucleo-da-foto/crates/<crate>`;
 # ver o README do núcleo.
-foto-codec = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.1" }
-raw-codec = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.1" }
-revelacao-core = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.1" }
-editor-core = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.1" }
-recuperacao-core = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.1" }
-fotolivro = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.1" }
-visualizador-pdf = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.1" }
-ia-local = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.1" }
-preenchimento = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.1" }
+foto-codec = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.2" }
+raw-codec = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.2" }
+revelacao-core = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.2" }
+editor-core = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.2" }
+recuperacao-core = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.2" }
+fotolivro = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.2" }
+visualizador-pdf = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.2" }
+ia-local = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.2" }
+preenchimento = { git = "https://github.com/alexkads/nucleo-da-foto", tag = "v0.1.2" }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
