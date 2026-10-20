@@ -1,12 +1,11 @@
 {
-  "versao": "0.1.175",
-  "titulo": "No Enquadrar, arrastar fora do retângulo gira a foto, como no Lightroom.",
+  "versao": "0.1.176",
+  "titulo": "O Enquadrar continua ligado ao trocar de foto, e cada foto volta como foi deixada.",
   "importante": false,
   "novidades": [
-    "No Enquadrar, aperte em qualquer lugar fora do retângulo e arraste em volta dele: a foto gira, e o retângulo diminui sozinho para não mostrar cantos vazios.",
-    "Junto da seta aparece o sinal de girar, e enquanto gira o ângulo fica ao lado do ponteiro e a grade fica mais fina, para acertar o horizonte.",
-    "Pegar uma alça ficou mais fácil: apertar logo ao lado dela ainda redimensiona.",
-    "Soltar vira um passo do histórico, como o transferidor; ⌘Z desfaz."
+    "Com o Enquadrar aberto, clicar em outra foto da tira já abre o Enquadrar nela, com o corte, o ângulo e a proporção dessa foto: dá para endireitar a sessão foto a foto sem reabrir a ferramenta.",
+    "Cada foto lembra o que foi escolhido nela, até a proporção \"Livre\": ao voltar a uma foto, ela está do jeito que ficou.",
+    "Nada de uma foto passa para a outra: o retângulo e a proporção são sempre os da foto na tela."
   ],
-  "por_que_atualizar": "Para endireitar a foto com o mouse onde o olho está, sem ir ao slider."
+  "por_que_atualizar": "Para enquadrar e endireitar uma sessão inteira sem abrir e fechar a ferramenta a cada foto."
 }

@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.176",
+    "data": "2026-10-20",
+    "titulo": "O Enquadrar continua ligado ao trocar de foto, e cada foto volta como foi deixada.",
+    "importante": false,
+    "novidades": [
+      "Com o Enquadrar aberto, clicar em outra foto da tira já abre o Enquadrar nela, com o corte, o ângulo e a proporção dessa foto: dá para endireitar a sessão foto a foto sem reabrir a ferramenta.",
+      "Cada foto lembra o que foi escolhido nela, até a proporção \"Livre\": ao voltar a uma foto, ela está do jeito que ficou.",
+      "Nada de uma foto passa para a outra: o retângulo e a proporção são sempre os da foto na tela."
+    ],
+    "por_que_atualizar": "Para enquadrar e endireitar uma sessão inteira sem abrir e fechar a ferramenta a cada foto."
+  },
+  {
     "versao": "0.1.175",
     "data": "2026-10-20",
     "titulo": "No Enquadrar, arrastar fora do retângulo gira a foto, como no Lightroom.",
