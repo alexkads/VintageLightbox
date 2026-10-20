@@ -1,11 +1,16 @@
 {
-  "versao": "0.1.176",
-  "titulo": "O Enquadrar continua ligado ao trocar de foto, e cada foto volta como foi deixada.",
-  "importante": false,
+  "versao": "0.1.177",
+  "titulo": "O balcão trabalha sem internet: tudo fica guardado e sobe sozinho quando a rede volta.",
+  "importante": true,
   "novidades": [
-    "Com o Enquadrar aberto, clicar em outra foto da tira já abre o Enquadrar nela, com o corte, o ângulo e a proporção dessa foto: dá para endireitar a sessão foto a foto sem reabrir a ferramenta.",
-    "Cada foto lembra o que foi escolhido nela, até a proporção \"Livre\": ao voltar a uma foto, ela está do jeito que ficou.",
-    "Nada de uma foto passa para a outra: o retângulo e a proporção são sempre os da foto na tela."
+    "Sem internet, o trabalho continua: a lista de sessões e a sessão aberta mostram o que o site tinha da última vez, com as miniaturas.",
+    "Nota, levar no balcão, rejeitar, negociar, mudar a faixa, criar sessão, salvar na galeria e avisar o cliente ficam guardados neste computador e sobem sozinhos, na ordem, quando a internet volta.",
+    "O caixa abre, vende (dinheiro, PIX na chave, cartão na maquininha) e registra sangria e suprimento sem internet. A venda sobe com a hora em que foi feita.",
+    "No rodapé, o aviso \"Sem internet\" conta o que está guardado; o clique mostra a lista, e \"Tentar agora\" envia sem esperar.",
+    "Se uma foto vendida sem internet também foi vendida por outro caminho no meio-tempo, a venda entra assim mesmo e o caixa marca a duplicidade para estornar uma.",
+    "O QR do bot da sessão continua na tela sem internet, e o cliente conversa com o bot pelo celular dele. Quando a rede volta, o balcão mostra quem entrou.",
+    "Fechar o app sem internet não perde nada: ao abrir de novo, o que estava guardado continua lá.",
+    "Com a internet funcionando, as sessões de ontem e de hoje ficam prontas neste computador para o caso de ela cair."
   ],
-  "por_que_atualizar": "Para enquadrar e endireitar uma sessão inteira sem abrir e fechar a ferramenta a cada foto."
+  "por_que_atualizar": "Para o estúdio não parar quando a internet cair: o atendimento segue e nada se perde."
 }
