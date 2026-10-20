@@ -92,6 +92,30 @@ impl Revelacao {
         self.soltar_no_corte(window, cx);
     }
 
+    /// O retângulo do Enquadrar na janela, `(x0, y0, x1, y1)` em pontos.
+    pub(crate) fn retangulo_de_corte_na_tela(&self) -> Option<(f32, f32, f32, f32)> {
+        self.retangulo_na_janela()
+    }
+
+    /// Apertar neste ponto da janela giraria a foto?
+    pub(crate) fn giraria_por_fora(&self, x: f32, y: f32) -> bool {
+        self.giraria_em(gpui_kit::point(px(x), px(y)))
+    }
+
+    /// Aperta em `de`, anda até `ate` e solta, em pontos da janela — o giro por
+    /// fora, como o ponteiro o faz.
+    pub(crate) fn girar_por_fora(
+        &mut self,
+        de: (f32, f32),
+        ate: (f32, f32),
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.comecar_giro(gpui_kit::point(px(de.0), px(de.1)), cx);
+        self.mover_no_corte(gpui_kit::point(px(ate.0), px(ate.1)), window, cx);
+        self.soltar_no_corte(window, cx);
+    }
+
     /// A proporção travada no Enquadrar.
     pub(crate) fn proporcao_travada(&self) -> Option<f32> {
         self.edicao.as_ref().and_then(|e| e.proporcao)

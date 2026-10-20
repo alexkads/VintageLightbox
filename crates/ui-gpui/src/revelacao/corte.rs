@@ -284,6 +284,47 @@ pub fn inclinar(corte: &CropSettings, graus: f32) -> CropSettings {
 /// O maior ângulo do endireitamento, como no site (`ANGULO_MAXIMO`).
 pub const ANGULO_MAXIMO: f32 = 45.;
 
+/// O ângulo que o **giro por fora** dá: arrastar fora do retângulo gira a foto
+/// pelo quanto o ponteiro andou em volta do `centro` — o gesto do Lightroom, e
+/// o `Gesture::CropRotate` do LightCraft (storytold/lightcraft,
+/// `crates/ui-egui/src/panels/detail.rs`, MIT).
+///
+/// Os pontos são da tela (y para baixo), então rodar o ponteiro no sentido
+/// horário aumenta o ângulo, que é o sentido em que a foto gira na tela.
+///
+/// 🔑 **A diferença dos dois ângulos é levada a (−180°, 180°]**: o `atan2`
+/// salta de +180° a −180° à esquerda do centro, e sem isso cruzar esse lado
+/// faria o giro pular para o limite oposto. O LightCraft não leva, e pula.
+pub fn angulo_do_giro(inicial: f32, centro: (f32, f32), de: (f32, f32), ate: (f32, f32)) -> f32 {
+    let a0 = (de.1 - centro.1).atan2(de.0 - centro.0);
+    let a1 = (ate.1 - centro.1).atan2(ate.0 - centro.0);
+    let mut delta = (a1 - a0).to_degrees();
+    if delta > 180. {
+        delta -= 360.;
+    } else if delta <= -180. {
+        delta += 360.;
+    }
+    (inicial + delta).clamp(-ANGULO_MAXIMO, ANGULO_MAXIMO)
+}
+
+/// Quanto virar o sinal de girar (radianos, sentido horário na tela) para o
+/// arco dele, desenhado de bojo para cima, apontar **para longe** do
+/// retângulo `(x0, y0, x1, y1)`: para cima acima dele, para a direita ao lado
+/// direito, na diagonal a partir de um canto.
+///
+/// O retângulo do Enquadrar fica sempre de pé na tela (é a foto que gira por
+/// baixo), então o ponto mais perto do contorno é o ponteiro preso à caixa.
+/// É o `rotate_cursor_turn` do LightCraft, sem o caso do retângulo girado.
+pub fn giro_do_sinal(retangulo: (f32, f32, f32, f32), p: (f32, f32)) -> f32 {
+    let (x0, y0, x1, y1) = retangulo;
+    let perto = (p.0.clamp(x0, x1), p.1.clamp(y0, y1));
+    let (dx, dy) = (p.0 - perto.0, p.1 - perto.1);
+    if dx.hypot(dy) < 0.5 {
+        return 0.;
+    }
+    dy.atan2(dx) + std::f32::consts::FRAC_PI_2
+}
+
 /// Um retângulo em pixels do espaço girado (depois de espelhos e giro de 90°).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Retangulo {
@@ -1371,5 +1412,55 @@ mod testes {
             Some(4. / 3.)
         );
         assert_eq!(proporcao_na_orientacao(None, 4., 3.), None);
+    }
+
+    /// Rodar o ponteiro em volta do centro gira a foto pelo mesmo tanto, no
+    /// mesmo sentido, e para em ±45°.
+    #[test]
+    fn o_giro_por_fora_segue_o_ponteiro_em_volta_do_centro() {
+        let c = (100., 100.);
+        // De cima para a direita do centro é um quarto de volta horário: preso a 45°.
+        assert_eq!(angulo_do_giro(0., c, (100., 0.), (200., 100.)), 45.);
+        // 10° no sentido horário, a partir de cima.
+        let dez = 10f32.to_radians();
+        let ate = (100. + 100. * dez.sin(), 100. - 100. * dez.cos());
+        assert!((angulo_do_giro(0., c, (100., 0.), ate) - 10.).abs() < 1e-3);
+        // Anti-horário, somando ao ângulo que a foto já tinha.
+        let ate = (100. - 100. * dez.sin(), 100. - 100. * dez.cos());
+        assert!((angulo_do_giro(3., c, (100., 0.), ate) + 7.).abs() < 1e-3);
+        assert_eq!(angulo_do_giro(-40., c, (100., 0.), (0., 100.)), -45.);
+    }
+
+    /// 🚨 À esquerda do centro o `atan2` salta de +180° a −180°: cruzar esse
+    /// lado é um passo pequeno, e não um pulo ao limite oposto.
+    #[test]
+    fn cruzar_a_esquerda_do_centro_nao_pula() {
+        let c = (0., 0.);
+        let de = (-100., -5.);
+        let ate = (-100., 5.);
+        let graus = angulo_do_giro(0., c, de, ate);
+        assert!(graus < 0. && graus > -6., "{graus}");
+        assert!(angulo_do_giro(0., c, ate, de) > 0.);
+    }
+
+    /// O arco do sinal aponta para longe do retângulo, de que lado for.
+    #[test]
+    fn o_sinal_de_girar_aponta_para_longe_do_retangulo() {
+        use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+        let caixa = (100., 100., 300., 200.);
+        let perto = |a: f32, b: f32| ((a - b + PI).rem_euclid(2. * PI) - PI).abs() < 1e-3;
+        let giro = |x: f32, y: f32| giro_do_sinal(caixa, (x, y));
+        assert!(perto(giro(200., 80.), 0.), "acima");
+        assert!(perto(giro(320., 150.), FRAC_PI_2), "à direita");
+        assert!(perto(giro(200., 230.), PI), "abaixo");
+        assert!(perto(giro(70., 150.), -FRAC_PI_2), "à esquerda");
+        assert!(
+            perto(giro(80., 80.), -FRAC_PI_4),
+            "canto de cima, à esquerda"
+        );
+        assert!(
+            perto(giro(320., 220.), 3. * FRAC_PI_4),
+            "canto de baixo, à direita"
+        );
     }
 }

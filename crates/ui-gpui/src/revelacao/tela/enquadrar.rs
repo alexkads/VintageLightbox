@@ -16,13 +16,14 @@
 //! | duplo clique no rótulo ou no transferidor | endireitar volta a zero |
 //! | Auto | endireita pelas retas da própria foto ([`revelacao_core::nivel`]) |
 //! | régua, ou ⌘ + arrastar na foto | a reta traçada fica horizontal ou vertical |
+//! | arrastar **fora** do retângulo | gira a foto em volta do centro do corte, como no Lightroom |
 //! | proporção | remodela o retângulo na hora, mantendo a área |
 
 use domain::value_objects::CropSettings;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon};
 use gpui_kit::{
     canvas, div, point, prelude::*, px, AnyElement, Bounds, Context, CursorStyle, MouseButton,
-    MouseDownEvent, PathBuilder, Pixels, Point, SharedString, Window,
+    MouseDownEvent, MouseMoveEvent, PathBuilder, Pixels, Point, SharedString, Window,
 };
 use revelacao_core::nivel;
 
@@ -49,6 +50,13 @@ const TOPO: f32 = 20.;
 const ARCO: f32 = 34.;
 /// O lado das alças: o `size-4` do site.
 const LADO_DA_ALCA: f32 = 16.;
+/// O lado de onde a alça **pega**, maior que o desenho: apertar logo fora dela
+/// redimensiona, e não gira (os 12 px de alcance do LightCraft).
+const ALCANCE_DA_ALCA: f32 = 28.;
+/// O sinal de girar fica abaixo e à direita da seta do sistema — o GPUI não
+/// tem cursor de giro nem deixa esconder a seta.
+const DESVIO_DO_SINAL: f32 = 24.;
+const RAIO_DO_SINAL: f32 = 11.;
 
 /// O Enquadrar, enquanto está aberto.
 #[derive(Debug, Default)]
@@ -73,6 +81,20 @@ pub(super) struct Edicao {
     pub aviso: Option<SharedString>,
     /// A perspectiva guiada ([`super::perspectiva`]).
     pub guias: super::perspectiva::EdicaoDasGuias,
+    /// O giro por fora em curso: arrastar fora do retângulo.
+    pub giro: Option<GiroPorFora>,
+    /// Onde o ponteiro está sobre o palco, em pontos da janela. É o que põe o
+    /// sinal de girar junto dele e o ângulo ao lado durante o giro.
+    pub ponteiro: Option<Point<Pixels>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct GiroPorFora {
+    /// O centro do retângulo, em pontos da janela: é em volta dele que a foto
+    /// gira, e ele não sai do lugar enquanto o retângulo encolhe.
+    centro: Point<Pixels>,
+    de: Point<Pixels>,
+    inicial: f32,
 }
 
 /// O traço mais curto que a régua aceita, em pontos: menos que isso é um
@@ -110,6 +132,78 @@ fn ponto_do_arco(angulo: f32, raio: f32) -> (f32, f32) {
         LARGURA_DO_TRANSFERIDOR / 2. + raio * v.sin(),
         TOPO + RAIO - raio * v.cos(),
     )
+}
+
+/// O ângulo no passo do slider (0,1°), sem o `-0.0` que escreveria "-0.0°".
+fn no_passo(graus: f32) -> f32 {
+    let preso = graus.clamp(-ANGULO_MAXIMO, ANGULO_MAXIMO);
+    let passo = ((preso / PASSO_DO_ANGULO).round() * PASSO_DO_ANGULO * 10.).round() / 10.;
+    if passo == 0. {
+        0.
+    } else {
+        passo
+    }
+}
+
+/// O sinal de girar: um arco de duas pontas num disco escuro, virado por
+/// `giro` (ver [`corte::giro_do_sinal`]). O `RotateDrag` do LightCraft.
+fn sinal_de_girar(onde: (f32, f32), giro: f32) -> AnyElement {
+    div()
+        .absolute()
+        .left(px(onde.0 + DESVIO_DO_SINAL - RAIO_DO_SINAL))
+        .top(px(onde.1 + DESVIO_DO_SINAL - RAIO_DO_SINAL))
+        .size(px(RAIO_DO_SINAL * 2.))
+        .rounded_full()
+        .bg(gpui_kit::rgba(0x00000096))
+        .child(
+            canvas(
+                |_, _, _| {},
+                move |bounds: Bounds<Pixels>, _, window, _| {
+                    let c = bounds.center();
+                    let (sen, cos) = giro.sin_cos();
+                    let em = |x: f32, y: f32| {
+                        point(c.x + px(x * cos - y * sen), c.y + px(x * sen + y * cos))
+                    };
+                    let branco = gpui_kit::white();
+                    // O arco, de bojo para cima: de −150° a −30° num círculo
+                    // de raio 6,5 com o centro 3,5 abaixo do meio.
+                    let (raio, baixo) = (6.5_f32, 3.5_f32);
+                    let no_arco = |graus: f32| {
+                        let t = graus.to_radians();
+                        (raio * t.cos(), baixo + raio * t.sin())
+                    };
+                    let mut arco = PathBuilder::stroke(px(1.6));
+                    let (x, y) = no_arco(-150.);
+                    arco.move_to(em(x, y));
+                    let mut graus = -140.;
+                    while graus <= -30. {
+                        let (x, y) = no_arco(graus);
+                        arco.line_to(em(x, y));
+                        graus += 10.;
+                    }
+                    if let Ok(caminho) = arco.build() {
+                        window.paint_path(caminho, branco);
+                    }
+                    // As pontas, seguindo o arco para fora.
+                    for (graus, sentido) in [(-150_f32, -1_f32), (-30., 1.)] {
+                        let t = graus.to_radians();
+                        let (x, y) = no_arco(graus);
+                        let (dx, dy) = (-t.sin() * sentido, t.cos() * sentido);
+                        let (nx, ny) = (-dy, dx);
+                        let mut ponta = PathBuilder::fill();
+                        ponta.move_to(em(x + dx * 2.6, y + dy * 2.6));
+                        ponta.line_to(em(x - dx + nx * 2.6, y - dy + ny * 2.6));
+                        ponta.line_to(em(x - dx - nx * 2.6, y - dy - ny * 2.6));
+                        ponta.close();
+                        if let Ok(caminho) = ponta.build() {
+                            window.paint_path(caminho, branco);
+                        }
+                    }
+                },
+            )
+            .size_full(),
+        )
+        .into_any_element()
 }
 
 /// O ângulo como o site escreve: `+3.5°`, `-0.1°`, `0.0°`.
@@ -534,6 +628,7 @@ impl Revelacao {
         self.edicao.as_ref().is_some_and(|e| {
             e.arrasto.is_some()
                 || e.transferidor.is_some()
+                || e.giro.is_some()
                 || e.regua.is_some()
                 || e.guias.em_gesto()
         })
@@ -558,14 +653,24 @@ impl Revelacao {
             return;
         };
         if let Some((x0, inicial)) = edicao.transferidor {
-            let bruto = inicial + (f32::from(ponteiro.x) - x0) * GRAUS_POR_PIXEL;
-            let preso = bruto.clamp(-ANGULO_MAXIMO, ANGULO_MAXIMO);
-            let passo = ((preso / PASSO_DO_ANGULO).round() * PASSO_DO_ANGULO * 10.).round() / 10.;
-            if (passo - self.corte_atual().angle()).abs() >= PASSO_DO_ANGULO / 2. {
-                self.definir_angulo(passo, cx);
-                self.angulo
-                    .update(cx, |estado, cx| estado.set_value(passo, window, cx));
+            let passo = no_passo(inicial + (f32::from(ponteiro.x) - x0) * GRAUS_POR_PIXEL);
+            self.endireitar_no_gesto(passo, window, cx);
+            return;
+        }
+        if let Some(giro) = edicao.giro {
+            let ponto = |p: Point<Pixels>| (f32::from(p.x), f32::from(p.y));
+            let passo = no_passo(corte::angulo_do_giro(
+                giro.inicial,
+                ponto(giro.centro),
+                ponto(giro.de),
+                ponto(ponteiro),
+            ));
+            if let Some(edicao) = self.edicao.as_mut() {
+                edicao.ponteiro = Some(ponteiro);
             }
+            // O ângulo ao lado do ponteiro anda com ele, mesmo sem mudar.
+            cx.notify();
+            self.endireitar_no_gesto(passo, window, cx);
             return;
         }
         let Some(arrasto) = edicao.arrasto else {
@@ -594,6 +699,116 @@ impl Revelacao {
         self.trocar_corte(corte::com_retangulo(&atual, novo, espaco), false, cx);
     }
 
+    /// Endireita durante um arrasto (transferidor ou giro por fora), levando o
+    /// slider junto. Um `definir_angulo` por pixel repetido custaria um
+    /// enquadramento inteiro à toa.
+    fn endireitar_no_gesto(&mut self, passo: f32, window: &mut Window, cx: &mut Context<Self>) {
+        if (passo - self.corte_atual().angle()).abs() >= PASSO_DO_ANGULO / 2. {
+            self.definir_angulo(passo, cx);
+            self.angulo
+                .update(cx, |estado, cx| estado.set_value(passo, window, cx));
+        }
+    }
+
+    /// O retângulo na janela, `(x0, y0, x1, y1)` em pontos.
+    pub(super) fn retangulo_na_janela(&self) -> Option<(f32, f32, f32, f32)> {
+        let espaco = self.espaco()?;
+        let (ax, ay, aw, _) = self.area_da_foto()?;
+        let escala = aw / espaco.0;
+        let r = corte::retangulo_de(&self.corte_atual(), espaco);
+        let (ox, oy) = (
+            f32::from(self.palco.origin.x),
+            f32::from(self.palco.origin.y),
+        );
+        let (x0, y0) = (ox + ax + r.x * escala, oy + ay + r.y * escala);
+        Some((x0, y0, x0 + r.w * escala, y0 + r.h * escala))
+    }
+
+    /// Apertar ali giraria a foto? Fora do retângulo, longe das alças e do
+    /// transferidor, e sem régua nem guias armadas — que ficam com a foto.
+    pub(super) fn giraria_em(&self, p: Point<Pixels>) -> bool {
+        let Some(edicao) = self.edicao.as_ref() else {
+            return false;
+        };
+        if edicao.regua_armada || edicao.guias.armadas || !self.palco.contains(&p) {
+            return false;
+        }
+        let Some((x0, y0, x1, y1)) = self.retangulo_na_janela() else {
+            return false;
+        };
+        let (x, y) = (f32::from(p.x), f32::from(p.y));
+        if (x0..=x1).contains(&x) && (y0..=y1).contains(&y) {
+            return false;
+        }
+        let perto_de_alca = Alca::TODAS.into_iter().any(|alca| {
+            let (fx, fy) = alca.posicao();
+            let (cx, cy) = (x0 + (x1 - x0) * fx, y0 + (y1 - y0) * fy);
+            (x - cx).abs() <= ALCANCE_DA_ALCA / 2. && (y - cy).abs() <= ALCANCE_DA_ALCA / 2.
+        });
+        // O transferidor, centrado 8 pontos acima do pé do palco.
+        let (pw, ph) = (
+            f32::from(self.palco.size.width),
+            f32::from(self.palco.size.height),
+        );
+        let (lx, ly) = (
+            x - f32::from(self.palco.origin.x),
+            y - f32::from(self.palco.origin.y),
+        );
+        let no_transferidor = (lx - pw / 2.).abs() <= LARGURA_DO_TRANSFERIDOR / 2.
+            && (ph - 8. - ALTURA_DO_TRANSFERIDOR..=ph - 8.).contains(&ly);
+        !perto_de_alca && !no_transferidor
+    }
+
+    /// Começa o giro por fora, em volta do centro do retângulo.
+    pub(super) fn comecar_giro(&mut self, de: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some((x0, y0, x1, y1)) = self.retangulo_na_janela() else {
+            return;
+        };
+        self.gravar_o_que_estiver_pendente();
+        let inicial = self.corte_atual().angle();
+        if let Some(edicao) = self.edicao.as_mut() {
+            edicao.giro = Some(GiroPorFora {
+                centro: point(px((x0 + x1) / 2.), px((y0 + y1) / 2.)),
+                de,
+                inicial,
+            });
+            edicao.ponteiro = Some(de);
+            cx.notify();
+        }
+    }
+
+    /// O ponteiro andou sobre o palco, fora de gesto. Só redesenha quando o
+    /// sinal de girar aparece, some ou anda.
+    fn pairar_no_corte(&mut self, p: Point<Pixels>, cx: &mut Context<Self>) {
+        if self.arrastando_no_corte() {
+            return;
+        }
+        let antes = self
+            .edicao
+            .as_ref()
+            .and_then(|e| e.ponteiro)
+            .is_some_and(|q| self.giraria_em(q));
+        let agora = self.giraria_em(p);
+        if let Some(edicao) = self.edicao.as_mut() {
+            edicao.ponteiro = Some(p);
+        }
+        if antes || agora {
+            cx.notify();
+        }
+    }
+
+    /// O ponteiro saiu do palco.
+    fn sair_do_palco(&mut self, cx: &mut Context<Self>) {
+        if self.arrastando_no_corte() {
+            return;
+        }
+        if let Some(edicao) = self.edicao.as_mut() {
+            if edicao.ponteiro.take().is_some() {
+                cx.notify();
+            }
+        }
+    }
+
     /// O botão subiu: o gesto vira um passo e vai para o banco.
     pub(super) fn soltar_no_corte(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.soltar_guia(window, cx) {
@@ -611,7 +826,8 @@ impl Revelacao {
             }
             return;
         }
-        if edicao.arrasto.take().is_none() && edicao.transferidor.take().is_none() {
+        let girou = edicao.giro.take().is_some();
+        if edicao.arrasto.take().is_none() && edicao.transferidor.take().is_none() && !girou {
             return;
         }
         self.gravar_o_que_estiver_pendente();
@@ -660,10 +876,17 @@ impl Revelacao {
                 .into_any_element()
         });
 
-        // A grade de terços: branco a 50 %, com a camada a 60 %.
-        let linha = gpui_kit::rgba(0xffffff4d);
-        let grade = (1..3).flat_map(|i| {
-            let f = i as f32 / 3.;
+        // A grade de terços: branco a 50 %, com a camada a 60 %. **Girando, ela
+        // fica fina** (oito por oito), como no Lightroom: é a régua contra a
+        // qual se acerta o horizonte.
+        let girando = self.edicao.as_ref().is_some_and(|e| e.giro.is_some());
+        let (divisoes, linha) = if girando {
+            (8, gpui_kit::rgba(0xffffff40))
+        } else {
+            (3, gpui_kit::rgba(0xffffff4d))
+        };
+        let grade = (1..divisoes).flat_map(move |i| {
+            let f = i as f32 / divisoes as f32;
             [
                 div()
                     .absolute()
@@ -694,17 +917,26 @@ impl Revelacao {
                 Alca::Superior | Alca::Inferior => CursorStyle::ResizeUpDown,
                 Alca::Esquerda | Alca::Direita => CursorStyle::ResizeLeftRight,
             };
+            // 🔑 **A alça pega num quadrado maior que o desenho**: apertar logo
+            // fora dela é redimensionar, e não girar.
             div()
                 .id(SharedString::from(format!("alca-{alca:?}")))
                 .absolute()
-                .left(px(w * fx - LADO_DA_ALCA / 2.))
-                .top(px(h * fy - LADO_DA_ALCA / 2.))
-                .size(px(LADO_DA_ALCA))
-                .rounded(crate::tema::canto(2.))
-                .bg(gpui_kit::white())
-                .border_1()
-                .border_color(gpui_kit::rgba(0x17171799))
-                .shadow_sm()
+                .left(px(w * fx - ALCANCE_DA_ALCA / 2.))
+                .top(px(h * fy - ALCANCE_DA_ALCA / 2.))
+                .size(px(ALCANCE_DA_ALCA))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    div()
+                        .size(px(LADO_DA_ALCA))
+                        .rounded(crate::tema::canto(2.))
+                        .bg(gpui_kit::white())
+                        .border_1()
+                        .border_color(gpui_kit::rgba(0x17171799))
+                        .shadow_sm(),
+                )
                 .cursor(cursor)
                 .on_mouse_down(
                     MouseButton::Left,
@@ -720,21 +952,69 @@ impl Revelacao {
         });
 
         let armada = self.edicao.as_ref().is_some_and(|e| e.regua_armada);
+        let origem = self.palco.origin;
+        let no_palco = |p: Point<Pixels>| (f32::from(p.x - origem.x), f32::from(p.y - origem.y));
+        // O sinal de girar acompanha o ponteiro onde apertar giraria, e durante
+        // o giro; o ângulo fica ao lado dele enquanto gira.
+        let edicao = self.edicao.as_ref();
+        let em_giro = edicao.and_then(|e| e.giro.zip(e.ponteiro)).map(|(_, p)| p);
+        let sinal = edicao
+            .and_then(|e| e.ponteiro)
+            .filter(|p| em_giro.is_some() || (!self.arrastando_no_corte() && self.giraria_em(*p)))
+            .map(|p| {
+                let (gx, gy) = (f32::from(p.x), f32::from(p.y));
+                let r = self.retangulo_na_janela().unwrap_or((gx, gy, gx, gy));
+                sinal_de_girar(no_palco(p), corte::giro_do_sinal(r, (gx, gy)))
+            });
+        let leitura = em_giro.map(|p| {
+            let (lx, ly) = no_palco(p);
+            // À direita do sinal; perto da borda direita, do outro lado do ponteiro.
+            let esquerda = if lx + 2. * DESVIO_DO_SINAL + 60. > pw {
+                lx - 64.
+            } else {
+                lx + 2. * DESVIO_DO_SINAL - 6.
+            };
+            div()
+                .absolute()
+                .left(px(esquerda))
+                .top(px(ly + DESVIO_DO_SINAL - 9.))
+                .px(px(6.))
+                .py(px(2.))
+                .rounded(crate::tema::canto(4.))
+                .bg(gpui_kit::rgba(0x000000b3))
+                .font_family("Menlo")
+                .text_size(crate::tema::letra::em(11.))
+                .text_color(gpui_kit::rgb(0xfbbf24))
+                .child(rotulo_do_angulo(self.corte_atual().angle()))
+        });
         Some(
             div()
                 .id("overlay-de-corte")
                 .absolute()
                 .inset_0()
-                // ⌘ + arrastar no véu, fora do retângulo, também traça a régua.
+                // ⌘ + arrastar no véu, fora do retângulo, traça a régua; sem o
+                // ⌘, gira a foto — o retângulo, as alças e o transferidor
+                // param o clique antes de ele chegar aqui.
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|tela, evento: &MouseDownEvent, _window, cx| {
                         if evento.modifiers.platform {
                             cx.stop_propagation();
                             tela.comecar_regua(evento.position, cx);
+                        } else if tela.giraria_em(evento.position) {
+                            cx.stop_propagation();
+                            tela.comecar_giro(evento.position, cx);
                         }
                     }),
                 )
+                .on_mouse_move(cx.listener(|tela, evento: &MouseMoveEvent, _window, cx| {
+                    tela.pairar_no_corte(evento.position, cx)
+                }))
+                .on_hover(cx.listener(|tela, dentro: &bool, _window, cx| {
+                    if !*dentro {
+                        tela.sair_do_palco(cx);
+                    }
+                }))
                 .children(faixas)
                 .child(
                     div()
@@ -785,6 +1065,8 @@ impl Revelacao {
                     )
                 })
                 .children(self.traco_da_regua())
+                .children(sinal)
+                .children(leitura)
                 .into_any_element(),
         )
     }
@@ -1176,6 +1458,22 @@ impl Revelacao {
                 self.ajuste_do_slider(false, numero.unwrap_or(0.), cx);
                 self.gravar_o_que_estiver_pendente();
                 self.sincronizar_sliders_da_perspectiva(window, cx);
+            }
+            // 🧪 O ponteiro parado sobre o palco (fração dele), sem botão — o
+            // `mouse_real mover` não chega a app em segundo plano, e é ele que
+            // mostra o sinal de girar.
+            "pairar" => {
+                let v: Vec<f32> = gesto
+                    .split_whitespace()
+                    .skip(1)
+                    .filter_map(|n| n.parse().ok())
+                    .collect();
+                if let [fx, fy] = v[..] {
+                    let p = self.palco.origin
+                        + point(self.palco.size.width * fx, self.palco.size.height * fy);
+                    self.pairar_no_corte(p, cx);
+                    eprintln!("[corte] pairar ({fx}, {fy}) giraria={}", self.giraria_em(p));
+                }
             }
             "restringir" => self.alternar_restringir(window, cx),
             "redefinir_perspectiva" => self.redefinir_perspectiva(window, cx),

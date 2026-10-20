@@ -188,3 +188,67 @@ fn a_trava_abre_na_proporcao_da_foto_e_segue_o_giro(cx: &mut TestAppContext) {
         assert!(c.crop_width() < 1., "a alça recortou");
     });
 }
+
+/// 🎬 **Arrastar fora do retângulo gira a foto** (dono, 20/10/2026: o recurso
+/// do Lightroom, visto no LightCraft): o ponteiro que roda 5° em volta do centro
+/// do corte endireita 5°, o retângulo encolhe para caber, o soltar grava e o
+/// ⌘Z desfaz. Logo fora de uma alça ainda é a alça, e dentro do retângulo é
+/// mover.
+#[gpui_kit::test]
+fn arrastar_fora_do_retangulo_gira_a_foto(cx: &mut TestAppContext) {
+    let e = abrir_o_ensaio(cx, Cenario::default());
+    e.revelar_a_do_site(cx, "a");
+    e.teclar(cx, "r");
+    // Recorta pela esquerda: sobra véu à esquerda do retângulo para girar.
+    e.revelacao(cx, |tela, window, cx| {
+        tela.travar_proporcao(None, cx);
+        tela.arrastar_no_corte(Some(Alca::Esquerda), 40., 0., window, cx);
+    });
+    let largura_antes = e.revelacao(cx, |tela, _w, _cx| tela.corte_na_ferramenta().crop_width());
+    let (x0, y0, x1, y1) = e
+        .revelacao(cx, |tela, _w, _cx| tela.retangulo_de_corte_na_tela())
+        .expect("o retângulo na tela");
+    let centro = ((x0 + x1) / 2., (y0 + y1) / 2.);
+    e.revelacao(cx, |tela, _w, _cx| {
+        assert!(!tela.giraria_por_fora(centro.0, centro.1), "dentro é mover");
+        assert!(
+            !tela.giraria_por_fora(x0 - 10., centro.1),
+            "logo fora da alça esquerda ainda é a alça"
+        );
+        assert!(tela.giraria_por_fora(x0 / 2., y0 + 20.), "no véu, gira");
+    });
+
+    // 5° no sentido horário em volta do centro do retângulo.
+    let de = (x0 / 2., y0 + 20.);
+    let (dx, dy) = (de.0 - centro.0, de.1 - centro.1);
+    let (sen, cos) = 5f32.to_radians().sin_cos();
+    let ate = (
+        centro.0 + dx * cos - dy * sen,
+        centro.1 + dx * sen + dy * cos,
+    );
+    e.revelacao(cx, |tela, window, cx| {
+        tela.girar_por_fora(de, ate, window, cx);
+        let c = tela.corte_na_ferramenta();
+        assert!(perto(c.angle(), 5.), "ângulo {}", c.angle());
+        assert!(
+            c.crop_width() < largura_antes,
+            "encolheu para caber: {}",
+            c.crop_width()
+        );
+        assert!(tela.cortando(), "soltar não fecha a ferramenta");
+    });
+    assert!(
+        e.gravador
+            .gravado()
+            .last()
+            .is_some_and(|g| g.2.angulo.is_some_and(|a| perto(a, 5.))),
+        "o giro grava ao soltar"
+    );
+
+    e.teclar(cx, "cmd-z");
+    e.revelacao(cx, |tela, _w, _cx| {
+        let c = tela.corte_na_ferramenta();
+        assert!(perto(c.angle(), 0.), "⌘Z desfaz o giro: {}", c.angle());
+        assert!(perto(c.crop_width(), largura_antes));
+    });
+}
