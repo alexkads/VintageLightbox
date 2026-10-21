@@ -1,5 +1,16 @@
 [
   {
+    "versao": "0.1.181",
+    "data": "2026-10-21",
+    "titulo": "A lista de sessões mostra quando o fotolivro não foi pelo WhatsApp, e por quê.",
+    "importante": false,
+    "novidades": [
+      "Na coluna Fotolivro, a sessão paga cujo livro não saiu pelo WhatsApp mostra o motivo embaixo: o cliente não leu o QR, o número da sessão é diferente do da conversa, o cliente não escreve há mais de 24 horas ou a sessão está sem WhatsApp.",
+      "Parando o mouse sobre o motivo, aparece o que fazer com o cliente na frente — por exemplo, pedir para ele ler o QR da sessão: o livro sai em até 10 minutos."
+    ],
+    "por_que_atualizar": "Para a atendente saber, ainda com o cliente no balcão, quando o fotolivro não chegou ao WhatsApp dele."
+  },
+  {
     "versao": "0.1.180",
     "data": "2026-10-21",
     "titulo": "A recusa do WhatsApp a um envio do chatbot não aparece mais como falta de internet.",
