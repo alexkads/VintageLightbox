@@ -1,5 +1,16 @@
 [
   {
+    "versao": "0.1.180",
+    "data": "2026-10-21",
+    "titulo": "A recusa do WhatsApp a um envio do chatbot não aparece mais como falta de internet.",
+    "importante": false,
+    "novidades": [
+      "Quando o WhatsApp recusa uma mensagem do chatbot (texto, anexo, reação, correção ou encaminhamento), o app mostra o motivo da recusa e não acende mais o aviso \"Sem internet\" nem o selo do rodapé.",
+      "Os gestos seguintes ao envio recusado vão direto ao site, em vez de ficarem guardados como se a rede tivesse caído."
+    ],
+    "por_que_atualizar": "Para o balconista saber que quem recusou foi o WhatsApp, e não a internet do balcão."
+  },
+  {
     "versao": "0.1.179",
     "data": "2026-10-21",
     "titulo": "O botão direito no balão do WhatsApp traz as opções do próprio WhatsApp.",

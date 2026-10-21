@@ -1,15 +1,10 @@
 {
-  "versao": "0.1.179",
-  "titulo": "O botão direito no balão do WhatsApp traz as opções do próprio WhatsApp.",
+  "versao": "0.1.180",
+  "titulo": "A recusa do WhatsApp a um envio do chatbot não aparece mais como falta de internet.",
   "importante": false,
   "novidades": [
-    "No chatbot, o botão direito numa mensagem abre Responder, Reagir, Favoritar, Fixar, Encaminhar, Copiar, Editar, Dados, Apagar e Selecionar mensagens, na ordem do WhatsApp.",
-    "Responder cita a mensagem: o cliente vê o balão citado em cima, e o painel também mostra quando é o cliente que responde citando.",
-    "Reagir põe o emoji na mensagem do cliente, e a reação que o cliente deixa aparece no balão.",
-    "Editar manda uma correção citando a mensagem errada: o WhatsApp não deixa trocar o texto do que já foi enviado.",
-    "Favoritar e fixar ficam só no painel; as fixadas aparecem no alto da conversa.",
-    "Encaminhar manda a mensagem (ou a foto) para até cinco conversas que escreveram nas últimas 24 horas.",
-    "Selecionar mensagens permite copiar, favoritar, encaminhar ou apagar várias de uma vez."
+    "Quando o WhatsApp recusa uma mensagem do chatbot (texto, anexo, reação, correção ou encaminhamento), o app mostra o motivo da recusa e não acende mais o aviso \"Sem internet\" nem o selo do rodapé.",
+    "Os gestos seguintes ao envio recusado vão direto ao site, em vez de ficarem guardados como se a rede tivesse caído."
   ],
-  "por_que_atualizar": "Para atender no balcão com os mesmos gestos do WhatsApp, sem sair do app."
+  "por_que_atualizar": "Para o balconista saber que quem recusou foi o WhatsApp, e não a internet do balcão."
 }
