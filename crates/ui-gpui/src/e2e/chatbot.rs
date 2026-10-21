@@ -791,6 +791,126 @@ fn o_indicador_segue_as_cinco_fontes(cx: &mut TestAppContext) {
 
 // ── A conversa ─────────────────────────────────────────────────────────────
 
+/// 💬 **O menu do balão** (dono, 2026-10-21): Responder cita pelo `wamid`,
+/// Editar manda a correção que cita a original (a Cloud API não edita o que
+/// saiu), Encaminhar leva às conversas escolhidas e Fixar marca no painel —
+/// cada gesto no pedido do site, pela tela.
+#[gpui_kit::test]
+fn o_menu_do_balao_responde_corrige_encaminha_e_fixa(cx: &mut TestAppContext) {
+    let e = abrir_o_chatbot(cx);
+    clicar(&e, cx, "chatbot-conversa-0");
+    let (dela, nossa) = chatbot(&e, cx, |t, _w, _cx| {
+        let (mensagens, _) = t.mensagens_da_aberta();
+        let dela = mensagens.iter().find(|m| !m.saida).cloned().unwrap();
+        let nossa = mensagens.iter().find(|m| m.saida).cloned().unwrap();
+        (dela, nossa)
+    });
+    assert!(!dela.pode_corrigir() && nossa.pode_corrigir() && nossa.pode_apagar());
+
+    // ↩️ Responder: a faixa da citada, e o envio leva o `wamid` dela.
+    chatbot(&e, cx, |t, w, cx| t.responder(dela.clone(), w, cx));
+    assert!(
+        desenhado(&e, cx, "chatbot-cancelar-modo"),
+        "a faixa do Responder"
+    );
+    escrever(&e, cx, "isso mesmo");
+    clicar(&e, cx, "chatbot-enviar");
+    let envio = pedidos(&e)
+        .into_iter()
+        .find(|p| p.caminho == "/whatsapp/messages/send")
+        .expect("o Responder enviou");
+    assert_eq!(
+        envio.corpo.unwrap(),
+        json!({"contact_id": ANA, "message": "isso mesmo", "responder_a": dela.id_na_meta().unwrap()})
+    );
+    chatbot(&e, cx, |t, _w, _cx| {
+        assert!(t.modo.is_none(), "a faixa sai com o envio")
+    });
+    e.esperar(cx);
+
+    // ✏️ Editar: o texto vem para o campo, e sai a correção que cita.
+    chatbot(&e, cx, |t, w, cx| t.corrigir(nossa.clone(), w, cx));
+    chatbot(&e, cx, |t, _w, cx| {
+        assert_eq!(t.compositor.read(cx).value().as_ref(), nossa.texto)
+    });
+    escrever(&e, cx, "mensagem corrigida");
+    clicar(&e, cx, "chatbot-enviar");
+    let wamid = crate::chatbot::pedidos::codificar(nossa.id_na_meta().unwrap());
+    let correcao = pedidos(&e)
+        .into_iter()
+        .find(|p| p.caminho == format!("/whatsapp/messages/by-whatsapp-id/{wamid}/correcao"))
+        .expect("a correção saiu");
+    assert_eq!(
+        correcao.corpo.unwrap(),
+        json!({"texto": "mensagem corrigida"})
+    );
+    e.esperar(cx);
+
+    // ↪️ Encaminhar: escolhe a conversa e confirma.
+    chatbot(&e, cx, |t, w, cx| {
+        t.abrir_encaminhar(vec![nossa.clone()], w, cx)
+    });
+    clicar(&e, cx, &format!("encaminhar-{ANA}"));
+    clicar(&e, cx, "encaminhar-confirmar");
+    let encaminhado = pedidos(&e)
+        .into_iter()
+        .find(|p| p.caminho == format!("/whatsapp/messages/by-whatsapp-id/{wamid}/encaminhar"))
+        .expect("o encaminhamento saiu");
+    assert_eq!(encaminhado.corpo.unwrap(), json!({"para": [ANA]}));
+    chatbot(&e, cx, |t, _w, _cx| assert!(t.dialogo.aberto().is_none()));
+
+    // 📌 Fixar: só a marca, pelo PATCH.
+    chatbot(&e, cx, |t, _w, cx| {
+        t.marcar(std::slice::from_ref(&dela), None, Some(true), cx)
+    });
+    passo(cx);
+    let dela_wamid = crate::chatbot::pedidos::codificar(dela.id_na_meta().unwrap());
+    let fixada = pedidos(&e)
+        .into_iter()
+        .find(|p| p.caminho == format!("/whatsapp/messages/by-whatsapp-id/{dela_wamid}/marcas"))
+        .expect("o fixar saiu");
+    assert_eq!(
+        (fixada.metodo, fixada.corpo.unwrap()),
+        ("PATCH", json!({"fixada": true}))
+    );
+}
+
+/// ☑️ **Selecionar mensagens**: o clique no balão marca e desmarca, e a barra
+/// toma o lugar do campo; vinda do "Editar", o campo não fica com a original.
+#[gpui_kit::test]
+fn a_selecao_marca_pelo_clique_e_tira_o_campo(cx: &mut TestAppContext) {
+    let e = abrir_o_chatbot(cx);
+    clicar(&e, cx, "chatbot-conversa-0");
+    let (primeira, segunda) = chatbot(&e, cx, |t, _w, _cx| {
+        let (mensagens, _) = t.mensagens_da_aberta();
+        (mensagens[0].clone(), mensagens[1].clone())
+    });
+    chatbot(&e, cx, |t, w, cx| t.corrigir(segunda.clone(), w, cx));
+    chatbot(&e, cx, |t, _w, cx| t.selecionar(&primeira, cx));
+    clicar(&e, cx, &format!("chatbot-balao-{}", segunda.id));
+    chatbot(&e, cx, |t, _w, _cx| {
+        assert_eq!(
+            t.selecao,
+            Some(vec![primeira.id.clone(), segunda.id.clone()])
+        );
+        assert!(t.modo.is_none());
+    });
+    assert!(desenhado(&e, cx, "selecao-copiar"), "a barra da seleção");
+    clicar(&e, cx, &format!("chatbot-balao-{}", primeira.id));
+    chatbot(&e, cx, |t, _w, _cx| {
+        assert_eq!(t.selecao, Some(vec![segunda.id.clone()]))
+    });
+    clicar(&e, cx, "selecao-sair");
+    chatbot(&e, cx, |t, _w, cx| {
+        assert!(t.selecao.is_none());
+        assert_eq!(
+            t.compositor.read(cx).value().as_ref(),
+            "",
+            "a original não ficou no campo"
+        );
+    });
+}
+
 /// ⌨️ **Enter envia, Shift+Enter quebra linha** — teclas de verdade no
 /// campo. O balão "enviando" aparece na hora, o campo esvazia, e o balão some
 /// quando o servidor confirma (e a conversa relê).

@@ -153,13 +153,21 @@ pub fn urgencias() -> PedidoJson {
 /// "Enviar": o WhatsApp tem rota própria; os outros quatro, `POST
 /// /<canal>/mensagens {contato, texto}`.
 pub fn enviar(chave: &Chave, texto: &str) -> PedidoJson {
+    enviar_respondendo(chave, texto, None)
+}
+
+/// ↩️ "Enviar" citando uma mensagem da conversa (`responder_a`, o `wamid`) —
+/// o "Responder" do menu do balão. Só o WhatsApp cita; nos outros canais o
+/// campo não existe e o pedido é o de sempre.
+pub fn enviar_respondendo(chave: &Chave, texto: &str, responder_a: Option<&str>) -> PedidoJson {
     match chave.canal {
-        Canal::WhatsApp => PedidoJson::gravar(
-            "enviada",
-            "POST",
-            "/whatsapp/messages/send",
-            json!({ "contact_id": chave.id, "message": texto }),
-        ),
+        Canal::WhatsApp => {
+            let mut corpo = json!({ "contact_id": chave.id, "message": texto });
+            if let Some(citada) = responder_a {
+                corpo["responder_a"] = json!(citada);
+            }
+            PedidoJson::gravar("enviada", "POST", "/whatsapp/messages/send", corpo)
+        }
         canal => PedidoJson::gravar(
             "enviada",
             "POST",
@@ -283,6 +291,78 @@ pub fn apagar_historico(contato: &str) -> PedidoJson {
         rotulo: "historico-apagado",
         metodo: "DELETE",
         caminho: format!("/whatsapp/messages/recipient/{}", codificar(contato)),
+        corpo: None,
+    }
+}
+
+// ── 💬 O menu do balão ─────────────────────────────────────────────────────
+// As rotas do site (`lib/api/whatsapp.ts`), todas pelo `wamid`. Reagir e a
+// correção ("Editar") saem para o cliente e respeitam a janela de 24 h — o
+// 409 vem com o motivo; favoritar e fixar ficam só no painel.
+
+fn rota_da_mensagem(id_na_meta: &str, gesto: &str) -> String {
+    format!(
+        "/whatsapp/messages/by-whatsapp-id/{}/{gesto}",
+        codificar(id_na_meta)
+    )
+}
+
+/// 👍 "Reagir" — emoji vazio tira a reação.
+pub fn reagir(id_na_meta: &str, emoji: &str) -> PedidoJson {
+    PedidoJson::gravar(
+        "reagida",
+        "POST",
+        rota_da_mensagem(id_na_meta, "reacao"),
+        json!({ "emoji": emoji }),
+    )
+}
+
+/// ⭐ 📌 "Favoritar" e "Fixar" — só o campo que veio muda.
+pub fn marcar(id_na_meta: &str, favorita: Option<bool>, fixada: Option<bool>) -> PedidoJson {
+    let mut corpo = json!({});
+    if let Some(favorita) = favorita {
+        corpo["favorita"] = json!(favorita);
+    }
+    if let Some(fixada) = fixada {
+        corpo["fixada"] = json!(fixada);
+    }
+    PedidoJson::gravar(
+        "marcada",
+        "PATCH",
+        rota_da_mensagem(id_na_meta, "marcas"),
+        corpo,
+    )
+}
+
+/// ✏️ "Editar": a correção que cita a mensagem errada.
+pub fn corrigir(id_na_meta: &str, texto: &str) -> PedidoJson {
+    PedidoJson::gravar(
+        "corrigida",
+        "POST",
+        rota_da_mensagem(id_na_meta, "correcao"),
+        json!({ "texto": texto }),
+    )
+}
+
+/// ↪️ "Encaminhar" para as conversas escolhidas.
+pub fn encaminhar(id_na_meta: &str, para: &[String]) -> PedidoJson {
+    PedidoJson::gravar(
+        "encaminhada",
+        "POST",
+        rota_da_mensagem(id_na_meta, "encaminhar"),
+        json!({ "para": para }),
+    )
+}
+
+/// 🗑️ "Apagar" — do nosso histórico; o cliente continua com ela.
+pub fn apagar_mensagem(id_na_meta: &str) -> PedidoJson {
+    PedidoJson {
+        rotulo: "mensagem-apagada",
+        metodo: "DELETE",
+        caminho: format!(
+            "/whatsapp/messages/by-whatsapp-id/{}",
+            codificar(id_na_meta)
+        ),
         corpo: None,
     }
 }
@@ -517,5 +597,55 @@ mod testes {
         assert!(texto.contains("name=\"caption\"\r\n\r\nsegue"));
         assert!(texto.contains("filename=\"orcamento.pdf\""));
         assert!(texto.contains("%PDF"));
+    }
+
+    #[test]
+    fn os_gestos_do_balao_vao_as_rotas_do_site_pelo_wamid() {
+        let w = "wamid.HB+/=";
+        let base = "/whatsapp/messages/by-whatsapp-id/wamid.HB%2B%2F%3D";
+
+        let r = reagir(w, "👍");
+        assert_eq!(
+            (r.metodo, r.caminho.as_str()),
+            ("POST", &*format!("{base}/reacao"))
+        );
+        assert_eq!(r.corpo, Some(json!({ "emoji": "👍" })));
+
+        let m = marcar(w, None, Some(true));
+        assert_eq!(
+            (m.metodo, m.caminho.as_str()),
+            ("PATCH", &*format!("{base}/marcas"))
+        );
+        assert_eq!(m.corpo, Some(json!({ "fixada": true })));
+
+        let c = corrigir(w, "Boa tarde!");
+        assert_eq!(c.caminho, format!("{base}/correcao"));
+        assert_eq!(c.corpo, Some(json!({ "texto": "Boa tarde!" })));
+
+        let e = encaminhar(w, &["5554".to_string()]);
+        assert_eq!(e.caminho, format!("{base}/encaminhar"));
+        assert_eq!(e.corpo, Some(json!({ "para": ["5554"] })));
+
+        let a = apagar_mensagem(w);
+        assert_eq!((a.metodo, a.caminho.as_str()), ("DELETE", base));
+    }
+
+    #[test]
+    fn responder_so_cita_no_whatsapp() {
+        let wa = Chave::nova(Canal::WhatsApp, "5554");
+        let p = enviar_respondendo(&wa, "isso", Some("wamid.A"));
+        assert_eq!(
+            p.corpo,
+            Some(json!({ "contact_id": "5554", "message": "isso", "responder_a": "wamid.A" }))
+        );
+        assert_eq!(
+            enviar(&wa, "isso").corpo,
+            Some(json!({ "contact_id": "5554", "message": "isso" }))
+        );
+        let tg = Chave::nova(Canal::Telegram, "99");
+        assert_eq!(
+            enviar_respondendo(&tg, "isso", Some("x")).corpo,
+            Some(json!({ "contato": "99", "texto": "isso" }))
+        );
     }
 }

@@ -16,18 +16,20 @@ use gpui_kit::component::input::{Input, Textarea};
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::marker::{Marker, MarkerContent, MarkerVariant};
 use gpui_kit::component::menu::DropdownMenu as _;
+use gpui_kit::component::menu::{ContextMenuExt as _, PopupMenu, PopupMenuItem};
 use gpui_kit::component::message::{Message, MessageAlignment, MessageContent, MessageFooter};
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::tag::Tag;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon, Sizable as _};
 use gpui_kit::{
-    div, prelude::*, px, rgb, AnyElement, Context, FontWeight, Hsla, SharedString, Window,
+    div, prelude::*, px, rgb, AnyElement, Context, FontWeight, Hsla, MouseButton, SharedString,
+    WeakEntity, Window,
 };
 
 use super::formatacao;
 use super::midia::{self, ComoEnviar, Midia, TipoDeMidia};
 use super::modelo::{self, Canal, Conversa, FiltroDeCanal, Mensagem, Status, Urgencia};
-use super::tela::{Anexo, Chatbot, Dialogo, Miniatura, Pendente};
+use super::tela::{Anexo, Chatbot, Dialogo, Miniatura, ModoDoCompositor, Pendente};
 use super::EnviarMensagem;
 use crate::estilo;
 use crate::recursos::Icone;
@@ -130,6 +132,11 @@ impl Render for Chatbot {
             self.compositor
                 .update(cx, |campo, cx| campo.trocar_valor("", window, cx));
         }
+        // ✏️ A correção recusada volta ao campo como foi escrita.
+        if let Some(texto) = self.por_no_compositor.take() {
+            self.compositor
+                .update(cx, |campo, cx| campo.trocar_valor(&texto, window, cx));
+        }
         let tema = cx.theme();
         let (fundo, texto) = (tema.background, tema.foreground);
         // 🪟 Os diálogos são o `Dialog` do gpui-kit (`crate::dialogo`), com a
@@ -138,6 +145,7 @@ impl Render for Chatbot {
         let largura = match &aberto {
             Some(Dialogo::Urgencias) => 720.,
             Some(Dialogo::QuemAssume(_)) => 384.,
+            Some(Dialogo::Encaminhar { .. }) => 480.,
             _ => 440.,
         };
         let conteudo = aberto.map(|d| self.dialogo_aberto(d, cx));
@@ -827,6 +835,8 @@ impl Chatbot {
         }
         let agora = chrono::Utc::now();
         let canal = conversa.chave.canal;
+        let nome = conversa.nome.clone();
+        let fixadas: Vec<Mensagem> = modelo::fixadas(&mensagens).into_iter().cloned().collect();
 
         let mut linhas: Vec<AnyElement> = Vec::new();
         if escondidas > 0 && !self.tudo {
@@ -867,7 +877,15 @@ impl Chatbot {
                 }
             }
             let midia = self.midia_do_balao(mensagem, cx);
-            linhas.push(balao(mensagem, canal, midia, (muted, apagado)).into_any_element());
+            linhas.push(self.linha_do_balao(
+                mensagem,
+                &mensagens,
+                &nome,
+                canal,
+                midia,
+                (muted, apagado),
+                cx,
+            ));
             anterior = Some(mensagem);
         }
         for pendente in pendentes {
@@ -876,6 +894,7 @@ impl Chatbot {
 
         let respostas = self.respostas_abertas.then(|| self.painel_de_respostas(cx));
 
+        let tela = cx.entity().downgrade();
         div()
             .relative()
             .flex_1()
@@ -883,15 +902,48 @@ impl Chatbot {
             .bg(muted.opacity(0.3))
             .child(
                 v_flex()
-                    .id("chatbot-historico")
                     .size_full()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.rolagem)
-                    .p(px(12.))
-                    .gap(px(4.))
-                    .children(linhas),
+                    .children(self.faixa_das_fixadas(&fixadas, cx))
+                    .child(
+                        v_flex()
+                            .id("chatbot-historico")
+                            .flex_1()
+                            .min_h(px(0.))
+                            .w_full()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.rolagem)
+                            .p(px(12.))
+                            .gap(px(4.))
+                            .children(linhas)
+                            // 💬 **Um menu para o histórico inteiro**, como o da
+                            // tira da Revelação: o balão do botão direito anota
+                            // quem foi; o menu é montado depois do evento, e lê.
+                            // No vão entre dois, não há alvo e o menu não abre.
+                            .context_menu(move |menu, window, cx| {
+                                let menu = match window.focused(cx) {
+                                    Some(antes) => menu.action_context(antes),
+                                    None => menu,
+                                };
+                                let Some(mensagem) = tela
+                                    .update(cx, |tela, _cx| tela.mensagem_do_menu())
+                                    .ok()
+                                    .flatten()
+                                else {
+                                    return menu;
+                                };
+                                montar_o_menu_do_balao(menu, mensagem, tela.clone(), window, cx)
+                            }),
+                    ),
             )
             .children(respostas)
+            .children(self.menu_de_reacoes.as_ref().map(|(menu, ponto, _)| {
+                gpui_kit::deferred(gpui_kit::anchored().position(*ponto).child(menu.clone()))
+                    .with_priority(2)
+            }))
+            .children(self.menu_do_roteiro.as_ref().map(|(menu, ponto, _)| {
+                gpui_kit::deferred(gpui_kit::anchored().position(*ponto).child(menu.clone()))
+                    .with_priority(1)
+            }))
             .when(self.carregando_historico, |d| {
                 d.child(
                     div()
@@ -907,6 +959,140 @@ impl Chatbot {
                         .child("Carregando…"),
                 )
             })
+    }
+
+    /// O balão com o que o menu precisa: o botão direito anota o alvo, e na
+    /// seleção o clique marca e desmarca (o círculo à esquerda, como no
+    /// WhatsApp).
+    #[allow(clippy::too_many_arguments)]
+    fn linha_do_balao(
+        &self,
+        mensagem: &Mensagem,
+        todas: &[Mensagem],
+        nome: &str,
+        canal: Canal,
+        midia: Option<AnyElement>,
+        cores: (Hsla, Hsla),
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let citada = mensagem
+            .gestos
+            .as_ref()
+            .and_then(|g| g.resposta_a.as_deref())
+            .map(|wamid| todas.iter().find(|m| m.id_na_meta() == Some(wamid)));
+        let selecionando = self.selecao.is_some();
+        let selecionada = self
+            .selecao
+            .as_ref()
+            .is_some_and(|s| s.contains(&mensagem.id));
+        let (id_direito, id_clique) = (mensagem.id.clone(), mensagem.id.clone());
+        let tema = cx.theme();
+        let (realce, borda, fundo) = (tema.accent, tema.border, tema.background);
+        h_flex()
+            .id(SharedString::from(format!("chatbot-linha-{}", mensagem.id)))
+            .debug_selector({
+                let id = mensagem.id.clone();
+                move || format!("chatbot-balao-{id}")
+            })
+            .w_full()
+            .gap(px(8.))
+            .items_center()
+            .rounded(px(6.))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |tela, evento: &gpui_kit::MouseDownEvent, _, _| {
+                    tela.alvo_do_menu = Some(id_direito.clone());
+                    tela.ponto_do_menu = evento.position;
+                }),
+            )
+            .when(selecionando, |d| {
+                d.cursor_pointer()
+                    .when(selecionada, |d| d.bg(realce.opacity(0.5)))
+                    .on_click(
+                        cx.listener(move |tela, _, _, cx| tela.alternar_selecao(&id_clique, cx)),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .size(px(18.))
+                            .rounded_full()
+                            .border_1()
+                            .border_color(if selecionada { verde() } else { borda })
+                            .bg(if selecionada { verde() } else { fundo })
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .when(selecionada, |d| {
+                                d.child(
+                                    Icon::new(Icone::Check)
+                                        .size(px(12.))
+                                        .text_color(gpui_kit::white()),
+                                )
+                            }),
+                    )
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .child(balao(mensagem, canal, midia, cores, citada, nome)),
+            )
+            .into_any_element()
+    }
+
+    /// 📌 As fixadas no alto do histórico, a mais recente primeiro. O clique
+    /// passa para a próxima, como no WhatsApp; o alfinete riscado desafixa.
+    fn faixa_das_fixadas(
+        &self,
+        fixadas: &[Mensagem],
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if fixadas.is_empty() {
+            return None;
+        }
+        let tema = cx.theme();
+        let (borda, fundo, apagado) = (tema.border, tema.background, tema.muted_foreground);
+        let n = fixadas.len();
+        let atual = fixadas[self.indice_da_fixada % n].clone();
+        let posicao = (n > 1).then(|| format!("{}/{} ", self.indice_da_fixada % n + 1, n));
+        Some(
+            h_flex()
+                .flex_none()
+                .px(px(12.))
+                .py(px(6.))
+                .gap(px(8.))
+                .items_center()
+                .border_b_1()
+                .border_color(borda)
+                .bg(fundo)
+                .text_xs()
+                .child(Icon::new(Icone::Pin).size(px(14.)).text_color(apagado))
+                .child(
+                    h_flex()
+                        .gap(px(4.))
+                        .id("chatbot-fixada")
+                        .flex_1()
+                        .min_w(px(0.))
+                        .truncate()
+                        .cursor_pointer()
+                        .on_click(cx.listener(|tela, _, _, cx| tela.proxima_fixada(cx)))
+                        .when_some(posicao, |d, posicao| {
+                            d.child(div().text_color(apagado).child(posicao))
+                        })
+                        .child(div().min_w(px(0.)).truncate().child(atual.texto.clone())),
+                )
+                .child(
+                    marcado(
+                        estilo::botao_icone_padrao("chatbot-desafixar", Icone::PinOff),
+                        "chatbot-desafixar",
+                    )
+                    .tooltip("Desafixar")
+                    .on_click(cx.listener(move |tela, _, _, cx| {
+                        tela.marcar(std::slice::from_ref(&atual), None, Some(false), cx)
+                    })),
+                )
+                .into_any_element(),
+        )
     }
 
     /// 📎 A foto, o documento ou o áudio de um balão.
@@ -1410,11 +1596,17 @@ impl Chatbot {
                 .child(div().flex_1().child(motivo))
                 .into_any_element();
         }
+        if self.selecao.is_some() {
+            return self.barra_de_selecao(cx).into_any_element();
+        }
         let vazio = self.compositor.read(cx).value().trim().is_empty();
         // 📎 Só o WhatsApp anexa: é o único canal com rota de mídia na API. O
         // clipe mora no compositor, que some inteiro com a janela de 24 h
         // fechada (o `motivo` acima) — anexo é mensagem de sessão como o texto.
-        let pode_anexar = conversa.chave.canal == Canal::WhatsApp;
+        // Na correção, só texto: ela cita a original.
+        let pode_anexar = conversa.chave.canal == Canal::WhatsApp
+            && !matches!(self.modo, Some(ModoDoCompositor::Corrigir(_)));
+        let faixa_do_modo = self.faixa_do_modo(&conversa.nome, cx);
         let tem_anexo = !self.anexos.is_empty();
         let linhas: Vec<AnyElement> = self
             .anexos
@@ -1440,6 +1632,7 @@ impl Chatbot {
                         .children(linhas),
                 )
             })
+            .children(faixa_do_modo)
             .when_some(decisao.aviso, |d, aviso| {
                 d.child(
                     div()
@@ -1457,6 +1650,15 @@ impl Chatbot {
                     .on_action(cx.listener(|tela, _: &EnviarMensagem, window, cx| {
                         tela.enviar_o_escrito(window, cx)
                     }))
+                    // Esc desiste de responder ou de corrigir, como o X da faixa.
+                    .on_key_down(cx.listener(
+                        |tela, evento: &gpui_kit::KeyDownEvent, window, cx| {
+                            if evento.keystroke.key == "escape" && tela.modo.is_some() {
+                                tela.cancelar_modo(window, cx);
+                                cx.stop_propagation();
+                            }
+                        },
+                    ))
                     .p(px(8.))
                     .gap(px(8.))
                     .items_end()
@@ -1502,10 +1704,196 @@ impl Chatbot {
             .into_any_element()
     }
 
+    /// ↩️ ✏️ A mensagem respondida ou corrigida, em cima do campo.
+    fn faixa_do_modo(&self, nome: &str, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let modo = self.modo.as_ref()?;
+        let apagado = cx.theme().muted_foreground;
+        let (icone, titulo) = match modo {
+            ModoDoCompositor::Responder(m) => (
+                Icone::Reply,
+                format!("Respondendo a {}", if m.saida { "você" } else { nome }),
+            ),
+            ModoDoCompositor::Corrigir(_) => (Icone::Pencil, "Editar mensagem".to_string()),
+        };
+        let corrigindo = matches!(modo, ModoDoCompositor::Corrigir(_));
+        Some(
+            h_flex()
+                .px(px(12.))
+                .py(px(6.))
+                .gap(px(8.))
+                .items_start()
+                .bg(cx.theme().muted.opacity(0.4))
+                .child(Icon::new(icone).size(px(16.)).text_color(verde()))
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .pl(px(8.))
+                        .border_l_4()
+                        .border_color(verde())
+                        .text_xs()
+                        .child(div().font_weight(FontWeight::SEMIBOLD).child(titulo))
+                        .child(
+                            div()
+                                .text_color(apagado)
+                                .line_clamp(2)
+                                .child(modo.mensagem().texto.clone()),
+                        )
+                        // 🔑 A Cloud API não edita o que saiu: dizer na hora é o
+                        // que impede alguém de achar que o cliente viu o texto
+                        // trocar.
+                        .when(corrigindo, |d| {
+                            d.child(div().text_color(ambar()).child(modelo::AVISO_DA_CORRECAO))
+                        }),
+                )
+                .child(
+                    marcado(
+                        estilo::botao_icone_padrao("chatbot-cancelar-modo", Icone::JanelaFechar),
+                        "chatbot-cancelar-modo",
+                    )
+                    .tooltip("Cancelar (Esc)")
+                    .on_click(cx.listener(|tela, _, window, cx| tela.cancelar_modo(window, cx))),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// ☑️ A barra que toma o lugar do campo enquanto há seleção.
+    fn barra_de_selecao(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let selecionadas = self.selecionadas();
+        let n = selecionadas.len();
+        let da_meta = n > 0 && selecionadas.iter().all(|m| m.gestos.is_some());
+        let apagaveis = n > 0 && selecionadas.iter().all(Mensagem::pode_apagar);
+        let todas_favoritas = n > 0
+            && selecionadas
+                .iter()
+                .all(|m| m.gestos.as_ref().is_some_and(|g| g.favorita));
+        let alguma_apagada = selecionadas.iter().any(Mensagem::apagada);
+        let tema = cx.theme();
+        let (borda, perigo) = (tema.border, tema.danger);
+        let (para_copiar, para_marcar, para_encaminhar, para_apagar) = (
+            selecionadas.clone(),
+            selecionadas.clone(),
+            selecionadas.clone(),
+            selecionadas,
+        );
+        h_flex()
+            .flex_none()
+            .min_h(px(56.))
+            .px(px(8.))
+            .gap(px(4.))
+            .items_center()
+            .border_t_1()
+            .border_color(borda)
+            .child(
+                marcado(
+                    estilo::botao_icone_padrao("selecao-sair", Icone::JanelaFechar),
+                    "selecao-sair",
+                )
+                .tooltip("Sair da seleção")
+                .on_click(cx.listener(|tela, _, _, cx| tela.sair_da_selecao(cx))),
+            )
+            .child(div().flex_1().text_sm().child(match n {
+                0 => "Clique nas mensagens".to_string(),
+                1 => "1 selecionada".to_string(),
+                n => format!("{n} selecionadas"),
+            }))
+            .child(estilo::desligado(
+                marcado(
+                    estilo::botao_icone_padrao("selecao-copiar", Icone::Copy),
+                    "selecao-copiar",
+                )
+                .tooltip("Copiar")
+                .on_click(cx.listener(move |tela, _, _, cx| tela.copiar(&para_copiar, cx))),
+                n == 0,
+            ))
+            .when(da_meta, |d| {
+                d.child(
+                    marcado(
+                        estilo::botao_icone_padrao(
+                            "selecao-favoritar",
+                            if todas_favoritas {
+                                Icone::StarOff
+                            } else {
+                                Icone::Star
+                            },
+                        ),
+                        "selecao-favoritar",
+                    )
+                    .tooltip(if todas_favoritas {
+                        "Desfavoritar"
+                    } else {
+                        "Favoritar"
+                    })
+                    .on_click(cx.listener(move |tela, _, _, cx| {
+                        tela.marcar(&para_marcar, Some(!todas_favoritas), None, cx)
+                    })),
+                )
+                .child(estilo::desligado(
+                    marcado(
+                        estilo::botao_icone_padrao("selecao-encaminhar", Icone::Forward),
+                        "selecao-encaminhar",
+                    )
+                    .tooltip("Encaminhar")
+                    .on_click(cx.listener(move |tela, _, window, cx| {
+                        tela.abrir_encaminhar(para_encaminhar.clone(), window, cx)
+                    })),
+                    alguma_apagada,
+                ))
+            })
+            .when(apagaveis, |d| {
+                d.child(
+                    marcado(
+                        estilo::botao_icone_padrao("selecao-apagar", Icone::Trash2),
+                        "selecao-apagar",
+                    )
+                    .text_color(perigo)
+                    .tooltip("Apagar do histórico")
+                    .on_click(cx.listener(move |tela, _, window, cx| {
+                        tela.pedir_apagar(para_apagar.clone(), window, cx)
+                    })),
+                )
+            })
+    }
+
     // ── Diálogos ───────────────────────────────────────────────────────────
 
     fn dialogo_aberto(&self, dialogo: Dialogo, cx: &mut Context<Self>) -> AnyElement {
         let caixa = match dialogo {
+            Dialogo::Dados(mensagem) => self.dialogo_de_dados(&mensagem, cx).into_any_element(),
+            Dialogo::Encaminhar {
+                mensagens,
+                escolhidos,
+            } => self
+                .dialogo_de_encaminhar(mensagens.len(), &escolhidos, cx)
+                .into_any_element(),
+            Dialogo::Apagar(mensagens) => estilo::conteudo_do_dialogo()
+                .child(estilo::cabecalho_do_dialogo(
+                    if mensagens.len() == 1 {
+                        "Apagar esta mensagem do histórico?".to_string()
+                    } else {
+                        format!("Apagar estas {} mensagens do histórico?", mensagens.len())
+                    },
+                    "O cliente continua com elas: o WhatsApp não deixa apagar o que já foi entregue.",
+                    None,
+                    cx,
+                ))
+                .child(
+                    estilo::rodape_do_dialogo()
+                        .child(
+                            marcado(estilo::botao_contorno("apagar-cancelar", cx), "apagar-cancelar")
+                                .child("Cancelar")
+                                .on_click(cx.listener(|tela, _, window, cx| tela.fechar_dialogo(window, cx))),
+                        )
+                        .child(
+                            marcado(estilo::botao_perigo("apagar-confirmar", cx), "apagar-confirmar")
+                                .child("Apagar")
+                                .on_click(cx.listener(|tela, _, window, cx| {
+                                    tela.apagar_confirmado(window, cx)
+                                })),
+                        ),
+                )
+                .into_any_element(),
             Dialogo::Urgencias => self.dialogo_de_urgencias(cx).into_any_element(),
             Dialogo::Resolver(urgencia) => self.dialogo_de_resolucao(&urgencia, cx).into_any_element(),
             Dialogo::Descartar(_) => estilo::conteudo_do_dialogo()
@@ -1826,6 +2214,386 @@ impl Chatbot {
 /// link passa a abrir com um clique em todos, que antes era texto morto aqui.
 ///
 /// `cores` é (o fundo do código, a cor da citação).
+impl Chatbot {
+    /// ℹ️ "Dados": o que se sabe da mensagem, sem nada que a tela já não guarde.
+    fn dialogo_de_dados(&self, mensagem: &Mensagem, cx: &mut Context<Self>) -> impl IntoElement {
+        let apagado = cx.theme().muted_foreground;
+        let nome = self.nome_da_aberta();
+        let data_hora = |quando: Option<chrono::DateTime<chrono::Utc>>| {
+            quando.map(|q| {
+                let local = q.with_timezone(&modelo::fuso_do_estudio());
+                format!("{} às {}", local.format("%d/%m/%Y"), modelo::hora(q))
+            })
+        };
+        let g = mensagem.gestos.clone().unwrap_or_default();
+        let situacao = g.entrega.as_deref().map(|e| match e {
+            "sent" => "Enviada",
+            "delivered" => "Entregue",
+            "read" => "Lida",
+            "failed" => "Não entregue",
+            _ => "Recebida",
+        });
+        let linhas: Vec<(&str, Option<String>)> = vec![
+            (
+                "De",
+                Some(if mensagem.saida { "Você".into() } else { nome }),
+            ),
+            (
+                if mensagem.saida {
+                    "Enviada em"
+                } else {
+                    "Recebida em"
+                },
+                data_hora(mensagem.quando),
+            ),
+            ("Situação", situacao.map(str::to_string)),
+            ("Automática", mensagem.rotulo_da_automacao()),
+            (
+                "Texto antes da edição",
+                g.editada.then(|| g.original.clone()).flatten(),
+            ),
+            ("Apagada pelo cliente em", data_hora(g.apagada_em)),
+            ("Fixada em", data_hora(g.fixada_em)),
+            ("Favorita", g.favorita.then(|| "sim".to_string())),
+            ("Sua reação", g.reacao_nossa.clone()),
+            ("Reação do cliente", g.reacao_do_cliente.clone()),
+            (
+                "Id no canal",
+                Some(if g.id_na_meta.is_empty() {
+                    mensagem.id.clone()
+                } else {
+                    g.id_na_meta.clone()
+                }),
+            ),
+        ];
+        estilo::conteudo_do_dialogo()
+            .child(estilo::cabecalho_do_dialogo(
+                "Dados da mensagem",
+                mensagem.texto.clone(),
+                None,
+                cx,
+            ))
+            .child(
+                v_flex().gap(px(6.)).text_sm().children(
+                    linhas
+                        .into_iter()
+                        .filter_map(|(rotulo, valor)| valor.map(|v| (rotulo, v)))
+                        .map(|(rotulo, valor)| {
+                            h_flex()
+                                .gap(px(12.))
+                                .items_start()
+                                .child(
+                                    div()
+                                        .w(px(150.))
+                                        .flex_none()
+                                        .text_color(apagado)
+                                        .child(rotulo),
+                                )
+                                .child(div().flex_1().min_w(px(0.)).child(valor))
+                        }),
+                ),
+            )
+            .child(
+                estilo::rodape_do_dialogo().child(
+                    marcado(estilo::botao_contorno("dados-fechar", cx), "dados-fechar")
+                        .child("Fechar")
+                        .on_click(
+                            cx.listener(|tela, _, window, cx| tela.fechar_dialogo(window, cx)),
+                        ),
+                ),
+            )
+    }
+
+    /// ↪️ "Encaminhar": as conversas de WhatsApp da página, até cinco.
+    fn dialogo_de_encaminhar(
+        &self,
+        n: usize,
+        escolhidos: &[String],
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let tema = cx.theme();
+        let (borda, apagado, realce, fundo) = (
+            tema.border,
+            tema.muted_foreground,
+            tema.accent,
+            tema.background,
+        );
+        let linhas: Vec<AnyElement> = self
+            .destinos_de_encaminhamento()
+            .into_iter()
+            .map(|c| {
+                let escolhido = escolhidos.contains(&c.chave.id);
+                let contato = c.chave.id.clone();
+                h_flex()
+                    .id(SharedString::from(format!("encaminhar-{}", c.chave.id)))
+                    .debug_selector({
+                        let id = c.chave.id.clone();
+                        move || format!("encaminhar-{id}")
+                    })
+                    .px(px(12.))
+                    .py(px(8.))
+                    .gap(px(12.))
+                    .items_center()
+                    .cursor_pointer()
+                    .when(escolhido, |d| d.bg(realce.opacity(0.6)))
+                    .hover(|d| d.bg(realce.opacity(0.4)))
+                    .on_click(
+                        cx.listener(move |tela, _, _, cx| tela.alternar_destino(&contato, cx)),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .size(px(18.))
+                            .rounded_full()
+                            .border_1()
+                            .border_color(if escolhido { verde() } else { borda })
+                            .bg(if escolhido { verde() } else { fundo })
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .when(escolhido, |d| {
+                                d.child(
+                                    Icon::new(Icone::Check)
+                                        .size(px(12.))
+                                        .text_color(gpui_kit::white()),
+                                )
+                            }),
+                    )
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .child(
+                                div()
+                                    .text_sm()
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .truncate()
+                                    .child(c.nome.clone()),
+                            )
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(apagado)
+                                    .child(modelo::formatar_whatsapp(&c.chave.id)),
+                            ),
+                    )
+                    .into_any_element()
+            })
+            .collect();
+        let vazio = linhas.is_empty();
+        estilo::conteudo_do_dialogo()
+            .child(estilo::cabecalho_do_dialogo(
+                if n == 1 {
+                    "Encaminhar mensagem".to_string()
+                } else {
+                    format!("Encaminhar {n} mensagens")
+                },
+                "Sai como mensagem nova, sem o selo de encaminhada (a Meta não tem esse selo). Só chega a quem escreveu nas últimas 24 horas.",
+                None,
+                cx,
+            ))
+            .child(
+                v_flex()
+                    .id("encaminhar-lista")
+                    .max_h(px(288.))
+                    .overflow_y_scroll()
+                    .rounded(px(6.))
+                    .border_1()
+                    .border_color(borda)
+                    .when(vazio, |d| {
+                        d.child(
+                            div()
+                                .p(px(16.))
+                                .text_sm()
+                                .text_color(apagado)
+                                .child("Nenhuma conversa de WhatsApp na lista."),
+                        )
+                    })
+                    .children(linhas),
+            )
+            .child(
+                estilo::rodape_do_dialogo()
+                    .child(
+                        marcado(estilo::botao_contorno("encaminhar-cancelar", cx), "encaminhar-cancelar")
+                            .child("Cancelar")
+                            .on_click(cx.listener(|tela, _, window, cx| tela.fechar_dialogo(window, cx))),
+                    )
+                    .child(estilo::desligado(
+                        marcado(estilo::botao_primario("encaminhar-confirmar", cx), "encaminhar-confirmar")
+                            .child(if escolhidos.is_empty() {
+                                "Encaminhar".to_string()
+                            } else {
+                                format!("Encaminhar ({})", escolhidos.len())
+                            })
+                            .on_click(cx.listener(|tela, _, window, cx| tela.encaminhar_agora(window, cx))),
+                        escolhidos.is_empty(),
+                    )),
+            )
+    }
+}
+
+/// 💬 O menu do balão, com as opções do WhatsApp na ordem dele (dono,
+/// 2026-10-21) — as mesmas do site (`menu-do-balao.tsx`). O que depende da
+/// Meta só aparece no WhatsApp; nos outros canais ficam Copiar, Dados e a
+/// seleção.
+/// 👍 As reações do WhatsApp, a de agora marcada; de novo nela, ou "Tirar a
+/// reação", tira.
+pub(crate) fn montar_as_reacoes(
+    mut menu: PopupMenu,
+    mensagem: Mensagem,
+    tela: WeakEntity<Chatbot>,
+) -> PopupMenu {
+    let nossa = mensagem
+        .gestos
+        .as_ref()
+        .and_then(|g| g.reacao_nossa.clone());
+    menu = menu.min_w(px(160.));
+    for emoji in modelo::REACOES {
+        let (tela, mensagem) = (tela.clone(), mensagem.clone());
+        menu = menu.item(
+            PopupMenuItem::new(emoji)
+                .checked(nossa.as_deref() == Some(emoji))
+                .on_click(move |_, _window, cx| {
+                    let _ = tela.update(cx, |t, cx| t.reagir(&mensagem, emoji, cx));
+                }),
+        );
+    }
+    if let Some(atual) = nossa {
+        menu = menu
+            .separator()
+            .item(
+                PopupMenuItem::new("Tirar a reação").on_click(move |_, _window, cx| {
+                    let _ = tela.update(cx, |t, cx| t.reagir(&mensagem, &atual, cx));
+                }),
+            );
+    }
+    menu
+}
+
+pub(crate) fn montar_o_menu_do_balao(
+    menu: PopupMenu,
+    mensagem: Mensagem,
+    tela: WeakEntity<Chatbot>,
+    _window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
+    type Gesto = fn(&mut Chatbot, Mensagem, &mut Window, &mut Context<Chatbot>);
+    // Os gestos que mexem no foco (Responder, Editar) e os que abrem diálogo
+    // rodam depois de o menu fechar: é ele quem devolve o foco ao fechar.
+    let com = |gesto: Gesto| {
+        let (tela, mensagem) = (tela.clone(), mensagem.clone());
+        move |_: &gpui_kit::ClickEvent, window: &mut Window, cx: &mut gpui_kit::App| {
+            let (tela, mensagem) = (tela.clone(), mensagem.clone());
+            window.defer(cx, move |window, cx| {
+                let _ = tela.update(cx, |t, cx| gesto(t, mensagem, window, cx));
+            });
+        }
+    };
+    let gestos = mensagem.gestos.clone();
+    let da_meta = gestos.is_some();
+    let apagada = mensagem.apagada();
+    let favorita = gestos.as_ref().is_some_and(|g| g.favorita);
+    let fixada = gestos.as_ref().is_some_and(|g| g.fixada_em.is_some());
+    let perigo = cx.theme().danger;
+
+    let mut menu = menu.min_w(px(220.));
+    if da_meta && !apagada {
+        menu = menu.item(
+            estilo::item_de_menu_com_icone("balao-responder", Icone::Reply, "Responder", None)
+                .on_click(com(|t, m, window, cx| t.responder(m, window, cx))),
+        );
+        // 👍 Um item como os outros: o submenu do kit, com ícone, abre uma
+        // coluna de ícone vazia em todos os itens e desalinha o menu. As
+        // reações abrem num segundo menu, no mesmo ponto — como no WhatsApp.
+        menu = menu.item(
+            estilo::item_de_menu_com_icone("balao-reagir", Icone::SmilePlus, "Reagir", None)
+                .on_click(com(|t, m, window, cx| t.abrir_reacoes(m, window, cx))),
+        );
+    }
+    if da_meta {
+        let (tela_f, mensagem_f) = (tela.clone(), mensagem.clone());
+        menu = menu.item(
+            estilo::item_de_menu_com_icone(
+                "balao-favoritar",
+                if favorita {
+                    Icone::StarOff
+                } else {
+                    Icone::Star
+                },
+                if favorita {
+                    "Desfavoritar"
+                } else {
+                    "Favoritar"
+                },
+                None,
+            )
+            .on_click(move |_, _window, cx| {
+                let _ = tela_f.update(cx, |t, cx| {
+                    t.marcar(std::slice::from_ref(&mensagem_f), Some(!favorita), None, cx)
+                });
+            }),
+        );
+        let (tela_x, mensagem_x) = (tela.clone(), mensagem.clone());
+        menu = menu.item(
+            estilo::item_de_menu_com_icone(
+                "balao-fixar",
+                if fixada { Icone::PinOff } else { Icone::Pin },
+                if fixada { "Desafixar" } else { "Fixar" },
+                None,
+            )
+            .on_click(move |_, _window, cx| {
+                let _ = tela_x.update(cx, |t, cx| {
+                    t.marcar(std::slice::from_ref(&mensagem_x), None, Some(!fixada), cx)
+                });
+            }),
+        );
+    }
+    if da_meta && !apagada {
+        menu = menu.item(
+            estilo::item_de_menu_com_icone("balao-encaminhar", Icone::Forward, "Encaminhar", None)
+                .on_click(com(|t, m, window, cx| {
+                    t.abrir_encaminhar(vec![m], window, cx)
+                })),
+        );
+    }
+    let (tela_c, mensagem_c) = (tela.clone(), mensagem.clone());
+    menu = menu.item(
+        estilo::item_de_menu_com_icone("balao-copiar", Icone::Copy, "Copiar", None).on_click(
+            move |_, _window, cx| {
+                let _ = tela_c.update(cx, |t, cx| t.copiar(std::slice::from_ref(&mensagem_c), cx));
+            },
+        ),
+    );
+    if mensagem.pode_corrigir() {
+        menu = menu.item(
+            estilo::item_de_menu_com_icone("balao-editar", Icone::Pencil, "Editar", None)
+                .on_click(com(|t, m, window, cx| t.corrigir(m, window, cx))),
+        );
+    }
+    menu = menu.item(
+        estilo::item_de_menu_com_icone("balao-dados", Icone::Info, "Dados", None)
+            .on_click(com(|t, m, window, cx| t.abrir_dados(m, window, cx))),
+    );
+    if mensagem.pode_apagar() {
+        menu = menu.separator().item(
+            estilo::item_de_menu_com_icone("balao-apagar", Icone::Trash2, "Apagar", Some(perigo))
+                .on_click(com(|t, m, window, cx| t.pedir_apagar(vec![m], window, cx))),
+        );
+    }
+    let (tela_s, mensagem_s) = (tela.clone(), mensagem.clone());
+    menu.separator().item(
+        estilo::item_de_menu_com_icone(
+            "balao-selecionar",
+            Icone::ListChecks,
+            "Selecionar mensagens",
+            None,
+        )
+        .on_click(move |_, _window, cx| {
+            let _ = tela_s.update(cx, |t, cx| t.selecionar(&mensagem_s, cx));
+        }),
+    )
+}
+
 fn texto_formatado(id: String, texto: &str, canal: Canal, cores: (Hsla, Hsla)) -> AnyElement {
     let formatado = formatacao::formatar(texto, canal == Canal::WhatsApp);
     if formatado.trechos.is_empty() {
@@ -1888,10 +2656,50 @@ fn balao(
     canal: Canal,
     midia: Option<AnyElement>,
     cores: (Hsla, Hsla),
+    citada: Option<Option<&Mensagem>>,
+    nome_do_contato: &str,
 ) -> impl IntoElement {
     let hora = mensagem.quando.map(modelo::hora).unwrap_or_default();
     let automacao = mensagem.rotulo_da_automacao();
     let saida = mensagem.saida;
+    let gestos = mensagem.gestos.clone().unwrap_or_default();
+    let apagada = mensagem.apagada();
+    let reacoes: Vec<String> = [
+        gestos.reacao_do_cliente.clone(),
+        gestos.reacao_nossa.clone(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    // ↩️ A citada, em cima do texto — a de quem respondeu, como o WhatsApp
+    // desenha. Fora do trecho carregado, diz isso.
+    let citacao = citada.map(|citada| {
+        let (autor, texto) = match citada {
+            Some(c) => (
+                if c.saida {
+                    "Você".to_string()
+                } else {
+                    nome_do_contato.to_string()
+                },
+                c.texto.clone(),
+            ),
+            None => (
+                "Mensagem anterior".to_string(),
+                "fora do trecho carregado".to_string(),
+            ),
+        };
+        v_flex()
+            .mb(px(4.))
+            .px(px(8.))
+            .py(px(4.))
+            .rounded(px(6.))
+            .border_l_4()
+            .border_color(verde())
+            .bg(cores.0.opacity(0.6))
+            .text_xs()
+            .child(div().font_weight(FontWeight::SEMIBOLD).child(autor))
+            .child(div().text_color(cores.1).line_clamp(2).child(texto))
+    });
     // 💬 A `Message` do gpui-kit: o `Bubble` com o texto e, no rodapé da
     // mensagem, a hora (e o selo de automática). O do estúdio vai à direita,
     // tingido com a cor do canal; o do cliente, à esquerda, de contorno.
@@ -1913,6 +2721,20 @@ fn balao(
                         BubbleContent::new()
                             .when(saida, |c| c.bg(cor_do_canal(canal).opacity(0.15))),
                     )
+                    .when_some(citacao, |b, citacao| b.child(citacao))
+                    // 🚫 O cliente apagou no telefone dele. A linha fica — quem
+                    // atende precisa saber o que foi dito.
+                    .when(apagada, |b| {
+                        b.child(
+                            h_flex()
+                                .gap(px(4.))
+                                .text_xs()
+                                .italic()
+                                .text_color(cores.1)
+                                .child(Icon::new(Icone::Ban).size(px(12.)))
+                                .child("O cliente apagou esta mensagem"),
+                        )
+                    })
                     // 📎 A mídia vem antes do texto, como no WhatsApp. O texto
                     // só aparece quando é legenda de verdade: o rótulo
                     // ("📷 Foto") debaixo da própria foto é ruído.
@@ -1930,6 +2752,15 @@ fn balao(
         .footer(
             MessageFooter::new()
                 .when_some(automacao, |f, rotulo| f.child(div().italic().child(rotulo)))
-                .child(hora),
+                .when(gestos.favorita, |f| {
+                    f.child(Icon::new(Icone::Star).size(px(12.)))
+                })
+                .when(gestos.fixada_em.is_some(), |f| {
+                    f.child(Icon::new(Icone::Pin).size(px(12.)))
+                })
+                .when(gestos.editada, |f| f.child("editada"))
+                .child(hora)
+                // 👍 As reações: a do cliente e a nossa.
+                .when(!reacoes.is_empty(), |f| f.child(reacoes.join(" "))),
         )
 }

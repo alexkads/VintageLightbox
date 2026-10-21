@@ -336,6 +336,12 @@ impl Aplicativo {
                     tela.seguir_o_roteiro_da_tira(&gesto, window, cx)
                 });
             }
+            Passo::Balao(gesto) => {
+                let gesto = gesto.clone();
+                self.chatbot.update(cx, |tela, cx| {
+                    tela.seguir_o_roteiro_do_balao(&gesto, window, cx)
+                });
+            }
             Passo::SessaoTira(gesto) => {
                 let gesto = gesto.clone();
                 self.detalhe.update(cx, |tela, cx| {

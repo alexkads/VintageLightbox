@@ -220,6 +220,16 @@ pub enum Icone {
     Palette,
     Maximize,
     Menu,
+    // 💬 O menu do balão do chatbot (as opções do WhatsApp).
+    Reply,
+    SmilePlus,
+    Star,
+    StarOff,
+    Pin,
+    PinOff,
+    Forward,
+    ListChecks,
+    Ban,
 }
 
 impl Icone {
@@ -367,6 +377,15 @@ impl Icone {
         Icone::Palette,
         Icone::Maximize,
         Icone::Menu,
+        Icone::Reply,
+        Icone::SmilePlus,
+        Icone::Star,
+        Icone::StarOff,
+        Icone::Pin,
+        Icone::PinOff,
+        Icone::Forward,
+        Icone::ListChecks,
+        Icone::Ban,
     ];
 
     fn arquivo(self) -> &'static str {
@@ -514,6 +533,15 @@ impl Icone {
             Icone::Palette => "palette",
             Icone::Maximize => "maximize",
             Icone::Menu => "menu",
+            Icone::Reply => "reply",
+            Icone::SmilePlus => "smile-plus",
+            Icone::Star => "star",
+            Icone::StarOff => "star-off",
+            Icone::Pin => "pin",
+            Icone::PinOff => "pin-off",
+            Icone::Forward => "forward",
+            Icone::ListChecks => "list-checks",
+            Icone::Ban => "ban",
         }
     }
 }

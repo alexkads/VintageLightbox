@@ -124,6 +124,11 @@ pub enum Passo {
     /// mesmo menu do botão direito sobre a miniatura, com a seleção que o
     /// botão direito deixaria.
     SessaoTira(String),
+    /// 💬 `balao menu 2` · `balao fechar` · `balao estado` — o menu do botão
+    /// direito do balão N da conversa aberta (contando de 1), desenhado sobre
+    /// o histórico; `estado` diz numa linha o modo do campo, a seleção e o
+    /// diálogo aberto.
+    Balao(String),
     /// 🖌️ A janela do editor em camadas aberta (`tira editar N` a abre):
     /// `editor mouse apertar|arrastar|soltar fx fy` (fração da foto, evento
     /// **real** do AppKit na janela do editor) · `editor tecla <keyCode> [mods]`
@@ -315,6 +320,7 @@ pub fn ler_roteiro(texto: &str) -> Result<Vec<Passo>, String> {
             "pdf" => Passo::Pdf(argumentos.join(" ")),
             "tira" => Passo::Tira(argumentos.join(" ")),
             "sessao_tira" => Passo::SessaoTira(argumentos.join(" ")),
+            "balao" => Passo::Balao(argumentos.join(" ")),
             "editor" => Passo::Editor(argumentos.join(" ")),
             "guias" => Passo::Guias(argumentos.join(" ")),
             "importar_modal" => Passo::ImportarModal,

@@ -498,7 +498,46 @@ pub struct Mensagem {
     pub tipo_da_automacao: Option<String>,
     /// 📎 A foto, o documento ou o áudio da mensagem — só o WhatsApp tem.
     pub midia: Option<super::midia::Midia>,
+    /// 💬 O que o menu do balão deixou nela — só o WhatsApp tem as rotas.
+    pub gestos: Option<Gestos>,
 }
+
+/// 💬 O menu do balão — o botão direito com as opções do WhatsApp (dono,
+/// 2026-10-21: *"clicar no balão com o botão direito e utilizar aquelas mesmas
+/// opções do whatsapp nativo"*), como no site (`menu-do-balao.tsx`).
+///
+/// Responder (citação) e Reagir **chegam ao cliente**; Favoritar e Fixar são
+/// marcas **só do painel** (a Cloud API não tem nenhum dos dois). A Cloud API
+/// **não edita nem apaga** o que já saiu: "Editar" manda uma correção que cita
+/// a original, e "Apagar" tira só do histórico daqui.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Gestos {
+    /// O `wamid` — a chave de todas as rotas do menu.
+    pub id_na_meta: String,
+    /// O `wamid` da mensagem que esta cita ("Responder").
+    pub resposta_a: Option<String>,
+    pub reacao_nossa: Option<String>,
+    pub reacao_do_cliente: Option<String>,
+    pub favorita: bool,
+    pub fixada_em: Option<DateTime<Utc>>,
+    /// O cliente apagou no telefone dele; aqui a linha fica.
+    pub apagada_em: Option<DateTime<Utc>>,
+    /// O cliente editou (o webhook da Meta conta), e o texto de antes.
+    pub editada: bool,
+    pub original: Option<String>,
+    /// `sent`, `delivered`, `read`, `failed` ou `received`.
+    pub entrega: Option<String>,
+}
+
+/// As reações do WhatsApp, na ordem dele.
+pub const REACOES: [&str; 6] = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
+
+/// Até cinco conversas por encaminhamento — o teto do WhatsApp.
+pub const DESTINOS_POR_ENCAMINHAMENTO: usize = 5;
+
+/// O aviso da correção: a Cloud API não edita o que saiu.
+pub const AVISO_DA_CORRECAO: &str =
+    "O WhatsApp não deixa editar mensagem já enviada pela API: vai uma correção citando esta.";
 
 impl Mensagem {
     /// O texto que o balão mostra. Mídia sem legenda grava o rótulo
@@ -525,6 +564,63 @@ impl Mensagem {
             Some(outro) => format!("automática ({outro})"),
         })
     }
+
+    /// O `wamid`, quando a mensagem é do WhatsApp e tem os gestos da Meta.
+    pub fn id_na_meta(&self) -> Option<&str> {
+        self.gestos.as_ref().map(|g| g.id_na_meta.as_str())
+    }
+
+    pub fn apagada(&self) -> bool {
+        self.gestos.as_ref().is_some_and(|g| g.apagada_em.is_some())
+    }
+
+    /// "Editar" só vale para o que saiu daqui com texto — a correção é um
+    /// texto que cita a original. Foto sem legenda não tem o que corrigir.
+    pub fn pode_corrigir(&self) -> bool {
+        self.gestos.is_some()
+            && self.saida
+            && !self.apagada()
+            && self.midia.as_ref().is_none_or(|m| m.com_legenda)
+    }
+
+    /// "Apagar" é do nosso histórico, e só do que saiu daqui — como já era.
+    pub fn pode_apagar(&self) -> bool {
+        self.gestos.is_some() && self.saida
+    }
+}
+
+/// O que "Copiar" põe na área de transferência: o texto cru, com as marcas do
+/// WhatsApp (`*negrito*`), como o próprio WhatsApp copia. Várias mensagens
+/// levam a linha de cada uma — `[14:03, 21/10/2026] Ana: texto`.
+pub fn texto_para_copiar(mensagens: &[&Mensagem], nome_do_contato: &str) -> String {
+    if let [uma] = mensagens {
+        return uma.texto.clone();
+    }
+    mensagens
+        .iter()
+        .map(|m| {
+            let quando = m
+                .quando
+                .map(|q| {
+                    let local = q.with_timezone(&fuso_do_estudio());
+                    format!("[{}, {}] ", hora(q), local.format("%d/%m/%Y"))
+                })
+                .unwrap_or_default();
+            let quem = if m.saida { "Você" } else { nome_do_contato };
+            format!("{quando}{quem}: {}", m.texto)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// 📌 As fixadas da conversa, da fixada mais recente para a mais antiga.
+pub fn fixadas(mensagens: &[Mensagem]) -> Vec<&Mensagem> {
+    let mut fixadas: Vec<&Mensagem> = mensagens
+        .iter()
+        .filter(|m| m.gestos.as_ref().is_some_and(|g| g.fixada_em.is_some()))
+        .collect();
+    fixadas.sort_by_key(|m| std::cmp::Reverse(m.gestos.as_ref().and_then(|g| g.fixada_em)));
+    fixadas
 }
 
 fn mensagem_do_whatsapp(m: &Value) -> Option<Mensagem> {
@@ -542,6 +638,19 @@ fn mensagem_do_whatsapp(m: &Value) -> Option<Mensagem> {
             .unwrap_or(false),
         tipo_da_automacao: texto(m, "automation_type"),
         midia: super::midia::Midia::da_mensagem(m),
+        gestos: Some(Gestos {
+            id_na_meta: texto(m, "message_id").unwrap_or_default(),
+            resposta_a: texto(m, "resposta_a"),
+            reacao_nossa: texto(m, "reacao_nossa"),
+            reacao_do_cliente: texto(m, "reacao_do_cliente"),
+            favorita: m.get("favorita").and_then(Value::as_bool).unwrap_or(false),
+            fixada_em: data(m.get("fixada_em")),
+            apagada_em: data(m.get("apagada_em")),
+            editada: m.get("is_edited").and_then(Value::as_bool).unwrap_or(false),
+            original: texto(m, "original_message"),
+            entrega: texto(m, "event"),
+        })
+        .filter(|g| !g.id_na_meta.is_empty()),
     })
 }
 
@@ -563,6 +672,7 @@ pub fn mensagens_do_canal(valor: &Value) -> Vec<Mensagem> {
                         automatica: false,
                         tipo_da_automacao: None,
                         midia: None,
+                        gestos: None,
                     })
                 })
                 .collect()
@@ -1174,7 +1284,63 @@ mod testes {
             automatica: false,
             tipo_da_automacao: None,
             midia: None,
+            gestos: None,
         }
+    }
+
+    #[test]
+    fn os_gestos_do_whatsapp_vem_da_linha_e_os_outros_canais_nao_tem() {
+        let valor = serde_json::json!({
+            "id": "l1", "recipient_id": "5554", "message": "*Bom dia!*",
+            "timestamp": "2026-10-21T17:03:00Z", "event": "delivered",
+            "message_id": "wamid.A", "resposta_a": "wamid.Z", "reacao_do_cliente": "❤️",
+            "favorita": true, "fixada_em": "2026-10-21T17:10:00Z", "is_edited": false
+        });
+        let m = mensagem_do_whatsapp(&valor).expect("mensagem");
+        let g = m.gestos.as_ref().expect("gestos do WhatsApp");
+        assert_eq!(g.id_na_meta, "wamid.A");
+        assert_eq!(g.resposta_a.as_deref(), Some("wamid.Z"));
+        assert_eq!(g.reacao_do_cliente.as_deref(), Some("❤️"));
+        assert!(g.favorita && g.fixada_em.is_some());
+        assert!(m.saida && m.pode_corrigir() && m.pode_apagar());
+
+        let outro = &mensagens_do_canal(&serde_json::json!([
+            { "id": "i1", "conteudo": "oi", "em": "2026-10-21T17:03:00Z", "direcao": "INBOUND" }
+        ]))[0];
+        assert!(outro.gestos.is_none() && !outro.pode_corrigir() && !outro.pode_apagar());
+    }
+
+    #[test]
+    fn copiar_uma_leva_o_texto_cru_e_varias_levam_hora_data_e_quem_disse() {
+        let mut a = msg("a", "5554", "2026-10-21T17:03:00Z");
+        a.texto = "*Bom dia!*".into();
+        a.saida = true;
+        let mut b = msg("b", "5554", "2026-10-21T17:03:00Z");
+        b.texto = "Jamais!".into();
+        assert_eq!(texto_para_copiar(&[&a], "Ana"), "*Bom dia!*");
+        assert_eq!(
+            texto_para_copiar(&[&a, &b], "Ana"),
+            "[14:03, 21/10/2026] Você: *Bom dia!*\n[14:03, 21/10/2026] Ana: Jamais!"
+        );
+    }
+
+    #[test]
+    fn a_fixada_mais_recente_vem_primeiro() {
+        let gestos = |quando: &str| {
+            Some(Gestos {
+                id_na_meta: "w".into(),
+                fixada_em: Some(t(quando)),
+                ..Gestos::default()
+            })
+        };
+        let mut a = msg("a", "5554", "2026-10-21T10:00:00Z");
+        a.gestos = gestos("2026-10-21T11:00:00Z");
+        let mut b = msg("b", "5554", "2026-10-21T10:01:00Z");
+        b.gestos = gestos("2026-10-21T12:00:00Z");
+        let c = msg("c", "5554", "2026-10-21T10:02:00Z");
+        let todas = [a, b, c];
+        let ids: Vec<&str> = fixadas(&todas).iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["b", "a"]);
     }
 
     #[test]

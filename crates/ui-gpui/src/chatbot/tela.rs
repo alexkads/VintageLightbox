@@ -123,6 +123,31 @@ pub struct Pendente {
     /// 📎 Esperando o anexo de antes subir: vários arquivos saem um de cada
     /// vez, na ordem da tira, para chegarem ao cliente nessa ordem.
     pub na_fila: bool,
+    /// ↩️ O `wamid` citado ("Responder") — vai junto no "Tentar de novo".
+    pub responder_a: Option<String>,
+}
+
+/// 🧪 Onde o roteiro desenha o menu do balão (e as reações abertas dali).
+const PONTO_DO_ROTEIRO: gpui_kit::Point<gpui_kit::Pixels> = gpui_kit::Point {
+    x: gpui_kit::px(760.),
+    y: gpui_kit::px(220.),
+};
+
+/// ↩️ ✏️ O que o compositor faz além de escrever: responder citando uma
+/// mensagem, ou corrigir uma nossa ("Editar" — a Cloud API não edita o que
+/// saiu, e vai uma correção que cita a original).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ModoDoCompositor {
+    Responder(Mensagem),
+    Corrigir(Mensagem),
+}
+
+impl ModoDoCompositor {
+    pub fn mensagem(&self) -> &Mensagem {
+        match self {
+            Self::Responder(m) | Self::Corrigir(m) => m,
+        }
+    }
 }
 
 /// 📎 O arquivo que o operador escolheu para mandar pela conversa.
@@ -251,6 +276,15 @@ pub enum Dialogo {
     QuemAssume(Chave),
     /// "Excluir todo o histórico" — só WhatsApp.
     ExcluirHistorico(Chave),
+    /// 💬 "Dados" de uma mensagem.
+    Dados(Mensagem),
+    /// 💬 "Encaminhar": as mensagens e as conversas escolhidas.
+    Encaminhar {
+        mensagens: Vec<Mensagem>,
+        escolhidos: Vec<String>,
+    },
+    /// 💬 "Apagar" do histórico — o cliente continua com elas.
+    Apagar(Vec<Mensagem>),
 }
 
 /// A que gesto uma resposta pertence.
@@ -266,6 +300,26 @@ enum Acao {
     ContarUso,
     /// 🎤 "Transcrever", com o id da mensagem.
     Transcricao(String),
+    /// 💬 Um gesto do menu do balão (reagir, favoritar, fixar): o toast certo
+    /// ou o errado, e a releitura.
+    Gesto {
+        certo: String,
+        errado: &'static str,
+    },
+    /// ✏️ A correção que cita a original. Recusada, volta ao campo como foi
+    /// escrita.
+    Correcao {
+        original: Box<Mensagem>,
+        texto: String,
+    },
+    /// ↪️ Um encaminhamento; o último da leva dá o toast de sucesso.
+    Encaminhamento {
+        ultimo: bool,
+    },
+    /// 🗑️ Uma das mensagens apagadas do histórico; a última dá o toast.
+    ApagarMensagem {
+        ultima: bool,
+    },
 }
 
 pub struct Chatbot {
@@ -322,6 +376,33 @@ pub struct Chatbot {
     /// desenho.
     pub(crate) rolagem: gpui_kit::ScrollHandle,
     pub(crate) rolagem_vista: Option<(Chave, usize, usize)>,
+
+    // ── 💬 O menu do balão ──
+    /// O balão do último botão direito: o menu é montado depois do evento, e lê.
+    pub(crate) alvo_do_menu: Option<String>,
+    /// "Responder" ou "Editar" em curso.
+    pub(crate) modo: Option<ModoDoCompositor>,
+    /// Os `id` escolhidos em "Selecionar mensagens"; `None` fora da seleção.
+    pub(crate) selecao: Option<Vec<String>>,
+    /// Qual fixada a faixa de cima mostra — o clique passa para a próxima.
+    pub(crate) indice_da_fixada: usize,
+    /// O texto que o campo recebe no próximo desenho (a correção recusada
+    /// volta como foi escrita; pôr texto no campo pede a janela).
+    pub(crate) por_no_compositor: Option<String>,
+    /// Onde foi o último botão direito — as reações abrem ali.
+    pub(crate) ponto_do_menu: gpui_kit::Point<gpui_kit::Pixels>,
+    /// 👍 O menu das reações, aberto por "Reagir", e o aviso de que fechou.
+    pub(crate) menu_de_reacoes: Option<(
+        Entity<gpui_kit::component::menu::PopupMenu>,
+        gpui_kit::Point<gpui_kit::Pixels>,
+        gpui_kit::Subscription,
+    )>,
+    /// 🧪 O menu do balão que o roteiro abriu (`balao menu N`), e onde.
+    pub(crate) menu_do_roteiro: Option<(
+        Entity<gpui_kit::component::menu::PopupMenu>,
+        gpui_kit::Point<gpui_kit::Pixels>,
+        gpui_kit::Subscription,
+    )>,
 
     // ── 📎 A mídia da conversa aberta ──
     /// Os arquivos escolhidos, esperando o "Enviar" — até
@@ -450,6 +531,14 @@ impl Chatbot {
             limpar_compositor: false,
             rolagem: gpui_kit::ScrollHandle::new(),
             rolagem_vista: None,
+            alvo_do_menu: None,
+            modo: None,
+            selecao: None,
+            indice_da_fixada: 0,
+            por_no_compositor: None,
+            ponto_do_menu: PONTO_DO_ROTEIRO,
+            menu_de_reacoes: None,
+            menu_do_roteiro: None,
             anexos: Vec::new(),
             escolha: None,
             miniaturas: HashMap::new(),
@@ -1114,6 +1203,9 @@ impl Chatbot {
             self.historico_aberto.clear();
             self.fora_da_pagina = PaginaDoWhatsApp::default();
             self.limpar_compositor = true;
+            self.modo = None;
+            self.selecao = None;
+            self.indice_da_fixada = 0;
             // O anexo escolhido era para a outra conversa, e as fotos dela
             // não precisam ficar na memória.
             self.largar_a_midia();
@@ -1150,6 +1242,30 @@ impl Chatbot {
         if self.bloqueado_pela_janela() {
             return;
         }
+        // ✏️ "Editar": a correção não passa pelo balão em voo — sai citando a
+        // original, e a recusa (janela, Meta) devolve o texto ao campo.
+        if let Some(ModoDoCompositor::Corrigir(original)) = self.modo.clone() {
+            let Some(wamid) = original.id_na_meta().map(str::to_string) else {
+                return;
+            };
+            if texto.is_empty() {
+                return;
+            }
+            self.modo = None;
+            self.compositor
+                .update(cx, |campo, cx| campo.trocar_valor("", window, cx));
+            let (envia, recebe) = channel();
+            self.pedir(pedidos::corrigir(&wamid, &texto), &envia);
+            self.acoes.push((
+                Acao::Correcao {
+                    original: Box::new(original),
+                    texto,
+                },
+                recebe,
+            ));
+            cx.notify();
+            return;
+        }
         if !self.anexos.is_empty() {
             let mut anexos = std::mem::take(&mut self.anexos);
             // O texto vira a legenda do primeiro que aceita uma. 🎤 Áudio não
@@ -1171,7 +1287,14 @@ impl Chatbot {
         // O campo esvazia na hora: o balão pendente já está na conversa.
         self.compositor
             .update(cx, |campo, cx| campo.trocar_valor("", window, cx));
-        self.despachar(texto, None, cx);
+        let responder_a = match self.modo.take() {
+            Some(ModoDoCompositor::Responder(m)) => m.id_na_meta().map(str::to_string),
+            outro => {
+                self.modo = outro;
+                None
+            }
+        };
+        self.despachar(texto, None, responder_a, cx);
     }
 
     fn bloqueado_pela_janela(&self) -> bool {
@@ -1185,10 +1308,21 @@ impl Chatbot {
     /// Uma resposta rápida sai direto, e conta um uso.
     pub fn enviar_resposta(&mut self, resposta: &RespostaRapida, cx: &mut Context<Self>) {
         self.respostas_abertas = false;
-        self.despachar(resposta.mensagem.clone(), Some(resposta.id.clone()), cx);
+        self.despachar(
+            resposta.mensagem.clone(),
+            Some(resposta.id.clone()),
+            None,
+            cx,
+        );
     }
 
-    fn despachar(&mut self, texto: String, resposta: Option<String>, cx: &mut Context<Self>) {
+    fn despachar(
+        &mut self,
+        texto: String,
+        resposta: Option<String>,
+        responder_a: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(chave) = self.aberta.clone() else {
             return;
         };
@@ -1201,6 +1335,7 @@ impl Chatbot {
             erro: None,
             anexo: None,
             na_fila: false,
+            responder_a,
         };
         self.mandar(&pendente);
         self.pendentes.push(pendente);
@@ -1223,6 +1358,7 @@ impl Chatbot {
             erro: None,
             anexo: Some(anexo),
             na_fila,
+            responder_a: None,
         };
         if !na_fila {
             self.mandar(&pendente);
@@ -1267,7 +1403,14 @@ impl Chatbot {
                 ),
                 &envia,
             ),
-            None => self.pedir(pedidos::enviar(&pendente.chave, &pendente.texto), &envia),
+            None => self.pedir(
+                pedidos::enviar_respondendo(
+                    &pendente.chave,
+                    &pendente.texto,
+                    pendente.responder_a.as_deref(),
+                ),
+                &envia,
+            ),
         }
         self.acoes.push((Acao::Envio(pendente.id), recebe));
     }
@@ -1978,7 +2121,457 @@ impl Chatbot {
                 }
             }
             Acao::ContarUso => {}
+            Acao::Gesto { certo, errado } => match resultado {
+                Ok(_) => {
+                    self.toast(certo, false, cx);
+                    self.recarregar(cx);
+                }
+                Err(erro) => self.toast(modelo::explicar(&erro, errado), true, cx),
+            },
+            Acao::Correcao { original, texto } => match resultado {
+                Ok(_) => {
+                    self.toast("Correção enviada", false, cx);
+                    self.recarregar(cx);
+                }
+                Err(erro) => {
+                    self.toast(
+                        modelo::explicar(&erro, "Não foi possível enviar a correção."),
+                        true,
+                        cx,
+                    );
+                    self.modo = Some(ModoDoCompositor::Corrigir(*original));
+                    self.por_no_compositor = Some(texto);
+                    cx.notify();
+                }
+            },
+            Acao::Encaminhamento { ultimo } => match resultado {
+                Ok(valor) => {
+                    let recusa = valor.as_array().and_then(|feitos| {
+                        feitos
+                            .iter()
+                            .find_map(|f| f.get("erro").and_then(Value::as_str))
+                            .map(str::to_string)
+                    });
+                    match recusa {
+                        Some(motivo) => self.toast(motivo, true, cx),
+                        None if ultimo => self.toast("Encaminhada", false, cx),
+                        None => {}
+                    }
+                    if ultimo {
+                        self.recarregar(cx);
+                    }
+                }
+                Err(erro) => self.toast(
+                    modelo::explicar(&erro, "Não foi possível encaminhar."),
+                    true,
+                    cx,
+                ),
+            },
+            Acao::ApagarMensagem { ultima } => match resultado {
+                Ok(_) if ultima => {
+                    self.toast("Apagada do histórico", false, cx);
+                    self.recarregar(cx);
+                }
+                Ok(_) => {}
+                Err(erro) => self.toast(
+                    modelo::explicar(&erro, "Erro ao excluir mensagem"),
+                    true,
+                    cx,
+                ),
+            },
         }
+    }
+
+    // ── 💬 O menu do balão ─────────────────────────────────────────────────
+
+    /// A mensagem do último botão direito, ainda na conversa aberta.
+    pub(crate) fn mensagem_do_menu(&mut self) -> Option<Mensagem> {
+        let id = self.alvo_do_menu.take()?;
+        self.mensagens_da_aberta()
+            .0
+            .into_iter()
+            .find(|m| m.id == id)
+    }
+
+    fn gesto(&mut self, pedido: PedidoJson, acao: Acao, cx: &mut Context<Self>) {
+        let (envia, recebe) = channel();
+        self.pedir(pedido, &envia);
+        self.acoes.push((acao, recebe));
+        cx.notify();
+    }
+
+    /// ↩️ "Responder": a faixa da citada em cima do campo, e o foco nele.
+    pub fn responder(&mut self, mensagem: Mensagem, window: &mut Window, cx: &mut Context<Self>) {
+        self.modo = Some(ModoDoCompositor::Responder(mensagem));
+        self.compositor
+            .update(cx, |campo, cx| campo.focus(window, cx));
+        cx.notify();
+    }
+
+    /// ✏️ "Editar": o texto da mensagem vem para o campo, para corrigir.
+    pub fn corrigir(&mut self, mensagem: Mensagem, window: &mut Window, cx: &mut Context<Self>) {
+        let texto = mensagem.texto.clone();
+        self.modo = Some(ModoDoCompositor::Corrigir(mensagem));
+        self.compositor.update(cx, |campo, cx| {
+            campo.trocar_valor(&texto, window, cx);
+            campo.focus(window, cx);
+        });
+        cx.notify();
+    }
+
+    /// O X da faixa (e o Esc): desiste de responder ou de corrigir. Saindo da
+    /// correção, o campo volta vazio — o rascunho era o texto da original.
+    pub fn cancelar_modo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(self.modo.take(), Some(ModoDoCompositor::Corrigir(_))) {
+            self.compositor
+                .update(cx, |campo, cx| campo.trocar_valor("", window, cx));
+        }
+        cx.notify();
+    }
+
+    /// 👍 "Reagir": as reações num segundo menu, onde foi o botão direito.
+    pub fn abrir_reacoes(
+        &mut self,
+        mensagem: Mensagem,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.menu_do_roteiro = None;
+        let tela = cx.entity().downgrade();
+        let menu = gpui_kit::component::menu::PopupMenu::build(window, cx, move |menu, _, _| {
+            super::desenho::montar_as_reacoes(menu, mensagem.clone(), tela.clone())
+        });
+        let fechou = cx.subscribe(&menu, |tela, _, _: &gpui_kit::DismissEvent, cx| {
+            tela.menu_de_reacoes = None;
+            cx.notify();
+        });
+        gpui_kit::Focusable::focus_handle(menu.read(cx), cx).focus(window, cx);
+        self.menu_de_reacoes = Some((menu, self.ponto_do_menu, fechou));
+        cx.notify();
+    }
+
+    /// 👍 "Reagir". De novo no mesmo emoji tira a reação, como no WhatsApp.
+    pub fn reagir(&mut self, mensagem: &Mensagem, emoji: &str, cx: &mut Context<Self>) {
+        self.menu_de_reacoes = None;
+        let Some(gestos) = &mensagem.gestos else {
+            return;
+        };
+        let emoji = if gestos.reacao_nossa.as_deref() == Some(emoji) {
+            ""
+        } else {
+            emoji
+        };
+        let certo = if emoji.is_empty() {
+            "Reação tirada"
+        } else {
+            "Reação enviada"
+        };
+        self.gesto(
+            pedidos::reagir(&gestos.id_na_meta, emoji),
+            Acao::Gesto {
+                certo: certo.into(),
+                errado: "Não foi possível reagir.",
+            },
+            cx,
+        );
+    }
+
+    /// ⭐ 📌 "Favoritar" e "Fixar" — marcas só do painel.
+    pub fn marcar(
+        &mut self,
+        mensagens: &[Mensagem],
+        favorita: Option<bool>,
+        fixada: Option<bool>,
+        cx: &mut Context<Self>,
+    ) {
+        let certo = match (favorita, fixada) {
+            (Some(true), _) => "Favoritada",
+            (Some(false), _) => "Desfavoritada",
+            (_, Some(true)) => "Mensagem fixada",
+            _ => "Mensagem desafixada",
+        };
+        let ultima = mensagens.len().saturating_sub(1);
+        for (i, mensagem) in mensagens.iter().enumerate() {
+            let Some(wamid) = mensagem.id_na_meta() else {
+                continue;
+            };
+            self.gesto(
+                pedidos::marcar(wamid, favorita, fixada),
+                if i == ultima {
+                    Acao::Gesto {
+                        certo: certo.into(),
+                        errado: "Não foi possível marcar a mensagem.",
+                    }
+                } else {
+                    Acao::ContarUso
+                },
+                cx,
+            );
+        }
+        self.selecao = None;
+    }
+
+    /// 📋 "Copiar" — o texto cru, como o WhatsApp copia.
+    pub fn copiar(&mut self, mensagens: &[Mensagem], cx: &mut Context<Self>) {
+        let nome = self.nome_da_aberta();
+        let referencias: Vec<&Mensagem> = mensagens.iter().collect();
+        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(
+            modelo::texto_para_copiar(&referencias, &nome),
+        ));
+        self.toast(
+            if mensagens.len() == 1 {
+                "Mensagem copiada.".to_string()
+            } else {
+                format!("{} mensagens copiadas.", mensagens.len())
+            },
+            false,
+            cx,
+        );
+        cx.notify();
+    }
+
+    /// O nome de quem está do outro lado da conversa aberta.
+    pub(crate) fn nome_da_aberta(&self) -> String {
+        let Some(chave) = &self.aberta else {
+            return String::new();
+        };
+        self.pagina_do_whatsapp
+            .conversas
+            .iter()
+            .chain(self.fora_da_pagina.conversas.iter())
+            .chain(self.outros.values().flatten())
+            .find(|c| &c.chave == chave)
+            .map(|c| c.nome.clone())
+            .unwrap_or_else(|| chave.id.clone())
+    }
+
+    pub fn abrir_dados(&mut self, mensagem: Mensagem, window: &mut Window, cx: &mut Context<Self>) {
+        self.dialogo.abrir(Dialogo::Dados(mensagem), window, cx);
+        cx.notify();
+    }
+
+    pub fn pedir_apagar(
+        &mut self,
+        mensagens: Vec<Mensagem>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if mensagens.is_empty() || !mensagens.iter().all(Mensagem::pode_apagar) {
+            return;
+        }
+        self.dialogo.abrir(Dialogo::Apagar(mensagens), window, cx);
+        cx.notify();
+    }
+
+    /// 🗑️ "Apagar" confirmado — do nosso histórico; o cliente continua com elas.
+    pub fn apagar_confirmado(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(Dialogo::Apagar(mensagens)) = self.dialogo.fechar(window, cx) else {
+            return;
+        };
+        let ultima = mensagens.len().saturating_sub(1);
+        for (i, mensagem) in mensagens.iter().enumerate() {
+            if let Some(wamid) = mensagem.id_na_meta() {
+                self.gesto(
+                    pedidos::apagar_mensagem(wamid),
+                    Acao::ApagarMensagem {
+                        ultima: i == ultima,
+                    },
+                    cx,
+                );
+            }
+        }
+        self.selecao = None;
+    }
+
+    /// ☑️ "Selecionar mensagens", começando por esta.
+    pub fn selecionar(&mut self, mensagem: &Mensagem, cx: &mut Context<Self>) {
+        self.selecao = Some(vec![mensagem.id.clone()]);
+        // Vindo do "Editar", o campo tinha o texto da original: não fica.
+        if matches!(self.modo.take(), Some(ModoDoCompositor::Corrigir(_))) {
+            self.limpar_compositor = true;
+        }
+        cx.notify();
+    }
+
+    pub fn alternar_selecao(&mut self, id: &str, cx: &mut Context<Self>) {
+        if let Some(selecao) = &mut self.selecao {
+            if let Some(i) = selecao.iter().position(|x| x == id) {
+                selecao.remove(i);
+            } else {
+                selecao.push(id.to_string());
+            }
+            cx.notify();
+        }
+    }
+
+    pub fn sair_da_selecao(&mut self, cx: &mut Context<Self>) {
+        self.selecao = None;
+        cx.notify();
+    }
+
+    /// As mensagens escolhidas, na ordem da conversa.
+    pub(crate) fn selecionadas(&self) -> Vec<Mensagem> {
+        let Some(selecao) = &self.selecao else {
+            return Vec::new();
+        };
+        self.mensagens_da_aberta()
+            .0
+            .into_iter()
+            .filter(|m| selecao.contains(&m.id))
+            .collect()
+    }
+
+    /// ↪️ "Encaminhar": as conversas de WhatsApp da página, para escolher.
+    pub fn abrir_encaminhar(
+        &mut self,
+        mensagens: Vec<Mensagem>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if mensagens.is_empty() || mensagens.iter().any(|m| m.gestos.is_none() || m.apagada()) {
+            return;
+        }
+        self.dialogo.abrir(
+            Dialogo::Encaminhar {
+                mensagens,
+                escolhidos: Vec::new(),
+            },
+            window,
+            cx,
+        );
+        cx.notify();
+    }
+
+    /// Os destinos possíveis: as conversas de WhatsApp da página.
+    pub(crate) fn destinos_de_encaminhamento(&self) -> Vec<Conversa> {
+        self.pagina_do_whatsapp.conversas.clone()
+    }
+
+    pub fn alternar_destino(&mut self, contato: &str, cx: &mut Context<Self>) {
+        let mut cheio = false;
+        if let Some(Dialogo::Encaminhar { escolhidos, .. }) = self.dialogo.aberto_mut() {
+            if let Some(i) = escolhidos.iter().position(|c| c == contato) {
+                escolhidos.remove(i);
+            } else if escolhidos.len() >= modelo::DESTINOS_POR_ENCAMINHAMENTO {
+                cheio = true;
+            } else {
+                escolhidos.push(contato.to_string());
+            }
+        }
+        if cheio {
+            self.toast(
+                format!(
+                    "Até {} conversas por vez.",
+                    modelo::DESTINOS_POR_ENCAMINHAMENTO
+                ),
+                true,
+                cx,
+            );
+        }
+        cx.notify();
+    }
+
+    pub fn encaminhar_agora(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(Dialogo::Encaminhar {
+            mensagens,
+            escolhidos,
+        }) = self.dialogo.aberto().cloned()
+        else {
+            return;
+        };
+        if escolhidos.is_empty() {
+            return;
+        }
+        self.dialogo.fechar(window, cx);
+        let ultima = mensagens.len().saturating_sub(1);
+        for (i, mensagem) in mensagens.iter().enumerate() {
+            if let Some(wamid) = mensagem.id_na_meta() {
+                self.gesto(
+                    pedidos::encaminhar(wamid, &escolhidos),
+                    Acao::Encaminhamento {
+                        ultimo: i == ultima,
+                    },
+                    cx,
+                );
+            }
+        }
+        self.selecao = None;
+    }
+
+    /// 🧪 Um gesto do roteiro de depuração (`balao …`). O botão direito de
+    /// verdade não aparece na captura da janela: o roteiro monta **o mesmo**
+    /// menu e o desenha sobre o histórico.
+    pub fn seguir_o_roteiro_do_balao(
+        &mut self,
+        gesto: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut partes = gesto.split_whitespace();
+        match (
+            partes.next(),
+            partes.next().and_then(|n| n.parse::<usize>().ok()),
+        ) {
+            (Some("menu"), Some(n)) => {
+                let Some(mensagem) = self
+                    .mensagens_da_aberta()
+                    .0
+                    .into_iter()
+                    .nth(n.saturating_sub(1))
+                else {
+                    eprintln!("[roteiro] a conversa aberta não tem o balão {n}");
+                    return;
+                };
+                let tela = cx.entity().downgrade();
+                let menu = gpui_kit::component::menu::PopupMenu::build(
+                    window,
+                    cx,
+                    move |menu, window, cx| {
+                        super::desenho::montar_o_menu_do_balao(
+                            menu,
+                            mensagem.clone(),
+                            tela.clone(),
+                            window,
+                            cx,
+                        )
+                    },
+                );
+                // Fecha com o item clicado, como o do botão direito.
+                let fechou = cx.subscribe(&menu, |tela, _, _: &gpui_kit::DismissEvent, cx| {
+                    tela.menu_do_roteiro = None;
+                    cx.notify();
+                });
+                self.menu_do_roteiro = Some((menu, PONTO_DO_ROTEIRO, fechou));
+                self.ponto_do_menu = PONTO_DO_ROTEIRO;
+                cx.notify();
+            }
+            (Some("fechar"), _) => {
+                self.menu_do_roteiro = None;
+                cx.notify();
+            }
+            (Some("estado"), _) => eprintln!(
+                "[roteiro] balao modo={:?} selecao={:?} dialogo={:?} compositor={:?}",
+                self.modo.as_ref().map(|m| match m {
+                    ModoDoCompositor::Responder(m) => format!("responder:{}", m.id),
+                    ModoDoCompositor::Corrigir(m) => format!("corrigir:{}", m.id),
+                }),
+                self.selecao,
+                self.dialogo.aberto().map(|d| match d {
+                    Dialogo::Dados(_) => "dados",
+                    Dialogo::Encaminhar { .. } => "encaminhar",
+                    Dialogo::Apagar(_) => "apagar",
+                    _ => "outro",
+                }),
+                self.compositor.read(cx).value().to_string(),
+            ),
+            _ => eprintln!("[roteiro] balao: gesto desconhecido '{gesto}'"),
+        }
+    }
+
+    /// 📌 A faixa das fixadas: o clique passa para a próxima, como no WhatsApp.
+    pub fn proxima_fixada(&mut self, cx: &mut Context<Self>) {
+        self.indice_da_fixada = self.indice_da_fixada.wrapping_add(1);
+        cx.notify();
     }
 
     /// O texto da tela, para o desenho.
