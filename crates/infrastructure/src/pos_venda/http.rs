@@ -262,7 +262,20 @@ struct EnvelopeDeErro {
 
 #[derive(Deserialize)]
 struct CorpoDeErro {
+    code: Option<String>,
     message: Option<String>,
+}
+
+/// 🏷️ **O `5xx` saiu da API, e não do caminho até ela?** A API responde as
+/// próprias falhas no envelope `{"error": {"code", "message"}}` — a Meta que
+/// recusou o envio do chatbot volta como `503 SERVICE_UNAVAILABLE`. Com
+/// envelope, o site respondeu: há internet, e quem falhou foi uma dependência
+/// dele. O proxy caído e o servidor reiniciando não trazem o envelope.
+fn falha_dita_pela_api(bytes: &[u8]) -> bool {
+    serde_json::from_slice::<EnvelopeDeErro>(bytes)
+        .ok()
+        .and_then(|e| e.error)
+        .is_some_and(|e| e.code.is_some())
 }
 
 /// A resposta do bilhete de revelação. O `caminho` e a validade vêm junto e não
@@ -1287,6 +1300,14 @@ impl PosVendaApiHttp {
         let leitura = metodo.eq_ignore_ascii_case("GET") && sessao.is_some() && espelhavel(caminho);
         let resultado = self.chamar_na_rede(sessao, metodo, caminho, corpo).await;
         let faltou_rede = match &resultado {
+            // A dependência do site que falhou não acende "Sem internet", e
+            // também não apaga: o estado da rede fica como estava.
+            Ok(resposta) if resposta.status >= 500 && falha_dita_pela_api(&resposta.bytes) => {
+                if let Some(lembranca) = leitura.then(|| self.espelho.ler(caminho)).flatten() {
+                    return Ok(self.lembrada(lembranca));
+                }
+                false
+            }
             Ok(resposta) if resposta.status >= 500 => true,
             Ok(resposta) => {
                 self.rede.marcar_com_rede();
@@ -2339,6 +2360,61 @@ mod tests {
         assert_eq!(api.estudios(&sessao).await.unwrap()[0].nome, "Gramado");
         assert_eq!(api.estudios(&sessao).await.unwrap()[0].nome, "Gramado");
         assert!(!api.rede().com_rede());
+    }
+
+    /// 📵 A Meta que recusa o envio do chatbot (cobrança pendente, token
+    /// recusado) volta da API como `503` com o envelope dela: o site respondeu,
+    /// e o balcão não está sem internet. A frase da Meta chega à tela; o selo
+    /// não acende (21/10/2026). O `503` do caminho, sem envelope, continua
+    /// sendo a rede que caiu.
+    #[tokio::test]
+    async fn a_recusa_da_meta_nao_acende_o_sem_internet() {
+        let servidor = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v2/whatsapp/messages/send"))
+            .respond_with(ResponseTemplate::new(503).set_body_json(json!({
+                "error": {
+                    "code": "SERVICE_UNAVAILABLE",
+                    "message": "A Meta recusou o envio: pagamento pendente na conta"
+                }
+            })))
+            .mount(&servidor)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/v2/whatsapp/messages/react"))
+            .respond_with(ResponseTemplate::new(503).set_body_string("no healthy upstream"))
+            .mount(&servidor)
+            .await;
+        let api = PosVendaApiHttp::nova(servidor.uri());
+        let sessao = sessao_valida();
+
+        let recusa = api
+            .pedir_json(
+                &sessao,
+                "POST",
+                "/whatsapp/messages/send",
+                Some(json!({ "contact_id": "5554", "message": "oi" })),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            recusa.to_string().contains("A Meta recusou o envio"),
+            "{recusa}"
+        );
+        assert!(
+            api.rede().com_rede(),
+            "a recusa da Meta não é falta de rede"
+        );
+
+        let caiu = api
+            .pedir_json(&sessao, "POST", "/whatsapp/messages/react", None)
+            .await
+            .unwrap_err();
+        assert!(erro_passageiro(&caiu.to_string()), "{caiu}");
+        assert!(
+            !api.rede().com_rede(),
+            "o 503 do caminho continua sendo rede"
+        );
     }
 
     #[tokio::test]

@@ -193,7 +193,8 @@ impl Espelho for EspelhoEmMemoria {
 /// fila de sincronização consulta antes de tentar.
 ///
 /// Quem muda o estado é o cliente HTTP: qualquer resposta do site (mesmo uma
-/// recusa) é rede; "sem resposta" ou `5xx` é falta dela.
+/// recusa) é rede; "sem resposta" ou `5xx` do caminho é falta dela. O `5xx`
+/// que a própria API explica (a Meta recusou) não mexe no estado.
 #[derive(Debug, Default)]
 pub struct EstadoDaRede {
     /// `0` = com rede; senão, desde quando (segundos desde a época) não há.
