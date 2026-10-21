@@ -121,6 +121,24 @@ impl FilaDeSincronizacao {
         self.no_estado(EstadoDoGesto::Pendente).await
     }
 
+    /// Os primeiros `limite` que esperam a vez — o que o trabalhador leva
+    /// agora.
+    ///
+    /// 🚨 **Só o começo da fila.** Ler todos a cada gesto era ler (e desfazer o
+    /// JSON de) duzentas linhas para mandar uma — e duzentas vezes, numa
+    /// sessão inteira guardada sem rede.
+    pub async fn proximas(&self, limite: u32) -> Result<Vec<GestoGuardado>, String> {
+        let linhas = sqlx::query(&format!(
+            "SELECT {COLUNAS} FROM fila_de_sincronizacao WHERE estado = 'pendente' \
+             ORDER BY id LIMIT ?"
+        ))
+        .bind(limite)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(erro)?;
+        Ok(linhas.iter().map(do_banco).collect())
+    }
+
     /// Os que o site recusou, na ordem.
     pub async fn conflitos(&self) -> Result<Vec<GestoGuardado>, String> {
         self.no_estado(EstadoDoGesto::Conflito).await
@@ -292,6 +310,15 @@ mod testes {
         assert_eq!(pendentes[1].corpo, json!({"nota": 5}));
         assert_eq!(f.contar().await.unwrap(), (2, 0));
 
+        assert_eq!(
+            f.proximas(1)
+                .await
+                .unwrap()
+                .iter()
+                .map(|g| g.id)
+                .collect::<Vec<_>>(),
+            vec![a]
+        );
         f.tentou(a).await.unwrap();
         assert_eq!(f.pendentes().await.unwrap()[0].tentativas, 1);
 

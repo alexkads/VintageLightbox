@@ -172,3 +172,44 @@ fn sem_rede_o_app_fecha_e_a_fila_sobrevive(cx: &mut TestAppContext) {
         (nota == 4).then_some(()).ok_or(format!("nota: {nota}"))
     });
 }
+
+/// ❌ O `X` numa foto que já está na nuvem, sem rede: a grade a tira da conta
+/// na hora. Com a rede de volta, a fila a marca no site e o resgate de sempre
+/// a tira da nuvem — a cópia daqui fica, rejeitada.
+#[gpui_kit::test]
+#[ignore = "precisa da API de teste: rode `make e2e-ciclo`"]
+fn sem_rede_o_x_na_nuvem_rejeita_e_a_foto_sai_quando_a_rede_volta(cx: &mut TestAppContext) {
+    let c = preparar(cx, "sem-internet-x", 2);
+    let (galeria, fotos) = criar_a_sessao(cx, &c, "X sem internet", "cliente-x@e2e.test");
+    c.b.ate(cx, "a sessão conta as duas à venda", |b, cx| {
+        b.detalhe(cx, |t, _w, _cx| t.contagem() == (0, 2, 0))
+    });
+
+    derrubar_a_internet(&c);
+    c.b.ir_na_grade(cx, &fotos[0]);
+    c.b.teclar(cx, "x");
+    c.b.ate(cx, "a grade tira a rejeitada da conta sem rede", |b, cx| {
+        b.detalhe(cx, |t, _w, _cx| t.contagem() == (0, 1, 0))
+    });
+    assert_eq!(
+        fotos_no_painel(&c.site, &galeria).len(),
+        2,
+        "o site ainda tem as duas, sem rejeição"
+    );
+
+    a_internet_volta(cx, &c);
+    c.b.ate_na_api(cx, "a rejeitada sai da nuvem", || {
+        let aberta = c.site.get(&format!("/pos-venda/galerias/{galeria}"));
+        let ainda = aberta["fotos"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|f| f["id"] == fotos[0].as_str() && f["apagada_em"].is_null());
+        (!ainda).then_some(()).ok_or(format!("{aberta}"))
+    });
+    c.b.ate(cx, "a fila esvazia", |b, cx| {
+        b.app(cx, |app, _w, _cx| app.situacao_da_fila.pendentes == 0)
+    });
+    assert_eq!(fotos_no_painel(&c.site, &galeria).len(), 1);
+    c.b.ato_limpo(cx, "o X na nuvem sem internet");
+}

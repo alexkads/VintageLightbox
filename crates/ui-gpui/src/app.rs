@@ -852,6 +852,9 @@ pub struct Aplicativo {
     marcador: Arc<dyn Marcador>,
     /// A tarefa do resgate da rejeição: uma foto de cada vez.
     _resgate: Option<gpui_kit::Task<()>>,
+    /// Um resgate está rodando — o próximo espera em [`Self::resgates_na_fila`].
+    resgatando: bool,
+    resgates_na_fila: Vec<resgate::AFotoQueVolta>,
     /// 🧪 O desfecho do último resgate, para os cenários.
     ultimo_resgate: Option<resgate::Desfecho>,
     /// A revelação já aplicada a cada foto local, por id: `"<preset>|<proporção>"`.
@@ -1598,6 +1601,8 @@ impl Aplicativo {
             importador: portas.importador.clone(),
             marcador: portas.marcador.clone(),
             _resgate: None,
+            resgatando: false,
+            resgates_na_fila: Vec::new(),
             ultimo_resgate: None,
             parametros_das_locais: std::collections::HashMap::new(),
             _sessao_escolhida: sessao_escolhida,
@@ -3947,6 +3952,27 @@ impl Aplicativo {
                 self.detalhe
                     .update(cx, |tela, cx| tela.sessao_chegou_ao_site(&id, cx));
             }
+            // ❌ A rejeição da nuvem feita sem rede chegou ao site: o resgate.
+            if let PosVendaRecado::ResgateDaRejeitada {
+                foto_no_site,
+                arquivo,
+                parametros,
+                galeria_id,
+            } = &recado
+            {
+                let (ajustes, corte) = crate::revelacao::persistencia::de_json(parametros);
+                self.resgatar(
+                    vec![crate::app::resgate::AFotoQueVolta {
+                        no_site: foto_no_site.clone(),
+                        arquivo: arquivo.clone(),
+                        ajustes,
+                        corte,
+                        galeria: galeria_id.clone(),
+                    }],
+                    cx,
+                );
+                continue;
+            }
             let _ = self.sincronias.0.send(recado);
             chegaram += 1;
         }
@@ -3992,6 +4018,15 @@ impl Aplicativo {
                 self.avisar_em_toast(texto, false, cx);
             }
             _ => {}
+        }
+        // 🔁 **A fila esvaziou, ou o site recusou um gesto**: a sessão aberta
+        // e o caixa releem — o que a tela mostrava somado da fila passa a vir
+        // do site, e o gesto recusado deixa de aparecer como feito.
+        if (antes.pendentes > 0 && agora.pendentes == 0) || agora.conflitos > antes.conflitos {
+            self.pedir_releitura_da_galeria(cx);
+            self.caixa.update(cx, |caixa, cx| caixa.reler_se_aberto(cx));
+            self.caixa_flutuante
+                .update(cx, |caixa, cx| caixa.reler_se_aberto(cx));
         }
         if agora.conflitos > antes.conflitos {
             self.avisar_em_toast(

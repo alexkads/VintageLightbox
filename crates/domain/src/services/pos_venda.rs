@@ -715,6 +715,13 @@ pub struct MudancaDaFoto {
     /// não entra na compra online; este é o que o cliente paga. Zero é recusado
     /// pelo site (`400`) — zero é cortesia, e cortesia é negociação.
     pub preco_de_venda: Option<Option<String>>,
+    /// 📴 A hora em que o gesto aconteceu (RFC 3339), quando ele foi feito sem
+    /// internet e sobe pela fila. O site deixa como está o campo que alguém
+    /// mudou depois desta hora: vale o último gesto a **acontecer**, e não o
+    /// último a chegar. `None` é o gesto de agora.
+    ///
+    /// ⚠️ Não é mudança: não conta em [`MudancaDaFoto::vazia`].
+    pub ocorrido_em: Option<String>,
 }
 
 impl MudancaDaFoto {
@@ -763,6 +770,9 @@ impl MudancaDaFoto {
         if let Some(rejeitada) = self.rejeitada {
             corpo.insert("rejeitada".into(), Value::from(rejeitada));
         }
+        if let Some(ocorrido_em) = &self.ocorrido_em {
+            corpo.insert("ocorrido_em".into(), Value::from(ocorrido_em.clone()));
+        }
         Value::Object(corpo)
     }
 
@@ -784,6 +794,10 @@ impl MudancaDaFoto {
             rejeitada: mapa.get("rejeitada").and_then(Value::as_bool),
             produto_id: ler_triplo(mapa, "produto_id"),
             preco_de_venda: ler_triplo(mapa, "preco_de_venda"),
+            ocorrido_em: mapa
+                .get("ocorrido_em")
+                .and_then(Value::as_str)
+                .map(str::to_string),
         }
     }
 
@@ -811,6 +825,9 @@ impl MudancaDaFoto {
         }
         if depois.preco_de_venda.is_some() {
             self.preco_de_venda = depois.preco_de_venda.clone();
+        }
+        if depois.ocorrido_em.is_some() {
+            self.ocorrido_em = depois.ocorrido_em.clone();
         }
     }
 }
@@ -1379,6 +1396,7 @@ mod tests {
             rejeitada: Some(false),
             produto_id: None,
             preco_de_venda: Some(Some("19.90".into())),
+            ocorrido_em: None,
         };
         let corpo = mudanca.corpo();
         assert_eq!(
@@ -1398,6 +1416,19 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(MudancaDaFoto::do_corpo(&so_nota.corpo()), so_nota);
+        // 📴 A hora do gesto vai e volta, e não é mudança.
+        let com_hora = MudancaDaFoto {
+            nota: Some(Some(2)),
+            ocorrido_em: Some("2026-10-20T14:00:00-03:00".into()),
+            ..Default::default()
+        };
+        assert_eq!(com_hora.corpo()["ocorrido_em"], "2026-10-20T14:00:00-03:00");
+        assert_eq!(MudancaDaFoto::do_corpo(&com_hora.corpo()), com_hora);
+        assert!(MudancaDaFoto {
+            ocorrido_em: Some("x".into()),
+            ..Default::default()
+        }
+        .vazia());
     }
 
     #[test]

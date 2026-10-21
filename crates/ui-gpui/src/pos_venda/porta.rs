@@ -163,6 +163,17 @@ pub enum Recado {
     GuardadoParaDepois {
         alvo: String,
     },
+    /// ❌ A rejeição da nuvem feita sem rede chegou ao site (a foto já está
+    /// marcada lá): a raiz faz agora o resgate de sempre — o bruto volta para
+    /// cá e só então a nuvem perde a foto (`app/resgate.rs`).
+    ResgateDaRejeitada {
+        foto_no_site: String,
+        arquivo: String,
+        /// Os parâmetros que estavam na nuvem, em JSON (`persistencia::de_json`).
+        parametros: serde_json::Value,
+        /// A sessão da foto — para onde ela volta.
+        galeria_id: Option<String>,
+    },
     /// A resposta de [`Publicador::pedir_json`]. O `rotulo` é o que a tela
     /// escolheu para saber a qual pedido ela responde.
     Json {

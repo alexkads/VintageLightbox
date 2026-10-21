@@ -15,7 +15,7 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use domain::services::pos_venda::Sessao;
+use domain::services::pos_venda::{MudancaDaFoto, Sessao};
 
 use super::{e_falta_de_rede, Gesto, Sincronizacao};
 use crate::pos_venda::porta::{FotoClassificada, Publicador, Recado};
@@ -26,6 +26,8 @@ const ESPERA_MAXIMA: Duration = Duration::from_secs(30);
 const COCHILO: Duration = Duration::from_secs(60);
 /// Sem rede e sem fila, de quanto em quanto ele pergunta se ela voltou.
 const SONDA: Duration = Duration::from_secs(15);
+/// Quantas fotos sobem ao mesmo tempo — o número da esteira.
+const EM_VOO: usize = crate::envios::EM_VOO;
 /// O teto de um gesto: a foto grande subindo numa rede lenta.
 const TETO_DO_GESTO: Duration = Duration::from_secs(15 * 60);
 
@@ -64,16 +66,40 @@ pub fn desfecho(recado: Recado) -> Desfecho {
 }
 
 /// Manda o gesto pela porta do site e espera a resposta.
-fn executar(publicador: &dyn Publicador, sessao: Sessao, gesto: Gesto, canal: Sender<Recado>) {
+fn executar(
+    publicador: &dyn Publicador,
+    sessao: Sessao,
+    gesto: Gesto,
+    ocorrido_em: &str,
+    canal: Sender<Recado>,
+) {
     match gesto {
         Gesto::CriarGaleria(nova) => publicador.criar_galeria(sessao, nova, canal),
         Gesto::AtualizarGaleria {
             galeria_id,
             mudanca,
         } => publicador.atualizar_galeria(sessao, galeria_id, mudanca, canal),
-        Gesto::MudarFoto { foto_id, mudanca } => {
-            publicador.negociar(sessao, foto_id, mudanca, canal)
-        }
+        // 📴 A hora do gesto vai junto: o site deixa como está o campo que
+        // alguém mudou depois dela (vale o último gesto a acontecer).
+        Gesto::MudarFoto { foto_id, mudanca } => publicador.negociar(
+            sessao,
+            foto_id,
+            MudancaDaFoto {
+                ocorrido_em: Some(ocorrido_em.to_string()),
+                ..mudanca
+            },
+            canal,
+        ),
+        Gesto::RejeitarDaNuvem { foto_no_site, .. } => publicador.negociar(
+            sessao,
+            foto_no_site,
+            MudancaDaFoto {
+                rejeitada: Some(true),
+                ocorrido_em: Some(ocorrido_em.to_string()),
+                ..Default::default()
+            },
+            canal,
+        ),
         // 🔑 **A nota vai do catálogo, e não da fila.** A da fila é a do
         // instante em que o gesto foi guardado; o operador pode ter dado outra
         // depois, sem rede, e a subida que só sai agora tem de levar a última.
@@ -166,21 +192,57 @@ impl Trabalhador {
     }
 
     async fn uma_volta(&self) -> Volta {
-        let pendentes = match self.sinc.fila().pendentes().await {
+        let proximas = match self.sinc.fila().proximas(EM_VOO as u32).await {
             Ok(p) => p,
             Err(erro) => {
                 crate::telemetria::avisar!("⚠️ [Sincronização] a fila não leu: {erro}");
                 return Volta::Esperar;
             }
         };
-        let Some(guardado) = pendentes.into_iter().next() else {
+        if proximas.is_empty() {
             return Volta::Vazia;
-        };
+        }
         let Some(sessao) = self.sessao.lock().ok().and_then(|s| s.clone()) else {
             // Ninguém entrou ainda nesta abertura do app: a conta vem com o
             // primeiro pedido da tela.
             return Volta::Esperar;
         };
+        // 📤 **As fotos sobem três por vez, como na esteira.** Só as que estão
+        // no começo da fila e uma atrás da outra: o gesto que vem depois delas
+        // (a nota da foto que acabou de subir) continua esperando a vez.
+        let mut lote: Vec<infrastructure::database::GestoGuardado> = Vec::new();
+        for guardado in proximas {
+            let cabe = match lote.first() {
+                None => true,
+                Some(primeiro) => {
+                    sobe_arquivo(primeiro)
+                        && sobe_arquivo(&guardado)
+                        && lote.iter().all(|g| g.alvo != guardado.alvo)
+                }
+            };
+            if !cabe {
+                break;
+            }
+            lote.push(guardado);
+        }
+        let voltas = futures::future::join_all(
+            lote.into_iter()
+                .map(|guardado| self.levar(guardado, sessao.clone())),
+        )
+        .await;
+        if voltas.iter().any(|v| matches!(v, Volta::Esperar)) {
+            Volta::Esperar
+        } else {
+            Volta::Andou
+        }
+    }
+
+    /// Leva um gesto ao site e cuida do que voltou.
+    async fn levar(
+        &self,
+        guardado: infrastructure::database::GestoGuardado,
+        sessao: Sessao,
+    ) -> Volta {
         let fila = self.sinc.fila();
         let Some(gesto) = Gesto::do_guardado(&guardado) else {
             let _ = fila
@@ -194,7 +256,13 @@ impl Trabalhador {
         };
 
         let (canal, resposta) = std::sync::mpsc::channel();
-        executar(self.site.as_ref(), sessao, gesto.clone(), canal);
+        executar(
+            self.site.as_ref(),
+            sessao,
+            gesto.clone(),
+            &guardado.ocorrido_em,
+            canal,
+        );
         let recado = tokio::task::spawn_blocking(move || resposta.recv_timeout(TETO_DO_GESTO))
             .await
             .ok()
@@ -207,6 +275,7 @@ impl Trabalhador {
         match desfecho(recado) {
             Desfecho::Chegou(recado) => {
                 self.sinc.rede().marcar_com_rede();
+                self.sinc.conta_recusada(false);
                 // 🔁 A sessão criada aqui ganhou outro id no site (um backend
                 // anterior ao id do app): os gestos e as fotos seguem o de lá.
                 let do_site = match &recado {
@@ -229,12 +298,34 @@ impl Trabalhador {
                 }
                 let _ = fila.concluir(guardado.id).await;
                 self.sinc.esquecer(&guardado.chave);
+                // ❌ A rejeição da nuvem marcou a foto no site: agora o resgate
+                // (o bruto volta para cá, e só então sai da nuvem) — a menos
+                // que o operador a tenha desfeito enquanto esperava a rede.
+                if let Gesto::RejeitarDaNuvem {
+                    foto_no_site,
+                    arquivo,
+                    parametros,
+                    galeria_id,
+                } = &gesto
+                {
+                    if !self.sinc.rejeicao_desfeita(foto_no_site) {
+                        self.sinc.ecoar(Recado::ResgateDaRejeitada {
+                            foto_no_site: foto_no_site.clone(),
+                            arquivo: arquivo.clone(),
+                            parametros: parametros.clone(),
+                            galeria_id: galeria_id.clone(),
+                        });
+                    }
+                }
                 self.sinc.ecoar(recado);
                 Volta::Andou
             }
             Desfecho::Esperar(frase) => {
                 if e_falta_de_rede(&frase) {
                     self.sinc.rede().marcar_sem_rede();
+                } else {
+                    // A conta venceu: o selo pede para entrar de novo.
+                    self.sinc.conta_recusada(true);
                 }
                 let _ = fila.tentou(guardado.id).await;
                 Volta::Esperar
@@ -258,6 +349,14 @@ impl Trabalhador {
             }
         }
     }
+}
+
+/// O gesto sobe arquivo (a foto classificada, a revelação) — o que vai em lote.
+fn sobe_arquivo(guardado: &infrastructure::database::GestoGuardado) -> bool {
+    matches!(
+        guardado.tipo.as_str(),
+        "subir_classificada" | "salvar_revelacao"
+    )
 }
 
 enum Volta {

@@ -2245,6 +2245,7 @@ impl Detalhe {
                         arquivo: f.arquivo.clone(),
                         ajustes,
                         corte,
+                        galeria: None,
                     })
                 })
                 .collect()
@@ -2695,11 +2696,14 @@ impl Detalhe {
 
     /// Quantas fotos há em cada estado — o que o cabeçalho conta.
     pub fn contagem(&self) -> (usize, usize, usize) {
-        let fotos = self
+        // 🔑 A rejeitada não conta: ela não é comprável (C21). Com rede ela sai
+        // do site na hora e nunca aparecia aqui; sem rede ela fica marcada até
+        // a fila levar o resgate — e contava como "à venda".
+        let fotos: Vec<&FotoDaGaleria> = self
             .aberta
             .as_ref()
-            .map(|a| a.fotos.as_slice())
-            .unwrap_or(&[]);
+            .map(|a| a.fotos.iter().filter(|f| !f.rejeitada).collect())
+            .unwrap_or_default();
         let levadas = fotos
             .iter()
             .filter(|f| f.estado == EstadoDaFotoNoSite::LevadaNoBalcao)
@@ -10370,6 +10374,7 @@ fn fundir_mudancas(
         rejeitada,
         produto_id,
         preco_de_venda,
+        ocorrido_em,
     } = depois;
     domain::services::pos_venda::MudancaDaFoto {
         estado: estado.or(antes.estado),
@@ -10379,6 +10384,7 @@ fn fundir_mudancas(
         rejeitada: rejeitada.or(antes.rejeitada),
         produto_id: produto_id.or(antes.produto_id),
         preco_de_venda: preco_de_venda.or(antes.preco_de_venda),
+        ocorrido_em: ocorrido_em.or(antes.ocorrido_em),
     }
 }
 

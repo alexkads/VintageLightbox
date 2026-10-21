@@ -10,7 +10,8 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 use domain::services::pos_venda::{
-    EstadoNoBalcao, Galeria, MudancaDaFoto, MudancaDaGaleria, NovaGaleria, Sessao,
+    EstadoDaFotoNoSite, EstadoNoBalcao, Galeria, MudancaDaFoto, MudancaDaGaleria, NovaGaleria,
+    Sessao,
 };
 use domain::value_objects::CropSettings;
 use infrastructure::gpu_adjustments::Ajustes;
@@ -35,6 +36,9 @@ pub struct PublicadorLocalPrimeiro {
 const SESSOES_PRE_CARREGADAS: usize = 6;
 /// O teto de miniaturas por sessão na pré-carga.
 const MINIATURAS_POR_SESSAO: usize = 400;
+/// O teto de cópias de trabalho por sessão na pré-carga — cada uma tem uns
+/// poucos MB.
+const COPIAS_POR_SESSAO: usize = 80;
 
 impl PublicadorLocalPrimeiro {
     pub fn novo(
@@ -110,6 +114,26 @@ impl PublicadorLocalPrimeiro {
                     dentro.miniatura(sessao.clone(), foto.id.clone(), canal);
                     let _ = resposta.recv_timeout(std::time::Duration::from_secs(60));
                 }
+                // 🎞️ E a cópia de trabalho das levadas e compradas: é delas que
+                // a Revelação parte, e são elas que o balcão revela no dia.
+                for foto in aberta
+                    .fotos
+                    .iter()
+                    .filter(|f| !f.apagada && f.estado != EstadoDaFotoNoSite::Disponivel)
+                    .take(COPIAS_POR_SESSAO)
+                {
+                    if !rede.com_rede() {
+                        return;
+                    }
+                    let (canal, resposta) = std::sync::mpsc::channel();
+                    dentro.copia_de_trabalho(
+                        sessao.clone(),
+                        format!("site:{}", foto.id),
+                        foto.id.clone(),
+                        canal,
+                    );
+                    let _ = resposta.recv_timeout(std::time::Duration::from_secs(120));
+                }
             }
         });
     }
@@ -159,6 +183,18 @@ impl PublicadorLocalPrimeiro {
                 }
                 let _ = canal.send(recado);
             }
+        });
+    }
+
+    /// 📶 O gesto que só existe com o site (apagar, tirar da nuvem): vai
+    /// direto, como sempre — e a falha de rede marca a rede como caída, para o
+    /// gesto seguinte já ir à fila e o selo acender (revisão de 20/10/2026).
+    fn repassar(&self, canal: Sender<Recado>, chamar: impl FnOnce(Sender<Recado>)) {
+        self.ler(canal, chamar, |sinc, recado| {
+            if falta_de_rede(&recado) {
+                sinc.rede().marcar_sem_rede();
+            }
+            recado
         });
     }
 
@@ -563,18 +599,22 @@ impl Publicador for PublicadorLocalPrimeiro {
 
     fn tirar_do_site(&self, sessao: Sessao, foto_id: String, canal: Sender<Recado>) {
         self.lembrar(&sessao);
-        self.dentro.tirar_do_site(sessao, foto_id, canal);
+        let dentro = self.dentro.clone();
+        self.repassar(canal, move |c| dentro.tirar_do_site(sessao, foto_id, c));
     }
 
     fn rejeitar_tirando_da_nuvem(&self, sessao: Sessao, foto_id: String, canal: Sender<Recado>) {
         self.lembrar(&sessao);
-        self.dentro
-            .rejeitar_tirando_da_nuvem(sessao, foto_id, canal);
+        let dentro = self.dentro.clone();
+        self.repassar(canal, move |c| {
+            dentro.rejeitar_tirando_da_nuvem(sessao, foto_id, c)
+        });
     }
 
     fn remover_remoto(&self, sessao: Sessao, no_site: String, canal: Sender<Recado>) {
         self.lembrar(&sessao);
-        self.dentro.remover_remoto(sessao, no_site, canal);
+        let dentro = self.dentro.clone();
+        self.repassar(canal, move |c| dentro.remover_remoto(sessao, no_site, c));
     }
 
     fn excluir_da_sessao(
@@ -585,7 +625,10 @@ impl Publicador for PublicadorLocalPrimeiro {
         canal: Sender<Recado>,
     ) {
         self.lembrar(&sessao);
-        self.dentro.excluir_da_sessao(sessao, no_site, local, canal);
+        let dentro = self.dentro.clone();
+        self.repassar(canal, move |c| {
+            dentro.excluir_da_sessao(sessao, no_site, local, c)
+        });
     }
 
     /// A nota, o `B`, o `X` e a negociação: o `PATCH` da foto.

@@ -112,6 +112,7 @@ parking_lot = "0.12"
 # compila de fora do crate — e o JSON é o formato nativo do `gpui-component`
 # para tema, não um contorno (`crates/ui-gpui/src/tema.rs`).
 serde_json.workspace = true
+futures.workspace = true
 # Só para ler a versão de migration aplicada na tela de primeira luz — a mesma
 # versão e as mesmas features do `infrastructure`, senão são dois drivers de
 # SQLite na árvore falando com o mesmo arquivo.

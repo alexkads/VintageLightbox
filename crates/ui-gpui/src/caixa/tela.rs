@@ -572,6 +572,15 @@ impl Caixa {
         self.carga.is_some()
     }
 
+    /// 📴 Relê, se já leu alguma vez — a fila de sincronização levou ao site o
+    /// que este caixa mostrava guardado (a venda "sem internet" ganha o número).
+    /// Sem leitura nenhuma ainda, não há o que reler.
+    pub(crate) fn reler_se_aberto(&mut self, cx: &mut Context<Self>) {
+        if self.vista.is_some() && self.carga.is_none() {
+            self.recarregar(cx);
+        }
+    }
+
     /// Relê a mesma tela — o `revalidatePath` depois de cada gravação.
     pub(super) fn recarregar(&mut self, cx: &mut Context<Self>) {
         self.navegar(self.estudio_pedido.clone(), self.escolhida.clone(), cx);

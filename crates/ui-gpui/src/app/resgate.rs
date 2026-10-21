@@ -68,6 +68,12 @@ pub struct AFotoQueVolta {
     /// Os PARÂMETROS que estão na nuvem, para voltarem com ela (caminho B).
     pub ajustes: Ajustes,
     pub corte: Corte,
+    /// A sessão da foto. `None` = a aberta na tela — o `X` de agora.
+    ///
+    /// 📴 O resgate que espera a rede (`Gesto::RejeitarDaNuvem`) leva a sessão
+    /// dele: quando a rede volta, o operador pode estar em outra sessão, ou na
+    /// lista, e a foto sem cópia aqui tem de voltar para a sessão dela.
+    pub galeria: Option<String>,
 }
 
 /// O que aconteceu com cada foto — o que a tela conta no fim.
@@ -78,6 +84,9 @@ pub struct Desfecho {
     /// As que **ficaram na nuvem**, sem a rejeição, por não ter sido possível
     /// garantir a cópia daqui ou o site ter recusado.
     pub ficaram: Vec<String>,
+    /// 📴 As que a rede caída segurou: a rejeição ficou na fila e o resgate
+    /// roda quando ela voltar.
+    pub guardadas: Vec<String>,
 }
 
 impl Desfecho {
@@ -97,6 +106,20 @@ impl Desfecho {
                 self.ficaram.join(" / ")
             )
         });
+        let sucesso = match (sucesso, self.guardadas.is_empty()) {
+            (s, true) => s,
+            (s, false) => {
+                let guardadas = format!(
+                    "Sem internet: {} foto(s) rejeitada(s). Saem da nuvem e voltam para este \
+                     computador quando a rede voltar.",
+                    self.guardadas.len()
+                );
+                Some(match s {
+                    Some(s) => format!("{s}. {guardadas}"),
+                    None => guardadas,
+                })
+            }
+        };
         (sucesso, falha)
     }
 }
@@ -104,13 +127,96 @@ impl Desfecho {
 impl Aplicativo {
     /// Rejeita estas fotos do site — cada uma volta para cá antes de a nuvem
     /// a perder.
+    ///
+    /// 📴 **Sem internet** (ou com a fila de sincronização esperando, para não
+    /// furar a vez) o resgate não roda — ele baixa o bruto. A rejeição vai para
+    /// a fila: a grade já a mostra rejeitada, o site a marca quando a rede
+    /// voltar, e só então o resgate de sempre traz a foto e a tira da nuvem.
     pub fn rejeitar_da_nuvem(&mut self, fotos: Vec<AFotoQueVolta>, cx: &mut Context<Self>) {
         if fotos.is_empty() || !self.pode_trabalhar() {
             return;
         }
+        self.resgatar(fotos, cx);
+    }
+
+    /// 📴 O resgate desta foto espera a rede? Sem internet, sim. Com a fila de
+    /// sincronização esperando, também — o `X` de agora não fura a vez do que
+    /// foi feito antes —, a não ser que o resgate venha da própria fila.
+    fn resgate_espera(&self, foto: &AFotoQueVolta) -> bool {
+        let Some(fila) = crate::sincronizacao::a_do_app() else {
+            return false;
+        };
+        let veio_da_fila = foto.galeria.is_some();
+        !fila.rede().com_rede() || (!veio_da_fila && fila.tem_pendente())
+    }
+
+    /// 📴 A parte do site vai para a fila: ela marca a foto como rejeitada lá
+    /// e pede o resgate quando a rede voltar.
+    fn guardar_a_rejeicao(&mut self, foto: &AFotoQueVolta) {
+        let Some(fila) = crate::sincronizacao::a_do_app() else {
+            return;
+        };
+        fila.guardar(crate::sincronizacao::Gesto::RejeitarDaNuvem {
+            foto_no_site: foto.no_site.clone(),
+            arquivo: foto.arquivo.clone(),
+            parametros: crate::pos_venda::porta::ajustes_em_json(
+                &foto.ajustes,
+                &persistencia::para_crop_settings(&foto.corte),
+            ),
+            galeria_id: foto.galeria.clone().or_else(|| self.sessao_aberta.clone()),
+        });
+    }
+
+    /// O resgate de sempre, com a rede de pé — ver o topo do módulo.
+    ///
+    /// 🚨 **Um lote por vez, e o que chega no meio espera.** O lote novo
+    /// substituía a tarefa do que estava rodando — e cancelava uma foto no
+    /// meio do caminho. Agora ele entra na fila do resgate e sai quando o
+    /// anterior termina (revisão de 20/10/2026).
+    pub(crate) fn resgatar(&mut self, fotos: Vec<AFotoQueVolta>, cx: &mut Context<Self>) {
+        if fotos.is_empty() || self.sessao().is_none() {
+            return;
+        }
+        if self.resgatando {
+            self.resgates_na_fila.extend(fotos);
+            return;
+        }
+        self.resgatando = true;
         self._resgate = Some(cx.spawn(async move |raiz, cx| {
             let mut desfecho = Desfecho::default();
             for foto in fotos {
+                // 📴 **O resgate que vem da fila confere o desfazer.** O `X`
+                // desfeito sem rede numa foto com cópia aqui tira só a marca
+                // do catálogo; a fila não sabe disso. Cópia sem a marca: o
+                // site perde a rejeição, e a foto fica onde está.
+                if foto.galeria.is_some() && copia_sem_rejeicao(&raiz, &foto.no_site, cx).await {
+                    let _ = raiz.update(cx, |raiz, _| {
+                        let Some(sessao) = raiz.sessao().cloned() else {
+                            return;
+                        };
+                        let (para_o_site, _) = channel::<Recado>();
+                        raiz.publicador.negociar(
+                            sessao,
+                            foto.no_site.clone(),
+                            domain::services::pos_venda::MudancaDaFoto {
+                                rejeitada: Some(false),
+                                ..Default::default()
+                            },
+                            para_o_site,
+                        );
+                    });
+                    continue;
+                }
+                // 📴 Sem rede (ou com a fila esperando): a cópia daqui fica
+                // rejeitada já, e o site espera na fila.
+                if raiz
+                    .update(cx, |raiz, _| raiz.resgate_espera(&foto))
+                    .unwrap_or(false)
+                {
+                    guardar_sem_rede(&raiz, &foto, cx).await;
+                    desfecho.guardadas.push(foto.arquivo.clone());
+                    continue;
+                }
                 // 🔑 **Marcada antes do `DELETE`**: um envio para ela que já
                 // esteja no ar volta com 404, e esse 404 não é recusa — ver
                 // `largar_o_que_ia_para`.
@@ -128,7 +234,16 @@ impl Aplicativo {
                         // Ficou no site: o que for para ela volta a valer.
                         let _ =
                             raiz.update(cx, |raiz, _| raiz.tiradas_do_site.remove(&foto.no_site));
-                        desfecho.ficaram.push(foto.arquivo.clone())
+                        // 📴 Foi a rede que caiu no meio: a rejeição vai para a
+                        // fila, e o resgate roda quando ela voltar.
+                        let sem_rede = crate::sincronizacao::a_do_app()
+                            .is_some_and(|fila| !fila.rede().com_rede());
+                        if sem_rede {
+                            guardar_sem_rede(&raiz, &foto, cx).await;
+                            desfecho.guardadas.push(foto.arquivo.clone())
+                        } else {
+                            desfecho.ficaram.push(foto.arquivo.clone())
+                        }
                     }
                 }
             }
@@ -138,6 +253,7 @@ impl Aplicativo {
 
     /// O fim do lote: as duas listas relêem, e o operador ouve o que houve.
     fn terminar_o_resgate(&mut self, desfecho: Desfecho, cx: &mut Context<Self>) {
+        self.resgatando = false;
         let (sucesso, falha) = desfecho.avisos();
         // O catálogo ganhou (ou mudou) fotos e o site perdeu: as duas mudaram.
         self.pedir_releitura_do_acervo(cx);
@@ -151,6 +267,9 @@ impl Aplicativo {
             self.avisar_falha(texto, cx);
         }
         self.ultimo_resgate = Some(desfecho);
+        // O que chegou enquanto este lote rodava.
+        let proximas = std::mem::take(&mut self.resgates_na_fila);
+        self.resgatar(proximas, cx);
         cx.notify();
     }
 
@@ -168,7 +287,9 @@ async fn rejeitar_uma(
     cx: &mut AsyncApp,
 ) -> Result<(), ()> {
     let Ok(Some((sessao, galeria))) = raiz.update(cx, |raiz, _| {
-        raiz.sessao().cloned().zip(raiz.sessao_aberta.clone())
+        raiz.sessao()
+            .cloned()
+            .zip(foto.galeria.clone().or_else(|| raiz.sessao_aberta.clone()))
     }) else {
         return Err(());
     };
@@ -397,6 +518,42 @@ async fn reler_e_achar(
 }
 
 /// A cópia desta foto do site no catálogo daqui, se houver.
+/// 📴 A rejeição sem rede: a cópia daqui (se houver) fica rejeitada no
+/// catálogo na hora — é ela que a grade mostra, e a marca segura a subida —, e
+/// a parte do site vai para a fila.
+async fn guardar_sem_rede(
+    raiz: &gpui_kit::WeakEntity<Aplicativo>,
+    foto: &AFotoQueVolta,
+    cx: &mut AsyncApp,
+) {
+    let copia = achar_a_copia(raiz, &foto.no_site, cx).await;
+    let _ = raiz.update(cx, |raiz, _| {
+        if let Some(id_local) = copia {
+            raiz.marcador
+                .marcar(id_local, Marca::Sinalizador(REJEITADA_NO_CATALOGO));
+        }
+        raiz.guardar_a_rejeicao(foto);
+    });
+}
+
+/// A cópia daqui desta foto do site existe e **não** está rejeitada no
+/// catálogo — o `X` foi desfeito nela.
+async fn copia_sem_rejeicao(
+    raiz: &gpui_kit::WeakEntity<Aplicativo>,
+    no_site: &str,
+    cx: &mut AsyncApp,
+) -> bool {
+    reler_e_achar(
+        raiz,
+        |f| {
+            f.pos_venda_foto_id.as_deref() == Some(no_site) && f.flag != Some(REJEITADA_NO_CATALOGO)
+        },
+        cx,
+    )
+    .await
+    .is_some()
+}
+
 async fn achar_a_copia(
     raiz: &gpui_kit::WeakEntity<Aplicativo>,
     no_site: &str,
@@ -433,11 +590,24 @@ mod testes {
         let misto = Desfecho {
             voltaram: vec!["a.jpg".into(), "b.jpg".into()],
             ficaram: vec!["c.jpg".into()],
+            guardadas: Vec::new(),
         };
         let (sucesso, falha) = misto.avisos();
         assert!(sucesso.is_some_and(|s| s.starts_with("2 foto(s) rejeitada(s)")));
         let falha = falha.expect("a frase do que ficou");
         assert!(falha.contains("c.jpg"), "o nome é o que o operador procura");
         assert!(falha.contains("continuam na nuvem"), "{falha}");
+    }
+
+    /// 📴 A que a rede caída segurou não é falha: ela espera na fila.
+    #[test]
+    fn a_rejeicao_que_a_rede_segurou_e_dita_como_guardada() {
+        let so_guardada = Desfecho {
+            guardadas: vec!["d.jpg".into()],
+            ..Default::default()
+        };
+        let (sucesso, falha) = so_guardada.avisos();
+        assert_eq!(falha, None);
+        assert!(sucesso.is_some_and(|s| s.starts_with("Sem internet: 1 foto(s) rejeitada(s)")));
     }
 }

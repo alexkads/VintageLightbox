@@ -47,6 +47,21 @@ pub enum Gesto {
         caminho: String,
         corpo: Value,
     },
+    /// ❌ O `X` numa foto que já está na nuvem, feito sem internet.
+    ///
+    /// 🔑 **Na volta são dois passos, nessa ordem**: a fila marca a foto como
+    /// rejeitada no site (o cliente deixa de vê-la e de poder comprá-la — o
+    /// `PATCH` só marca, nunca apaga) e, chegando, pede à raiz o resgate de
+    /// sempre (`app/resgate.rs`): o bruto volta para cá antes de a nuvem o
+    /// perder. Sem rede o resgate não roda — ele baixa o bruto.
+    RejeitarDaNuvem {
+        foto_no_site: String,
+        arquivo: String,
+        /// Os parâmetros que estão na nuvem, para voltarem com ela.
+        parametros: Value,
+        /// A sessão da foto, para onde ela volta.
+        galeria_id: Option<String>,
+    },
 }
 
 impl Gesto {
@@ -59,6 +74,7 @@ impl Gesto {
             Self::SalvarRevelacao { .. } => "salvar_revelacao",
             Self::Avisar { .. } => "avisar",
             Self::PedidoJson { .. } => "pedido_json",
+            Self::RejeitarDaNuvem { .. } => "rejeitar_da_nuvem",
         }
     }
 
@@ -71,6 +87,7 @@ impl Gesto {
             Self::SubirClassificada { foto, .. } => &foto.foto_id,
             Self::SalvarRevelacao { foto_no_site, .. } => foto_no_site,
             Self::PedidoJson { caminho, .. } => caminho,
+            Self::RejeitarDaNuvem { foto_no_site, .. } => foto_no_site,
         }
     }
 
@@ -81,6 +98,7 @@ impl Gesto {
             Self::AtualizarGaleria { galeria_id, .. }
             | Self::Avisar { galeria_id }
             | Self::SubirClassificada { galeria_id, .. } => Some(galeria_id),
+            Self::RejeitarDaNuvem { galeria_id, .. } => galeria_id.as_deref(),
             Self::MudarFoto { .. } | Self::SalvarRevelacao { .. } => None,
             Self::PedidoJson { corpo, .. } => corpo.get("galeria_id").and_then(Value::as_str),
         }
@@ -100,6 +118,11 @@ impl Gesto {
             Self::SalvarRevelacao { parametros, .. } => parametros.clone(),
             Self::Avisar { .. } => json!({}),
             Self::PedidoJson { metodo, corpo, .. } => json!({ "metodo": metodo, "corpo": corpo }),
+            Self::RejeitarDaNuvem {
+                arquivo,
+                parametros,
+                ..
+            } => json!({ "arquivo": arquivo, "parametros": parametros }),
         }
     }
 
@@ -161,6 +184,16 @@ impl Gesto {
                 caminho: guardado.alvo.clone(),
                 corpo: corpo.get("corpo").cloned().unwrap_or(Value::Null),
             },
+            "rejeitar_da_nuvem" => Self::RejeitarDaNuvem {
+                foto_no_site: guardado.alvo.clone(),
+                arquivo: corpo
+                    .get("arquivo")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                parametros: corpo.get("parametros").cloned().unwrap_or(Value::Null),
+                galeria_id: guardado.galeria_id.clone(),
+            },
             _ => return None,
         })
     }
@@ -210,6 +243,9 @@ impl Gesto {
             Self::SalvarRevelacao { .. } => "Salvar a revelação na galeria".to_string(),
             Self::Avisar { .. } => "Avisar o cliente por e-mail".to_string(),
             Self::PedidoJson { caminho, corpo, .. } => super::caixa::descrever(caminho, corpo),
+            Self::RejeitarDaNuvem { arquivo, .. } => {
+                format!("Rejeitar {arquivo} e trazê-la da nuvem")
+            }
         }
     }
 }
@@ -283,6 +319,12 @@ mod testes {
                 metodo: "POST".into(),
                 caminho: "/pos-venda/caixa/vendas".into(),
                 corpo: json!({ "galeria_id": "g1", "chave": "k", "itens": [] }),
+            },
+            Gesto::RejeitarDaNuvem {
+                foto_no_site: "f9".into(),
+                arquivo: "DSC_9.jpg".into(),
+                parametros: json!({ "exposure": 0.2 }),
+                galeria_id: Some("g1".into()),
             },
         ];
         for gesto in gestos {

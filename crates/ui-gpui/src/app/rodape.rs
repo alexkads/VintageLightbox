@@ -513,6 +513,10 @@ pub fn frase_da_fila(situacao: crate::sincronizacao::Situacao) -> Option<(String
             "alterações guardadas",
         )
     };
+    // A conta venceu: nada sobe até alguém entrar de novo — e o selo diz isso.
+    if situacao.precisa_entrar && situacao.pendentes > 0 {
+        return Some((format!("Entre na conta para enviar {}", guardadas()), true));
+    }
     if situacao.conflitos > 0 {
         return Some((
             format!(
@@ -749,6 +753,7 @@ mod testes {
                 pendentes: 3,
                 conflitos: 0,
                 sem_rede_desde: Some(1),
+                precisa_entrar: false,
             }),
             Some(("Sem internet · 3 alterações guardadas".into(), false))
         );
@@ -757,6 +762,7 @@ mod testes {
                 pendentes: 1,
                 conflitos: 0,
                 sem_rede_desde: None,
+                precisa_entrar: false,
             }),
             Some(("Enviando 1 alteração guardada".into(), false))
         );
@@ -765,8 +771,20 @@ mod testes {
                 pendentes: 0,
                 conflitos: 2,
                 sem_rede_desde: None,
+                precisa_entrar: false,
             }),
             Some(("2 recusadas na volta".into(), true))
+        );
+        assert_eq!(
+            frase_da_fila(Situacao {
+                pendentes: 4,
+                precisa_entrar: true,
+                ..Default::default()
+            }),
+            Some((
+                "Entre na conta para enviar 4 alterações guardadas".into(),
+                true
+            ))
         );
     }
 

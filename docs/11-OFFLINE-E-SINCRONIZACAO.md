@@ -78,8 +78,29 @@ Código em `crates/ui-gpui/src/sincronizacao/` e
    que só existe lá, agenda, chatbot e o resto que grava.
 9. **Primeira entrada pede internet**; depois, o app abre sem rede dentro dos 15
    dias do refresh, e a renovação que falha por rede não derruba a conta.
-10. **Várias máquinas sem rede trabalham cada uma por si**; na volta vale a ordem
-    em que cada fila chega, e a recusa vira conflito.
+10. **Vale o último gesto a ACONTECER, e não o último a chegar** (revisão de
+    20/out). O `PATCH` da foto que sobe pela fila leva `ocorrido_em`, e o site
+    guarda a hora da última mudança de cada campo (`pos_venda_fotos.marcas_em`):
+    a nota dada às 14h sem rede não desfaz a que outro balcão deu às 14h30 com
+    rede. Os outros campos do mesmo gesto valem.
+11. **O `X` numa foto que já está na nuvem, sem rede**, vai para a fila
+    (`Gesto::RejeitarDaNuvem`): a grade a mostra rejeitada na hora; na volta a
+    fila a marca no site e pede à raiz o resgate de sempre (o bruto volta para
+    cá e só então sai da nuvem). Desfeito antes de a rede voltar, o resgate não
+    roda.
+12. **A conta da abertura sem rede**: o `/auth/me` entra no espelho — é dele
+    que vêm o perfil de acesso (estúdios, caixas) e a retomada da última tela.
+    Conta vencida com gesto esperando: o selo diz "Entre na conta para enviar".
+
+### Como a fila anda
+
+- O trabalhador lê só o começo da fila (`proximas`), nunca ela inteira.
+- As fotos (subida e "Salvar na galeria") sobem **três por vez**, como na
+  esteira; o gesto que vem atrás delas espera a vez.
+- A mesma foto a subir não entra duas vezes (a reabertura do app pede de novo
+  o que falta); a subida lê a nota do catálogo na hora de ir.
+- Quando a fila esvazia, ou o site recusa um gesto, a sessão aberta e os dois
+  caixas releem: a venda "sem internet" ganha o número do site.
 
 ### O que o operador vê
 
@@ -102,7 +123,8 @@ sozinha quando a fila a leva. "Novo QR" precisa de internet.
 ### Pré-carga
 
 Com rede, a lista de sessões leva ao espelho as de ontem e de hoje (até seis,
-uma vez por abertura): a galeria, o QR do bot e as miniaturas. A sessão do dia abre com a
+uma vez por abertura): a galeria, o QR do bot, as miniaturas e a cópia de
+trabalho das levadas e compradas (até 80 por sessão), de onde a Revelação parte. A sessão do dia abre com a
 grade cheia depois de a internet cair, mesmo que ninguém a tenha aberto naquele
 computador. A cópia de trabalho entra no espelho quando a foto é aberta.
 

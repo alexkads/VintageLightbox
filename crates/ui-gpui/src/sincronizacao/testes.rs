@@ -37,6 +37,10 @@ struct SiteDeMentira {
     miniaturas: Mutex<Vec<String>>,
     /// Os `GET` do pedido cru, na ordem.
     lidos: Mutex<Vec<String>>,
+    /// As cópias de trabalho pedidas — a pré-carga.
+    copias: Mutex<Vec<String>>,
+    /// A hora de cada `PATCH` de foto que chegou (`None` = gesto de agora).
+    horas: Mutex<Vec<Option<String>>>,
 }
 
 impl SiteDeMentira {
@@ -77,6 +81,7 @@ impl SiteDeMentira {
                 },
                 FotoDaGaleria {
                     id: "f2".into(),
+                    estado: domain::services::pos_venda::EstadoDaFotoNoSite::LevadaNoBalcao,
                     ..Default::default()
                 },
             ],
@@ -222,7 +227,18 @@ impl Publicador for SiteDeMentira {
                 foto_id: foto_id.clone(),
                 erro: None,
             },
-            format!("patch {foto_id} {}", mudanca.corpo()),
+            {
+                // A hora vai à parte: o registro mostra o que mudou.
+                let hora = mudanca.ocorrido_em.clone();
+                if !self.sem_rede.load(Ordering::SeqCst) {
+                    self.horas.lock().unwrap().push(hora);
+                }
+                let sem_hora = MudancaDaFoto {
+                    ocorrido_em: None,
+                    ..mudanca
+                };
+                format!("patch {foto_id} {}", sem_hora.corpo())
+            },
         );
     }
     fn enviar_arquivo(
@@ -273,10 +289,15 @@ impl Publicador for SiteDeMentira {
     fn copia_de_trabalho(
         &self,
         _sessao: Sessao,
-        _foto_local: String,
-        _foto_no_site: String,
-        _canal: Sender<Recado>,
+        foto_local: String,
+        foto_no_site: String,
+        canal: Sender<Recado>,
     ) {
+        self.copias.lock().unwrap().push(foto_no_site);
+        let _ = canal.send(Recado::Pixels {
+            foto_id: foto_local,
+            bytes: vec![1],
+        });
     }
 }
 
@@ -889,9 +910,164 @@ async fn a_lista_com_rede_pre_carrega_as_sessoes_de_hoje() {
             .contains(&"/pos-venda/galerias/g1/bot".to_string()),
         "o QR do bot vai ao espelho junto"
     );
+    ate(
+        || *b.site.copias.lock().unwrap() == vec!["f2".to_string()],
+        "a cópia de trabalho da levada",
+    )
+    .await;
     // A segunda lista não pré-carrega de novo.
     b.porta.galerias(sessao(), canal);
     let _ = colher(&recados).await;
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(b.site.miniaturas.lock().unwrap().len(), 2);
+}
+
+/// 📴 O `PATCH` que sobe pela fila leva a hora em que o gesto aconteceu — o
+/// site deixa como está o campo que alguém mudou depois (vale o último gesto a
+/// acontecer). O gesto de agora vai sem hora.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn o_patch_da_fila_leva_a_hora_do_gesto() {
+    let b = montar().await;
+    let (canal, recados) = std::sync::mpsc::channel();
+    b.porta
+        .negociar(sessao(), "f1".into(), nota(5), canal.clone());
+    let _ = colher(&recados).await;
+    b.site.sem_rede.store(true, Ordering::SeqCst);
+    b.sinc.rede().marcar_sem_rede();
+    b.porta
+        .negociar(sessao(), "f2".into(), nota(3), canal.clone());
+    let _ = colher(&recados).await;
+    b.site.sem_rede.store(false, Ordering::SeqCst);
+    b.sinc.acordar.notify_one();
+    ate(|| b.sinc.situacao().pendentes == 0, "a fila esvaziar").await;
+    let horas = b.site.horas.lock().unwrap().clone();
+    assert_eq!(horas.len(), 2);
+    assert_eq!(horas[0], None, "o gesto de agora vai sem hora");
+    let hora = horas[1].clone().expect("o gesto da fila leva a hora");
+    assert!(
+        chrono::DateTime::parse_from_rfc3339(&hora).is_ok(),
+        "{hora}"
+    );
+}
+
+/// ❌ O `X` numa foto da nuvem, sem rede: a grade já a mostra rejeitada; na
+/// volta a fila a marca no site e pede à raiz o resgate. Se o operador
+/// desfez o `X` enquanto esperava, a foto fica onde está.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_rejeicao_da_nuvem_sem_rede_marca_e_pede_o_resgate_na_volta() {
+    use serde_json::json;
+    let b = montar().await;
+    b.site.sem_rede.store(true, Ordering::SeqCst);
+    b.sinc.rede().marcar_sem_rede();
+    let (canal, recados) = std::sync::mpsc::channel();
+    // A raiz guarda as duas rejeições (`app/resgate.rs`).
+    for foto in ["f1", "f2"] {
+        b.sinc.guardar(super::Gesto::RejeitarDaNuvem {
+            foto_no_site: foto.into(),
+            arquivo: format!("{foto}.jpg"),
+            parametros: json!({ "exposure": 0.3 }),
+            galeria_id: Some("g1".into()),
+        });
+    }
+    // A f2 o operador desfez antes de a rede voltar.
+    b.porta.negociar(
+        sessao(),
+        "f2".into(),
+        MudancaDaFoto {
+            rejeitada: Some(false),
+            ..Default::default()
+        },
+        canal.clone(),
+    );
+    let _ = colher(&recados).await;
+
+    b.porta.abrir_galeria(sessao(), "g1".into(), canal.clone());
+    let Recado::Aberta(aberta) = colher(&recados).await else {
+        panic!("a sessão tinha de abrir");
+    };
+    assert!(
+        aberta.fotos[0].rejeitada,
+        "a grade mostra a rejeitada sem rede"
+    );
+    assert!(!aberta.fotos[1].rejeitada, "e a desfeita, desfeita");
+
+    b.site.sem_rede.store(false, Ordering::SeqCst);
+    b.sinc.acordar.notify_one();
+    ate(|| b.sinc.situacao().pendentes == 0, "a fila esvaziar").await;
+    assert_eq!(
+        *b.site.chegou.lock().unwrap(),
+        vec![
+            r#"patch f1 {"rejeitada":true}"#.to_string(),
+            r#"patch f2 {"rejeitada":true}"#.to_string(),
+            r#"patch f2 {"rejeitada":false}"#.to_string(),
+        ]
+    );
+    let mut resgates = Vec::new();
+    for _ in 0..3 {
+        if let Recado::ResgateDaRejeitada { foto_no_site, .. } = colher(&b.ecos).await {
+            resgates.push(foto_no_site);
+        }
+    }
+    assert_eq!(
+        resgates,
+        vec!["f1".to_string()],
+        "só a que continua rejeitada volta"
+    );
+}
+
+/// 📤 Depois de uma queda, as fotos guardadas sobem em lote, e o gesto que
+/// vem atrás delas (a nota da foto do site) espera a vez.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn as_fotos_guardadas_sobem_em_lote_e_a_nota_espera_a_vez() {
+    let b = montar().await;
+    b.site.sem_rede.store(true, Ordering::SeqCst);
+    b.sinc.rede().marcar_sem_rede();
+    let (canal, recados) = std::sync::mpsc::channel();
+    for n in 1..=4 {
+        b.porta.subir_classificada(
+            sessao(),
+            "g1".into(),
+            FotoClassificada {
+                foto_id: format!("local-{n}"),
+                ordem: n,
+                estado: None,
+                nota: Some(5),
+                produto_id: None,
+            },
+            canal.clone(),
+        );
+        let _ = colher(&recados).await;
+    }
+    // A reabertura pede de novo a subida da primeira: ela não entra duas vezes.
+    b.porta.subir_classificada(
+        sessao(),
+        "g1".into(),
+        FotoClassificada {
+            foto_id: "local-1".into(),
+            ordem: 1,
+            estado: None,
+            nota: Some(5),
+            produto_id: None,
+        },
+        canal.clone(),
+    );
+    let _ = colher(&recados).await;
+    assert_eq!(b.sinc.situacao().pendentes, 4);
+    b.porta
+        .negociar(sessao(), "f1".into(), nota(4), canal.clone());
+    let _ = colher(&recados).await;
+    b.site.sem_rede.store(false, Ordering::SeqCst);
+    b.sinc.acordar.notify_one();
+    ate(|| b.sinc.situacao().pendentes == 0, "a fila esvaziar").await;
+    let chegou = b.site.chegou.lock().unwrap().clone();
+    assert_eq!(chegou.len(), 5, "{chegou:?}");
+    let mut subidas: Vec<String> = chegou[..4].to_vec();
+    subidas.sort();
+    assert_eq!(
+        subidas,
+        (1..=4)
+            .map(|n| format!("subir local-{n} em g1"))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(chegou[4], r#"patch f1 {"nota":4}"#);
 }

@@ -55,10 +55,12 @@ pub trait Espelho: Send + Sync {
 /// cheio; o fluxo de eventos não é leitura que se repita.
 pub fn espelhavel(caminho: &str) -> bool {
     let rota = caminho.split('?').next().unwrap_or(caminho);
+    // 🔑 O `/auth/me` entra: é dele que vêm o perfil de acesso (os estúdios e
+    // os caixas da conta) e a retomada da última tela — sem ele, o app aberto
+    // sem rede não sabia quem estava ali (revisão de 20/10/2026).
     !(rota.ends_with("/original")
         || rota.ends_with("/fonte-para-revelar")
-        || rota.contains("/eventos")
-        || rota.starts_with("/auth/"))
+        || rota.contains("/eventos"))
 }
 
 fn agora() -> i64 {
@@ -310,7 +312,7 @@ mod testes {
         assert!(espelhavel("/pos-venda/caixa?estudio_id=1&local=ESTUDIO"));
         assert!(!espelhavel("/pos-venda/fotos/a/original"));
         assert!(!espelhavel("/pos-venda/fotos/a/fonte-para-revelar"));
-        assert!(!espelhavel("/auth/me"));
+        assert!(espelhavel("/auth/me"));
     }
 
     #[test]

@@ -71,6 +71,9 @@ pub struct Situacao {
     pub conflitos: usize,
     /// Desde quando o site não responde (segundos desde a época).
     pub sem_rede_desde: Option<i64>,
+    /// A conta deste computador venceu (mais de 15 dias, ou foi encerrada):
+    /// a fila espera alguém entrar de novo.
+    pub precisa_entrar: bool,
 }
 
 /// A fila de sincronização deste balcão — uma só, dividida pela porta, pelo
@@ -93,6 +96,8 @@ pub struct Sincronizacao {
     /// como as de um envio feito agora (a revelação sai do depósito, a grade
     /// relê).
     ecos: Mutex<Option<std::sync::mpsc::Sender<crate::pos_venda::porta::Recado>>>,
+    /// A conta venceu e a fila espera — ver [`Situacao::precisa_entrar`].
+    conta_recusada: std::sync::atomic::AtomicBool,
 }
 
 /// A fila deste app — uma só, montada na abertura (`montagem.rs`).
@@ -186,6 +191,24 @@ impl Sincronizacao {
             escrita,
             acordar,
             ecos: Mutex::new(None),
+            conta_recusada: Default::default(),
+        })
+    }
+
+    pub(crate) fn conta_recusada(&self, recusada: bool) {
+        self.conta_recusada
+            .store(recusada, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// ❌ O operador desfez, sem rede, a rejeição desta foto da nuvem — a
+    /// fila espera um `X` de volta (`rejeitada: false`) para ela. Aí o
+    /// resgate não roda: a foto fica onde está.
+    pub(crate) fn rejeicao_desfeita(&self, foto_no_site: &str) -> bool {
+        self.memoria.lock().is_ok_and(|m| {
+            m.iter().any(|item| {
+                matches!(&item.gesto, Gesto::MudarFoto { foto_id, mudanca }
+                    if foto_id == foto_no_site && mudanca.rejeitada == Some(false))
+            })
         })
     }
 
@@ -224,6 +247,20 @@ impl Sincronizacao {
 
     /// Guarda o gesto no fim da fila. Volta na hora: quem grava é a tarefa.
     pub fn guardar(&self, gesto: Gesto) {
+        // 📤 A mesma foto a subir já espera na fila (a reabertura do app pede
+        // de novo a subida do que falta): a segunda não entra. A subida lê a
+        // nota e o estado do catálogo na hora de ir, então nada se perde.
+        if let Gesto::SubirClassificada { foto, .. } = &gesto {
+            let ja = self.memoria.lock().is_ok_and(|m| {
+                m.iter().any(|item| {
+                    matches!(&item.gesto, Gesto::SubirClassificada { foto: f, .. }
+                        if f.foto_id == foto.foto_id)
+                })
+            });
+            if ja {
+                return;
+            }
+        }
         let chave = uuid::Uuid::new_v4().to_string();
         let agora = chrono::Local::now().to_rfc3339();
         let novo = gesto.para_guardar(&chave, &agora);
@@ -311,6 +348,9 @@ impl Sincronizacao {
                 {
                     *galeria_id = para.to_string()
                 }
+                Gesto::RejeitarDaNuvem { galeria_id, .. } if galeria_id.as_deref() == Some(de) => {
+                    *galeria_id = Some(para.to_string())
+                }
                 Gesto::PedidoJson { caminho, corpo, .. } => {
                     *caminho = caminho.replace(de, para);
                     if let Ok(trocado) = serde_json::from_str(&corpo.to_string().replace(de, para))
@@ -327,6 +367,9 @@ impl Sincronizacao {
         Situacao {
             pendentes: self.memoria.lock().map(|m| m.len()).unwrap_or(0),
             conflitos: self.conflitos.lock().map(|c| c.len()).unwrap_or(0),
+            precisa_entrar: self
+                .conta_recusada
+                .load(std::sync::atomic::Ordering::Relaxed),
             sem_rede_desde: self.rede.sem_rede_desde(),
         }
     }
@@ -348,6 +391,13 @@ impl Sincronizacao {
         for item in memoria.iter() {
             match &item.gesto {
                 Gesto::MudarFoto { foto_id, mudanca } => aberta.aplicar(foto_id, mudanca),
+                Gesto::RejeitarDaNuvem { foto_no_site, .. } => aberta.aplicar(
+                    foto_no_site,
+                    &domain::services::pos_venda::MudancaDaFoto {
+                        rejeitada: Some(true),
+                        ..Default::default()
+                    },
+                ),
                 Gesto::AtualizarGaleria {
                     galeria_id,
                     mudanca,
@@ -436,9 +486,15 @@ impl Sincronizacao {
         else {
             return;
         };
+        let rejeitar = domain::services::pos_venda::MudancaDaFoto {
+            rejeitada: Some(true),
+            ..Default::default()
+        };
         for item in memoria.iter() {
-            let Gesto::MudarFoto { foto_id, mudanca } = &item.gesto else {
-                continue;
+            let (foto_id, mudanca) = match &item.gesto {
+                Gesto::MudarFoto { foto_id, mudanca } => (foto_id, mudanca),
+                Gesto::RejeitarDaNuvem { foto_no_site, .. } => (foto_no_site, &rejeitar),
+                _ => continue,
             };
             if let Some(foto) = fotos
                 .iter_mut()
