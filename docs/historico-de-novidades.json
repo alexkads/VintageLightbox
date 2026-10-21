@@ -1,5 +1,21 @@
 [
   {
+    "versao": "0.1.178",
+    "data": "2026-10-20",
+    "titulo": "Revisão do trabalho sem internet: mais situações cobertas e nada se perde entre dois balcões.",
+    "importante": true,
+    "novidades": [
+      "O app aberto sem internet já sabe quem está na conta: estúdios, caixas e a volta à última tela funcionam como com rede.",
+      "Dois balcões na mesma foto: vale o que foi feito por último, pela hora em que aconteceu. A nota dada sem internet não desfaz a que outro balcão deu depois.",
+      "Rejeitar (X) uma foto que já está na nuvem funciona sem internet: ela some da venda na hora e volta para este computador quando a rede voltar. Desfazer antes também vale.",
+      "Depois de uma queda longa, as fotos guardadas sobem três por vez, e a lista de sessões e o caixa se atualizam sozinhos quando tudo chega.",
+      "A Revelação abre sem internet as fotos levadas e compradas das sessões do dia.",
+      "A venda feita sem internet de uma foto apagada do site no meio-tempo entra no caixa, marcada para estornar.",
+      "Se a conta precisar entrar de novo, o aviso do rodapé diz isso em vez de ficar \"enviando\"."
+    ],
+    "por_que_atualizar": "Para o trabalho sem internet não ter pontas soltas: cada gesto feito sem rede chega ao site certo, na ordem e sem desfazer o de outro balcão."
+  },
+  {
     "versao": "0.1.177",
     "data": "2026-10-20",
     "titulo": "O balcão trabalha sem internet: tudo fica guardado e sobe sozinho quando a rede volta.",
