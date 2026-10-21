@@ -329,6 +329,10 @@ pub struct ResumoDoFotolivro {
     pub email_enviado_em: Option<String>,
     pub email_aberto_em: Option<String>,
     pub whatsapp_enviado_em: Option<String>,
+    /// 📖 Por que o livro da sessão paga não saiu pelo WhatsApp, como a API o
+    /// diz (`cliente_nao_escreveu`, `numero_diferente`…). `None` = saiu, não
+    /// foi cobrada, ou a API não sabe.
+    pub whatsapp_pendente: Option<String>,
 }
 
 /// 🔑 **`vendas: 0` é um fato**: a sessão não passou pelo caixa, e é dele que

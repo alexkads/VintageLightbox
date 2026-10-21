@@ -1676,6 +1676,9 @@ struct FotolivroDaApi {
     email_aberto_em: Option<String>,
     #[serde(default)]
     whatsapp_enviado_em: Option<String>,
+    /// 📖 Por que o livro não saiu pelo WhatsApp (`cliente_nao_escreveu`…).
+    #[serde(default)]
+    whatsapp_pendente: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -1760,6 +1763,7 @@ impl From<GaleriaDoPainelDaApi> for GaleriaDoPainel {
                     email_enviado_em: f.email_enviado_em,
                     email_aberto_em: f.email_aberto_em,
                     whatsapp_enviado_em: f.whatsapp_enviado_em,
+                    whatsapp_pendente: f.whatsapp_pendente,
                 }),
             preset_padrao_id: g.preset_padrao_id,
             proporcao_padrao: g.proporcao_padrao,

@@ -164,6 +164,43 @@ pub struct ResumoDoFotolivro {
     pub email_enviado_em: Option<String>,
     pub email_aberto_em: Option<String>,
     pub whatsapp_enviado_em: Option<String>,
+    /// 📖 Por que o livro não saiu pelo WhatsApp — ver [`motivo_do_whatsapp`].
+    pub whatsapp_pendente: Option<String>,
+}
+
+/// 📖 **A checagem do fotolivro depois do pagamento** (dono, 2026-10-21:
+/// *"ponha a checagem do fotolivro (enviado ou o motivo de não ter saído) na
+/// lista de sessões do site e do app"*): o texto curto da coluna e o que fazer
+/// com o cliente na frente. O livro sai pelo WhatsApp só se o cliente escreveu
+/// nas últimas 24 h — modelo da Meta é proibido.
+///
+/// ⚠️ Os mesmos textos do site (`fotolivro-na-lista.ts`, `MOTIVO_DO_WHATSAPP`).
+pub fn motivo_do_whatsapp(
+    livro: Option<&ResumoDoFotolivro>,
+) -> Option<(&'static str, &'static str)> {
+    Some(match livro?.whatsapp_pendente.as_deref()? {
+        "cliente_nao_escreveu" => (
+            "cliente não leu o QR",
+            "O cliente nunca escreveu ao WhatsApp do estúdio. Peça para ele ler o QR da sessão: o livro sai em até 10 minutos.",
+        ),
+        "numero_diferente" => (
+            "número diferente do da conversa",
+            "O cliente escreveu com outro número. Corrija o WhatsApp da sessão para o número da conversa.",
+        ),
+        "fora_da_janela" => (
+            "cliente sem escrever há mais de 24 h",
+            "O cliente escreveu há mais de 24 horas, e o WhatsApp não deixa a empresa escrever primeiro. Se ele mandar mensagem de novo, o livro sai.",
+        ),
+        "na_fila" => (
+            "sai em até 10 min",
+            "O cliente escreveu nas últimas 24 horas: o livro sai na próxima rodada, em até 10 minutos.",
+        ),
+        "sem_whatsapp" => (
+            "sessão sem WhatsApp",
+            "A sessão não tem número de WhatsApp. Cadastre o número do cliente na sessão.",
+        ),
+        _ => return None,
+    })
 }
 
 /// 📖 O que a coluna "Fotolivro" diz de uma sessão (dono, 2026-10-09: *"existe
@@ -1604,5 +1641,25 @@ mod testes_do_periodo {
         };
 
         assert_eq!(filtrar(&sessoes, &criterio, 0).len(), 1);
+    }
+
+    #[test]
+    fn o_motivo_do_whatsapp_tem_o_texto_do_site() {
+        let livro = |pendente: Option<&str>| ResumoDoFotolivro {
+            whatsapp_pendente: pendente.map(str::to_string),
+            ..Default::default()
+        };
+        assert_eq!(motivo_do_whatsapp(None), None);
+        assert_eq!(motivo_do_whatsapp(Some(&livro(None))), None);
+        assert_eq!(
+            motivo_do_whatsapp(Some(&livro(Some("cliente_nao_escreveu")))).map(|m| m.0),
+            Some("cliente não leu o QR")
+        );
+        assert_eq!(
+            motivo_do_whatsapp(Some(&livro(Some("numero_diferente")))).map(|m| m.0),
+            Some("número diferente do da conversa")
+        );
+        // Um motivo que este app ainda não conhece não vira texto inventado.
+        assert_eq!(motivo_do_whatsapp(Some(&livro(Some("outro")))), None);
     }
 }

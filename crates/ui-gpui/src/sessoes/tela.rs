@@ -1093,6 +1093,7 @@ impl Sessoes {
                     email_enviado_em: f.email_enviado_em.clone(),
                     email_aberto_em: f.email_aberto_em.clone(),
                     whatsapp_enviado_em: f.whatsapp_enviado_em.clone(),
+                    whatsapp_pendente: f.whatsapp_pendente.clone(),
                 }),
                 caixa: g.caixa.as_ref().map(|c| PagoNoCaixa {
                     vendas: c.vendas,
@@ -3610,6 +3611,35 @@ pub(super) fn lixeira(
 /// site: `?`, `—`, "Não enviado" (o passivo, em âmbar), "E-mail dd/mm · não
 /// aberto" e "Aberto dd/mm", com "· WhatsApp" quando ele saiu.
 pub(super) fn celula_do_fotolivro(
+    fotolivro: Option<&ResumoDoFotolivro>,
+    caixa: Option<&PagoNoCaixa>,
+    apagado: Hsla,
+) -> AnyElement {
+    let principal = estado_do_livro(fotolivro, caixa, apagado);
+    // 📖 A checagem do WhatsApp depois do pagamento (dono, 21/10/2026): o
+    // motivo, embaixo, quando o livro não saiu por lá — mesmo que o e-mail das
+    // 6 h já tenha saído. Os textos são os do site.
+    let Some((curto, titulo)) = biblioteca_core::sessoes::motivo_do_whatsapp(fotolivro) else {
+        return principal;
+    };
+    gpui_kit::component::v_flex()
+        .id(SharedString::from(format!("motivo-do-whatsapp-{curto}")))
+        .items_start()
+        .child(principal)
+        .child(
+            div()
+                .text_xs()
+                .whitespace_nowrap()
+                .text_color(crate::tema::cores::selo_ambar().2)
+                .child(format!("WhatsApp: {curto}")),
+        )
+        .tooltip(move |window, cx| {
+            gpui_kit::component::tooltip::Tooltip::new(titulo).build(window, cx)
+        })
+        .into_any_element()
+}
+
+fn estado_do_livro(
     fotolivro: Option<&ResumoDoFotolivro>,
     caixa: Option<&PagoNoCaixa>,
     apagado: Hsla,
