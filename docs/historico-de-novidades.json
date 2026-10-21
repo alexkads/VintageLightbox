@@ -1,5 +1,21 @@
 [
   {
+    "versao": "0.1.179",
+    "data": "2026-10-21",
+    "titulo": "O botão direito no balão do WhatsApp traz as opções do próprio WhatsApp.",
+    "importante": false,
+    "novidades": [
+      "No chatbot, o botão direito numa mensagem abre Responder, Reagir, Favoritar, Fixar, Encaminhar, Copiar, Editar, Dados, Apagar e Selecionar mensagens, na ordem do WhatsApp.",
+      "Responder cita a mensagem: o cliente vê o balão citado em cima, e o painel também mostra quando é o cliente que responde citando.",
+      "Reagir põe o emoji na mensagem do cliente, e a reação que o cliente deixa aparece no balão.",
+      "Editar manda uma correção citando a mensagem errada: o WhatsApp não deixa trocar o texto do que já foi enviado.",
+      "Favoritar e fixar ficam só no painel; as fixadas aparecem no alto da conversa.",
+      "Encaminhar manda a mensagem (ou a foto) para até cinco conversas que escreveram nas últimas 24 horas.",
+      "Selecionar mensagens permite copiar, favoritar, encaminhar ou apagar várias de uma vez."
+    ],
+    "por_que_atualizar": "Para atender no balcão com os mesmos gestos do WhatsApp, sem sair do app."
+  },
+  {
     "versao": "0.1.178",
     "data": "2026-10-20",
     "titulo": "Revisão do trabalho sem internet: mais situações cobertas e nada se perde entre dois balcões.",
