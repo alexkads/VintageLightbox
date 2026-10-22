@@ -162,9 +162,10 @@ impl PublicadorLocalPrimeiro {
         guardado: Recado,
         chamar: impl FnOnce(Sender<Recado>),
     ) {
+        let feito_em = chrono::Local::now().to_rfc3339();
         if self.guardar_ja() {
             let sem_internet = !self.sinc.rede().com_rede();
-            self.sinc.guardar(gesto);
+            self.sinc.guardar_feito_em(gesto, feito_em);
             let _ = canal.send(com_o_motivo(guardado, sem_internet));
             return;
         }
@@ -180,7 +181,7 @@ impl PublicadorLocalPrimeiro {
                         if sem_internet {
                             sinc.rede().marcar_sem_rede();
                         }
-                        sinc.guardar(gesto);
+                        sinc.guardar_feito_em(gesto, feito_em.clone());
                         let _ = canal.send(com_o_motivo(guardado.clone(), sem_internet));
                         continue;
                     }

@@ -3987,6 +3987,22 @@ impl Aplicativo {
         if agora == antes {
             return;
         }
+        // 💾 O disco recusou guardar: o aviso que pede o operador agora.
+        if agora.sem_disco && !antes.sem_disco {
+            crate::sons::soar(
+                crate::sons::Evento::Falha,
+                "Disco cheio",
+                "libere espaço para o app guardar o trabalho",
+                cx,
+            );
+            self.avisar_em_toast(
+                "O disco está cheio: o que foi feito sem internet ainda não está guardado neste \
+                 computador. Libere espaço e não feche o app — ele guarda sozinho em seguida."
+                    .into(),
+                true,
+                cx,
+            );
+        }
         // A rede caiu, ou voltou: um aviso só, na transição.
         match (
             antes.sem_rede_desde.is_some(),

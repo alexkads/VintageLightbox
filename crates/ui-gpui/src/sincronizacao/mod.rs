@@ -74,6 +74,9 @@ pub struct Situacao {
     /// A conta deste computador venceu (mais de 15 dias, ou foi encerrada):
     /// a fila espera alguém entrar de novo.
     pub precisa_entrar: bool,
+    /// 💾 O disco recusou guardar um gesto (cheio, quase sempre): ele está só
+    /// na memória e se perde se o app fechar. A gravação insiste sozinha.
+    pub sem_disco: bool,
 }
 
 /// A fila de sincronização deste balcão — uma só, dividida pela porta, pelo
@@ -98,6 +101,8 @@ pub struct Sincronizacao {
     ecos: Mutex<Option<std::sync::mpsc::Sender<crate::pos_venda::porta::Recado>>>,
     /// A conta venceu e a fila espera — ver [`Situacao::precisa_entrar`].
     conta_recusada: std::sync::atomic::AtomicBool,
+    /// 💾 Ver [`Situacao::sem_disco`].
+    sem_disco: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// A fila deste app — uma só, montada na abertura (`montagem.rs`).
@@ -126,6 +131,47 @@ pub fn a_do_app() -> Option<Arc<Sincronizacao>> {
 /// esvazia com a rede de volta também guardam o gesto.
 pub fn sem_internet_agora() -> bool {
     a_do_app().is_some_and(|fila| !fila.rede().com_rede())
+}
+
+/// O primeiro intervalo entre as tentativas de guardar no disco.
+const ESPERA_DO_DISCO: std::time::Duration = std::time::Duration::from_secs(1);
+/// O intervalo mais longo — o operador que liberou espaço não espera mais que
+/// isso para ver o aviso sumir.
+const ESPERA_MAXIMA_DO_DISCO: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// 💾 **Guarda o gesto na tabela, insistindo até conseguir.**
+///
+/// 🚨 Antes, a falha (o disco cheio) só ia ao relato: o gesto ficava na
+/// memória, a tela o dava por guardado, ele **nunca subia** (o trabalhador lê
+/// da tabela), prendia na fila os que vinham atrás e sumia ao fechar o app
+/// (verificação de 22/10/2026). Agora a tarefa repete o mesmo gesto — os de
+/// trás esperam no canal, e a ordem da tabela continua a dos gestos — e
+/// `sem_disco` acende o aviso do rodapé até o disco aceitar.
+async fn gravar_ate_conseguir(
+    fila: &FilaDeSincronizacao,
+    gesto: &GestoNovo,
+    sem_disco: &std::sync::atomic::AtomicBool,
+) {
+    use std::sync::atomic::Ordering;
+    let mut espera = ESPERA_DO_DISCO;
+    loop {
+        match fila.enfileirar(gesto).await {
+            Ok(_) => {
+                sem_disco.store(false, Ordering::Relaxed);
+                return;
+            }
+            Err(erro) => {
+                if !sem_disco.swap(true, Ordering::Relaxed) {
+                    crate::telemetria::avisar!(
+                        "⚠️ [Sincronização] o disco não guardou o gesto {}: {erro}",
+                        gesto.tipo
+                    );
+                }
+                tokio::time::sleep(espera).await;
+                espera = (espera * 2).min(ESPERA_MAXIMA_DO_DISCO);
+            }
+        }
+    }
 }
 
 impl Sincronizacao {
@@ -175,16 +221,11 @@ impl Sincronizacao {
         let acordar = Arc::new(tokio::sync::Notify::new());
         let gravadora = fila.clone();
         let acorda = acordar.clone();
+        let sem_disco = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let sem_disco_da_tarefa = sem_disco.clone();
         tokio.spawn(async move {
             while let Some(gesto) = a_gravar.recv().await {
-                if let Err(erro) = gravadora.enfileirar(&gesto).await {
-                    // 🚨 Não há a quem devolver: a tela já seguiu. O aviso vai
-                    // ao relato, e o gesto continua na memória até o app fechar.
-                    crate::telemetria::avisar!(
-                        "⚠️ [Sincronização] o gesto {} não foi guardado: {erro}",
-                        gesto.tipo
-                    );
-                }
+                gravar_ate_conseguir(&gravadora, &gesto, &sem_disco_da_tarefa).await;
                 acorda.notify_one();
             }
         });
@@ -199,6 +240,7 @@ impl Sincronizacao {
             acordar,
             ecos: Mutex::new(None),
             conta_recusada: Default::default(),
+            sem_disco,
         })
     }
 
@@ -252,8 +294,18 @@ impl Sincronizacao {
         &self.tokio
     }
 
-    /// Guarda o gesto no fim da fila. Volta na hora: quem grava é a tarefa.
+    /// Guarda o gesto no fim da fila, com a hora de agora. Volta na hora:
+    /// quem grava é a tarefa.
     pub fn guardar(&self, gesto: Gesto) {
+        self.guardar_feito_em(gesto, chrono::Local::now().to_rfc3339());
+    }
+
+    /// 🕐 Guarda o gesto com a hora **em que o operador o fez**, e não a da
+    /// falha que o mandou para a fila. Dois gestos seguidos que tentam o site
+    /// ao mesmo tempo podem cair na fila em qualquer ordem; com a hora do gesto,
+    /// o "vale o último" do site (`marcas_em`) acerta o final mesmo assim — a
+    /// nota 5 e depois a 3 terminam em 3 (verificação de 22/10/2026).
+    pub fn guardar_feito_em(&self, gesto: Gesto, feito_em: String) {
         // 📤 A mesma foto a subir já espera na fila (a reabertura do app pede
         // de novo a subida do que falta): a segunda não entra. A subida lê a
         // nota e o estado do catálogo na hora de ir, então nada se perde.
@@ -269,8 +321,7 @@ impl Sincronizacao {
             }
         }
         let chave = uuid::Uuid::new_v4().to_string();
-        let agora = chrono::Local::now().to_rfc3339();
-        let novo = gesto.para_guardar(&chave, &agora);
+        let novo = gesto.para_guardar(&chave, &feito_em);
         if let Ok(mut memoria) = self.memoria.lock() {
             memoria.push(NaMemoria { chave, gesto });
         }
@@ -378,6 +429,7 @@ impl Sincronizacao {
                 .conta_recusada
                 .load(std::sync::atomic::Ordering::Relaxed),
             sem_rede_desde: self.rede.sem_rede_desde(),
+            sem_disco: self.sem_disco.load(std::sync::atomic::Ordering::Relaxed),
         }
     }
 

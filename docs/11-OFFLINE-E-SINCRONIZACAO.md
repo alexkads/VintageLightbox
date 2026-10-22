@@ -139,6 +139,8 @@ que mudou:
 | Cada aviso sonoro (a rede que cai soa) subia ao site como ocorrência de **erro** | O "tocou" e o "falar" ficam só no terminal |
 | Sem internet, cada canal do tempo real relatava um erro a cada dez minutos | A queda da rede (e o site fora do ar) fica só no terminal; o resto continua relatado |
 | A sangria recusada na volta dizia "(0 centavos)" | "(R$ 0,00)" — a frase do site, em reais |
+| (22/10) O disco que recusava guardar o gesto (cheio) só avisava o relato: o gesto ficava na memória, a tela o dava por guardado, ele nunca subia (o trabalhador lê da tabela), prendia a fila atrás dele e sumia ao fechar o app | A gravação insiste sozinha, na ordem (1 s a 15 s); o selo diz "Disco cheio · N só na memória" em vermelho, um aviso com som pede para liberar espaço e não fechar, e a bandeja conta como envio no ar |
+| (22/10) Dois gestos seguidos que tentavam o site juntos com a rede caindo entravam na fila em qualquer ordem, com a hora da **falha** | Cada gesto leva a hora em que o operador o fez (`guardar_feito_em`): o "vale o último" do site termina na nota dada por último |
 | O recado do caixa com a frase do gesto guardado saía pela borda da janela, por cima do rodapé | Quebra a linha e fica acima do rodapé |
 | "Sem internet" na frase do gesto guardado com a rede de pé (soluço, ou a fila que ainda esvazia) | O porquê vai na resposta guardada (`sem_internet`, no `GuardadoParaDepois` e no JSON do caixa), decidido **na hora de guardar**: lido na tela, a fila já podia ter levado o gesto (o e2e da resposta perdida pegou essa corrida) |
 

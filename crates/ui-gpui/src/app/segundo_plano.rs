@@ -55,6 +55,7 @@ impl Aplicativo {
             recusadas: self.recusas.len() + self.situacao_da_fila.conflitos,
             guardadas: self.situacao_da_fila.pendentes,
             sem_rede: self.situacao_da_fila.sem_rede_desde.is_some(),
+            sem_disco: self.situacao_da_fila.sem_disco,
             refazendo: self.reposicoes_pendentes,
             conta: self.conta.as_ref().map(|c| c.email.clone()),
             ultimo_envio: self.ultimo_envio,
@@ -215,6 +216,7 @@ mod testes {
                     conflitos: 1,
                     sem_rede_desde: Some(1),
                     precisa_entrar: false,
+                    sem_disco: false,
                 };
                 let r = app.retrato_do_segundo_plano(cx);
                 assert_eq!((r.guardadas, r.recusadas, r.sem_rede), (3, 2, true));

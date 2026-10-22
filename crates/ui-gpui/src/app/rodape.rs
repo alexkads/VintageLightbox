@@ -534,6 +534,17 @@ pub fn frase_da_fila(situacao: crate::sincronizacao::Situacao) -> Option<(String
             "alterações guardadas",
         )
     };
+    // 💾 O disco recusou guardar: o que está só na memória se perde se o app
+    // fechar. É o aviso mais urgente do selo.
+    if situacao.sem_disco {
+        return Some((
+            format!(
+                "Disco cheio · {} só na memória",
+                plural(situacao.pendentes, "alteração", "alterações")
+            ),
+            true,
+        ));
+    }
     // A conta venceu: nada sobe até alguém entrar de novo — e o selo diz isso.
     if situacao.precisa_entrar && situacao.pendentes > 0 {
         return Some((format!("Entre na conta para enviar {}", guardadas()), true));
@@ -630,6 +641,16 @@ impl Aplicativo {
                 ha_quanto(agora - desde)
             ),
             None => "A internet está funcionando.".to_string(),
+        };
+        // 💾 Antes da rede: o disco que recusa é o que pode perder trabalho.
+        let rede = if situacao.sem_disco {
+            format!(
+                "O disco deste computador está cheio: as alterações abaixo estão só na memória \
+                 e se perdem se o app fechar. Libere espaço — o app guarda sozinho em seguida. \
+                 {rede}"
+            )
+        } else {
+            rede
         };
         let pendentes = fila.pendentes();
         let conflitos = fila.conflitos();
@@ -775,6 +796,7 @@ mod testes {
                 conflitos: 0,
                 sem_rede_desde: Some(1),
                 precisa_entrar: false,
+                sem_disco: false,
             }),
             Some(("Sem internet · 3 alterações guardadas".into(), false))
         );
@@ -784,6 +806,7 @@ mod testes {
                 conflitos: 0,
                 sem_rede_desde: None,
                 precisa_entrar: false,
+                sem_disco: false,
             }),
             Some(("Enviando 1 alteração guardada".into(), false))
         );
@@ -793,6 +816,7 @@ mod testes {
                 conflitos: 2,
                 sem_rede_desde: None,
                 precisa_entrar: false,
+                sem_disco: false,
             }),
             Some(("2 recusadas na volta".into(), true))
         );
@@ -806,6 +830,21 @@ mod testes {
                 "Entre na conta para enviar 4 alterações guardadas".into(),
                 true
             ))
+        );
+    }
+
+    /// 💾 O disco que recusa guardar passa na frente de tudo no selo.
+    #[test]
+    fn o_disco_cheio_e_o_aviso_mais_urgente_do_selo() {
+        use crate::sincronizacao::Situacao;
+        assert_eq!(
+            frase_da_fila(Situacao {
+                pendentes: 3,
+                sem_disco: true,
+                sem_rede_desde: Some(1),
+                ..Default::default()
+            }),
+            Some(("Disco cheio · 3 alterações só na memória".into(), true))
         );
     }
 

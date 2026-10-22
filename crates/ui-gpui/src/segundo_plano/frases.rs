@@ -27,6 +27,8 @@ pub struct Retrato {
     pub guardadas: usize,
     /// 📴 O site não responde.
     pub sem_rede: bool,
+    /// 💾 Há gesto só na memória: o disco recusou guardá-lo.
+    pub sem_disco: bool,
     /// Miniaturas sendo refeitas do disco.
     pub refazendo: usize,
     pub conta: Option<String>,
@@ -44,7 +46,8 @@ impl Retrato {
     /// 🔑 **Só o envio conta.** Miniatura refeita é cache: some com o app e
     /// volta na próxima abertura, sem perda nenhuma.
     pub fn ha_envio_pendente(&self) -> bool {
-        self.subindo > 0
+        // 💾 O gesto só na memória se perde ao sair: conta como envio no ar.
+        self.subindo > 0 || self.sem_disco
     }
 }
 
@@ -154,6 +157,9 @@ pub fn linhas(r: &Retrato) -> Linhas {
     };
 
     let mut resumo = Vec::new();
+    if r.sem_disco {
+        resumo.push("Disco cheio".to_string());
+    }
     if r.sem_rede {
         resumo.push("Sem internet".to_string());
     }
@@ -243,6 +249,7 @@ mod testes {
             recusadas: 1,
             guardadas: 0,
             sem_rede: false,
+            sem_disco: false,
             refazendo: 1,
             conta: Some("dono@estudio".into()),
             pilha_local: true,
@@ -330,6 +337,15 @@ mod testes {
             ..Default::default()
         };
         assert!(subindo.ha_envio_pendente());
+        let so_na_memoria = Retrato {
+            guardadas: 1,
+            sem_disco: true,
+            ..Default::default()
+        };
+        assert!(
+            so_na_memoria.ha_envio_pendente(),
+            "o gesto que o disco recusou se perde ao sair"
+        );
     }
 
     #[test]

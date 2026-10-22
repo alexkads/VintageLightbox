@@ -340,6 +340,8 @@ struct Balcao {
     porta: PublicadorLocalPrimeiro,
     ecos: Receiver<Recado>,
     trocas: Arc<Mutex<Vec<(String, String)>>>,
+    /// O banco da fila, para o teste do disco que recusa.
+    pool: sqlx::SqlitePool,
     _pasta: tempfile::TempDir,
 }
 
@@ -350,7 +352,7 @@ async fn montar() -> Balcao {
     infrastructure::run_migrations(&pool).await.unwrap();
     let rede = Arc::new(EstadoDaRede::default());
     let sinc = Sincronizacao::abrir(
-        FilaDeSincronizacao::new(pool),
+        FilaDeSincronizacao::new(pool.clone()),
         rede,
         tokio::runtime::Handle::current(),
     )
@@ -378,6 +380,7 @@ async fn montar() -> Balcao {
         porta,
         ecos,
         trocas,
+        pool,
         _pasta: pasta,
     }
 }
@@ -1278,6 +1281,96 @@ async fn a_queda_longa_nao_gasta_o_folego_do_soluco() {
         *b.site.chegou.lock().unwrap(),
         vec![r#"patch f1 {"nota":5}"#.to_string()]
     );
+}
+
+/// 💾 O disco recusa guardar o gesto (cheio): ele não se perde nem prende a
+/// fila calado. O aviso acende, a gravação insiste, e quando o disco volta o
+/// gesto vai para a tabela — e dali ao site, na ordem.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn o_disco_que_recusa_nao_perde_o_gesto() {
+    let b = montar().await;
+    sqlx::query("ALTER TABLE fila_de_sincronizacao RENAME TO fila_fora")
+        .execute(&b.pool)
+        .await
+        .unwrap();
+    b.site.sem_rede.store(true, Ordering::SeqCst);
+    let (canal, recados) = std::sync::mpsc::channel();
+    b.porta
+        .negociar(sessao(), "f1".into(), nota(5), canal.clone());
+    b.porta.negociar(sessao(), "f2".into(), nota(3), canal);
+    let _ = colher(&recados).await;
+    let _ = colher(&recados).await;
+    ate(|| b.sinc.situacao().sem_disco, "o aviso do disco acender").await;
+    assert_eq!(
+        b.sinc.situacao().pendentes,
+        2,
+        "os dois na memória, à vista"
+    );
+
+    // Espaço liberado: a gravação insiste e acerta, na ordem.
+    sqlx::query("ALTER TABLE fila_fora RENAME TO fila_de_sincronizacao")
+        .execute(&b.pool)
+        .await
+        .unwrap();
+    for _ in 0..300 {
+        if !b.sinc.situacao().sem_disco {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(
+        !b.sinc.situacao().sem_disco,
+        "o aviso apaga quando o disco guarda"
+    );
+    assert_eq!(b.sinc.fila().pendentes().await.unwrap().len(), 2);
+
+    b.site.sem_rede.store(false, Ordering::SeqCst);
+    b.sinc.tentar_agora();
+    ate(|| b.sinc.situacao().pendentes == 0, "a fila levar os dois").await;
+    // Os dois tentaram o site juntos: a ordem na fila é a das falhas, e quem
+    // acerta o final é a hora de cada gesto (ver `a_hora_guardada_e_a_do_gesto`).
+    let mut chegou = b.site.chegou.lock().unwrap().clone();
+    chegou.sort();
+    assert_eq!(
+        chegou,
+        vec![
+            r#"patch f1 {"nota":5}"#.to_string(),
+            r#"patch f2 {"nota":3}"#.to_string()
+        ]
+    );
+}
+
+/// 🕐 A hora guardada é a do gesto, e não a da falha: a nota 5 dada antes da 3
+/// leva a hora mais velha mesmo que entre na fila depois — e o "vale o
+/// último" do site termina na 3.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_hora_guardada_e_a_do_gesto() {
+    let b = montar().await;
+    b.site.sem_rede.store(true, Ordering::SeqCst);
+    let (canal, recados) = std::sync::mpsc::channel();
+    b.porta
+        .negociar(sessao(), "f1".into(), nota(5), canal.clone());
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    b.porta.negociar(sessao(), "f1".into(), nota(3), canal);
+    let _ = colher(&recados).await;
+    let _ = colher(&recados).await;
+    // A tabela é gravada por uma tarefa: espera os dois chegarem lá.
+    let mut guardados = Vec::new();
+    for _ in 0..300 {
+        guardados = b.sinc.fila().pendentes().await.unwrap();
+        if guardados.len() == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let hora = |nota: i64| {
+        guardados
+            .iter()
+            .find(|g| g.corpo.to_string().contains(&format!("\"nota\":{nota}")))
+            .map(|g| chrono::DateTime::parse_from_rfc3339(&g.ocorrido_em).unwrap())
+            .unwrap_or_else(|| panic!("a nota {nota} na fila: {guardados:?}"))
+    };
+    assert!(hora(5) < hora(3), "a 5 foi dada antes: {guardados:?}");
 }
 
 /// 🔗 O link do cliente com a bandeira da rede atrasada (a rede voltou, e
