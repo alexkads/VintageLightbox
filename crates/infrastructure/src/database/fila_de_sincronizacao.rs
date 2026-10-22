@@ -202,7 +202,9 @@ impl FilaDeSincronizacao {
         self.concluir(id).await
     }
 
-    /// Mais uma tentativa que não chegou (sem rede): o gesto fica na vez.
+    /// O site respondeu e soluçou (o `5xx` explicado, o `429`): o gesto fica
+    /// na vez com uma tentativa a menos. A rede caída não passa por aqui — por
+    /// ela o gesto espera o que for preciso.
     pub async fn tentou(&self, id: i64) -> Result<(), String> {
         sqlx::query("UPDATE fila_de_sincronizacao SET tentativas = tentativas + 1 WHERE id = ?")
             .bind(id)
@@ -226,10 +228,13 @@ impl FilaDeSincronizacao {
         Ok(())
     }
 
-    /// O operador pediu para tentar de novo o gesto recusado.
+    /// O operador pediu para tentar de novo o gesto recusado — com as
+    /// tentativas zeradas: o conflito que veio de soluços repetidos não pode
+    /// voltar a ser conflito no primeiro soluço seguinte.
     pub async fn refazer(&self, id: i64) -> Result<(), String> {
         sqlx::query(
-            "UPDATE fila_de_sincronizacao SET estado = 'pendente', erro = NULL WHERE id = ?",
+            "UPDATE fila_de_sincronizacao SET estado = 'pendente', erro = NULL, tentativas = 0 \
+             WHERE id = ?",
         )
         .bind(id)
         .execute(&self.pool)
@@ -345,8 +350,11 @@ mod testes {
         assert_eq!(conflitos[0].estado, EstadoDoGesto::Conflito);
         assert_eq!(f.contar().await.unwrap(), (0, 1));
 
+        f.tentou(id).await.unwrap();
         f.refazer(id).await.unwrap();
-        assert_eq!(f.pendentes().await.unwrap()[0].erro, None);
+        let de_volta = &f.pendentes().await.unwrap()[0];
+        assert_eq!(de_volta.erro, None);
+        assert_eq!(de_volta.tentativas, 0, "o refazer devolve o fôlego inteiro");
         f.descartar(id).await.unwrap();
         assert_eq!(f.contar().await.unwrap(), (0, 0));
     }

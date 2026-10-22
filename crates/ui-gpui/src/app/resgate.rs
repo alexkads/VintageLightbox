@@ -87,6 +87,10 @@ pub struct Desfecho {
     /// 📴 As que a rede caída segurou: a rejeição ficou na fila e o resgate
     /// roda quando ela voltar.
     pub guardadas: Vec<String>,
+    /// 📴 Alguma guardada foi por falta de internet, lida na hora de guardar.
+    /// A guardada também nasce com a rede de pé, atrás da fila que ainda
+    /// esvazia, e aí a frase não fala da rede.
+    pub sem_internet: bool,
 }
 
 impl Desfecho {
@@ -109,11 +113,19 @@ impl Desfecho {
         let sucesso = match (sucesso, self.guardadas.is_empty()) {
             (s, true) => s,
             (s, false) => {
-                let guardadas = format!(
-                    "Sem internet: {} foto(s) rejeitada(s). Saem da nuvem e voltam para este \
-                     computador quando a rede voltar.",
-                    self.guardadas.len()
-                );
+                let guardadas = if self.sem_internet {
+                    format!(
+                        "Sem internet: {} foto(s) rejeitada(s). Saem da nuvem e voltam para este \
+                         computador quando a rede voltar.",
+                        self.guardadas.len()
+                    )
+                } else {
+                    format!(
+                        "{} foto(s) rejeitada(s). Saem da nuvem e voltam para este computador \
+                         depois do que já está na fila para o site.",
+                        self.guardadas.len()
+                    )
+                };
                 Some(match s {
                     Some(s) => format!("{s}. {guardadas}"),
                     None => guardadas,
@@ -213,6 +225,7 @@ impl Aplicativo {
                     .update(cx, |raiz, _| raiz.resgate_espera(&foto))
                     .unwrap_or(false)
                 {
+                    desfecho.sem_internet |= crate::sincronizacao::sem_internet_agora();
                     guardar_sem_rede(&raiz, &foto, cx).await;
                     desfecho.guardadas.push(foto.arquivo.clone());
                     continue;
@@ -239,6 +252,7 @@ impl Aplicativo {
                         let sem_rede = crate::sincronizacao::a_do_app()
                             .is_some_and(|fila| !fila.rede().com_rede());
                         if sem_rede {
+                            desfecho.sem_internet = true;
                             guardar_sem_rede(&raiz, &foto, cx).await;
                             desfecho.guardadas.push(foto.arquivo.clone())
                         } else {
@@ -590,7 +604,7 @@ mod testes {
         let misto = Desfecho {
             voltaram: vec!["a.jpg".into(), "b.jpg".into()],
             ficaram: vec!["c.jpg".into()],
-            guardadas: Vec::new(),
+            ..Default::default()
         };
         let (sucesso, falha) = misto.avisos();
         assert!(sucesso.is_some_and(|s| s.starts_with("2 foto(s) rejeitada(s)")));
@@ -604,10 +618,19 @@ mod testes {
     fn a_rejeicao_que_a_rede_segurou_e_dita_como_guardada() {
         let so_guardada = Desfecho {
             guardadas: vec!["d.jpg".into()],
+            sem_internet: true,
             ..Default::default()
         };
         let (sucesso, falha) = so_guardada.avisos();
         assert_eq!(falha, None);
         assert!(sucesso.is_some_and(|s| s.starts_with("Sem internet: 1 foto(s) rejeitada(s)")));
+        // Com a rede de pé, atrás da fila: a frase não culpa a internet.
+        let atras_da_fila = Desfecho {
+            guardadas: vec!["d.jpg".into()],
+            ..Default::default()
+        };
+        let sucesso = atras_da_fila.avisos().0.expect("a frase da guardada");
+        assert!(!sucesso.contains("internet"), "{sucesso}");
+        assert!(sucesso.contains("na fila"), "{sucesso}");
     }
 }

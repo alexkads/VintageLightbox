@@ -1,7 +1,7 @@
 //! A fila sem rede, de ponta a ponta, contra uma porta de mentira que deixa o
 //! teste derrubar e devolver a internet.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -31,6 +31,12 @@ struct SiteDeMentira {
     chegou: Mutex<Vec<String>>,
     /// A recusa de regra da próxima mudança de foto.
     recusar: Mutex<Option<String>>,
+    /// Quantas mudanças de foto bateram à porta, a rede caída incluída.
+    mudancas_tentadas: AtomicUsize,
+    /// A falha da próxima gravação pelo pedido cru (o caixa).
+    recusar_json: Mutex<Option<String>>,
+    /// As gravações do pedido cru que chegaram **com** a hora do balcão.
+    com_hora: Mutex<Vec<String>>,
     /// O id que o site dá à sessão criada — `None` aceita o do app.
     id_do_site: Mutex<Option<String>>,
     /// As miniaturas pedidas — a pré-carga.
@@ -112,6 +118,12 @@ impl Publicador for SiteDeMentira {
         }
         if pedido.metodo == "GET" {
             self.lidos.lock().unwrap().push(pedido.caminho.clone());
+        } else if let Some(frase) = self.recusar_json.lock().unwrap().take() {
+            let _ = canal.send(Recado::Json {
+                rotulo,
+                resultado: Err(frase),
+            });
+            return;
         }
         let resposta = match (
             pedido.metodo,
@@ -125,7 +137,9 @@ impl Publicador for SiteDeMentira {
         if pedido.metodo != "GET" {
             let mut corpo = pedido.corpo.clone().unwrap_or_default();
             if let Some(m) = corpo.as_object_mut() {
-                m.remove("ocorrido_em");
+                if m.remove("ocorrido_em").is_some() {
+                    self.com_hora.lock().unwrap().push(pedido.caminho.clone());
+                }
             }
             self.chegou
                 .lock()
@@ -142,7 +156,16 @@ impl Publicador for SiteDeMentira {
     fn sair(&self, _canal: Sender<Recado>) {}
     fn produtos(&self, _sessao: Sessao, _canal: Sender<Recado>) {}
     fn estudios(&self, _sessao: Sessao, _canal: Sender<Recado>) {}
-    fn link(&self, _sessao: Sessao, _galeria_id: String, _canal: Sender<Recado>) {}
+    fn link(&self, _sessao: Sessao, galeria_id: String, canal: Sender<Recado>) {
+        self.responder(
+            canal,
+            Recado::Link(domain::services::pos_venda::LinkDeAcesso {
+                url: format!("https://site/g/{galeria_id}"),
+                validade_em_segundos: None,
+            }),
+            format!("link {galeria_id}"),
+        );
+    }
     fn atualizar_galeria(
         &self,
         _sessao: Sessao,
@@ -212,6 +235,7 @@ impl Publicador for SiteDeMentira {
         mudanca: MudancaDaFoto,
         canal: Sender<Recado>,
     ) {
+        self.mudancas_tentadas.fetch_add(1, Ordering::SeqCst);
         if !self.sem_rede.load(Ordering::SeqCst) {
             if let Some(frase) = self.recusar.lock().unwrap().take() {
                 let _ = canal.send(Recado::Negociou {
@@ -608,7 +632,8 @@ async fn a_foto_e_a_revelacao_sem_rede_ficam_guardadas_e_sobem_depois() {
     assert_eq!(
         colher(&recados).await,
         Recado::GuardadoParaDepois {
-            alvo: "local-1".into()
+            alvo: "local-1".into(),
+            sem_internet: true,
         }
     );
     b.porta.salvar_revelacao(
@@ -620,7 +645,10 @@ async fn a_foto_e_a_revelacao_sem_rede_ficam_guardadas_e_sobem_depois() {
     );
     assert_eq!(
         colher(&recados).await,
-        Recado::GuardadoParaDepois { alvo: "f1".into() }
+        Recado::GuardadoParaDepois {
+            alvo: "f1".into(),
+            sem_internet: true,
+        }
     );
     b.site.sem_rede.store(false, Ordering::SeqCst);
     b.sinc.acordar.notify_one();
@@ -1070,4 +1098,203 @@ async fn as_fotos_guardadas_sobem_em_lote_e_a_nota_espera_a_vez() {
             .collect::<Vec<_>>()
     );
     assert_eq!(chegou[4], r#"patch f1 {"nota":4}"#);
+}
+
+/// 💰 A venda que vai **agora**, com rede, não leva a hora do balcão — o site
+/// tem de poder recusar a foto já vendida antes de o operador cobrar. A que
+/// ficou na fila leva: o dinheiro já está na gaveta, e ela entra marcada.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn so_a_venda_guardada_leva_a_hora_do_balcao() {
+    use crate::pos_venda::porta::PedidoJson;
+    use serde_json::json;
+    let b = montar().await;
+    let (canal, recados) = std::sync::mpsc::channel();
+    let venda = |chave: &str| {
+        PedidoJson::gravar(
+            "venda",
+            "POST",
+            "/pos-venda/caixa/vendas",
+            json!({ "galeria_id": "g1", "itens": [], "pagamentos": [], "chave": chave }),
+        )
+    };
+    b.porta.pedir_json(sessao(), venda("agora"), canal.clone());
+    let _ = colher(&recados).await;
+    assert!(
+        b.site.com_hora.lock().unwrap().is_empty(),
+        "a venda de agora vai sem a hora"
+    );
+
+    b.site.sem_rede.store(true, Ordering::SeqCst);
+    b.sinc.rede().marcar_sem_rede();
+    b.porta
+        .pedir_json(sessao(), venda("guardada"), canal.clone());
+    let _ = colher(&recados).await;
+    b.site.sem_rede.store(false, Ordering::SeqCst);
+    b.sinc.acordar.notify_one();
+    ate(|| b.sinc.situacao().pendentes == 0, "a fila esvaziar").await;
+    assert_eq!(
+        *b.site.com_hora.lock().unwrap(),
+        vec!["/pos-venda/caixa/vendas".to_string()],
+        "a venda guardada leva a hora"
+    );
+}
+
+/// 📴 O porquê vai na resposta guardada, decidido na hora de guardar: a venda
+/// que a rede segurou diz "sem internet"; a que o site soluçou, não — mesmo que
+/// a fila já a tenha levado quando a tela for ler (a corrida que o e2e da
+/// resposta perdida pegou).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_venda_guardada_diz_por_que_ficou() {
+    use crate::pos_venda::porta::PedidoJson;
+    use serde_json::json;
+    let b = montar().await;
+    let (canal, recados) = std::sync::mpsc::channel();
+    let venda = |chave: &str| {
+        PedidoJson::gravar(
+            "venda",
+            "POST",
+            "/pos-venda/caixa/vendas",
+            json!({ "galeria_id": "g1", "itens": [], "pagamentos": [], "chave": chave }),
+        )
+    };
+    let motivo = |recado: Recado| match recado {
+        Recado::Json {
+            resultado: Ok(v), ..
+        } => (v["guardada_sem_rede"].clone(), v["sem_internet"].clone()),
+        outro => panic!("a venda guardada responde com o JSON: {outro:?}"),
+    };
+
+    *b.site.recusar_json.lock().unwrap() =
+        Some("o site respondeu 500 Internal Server Error: o banco não respondeu".into());
+    b.porta.pedir_json(sessao(), venda("soluco"), canal.clone());
+    assert_eq!(motivo(colher(&recados).await), (json!(true), json!(false)));
+    ate(|| b.sinc.situacao().pendentes == 0, "a fila levar a venda").await;
+
+    b.site.sem_rede.store(true, Ordering::SeqCst);
+    b.porta.pedir_json(sessao(), venda("sem-rede"), canal);
+    assert_eq!(motivo(colher(&recados).await), (json!(true), json!(true)));
+}
+
+/// 🌪️ O site respondeu, mas falhou (o `5xx` que a API explica): o gesto não
+/// se perde — fica na fila —, e o "Sem internet" **não** acende: há rede.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_falha_que_o_site_explica_guarda_o_gesto_sem_acender_o_sem_internet() {
+    let b = montar().await;
+    *b.site.recusar.lock().unwrap() =
+        Some("o site respondeu 500 Internal Server Error: o banco não respondeu".into());
+    let (canal, recados) = std::sync::mpsc::channel();
+    b.porta
+        .negociar(sessao(), "f1".into(), nota(5), canal.clone());
+    assert_eq!(
+        colher(&recados).await,
+        Recado::Negociou {
+            foto_id: "f1".into(),
+            erro: None
+        },
+        "a tela segue: o gesto ficou guardado"
+    );
+    assert!(b.sinc.rede().com_rede(), "o site respondeu: há rede");
+    ate(|| b.sinc.situacao().pendentes == 0, "a fila levar o gesto").await;
+    assert_eq!(
+        *b.site.chegou.lock().unwrap(),
+        vec![r#"patch f1 {"nota":5}"#.to_string()]
+    );
+}
+
+/// 🌪️ O site que soluça ganha tentativas; persistindo, é conflito — o
+/// operador precisa saber. A rede caída e a conta vencida esperam sem limite.
+#[test]
+fn o_soluco_do_site_tem_limite_e_a_rede_caida_nao() {
+    use super::trabalhador::{desfecho, Desfecho, SOLUCOS_DO_SITE};
+    let falha = |frase: &str| Recado::Falhou(frase.into());
+    let explicada = "o site respondeu 500 Internal Server Error: o banco não respondeu";
+    assert!(matches!(
+        desfecho(falha(explicada), 0),
+        Desfecho::Esperar(_)
+    ));
+    assert!(matches!(
+        desfecho(falha(explicada), SOLUCOS_DO_SITE - 1),
+        Desfecho::Recusado(_)
+    ));
+    let pausa = "o site respondeu 429 Too Many Requests: devagar";
+    assert!(matches!(desfecho(falha(pausa), 3), Desfecho::Esperar(_)));
+    let sem_rede = "sem resposta do site (o caminho até a API devolveu 502 Bad Gateway)";
+    assert!(matches!(
+        desfecho(falha(sem_rede), 500),
+        Desfecho::Esperar(_)
+    ));
+    let conta = "o site recusou o acesso: confira e-mail e senha";
+    assert!(matches!(desfecho(falha(conta), 500), Desfecho::Esperar(_)));
+    let regra = "o site respondeu 409 Conflict: a foto já foi comprada";
+    assert!(matches!(desfecho(falha(regra), 0), Desfecho::Recusado(_)));
+}
+
+/// 🌪️ A queda longa não gasta o fôlego do soluço: a espera pela rede não
+/// conta tentativa, e o primeiro `5xx` explicado da volta ainda espera a vez
+/// em vez de virar conflito.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_queda_longa_nao_gasta_o_folego_do_soluco() {
+    use super::trabalhador::SOLUCOS_DO_SITE;
+    let b = montar().await;
+    b.site.sem_rede.store(true, Ordering::SeqCst);
+    let (canal, recados) = std::sync::mpsc::channel();
+    b.porta.negociar(sessao(), "f1".into(), nota(5), canal);
+    let _ = colher(&recados).await;
+    // A rede caída, mais vezes que o fôlego inteiro do soluço.
+    for vez in 0..SOLUCOS_DO_SITE {
+        let antes = b.site.mudancas_tentadas.load(Ordering::SeqCst);
+        b.sinc.tentar_agora();
+        ate(
+            || b.site.mudancas_tentadas.load(Ordering::SeqCst) > antes,
+            &format!("a tentativa {vez} sem rede"),
+        )
+        .await;
+    }
+    let guardado = b.sinc.fila().pendentes().await.unwrap().remove(0);
+    assert_eq!(guardado.tentativas, 0, "a rede caída não gasta tentativa");
+
+    // A rede volta com um soluço do site: o gesto espera a vez.
+    *b.site.recusar.lock().unwrap() =
+        Some("o site respondeu 500 Internal Server Error: o banco não respondeu".into());
+    b.site.sem_rede.store(false, Ordering::SeqCst);
+    b.sinc.tentar_agora();
+    ate(
+        || b.site.recusar.lock().unwrap().is_none(),
+        "o soluço do site",
+    )
+    .await;
+    b.sinc.tentar_agora();
+    ate(
+        || !b.site.chegou.lock().unwrap().is_empty() || b.sinc.situacao().conflitos > 0,
+        "o gesto chegar (ou virar conflito)",
+    )
+    .await;
+    assert_eq!(
+        b.sinc.situacao().conflitos,
+        0,
+        "o soluço da volta virou conflito"
+    );
+    assert_eq!(
+        *b.site.chegou.lock().unwrap(),
+        vec![r#"patch f1 {"nota":5}"#.to_string()]
+    );
+}
+
+/// 🔗 O link do cliente com a bandeira da rede atrasada (a rede voltou, e
+/// nada perguntou ainda): o app tenta, e o link sai. Sem rede de verdade, a
+/// frase diz que o link precisa de internet.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn o_link_tenta_mesmo_com_a_bandeira_atrasada() {
+    let b = montar().await;
+    b.sinc.rede().marcar_sem_rede();
+    let (canal, recados) = std::sync::mpsc::channel();
+    b.porta.link(sessao(), "g1".into(), canal.clone());
+    assert!(matches!(colher(&recados).await, Recado::Link(_)));
+
+    b.site.sem_rede.store(true, Ordering::SeqCst);
+    b.porta.link(sessao(), "g1".into(), canal);
+    let Recado::Falhou(frase) = colher(&recados).await else {
+        panic!("sem rede o link falha com a frase");
+    };
+    assert!(frase.contains("precisa de internet"), "{frase}");
 }

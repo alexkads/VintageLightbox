@@ -592,7 +592,7 @@ fn a_sangria_confere_e_grava(cx: &mut TestAppContext) {
     com(cx, &j, |t, _, _| {
         assert_eq!(
             t.avisos_passageiros(),
-            vec!["Sangria de R$ 30,00 registrado."]
+            vec!["Sangria de R$ 30,00 registrada."]
         );
     });
 }

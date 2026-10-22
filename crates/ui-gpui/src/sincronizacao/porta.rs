@@ -16,7 +16,7 @@ use domain::services::pos_venda::{
 use domain::value_objects::CropSettings;
 use infrastructure::gpu_adjustments::Ajustes;
 
-use super::{e_falta_de_rede, Gesto, Sincronizacao};
+use super::{e_falta_de_rede, e_passageira, Gesto, Sincronizacao};
 use crate::pos_venda::porta::{FotoClassificada, PedidoCru, PedidoJson, Publicador, Recado};
 
 /// A frase dos gestos que precisam do site na hora.
@@ -163,8 +163,9 @@ impl PublicadorLocalPrimeiro {
         chamar: impl FnOnce(Sender<Recado>),
     ) {
         if self.guardar_ja() {
+            let sem_internet = !self.sinc.rede().com_rede();
             self.sinc.guardar(gesto);
-            let _ = canal.send(guardado);
+            let _ = canal.send(com_o_motivo(guardado, sem_internet));
             return;
         }
         let (para_ca, daqui) = std::sync::mpsc::channel();
@@ -173,11 +174,14 @@ impl PublicadorLocalPrimeiro {
         self.sinc.tokio().spawn_blocking(move || {
             let mut gesto = Some(gesto);
             for recado in daqui {
-                if falta_de_rede(&recado) {
+                if let Some(frase) = frase_de_falha(&recado).filter(|f| e_passageira(f)) {
                     if let Some(gesto) = gesto.take() {
-                        sinc.rede().marcar_sem_rede();
+                        let sem_internet = e_falta_de_rede(frase);
+                        if sem_internet {
+                            sinc.rede().marcar_sem_rede();
+                        }
                         sinc.guardar(gesto);
-                        let _ = canal.send(guardado.clone());
+                        let _ = canal.send(com_o_motivo(guardado.clone(), sem_internet));
                         continue;
                     }
                 }
@@ -191,7 +195,7 @@ impl PublicadorLocalPrimeiro {
     /// gesto seguinte já ir à fila e o selo acender (revisão de 20/10/2026).
     fn repassar(&self, canal: Sender<Recado>, chamar: impl FnOnce(Sender<Recado>)) {
         self.ler(canal, chamar, |sinc, recado| {
-            if falta_de_rede(&recado) {
+            if frase_de_falha(&recado).is_some_and(e_falta_de_rede) {
                 sinc.rede().marcar_sem_rede();
             }
             recado
@@ -251,21 +255,48 @@ fn galeria_do_caminho(caminho: &str) -> Option<&str> {
     (!id.is_empty() && !id.contains('/') && !id.contains('?')).then_some(id)
 }
 
-/// O recado é "o site não respondeu"?
-pub fn falta_de_rede(recado: &Recado) -> bool {
+/// 📴 O `guardado` com o porquê: sem internet, ou guardado com a rede de pé
+/// (o soluço do site, a vez atrás da fila). A frase da tela fala de internet
+/// só no primeiro caso — o caixa lê `sem_internet` na resposta guardada.
+fn com_o_motivo(guardado: Recado, sem_internet: bool) -> Recado {
+    match guardado {
+        Recado::GuardadoParaDepois { alvo, .. } => {
+            Recado::GuardadoParaDepois { alvo, sem_internet }
+        }
+        Recado::Json {
+            rotulo,
+            resultado: Ok(mut valor),
+        } if valor.get("guardada_sem_rede").is_some() => {
+            valor["sem_internet"] = sem_internet.into();
+            Recado::Json {
+                rotulo,
+                resultado: Ok(valor),
+            }
+        }
+        outro => outro,
+    }
+}
+
+/// A frase da falha que o recado traz, quando ele é uma falha.
+pub fn frase_de_falha(recado: &Recado) -> Option<&str> {
     match recado {
         Recado::Falhou(frase)
         | Recado::GaleriaNaoAtualizada(frase)
         | Recado::EnvioFalhou { frase, .. }
         | Recado::Negociou {
             erro: Some(frase), ..
-        } => e_falta_de_rede(frase),
-        Recado::Json {
+        }
+        | Recado::Json {
             resultado: Err(frase),
             ..
-        } => e_falta_de_rede(frase),
-        _ => false,
+        } => Some(frase),
+        _ => None,
     }
+}
+
+/// O recado é "o site não respondeu"?
+pub fn falta_de_rede(recado: &Recado) -> bool {
+    frase_de_falha(recado).is_some_and(e_falta_de_rede)
 }
 
 impl Publicador for PublicadorLocalPrimeiro {
@@ -398,7 +429,7 @@ impl Publicador for PublicadorLocalPrimeiro {
                     Recado::Json {
                         rotulo,
                         resultado: Err(frase),
-                    } if e_falta_de_rede(&frase) => Recado::Json {
+                    } if e_passageira(&frase) => Recado::Json {
                         rotulo,
                         resultado: sinc.projetar_json(&caminho, None).ok_or(frase),
                     },
@@ -408,24 +439,25 @@ impl Publicador for PublicadorLocalPrimeiro {
             return;
         }
         if let Some(tipo) = super::caixa::guardavel(pedido.metodo, &pedido.caminho) {
-            let mut corpo = pedido
+            // 🕐 **A hora do balcão vai só com o que fica na fila.** A venda
+            // das 14h guardada sem rede entra às 14h — e o site a aceita mesmo
+            // que a foto tenha sido vendida no meio-tempo (o dinheiro já está
+            // na gaveta), marcando a duplicidade. A venda que vai **agora**
+            // não leva a hora: o site tem de poder recusar a foto já vendida
+            // antes de o operador cobrar (verificação de 21/10/2026).
+            let mut guardado_corpo = pedido
                 .corpo
                 .clone()
                 .unwrap_or_else(|| serde_json::json!({}));
-            // A hora do balcão vai junto: a venda das 14h entra às 14h.
-            corpo["ocorrido_em"] = chrono::Local::now().to_rfc3339().into();
+            guardado_corpo["ocorrido_em"] = chrono::Local::now().to_rfc3339().into();
             let guardado = Recado::Json {
                 rotulo: pedido.rotulo,
-                resultado: Ok(super::caixa::resposta_guardada(tipo, &corpo)),
+                resultado: Ok(super::caixa::resposta_guardada(tipo, &guardado_corpo)),
             };
             let gesto = Gesto::PedidoJson {
                 metodo: pedido.metodo.to_string(),
                 caminho: pedido.caminho.clone(),
-                corpo: corpo.clone(),
-            };
-            let pedido = PedidoJson {
-                corpo: Some(corpo),
-                ..pedido
+                corpo: guardado_corpo,
             };
             self.gravar(gesto, canal, guardado, move |c| {
                 dentro.pedir_json(sessao, pedido, c)
@@ -469,13 +501,21 @@ impl Publicador for PublicadorLocalPrimeiro {
             )));
             return;
         }
-        if !self.sinc.rede().com_rede() {
-            let _ = canal.send(Recado::Falhou(format!(
-                "O link do cliente {PRECISA_DE_INTERNET}"
-            )));
-            return;
-        }
-        self.dentro.link(sessao, galeria_id, canal);
+        // Tenta sempre — a bandeira da rede pode estar atrasada em relação à
+        // rede de verdade —, e a falha de rede vira a frase de que o link
+        // precisa de internet.
+        let dentro = self.dentro.clone();
+        self.ler(
+            canal,
+            move |c| dentro.link(sessao, galeria_id, c),
+            |sinc, recado| match frase_de_falha(&recado) {
+                Some(frase) if e_falta_de_rede(frase) => {
+                    sinc.rede().marcar_sem_rede();
+                    Recado::Falhou(format!("O link do cliente {PRECISA_DE_INTERNET}"))
+                }
+                _ => recado,
+            },
+        );
     }
 
     fn atualizar_galeria(
@@ -544,7 +584,7 @@ impl Publicador for PublicadorLocalPrimeiro {
                 }
                 // Sem rede e sem espelho (a primeira abertura do dia, offline):
                 // as sessões criadas aqui ainda aparecem.
-                Recado::Falhou(frase) if e_falta_de_rede(&frase) => {
+                Recado::Falhou(frase) if e_passageira(&frase) => {
                     let mut lista = Vec::new();
                     sinc.projetar_lista(&mut lista);
                     if lista.is_empty() {
@@ -586,6 +626,7 @@ impl Publicador for PublicadorLocalPrimeiro {
         self.lembrar(&sessao);
         let guardado = Recado::GuardadoParaDepois {
             alvo: foto.foto_id.clone(),
+            sem_internet: true,
         };
         let gesto = Gesto::SubirClassificada {
             galeria_id: galeria_id.clone(),
@@ -705,6 +746,7 @@ impl Publicador for PublicadorLocalPrimeiro {
         self.lembrar(&sessao);
         let guardado = Recado::GuardadoParaDepois {
             alvo: foto_no_site.clone(),
+            sem_internet: true,
         };
         let gesto = Gesto::SalvarRevelacao {
             foto_no_site: foto_no_site.clone(),
@@ -720,6 +762,7 @@ impl Publicador for PublicadorLocalPrimeiro {
         self.lembrar(&sessao);
         let guardado = Recado::GuardadoParaDepois {
             alvo: galeria_id.clone(),
+            sem_internet: true,
         };
         let gesto = Gesto::Avisar {
             galeria_id: galeria_id.clone(),

@@ -201,14 +201,16 @@ fn tocar_ate_o_fim(saida: &rodio::MixerDeviceSink, som: &Som, volume: f32) -> Re
         std::thread::sleep(Duration::from_millis(30));
     }
     tocador.stop();
-    crate::telemetria::avisar!("🔊 [Sons] tocou {som:?} a {:.0}%", volume * 100.0);
+    // Só no terminal: o `avisar!` relata **erro** ao site, e o som que tocou não
+    // é erro — cada queda da rede (que soa) virava uma ocorrência em produção.
+    eprintln!("🔊 [Sons] tocou {som:?} a {:.0}%", volume * 100.0);
     Ok(())
 }
 
 impl AltoFalante for AltoFalanteDoSistema {
     fn tocar(&self, pedido: Pedido) {
         if let Some(fala) = &pedido.fala {
-            crate::telemetria::avisar!("🗣️ [Sons] falar: {}", fala.texto);
+            eprintln!("🗣️ [Sons] falar: {}", fala.texto);
         }
         let _ = self.fila.lock().unwrap().send(pedido);
     }

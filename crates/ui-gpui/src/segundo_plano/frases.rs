@@ -19,8 +19,14 @@ pub struct Retrato {
     /// segundo plano, e quem fica esperando alguma coisa é só a rejeitada —
     /// esperando o operador mudar de ideia.
     pub rejeitadas: usize,
-    /// O que o site recusou nesta abertura.
+    /// O que o site recusou: os envios desta abertura e os gestos da fila de
+    /// sincronização recusados na volta.
     pub recusadas: usize,
+    /// 📴 Gestos guardados na fila de sincronização (`crate::sincronizacao`),
+    /// esperando o site. Moram no disco: fechar o app não os perde.
+    pub guardadas: usize,
+    /// 📴 O site não responde.
+    pub sem_rede: bool,
     /// Miniaturas sendo refeitas do disco.
     pub refazendo: usize,
     pub conta: Option<String>,
@@ -65,6 +71,11 @@ pub fn plural(n: usize, um: &str, varios: &str) -> String {
     }
 }
 
+/// "1 alteração guardada", "4 alterações guardadas" — a conta do selo da fila.
+pub fn guardadas(n: usize) -> String {
+    plural(n, "alteração guardada", "alterações guardadas")
+}
+
 /// "agora há pouco", "há 5 min", "há 3 h", "há 2 dias".
 pub fn ha_quanto(segundos: i64) -> String {
     match segundos.max(0) {
@@ -106,9 +117,19 @@ pub fn linhas(r: &Retrato) -> Linhas {
         Some(email) => format!("Conta: {email}"),
         None => "Conta: sem sessão".into(),
     };
-    let subindo = match r.subindo {
-        0 => "Subindo: nada na fila".into(),
-        n => format!("Subindo: {}", plural(n, "foto", "fotos")),
+    // 📴 O gesto guardado sem internet também espera o site: "nada na fila"
+    // com ele no disco diria que está tudo lá.
+    let mut na_fila = Vec::new();
+    if r.subindo > 0 {
+        na_fila.push(plural(r.subindo, "foto", "fotos"));
+    }
+    if r.guardadas > 0 {
+        na_fila.push(guardadas(r.guardadas));
+    }
+    let subindo = if na_fila.is_empty() {
+        "Subindo: nada na fila".into()
+    } else {
+        format!("Subindo: {}", na_fila.join(" · "))
     };
     let rejeitadas = match r.rejeitadas {
         0 => "Rejeitadas (não sobem): nenhuma".into(),
@@ -133,6 +154,12 @@ pub fn linhas(r: &Retrato) -> Linhas {
     };
 
     let mut resumo = Vec::new();
+    if r.sem_rede {
+        resumo.push("Sem internet".to_string());
+    }
+    if r.guardadas > 0 {
+        resumo.push(guardadas(r.guardadas));
+    }
     if r.subindo > 0 {
         resumo.push(format!("{} subindo", plural(r.subindo, "foto", "fotos")));
     }
@@ -143,7 +170,7 @@ pub fn linhas(r: &Retrato) -> Linhas {
         ));
     }
     if r.rejeitadas > 0 {
-        resumo.push(format!("{} rejeitadas", r.rejeitadas));
+        resumo.push(plural(r.rejeitadas, "rejeitada", "rejeitadas"));
     }
     let dica = if resumo.is_empty() {
         format!("{NOME} — Tudo sincronizado")
@@ -214,6 +241,8 @@ mod testes {
             subindo: 5,
             rejeitadas: 3,
             recusadas: 1,
+            guardadas: 0,
+            sem_rede: false,
             refazendo: 1,
             conta: Some("dono@estudio".into()),
             pilha_local: true,
@@ -249,9 +278,42 @@ mod testes {
         assert_eq!(l.segundo_plano, "Em segundo plano: 7 miniaturas");
         assert_eq!(
             l.dica,
-            format!("{NOME} — 1 foto subindo · 1 rejeitadas"),
+            format!("{NOME} — 1 foto subindo · 1 rejeitada"),
             "miniatura refeita não entra no resumo: é cache, não envio"
         );
+    }
+
+    /// 📴 Com gesto guardado sem internet, a bandeja não diz "Tudo
+    /// sincronizado" nem "nada na fila" — achado na janela de verdade, com a
+    /// rede caída e quatro gestos esperando.
+    #[test]
+    fn o_gesto_guardado_cala_o_tudo_sincronizado() {
+        let sem_rede = linhas(&Retrato {
+            guardadas: 4,
+            sem_rede: true,
+            ..Default::default()
+        });
+        assert_eq!(sem_rede.subindo, "Subindo: 4 alterações guardadas");
+        assert_eq!(
+            sem_rede.dica,
+            format!("{NOME} — Sem internet · 4 alterações guardadas")
+        );
+        let voltando = linhas(&Retrato {
+            subindo: 2,
+            guardadas: 1,
+            ..Default::default()
+        });
+        assert_eq!(voltando.subindo, "Subindo: 2 fotos · 1 alteração guardada");
+        assert_eq!(
+            voltando.dica,
+            format!("{NOME} — 1 alteração guardada · 2 fotos subindo")
+        );
+        let so_sem_rede = linhas(&Retrato {
+            sem_rede: true,
+            ..Default::default()
+        });
+        assert_eq!(so_sem_rede.subindo, "Subindo: nada na fila");
+        assert_eq!(so_sem_rede.dica, format!("{NOME} — Sem internet"));
     }
 
     #[test]

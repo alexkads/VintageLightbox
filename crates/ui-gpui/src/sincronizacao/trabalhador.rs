@@ -5,11 +5,13 @@
 //! trabalhou, e é ela que dá ao site o mesmo final que a tela mostra: a nota 5
 //! e depois a 3 chegam nessa ordem.
 //!
-//! 🔑 **A rede caída nunca gasta o gesto.** Sem resposta (ou `5xx`), ele fica
-//! onde está e o trabalhador espera — de 2 s a 30 s, dobrando. Só a recusa de
-//! regra (`4xx`) tira o gesto da vez: ele vira **conflito**, com a frase do
-//! site, e espera o operador na tela "Sincronização". Uma fila travada atrás de
-//! uma recusa seria a internet de volta e nada subindo.
+//! 🔑 **A rede caída nunca gasta o gesto.** Sem resposta (ou o `5xx` do
+//! caminho até a API), ele fica onde está e o trabalhador espera — de 2 s a
+//! 30 s, dobrando. O site que respondeu e soluçou (o `5xx` que ele explica, o
+//! `429`) ganha [`SOLUCOS_DO_SITE`] tentativas. A recusa de regra (`4xx`) tira
+//! o gesto da vez na hora: ele vira **conflito**, com a frase do site, e espera
+//! o operador na tela "Sincronização". Uma fila travada atrás de uma recusa
+//! seria a internet de volta e nada subindo.
 
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
@@ -17,7 +19,7 @@ use std::time::Duration;
 
 use domain::services::pos_venda::{MudancaDaFoto, Sessao};
 
-use super::{e_falta_de_rede, Gesto, Sincronizacao};
+use super::{e_falta_de_rede, e_passageira, Gesto, Sincronizacao};
 use crate::pos_venda::porta::{FotoClassificada, Publicador, Recado};
 
 const ESPERA_INICIAL: Duration = Duration::from_secs(2);
@@ -28,6 +30,10 @@ const COCHILO: Duration = Duration::from_secs(60);
 const SONDA: Duration = Duration::from_secs(15);
 /// Quantas fotos sobem ao mesmo tempo — o número da esteira.
 const EM_VOO: usize = crate::envios::EM_VOO;
+/// Quantas vezes um gesto espera o **site** se recompor (o `5xx` que a API
+/// explica, o `429` da pausa) antes de virar conflito. A rede caída não conta:
+/// por ela o gesto espera o que for preciso.
+pub const SOLUCOS_DO_SITE: i64 = 8;
 /// O teto de um gesto: a foto grande subindo numa rede lenta.
 const TETO_DO_GESTO: Duration = Duration::from_secs(15 * 60);
 
@@ -41,8 +47,8 @@ pub enum Desfecho {
     Recusado(String),
 }
 
-/// Lê a resposta do site a um gesto.
-pub fn desfecho(recado: Recado) -> Desfecho {
+/// Lê a resposta do site a um gesto que já foi tentado `tentativas` vezes.
+pub fn desfecho(recado: Recado, tentativas: i64) -> Desfecho {
     let frase = match &recado {
         Recado::Falhou(f)
         | Recado::GaleriaNaoAtualizada(f)
@@ -56,13 +62,20 @@ pub fn desfecho(recado: Recado) -> Desfecho {
         }
         _ => return Desfecho::Chegou(recado),
     };
-    // A conta vencida não é recusa do gesto: entrar de novo resolve, e o gesto
-    // continua valendo.
+    // A rede caída e a conta vencida não são recusa do gesto: a rede volta,
+    // entrar de novo resolve, e o gesto continua valendo — sem limite.
     if e_falta_de_rede(&frase) || frase.contains("recusou o acesso") {
-        Desfecho::Esperar(frase)
-    } else {
-        Desfecho::Recusado(frase)
+        return Desfecho::Esperar(frase);
     }
+    // 🌪️ O site respondeu, mas soluçou (o `5xx` que ele explica) ou pediu uma
+    // pausa (`429`, a fila despejando centenas de gestos depois de uma queda):
+    // vale esperar e repetir — até um ponto. Persistindo, é defeito, e o
+    // operador precisa saber: vira conflito com a frase do site.
+    let pausa = frase.contains("respondeu 429");
+    if (e_passageira(&frase) || pausa) && tentativas + 1 < SOLUCOS_DO_SITE {
+        return Desfecho::Esperar(frase);
+    }
+    Desfecho::Recusado(frase)
 }
 
 /// Manda o gesto pela porta do site e espera a resposta.
@@ -272,7 +285,7 @@ impl Trabalhador {
             return Volta::Esperar;
         };
 
-        match desfecho(recado) {
+        match desfecho(recado, guardado.tentativas) {
             Desfecho::Chegou(recado) => {
                 self.sinc.rede().marcar_com_rede();
                 self.sinc.conta_recusada(false);
@@ -323,11 +336,15 @@ impl Trabalhador {
             Desfecho::Esperar(frase) => {
                 if e_falta_de_rede(&frase) {
                     self.sinc.rede().marcar_sem_rede();
-                } else {
+                } else if frase.contains("recusou o acesso") {
                     // A conta venceu: o selo pede para entrar de novo.
                     self.sinc.conta_recusada(true);
+                } else {
+                    // 🌪️ Só o soluço do site gasta tentativa. Contando a rede
+                    // caída, uma queda de uma hora deixava o gesto sem fôlego, e
+                    // o primeiro `5xx` da volta o mandava aos conflitos.
+                    let _ = fila.tentou(guardado.id).await;
                 }
-                let _ = fila.tentou(guardado.id).await;
                 Volta::Esperar
             }
             Desfecho::Recusado(frase) => {

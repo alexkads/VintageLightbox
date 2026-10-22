@@ -1653,10 +1653,17 @@ impl Caixa {
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false)
         });
-        let depois = if sem_rede {
-            " Sem internet: fica guardado e sobe quando a rede voltar."
-        } else {
-            ""
+        // O porquê vem na resposta guardada (`sem_internet`), decidido na hora
+        // de guardar: sem ele, a resposta de antes diz que foi a rede.
+        let sem_internet = resultado.as_ref().is_ok_and(|v| {
+            v.get("sem_internet")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(true)
+        });
+        let depois = match (sem_rede, sem_internet) {
+            (false, _) => "",
+            (true, true) => " Sem internet: fica guardado e sobe quando a rede voltar.",
+            (true, false) => " Guardado neste computador: sobe sozinho, na ordem da fila.",
         };
         // 🖥️ Na tela cheia a resposta pode chegar com outro formulário na vez.
         if let Some(contexto) = match rotulo {
@@ -1707,9 +1714,14 @@ impl Caixa {
                 match resultado {
                     Ok(_) => {
                         if let Some(EmCurso::Movimento { tipo, valor }) = pedido {
+                            // A sangria é registrada; o suprimento, registrado.
+                            let registrado = match tipo {
+                                TipoDeMovimento::Sangria => "registrada",
+                                TipoDeMovimento::Suprimento => "registrado",
+                            };
                             self.avisar(
                                 format!(
-                                    "{} de {} registrado.{depois}",
+                                    "{} de {} {registrado}.{depois}",
                                     tipo.rotulo(),
                                     dinheiro::formatar(valor)
                                 ),

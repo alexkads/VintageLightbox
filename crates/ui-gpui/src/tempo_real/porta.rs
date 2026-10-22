@@ -238,6 +238,13 @@ async fn manter_aberto(
                 });
                 return;
             }
+            // 📴 A rede caída, ou o site fora do ar, não é defeito do app: sem
+            // internet, cada canal relatava uma ocorrência a cada dez minutos,
+            // e uma tarde offline enchia de erro a telemetria do balcão. Fica no
+            // terminal; o resto continua relatado.
+            Err(erro) if crate::sincronizacao::e_passageira(&erro.to_string()) => {
+                eprintln!("📴 [Tempo real] {fonte}: {erro}")
+            }
             Err(erro) => crate::telemetria::avisar!("⚠️ [Tempo real] {fonte}: {erro}"),
             Ok(()) => {}
         }

@@ -4065,7 +4065,9 @@ impl Aplicativo {
                 }
                 // 📴 O site não respondeu e o envio ficou na fila: a vaga da
                 // esteira abre, sem falha — quem repete agora é a fila.
-                PosVendaRecado::GuardadoParaDepois { alvo } => self.esteira.respondeu(alvo, false),
+                PosVendaRecado::GuardadoParaDepois { alvo, .. } => {
+                    self.esteira.respondeu(alvo, false)
+                }
                 // A foto foi tirada do site por uma rejeição: não há o que
                 // repetir — ver `largar_o_que_ia_para`.
                 PosVendaRecado::EnvioFalhou { alvo, .. } if self.tiradas_do_site.contains(alvo) => {
@@ -4219,7 +4221,7 @@ impl Aplicativo {
                 // 📴 Guardado para depois: nada falhou e nada subiu. A foto
                 // segue "No disco", a revelação segue no depósito, e o selo do
                 // rodapé conta o que espera a rede.
-                PosVendaRecado::GuardadoParaDepois { alvo } => {
+                PosVendaRecado::GuardadoParaDepois { alvo, .. } => {
                     self.parametros_no_ar.remove(&alvo);
                     self.subindo_sozinhas.remove(&alvo);
                     self.tirar_do_lote_do_salvar(cx);

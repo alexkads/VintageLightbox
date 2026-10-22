@@ -4067,10 +4067,14 @@ impl Detalhe {
                 }
                 // 📴 Sem internet: o aviso ao cliente ficou na fila e sai
                 // sozinho quando a rede voltar.
-                Recado::GuardadoParaDepois { .. } if self.avisando => {
+                Recado::GuardadoParaDepois { sem_internet, .. } if self.avisando => {
                     self.avisando = false;
                     self.avisar_sucesso(
-                        "Sem internet: o aviso ao cliente fica guardado e sai quando a rede voltar.",
+                        if sem_internet {
+                            "Sem internet: o aviso ao cliente fica guardado e sai quando a rede voltar."
+                        } else {
+                            "O aviso ao cliente ficou guardado e sai sozinho, na ordem da fila."
+                        },
                         cx,
                     );
                 }

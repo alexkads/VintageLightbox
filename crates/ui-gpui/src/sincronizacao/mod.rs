@@ -121,6 +121,13 @@ pub fn a_do_app() -> Option<Arc<Sincronizacao>> {
     DO_APP.lock().ok().and_then(|f| f.clone())
 }
 
+/// 📴 O balcão está sem internet agora? A frase do gesto guardado só diz "sem
+/// internet" quando é isso: o `5xx` que o site explica e a fila que ainda
+/// esvazia com a rede de volta também guardam o gesto.
+pub fn sem_internet_agora() -> bool {
+    a_do_app().is_some_and(|fila| !fila.rede().com_rede())
+}
+
 impl Sincronizacao {
     /// Abre a fila do catálogo: lê o que ficou de antes (o app fechado sem
     /// rede) e liga a tarefa que grava.
@@ -647,8 +654,17 @@ pub fn pasta_do_endereco(base: &str) -> String {
     }
 }
 
-/// A falha que é falta de rede — a que vira fila, e não erro na tela.
+/// A falha que é **falta de rede** — ninguém respondeu, ou só o caminho até a
+/// API: vira fila e acende o "Sem internet".
 pub fn e_falta_de_rede(frase: &str) -> bool {
+    infrastructure::pos_venda::http::erro_de_rede(frase)
+}
+
+/// A falha que **passa sozinha**: a rede, ou o `5xx` que a própria API
+/// explica (o armazenamento que soluçou). Vira fila — o gesto do operador não
+/// se perde por um soluço do servidor —, mas só a primeira acende o "Sem
+/// internet": na segunda o site respondeu.
+pub fn e_passageira(frase: &str) -> bool {
     infrastructure::pos_venda::http::erro_passageiro(frase)
 }
 

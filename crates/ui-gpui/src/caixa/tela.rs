@@ -2289,9 +2289,11 @@ impl Caixa {
             gpui_kit::deferred(
                 gpui_kit::anchored()
                     .anchor(gpui_kit::Anchor::BottomRight)
+                    // 🪟 Acima do rodapé da janela, como os toasts do kit
+                    // (`tema::aplicar`).
                     .position(gpui_kit::point(
                         tamanho.width - px(16.),
-                        tamanho.height - px(16.),
+                        tamanho.height - px(16. + crate::app::rodape::ALTURA_DO_RODAPE),
                     ))
                     .position_mode(gpui_kit::AnchoredPositionMode::Window)
                     .child(
@@ -2315,7 +2317,16 @@ impl Caixa {
                                     .shadow_lg()
                                     .text_sm()
                                     .child(Icon::new(icone).size(px(16.)).text_color(cor))
-                                    .child(div().flex_1().text_color(texto).child(r.texto.clone()))
+                                    // 🪟 `min_w(0)`: sem ele a frase longa (a do
+                                    // gesto guardado sem internet) não quebra e
+                                    // sai pela borda da janela.
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w(px(0.))
+                                            .text_color(texto)
+                                            .child(r.texto.clone()),
+                                    )
                             })),
                     ),
             )

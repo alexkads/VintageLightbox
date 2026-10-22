@@ -50,7 +50,11 @@ impl Aplicativo {
         Retrato {
             subindo: self.sincronias_pendentes,
             rejeitadas,
-            recusadas: self.recusas.len(),
+            // 📴 O gesto que o site recusou na volta também é recusa do
+            // servidor, e espera o operador no selo do rodapé.
+            recusadas: self.recusas.len() + self.situacao_da_fila.conflitos,
+            guardadas: self.situacao_da_fila.pendentes,
+            sem_rede: self.situacao_da_fila.sem_rede_desde.is_some(),
             refazendo: self.reposicoes_pendentes,
             conta: self.conta.as_ref().map(|c| c.email.clone()),
             ultimo_envio: self.ultimo_envio,
@@ -204,6 +208,16 @@ mod testes {
                 assert_eq!(r.recusadas, 1);
                 assert_eq!(r.ultimo_envio, Some(123));
                 assert!(r.ha_envio_pendente(), "fechar agora esconderia a janela");
+
+                // 📴 A fila de sincronização: o que espera e o que voltou recusado.
+                app.situacao_da_fila = crate::sincronizacao::Situacao {
+                    pendentes: 3,
+                    conflitos: 1,
+                    sem_rede_desde: Some(1),
+                    precisa_entrar: false,
+                };
+                let r = app.retrato_do_segundo_plano(cx);
+                assert_eq!((r.guardadas, r.recusadas, r.sem_rede), (3, 2, true));
             })
             .expect("a janela deve estar aberta");
     }

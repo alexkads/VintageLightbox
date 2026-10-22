@@ -62,9 +62,10 @@ Código em `crates/ui-gpui/src/sincronizacao/` e
    na grade ao reabrir; a sessão criada sem rede abre vazia; o caixa aberto sem
    rede aparece aberto, com a venda guardada.
 5. **A rede caída nunca gasta o gesto**: o trabalhador espera (2 s a 30 s,
-   dobrando). Só a recusa de regra (4xx) tira o gesto da vez — vira **conflito**,
+   dobrando). A recusa de regra (4xx) tira o gesto da vez — vira **conflito**,
    com a frase do site, na lista do selo do rodapé ("Tentar de novo",
-   "Descartar").
+   "Descartar"). O `5xx` que o site explica e o `429` voltam à fila até 8
+   vezes antes de virar conflito.
 6. **O id nasce no app**: a sessão criada sem rede ganha UUID aqui, e o site
    aceita esse id (`POST /pos-venda/galerias` com `id`, idempotente). Se um site
    antigo der outro id, a fila e as fotos do catálogo seguem o de lá.
@@ -109,6 +110,37 @@ Código em `crates/ui-gpui/src/sincronizacao/` e
 - Um aviso (com som) quando a rede cai e quando volta.
 - No caixa, a venda guardada aparece como "sem internet" (sem número — o número é
   do site) e a frase diz que ela sobe quando a rede voltar.
+- Com gesto guardado (ou recusado na volta), o rodapé não diz "Tudo no site"
+  (fica só "Último envio há …") e a bandeja não diz "Tudo sincronizado": a dica
+  do ícone e a linha "Subindo" contam as alterações guardadas.
+- 💸 A sangria guardada sem rede não confere o dinheiro da gaveta: quem confere
+  é o site, na volta, já com as vendas guardadas antes dela. Se passar do
+  dinheiro do caixa, volta recusada, com o valor, para "Tentar de novo" (depois
+  de um suprimento) ou "Descartar".
+
+### A verificação de 21/out/2026
+
+> *"Verifique a qualidade o OffLine First do VintageLightBox"* — dono, 21/out/2026.
+
+Revisão do código e o app de verdade, na janela, contra a API descartável do
+ciclo, com o proxy derrubando a rede no meio do expediente: sessão criada com
+rede, nota, `B` e `X` sem rede, o app fechado e reaberto sem rede (duas vezes),
+nota depois de reabrir, caixa aberto e sangria sem rede, e a rede de volta. O
+que mudou:
+
+| Achado | Agora |
+|---|---|
+| Todo `5xx` contava como "sem internet" — até o que a API explica (`{"error":…}`) | **Falta de rede** é ninguém responder ou o `5xx` sem o envelope da API (o 502 do proxy, da Cloudflare). O `5xx` explicado é **soluço do site**: o gesto fica guardado, mas o "Sem internet" não acende |
+| O soluço do site esperava para sempre | Volta à fila até 8 vezes (e o `429` também); depois vira conflito, com a frase do site — um erro fixo do servidor não trava a fila. Só o soluço gasta tentativa (a espera pela rede caída não conta), e o "Tentar de novo" zera a conta |
+| A venda feita **com rede** ia com `ocorrido_em`, e o site a gravava como duplicidade em vez de recusar a foto já vendida | Só o gesto guardado leva a hora do balcão; o pedido direto vai sem ela e a recusa chega na hora |
+| O "Copiar link" recusava pela bandeira de rede atrasada | Tenta sempre; a frase "precisa de internet" sai só quando a rede falha de fato |
+| A nota guardada há mais de 30 dias virava "agora" no site e ganhava da mais nova | A hora do gesto (`hora_do_gesto`) só é limitada no futuro; o limite de 30 dias é do caixa (`hora_do_balcao`) |
+| "Tudo no site" e "Tudo sincronizado" com 4 gestos guardados, e com 1 recusado na volta | Ver "O que o operador vê"; o recusado na volta conta em "Recusadas pelo servidor" da bandeja |
+| Cada aviso sonoro (a rede que cai soa) subia ao site como ocorrência de **erro** | O "tocou" e o "falar" ficam só no terminal |
+| Sem internet, cada canal do tempo real relatava um erro a cada dez minutos | A queda da rede (e o site fora do ar) fica só no terminal; o resto continua relatado |
+| A sangria recusada na volta dizia "(0 centavos)" | "(R$ 0,00)" — a frase do site, em reais |
+| O recado do caixa com a frase do gesto guardado saía pela borda da janela, por cima do rodapé | Quebra a linha e fica acima do rodapé |
+| "Sem internet" na frase do gesto guardado com a rede de pé (soluço, ou a fila que ainda esvazia) | O porquê vai na resposta guardada (`sem_internet`, no `GuardadoParaDepois` e no JSON do caixa), decidido **na hora de guardar**: lido na tela, a fila já podia ter levado o gesto (o e2e da resposta perdida pegou essa corrida) |
 
 ### O bot da sessão (o QR)
 

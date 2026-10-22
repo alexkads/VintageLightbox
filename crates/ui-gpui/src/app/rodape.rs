@@ -87,11 +87,31 @@ pub struct Envios {
 }
 
 /// As frases dos envios — as mesmas contas da bandeja (`frases::linhas`).
-pub fn envios(subindo: usize, recusados: usize, ultimo: Option<i64>, agora: i64) -> Envios {
-    let calmo = (subindo == 0 && recusados == 0).then(|| match ultimo {
-        Some(quando) => format!("Tudo no site · último envio {}", ha_quanto(agora - quando)),
-        None => "Nada na fila de envio".into(),
-    });
+///
+/// 📴 `guardadas` são os gestos da fila de sincronização que não estão no
+/// site — os que esperam e os que ele recusou na volta: com eles, "tudo no
+/// site" seria mentira. O selo da fila conta cada um, e este trecho fica só
+/// com a hora do último envio.
+pub fn envios(
+    subindo: usize,
+    recusados: usize,
+    guardadas: usize,
+    ultimo: Option<i64>,
+    agora: i64,
+) -> Envios {
+    let calmo = if subindo > 0 || recusados > 0 {
+        None
+    } else {
+        match (ultimo, guardadas) {
+            (Some(quando), 0) => Some(format!(
+                "Tudo no site · último envio {}",
+                ha_quanto(agora - quando)
+            )),
+            (Some(quando), _) => Some(format!("Último envio {}", ha_quanto(agora - quando))),
+            (None, 0) => Some("Nada na fila de envio".into()),
+            (None, _) => None,
+        }
+    };
     Envios {
         subindo: (subindo > 0).then(|| format!("Subindo {}", plural(subindo, "foto", "fotos"))),
         recusados: (recusados > 0).then(|| plural(recusados, "envio recusado", "envios recusados")),
@@ -222,6 +242,7 @@ impl Aplicativo {
         let frases = envios(
             self.sincronias_pendentes,
             self.recusas.len(),
+            self.situacao_da_fila.pendentes + self.situacao_da_fila.conflitos,
             self.ultimo_envio,
             chrono::Utc::now().timestamp(),
         );
@@ -803,29 +824,39 @@ mod testes {
 
     #[test]
     fn sem_fila_os_envios_dizem_quando_foi_o_ultimo() {
-        let nunca = envios(0, 0, None, 1_000);
+        let nunca = envios(0, 0, 0, None, 1_000);
         assert_eq!(nunca.calmo.as_deref(), Some("Nada na fila de envio"));
         assert_eq!((nunca.subindo, nunca.recusados), (None, None));
-        let ha_pouco = envios(0, 0, Some(1_000 - 300), 1_000);
+        let ha_pouco = envios(0, 0, 0, Some(1_000 - 300), 1_000);
         assert_eq!(
             ha_pouco.calmo.as_deref(),
             Some("Tudo no site · último envio há 5 min")
         );
     }
 
+    /// 📴 Com a rede caída e gestos guardados, o rodapé dizia "Tudo no site"
+    /// ao lado de "Sem internet · 4 alterações guardadas" — achado na janela
+    /// de verdade.
+    #[test]
+    fn o_gesto_guardado_cala_o_tudo_no_site() {
+        let guardado = envios(0, 0, 4, Some(1_000 - 60), 1_000);
+        assert_eq!(guardado.calmo.as_deref(), Some("Último envio há 1 min"));
+        assert_eq!(envios(0, 0, 4, None, 1_000).calmo, None);
+    }
+
     /// Subindo e recusados aparecem juntos, e "tudo no site" some — ele
     /// mentiria com uma recusa na lista.
     #[test]
     fn subindo_e_recusados_aparecem_juntos_e_calam_o_tudo_no_site() {
-        let e = envios(3, 1, Some(0), 1_000);
+        let e = envios(3, 1, 0, Some(0), 1_000);
         assert_eq!(e.subindo.as_deref(), Some("Subindo 3 fotos"));
         assert_eq!(e.recusados.as_deref(), Some("1 envio recusado"));
         assert_eq!(e.calmo, None);
-        let so_recusa = envios(0, 2, Some(0), 1_000);
+        let so_recusa = envios(0, 2, 0, Some(0), 1_000);
         assert_eq!(so_recusa.recusados.as_deref(), Some("2 envios recusados"));
         assert_eq!(so_recusa.calmo, None);
         assert_eq!(
-            envios(1, 0, None, 0).subindo.as_deref(),
+            envios(1, 0, 0, None, 0).subindo.as_deref(),
             Some("Subindo 1 foto")
         );
     }

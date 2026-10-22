@@ -162,6 +162,11 @@ pub enum Recado {
     /// vaga; quem esperava o aviso diz que ele sai depois.
     GuardadoParaDepois {
         alvo: String,
+        /// Guardado porque a rede caiu — e não por um soluço do site, nem por
+        /// esperar a vez atrás da fila: a frase fala de internet só aí.
+        /// Decidido na hora de guardar; lido depois, na tela, a fila já podia
+        /// ter levado o gesto e a rede ter voltado.
+        sem_internet: bool,
     },
     /// ❌ A rejeição da nuvem feita sem rede chegou ao site (a foto já está
     /// marcada lá): a raiz faz agora o resgate de sempre — o bruto volta para

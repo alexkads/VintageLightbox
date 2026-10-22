@@ -311,6 +311,30 @@ fn recusa_da_entrada(status: u16, errou: &str) -> Option<DomainError> {
     Some(DomainError::Recusado(frase))
 }
 
+/// 📶 **A falha é da rede?** Ninguém respondeu, ou quem respondeu foi o
+/// caminho até a API (o proxy do Fly, o servidor reiniciando: `5xx` sem o
+/// envelope dela). É a falha que vira fila e acende o "Sem internet".
+///
+/// ⚠️ **Não é o mesmo que [`erro_passageiro`].** O `5xx` que a própria API
+/// explica (o armazenamento que soluçou, a Meta que recusou) também passa
+/// sozinho, e vale repetir — mas o site respondeu: há internet.
+pub fn erro_de_rede(mensagem: &str) -> bool {
+    mensagem.contains(SEM_RESPOSTA)
+}
+
+/// A recusa de um `5xx`: com o envelope da API, a frase dela (`o site
+/// respondeu 503: …`); sem ele, a resposta veio do caminho, e para o balcão
+/// isso é o site sem responder.
+fn recusa_do_servidor(status: impl std::fmt::Display, corpo: &[u8], mensagem: &str) -> DomainError {
+    if falha_dita_pela_api(corpo) {
+        DomainError::InfrastructureError(format!("o site respondeu {status}: {mensagem}"))
+    } else {
+        DomainError::InfrastructureError(format!(
+            "{SEM_RESPOSTA} (o caminho até a API devolveu {status})"
+        ))
+    }
+}
+
 /// 🌪️ **A falha passa sozinha?** A rede que não respondeu e o site que
 /// respondeu 5xx (o proxy caído, o servidor reiniciando) são piscadas: repetir
 /// um gesto idempotente daqui a pouco resolve. O 4xx é recusa de regra, e o
@@ -349,6 +373,9 @@ async fn recusa(resposta: reqwest::Response) -> DomainError {
     if status == reqwest::StatusCode::UNPROCESSABLE_ENTITY {
         return DomainError::FaltaEmail(mensagem);
     }
+    if status.is_server_error() {
+        return recusa_do_servidor(status, corpo.as_bytes(), &mensagem);
+    }
     DomainError::InfrastructureError(format!("o site respondeu {status}: {mensagem}"))
 }
 
@@ -377,6 +404,13 @@ fn recusa_da_crua(resposta: &RespostaCrua) -> DomainResult<()> {
         .and_then(|e| e.error)
         .and_then(|e| e.message)
         .unwrap_or_else(|| texto.chars().take(200).collect());
+    if resposta.status >= 500 {
+        return Err(recusa_do_servidor(
+            resposta.status,
+            &resposta.bytes,
+            &mensagem,
+        ));
+    }
     Err(DomainError::InfrastructureError(format!(
         "o site respondeu {}: {mensagem}",
         resposta.status
@@ -401,10 +435,16 @@ fn recusa_tipada(resposta: &RespostaCrua) -> DomainResult<()> {
         404 => DomainError::NaoEncontradoNoSite(mensagem),
         422 => DomainError::FaltaEmail(mensagem),
         status => {
-            let status = reqwest::StatusCode::from_u16(status)
+            let por_extenso = reqwest::StatusCode::from_u16(status)
                 .map(|s| s.to_string())
                 .unwrap_or_else(|_| status.to_string());
-            DomainError::InfrastructureError(format!("o site respondeu {status}: {mensagem}"))
+            if status >= 500 {
+                recusa_do_servidor(por_extenso, &resposta.bytes, &mensagem)
+            } else {
+                DomainError::InfrastructureError(format!(
+                    "o site respondeu {por_extenso}: {mensagem}"
+                ))
+            }
         }
     })
 }
@@ -1300,9 +1340,12 @@ impl PosVendaApiHttp {
         let leitura = metodo.eq_ignore_ascii_case("GET") && sessao.is_some() && espelhavel(caminho);
         let resultado = self.chamar_na_rede(sessao, metodo, caminho, corpo).await;
         let faltou_rede = match &resultado {
-            // A dependência do site que falhou não acende "Sem internet", e
-            // também não apaga: o estado da rede fica como estava.
+            // A dependência do site que falhou não acende "Sem internet": o
+            // site respondeu, então há rede — e o estado diz isso (sem apagar
+            // aqui, uma falha dita pela API mantinha aceso o "Sem internet"
+            // que outra chamada tinha ligado, com a rede de volta).
             Ok(resposta) if resposta.status >= 500 && falha_dita_pela_api(&resposta.bytes) => {
+                self.rede.marcar_com_rede();
                 if let Some(lembranca) = leitura.then(|| self.espelho.ler(caminho)).flatten() {
                     return Ok(self.lembrada(lembranca));
                 }
@@ -2342,6 +2385,51 @@ mod tests {
             .is_err());
     }
 
+    /// 📶 Os gestos tipados (o `PATCH` da foto) separam do mesmo jeito o `5xx`
+    /// do caminho (rede) do `5xx` que a API explica (o site soluçou).
+    #[tokio::test]
+    async fn o_patch_separa_o_caminho_caido_da_falha_explicada() {
+        let servidor = MockServer::start().await;
+        Mock::given(method("PATCH"))
+            .and(path("/api/v2/pos-venda/fotos/f1"))
+            .respond_with(ResponseTemplate::new(502).set_body_string("<html>bad gateway</html>"))
+            .mount(&servidor)
+            .await;
+        Mock::given(method("PATCH"))
+            .and(path("/api/v2/pos-venda/fotos/f2"))
+            .respond_with(ResponseTemplate::new(500).set_body_json(json!({
+                "error": { "code": "INTERNAL_ERROR", "message": "o banco não respondeu" }
+            })))
+            .mount(&servidor)
+            .await;
+        let api = PosVendaApiHttp::nova(servidor.uri());
+        let mudanca = MudancaDaFoto {
+            nota: Some(Some(4)),
+            ..Default::default()
+        };
+        let caminho = api
+            .mudar_foto(&sessao_valida(), "f1", &mudanca)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(erro_de_rede(&caminho), "{caminho}");
+        assert!(
+            !caminho.contains("<html>"),
+            "o corpo do proxy não vai à tela: {caminho}"
+        );
+        let explicada = api
+            .mudar_foto(&sessao_valida(), "f2", &mudanca)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(!erro_de_rede(&explicada), "{explicada}");
+        assert!(
+            erro_passageiro(&explicada),
+            "o soluço do site vale repetir: {explicada}"
+        );
+        assert!(explicada.contains("o banco não respondeu"), "{explicada}");
+    }
+
     /// O `5xx` do site (o Fly reiniciando) é como a rede caída: vale o espelho.
     #[tokio::test]
     async fn o_site_em_5xx_tambem_devolve_o_espelho() {
@@ -2415,9 +2503,25 @@ mod tests {
             .await
             .unwrap_err();
         assert!(erro_passageiro(&caiu.to_string()), "{caiu}");
+        assert!(erro_de_rede(&caiu.to_string()), "{caiu}");
+        assert!(!erro_de_rede(&recusa.to_string()), "{recusa}");
         assert!(
             !api.rede().com_rede(),
             "o 503 do caminho continua sendo rede"
+        );
+
+        // O site que explica a falha respondeu: a rede está de pé de novo.
+        let _ = api
+            .pedir_json(
+                &sessao,
+                "POST",
+                "/whatsapp/messages/send",
+                Some(json!({ "contact_id": "5554", "message": "oi" })),
+            )
+            .await;
+        assert!(
+            api.rede().com_rede(),
+            "a falha dita pela API apaga o sem rede"
         );
     }
 
