@@ -1,5 +1,20 @@
 [
   {
+    "versao": "0.1.182",
+    "data": "2026-10-21",
+    "titulo": "O trabalho sem internet ficou mais fiel: o rodapé e a bandeja dizem o que ainda falta subir, e o caixa confere na hora a venda feita com rede.",
+    "importante": false,
+    "novidades": [
+      "Com alterações guardadas sem internet, ou recusadas pelo site na volta, o rodapé não diz mais \"Tudo no site\" e o ícone da bandeja não diz mais \"Tudo sincronizado\": os dois mostram o que ainda falta chegar ao site.",
+      "Quando o site responde com um erro passageiro, a alteração fica guardada e é reenviada sozinha, sem acender o aviso \"Sem internet\". Se o erro continuar, ela aparece entre as recusadas do rodapé, com o motivo, para tentar de novo ou descartar.",
+      "A venda feita com internet volta a ser conferida na hora: se a foto já tiver sido vendida por outro caminho, o caixa avisa antes de cobrar.",
+      "O \"Copiar link\" funciona assim que a internet volta, sem esperar o aviso do app.",
+      "Os recados do caixa feitos sem internet aparecem inteiros, acima do rodapé, e a sangria recusada na volta mostra o dinheiro do caixa em reais.",
+      "Uma nota dada sem internet e guardada por mais de um mês não desfaz mais a nota mais nova, dada depois em outro balcão."
+    ],
+    "por_que_atualizar": "Para o balcão confiar no que o rodapé e a bandeja dizem depois de uma queda da internet, e para o caixa conferir na hora a venda feita com rede."
+  },
+  {
     "versao": "0.1.181",
     "data": "2026-10-21",
     "titulo": "A lista de sessões mostra quando o fotolivro não foi pelo WhatsApp, e por quê.",
