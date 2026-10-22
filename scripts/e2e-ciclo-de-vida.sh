@@ -123,6 +123,18 @@ no_backend cargo build -q -p e2e-tests --bin servidor-do-ciclo
 ALVO_DO_BACKEND=$(no_backend cargo metadata --format-version 1 --no-deps |
     python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')
 
+# 🔨 O app compila ANTES de a API subir. O token da sessão de teste nasce com
+# o servidor e vale 15 minutos; com a compilação depois, uma versão nova (que
+# recompila o app do zero, 11 a 16 min com a máquina carregada) fazia o token
+# vencer no meio dos testes, e tudo virava 401 — três `make producao` seguidos
+# barrados assim em 21/10/2026, sem defeito nenhum no código.
+echo "🔨 compilando os testes do app…"
+(
+    cd "$RAIZ"
+    if [ -n "${CARGO_TARGET_DIR_APP:-}" ]; then export CARGO_TARGET_DIR="$CARGO_TARGET_DIR_APP"; fi
+    cargo test -q -p ui-gpui --lib --no-run
+)
+
 echo "🐳 subindo Postgres, Redis e a API…"
 mkfifo "$TMP/entrada"
 "$ALVO_DO_BACKEND/debug/servidor-do-ciclo" <"$TMP/entrada" >"$TMP/servidor.json" 2>"$TMP/servidor.log" &
