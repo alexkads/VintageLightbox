@@ -46,6 +46,10 @@ pub struct ClienteNoBot {
     pub nome: Option<String>,
     pub passo: String,
     pub nome_completo: Option<String>,
+    /// Como o cliente quer identificar a sessão (o casal, a família). A API
+    /// anterior não manda.
+    #[serde(default)]
+    pub nome_da_sessao: Option<String>,
     /// RFC 3339, como o site manda — só serve de chave.
     pub iniciado_em: String,
     /// RFC 3339 — muda a cada resposta; é o que diz que o bot gravou algo.
@@ -132,6 +136,7 @@ pub fn nome_do_canal(canal: &str) -> &'static str {
 pub fn rotulo_do_passo(passo: &str) -> &'static str {
     match passo {
         "nome" => "respondendo o nome",
+        "nome_da_sessao" => "respondendo o nome da sessão",
         "telefone" => "respondendo o telefone",
         "email" => "respondendo o e-mail",
         "como_conheceu" | "como_conheceu_detalhe" => "respondendo como conheceu",
@@ -384,6 +389,7 @@ mod testes {
             nome: Some("Maria".into()),
             passo: passo.into(),
             nome_completo: nome_completo.map(str::to_string),
+            nome_da_sessao: None,
             iniciado_em: "2026-09-30T12:00:00Z".into(),
             atualizado_em: "2026-09-30T12:00:00Z".into(),
         }
@@ -426,9 +432,25 @@ mod testes {
         let s: SituacaoDoBot = serde_json::from_value(json).unwrap();
         assert_eq!(s.convite.codigo, "RF-ABC234");
         assert_eq!(s.clientes[0].passo, "email");
+        assert_eq!(
+            s.clientes[0].nome_da_sessao, None,
+            "a API anterior não manda"
+        );
         let tela = convite_para_a_tela(&s);
         assert_eq!(tela.estado, EstadoDoBot::Conversando);
         assert_eq!(tela.quem.as_deref(), Some("Maria Souza · WhatsApp"));
+    }
+
+    #[test]
+    fn le_o_nome_da_sessao_e_o_passo_dele() {
+        let json = serde_json::json!({
+            "canal": "web", "nome": null, "passo": "nome_da_sessao",
+            "nome_completo": "Maria Souza", "nome_da_sessao": "Família Souza",
+            "iniciado_em": "2026-10-24T12:00:00Z"
+        });
+        let c: ClienteNoBot = serde_json::from_value(json).unwrap();
+        assert_eq!(c.nome_da_sessao.as_deref(), Some("Família Souza"));
+        assert_eq!(rotulo_do_passo(&c.passo), "respondendo o nome da sessão");
     }
 
     #[test]

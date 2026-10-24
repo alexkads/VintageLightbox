@@ -5272,8 +5272,10 @@ impl Detalhe {
 
         let clientes = situacao.clientes.iter().enumerate().map(|(i, c)| {
             let concluido = c.passo == "concluido";
-            let nome_completo = c.nome_completo.clone();
-            let pode_titulo = nome_completo
+            // O nome que o cliente deu à sessão; em cadastro de antes dessa
+            // pergunta, o nome completo.
+            let para_titulo = c.nome_da_sessao.clone().or_else(|| c.nome_completo.clone());
+            let pode_titulo = para_titulo
                 .as_deref()
                 .is_some_and(|n| n.trim() != titulo_atual.trim());
             div()
@@ -5334,7 +5336,7 @@ impl Detalhe {
                         .text_color(fraco)
                         .child(rotulo_do_passo(&c.passo)),
                 )
-                .when_some(nome_completo.filter(|_| pode_titulo), |d, nome| {
+                .when_some(para_titulo.filter(|_| pode_titulo), |d, nome| {
                     d.child(
                         div().pl(px(15.)).child(
                             crate::estilo::botao_fantasma(format!("qr-titulo-{i}"), cx)
@@ -10944,6 +10946,34 @@ mod testes {
             "o canal vaza do painel: {canal:?} × {painel:?}"
         );
         assert!(canal.size.width > px(30.), "o canal encolheu: {canal:?}");
+    }
+
+    /// 📸 O título que o cartão oferece é o nome que o cliente deu à sessão
+    /// (dono, 24/10/2026: "o nome do casal ou o sobrenome da família, pois
+    /// esse será utilizado no fotolivro"), não o nome completo de quem leu o QR.
+    #[gpui_kit::test]
+    fn o_titulo_oferecido_e_o_nome_da_sessao(cx: &mut TestAppContext) {
+        let publicador = publicador_com(vec![], false);
+        publicador.responder_json(
+            crate::sessoes::qr_do_bot::PEDIDO_DA_SITUACAO,
+            Ok(situacao_do_bot(serde_json::json!([{
+                "canal": "whatsapp", "nome": "Maria", "passo": "telefone",
+                "nome_completo": "Maria Souza", "nome_da_sessao": "Família Souza",
+                "iniciado_em": "2026-10-24T12:00:00Z"
+            }]))),
+        );
+        let janela = janela_com(
+            cx,
+            publicador.clone(),
+            Arc::new(SeletorDeMentira::default()),
+        );
+        entrar(cx, &janela);
+        clicar(cx, &janela, "qr-titulo-0");
+        let galerias = publicador.galerias.lock().expect("as galerias");
+        assert!(
+            galerias.iter().any(|g| g.titulo == "Família Souza"),
+            "o título não virou o nome da sessão"
+        );
     }
 
     /// 📸 Os comandos do atendente são independentes: fechar o painel não
