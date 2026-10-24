@@ -2135,15 +2135,27 @@ impl Aplicativo {
     }
 
     /// O diálogo "Novidades da versão X", quando pedido.
-    fn novidades_da_versao(&self, cx: &mut Context<Self>) -> Option<gpui_kit::AnyElement> {
+    fn novidades_da_versao(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui_kit::AnyElement> {
         let agir = cx.listener(|este, pedido: &PedidoDeAtualizacao, _window, cx| {
             este.atender(*pedido, cx);
         });
-        faixa::desenhar_novidades(
+        let (miolo, rodape) = faixa::desenhar_novidades(
             &self.atualizacao,
             &self.rolagem_das_novidades,
             cx,
             Arc::new(move |pedido, window, app| agir(&pedido, window, app)),
+        )?;
+        crate::dialogo::desenhar_conteudo(
+            Some(miolo),
+            Some(rodape),
+            crate::dialogo::Jeito::dialogo(820.),
+            |app, _window, cx| app.atender(PedidoDeAtualizacao::FecharNovidades, cx),
+            window,
+            cx,
         )
     }
 
@@ -7599,7 +7611,7 @@ impl Render for Aplicativo {
             .children(modal_de_configuracoes)
             .children(self.menu_da_conta(window))
             // As novidades da versão: por cima de tudo, só quando pedidas.
-            .children(self.novidades_da_versao(cx))
+            .children(self.novidades_da_versao(window, cx))
             // 📏 A barra do pé: por cima da tela e dos modais, sem pegar clique
             // (não tem `on_mouse_*`, e três pixels não tapam nada).
             .children(self.barra_do_pe(cx))

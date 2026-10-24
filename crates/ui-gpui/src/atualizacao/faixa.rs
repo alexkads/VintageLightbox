@@ -28,11 +28,15 @@
 
 use std::sync::Arc;
 
+use gpui_kit::component::alert::Alert;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::list::ListItem;
+use gpui_kit::component::separator::Separator;
 use gpui_kit::component::shimmer::ShimmerText;
-use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Disableable, Sizable};
-use gpui_kit::{div, prelude::*, px, AnyElement, FontWeight, MouseButton, SharedString, Window};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Disableable, Icon, Sizable};
+use gpui_kit::{div, prelude::*, px, AnyElement, FontWeight, SharedString, Window};
+
+use crate::recursos::Icone;
 
 use super::novidades;
 use super::porta::{Aviso, JeitoDeAtualizar, VersaoNova};
@@ -462,12 +466,16 @@ pub fn desenhar(estado: &Estado, cx: &gpui_kit::App, agir: Agir) -> Option<AnyEl
 /// 📚 Abre na versão anunciada (ou na aberta, pelo rodapé), e a lista desce
 /// por todo o histórico (dono, 01/out/2026: *"pra gente conseguir navegar
 /// pelo histórico de novidades anteriores"*).
+///
+/// 🪟 Devolve o miolo e o rodapé do `Dialog` do gpui-kit — quem o desenha é
+/// [`crate::dialogo::desenhar_conteudo`], como os outros diálogos do app (dono,
+/// 24/out/2026: *"Use GPUI KIT"*). O X, o `Esc` e o clique fora são de lá.
 pub fn desenhar_novidades(
     estado: &Estado,
     rolagem: &gpui_kit::ScrollHandle,
     cx: &gpui_kit::App,
     agir: Agir,
-) -> Option<AnyElement> {
+) -> Option<(AnyElement, AnyElement)> {
     if !estado.desta_versao_aberta && (!estado.novidades_abertas || estado.versao.is_none()) {
         return None;
     }
@@ -477,23 +485,15 @@ pub fn desenhar_novidades(
     let instalada = env!("CARGO_PKG_VERSION");
     let nova = novidades::mais_nova(&n.versao, instalada);
     let tema = cx.theme();
-    let (apagado, borda, aviso) = (tema.muted_foreground, tema.border, tema.warning);
+    let apagado = tema.muted_foreground;
 
-    let mut corpo = v_flex().gap(px(12.));
-    if let Some(data) = n.data.as_deref().and_then(data_por_extenso) {
-        corpo = corpo.child(
-            div()
-                .text_xs()
-                .text_color(apagado)
-                .child(format!("Lançada em {data}")),
-        );
-    }
+    let mut corpo = v_flex().gap(px(20.));
     let por_que = if nova {
         "Por que atualizar"
     } else {
         "Por que ela importa"
     };
-    corpo = corpo.child(o_que_mudou(n, por_que, aviso));
+    corpo = corpo.child(o_que_mudou(n, por_que, cx));
 
     let como = estado
         .versao
@@ -501,16 +501,22 @@ pub fn desenhar_novidades(
         .filter(|_| estado.novidades_abertas && nova)
         .map(|v| novidades::como_atualizar(v.jeito));
     if let Some(como) = &como {
-        corpo = corpo.child(secao("Como atualizar")).child(
-            v_flex().gap(px(4.)).children(
-                como.passos
-                    .iter()
-                    .enumerate()
-                    .map(|(i, passo)| div().text_sm().child(format!("{}. {passo}", i + 1))),
-            ),
-        );
+        let mut bloco = v_flex()
+            .gap(px(10.))
+            .child(secao("Como atualizar", cx))
+            .child(
+                v_flex()
+                    .gap(px(8.))
+                    .children(como.passos.iter().enumerate().map(|(i, passo)| {
+                        h_flex()
+                            .items_start()
+                            .gap(px(10.))
+                            .child(crate::estilo::selo_do_passo(i + 1, false))
+                            .child(div().flex_1().min_w(px(0.)).text_sm().child(*passo))
+                    })),
+            );
         if let Some(comando) = como.comando {
-            corpo = corpo
+            bloco = bloco
                 .child(
                     div()
                         .text_xs()
@@ -518,34 +524,35 @@ pub fn desenhar_novidades(
                         .child("Se a atualização pelo app falhar, feche o app e rode no Terminal:"),
                 )
                 .child(
-                    div()
-                        .p(px(8.))
-                        .rounded(crate::tema::canto(6.))
-                        .border_1()
-                        .border_color(borda)
+                    crate::estilo::cartao(cx)
+                        .p(px(10.))
+                        .bg(tema.muted.opacity(0.5))
                         .text_xs()
                         .font_family("monospace")
                         .child(comando),
                 );
         }
         if como.baixar.is_some() {
-            corpo = corpo.child(div().text_xs().text_color(apagado).child(
+            bloco = bloco.child(div().text_xs().text_color(apagado).child(
                 "Se a atualização pelo app falhar, feche o app e rode o instalador baixado.",
             ));
         }
+        corpo = corpo.child(bloco);
     }
 
     // ← e → andam uma versão; nas pontas o botão apaga.
-    let mut navegar = h_flex().gap(px(4.));
-    for (id, rotulo, alvo) in [
+    let mut navegar = h_flex().gap(px(4.)).items_center();
+    for (id, rotulo, icone, alvo) in [
         (
             "novidades-mais-recente",
             "Mais recente",
+            Icone::ChevronLeft,
             em_vista.checked_sub(1),
         ),
         (
             "novidades-mais-antiga",
             "Mais antiga",
+            Icone::ChevronRight,
             Some(em_vista + 1).filter(|i| *i < linha.len()),
         ),
     ] {
@@ -553,7 +560,8 @@ pub fn desenhar_novidades(
         navegar = navegar.child(
             Button::new(id)
                 .label(rotulo)
-                .xsmall()
+                .icon(Icon::new(icone))
+                .small()
                 .ghost()
                 .disabled(alvo.is_none())
                 .on_click(move |_ev, w, cx| {
@@ -563,50 +571,74 @@ pub fn desenhar_novidades(
                 }),
         );
     }
+    navegar = navegar.child(
+        div()
+            .pl(px(4.))
+            .text_xs()
+            .text_color(apagado)
+            .child(format!("{} de {}", em_vista + 1, linha.len())),
+    );
 
-    let mut acoes = h_flex().gap(px(6.));
+    let mut acoes = h_flex().gap(px(8.));
     if let Some(como) = &como {
         if como.comando.is_some() {
-            acoes = acoes.child(botao(
-                "novidades-copiar",
-                "Copiar comando",
-                false,
-                Pedido::CopiarComando,
-                &agir,
-            ));
+            acoes = acoes.child(
+                botao(
+                    "novidades-copiar",
+                    "Copiar comando",
+                    false,
+                    Pedido::CopiarComando,
+                    &agir,
+                )
+                .icon(Icon::new(Icone::Copy))
+                .small()
+                .outline(),
+            );
         }
         if como.baixar.is_some() {
-            acoes = acoes.child(botao(
-                "novidades-baixar",
-                "Baixar o instalador",
-                false,
-                Pedido::BaixarInstalador,
-                &agir,
-            ));
+            acoes = acoes.child(
+                botao(
+                    "novidades-baixar",
+                    "Baixar o instalador",
+                    false,
+                    Pedido::BaixarInstalador,
+                    &agir,
+                )
+                .icon(Icon::new(Icone::Download))
+                .small()
+                .outline(),
+            );
         }
     }
-    if estado.novidades_abertas
+    let atualizar = estado.novidades_abertas
         && matches!(estado.visivel(), Some(Aviso::Disponivel { .. }))
-        && !estado.instalando
-    {
-        acoes = acoes.child(botao(
-            "novidades-atualizar",
-            "Atualizar",
-            true,
-            Pedido::Instalar,
+        && !estado.instalando;
+    acoes = acoes.child(
+        botao(
+            "novidades-fechar",
+            "Fechar",
+            false,
+            Pedido::FecharNovidades,
             &agir,
-        ));
+        )
+        .small()
+        .outline(),
+    );
+    if atualizar {
+        acoes = acoes.child(
+            botao(
+                "novidades-atualizar",
+                "Atualizar",
+                true,
+                Pedido::Instalar,
+                &agir,
+            )
+            .icon(Icon::new(Icone::RefreshCw))
+            .small(),
+        );
     }
-    acoes = acoes.child(botao(
-        "novidades-fechar",
-        "Fechar",
-        false,
-        Pedido::FecharNovidades,
-        &agir,
-    ));
-    let rodape = h_flex()
+    let rodape = crate::dialogo::rodape_da_pergunta(cx)
         .justify_between()
-        .gap(px(6.))
         .child(navegar)
         .child(acoes);
 
@@ -616,14 +648,94 @@ pub fn desenhar_novidades(
         .flatten();
     let versoes = lista_de_versoes(&linha, em_vista, anunciada.as_deref(), rolagem, cx, &agir);
 
-    Some(moldura(
-        format!("Novidades da versão {}", n.versao),
-        versoes,
-        corpo.into_any_element(),
-        rodape,
-        cx,
-        agir,
-    ))
+    // O selo da versão em vista, ao lado do título — o mesmo da lista.
+    let selo = if n.versao == instalada {
+        Some(crate::estilo::selo_contorno(cx).child("Instalada"))
+    } else if nova {
+        Some(crate::estilo::selo_colorido(crate::tema::cores::selo_esmeralda()).child("Nova"))
+    } else {
+        None
+    };
+    let cabecalho = h_flex()
+        .flex_none()
+        .items_center()
+        .gap(px(12.))
+        // O X do kit fica no canto de cima.
+        .pr(px(32.))
+        .child(
+            div()
+                .flex_none()
+                .size(px(36.))
+                .rounded(crate::tema::canto(8.))
+                .bg(tema.primary.opacity(0.12))
+                .text_color(tema.primary)
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(Icon::new(Icone::Sparkles).size(px(18.))),
+        )
+        .child(
+            v_flex()
+                .min_w(px(0.))
+                .gap(px(2.))
+                .child(
+                    h_flex()
+                        .gap(px(8.))
+                        .items_center()
+                        .child(
+                            div()
+                                .text_lg()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(format!("Novidades da versão {}", n.versao)),
+                        )
+                        .children(selo)
+                        .when(n.importante, |c| {
+                            c.child(
+                                crate::estilo::selo_colorido((
+                                    tema.warning.opacity(0.15),
+                                    tema.warning.opacity(0.4),
+                                    tema.warning,
+                                ))
+                                .child("Importante"),
+                            )
+                        }),
+                )
+                .children(n.data.as_deref().and_then(data_por_extenso).map(|data| {
+                    div()
+                        .text_xs()
+                        .text_color(apagado)
+                        .child(format!("Lançada em {data}"))
+                })),
+        );
+
+    let miolo = v_flex()
+        .id("novidades-da-versao")
+        .debug_selector(|| "novidades-da-versao".into())
+        .h(px(520.))
+        .gap(px(16.))
+        .child(cabecalho)
+        .child(Separator::horizontal())
+        .child(
+            h_flex()
+                .flex_1()
+                .min_h(px(0.))
+                .items_start()
+                .gap(px(16.))
+                .child(div().h_full().flex().child(versoes))
+                .child(Separator::vertical())
+                .child(
+                    div()
+                        .id("novidades-texto")
+                        .debug_selector(|| "novidades-texto".into())
+                        .h_full()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .overflow_y_scroll()
+                        .pr(px(8.))
+                        .child(corpo),
+                ),
+        );
+    Some((miolo.into_any_element(), rodape.into_any_element()))
 }
 
 /// A coluna das versões: número, data e o selo da instalada e das novas.
@@ -733,138 +845,61 @@ fn data_curta(data: &str) -> Option<String> {
     Some(format!("{dia} de {curto} de {ano}"))
 }
 
-fn secao(titulo: &'static str) -> gpui_kit::Div {
+/// O nome de uma seção do texto: miúdo, apagado e em caixa alta.
+fn secao(titulo: &'static str, cx: &gpui_kit::App) -> gpui_kit::Div {
     div()
-        .text_sm()
+        .text_xs()
         .font_weight(FontWeight::SEMIBOLD)
-        .child(titulo)
+        .text_color(cx.theme().muted_foreground)
+        .child(titulo.to_uppercase())
 }
 
 /// O título, o que mudou e o porquê — igual para a versão nova e a aberta.
-fn o_que_mudou(
-    n: &novidades::Novidades,
-    por_que: &'static str,
-    aviso: gpui_kit::Hsla,
-) -> AnyElement {
+fn o_que_mudou(n: &novidades::Novidades, por_que: &'static str, cx: &gpui_kit::App) -> AnyElement {
+    let tema = cx.theme();
     v_flex()
-        .gap(px(12.))
-        .when(n.importante, |corpo| {
-            corpo.child(
-                div()
-                    .px(px(8.))
-                    .py(px(4.))
-                    .rounded(crate::tema::canto(6.))
-                    .bg(aviso.opacity(0.15))
-                    .text_color(aviso)
-                    .text_xs()
-                    .font_weight(FontWeight::MEDIUM)
-                    .child("Atualização importante"),
-            )
-        })
-        .child(div().text_sm().child(n.titulo.clone()))
+        .gap(px(20.))
+        .child(
+            div()
+                .text_base()
+                .font_weight(FontWeight::MEDIUM)
+                .child(n.titulo.clone()),
+        )
         // A versão que só o anúncio do servidor trouxe não tem a lista.
         .when(!n.novidades.is_empty(), |corpo| {
-            corpo
-                .child(secao("O que mudou"))
-                .child(
+            corpo.child(
+                v_flex().gap(px(10.)).child(secao("O que mudou", cx)).child(
                     v_flex()
-                        .gap(px(4.))
+                        .gap(px(8.))
                         .children(n.novidades.iter().map(|item| {
                             h_flex()
                                 .items_start()
-                                .gap(px(6.))
+                                .gap(px(8.))
                                 .text_sm()
-                                .child("•")
+                                .child(
+                                    div()
+                                        .flex_none()
+                                        .pt(px(2.))
+                                        .text_color(tema.success)
+                                        .child(Icon::new(Icone::Check).size(px(14.))),
+                                )
                                 // `min_w(0)`: sem ele o item não quebra a linha e
                                 // passa da borda do diálogo.
                                 .child(div().flex_1().min_w(px(0.)).child(item.clone()))
                         })),
-                )
+                ),
+            )
         })
         .when(!n.por_que_atualizar.trim().is_empty(), |corpo| {
-            corpo
-                .child(secao(por_que))
-                .child(div().text_sm().child(n.por_que_atualizar.clone()))
+            corpo.child(
+                Alert::info("novidades-por-que", n.por_que_atualizar.clone())
+                    .title(por_que)
+                    .icon(Icon::new(Icone::Sparkles).size(px(16.)))
+                    .small()
+                    .px(px(16.))
+                    .py(px(12.)),
+            )
         })
-        .into_any_element()
-}
-
-/// O véu escuro e o cartão do diálogo: a lista das versões e o texto, cada
-/// um rolando por si. Clicar fora fecha.
-fn moldura(
-    titulo: String,
-    versoes: AnyElement,
-    corpo: AnyElement,
-    rodape: gpui_kit::Div,
-    cx: &gpui_kit::App,
-    agir: Agir,
-) -> AnyElement {
-    let tema = cx.theme();
-    let (borda, fundo) = (tema.border, tema.popover);
-    div()
-        .absolute()
-        .top_0()
-        .left_0()
-        .size_full()
-        .flex()
-        .items_center()
-        .justify_center()
-        .bg(gpui_kit::black().opacity(0.5))
-        .occlude()
-        .on_mouse_down(MouseButton::Left, move |_, w, cx| {
-            agir(Pedido::FecharNovidades, w, cx)
-        })
-        .child(
-            v_flex()
-                .id("novidades-da-versao")
-                .debug_selector(|| "novidades-da-versao".into())
-                .w(px(780.))
-                .h(px(620.))
-                .max_w(gpui_kit::relative(0.94))
-                .max_h(gpui_kit::relative(0.9))
-                .p(px(16.))
-                .gap(px(16.))
-                .rounded(crate::tema::canto(12.))
-                .border_1()
-                .border_color(borda)
-                .bg(fundo)
-                .shadow_lg()
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .child(
-                    div()
-                        .flex_none()
-                        .text_lg()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(titulo),
-                )
-                .child(
-                    h_flex()
-                        .flex_1()
-                        .min_h(px(0.))
-                        .items_start()
-                        .gap(px(16.))
-                        .child(
-                            div()
-                                .h_full()
-                                .flex()
-                                .border_r_1()
-                                .border_color(borda)
-                                .child(versoes),
-                        )
-                        .child(
-                            div()
-                                .id("novidades-texto")
-                                .debug_selector(|| "novidades-texto".into())
-                                .h_full()
-                                .flex_1()
-                                .min_w(px(0.))
-                                .overflow_y_scroll()
-                                .pr(px(8.))
-                                .child(corpo),
-                        ),
-                )
-                .child(rodape.flex_none()),
-        )
         .into_any_element()
 }
 
