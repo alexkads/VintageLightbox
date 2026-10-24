@@ -51,6 +51,15 @@ pub fn fontes_ptp() -> Vec<ImportSource> {
 /// Procura pontos de montagem PTP criados pelo GVfs. O diretório é o contrato
 /// POSIX que o GVfs oferece aos programas que não usam a API GIO diretamente.
 fn fontes_gvfs() -> Vec<ImportSource> {
+    montagens_gvfs()
+        .into_iter()
+        .map(|(nome, caminho)| ImportSource::new_device(nome, caminho))
+        .collect()
+}
+
+/// As câmeras que o GVfs montou agora: o rótulo e a pasta de cada uma. Também
+/// é a lista que a ejeção consulta (`super::ejetar`).
+pub(super) fn montagens_gvfs() -> Vec<(String, PathBuf)> {
     let Some(uid) = uid_da_sessao() else {
         return Vec::new();
     };
@@ -62,13 +71,12 @@ fn fontes_gvfs() -> Vec<ImportSource> {
     entradas
         .filter_map(Result::ok)
         .filter_map(|entrada| {
-            let caminho = entrada.path();
             let nome = entrada.file_name().to_string_lossy().to_string();
             // GPhoto2 é a origem PTP do GVfs. MTP também é uma câmera possível,
             // mas fica fora deste adaptador para não confundir celulares com
             // câmeras na lista de cartões.
             nome.starts_with("gphoto2:")
-                .then(|| ImportSource::new_device(nome_da_montagem(&nome), caminho))
+                .then(|| (nome_da_montagem(&nome), entrada.path()))
         })
         .collect()
 }

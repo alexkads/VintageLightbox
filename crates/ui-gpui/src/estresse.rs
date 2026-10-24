@@ -591,6 +591,7 @@ fn portas_com(
         escolha_de_presets: Arc::new(EscolhaDeMentira::default()),
         explorador: Arc::new(ExploradorDeMentira::default()),
         importador: Arc::new(ImportadorDeMentira::default()),
+        ejecao: crate::importacao::ejecao::Ejecoes::desligada(),
         seletor: Arc::new(SeletorDeMentira::default()),
         seletor_de_fotos: Arc::new(crate::sessoes::arquivos::mentira::SeletorDeMentira::default()),
         atualizador: Arc::new(AtualizadorDeMentira::default()),

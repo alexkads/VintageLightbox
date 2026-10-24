@@ -61,6 +61,7 @@ pub enum Evento {
     RevelacoesSalvas,
     ExportacaoConcluida,
     NovaVersao,
+    CartaoEjetado,
 }
 
 /// Som, voz, ou os dois (o som primeiro).
@@ -106,7 +107,7 @@ impl Modo {
 }
 
 impl Evento {
-    pub const TODOS: [Evento; 8] = [
+    pub const TODOS: [Evento; 9] = [
         Evento::MensagemNoChatbot,
         Evento::ClienteNoQr,
         Evento::NovoAgendamento,
@@ -115,6 +116,7 @@ impl Evento {
         Evento::RevelacoesSalvas,
         Evento::ExportacaoConcluida,
         Evento::NovaVersao,
+        Evento::CartaoEjetado,
     ];
 
     /// A chave no `sons.json` — nunca muda, ou o arquivo de quem já
@@ -129,6 +131,7 @@ impl Evento {
             Evento::RevelacoesSalvas => "revelacoes_salvas",
             Evento::ExportacaoConcluida => "exportacao_concluida",
             Evento::NovaVersao => "nova_versao",
+            Evento::CartaoEjetado => "cartao_ejetado",
         }
     }
 
@@ -146,6 +149,7 @@ impl Evento {
             Evento::RevelacoesSalvas => "Fotos salvas na galeria",
             Evento::ExportacaoConcluida => "Exportação concluída",
             Evento::NovaVersao => "Nova versão pronta para reabrir",
+            Evento::CartaoEjetado => "Cartão ejetado depois da importação",
         }
     }
 
@@ -167,6 +171,8 @@ impl Evento {
                 Embutido::Sino,
                 "Nova versão instalada. Reabra o app quando puder",
             ),
+            // ⏏️ Ligado: é o que diz ao balconista que já pode tirar o cartão.
+            Evento::CartaoEjetado => (true, Embutido::Campainha, "Cartão ejetado. Pode retirar"),
         };
         Escolha {
             ligado,
@@ -192,6 +198,7 @@ impl Evento {
             Evento::RevelacoesSalvas => ("Fotos salvas", "12 fotos"),
             Evento::ExportacaoConcluida => ("Exportação concluída", "12 arquivos"),
             Evento::NovaVersao => ("Nova versão", "0.1.90"),
+            Evento::CartaoEjetado => ("Cartão ejetado", "NIKON D3100"),
         }
     }
 }

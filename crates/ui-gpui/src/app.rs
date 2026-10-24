@@ -19,6 +19,7 @@ mod canto_dos_envios;
 mod capturas;
 /// 🖌️ A janela do editor em camadas, aberta pela tira da Revelação.
 mod editor;
+mod ejecao;
 mod favoritas;
 mod guias;
 /// 🖥️ Em qual monitor a tela do cliente abre, quando há mais de um.
@@ -121,6 +122,9 @@ pub struct Portas {
     pub escolha_de_presets: Arc<dyn crate::revelacao::lightroom::EscolhaDePresets>,
     pub explorador: Arc<dyn Explorador>,
     pub importador: Arc<dyn Importador>,
+    /// ⏏️ Os avisos de cartão ejetado (ou preso) ao fim da importação, que a
+    /// raiz mostra por cima de qualquer tela.
+    pub ejecao: crate::importacao::ejecao::Ejecoes,
     pub seletor: Arc<dyn SeletorDePasta>,
     /// Quem abre a janela **do sistema** para escolher as fotos da sessão.
     ///
@@ -1054,6 +1058,10 @@ pub struct Aplicativo {
     /// Recolhe o anúncio de versão que o servidor mandou pelo SSE
     /// (`telemetria`). `None` nos testes, onde a telemetria não é ligada.
     _anuncios_do_servidor: Option<gpui_kit::Task<()>>,
+    /// ⏏️ Os avisos do cartão ejetado (`app/ejecao.rs`).
+    _ejecoes: Option<gpui_kit::Task<()>>,
+    /// O "Ejetando o cartão…" está aberto — o resultado o fecha.
+    ejetando_na_tela: bool,
 }
 
 impl Aplicativo {
@@ -1386,6 +1394,7 @@ impl Aplicativo {
             },
         );
         let avisador = portas.avisador.clone();
+        let ejecoes = Self::ouvir_as_ejecoes(&portas.ejecao, window, cx);
         let retencao = cx.new(|cx| Retencao::nova(publicador_da_retencao, window, cx));
         let pedido_da_retencao = cx.subscribe_in(
             &retencao,
@@ -1658,6 +1667,8 @@ impl Aplicativo {
             rolagem_das_novidades: gpui_kit::ScrollHandle::new(),
             _atualizacao: Some(atualizacao),
             _anuncios_do_servidor: anuncios_do_servidor,
+            _ejecoes: ejecoes,
+            ejetando_na_tela: false,
         }
     }
 
@@ -7882,6 +7893,7 @@ mod testes {
             escolha_de_presets: Arc::new(EscolhaDeMentira::default()),
             explorador: Arc::new(ExploradorDeMentira::default()),
             importador: Arc::new(ImportadorDeMentira::default()),
+            ejecao: crate::importacao::ejecao::Ejecoes::desligada(),
             seletor: Arc::new(SeletorDeMentira::default()),
             seletor_de_fotos: Arc::new(
                 crate::sessoes::arquivos::mentira::SeletorDeMentira::default(),

@@ -1,4 +1,5 @@
 pub mod brutos;
+pub mod ejetar;
 pub mod history_repo;
 pub mod ptp;
 pub mod repository;

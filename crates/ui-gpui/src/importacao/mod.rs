@@ -6,6 +6,7 @@
 //! é o que faz um cartão de 2.000 RAWs abrir a tela em vez de travá-la.
 
 pub mod destino;
+pub mod ejecao;
 pub mod estado;
 pub mod explorador;
 pub mod tela;

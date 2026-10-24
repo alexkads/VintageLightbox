@@ -436,10 +436,16 @@ pub async fn montar(ambiente: Ambiente) -> Montagem {
         importacao.clone(),
         tokio::runtime::Handle::current(),
     ));
-    let importador: Arc<dyn Importador> = Arc::new(ImportadorDoDisco::novo(
-        importacao,
-        tokio::runtime::Handle::current(),
-    ));
+    // ⏏️ O cartão sai sozinho ao fim de cada importação (`importacao::ejecao`).
+    let (importador, ejecao) = crate::importacao::ejecao::ImportadorQueEjeta::novo(
+        Arc::new(ImportadorDoDisco::novo(
+            importacao,
+            tokio::runtime::Handle::current(),
+        )),
+        Arc::new(crate::importacao::ejecao::EjetorDoSistema),
+        crate::importacao::ejecao::FOLGA,
+    );
+    let importador: Arc<dyn Importador> = Arc::new(importador);
     let seletor: Arc<dyn SeletorDePasta> = Arc::new(SeletorNativo::novo());
     let recuperador: Arc<dyn crate::recuperacao::porta::Recuperador> =
         Arc::new(crate::recuperacao::porta::RecuperadorDoDisco::novo(
@@ -495,6 +501,7 @@ pub async fn montar(ambiente: Ambiente) -> Montagem {
             escolha_de_presets,
             explorador,
             importador,
+            ejecao,
             seletor,
             seletor_de_fotos,
             atualizador,

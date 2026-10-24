@@ -604,6 +604,20 @@ mod testes {
 
     fn clicar(visual: &mut VisualTestContext, alvo: &'static str) {
         visual.run_until_parked();
+        // 🔑 A aba rola (560 px no máximo), e o "Adicionar som…" mora no fim,
+        // abaixo da dobra desde o nono tipo ("Cartão ejetado"). Rola até o fim
+        // antes de procurar o botão — o que o operador faz com a roda.
+        if alvo == "adicionar-som" {
+            visual.simulate_event(gpui_kit::ScrollWheelEvent {
+                position: gpui_kit::point(gpui_kit::px(200.), gpui_kit::px(200.)),
+                delta: gpui_kit::ScrollDelta::Pixels(gpui_kit::point(
+                    gpui_kit::px(0.),
+                    gpui_kit::px(-2000.),
+                )),
+                ..Default::default()
+            });
+            visual.run_until_parked();
+        }
         let onde = visual
             .debug_bounds(alvo)
             .unwrap_or_else(|| panic!("{alvo} não está desenhado"));

@@ -492,6 +492,7 @@ pub(super) fn abrir_o_app(cx: &mut TestAppContext, cenario: Cenario) -> Estudio 
         escolha_de_presets: escolha,
         explorador: Arc::new(ExploradorDeMentira::default()),
         importador: importador.clone(),
+        ejecao: crate::importacao::ejecao::Ejecoes::desligada(),
         seletor: seletor.clone(),
         seletor_de_fotos: seletor_de_fotos.clone(),
         atualizador: Arc::new(AtualizadorDeMentira::default()),
