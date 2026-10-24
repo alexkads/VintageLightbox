@@ -1,5 +1,18 @@
 [
   {
+    "versao": "0.1.186",
+    "data": "2026-10-24",
+    "titulo": "O cartão de memória é ejetado sozinho ao fim de cada importação, e a tela diz em letras grandes quando pode tirar.",
+    "importante": false,
+    "novidades": [
+      "Terminada a cópia das fotos do cartão (ou da câmera ligada no cabo), o app ejeta o cartão sozinho. Não é mais preciso ejetar pelo sistema.",
+      "Enquanto ejeta, aparece no meio da tela a faixa amarela \"AGUARDE — NÃO RETIRE\". Quando termina, a faixa fica verde, \"PODE RETIRAR O CARTÃO\", com um som de aviso.",
+      "Se o cartão não puder ser ejetado (outro programa usando), a faixa fica vermelha, \"NÃO RETIRE O CARTÃO\", com o motivo e o botão \"Tentar ejetar de novo\".",
+      "Se mais fotos do mesmo cartão estiverem na fila, ele só é ejetado depois da última. Importação cancelada não ejeta."
+    ],
+    "por_que_atualizar": "Tirar o cartão sem ejetar, principalmente no Linux com a câmera no cabo, atrapalhava a importação seguinte."
+  },
+  {
     "versao": "0.1.185",
     "data": "2026-10-24",
     "titulo": "A janela das novidades da versão ficou mais fácil de ler.",
