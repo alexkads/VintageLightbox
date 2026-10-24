@@ -1,5 +1,16 @@
 [
   {
+    "versao": "0.1.184",
+    "data": "2026-10-24",
+    "titulo": "O bot da sessão pergunta como identificar a sessão, e o cartão do QR oferece esse nome como título.",
+    "importante": false,
+    "novidades": [
+      "Depois do nome completo, o bot da sessão pergunta como o cliente quer identificar a sessão, com o exemplo: o nome do casal ou o sobrenome da família, que será usado no fotolivro.",
+      "No cartão do QR, \"Usar como título\" passa a usar esse nome (por exemplo, \"Família Souza\") em vez do nome completo de quem leu o QR. O título só muda quando o atendente toca no botão."
+    ],
+    "por_que_atualizar": "Para o título da sessão e o fotolivro saírem com o nome do casal ou da família."
+  },
+  {
     "versao": "0.1.183",
     "data": "2026-10-22",
     "titulo": "Com o disco cheio, o que foi feito sem internet não se perde mais: o app avisa e guarda sozinho assim que houver espaço.",

@@ -1,11 +1,10 @@
 {
-  "versao": "0.1.183",
-  "titulo": "Com o disco cheio, o que foi feito sem internet não se perde mais: o app avisa e guarda sozinho assim que houver espaço.",
+  "versao": "0.1.184",
+  "titulo": "O bot da sessão pergunta como identificar a sessão, e o cartão do QR oferece esse nome como título.",
   "importante": false,
   "novidades": [
-    "Se o disco do computador estiver cheio quando a internet cair, o rodapé mostra em vermelho \"Disco cheio\" com quantas alterações estão só na memória, e um aviso com som pede para liberar espaço e não fechar o app.",
-    "Assim que houver espaço, o app guarda essas alterações sozinho, na ordem, e elas sobem ao site quando a rede voltar — antes elas podiam se perder ao fechar o app.",
-    "Duas marcações seguidas na mesma foto feitas no instante em que a internet cai terminam no site como a última feita pelo operador."
+    "Depois do nome completo, o bot da sessão pergunta como o cliente quer identificar a sessão, com o exemplo: o nome do casal ou o sobrenome da família, que será usado no fotolivro.",
+    "No cartão do QR, \"Usar como título\" passa a usar esse nome (por exemplo, \"Família Souza\") em vez do nome completo de quem leu o QR. O título só muda quando o atendente toca no botão."
   ],
-  "por_que_atualizar": "Para nada do que o balcão fez sem internet se perder, mesmo com o disco cheio."
+  "por_que_atualizar": "Para o título da sessão e o fotolivro saírem com o nome do casal ou da família."
 }
