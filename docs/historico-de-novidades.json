@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.185",
+    "data": "2026-10-24",
+    "titulo": "A janela das novidades da versão ficou mais fácil de ler.",
+    "importante": false,
+    "novidades": [
+      "No alto, a versão aparece com o selo (Instalada ou Nova) e a data em que saiu.",
+      "Cada mudança vem com um ✓, e o motivo para atualizar fica num quadro em destaque.",
+      "Embaixo, as setas Mais recente e Mais antiga andam pelas versões e mostram em qual delas você está (por exemplo, 4 de 171). A janela fecha pelo X, pelo Esc ou clicando fora."
+    ],
+    "por_que_atualizar": "Para a equipe ver o que mudou em cada versão sem esforço."
+  },
+  {
     "versao": "0.1.184",
     "data": "2026-10-24",
     "titulo": "O bot da sessão pergunta como identificar a sessão, e o cartão do QR oferece esse nome como título.",

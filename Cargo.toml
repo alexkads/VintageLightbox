@@ -33,7 +33,7 @@ exclude = ["vendor/gpui-pre-linux"]
 gpui-pre-linux = { path = "vendor/gpui-pre-linux" }
 
 [workspace.package]
-version = "0.1.184"
+version = "0.1.185"
 edition = "2021"
 authors = ["VintageLightbox Team"]
 license = "MIT"
