@@ -274,6 +274,27 @@ as máscaras locais e a revelação do RAW (nas fotos NEF, todas passavam de 30 
 (`scripts/construir-web.sh`), copiar o `nomes.json` (133 campos desde 2/out/2026, sem os `dt_*`), o `presets-lr.json` e registrar o
 campo no `CONTRATO_DA_FOTO.md`.
 
+### A prévia enquadrada na GPU — como o Lightroom (28/out/2026)
+
+O Lightroom usa a GPU em duas coisas: aplicar os ajustes **e mostrar a prévia** — ela nasce na
+GPU, no tamanho da tela, e vai para a janela como está. Aqui os ajustes já eram da GPU desde o
+começo, mas a prévia não: o shader devolvia a foto inteira, e a thread da interface recortava,
+girava, endireitava e corrigia a perspectiva na CPU (`transformacao::aplicar`), trocava R↔B
+(`para_gpui`) e varria o histograma — **a cada resultado**, dezenas de vezes por segundo
+enquanto um slider anda. Nas sessões de `app_desktop_desempenho` de um balcão (Intel Iris Pro,
+28/set/2026) isso era o maior custo da interface: 33 a 77 ms por quadro só no recorte de uma
+foto com perspectiva, mais 1 a 5 ms da conversão e 3 a 8 ms do histograma.
+
+| | |
+|---|---|
+| ✅ **Enquadramento na GPU** (`revelacao-core/src/enquadrador.rs`, `shaders/enquadrar.wgsl`) | uma passada de compute lê a foto revelada e escreve, já enquadrada e no tamanho da saída, pela matriz de `Corte::mapa` — espelhos, giro, perspectiva, endireitamento e recorte numa reamostragem só, bilinear. Sem ângulo nem perspectiva o pixel é byte a byte o da CPU (o retângulo é o inteiro de `Corte::retangulo`); com ângulo ou perspectiva, diferença de um nível aqui e ali, nas bordas |
+| ✅ **BGRA direto da GPU** | a saída vem na ordem que o Metal, o DirectX e o GPUI desenham; a `RenderImage` nasce dos bytes da GPU, sem cópia nem troca na CPU |
+| ✅ **Histograma fora da interface** | calculado na thread do motor, do que está na tela, e entregue junto (`processador::Pronta`) |
+| ✅ **A tela segura o quadro** | enquadramento que muda (Enquadrar, girar, endireitar, perspectiva) é refeito pela GPU; enquanto o resultado não chega, o palco mostra o último quadro, como o Lightroom — não recorta a revelada na CPU para um quadro que o próximo resultado substitui |
+| ✅ **O cache guarda a imagem pronta** | voltar uma seta, desfazer, sair de uma predefinição: a imagem da janela vem do cache já enquadrada |
+| ⚠️ **O arquivo não passa por aqui** | exportação, impressão, prévias gravadas e a tira continuam pelo caminho da CPU, byte a byte os de sempre |
+| ⚠️ **Ainda volta pela CPU** | a prévia é lida da GPU para a memória e sobe de novo para a textura da janela (GPUI). Desenhar a textura do motor direto na janela pediria do GPUI uma superfície externa — hoje ele só tem uma, no macOS, em YCbCr 4:2:0 (`gpui::surface`), que não serve a foto. No Apple Silicon o custo dessa volta é de ~1 ms; no balcão com OpenGL/Mesa, mais |
+
 ### O que mais falta na Revelação, comparado ao Lightroom
 
 | | |

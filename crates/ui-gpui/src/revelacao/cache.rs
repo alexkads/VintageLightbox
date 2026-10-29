@@ -31,7 +31,7 @@
 use image::DynamicImage;
 use lru::LruCache;
 
-use super::processador::{Ajustes, Corte};
+use super::processador::{Ajustes, Corte, Pronta};
 
 /// O teto do cache, **em pixels** — e não em número de revelações.
 ///
@@ -60,6 +60,25 @@ const MAIOR_PARA_GUARDAR: u64 = 12_000_000;
 /// Quantos pixels uma revelação ocupa.
 fn custo(imagem: &DynamicImage) -> u64 {
     u64::from(imagem.width()) * u64::from(imagem.height())
+}
+
+/// Uma revelação guardada: a foto inteira e, quando o motor a fez, a imagem
+/// da janela já enquadrada — a volta a ela não recorta nada na CPU.
+struct Guardada {
+    imagem: DynamicImage,
+    pronta: Option<Pronta>,
+}
+
+impl Guardada {
+    /// Os pixels das duas: a imagem da janela também mora na memória (e na
+    /// textura do GPUI enquanto estiver guardada).
+    fn custo(&self) -> u64 {
+        let da_tela = self.pronta.as_ref().map_or(0, |p| {
+            let tamanho = p.imagem.size(0);
+            u64::from(tamanho.width.0.max(0) as u32) * u64::from(tamanho.height.0.max(0) as u32)
+        });
+        custo(&self.imagem) + da_tela
+    }
 }
 
 /// A identidade de uma revelação: a foto e a revelação com que ela foi feita.
@@ -152,7 +171,7 @@ impl Chave {
 
 /// As revelações guardadas, as mais recentes por último a sair.
 pub struct CacheDeReveladas {
-    guardadas: LruCache<Chave, DynamicImage>,
+    guardadas: LruCache<Chave, Guardada>,
     /// Quantos pixels há guardados agora. Somado e subtraído a cada entrada e
     /// saída, para o despejo não ter de varrer o cache inteiro.
     pixels: u64,
@@ -186,25 +205,35 @@ impl CacheDeReveladas {
     /// Clona: o palco precisa da imagem e o cache precisa continuar com ela.
     /// É uma cópia de prévia, não da foto inteira.
     pub fn buscar(&mut self, chave: &Chave) -> Option<DynamicImage> {
-        self.guardadas.get(chave).cloned()
+        self.guardadas.get(chave).map(|g| g.imagem.clone())
+    }
+
+    /// A imagem da janela desta revelação, se o motor a fez enquadrada.
+    pub fn buscar_pronta(&mut self, chave: &Chave) -> Option<Pronta> {
+        self.guardadas.get(chave).and_then(|g| g.pronta.clone())
     }
 
     /// Guarda, despejando as mais velhas até caber no teto. Devolve se guardou.
-    pub fn guardar(&mut self, chave: Chave, imagem: &DynamicImage) -> bool {
+    pub fn guardar(&mut self, chave: Chave, imagem: &DynamicImage, pronta: Option<Pronta>) -> bool {
         if custo(imagem) > MAIOR_PARA_GUARDAR {
             return false;
         }
-        if let Some(velha) = self.guardadas.put(chave, imagem.clone()) {
-            self.pixels = self.pixels.saturating_sub(custo(&velha));
+        let nova = Guardada {
+            imagem: imagem.clone(),
+            pronta,
+        };
+        let custo_da_nova = nova.custo();
+        if let Some(velha) = self.guardadas.put(chave, nova) {
+            self.pixels = self.pixels.saturating_sub(velha.custo());
         }
-        self.pixels += custo(imagem);
+        self.pixels += custo_da_nova;
 
         // ⚠️ **Nunca despeja a última.** Uma revelação sozinha maior que o teto
         // ainda é a foto que o operador está vendo; jogá-la fora seria guardar
         // para esquecer no mesmo instante.
         while self.pixels > self.teto && self.guardadas.len() > 1 {
             match self.guardadas.pop_lru() {
-                Some((_, saiu)) => self.pixels = self.pixels.saturating_sub(custo(&saiu)),
+                Some((_, saiu)) => self.pixels = self.pixels.saturating_sub(saiu.custo()),
                 None => break,
             }
         }
@@ -228,7 +257,7 @@ impl CacheDeReveladas {
             .collect();
         for chave in alvos {
             if let Some(saiu) = self.guardadas.pop(&chave) {
-                self.pixels = self.pixels.saturating_sub(custo(&saiu));
+                self.pixels = self.pixels.saturating_sub(saiu.custo());
             }
         }
     }
@@ -289,7 +318,7 @@ mod testes {
         assert_ne!(do_bruto, r1);
         assert_ne!(r1, r2);
         let mut cache = CacheDeReveladas::default();
-        cache.guardar(r1.clone(), &imagem(10, 10));
+        cache.guardar(r1.clone(), &imagem(10, 10), None);
         assert!(cache.buscar(&r2).is_none());
         assert!(cache.buscar(&do_bruto).is_none());
         assert!(cache.buscar(&r1).is_some());
@@ -376,7 +405,7 @@ mod testes {
         );
 
         assert!(cache.buscar(&chave).is_none(), "nasce vazio");
-        assert!(cache.guardar(chave.clone(), &imagem(64, 48)));
+        assert!(cache.guardar(chave.clone(), &imagem(64, 48), None));
 
         let guardada = cache.buscar(&chave).expect("guardada");
         assert_eq!((guardada.width(), guardada.height()), (64, 48));
@@ -400,7 +429,7 @@ mod testes {
         );
 
         assert!(
-            !cache.guardar(chave.clone(), &imagem(6000, 4000)),
+            !cache.guardar(chave.clone(), &imagem(6000, 4000), None),
             "24 MP passa do que se guarda"
         );
         assert!(cache.buscar(&chave).is_none());
@@ -420,7 +449,7 @@ mod testes {
             &Default::default(),
         );
 
-        assert!(cache.guardar(chave.clone(), &imagem(2560, 1707)));
+        assert!(cache.guardar(chave.clone(), &imagem(2560, 1707), None));
         assert!(cache.buscar(&chave).is_some());
     }
 
@@ -435,9 +464,9 @@ mod testes {
             Chave::nova("id-1", ORIGEM, &ajustes, &corte(), &Default::default());
         let outra_foto = Chave::nova("id-2", ORIGEM, &ajustes, &corte(), &Default::default());
 
-        cache.guardar(uma.clone(), &imagem(8, 8));
-        cache.guardar(outros_parametros.clone(), &imagem(8, 8));
-        cache.guardar(outra_foto.clone(), &imagem(8, 8));
+        cache.guardar(uma.clone(), &imagem(8, 8), None);
+        cache.guardar(outros_parametros.clone(), &imagem(8, 8), None);
+        cache.guardar(outra_foto.clone(), &imagem(8, 8), None);
 
         cache.esquecer("id-1");
 
@@ -477,11 +506,11 @@ mod testes {
             &Default::default(),
         );
 
-        cache.guardar(a.clone(), &imagem(8, 8));
-        cache.guardar(b.clone(), &imagem(8, 8));
+        cache.guardar(a.clone(), &imagem(8, 8), None);
+        cache.guardar(b.clone(), &imagem(8, 8), None);
         // Tocar em `a` a torna a mais recente: quem sai é `b`.
         assert!(cache.buscar(&a).is_some());
-        cache.guardar(c.clone(), &imagem(8, 8));
+        cache.guardar(c.clone(), &imagem(8, 8), None);
 
         assert!(cache.buscar(&a).is_some());
         assert!(cache.buscar(&c).is_some());

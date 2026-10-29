@@ -307,7 +307,10 @@ em `docs/historico/PARIDADE-UI.md`.
   do sistema/lucide se baixam com `scripts/baixar-do-template.py`. Matrix e Cyberpunk são temas
   fixos, fora do template. Para experimentar: `VLB_TEMPLATE=lyra cargo run -p ui-gpui`.
 - Imagem: `DynamicImage → RgbaImage → Frame → RenderImage` (`imagem.rs`)
-  ⚠️ **em BGRA** — o GPUI espera essa ordem e o crate `image` produz RGBA
+  ⚠️ **em BGRA** — o GPUI espera essa ordem e o crate `image` produz RGBA.
+  🎞️ **A prévia da Revelação não passa por aí** (28/out/2026): o motor devolve a foto
+  já enquadrada e em BGRA (`Motor::revelar_para_tela`, `processador::Pronta`), e o palco
+  só aponta — ver `docs/PARIDADE-LIGHTROOM.md`, "A prévia enquadrada na GPU"
 - Seletor de arquivos nativo via `rfd`; o motor de revelação é wgpu próprio,
   numa thread de fundo (`revelacao/processador.rs`)
 - Teclas: as da raiz em `app.rs`, e sempre com contexto — ligação sem `!Input`

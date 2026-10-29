@@ -46,7 +46,7 @@ use super::historico::{Estado, Historico};
 use super::lightroom::{Arquivo, EscolhaDePresets, Relatorio};
 use super::persistencia::{self, Corte, Gravador};
 use super::presets::GuardaDePresets;
-use super::processador::{Ajustes, Pedido, Processador};
+use super::processador::{Ajustes, ParaTela, Pedido, Processador, Pronta};
 use super::reposicao::APor;
 use super::sincronizacao::{self, Escolha};
 use infrastructure::gpu_adjustments::ParametrosLocais;
@@ -508,6 +508,27 @@ struct Controle {
 }
 
 /// Um pedido no motor, e o que fazer com o que voltar dele.
+/// O enquadramento **que a tela mostra**: dentro do Enquadrar (`recortar`
+/// falso) a foto aparece inteira, e o retângulo é só desenho por cima — então
+/// o retângulo não conta. É por isto que a tela decide se a imagem pronta do
+/// motor ainda é a da tela.
+fn enquadramento_visivel(corte: &transformacao::Corte, recortar: bool) -> transformacao::Corte {
+    if recortar {
+        return corte.clone();
+    }
+    transformacao::Corte::novo(
+        0.0,
+        0.0,
+        1.0,
+        1.0,
+        corte.giro_90(),
+        corte.angulo(),
+        corte.espelho_h(),
+        corte.espelho_v(),
+    )
+    .com_perspectiva(*corte.perspectiva())
+}
+
 struct Pendente {
     chave: cache::Chave,
     destino: Destino,
@@ -554,6 +575,11 @@ struct Aberta {
     /// O que está na tela: a revelada depois de espelhada, girada, endireitada e
     /// recortada.
     desenhada: Option<Arc<RenderImage>>,
+    /// O que o motor devolveu **já enquadrado pela GPU**, pronto para o palco,
+    /// e com que enquadramento. Enquanto ele for o da tela, é ele que vai a
+    /// `desenhada`, sem recorte nem conversão na CPU — ver
+    /// [`Revelacao::refazer_exibicao`].
+    pronta: Option<Pronta>,
 }
 
 struct Origem {
@@ -1493,6 +1519,7 @@ impl Revelacao {
             revelada: if vai_revelar { None } else { bruta },
             espera,
             desenhada: None,
+            pronta: None,
         });
         if enquadrando {
             self.montar_o_enquadrar(window, cx);
@@ -2144,6 +2171,34 @@ impl Revelacao {
             return;
         };
 
+        // 🔑 **O que o motor devolveu já enquadrado vai direto ao palco.** A
+        // GPU recortou, girou, endireitou e já entregou em BGRA, com o
+        // histograma: nada a fazer aqui além de apontar. É o caminho de todo
+        // resultado de slider. Enquanto o motor refaz um enquadramento que
+        // mudou (um pedido no ar), a tela segura o último quadro — como o
+        // Lightroom —, em vez de recortar a revelada na CPU para um quadro
+        // que o próximo resultado substitui.
+        if !self.mostrando_original {
+            if let Some(pronta) = aberta.pronta.as_ref() {
+                let em_dia = pronta.recortar == recortar
+                    && enquadramento_visivel(&pronta.corte, pronta.recortar)
+                        == enquadramento_visivel(&transformacao::corte(&corte), recortar);
+                if em_dia || self.aguardando.is_some() {
+                    if medir {
+                        self.histograma = Some(pronta.histograma.clone());
+                    }
+                    aberta.espera = None;
+                    let anterior = aberta.desenhada.take();
+                    aberta.desenhada = Some(pronta.imagem.clone());
+                    self.saindo = if cruzar { anterior } else { None };
+                    if self.saindo.is_some() {
+                        self.cruzamento = self.cruzamento.wrapping_add(1);
+                    }
+                    return;
+                }
+            }
+        }
+
         // 🔑 O "antes" troca só a **fonte**, e não o enquadramento: comparar cor
         // com a foto pulando de tamanho na tela não compara nada. É o que o
         // legado faz — ele troca a textura e mantém o corte, que vive no viewer.
@@ -2289,9 +2344,17 @@ impl Revelacao {
         // revelação é uma que já passou pelo motor, e a ida à GPU produziria
         // exatamente o mesmo pixel. Com o palco esperando a resposta para
         // desenhar (ver `mostrar`), essa ida é o tempo de tela preta.
-        if let Some(pronta) = self.reveladas.buscar(&chave) {
+        if let Some(guardada) = self.reveladas.buscar(&chave) {
+            let recortar = self.edicao.is_none();
+            let da_tela = self
+                .reveladas
+                .buscar_pronta(&chave)
+                .filter(|p| p.recortar == recortar);
             if let Some(aberta) = self.aberta.as_mut() {
-                aberta.revelada = Some(pronta);
+                aberta.revelada = Some(guardada);
+                if da_tela.is_some() {
+                    aberta.pronta = da_tela;
+                }
             }
             // 🚨 **O pedido que ainda está na GPU ficou para trás deste.** Sem
             // isto o resultado dele chega depois e pinta por cima: passar o
@@ -2353,6 +2416,11 @@ impl Revelacao {
             corte,
             locais,
             lado_na_tela,
+            // Enquadrada na GPU para o palco; a inteira só fora do rascunho.
+            tela: Some(ParaTela {
+                recortar: self.edicao.is_none(),
+                inteira: lado_na_tela.is_none(),
+            }),
         });
         self.pedidos.insert(
             id,
@@ -2492,6 +2560,12 @@ impl Revelacao {
             corte,
             locais,
             lado_na_tela: None,
+            // A próxima entra no cache com a imagem da janela já feita: a seta
+            // chega e o palco aponta, sem recorte.
+            tela: Some(ParaTela {
+                recortar: true,
+                inteira: true,
+            }),
         });
         self.pedidos.insert(
             id,
@@ -2521,10 +2595,22 @@ impl Revelacao {
     /// antes. É o que o editor do site faz ao arrastar uma alça: a vinheta
     /// acompanha o retângulo.
     ///
-    /// 🔑 **Sem vinheta, não pede nada**: o enquadramento sozinho não muda o que
-    /// o shader devolve, e revelar a cada milímetro de alça seria GPU por nada.
+    /// 🔑 **E o enquadramento é feito pela GPU** (`processador::Pronta`): quando
+    /// o que a tela mostra mudou de enquadramento (entrar e sair do Enquadrar,
+    /// girar, endireitar, perspectiva), é o motor que refaz a imagem do palco —
+    /// não o recorte na CPU. Mover a alça do retângulo dentro do Enquadrar não
+    /// muda a imagem (a foto aparece inteira), e aí nada é pedido sem vinheta.
     fn revelar_de_novo_se_a_vinheta_segue_o_corte(&mut self, cx: &mut Context<Self>) {
-        if self.ajustes_na_tela().vinheta_ligada() {
+        let recortar = self.edicao.is_none();
+        let visivel = enquadramento_visivel(&transformacao::corte(&self.corte_na_tela()), recortar);
+        let em_dia = self
+            .aberta
+            .as_ref()
+            .and_then(|a| a.pronta.as_ref())
+            .is_some_and(|p| {
+                p.recortar == recortar && enquadramento_visivel(&p.corte, p.recortar) == visivel
+            });
+        if self.ajustes_na_tela().vinheta_ligada() || !em_dia {
             self.pedir_revelacao(cx);
         }
     }
@@ -2602,10 +2688,22 @@ impl Revelacao {
             // 🔧 Com `VLB_VIGIA=1`, o tamanho e o custo de cada revelação — a
             // conta que separa a GPU do resto quando um balcão acha lento.
             if crate::depuracao::vigia::ligado() {
+                let (largura, altura) = resultado
+                    .pronta
+                    .as_ref()
+                    .map(|p| {
+                        let t = p.imagem.size(0);
+                        (t.width.0, t.height.0)
+                    })
+                    .or_else(|| {
+                        resultado
+                            .imagem
+                            .as_ref()
+                            .map(|i| (i.width() as i32, i.height() as i32))
+                    })
+                    .unwrap_or((0, 0));
                 eprintln!(
-                    "[revelacao] {}x{} {} em {:.1} ms no motor ({})",
-                    resultado.imagem.width(),
-                    resultado.imagem.height(),
+                    "[revelacao] {largura}x{altura} {} em {:.1} ms no motor ({})",
                     if rascunho { "rascunho" } else { "inteira" },
                     resultado.duracao_ms,
                     self.processador.backend().unwrap_or("?"),
@@ -2613,8 +2711,13 @@ impl Revelacao {
             }
             if let Some(pendente) = &pendente {
                 if (antecipado || ultimo_do_gesto) && !rascunho {
-                    self.reveladas
-                        .guardar(pendente.chave.clone(), &resultado.imagem);
+                    if let Some(imagem) = resultado.imagem.as_ref() {
+                        self.reveladas.guardar(
+                            pendente.chave.clone(),
+                            imagem,
+                            resultado.pronta.clone(),
+                        );
+                    }
                 }
             }
             // 🚨 **O pedido do Comparar que a thread largou volta para a fila.**
@@ -2633,7 +2736,9 @@ impl Revelacao {
                     self.pedido_do_comparar = None;
                 }
                 let (posicao, crop) = (*posicao, crop.clone());
-                self.entregar_ao_comparar(posicao, &resultado.imagem, &crop, cx);
+                if let Some(imagem) = resultado.imagem.as_ref() {
+                    self.entregar_ao_comparar(posicao, imagem, &crop, cx);
+                }
             }
 
             // 🚨 **A revelação antecipada nunca vai ao palco.** Ela é da foto
@@ -2642,7 +2747,14 @@ impl Revelacao {
             // outro caminho. Sem registro, vale a regra antiga (o id).
             if !antecipado && resultado.id > descartar_ate {
                 if let Some(aberta) = self.aberta.as_mut() {
-                    aberta.revelada = Some(resultado.imagem);
+                    // O rascunho só traz a imagem do palco: a inteira de antes
+                    // do gesto fica, para a tira e o cache.
+                    if let Some(imagem) = resultado.imagem {
+                        aberta.revelada = Some(imagem);
+                    }
+                    if let Some(pronta) = resultado.pronta {
+                        aberta.pronta = Some(pronta);
+                    }
                 }
                 self.atualizar_exibicao();
                 crate::desempenho::foto_na_tela(resultado.id);
@@ -4363,6 +4475,129 @@ mod testes {
             .expect("a janela deve estar aberta");
     }
 
+    /// Uma imagem pronta do motor, como `processador.rs` a monta: 8×8 em BGRA,
+    /// com o enquadramento dado.
+    fn pronta_de_prova(corte: transformacao::Corte, recortar: bool) -> Pronta {
+        let bytes = vec![0u8; 8 * 8 * 4];
+        Pronta {
+            imagem: crate::imagem::de_bgra(8, 8, bytes.clone()).expect("8×8"),
+            histograma: Histograma::de_bgra(&bytes, 8, 8),
+            corte,
+            recortar,
+        }
+    }
+
+    /// 🔑 **A imagem que o motor devolveu já enquadrada vai ao palco como
+    /// está** — a mesma `RenderImage`, sem recorte, conversão nem histograma na
+    /// thread da interface. É o caminho de todo resultado de slider, e o que
+    /// tira da interface os 33 a 77 ms por quadro medidos no balcão.
+    #[gpui_kit::test]
+    fn a_imagem_pronta_do_motor_vai_ao_palco_sem_passar_pela_cpu(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let janela = janela(cx, previews);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+                let corte = transformacao::corte(&tela.corte_na_tela());
+                let pronta = pronta_de_prova(corte, true);
+                let id = pronta.imagem.id;
+                tela.aberta.as_mut().expect("aberta").pronta = Some(pronta);
+                tela.aguardando = None;
+
+                tela.atualizar_exibicao();
+                let desenhada = tela.aberta.as_ref().unwrap().desenhada.as_ref().unwrap();
+                assert_eq!(
+                    desenhada.id, id,
+                    "o palco mostra a imagem pronta, sem cópia"
+                );
+                assert_eq!(
+                    tela.histograma.as_ref().map(|h| h.maximo),
+                    Some(64),
+                    "o histograma é o que veio com ela"
+                );
+
+                // O "antes" não é ela: é a bruta, recortada aqui.
+                tela.alternar_original(cx);
+                let desenhada = tela.aberta.as_ref().unwrap().desenhada.as_ref().unwrap();
+                assert_ne!(desenhada.id, id, "o antes é a foto crua");
+                tela.alternar_original(cx);
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// 🔑 **Enquadramento que mudou: a GPU refaz, e a tela segura o último
+    /// quadro enquanto espera** — como o Lightroom. Só sem pedido no ar a
+    /// revelada é recortada na CPU, para a tela não ficar com o enquadramento
+    /// velho.
+    #[gpui_kit::test]
+    fn com_o_enquadramento_mudado_a_tela_segura_o_quadro_ate_o_motor(cx: &mut TestAppContext) {
+        let (previews, _dir) = previews_descartaveis();
+        previews
+            .save_preview("id-retrato.jpg", &foto_cinza())
+            .expect("gravar preview");
+        let janela = janela(cx, previews);
+
+        janela
+            .update(cx, |tela, window, cx| {
+                tela.abrir(foto("retrato.jpg"), window, cx);
+                // Uma pronta feita com outro enquadramento.
+                let outro = transformacao::Corte::novo(0.25, 0.25, 0.5, 0.5, 0, 0.0, false, false);
+                let pronta = pronta_de_prova(outro, true);
+                let id = pronta.imagem.id;
+                tela.aberta.as_mut().expect("aberta").pronta = Some(pronta);
+
+                // Pedido no ar: o último quadro fica.
+                tela.aguardando = Some(7);
+                tela.atualizar_exibicao();
+                let desenhada = tela.aberta.as_ref().unwrap().desenhada.as_ref().unwrap();
+                assert_eq!(
+                    desenhada.id, id,
+                    "com o motor refazendo, a tela segura o quadro"
+                );
+
+                // Nada no ar: a revelada recortada aqui, com o enquadramento de agora.
+                tela.aguardando = None;
+                tela.atualizar_exibicao();
+                let desenhada = tela.aberta.as_ref().unwrap().desenhada.as_ref().unwrap();
+                assert_ne!(
+                    desenhada.id, id,
+                    "sem pedido no ar, o enquadramento velho não fica"
+                );
+                assert_eq!(
+                    desenhada.size(0).width.0,
+                    8,
+                    "a foto inteira, como o corte de agora pede"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// Dentro do Enquadrar a foto aparece inteira: mover o retângulo não muda
+    /// a imagem, e a pronta continua valendo.
+    #[test]
+    fn no_enquadrar_o_retangulo_nao_conta_no_enquadramento_visivel() {
+        let a = transformacao::Corte::novo(0.1, 0.1, 0.5, 0.5, 1, 3.0, true, false);
+        let b = transformacao::Corte::novo(0.3, 0.2, 0.6, 0.7, 1, 3.0, true, false);
+        assert_eq!(
+            enquadramento_visivel(&a, false),
+            enquadramento_visivel(&b, false)
+        );
+        assert_ne!(
+            enquadramento_visivel(&a, true),
+            enquadramento_visivel(&b, true)
+        );
+        let c = transformacao::Corte::novo(0.1, 0.1, 0.5, 0.5, 1, 4.0, true, false);
+        assert_ne!(
+            enquadramento_visivel(&a, false),
+            enquadramento_visivel(&c, false),
+            "o ângulo conta"
+        );
+    }
+
     /// ⚠️ **Cada cruzamento precisa de um id próprio.**
     ///
     /// O `ElementId` da animação é o que o GPUI usa para achar o estado dela.
@@ -5013,7 +5248,7 @@ mod testes {
                     )),
                     &Default::default(),
                 );
-                assert!(tela.reveladas.guardar(chave, &foto_uniforme(200)));
+                assert!(tela.reveladas.guardar(chave, &foto_uniforme(200), None));
             })
             .expect("a janela deve estar aberta");
 
@@ -5063,7 +5298,7 @@ mod testes {
                     )),
                     &Default::default(),
                 );
-                tela.reveladas.guardar(chave, &foto_uniforme(200));
+                tela.reveladas.guardar(chave, &foto_uniforme(200), None);
 
                 tela.abrir(com_parametros.clone(), window, cx);
 
@@ -5111,7 +5346,7 @@ mod testes {
                     )),
                     &Default::default(),
                 );
-                tela.reveladas.guardar(chave, &foto_uniforme(200));
+                tela.reveladas.guardar(chave, &foto_uniforme(200), None);
                 tela.abrir(com_parametros.clone(), window, cx);
                 assert!(tela.aguardando.is_none(), "a foto sai do cache");
 

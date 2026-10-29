@@ -42,7 +42,7 @@ mais, e o relatório avisa.
 | **Tempo observado do quadro** | `render` da raiz → depois do `present` (aproximado). Mostrado **separado** das etapas: CPU e GPU trabalham em paralelo e não se somam. |
 | **Montagem da interface** | `render` da raiz → fim da pintura (render + layout + pintura do GPUI). |
 | **Apresentação (aprox.)** | fim da pintura → primeira tarefa que a thread roda depois do quadro. É um teto, não o valor exato do `present`. |
-| **Etapas na thread da interface** | decodificação síncrona, preparação dos ajustes, recorte/giro, histograma, conversão RGBA→BGRA (`para_gpui`). Prendem o quadro. |
+| **Etapas na thread da interface** | decodificação síncrona, preparação dos ajustes, recorte/giro, histograma, conversão RGBA→BGRA (`para_gpui`). Prendem o quadro. Desde 28/out/2026 o resultado do motor chega **já enquadrado e em BGRA**, com o histograma (`processador::Pronta`): recorte, histograma e conversão só aparecem no "antes" (`\\`), na foto no neutro e enquanto o cache não tem a imagem pronta. |
 | **Etapas em segundo plano** | decodificação antecipada, redução, preparo no motor (upload, grades), gravação e envio dos comandos, espera pela GPU, cópia de volta. Atrasam a foto, não o quadro. |
 | **GPU** | máscaras, retoques e revelação, por **timestamp query** nas passadas do motor. |
 | **Do pedido à foto na tela** | ponta a ponta: do pedido ao motor até o resultado entrar no palco. |

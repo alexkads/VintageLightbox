@@ -292,6 +292,7 @@ impl Revelacao {
             corte,
             locais,
             lado_na_tela: None,
+            tela: None,
         });
         self.pedidos.insert(
             id,

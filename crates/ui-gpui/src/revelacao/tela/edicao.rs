@@ -447,8 +447,8 @@ mod testes {
                         &Default::default(),
                     )
                 };
-                tela.reveladas.guardar(chave("id-0"), &imagem);
-                tela.reveladas.guardar(chave("id-1"), &imagem);
+                tela.reveladas.guardar(chave("id-0"), &imagem, None);
+                tela.reveladas.guardar(chave("id-1"), &imagem, None);
                 editar_e_salvar(&p, 0);
                 tela.fonte_mudou("id-0", None, cx);
                 assert!(tela.reveladas.buscar(&chave("id-0")).is_none());

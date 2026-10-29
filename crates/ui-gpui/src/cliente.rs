@@ -35,7 +35,7 @@ use gpui_kit::{
 use infrastructure::cache::preview_manager::PreviewManager;
 use infrastructure::transformacao;
 
-use crate::revelacao::processador::{Ajustes, Pedido, Processador};
+use crate::revelacao::processador::{Ajustes, ParaTela, Pedido, Processador};
 
 pub mod nome_do_monitor;
 
@@ -834,6 +834,13 @@ impl Cliente {
             corte: transformacao::corte(&pedido.corte),
             locais: pedido.locais,
             lado_na_tela: self.lado_do_monitor,
+            // Enquadrada e em BGRA pela GPU, no tamanho do monitor: a thread
+            // da interface não recorta nem converte — e a Tela do cliente fica
+            // aberta o expediente inteiro.
+            tela: Some(ParaTela {
+                recortar: true,
+                inteira: false,
+            }),
         });
         self.revelando = Some((id, pedido.foto, pedido.posicao, pedido.corte));
         if self._colheita.is_none() {
@@ -861,8 +868,16 @@ impl Cliente {
             if let Some((id, foto, posicao, corte)) = self.revelando.take() {
                 if id == resultado.id {
                     let inicio = std::time::Instant::now();
-                    let exibida = transformacao::aplicar(&resultado.imagem, &corte, true);
-                    let imagem = crate::imagem::para_gpui(exibida);
+                    // A pronta já vem enquadrada pela GPU; sem ela (uma GPU
+                    // que recusou a passada), o caminho de sempre na CPU.
+                    let imagem = match (resultado.pronta, resultado.imagem) {
+                        (Some(pronta), _) => pronta.imagem,
+                        (None, Some(inteira)) => {
+                            let exibida = transformacao::aplicar(&inteira, &corte, true);
+                            crate::imagem::para_gpui(exibida)
+                        }
+                        (None, None) => return true,
+                    };
                     crate::depuracao::vigia::cronometrar(
                         "tela do cliente: enquadrar + converter",
                         inicio,

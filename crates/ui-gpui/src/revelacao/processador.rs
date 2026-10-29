@@ -26,12 +26,48 @@
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 
+use gpui_kit::RenderImage;
 use image::DynamicImage;
 use parking_lot::Mutex;
+use revelacao_core::{OrdemDosCanais, PedidoDeTela};
 
 pub use infrastructure::gpu_adjustments::Ajustes;
 use infrastructure::gpu_adjustments::Motor;
 pub use infrastructure::transformacao::Corte;
+
+use super::histograma::Histograma;
+
+/// O que a tela quer do motor além da foto inteira: a foto **já enquadrada na
+/// GPU**, em BGRA, pronta para o palco — ver [`Pronta`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ParaTela {
+    /// `true` fora do Enquadrar (a foto sai recortada); `false` dentro dele (a
+    /// foto inteira, girada e endireitada, com os cantos transparentes).
+    pub recortar: bool,
+    /// Também a foto inteira em RGBA, para o cache, a tira e o arquivo. No
+    /// rascunho de um arrasto não vale a segunda leitura de volta.
+    pub inteira: bool,
+}
+
+/// A foto enquadrada na GPU, pronta para o palco, e o estado em que foi feita.
+///
+/// 🔑 **É o que o Lightroom faz**: a prévia nasce na GPU no tamanho e na ordem
+/// de canais da janela, e a thread da interface não toca num pixel — nem
+/// recorte, nem giro, nem a troca R↔B, nem o histograma, que vem junto. Antes
+/// disto cada resultado custava na thread da interface o recorte na CPU (33 a
+/// 77 ms por quadro numa foto com perspectiva, medido no balcão), a conversão
+/// para BGRA e o histograma.
+#[derive(Clone)]
+pub struct Pronta {
+    /// A imagem da janela, em BGRA, já registrada na coleta (`imagem.rs`).
+    pub imagem: Arc<RenderImage>,
+    /// O histograma do que está na tela, calculado fora da thread da interface.
+    pub histograma: Histograma,
+    /// O enquadramento com que foi feita — a tela só a usa enquanto ele for o
+    /// da tela (ver `Revelacao::refazer_exibicao`).
+    pub corte: Corte,
+    pub recortar: bool,
+}
 
 /// Um pedido de revelação.
 pub struct Pedido {
@@ -61,12 +97,19 @@ pub struct Pedido {
     /// arrasto de um slider a Revelação pede no tamanho do palco, e a tela do
     /// cliente sempre no tamanho do monitor — ver [`tamanho_reduzido`].
     pub lado_na_tela: Option<u32>,
+    /// A foto enquadrada na GPU para o palco ([`Pronta`]); `None` é o pedido
+    /// de sempre, só a foto inteira em RGBA (o Comparar).
+    pub tela: Option<ParaTela>,
 }
 
 /// O que volta.
 pub struct Resultado {
     pub id: u64,
-    pub imagem: DynamicImage,
+    /// A foto inteira, sem enquadramento, em RGBA — `None` no rascunho de um
+    /// arrasto, que só pede a [`Pronta`].
+    pub imagem: Option<DynamicImage>,
+    /// A foto enquadrada para o palco, quando o pedido a pediu.
+    pub pronta: Option<Pronta>,
     pub duracao_ms: f32,
 }
 
@@ -238,7 +281,45 @@ fn laco(
         if let Err(erro) = motor.definir_locais(&pedido.locais) {
             crate::telemetria::avisar!("⚠️ [Revelação] a revelação local ficou de fora: {erro:?}");
         }
-        if let Some(imagem) = motor.revelar(&pixels, largura, altura, &pedido.ajustes) {
+        // 🔑 Com `tela`, a foto volta enquadrada e em BGRA pela própria GPU, e
+        // a inteira só quando pedida. Sem o enquadramento na GPU (uma GPU que
+        // recusou a passada), a inteira de sempre — a tela recorta na CPU.
+        let revelado = match pedido.tela {
+            Some(para_tela) => motor
+                .revelar_para_tela(
+                    &pixels,
+                    largura,
+                    altura,
+                    &pedido.ajustes,
+                    PedidoDeTela {
+                        recortar: para_tela.recortar,
+                        ordem: OrdemDosCanais::Bgra,
+                        inteira: para_tela.inteira,
+                    },
+                )
+                .map(|r| (r.inteira, Some((r.tela, para_tela.recortar))))
+                .or_else(|| {
+                    motor
+                        .revelar(&pixels, largura, altura, &pedido.ajustes)
+                        .map(|imagem| (Some(imagem), None))
+                }),
+            None => motor
+                .revelar(&pixels, largura, altura, &pedido.ajustes)
+                .map(|imagem| (Some(imagem), None)),
+        };
+        if let Some((imagem, tela)) = revelado {
+            // O histograma e a imagem da janela nascem aqui, fora da thread
+            // da interface — sem cópia: os bytes da GPU são os da imagem.
+            let pronta = tela.and_then(|(tela, recortar)| {
+                let histograma = Histograma::de_bgra(&tela.bytes, tela.largura, tela.altura);
+                let imagem = crate::imagem::de_bgra(tela.largura, tela.altura, tela.bytes)?;
+                Some(Pronta {
+                    imagem,
+                    histograma,
+                    corte: pedido.corte.clone(),
+                    recortar,
+                })
+            });
             if medindo {
                 crate::desempenho::revelacao_do_motor(
                     crate::desempenho::RevelacaoNoMotor {
@@ -257,6 +338,7 @@ fn laco(
             let _ = resultados.send(Resultado {
                 id: pedido.id,
                 imagem,
+                pronta,
                 duracao_ms: comeco.elapsed().as_secs_f32() * 1000.0,
             });
         }

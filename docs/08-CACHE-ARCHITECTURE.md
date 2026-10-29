@@ -172,6 +172,16 @@ Medido com `medir-revelacao` (release, catálogo real):
 O que sobra por quadro é quase todo `para_gpui`: 17,5 MB escritos, ~4,5 GB/s — é
 limite de memória, não de código. Sair disso é o shader devolver BGRA direto.
 
+✅ **E ele devolve, desde 28/out/2026.** O motor (`revelacao-core`, `Motor::revelar_para_tela`)
+enquadra a foto numa passada de compute e a lê de volta **já em BGRA e no tamanho da saída**; o
+histograma é calculado na thread do motor; e a tela (`processador::Pronta`) só aponta a
+`RenderImage` para o palco. Por resultado de slider, a thread da interface deixou de fazer o
+recorte/giro/perspectiva (`transformacao::aplicar`: 33 a 77 ms por quadro numa foto com
+perspectiva, medido num balcão em `app_desktop_desempenho`), o `para_gpui` e o histograma. É a
+prévia do Lightroom: nasce na GPU e vai para a janela como está. O arquivo que sai continua pelo
+caminho da CPU, byte a byte o de sempre. Ver `docs/PARIDADE-LIGHTROOM.md`, "A prévia enquadrada
+na GPU".
+
 ---
 
 ## 🚨 O L1 é da Revelação, e a grade da sessão o usava como se fosse dela — 6/set/2026

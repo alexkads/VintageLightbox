@@ -78,6 +78,28 @@ impl Histograma {
             azul[pixel[2] as usize] += 1;
         }
 
+        Self::montar(vermelho, verde, azul)
+    }
+
+    /// O histograma de pixels de 4 bytes já na ordem da janela (B, G, R, A) —
+    /// o que o motor devolve pronto para desenhar (`processador::Pronta`). A
+    /// mesma amostragem de [`Histograma::da_imagem`], com os canais no lugar.
+    pub fn de_bgra(bytes: &[u8], largura: u32, altura: u32) -> Self {
+        let mut vermelho = [0u32; NIVEIS];
+        let mut verde = [0u32; NIVEIS];
+        let mut azul = [0u32; NIVEIS];
+        let pixels = bytes.as_chunks::<4>().0;
+        let total = (largura as usize * altura as usize).min(pixels.len());
+        let passo = (total / AMOSTRAS).max(1);
+        for pixel in pixels[..total].iter().step_by(passo) {
+            azul[pixel[0] as usize] += 1;
+            verde[pixel[1] as usize] += 1;
+            vermelho[pixel[2] as usize] += 1;
+        }
+        Self::montar(vermelho, verde, azul)
+    }
+
+    fn montar(vermelho: [u32; NIVEIS], verde: [u32; NIVEIS], azul: [u32; NIVEIS]) -> Self {
         let maximo = vermelho
             .iter()
             .chain(verde.iter())
@@ -286,6 +308,24 @@ mod testes {
     fn sao_duzentos_e_cinquenta_e_seis_niveis() {
         let histograma = Histograma::da_imagem(&chapada(2, [0, 0, 0, 255]));
         assert_eq!(histograma.alturas().count(), NIVEIS);
+    }
+
+    /// 🔑 **Em BGRA o histograma é o mesmo** — o vermelho continua sendo o
+    /// vermelho, só mudou de lugar no byte. É o que o motor devolve pronto.
+    #[test]
+    fn o_histograma_em_bgra_e_o_da_imagem() {
+        let mut img = RgbaImage::new(40, 30);
+        for (i, pixel) in img.pixels_mut().enumerate() {
+            let v = (i % 251) as u8;
+            *pixel = Rgba([v, v.wrapping_mul(3), 255 - v, 255]);
+        }
+        let mut bgra = img.as_raw().clone();
+        for p in bgra.as_chunks_mut::<4>().0 {
+            p.swap(0, 2);
+        }
+        let da_imagem = Histograma::da_imagem(&DynamicImage::ImageRgba8(img));
+        let de_bgra = Histograma::de_bgra(&bgra, 40, 30);
+        assert_eq!(de_bgra, da_imagem);
     }
 
     /// A soma de cada canal é o número de pixels — nenhum se perde no caminho.
