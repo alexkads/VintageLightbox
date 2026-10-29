@@ -1,12 +1,14 @@
 {
-  "versao": "0.1.186",
-  "titulo": "O cartão de memória é ejetado sozinho ao fim de cada importação, e a tela diz em letras grandes quando pode tirar.",
+  "versao": "0.1.187",
+  "titulo": "A Revelação ficou mais leve: a prévia da foto nasce pronta na placa de vídeo, como no Lightroom.",
   "importante": false,
   "novidades": [
-    "Terminada a cópia das fotos do cartão (ou da câmera ligada no cabo), o app ejeta o cartão sozinho. Não é mais preciso ejetar pelo sistema.",
-    "Enquanto ejeta, aparece no meio da tela a faixa amarela \"AGUARDE — NÃO RETIRE\". Quando termina, a faixa fica verde, \"PODE RETIRAR O CARTÃO\", com um som de aviso.",
-    "Se o cartão não puder ser ejetado (outro programa usando), a faixa fica vermelha, \"NÃO RETIRE O CARTÃO\", com o motivo e o botão \"Tentar ejetar de novo\".",
-    "Se mais fotos do mesmo cartão estiverem na fila, ele só é ejetado depois da última. Importação cancelada não ejeta."
+    "Mexer num controle da Revelação pesa menos no processador do balcão: o corte, o giro, o endireitar e a correção de perspectiva da prévia agora são feitos na placa de vídeo, junto com os ajustes, e a foto chega à tela já pronta para desenhar.",
+    "O histograma passou a ser calculado junto com a prévia, fora da tela.",
+    "Voltar a uma foto já revelada (setas, desfazer, sair de uma predefinição) mostra a prévia guardada sem refazer o corte.",
+    "Ao entrar no Enquadrar, girar ou endireitar, a tela segura a última prévia até a placa de vídeo entregar a nova, em vez de travar refazendo o corte.",
+    "A Tela do cliente usa o mesmo caminho: a foto chega ao segundo monitor pronta da placa de vídeo.",
+    "O arquivo que sai (exportação, impressão, galeria) continua exatamente como antes."
   ],
-  "por_que_atualizar": "Tirar o cartão sem ejetar, principalmente no Linux com a câmera no cabo, atrapalhava a importação seguinte."
+  "por_que_atualizar": "Nos balcões com placa de vídeo fraca, cada movimento de controle numa foto endireitada ou com perspectiva custava de 30 a 80 ms do processador a cada quadro; agora a prévia vem inteira da placa."
 }
