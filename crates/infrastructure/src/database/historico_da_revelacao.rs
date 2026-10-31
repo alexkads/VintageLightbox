@@ -2,6 +2,7 @@
 //! (migration 028). O JSON é do ui-gpui (`revelacao/historico.rs`); aqui ele é
 //! só texto.
 
+use super::espera;
 use sqlx::{Row, SqlitePool};
 
 #[derive(Clone)]
@@ -20,11 +21,13 @@ impl CatalogoDoHistorico {
 
     /// O histórico gravado da foto. `None` quando ela nunca foi revelada aqui.
     pub async fn ler(&self, foto_id: &str) -> Result<Option<String>, String> {
-        let linha = sqlx::query("SELECT json FROM historico_da_revelacao WHERE foto_id = ?")
-            .bind(foto_id)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(erro)?;
+        let linha = espera::com_espera("ler", || {
+            sqlx::query("SELECT json FROM historico_da_revelacao WHERE foto_id = ?")
+                .bind(foto_id)
+                .fetch_optional(&self.pool)
+        })
+        .await
+        .map_err(erro)?;
         Ok(linha.map(|l| l.get::<String, _>("json")))
     }
 
@@ -34,16 +37,18 @@ impl CatalogoDoHistorico {
     /// ordem que quiserem: sem a versão, a que chegasse por último podia ser a
     /// mais velha, e o painel reabriria sem o último passo.
     pub async fn gravar(&self, foto_id: &str, json: &str, versao: i64) -> Result<(), String> {
-        sqlx::query(
-            "INSERT INTO historico_da_revelacao (foto_id, json, versao) VALUES (?, ?, ?) \
+        espera::com_espera("gravar", || {
+            sqlx::query(
+                "INSERT INTO historico_da_revelacao (foto_id, json, versao) VALUES (?, ?, ?) \
              ON CONFLICT(foto_id) DO UPDATE SET json = excluded.json, \
              versao = excluded.versao, atualizado_em = CURRENT_TIMESTAMP \
              WHERE excluded.versao > historico_da_revelacao.versao",
-        )
-        .bind(foto_id)
-        .bind(json)
-        .bind(versao)
-        .execute(&self.pool)
+            )
+            .bind(foto_id)
+            .bind(json)
+            .bind(versao)
+            .execute(&self.pool)
+        })
         .await
         .map_err(erro)?;
         Ok(())
@@ -51,11 +56,13 @@ impl CatalogoDoHistorico {
 
     /// Apaga o histórico da foto.
     pub async fn apagar(&self, foto_id: &str) -> Result<(), String> {
-        sqlx::query("DELETE FROM historico_da_revelacao WHERE foto_id = ?")
-            .bind(foto_id)
-            .execute(&self.pool)
-            .await
-            .map_err(erro)?;
+        espera::com_espera("apagar", || {
+            sqlx::query("DELETE FROM historico_da_revelacao WHERE foto_id = ?")
+                .bind(foto_id)
+                .execute(&self.pool)
+        })
+        .await
+        .map_err(erro)?;
         Ok(())
     }
 }

@@ -2,6 +2,7 @@
 //!
 //! Implementação concreta do CollectionRepository usando SQLite via SQLx.
 
+use super::espera;
 use async_trait::async_trait;
 use domain::{
     entities::Collection,
@@ -67,13 +68,13 @@ impl CollectionRepositoryImpl {
     ) -> DomainResult<HashSet<PhotoId>> {
         let collection_id_str = collection_id.to_string();
 
-        let rows = sqlx::query("SELECT photo_id FROM collection_photos WHERE collection_id = ?")
-            .bind(&collection_id_str)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| {
-                DomainError::InvalidOperation(format!("Failed to fetch photo_ids: {}", e))
-            })?;
+        let rows = espera::com_espera("fetch_photo_ids", || {
+            sqlx::query("SELECT photo_id FROM collection_photos WHERE collection_id = ?")
+                .bind(&collection_id_str)
+                .fetch_all(&self.pool)
+        })
+        .await
+        .map_err(|e| DomainError::InvalidOperation(format!("Failed to fetch photo_ids: {}", e)))?;
 
         let mut photo_ids = HashSet::new();
         for row in rows {
@@ -96,28 +97,29 @@ impl CollectionRepositoryImpl {
         let collection_id_str = collection_id.to_string();
 
         // Primeiro, remover todas as associações existentes
-        sqlx::query("DELETE FROM collection_photos WHERE collection_id = ?")
-            .bind(&collection_id_str)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| {
-                DomainError::InvalidOperation(format!("Failed to delete photo associations: {}", e))
-            })?;
+        espera::com_espera("save_photo_ids", || {
+            sqlx::query("DELETE FROM collection_photos WHERE collection_id = ?")
+                .bind(&collection_id_str)
+                .execute(&self.pool)
+        })
+        .await
+        .map_err(|e| {
+            DomainError::InvalidOperation(format!("Failed to delete photo associations: {}", e))
+        })?;
 
         // Inserir novas associações
         for photo_id in photo_ids {
             let photo_id_str = photo_id.to_string();
-            sqlx::query("INSERT INTO collection_photos (collection_id, photo_id) VALUES (?, ?)")
-                .bind(&collection_id_str)
-                .bind(&photo_id_str)
-                .execute(&self.pool)
-                .await
-                .map_err(|e| {
-                    DomainError::InvalidOperation(format!(
-                        "Failed to insert photo association: {}",
-                        e
-                    ))
-                })?;
+            espera::com_espera("save_photo_ids", || {
+                sqlx::query("INSERT INTO collection_photos (collection_id, photo_id) VALUES (?, ?)")
+                    .bind(&collection_id_str)
+                    .bind(&photo_id_str)
+                    .execute(&self.pool)
+            })
+            .await
+            .map_err(|e| {
+                DomainError::InvalidOperation(format!("Failed to insert photo association: {}", e))
+            })?;
         }
 
         Ok(())
@@ -133,16 +135,18 @@ impl CollectionRepository for CollectionRepositoryImpl {
         let created_at = collection.created_at().to_rfc3339();
         let modified_at = collection.modified_at().to_rfc3339();
 
-        sqlx::query(
-            "INSERT INTO collections (id, name, description, created_at, modified_at)
+        espera::com_espera("save", || {
+            sqlx::query(
+                "INSERT INTO collections (id, name, description, created_at, modified_at)
              VALUES (?, ?, ?, ?, ?)",
-        )
-        .bind(&id)
-        .bind(&name)
-        .bind(&description)
-        .bind(&created_at)
-        .bind(&modified_at)
-        .execute(&self.pool)
+            )
+            .bind(&id)
+            .bind(&name)
+            .bind(&description)
+            .bind(&created_at)
+            .bind(&modified_at)
+            .execute(&self.pool)
+        })
         .await
         .map_err(|e| DomainError::InvalidOperation(format!("Failed to save collection: {}", e)))?;
 
@@ -156,13 +160,13 @@ impl CollectionRepository for CollectionRepositoryImpl {
     async fn find_by_id(&self, id: &CollectionId) -> DomainResult<Option<Collection>> {
         let id_str = id.to_string();
 
-        let row = sqlx::query("SELECT * FROM collections WHERE id = ?")
-            .bind(&id_str)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|e| {
-                DomainError::InvalidOperation(format!("Failed to find collection: {}", e))
-            })?;
+        let row = espera::com_espera("find_by_id", || {
+            sqlx::query("SELECT * FROM collections WHERE id = ?")
+                .bind(&id_str)
+                .fetch_optional(&self.pool)
+        })
+        .await
+        .map_err(|e| DomainError::InvalidOperation(format!("Failed to find collection: {}", e)))?;
 
         match row {
             Some(r) => Ok(Some(self.row_to_collection(&r).await?)),
@@ -171,12 +175,13 @@ impl CollectionRepository for CollectionRepositoryImpl {
     }
 
     async fn find_all(&self) -> DomainResult<Vec<Collection>> {
-        let rows = sqlx::query("SELECT * FROM collections ORDER BY created_at DESC")
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| {
-                DomainError::InvalidOperation(format!("Failed to fetch collections: {}", e))
-            })?;
+        let rows = espera::com_espera("find_all", || {
+            sqlx::query("SELECT * FROM collections ORDER BY created_at DESC").fetch_all(&self.pool)
+        })
+        .await
+        .map_err(|e| {
+            DomainError::InvalidOperation(format!("Failed to fetch collections: {}", e))
+        })?;
 
         let mut collections = Vec::new();
         for row in rows {
@@ -192,16 +197,18 @@ impl CollectionRepository for CollectionRepositoryImpl {
         let description = collection.description().map(|d| d.to_string());
         let modified_at = collection.modified_at().to_rfc3339();
 
-        let result = sqlx::query(
-            "UPDATE collections
+        let result = espera::com_espera("update", || {
+            sqlx::query(
+                "UPDATE collections
              SET name = ?, description = ?, modified_at = ?
              WHERE id = ?",
-        )
-        .bind(&name)
-        .bind(&description)
-        .bind(&modified_at)
-        .bind(&id)
-        .execute(&self.pool)
+            )
+            .bind(&name)
+            .bind(&description)
+            .bind(&modified_at)
+            .bind(&id)
+            .execute(&self.pool)
+        })
         .await
         .map_err(|e| {
             DomainError::InvalidOperation(format!("Failed to update collection: {}", e))
@@ -221,13 +228,15 @@ impl CollectionRepository for CollectionRepositoryImpl {
     async fn delete(&self, id: &CollectionId) -> DomainResult<()> {
         let id_str = id.to_string();
 
-        let result = sqlx::query("DELETE FROM collections WHERE id = ?")
-            .bind(&id_str)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| {
-                DomainError::InvalidOperation(format!("Failed to delete collection: {}", e))
-            })?;
+        let result = espera::com_espera("delete", || {
+            sqlx::query("DELETE FROM collections WHERE id = ?")
+                .bind(&id_str)
+                .execute(&self.pool)
+        })
+        .await
+        .map_err(|e| {
+            DomainError::InvalidOperation(format!("Failed to delete collection: {}", e))
+        })?;
 
         if result.rows_affected() == 0 {
             return Err(DomainError::CollectionNotFound);
@@ -241,14 +250,16 @@ impl CollectionRepository for CollectionRepositoryImpl {
     async fn find_by_photo(&self, photo_id: &PhotoId) -> DomainResult<Vec<Collection>> {
         let photo_id_str = photo_id.to_string();
 
-        let rows = sqlx::query(
-            "SELECT c.* FROM collections c
+        let rows = espera::com_espera("find_by_photo", || {
+            sqlx::query(
+                "SELECT c.* FROM collections c
              INNER JOIN collection_photos cp ON c.id = cp.collection_id
              WHERE cp.photo_id = ?
              ORDER BY c.created_at DESC",
-        )
-        .bind(&photo_id_str)
-        .fetch_all(&self.pool)
+            )
+            .bind(&photo_id_str)
+            .fetch_all(&self.pool)
+        })
         .await
         .map_err(|e| {
             DomainError::InvalidOperation(format!("Failed to find collections by photo: {}", e))

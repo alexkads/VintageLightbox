@@ -6,6 +6,7 @@
 //! o app, a desligar a máquina e a abrir de novo no dia seguinte, junto com as
 //! fotos e as notas que ele descreve.
 
+use super::espera;
 use sqlx::{Row, SqlitePool};
 
 /// Um gesto guardado.
@@ -100,7 +101,8 @@ impl FilaDeSincronizacao {
 
     /// Guarda o gesto no fim da fila e devolve a ordem dele.
     pub async fn enfileirar(&self, gesto: &GestoNovo) -> Result<i64, String> {
-        let resultado = sqlx::query(
+        let resultado = espera::com_espera("enfileirar", || {
+            sqlx::query(
             "INSERT INTO fila_de_sincronizacao (chave, tipo, alvo, galeria_id, corpo, ocorrido_em) \
              VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(chave) DO NOTHING",
         )
@@ -111,6 +113,7 @@ impl FilaDeSincronizacao {
         .bind(gesto.corpo.to_string())
         .bind(&gesto.ocorrido_em)
         .execute(&self.pool)
+        })
         .await
         .map_err(erro)?;
         Ok(resultado.last_insert_rowid())
@@ -128,12 +131,13 @@ impl FilaDeSincronizacao {
     /// JSON de) duzentas linhas para mandar uma — e duzentas vezes, numa
     /// sessão inteira guardada sem rede.
     pub async fn proximas(&self, limite: u32) -> Result<Vec<GestoGuardado>, String> {
-        let linhas = sqlx::query(&format!(
+        let sql = format!(
             "SELECT {COLUNAS} FROM fila_de_sincronizacao WHERE estado = 'pendente' \
              ORDER BY id LIMIT ?"
-        ))
-        .bind(limite)
-        .fetch_all(&self.pool)
+        );
+        let linhas = espera::com_espera("proximas", || {
+            sqlx::query(&sql).bind(limite).fetch_all(&self.pool)
+        })
         .await
         .map_err(erro)?;
         Ok(linhas.iter().map(do_banco).collect())
@@ -147,21 +151,19 @@ impl FilaDeSincronizacao {
     /// Todos, pendentes e em conflito, na ordem — o que a tela soma por cima
     /// do espelho.
     pub async fn todos(&self) -> Result<Vec<GestoGuardado>, String> {
-        let linhas = sqlx::query(&format!(
-            "SELECT {COLUNAS} FROM fila_de_sincronizacao ORDER BY id"
-        ))
-        .fetch_all(&self.pool)
-        .await
-        .map_err(erro)?;
+        let sql = format!("SELECT {COLUNAS} FROM fila_de_sincronizacao ORDER BY id");
+        let linhas = espera::com_espera("todos", || sqlx::query(&sql).fetch_all(&self.pool))
+            .await
+            .map_err(erro)?;
         Ok(linhas.iter().map(do_banco).collect())
     }
 
     async fn no_estado(&self, estado: EstadoDoGesto) -> Result<Vec<GestoGuardado>, String> {
-        let linhas = sqlx::query(&format!(
-            "SELECT {COLUNAS} FROM fila_de_sincronizacao WHERE estado = ? ORDER BY id"
-        ))
-        .bind(estado.texto())
-        .fetch_all(&self.pool)
+        let sql =
+            format!("SELECT {COLUNAS} FROM fila_de_sincronizacao WHERE estado = ? ORDER BY id");
+        let linhas = espera::com_espera("no_estado", || {
+            sqlx::query(&sql).bind(estado.texto()).fetch_all(&self.pool)
+        })
         .await
         .map_err(erro)?;
         Ok(linhas.iter().map(do_banco).collect())
@@ -169,13 +171,15 @@ impl FilaDeSincronizacao {
 
     /// Quantos pendentes e quantos em conflito — o selo do rodapé.
     pub async fn contar(&self) -> Result<(usize, usize), String> {
-        let linha = sqlx::query(
-            "SELECT \
+        let linha = espera::com_espera("contar", || {
+            sqlx::query(
+                "SELECT \
                SUM(CASE WHEN estado = 'pendente' THEN 1 ELSE 0 END) AS pendentes, \
                SUM(CASE WHEN estado = 'conflito' THEN 1 ELSE 0 END) AS conflitos \
              FROM fila_de_sincronizacao",
-        )
-        .fetch_one(&self.pool)
+            )
+            .fetch_one(&self.pool)
+        })
         .await
         .map_err(erro)?;
         let pendentes: Option<i64> = linha.get("pendentes");
@@ -188,11 +192,13 @@ impl FilaDeSincronizacao {
 
     /// Chegou ao site: sai da fila.
     pub async fn concluir(&self, id: i64) -> Result<(), String> {
-        sqlx::query("DELETE FROM fila_de_sincronizacao WHERE id = ?")
-            .bind(id)
-            .execute(&self.pool)
-            .await
-            .map_err(erro)?;
+        espera::com_espera("concluir", || {
+            sqlx::query("DELETE FROM fila_de_sincronizacao WHERE id = ?")
+                .bind(id)
+                .execute(&self.pool)
+        })
+        .await
+        .map_err(erro)?;
         Ok(())
     }
 
@@ -206,23 +212,27 @@ impl FilaDeSincronizacao {
     /// na vez com uma tentativa a menos. A rede caída não passa por aqui — por
     /// ela o gesto espera o que for preciso.
     pub async fn tentou(&self, id: i64) -> Result<(), String> {
-        sqlx::query("UPDATE fila_de_sincronizacao SET tentativas = tentativas + 1 WHERE id = ?")
-            .bind(id)
-            .execute(&self.pool)
-            .await
-            .map_err(erro)?;
+        espera::com_espera("tentou", || {
+            sqlx::query("UPDATE fila_de_sincronizacao SET tentativas = tentativas + 1 WHERE id = ?")
+                .bind(id)
+                .execute(&self.pool)
+        })
+        .await
+        .map_err(erro)?;
         Ok(())
     }
 
     /// O site recusou por regra: o gesto sai da vez e espera o operador.
     pub async fn conflito(&self, id: i64, frase: &str) -> Result<(), String> {
-        sqlx::query(
-            "UPDATE fila_de_sincronizacao SET estado = 'conflito', erro = ?, \
+        espera::com_espera("conflito", || {
+            sqlx::query(
+                "UPDATE fila_de_sincronizacao SET estado = 'conflito', erro = ?, \
              tentativas = tentativas + 1 WHERE id = ?",
-        )
-        .bind(frase)
-        .bind(id)
-        .execute(&self.pool)
+            )
+            .bind(frase)
+            .bind(id)
+            .execute(&self.pool)
+        })
         .await
         .map_err(erro)?;
         Ok(())
@@ -232,12 +242,14 @@ impl FilaDeSincronizacao {
     /// tentativas zeradas: o conflito que veio de soluços repetidos não pode
     /// voltar a ser conflito no primeiro soluço seguinte.
     pub async fn refazer(&self, id: i64) -> Result<(), String> {
-        sqlx::query(
+        espera::com_espera("refazer", || {
+            sqlx::query(
             "UPDATE fila_de_sincronizacao SET estado = 'pendente', erro = NULL, tentativas = 0 \
              WHERE id = ?",
         )
         .bind(id)
         .execute(&self.pool)
+        })
         .await
         .map_err(erro)?;
         Ok(())
@@ -251,16 +263,18 @@ impl FilaDeSincronizacao {
         if de == para || de.is_empty() {
             return Ok(());
         }
-        sqlx::query(
-            "UPDATE fila_de_sincronizacao SET \
+        espera::com_espera("trocar_galeria", || {
+            sqlx::query(
+                "UPDATE fila_de_sincronizacao SET \
                galeria_id = CASE WHEN galeria_id = ?1 THEN ?2 ELSE galeria_id END, \
                alvo = REPLACE(alvo, ?1, ?2), \
                corpo = REPLACE(corpo, ?1, ?2) \
              WHERE galeria_id = ?1 OR alvo LIKE '%' || ?1 || '%' OR corpo LIKE '%' || ?1 || '%'",
-        )
-        .bind(de)
-        .bind(para)
-        .execute(&self.pool)
+            )
+            .bind(de)
+            .bind(para)
+            .execute(&self.pool)
+        })
         .await
         .map_err(erro)?;
         Ok(())

@@ -7,6 +7,7 @@
 //! cujas duas migrations do pós-venda (017 e 019) dizem, cada uma à sua
 //! maneira, que ali mora "uma foto no disco".
 
+use super::espera;
 use async_trait::async_trait;
 use domain::repositories::RevelacoesDoSiteRepository;
 use domain::{DomainError, DomainResult};
@@ -28,28 +29,32 @@ impl RevelacoesDoSiteRepository for SqliteRevelacoesDoSite {
     async fn guardar(&self, foto_no_site: &str, ajustes: &str) -> DomainResult<()> {
         // O depósito guarda o **estado**, não a história: o gesto seguinte
         // substitui o anterior, como o autosave do site faz.
-        sqlx::query(
-            r#"
+        espera::com_espera("guardar", || {
+            sqlx::query(
+                r#"
             INSERT INTO revelacoes_do_site (pos_venda_foto_id, ajustes, atualizada_em)
             VALUES (?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(pos_venda_foto_id) DO UPDATE SET
                 ajustes = excluded.ajustes,
                 atualizada_em = CURRENT_TIMESTAMP
             "#,
-        )
-        .bind(foto_no_site)
-        .bind(ajustes)
-        .execute(&self.pool)
+            )
+            .bind(foto_no_site)
+            .bind(ajustes)
+            .execute(&self.pool)
+        })
         .await
         .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
         Ok(())
     }
 
     async fn todas(&self) -> DomainResult<Vec<(String, String)>> {
-        let linhas = sqlx::query("SELECT pos_venda_foto_id, ajustes FROM revelacoes_do_site")
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
+        let linhas = espera::com_espera("todas", || {
+            sqlx::query("SELECT pos_venda_foto_id, ajustes FROM revelacoes_do_site")
+                .fetch_all(&self.pool)
+        })
+        .await
+        .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
 
         Ok(linhas
             .into_iter()
@@ -58,16 +63,18 @@ impl RevelacoesDoSiteRepository for SqliteRevelacoesDoSite {
     }
 
     async fn esquecer(&self, foto_no_site: &str) -> DomainResult<()> {
-        sqlx::query("DELETE FROM revelacoes_do_site WHERE pos_venda_foto_id = ?")
-            .bind(foto_no_site)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
+        espera::com_espera("esquecer", || {
+            sqlx::query("DELETE FROM revelacoes_do_site WHERE pos_venda_foto_id = ?")
+                .bind(foto_no_site)
+                .execute(&self.pool)
+        })
+        .await
+        .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
         Ok(())
     }
 
     async fn guardar_locais(&self, foto_no_site: &str, locais: Option<&str>) -> DomainResult<()> {
-        let consulta = match locais {
+        let consulta = || match locais {
             Some(locais) => sqlx::query(
                 r#"
                 INSERT INTO locais_do_site (pos_venda_foto_id, locais, atualizada_em)
@@ -82,18 +89,19 @@ impl RevelacoesDoSiteRepository for SqliteRevelacoesDoSite {
             None => sqlx::query("DELETE FROM locais_do_site WHERE pos_venda_foto_id = ?")
                 .bind(foto_no_site),
         };
-        consulta
-            .execute(&self.pool)
+        espera::com_espera("guardar_locais", || consulta().execute(&self.pool))
             .await
             .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
         Ok(())
     }
 
     async fn locais_de_todas(&self) -> DomainResult<Vec<(String, String)>> {
-        let linhas = sqlx::query("SELECT pos_venda_foto_id, locais FROM locais_do_site")
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
+        let linhas = espera::com_espera("locais_de_todas", || {
+            sqlx::query("SELECT pos_venda_foto_id, locais FROM locais_do_site")
+                .fetch_all(&self.pool)
+        })
+        .await
+        .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
         Ok(linhas
             .into_iter()
             .map(|l| (l.get("pos_venda_foto_id"), l.get("locais")))

@@ -2,6 +2,7 @@
 //!
 //! Implementação concreta do PhotoRepository usando SQLite via SQLx.
 
+use super::espera;
 use async_trait::async_trait;
 use domain::{
     entities::Photo,
@@ -468,14 +469,14 @@ impl PhotoRepository for PhotoRepositoryImpl {
         // Serializar metadata para JSON
         let metadata = photo.metadata().and_then(|m| serde_json::to_string(m).ok());
 
-        sqlx::query(
+        espera::com_espera("save", || sqlx::query(
             "INSERT INTO photos (id, file_path, rating, color_label, flag, comprada_em, pos_venda_foto_id, sessao_id, nome_original, edit_parametros, edit_locais, is_edited, imported_at, modified_at, metadata, thumbnail_path, preview_path, edit_exposure, edit_contrast, edit_temperature, edit_tint, edit_highlights, edit_shadows, edit_whites, edit_blacks, edit_clarity, edit_vibrance, edit_saturation, edit_tone_curve_shadows, edit_tone_curve_darks, edit_tone_curve_lights, edit_tone_curve_highlights, content_hash, edit_hsl_red_sat, edit_hsl_orange_sat, edit_hsl_yellow_sat, edit_hsl_green_sat, edit_hsl_aqua_sat, edit_hsl_blue_sat, edit_hsl_purple_sat, edit_hsl_magenta_sat, edit_hsl_red_hue, edit_hsl_orange_hue, edit_hsl_yellow_hue, edit_hsl_green_hue, edit_hsl_aqua_hue, edit_hsl_blue_hue, edit_hsl_purple_hue, edit_hsl_magenta_hue, edit_hsl_red_lum, edit_hsl_orange_lum, edit_hsl_yellow_lum, edit_hsl_green_lum, edit_hsl_aqua_lum, edit_hsl_blue_lum, edit_hsl_purple_lum, edit_hsl_magenta_lum, edit_lens_distortion, edit_lens_vignette_amount, edit_lens_vignette_midpoint, edit_nr_luminance, edit_nr_color, edit_sharpen_amount, edit_sharpen_radius, edit_split_shadow_hue, edit_split_shadow_sat, edit_split_highlight_hue, edit_split_highlight_sat, edit_split_balance, edit_grain_amount, edit_grain_size, edit_crop_x, edit_crop_y, edit_crop_width, edit_crop_height, edit_crop_rotation, edit_crop_angle, edit_crop_flip_h, edit_crop_flip_v)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&id)
         .bind(&file_path)
         .bind(rating)
-        .bind(color_label)
+        .bind(&color_label)
         .bind(flag)
         .bind(&comprada_em)
         .bind(&pos_venda_foto_id)
@@ -486,9 +487,9 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(is_edited)
         .bind(&imported_at)
         .bind(&modified_at)
-        .bind(metadata)
-        .bind(thumbnail_path)
-        .bind(preview_path)
+        .bind(&metadata)
+        .bind(&thumbnail_path)
+        .bind(&preview_path)
         .bind(edit_exposure)
         .bind(edit_contrast)
         .bind(edit_temperature)
@@ -504,7 +505,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(edit_tone_curve_darks)
         .bind(edit_tone_curve_lights)
         .bind(edit_tone_curve_highlights)
-        .bind(content_hash)
+        .bind(&content_hash)
         .bind(edit_hsl_red_sat)
         .bind(edit_hsl_orange_sat)
         .bind(edit_hsl_yellow_sat)
@@ -556,7 +557,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(photo.edit_crop_angle())
         .bind(photo.edit_crop_flip_h())
         .bind(photo.edit_crop_flip_v())
-        .execute(&self.pool)
+        .execute(&self.pool))
         .await
         .map_err(|e| DomainError::InvalidOperation(format!("Failed to save photo: {}", e)))?;
 
@@ -566,11 +567,13 @@ impl PhotoRepository for PhotoRepositoryImpl {
     async fn find_by_id(&self, id: &PhotoId) -> DomainResult<Option<Photo>> {
         let id_str = id.to_string();
 
-        let row = sqlx::query("SELECT * FROM photos WHERE id = ?")
-            .bind(&id_str)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|e| DomainError::InvalidOperation(format!("Failed to find photo: {}", e)))?;
+        let row = espera::com_espera("find_by_id", || {
+            sqlx::query("SELECT * FROM photos WHERE id = ?")
+                .bind(&id_str)
+                .fetch_optional(&self.pool)
+        })
+        .await
+        .map_err(|e| DomainError::InvalidOperation(format!("Failed to find photo: {}", e)))?;
 
         match row {
             Some(r) => Ok(Some(Self::row_to_photo(&r)?)),
@@ -595,10 +598,11 @@ impl PhotoRepository for PhotoRepositoryImpl {
     /// não faz sem `json_extract` e nem com ele. O catálogo já é carregado
     /// inteiro aqui; ordenar depois de ler não custa outra ida ao disco.
     async fn find_all(&self) -> DomainResult<Vec<Photo>> {
-        let rows = sqlx::query("SELECT * FROM photos")
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| DomainError::InvalidOperation(format!("Failed to fetch photos: {}", e)))?;
+        let rows = espera::com_espera("find_all", || {
+            sqlx::query("SELECT * FROM photos").fetch_all(&self.pool)
+        })
+        .await
+        .map_err(|e| DomainError::InvalidOperation(format!("Failed to fetch photos: {}", e)))?;
 
         let mut fotos: Vec<Photo> = rows
             .iter()
@@ -707,14 +711,14 @@ impl PhotoRepository for PhotoRepositoryImpl {
         // Serializar metadata para JSON
         let metadata = photo.metadata().and_then(|m| serde_json::to_string(m).ok());
 
-        let result = sqlx::query(
+        let result = espera::com_espera("update", || sqlx::query(
             "UPDATE photos
              SET file_path = ?, rating = ?, color_label = ?, flag = ?, comprada_em = ?, pos_venda_foto_id = ?, nome_original = ?, edit_parametros = ?, is_edited = ?, modified_at = ?, metadata = ?, thumbnail_path = ?, preview_path = ?, edit_exposure = ?, edit_contrast = ?, edit_temperature = ?, edit_tint = ?, edit_highlights = ?, edit_shadows = ?, edit_whites = ?, edit_blacks = ?, edit_clarity = ?, edit_vibrance = ?, edit_saturation = ?, edit_tone_curve_shadows = ?, edit_tone_curve_darks = ?, edit_tone_curve_lights = ?, edit_tone_curve_highlights = ?, content_hash = ?, edit_hsl_red_sat = ?, edit_hsl_orange_sat = ?, edit_hsl_yellow_sat = ?, edit_hsl_green_sat = ?, edit_hsl_aqua_sat = ?, edit_hsl_blue_sat = ?, edit_hsl_purple_sat = ?, edit_hsl_magenta_sat = ?, edit_hsl_red_hue = ?, edit_hsl_orange_hue = ?, edit_hsl_yellow_hue = ?, edit_hsl_green_hue = ?, edit_hsl_aqua_hue = ?, edit_hsl_blue_hue = ?, edit_hsl_purple_hue = ?, edit_hsl_magenta_hue = ?, edit_hsl_red_lum = ?, edit_hsl_orange_lum = ?, edit_hsl_yellow_lum = ?, edit_hsl_green_lum = ?, edit_hsl_aqua_lum = ?, edit_hsl_blue_lum = ?, edit_hsl_purple_lum = ?, edit_hsl_magenta_lum = ?, edit_lens_distortion = ?, edit_lens_vignette_amount = ?, edit_lens_vignette_midpoint = ?, edit_nr_luminance = ?, edit_nr_color = ?, edit_sharpen_amount = ?, edit_sharpen_radius = ?, edit_split_shadow_hue = ?, edit_split_shadow_sat = ?, edit_split_highlight_hue = ?, edit_split_highlight_sat = ?, edit_split_balance = ?, edit_grain_amount = ?, edit_grain_size = ?, edit_crop_x = ?, edit_crop_y = ?, edit_crop_width = ?, edit_crop_height = ?, edit_crop_rotation = ?, edit_crop_angle = ?, edit_crop_flip_h = ?, edit_crop_flip_v = ?
              WHERE id = ?"
         )
         .bind(&file_path)
         .bind(rating)
-        .bind(color_label)
+        .bind(&color_label)
         .bind(flag)
         .bind(&comprada_em)
         .bind(&pos_venda_foto_id)
@@ -722,9 +726,9 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(&parametros)
         .bind(is_edited)
         .bind(&modified_at)
-        .bind(metadata)
-        .bind(thumbnail_path)
-        .bind(preview_path)
+        .bind(&metadata)
+        .bind(&thumbnail_path)
+        .bind(&preview_path)
         .bind(edit_exposure)
         .bind(edit_contrast)
         .bind(edit_temperature)
@@ -740,7 +744,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(edit_tone_curve_darks)
         .bind(edit_tone_curve_lights)
         .bind(edit_tone_curve_highlights)
-        .bind(content_hash)
+        .bind(&content_hash)
         .bind(edit_hsl_red_sat)
         .bind(edit_hsl_orange_sat)
         .bind(edit_hsl_yellow_sat)
@@ -788,7 +792,7 @@ impl PhotoRepository for PhotoRepositoryImpl {
         .bind(edit_crop_flip_h)
         .bind(edit_crop_flip_v)
         .bind(&id)
-        .execute(&self.pool)
+        .execute(&self.pool))
         .await
         .map_err(|e| DomainError::InvalidOperation(format!("Failed to update photo: {}", e)))?;
 
@@ -801,12 +805,14 @@ impl PhotoRepository for PhotoRepositoryImpl {
 
     async fn atualizar_locais(&self, id: &PhotoId, locais: Option<&str>) -> DomainResult<()> {
         // Só a coluna da revelação local — ver o `update` do trait.
-        let resultado = sqlx::query("UPDATE photos SET edit_locais = ? WHERE id = ?")
-            .bind(locais)
-            .bind(id.to_string())
-            .execute(&self.pool)
-            .await
-            .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
+        let resultado = espera::com_espera("atualizar_locais", || {
+            sqlx::query("UPDATE photos SET edit_locais = ? WHERE id = ?")
+                .bind(locais)
+                .bind(id.to_string())
+                .execute(&self.pool)
+        })
+        .await
+        .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
         if resultado.rows_affected() == 0 {
             return Err(DomainError::PhotoNotFound);
         }
@@ -816,11 +822,13 @@ impl PhotoRepository for PhotoRepositoryImpl {
     async fn delete(&self, id: &PhotoId) -> DomainResult<()> {
         let id_str = id.to_string();
 
-        let result = sqlx::query("DELETE FROM photos WHERE id = ?")
-            .bind(&id_str)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| DomainError::InvalidOperation(format!("Failed to delete photo: {}", e)))?;
+        let result = espera::com_espera("delete", || {
+            sqlx::query("DELETE FROM photos WHERE id = ?")
+                .bind(&id_str)
+                .execute(&self.pool)
+        })
+        .await
+        .map_err(|e| DomainError::InvalidOperation(format!("Failed to delete photo: {}", e)))?;
 
         if result.rows_affected() == 0 {
             return Err(DomainError::PhotoNotFound);
@@ -832,25 +840,27 @@ impl PhotoRepository for PhotoRepositoryImpl {
     async fn exists(&self, id: &PhotoId) -> DomainResult<bool> {
         let id_str = id.to_string();
 
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM photos WHERE id = ?")
-            .bind(&id_str)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| {
-                DomainError::InvalidOperation(format!("Failed to check existence: {}", e))
-            })?;
+        let count: i64 = espera::com_espera("exists", || {
+            sqlx::query_scalar("SELECT COUNT(*) FROM photos WHERE id = ?")
+                .bind(&id_str)
+                .fetch_one(&self.pool)
+        })
+        .await
+        .map_err(|e| DomainError::InvalidOperation(format!("Failed to check existence: {}", e)))?;
 
         Ok(count > 0)
     }
 
     async fn find_by_content_hash(&self, hash: &str) -> DomainResult<Option<Photo>> {
-        let row = sqlx::query("SELECT * FROM photos WHERE content_hash = ? LIMIT 1")
-            .bind(hash)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|e| {
-                DomainError::InvalidOperation(format!("Failed to find photo by hash: {}", e))
-            })?;
+        let row = espera::com_espera("find_by_content_hash", || {
+            sqlx::query("SELECT * FROM photos WHERE content_hash = ? LIMIT 1")
+                .bind(hash)
+                .fetch_optional(&self.pool)
+        })
+        .await
+        .map_err(|e| {
+            DomainError::InvalidOperation(format!("Failed to find photo by hash: {}", e))
+        })?;
 
         match row {
             Some(r) => Ok(Some(Self::row_to_photo(&r)?)),
@@ -865,37 +875,33 @@ impl PhotoRepository for PhotoRepositoryImpl {
     ) -> DomainResult<Option<Photo>> {
         // `IS`, e não `=`: com `sessao_id` nulo, `= NULL` nunca casa, e o lote
         // sem sessão reimportaria tudo.
-        let row =
+        let row = espera::com_espera("find_by_content_hash_na_sessao", || {
             sqlx::query("SELECT * FROM photos WHERE content_hash = ? AND sessao_id IS ? LIMIT 1")
                 .bind(hash)
-                .bind(sessao_id)
+                .bind(&sessao_id)
                 .fetch_optional(&self.pool)
-                .await
-                .map_err(|e| {
-                    DomainError::InvalidOperation(format!(
-                        "Failed to find photo by hash in session: {}",
-                        e
-                    ))
-                })?;
+        })
+        .await
+        .map_err(|e| {
+            DomainError::InvalidOperation(format!("Failed to find photo by hash in session: {}", e))
+        })?;
 
         row.map(|r| Self::row_to_photo(&r)).transpose()
     }
 
     async fn trocar_sessao(&self, de: &str, para: &str) -> DomainResult<usize> {
         // `modified_at` anda como andava em `Photo::definir_sessao`.
-        let resultado =
+        let resultado = espera::com_espera("trocar_sessao", || {
             sqlx::query("UPDATE photos SET sessao_id = ?, modified_at = ? WHERE sessao_id = ?")
                 .bind(para)
                 .bind(chrono::Utc::now().to_rfc3339())
                 .bind(de)
                 .execute(&self.pool)
-                .await
-                .map_err(|e| {
-                    DomainError::InvalidOperation(format!(
-                        "Failed to move photos to session: {}",
-                        e
-                    ))
-                })?;
+        })
+        .await
+        .map_err(|e| {
+            DomainError::InvalidOperation(format!("Failed to move photos to session: {}", e))
+        })?;
         Ok(resultado.rows_affected() as usize)
     }
 }

@@ -1,3 +1,4 @@
+use super::espera;
 use async_trait::async_trait;
 use domain::entities::{preset::PresetAdjustments, Preset, PresetId};
 use domain::repositories::PresetRepository;
@@ -28,8 +29,9 @@ impl PresetRepository for SqlitePresetRepository {
         let ajustes = serde_json::to_string(&preset.adjustments)
             .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
 
-        sqlx::query(
-            r#"
+        espera::com_espera("save", || {
+            sqlx::query(
+                r#"
             INSERT INTO presets (id, name, is_system, adjustments)
             VALUES (?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
@@ -38,12 +40,13 @@ impl PresetRepository for SqlitePresetRepository {
                 adjustments = excluded.adjustments,
                 updated_at = CURRENT_TIMESTAMP
             "#,
-        )
-        .bind(id_str)
-        .bind(&preset.name)
-        .bind(preset.is_system)
-        .bind(ajustes)
-        .execute(&self.pool)
+            )
+            .bind(&id_str)
+            .bind(&preset.name)
+            .bind(preset.is_system)
+            .bind(&ajustes)
+            .execute(&self.pool)
+        })
         .await
         .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
 
@@ -53,33 +56,34 @@ impl PresetRepository for SqlitePresetRepository {
     async fn find_by_id(&self, id: &PresetId) -> DomainResult<Option<Preset>> {
         let id_str = id.to_string();
 
-        let row = sqlx::query(&format!("SELECT {CAMPOS} FROM presets WHERE id = ?"))
-            .bind(id_str)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
+        let sql = format!("SELECT {CAMPOS} FROM presets WHERE id = ?");
+        let row = espera::com_espera("find_by_id", || {
+            sqlx::query(&sql).bind(&id_str).fetch_optional(&self.pool)
+        })
+        .await
+        .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
 
         row.map(|row| map_row_to_preset(&row)).transpose()
     }
 
     async fn find_all(&self) -> DomainResult<Vec<Preset>> {
-        let rows = sqlx::query(&format!(
-            "SELECT {CAMPOS} FROM presets ORDER BY name COLLATE NOCASE ASC"
-        ))
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
+        let sql = format!("SELECT {CAMPOS} FROM presets ORDER BY name COLLATE NOCASE ASC");
+        let rows = espera::com_espera("find_all", || sqlx::query(&sql).fetch_all(&self.pool))
+            .await
+            .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
 
         rows.iter().map(map_row_to_preset).collect()
     }
 
     async fn delete(&self, id: &PresetId) -> DomainResult<()> {
         let id_str = id.to_string();
-        sqlx::query("DELETE FROM presets WHERE id = ?")
-            .bind(id_str)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
+        espera::com_espera("delete", || {
+            sqlx::query("DELETE FROM presets WHERE id = ?")
+                .bind(&id_str)
+                .execute(&self.pool)
+        })
+        .await
+        .map_err(|e| DomainError::InfrastructureError(e.to_string()))?;
         Ok(())
     }
 }

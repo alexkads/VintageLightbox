@@ -24,6 +24,14 @@
 //! O veredito está no fim: cada foto na sessão dela, nenhuma presa no
 //! rascunho, uma troca por foto, e os números de erro de cada gesto.
 //!
+//! 🔒 **`VLB_ACERVO=N` semeia N fotos antes de importar** (31/out/2026). O
+//! estúdio de Gramado passou cinco dias com "database is locked" na cópia e
+//! na revelação (*"6 fotos não foram copiadas"*): com semanas de uso, a
+//! releitura do catálogo inteiro que a tela pede a cada foto ficou longa, e
+//! no diário clássico do SQLite quem lê segura o arquivo — a gravação desistia
+//! nos 5 s do sqlx. Catálogo vazio não reproduz; com o acervo de um balcão de
+//! verdade, sim. A fila de sincronização (o offline) grava junto, como no app.
+//!
 //! ⚠️ **Recusa um catálogo que já tem fotos**: o caminho vem de `VLB_CATALOG`,
 //! e um engano apontaria para a biblioteca real.
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -73,7 +81,8 @@ async fn main() {
         .unwrap()
         .flatten()
         .map(|e| e.path().to_string_lossy().to_string())
-        .filter(|c| c.ends_with(".jpg"))
+        // `.JPG`, maiúsculo, é como a câmera grava no cartão.
+        .filter(|c| c.to_lowercase().ends_with(".jpg"))
         .collect();
     arquivos.sort();
     println!(
@@ -96,6 +105,13 @@ async fn main() {
     );
     let pool = infrastructure::create_pool(&url).await.unwrap();
     infrastructure::run_migrations(&pool).await.unwrap();
+    let acervo: usize = std::env::var("VLB_ACERVO")
+        .ok()
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(0);
+    if acervo > 0 {
+        semear_acervo(&pool, acervo).await;
+    }
     let fotos = Arc::new(infrastructure::PhotoRepositoryImpl::new(pool.clone()));
     let extrator = Arc::new(infrastructure::ExifReader);
     let miniaturas = Arc::new(infrastructure::ThumbnailGeneratorImpl::new());
@@ -162,7 +178,8 @@ async fn main() {
     // O que entrou, para o balcão ter em que mexer.
     let entradas: Arc<Mutex<Vec<String>>> = Arc::default();
     let acabou = Arc::new(AtomicBool::new(false));
-    let (tela2, nota, bandeira, releitura, troca, importar) = (
+    let (tela2, nota, bandeira, releitura, troca, importar, fila) = (
+        Arc::new(Conta::default()),
         Arc::new(Conta::default()),
         Arc::new(Conta::default()),
         Arc::new(Conta::default()),
@@ -267,8 +284,58 @@ async fn main() {
                 }),
             ));
         }
-        // 🔁 A releitura do catálogo que a raiz pede a cada foto.
+        // 📴 A fila de sincronização: gestos guardados e levados ao site,
+        // no mesmo SQLite (`sincronizacao::trabalhador`).
         {
+            let (fila_do_banco, conta) = (
+                infrastructure::database::FilaDeSincronizacao::new(pool.clone()),
+                fila.clone(),
+            );
+            let ordem = Arc::new(AtomicUsize::new(0));
+            trabalhos.push(laco(
+                150,
+                acabou.clone(),
+                Box::new(move || {
+                    let (fila_do_banco, conta, ordem) =
+                        (fila_do_banco.clone(), conta.clone(), ordem.clone());
+                    Box::pin(async move {
+                        let n = ordem.fetch_add(1, Ordering::Relaxed);
+                        let r = fila_do_banco
+                            .enfileirar(&infrastructure::database::GestoNovo {
+                                chave: format!("estresse:{n}"),
+                                tipo: "nota".into(),
+                                alvo: format!("foto-{n}"),
+                                galeria_id: None,
+                                corpo: serde_json::json!({ "nota": n % 5 }),
+                                ocorrido_em: chrono::Utc::now().to_rfc3339(),
+                            })
+                            .await;
+                        let r = match r {
+                            Ok(_) => match fila_do_banco.proximas(20).await {
+                                Ok(prontos) => {
+                                    let mut r = Ok(());
+                                    for g in prontos {
+                                        r = r.and(fila_do_banco.concluir(g.id).await);
+                                    }
+                                    r
+                                }
+                                Err(e) => Err(e),
+                            },
+                            Err(e) => Err(e),
+                        };
+                        conta.anotar(r);
+                    })
+                }),
+            ));
+        }
+        // 🔁 A releitura do catálogo que a raiz pede a cada foto — e que a
+        // Nova sessão e a Revelação pedem cada uma por conta própria
+        // (`VLB_RELEITURAS`, uma por padrão).
+        let releituras: usize = std::env::var("VLB_RELEITURAS")
+            .ok()
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(1);
+        for _ in 0..releituras {
             let (biblioteca, conta) = (biblioteca.clone(), releitura.clone());
             trabalhos.push(laco(
                 200,
@@ -409,6 +476,7 @@ async fn main() {
     );
     releitura.mostrar("releitura");
     troca.mostrar("troca");
+    fila.mostrar("fila offline");
 
     // O veredito: cada foto importada tem de estar na sessão dela.
     let todas = biblioteca.get_all_photos().await.unwrap();
@@ -432,5 +500,39 @@ async fn main() {
         "trocas rascunho→sessão: {} para {} fotos importadas (a mais = foto que voltou ao rascunho)",
         movidas.load(Ordering::Relaxed),
         importar.ok.load(Ordering::Relaxed)
+    );
+}
+
+/// O acervo de um balcão com semanas de uso: `n` fotos já catalogadas, com
+/// metadados do tamanho dos de uma câmera, num lote só.
+async fn semear_acervo(pool: &sqlx::SqlitePool, n: usize) {
+    let inicio = Instant::now();
+    let agora = chrono::Utc::now().to_rfc3339();
+    let metadados = format!(
+        r#"{{"camera_make":"NIKON CORPORATION","camera_model":"NIKON D750","width":6016,"height":4016,"iso":400,"lens":"{}"}}"#,
+        "24.0-120.0 mm f/4.0 ".repeat(20)
+    );
+    let mut tx = pool.begin().await.unwrap();
+    for i in 0..n {
+        sqlx::query(
+            "INSERT INTO photos (id, file_path, rating, flag, is_edited, imported_at, modified_at, \
+             metadata, sessao_id, edit_exposure, edit_contrast) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, 0.4, 1.2)",
+        )
+        .bind(uuid::Uuid::new_v4().to_string())
+        .bind(format!("/acervo/Ensaios/g{}/GRA_{i:06}.JPG", i / 40))
+        .bind((i % 6) as i64)
+        .bind(if i % 3 == 0 { Some(1i64) } else { None })
+        .bind(&agora)
+        .bind(&agora)
+        .bind(&metadados)
+        .bind(format!("acervo-{}", i / 40))
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    }
+    tx.commit().await.unwrap();
+    println!(
+        "acervo: {n} fotos semeadas em {:.1}s",
+        inicio.elapsed().as_secs_f32()
     );
 }

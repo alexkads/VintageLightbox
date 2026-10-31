@@ -4,6 +4,7 @@
 //! (`docs/editor-em-camadas/03-GRAVACAO-E-CATALOGO.md`). É o passo 4 da
 //! gravação: a revisão só vale para a Revelação depois de [`CatalogoDeEdicoes::confirmar`].
 
+use super::espera;
 use std::path::Path;
 
 use editor_core::VersaoEditada;
@@ -72,11 +73,13 @@ impl CatalogoDeEdicoes {
     }
 
     pub async fn todas(&self) -> Result<Vec<EdicaoRegistrada>, String> {
-        let linhas = sqlx::query(
-            "SELECT edicao_id, foto_id, pos_venda_foto_id, diretorio, revisao, arquivo, \
+        let linhas = espera::com_espera("todas", || {
+            sqlx::query(
+                "SELECT edicao_id, foto_id, pos_venda_foto_id, diretorio, revisao, arquivo, \
              sha256, largura, altura, base_sha256, ativa FROM edicoes_de_foto",
-        )
-        .fetch_all(&self.pool)
+            )
+            .fetch_all(&self.pool)
+        })
         .await
         .map_err(erro)?;
         Ok(linhas
@@ -99,17 +102,19 @@ impl CatalogoDeEdicoes {
 
     /// Uma edição nova, ainda sem revisão (a primeira gravação confirma a 1).
     pub async fn criar(&self, edicao: &EdicaoRegistrada) -> Result<(), String> {
-        sqlx::query(
-            "INSERT INTO edicoes_de_foto \
+        espera::com_espera("criar", || {
+            sqlx::query(
+                "INSERT INTO edicoes_de_foto \
              (edicao_id, foto_id, pos_venda_foto_id, diretorio, revisao, base_sha256, ativa) \
              VALUES (?, ?, ?, ?, 0, ?, 0)",
-        )
-        .bind(&edicao.edicao_id)
-        .bind(&edicao.foto_id)
-        .bind(&edicao.pos_venda_foto_id)
-        .bind(&edicao.diretorio)
-        .bind(&edicao.base_sha256)
-        .execute(&self.pool)
+            )
+            .bind(&edicao.edicao_id)
+            .bind(&edicao.foto_id)
+            .bind(&edicao.pos_venda_foto_id)
+            .bind(&edicao.diretorio)
+            .bind(&edicao.base_sha256)
+            .execute(&self.pool)
+        })
         .await
         .map_err(erro)?;
         Ok(())
@@ -131,20 +136,22 @@ impl CatalogoDeEdicoes {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
         });
-        let feito = sqlx::query(
-            "UPDATE edicoes_de_foto SET revisao = ?, arquivo = ?, sha256 = ?, largura = ?, \
+        let feito = espera::com_espera("confirmar", || {
+            sqlx::query(
+                "UPDATE edicoes_de_foto SET revisao = ?, arquivo = ?, sha256 = ?, largura = ?, \
              altura = ?, ativa = ?, atualizada_em = CURRENT_TIMESTAMP \
              WHERE edicao_id = ? AND revisao < ?",
-        )
-        .bind(revisao as i64)
-        .bind(arquivo)
-        .bind(versao.map(|v| v.sha256.clone()))
-        .bind(versao.map(|v| v.largura as i64))
-        .bind(versao.map(|v| v.altura as i64))
-        .bind(i64::from(versao.is_some()))
-        .bind(edicao_id)
-        .bind(revisao as i64)
-        .execute(&self.pool)
+            )
+            .bind(revisao as i64)
+            .bind(&arquivo)
+            .bind(versao.map(|v| v.sha256.clone()))
+            .bind(versao.map(|v| v.largura as i64))
+            .bind(versao.map(|v| v.altura as i64))
+            .bind(i64::from(versao.is_some()))
+            .bind(edicao_id)
+            .bind(revisao as i64)
+            .execute(&self.pool)
+        })
         .await
         .map_err(erro)?;
         Ok(feito.rows_affected() == 1)
@@ -154,11 +161,13 @@ impl CatalogoDeEdicoes {
     /// arquivos do projeto são apagados por quem chama, **depois** disto — a
     /// linha é o que diz à Revelação que a imagem editada vale.
     pub async fn excluir(&self, edicao_id: &str) -> Result<(), String> {
-        sqlx::query("DELETE FROM edicoes_de_foto WHERE edicao_id = ?")
-            .bind(edicao_id)
-            .execute(&self.pool)
-            .await
-            .map_err(erro)?;
+        espera::com_espera("excluir", || {
+            sqlx::query("DELETE FROM edicoes_de_foto WHERE edicao_id = ?")
+                .bind(edicao_id)
+                .execute(&self.pool)
+        })
+        .await
+        .map_err(erro)?;
         Ok(())
     }
 
@@ -168,13 +177,15 @@ impl CatalogoDeEdicoes {
         edicao_id: &str,
         pos_venda_foto_id: &str,
     ) -> Result<(), String> {
-        sqlx::query(
-            "UPDATE edicoes_de_foto SET pos_venda_foto_id = ? \
+        espera::com_espera("ligar_ao_site", || {
+            sqlx::query(
+                "UPDATE edicoes_de_foto SET pos_venda_foto_id = ? \
              WHERE edicao_id = ? AND pos_venda_foto_id IS NULL",
-        )
-        .bind(pos_venda_foto_id)
-        .bind(edicao_id)
-        .execute(&self.pool)
+            )
+            .bind(pos_venda_foto_id)
+            .bind(edicao_id)
+            .execute(&self.pool)
+        })
         .await
         .map_err(erro)?;
         Ok(())
