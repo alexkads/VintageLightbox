@@ -1,14 +1,12 @@
 {
-  "versao": "0.1.187",
-  "titulo": "A Revelação ficou mais leve: a prévia da foto nasce pronta na placa de vídeo, como no Lightroom.",
-  "importante": false,
+  "versao": "0.1.188",
+  "titulo": "As fotos não deixam mais de ser copiadas com \"database is locked\": o catálogo espera a vez em vez de desistir.",
+  "importante": true,
   "novidades": [
-    "Mexer num controle da Revelação pesa menos no processador do balcão: o corte, o giro, o endireitar e a correção de perspectiva da prévia agora são feitos na placa de vídeo, junto com os ajustes, e a foto chega à tela já pronta para desenhar.",
-    "O histograma passou a ser calculado junto com a prévia, fora da tela.",
-    "Voltar a uma foto já revelada (setas, desfazer, sair de uma predefinição) mostra a prévia guardada sem refazer o corte.",
-    "Ao entrar no Enquadrar, girar ou endireitar, a tela segura a última prévia até a placa de vídeo entregar a nova, em vez de travar refazendo o corte.",
-    "A Tela do cliente usa o mesmo caminho: a foto chega ao segundo monitor pronta da placa de vídeo.",
-    "O arquivo que sai (exportação, impressão, galeria) continua exatamente como antes."
+    "A cópia das fotos da Nova sessão não falha mais com \"database is locked\" quando o balcão está trabalhando em várias coisas ao mesmo tempo.",
+    "A revelação padrão aplicada a cada foto que entra, a nota, a bandeira e a troca de sessão também deixaram de se perder por esse motivo.",
+    "Quando o catálogo está ocupado, o app espera a vez e grava, sem mostrar erro ao balconista.",
+    "Com o catálogo grande, a importação com o balcão em uso ficou bem mais rápida."
   ],
-  "por_que_atualizar": "Nos balcões com placa de vídeo fraca, cada movimento de controle numa foto endireitada ou com perspectiva custava de 30 a 80 ms do processador a cada quadro; agora a prévia vem inteira da placa."
+  "por_que_atualizar": "Em balcões com muitas fotos no catálogo, a cópia do cartão e a revelação falhavam com \"database is locked\" e algumas fotos ficavam para trás. Nesta versão, o mesmo teste de carga que reproduzia o erro copiou todas as fotos, sem nenhuma falha."
 }
