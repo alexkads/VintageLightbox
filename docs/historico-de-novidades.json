@@ -1,5 +1,15 @@
 [
   {
+    "versao": "0.1.189",
+    "data": "2026-11-05",
+    "titulo": "Correções internas de estabilidade.",
+    "importante": false,
+    "novidades": [
+      "Correções internas de estabilidade."
+    ],
+    "por_que_atualizar": "Para manter o aplicativo estável e em dia com o site."
+  },
+  {
     "versao": "0.1.188",
     "data": "2026-10-31",
     "titulo": "As fotos não deixam mais de ser copiadas com \"database is locked\": o catálogo espera a vez em vez de desistir.",
