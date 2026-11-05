@@ -113,13 +113,6 @@ fn frase_da_correcao(para: LocalDaSessao, feito: &serde_json::Value) -> String {
     partes.join(" ")
 }
 
-/// 📍 O aviso de quem clica no local sem poder corrigi-lo — o mesmo texto do
-/// site (`LOCAL_SEM_PERMISSAO` em `lib/local-da-sessao.ts`), com o nome da
-/// permissão como a tela de perfis a mostra.
-const LOCAL_SEM_PERMISSAO: &str = "O seu perfil de acesso não permite corrigir o local da \
-     sessão. Peça a quem administra o sistema para liberar “Mudar o local da sessão” no \
-     seu perfil.";
-
 /// O lado da miniatura da sessão, em pixels.
 ///
 /// 🔑 **É o `ZOOM_MAXIMO`**, e não um número à parte: no zoom cheio a célula tem
@@ -3244,17 +3237,6 @@ impl Detalhe {
             .unwrap_or_default()
     }
 
-    /// 📍 O clique no local do cabeçalho: abre a correção, ou — sem a
-    /// permissão — avisa o que pedir (dono, 18/out/2026: o selo mudo fazia o
-    /// balconista achar que a correção estava quebrada).
-    pub fn clicar_no_local(&mut self, cx: &mut Context<Self>) {
-        if crate::acesso_da_conta::pode_mudar_local() {
-            self.abrir_correcao_do_local(cx);
-        } else {
-            self.avisar_do_gesto(LOCAL_SEM_PERMISSAO, false, cx);
-        }
-    }
-
     /// 📍 "Corrigir o local": abre o diálogo com o outro local como destino.
     pub fn abrir_correcao_do_local(&mut self, cx: &mut Context<Self>) {
         if self.aberta.is_none() || !crate::acesso_da_conta::pode_mudar_local() {
@@ -5986,10 +5968,12 @@ impl Detalhe {
                             .disabled(self.estudio_de_antes.is_some()),
                     ))
             }))
-            // 📍 O local da sessão (18/out/2026), e a correção dele para quem
-            // pode. Some para quem tem o local escondido no perfil.
+            // 📍 A correção do local da sessão, só para quem pode: sem "Mudar
+            // o local da sessão" no perfil o botão não existe (dono, 05/nov/2026),
+            // e some também para quem tem o local escondido.
             .children(
                 (self.aberta.is_some()
+                    && crate::acesso_da_conta::pode_mudar_local()
                     && crate::acesso_da_conta::mostra_local(self.local_da_galeria()))
                 .then(|| {
                     let local = self.local_da_galeria();
@@ -5998,7 +5982,9 @@ impl Detalhe {
                         .child(Icon::new(Icone::MapPin).size(px(14.)))
                         .child(local.rotulo())
                         .tooltip("Corrigir o local da sessão")
-                        .on_click(cx.listener(|tela, _ev, _window, cx| tela.clicar_no_local(cx)))
+                        .on_click(cx.listener(|tela, _ev, _window, cx| {
+                            tela.abrir_correcao_do_local(cx)
+                        }))
                 }),
             )
             .child(divisor_de_grupo())
@@ -13696,12 +13682,11 @@ mod testes {
         crate::acesso_da_conta::definir_acesso(None);
     }
 
-    /// 📍 **O clique no local sempre responde** (dono, 18/out/2026: *"nem
-    /// aparece popup"*): sem a permissão ele avisa o que pedir e não abre a
-    /// correção; com ela, o diálogo abre. Pelo clique de verdade no selo do
-    /// cabeçalho, e não pelo método.
+    /// 📍 **Sem "Mudar o local da sessão" no perfil, o botão do local não
+    /// existe** (dono, 05/nov/2026: *"nem deveria aparecer o botão"*). Com a
+    /// permissão ele aparece e o clique de verdade abre a correção.
     #[gpui_kit::test]
-    fn o_clique_no_local_sem_permissao_avisa_o_que_pedir(cx: &mut TestAppContext) {
+    fn o_botao_do_local_so_existe_com_a_permissao(cx: &mut TestAppContext) {
         crate::acesso_da_conta::definir_acesso(Some(biblioteca_core::acesso::Acesso {
             permissoes: vec!["OperateCounter".into()],
             ..Default::default()
@@ -13714,30 +13699,25 @@ mod testes {
         entrar(cx, &janela);
         let mut visual = gpui_kit::VisualTestContext::from_window(janela.into(), cx);
         visual.run_until_parked();
-        let selo = visual
-            .debug_bounds("sessao-local")
-            .expect("o local aparece no cabeçalho")
-            .center();
-        // O primeiro evento de ponteiro da janela de teste se perde.
-        visual.simulate_mouse_move(selo, None, gpui_kit::Modifiers::none());
-        visual.simulate_click(selo, gpui_kit::Modifiers::none());
-        visual.run_until_parked();
-        janela
-            .update(cx, |tela, _window, _cx| {
-                assert!(
-                    tela.correcao_do_local.aberto().is_none(),
-                    "sem permissão não abre"
-                );
-                assert_eq!(tela.ultimo_aviso(), Some(LOCAL_SEM_PERMISSAO));
-            })
-            .unwrap();
+        assert!(
+            visual.debug_bounds("sessao-local").is_none(),
+            "sem a permissão o botão não aparece"
+        );
 
         crate::acesso_da_conta::definir_acesso(Some(biblioteca_core::acesso::Acesso {
             permissoes: vec!["OperateCounter".into(), "ChangeSessionLocation".into()],
             pode_mudar_local: true,
             ..Default::default()
         }));
-        visual.simulate_click(selo, gpui_kit::Modifiers::none());
+        janela.update(cx, |_tela, _window, cx| cx.notify()).unwrap();
+        visual.run_until_parked();
+        let botao = visual
+            .debug_bounds("sessao-local")
+            .expect("com a permissão o botão aparece")
+            .center();
+        // O primeiro evento de ponteiro da janela de teste se perde.
+        visual.simulate_mouse_move(botao, None, gpui_kit::Modifiers::none());
+        visual.simulate_click(botao, gpui_kit::Modifiers::none());
         visual.run_until_parked();
         assert!(
             visual.debug_bounds("correcao-do-local").is_some(),
