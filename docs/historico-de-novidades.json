@@ -1,5 +1,18 @@
 [
   {
+    "versao": "0.1.191",
+    "data": "2026-11-08",
+    "titulo": "Mandar mensagem no WhatsApp para o cliente que saiu sem ler o QR.",
+    "importante": false,
+    "novidades": [
+      "No painel do bot da sessão, o botão \"Mensagem no WhatsApp\" manda ao cliente que deixou só o telefone uma mensagem com o botão \"Receber minhas fotos\". Quando ele toca, o bot segue como se tivesse lido o QR.",
+      "Antes de enviar, o diálogo mostra o custo da mensagem na Meta, com o link dos preços, e pede o WhatsApp do cliente. Número fora do padrão não é enviado, e a tela diz o que corrigir.",
+      "Enquanto a Meta não aprovar a mensagem, o diálogo avisa para tentar mais tarde; quando ela aprova, o botão Sim libera sozinho.",
+      "Depois do envio, o painel mostra a hora da mensagem e o final do número."
+    ],
+    "por_que_atualizar": "Para chamar pelo bot o cliente de excursão que saiu com pressa sem ler o QR."
+  },
+  {
     "versao": "0.1.190",
     "data": "2026-11-08",
     "titulo": "O cartão do QR mostra quem preencheu o formulário do site.",
