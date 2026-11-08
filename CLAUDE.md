@@ -363,9 +363,28 @@ versões anteriores — e o `make producao` do e-commerce levar o `dev` ao `main
 `lancar-o-app-desktop`, no repositório do e-commerce.
 
 🚨 **Produção só sai do `main`, e só com o `main` dos três projetos em dia** (dono, 24/set/2026):
-este, o e-commerce e a landing `fotoamodaantiga`. O trabalho fica no `dev`. Quem confere e quem leva
-o `dev` ao `main` nos três é `../recordarfotos-e-commerce/scripts/mains.sh` (`make mains` lá). Nunca
-`git push origin main` daqui à mão.
+este, o e-commerce e a landing `fotoamodaantiga`. O trabalho fica no `dev`, e entra nele por PR
+(seção abaixo). Quem confere e quem leva o `dev` ao `main` nos três é
+`../recordarfotos-e-commerce/scripts/mains.sh` (`make mains` lá). Nunca `git push origin main`
+daqui à mão.
+
+### 🔀 Issue e PR — todo trabalho entra no `dev` por pull request (desde 8/nov/2026)
+
+> *"vamos fazer issue e PRs igual estamos fazendo em RavenRS"* — dono, 8/nov/2026.
+
+O fluxo é o mesmo dos três projetos, descrito no CLAUDE.md do e-commerce (seção "Issue e PR"):
+issue antes (template de defeito ou melhoria), branch `claude/<assunto>` numa worktree a partir do
+`origin/dev`, PR para o `dev` pelo template, `Closes #N` na descrição e nos commits, merge só com o
+ok do dono no chat, e a issue fecha quando o `make mains` leva o commit ao `main`. O que é deste
+repositório:
+
+- **A worktree fica em `.claude/worktrees/<assunto>`**, que o `.gitignore` ignora. Ela resolve o
+  checkout dividido entre sessões: cada uma faz commit só do que é dela.
+- **O `target` da worktree é o maior custo de disco da máquina.** Compile com
+  `CARGO_INCREMENTAL=0`, um build do app por vez, e apague o `target` assim que a última compilação
+  dela acabar; ao juntar o PR, apague a worktree.
+- **O commit da versão continua sendo o último**: num PR que lança versão, ele é o último commit do
+  branch, e o número se decide com `git fetch` na hora (outra sessão pode ter lançado o mesmo).
 
 🚨 **O commit da versão é o último commit de código.** Quem compilou a 0.1.N não recompila outra
 0.1.N: uma correção que entra depois não chega a ninguém. E **não há volta de versão**: um lançamento
