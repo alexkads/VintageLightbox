@@ -544,17 +544,16 @@ pub async fn montar_fotolivro(
             }
             Ok((_, foto, Err(erro))) => {
                 falhas += 1;
-                let _ = canal.send(Andamento::Falhou {
-                    destino: PathBuf::from(&foto.nome),
-                    erro: frase_do_erro(&erro),
-                });
+                falhou(&canal, "foto do livro", PathBuf::from(&foto.nome), &erro);
             }
             Err(erro) => {
                 falhas += 1;
-                let _ = canal.send(Andamento::Falhou {
-                    destino: PathBuf::new(),
-                    erro: format!("a foto parou no meio: {erro}"),
-                });
+                falhou(
+                    &canal,
+                    "foto do livro",
+                    PathBuf::new(),
+                    &format!("a foto parou no meio: {erro}"),
+                );
             }
         }
     }
@@ -592,19 +591,13 @@ pub async fn montar_fotolivro(
                     if let Err(erro) = entregar(&destino, entrega, sessao_da_entrega, &*site).await
                     {
                         falhas += 1;
-                        let _ = canal.send(Andamento::Falhou {
-                            destino: destino.clone(),
-                            erro,
-                        });
+                        falhou(&canal, "entrega do livro", destino.clone(), &erro);
                     }
                 }
             }
             Err(erro) => {
                 falhas += 1;
-                let _ = canal.send(Andamento::Falhou {
-                    destino: destino.clone(),
-                    erro,
-                });
+                falhou(&canal, "livro", destino.clone(), &erro);
             }
         }
     }
@@ -680,18 +673,22 @@ pub async fn exportar_lote(
             }
             Ok((destino, Err(erro))) => {
                 falhas += 1;
-                let _ = canal.send(Andamento::Falhou {
-                    destino,
-                    erro: frase_do_erro(&erro),
-                });
+                let etapa = if entrega.is_some() {
+                    "entrega"
+                } else {
+                    "arquivo"
+                };
+                falhou(&canal, etapa, destino, &erro);
             }
             // Uma tarefa que entrou em pânico ainda é uma foto que não saiu.
             Err(erro) => {
                 falhas += 1;
-                let _ = canal.send(Andamento::Falhou {
-                    destino: PathBuf::new(),
-                    erro: format!("a exportação parou no meio: {erro}"),
-                });
+                falhou(
+                    &canal,
+                    "arquivo",
+                    PathBuf::new(),
+                    &format!("a exportação parou no meio: {erro}"),
+                );
             }
         }
     }
@@ -762,6 +759,29 @@ async fn gravar_por_cima(parcial: &Path, destino: &Path) -> Result<(), String> {
             Err(format!("o arquivo não pôde ser gravado: {erro}"))
         }
     }
+}
+
+/// A foto, o livro ou a entrega que não saiu: a frase vai para a tela e o
+/// erro cru, para a telemetria.
+///
+/// 🔎 **Antes, a falha ficava só no diálogo** (#8). Um balcão dizia "não
+/// consigo exportar", e o painel de ocorrências não tinha nada para ler. A
+/// telemetria já junta os repetidos e tem teto por hora, então um lote inteiro
+/// falhando vira poucas linhas. Vai o erro cru, e não a [`frase_do_erro`]: é
+/// ele que diz a causa a quem investiga.
+fn falhou(canal: &Sender<Andamento>, etapa: &str, destino: PathBuf, erro: &str) {
+    crate::telemetria::erro("exportacao", &relato_da_falha(etapa, erro));
+    let _ = canal.send(Andamento::Falhou {
+        destino,
+        erro: frase_do_erro(erro),
+    });
+}
+
+/// A mensagem da ocorrência: a etapa que falhou e o erro, sem o nome do
+/// arquivo de destino. O nome é do cliente, e com ele cada foto de um lote
+/// virava uma mensagem diferente, que a telemetria não juntaria.
+fn relato_da_falha(etapa: &str, erro: &str) -> String {
+    format!("{etapa}: {erro}")
 }
 
 /// O erro na língua de quem está no balcão.
@@ -1446,6 +1466,36 @@ mod testes {
         assert!(andamentos.iter().any(|a| matches!(a,
             Andamento::Falhou { erro, .. } if erro.contains("entre na conta"))));
         assert_eq!(terminou(&andamentos), (0, 1, 0));
+    }
+
+    /// 🔎 A ocorrência diz a etapa e a causa crua, e não leva o nome do
+    /// arquivo: duas fotos do mesmo lote falhando igual são o mesmo relato.
+    #[test]
+    fn a_falha_relatada_diz_a_etapa_e_a_causa_crua() {
+        let relato = relato_da_falha("arquivo", "Photo ID inválido");
+        assert_eq!(relato, "arquivo: Photo ID inválido");
+        assert_eq!(relato, relato_da_falha("arquivo", "Photo ID inválido"));
+        assert!(!relato.contains("a foto não está no catálogo"), "{relato}");
+    }
+
+    /// Falhar avisa a tela com a frase de balcão, mesmo com a telemetria
+    /// desligada (como nos testes e antes da conta entrar).
+    #[test]
+    fn falhar_avisa_a_tela_com_a_frase() {
+        let (canal, recebe) = std::sync::mpsc::channel();
+        falhou(
+            &canal,
+            "livro",
+            PathBuf::from("livro.pdf"),
+            "Photo ID inválido",
+        );
+        match recebe.try_recv() {
+            Ok(Andamento::Falhou { destino, erro }) => {
+                assert_eq!(destino, PathBuf::from("livro.pdf"));
+                assert_eq!(erro, "a foto não está no catálogo deste computador");
+            }
+            outro => panic!("esperava a falha, veio {outro:?}"),
+        }
     }
 
     /// O erro de programador vira frase de balcão.
