@@ -129,6 +129,8 @@ pub fn nome_do_canal(canal: &str) -> &'static str {
         "telegram" => "Telegram",
         "messenger" => "Messenger",
         "web" => "chat do site",
+        // 📝 O formulário da página do QR: guarda o que o cliente preencheu.
+        "formulario" => "formulário do site",
         _ => "bot",
     }
 }
