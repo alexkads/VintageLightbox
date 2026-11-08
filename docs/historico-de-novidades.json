@@ -1,5 +1,15 @@
 [
   {
+    "versao": "0.1.190",
+    "data": "2026-11-08",
+    "titulo": "O cartão do QR mostra quem preencheu o formulário do site.",
+    "importante": false,
+    "novidades": [
+      "O cartão do QR, na tela da sessão, mostra \"formulário do site\" para o cliente que preencheu os dados pela página do QR."
+    ],
+    "por_que_atualizar": "Para o cartão do QR dizer por onde o cliente fez o cadastro."
+  },
+  {
     "versao": "0.1.189",
     "data": "2026-11-05",
     "titulo": "Correções internas de estabilidade.",
