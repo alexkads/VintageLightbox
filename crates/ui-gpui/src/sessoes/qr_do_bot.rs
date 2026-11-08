@@ -31,6 +31,24 @@ pub struct SituacaoDoBot {
     pub qr: Vec<Vec<bool>>,
     #[serde(default)]
     pub clientes: Vec<ClienteNoBot>,
+    /// 📞 O chamado por modelo, se já saiu. A API anterior não manda.
+    #[serde(default)]
+    pub chamado: Option<ChamadoNaTela>,
+    /// 📞 O botão "Mandar mensagem no WhatsApp" aparece — a regra é do site.
+    #[serde(default)]
+    pub pode_chamar: bool,
+}
+
+/// 📞 O chamado de quem deixou o telefone e saiu sem ler o QR (dono,
+/// 08/11/2026): o bot manda o modelo da Meta com o botão "Receber minhas
+/// fotos". Uma vez por sessão — a regra inteira é do site
+/// (`application::pos_venda::chamado`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ChamadoNaTela {
+    /// RFC 3339.
+    pub chamado_em: String,
+    /// Os 4 últimos dígitos do número chamado.
+    pub final_do_numero: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -75,6 +93,144 @@ pub const PEDIDO_DO_NOVO_QR: &str = "bot-da-sessao-novo-qr";
 
 pub fn caminho_do_novo_qr(galeria_id: &str) -> String {
     format!("/pos-venda/galerias/{galeria_id}/bot/novo-convite")
+}
+
+/// 📞 "Mandar mensagem no WhatsApp": devolve `{enviado, mensagem}` — a recusa (janela
+/// aberta, já chamado…) é regra, não erro.
+pub const PEDIDO_DO_CHAMADO: &str = "bot-da-sessao-chamar";
+
+pub fn caminho_do_chamado(galeria_id: &str) -> String {
+    format!("/pos-venda/galerias/{galeria_id}/bot/chamar")
+}
+
+/// 📞 O diálogo abriu: o modelo está aprovado na Meta? e o número da sessão.
+pub const PEDIDO_DA_PREVIA_DO_CHAMADO: &str = "bot-da-sessao-previa-do-chamado";
+
+/// 📡 As mudanças de situação dos modelos do WhatsApp — o diálogo relê quando
+/// a Meta aprova (dono, 08/11/2026: *"precisa usar SSE"*).
+pub const CAMINHO_DOS_MODELOS: &str = "/pos-venda/modelos/eventos";
+
+/// 💵 Onde a Meta publica o preço de cada mensagem (o link do diálogo).
+pub const PRECOS_DA_META: &str = "https://developers.facebook.com/docs/whatsapp/pricing";
+
+/// 📞 O que `GET …/bot/chamar` devolve.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct PreviaDoChamado {
+    pub pode_enviar: bool,
+    #[serde(default)]
+    pub aviso: Option<String>,
+    #[serde(default)]
+    pub whatsapp_da_sessao: Option<String>,
+}
+
+/// 📡 O evento é de um modelo da Meta que mudou de situação?
+pub fn evento_de_modelo(dados: &serde_json::Value) -> bool {
+    dados["tipo"].as_str() == Some("modelo_mudou")
+}
+
+const DDDS: [u8; 67] = [
+    11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 24, 27, 28, 31, 32, 33, 34, 35, 37, 38, 41, 42, 43,
+    44, 45, 46, 47, 48, 49, 51, 53, 54, 55, 61, 62, 63, 64, 65, 66, 67, 68, 69, 71, 73, 74, 75, 77,
+    79, 81, 82, 83, 84, 85, 86, 87, 88, 89, 91, 92, 93, 94, 95, 96, 97, 98, 99,
+];
+
+/// 📞 O número antes de uma mensagem paga — a mesma regra do site
+/// (`domain::shared::phone::whatsapp_para_enviar` no e-commerce), aqui para o
+/// diálogo dizer na hora o que corrigir. Quem decide é o site.
+pub fn validar_whatsapp(bruto: &str) -> Result<String, String> {
+    let bruto = bruto.trim();
+    if bruto.is_empty() {
+        return Err("Informe o número do WhatsApp do cliente.".to_string());
+    }
+    if bruto
+        .chars()
+        .any(|c| !(c.is_ascii_digit() || " ()-.+".contains(c)))
+    {
+        return Err("O número só pode ter algarismos, espaço, parênteses, traço e +.".to_string());
+    }
+    let digitos: String = bruto.chars().filter(char::is_ascii_digit).collect();
+    if bruto.starts_with('+') && !digitos.starts_with("55") {
+        return if (10..=15).contains(&digitos.len()) {
+            Ok(digitos)
+        } else {
+            Err(
+                "Número de fora do Brasil: + código do país e o número, de 10 a 15 algarismos."
+                    .to_string(),
+            )
+        };
+    }
+    let mut local = digitos.trim_start_matches('0');
+    if local.len() >= 12 && local.starts_with("55") {
+        local = &local[2..];
+    }
+    if local.len() == 10 {
+        return Err("Celular precisa do 9 na frente: (DDD) 9XXXX-XXXX.".to_string());
+    }
+    if local.len() != 11 {
+        return Err(
+            "Número incompleto ou com algarismos a mais: use (DDD) 9XXXX-XXXX.".to_string(),
+        );
+    }
+    let ddd: u8 = local[..2].parse().unwrap_or(0);
+    if !DDDS.contains(&ddd) {
+        return Err(format!("O DDD {ddd} não existe."));
+    }
+    if !local[2..].starts_with('9') {
+        return Err("Celular começa com 9 depois do DDD: (DDD) 9XXXX-XXXX.".to_string());
+    }
+    Ok(format!("55{local}"))
+}
+
+/// 📞 O que a resposta do chamado diz: se saiu e a frase do site.
+pub fn resposta_do_chamado(v: &serde_json::Value) -> (bool, String) {
+    let enviado = v["enviado"].as_bool().unwrap_or(false);
+    let frase = v["mensagem"]
+        .as_str()
+        .filter(|m| !m.trim().is_empty())
+        .unwrap_or(if enviado {
+            "Mensagem enviada."
+        } else {
+            "A mensagem não saiu."
+        })
+        .to_string();
+    (enviado, frase)
+}
+
+/// 📞 A linha do chamado no painel — a mesma frase do site
+/// (`linhaDoChamado`): quando saiu, para que final, e se o cliente já veio.
+pub fn linha_do_chamado<Tz: chrono::TimeZone>(
+    chamado: &ChamadoNaTela,
+    clientes: &[ClienteNoBot],
+    agora: chrono::DateTime<Tz>,
+) -> String
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let espera = if clientes.is_empty() {
+        " · esperando o toque"
+    } else {
+        " · o cliente respondeu"
+    };
+    let quando = match chrono::DateTime::parse_from_rfc3339(&chamado.chamado_em) {
+        Ok(em) => {
+            let em = em.with_timezone(&agora.timezone());
+            if em.date_naive() == agora.date_naive() {
+                format!("às {}", em.format("%H:%M"))
+            } else {
+                format!("em {} às {}", em.format("%d/%m"), em.format("%H:%M"))
+            }
+        }
+        Err(_) => String::new(),
+    };
+    let quando = if quando.is_empty() {
+        String::new()
+    } else {
+        format!(" {quando}")
+    };
+    format!(
+        "Mensagem enviada no WhatsApp{quando} (final {}){espera}",
+        chamado.final_do_numero
+    )
 }
 
 /// O lugar padrão do painel do atendente: 24 pt da direita e 150 do alto —
@@ -345,6 +501,8 @@ pub struct EstadoDoQr {
     pub painel_aberto: bool,
     /// O "Novo QR" no ar.
     pub trocando: bool,
+    /// 📞 O "Mandar mensagem no WhatsApp" no ar.
+    pub chamando: bool,
     pub lendo: bool,
     pub releitura_pendente: bool,
     /// Enquanto viva, o tempo real desta sessão fica aberto.
@@ -361,6 +519,7 @@ impl Default for EstadoDoQr {
             ligado: true,
             painel_aberto: true,
             trocando: false,
+            chamando: false,
             lendo: false,
             releitura_pendente: false,
             guarda: None,
@@ -417,6 +576,96 @@ mod testes {
         assert!(
             mudou_algum_dado(Some(&[um]), &[respondeu]),
             "respondeu uma pergunta"
+        );
+    }
+
+    #[test]
+    fn o_chamado_vem_do_site_e_vira_a_linha_do_painel() {
+        let json = serde_json::json!({
+            "convite": { "codigo": "RF-ABC234", "url": "https://x/s/RF-ABC234" },
+            "qr": [[true]],
+            "clientes": [],
+            "chamado": { "chamado_em": "2026-11-08T17:32:00Z", "final_do_numero": "0000" },
+            "pode_chamar": false
+        });
+        let s: SituacaoDoBot = serde_json::from_value(json).unwrap();
+        let chamado = s.chamado.clone().unwrap();
+        let brasilia = chrono::FixedOffset::west_opt(3 * 3600).unwrap();
+        let mesmo_dia = chrono::DateTime::parse_from_rfc3339("2026-11-08T20:00:00Z")
+            .unwrap()
+            .with_timezone(&brasilia);
+        assert_eq!(
+            linha_do_chamado(&chamado, &s.clientes, mesmo_dia),
+            "Mensagem enviada no WhatsApp às 14:32 (final 0000) · esperando o toque"
+        );
+        let outro_dia = chrono::DateTime::parse_from_rfc3339("2026-11-10T12:00:00Z")
+            .unwrap()
+            .with_timezone(&brasilia);
+        assert_eq!(
+            linha_do_chamado(&chamado, &[cliente("whatsapp", "nome", None)], outro_dia),
+            "Mensagem enviada no WhatsApp em 08/11 às 14:32 (final 0000) · o cliente respondeu"
+        );
+    }
+
+    #[test]
+    fn o_numero_e_validado_como_no_site() {
+        for bom in [
+            "(54) 99999-0000",
+            "54999990000",
+            "054 99999 0000",
+            "+55 54 99999-0000",
+        ] {
+            assert_eq!(
+                validar_whatsapp(bom).as_deref(),
+                Ok("5554999990000"),
+                "{bom}"
+            );
+        }
+        assert_eq!(
+            validar_whatsapp("+54 9 11 2345-6789").as_deref(),
+            Ok("5491123456789")
+        );
+        assert!(validar_whatsapp("(54) 9999-0000")
+            .unwrap_err()
+            .contains("9 na frente"));
+        assert!(validar_whatsapp("(20) 99999-0000")
+            .unwrap_err()
+            .contains("DDD 20"));
+        assert!(validar_whatsapp("").is_err());
+    }
+
+    #[test]
+    fn so_o_evento_de_modelo_rele_o_dialogo() {
+        assert!(evento_de_modelo(
+            &serde_json::json!({ "tipo": "modelo_mudou" })
+        ));
+        assert!(!evento_de_modelo(
+            &serde_json::json!({ "tipo": "cliente_no_bot" })
+        ));
+    }
+
+    #[test]
+    fn a_api_anterior_nao_manda_o_chamado() {
+        let s: SituacaoDoBot = serde_json::from_value(serde_json::json!({
+            "convite": { "codigo": "RF-ABC234", "url": "https://x/s/RF-ABC234" },
+            "qr": [[true]]
+        }))
+        .unwrap();
+        assert_eq!(s.chamado, None);
+        assert!(!s.pode_chamar);
+    }
+
+    #[test]
+    fn a_resposta_do_chamado_traz_a_frase_do_site() {
+        assert_eq!(
+            resposta_do_chamado(
+                &serde_json::json!({ "enviado": false, "mensagem": "A mensagem desta sessão já foi enviada." })
+            ),
+            (false, "A mensagem desta sessão já foi enviada.".to_string())
+        );
+        assert_eq!(
+            resposta_do_chamado(&serde_json::json!({ "enviado": true })),
+            (true, "Mensagem enviada.".to_string())
         );
     }
 

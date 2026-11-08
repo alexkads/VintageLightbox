@@ -100,6 +100,7 @@ pub fn tipo_de_aviso(tipo: &str) -> &str {
         "vencimento_download" => "Vencimento do download",
         "fotolivro" => "Fotolivro",
         "fotolivro_whatsapp" => "Fotolivro (WhatsApp)",
+        "chamado_whatsapp" => "Mensagem da sessão no WhatsApp (modelo)",
         outro => outro,
     }
 }

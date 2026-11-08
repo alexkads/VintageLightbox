@@ -935,6 +935,8 @@ pub struct Detalhe {
     gravando_dados: Option<(MotivoDoFormulario, DadosDoCliente)>,
     /// 📍 A correção do local da sessão, quando aberta — ver [`CorrecaoDoLocal`].
     correcao_do_local: Modal<CorrecaoDoLocal>,
+    /// 📞 O diálogo da mensagem no WhatsApp — ver [`MensagemDoChamado`].
+    mensagem_no_whatsapp: Modal<MensagemDoChamado>,
     /// 🔁 A foto em que a Revelação estava quando o app fechou, e desde quando
     /// se espera por ela — ver [`Detalhe::revelar_ao_carregar`].
     revelar_lembrada: Option<(String, std::time::Instant)>,
@@ -1019,6 +1021,21 @@ struct FormularioDoCliente {
 /// erroneamente, deverá ter um recurso de correção de local"*). O
 /// `LocalDaGaleria` do site: com dois locais, o certo é sempre o outro — o
 /// diálogo diz de onde para onde e pede o motivo, que fica na trilha.
+/// 📞 **Mensagem no WhatsApp** — o diálogo antes de o bot falar primeiro com
+/// o cliente que deixou o telefone e saiu sem ler o QR (dono, 08/11/2026): o
+/// custo na Meta e o link dos preços, a caixa do número validado, o aviso de
+/// modelo ainda não aprovado e Não / Sim. Aberto, relê a prévia quando a Meta
+/// muda a situação de um modelo (SSE). O mesmo diálogo do site
+/// (`mensagem-no-whatsapp.tsx`); a regra é do site.
+struct MensagemDoChamado {
+    /// `None` até a primeira pintura com janela.
+    numero: Option<Entity<InputState>>,
+    /// `None` enquanto a prévia não volta ("Consultando a Meta…").
+    previa: Option<super::qr_do_bot::PreviaDoChamado>,
+    erro: Option<SharedString>,
+    enviando: bool,
+}
+
 struct CorrecaoDoLocal {
     para: LocalDaSessao,
     /// `None` até a primeira pintura com janela, como os dados do cliente.
@@ -1247,6 +1264,7 @@ impl Detalhe {
             dados_do_cliente: Modal::default(),
             gravando_dados: None,
             correcao_do_local: Modal::default(),
+            mensagem_no_whatsapp: Modal::default(),
             revelar_lembrada: None,
             carregando: false,
             erro: None,
@@ -4202,6 +4220,49 @@ impl Detalhe {
                     self.chegou_a_correcao_do_local(resultado, cx);
                 }
                 Recado::Json { rotulo, resultado }
+                    if rotulo == super::qr_do_bot::PEDIDO_DA_PREVIA_DO_CHAMADO =>
+                {
+                    if let Some(m) = self.mensagem_no_whatsapp.aberto_mut() {
+                        match resultado.and_then(|v| {
+                            serde_json::from_value::<super::qr_do_bot::PreviaDoChamado>(v)
+                                .map_err(|e| e.to_string())
+                        }) {
+                            Ok(previa) => m.previa = Some(previa),
+                            Err(erro) => m.erro = Some(crate::erro_da_api::legivel(&erro).into()),
+                        }
+                    }
+                }
+                Recado::Json { rotulo, resultado }
+                    if rotulo == super::qr_do_bot::PEDIDO_DO_CHAMADO =>
+                {
+                    self.bot.chamando = false;
+                    if let Some(m) = self.mensagem_no_whatsapp.aberto_mut() {
+                        m.enviando = false;
+                    }
+                    match resultado {
+                        Ok(v) => {
+                            let (enviado, frase) = super::qr_do_bot::resposta_do_chamado(&v);
+                            if enviado {
+                                self.mensagem_no_whatsapp.fechar_depois(cx);
+                                self.avisar_sucesso(frase, cx);
+                                self.ler_o_bot(cx);
+                            } else {
+                                // Recusa é regra (modelo, janela, número): fica
+                                // no diálogo, que relê a prévia.
+                                if let Some(m) = self.mensagem_no_whatsapp.aberto_mut() {
+                                    m.erro = Some(frase.into());
+                                }
+                                self.pedir_a_previa_do_chamado(cx);
+                            }
+                        }
+                        Err(erro) => {
+                            if let Some(m) = self.mensagem_no_whatsapp.aberto_mut() {
+                                m.erro = Some(crate::erro_da_api::legivel(&erro).into());
+                            }
+                        }
+                    }
+                }
+                Recado::Json { rotulo, resultado }
                     if rotulo == super::qr_do_bot::PEDIDO_DO_NOVO_QR =>
                 {
                     self.bot.trocando = false;
@@ -4866,7 +4927,11 @@ impl Detalhe {
         let (envia, recebe) = channel();
         self.bot.guarda = Some(escuta.escutar(
             sessao,
-            vec![("galeria", super::qr_do_bot::caminho_dos_eventos(&id))],
+            vec![
+                ("galeria", super::qr_do_bot::caminho_dos_eventos(&id)),
+                // 📡 A Meta aprovou um modelo: o diálogo aberto relê a prévia.
+                ("modelos", super::qr_do_bot::CAMINHO_DOS_MODELOS.to_string()),
+            ],
             envia,
         ));
         self.bot.vigia = Some(cx.spawn(async move |esta, cx| {
@@ -4879,10 +4944,12 @@ impl Detalhe {
                     .await;
                 let mut reler = false;
                 let mut reler_a_galeria = false;
+                let mut reler_a_previa = false;
                 loop {
                     match recebe.try_recv() {
                         Ok(crate::tempo_real::Sinal::Evento { dados, .. }) => {
                             reler |= super::qr_do_bot::evento_do_bot(&dados);
+                            reler_a_previa |= super::qr_do_bot::evento_de_modelo(&dados);
                             reler_a_galeria |= super::qr_do_bot::evento_de_fotos_pagas(&dados);
                         }
                         Ok(crate::tempo_real::Sinal::Pronto { .. }) => {
@@ -4901,6 +4968,17 @@ impl Detalhe {
                     }
                 }
                 if reler && esta.update(cx, |tela, cx| tela.ler_o_bot(cx)).is_err() {
+                    return;
+                }
+                if reler_a_previa
+                    && esta
+                        .update(cx, |tela, cx| {
+                            if tela.mensagem_no_whatsapp.aberto().is_some() {
+                                tela.pedir_a_previa_do_chamado(cx);
+                            }
+                        })
+                        .is_err()
+                {
                     return;
                 }
                 // 💳 O pagamento do cliente no pós-venda (ou o que se perdeu numa
@@ -5155,6 +5233,66 @@ impl Detalhe {
         );
         let ligado = self.bot.ligado;
 
+        // 📞 O chamado de quem deixou o telefone sem ler o QR: a linha depois
+        // que saiu, o botão enquanto o site deixar (`pode_chamar`).
+        let chamado = if let Some(c) = situacao.chamado.as_ref() {
+            Some(
+                h_flex()
+                    .pt(px(6.))
+                    .border_t_1()
+                    .border_color(borda)
+                    .gap(px(6.))
+                    .items_start()
+                    .text_xs()
+                    .text_color(fraco)
+                    .child(
+                        gpui_kit::component::Icon::new(Icone::MessageCircle)
+                            .size(px(13.))
+                            .text_color(fraco),
+                    )
+                    .child(div().flex_1().child(super::qr_do_bot::linha_do_chamado(
+                        c,
+                        &situacao.clientes,
+                        chrono::Local::now(),
+                    )))
+                    .into_any_element(),
+            )
+        } else if situacao.pode_chamar {
+            let chamando = self.bot.chamando;
+            Some(
+                div()
+                    .pt(px(6.))
+                    .border_t_1()
+                    .border_color(borda)
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.))
+                    .child(div().text_xs().text_color(fraco).child(
+                        "Saiu sem ler o QR? O bot manda uma mensagem para o WhatsApp do cliente.",
+                    ))
+                    .child(
+                        crate::estilo::botao_contorno_pequeno("painel-do-bot-chamar", cx)
+                            .debug_selector(|| "painel-do-bot-chamar".into())
+                            .w_full()
+                            .disabled(chamando)
+                            .child(
+                                gpui_kit::component::Icon::new(Icone::MessageCircle).size(px(13.)),
+                            )
+                            .child(if chamando {
+                                "Enviando…"
+                            } else {
+                                "Mensagem no WhatsApp"
+                            })
+                            .on_click(
+                                cx.listener(|tela, _, _, cx| tela.abrir_mensagem_no_whatsapp(cx)),
+                            ),
+                    )
+                    .into_any_element(),
+            )
+        } else {
+            None
+        };
+
         let cabecalho = h_flex()
             .id("painel-do-bot-titulo")
             .gap(px(6.))
@@ -5404,6 +5542,7 @@ impl Detalhe {
                             .children(clientes)
                             .into_any_element()
                     })
+                    .children(chamado)
                     .child(
                         canvas(
                             move |limites, _, _| {
@@ -5440,6 +5579,233 @@ impl Detalhe {
         self.posicao_do_painel_do_bot =
             super::qr_do_bot::dentro_da_janela(nova, self.tamanho_do_painel_do_bot.get(), janela);
         cx.notify();
+    }
+
+    /// 📞 "Mensagem no WhatsApp": abre o diálogo e pede a prévia — o modelo
+    /// está aprovado na Meta? e o número da sessão.
+    pub fn abrir_mensagem_no_whatsapp(&mut self, cx: &mut Context<Self>) {
+        if self.mensagem_no_whatsapp.aberto().is_none() {
+            self.mensagem_no_whatsapp
+                .abrir_sem_janela(MensagemDoChamado {
+                    numero: None,
+                    previa: None,
+                    erro: None,
+                    enviando: false,
+                });
+        }
+        self.pedir_a_previa_do_chamado(cx);
+        cx.notify();
+    }
+
+    fn pedir_a_previa_do_chamado(&mut self, cx: &mut Context<Self>) {
+        let (Some(sessao), Some(id)) = (self.sessao.clone(), self.galeria_id.clone()) else {
+            return;
+        };
+        self.publicador.pedir_json(
+            sessao,
+            crate::pos_venda::porta::PedidoJson::ler(
+                super::qr_do_bot::PEDIDO_DA_PREVIA_DO_CHAMADO,
+                super::qr_do_bot::caminho_do_chamado(&id),
+            ),
+            self.da_sessao.0.clone(),
+        );
+        self.acompanhar(cx);
+    }
+
+    pub fn fechar_mensagem_no_whatsapp(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self
+            .mensagem_no_whatsapp
+            .aberto()
+            .is_some_and(|m| m.enviando)
+        {
+            return;
+        }
+        self.mensagem_no_whatsapp.fechar(window, cx);
+        cx.notify();
+    }
+
+    /// O campo do número nasce na primeira pintura, com o WhatsApp da sessão.
+    fn preparar_mensagem_no_whatsapp(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self
+            .mensagem_no_whatsapp
+            .aberto()
+            .is_some_and(|m| m.numero.is_none())
+        {
+            return;
+        }
+        let da_sessao = self
+            .aberta
+            .as_ref()
+            .and_then(|a| a.galeria.whatsapp.clone())
+            .unwrap_or_default();
+        let numero = campo_preenchido(&da_sessao, "(54) 99999-0000", window, cx);
+        if window
+            .root::<gpui_kit::component::Root>()
+            .flatten()
+            .is_some()
+        {
+            let foco = numero.read(cx).focus_handle(cx);
+            self.mensagem_no_whatsapp.focar(&foco, window, cx);
+        }
+        if let Some(m) = self.mensagem_no_whatsapp.aberto_mut() {
+            m.numero = Some(numero);
+        }
+    }
+
+    /// 📞 O "Sim, enviar": valida o número e pede o envio ao site. A regra
+    /// (modelo aprovado, uma vez, janela) é do site; sem rede, a frase da
+    /// conexão — mensagem paga não espera na fila.
+    pub fn enviar_mensagem_no_whatsapp(&mut self, cx: &mut Context<Self>) {
+        let (Some(sessao), Some(id)) = (self.sessao.clone(), self.galeria_id.clone()) else {
+            return;
+        };
+        let Some(m) = self.mensagem_no_whatsapp.aberto_mut() else {
+            return;
+        };
+        if m.enviando || !m.previa.as_ref().is_some_and(|p| p.pode_enviar) {
+            return;
+        }
+        let digitado = m
+            .numero
+            .as_ref()
+            .map(|c| c.read(cx).value().to_string())
+            .unwrap_or_default();
+        if let Err(motivo) = super::qr_do_bot::validar_whatsapp(&digitado) {
+            m.erro = Some(motivo.into());
+            cx.notify();
+            return;
+        }
+        m.erro = None;
+        m.enviando = true;
+        self.bot.chamando = true;
+        self.publicador.pedir_json(
+            sessao,
+            crate::pos_venda::porta::PedidoJson::gravar(
+                super::qr_do_bot::PEDIDO_DO_CHAMADO,
+                "POST",
+                super::qr_do_bot::caminho_do_chamado(&id),
+                serde_json::json!({ "whatsapp": digitado }),
+            ),
+            self.da_sessao.0.clone(),
+        );
+        self.acompanhar(cx);
+        cx.notify();
+    }
+
+    /// 📞 O diálogo da mensagem no WhatsApp.
+    fn dialogo_da_mensagem(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui_kit::AnyElement> {
+        use crate::estilo;
+        let m = self.mensagem_no_whatsapp.aberto()?;
+        let campo = m.numero.as_ref()?;
+        let enviando = m.enviando;
+        let previa = m.previa.clone();
+        let pode = previa.as_ref().is_some_and(|p| p.pode_enviar) && !enviando;
+        let tema = cx.theme();
+        let (perigo, fraco) = (tema.danger, tema.muted_foreground);
+        let aviso = previa.as_ref().and_then(|p| p.aviso.clone()).map(|aviso| {
+            h_flex()
+                .gap(px(8.))
+                .items_start()
+                .p(px(10.))
+                .rounded(crate::tema::canto(8.))
+                .bg(tema.warning.opacity(0.12))
+                .text_sm()
+                .child(
+                    gpui_kit::component::Icon::new(crate::recursos::Icone::TriangleAlert)
+                        .size(px(16.))
+                        .text_color(tema.warning),
+                )
+                .child(div().flex_1().child(aviso))
+        });
+        Some(
+            gpui_kit::component::v_flex()
+                .gap(px(14.))
+                .debug_selector(|| "mensagem-no-whatsapp".into())
+                .on_mouse_down(gpui_kit::MouseButton::Left, |_, _, cx| {
+                    cx.stop_propagation()
+                })
+                .child(estilo::cabecalho_do_dialogo(
+                    "Mandar mensagem ao cliente?",
+                    SharedString::from(
+                        "O cliente ainda não escreveu para o estúdio. Para o bot falar primeiro, \
+                         a Meta cobra a mensagem (modelo de Utilidade, cerca de R$ 0,05 cada). \
+                         Ela sai uma vez por sessão, com o botão \"Receber minhas fotos\"; quando \
+                         o cliente toca, o bot segue sem custo extra.",
+                    ),
+                    Some(crate::recursos::Icone::MessageCircle),
+                    cx,
+                ))
+                .child(
+                    estilo::botao_raso("mensagem-precos-da-meta")
+                        .child("Ver os preços na Meta")
+                        .child(
+                            gpui_kit::component::Icon::new(crate::recursos::Icone::ExternalLink)
+                                .size(px(14.)),
+                        )
+                        .on_click(|_, _, cx| cx.open_url(super::qr_do_bot::PRECOS_DA_META)),
+                )
+                .children(aviso)
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(6.))
+                        .child(
+                            div()
+                                .text_sm()
+                                .font_weight(gpui_kit::FontWeight::MEDIUM)
+                                .child("WhatsApp do cliente"),
+                        )
+                        .child(estilo::campo(Input::new(campo)))
+                        // Linha reservada: a recusa aparece sem o diálogo mudar de tamanho.
+                        .child(
+                            div()
+                                .min_h(px(18.))
+                                .text_xs()
+                                .text_color(perigo)
+                                .children(m.erro.clone()),
+                        )
+                        .child(div().text_xs().text_color(fraco).child(
+                            "Celular com DDD. De fora do Brasil, comece com + e o código do país.",
+                        )),
+                )
+                .child(
+                    estilo::rodape_do_dialogo()
+                        .child(estilo::desligado(
+                            estilo::botao_contorno("mensagem-nao", cx)
+                                .debug_selector(|| "mensagem-nao".into())
+                                .child("Não")
+                                .when(!enviando, |b| {
+                                    b.on_click(cx.listener(|tela, _ev, window, cx| {
+                                        tela.fechar_mensagem_no_whatsapp(window, cx)
+                                    }))
+                                }),
+                            enviando,
+                        ))
+                        .child(estilo::desligado(
+                            estilo::botao_primario("mensagem-sim", cx)
+                                .debug_selector(|| "mensagem-sim".into())
+                                .child(if enviando {
+                                    "Enviando…"
+                                } else if previa.is_none() {
+                                    "Consultando a Meta…"
+                                } else {
+                                    "Sim, enviar"
+                                })
+                                .when(pode, |b| {
+                                    b.on_click(cx.listener(|tela, _ev, _w, cx| {
+                                        tela.enviar_mensagem_no_whatsapp(cx)
+                                    }))
+                                }),
+                            !pode,
+                        )),
+                )
+                .into_any_element(),
+        )
     }
 
     /// 📸 "Novo QR": o código atual para de abrir conversa nova, e outro vai
@@ -5500,6 +5866,7 @@ impl Render for Detalhe {
         }
         self.preparar_formulario_do_cliente(window, cx);
         self.preparar_correcao_do_local(window, cx);
+        self.preparar_mensagem_no_whatsapp(window, cx);
         self.preparar_painel(window, cx);
         self.preparar_lote(window, cx);
         // 🔑 Depois das preparações: os campos dos dados do cliente nascem em
@@ -5578,6 +5945,19 @@ impl Render for Detalhe {
                 crate::dialogo::Jeito::dialogo(440.),
                 Self::dialogo_do_local,
                 |tela, window, cx| tela.fechar_correcao_do_local(window, cx),
+                window,
+                cx,
+            )
+        };
+        // 📞 A mensagem no WhatsApp: Esc e o clique fora fecham, menos enviando.
+        let dialogo_da_mensagem = {
+            let quer = self.mensagem_no_whatsapp.aberto().is_some();
+            crate::dialogo::desenhar(
+                self,
+                quer,
+                crate::dialogo::Jeito::dialogo(440.),
+                Self::dialogo_da_mensagem,
+                |tela, window, cx| tela.fechar_mensagem_no_whatsapp(window, cx),
                 window,
                 cx,
             )
@@ -5703,6 +6083,7 @@ impl Render for Detalhe {
             .children(dialogo_de_descartar)
             .children(formulario_do_cliente)
             .children(dialogo_do_local)
+            .children(dialogo_da_mensagem)
             // 📸 O painel do bot, na posição que o atendente escolheu.
             .children(painel_do_bot)
     }
@@ -10815,9 +11196,13 @@ mod testes {
             .pedidos_json()
             .iter()
             .any(|p| p.caminho == "/pos-venda/galerias/g1/bot"));
+        // A sessão e, para o diálogo da mensagem no WhatsApp, os modelos da Meta.
         assert_eq!(
             escuta.caminhos_da_fonte("galeria"),
-            vec!["/pos-venda/galerias/g1/eventos"]
+            vec![
+                "/pos-venda/galerias/g1/eventos",
+                "/pos-venda/modelos/eventos"
+            ]
         );
         janela
             .update(cx, |tela, _w, cx| {
@@ -11016,6 +11401,125 @@ mod testes {
                 assert!(tela
                     .ultimo_aviso()
                     .is_some_and(|a| a.starts_with("Novo QR na tela do cliente: RF-NOVO23")));
+            })
+            .unwrap();
+    }
+
+    /// 📞 A "Mensagem no WhatsApp": o botão abre o diálogo, que pede a prévia;
+    /// com o modelo aguardando a Meta o Sim fica desligado e o aviso aparece; o
+    /// SSE da aprovação relê a prévia; o número fora de padrão não sai; o
+    /// número certo vai no corpo e o painel relê com a linha da mensagem.
+    #[gpui_kit::test]
+    fn a_mensagem_no_whatsapp_confere_a_meta_e_o_numero(cx: &mut TestAppContext) {
+        let publicador = publicador_com(vec![], false);
+        let escuta = Arc::new(crate::tempo_real::porta::mentira::EscutaDeMentira::default());
+        let mut pode = situacao_do_bot(serde_json::json!([]));
+        pode["pode_chamar"] = serde_json::json!(true);
+        publicador.responder_json(crate::sessoes::qr_do_bot::PEDIDO_DA_SITUACAO, Ok(pode));
+        publicador.responder_json(
+            crate::sessoes::qr_do_bot::PEDIDO_DA_PREVIA_DO_CHAMADO,
+            Ok(serde_json::json!({
+                "pode_enviar": false,
+                "aviso": "O modelo da mensagem ainda não foi aprovado pela Meta (aguardando a análise). Tente mais tarde.",
+                "whatsapp_da_sessao": null,
+            })),
+        );
+        let janela = janela_com(
+            cx,
+            publicador.clone(),
+            Arc::new(SeletorDeMentira::default()),
+        );
+        janela
+            .update(cx, |tela, _w, _cx| tela.com_escuta(escuta.clone()))
+            .unwrap();
+        entrar(cx, &janela);
+        janela
+            .update(cx, |tela, _w, cx| tela.abrir_mensagem_no_whatsapp(cx))
+            .unwrap();
+        colher_ate_parar(cx, &janela);
+        janela
+            .update(cx, |tela, window, cx| {
+                let m = tela.mensagem_no_whatsapp.aberto().expect("o diálogo abriu");
+                let previa = m.previa.clone().expect("a prévia voltou");
+                assert!(!previa.pode_enviar);
+                assert!(previa.aviso.unwrap().contains("Tente mais tarde"));
+                // O Sim desligado não manda nada.
+                tela.enviar_mensagem_no_whatsapp(cx);
+                assert!(!tela.mensagem_no_whatsapp.aberto().unwrap().enviando);
+                let _ = window;
+            })
+            .unwrap();
+
+        // 📡 A Meta aprovou: o SSE relê a prévia, e o Sim liga.
+        publicador.responder_json(
+            crate::sessoes::qr_do_bot::PEDIDO_DA_PREVIA_DO_CHAMADO,
+            Ok(serde_json::json!({ "pode_enviar": true, "aviso": null, "whatsapp_da_sessao": null })),
+        );
+        escuta.mandar(crate::tempo_real::Sinal::Evento {
+            fonte: "modelos",
+            dados: serde_json::json!({ "tipo": "modelo_mudou", "nome": "chamar_cliente_da_sessao" }),
+        });
+        cx.executor().advance_clock(Duration::from_millis(600));
+        colher_ate_parar(cx, &janela);
+        janela
+            .update(cx, |tela, window, cx| {
+                let m = tela.mensagem_no_whatsapp.aberto().unwrap();
+                assert!(
+                    m.previa.as_ref().unwrap().pode_enviar,
+                    "a aprovação chegou pelo SSE"
+                );
+                let campo = m.numero.clone().expect("o campo nasceu na pintura");
+                campo.update(cx, |c, cx| {
+                    c.trocar_valor("(54) 9999-0000".to_string(), window, cx)
+                });
+                tela.enviar_mensagem_no_whatsapp(cx);
+                let m = tela.mensagem_no_whatsapp.aberto().unwrap();
+                assert!(m.erro.as_ref().unwrap().contains("9 na frente"));
+                assert!(!m.enviando, "número fora de padrão não sai");
+                campo.update(cx, |c, cx| {
+                    c.trocar_valor("(54) 99999-0000".to_string(), window, cx)
+                });
+            })
+            .unwrap();
+        publicador.responder_json(
+            crate::sessoes::qr_do_bot::PEDIDO_DO_CHAMADO,
+            Ok(serde_json::json!({
+                "enviado": true,
+                "mensagem": "Mensagem enviada. O bot responde quando o cliente tocar no botão.",
+            })),
+        );
+        let mut chamado = situacao_do_bot(serde_json::json!([]));
+        chamado["chamado"] = serde_json::json!({
+            "chamado_em": "2026-11-08T17:32:00Z", "final_do_numero": "0000"
+        });
+        publicador.responder_json(crate::sessoes::qr_do_bot::PEDIDO_DA_SITUACAO, Ok(chamado));
+        janela
+            .update(cx, |tela, _w, cx| tela.enviar_mensagem_no_whatsapp(cx))
+            .unwrap();
+        colher_ate_parar(cx, &janela);
+        let envio = publicador
+            .pedidos_json()
+            .into_iter()
+            .find(|p| p.metodo == "POST" && p.caminho == "/pos-venda/galerias/g1/bot/chamar")
+            .expect("o envio saiu");
+        assert_eq!(
+            envio.corpo,
+            Some(serde_json::json!({ "whatsapp": "(54) 99999-0000" }))
+        );
+        janela
+            .update(cx, |tela, _w, _cx| {
+                assert_eq!(
+                    tela.ultimo_aviso(),
+                    Some("Mensagem enviada. O bot responde quando o cliente tocar no botão.")
+                );
+                let situacao = tela.bot.situacao.as_ref().unwrap();
+                assert_eq!(
+                    situacao
+                        .chamado
+                        .as_ref()
+                        .map(|c| c.final_do_numero.as_str()),
+                    Some("0000")
+                );
             })
             .unwrap();
     }
