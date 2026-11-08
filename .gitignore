@@ -64,3 +64,6 @@ vintage_lightbox.db
 # A checagem isolada do rust-analyzer (ver docs/REGUA-DO-LIGHTROOM.md)
 /target-checagem/
 /ferramentas/lightroom/medicao/perfis/target/
+
+# Worktrees das sessões (issue e PR)
+.claude/worktrees/
