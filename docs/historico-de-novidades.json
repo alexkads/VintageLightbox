@@ -1,5 +1,15 @@
 [
   {
+    "versao": "0.1.192",
+    "data": "2026-11-08",
+    "titulo": "O botão Sim da mensagem no WhatsApp libera assim que a Meta responde.",
+    "importante": false,
+    "novidades": [
+      "O diálogo \"Mandar mensagem ao cliente?\" podia ficar parado em \"Consultando a Meta…\" até outro clique na tela. Agora o botão Sim libera assim que a resposta chega, e o \"Enviando…\" também volta sozinho."
+    ],
+    "por_que_atualizar": "Para mandar a mensagem ao cliente sem esperar o botão destravar."
+  },
+  {
     "versao": "0.1.191",
     "data": "2026-11-08",
     "titulo": "Mandar mensagem no WhatsApp para o cliente que saiu sem ler o QR.",
