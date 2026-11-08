@@ -4309,7 +4309,15 @@ impl Detalhe {
             || self.gravando_dados.is_some()
             || self.correcao_do_local.aberto().is_some_and(|c| c.gravando)
             || self.bot.lendo
-            || self.bot.trocando;
+            || self.bot.trocando
+            // 📞 A prévia e o envio da mensagem no WhatsApp. Sem eles o laço
+            // parava na primeira volta, antes de a Meta responder, e o diálogo
+            // ficava em "Consultando a Meta…" para sempre (issue #12).
+            || self.bot.chamando
+            || self
+                .mensagem_no_whatsapp
+                .aberto()
+                .is_some_and(|m| m.enviando || (m.previa.is_none() && m.erro.is_none()));
         if !continua {
             self.colhendo = false;
         }
@@ -11401,6 +11409,51 @@ mod testes {
                 assert!(tela
                     .ultimo_aviso()
                     .is_some_and(|a| a.starts_with("Novo QR na tela do cliente: RF-NOVO23")));
+            })
+            .unwrap();
+    }
+
+    /// 📞 A prévia que **demora** a voltar (issue #12): o laço da colheita tem de
+    /// seguir esperando por ela. Antes ele parava na primeira volta, a resposta
+    /// ficava no canal e o diálogo, em "Consultando a Meta…" para sempre — o
+    /// teste de baixo não via porque a porta de mentira respondia na hora.
+    #[gpui_kit::test]
+    fn a_previa_que_demora_ainda_liga_o_sim(cx: &mut TestAppContext) {
+        let publicador = publicador_com(vec![], true);
+        let mut pode = situacao_do_bot(serde_json::json!([]));
+        pode["pode_chamar"] = serde_json::json!(true);
+        publicador.responder_json(crate::sessoes::qr_do_bot::PEDIDO_DA_SITUACAO, Ok(pode));
+        publicador.responder_json(
+            crate::sessoes::qr_do_bot::PEDIDO_DA_PREVIA_DO_CHAMADO,
+            Ok(serde_json::json!({ "pode_enviar": true, "aviso": null, "whatsapp_da_sessao": null })),
+        );
+        let janela = janela_com(
+            cx,
+            publicador.clone(),
+            Arc::new(SeletorDeMentira::default()),
+        );
+        entrar(cx, &janela);
+        for _ in 0..5 {
+            publicador.responder();
+            cx.executor().advance_clock(Duration::from_millis(200));
+            cx.run_until_parked();
+        }
+        janela
+            .update(cx, |tela, _w, cx| tela.abrir_mensagem_no_whatsapp(cx))
+            .unwrap();
+        // A Meta demora: várias voltas do laço passam sem resposta.
+        cx.executor().advance_clock(Duration::from_millis(1_000));
+        cx.run_until_parked();
+        publicador.responder();
+        cx.executor().advance_clock(Duration::from_millis(300));
+        cx.run_until_parked();
+        janela
+            .update(cx, |tela, _w, _cx| {
+                let m = tela.mensagem_no_whatsapp.aberto().expect("o diálogo abriu");
+                assert!(
+                    m.previa.as_ref().is_some_and(|p| p.pode_enviar),
+                    "a prévia chegou sem ninguém colher à mão"
+                );
             })
             .unwrap();
     }
