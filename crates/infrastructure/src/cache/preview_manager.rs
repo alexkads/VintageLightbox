@@ -518,6 +518,48 @@ impl PreviewManager {
             .map_err(|e| e.to_string())?;
         Ok(deleted as u64)
     }
+
+    /// Miniaturas e previews **sem uso há mais de `dias`**: quantos são e
+    /// quanto pesam. É o número que a tela mostra antes de limpar.
+    ///
+    /// "Uso" é o `last_accessed_at`, que a leitura da foto renova: a sessão
+    /// aberta ontem fica, a de três meses atrás sai — o mesmo critério do
+    /// "descartar previews 1:1 depois de 30 dias" do Lightroom.
+    pub fn sem_uso_ha(&self, dias: u32) -> (u64, u64) {
+        self.sem_uso_ate(Self::limite(dias, chrono::Utc::now().timestamp()))
+    }
+
+    /// Apaga o que está sem uso há mais de `dias`. Devolve quantos itens saíram.
+    pub fn limpar_sem_uso_ha(&self, dias: u32) -> Result<u64, String> {
+        self.limpar_sem_uso_ate(Self::limite(dias, chrono::Utc::now().timestamp()))
+    }
+
+    fn limite(dias: u32, agora: i64) -> i64 {
+        agora - i64::from(dias) * 86_400
+    }
+
+    fn sem_uso_ate(&self, limite: i64) -> (u64, u64) {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT COUNT(*), COALESCE(SUM(LENGTH(data)), 0) FROM previews
+             WHERE last_accessed_at < ?1",
+            [limite],
+            |row| Ok((row.get::<_, i64>(0)? as u64, row.get::<_, i64>(1)? as u64)),
+        )
+        .unwrap_or((0, 0))
+    }
+
+    fn limpar_sem_uso_ate(&self, limite: i64) -> Result<u64, String> {
+        let conn = self.conn.lock().unwrap();
+        let deleted = conn
+            .execute("DELETE FROM previews WHERE last_accessed_at < ?1", [limite])
+            .map_err(|e| e.to_string())?;
+        if deleted > 0 {
+            // Como no `clear_all`: sem o VACUUM o arquivo não encolhe.
+            conn.execute("VACUUM", []).ok();
+        }
+        Ok(deleted as u64)
+    }
 }
 
 impl PreviewStorage for PreviewManager {
@@ -610,6 +652,40 @@ mod tests {
     ///
     /// O teste mede o **efeito observável**: apagar a linha do disco e a foto
     /// continuar vindo prova que ela não foi lida de lá.
+    /// 🚨 A limpeza por período leva **só o que está sem uso há mais tempo** —
+    /// a foto aberta ontem fica, mesmo sendo antiga no cache.
+    #[test]
+    fn limpar_por_periodo_leva_so_o_sem_uso() {
+        let dir = tempfile::tempdir().expect("diretório");
+        let previews = PreviewManager::new_with_path(dir.path().to_path_buf());
+        let imagem = DynamicImage::ImageRgb8(image::RgbImage::new(16, 16));
+        for id in ["velha", "media", "nova"] {
+            previews.save_thumbnail(id, &imagem).expect("gravar");
+            previews.save_preview(id, &imagem).expect("gravar");
+        }
+        let agora = chrono::Utc::now().timestamp();
+        {
+            let conn = previews.conn.lock().expect("a conexão");
+            for (id, dias) in [("velha", 100), ("media", 40), ("nova", 1)] {
+                conn.execute(
+                    "UPDATE previews SET last_accessed_at = ?1, created_at = 0 WHERE photo_id = ?2",
+                    rusqlite::params![agora - dias * 86_400, id],
+                )
+                .expect("envelhecer");
+            }
+        }
+
+        assert_eq!(previews.sem_uso_ha(90).0, 2, "só a velha, nos dois tipos");
+        assert_eq!(previews.sem_uso_ha(30).0, 4, "a velha e a média");
+        assert!(previews.sem_uso_ha(30).1 > 0, "o peso vem junto");
+        assert_eq!(previews.sem_uso_ha(0).0, 6);
+
+        assert_eq!(previews.limpar_sem_uso_ha(30).expect("limpar"), 4);
+        let sobrou = previews.get_stats();
+        assert_eq!((sobrou.thumbnail_count, sobrou.large_preview_count), (1, 1));
+        assert_eq!(previews.sem_uso_ha(15).0, 0);
+    }
+
     #[test]
     fn a_segunda_leitura_vem_da_memoria() {
         let dir = tempfile::tempdir().expect("diretório");
