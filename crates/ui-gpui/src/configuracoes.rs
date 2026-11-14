@@ -9,19 +9,20 @@
 //! ## ⚠️ Limpar cache é seguro, e o texto tem de dizer isso
 //!
 //! Apagar previews **não toca nos arquivos originais**: é trabalho refeito, não
-//! trabalho perdido. Sem essa frase à vista, três botões chamados "limpar" ao
+//! trabalho perdido. Sem essa frase à vista, botões chamados "limpar" ao
 //! lado de um número em gigabytes são um convite a não clicar em nenhum — e o
 //! cache continua crescendo.
 
 use std::sync::Arc;
 
-use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::button::Button;
 use gpui_kit::component::tab::{Tab, TabBar};
-use gpui_kit::component::{ActiveTheme, Disableable, Sizable};
-use gpui_kit::{div, prelude::*, px, App, Context, Entity, SharedString, Window};
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Disableable, Icon, Sizable};
+use gpui_kit::{div, prelude::*, px, App, Context, Entity, FontWeight, SharedString, Window};
 
 use crate::autenticador_da_conta::AutenticadorDaConta;
 use crate::pos_venda::porta::Publicador;
+use crate::recursos::Icone;
 use crate::sons::tela::AvisosSonoros;
 use domain::services::pos_venda::Sessao;
 use infrastructure::cache::preview_manager::{CacheStats, PreviewManager};
@@ -50,6 +51,9 @@ pub fn formatar_bytes(bytes: u64) -> String {
     texto.replace('.', ",")
 }
 
+/// Os períodos da limpeza por idade, em dias (pedido do dono, 14/11/2026).
+pub const PERIODOS: [u32; 4] = [15, 30, 60, 90];
+
 pub struct Configuracoes {
     previews: Arc<PreviewManager>,
     /// O retrato do cache, lido ao abrir e depois de cada limpeza.
@@ -60,6 +64,15 @@ pub struct Configuracoes {
     estatisticas: Option<CacheStats>,
     /// O que a última limpeza fez, para a tela poder dizer.
     ultima_limpeza: Option<SharedString>,
+    /// Se a última limpeza foi uma falha — o toast é vermelho.
+    limpeza_falhou: bool,
+    /// O período escolhido para a limpeza por idade (um de [`PERIODOS`]).
+    periodo: u32,
+    /// Quantos itens e quantos bytes estão sem uso há mais de cada período,
+    /// lidos junto com as `estatisticas`.
+    sem_uso: Vec<(u32, (u64, u64))>,
+    /// A última limpeza que já virou toast (`estilo::toast_quando_mudar`).
+    limpeza_vista: Option<SharedString>,
     /// A aba aberta: 0 é "Avisos sonoros", 1 é "Cache", 2 é "Conta".
     aba: usize,
     /// A aba dos sons, criada na primeira abertura — os campos dela pedem a
@@ -75,6 +88,10 @@ impl Configuracoes {
             previews,
             estatisticas: None,
             ultima_limpeza: None,
+            limpeza_falhou: false,
+            periodo: 30,
+            sem_uso: Vec::new(),
+            limpeza_vista: None,
             aba: 0,
             sons: None,
             conta: None,
@@ -119,6 +136,10 @@ impl Configuracoes {
     /// Relê o cache. Chamado ao abrir e depois de limpar.
     pub fn atualizar(&mut self, cx: &mut Context<Self>) {
         self.estatisticas = Some(self.previews.get_stats());
+        self.sem_uso = PERIODOS
+            .iter()
+            .map(|&dias| (dias, self.previews.sem_uso_ha(dias)))
+            .collect();
         cx.notify();
     }
 
@@ -132,12 +153,17 @@ impl Configuracoes {
 
     fn limpar(
         &mut self,
-        o_que: &'static str,
+        o_que: Nome,
         acao: impl FnOnce(&PreviewManager) -> Result<u64, String>,
         cx: &mut Context<Self>,
     ) {
-        self.ultima_limpeza = Some(match acao(&self.previews) {
-            Ok(quantos) => format!("{quantos} {o_que} apagad{}", plural(quantos)).into(),
+        let resultado = acao(&self.previews);
+        self.limpeza_falhou = resultado.is_err();
+        // Uma limpeza nova sempre vira toast, mesmo com a frase igual à
+        // anterior.
+        self.limpeza_vista = None;
+        self.ultima_limpeza = Some(match resultado {
+            Ok(quantos) => apagados(quantos, o_que).into(),
             // 🚨 A falha aparece na tela, e não só no terminal. Limpar cache é
             // uma ação que o fotógrafo pede olhando um número de gigabytes: se
             // ela falha em silêncio, o número não muda e a conclusão é que o
@@ -148,30 +174,61 @@ impl Configuracoes {
     }
 
     pub fn limpar_miniaturas(&mut self, cx: &mut Context<Self>) {
-        self.limpar("miniaturas", |cache| cache.clear_thumbnails(), cx);
+        self.limpar(
+            ("miniatura", "miniaturas", true),
+            |cache| cache.clear_thumbnails(),
+            cx,
+        );
     }
 
     pub fn limpar_previews(&mut self, cx: &mut Context<Self>) {
-        self.limpar("previews", |cache| cache.clear_previews(), cx);
+        self.limpar(
+            ("preview", "previews", false),
+            |cache| cache.clear_previews(),
+            cx,
+        );
     }
 
-    pub fn limpar_tudo(&mut self, cx: &mut Context<Self>) {
-        self.limpar("itens", |cache| cache.clear_all(), cx);
+    /// Escolhe o período da limpeza por idade.
+    pub fn escolher_periodo(&mut self, dias: u32, cx: &mut Context<Self>) {
+        self.periodo = dias;
+        cx.notify();
     }
 
-    fn linha(&self, rotulo: &'static str, valor: String, cx: &App) -> impl IntoElement {
-        div()
-            .flex()
-            .justify_between()
-            .gap(px(12.))
-            .text_xs()
-            .child(div().text_color(cx.theme().muted_foreground).child(rotulo))
-            .child(div().truncate().child(SharedString::from(valor)))
+    /// Itens e bytes sem uso há mais do período escolhido.
+    pub fn sem_uso_do_periodo(&self) -> (u64, u64) {
+        self.sem_uso
+            .iter()
+            .find(|(dias, _)| *dias == self.periodo)
+            .map(|(_, numeros)| *numeros)
+            .unwrap_or((0, 0))
+    }
+
+    /// Apaga o que está sem uso há mais do período escolhido.
+    pub fn limpar_por_periodo(&mut self, cx: &mut Context<Self>) {
+        let dias = self.periodo;
+        self.limpar(
+            ("item", "itens", false),
+            move |cache| cache.limpar_sem_uso_ha(dias),
+            cx,
+        );
     }
 }
 
 impl Render for Configuracoes {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 🍞 O resultado da limpeza é toast do kit, verde ou vermelho.
+        crate::estilo::toast_quando_mudar(
+            &mut self.limpeza_vista,
+            self.ultima_limpeza.clone(),
+            if self.limpeza_falhou {
+                crate::estilo::Toast::Erro
+            } else {
+                crate::estilo::Toast::Sucesso
+            },
+            window,
+            cx,
+        );
         let tela = cx.entity().downgrade();
         let abas = TabBar::new("abas-das-configuracoes")
             .segmented()
@@ -219,8 +276,134 @@ impl Render for Configuracoes {
 }
 
 impl Configuracoes {
+    /// Um dos três cartões do alto: ícone e nome, o número grande, uma linha
+    /// do que ele é e, no pé, o botão da parte dele.
+    fn cartao_do_cache(
+        &self,
+        icone: Icone,
+        nome: &'static str,
+        numero: SharedString,
+        detalhe: &'static str,
+        botao: Button,
+        cx: &App,
+    ) -> impl IntoElement {
+        let caixa = crate::tema::medidas().cartao;
+        let muted = cx.theme().muted_foreground;
+        crate::estilo::cartao(cx)
+            .flex_1()
+            .min_w_0()
+            .bg(cx.theme().background)
+            .child(
+                v_flex()
+                    .size_full()
+                    .p(px(caixa.respiro))
+                    .gap(px(caixa.vao.min(12.)))
+                    .child(
+                        h_flex()
+                            .gap(px(6.))
+                            .items_center()
+                            .text_xs()
+                            .text_color(muted)
+                            .child(Icon::new(icone).size(px(14.)).text_color(muted))
+                            .child(nome),
+                    )
+                    .child(
+                        div()
+                            .text_2xl()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .truncate()
+                            .child(numero),
+                    )
+                    .child(div().flex_1().text_xs().text_color(muted).child(detalhe))
+                    .child(div().pt(px(4.)).child(botao.w_full())),
+            )
+    }
+
+    /// A limpeza por idade: o período (15, 30, 60 ou 90 dias sem uso), o que
+    /// ele libera e o botão. O número aparece **antes** do clique, para quem
+    /// escolhe saber o que vai sair.
+    fn cartao_do_periodo(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let caixa = crate::tema::medidas().cartao;
+        let muted = cx.theme().muted_foreground;
+        let (itens, bytes) = self.sem_uso_do_periodo();
+        let escolhido = PERIODOS
+            .iter()
+            .position(|&dias| dias == self.periodo)
+            .unwrap_or(1);
+        let tela = cx.entity().downgrade();
+        let periodos = PERIODOS.iter().fold(
+            TabBar::new("periodos-do-cache")
+                .segmented()
+                .small()
+                .selected_index(escolhido)
+                .on_click(move |indice, _, cx| {
+                    let dias = PERIODOS[(*indice).min(PERIODOS.len() - 1)];
+                    let _ = tela.update(cx, |tela, cx| tela.escolher_periodo(dias, cx));
+                }),
+            |barra, dias| {
+                barra.child(
+                    Tab::new()
+                        .debug_selector(move || format!("periodo-{dias}"))
+                        .label(format!("> {dias} dias")),
+                )
+            },
+        );
+        let resumo: SharedString = if itens == 0 {
+            "Nada sem uso há tanto tempo".into()
+        } else {
+            format!(
+                "{} {} · {}",
+                milhar(itens),
+                if itens == 1 { "item" } else { "itens" },
+                formatar_bytes(bytes)
+            )
+            .into()
+        };
+
+        crate::estilo::cartao(cx).bg(cx.theme().background).child(
+            v_flex()
+                .p(px(caixa.respiro))
+                .gap(px(10.))
+                .child(
+                    h_flex()
+                        .gap(px(6.))
+                        .items_center()
+                        .text_xs()
+                        .text_color(muted)
+                        .child(Icon::new(Icone::Clock).size(px(14.)).text_color(muted))
+                        .child(div().flex_1().child("Limpar o que está sem uso há mais de"))
+                        .child(
+                            div()
+                                .flex_none()
+                                .text_color(if itens == 0 {
+                                    muted
+                                } else {
+                                    cx.theme().foreground
+                                })
+                                .child(resumo),
+                        ),
+                )
+                .child(
+                    h_flex()
+                        .gap(px(12.))
+                        .items_center()
+                        .child(div().flex_none().child(periodos))
+                        .child(div().flex_1())
+                        .child(
+                            crate::estilo::botao_contorno_pequeno("limpar-por-periodo", cx)
+                                .label("Limpar")
+                                .disabled(itens == 0)
+                                .on_click(cx.listener(|tela, _ev, _window, cx| {
+                                    tela.limpar_por_periodo(cx);
+                                })),
+                        ),
+                ),
+        )
+    }
+
     fn cache(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let estatisticas = self.estatisticas.clone();
+        let muted = cx.theme().muted_foreground;
         // ⚠️ Os botões **desligam quando não há o que limpar**, como no legado.
         // Um "Limpar miniaturas" aceso sobre um cache vazio responde com "0
         // apagadas", e quem clicou fica sem saber se apagou nada ou se falhou.
@@ -228,99 +411,146 @@ impl Configuracoes {
         let tem_previews = estatisticas
             .as_ref()
             .is_some_and(|e| e.large_preview_count > 0);
+        // Enquanto o cache não foi lido, o cartão mostra o travessão e não um
+        // "0" que pareceria um cache vazio.
+        let ou_traco = |numero: Option<String>| -> SharedString {
+            numero.unwrap_or_else(|| "—".to_string()).into()
+        };
+        let tamanho = ou_traco(
+            estatisticas
+                .as_ref()
+                .map(|e| formatar_bytes(e.total_size_bytes)),
+        );
+        let miniaturas = ou_traco(estatisticas.as_ref().map(|e| milhar(e.thumbnail_count)));
+        let previews = ou_traco(estatisticas.as_ref().map(|e| milhar(e.large_preview_count)));
+        let caminho = estatisticas.as_ref().map(|e| e.db_path.clone());
+        let pasta = caminho
+            .as_ref()
+            .and_then(|arquivo| arquivo.parent().map(|pasta| pasta.to_path_buf()));
 
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(10.))
+        let abrir_pasta = crate::estilo::botao_contorno_pequeno("abrir-pasta-do-cache", cx)
+            .label("Abrir a pasta")
+            .disabled(pasta.is_none())
+            .on_click(move |_, _, _| {
+                if let Some(pasta) = &pasta {
+                    crate::bandeja::abrir_pasta(pasta);
+                }
+            });
+        let limpar_miniaturas = crate::estilo::botao_contorno_pequeno("limpar-miniaturas", cx)
+            .label("Limpar miniaturas")
+            .disabled(!tem_miniaturas)
+            .on_click(cx.listener(|tela, _ev, _window, cx| {
+                tela.limpar_miniaturas(cx);
+            }));
+        let limpar_previews = crate::estilo::botao_contorno_pequeno("limpar-previews", cx)
+            .label("Limpar previews")
+            .disabled(!tem_previews)
+            .on_click(cx.listener(|tela, _ev, _window, cx| {
+                tela.limpar_previews(cx);
+            }));
+
+        v_flex()
+            .gap(px(16.))
             .size_full()
-            .child(div().text_xs().child("Cache de previews"))
-            .child(match &estatisticas {
-                Some(numeros) => div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(3.))
-                    .child(self.linha("miniaturas", numeros.thumbnail_count.to_string(), cx))
-                    .child(self.linha(
-                        "previews grandes",
-                        numeros.large_preview_count.to_string(),
+            .child(
+                v_flex()
+                    .gap(px(2.))
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child("Cache de previews"),
+                    )
+                    .child(div().text_xs().text_color(muted).child(
+                        "Imagens prontas que fazem a grade e a Revelação abrirem rápido. \
+                         O que faltar é refeito sozinho.",
+                    )),
+            )
+            .child(
+                h_flex()
+                    .gap(px(12.))
+                    .items_stretch()
+                    .child(self.cartao_do_cache(
+                        Icone::HardDrive,
+                        "Tamanho no disco",
+                        tamanho,
+                        "Miniaturas e previews",
+                        abrir_pasta,
                         cx,
                     ))
-                    .child(self.linha("tamanho", formatar_bytes(numeros.total_size_bytes), cx))
-                    .child(self.linha("arquivo", numeros.db_path.to_string_lossy().to_string(), cx))
-                    .into_any_element(),
-                None => div()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("lendo o cache…")
-                    .into_any_element(),
-            })
-            .child(
-                div()
-                    .flex()
-                    .gap(px(4.))
-                    .pt(px(4.))
-                    .child(
-                        Button::new("limpar-miniaturas")
-                            .label("Limpar miniaturas")
-                            .xsmall()
-                            .disabled(!tem_miniaturas)
-                            .on_click(cx.listener(|tela, _ev, _window, cx| {
-                                tela.limpar_miniaturas(cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("limpar-previews")
-                            .label("Limpar previews")
-                            .xsmall()
-                            .disabled(!tem_previews)
-                            .on_click(cx.listener(|tela, _ev, _window, cx| {
-                                tela.limpar_previews(cx);
-                            })),
-                    )
-                    .child(
-                        Button::new("limpar-tudo")
-                            .label("Limpar tudo")
-                            .xsmall()
-                            .danger()
-                            .disabled(!tem_miniaturas && !tem_previews)
-                            .on_click(cx.listener(|tela, _ev, _window, cx| {
-                                tela.limpar_tudo(cx);
-                            })),
-                    ),
+                    .child(self.cartao_do_cache(
+                        Icone::Columns3,
+                        "Miniaturas",
+                        miniaturas,
+                        "Da grade e da tira",
+                        limpar_miniaturas,
+                        cx,
+                    ))
+                    .child(self.cartao_do_cache(
+                        Icone::Maximize,
+                        "Previews grandes",
+                        previews,
+                        "Da Revelação e da lupa",
+                        limpar_previews,
+                        cx,
+                    )),
             )
-            .children(self.ultima_limpeza.clone().map(|texto| {
-                div()
+            .child(self.cartao_do_periodo(cx))
+            .children(caminho.map(|caminho| {
+                h_flex()
+                    .min_w_0()
+                    .gap(px(6.))
+                    .items_center()
                     .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(texto)
+                    .text_color(muted)
+                    .child(Icon::new(Icone::File).size(px(12.)).text_color(muted))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .child(SharedString::from(caminho.to_string_lossy().to_string())),
+                    )
             }))
-            .child(
-                // ⚠️ A frase que faz os três botões serem clicáveis: limpar cache
-                // é trabalho refeito, não trabalho perdido.
-                div()
-                    .mt(px(4.))
-                    .px(px(8.))
-                    .py(px(6.))
-                    .rounded(cx.theme().radius)
-                    .bg(cx.theme().muted)
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(
-                        "Limpar o cache não toca nas fotos originais. As previews são geradas de \
-                         novo quando a foto for aberta.",
-                    ),
-            )
+            // ⚠️ A frase que faz os botões de limpar serem clicáveis: limpar cache
+            // é trabalho refeito, não trabalho perdido.
+            .child(crate::estilo::aviso(
+                "Limpar o cache não toca nas fotos originais. As previews são geradas de \
+                 novo quando a foto for aberta.",
+                false,
+                cx,
+            ))
     }
 }
 
-fn plural(quantos: u64) -> &'static str {
-    if quantos == 1 {
-        "o"
-    } else {
-        "os"
+/// Número inteiro com o ponto de milhar: "4.146", e não "4146".
+fn milhar(numero: u64) -> String {
+    let digitos = numero.to_string();
+    let mut texto = String::with_capacity(digitos.len() + digitos.len() / 3);
+    for (i, digito) in digitos.chars().enumerate() {
+        if i > 0 && (digitos.len() - i).is_multiple_of(3) {
+            texto.push('.');
+        }
+        texto.push(digito);
     }
+    texto
 }
+
+/// "3 miniaturas apagadas", "1 preview apagado": o número, o nome e o
+/// particípio concordando com os dois.
+fn apagados(quantos: u64, nome: Nome) -> String {
+    let (singular, plural_do_nome, feminino) = nome;
+    let nome = if quantos == 1 {
+        singular
+    } else {
+        plural_do_nome
+    };
+    let vogal = if feminino { "a" } else { "o" };
+    let fim = if quantos == 1 { "" } else { "s" };
+    format!("{} {nome} apagad{vogal}{fim}", milhar(quantos))
+}
+
+/// Singular, plural e se é feminino.
+type Nome = (&'static str, &'static str, bool);
 
 #[cfg(test)]
 mod testes {
@@ -398,33 +628,10 @@ mod testes {
                     numeros.large_preview_count, 2,
                     "limpar miniatura não pode levar preview junto"
                 );
-                assert_eq!(tela.ultima_limpeza(), Some("3 miniaturas apagados"));
+                assert_eq!(tela.ultima_limpeza(), Some("3 miniaturas apagadas"));
 
                 tela.limpar_previews(cx);
                 assert_eq!(tela.estatisticas().expect("releu").large_preview_count, 0);
-            })
-            .expect("a janela deve estar aberta");
-    }
-
-    /// "Limpar tudo" leva os dois.
-    #[gpui_kit::test]
-    fn limpar_tudo_esvazia_o_cache(cx: &mut TestAppContext) {
-        let (cache, _dir) = cache_com(2, 2);
-        cx.update(gpui_kit::init);
-        let janela = cx.add_window(|_window, cx| {
-            let mut tela = Configuracoes::nova(cache);
-            tela.atualizar(cx);
-            tela
-        });
-
-        janela
-            .update(cx, |tela, _window, cx| {
-                tela.limpar_tudo(cx);
-
-                let numeros = tela.estatisticas().expect("releu");
-                assert_eq!(numeros.thumbnail_count, 0);
-                assert_eq!(numeros.large_preview_count, 0);
-                assert_eq!(numeros.total_size_bytes, 0);
             })
             .expect("a janela deve estar aberta");
     }
@@ -437,6 +644,7 @@ mod testes {
     #[gpui_kit::test]
     fn o_numero_e_relido_depois_de_limpar(cx: &mut TestAppContext) {
         let (cache, _dir) = cache_com(4, 0);
+        // Só miniaturas: limpá-las esvazia o cache.
         cx.update(gpui_kit::init);
         let janela = cx.add_window(|_window, cx| {
             let mut tela = Configuracoes::nova(cache);
@@ -449,18 +657,58 @@ mod testes {
                 let antes = tela.estatisticas().expect("leu").total_size_bytes;
                 assert!(antes > 0);
 
-                tela.limpar_tudo(cx);
+                tela.limpar_miniaturas(cx);
 
                 assert_eq!(tela.estatisticas().expect("releu").total_size_bytes, 0);
             })
             .expect("a janela deve estar aberta");
     }
 
-    /// O singular concorda com o número.
+    /// O singular e o feminino concordam com o número e com o nome.
     #[test]
     fn uma_miniatura_apagada_nao_vira_apagados() {
-        assert_eq!(plural(1), "o");
-        assert_eq!(plural(0), "os");
-        assert_eq!(plural(9), "os");
+        const MINIATURA: Nome = ("miniatura", "miniaturas", true);
+        const PREVIEW: Nome = ("preview", "previews", false);
+        assert_eq!(apagados(1, MINIATURA), "1 miniatura apagada");
+        assert_eq!(apagados(3, MINIATURA), "3 miniaturas apagadas");
+        assert_eq!(apagados(1, PREVIEW), "1 preview apagado");
+        assert_eq!(apagados(4758, PREVIEW), "4.758 previews apagados");
+    }
+
+    /// 🚨 O período escolhido decide o que sai: o cache recém-gravado não tem
+    /// nada sem uso há 15 dias, e "Limpar" por período não leva nada.
+    #[gpui_kit::test]
+    fn o_periodo_so_leva_o_que_esta_sem_uso(cx: &mut TestAppContext) {
+        let (cache, _dir) = cache_com(2, 2);
+        cx.update(gpui_kit::init);
+        let janela = cx.add_window(|_window, cx| {
+            let mut tela = Configuracoes::nova(cache);
+            tela.atualizar(cx);
+            tela
+        });
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.escolher_periodo(15, cx);
+                assert_eq!(tela.sem_uso_do_periodo(), (0, 0));
+
+                tela.limpar_por_periodo(cx);
+                let numeros = tela.estatisticas().expect("releu");
+                assert_eq!(
+                    (numeros.thumbnail_count, numeros.large_preview_count),
+                    (2, 2),
+                    "nada estava sem uso"
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// O ponto de milhar do resto do app.
+    #[test]
+    fn o_numero_leva_o_ponto_de_milhar() {
+        assert_eq!(milhar(0), "0");
+        assert_eq!(milhar(999), "999");
+        assert_eq!(milhar(4146), "4.146");
+        assert_eq!(milhar(1_234_567), "1.234.567");
     }
 }
