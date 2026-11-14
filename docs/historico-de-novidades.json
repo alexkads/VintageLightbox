@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.193",
+    "data": "2026-11-14",
+    "titulo": "Cache mais clara, e agora dá para limpar só o que está parado há 15, 30, 60 ou 90 dias.",
+    "importante": false,
+    "novidades": [
+      "Configurações › Cache foi redesenhada: tamanho no disco, miniaturas e previews em cartões, cada um com o seu botão, e o \"Abrir a pasta\" no lugar do caminho comprido.",
+      "Novo: limpar o que está sem uso há mais de 15, 30, 60 ou 90 dias. A tela mostra antes quantos itens e quantos MB vão sair, e o que você abriu há pouco fica.",
+      "O botão \"Limpar tudo\" saiu, para não esvaziar sem querer as previews do trabalho do dia."
+    ],
+    "por_que_atualizar": "Para liberar espaço no disco sem perder as previews das sessões recentes."
+  },
+  {
     "versao": "0.1.192",
     "data": "2026-11-08",
     "titulo": "O botão Sim da mensagem no WhatsApp libera assim que a Meta responde.",
