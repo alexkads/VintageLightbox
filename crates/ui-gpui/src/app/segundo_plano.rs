@@ -217,6 +217,7 @@ mod testes {
                     sem_rede_desde: Some(1),
                     precisa_entrar: false,
                     sem_disco: false,
+                    dado_guardado: None,
                 };
                 let r = app.retrato_do_segundo_plano(cx);
                 assert_eq!((r.guardadas, r.recusadas, r.sem_rede), (3, 2, true));

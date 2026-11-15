@@ -309,6 +309,21 @@ impl Aplicativo {
         // gesto recusado na volta.
         let fila = self.selo_da_fila(cx);
 
+        // ── 🕰️ O dado guardado ────────────────────────────────────────────
+        // A tela mostra o espelho porque o site não respondeu: a hora do dado.
+        // Some quando a mesma leitura volta do site.
+        let guardado = self.situacao_da_fila.dado_guardado.map(|dado| {
+            let (frase, explicacao) = frase_do_dado_guardado(dado, &chrono::Local::now());
+            item("rodape-dado-guardado")
+                .text_color(aviso)
+                .font_weight(FontWeight::MEDIUM)
+                .child(Icon::new(Icone::History).size(px(12.)))
+                .child(frase)
+                .tooltip(move |window, cx| {
+                    gpui_kit::component::tooltip::Tooltip::new(explicacao.clone()).build(window, cx)
+                })
+        });
+
         // ── O WhatsApp parado ─────────────────────────────────────────────
         // 🚨 A Meta recusando as mensagens da casa (cobrança em aberto…): o
         // que aparece como enviado não chega ao cliente.
@@ -400,6 +415,9 @@ impl Aplicativo {
             .child(separador())
             .child(trecho_dos_envios)
             .when_some(fila, |rodape, fila| rodape.child(separador()).child(fila))
+            .when_some(guardado, |rodape, guardado| {
+                rodape.child(separador()).child(guardado)
+            })
             .when_some(whatsapp, |rodape, whatsapp| {
                 rodape.child(separador()).child(whatsapp)
             })
@@ -564,6 +582,42 @@ pub fn frase_da_fila(situacao: crate::sincronizacao::Situacao) -> Option<(String
         (false, 0) => None,
         (false, _) => Some((format!("Enviando {}", guardadas()), false)),
     }
+}
+
+/// 🕰️ O aviso do dado guardado: a frase do rodapé e a explicação do balão.
+///
+/// A hora é a do dado — o que o operador precisa para saber o quanto confiar
+/// na lista —, com o dia quando não é de hoje. O motivo separa a internet
+/// (o selo "Sem internet" já diz) do site que respondeu erro, o caso de
+/// 15/11/2026: a lista congelou das 15:25 às 18:05 sem aviso nenhum.
+pub fn frase_do_dado_guardado<Tz: chrono::TimeZone>(
+    dado: infrastructure::pos_venda::DadoGuardado,
+    agora: &chrono::DateTime<Tz>,
+) -> (String, String)
+where
+    Tz::Offset: std::fmt::Display,
+{
+    use infrastructure::pos_venda::MotivoDaLembranca;
+    let fuso = agora.timezone();
+    let quando = chrono::DateTime::from_timestamp(dado.visto_em, 0)
+        .unwrap_or_default()
+        .with_timezone(&fuso);
+    let hora = if quando.date_naive() == agora.date_naive() {
+        format!("das {}", quando.format("%H:%M"))
+    } else {
+        format!("de {}", quando.format("%d/%m, %H:%M"))
+    };
+    let (curto, porque) = match dado.motivo {
+        MotivoDaLembranca::SiteComErro => ("o site não respondeu", "O site respondeu com erro"),
+        MotivoDaLembranca::SemRede => ("sem internet", "Sem internet"),
+    };
+    (
+        format!("Mostrando dados {hora} · {curto}"),
+        format!(
+            "{porque}: a tela mostra o que foi lido {hora}. O que mudou no site depois \
+             disso ainda não aparece. O aviso some sozinho quando o site voltar a responder."
+        ),
+    )
 }
 
 impl Aplicativo {
@@ -797,6 +851,7 @@ mod testes {
                 sem_rede_desde: Some(1),
                 precisa_entrar: false,
                 sem_disco: false,
+                dado_guardado: None,
             }),
             Some(("Sem internet · 3 alterações guardadas".into(), false))
         );
@@ -807,6 +862,7 @@ mod testes {
                 sem_rede_desde: None,
                 precisa_entrar: false,
                 sem_disco: false,
+                dado_guardado: None,
             }),
             Some(("Enviando 1 alteração guardada".into(), false))
         );
@@ -817,6 +873,7 @@ mod testes {
                 sem_rede_desde: None,
                 precisa_entrar: false,
                 sem_disco: false,
+                dado_guardado: None,
             }),
             Some(("2 recusadas na volta".into(), true))
         );
@@ -846,6 +903,41 @@ mod testes {
             }),
             Some(("Disco cheio · 3 alterações só na memória".into(), true))
         );
+    }
+
+    /// 🕰️ 15/11/2026: a lista de sessões veio do espelho das 15:25 às 18:05
+    /// sem aviso. A frase diz a hora do dado e se foi o site ou a internet.
+    #[test]
+    fn o_dado_guardado_diz_a_hora_e_o_motivo() {
+        use chrono::TimeZone as _;
+        use infrastructure::pos_venda::{DadoGuardado, MotivoDaLembranca};
+        let fuso = chrono::FixedOffset::west_opt(3 * 3600).unwrap();
+        let agora = fuso.with_ymd_and_hms(2026, 11, 15, 18, 5, 0).unwrap();
+        let das_15_25 = fuso
+            .with_ymd_and_hms(2026, 11, 15, 15, 25, 0)
+            .unwrap()
+            .timestamp();
+        let (frase, explicacao) = frase_do_dado_guardado(
+            DadoGuardado {
+                visto_em: das_15_25,
+                motivo: MotivoDaLembranca::SiteComErro,
+            },
+            &agora,
+        );
+        assert_eq!(frase, "Mostrando dados das 15:25 · o site não respondeu");
+        assert!(
+            explicacao.starts_with("O site respondeu com erro"),
+            "{explicacao}"
+        );
+
+        let (frase, _) = frase_do_dado_guardado(
+            DadoGuardado {
+                visto_em: das_15_25 - 86_400,
+                motivo: MotivoDaLembranca::SemRede,
+            },
+            &agora,
+        );
+        assert_eq!(frase, "Mostrando dados de 14/11, 15:25 · sem internet");
     }
 
     #[test]
