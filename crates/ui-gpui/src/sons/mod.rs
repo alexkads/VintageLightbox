@@ -574,12 +574,26 @@ mod testes {
         assert_eq!(
             alto_falante.pedidos(),
             vec![Pedido {
-                gravada: None,
+                // 🎙️ Padrão som e voz desde 15/11/2026: a frase gravada fala.
+                gravada: Some(gravadas::Gravada::NovoAgendamento),
                 som: Some(Som::Embutido(Embutido::DoisToques)),
                 fala: None,
                 volume: 0.7,
             }]
         );
+    }
+
+    /// 🎙️ Com voz e gravação, fala a gravação — a voz do sistema só fala o
+    /// que não tem frase gravada.
+    #[test]
+    fn com_gravacao_a_voz_do_sistema_nao_fala() {
+        let (mut sons, alto_falante, _pasta) = sons();
+        sons.mudar(|p| p.escolha_mut(Evento::PediuAtendente).modo = Modo::Voz);
+        sons.soar_em(Evento::PediuAtendente, "Ana", "", Instant::now());
+        let pedidos = alto_falante.pedidos();
+        assert_eq!(pedidos[0].gravada, Some(gravadas::Gravada::PediuAtendente));
+        assert_eq!(pedidos[0].fala, None);
+        assert_eq!(pedidos[0].som, None, "só voz não toca som");
     }
 
     #[test]
@@ -639,24 +653,25 @@ mod testes {
         sons.soar_em(Evento::Falha, "Falha", "", Instant::now());
         let pedidos = alto_falante.pedidos();
         assert_eq!(pedidos[0].som, Some(Som::Embutido(Embutido::DoisToques)));
-        assert_eq!(
-            pedidos[0].fala,
-            Some(Fala {
-                texto: "Chegou agendamento de Ana · 05/10".into(),
-                voz: Some("Luciana".into()),
-                ritmo: 1.3,
-            })
-        );
+        // 🎙️ O evento tem frase gravada: ela fala, e não a voz do sistema.
+        assert_eq!(pedidos[0].gravada, Some(gravadas::Gravada::NovoAgendamento));
+        assert_eq!(pedidos[0].fala, None);
         assert_eq!(pedidos[1].som, None, "só voz não toca som");
+        assert_eq!(pedidos[1].gravada, Some(gravadas::Gravada::Falha));
+        // O texto que a voz do sistema falaria continua montado como antes.
         assert_eq!(
-            pedidos[1].fala.as_ref().map(|f| f.texto.as_str()),
-            Some("Atenção"),
+            preencher("Chegou {titulo} de {detalhe}", "agendamento", "Ana · 05/10"),
+            "Chegou agendamento de Ana · 05/10"
+        );
+        assert_eq!(
+            preencher("Atenção: {detalhe}", "Falha", ""),
+            "Atenção",
             "o detalhe vazio não deixa ': ' pendurado"
         );
     }
 
     #[test]
-    fn so_voz_com_texto_vazio_nao_pede_nada() {
+    fn so_voz_com_texto_vazio_ainda_fala_a_gravacao() {
         let (mut sons, alto_falante, _pasta) = sons();
         sons.mudar(|p| {
             let escolha = p.escolha_mut(Evento::Falha);
@@ -664,7 +679,11 @@ mod testes {
             escolha.texto = "{detalhe}".into();
         });
         sons.soar_em(Evento::Falha, "", "  ", Instant::now());
-        assert!(alto_falante.pedidos().is_empty());
+        // 🎙️ A gravação não depende do texto: só voz ainda fala a frase gravada.
+        let pedidos = alto_falante.pedidos();
+        assert_eq!(pedidos.len(), 1);
+        assert_eq!(pedidos[0].gravada, Some(gravadas::Gravada::Falha));
+        assert_eq!(pedidos[0].fala, None);
     }
 
     /// 🔑 O som próprio é uma cópia; apagado, o aviso volta ao de fábrica em

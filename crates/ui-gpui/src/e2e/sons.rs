@@ -8,7 +8,6 @@ use serde_json::json;
 use super::agenda;
 use super::chatbot::{self, clicar, desenhado};
 use super::Estudio;
-use crate::chatbot::modelo::fuso_do_estudio;
 use crate::sons::{Embutido, Evento, Modo, Som, Sons};
 use crate::tempo_real::porta::Sinal;
 
@@ -44,18 +43,15 @@ fn a_conversa_aberta_nao_toca(cx: &mut TestAppContext) {
     assert!(e.sons.pedidos().is_empty());
 }
 
-/// Novo e cancelado têm sons próprios, e a voz lê o cliente e o horário.
+/// Novo e cancelado têm sons próprios e as frases gravadas (desde 15/11/2026 a
+/// gravação fala no lugar da voz do sistema, que lia o cliente e o horário).
 #[gpui_kit::test]
-fn agendamento_novo_e_cancelado_tem_sons_proprios_e_a_voz_le_o_horario(cx: &mut TestAppContext) {
+fn agendamento_novo_e_cancelado_tem_sons_proprios_e_vozes_gravadas(cx: &mut TestAppContext) {
     let e = agenda::entrar(cx);
     mudar(&e, cx, |p| {
         p.escolha_mut(Evento::NovoAgendamento).modo = Modo::SomEVoz;
     });
     let quando = agenda::as_(1, 9, 0);
-    let horario = quando
-        .with_timezone(&fuso_do_estudio())
-        .format("%d/%m, %H:%M")
-        .to_string();
 
     e.escuta.mandar(agenda::criado("e9", quando, Some("s1")));
     e.esperar(cx);
@@ -70,11 +66,16 @@ fn agendamento_novo_e_cancelado_tem_sons_proprios_e_a_voz_le_o_horario(cx: &mut 
     assert_eq!(pedidos.len(), 2);
     assert_eq!(pedidos[0].som, Some(Som::Embutido(Embutido::DoisToques)));
     assert_eq!(
-        pedidos[0].fala.as_ref().map(|f| f.texto.clone()),
-        Some(format!("Novo agendamento: Família Nova · {horario}"))
+        pedidos[0].gravada,
+        Some(crate::sons::gravadas::Gravada::NovoAgendamento)
     );
+    assert_eq!(pedidos[0].fala, None);
     assert_eq!(pedidos[1].som, Some(Som::Embutido(Embutido::Descida)));
-    assert_eq!(pedidos[1].fala, None, "o cancelado ficou só no som");
+    assert_eq!(
+        pedidos[1].gravada,
+        Some(crate::sons::gravadas::Gravada::AgendamentoCancelado),
+        "o cancelado também fala, pela gravação"
+    );
 }
 
 /// 🚨 As Configurações pelo clique: a aba dos sons abre primeiro, o
