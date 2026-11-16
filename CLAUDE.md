@@ -378,6 +378,12 @@ daqui à mão.
 
 ### 🔀 Issue e PR — todo trabalho entra no `dev` por pull request (desde 8/nov/2026)
 
+🪨 **Escrito na pedra (dono, 15/11/2026, alexkads/recordarfotos-e-commerce#23): nenhum PR sem
+issue, nenhum commit em produção sem issue.** O `mains.sh` do e-commerce recusa levar o `dev` ao
+`main` deste projeto enquanto houver commit de código a caminho que não cite `#N` na mensagem
+(merges não contam; sem opção para pular). O quadro *Development* do PR mostra "No linked issues"
+porque a base é o `dev`: a ligação é à mão, pela engrenagem.
+
 > *"vamos fazer issue e PRs igual estamos fazendo em RavenRS"* — dono, 8/nov/2026.
 
 O fluxo é o mesmo dos três projetos, descrito no CLAUDE.md do e-commerce (seção "Issue e PR"):

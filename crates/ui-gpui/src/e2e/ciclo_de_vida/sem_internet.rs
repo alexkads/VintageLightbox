@@ -213,3 +213,43 @@ fn sem_rede_o_x_na_nuvem_rejeita_e_a_foto_sai_quando_a_rede_volta(cx: &mut TestA
     assert_eq!(fotos_no_painel(&c.site, &galeria).len(), 1);
     c.b.ato_limpo(cx, "o X na nuvem sem internet");
 }
+
+/// 🕰️ **O site responde erro e a lista é a de antes** (15/11/2026): a API
+/// devolveu `500` na lista de sessões por quase três horas, o espelho a serviu
+/// em silêncio e o balcão via 13 sessões de 17. Agora o rodapé diz de que hora
+/// é o dado e que foi o site — e o aviso some quando a lista volta do site.
+#[gpui_kit::test]
+#[ignore = "precisa da API de teste: rode `make e2e-ciclo`"]
+fn o_site_com_erro_avisa_no_rodape_que_a_lista_e_guardada(cx: &mut TestAppContext) {
+    use infrastructure::pos_venda::MotivoDaLembranca;
+    let c = preparar(cx, "site-com-erro", 1);
+    criar_a_sessao(cx, &c, "Lista guardada", "cliente-guardada@e2e.test");
+    assert_eq!(fila(cx, &c).dado_guardado, None, "tudo veio do site");
+
+    c.falhas.programar(json!({
+        "metodo": "GET", "caminho": "/pos-venda/galerias", "modo": "status", "status": 500, "vezes": 0
+    }));
+    c.b.app(cx, |app, _w, cx| {
+        app.sessoes.update(cx, |tela, cx| tela.recarregar(cx));
+    });
+    c.b.ate(cx, "o rodapé avisa que a lista é a guardada", |b, cx| {
+        b.desenhado(cx, "rodape-dado-guardado")
+    });
+    let guardado = fila(cx, &c).dado_guardado.expect("o dado guardado");
+    assert_eq!(guardado.motivo, MotivoDaLembranca::SiteComErro);
+    let agora = chrono::Utc::now().timestamp();
+    assert!(
+        (agora - guardado.visto_em) < 15 * 60,
+        "a hora é a da última leitura boa: {}",
+        guardado.visto_em
+    );
+
+    c.falhas.limpar();
+    c.b.app(cx, |app, _w, cx| {
+        app.sessoes.update(cx, |tela, cx| tela.recarregar(cx));
+    });
+    c.b.ate(cx, "a lista volta do site e o aviso some", |b, cx| {
+        !b.desenhado(cx, "rodape-dado-guardado")
+    });
+    assert_eq!(fila(cx, &c).dado_guardado, None);
+}

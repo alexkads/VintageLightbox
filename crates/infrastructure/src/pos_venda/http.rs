@@ -38,7 +38,9 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::pos_venda::autorizacao::{abrir_no_navegador, PedidoDeAutorizacao};
-use crate::pos_venda::espelho::{espelhavel, Espelho, EspelhoEmMemoria, EstadoDaRede, Lembranca};
+use crate::pos_venda::espelho::{
+    espelhavel, Espelho, EspelhoEmMemoria, EstadoDaRede, Lembranca, MotivoDaLembranca,
+};
 
 /// O teto de uma chamada. Um original de 30 MB numa subida de estúdio leva
 /// dezenas de segundos; o padrão do `reqwest` (nenhum) deixaria uma conexão
@@ -1347,13 +1349,18 @@ impl PosVendaApiHttp {
             Ok(resposta) if resposta.status >= 500 && falha_dita_pela_api(&resposta.bytes) => {
                 self.rede.marcar_com_rede();
                 if let Some(lembranca) = leitura.then(|| self.espelho.ler(caminho)).flatten() {
-                    return Ok(self.lembrada(lembranca));
+                    return Ok(self.lembrada(caminho, lembranca, MotivoDaLembranca::SiteComErro));
                 }
                 false
             }
             Ok(resposta) if resposta.status >= 500 => true,
             Ok(resposta) => {
                 self.rede.marcar_com_rede();
+                if leitura {
+                    // 🕰️ O site respondeu por esta rota: o que a tela mostra
+                    // dela deixa de ser o espelho (uma recusa também é o site).
+                    self.rede.leu_do_site(caminho, resposta.tipo.as_deref());
+                }
                 if leitura && (200..300).contains(&resposta.status) {
                     self.espelho
                         .guardar(caminho, &resposta.bytes, resposta.tipo.as_deref());
@@ -1364,16 +1371,34 @@ impl PosVendaApiHttp {
         };
         if faltou_rede {
             self.rede.marcar_sem_rede();
+            // 🕰️ Um `5xx` do caminho é o site (ou o proxy dele) respondendo
+            // erro; o pedido que nem voltou é a internet. O selo "Sem
+            // internet" acende nos dois, mas o aviso do dado guardado diz qual.
+            let motivo = if matches!(&resultado, Ok(r) if r.status >= 500) {
+                MotivoDaLembranca::SiteComErro
+            } else {
+                MotivoDaLembranca::SemRede
+            };
             if let Some(lembranca) = leitura.then(|| self.espelho.ler(caminho)).flatten() {
-                return Ok(self.lembrada(lembranca));
+                return Ok(self.lembrada(caminho, lembranca, motivo));
             }
         }
         resultado
     }
 
     /// A leitura guardada, no lugar da resposta que não veio.
-    fn lembrada(&self, lembranca: Lembranca) -> RespostaCrua {
-        self.rede.lembrou(lembranca.visto_em);
+    fn lembrada(
+        &self,
+        caminho: &str,
+        lembranca: Lembranca,
+        motivo: MotivoDaLembranca,
+    ) -> RespostaCrua {
+        self.rede.lembrou(
+            caminho,
+            lembranca.tipo.as_deref(),
+            lembranca.visto_em,
+            motivo,
+        );
         RespostaCrua {
             status: 200,
             tipo: lembranca.tipo,
@@ -2383,6 +2408,82 @@ mod tests {
             .abrir_galeria(&sessao, "g-nunca-aberta")
             .await
             .is_err());
+    }
+
+    /// 🕰️ 15/11/2026: a API respondeu `500` na lista de sessões e o espelho a
+    /// devolveu em silêncio. A leitura lembrada fica marcada com a hora do
+    /// dado e o motivo (o site, não a internet), e sai quando a lista volta.
+    #[tokio::test]
+    async fn o_5xx_lembrado_marca_o_dado_guardado_e_a_volta_apaga() {
+        let servidor = MockServer::start().await;
+        let pasta = tempfile::tempdir().unwrap();
+        let espelho: Arc<dyn Espelho> = Arc::new(crate::pos_venda::espelho::EspelhoEmDisco::novo(
+            pasta.path(),
+        ));
+        let api = PosVendaApiHttp::nova(servidor.uri()).com_espelho(espelho);
+        let sessao = sessao_valida();
+        let lista = json!([
+            { "id": "g1", "titulo": "Ana", "produto_id": "p1", "criada_em": "2026-09-06T12:00:00Z" }
+        ]);
+
+        let boa = Mock::given(method("GET"))
+            .and(path("/api/v2/pos-venda/galerias"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(lista.clone()))
+            .mount_as_scoped(&servidor)
+            .await;
+        api.galerias(&sessao).await.unwrap();
+        assert_eq!(api.rede().dado_guardado(), None);
+        drop(boa);
+
+        // O site cai com o envelope da API (o tempo esgotado do banco).
+        let ruim = Mock::given(method("GET"))
+            .and(path("/api/v2/pos-venda/galerias"))
+            .respond_with(ResponseTemplate::new(500).set_body_json(json!({
+                "error": { "code": "INTERNAL", "message": "tempo esgotado" }
+            })))
+            .mount_as_scoped(&servidor)
+            .await;
+        assert_eq!(api.galerias(&sessao).await.unwrap()[0].titulo, "Ana");
+        let guardado = api.rede().dado_guardado().expect("a tela vê o espelho");
+        assert_eq!(guardado.motivo, MotivoDaLembranca::SiteComErro);
+        assert!(guardado.visto_em > 0);
+        assert!(
+            api.rede().com_rede(),
+            "o site respondeu: não é falta de internet"
+        );
+        drop(ruim);
+
+        // O `502` do proxy (sem envelope) também é o site, e não a internet.
+        let proxy = Mock::given(method("GET"))
+            .and(path("/api/v2/pos-venda/galerias"))
+            .respond_with(ResponseTemplate::new(502).set_body_string("bad gateway"))
+            .mount_as_scoped(&servidor)
+            .await;
+        api.galerias(&sessao).await.unwrap();
+        assert_eq!(
+            api.rede().dado_guardado().map(|d| d.motivo),
+            Some(MotivoDaLembranca::SiteComErro)
+        );
+        drop(proxy);
+
+        // A lista volta do site: o aviso some.
+        Mock::given(method("GET"))
+            .and(path("/api/v2/pos-venda/galerias"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(lista))
+            .mount(&servidor)
+            .await;
+        api.galerias(&sessao).await.unwrap();
+        assert_eq!(api.rede().dado_guardado(), None);
+
+        // Sem internet, o motivo é outro.
+        let sem_rede = PosVendaApiHttp::nova("http://127.0.0.1:9").com_espelho(Arc::new(
+            crate::pos_venda::espelho::EspelhoEmDisco::novo(pasta.path()),
+        ));
+        sem_rede.galerias(&sessao).await.unwrap();
+        assert_eq!(
+            sem_rede.rede().dado_guardado().map(|d| d.motivo),
+            Some(MotivoDaLembranca::SemRede)
+        );
     }
 
     /// 📶 Os gestos tipados (o `PATCH` da foto) separam do mesmo jeito o `5xx`
