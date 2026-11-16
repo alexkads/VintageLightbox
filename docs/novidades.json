@@ -1,10 +1,12 @@
 {
-  "versao": "0.1.194",
-  "titulo": "A lista avisa quando mostra dados guardados.",
+  "versao": "0.1.195",
+  "titulo": "Os avisos agora falam, com a voz do Papai Noel.",
   "importante": false,
   "novidades": [
-    "Quando o site não responde, o app continua mostrando a última lista que recebeu. Agora o rodapé avisa, com a hora: \"Mostrando dados das 15:25 · o site não respondeu\".",
-    "O aviso diz se foi a internet que caiu ou o site que respondeu com erro, e some sozinho quando o site volta."
+    "Cada aviso sonoro ganhou uma frase falada: mensagem no chatbot, cliente pelo QR, agendamento novo ou cancelado, fotos salvas, exportação, cartão ejetado. Em Configurações › Avisos sonoros dá para escolher som, voz ou os dois.",
+    "Novo aviso: quando um cliente pede para falar com um atendente no WhatsApp, o app avisa na hora.",
+    "Quando a internet cai ou o site para de responder, o app avisa e lembra que dá para continuar trabalhando: ele guarda tudo e envia quando a conexão voltar. E avisa quando voltou.",
+    "Os administradores recebem uma notificação, com voz, quando o servidor precisa de atenção."
   ],
-  "por_que_atualizar": "Para saber na hora quando a lista de sessões pode estar desatualizada."
+  "por_que_atualizar": "Para ouvir na hora o que pede atenção no balcão, mesmo sem olhar a tela."
 }
