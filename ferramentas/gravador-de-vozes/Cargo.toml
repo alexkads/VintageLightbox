@@ -1,0 +1,20 @@
+# 🎙️ O gravador das vozes de aviso do app (skill `vozes-gravadas`).
+#
+# Fora do workspace de propósito (`[workspace]` vazio abaixo): ele puxa o
+# `ravenrs-ai` do RavenRS (candle, Kokoro) e nenhum balcão pode compilá-lo ao
+# se atualizar. Roda só na máquina de quem grava, por `regravar.sh`.
+[package]
+name = "gravador-de-vozes"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# O RavenRS ao lado do RecordarFotos: ~/Projects/RavenRS.
+ravenrs-ai = { path = "../../../../RavenRS/crates/ravenrs-ai" }
+vorbis_rs = "0.5"
+
+[profile.release]
+debug = false
+
+[workspace]
