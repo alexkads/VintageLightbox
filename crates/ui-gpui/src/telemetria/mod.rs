@@ -302,6 +302,68 @@ pub fn motivo_do_encerramento(evento: &crate::tempo_real::sse::EventoSse) -> Opt
     )
 }
 
+/// O aviso do sistema, se o evento é o `alerta` da proteção da API
+/// (`handlers/app_desktop.rs`: `data: {"tipo": "alerta", "titulo": …,
+/// "detalhe": …, "maquina": …}`). O servidor só o manda a contas `ADMIN`.
+pub fn alerta_do_evento(
+    evento: &crate::tempo_real::sse::EventoSse,
+) -> Option<crate::tempo_real::aviso::Aviso> {
+    if evento.nome != "alerta" {
+        return None;
+    }
+    let dados: serde_json::Value = serde_json::from_str(&evento.dados).ok()?;
+    let titulo = dados.get("titulo")?.as_str()?.trim();
+    if titulo.is_empty() {
+        return None;
+    }
+    let detalhe = dados
+        .get("detalhe")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    Some(crate::tempo_real::aviso::Aviso {
+        titulo: format!("🔌 {titulo}"),
+        corpo: detalhe.to_string(),
+        // Um alerta novo substitui o anterior, em vez de empilhar.
+        destino: "alerta-da-api".to_string(),
+    })
+}
+
+/// 🔌 O alerta da API que a raiz ainda não tocou: `(codigo, titulo, detalhe)`.
+static ALERTAS: Mutex<Vec<(String, String, String)>> = Mutex::new(Vec::new());
+
+/// O `codigo` do evento `alerta`: `falha`, `memoria` ou `normal`.
+pub fn codigo_do_alerta(evento: &crate::tempo_real::sse::EventoSse) -> String {
+    serde_json::from_str::<serde_json::Value>(&evento.dados)
+        .ok()
+        .and_then(|d| d.get("codigo")?.as_str().map(str::to_string))
+        .unwrap_or_else(|| "falha".into())
+}
+
+fn guardar_alerta(codigo: String, aviso: &crate::tempo_real::aviso::Aviso) {
+    ALERTAS.lock().unwrap_or_else(|e| e.into_inner()).push((
+        codigo,
+        aviso.titulo.clone(),
+        aviso.corpo.clone(),
+    ));
+}
+
+/// Os alertas da API que chegaram desde a última vez — a vigia da raiz os toca.
+pub fn tomar_alertas() -> Vec<(String, String, String)> {
+    std::mem::take(&mut *ALERTAS.lock().unwrap_or_else(|e| e.into_inner()))
+}
+
+/// 🔌 Mostra o alerta como notificação do sistema operacional, esteja a janela
+/// na frente ou não: é aviso ao administrador, e não uma mensagem da tela. O
+/// clique não abre nada (não há tela de destino), então ninguém ouve o canal.
+fn mostrar_alerta(aviso: crate::tempo_real::aviso::Aviso) {
+    use crate::tempo_real::aviso::{Avisador, AvisoDoSistema};
+    static AVISADOR: OnceLock<AvisoDoSistema> = OnceLock::new();
+    let (cliques, _ninguem_ouve) = std::sync::mpsc::channel();
+    AVISADOR
+        .get_or_init(AvisoDoSistema::default)
+        .avisar(aviso, cliques);
+}
+
 /// O que a entrada diz a quem foi posto para fora.
 pub fn frase_do_encerramento(motivo: &str) -> &'static str {
     match motivo {
@@ -379,6 +441,14 @@ async fn manter_o_fluxo(sessao: Sessao) {
                             }
                             if let Some(motivo) = motivo_do_encerramento(&evento) {
                                 encerrada = Some(motivo);
+                            }
+                            // 🔌 A proteção da API disparou (issue #22 do
+                            // e-commerce): o servidor só manda a administradores.
+                            if let Some(aviso) = alerta_do_evento(&evento) {
+                                // 🎙️ A voz sai pela vigia da raiz (`app/vozes.rs`),
+                                // que tem o `cx` dos sons.
+                                guardar_alerta(codigo_do_alerta(&evento), &aviso);
+                                mostrar_alerta(aviso);
                             }
                         }
                     }
@@ -582,6 +652,41 @@ mod testes {
         let mut leitor = LeitorSse::default();
         let cru = leitor.ler(b"event: sessao_encerrada\ndata: {}\n\n");
         assert_eq!(super::motivo_do_encerramento(&cru[0]).as_deref(), Some(""));
+    }
+
+    #[test]
+    fn o_alerta_da_api_vira_aviso_do_sistema() {
+        let mut leitor = crate::tempo_real::sse::LeitorSse::default();
+        let eventos = leitor.ler(
+            b"event: alerta\n\
+              data: {\"tipo\":\"alerta\",\"titulo\":\"Uma parte do sistema est\\u00e1 falhando\",\"detalhe\":\"Disjuntor aberto em GET /api/v2/pos-venda/galerias\",\"maquina\":\"80e335\"}\n\n\
+              event: alerta\n\
+              data: {\"tipo\":\"alerta\"}\n\n\
+              event: versao_nova\n\
+              data: {\"tipo\":\"versao_nova\"}\n\n",
+        );
+        let aviso = super::alerta_do_evento(&eventos[0]).expect("o alerta vira aviso");
+        assert_eq!(aviso.titulo, "🔌 Uma parte do sistema está falhando");
+        assert_eq!(
+            aviso.corpo,
+            "Disjuntor aberto em GET /api/v2/pos-venda/galerias"
+        );
+        assert_eq!(aviso.destino, "alerta-da-api");
+        assert_eq!(
+            super::alerta_do_evento(&eventos[1]),
+            None,
+            "sem título não avisa"
+        );
+        assert_eq!(
+            super::alerta_do_evento(&eventos[2]),
+            None,
+            "outro evento não é alerta"
+        );
+        assert_eq!(
+            super::codigo_do_alerta(&eventos[0]),
+            "falha",
+            "sem código é falha"
+        );
         assert!(super::frase_do_encerramento("").contains("terminou"));
         assert!(super::frase_do_encerramento("motivo_do_futuro").contains("terminou"));
     }

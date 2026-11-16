@@ -32,6 +32,7 @@ pub mod rodape;
 mod roteiro;
 /// O que a raiz conta à bandeja (`crate::segundo_plano`).
 mod segundo_plano;
+mod vozes;
 pub mod whatsapp_bloqueado;
 pub use segundo_plano::Saida;
 
@@ -1770,6 +1771,13 @@ impl Aplicativo {
             // 🧑‍💼 A compilação automática só com o balcão parado.
             if raiz
                 .update(cx, |raiz, cx| raiz.vigiar_o_balcao(cx))
+                .is_err()
+            {
+                break;
+            }
+            // 🎙️ Os alertas da API e as quedas da conexão, em voz (`vozes`).
+            if raiz
+                .update(cx, |raiz, cx| raiz.vigiar_as_vozes(cx))
                 .is_err()
             {
                 break;
