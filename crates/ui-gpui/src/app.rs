@@ -10242,10 +10242,13 @@ mod testes {
             pedidos[0].som,
             Some(crate::sons::Som::Embutido(crate::sons::Embutido::Alerta))
         );
+        // 🎙️ Desde 15/11/2026 a falha fala a frase gravada ("Atenção! Algo deu
+        // errado. Confira o aviso na tela."); o texto do erro fica no toast.
         assert_eq!(
-            pedidos[0].fala.as_ref().map(|f| f.texto.as_str()),
-            Some("Atenção: o caixa está fechado")
+            pedidos[0].gravada,
+            Some(crate::sons::gravadas::Gravada::Falha)
         );
+        assert_eq!(pedidos[0].fala, None);
     }
 
     /// 🚨 Abrir as Configurações **relê o cache**.
