@@ -1,5 +1,16 @@
 [
   {
+    "versao": "0.1.194",
+    "data": "2026-11-15",
+    "titulo": "A lista avisa quando mostra dados guardados.",
+    "importante": false,
+    "novidades": [
+      "Quando o site não responde, o app continua mostrando a última lista que recebeu. Agora o rodapé avisa, com a hora: \"Mostrando dados das 15:25 · o site não respondeu\".",
+      "O aviso diz se foi a internet que caiu ou o site que respondeu com erro, e some sozinho quando o site volta."
+    ],
+    "por_que_atualizar": "Para saber na hora quando a lista de sessões pode estar desatualizada."
+  },
+  {
     "versao": "0.1.193",
     "data": "2026-11-14",
     "titulo": "Cache mais clara, e agora dá para limpar só o que está parado há 15, 30, 60 ou 90 dias.",

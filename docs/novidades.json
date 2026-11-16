@@ -1,11 +1,10 @@
 {
-  "versao": "0.1.193",
-  "titulo": "Cache mais clara, e agora dá para limpar só o que está parado há 15, 30, 60 ou 90 dias.",
+  "versao": "0.1.194",
+  "titulo": "A lista avisa quando mostra dados guardados.",
   "importante": false,
   "novidades": [
-    "Configurações › Cache foi redesenhada: tamanho no disco, miniaturas e previews em cartões, cada um com o seu botão, e o \"Abrir a pasta\" no lugar do caminho comprido.",
-    "Novo: limpar o que está sem uso há mais de 15, 30, 60 ou 90 dias. A tela mostra antes quantos itens e quantos MB vão sair, e o que você abriu há pouco fica.",
-    "O botão \"Limpar tudo\" saiu, para não esvaziar sem querer as previews do trabalho do dia."
+    "Quando o site não responde, o app continua mostrando a última lista que recebeu. Agora o rodapé avisa, com a hora: \"Mostrando dados das 15:25 · o site não respondeu\".",
+    "O aviso diz se foi a internet que caiu ou o site que respondeu com erro, e some sozinho quando o site volta."
   ],
-  "por_que_atualizar": "Para liberar espaço no disco sem perder as previews das sessões recentes."
+  "por_que_atualizar": "Para saber na hora quando a lista de sessões pode estar desatualizada."
 }

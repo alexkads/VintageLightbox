@@ -189,18 +189,58 @@ impl Espelho for EspelhoEmMemoria {
     }
 }
 
+/// 🕰️ Por que a tela está vendo uma leitura guardada no lugar da do site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MotivoDaLembranca {
+    /// O pedido nem chegou ao site (sem internet, tempo esgotado no caminho).
+    SemRede,
+    /// O site respondeu, mas com erro (`5xx`): a internet está aí, ele não.
+    SiteComErro,
+}
+
+/// 🕰️ A tela está mostrando o espelho: desde que hora é o dado, e por quê.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DadoGuardado {
+    /// Quando o site mandou o dado que a tela mostra (segundos desde a época).
+    /// Com várias rotas lembradas, a mais antiga — é ela que pode enganar.
+    pub visto_em: i64,
+    pub motivo: MotivoDaLembranca,
+}
+
+/// Uma rota que respondeu do espelho e ainda não voltou a ler do site.
+#[derive(Debug, Clone, Copy)]
+struct RotaLembrada {
+    visto_em: i64,
+    motivo: MotivoDaLembranca,
+    /// Quando o espelho respondeu por ela pela última vez.
+    lembrada_em: i64,
+}
+
+/// Uma rota lembrada que ninguém pediu de novo por este tempo, com o site já
+/// respondendo a outras, deixou a tela (a sessão aberta e fechada durante a
+/// queda): o aviso não fica aceso por ela.
+const ROTA_ESQUECIDA_EM: i64 = 10 * 60;
+
 /// 📶 **Se o site está respondendo** — o que o selo do rodapé mostra e o que a
 /// fila de sincronização consulta antes de tentar.
 ///
 /// Quem muda o estado é o cliente HTTP: qualquer resposta do site (mesmo uma
 /// recusa) é rede; "sem resposta" ou `5xx` do caminho é falta dela. O `5xx`
 /// que a própria API explica (a Meta recusou) não mexe no estado.
+///
+/// 🕰️ **E se a tela está vendo o espelho** (15/11/2026): a API respondeu `500`
+/// na lista de sessões por quase três horas, o espelho a devolveu em silêncio e
+/// o balcão viu 13 sessões de 17 sem aviso nenhum. Cada leitura que volta do
+/// espelho fica marcada **pela rota**, e sai quando a mesma rota volta a ler do
+/// site — uma outra rota que deu certo não prova que a lista está em dia.
 #[derive(Debug, Default)]
 pub struct EstadoDaRede {
     /// `0` = com rede; senão, desde quando (segundos desde a época) não há.
     sem_rede_desde: AtomicI64,
-    /// Quando o espelho respondeu no lugar do site pela última vez.
-    ultima_lembranca: AtomicI64,
+    /// As rotas de dados (JSON) que a tela está vendo do espelho.
+    lembradas: Mutex<HashMap<String, RotaLembrada>>,
+    /// A última leitura de dados que veio do site.
+    ultima_leitura_do_site: AtomicI64,
 }
 
 impl EstadoDaRede {
@@ -229,18 +269,89 @@ impl EstadoDaRede {
         self.sem_rede_desde.store(0, Ordering::Relaxed);
     }
 
-    /// O espelho respondeu no lugar do site — a tela pode estar vendo dados de
-    /// antes. Guardado para o selo dizer "visto às 14h".
-    pub fn lembrou(&self, visto_em: i64) {
-        self.ultima_lembranca.store(visto_em, Ordering::Relaxed);
+    /// O espelho respondeu no lugar do site pela rota `caminho` — a tela pode
+    /// estar vendo dados de antes. Só os dados contam (`json`): a miniatura de
+    /// ontem é a mesma de hoje.
+    pub fn lembrou(
+        &self,
+        caminho: &str,
+        tipo: Option<&str>,
+        visto_em: i64,
+        motivo: MotivoDaLembranca,
+    ) {
+        self.lembrou_em(caminho, tipo, visto_em, motivo, agora());
     }
 
-    pub fn ultima_lembranca(&self) -> Option<i64> {
-        match self.ultima_lembranca.load(Ordering::Relaxed) {
-            0 => None,
-            v => Some(v),
+    fn lembrou_em(
+        &self,
+        caminho: &str,
+        tipo: Option<&str>,
+        visto_em: i64,
+        motivo: MotivoDaLembranca,
+        quando: i64,
+    ) {
+        if !e_dado(tipo) {
+            return;
+        }
+        if let Ok(mut lembradas) = self.lembradas.lock() {
+            lembradas.insert(
+                caminho.to_string(),
+                RotaLembrada {
+                    visto_em,
+                    motivo,
+                    lembrada_em: quando,
+                },
+            );
         }
     }
+
+    /// A rota `caminho` voltou a ler do site: o que a tela mostra dela está em
+    /// dia.
+    pub fn leu_do_site(&self, caminho: &str, tipo: Option<&str>) {
+        self.leu_do_site_em(caminho, tipo, agora());
+    }
+
+    fn leu_do_site_em(&self, caminho: &str, tipo: Option<&str>, quando: i64) {
+        if let Ok(mut lembradas) = self.lembradas.lock() {
+            lembradas.remove(caminho);
+        }
+        if e_dado(tipo) {
+            self.ultima_leitura_do_site.store(quando, Ordering::Relaxed);
+        }
+    }
+
+    /// 🕰️ O que o rodapé avisa: a tela mostra dado guardado, desde que hora, e
+    /// por quê. `None` = tudo o que está na tela veio do site.
+    pub fn dado_guardado(&self) -> Option<DadoGuardado> {
+        self.dado_guardado_em(agora())
+    }
+
+    fn dado_guardado_em(&self, agora: i64) -> Option<DadoGuardado> {
+        let ultima_do_site = self.ultima_leitura_do_site.load(Ordering::Relaxed);
+        let lembradas = self.lembradas.lock().ok()?;
+        lembradas
+            .values()
+            .filter(|r| {
+                let esquecida =
+                    agora - r.lembrada_em > ROTA_ESQUECIDA_EM && ultima_do_site > r.lembrada_em;
+                !esquecida
+            })
+            .min_by_key(|r| r.visto_em)
+            .map(|r| DadoGuardado {
+                visto_em: r.visto_em,
+                motivo: r.motivo,
+            })
+    }
+
+    /// Quando foi lido o dado mais antigo que a tela mostra do espelho.
+    pub fn ultima_lembranca(&self) -> Option<i64> {
+        self.dado_guardado().map(|d| d.visto_em)
+    }
+}
+
+/// Dados (`json`), e não imagem: é o que envelhece na tela.
+fn e_dado(tipo: Option<&str>) -> bool {
+    tipo.is_some_and(|t| t.contains("json"))
 }
 
 #[cfg(test)]
@@ -327,5 +438,69 @@ mod testes {
         assert_eq!(rede.sem_rede_desde(), Some(desde));
         rede.marcar_com_rede();
         assert!(rede.com_rede());
+    }
+
+    /// 🕰️ 15/11/2026: a lista de sessões veio do espelho por quase três horas
+    /// sem aviso. O aviso é **da rota**: outra que deu certo não o apaga; a
+    /// mesma, sim.
+    #[test]
+    fn o_dado_guardado_e_da_rota_e_sai_quando_ela_volta_do_site() {
+        let json = Some("application/json");
+        let rede = EstadoDaRede::default();
+        assert_eq!(rede.dado_guardado(), None);
+
+        rede.lembrou_em(
+            "/pos-venda/galerias",
+            json,
+            1_000,
+            MotivoDaLembranca::SiteComErro,
+            5_000,
+        );
+        // A miniatura lembrada não envelhece a tela.
+        rede.lembrou_em(
+            "/pos-venda/fotos/f1/miniatura",
+            Some("image/webp"),
+            10,
+            MotivoDaLembranca::SemRede,
+            5_000,
+        );
+        let aviso = DadoGuardado {
+            visto_em: 1_000,
+            motivo: MotivoDaLembranca::SiteComErro,
+        };
+        assert_eq!(rede.dado_guardado_em(5_001), Some(aviso));
+
+        // As excluídas responderam: a lista de sessões continua a de antes.
+        rede.leu_do_site_em("/pos-venda/galerias/excluidas", json, 5_002);
+        assert_eq!(rede.dado_guardado_em(5_003), Some(aviso));
+
+        // A própria lista voltou do site: o aviso some.
+        rede.leu_do_site_em("/pos-venda/galerias", json, 5_004);
+        assert_eq!(rede.dado_guardado_em(5_005), None);
+    }
+
+    /// A sessão aberta durante a queda e fechada depois: ninguém a lê de novo,
+    /// e o aviso não fica aceso por ela para sempre — só depois que o site já
+    /// respondeu a outra leitura.
+    #[test]
+    fn a_rota_que_ninguem_pede_mais_nao_segura_o_aviso() {
+        let json = Some("application/json");
+        let rede = EstadoDaRede::default();
+        rede.lembrou_em(
+            "/pos-venda/galerias/g1",
+            json,
+            900,
+            MotivoDaLembranca::SemRede,
+            1_000,
+        );
+        let depois = 1_000 + ROTA_ESQUECIDA_EM + 1;
+        // Sem o site ter respondido a nada, o aviso fica: pode estar na tela.
+        assert!(rede.dado_guardado_em(depois).is_some());
+        rede.leu_do_site_em("/pos-venda/galerias", json, 1_100);
+        assert!(
+            rede.dado_guardado_em(1_200).is_some(),
+            "cedo demais para esquecer"
+        );
+        assert_eq!(rede.dado_guardado_em(depois), None);
     }
 }

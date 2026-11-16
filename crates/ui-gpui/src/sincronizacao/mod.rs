@@ -77,6 +77,9 @@ pub struct Situacao {
     /// 💾 O disco recusou guardar um gesto (cheio, quase sempre): ele está só
     /// na memória e se perde se o app fechar. A gravação insiste sozinha.
     pub sem_disco: bool,
+    /// 🕰️ A tela mostra uma leitura guardada do espelho, porque o site não
+    /// respondeu (15/11/2026): de que hora é o dado, e por quê.
+    pub dado_guardado: Option<infrastructure::pos_venda::DadoGuardado>,
 }
 
 /// A fila de sincronização deste balcão — uma só, dividida pela porta, pelo
@@ -430,6 +433,7 @@ impl Sincronizacao {
                 .load(std::sync::atomic::Ordering::Relaxed),
             sem_rede_desde: self.rede.sem_rede_desde(),
             sem_disco: self.sem_disco.load(std::sync::atomic::Ordering::Relaxed),
+            dado_guardado: self.rede.dado_guardado(),
         }
     }
 
