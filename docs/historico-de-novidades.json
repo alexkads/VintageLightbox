@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.195",
+    "data": "2026-11-17",
+    "titulo": "O Limpar da aba Cache agora apaga também as fotos que já estão no site.",
+    "importante": false,
+    "novidades": [
+      "Configurações › Cache: o Limpar por período (15, 30, 60 ou 90 dias) apaga, além do cache, as fotos guardadas nesta máquina das sessões paradas há mais tempo que o escolhido, desde que elas já estejam no site. Nada sai do site.",
+      "Ficam sempre: a foto que ainda não subiu, a rejeitada, a que tem alteração esperando internet e a que tem edição. A sessão apagada daqui continua abrindo, pelas fotos do site.",
+      "Antes do clique o cartão mostra quantas fotos e quanto espaço vão sair; depois, o aviso diz quantas saíram e quanto liberou."
+    ],
+    "por_que_atualizar": "Para liberar o disco do computador sem perder nenhuma foto."
+  },
+  {
     "versao": "0.1.194",
     "data": "2026-11-15",
     "titulo": "A lista avisa quando mostra dados guardados.",
