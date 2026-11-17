@@ -71,6 +71,17 @@ impl Retrato {
     }
 }
 
+/// Quanto da limpeza já andou — o que a barra do rodapé mostra (#25).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Andamento {
+    /// Fotos já tiradas do catálogo.
+    pub feitas: u64,
+    /// Quantas fotos a limpeza vai tirar.
+    pub total: u64,
+    /// Bytes de foto já liberados.
+    pub bytes: u64,
+}
+
 /// Uma foto local que pode sair.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Candidata {
@@ -109,10 +120,31 @@ impl FotosLocais {
 
     /// Apaga o que está sem uso há mais de `dias` e devolve o que saiu.
     pub async fn limpar_sem_uso_ha(&self, dias: u32) -> Result<Retrato, String> {
+        self.limpar_sem_uso_ha_contando(dias, |_| {}).await
+    }
+
+    /// O mesmo, contando o andamento a cada foto (#25): `andou` recebe o
+    /// total logo no começo e depois cada foto que sai.
+    ///
+    /// 🔑 **Cede a vez ao runtime entre uma foto e outra.** São centenas de
+    /// `DELETE` e de arquivos apagados seguidos: sem a pausa, a limpeza
+    /// ocuparia uma thread do tokio e o catálogo de ponta a ponta, e o balcão
+    /// sentiria na triagem e na revelação, que gravam no mesmo banco.
+    pub async fn limpar_sem_uso_ha_contando(
+        &self,
+        dias: u32,
+        andou: impl Fn(Andamento),
+    ) -> Result<Retrato, String> {
         let candidatas = self.candidatas(limite(dias, Utc::now())).await?;
         let mut retrato = Retrato::default();
         let mut pastas = HashSet::new();
+        let mut andamento = Andamento {
+            total: candidatas.len() as u64,
+            ..Andamento::default()
+        };
+        andou(andamento);
         for candidata in candidatas {
+            tokio::task::yield_now().await;
             let bytes = tamanho(&candidata.caminho);
             // 🔑 **A linha primeiro.** Se o arquivo não sair (aberto em outro
             // programa no Windows), sobra um arquivo solto na pasta do ensaio —
@@ -140,6 +172,9 @@ impl FotosLocais {
             if let Some(pasta) = candidata.caminho.parent() {
                 pastas.insert(pasta.to_path_buf());
             }
+            andamento.feitas = retrato.fotos;
+            andamento.bytes = retrato.bytes_das_fotos;
+            andou(andamento);
         }
         // A pasta do ensaio que ficou vazia sai também — `remove_dir` recusa
         // pasta com qualquer coisa dentro, e é essa recusa que a protege.
@@ -417,6 +452,33 @@ mod testes {
         assert_eq!(c.fotos().limpar_sem_uso_ha(30).await.unwrap().fotos, 1);
         assert!(!velha.exists());
         assert!(nova.exists(), "a recente fica, e a pasta com ela");
+    }
+
+    /// 🚨 O andamento conta o total no começo e cada foto que sai, com os
+    /// bytes — é o que a barra do rodapé desenha (#25).
+    #[tokio::test]
+    async fn o_andamento_conta_foto_a_foto() {
+        let c = catalogo().await;
+        c.foto("a", Some("s1"), Some("site-a"), 90).await;
+        c.foto("b", Some("s1"), Some("site-b"), 90).await;
+        c.foto("c", Some("s2"), None, 90).await;
+
+        let vistos = std::sync::Mutex::new(Vec::new());
+        let saiu = c
+            .fotos()
+            .limpar_sem_uso_ha_contando(30, |a| vistos.lock().unwrap().push(a))
+            .await
+            .unwrap();
+
+        assert_eq!(saiu.fotos, 2);
+        let vistos = vistos.into_inner().unwrap();
+        assert_eq!(
+            vistos
+                .iter()
+                .map(|a| (a.feitas, a.total, a.bytes))
+                .collect::<Vec<_>>(),
+            vec![(0, 2, 0), (1, 2, 1000), (2, 2, 2000)]
+        );
     }
 
     /// O espelho velho sai pelo mesmo período; o recém-lido fica.

@@ -16,6 +16,7 @@
 //! | versão | `VintageLightbox` e `versão 0.1.22` | as novidades desta versão |
 //! | envios | subindo, recusados, ou "tudo no site" | os recusados abrem os motivos |
 //! | WhatsApp | só quando a Meta recusa as mensagens da casa ([`super::whatsapp_bloqueado`]) | o que parou e onde pagar |
+//! | limpeza | só enquanto o Limpar por período apaga fotos locais: a barra, quantas e quanto (#25) | abre Configurações › Cache |
 //! | meio | a faixa de atualização, quando há aviso ([`faixa`]) | os botões dela |
 //! | tela | o recorte, quantas fotos e quantas selecionadas | — |
 //! | servidor | o site em que o app está; âmbar fora da produção | abre o site |
@@ -40,6 +41,7 @@ use std::sync::{Arc, OnceLock};
 
 use biblioteca_core::acervo::{Estado, Filtro};
 use gpui_kit::component::popover::Popover;
+use gpui_kit::component::progress::Progress;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Icon, Selectable};
 use gpui_kit::{div, prelude::*, px, AnyElement, Context, FontWeight, SharedString};
 
@@ -329,6 +331,36 @@ impl Aplicativo {
         // que aparece como enviado não chega ao cliente.
         let whatsapp = self.trecho_do_whatsapp(cx);
 
+        // ── 🧹 A limpeza das fotos locais ─────────────────────────────────
+        // Em segundo plano (#25): o operador segue trabalhando e a barra anda
+        // aqui, com as Configurações abertas ou fechadas.
+        let limpeza = self
+            .configuracoes
+            .read(cx)
+            .andamento_da_limpeza()
+            .map(|andamento| {
+                let (frase, porcento) = frase_da_limpeza(andamento);
+                botao("rodape-limpeza")
+                    .text_color(frente)
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(Icon::new(Icone::Trash2).size(px(12.)))
+                    .child(frase)
+                    .child(
+                        div().flex_none().w(px(90.)).child(
+                            Progress::new("rodape-limpeza-barra")
+                                .value(porcento)
+                                .h(px(4.)),
+                        ),
+                    )
+                    .tooltip(
+                        "Apagando desta máquina as fotos que já estão no site. \
+                         Pode seguir trabalhando.",
+                    )
+                    .on_click(cx.listener(|raiz, _, window, cx| {
+                        raiz.abrir_configuracoes_no_cache(window, cx);
+                    }))
+            });
+
         // ── A faixa de atualização ────────────────────────────────────────
         let agir = cx.listener(|raiz, pedido: &PedidoDeAtualizacao, _window, cx| {
             raiz.atender(*pedido, cx);
@@ -421,6 +453,9 @@ impl Aplicativo {
             .when_some(whatsapp, |rodape, whatsapp| {
                 rodape.child(separador()).child(whatsapp)
             })
+            .when_some(limpeza, |rodape, limpeza| {
+                rodape.child(separador()).child(limpeza)
+            })
             .child(
                 // O meio cresce e encolhe: a frase da faixa se corta antes de
                 // empurrar os trechos das pontas para fora.
@@ -441,6 +476,39 @@ impl Aplicativo {
             .child(desempenho)
             .child(separador())
             .child(servidor)
+    }
+
+    /// 🧹 O fim da limpeza das fotos vira toast **da raiz** (#25): quem clicou
+    /// em Limpar pode já ter fechado as Configurações e estar noutra tela.
+    pub(super) fn avisar_o_fim_da_limpeza(
+        &mut self,
+        window: &mut gpui_kit::Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some((numero, frase, falhou)) = self
+            .configuracoes
+            .read(cx)
+            .fim_da_limpeza_de_fotos()
+            .cloned()
+        else {
+            return;
+        };
+        if numero <= self.fim_da_limpeza_avisado {
+            return;
+        }
+        self.fim_da_limpeza_avisado = numero;
+        let nota = estilo::toast(
+            frase,
+            if falhou {
+                estilo::Toast::Erro
+            } else {
+                estilo::Toast::Sucesso
+            },
+            cx,
+        );
+        window.defer(cx, move |window, cx| {
+            estilo::mostrar_toast(nota, window, cx)
+        });
     }
 
     /// A lista do que o site recusou nesta abertura, sobre o rodapé — aberta
@@ -836,9 +904,48 @@ impl Aplicativo {
     }
 }
 
+/// "Limpando fotos · 120 de 800 · 1,2 GB" e quanto da barra está cheia (0–100).
+///
+/// Enquanto o total ainda não foi contado, a frase não promete número.
+pub(crate) fn frase_da_limpeza(andamento: crate::biblioteca::acervo::Andamento) -> (String, f32) {
+    if andamento.total == 0 {
+        return ("Limpando fotos…".into(), 0.);
+    }
+    let porcento = (andamento.feitas as f32 / andamento.total as f32 * 100.).clamp(0., 100.);
+    let mut frase = format!(
+        "Limpando fotos · {} de {}",
+        andamento.feitas, andamento.total
+    );
+    if andamento.bytes > 0 {
+        frase.push_str(&format!(
+            " · {}",
+            crate::configuracoes::formatar_bytes(andamento.bytes)
+        ));
+    }
+    (frase, porcento)
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    /// 🧹 A frase e a barra da limpeza no rodapé (#25): sem total ainda, não
+    /// promete número; depois, quantas de quantas e quanto liberou.
+    #[test]
+    fn a_limpeza_no_rodape_conta_e_enche_a_barra() {
+        use crate::biblioteca::acervo::Andamento;
+        assert_eq!(
+            frase_da_limpeza(Andamento::default()),
+            ("Limpando fotos…".to_string(), 0.)
+        );
+        let (frase, porcento) = frase_da_limpeza(Andamento {
+            feitas: 120,
+            total: 480,
+            bytes: 3 * 1024 * 1024,
+        });
+        assert_eq!(frase, "Limpando fotos · 120 de 480 · 3,0 MB");
+        assert_eq!(porcento, 25.);
+    }
 
     #[test]
     fn o_selo_da_fila_so_fala_quando_ha_o_que_dizer() {

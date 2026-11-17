@@ -33,7 +33,7 @@ use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Disableable, Icon, Sizabl
 use gpui_kit::{div, prelude::*, px, App, Context, Entity, FontWeight, SharedString, Task, Window};
 
 use crate::autenticador_da_conta::AutenticadorDaConta;
-use crate::biblioteca::acervo::{Acervo, Retrato};
+use crate::biblioteca::acervo::{Acervo, Andamento, AndamentoDaLimpeza, Retrato};
 use crate::pos_venda::porta::Publicador;
 use crate::recursos::Icone;
 use crate::sons::tela::AvisosSonoros;
@@ -67,11 +67,16 @@ pub fn formatar_bytes(bytes: u64) -> String {
 /// Os períodos da limpeza por idade, em dias (pedido do dono, 14/11/2026).
 pub const PERIODOS: [u32; 4] = [15, 30, 60, 90];
 
-/// A limpeza das fotos a caminho, e o que o cache já respondeu.
-type LimpezaAndando = (Receiver<Result<Retrato, String>>, Result<u64, String>);
+/// A limpeza das fotos a caminho: o canal, o que o cache já respondeu e o
+/// último andamento lido.
+type LimpezaAndando = (Receiver<AndamentoDaLimpeza>, Result<u64, String>, Andamento);
 
 /// De quanto em quanto a tela olha se a medida ou a limpeza das fotos voltou.
-const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(100);
+///
+/// ⚠️ **Não menos que isto**: cada andamento novo redesenha a raiz (é ela que
+/// pinta o rodapé), e quatro vezes por segundo basta para a barra andar sem
+/// disputar quadro com a Revelação.
+const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(250);
 
 pub struct Configuracoes {
     previews: Arc<PreviewManager>,
@@ -107,6 +112,9 @@ pub struct Configuracoes {
     medida: Option<Receiver<Vec<(u32, Retrato)>>>,
     /// A limpeza das fotos a caminho, com o que o cache já apagou.
     limpeza: Option<LimpezaAndando>,
+    /// O fim da última limpeza das fotos, para a **raiz** avisar (#25): o
+    /// número só cresce, e cada um vira um toast, em qualquer tela.
+    fim_das_fotos: Option<(u64, SharedString, bool)>,
     _colheita: Option<Task<()>>,
 }
 
@@ -127,6 +135,7 @@ impl Configuracoes {
             fotos_sem_uso: Vec::new(),
             medida: None,
             limpeza: None,
+            fim_das_fotos: None,
             _colheita: None,
         }
     }
@@ -209,15 +218,33 @@ impl Configuracoes {
             self.medida = None;
             cx.notify();
         }
-        let voltou = self
-            .limpeza
-            .as_ref()
-            .and_then(|(resposta, _)| resposta.try_recv().ok());
-        if let Some(fotos) = voltou {
-            let (_, cache) = self.limpeza.take().expect("havia limpeza");
-            self.limpeza_falhou = cache.is_err() || fotos.is_err();
-            self.limpeza_vista = None;
-            self.ultima_limpeza = Some(resumo_da_limpeza(cache, fotos).into());
+        let mut fim = None;
+        if let Some((resposta, _, andamento)) = self.limpeza.as_mut() {
+            let antes = *andamento;
+            while let Ok(recado) = resposta.try_recv() {
+                match recado {
+                    AndamentoDaLimpeza::Andando(novo) => *andamento = novo,
+                    AndamentoDaLimpeza::Terminou(fotos) => {
+                        fim = Some(fotos);
+                        break;
+                    }
+                }
+            }
+            if *andamento != antes {
+                cx.notify();
+            }
+        }
+        if let Some(fotos) = fim {
+            let (_, cache, _) = self.limpeza.take().expect("havia limpeza");
+            let falhou = cache.is_err() || fotos.is_err();
+            let frase: SharedString = resumo_da_limpeza(cache, fotos).into();
+            self.limpeza_falhou = falhou;
+            // 🍞 Quem avisa é a raiz, em qualquer tela: o diálogo marca a
+            // frase como vista para não repetir o toast se estiver aberto.
+            self.limpeza_vista = Some(frase.clone());
+            self.ultima_limpeza = Some(frase.clone());
+            let numero = self.fim_das_fotos.as_ref().map_or(1, |(n, _, _)| n + 1);
+            self.fim_das_fotos = Some((numero, frase, falhou));
             self.atualizar(cx);
         }
         let continua = self.medida.is_some() || self.limpeza.is_some();
@@ -230,6 +257,16 @@ impl Configuracoes {
     /// Se a limpeza das fotos ainda está andando — o botão espera.
     pub fn limpando(&self) -> bool {
         self.limpeza.is_some()
+    }
+
+    /// O andamento da limpeza das fotos, enquanto ela anda — o rodapé (#25).
+    pub fn andamento_da_limpeza(&self) -> Option<Andamento> {
+        self.limpeza.as_ref().map(|(_, _, andamento)| *andamento)
+    }
+
+    /// O fim da última limpeza das fotos: número, frase e se falhou.
+    pub fn fim_da_limpeza_de_fotos(&self) -> Option<&(u64, SharedString, bool)> {
+        self.fim_das_fotos.as_ref()
     }
 
     pub fn estatisticas(&self) -> Option<&CacheStats> {
@@ -320,7 +357,7 @@ impl Configuracoes {
         let cache = self.previews.limpar_sem_uso_ha(dias);
         let (canal, resposta) = channel();
         acervo.limpar_fotos_locais(dias, canal);
-        self.limpeza = Some((resposta, cache));
+        self.limpeza = Some((resposta, cache, Andamento::default()));
         self.colher_depois(cx);
         cx.notify();
     }
@@ -464,8 +501,13 @@ impl Configuracoes {
             },
         );
         let nada = itens == 0 && fotos.fotos == 0;
-        let resumo: SharedString = if limpando {
-            "Limpando…".into()
+        let resumo: SharedString = if let Some(a) = self.andamento_da_limpeza() {
+            format!(
+                "Limpando… {} de {} fotos · siga trabalhando",
+                milhar(a.feitas),
+                milhar(a.total)
+            )
+            .into()
         } else if nada {
             "Nada sem uso há tanto tempo".into()
         } else {
@@ -862,6 +904,20 @@ mod testes {
     struct FotosDeMentira {
         retrato: Retrato,
         pedidos: std::sync::Mutex<Vec<u32>>,
+        /// A limpeza fica pendurada aqui: o teste manda o andamento aos
+        /// poucos, como a de verdade.
+        canal: std::sync::Mutex<Option<std::sync::mpsc::Sender<AndamentoDaLimpeza>>>,
+    }
+
+    impl FotosDeMentira {
+        fn mandar(&self, recado: AndamentoDaLimpeza) {
+            let canal = self.canal.lock().unwrap();
+            canal
+                .as_ref()
+                .expect("a limpeza começou")
+                .send(recado)
+                .unwrap();
+        }
     }
 
     impl Acervo for FotosDeMentira {
@@ -882,10 +938,10 @@ mod testes {
         fn limpar_fotos_locais(
             &self,
             dias: u32,
-            canal: std::sync::mpsc::Sender<Result<Retrato, String>>,
+            canal: std::sync::mpsc::Sender<AndamentoDaLimpeza>,
         ) {
             self.pedidos.lock().unwrap().push(dias);
-            let _ = canal.send(Ok(self.retrato));
+            *self.canal.lock().unwrap() = Some(canal);
         }
     }
 
@@ -904,6 +960,7 @@ mod testes {
                 bytes_do_espelho: 0,
             },
             pedidos: Default::default(),
+            canal: Default::default(),
         });
         cx.update(gpui_kit::init);
         let acervo: Arc<dyn Acervo> = fotos.clone();
@@ -921,13 +978,48 @@ mod testes {
 
                 tela.limpar_por_periodo(cx);
                 assert!(tela.limpando());
+                assert_eq!(*fotos.pedidos.lock().unwrap(), vec![60]);
+
+                // 🚨 O andamento chega aos poucos e a tela o guarda — é o que
+                // o rodapé desenha (#25).
+                fotos.mandar(AndamentoDaLimpeza::Andando(Andamento {
+                    feitas: 0,
+                    total: 12,
+                    bytes: 0,
+                }));
+                fotos.mandar(AndamentoDaLimpeza::Andando(Andamento {
+                    feitas: 5,
+                    total: 12,
+                    bytes: 1024,
+                }));
+                tela.colher(cx);
+                assert_eq!(
+                    tela.andamento_da_limpeza(),
+                    Some(Andamento {
+                        feitas: 5,
+                        total: 12,
+                        bytes: 1024
+                    })
+                );
+                assert!(tela.fim_da_limpeza_de_fotos().is_none());
+
+                fotos.mandar(AndamentoDaLimpeza::Terminou(Ok(fotos.retrato)));
                 tela.colher(cx);
 
                 assert!(!tela.limpando());
-                assert_eq!(*fotos.pedidos.lock().unwrap(), vec![60]);
+                assert_eq!(tela.andamento_da_limpeza(), None);
                 assert_eq!(
                     tela.ultima_limpeza(),
                     Some("12 fotos locais apagadas · 3,00 GB liberados")
+                );
+                let (numero, frase, falhou) = tela
+                    .fim_da_limpeza_de_fotos()
+                    .expect("a raiz avisa")
+                    .clone();
+                assert_eq!((numero, falhou), (1, false));
+                assert_eq!(
+                    frase.as_ref(),
+                    "12 fotos locais apagadas · 3,00 GB liberados"
                 );
             })
             .expect("a janela deve estar aberta");
