@@ -63,14 +63,25 @@ pub trait Acervo: Send + Sync + 'static {
         );
     }
 
-    /// 🧹 Apaga as fotos locais sem uso há mais de `dias` que o site já guarda.
-    fn limpar_fotos_locais(&self, dias: u32, canal: Sender<Result<Retrato, String>>) {
+    /// 🧹 Apaga as fotos locais sem uso há mais de `dias` que o site já guarda,
+    /// **em segundo plano**: o canal recebe o andamento a cada foto e, por
+    /// último, o fim (#25). A tela segue livre — é o rodapé que mostra a barra.
+    fn limpar_fotos_locais(&self, dias: u32, canal: Sender<AndamentoDaLimpeza>) {
         let _ = dias;
-        let _ = canal.send(Ok(Retrato::default()));
+        let _ = canal.send(AndamentoDaLimpeza::Terminou(Ok(Retrato::default())));
     }
 }
 
-pub use infrastructure::fotos_locais::Retrato;
+pub use infrastructure::fotos_locais::{Andamento, Retrato};
+
+/// O que a limpeza das fotos conta pelo canal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AndamentoDaLimpeza {
+    /// Mais uma foto saiu (ou o total acabou de ser contado).
+    Andando(Andamento),
+    /// Acabou: o que saiu, ou por que parou.
+    Terminou(Result<Retrato, String>),
+}
 
 /// O acervo de verdade: o `LibraryController` numa `Handle` do tokio.
 pub struct AcervoDoBanco {
@@ -156,13 +167,19 @@ impl Acervo for AcervoDoBanco {
         });
     }
 
-    fn limpar_fotos_locais(&self, dias: u32, canal: Sender<Result<Retrato, String>>) {
+    fn limpar_fotos_locais(&self, dias: u32, canal: Sender<AndamentoDaLimpeza>) {
         let Some(fotos) = self.fotos_locais.clone() else {
-            let _ = canal.send(Ok(Retrato::default()));
+            let _ = canal.send(AndamentoDaLimpeza::Terminou(Ok(Retrato::default())));
             return;
         };
         self.tokio.spawn(async move {
-            let _ = canal.send(fotos.limpar_sem_uso_ha(dias).await);
+            let andando = canal.clone();
+            let fim = fotos
+                .limpar_sem_uso_ha_contando(dias, move |a| {
+                    let _ = andando.send(AndamentoDaLimpeza::Andando(a));
+                })
+                .await;
+            let _ = canal.send(AndamentoDaLimpeza::Terminou(fim));
         });
     }
 }
