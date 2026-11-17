@@ -165,12 +165,19 @@ fn materializar(camera: Camera) -> Result<ImportSource, String> {
     ))
 }
 
-fn diretorio_de_cache(porta: &str) -> Result<PathBuf, String> {
-    let base = directories::ProjectDirs::from("com", "RecordarFotos", "VintageLightbox")
+/// 📸 Onde a câmera (PTP) descarrega as fotos antes de a importação copiá-las
+/// ao ensaio — uma subpasta por porta. Ninguém a esvaziava: é a limpeza por
+/// período que a leva, como as outras fotos locais (#32).
+pub fn pasta_da_camera() -> Option<PathBuf> {
+    directories::ProjectDirs::from("com", "RecordarFotos", "VintageLightbox")
         .map(|p| p.cache_dir().join("ptp"))
         .or_else(|| {
             std::env::var_os("XDG_CACHE_HOME").map(|p| PathBuf::from(p).join("vintagelightbox/ptp"))
         })
+}
+
+fn diretorio_de_cache(porta: &str) -> Result<PathBuf, String> {
+    let base = pasta_da_camera()
         .ok_or_else(|| "não foi possível encontrar uma pasta de cache".to_string())?;
     let nome = porta
         .chars()

@@ -48,6 +48,13 @@
 //! estão quase todas as fotos de um balcão que não importou a sessão (439 MB
 //! no Fedora, 773 MB no Mac, em 17/11). O resto (`json`) conta como item. Tudo
 //! se refaz na próxima leitura com rede.
+//!
+//! # A pasta da câmera (#32)
+//!
+//! A importação pela câmera (PTP) descarrega as fotos numa pasta do cache do
+//! sistema antes de copiá-las ao ensaio, e ninguém a esvaziava: no Fedora, 8
+//! fotos de 23/10 seguiam lá um mês depois. Elas contam como fotos locais e
+//! saem pelo período (data do arquivo), com as subpastas que ficam vazias.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -114,6 +121,8 @@ pub struct FotosLocais {
     catalogo: PathBuf,
     /// `<catálogo>/Espelho do site` — todas as pastas de endereço juntas.
     espelho: PathBuf,
+    /// 📸 Onde a câmera (PTP) descarrega as fotos antes da importação (#32).
+    camera: Option<PathBuf>,
 }
 
 impl FotosLocais {
@@ -123,6 +132,23 @@ impl FotosLocais {
             pool,
             catalogo,
             espelho,
+            camera: None,
+        }
+    }
+
+    /// 📸 A pasta temporária da câmera entra nas fotos locais (#32): conta no
+    /// total e sai pelo período, como o resto.
+    pub fn com_pasta_da_camera(mut self, pasta: Option<PathBuf>) -> Self {
+        self.camera = pasta;
+        self
+    }
+
+    /// A pasta da câmera: quantos arquivos e quanto pesam (e, com `apagar`,
+    /// apaga) — tudo, ou só o mais velho que `dias`.
+    fn varrer_camera(&self, dias: Option<u32>, apagar: bool) -> (u64, u64) {
+        match &self.camera {
+            Some(pasta) => varrer_camera(pasta, dias, apagar),
+            None => (0, 0),
         }
     }
 
@@ -148,6 +174,9 @@ impl FotosLocais {
                 retrato.bytes_das_fotos += meta.len();
             }
         }
+        let (da_camera, bytes_da_camera) = self.varrer_camera(None, false);
+        retrato.fotos += da_camera;
+        retrato.bytes_das_fotos += bytes_da_camera;
         Ok(retrato)
     }
 
@@ -156,8 +185,10 @@ impl FotosLocais {
         let agora = Utc::now();
         let candidatas = self.candidatas(limite(dias, agora)).await?;
         let mut retrato = varrer_espelho(&self.espelho, Some(dias), false);
-        retrato.fotos = candidatas.len() as u64;
-        retrato.bytes_das_fotos = candidatas.iter().map(|c| tamanho(&c.caminho)).sum();
+        let (da_camera, bytes_da_camera) = self.varrer_camera(Some(dias), false);
+        retrato.fotos = candidatas.len() as u64 + da_camera;
+        retrato.bytes_das_fotos =
+            candidatas.iter().map(|c| tamanho(&c.caminho)).sum::<u64>() + bytes_da_camera;
         Ok(retrato)
     }
 
@@ -224,6 +255,9 @@ impl FotosLocais {
         for pasta in pastas {
             let _ = std::fs::remove_dir(&pasta);
         }
+        let (da_camera, bytes_da_camera) = self.varrer_camera(Some(dias), true);
+        retrato.fotos += da_camera;
+        retrato.bytes_das_fotos += bytes_da_camera;
         let espelho = varrer_espelho(&self.espelho, Some(dias), true);
         retrato.fotos_do_espelho = espelho.fotos_do_espelho;
         retrato.bytes_das_fotos_do_espelho = espelho.bytes_das_fotos_do_espelho;
@@ -343,6 +377,53 @@ fn varrer_espelho(pasta: &Path, dias: Option<u32>, apagar: bool) -> Retrato {
         }
     }
     retrato
+}
+
+/// 📸 A pasta da câmera, em qualquer profundidade (o `gphoto2 --recurse` repete
+/// as pastas do cartão): conta, e com `apagar` apaga, os arquivos mais velhos
+/// que `dias` (sem `dias`, todos — só para contar). As subpastas que ficam
+/// vazias saem; a pasta da câmera fica.
+fn varrer_camera(pasta: &Path, dias: Option<u32>, apagar: bool) -> (u64, u64) {
+    debug_assert!(dias.is_some() || !apagar, "apagar sempre tem período");
+    let limite =
+        dias.map(|dias| SystemTime::now() - Duration::from_secs(u64::from(dias.max(1)) * 86_400));
+    let mut contagem = (0, 0);
+    varrer_camera_em(pasta, limite, apagar, &mut contagem);
+    contagem
+}
+
+fn varrer_camera_em(
+    pasta: &Path,
+    limite: Option<SystemTime>,
+    apagar: bool,
+    contagem: &mut (u64, u64),
+) {
+    let Ok(entradas) = std::fs::read_dir(pasta) else {
+        return;
+    };
+    for entrada in entradas.flatten() {
+        let caminho = entrada.path();
+        let Ok(meta) = entrada.metadata() else {
+            continue;
+        };
+        if meta.is_dir() {
+            varrer_camera_em(&caminho, limite, apagar, contagem);
+            if apagar {
+                // `remove_dir` recusa a pasta com qualquer coisa dentro.
+                let _ = std::fs::remove_dir(&caminho);
+            }
+            continue;
+        }
+        let velho = match limite {
+            None => true,
+            Some(limite) => meta.modified().map(|m| m < limite).unwrap_or(false),
+        };
+        if !velho || (apagar && std::fs::remove_file(&caminho).is_err()) {
+            continue;
+        }
+        contagem.0 += 1;
+        contagem.1 += meta.len();
+    }
 }
 
 /// Se o cabeçalho guardado diz que a resposta é imagem — a segunda linha dele
@@ -700,5 +781,47 @@ mod testes {
         );
         assert_eq!((total.do_espelho, total.todas_as_fotos()), (0, 3));
         assert!(endereco.join("foto.corpo").exists(), "medir não apaga");
+    }
+
+    /// 📸 **A pasta da câmera entra nas fotos locais** (#32): a foto descarregada
+    /// há 40 dias sai pelo período, com a subpasta que ficou vazia; a de 2 dias
+    /// fica; o total conta as duas. No Fedora, 8 fotos de 23/10 (51 MB) seguiam
+    /// lá um mês depois.
+    #[tokio::test]
+    async fn a_pasta_da_camera_conta_e_sai_pelo_periodo() {
+        let c = catalogo().await;
+        let camera = TempDir::new().unwrap();
+        let porta = camera.path().join("usb_001_061");
+        let antiga = porta.join("DCIM").join("100NIKON");
+        std::fs::create_dir_all(&antiga).unwrap();
+        let velha = antiga.join("DSC_0001.JPG");
+        let nova = porta.join("DSC_0002.JPG");
+        std::fs::write(&velha, vec![1u8; 900]).unwrap();
+        std::fs::write(&nova, vec![1u8; 400]).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&velha)
+            .unwrap()
+            .set_modified(SystemTime::now() - Duration::from_secs(40 * 86_400))
+            .unwrap();
+        let fotos = c
+            .fotos()
+            .com_pasta_da_camera(Some(camera.path().to_path_buf()));
+
+        let total = fotos.guardadas().await.unwrap();
+        assert_eq!((total.fotos, total.bytes_das_fotos), (2, 1300));
+        let antes = fotos.sem_uso_ha(30).await.unwrap();
+        assert_eq!((antes.fotos, antes.bytes_das_fotos), (1, 900));
+
+        let saiu = fotos.limpar_sem_uso_ha(30).await.unwrap();
+        assert_eq!((saiu.fotos, saiu.bytes_das_fotos), (1, 900));
+        assert!(
+            !velha.exists() && !antiga.exists(),
+            "a foto e a pasta vazia saem"
+        );
+        assert!(
+            nova.exists() && camera.path().exists(),
+            "a recente e a pasta da câmera ficam"
+        );
     }
 }
