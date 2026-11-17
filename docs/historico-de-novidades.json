@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.196",
+    "data": "2026-11-17",
+    "titulo": "A limpeza das fotos anda em segundo plano, com a barra no rodapé.",
+    "importante": false,
+    "novidades": [
+      "Configurações › Cache: depois de clicar em Limpar, pode fechar a janela e seguir trabalhando. As fotos saem em segundo plano, sem travar a triagem, a revelação nem o caixa.",
+      "O rodapé mostra o andamento: \"Limpando fotos · 120 de 480 · 3,0 MB\", com uma barra que enche. Clicar nele abre a aba Cache.",
+      "No fim aparece o aviso com quantas fotos saíram e quanto espaço foi liberado, em qualquer tela em que você estiver."
+    ],
+    "por_que_atualizar": "Para liberar o disco sem parar o atendimento."
+  },
+  {
     "versao": "0.1.195",
     "data": "2026-11-17",
     "titulo": "O Limpar da aba Cache agora apaga também as fotos que já estão no site.",
