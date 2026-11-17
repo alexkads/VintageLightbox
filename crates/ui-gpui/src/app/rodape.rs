@@ -16,7 +16,7 @@
 //! | versão | `VintageLightbox` e `versão 0.1.22` | as novidades desta versão |
 //! | envios | subindo, recusados, ou "tudo no site" | os recusados abrem os motivos |
 //! | WhatsApp | só quando a Meta recusa as mensagens da casa ([`super::whatsapp_bloqueado`]) | o que parou e onde pagar |
-//! | limpeza | só enquanto o Limpar por período apaga fotos locais: a barra, quantas e quanto (#25) | abre Configurações › Cache |
+//! | limpeza | só enquanto o Limpar por período apaga fotos locais: a barra, quantas e quanto (#25) | abre Configurações › Armazenamento |
 //! | meio | a faixa de atualização, quando há aviso ([`faixa`]) | os botões dela |
 //! | tela | o recorte, quantas fotos e quantas selecionadas | — |
 //! | servidor | o site em que o app está; âmbar fora da produção | abre o site |
