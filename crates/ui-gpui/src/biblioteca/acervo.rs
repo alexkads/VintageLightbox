@@ -48,7 +48,29 @@ pub trait Acervo: Send + Sync + 'static {
         let _ = sessao;
         let _ = canal.send(Err("este acervo não apaga".into()));
     }
+
+    /// 🧹 Quanto a limpeza por período levaria das **fotos locais que já
+    /// estão no site** (e do espelho), para cada período — o número que a aba
+    /// Cache mostra antes do clique. Ver `infrastructure::fotos_locais`.
+    ///
+    /// Sem peça ligada, responde que não há nada: a tela segue só com o cache.
+    fn medir_fotos_locais(&self, periodos: Vec<u32>, canal: Sender<Vec<(u32, Retrato)>>) {
+        let _ = canal.send(
+            periodos
+                .into_iter()
+                .map(|d| (d, Retrato::default()))
+                .collect(),
+        );
+    }
+
+    /// 🧹 Apaga as fotos locais sem uso há mais de `dias` que o site já guarda.
+    fn limpar_fotos_locais(&self, dias: u32, canal: Sender<Result<Retrato, String>>) {
+        let _ = dias;
+        let _ = canal.send(Ok(Retrato::default()));
+    }
 }
+
+pub use infrastructure::fotos_locais::Retrato;
 
 /// O acervo de verdade: o `LibraryController` numa `Handle` do tokio.
 pub struct AcervoDoBanco {
@@ -57,11 +79,22 @@ pub struct AcervoDoBanco {
     /// Um `tokio::spawn` de dentro do GPUI entra em pânico com *there is no
     /// reactor running*.
     tokio: tokio::runtime::Handle,
+    /// As fotos locais que a limpeza por período leva (issue #22).
+    fotos_locais: Option<Arc<infrastructure::fotos_locais::FotosLocais>>,
 }
 
 impl AcervoDoBanco {
     pub fn novo(biblioteca: Arc<LibraryController>, tokio: tokio::runtime::Handle) -> Self {
-        Self { biblioteca, tokio }
+        Self {
+            biblioteca,
+            tokio,
+            fotos_locais: None,
+        }
+    }
+
+    pub fn com_fotos_locais(mut self, fotos: infrastructure::fotos_locais::FotosLocais) -> Self {
+        self.fotos_locais = Some(Arc::new(fotos));
+        self
     }
 }
 
@@ -99,6 +132,37 @@ impl Acervo for AcervoDoBanco {
                 caminhos.len()
             });
             let _ = canal.send(resultado);
+        });
+    }
+
+    fn medir_fotos_locais(&self, periodos: Vec<u32>, canal: Sender<Vec<(u32, Retrato)>>) {
+        let Some(fotos) = self.fotos_locais.clone() else {
+            let _ = canal.send(
+                periodos
+                    .into_iter()
+                    .map(|d| (d, Retrato::default()))
+                    .collect(),
+            );
+            return;
+        };
+        self.tokio.spawn(async move {
+            let mut medidas = Vec::with_capacity(periodos.len());
+            for dias in periodos {
+                // Uma medida que falha conta como nada a limpar: o botão apaga,
+                // e não promete o que não mediu.
+                medidas.push((dias, fotos.sem_uso_ha(dias).await.unwrap_or_default()));
+            }
+            let _ = canal.send(medidas);
+        });
+    }
+
+    fn limpar_fotos_locais(&self, dias: u32, canal: Sender<Result<Retrato, String>>) {
+        let Some(fotos) = self.fotos_locais.clone() else {
+            let _ = canal.send(Ok(Retrato::default()));
+            return;
+        };
+        self.tokio.spawn(async move {
+            let _ = canal.send(fotos.limpar_sem_uso_ha(dias).await);
         });
     }
 }

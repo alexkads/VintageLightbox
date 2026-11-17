@@ -1615,7 +1615,9 @@ impl Aplicativo {
             ultimo_resgate: None,
             parametros_das_locais: std::collections::HashMap::new(),
             _sessao_escolhida: sessao_escolhida,
-            configuracoes: cx.new(|_| Configuracoes::nova(previews_das_configuracoes)),
+            configuracoes: cx.new(|_| {
+                Configuracoes::nova(previews_das_configuracoes).com_acervo(portas.acervo.clone())
+            }),
             configurando: false,
             saida: None,
             escolha_de_monitor: Modal::default(),
