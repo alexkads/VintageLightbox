@@ -1,5 +1,16 @@
 [
   {
+    "versao": "0.1.198",
+    "data": "2026-11-17",
+    "titulo": "O Limpar devolve ao disco todo o espaço que promete, inclusive o das fotos baixadas da câmera.",
+    "importante": false,
+    "novidades": [
+      "Configurações › Armazenamento: depois do Limpar, o arquivo do cache de previews encolhe de verdade. Antes a tela dizia \"0 bytes\" e o disco seguia ocupado.",
+      "As fotos que a câmera descarrega para a importação agora contam em \"Fotos nesta máquina\" e saem pelo período escolhido, como as outras fotos desta máquina."
+    ],
+    "por_que_atualizar": "Para o Limpar liberar no disco o mesmo espaço que a tela mostra."
+  },
+  {
     "versao": "0.1.197",
     "data": "2026-11-17",
     "titulo": "O Limpar tira desta máquina todas as fotos paradas há mais que o período, e a aba mostra quantas fotos estão guardadas.",
