@@ -97,7 +97,7 @@ pub struct Configuracoes {
     sem_uso: Vec<(u32, (u64, u64))>,
     /// A última limpeza que já virou toast (`estilo::toast_quando_mudar`).
     limpeza_vista: Option<SharedString>,
-    /// A aba aberta: 0 é "Avisos sonoros", 1 é "Cache", 2 é "Conta".
+    /// A aba aberta: 0 é "Avisos sonoros", 1 é "Armazenamento", 2 é "Conta".
     aba: usize,
     /// A aba dos sons, criada na primeira abertura — os campos dela pedem a
     /// janela, que o `nova` não tem.
@@ -110,6 +110,10 @@ pub struct Configuracoes {
     fotos_sem_uso: Vec<(u32, Retrato)>,
     /// A medida das fotos a caminho.
     medida: Option<Receiver<Vec<(u32, Retrato)>>>,
+    /// 📸 Todas as fotos guardadas nesta máquina, sem período (#28).
+    fotos_guardadas: Option<Retrato>,
+    /// A medida do total a caminho.
+    medida_do_total: Option<Receiver<Retrato>>,
     /// A limpeza das fotos a caminho, com o que o cache já apagou.
     limpeza: Option<LimpezaAndando>,
     /// O fim da última limpeza das fotos, para a **raiz** avisar (#25): o
@@ -134,6 +138,8 @@ impl Configuracoes {
             acervo: None,
             fotos_sem_uso: Vec::new(),
             medida: None,
+            fotos_guardadas: None,
+            medida_do_total: None,
             limpeza: None,
             fim_das_fotos: None,
             _colheita: None,
@@ -175,7 +181,7 @@ impl Configuracoes {
         self.aba
     }
 
-    /// 0 é "Avisos sonoros", 1 é "Cache", 2 é "Conta".
+    /// 0 é "Avisos sonoros", 1 é "Armazenamento", 2 é "Conta".
     pub fn ir_para_a_aba(&mut self, aba: usize, cx: &mut Context<Self>) {
         self.aba = aba.min(2);
         cx.notify();
@@ -192,6 +198,9 @@ impl Configuracoes {
             let (canal, resposta) = channel();
             acervo.medir_fotos_locais(PERIODOS.to_vec(), canal);
             self.medida = Some(resposta);
+            let (canal, resposta) = channel();
+            acervo.medir_fotos_guardadas(canal);
+            self.medida_do_total = Some(resposta);
             self.colher_depois(cx);
         }
         cx.notify();
@@ -216,6 +225,11 @@ impl Configuracoes {
         if let Some(Ok(medidas)) = self.medida.as_ref().map(Receiver::try_recv) {
             self.fotos_sem_uso = medidas;
             self.medida = None;
+            cx.notify();
+        }
+        if let Some(Ok(total)) = self.medida_do_total.as_ref().map(Receiver::try_recv) {
+            self.fotos_guardadas = Some(total);
+            self.medida_do_total = None;
             cx.notify();
         }
         let mut fim = None;
@@ -247,7 +261,8 @@ impl Configuracoes {
             self.fim_das_fotos = Some((numero, frase, falhou));
             self.atualizar(cx);
         }
-        let continua = self.medida.is_some() || self.limpeza.is_some();
+        let continua =
+            self.medida.is_some() || self.medida_do_total.is_some() || self.limpeza.is_some();
         if !continua {
             self._colheita = None;
         }
@@ -299,22 +314,6 @@ impl Configuracoes {
         self.atualizar(cx);
     }
 
-    pub fn limpar_miniaturas(&mut self, cx: &mut Context<Self>) {
-        self.limpar(
-            ("miniatura", "miniaturas", true),
-            |cache| cache.clear_thumbnails(),
-            cx,
-        );
-    }
-
-    pub fn limpar_previews(&mut self, cx: &mut Context<Self>) {
-        self.limpar(
-            ("preview", "previews", false),
-            |cache| cache.clear_previews(),
-            cx,
-        );
-    }
-
     /// Escolhe o período da limpeza por idade.
     pub fn escolher_periodo(&mut self, dias: u32, cx: &mut Context<Self>) {
         self.periodo = dias;
@@ -328,6 +327,11 @@ impl Configuracoes {
             .find(|(dias, _)| *dias == self.periodo)
             .map(|(_, numeros)| *numeros)
             .unwrap_or((0, 0))
+    }
+
+    /// 📸 Todas as fotos guardadas nesta máquina — o total da aba (#28).
+    pub fn fotos_guardadas(&self) -> Option<Retrato> {
+        self.fotos_guardadas
     }
 
     /// As **fotos locais** (e o espelho) sem uso há mais do período escolhido.
@@ -397,7 +401,7 @@ impl Render for Configuracoes {
             .child(
                 Tab::new()
                     .debug_selector(|| "aba-cache".into())
-                    .label("Cache"),
+                    .label("Armazenamento"),
             )
             .child(
                 Tab::new()
@@ -431,8 +435,8 @@ impl Configuracoes {
         icone: Icone,
         nome: &'static str,
         numero: SharedString,
-        detalhe: &'static str,
-        botao: Button,
+        detalhe: impl Into<SharedString>,
+        botao: Option<Button>,
         cx: &App,
     ) -> impl IntoElement {
         let caixa = crate::tema::medidas().cartao;
@@ -462,8 +466,14 @@ impl Configuracoes {
                             .truncate()
                             .child(numero),
                     )
-                    .child(div().flex_1().text_xs().text_color(muted).child(detalhe))
-                    .child(div().pt(px(4.)).child(botao.w_full())),
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_xs()
+                            .text_color(muted)
+                            .child(detalhe.into()),
+                    )
+                    .children(botao.map(|botao| div().pt(px(4.)).child(botao.w_full()))),
             )
     }
 
@@ -500,7 +510,10 @@ impl Configuracoes {
                 )
             },
         );
-        let nada = itens == 0 && fotos.fotos == 0;
+        // 🚨 As fotos do site guardadas no espelho são fotos (#28): contadas
+        // como item do cache, o operador lia "só limpa o cache".
+        let todas_as_fotos = fotos.todas_as_fotos();
+        let nada = itens == 0 && todas_as_fotos == 0;
         let resumo: SharedString = if let Some(a) = self.andamento_da_limpeza() {
             format!(
                 "Limpando… {} de {} fotos · siga trabalhando",
@@ -512,8 +525,8 @@ impl Configuracoes {
             "Nada sem uso há tanto tempo".into()
         } else {
             let mut partes = Vec::new();
-            if fotos.fotos > 0 {
-                partes.push(contagem(fotos.fotos, ("foto", "fotos")));
+            if todas_as_fotos > 0 {
+                partes.push(contagem(todas_as_fotos, ("foto", "fotos")));
             }
             if itens > 0 {
                 partes.push(contagem(itens, ("item", "itens")));
@@ -558,18 +571,14 @@ impl Configuracoes {
         )
     }
 
+    /// A aba **Armazenamento** (#28): as fotos guardadas nesta máquina, o
+    /// cache de previews e a limpeza por período — o único botão que apaga.
     fn cache(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let estatisticas = self.estatisticas.clone();
+        let guardadas = self.fotos_guardadas;
         let muted = cx.theme().muted_foreground;
-        // ⚠️ Os botões **desligam quando não há o que limpar**, como no legado.
-        // Um "Limpar miniaturas" aceso sobre um cache vazio responde com "0
-        // apagadas", e quem clicou fica sem saber se apagou nada ou se falhou.
-        let tem_miniaturas = estatisticas.as_ref().is_some_and(|e| e.thumbnail_count > 0);
-        let tem_previews = estatisticas
-            .as_ref()
-            .is_some_and(|e| e.large_preview_count > 0);
-        // Enquanto o cache não foi lido, o cartão mostra o travessão e não um
-        // "0" que pareceria um cache vazio.
+        // Enquanto o número não foi lido, o cartão mostra o travessão e não um
+        // "0" que pareceria vazio.
         let ou_traco = |numero: Option<String>| -> SharedString {
             numero.unwrap_or_else(|| "—".to_string()).into()
         };
@@ -580,49 +589,77 @@ impl Configuracoes {
         );
         let miniaturas = ou_traco(estatisticas.as_ref().map(|e| milhar(e.thumbnail_count)));
         let previews = ou_traco(estatisticas.as_ref().map(|e| milhar(e.large_preview_count)));
+        let fotos = ou_traco(guardadas.map(|g| milhar(g.todas_as_fotos())));
+        let peso_das_fotos = ou_traco(guardadas.map(|g| formatar_bytes(g.bytes())));
+        let de_onde: SharedString = match guardadas {
+            Some(g) => format!(
+                "{} importadas aqui · {} vindas do site",
+                milhar(g.fotos),
+                milhar(g.fotos_do_espelho)
+            )
+            .into(),
+            None => "Importadas aqui e vindas do site".into(),
+        };
         let caminho = estatisticas.as_ref().map(|e| e.db_path.clone());
-        let pasta = caminho
+        // `<catálogo>/Previews.lrdata/preview_cache.db`: a pasta do catálogo é
+        // a de cima da pasta do cache — é lá que as fotos ficam.
+        let catalogo = caminho
             .as_ref()
-            .and_then(|arquivo| arquivo.parent().map(|pasta| pasta.to_path_buf()));
+            .and_then(|arquivo| arquivo.parent()?.parent().map(|pasta| pasta.to_path_buf()));
 
-        let abrir_pasta = crate::estilo::botao_contorno_pequeno("abrir-pasta-do-cache", cx)
+        let abrir_pasta = crate::estilo::botao_contorno_pequeno("abrir-pasta-do-catalogo", cx)
             .label("Abrir a pasta")
-            .disabled(pasta.is_none())
+            .disabled(catalogo.is_none())
             .on_click(move |_, _, _| {
-                if let Some(pasta) = &pasta {
+                if let Some(pasta) = &catalogo {
                     crate::bandeja::abrir_pasta(pasta);
                 }
             });
-        let limpar_miniaturas = crate::estilo::botao_contorno_pequeno("limpar-miniaturas", cx)
-            .label("Limpar miniaturas")
-            .disabled(!tem_miniaturas)
-            .on_click(cx.listener(|tela, _ev, _window, cx| {
-                tela.limpar_miniaturas(cx);
-            }));
-        let limpar_previews = crate::estilo::botao_contorno_pequeno("limpar-previews", cx)
-            .label("Limpar previews")
-            .disabled(!tem_previews)
-            .on_click(cx.listener(|tela, _ev, _window, cx| {
-                tela.limpar_previews(cx);
-            }));
+        let titulo = |nome: &'static str, explicacao: &'static str| {
+            v_flex()
+                .gap(px(2.))
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(nome),
+                )
+                .child(div().text_xs().text_color(muted).child(explicacao))
+        };
 
         v_flex()
             .gap(px(16.))
             .size_full()
+            .child(titulo(
+                "Fotos nesta máquina",
+                "As importadas aqui e as que vieram do site para trabalhar sem internet.",
+            ))
             .child(
-                v_flex()
-                    .gap(px(2.))
-                    .child(
-                        div()
-                            .text_sm()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child("Cache de previews"),
-                    )
-                    .child(div().text_xs().text_color(muted).child(
-                        "Imagens prontas que fazem a grade e a Revelação abrirem rápido. \
-                         O que faltar é refeito sozinho.",
+                h_flex()
+                    .gap(px(12.))
+                    .items_stretch()
+                    .child(self.cartao_do_cache(
+                        Icone::Camera,
+                        "Fotos",
+                        fotos,
+                        de_onde,
+                        Some(abrir_pasta),
+                        cx,
+                    ))
+                    .child(self.cartao_do_cache(
+                        Icone::HardDrive,
+                        "Espaço das fotos",
+                        peso_das_fotos,
+                        "Ocupado no disco desta máquina",
+                        None,
+                        cx,
                     )),
             )
+            .child(titulo(
+                "Cache de previews",
+                "Imagens prontas que fazem a grade e a Revelação abrirem rápido. \
+                 O que faltar é refeito sozinho.",
+            ))
             .child(
                 h_flex()
                     .gap(px(12.))
@@ -632,7 +669,7 @@ impl Configuracoes {
                         "Tamanho no disco",
                         tamanho,
                         "Miniaturas e previews",
-                        abrir_pasta,
+                        None,
                         cx,
                     ))
                     .child(self.cartao_do_cache(
@@ -640,7 +677,7 @@ impl Configuracoes {
                         "Miniaturas",
                         miniaturas,
                         "Da grade e da tira",
-                        limpar_miniaturas,
+                        None,
                         cx,
                     ))
                     .child(self.cartao_do_cache(
@@ -648,33 +685,17 @@ impl Configuracoes {
                         "Previews grandes",
                         previews,
                         "Da Revelação e da lupa",
-                        limpar_previews,
+                        None,
                         cx,
                     )),
             )
             .child(self.cartao_do_periodo(cx))
-            .children(caminho.map(|caminho| {
-                h_flex()
-                    .min_w_0()
-                    .gap(px(6.))
-                    .items_center()
-                    .text_xs()
-                    .text_color(muted)
-                    .child(Icon::new(Icone::File).size(px(12.)).text_color(muted))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .truncate()
-                            .child(SharedString::from(caminho.to_string_lossy().to_string())),
-                    )
-            }))
-            // ⚠️ A frase que faz os botões de limpar serem clicáveis: limpar cache
-            // é trabalho refeito, não trabalho perdido.
+            // ⚠️ A frase que faz o Limpar ser clicável: o que sai desta máquina
+            // não sai do site, e o cache é trabalho refeito, não perdido.
             .child(crate::estilo::aviso(
-                "Limpar miniaturas e previews não toca nas fotos: elas são geradas de novo \
-                 quando a foto for aberta. O Limpar por período apaga também as fotos \
-                 desta máquina que já estão no site; a que não subiu, a rejeitada e a \
-                 que tem edição ficam.",
+                "O Limpar apaga desta máquina as fotos e o cache parados há mais que o \
+                 período, inclusive as fotos que vieram do site. No site nada muda, e \
+                 miniaturas e previews se refazem quando a foto for aberta.",
                 false,
                 cx,
             ))
@@ -727,9 +748,11 @@ fn resumo_da_limpeza(cache: Result<u64, String>, fotos: Result<Retrato, String>)
         (Err(erro), _) | (_, Err(erro)) => format!("Não foi possível limpar: {erro}"),
         (Ok(itens), Ok(fotos)) => {
             let itens = itens + fotos.do_espelho;
-            let mut frase = if fotos.fotos > 0 {
-                let fotos_ditas =
-                    contagem(fotos.fotos, ("foto local apagada", "fotos locais apagadas"));
+            let mut frase = if fotos.todas_as_fotos() > 0 {
+                let fotos_ditas = contagem(
+                    fotos.todas_as_fotos(),
+                    ("foto local apagada", "fotos locais apagadas"),
+                );
                 if itens > 0 {
                     format!(
                         "{fotos_ditas} e {}",
@@ -791,74 +814,6 @@ mod testes {
         assert_eq!(formatar_bytes(2048), "2,0 KB");
         assert_eq!(formatar_bytes(5 * 1024 * 1024), "5,0 MB");
         assert_eq!(formatar_bytes(3 * 1024 * 1024 * 1024), "3,00 GB");
-    }
-
-    /// 🚨 Cada botão apaga **o que o nome dele diz**, e não o cache inteiro.
-    ///
-    /// São três `DELETE` diferentes no mesmo `Mutex`, e trocar dois de lugar
-    /// compila: "Limpar miniaturas" levaria junto os previews grandes, que são
-    /// os caros de refazer (cada um é um RAW aberto de novo). Nada falharia — o
-    /// número simplesmente cairia mais do que devia.
-    #[gpui_kit::test]
-    fn cada_botao_apaga_so_a_sua_parte(cx: &mut TestAppContext) {
-        let (cache, _dir) = cache_com(3, 2);
-        // O tema global do `gpui-component` — o `render` o lê, e sem ele a
-        // janela morre no primeiro quadro.
-        cx.update(gpui_kit::init);
-        let janela = cx.add_window(|_window, cx| {
-            let mut tela = Configuracoes::nova(cache);
-            tela.atualizar(cx);
-            tela
-        });
-
-        janela
-            .update(cx, |tela, _window, cx| {
-                let numeros = tela.estatisticas().expect("já leu o cache");
-                assert_eq!(numeros.thumbnail_count, 3);
-                assert_eq!(numeros.large_preview_count, 2);
-
-                tela.limpar_miniaturas(cx);
-
-                let numeros = tela.estatisticas().expect("releu");
-                assert_eq!(numeros.thumbnail_count, 0);
-                assert_eq!(
-                    numeros.large_preview_count, 2,
-                    "limpar miniatura não pode levar preview junto"
-                );
-                assert_eq!(tela.ultima_limpeza(), Some("3 miniaturas apagadas"));
-
-                tela.limpar_previews(cx);
-                assert_eq!(tela.estatisticas().expect("releu").large_preview_count, 0);
-            })
-            .expect("a janela deve estar aberta");
-    }
-
-    /// 🚨 O número na tela é relido **depois** de limpar.
-    ///
-    /// Sem a releitura, os três botões apagam de verdade e a tela continua
-    /// mostrando o tamanho de antes — e a conclusão de quem olha é que o botão
-    /// não funcionou. Clicar de novo (e de novo) é o desfecho.
-    #[gpui_kit::test]
-    fn o_numero_e_relido_depois_de_limpar(cx: &mut TestAppContext) {
-        let (cache, _dir) = cache_com(4, 0);
-        // Só miniaturas: limpá-las esvazia o cache.
-        cx.update(gpui_kit::init);
-        let janela = cx.add_window(|_window, cx| {
-            let mut tela = Configuracoes::nova(cache);
-            tela.atualizar(cx);
-            tela
-        });
-
-        janela
-            .update(cx, |tela, _window, cx| {
-                let antes = tela.estatisticas().expect("leu").total_size_bytes;
-                assert!(antes > 0);
-
-                tela.limpar_miniaturas(cx);
-
-                assert_eq!(tela.estatisticas().expect("releu").total_size_bytes, 0);
-            })
-            .expect("a janela deve estar aberta");
     }
 
     /// O singular e o feminino concordam com o número e com o nome.
@@ -935,6 +890,13 @@ mod testes {
             let _ = canal.send(periodos.into_iter().map(|d| (d, self.retrato)).collect());
         }
 
+        fn medir_fotos_guardadas(&self, canal: std::sync::mpsc::Sender<Retrato>) {
+            let _ = canal.send(Retrato {
+                fotos_do_espelho: 30,
+                ..self.retrato
+            });
+        }
+
         fn limpar_fotos_locais(
             &self,
             dias: u32,
@@ -956,8 +918,7 @@ mod testes {
             retrato: Retrato {
                 fotos: 12,
                 bytes_das_fotos: 3 * 1024 * 1024 * 1024,
-                do_espelho: 0,
-                bytes_do_espelho: 0,
+                ..Retrato::default()
             },
             pedidos: Default::default(),
             canal: Default::default(),
@@ -973,6 +934,11 @@ mod testes {
         janela
             .update(cx, |tela, _window, cx| {
                 tela.colher(cx);
+                // 📸 O total da aba Armazenamento chega junto (#28): as
+                // importadas e as vindas do site, sem período.
+                let total = tela.fotos_guardadas().expect("mediu o total");
+                assert_eq!((total.fotos, total.fotos_do_espelho), (12, 30));
+                assert_eq!(total.todas_as_fotos(), 42);
                 tela.escolher_periodo(60, cx);
                 assert_eq!(tela.fotos_sem_uso_do_periodo().fotos, 12);
 
@@ -1033,11 +999,23 @@ mod testes {
             fotos: 1,
             bytes_das_fotos: 2048,
             do_espelho: 2,
-            bytes_do_espelho: 0,
+            ..Retrato::default()
         };
         assert_eq!(
             resumo_da_limpeza(Ok(3), Ok(fotos)),
             "1 foto local apagada e 5 itens do cache · 2,0 KB liberados"
+        );
+        // 🚨 A foto do site guardada no espelho é foto, e não item (#28).
+        let do_espelho = Retrato {
+            fotos_do_espelho: 3,
+            bytes_das_fotos_do_espelho: 3072,
+            do_espelho: 2,
+            bytes_do_espelho: 1024,
+            ..Retrato::default()
+        };
+        assert_eq!(
+            resumo_da_limpeza(Ok(0), Ok(do_espelho)),
+            "3 fotos locais apagadas e 2 itens do cache · 4,0 KB liberados"
         );
         assert_eq!(
             resumo_da_limpeza(Ok(4), Ok(Retrato::default())),

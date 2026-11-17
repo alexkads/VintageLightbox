@@ -49,9 +49,9 @@ pub trait Acervo: Send + Sync + 'static {
         let _ = canal.send(Err("este acervo não apaga".into()));
     }
 
-    /// 🧹 Quanto a limpeza por período levaria das **fotos locais que já
-    /// estão no site** (e do espelho), para cada período — o número que a aba
-    /// Cache mostra antes do clique. Ver `infrastructure::fotos_locais`.
+    /// 🧹 Quanto a limpeza por período levaria das **fotos locais** (e do
+    /// espelho), para cada período — o número que a aba Armazenamento mostra
+    /// antes do clique. Ver `infrastructure::fotos_locais`.
     ///
     /// Sem peça ligada, responde que não há nada: a tela segue só com o cache.
     fn medir_fotos_locais(&self, periodos: Vec<u32>, canal: Sender<Vec<(u32, Retrato)>>) {
@@ -63,7 +63,13 @@ pub trait Acervo: Send + Sync + 'static {
         );
     }
 
-    /// 🧹 Apaga as fotos locais sem uso há mais de `dias` que o site já guarda,
+    /// 📸 Todas as fotos guardadas nesta máquina, sem período — o total da aba
+    /// Armazenamento (#28). Sem peça ligada, responde que não há nenhuma.
+    fn medir_fotos_guardadas(&self, canal: Sender<Retrato>) {
+        let _ = canal.send(Retrato::default());
+    }
+
+    /// 🧹 Apaga as fotos locais paradas há mais de `dias` (#28),
     /// **em segundo plano**: o canal recebe o andamento a cada foto e, por
     /// último, o fim (#25). A tela segue livre — é o rodapé que mostra a barra.
     fn limpar_fotos_locais(&self, dias: u32, canal: Sender<AndamentoDaLimpeza>) {
@@ -164,6 +170,18 @@ impl Acervo for AcervoDoBanco {
                 medidas.push((dias, fotos.sem_uso_ha(dias).await.unwrap_or_default()));
             }
             let _ = canal.send(medidas);
+        });
+    }
+
+    fn medir_fotos_guardadas(&self, canal: Sender<Retrato>) {
+        let Some(fotos) = self.fotos_locais.clone() else {
+            let _ = canal.send(Retrato::default());
+            return;
+        };
+        self.tokio.spawn(async move {
+            // Uma medida que falha conta como nenhuma: a tela mostra zero, e
+            // não um número que não mediu.
+            let _ = canal.send(fotos.guardadas().await.unwrap_or_default());
         });
     }
 
