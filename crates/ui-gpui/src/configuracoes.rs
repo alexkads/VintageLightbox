@@ -12,15 +12,28 @@
 //! trabalho perdido. Sem essa frase à vista, botões chamados "limpar" ao
 //! lado de um número em gigabytes são um convite a não clicar em nenhum — e o
 //! cache continua crescendo.
+//!
+//! ## 🧹 O "Limpar" por período leva também as fotos locais (issue #22)
+//!
+//! > *"Eu preciso que limpar, também limpe as fotos e não somente o cache"* ·
+//! > *"precisa limpar somente as fotos locais, pois o disco do PC está
+//! > lotado"* — dono, 17/11/2026.
+//!
+//! Os botões de miniaturas e previews continuam só no cache. O do período leva
+//! junto as cópias locais **que o site já guarda** (`infrastructure::fotos_locais`
+//! diz quais ficam), e o aviso do rodapé diz isso com as palavras do balcão.
 
+use std::sync::mpsc::{channel, Receiver};
 use std::sync::Arc;
+use std::time::Duration;
 
 use gpui_kit::component::button::Button;
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme, Disableable, Icon, Sizable};
-use gpui_kit::{div, prelude::*, px, App, Context, Entity, FontWeight, SharedString, Window};
+use gpui_kit::{div, prelude::*, px, App, Context, Entity, FontWeight, SharedString, Task, Window};
 
 use crate::autenticador_da_conta::AutenticadorDaConta;
+use crate::biblioteca::acervo::{Acervo, Retrato};
 use crate::pos_venda::porta::Publicador;
 use crate::recursos::Icone;
 use crate::sons::tela::AvisosSonoros;
@@ -54,6 +67,12 @@ pub fn formatar_bytes(bytes: u64) -> String {
 /// Os períodos da limpeza por idade, em dias (pedido do dono, 14/11/2026).
 pub const PERIODOS: [u32; 4] = [15, 30, 60, 90];
 
+/// A limpeza das fotos a caminho, e o que o cache já respondeu.
+type LimpezaAndando = (Receiver<Result<Retrato, String>>, Result<u64, String>);
+
+/// De quanto em quanto a tela olha se a medida ou a limpeza das fotos voltou.
+const INTERVALO_DE_COLHEITA: Duration = Duration::from_millis(100);
+
 pub struct Configuracoes {
     previews: Arc<PreviewManager>,
     /// O retrato do cache, lido ao abrir e depois de cada limpeza.
@@ -80,6 +99,15 @@ pub struct Configuracoes {
     sons: Option<Entity<AvisosSonoros>>,
     /// A aba da conta, criada na primeira abertura com a sessão da vez.
     conta: Option<Entity<AutenticadorDaConta>>,
+    /// 🧹 Quem mede e apaga as fotos locais que já estão no site.
+    acervo: Option<Arc<dyn Acervo>>,
+    /// O que cada período levaria das fotos locais, lido junto com o cache.
+    fotos_sem_uso: Vec<(u32, Retrato)>,
+    /// A medida das fotos a caminho.
+    medida: Option<Receiver<Vec<(u32, Retrato)>>>,
+    /// A limpeza das fotos a caminho, com o que o cache já apagou.
+    limpeza: Option<LimpezaAndando>,
+    _colheita: Option<Task<()>>,
 }
 
 impl Configuracoes {
@@ -95,7 +123,18 @@ impl Configuracoes {
             aba: 0,
             sons: None,
             conta: None,
+            acervo: None,
+            fotos_sem_uso: Vec::new(),
+            medida: None,
+            limpeza: None,
+            _colheita: None,
         }
+    }
+
+    /// Liga as fotos locais à limpeza por período.
+    pub fn com_acervo(mut self, acervo: Arc<dyn Acervo>) -> Self {
+        self.acervo = Some(acervo);
+        self
     }
 
     /// Liga a aba da conta à sessão da vez. Chamado ao abrir: quem entrou pode
@@ -140,7 +179,57 @@ impl Configuracoes {
             .iter()
             .map(|&dias| (dias, self.previews.sem_uso_ha(dias)))
             .collect();
+        if let Some(acervo) = &self.acervo {
+            let (canal, resposta) = channel();
+            acervo.medir_fotos_locais(PERIODOS.to_vec(), canal);
+            self.medida = Some(resposta);
+            self.colher_depois(cx);
+        }
         cx.notify();
+    }
+
+    /// Olha de tempos em tempos se a medida ou a limpeza das fotos voltou.
+    fn colher_depois(&mut self, cx: &mut Context<Self>) {
+        if self._colheita.is_some() {
+            return;
+        }
+        self._colheita = Some(cx.spawn(async move |tela, cx| loop {
+            cx.background_executor().timer(INTERVALO_DE_COLHEITA).await;
+            let continua = tela.update(cx, |tela, cx| tela.colher(cx)).unwrap_or(false);
+            if !continua {
+                break;
+            }
+        }));
+    }
+
+    /// Recolhe o que as fotos responderam. Devolve se ainda há o que esperar.
+    pub fn colher(&mut self, cx: &mut Context<Self>) -> bool {
+        if let Some(Ok(medidas)) = self.medida.as_ref().map(Receiver::try_recv) {
+            self.fotos_sem_uso = medidas;
+            self.medida = None;
+            cx.notify();
+        }
+        let voltou = self
+            .limpeza
+            .as_ref()
+            .and_then(|(resposta, _)| resposta.try_recv().ok());
+        if let Some(fotos) = voltou {
+            let (_, cache) = self.limpeza.take().expect("havia limpeza");
+            self.limpeza_falhou = cache.is_err() || fotos.is_err();
+            self.limpeza_vista = None;
+            self.ultima_limpeza = Some(resumo_da_limpeza(cache, fotos).into());
+            self.atualizar(cx);
+        }
+        let continua = self.medida.is_some() || self.limpeza.is_some();
+        if !continua {
+            self._colheita = None;
+        }
+        continua
+    }
+
+    /// Se a limpeza das fotos ainda está andando — o botão espera.
+    pub fn limpando(&self) -> bool {
+        self.limpeza.is_some()
     }
 
     pub fn estatisticas(&self) -> Option<&CacheStats> {
@@ -195,7 +284,7 @@ impl Configuracoes {
         cx.notify();
     }
 
-    /// Itens e bytes sem uso há mais do período escolhido.
+    /// Itens e bytes do **cache** sem uso há mais do período escolhido.
     pub fn sem_uso_do_periodo(&self) -> (u64, u64) {
         self.sem_uso
             .iter()
@@ -204,14 +293,36 @@ impl Configuracoes {
             .unwrap_or((0, 0))
     }
 
-    /// Apaga o que está sem uso há mais do período escolhido.
+    /// As **fotos locais** (e o espelho) sem uso há mais do período escolhido.
+    pub fn fotos_sem_uso_do_periodo(&self) -> Retrato {
+        self.fotos_sem_uso
+            .iter()
+            .find(|(dias, _)| *dias == self.periodo)
+            .map(|(_, retrato)| *retrato)
+            .unwrap_or_default()
+    }
+
+    /// Apaga o que está sem uso há mais do período escolhido: o cache na hora,
+    /// e as fotos locais que o site já guarda em segundo plano.
     pub fn limpar_por_periodo(&mut self, cx: &mut Context<Self>) {
         let dias = self.periodo;
-        self.limpar(
-            ("item", "itens", false),
-            move |cache| cache.limpar_sem_uso_ha(dias),
-            cx,
-        );
+        let Some(acervo) = self.acervo.clone() else {
+            self.limpar(
+                ("item", "itens", false),
+                move |cache| cache.limpar_sem_uso_ha(dias),
+                cx,
+            );
+            return;
+        };
+        if self.limpeza.is_some() {
+            return;
+        }
+        let cache = self.previews.limpar_sem_uso_ha(dias);
+        let (canal, resposta) = channel();
+        acervo.limpar_fotos_locais(dias, canal);
+        self.limpeza = Some((resposta, cache));
+        self.colher_depois(cx);
+        cx.notify();
     }
 }
 
@@ -325,7 +436,11 @@ impl Configuracoes {
     fn cartao_do_periodo(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let caixa = crate::tema::medidas().cartao;
         let muted = cx.theme().muted_foreground;
-        let (itens, bytes) = self.sem_uso_do_periodo();
+        let (itens_do_cache, bytes_do_cache) = self.sem_uso_do_periodo();
+        let fotos = self.fotos_sem_uso_do_periodo();
+        let itens = itens_do_cache + fotos.do_espelho;
+        let bytes = bytes_do_cache + fotos.bytes();
+        let limpando = self.limpando();
         let escolhido = PERIODOS
             .iter()
             .position(|&dias| dias == self.periodo)
@@ -348,16 +463,20 @@ impl Configuracoes {
                 )
             },
         );
-        let resumo: SharedString = if itens == 0 {
+        let nada = itens == 0 && fotos.fotos == 0;
+        let resumo: SharedString = if limpando {
+            "Limpando…".into()
+        } else if nada {
             "Nada sem uso há tanto tempo".into()
         } else {
-            format!(
-                "{} {} · {}",
-                milhar(itens),
-                if itens == 1 { "item" } else { "itens" },
-                formatar_bytes(bytes)
-            )
-            .into()
+            let mut partes = Vec::new();
+            if fotos.fotos > 0 {
+                partes.push(contagem(fotos.fotos, ("foto", "fotos")));
+            }
+            if itens > 0 {
+                partes.push(contagem(itens, ("item", "itens")));
+            }
+            format!("{} · {}", partes.join(" e "), formatar_bytes(bytes)).into()
         };
 
         crate::estilo::cartao(cx).bg(cx.theme().background).child(
@@ -375,11 +494,7 @@ impl Configuracoes {
                         .child(
                             div()
                                 .flex_none()
-                                .text_color(if itens == 0 {
-                                    muted
-                                } else {
-                                    cx.theme().foreground
-                                })
+                                .text_color(if nada { muted } else { cx.theme().foreground })
                                 .child(resumo),
                         ),
                 )
@@ -392,7 +507,7 @@ impl Configuracoes {
                         .child(
                             crate::estilo::botao_contorno_pequeno("limpar-por-periodo", cx)
                                 .label("Limpar")
-                                .disabled(itens == 0)
+                                .disabled(nada || limpando)
                                 .on_click(cx.listener(|tela, _ev, _window, cx| {
                                     tela.limpar_por_periodo(cx);
                                 })),
@@ -514,8 +629,10 @@ impl Configuracoes {
             // ⚠️ A frase que faz os botões de limpar serem clicáveis: limpar cache
             // é trabalho refeito, não trabalho perdido.
             .child(crate::estilo::aviso(
-                "Limpar o cache não toca nas fotos originais. As previews são geradas de \
-                 novo quando a foto for aberta.",
+                "Limpar miniaturas e previews não toca nas fotos: elas são geradas de novo \
+                 quando a foto for aberta. O Limpar por período apaga também as fotos \
+                 desta máquina que já estão no site; a que não subiu, a rejeitada e a \
+                 que tem edição ficam.",
                 false,
                 cx,
             ))
@@ -551,6 +668,44 @@ fn apagados(quantos: u64, nome: Nome) -> String {
 
 /// Singular, plural e se é feminino.
 type Nome = (&'static str, &'static str, bool);
+
+/// "1 foto", "1.204 fotos".
+fn contagem(quantos: u64, (singular, plural): (&str, &str)) -> String {
+    format!(
+        "{} {}",
+        milhar(quantos),
+        if quantos == 1 { singular } else { plural }
+    )
+}
+
+/// O que a limpeza por período fez, numa frase: as fotos primeiro, porque é
+/// por elas que o disco esvazia.
+fn resumo_da_limpeza(cache: Result<u64, String>, fotos: Result<Retrato, String>) -> String {
+    match (cache, fotos) {
+        (Err(erro), _) | (_, Err(erro)) => format!("Não foi possível limpar: {erro}"),
+        (Ok(itens), Ok(fotos)) => {
+            let itens = itens + fotos.do_espelho;
+            let mut frase = if fotos.fotos > 0 {
+                let fotos_ditas =
+                    contagem(fotos.fotos, ("foto local apagada", "fotos locais apagadas"));
+                if itens > 0 {
+                    format!(
+                        "{fotos_ditas} e {}",
+                        contagem(itens, ("item do cache", "itens do cache"))
+                    )
+                } else {
+                    fotos_ditas
+                }
+            } else {
+                apagados(itens, ("item", "itens", false))
+            };
+            if fotos.bytes() > 0 {
+                frase.push_str(&format!(" · {} liberados", formatar_bytes(fotos.bytes())));
+            }
+            frase
+        }
+    }
+}
 
 #[cfg(test)]
 mod testes {
@@ -701,6 +856,105 @@ mod testes {
                 );
             })
             .expect("a janela deve estar aberta");
+    }
+
+    /// Um acervo que diz ter fotos locais a limpar e anota o período pedido.
+    struct FotosDeMentira {
+        retrato: Retrato,
+        pedidos: std::sync::Mutex<Vec<u32>>,
+    }
+
+    impl Acervo for FotosDeMentira {
+        fn recarregar(
+            &self,
+            _canal: std::sync::mpsc::Sender<Vec<adapters::view_models::PhotoViewModel>>,
+        ) {
+        }
+
+        fn medir_fotos_locais(
+            &self,
+            periodos: Vec<u32>,
+            canal: std::sync::mpsc::Sender<Vec<(u32, Retrato)>>,
+        ) {
+            let _ = canal.send(periodos.into_iter().map(|d| (d, self.retrato)).collect());
+        }
+
+        fn limpar_fotos_locais(
+            &self,
+            dias: u32,
+            canal: std::sync::mpsc::Sender<Result<Retrato, String>>,
+        ) {
+            self.pedidos.lock().unwrap().push(dias);
+            let _ = canal.send(Ok(self.retrato));
+        }
+    }
+
+    /// 🚨 O "Limpar" por período leva as fotos locais junto com o cache — o
+    /// pedido do dono de 17/11/2026 (issue #22). O número aparece antes do
+    /// clique, o período escolhido é o que vai à limpeza, e o toast conta as
+    /// fotos e o que liberou.
+    #[gpui_kit::test]
+    fn o_periodo_leva_as_fotos_locais(cx: &mut TestAppContext) {
+        let (cache, _dir) = cache_com(0, 0);
+        let fotos = Arc::new(FotosDeMentira {
+            retrato: Retrato {
+                fotos: 12,
+                bytes_das_fotos: 3 * 1024 * 1024 * 1024,
+                do_espelho: 0,
+                bytes_do_espelho: 0,
+            },
+            pedidos: Default::default(),
+        });
+        cx.update(gpui_kit::init);
+        let acervo: Arc<dyn Acervo> = fotos.clone();
+        let janela = cx.add_window(|_window, cx| {
+            let mut tela = Configuracoes::nova(cache).com_acervo(acervo);
+            tela.atualizar(cx);
+            tela
+        });
+
+        janela
+            .update(cx, |tela, _window, cx| {
+                tela.colher(cx);
+                tela.escolher_periodo(60, cx);
+                assert_eq!(tela.fotos_sem_uso_do_periodo().fotos, 12);
+
+                tela.limpar_por_periodo(cx);
+                assert!(tela.limpando());
+                tela.colher(cx);
+
+                assert!(!tela.limpando());
+                assert_eq!(*fotos.pedidos.lock().unwrap(), vec![60]);
+                assert_eq!(
+                    tela.ultima_limpeza(),
+                    Some("12 fotos locais apagadas · 3,00 GB liberados")
+                );
+            })
+            .expect("a janela deve estar aberta");
+    }
+
+    /// A frase da limpeza: fotos primeiro, cache depois, e a falha de qualquer
+    /// uma das duas aparece.
+    #[test]
+    fn a_frase_da_limpeza_conta_fotos_e_cache() {
+        let fotos = Retrato {
+            fotos: 1,
+            bytes_das_fotos: 2048,
+            do_espelho: 2,
+            bytes_do_espelho: 0,
+        };
+        assert_eq!(
+            resumo_da_limpeza(Ok(3), Ok(fotos)),
+            "1 foto local apagada e 5 itens do cache · 2,0 KB liberados"
+        );
+        assert_eq!(
+            resumo_da_limpeza(Ok(4), Ok(Retrato::default())),
+            "4 itens apagados"
+        );
+        assert_eq!(
+            resumo_da_limpeza(Ok(0), Err("disco".into())),
+            "Não foi possível limpar: disco"
+        );
     }
 
     /// O ponto de milhar do resto do app.
