@@ -1,11 +1,12 @@
 {
-  "versao": "0.1.196",
-  "titulo": "A limpeza das fotos anda em segundo plano, com a barra no rodapé.",
+  "versao": "0.1.197",
+  "titulo": "O Limpar tira desta máquina todas as fotos paradas há mais que o período, e a aba mostra quantas fotos estão guardadas.",
   "importante": false,
   "novidades": [
-    "Configurações › Cache: depois de clicar em Limpar, pode fechar a janela e seguir trabalhando. As fotos saem em segundo plano, sem travar a triagem, a revelação nem o caixa.",
-    "O rodapé mostra o andamento: \"Limpando fotos · 120 de 480 · 3,0 MB\", com uma barra que enche. Clicar nele abre a aba Cache.",
-    "No fim aparece o aviso com quantas fotos saíram e quanto espaço foi liberado, em qualquer tela em que você estiver."
+    "Configurações › Armazenamento (antes \"Cache\"): no topo aparece \"Fotos nesta máquina\", com o total de fotos guardadas, quantas foram importadas aqui, quantas vieram do site e quanto espaço ocupam.",
+    "O Limpar agora segue só o período escolhido: em \"> 30 dias\", sai desta máquina toda foto parada há mais de 30 dias, inclusive as que vieram do site para trabalhar sem internet. No site nada muda.",
+    "As fotos que vieram do site contam como fotos no número antes do clique e no aviso do fim, e não mais como \"itens do cache\".",
+    "O único botão que apaga é o Limpar por período: saíram \"Limpar miniaturas\" e \"Limpar previews\", que se refazem sozinhos quando a foto é aberta."
   ],
-  "por_que_atualizar": "Para liberar o disco sem parar o atendimento."
+  "por_que_atualizar": "Para o Limpar liberar de verdade o disco do balcão."
 }
