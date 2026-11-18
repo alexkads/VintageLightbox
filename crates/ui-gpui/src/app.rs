@@ -32,6 +32,7 @@ pub mod rodape;
 mod roteiro;
 /// O que a raiz conta à bandeja (`crate::segundo_plano`).
 mod segundo_plano;
+mod vozes;
 pub mod whatsapp_bloqueado;
 pub use segundo_plano::Saida;
 
@@ -1782,6 +1783,13 @@ impl Aplicativo {
             // 🧑‍💼 A compilação automática só com o balcão parado.
             if raiz
                 .update(cx, |raiz, cx| raiz.vigiar_o_balcao(cx))
+                .is_err()
+            {
+                break;
+            }
+            // 🎙️ Os alertas da API e as quedas da conexão, em voz (`vozes`).
+            if raiz
+                .update(cx, |raiz, cx| raiz.vigiar_as_vozes(cx))
                 .is_err()
             {
                 break;
@@ -10248,10 +10256,13 @@ mod testes {
             pedidos[0].som,
             Some(crate::sons::Som::Embutido(crate::sons::Embutido::Alerta))
         );
+        // 🎙️ Desde 15/11/2026 a falha fala a frase gravada ("Atenção! Algo deu
+        // errado. Confira o aviso na tela."); o texto do erro fica no toast.
         assert_eq!(
-            pedidos[0].fala.as_ref().map(|f| f.texto.as_str()),
-            Some("Atenção: o caixa está fechado")
+            pedidos[0].gravada,
+            Some(crate::sons::gravadas::Gravada::Falha)
         );
+        assert_eq!(pedidos[0].fala, None);
     }
 
     /// 🚨 Abrir as Configurações **relê o cache**.

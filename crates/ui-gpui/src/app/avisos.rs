@@ -70,6 +70,15 @@ impl Aplicativo {
                 self.trazer_para_a_frente(Tela::Chatbot, window, cx)
             }
             PedidoDoChatbot::Mudou => cx.notify(),
+            // 🙋 Sempre, com a janela na frente ou não: é alguém esperando.
+            PedidoDoChatbot::PediuAtendente { nome } => {
+                crate::sons::soar(
+                    crate::sons::Evento::PediuAtendente,
+                    &nome,
+                    "quer falar com uma pessoa",
+                    cx,
+                );
+            }
         }
     }
 

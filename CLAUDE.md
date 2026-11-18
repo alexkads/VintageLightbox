@@ -325,6 +325,14 @@ e `--bin medir-abertura`.
 etapas de CPU e GPU (timestamp query), máquina e drivers, sessões no banco e comparação entre
 sistemas. Como medir, o que cada número é e o que não dá para medir: [`docs/DESEMPENHO.md`](docs/DESEMPENHO.md).
 
+## 🎙️ Avisos falados: vozes gravadas (skill `vozes-gravadas`)
+
+Todo aviso que fala usa uma **frase gravada uma vez** com o Kokoro 82M (voz `pm_santa`), comprimida em
+Ogg Vorbis e embutida em `crates/ui-gpui/assets/vozes/` — nenhum balcão baixa modelo nem compila o
+Kokoro. Para criar ou mudar uma frase: `.claude/skills/vozes-gravadas/` e
+`ferramentas/gravador-de-vozes/regravar.sh` (fora do workspace). Sem números no texto, e nunca
+conferir o `.ogg` com o `afplay` do macOS (toca pela metade).
+
 ## Como uma funcionalidade nova atravessa as camadas
 
 1. Entidade / value object no `domain`, com teste

@@ -1,5 +1,17 @@
 [
   {
+    "versao": "0.1.200",
+    "data": "2026-11-18",
+    "titulo": "O VintageLightbox fala quando um aviso pede atenção.",
+    "importante": false,
+    "novidades": [
+      "Os avisos com voz usam frases gravadas em português com a voz do Papai Noel, inclusive quando o computador está sem internet.",
+      "O app avisa quando um cliente pede um atendente, quando a conexão cai ou volta e quando termina de enviar o que ficou na fila.",
+      "Em Configurações › Avisos sonoros, escolha som, voz ou os dois e use Ouvir para conferir cada aviso."
+    ],
+    "por_que_atualizar": "Para ouvir os avisos importantes enquanto trabalha, mesmo longe da tela."
+  },
+  {
     "versao": "0.1.199",
     "data": "2026-11-18",
     "titulo": "O suporte pode inspecionar e controlar a janela pelo terminal.",

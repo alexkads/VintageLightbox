@@ -23,6 +23,7 @@
 //! não faz nada.
 
 pub mod embutidos;
+pub mod gravadas;
 pub mod porta;
 pub mod preferencias;
 pub mod tela;
@@ -62,6 +63,22 @@ pub enum Evento {
     ExportacaoConcluida,
     NovaVersao,
     CartaoEjetado,
+    /// 🙋 O cliente pediu uma pessoa no WhatsApp (`TRANSFER_TO_HUMAN`).
+    PediuAtendente,
+    /// 🔌 A proteção da API disparou (só a administradores).
+    AlertaDaApi,
+    /// 🔌 O servidor está com pouca memória (só a administradores).
+    AlertaDeMemoria,
+    /// ✅ A API voltou ao normal (só a administradores).
+    ApiNormalizada,
+    /// 📴 O site respondeu erro: o app guarda e envia depois.
+    ServidorFora,
+    /// 📴 Sem internet: o app guarda e envia depois.
+    SemInternet,
+    /// 📶 A conexão voltou e a fila começou a subir.
+    ConexaoVoltou,
+    /// 📤 A fila do que esperava a rede esvaziou.
+    EnvioConcluido,
 }
 
 /// Som, voz, ou os dois (o som primeiro).
@@ -107,7 +124,7 @@ impl Modo {
 }
 
 impl Evento {
-    pub const TODOS: [Evento; 9] = [
+    pub const TODOS: [Evento; 17] = [
         Evento::MensagemNoChatbot,
         Evento::ClienteNoQr,
         Evento::NovoAgendamento,
@@ -117,6 +134,14 @@ impl Evento {
         Evento::ExportacaoConcluida,
         Evento::NovaVersao,
         Evento::CartaoEjetado,
+        Evento::PediuAtendente,
+        Evento::AlertaDaApi,
+        Evento::AlertaDeMemoria,
+        Evento::ApiNormalizada,
+        Evento::ServidorFora,
+        Evento::SemInternet,
+        Evento::ConexaoVoltou,
+        Evento::EnvioConcluido,
     ];
 
     /// A chave no `sons.json` — nunca muda, ou o arquivo de quem já
@@ -132,6 +157,14 @@ impl Evento {
             Evento::ExportacaoConcluida => "exportacao_concluida",
             Evento::NovaVersao => "nova_versao",
             Evento::CartaoEjetado => "cartao_ejetado",
+            Evento::PediuAtendente => "pediu_atendente",
+            Evento::AlertaDaApi => "alerta_da_api",
+            Evento::AlertaDeMemoria => "alerta_de_memoria",
+            Evento::ApiNormalizada => "api_normalizada",
+            Evento::ServidorFora => "servidor_fora",
+            Evento::SemInternet => "sem_internet",
+            Evento::ConexaoVoltou => "conexao_voltou",
+            Evento::EnvioConcluido => "envio_concluido",
         }
     }
 
@@ -150,6 +183,14 @@ impl Evento {
             Evento::ExportacaoConcluida => "Exportação concluída",
             Evento::NovaVersao => "Nova versão pronta para reabrir",
             Evento::CartaoEjetado => "Cartão ejetado depois da importação",
+            Evento::PediuAtendente => "Cliente pediu um atendente",
+            Evento::AlertaDaApi => "Alerta da API: uma parte falhando (administradores)",
+            Evento::AlertaDeMemoria => "Alerta da API: pouca memória (administradores)",
+            Evento::ApiNormalizada => "A API voltou ao normal (administradores)",
+            Evento::ServidorFora => "O site não está respondendo",
+            Evento::SemInternet => "Sem internet",
+            Evento::ConexaoVoltou => "A conexão voltou",
+            Evento::EnvioConcluido => "Tudo o que estava guardado foi enviado",
         }
     }
 
@@ -173,10 +214,28 @@ impl Evento {
             ),
             // ⏏️ Ligado: é o que diz ao balconista que já pode tirar o cartão.
             Evento::CartaoEjetado => (true, Embutido::Campainha, "Cartão ejetado. Pode retirar"),
+            Evento::PediuAtendente => (
+                true,
+                Embutido::Alerta,
+                "Cliente pedindo atendente: {titulo}",
+            ),
+            Evento::AlertaDaApi => (true, Embutido::Alerta, "Atenção: {titulo}"),
+            Evento::AlertaDeMemoria => (true, Embutido::Alerta, "Atenção: {titulo}"),
+            Evento::ApiNormalizada => (true, Embutido::Suave, "O sistema voltou ao normal"),
+            Evento::ServidorFora => (true, Embutido::Alerta, "O site não está respondendo"),
+            Evento::SemInternet => (true, Embutido::Alerta, "Sem internet"),
+            Evento::ConexaoVoltou => (true, Embutido::Suave, "A conexão voltou"),
+            Evento::EnvioConcluido => (false, Embutido::Suave, "Tudo enviado"),
         };
         Escolha {
             ligado,
-            modo: Modo::Som,
+            // 🎙️ Toda frase tem gravação: som e voz por padrão (dono, 15/11/2026:
+            // *"use o áudio dessas mensagens ao máximo"*).
+            modo: if self.gravada().is_some() {
+                Modo::SomEVoz
+            } else {
+                Modo::Som
+            },
             som: som.chave().into(),
             texto: texto.into(),
         }
@@ -199,7 +258,43 @@ impl Evento {
             Evento::ExportacaoConcluida => ("Exportação concluída", "12 arquivos"),
             Evento::NovaVersao => ("Nova versão", "0.1.90"),
             Evento::CartaoEjetado => ("Cartão ejetado", "NIKON D3100"),
+            Evento::PediuAtendente => ("Maria Souza", "quer falar com uma pessoa"),
+            Evento::AlertaDaApi => (
+                "Uma parte do sistema está falhando",
+                "GET /api/v2/pos-venda/galerias",
+            ),
+            Evento::AlertaDeMemoria => ("Servidor com pouca memória", "760 MB"),
+            Evento::ApiNormalizada => ("Tudo certo", "a API voltou"),
+            Evento::ServidorFora => ("O site não está respondendo", "o trabalho fica guardado"),
+            Evento::SemInternet => ("Sem internet", "o trabalho fica guardado"),
+            Evento::ConexaoVoltou => ("A conexão voltou", "enviando o que ficou guardado"),
+            Evento::EnvioConcluido => ("Tudo enviado", "a fila esvaziou"),
         }
+    }
+
+    /// 🎙️ A frase gravada do evento (`gravadas`): é ela que fala quando o modo
+    /// tem voz, no lugar da voz do sistema.
+    pub fn gravada(self) -> Option<gravadas::Gravada> {
+        use gravadas::Gravada as G;
+        Some(match self {
+            Evento::MensagemNoChatbot => G::MensagemNoChatbot,
+            Evento::ClienteNoQr => G::ClienteNoQr,
+            Evento::NovoAgendamento => G::NovoAgendamento,
+            Evento::AgendamentoCancelado => G::AgendamentoCancelado,
+            Evento::Falha => G::Falha,
+            Evento::RevelacoesSalvas => G::FotosSalvas,
+            Evento::ExportacaoConcluida => G::ExportacaoConcluida,
+            Evento::NovaVersao => G::NovaVersao,
+            Evento::CartaoEjetado => G::CartaoEjetado,
+            Evento::PediuAtendente => G::PediuAtendente,
+            Evento::AlertaDaApi => G::AlertaFalha,
+            Evento::AlertaDeMemoria => G::AlertaMemoria,
+            Evento::ApiNormalizada => G::AlertaNormal,
+            Evento::ServidorFora => G::ServidorOffline,
+            Evento::SemInternet => G::SemInternet,
+            Evento::ConexaoVoltou => G::ConexaoVoltou,
+            Evento::EnvioConcluido => G::EnvioConcluido,
+        })
     }
 }
 
@@ -273,18 +368,24 @@ impl Sons {
             .modo
             .toca()
             .then(|| self.som(&escolha.som, evento.som_padrao()));
+        // 🎙️ Com voz e gravação, fala a gravação; a voz do sistema só fala o
+        // que não tem frase gravada.
+        let gravada = escolha.modo.fala().then(|| evento.gravada()).flatten();
         let fala = escolha
             .modo
             .fala()
-            .then(|| preencher(&escolha.texto, titulo, detalhe))
+            .then_some(())
+            .filter(|()| gravada.is_none())
+            .map(|()| preencher(&escolha.texto, titulo, detalhe))
             .filter(|texto| !texto.is_empty())
             .map(|texto| Fala {
                 texto,
                 voz: self.preferencias.voz.clone(),
                 ritmo: self.preferencias.ritmo,
             });
-        (som.is_some() || fala.is_some()).then_some(Pedido {
+        (som.is_some() || fala.is_some() || gravada.is_some()).then_some(Pedido {
             som,
+            gravada,
             fala,
             volume: self.preferencias.volume,
         })
@@ -340,6 +441,7 @@ impl Sons {
     /// Toca um som só, no volume de agora — o "Ouvir" de um som próprio.
     pub fn ouvir_som(&self, chave: &str) {
         self.portas.alto_falante.tocar(Pedido {
+            gravada: None,
             som: Some(self.som(chave, Embutido::Sino)),
             fala: None,
             volume: self.preferencias.volume,
@@ -350,6 +452,7 @@ impl Sons {
     /// escolhidos — para decidir a voz antes de pô-la num aviso.
     pub fn ouvir_voz(&self) {
         self.portas.alto_falante.tocar(Pedido {
+            gravada: None,
             som: None,
             fala: Some(Fala {
                 texto: EXEMPLO_DA_VOZ.into(),
@@ -471,11 +574,26 @@ mod testes {
         assert_eq!(
             alto_falante.pedidos(),
             vec![Pedido {
+                // 🎙️ Padrão som e voz desde 15/11/2026: a frase gravada fala.
+                gravada: Some(gravadas::Gravada::NovoAgendamento),
                 som: Some(Som::Embutido(Embutido::DoisToques)),
                 fala: None,
                 volume: 0.7,
             }]
         );
+    }
+
+    /// 🎙️ Com voz e gravação, fala a gravação — a voz do sistema só fala o
+    /// que não tem frase gravada.
+    #[test]
+    fn com_gravacao_a_voz_do_sistema_nao_fala() {
+        let (mut sons, alto_falante, _pasta) = sons();
+        sons.mudar(|p| p.escolha_mut(Evento::PediuAtendente).modo = Modo::Voz);
+        sons.soar_em(Evento::PediuAtendente, "Ana", "", Instant::now());
+        let pedidos = alto_falante.pedidos();
+        assert_eq!(pedidos[0].gravada, Some(gravadas::Gravada::PediuAtendente));
+        assert_eq!(pedidos[0].fala, None);
+        assert_eq!(pedidos[0].som, None, "só voz não toca som");
     }
 
     #[test]
@@ -535,24 +653,25 @@ mod testes {
         sons.soar_em(Evento::Falha, "Falha", "", Instant::now());
         let pedidos = alto_falante.pedidos();
         assert_eq!(pedidos[0].som, Some(Som::Embutido(Embutido::DoisToques)));
-        assert_eq!(
-            pedidos[0].fala,
-            Some(Fala {
-                texto: "Chegou agendamento de Ana · 05/10".into(),
-                voz: Some("Luciana".into()),
-                ritmo: 1.3,
-            })
-        );
+        // 🎙️ O evento tem frase gravada: ela fala, e não a voz do sistema.
+        assert_eq!(pedidos[0].gravada, Some(gravadas::Gravada::NovoAgendamento));
+        assert_eq!(pedidos[0].fala, None);
         assert_eq!(pedidos[1].som, None, "só voz não toca som");
+        assert_eq!(pedidos[1].gravada, Some(gravadas::Gravada::Falha));
+        // O texto que a voz do sistema falaria continua montado como antes.
         assert_eq!(
-            pedidos[1].fala.as_ref().map(|f| f.texto.as_str()),
-            Some("Atenção"),
+            preencher("Chegou {titulo} de {detalhe}", "agendamento", "Ana · 05/10"),
+            "Chegou agendamento de Ana · 05/10"
+        );
+        assert_eq!(
+            preencher("Atenção: {detalhe}", "Falha", ""),
+            "Atenção",
             "o detalhe vazio não deixa ': ' pendurado"
         );
     }
 
     #[test]
-    fn so_voz_com_texto_vazio_nao_pede_nada() {
+    fn so_voz_com_texto_vazio_ainda_fala_a_gravacao() {
         let (mut sons, alto_falante, _pasta) = sons();
         sons.mudar(|p| {
             let escolha = p.escolha_mut(Evento::Falha);
@@ -560,7 +679,11 @@ mod testes {
             escolha.texto = "{detalhe}".into();
         });
         sons.soar_em(Evento::Falha, "", "  ", Instant::now());
-        assert!(alto_falante.pedidos().is_empty());
+        // 🎙️ A gravação não depende do texto: só voz ainda fala a frase gravada.
+        let pedidos = alto_falante.pedidos();
+        assert_eq!(pedidos.len(), 1);
+        assert_eq!(pedidos[0].gravada, Some(gravadas::Gravada::Falha));
+        assert_eq!(pedidos[0].fala, None);
     }
 
     /// 🔑 O som próprio é uma cópia; apagado, o aviso volta ao de fábrica em
@@ -648,6 +771,7 @@ mod testes {
         assert_eq!(
             alto_falante.pedidos(),
             vec![Pedido {
+                gravada: None,
                 som: None,
                 fala: Some(Fala {
                     texto: EXEMPLO_DA_VOZ.into(),

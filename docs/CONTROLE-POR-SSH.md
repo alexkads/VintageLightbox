@@ -103,12 +103,17 @@ no `controle.json` da pasta privada. Use a mesma conta do processo gráfico via
 SSH: não é necessário expor portas ou usar RDP. A janela já deve estar aberta
 numa sessão gráfica; a CLI não precisa de DISPLAY.
 
+Em uma VPN Tailscale, confira o dispositivo com `tailscale status` e prefira
+o nome MagicDNS para SSH. Se o nome ou a conexão falhar, verifique o nome,
+o endereço atual e o estado do host em **Devices** no Tailscale. Nos exemplos,
+substitua o usuário e o nome do Fedora pelos da sua rede.
+
 ```sh
-ssh alexdasilva@100.110.180.47 \
+ssh operador@fedora.sua-rede.ts.net \
   '/caminho/vlb --dir "$HOME/.local/state/vintagelightbox/controle" inspect'
-ssh alexdasilva@100.110.180.47 \
+ssh operador@fedora.sua-rede.ts.net \
   '/caminho/vlb --dir "$HOME/.local/state/vintagelightbox/controle" screenshot /tmp/vintage.png'
-scp alexdasilva@100.110.180.47:/tmp/vintage.png ./vintage.png
+scp operador@fedora.sua-rede.ts.net:/tmp/vintage.png ./vintage.png
 ```
 
 A captura é gravada na máquina do app. A CLI torna o caminho absoluto na máquina
@@ -145,7 +150,7 @@ SetValue, ação do app, clique por ID e por coordenada, rolagem, arrasto e capt
 PNG. Os testes de protocolo e dois cenários de UI passaram. `cargo check -p
 ui-gpui` também passou no Fedora 44 por SSH.
 
-Conferido na janela real do Fedora 44, GNOME/Wayland, em 100.110.180.47:
+Conferido na janela real do Fedora 44, GNOME/Wayland, acessado por SSH pela VPN do Tailscale:
 o mesmo roteiro de controle passou, incluindo 40 consultas consecutivas,
 inspeção, foco, Unicode, SetValue, ações, cliques, rolagem, arrasto e erros da CLI.
 O PNG da própria janela (2880 pixels de largura, escala fracionária do GNOME)

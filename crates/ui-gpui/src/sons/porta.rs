@@ -23,6 +23,8 @@ pub enum Som {
     Embutido(Embutido),
     /// Um arquivo da pasta dos sons próprios.
     Proprio(PathBuf),
+    /// 🎙️ Uma frase gravada, embutida no app.
+    Gravada(super::gravadas::Gravada),
 }
 
 /// O que falar, e com que voz.
@@ -38,6 +40,8 @@ pub struct Fala {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Pedido {
     pub som: Option<Som>,
+    /// 🎙️ A frase gravada, tocada depois do som e no lugar da fala.
+    pub gravada: Option<super::gravadas::Gravada>,
     pub fala: Option<Fala>,
     /// 0,0 a 1,0.
     pub volume: f32,
@@ -123,27 +127,31 @@ impl AltoFalanteDoSistema {
                 let mut sem_audio_avisado = false;
                 let mut sem_voz_avisada = false;
                 for pedido in pedidos {
-                    if let Some(som) = &pedido.som {
-                        if saida.is_none() {
-                            match rodio::DeviceSinkBuilder::open_default_sink() {
-                                Ok(mut aberta) => {
-                                    aberta.log_on_drop(false);
-                                    saida = Some(aberta);
-                                }
-                                Err(erro) => {
-                                    if !sem_audio_avisado {
-                                        crate::telemetria::avisar!(
-                                            "⚠️ [Sons] sem saída de áudio: {erro}"
-                                        );
-                                        sem_audio_avisado = true;
-                                    }
+                    if saida.is_none() && (pedido.som.is_some() || pedido.gravada.is_some()) {
+                        match rodio::DeviceSinkBuilder::open_default_sink() {
+                            Ok(mut aberta) => {
+                                aberta.log_on_drop(false);
+                                saida = Some(aberta);
+                            }
+                            Err(erro) => {
+                                if !sem_audio_avisado {
+                                    crate::telemetria::avisar!(
+                                        "⚠️ [Sons] sem saída de áudio: {erro}"
+                                    );
+                                    sem_audio_avisado = true;
                                 }
                             }
                         }
-                        if let Some(saida) = &saida {
-                            if let Err(erro) = tocar_ate_o_fim(saida, som, pedido.volume) {
-                                crate::telemetria::avisar!("⚠️ [Sons] não tocou {som:?}: {erro}");
-                            }
+                    }
+                    if let (Some(som), Some(saida)) = (&pedido.som, &saida) {
+                        if let Err(erro) = tocar_ate_o_fim(saida, som, pedido.volume) {
+                            crate::telemetria::avisar!("⚠️ [Sons] não tocou {som:?}: {erro}");
+                        }
+                    }
+                    if let (Some(gravada), Some(saida)) = (pedido.gravada, &saida) {
+                        let som = Som::Gravada(gravada);
+                        if let Err(erro) = tocar_ate_o_fim(saida, &som, pedido.volume) {
+                            crate::telemetria::avisar!("⚠️ [Sons] não tocou {som:?}: {erro}");
                         }
                     }
                     if let Some(fala) = &pedido.fala {
@@ -187,6 +195,11 @@ fn tocar_ate_o_fim(saida: &rodio::MixerDeviceSink, som: &Som, volume: f32) -> Re
                 std::num::NonZero::new(super::embutidos::TAXA).unwrap(),
                 amostras,
             ));
+        }
+        Som::Gravada(gravada) => {
+            let decodificado = rodio::Decoder::new(std::io::Cursor::new(gravada.bytes()))
+                .map_err(|erro| erro.to_string())?;
+            tocador.append(decodificado);
         }
         Som::Proprio(caminho) => {
             let arquivo = std::fs::File::open(caminho).map_err(|erro| erro.to_string())?;

@@ -75,9 +75,36 @@ pub enum PedidoDoChatbot {
     TrazerParaAFrente,
     /// Novidades ou urgências mudaram — o selo do menu lateral.
     Mudou,
+    /// 🙋 Um cliente acabou de pedir uma pessoa (`TRANSFER_TO_HUMAN`).
+    PediuAtendente { nome: String },
 }
 
 impl EventEmitter<PedidoDoChatbot> for Chatbot {}
+
+/// 🙋 Os pedidos de atendente que ainda não foram avisados. Na primeira lista só
+/// anota: quem já esperava na abertura do app não vira voz de repente.
+fn novos_pedidos_de_atendente(
+    avisados: &mut Option<std::collections::HashSet<String>>,
+    urgencias: &[Urgencia],
+) -> Vec<String> {
+    let pedidos = urgencias
+        .iter()
+        .filter(|u| u.pediu_atendente() && u.pendente());
+    let Some(ja) = avisados else {
+        *avisados = Some(pedidos.map(|u| u.id.clone()).collect());
+        return Vec::new();
+    };
+    pedidos
+        .filter(|u| ja.insert(u.id.clone()))
+        .map(|u| {
+            if u.profile_name.trim().is_empty() {
+                u.contact_id.clone()
+            } else {
+                u.profile_name.clone()
+            }
+        })
+        .collect()
+}
 
 /// Uma resposta pronta (`GET /whatsapp/quick-responses`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -347,6 +374,9 @@ pub struct Chatbot {
     pub(crate) historico_aberto: Vec<Mensagem>,
     pub(crate) carregando_historico: bool,
     pub(crate) urgencias: Vec<Urgencia>,
+    /// 🙋 Os pedidos de atendente já avisados em voz. `None` até a primeira
+    /// lista: o que já esperava na abertura não fala.
+    atendentes_avisados: Option<std::collections::HashSet<String>>,
     pub(crate) respostas: Vec<RespostaRapida>,
     pub(crate) carregou: bool,
     pub(crate) falhou_a_carga: bool,
@@ -513,6 +543,7 @@ impl Chatbot {
             historico_aberto: Vec::new(),
             carregando_historico: false,
             urgencias: Vec::new(),
+            atendentes_avisados: None,
             respostas: Vec::new(),
             carregou: false,
             falhou_a_carga: false,
@@ -995,6 +1026,11 @@ impl Chatbot {
             "respostas" => self.respostas = RespostaRapida::lista(&valor),
             "urgencias" => {
                 self.urgencias = Urgencia::lista(&valor);
+                for nome in
+                    novos_pedidos_de_atendente(&mut self.atendentes_avisados, &self.urgencias)
+                {
+                    cx.emit(PedidoDoChatbot::PediuAtendente { nome });
+                }
                 cx.emit(PedidoDoChatbot::Mudou);
             }
             outro => {
@@ -2585,5 +2621,48 @@ impl Chatbot {
             com_atendente
         )
         .into()
+    }
+}
+
+#[cfg(test)]
+mod testes_do_atendente {
+    use super::*;
+
+    fn lista(itens: &[(&str, &str, &str)]) -> Vec<Urgencia> {
+        let valor = serde_json::Value::Array(
+            itens
+                .iter()
+                .map(|(id, nome, motivo)| {
+                    serde_json::json!({
+                        "id": id, "contact_id": format!("55519{id}"), "profile_name": nome,
+                        "reason": motivo, "status": "PENDING",
+                    })
+                })
+                .collect(),
+        );
+        Urgencia::lista(&valor)
+    }
+
+    #[test]
+    fn so_avisa_o_pedido_novo_e_uma_vez() {
+        let mut avisados = None;
+        let abertura = lista(&[("1", "Ana", "TRANSFER_TO_HUMAN")]);
+        assert!(
+            novos_pedidos_de_atendente(&mut avisados, &abertura).is_empty(),
+            "quem já esperava na abertura não fala"
+        );
+        let depois = lista(&[
+            ("1", "Ana", "TRANSFER_TO_HUMAN"),
+            ("2", "Caio", "TRANSFER_TO_HUMAN"),
+            ("3", "Bia", "OUTRO_MOTIVO"),
+        ]);
+        assert_eq!(
+            novos_pedidos_de_atendente(&mut avisados, &depois),
+            vec!["Caio"]
+        );
+        assert!(
+            novos_pedidos_de_atendente(&mut avisados, &depois).is_empty(),
+            "o mesmo pedido não fala de novo"
+        );
     }
 }

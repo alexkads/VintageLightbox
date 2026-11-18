@@ -1,0 +1,17 @@
+alerta-falha	Atenção! Uma parte do sistema do Recordar Fotos está falhando. Confira o aviso na tela.
+alerta-memoria	Atenção! O servidor do Recordar Fotos está com pouca memória.
+alerta-normal	Tudo certo! O sistema do Recordar Fotos voltou ao normal.
+pediu-atendente	Atenção! Um cliente está pedindo para falar com um atendente no WhatsApp.
+mensagem-no-chatbot	Chegou uma nova mensagem de cliente no chatbot.
+cliente-no-qr	Um cliente acabou de chegar pelo QR da sessão.
+novo-agendamento	Oba! Chegou um novo agendamento.
+agendamento-cancelado	Um agendamento foi cancelado.
+falha	Atenção! Algo deu errado. Confira o aviso na tela.
+fotos-salvas	Prontinho! As fotos foram salvas na galeria.
+exportacao-concluida	Prontinho! A exportação foi concluída.
+nova-versao	Uma nova versão do aplicativo está pronta. Reabra quando puder.
+cartao-ejetado	Pode retirar o cartão de memória.
+servidor-offline	Atenção! O servidor do Recordar Fotos não está respondendo. Pode continuar trabalhando: eu guardo tudo e envio quando ele voltar.
+sem-internet	Atenção! Este computador ficou sem internet. Pode continuar trabalhando: eu guardo tudo e envio quando a conexão voltar.
+conexao-voltou	A conexão voltou! Estou enviando o que ficou guardado.
+envio-concluido	Prontinho! Tudo o que estava guardado já foi enviado.

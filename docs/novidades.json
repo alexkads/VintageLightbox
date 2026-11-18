@@ -1,10 +1,11 @@
 {
-  "versao": "0.1.199",
-  "titulo": "O suporte pode inspecionar e controlar a janela pelo terminal.",
+  "versao": "0.1.200",
+  "titulo": "O VintageLightbox fala quando um aviso pede atenção.",
   "importante": false,
   "novidades": [
-    "Com o controle local habilitado, o suporte pode consultar os botões e campos da janela, digitar, clicar e fazer capturas pelo terminal, inclusive por SSH.",
-    "O instalador inclui o comando vlb no macOS, no Windows e no Linux. O controle fica desligado até ser habilitado explicitamente."
+    "Os avisos com voz usam frases gravadas em português com a voz do Papai Noel, inclusive quando o computador está sem internet.",
+    "O app avisa quando um cliente pede um atendente, quando a conexão cai ou volta e quando termina de enviar o que ficou na fila.",
+    "Em Configurações › Avisos sonoros, escolha som, voz ou os dois e use Ouvir para conferir cada aviso."
   ],
-  "por_que_atualizar": "Para facilitar o suporte remoto sem precisar abrir uma sessão de Área de Trabalho Remota."
+  "por_que_atualizar": "Para ouvir os avisos importantes enquanto trabalha, mesmo longe da tela."
 }
