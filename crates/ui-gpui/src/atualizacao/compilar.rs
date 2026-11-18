@@ -90,6 +90,10 @@ pub fn decidir(
     ocupado: bool,
     agora: u64,
 ) -> Decisao {
+    // Pacotes do sistema são atualizados pelo gerenciador da plataforma.
+    if matches!(jeito, JeitoDaInstalacao::Rpm | JeitoDaInstalacao::Msix) {
+        return Decisao::Nada;
+    }
     // Quem desenvolve atualiza por `git pull`: só o pacote, como sempre foi.
     if jeito == JeitoDaInstalacao::Desenvolvimento {
         return match pacote {
@@ -602,6 +606,22 @@ mod testes {
     }
 
     const AGORA: u64 = 1_800_000_000;
+
+    #[test]
+    fn pacotes_do_sistema_nao_iniciam_atualizador_proprio() {
+        for jeito in [JeitoDaInstalacao::Rpm, JeitoDaInstalacao::Msix] {
+            let decisao = decidir(
+                jeito,
+                "0.1.0",
+                pacote("0.2.0"),
+                main("0.2.0"),
+                &Memoria::default(),
+                false,
+                AGORA,
+            );
+            assert!(matches!(decisao, Decisao::Nada));
+        }
+    }
 
     /// 🔎 O motivo diz o que o dono precisa ler no painel — o caso de 29/09
     /// (cache do GitHub com a versão velha) inclusive.

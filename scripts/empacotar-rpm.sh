@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 #
 # O pacote .rpm do VintageLightbox (Zed GPUI), para Fedora — gerado e conferido
-# na própria máquina. É o único pacote que sobrou: o `.dmg` e o `empacotar.sh`
-# saíram em 27/set/2026, quando todo balcão passou a atualizar compilando.
+# na própria máquina. Para Windows, use scripts/empacotar-msix.ps1.
 #
 #   ./scripts/empacotar-rpm.sh                    compila e gera o .rpm
 #   ./scripts/empacotar-rpm.sh --binario CAMINHO  usa um binário já compilado
@@ -22,9 +21,8 @@
 #    `APP_ID` de `crates/ui-gpui/src/menu.rs`: o GNOME casa a janela com o
 #    `.desktop` pelo nome dele. Com outro nome a janela abre sem ícone.
 #
-# ⚠️ **Um .rpm gerado no Fedora N instala no N e nos seguintes**, não nos
-#    anteriores: ele herda as versões das bibliotecas desta máquina. Gere na
-#    versão mais antiga que precisa atender.
+# ⚠️ O pacote depende das bibliotecas da máquina de build. Gere e teste em
+#    cada versão do Fedora que pretende suportar; compatibilidade não é garantida.
 set -euo pipefail
 
 RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -75,8 +73,8 @@ conferir() {
   command -v desktop-file-validate >/dev/null || faltam+=(desktop-file-utils)
   if [ "${#faltam[@]}" -gt 0 ]; then
     command -v dnf >/dev/null || { erro "falta ${faltam[*]}, e esta máquina não tem dnf."; exit 1; }
-    aviso "faltam ferramentas: ${faltam[*]} — instalando (pede a senha)"
-    correr sudo dnf install -y "${faltam[@]}"
+    erro "faltam ferramentas: ${faltam[*]}. Instale com: sudo dnf install ${faltam[*]}"
+    exit 1
   fi
 
   # A versão sai do workspace.
@@ -97,10 +95,17 @@ compilar() {
     [ -x "$BINARIO" ] || { erro "não é um executável: $BINARIO"; exit 1; }
   else
     diga "compilando (15 a 40 minutos na primeira vez)"
-    correr cargo build --release -p "$CRATE" --bin "$BIN" --manifest-path "$RAIZ/Cargo.toml"
-    BINARIO="$RAIZ/target/release/$BIN"
+    local alvo="${CARGO_TARGET_DIR:-$RAIZ/target}"
+    correr cargo build --release -p "$CRATE" --bin "$BIN" \
+      --manifest-path "$RAIZ/Cargo.toml" --target-dir "$alvo"
+    BINARIO="$alvo/release/$BIN"
   fi
-  [ "$SECO" -eq 1 ] || ok "$BINARIO ($(du -h "$BINARIO" | cut -f1))"
+  if [ "$SECO" -eq 0 ]; then
+    local resposta
+    resposta=$("$BINARIO" --versao) || { erro "o binário não executa --versao nesta máquina."; exit 1; }
+    [ "$resposta" = "$VERSAO" ] || { erro "binário versão $resposta; o pacote pede $VERSAO."; exit 1; }
+    ok "$BINARIO ($(du -h "$BINARIO" | cut -f1))"
+  fi
 }
 
 # ── 3. O atalho do menu e a receita ──────────────────────────────────────────
@@ -251,7 +256,11 @@ conferir_pacote() {
 instalar() {
   [ "$INSTALAR" -eq 1 ] || return 0
   diga "instalando"
-  correr sudo dnf install -y "$RPM"
+  if [ "$SECO" -eq 1 ]; then
+    echo "   [seco] sudo dnf install -y <rpm-gerado>"
+  else
+    sudo dnf install -y "$RPM"
+  fi
   # ⚠️ O instalador `curl | sh` põe o mesmo atalho em ~/.local, e o de lá vence
   #    o de /usr no menu. Com os dois, o menu abre a cópia compilada.
   if [ -e "$HOME/.local/share/applications/$APP_ID.desktop" ]; then
@@ -269,6 +278,6 @@ instalar
 
 if [ "$SECO" -eq 0 ]; then
   printf "\n${V}✅ pronto:${Z} %s\n\n" "$RPM"
-  echo "   Para instalar:  sudo dnf install ./${RPM#"$RAIZ"/}"
+  echo "   Para instalar:  sudo dnf install \"$RPM\""
   echo "   Para remover:   sudo dnf remove $PACOTE"
 fi
