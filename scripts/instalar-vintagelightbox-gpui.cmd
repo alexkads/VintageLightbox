@@ -458,6 +458,9 @@ if ($SoConferir) { Ok "cargo check passou: o codigo compila nesta maquina (nada 
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $binario)) {
     throw "a compilacao falhou, ou nao deixou $binario"
 }
+$cli = Join-Path $env:CARGO_TARGET_DIR "$Alvo\instalador\vlb.exe"
+Correr { cargo "+$Toolchain" build --profile instalador --manifest-path (Join-Path $Fonte "Cargo.toml") -p vlb-controle --bin vlb --target $Alvo }
+if (-not (Test-Path $cli)) { throw "a compilacao nao deixou a CLI $cli" }
 
 # ── Conferir o binario novo antes de tocar no instalado ──────────────────────
 # 🔑 **O que funciona nao e tocado ate o novo provar que abre** (dono,
@@ -546,6 +549,8 @@ function Afastar($arquivo) {
 try {
     Afastar $exe
     Copy-Item $binario $exe -Force
+    Afastar (Join-Path $Destino "vlb.exe")
+    Copy-Item $cli (Join-Path $Destino "vlb.exe") -Force
     # O executavel liga com as DLLs do MinGW (libstdc++, libgcc, winpthread).
     # Fora do PATH do MSYS2 ele nao abriria, entao elas vao junto.
     foreach ($dll in "libstdc++-6.dll", "libgcc_s_seh-1.dll", "libwinpthread-1.dll") {
@@ -1230,6 +1235,15 @@ if [ "$SECO" -eq 0 ] && [ ! -x "$BINARIO" ]; then
   erro "a compilação terminou mas não há binário em $BINARIO"
   exit 1
 fi
+if ! correr cargo build --profile instalador --manifest-path "$FONTE/Cargo.toml" -p vlb-controle --bin vlb; then
+  erro "a compilação da CLI falhou; o app instalado continua como estava"
+  exit 1
+fi
+CLI="$CARGO_TARGET_DIR/instalador/vlb"
+if [ "$SECO" -eq 0 ] && [ ! -x "$CLI" ]; then
+  erro "a compilação não deixou a CLI em $CLI"
+  exit 1
+fi
 VERSAO="$(sed -n '/^\[workspace\.package\]/,/^\[/p' "$FONTE/Cargo.toml" 2>/dev/null | sed -n 's/^version *= *"\(.*\)"/\1/p' | head -1)"
 [ -n "$VERSAO" ] || VERSAO="0.0.0"
 
@@ -1295,6 +1309,7 @@ if [ "$SISTEMA" = "Darwin" ]; then
   rm -rf "$APP"
   mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
   cp "$BINARIO" "$APP/Contents/MacOS/ui-gpui"
+  cp "$CLI" "$APP/Contents/MacOS/vlb"
   cp "$FONTE/empacotamento/icones/icone.icns" "$APP/Contents/Resources/icone.icns"
   # 🔑 O identificador é o mesmo do `.dmg` (`empacotamento/packager.toml`): é
   #    por ele que o macOS lembra as permissões já concedidas ao app GPUI.
@@ -1367,6 +1382,8 @@ else
     exit 0
   fi
   mkdir -p "$DESTINO/bin" "$DESTINO/share/applications" "$DESTINO/share/icons/hicolor/256x256/apps"
+  install -m 755 "$CLI" "$DESTINO/bin/.vlb.novo"
+  mv -f "$DESTINO/bin/.vlb.novo" "$DESTINO/bin/vlb"
   # 🔑 **Trocar sem corromper.** O novo é copiado ao lado; o instalado fica
   #    como `.anterior`; o novo entra por `mv`, que é atômico no mesmo disco —
   #    não há instante sem app. O app aberto segue com o arquivo antigo.

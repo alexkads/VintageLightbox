@@ -22,6 +22,8 @@ pub mod campo;
 pub mod chatbot;
 pub mod cliente;
 pub mod configuracoes;
+/// Canal local explicitamente habilitado para inspeção e comandos via SSH.
+pub mod controle;
 /// Uma cópia só do app por catálogo; a segunda acorda a primeira e sai.
 pub mod copia_unica;
 /// Fotografar a janela e seguir um roteiro, só em build de depuração.

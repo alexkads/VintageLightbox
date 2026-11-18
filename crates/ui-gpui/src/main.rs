@@ -52,6 +52,11 @@ fn cofre_da_sessao(pilha_local: bool) -> Arc<dyn domain::services::pos_venda::Co
 
 #[tokio::main]
 async fn main() {
+    // CLI exits before opening the catalog, keychain or a second window.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|a| a == "--controle") {
+        std::process::exit(vlb_controle::cli::run(args[1..].to_vec()));
+    }
     // 🔄 `--versao`: responde a versão e sai, **antes** de janela, catálogo,
     // rede ou a trava de uma cópia só. É a prova de vida que o instalador pede
     // ao binário novo antes de trocar o instalado, e a conferência que a
@@ -277,6 +282,7 @@ async fn main() {
             // processo. O porquê do critério ser a janela principal, e não "sobrou
             // alguma janela", está em `ui_gpui::encerramento`.
             let principal = AnyWindowHandle::from(principal);
+            ui_gpui::controle::ligar(principal, cx);
             cx.on_window_closed(move |cx, _janela| {
                 if ui_gpui::encerramento::deve_encerrar(&principal, &cx.windows()) {
                     cx.quit();
