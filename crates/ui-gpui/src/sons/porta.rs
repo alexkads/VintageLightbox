@@ -127,27 +127,25 @@ impl AltoFalanteDoSistema {
                 let mut sem_audio_avisado = false;
                 let mut sem_voz_avisada = false;
                 for pedido in pedidos {
-                    if let Some(som) = &pedido.som {
-                        if saida.is_none() {
-                            match rodio::DeviceSinkBuilder::open_default_sink() {
-                                Ok(mut aberta) => {
-                                    aberta.log_on_drop(false);
-                                    saida = Some(aberta);
-                                }
-                                Err(erro) => {
-                                    if !sem_audio_avisado {
-                                        crate::telemetria::avisar!(
-                                            "⚠️ [Sons] sem saída de áudio: {erro}"
-                                        );
-                                        sem_audio_avisado = true;
-                                    }
+                    if saida.is_none() && (pedido.som.is_some() || pedido.gravada.is_some()) {
+                        match rodio::DeviceSinkBuilder::open_default_sink() {
+                            Ok(mut aberta) => {
+                                aberta.log_on_drop(false);
+                                saida = Some(aberta);
+                            }
+                            Err(erro) => {
+                                if !sem_audio_avisado {
+                                    crate::telemetria::avisar!(
+                                        "⚠️ [Sons] sem saída de áudio: {erro}"
+                                    );
+                                    sem_audio_avisado = true;
                                 }
                             }
                         }
-                        if let Some(saida) = &saida {
-                            if let Err(erro) = tocar_ate_o_fim(saida, som, pedido.volume) {
-                                crate::telemetria::avisar!("⚠️ [Sons] não tocou {som:?}: {erro}");
-                            }
+                    }
+                    if let (Some(som), Some(saida)) = (&pedido.som, &saida) {
+                        if let Err(erro) = tocar_ate_o_fim(saida, som, pedido.volume) {
+                            crate::telemetria::avisar!("⚠️ [Sons] não tocou {som:?}: {erro}");
                         }
                     }
                     if let (Some(gravada), Some(saida)) = (pedido.gravada, &saida) {
