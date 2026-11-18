@@ -155,6 +155,11 @@ opt-level = 3
 opt-level = 3
 lto = true
 codegen-units = 1
+# 📦 Sem símbolos no binário. É o que se publica como pacote (issue #37): o
+# cliente não precisa dos nomes, o download fica menor e o que sobra de caminho
+# do projeto no binário some. O `--remap-path-prefix` do empacotador cobre o
+# resto (paths de panic e de `file!()`).
+strip = true
 
 # O perfil de quem compila o app na própria máquina (`scripts/instalar-*.cmd`).
 #

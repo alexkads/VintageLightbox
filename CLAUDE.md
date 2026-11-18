@@ -358,6 +358,15 @@ primeira abertura; compilado na própria máquina, ele abre direto. O que ficou 
 e por que não sai, está em [`empacotamento/README.md`](empacotamento/README.md) — **ler antes de
 tocar em versão, `atualizacao/`, `chave-publica.txt` ou `enderecos-de-atualizacao.txt`.**
 
+🐧 **Linux (Fedora 44+) tem pacote pronto, em implantação (issue #37).** O `docs/instalar.sh` baixa o
+`.tar.gz` do R2, confere a assinatura minisign **antes** de abrir qualquer coisa e instala em `~/.local`
+sem `sudo` e sem compilar; só cai para a compilação (uma vez, sem laço) se não houver pacote, a
+assinatura não bater, a glibc for menor que a do Fedora 44 ou o binário não responder a `--versao`.
+Quem gera é `scripts/empacotar-pacote.sh` (na fedora), quem assina e publica é o Mac do dono, e o
+`scripts/testar-instalar-linux.sh` ensaia o ciclo inteiro. **Enquanto o `latest-linux.json` não existir
+no R2, o Linux segue compilando**, que é o comportamento de sempre. Windows e macOS ainda compilam.
+Detalhes e o passo a passo da publicação: [`empacotamento/README.md`](empacotamento/README.md).
+
 **Como funciona.** Ao abrir, o app lê o [`docs/novidades.json`](docs/novidades.json) do `main`
 (`raw` do GitHub, depois o Pages). Se a versão de lá for maior que a `CARGO_PKG_VERSION`, aparece a
 faixa com as novidades, e o "Atualizar" roda o instalador, que baixa o `main` e recompila
