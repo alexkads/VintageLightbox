@@ -239,6 +239,17 @@ mod real {
                 use super::super::compilar;
                 use super::super::novidades::{self, JeitoDaInstalacao};
                 let jeito = novidades::jeito_desta_instalacao();
+                if matches!(jeito, JeitoDaInstalacao::Rpm | JeitoDaInstalacao::Msix) {
+                    if pedida {
+                        let mensagem = if jeito == JeitoDaInstalacao::Msix {
+                            "Esta instalação é gerenciada pelo Windows. Instale um MSIX mais recente do mesmo fornecedor."
+                        } else {
+                            "Esta instalação é gerenciada pelo Fedora. Instale um RPM mais recente ou atualize pelo repositório configurado no sistema."
+                        };
+                        let _ = canal.send(Aviso::SemResposta(mensagem.into()));
+                    }
+                    return;
+                }
                 // Algum servidor respondeu? Só a procura pedida usa isto, para
                 // não dizer "está em dia" sem ter perguntado a ninguém.
                 let mut respondeu = false;

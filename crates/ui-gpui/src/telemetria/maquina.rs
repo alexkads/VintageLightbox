@@ -71,6 +71,8 @@ pub fn deste() -> &'static Computador {
         let jeito = match crate::atualizacao::novidades::jeito_desta_instalacao() {
             crate::atualizacao::novidades::JeitoDaInstalacao::Compilado => "compilado",
             crate::atualizacao::novidades::JeitoDaInstalacao::Pacote => "pacote",
+            crate::atualizacao::novidades::JeitoDaInstalacao::Rpm => "rpm",
+            crate::atualizacao::novidades::JeitoDaInstalacao::Msix => "msix",
             crate::atualizacao::novidades::JeitoDaInstalacao::Desenvolvimento => "desenvolvimento",
         };
         Computador {

@@ -196,6 +196,10 @@ pub enum JeitoDaInstalacao {
     Compilado,
     /// O pacote assinado (perfil `release`).
     Pacote,
+    /// O executável instalado pelo RPM, gerenciado pelo Fedora.
+    Rpm,
+    /// O pacote MSIX, gerenciado pelo Windows.
+    Msix,
     /// Quem desenvolve (`debug`).
     Desenvolvimento,
 }
@@ -211,6 +215,28 @@ impl JeitoDaInstalacao {
 }
 
 pub fn jeito_desta_instalacao() -> JeitoDaInstalacao {
+    // O RPM instala neste caminho; não confundir com o mesmo binário compilado
+    // pelo instalador do usuário em ~/.local/bin.
+    #[cfg(target_os = "linux")]
+    if std::env::current_exe().ok().as_deref()
+        == Some(std::path::Path::new("/usr/bin/vintagelightbox-gpui"))
+    {
+        return JeitoDaInstalacao::Rpm;
+    }
+    // A identidade do processo vem do Windows, independentemente do volume ou caminho.
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER;
+        use windows_sys::Win32::Storage::Packaging::Appx::GetCurrentPackageFullName;
+        let mut tamanho = 0;
+        // SAFETY: tamanho aponta para um u32 valido. Com buffer nulo e tamanho zero,
+        // a API apenas consulta o tamanho necessario; nao escreve uma string.
+        if unsafe { GetCurrentPackageFullName(&mut tamanho, std::ptr::null_mut()) }
+            == ERROR_INSUFFICIENT_BUFFER
+        {
+            return JeitoDaInstalacao::Msix;
+        }
+    }
     JeitoDaInstalacao::do_texto(env!("VLB_JEITO_DE_INSTALAR"))
 }
 
