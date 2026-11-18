@@ -63,6 +63,7 @@ mod chatbot;
 mod ciclo_de_vida;
 mod cliente;
 mod conta;
+mod controle;
 mod enquadrar;
 mod galeria;
 mod janela;

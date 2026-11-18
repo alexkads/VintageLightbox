@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/controle-local",
     "crates/domain",
     "crates/use-cases",
     "crates/adapters",
@@ -24,16 +25,19 @@ members = [
 ]
 # O crate vendorizado é dependência, não membro: sem isto os testes, benches e
 # lints dele entrariam no workspace.
-exclude = ["vendor/gpui-pre-linux"]
+exclude = ["vendor/gpui-pre-linux", "vendor/gpui-pre", "vendor/gpui-pre-wgpu", "vendor/gpui-pre-windows"]
 
 # 🖥️ O Wayland do GPUI ignorava o `display_id` de uma janela comum, e a Tela do
 # cliente nascia no monitor que o GNOME quisesse (2026-10-03). O patch é de
 # poucas linhas: ver vendor/gpui-pre-linux/MUDANCAS.md.
 [patch.crates-io]
+gpui-pre-windows = { path = "vendor/gpui-pre-windows" }
+gpui-pre = { path = "vendor/gpui-pre" }
+gpui-pre-wgpu = { path = "vendor/gpui-pre-wgpu" }
 gpui-pre-linux = { path = "vendor/gpui-pre-linux" }
 
 [workspace.package]
-version = "0.1.198"
+version = "0.1.199"
 edition = "2021"
 authors = ["VintageLightbox Team"]
 license = "MIT"

@@ -1744,6 +1744,10 @@ impl PlatformWindow for X11Window {
         self.0.callbacks.borrow_mut().button_layout_changed = Some(callback);
     }
 
+    fn render_to_image(&self, scene: &Scene) -> anyhow::Result<image::RgbaImage> {
+        self.0.state.borrow_mut().renderer.render_to_image(scene)
+    }
+
     fn draw(&self, scene: &Scene) {
         let mut inner = self.0.state.borrow_mut();
 

@@ -122,6 +122,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 fonte="$(dirname "$manifesto")"
+[ "$bin" != vlb ] || [ "${TEST_CLI_BUILD_EXIT:-0}" -eq 0 ] || exit "$TEST_CLI_BUILD_EXIT"
 mkdir -p "$CARGO_TARGET_DIR/$perfil"
 # O binário falso responde `--versao` como o de verdade (a prova de vida que o
 # instalador pede antes de trocar o instalado). TEST_VERSAO_EXIT simula um
@@ -222,13 +223,15 @@ class CasosDoInstalador:
         self.assertTrue((self.app_mac() / "Contents/MacOS" / self.info["bin"]).exists())
         self.assertEqual(list(self.casa.glob("download.*")), [])
 
-    def test_compila_so_o_binario_do_app(self):
+    def test_compila_app_e_cli(self):
         result = self.run_installer()
         self.assertEqual(result.returncode, 0, result.stdout)
         linha = self.log.read_text()
         self.assertIn(f"-p {self.info['crate']} --bin {self.info['bin']}", linha)
         self.assertIn("--profile instalador", linha)
         self.assertTrue((self.casa / f"target-{self.app}/instalador" / self.info["bin"]).exists())
+        self.assertIn("-p vlb-controle --bin vlb", linha)
+        self.assertTrue((self.app_mac() / "Contents/MacOS/vlb").exists())
 
     def test_faxina_do_cache_apaga_versoes_antigas_dos_crates_da_casa(self):
         """🚨 Mac do dono, 11/out/2026: 22 GiB em `deps`, 47 cópias de cada crate
@@ -359,10 +362,21 @@ class CasosDoInstalador:
         self.assertEqual(result.returncode, 0, result.stdout)
         nome = f"vintagelightbox-{self.app}"
         self.assertTrue((self.destino / "bin" / nome).exists())
+        self.assertTrue((self.destino / "bin/vlb").exists())
         atalho = (self.destino / f"share/applications/{nome}.desktop").read_text()
         self.assertIn(f"Exec={self.destino}/bin/{nome}", atalho)
         self.assertIn(f"Icon={nome}", atalho)
         self.assertNotIn("#@", atalho)
+
+    def test_falha_na_cli_preserva_o_app_instalado(self):
+        self.mock("uname", "echo Linux")
+        self.env["TEST_CLI_BUILD_EXIT"] = "42"
+        instalado = self.destino / "bin" / f"vintagelightbox-{self.app}"
+        instalado.parent.mkdir(parents=True)
+        instalado.write_text("o que funciona")
+        result = self.run_installer(piped=True)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(instalado.read_text(), "o que funciona")
 
     def test_linux_troca_sem_corromper_e_guarda_o_anterior(self):
         """O novo entra por renomeação e o instalado fica como `.anterior`."""
@@ -730,14 +744,17 @@ foreach ($arquivo in $args) {
         destino.mkdir()
         mingw.mkdir()
         (destino / "VintageLightbox-GPUI.exe").write_text("o que funciona")
+        (destino / "vlb.exe").write_text("cli anterior")
         (destino / "libgcc_s_seh-1.dll").write_text("dll velha")
         (mingw / "libgcc_s_seh-1.dll").write_text("dll nova")
         binario = self.base / "novo.exe"
         binario.write_text("o novo")
+        cli = self.base / "vlb.exe"
+        cli.write_text("cli nova")
         preparar(binario, destino, mingw)
         codigo = (
             "$ErrorActionPreference = 'Stop'\n"
-            f"$Destino = '{destino}'\n$mingw = '{mingw}'\n$binario = '{binario}'\n"
+            f"$Destino = '{destino}'\n$mingw = '{mingw}'\n$binario = '{binario}'\n$cli = '{cli}'\n"
             + texto[inicio:fim]
         )
         return self.pwsh(codigo), destino
@@ -747,6 +764,8 @@ foreach ($arquivo in $args) {
         result, destino = self.troca_do_windows(lambda *_: None)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual((destino / "VintageLightbox-GPUI.exe").read_text(), "o novo")
+        self.assertEqual((destino / "vlb.exe").read_text(), "cli nova")
+        self.assertEqual((destino / "vlb.exe.anterior").read_text(), "cli anterior")
         self.assertEqual((destino / "VintageLightbox-GPUI.exe.anterior").read_text(), "o que funciona")
         self.assertEqual((destino / "libgcc_s_seh-1.dll").read_text(), "dll nova")
         self.assertEqual((destino / "libgcc_s_seh-1.dll.anterior").read_text(), "dll velha")
