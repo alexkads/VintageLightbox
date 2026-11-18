@@ -29,10 +29,14 @@ No PowerShell:
 
 ```powershell
 $env:VLB_CONTROLE = "$env:LOCALAPPDATA\VintageLightbox\controle"
-.\ui-gpui.exe
+$app = "$env:LOCALAPPDATA\Programs\VintageLightbox-GPUI"
+& "$app\VintageLightbox-GPUI.exe"
 # Em outro terminal, na mesma máquina/conta:
-.\vlb.exe --dir "$env:LOCALAPPDATA\VintageLightbox\controle" status
+& "$env:LOCALAPPDATA\Programs\VintageLightbox-GPUI\vlb.exe" --dir "$env:LOCALAPPDATA\VintageLightbox\controle" status
 ```
+
+Se compilou manualmente, use `target\release\ui-gpui.exe` e
+`target\release\vlb.exe` em vez dos caminhos da instalação.
 
 No macOS/Linux o executável também aceita `ui-gpui --controle --dir PASTA status`,
 antes de abrir catálogo/chaveiro/janela. No Windows prefira `vlb.exe`, que
@@ -139,5 +143,15 @@ Conferido na janela real do macOS em 17/11/2026, em build release com catálogo
 isolado: 40 consultas consecutivas, inspeção com filtro, foco, texto Unicode,
 SetValue, ação do app, clique por ID e por coordenada, rolagem, arrasto e captura
 PNG. Os testes de protocolo e dois cenários de UI passaram. `cargo check -p
-ui-gpui` também passou no Fedora 44 por SSH. A captura nativa
-de Linux/Windows ainda precisa de conferência visual nessas plataformas.
+ui-gpui` também passou no Fedora 44 por SSH.
+
+Conferido na janela real do Fedora 44, GNOME/Wayland, em 100.110.180.47:
+o mesmo roteiro de controle passou, incluindo 40 consultas consecutivas,
+inspeção, foco, Unicode, SetValue, ações, cliques, rolagem, arrasto e erros da CLI.
+O PNG da própria janela (2880 pixels de largura, escala fracionária do GNOME)
+foi copiado por SSH e inspecionado visualmente.
+
+Conferido no Windows 11 em VM VirtualBox no mesmo host: o instalador gerou e
+instalou o app e a CLI. Na janela do app instalado passaram 40 consultas,
+inspeção, foco, Unicode, SetValue, ações, cliques, teclado, rolagem e arrasto.
+O PNG da própria janela (1024 × 697) foi inspecionado visualmente.
