@@ -226,10 +226,16 @@ pub async fn montar(ambiente: Ambiente) -> Montagem {
     // 🚨 A releitura do catálogo, pelo mesmo `LibraryController` que leu a lista
     // acima. Sem ela a importação grava no banco e a grade continua com a lista
     // lida antes de a janela existir — as fotos só apareciam ao reabrir o app.
-    let acervo: Arc<dyn Acervo> = Arc::new(AcervoDoBanco::novo(
-        biblioteca.clone(),
-        tokio::runtime::Handle::current(),
-    ));
+    // 🧹 E as fotos locais paradas há mais que o período (#28), que o "Limpar" por período
+    // das Configurações leva junto com o cache (issue #22).
+    let acervo: Arc<dyn Acervo> = Arc::new(
+        AcervoDoBanco::novo(biblioteca.clone(), tokio::runtime::Handle::current())
+            .com_fotos_locais(
+                infrastructure::fotos_locais::FotosLocais::new(pool.clone(), catalogo.clone())
+                    // 📸 E as fotos que a câmera descarregou antes da importação (#32).
+                    .com_pasta_da_camera(infrastructure::devices::ptp::pasta_da_camera()),
+            ),
+    );
     // 📸 O pós-venda do site — o vão que o projeto existe para fechar. O mesmo
     // exportador da exportação, em memória: o que sobe é o que a tela mostra,
     // e o site gera a prévia marcada a partir dele.

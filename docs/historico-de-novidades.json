@@ -1,16 +1,62 @@
 [
   {
-    "versao": "0.1.195",
-    "data": "2026-11-15",
-    "titulo": "Os avisos agora falam, com a voz do Papai Noel.",
+    "versao": "0.1.199",
+    "data": "2026-11-18",
+    "titulo": "O suporte pode inspecionar e controlar a janela pelo terminal.",
     "importante": false,
     "novidades": [
-      "Cada aviso sonoro ganhou uma frase falada: mensagem no chatbot, cliente pelo QR, agendamento novo ou cancelado, fotos salvas, exportação, cartão ejetado. Em Configurações › Avisos sonoros dá para escolher som, voz ou os dois.",
-      "Novo aviso: quando um cliente pede para falar com um atendente no WhatsApp, o app avisa na hora.",
-      "Quando a internet cai ou o site para de responder, o app avisa e lembra que dá para continuar trabalhando: ele guarda tudo e envia quando a conexão voltar. E avisa quando voltou.",
-      "Os administradores recebem uma notificação, com voz, quando o servidor precisa de atenção."
+      "Com o controle local habilitado, o suporte pode consultar os botões e campos da janela, digitar, clicar e fazer capturas pelo terminal, inclusive por SSH.",
+      "O instalador inclui o comando vlb no macOS, no Windows e no Linux. O controle fica desligado até ser habilitado explicitamente."
     ],
-    "por_que_atualizar": "Para ouvir na hora o que pede atenção no balcão, mesmo sem olhar a tela."
+    "por_que_atualizar": "Para facilitar o suporte remoto sem precisar abrir uma sessão de Área de Trabalho Remota."
+  },
+  {
+    "versao": "0.1.198",
+    "data": "2026-11-17",
+    "titulo": "O Limpar devolve ao disco todo o espaço que promete, inclusive o das fotos baixadas da câmera.",
+    "importante": false,
+    "novidades": [
+      "Configurações › Armazenamento: depois do Limpar, o arquivo do cache de previews encolhe de verdade. Antes a tela dizia \"0 bytes\" e o disco seguia ocupado.",
+      "As fotos que a câmera descarrega para a importação agora contam em \"Fotos nesta máquina\" e saem pelo período escolhido, como as outras fotos desta máquina."
+    ],
+    "por_que_atualizar": "Para o Limpar liberar no disco o mesmo espaço que a tela mostra."
+  },
+  {
+    "versao": "0.1.197",
+    "data": "2026-11-17",
+    "titulo": "O Limpar tira desta máquina todas as fotos paradas há mais que o período, e a aba mostra quantas fotos estão guardadas.",
+    "importante": false,
+    "novidades": [
+      "Configurações › Armazenamento (antes \"Cache\"): no topo aparece \"Fotos nesta máquina\", com o total de fotos guardadas, quantas foram importadas aqui, quantas vieram do site e quanto espaço ocupam.",
+      "O Limpar agora segue só o período escolhido: em \"> 30 dias\", sai desta máquina toda foto parada há mais de 30 dias, inclusive as que vieram do site para trabalhar sem internet. No site nada muda.",
+      "As fotos que vieram do site contam como fotos no número antes do clique e no aviso do fim, e não mais como \"itens do cache\".",
+      "O único botão que apaga é o Limpar por período: saíram \"Limpar miniaturas\" e \"Limpar previews\", que se refazem sozinhos quando a foto é aberta."
+    ],
+    "por_que_atualizar": "Para o Limpar liberar de verdade o disco do balcão."
+  },
+  {
+    "versao": "0.1.196",
+    "data": "2026-11-17",
+    "titulo": "A limpeza das fotos anda em segundo plano, com a barra no rodapé.",
+    "importante": false,
+    "novidades": [
+      "Configurações › Cache: depois de clicar em Limpar, pode fechar a janela e seguir trabalhando. As fotos saem em segundo plano, sem travar a triagem, a revelação nem o caixa.",
+      "O rodapé mostra o andamento: \"Limpando fotos · 120 de 480 · 3,0 MB\", com uma barra que enche. Clicar nele abre a aba Cache.",
+      "No fim aparece o aviso com quantas fotos saíram e quanto espaço foi liberado, em qualquer tela em que você estiver."
+    ],
+    "por_que_atualizar": "Para liberar o disco sem parar o atendimento."
+  },
+  {
+    "versao": "0.1.195",
+    "data": "2026-11-17",
+    "titulo": "O Limpar da aba Cache agora apaga também as fotos que já estão no site.",
+    "importante": false,
+    "novidades": [
+      "Configurações › Cache: o Limpar por período (15, 30, 60 ou 90 dias) apaga, além do cache, as fotos guardadas nesta máquina das sessões paradas há mais tempo que o escolhido, desde que elas já estejam no site. Nada sai do site.",
+      "Ficam sempre: a foto que ainda não subiu, a rejeitada, a que tem alteração esperando internet e a que tem edição. A sessão apagada daqui continua abrindo, pelas fotos do site.",
+      "Antes do clique o cartão mostra quantas fotos e quanto espaço vão sair; depois, o aviso diz quantas saíram e quanto liberou."
+    ],
+    "por_que_atualizar": "Para liberar o disco do computador sem perder nenhuma foto."
   },
   {
     "versao": "0.1.194",

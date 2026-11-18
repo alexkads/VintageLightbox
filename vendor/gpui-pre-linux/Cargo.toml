@@ -82,6 +82,10 @@ name = "gpui_linux"
 path = "src/gpui_linux.rs"
 doctest = false
 
+[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.image]
+version = "0.25.1"
+default-features = false
+
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.accesskit]
 version = "0.24.0"
 features = ["enumn"]

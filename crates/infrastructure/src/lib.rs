@@ -9,6 +9,7 @@ pub mod dng;
 pub mod exif_reader;
 pub mod file_organizer;
 pub mod file_system;
+pub mod fotos_locais;
 /// O motor de revelação (`Ajustes`, `Motor`) re-exportado do `revelacao-core`,
 /// mais a leitura da entidade.
 ///

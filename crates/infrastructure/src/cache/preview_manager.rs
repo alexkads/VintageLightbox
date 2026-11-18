@@ -493,8 +493,7 @@ impl PreviewManager {
             .execute("DELETE FROM previews", [])
             .map_err(|e| e.to_string())?;
 
-        // VACUUM to reclaim disk space
-        conn.execute("VACUUM", []).ok();
+        encolher(&conn);
 
         Ok(deleted as u64)
     }
@@ -506,6 +505,7 @@ impl PreviewManager {
         let deleted = conn
             .execute("DELETE FROM previews WHERE type = 0", [])
             .map_err(|e| e.to_string())?;
+        encolher(&conn);
         Ok(deleted as u64)
     }
 
@@ -516,6 +516,7 @@ impl PreviewManager {
         let deleted = conn
             .execute("DELETE FROM previews WHERE type = 1", [])
             .map_err(|e| e.to_string())?;
+        encolher(&conn);
         Ok(deleted as u64)
     }
 
@@ -555,11 +556,22 @@ impl PreviewManager {
             .execute("DELETE FROM previews WHERE last_accessed_at < ?1", [limite])
             .map_err(|e| e.to_string())?;
         if deleted > 0 {
-            // Como no `clear_all`: sem o VACUUM o arquivo não encolhe.
-            conn.execute("VACUUM", []).ok();
+            encolher(&conn);
         }
         Ok(deleted as u64)
     }
+}
+
+/// 🧹 Devolve ao disco o espaço do que foi apagado (#32).
+///
+/// O `VACUUM` sozinho não basta: o banco está em **WAL**, e nesse modo o
+/// `VACUUM` reescreve o banco **dentro do `-wal`** — o arquivo principal só
+/// encolhe num checkpoint, e o `-wal` só volta a zero com `TRUNCATE`. Sem os
+/// dois, no Fedora do balcão (17/11/2026) a tela dizia "0 bytes" com 86 MB no
+/// disco: 42 no `.db` e 45 no `-wal`, para 12 KB de conteúdo.
+fn encolher(conn: &Connection) {
+    conn.execute("VACUUM", []).ok();
+    let _ = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
 }
 
 impl PreviewStorage for PreviewManager {
@@ -684,6 +696,54 @@ mod tests {
         let sobrou = previews.get_stats();
         assert_eq!((sobrou.thumbnail_count, sobrou.large_preview_count), (1, 1));
         assert_eq!(previews.sem_uso_ha(15).0, 0);
+    }
+
+    /// 🚨 **O arquivo encolhe de verdade depois de limpar** (#32): o `.db` e o
+    /// `-wal` juntos, e não só o número da tela. Sem o checkpoint, o `VACUUM`
+    /// do modo WAL deixava os dois arquivos com o tamanho de antes.
+    #[test]
+    fn limpar_devolve_o_espaco_ao_disco() {
+        let dir = tempfile::tempdir().expect("diretório");
+        let previews = PreviewManager::new_with_path(dir.path().to_path_buf());
+        let mut ruido = image::RgbImage::new(192, 192);
+        let mut semente: u32 = 7;
+        for pixel in ruido.pixels_mut() {
+            semente = semente.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            let b = semente.to_le_bytes();
+            *pixel = image::Rgb([b[1], b[2], b[3]]);
+        }
+        let imagem = DynamicImage::ImageRgb8(ruido);
+        for i in 0..120 {
+            previews
+                .save_preview(&format!("foto-{i}"), &imagem)
+                .expect("gravar");
+        }
+        let no_disco = || -> u64 {
+            ["preview_cache.db", "preview_cache.db-wal"]
+                .iter()
+                .map(|nome| {
+                    std::fs::metadata(dir.path().join(nome))
+                        .map(|m| m.len())
+                        .unwrap_or(0)
+                })
+                .sum()
+        };
+        {
+            let conn = previews.conn.lock().expect("a conexão");
+            conn.execute("UPDATE previews SET last_accessed_at = 0", [])
+                .expect("envelhecer");
+            let _ = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
+        }
+        let antes = no_disco();
+        assert!(antes > 1_000_000, "o cache cheio pesa: {antes} bytes");
+
+        assert_eq!(previews.limpar_sem_uso_ha(15).expect("limpar"), 120);
+
+        let depois = no_disco();
+        assert!(
+            depois * 10 < antes,
+            "o .db e o -wal encolhem: {antes} → {depois} bytes"
+        );
     }
 
     #[test]

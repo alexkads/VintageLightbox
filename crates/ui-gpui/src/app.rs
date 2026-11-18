@@ -915,6 +915,12 @@ pub struct Aplicativo {
     /// acompanhar a seleção **sem erro nenhum** — a foto congela no que estava, e
     /// quem está do outro lado do monitor não tem como saber que congelou.
     _observador: gpui_kit::Subscription,
+    /// 🧹 A limpeza das fotos anda em segundo plano e o rodapé mostra a barra
+    /// (#25): cada andamento das Configurações redesenha a raiz, com o diálogo
+    /// aberto ou fechado.
+    _limpeza_no_rodape: gpui_kit::Subscription,
+    /// O último fim de limpeza que já virou toast (o número das Configurações).
+    fim_da_limpeza_avisado: u64,
     /// As outras duas telas que a segunda tela acompanha.
     _cliente_na_galeria: gpui_kit::Subscription,
     _cliente_na_revelacao: gpui_kit::Subscription,
@@ -1145,6 +1151,10 @@ impl Aplicativo {
             presets_do_sistema: presets.iter().filter(|p| p.is_system).cloned().collect(),
         };
         let previews_das_configuracoes = previews.clone();
+        let configuracoes = cx.new(|_| {
+            Configuracoes::nova(previews_das_configuracoes).com_acervo(portas.acervo.clone())
+        });
+        let limpeza_no_rodape = cx.observe(&configuracoes, |_raiz, _configuracoes, cx| cx.notify());
         // O mesmo seletor nativo da importação: escolher pasta é interação com
         // o sistema, e dois seletores seriam duas janelas do SO para a mesma
         // pergunta.
@@ -1616,7 +1626,7 @@ impl Aplicativo {
             ultimo_resgate: None,
             parametros_das_locais: std::collections::HashMap::new(),
             _sessao_escolhida: sessao_escolhida,
-            configuracoes: cx.new(|_| Configuracoes::nova(previews_das_configuracoes)),
+            configuracoes,
             configurando: false,
             saida: None,
             escolha_de_monitor: Modal::default(),
@@ -1626,6 +1636,8 @@ impl Aplicativo {
             convite_entregue: None,
             previews: previews_do_cliente,
             _observador: observador,
+            _limpeza_no_rodape: limpeza_no_rodape,
+            fim_da_limpeza_avisado: 0,
             _cliente_na_galeria: cliente_na_galeria,
             _cliente_na_revelacao: cliente_na_revelacao,
             no_cliente: None,
@@ -7339,6 +7351,8 @@ impl Render for Aplicativo {
         let faixa_das_guias = self.faixa_das_guias(window, cx);
         // 🔔 Os avisos da fila vão para a lista do kit (`avisar_em_toast`).
         self.entregar_os_avisos(window, cx);
+        // 🧹 O fim da limpeza das fotos, em qualquer tela (#25).
+        self.avisar_o_fim_da_limpeza(window, cx);
         // 🔁 A volta para onde se estava, e o retrato de agora no disco.
         self.cuidar_da_retomada(window, cx);
         // Os modais da raiz são o `Dialog` do gpui-kit (`crate::dialogo`).

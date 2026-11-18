@@ -33,6 +33,7 @@ shaders-em-tempo-de-execucao = ["dep:gpui_platform", "gpui_platform/runtime_shad
 roteiro = []
 
 [dependencies]
+vlb-controle = { path = "../controle-local" }
 # gpui-kit como a documentação manda (https://gpui-kit.com/docs/getting-started):
 # sem os recursos padrão, porque o app traz os próprios (`recursos::Recursos`).
 gpui-kit = { version = "0.7", default-features = false, features = ["component"] }

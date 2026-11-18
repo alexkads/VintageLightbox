@@ -39,6 +39,13 @@ desfaz a tela cheia sozinho (`cliente::ao_nascer`).
 Wayland, nasce em tela cheia no monitor escolhido
 (`crates/ui-gpui/src/cliente.rs`, `ao_nascer`).
 
+## Controle local (#35)
+
+Os backends X11 e Wayland implementam `PlatformWindow::render_to_image` usando
+o renderer WGPU da própria janela (patch em `vendor/gpui-pre-wgpu`). A captura
+fica disponível por solicitação da CLI, sem fotografar o desktop.
+O manifesto declara `image` para o tipo de retorno dessa captura.
+
 ## Quando sair
 
 Quando o GPUI de cima passar o `target_output` ao `set_fullscreen`. Para

@@ -2,6 +2,9 @@
 
 Clone profissional do Adobe Lightroom desenvolvido em Rust com interface GPUI.
 
+Controle pelo terminal/SSH, inspeção de controles e captura da janela:
+[CLI `vlb`](docs/CONTROLE-POR-SSH.md).
+
 > 🖥️ **Um app, um instalador.** O **VintageLightbox (Zed GPUI)** se instala com
 > `instalar-vintagelightbox-gpui.cmd` (**[docs/INSTALAR-GPUI.md](docs/INSTALAR-GPUI.md)**). Veja a
 > seção **🖥️ Instalar**, mais abaixo.
