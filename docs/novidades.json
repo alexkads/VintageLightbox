@@ -1,11 +1,9 @@
 {
-  "versao": "0.1.200",
-  "titulo": "O VintageLightbox fala quando um aviso pede atenção.",
-  "importante": false,
+  "versao": "0.1.201",
+  "titulo": "A marcação feita enquanto as fotos sobem chega ao caixa.",
+  "importante": true,
   "novidades": [
-    "Os avisos com voz usam frases gravadas em português com a voz do Papai Noel, inclusive quando o computador está sem internet.",
-    "O app avisa quando um cliente pede um atendente, quando a conexão cai ou volta e quando termina de enviar o que ficou na fila.",
-    "Em Configurações › Avisos sonoros, escolha som, voz ou os dois e use Ouvir para conferir cada aviso."
+    "A nota e o B (levar) dados numa foto que ainda está subindo para o site agora sempre chegam ao caixa: o cupom cobra todas as fotos que o cliente leva."
   ],
-  "por_que_atualizar": "Para ouvir os avisos importantes enquanto trabalha, mesmo longe da tela."
+  "por_que_atualizar": "Para o caixa não cobrar menos fotos do que o cliente leva quando você marca durante a subida."
 }
