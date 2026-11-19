@@ -4171,6 +4171,17 @@ impl Aplicativo {
             match recado {
                 PosVendaRecado::Sincronizou => {
                     self.ultimo_envio = Some(chrono::Utc::now().timestamp());
+                    // 🧾 **O caixa aberto relê quando a gravação volta** (#44).
+                    // A conciliação (`conciliar_o_que_subiu`) manda o `B` dado
+                    // durante a subida por fora da grade: a grade já mostrava
+                    // o `B` desde a tecla, o retrato dela não muda quando o
+                    // site grava, e o caixa flutuante — que relê pelo retrato —
+                    // ficava com o cupom de antes, cobrando menos fotos do que
+                    // o cliente leva (e2e `vender_com_as_fotos_ainda_subindo`).
+                    // Aqui o site já gravou: a releitura traz o valor novo.
+                    self.caixa.update(cx, |caixa, cx| caixa.reler_se_aberto(cx));
+                    self.caixa_flutuante
+                        .update(cx, |caixa, cx| caixa.reler_se_aberto(cx));
                     mudou = true
                 }
                 PosVendaRecado::Excluiu => {
