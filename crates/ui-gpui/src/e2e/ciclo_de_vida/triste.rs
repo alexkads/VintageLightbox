@@ -110,7 +110,7 @@ fn o_valor_invalido_no_pagamento_e_recusado_e_corrigido(cx: &mut TestAppContext)
     c.b.caixa(cx, |caixa, _w, _cx| {
         assert_eq!(caixa.pagamentos_lancados(), 0, "nada lançado")
     });
-    c.b.teclar(cx, "cmd-a");
+    c.b.teclar(cx, "secondary-a");
     c.b.digitar(cx, "40,00");
     c.b.teclar(cx, "enter");
     c.b.teclar(cx, "enter");
@@ -182,7 +182,7 @@ fn o_estorno_acima_do_pago_e_recusado(cx: &mut TestAppContext) {
     let venda_id = venda["id"].as_str().expect("o id").to_string();
     c.b.clicar(cx, &format!("caixa-estornar-{venda_id}"));
     c.b.clicar(cx, &campo_do_caixa("Valor a devolver (até R$ 80,00)"));
-    c.b.teclar(cx, "cmd-a");
+    c.b.teclar(cx, "secondary-a");
     c.b.digitar(cx, "999,00");
     c.b.clicar(cx, "caixa-campo-motivo");
     c.b.digitar(cx, "o cliente desistiu");
@@ -203,7 +203,7 @@ fn o_estorno_acima_do_pago_e_recusado(cx: &mut TestAppContext) {
     );
     // Corrige o valor e confirma.
     c.b.clicar(cx, &campo_do_caixa("Valor a devolver (até R$ 80,00)"));
-    c.b.teclar(cx, "cmd-a");
+    c.b.teclar(cx, "secondary-a");
     c.b.digitar(cx, "40,00");
     c.b.teclar(cx, "enter");
     c.b.ate_na_api(cx, "o estorno certo entra", || {
@@ -227,7 +227,7 @@ fn o_fechamento_com_a_contagem_errada_e_corrigido(cx: &mut TestAppContext) {
     // Contou 50 no dinheiro (eram 100) — e confere.
     pedir_o_fechamento_sem_fechar(cx, &c, "50,00", "40,00");
     c.b.clicar(cx, "caixa-corrigir");
-    c.b.teclar(cx, "cmd-a");
+    c.b.teclar(cx, "secondary-a");
     c.b.digitar(cx, "100,00");
     c.b.teclar(cx, "enter");
     c.b.ate(cx, "a contagem corrigida é conferida", |b, cx| {
