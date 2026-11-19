@@ -21,6 +21,7 @@ mod capturas;
 mod editor;
 mod ejecao;
 mod favoritas;
+mod gestos_na_subida;
 mod guias;
 /// 🖥️ Em qual monitor a tela do cliente abre, quando há mais de um.
 mod monitor_do_cliente;
@@ -833,6 +834,10 @@ pub struct Aplicativo {
     /// sobe — dono: *"eu não posso impedir o atendente de fazer as
     /// marcações"*).
     subindo_sozinhas: std::collections::HashMap<String, (Option<u8>, bool, bool)>,
+    /// O `5` e o `B` dados nas fotos de [`Self::subindo_sozinhas`], guardados
+    /// na hora da tecla: a releitura que a conciliação usa pode ter sido lida
+    /// antes de o catálogo gravá-los (#44).
+    gestos_na_subida: gestos_na_subida::GestosNaSubida,
     /// A revelação que cada foto levou ao subir, pelo id local, até a
     /// conciliação compará-la com a do catálogo — ver
     /// [`Self::conciliar_os_parametros_que_subiu`].
@@ -1613,6 +1618,7 @@ impl Aplicativo {
             avisos_a_tirar: Vec::new(),
             presets_conhecidos: presets_para_os_parametros,
             subindo_sozinhas: std::collections::HashMap::new(),
+            gestos_na_subida: gestos_na_subida::GestosNaSubida::default(),
             parametros_que_subiram: std::collections::HashMap::new(),
             parametros_no_site_das_que_subiram: std::collections::HashMap::new(),
             recem_subidas: std::collections::HashSet::new(),
@@ -2638,13 +2644,17 @@ impl Aplicativo {
             else {
                 continue;
             };
-            let nota = u8::try_from(foto.rating)
+            let nota_lida = u8::try_from(foto.rating)
                 .ok()
                 .filter(|n| (1..=5).contains(n));
             let rejeitada = foto.flag == Some(REJEITADA_NO_CATALOGO);
             // 🔑 A subida lê o `B` do catálogo na hora de sair, e o operador
-            // pode tê-lo apertado depois: a diferença vai aqui.
-            let levada = foto.comprada && nota.is_some();
+            // pode tê-lo apertado depois: a diferença vai aqui. O gesto
+            // guardado na hora da tecla vence a releitura, que pode ter sido
+            // lida antes de o catálogo gravá-lo (#44).
+            let (nota, levada) =
+                self.gestos_na_subida
+                    .conciliar(&foto.id, nota_lida, foto.comprada);
             let mudanca = domain::services::pos_venda::MudancaDaFoto {
                 nota: (nota != nota_enviada).then_some(nota.map(i16::from)),
                 rejeitada: (rejeitada != rejeicao_enviada).then_some(rejeitada),
@@ -3062,6 +3072,7 @@ impl Aplicativo {
                     if let Some(local) = &local {
                         self.esteira.tirar_da_fila(local);
                         self.subindo_sozinhas.remove(local);
+                        self.gestos_na_subida.esquecer(local);
                         self.recem_subidas.remove(local);
                     }
                     self.publicador.excluir_da_sessao(
@@ -3090,6 +3101,7 @@ impl Aplicativo {
                     for id in &ids {
                         self.esteira.tirar_da_fila(id);
                         self.subindo_sozinhas.remove(id);
+                        self.gestos_na_subida.esquecer(id);
                         self.rejeitadas_agora.insert(id.clone());
                     }
                 } else {
@@ -3136,12 +3148,24 @@ impl Aplicativo {
             // `conciliar_o_que_subiu` leva depois.
             DetalhePedido::Levar { ids, levada } => {
                 let (ids, levada) = (ids.clone(), *levada);
+                for id in ids
+                    .iter()
+                    .filter(|id| self.subindo_sozinhas.contains_key(*id))
+                {
+                    self.gestos_na_subida.levar(id, levada);
+                }
                 self.biblioteca
                     .update(cx, |tela, cx| tela.marcar_comprada_ids(&ids, levada, cx));
                 self.pedir_releitura_do_acervo(cx);
             }
             DetalhePedido::Classificar { ids, nota } => {
                 let (ids, nota) = (ids.clone(), *nota);
+                for id in ids
+                    .iter()
+                    .filter(|id| self.subindo_sozinhas.contains_key(*id))
+                {
+                    self.gestos_na_subida.classificar(id, nota);
+                }
                 self.biblioteca
                     .update(cx, |tela, cx| tela.classificar_ids(&ids, nota, cx));
                 // 🔑 Idem: a estrela só aparece na grade da sessão depois de
@@ -4248,6 +4272,7 @@ impl Aplicativo {
                 {
                     self.parametros_no_ar.remove(&alvo);
                     self.subindo_sozinhas.remove(&alvo);
+                    self.gestos_na_subida.esquecer(&alvo);
                     self.tirar_do_lote_do_salvar(cx);
                     self.recontar_o_que_falta_subir(cx);
                 }
@@ -4264,6 +4289,7 @@ impl Aplicativo {
                     // especialmente ao classificar uma foto que falhou sem
                     // nota durante a importação assíncrona.
                     self.subindo_sozinhas.remove(&alvo);
+                    self.gestos_na_subida.esquecer(&alvo);
                     self.contar_o_salvar(true, cx);
                     // 🔑 **Nada some em silêncio** (G7): a recusa fica no
                     // canto até alguém olhar, além do aviso na tela — e
@@ -4283,6 +4309,7 @@ impl Aplicativo {
                 PosVendaRecado::GuardadoParaDepois { alvo, .. } => {
                     self.parametros_no_ar.remove(&alvo);
                     self.subindo_sozinhas.remove(&alvo);
+                    self.gestos_na_subida.esquecer(&alvo);
                     self.tirar_do_lote_do_salvar(cx);
                     self.recontar_o_que_falta_subir(cx);
                     mudou = true;
