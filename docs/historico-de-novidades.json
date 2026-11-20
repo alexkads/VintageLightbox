@@ -1,5 +1,15 @@
 [
   {
+    "versao": "0.1.202",
+    "data": "2026-11-20",
+    "titulo": "O caixa aberto acompanha o que o site confirma.",
+    "importante": true,
+    "novidades": [
+      "Quando você marca B (levar) numa foto que ainda está subindo, o caixa que já está aberto atualiza sozinho assim que o site confirma: o cupom passa a cobrar todas as fotos que o cliente leva, sem fechar e abrir o caixa."
+    ],
+    "por_que_atualizar": "Para o caixa aberto não ficar com o valor de antes e cobrar menos fotos do que o cliente leva."
+  },
+  {
     "versao": "0.1.201",
     "data": "2026-11-19",
     "titulo": "A marcação feita enquanto as fotos sobem chega ao caixa.",
