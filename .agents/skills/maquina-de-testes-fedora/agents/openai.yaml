@@ -1,0 +1,4 @@
+interface:
+  display_name: "Máquina de testes Fedora"
+  short_description: "Builds e testes no Fedora e na VM Windows"
+  default_prompt: "Use $maquina-de-testes-fedora para compilar e validar o VintageLightbox."
