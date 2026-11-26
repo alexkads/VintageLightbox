@@ -610,6 +610,11 @@ fn tentar_o_rpm(
         .map_err(|e| format!("não consegui rodar o ajudante ({e})"))?;
     let mut lidas = lidas_antes;
     loop {
+        // O fim primeiro, a leitura depois: o ajudante que sai entre as duas
+        // deixaria as últimas etapas sem ler (o teste pegou, 26/11).
+        let fim = filho
+            .try_wait()
+            .map_err(|e| format!("perdi o ajudante de vista ({e})"))?;
         if let Ok(texto) = std::fs::read_to_string(registro) {
             let linhas: Vec<&str> = texto.lines().collect();
             for linha in &linhas[lidas.min(linhas.len())..] {
@@ -619,16 +624,15 @@ fn tentar_o_rpm(
             }
             lidas = linhas.len();
         }
-        match filho.try_wait() {
-            Ok(Some(status)) if status.success() => return Ok(()),
-            Ok(Some(status)) => {
+        match fim {
+            Some(status) if status.success() => return Ok(()),
+            Some(status) => {
                 return Err(match status.code() {
                     Some(3) => "nenhum RPM desta versão no R2 nem no GitHub".into(),
                     _ => format!("o ajudante do RPM parou ({status})"),
                 })
             }
-            Ok(None) => std::thread::sleep(Duration::from_millis(300)),
-            Err(e) => return Err(format!("perdi o ajudante de vista ({e})")),
+            None => std::thread::sleep(Duration::from_millis(300)),
         }
     }
 }
