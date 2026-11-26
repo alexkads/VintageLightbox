@@ -1,14 +1,9 @@
 {
-  "versao": "0.1.203",
-  "titulo": "Caixa do dia: o app pede o caixa de hoje antes de começar.",
-  "importante": true,
-  "obrigatoria": true,
+  "versao": "0.1.204",
+  "titulo": "O caixa do dia vale para todas as contas.",
+  "importante": false,
   "novidades": [
-    "Ao entrar, o app pede o caixa do dia antes de qualquer outra tela. Se o caixa de um dia anterior ficou aberto, você fecha ele primeiro, com o motivo do atraso, e depois abre o de hoje.",
-    "O caixa fecha no horário do estúdio (à meia-noite, se nada foi mudado). Depois desse horário o caixa velho não vende mais: a tecla de vender leva ao fechamento.",
-    "O caixa mostra o dia em que foi aberto, no alto da tela do caixa e no painel da galeria.",
-    "No Abrir caixa, dá para fixar este computador num caixa do estúdio (CX1, CX2…). Se outra pessoa deixou o caixa dela aberto neste computador, você conta a gaveta e encerra o caixa dela antes de abrir o seu.",
-    "As próximas atualizações de emergência instalam sozinhas, sem esperar o balcão parar."
+    "Toda conta que vende passa pelo caixa do dia ao entrar, também as de administrador: se o caixa de um dia anterior ficou aberto, você fecha ele primeiro, com o motivo do atraso, e depois abre o de hoje. Só a conta do dono pode ignorar o pedido."
   ],
-  "por_que_atualizar": "Para cada dia ter a sua conta no caixa, e o dono receber o resumo de cada fechamento."
+  "por_que_atualizar": "Para nenhum computador começar o dia sem o caixa de hoje aberto."
 }

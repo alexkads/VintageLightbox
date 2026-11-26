@@ -447,12 +447,39 @@ fn o_portao_pede_o_caixa_de_hoje_e_solta_quando_ele_abre(cx: &mut TestAppContext
     com(cx, &j, |t, _, _| {
         assert_eq!(t.portao_agora(), Portao::Livre)
     });
-    // Desligado (o dono, ou a conta sem o caixa), nunca segura.
+    // Desligado (a conta sem o caixa), nunca segura.
     *publicador.caixa.lock().unwrap() = Value::Null;
     com(cx, &j, |t, _, cx| t.ligar_o_portao(false, cx));
     colher(cx, &j);
     com(cx, &j, |t, _, _| {
         assert_eq!(t.portao_agora(), Portao::Livre)
+    });
+}
+
+/// 👑 #52 (dono, 26/11/2026): o dono também cai no portão, e só ele o ignora.
+#[gpui_kit::test]
+fn o_dono_cai_no_portao_e_so_ele_pode_ignorar(cx: &mut TestAppContext) {
+    use biblioteca_core::caixa::Portao;
+    let publicador = Arc::new(PublicadorDoCaixa::default());
+    let j = janela(cx, publicador.clone());
+    // Quem não é o dono: o "Ignorar" não solta.
+    com(cx, &j, |t, _, cx| t.ligar_o_portao(true, cx));
+    colher(cx, &j);
+    com(cx, &j, |t, _, cx| {
+        assert_eq!(t.portao_agora(), Portao::AbrirODeHoje);
+        t.ignorar_o_portao(cx);
+        assert_eq!(t.portao_agora(), Portao::AbrirODeHoje);
+    });
+    // O dono: o portão aparece igual, e o "Ignorar" solta.
+    com(cx, &j, |t, _, cx| {
+        t.deixar_ignorar(true, cx);
+        t.ligar_o_portao(true, cx);
+    });
+    colher(cx, &j);
+    com(cx, &j, |t, _, cx| {
+        assert_eq!(t.portao_agora(), Portao::AbrirODeHoje);
+        t.ignorar_o_portao(cx);
+        assert_eq!(t.portao_agora(), Portao::Livre);
     });
 }
 

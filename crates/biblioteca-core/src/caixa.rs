@@ -1009,13 +1009,14 @@ pub enum Portao {
 
 /// Quem passa pelo portão: a conta que opera o caixa, **inclusive o
 /// administrador** — o balcão de Gramado vende com uma conta `ADMIN` sem perfil
-/// (25/11/2026, 219 vendas num caixa aberto desde 20/10). Só o dono fica de
-/// fora: ele administra, e o caixa dele é quando ele quiser.
+/// (25/11/2026, 219 vendas num caixa aberto desde 20/10). **O dono também**
+/// (26/11/2026: *"Até o dono tem que fechar o caixa!"*): a 0.1.203 o deixava de
+/// fora, e ele atualizou, abriu uma sessão e o portão não apareceu.
 ///
 /// Sem `acesso` (a API de antes dos perfis) ninguém passa: na dúvida, o portão
 /// não segura o balcão — quem recusa a venda num caixa vencido é a API.
-pub fn passa_pelo_portao(acesso: Option<&crate::acesso::Acesso>, dono: bool) -> bool {
-    !dono && acesso.is_some_and(|a| a.pode(crate::acesso::CAIXA))
+pub fn passa_pelo_portao(acesso: Option<&crate::acesso::Acesso>) -> bool {
+    acesso.is_some_and(|a| a.pode(crate::acesso::CAIXA))
 }
 
 /// O portão, pela situação do caixa. Sem estúdio ou sem resposta da API, não
@@ -1818,7 +1819,7 @@ mod testes {
     }
 
     #[test]
-    fn passa_pelo_portao_quem_opera_o_caixa_menos_o_dono() {
+    fn passa_pelo_portao_quem_opera_o_caixa_dono_inclusive() {
         use crate::acesso::{Acesso, CAIXA, OPERAR_O_BALCAO};
         let funcionario = Acesso {
             perfil: Some("Balcão".into()),
@@ -1834,12 +1835,12 @@ mod testes {
             permissoes: vec![OPERAR_O_BALCAO.into()],
             ..funcionario.clone()
         };
-        assert!(passa_pelo_portao(Some(&funcionario), false));
-        // 🔑 O administrador também: Gramado vende com uma conta ADMIN.
-        assert!(passa_pelo_portao(Some(&administrador), false));
-        assert!(!passa_pelo_portao(Some(&administrador), true));
-        assert!(!passa_pelo_portao(Some(&sem_caixa), false));
-        assert!(!passa_pelo_portao(None, false));
+        assert!(passa_pelo_portao(Some(&funcionario)));
+        // 🔑 O administrador também: Gramado vende com uma conta ADMIN, e o
+        // dono é uma conta ADMIN — ninguém que vende fica de fora.
+        assert!(passa_pelo_portao(Some(&administrador)));
+        assert!(!passa_pelo_portao(Some(&sem_caixa)));
+        assert!(!passa_pelo_portao(None));
     }
 
     #[test]
