@@ -110,6 +110,10 @@ impl Caixa {
         if agora != Portao::FecharOVencido {
             self.portao.erro = None;
         }
+        // 🪟 A página do portão muda e o campo do motivo some: o diálogo aberto
+        // por cima (o resumo do fechamento) devolve o foco à página, e não a
+        // um campo que não existe mais (achado pelo e2e do ciclo, 26/11).
+        self.foco_antes.esquecer();
         self.portao.contado = Some(agora);
         cx.emit(PedidoDoCaixa::Portao(agora));
     }
