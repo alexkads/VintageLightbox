@@ -5,7 +5,8 @@
 //! O operador do ciclo é `ADMIN` sem perfil, como o balcão de Gramado: passa
 //! pelo portão. O cenário percorre os dois estados dele:
 //!
-//! 1. **Nenhum caixa aberto**: a conta entra e cai no portão; o menu não leva
+//! 1. **Nenhum caixa aberto**: a conta entra e cai no portão, que pergunta o
+//!    estúdio (o catálogo é novo) antes do caixa; o menu não leva
 //!    a outra tela.
 //! 2. **Um caixa de anteontem aberto** (aberto pela API com a hora de
 //!    anteontem, como um gesto guardado sem rede): o portão pede o
@@ -42,6 +43,24 @@ fn o_portao_fecha_o_caixa_vencido_e_abre_o_de_hoje(cx: &mut TestAppContext) {
             })
         },
     );
+    // 🏢 O catálogo é novo: o portão pergunta o estúdio antes do caixa, e o
+    // operador escolhe o do cenário pela tela.
+    b.app(cx, |app, _w, cx| {
+        assert!(
+            app.caixa.read(cx).escolhendo_o_estudio(),
+            "sem estúdio nesta máquina, o portão pergunta qual"
+        )
+    });
+    b.clicar(cx, &format!("caixa-portao-estudio-{}", c.estudio_id));
+    b.ate(cx, "o caixa é relido no estúdio escolhido", |b, cx| {
+        b.app(cx, |app, _w, cx| {
+            let caixa = app.caixa.read(cx);
+            !caixa.carregando()
+                && !caixa.escolhendo_o_estudio()
+                && caixa.estudio_do_caixa() == Some(c.estudio_id.as_str())
+                && caixa.portao_agora() == Portao::AbrirODeHoje
+        })
+    });
     b.app(cx, |app, w, cx| app.ir_para(Tela::Sessoes, w, cx));
     b.app(cx, |app, _w, _cx| {
         assert_eq!(app.tela(), Tela::Caixa, "o menu não leva a outra tela")

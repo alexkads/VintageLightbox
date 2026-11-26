@@ -66,11 +66,14 @@ impl Aplicativo {
             self.portao_pendente = Some(portao);
             return;
         }
-        // O foco só muda quando a tela muda: o "livre" de quem não passa pelo
-        // portão chega no meio do trabalho e não pode tirar o cursor do campo.
-        let muda_a_tela = portao != Portao::Livre || self.portao_segura();
+        // 🪟 O foco só muda quando a tela muda. O "livre" de quem não passa
+        // pelo portão chega no meio do trabalho, e a troca de "fechar o
+        // vencido" para "abrir o de hoje" chega com o resumo do fechamento
+        // aberto: tirar o foco dali deixava o Esc e o F8 sem dono (achado na
+        // janela real, 26/11).
+        let antes = self.tela;
         self.aplicar_o_portao(portao, cx);
-        if muda_a_tela {
+        if self.tela != antes {
             window.focus(&self.foco, cx);
         }
     }

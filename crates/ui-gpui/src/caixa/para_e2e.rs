@@ -27,6 +27,11 @@ impl Caixa {
         self.dialogo_aberto()
     }
 
+    /// 🏢 O portão está perguntando em qual estúdio fica este caixa.
+    pub(crate) fn escolhendo_o_estudio(&self) -> bool {
+        self.estudio_a_escolher()
+    }
+
     /// ⏰ O erro que a página do portão mostra (o motivo do atraso que falta).
     pub(crate) fn erro_do_portao(&self) -> Option<String> {
         self.portao.erro.clone()

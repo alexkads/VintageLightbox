@@ -46,6 +46,13 @@ pub(crate) struct EstadoDoPortao {
     /// O motivo do atraso, escrito na página antes de contar.
     pub motivo: Option<Entity<InputState>>,
     pub erro: Option<String>,
+    /// 🏢 O estúdio escolhido no próprio portão, nesta abertura do app (o
+    /// arquivo da máquina também o guarda; a memória basta para não perguntar
+    /// de novo enquanto ele relê).
+    pub estudio_escolhido: Option<String>,
+    /// O dia do caixa vencido (`"24/11"`), para o passo "Fechar o caixa de
+    /// DD/MM" seguir com a data depois que ele fecha e sai da vista.
+    pub dia_do_vencido: Option<String>,
 }
 
 impl Caixa {
@@ -85,6 +92,15 @@ impl Caixa {
             return;
         }
         let agora = self.portao_agora();
+        // O dia do vencido acompanha cada carga: trocar de estúdio no portão
+        // troca de caixa vencido sem o portão mudar de estado.
+        if agora == Portao::FecharOVencido {
+            self.portao.dia_do_vencido = self
+                .vista
+                .as_ref()
+                .and_then(|v| v.caixa.as_ref())
+                .map(dados::CaixaDoBalcao::dia);
+        }
         if self.portao.contado == Some(agora) {
             return;
         }
@@ -115,9 +131,32 @@ impl Caixa {
         }
     }
 
+    /// 🏢 **O estúdio vem antes do caixa.** Máquina sem estúdio escolhido (o
+    /// catálogo novo, ou quem respondeu "Todos os estúdios") e mais de um
+    /// estúdio ativo: o portão pergunta em qual estúdio fica este caixa, em vez
+    /// de abrir o caixa do primeiro da lista — que seria o de outra cidade
+    /// metade das vezes (o mesmo cuidado de 18/09 no caixa).
+    pub(super) fn estudio_a_escolher(&self) -> bool {
+        let Some(v) = self.vista.as_ref() else {
+            return false;
+        };
+        v.estudios.len() > 1
+            && self.estudio_pedido.is_none()
+            && self.portao.estudio_escolhido.is_none()
+            && crate::sessoes::tela::estudio_de_trabalho_guardado().is_none()
+    }
+
+    /// O estúdio escolhido no portão: fica sendo o desta máquina, e o caixa é
+    /// relido nele.
+    fn escolher_o_estudio_do_balcao(&mut self, estudio: String, cx: &mut Context<Self>) {
+        crate::sessoes::tela::guardar_estudio_de_trabalho(&estudio);
+        self.portao.estudio_escolhido = Some(estudio.clone());
+        self.navegar(Some(estudio), None, cx);
+    }
+
     /// F8 no portão: com o caixa vencido, o motivo vem antes da contagem.
     fn f8_no_portao(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.dialogo.is_some() {
+        if self.dialogo.is_some() || self.estudio_a_escolher() {
             return;
         }
         match self.portao_agora() {
@@ -167,7 +206,9 @@ impl Caixa {
             ));
         }
         let (fundo, texto) = (cx.theme().background, cx.theme().foreground);
+        let escolher = self.estudio_a_escolher();
         let principal = match portao {
+            _ if escolher => self.pagina_do_estudio(cx),
             Portao::FecharOVencido => self.pagina_do_vencido(cx),
             _ => self.pagina_da_abertura(cx),
         };
@@ -248,26 +289,77 @@ impl Caixa {
             .into_any_element()
     }
 
+    /// 🏢 Em qual estúdio fica este caixa: um botão por estúdio ativo.
+    fn pagina_do_estudio(&self, cx: &mut Context<Self>) -> Div {
+        let apagado = cx.theme().muted_foreground;
+        let estudios: Vec<(String, String)> = self
+            .vista
+            .as_ref()
+            .map(|v| {
+                v.estudios
+                    .iter()
+                    .map(|e| (e.id.clone(), e.nome.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        v_flex()
+            .gap(px(16.))
+            .child(
+                v_flex()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .text_lg()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child("Em qual estúdio fica este caixa?"),
+                    )
+                    .child(div().text_color(apagado).child(
+                        "Este computador ainda não tem estúdio escolhido. O caixa do dia é de um estúdio só: escolha onde fica esta gaveta. A escolha fica guardada neste computador e vale também para as sessões.",
+                    )),
+            )
+            .child(
+                v_flex()
+                    .max_w(px(640.))
+                    .gap(px(8.))
+                    .children(estudios.into_iter().map(|(id, nome)| {
+                        let escolhido = id.clone();
+                        estilo::botao_contorno(format!("caixa-portao-estudio-{id}"), cx)
+                            .w_full()
+                            .justify_start()
+                            .child(nome)
+                            .on_click(cx.listener(move |t, _: &ClickEvent, _, cx| {
+                                t.escolher_o_estudio_do_balcao(escolhido.clone(), cx)
+                            }))
+                    })),
+            )
+    }
+
     /// 1 Fechar o caixa de DD/MM — 2 Abrir o caixa de hoje — 3 Começar o dia.
     fn passos(&self, portao: Portao, cx: &Context<Self>) -> gpui_kit::Stateful<Div> {
         let dia = self
             .vista
             .as_ref()
             .and_then(|v| v.caixa.as_ref())
-            .map(dados::CaixaDoBalcao::dia);
+            .filter(|_| portao == Portao::FecharOVencido)
+            .map(dados::CaixaDoBalcao::dia)
+            .or_else(|| self.portao.dia_do_vencido.clone());
         let fechar = (portao == Portao::FecharOVencido || self.portao.fechou_o_vencido)
             .then(|| format!("Fechar o caixa de {}", dia.unwrap_or_default()));
         let mut itens: Vec<(String, bool, bool)> = Vec::new();
+        let escolher = self.estudio_a_escolher();
+        if escolher || self.portao.estudio_escolhido.is_some() {
+            itens.push(("Escolher o estúdio".into(), escolher, !escolher));
+        }
         if let Some(f) = fechar {
             itens.push((
                 f,
-                portao == Portao::FecharOVencido,
+                !escolher && portao == Portao::FecharOVencido,
                 self.portao.fechou_o_vencido,
             ));
         }
         itens.push((
             "Abrir o caixa de hoje".into(),
-            portao == Portao::AbrirODeHoje,
+            !escolher && portao == Portao::AbrirODeHoje,
             false,
         ));
         itens.push(("Começar o dia".into(), false, false));

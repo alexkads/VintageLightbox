@@ -416,6 +416,21 @@ pub fn estudio_de_trabalho_guardado() -> Option<String> {
     estudio_lembrado(&caminho_da_lembranca())
 }
 
+/// 🏢 O estúdio escolhido no portão do caixa do dia (#52) vira o desta máquina,
+/// e a entrada das sessões não pergunta de novo. O "Todos os estúdios" da
+/// lista fica como estava: o recorte da lista é outra escolha.
+pub fn guardar_estudio_de_trabalho(estudio_id: &str) {
+    let caminho = caminho_da_lembranca();
+    let guardada = lembranca(&caminho);
+    gravar_lembranca(
+        &caminho,
+        Lembranca {
+            estudio_id: Some(estudio_id.to_string()),
+            ver_todos: guardada.ver_todos,
+        },
+    );
+}
+
 fn lembrar_estudio(caminho: &Path, estudio_id: &str) {
     gravar_lembranca(
         caminho,
@@ -1467,6 +1482,10 @@ impl Sessoes {
                         && !self.estudios.is_empty()
                     {
                         self.escolhendo_estudio = true;
+                    } else {
+                        // ⏰ Respondida em outro lugar (o portão do caixa
+                        // escolheu o estúdio): a pergunta que estava aberta sai.
+                        self.escolhendo_estudio = false;
                     }
                 }
                 Recado::CapaDoEstudio { estudio_id, bytes } => {
