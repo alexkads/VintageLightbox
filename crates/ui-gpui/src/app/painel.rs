@@ -614,7 +614,10 @@ impl Aplicativo {
                         let passa = biblioteca_core::caixa::passa_pelo_portao(acesso.as_ref())
                             && !super::portao_do_caixa::desligado_no_teste();
                         self.retomada_espera_o_portao = passa;
-                        self.caixa.update(cx, |t, cx| t.ligar_o_portao(passa, cx));
+                        self.caixa.update(cx, |t, cx| {
+                            t.deixar_ignorar(pode, cx);
+                            t.ligar_o_portao(passa, cx);
+                        });
                         let (restritos, nenhum) = acesso
                             .map(|a| (a.estudios_restritos(), a.sem_estudio()))
                             .unwrap_or_default();
