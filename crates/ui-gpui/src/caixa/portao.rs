@@ -114,6 +114,10 @@ impl Caixa {
         // por cima (o resumo do fechamento) devolve o foco à página, e não a
         // um campo que não existe mais (achado pelo e2e do ciclo, 26/11).
         self.foco_antes.esquecer();
+        // E, se o foco ainda está num campo da página de antes (o motivo,
+        // devolvido pelo resumo que fechou antes de a releitura chegar), ele
+        // passa à página nova no próximo desenho, antes de o campo sumir.
+        self.pedir_foco = true;
         self.portao.contado = Some(agora);
         cx.emit(PedidoDoCaixa::Portao(agora));
     }
