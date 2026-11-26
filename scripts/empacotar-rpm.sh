@@ -96,9 +96,12 @@ compilar() {
     diga "usando o binário pronto"
     [ -x "$BINARIO" ] || { erro "não é um executável: $BINARIO"; exit 1; }
   else
+    # 🔑 **No perfil `instalador`, o do script do balcão** (#55): o binário se
+    #    enxerga como "compilado" (`build.rs`, pela pasta de saída) e segue a
+    #    mesma decisão de atualizar — que agora tenta o RPM antes do script.
     diga "compilando (15 a 40 minutos na primeira vez)"
-    correr cargo build --release -p "$CRATE" --bin "$BIN" --manifest-path "$RAIZ/Cargo.toml"
-    BINARIO="$RAIZ/target/release/$BIN"
+    correr cargo build --profile instalador -p "$CRATE" --bin "$BIN" --manifest-path "$RAIZ/Cargo.toml"
+    BINARIO="${CARGO_TARGET_DIR:-$RAIZ/target}/instalador/$BIN"
   fi
   [ "$SECO" -eq 1 ] || ok "$BINARIO ($(du -h "$BINARIO" | cut -f1))"
 }
@@ -140,6 +143,8 @@ ExclusiveArch:  x86_64
 Source0:        $APP_ID
 Source1:        $APP_ID.desktop
 Source2:        LICENSE
+Source3:        atualizar-rpm
+Source4:        br.com.recordarfotos.vintagelightbox.policy
 
 Requires:       libX11.so.6()(64bit)
 Requires:       libxcb.so.1()(64bit)
@@ -150,6 +155,11 @@ Requires:       libfontconfig.so.1()(64bit)
 Requires:       libfreetype.so.6()(64bit)
 Requires:       libasound.so.2()(64bit)
 Requires:       libvulkan.so.1()(64bit)
+# A atualização por RPM (#55): o ajudante baixa com o curl, instala com o dnf
+# e é liberado sem senha pelo polkit.
+Requires:       curl
+Requires:       dnf
+Requires:       polkit
 # O driver Vulkan da Intel e da AMD; com NVIDIA quem traz é o akmod-nvidia.
 Recommends:     mesa-vulkan-drivers
 # O GNOME não mostra ícone de bandeja sem ela.
@@ -170,6 +180,8 @@ cp %{SOURCE2} .
 %install
 install -Dm755 %{SOURCE0} %{buildroot}%{_bindir}/$APP_ID
 install -Dm644 %{SOURCE1} %{buildroot}%{_datadir}/applications/$APP_ID.desktop
+install -Dm755 %{SOURCE3} %{buildroot}%{_libexecdir}/$PACOTE/atualizar-rpm
+install -Dm644 %{SOURCE4} %{buildroot}%{_datadir}/polkit-1/actions/br.com.recordarfotos.$PACOTE.policy
 for t in 32 128 256 512; do
   install -Dm644 %{_sourcedir}/icone-\${t}.png \\
     %{buildroot}%{_datadir}/icons/hicolor/\${t}x\${t}/apps/$APP_ID.png
@@ -181,6 +193,8 @@ install -Dm644 %{_sourcedir}/icone-256@2.png \\
 %license LICENSE
 %{_bindir}/$APP_ID
 %{_datadir}/applications/$APP_ID.desktop
+%{_libexecdir}/$PACOTE/atualizar-rpm
+%{_datadir}/polkit-1/actions/br.com.recordarfotos.$PACOTE.policy
 %{_datadir}/icons/hicolor/*/apps/$APP_ID.png
 
 %changelog
@@ -201,6 +215,8 @@ montar() {
 
   install -m755 "$BINARIO" "$src/$APP_ID"
   cp "$RAIZ/LICENSE" "$src/LICENSE"
+  install -m755 "$RAIZ/empacotamento/linux/atualizar-rpm" "$src/atualizar-rpm"
+  cp "$RAIZ/empacotamento/linux/br.com.recordarfotos.vintagelightbox.policy" "$src/"
   cp "$ICONES/32x32.png"       "$src/icone-32.png"
   cp "$ICONES/128x128.png"     "$src/icone-128.png"
   cp "$ICONES/256x256.png"     "$src/icone-256.png"
@@ -217,6 +233,8 @@ montar() {
   [ -n "$RPM" ] || { erro "o rpmbuild terminou sem gerar o pacote."; exit 1; }
   cp "$RPM" "$SAIDA/"
   RPM="$SAIDA/$(basename "$RPM")"
+  # O sha256 que o ajudante da atualização confere antes do dnf (#55).
+  (cd "$SAIDA" && sha256sum "$(basename "$RPM")" > "$(basename "$RPM").sha256")
   ok "$(basename "$RPM") ($(du -h "$RPM" | cut -f1))"
 }
 
@@ -228,6 +246,8 @@ conferir_pacote() {
   diga "conferindo o pacote"
   local arquivos; arquivos=$(rpm -qpl "$RPM")
   for f in "/usr/bin/$APP_ID" "/usr/share/applications/$APP_ID.desktop" \
+           "/usr/libexec/$PACOTE/atualizar-rpm" \
+           "/usr/share/polkit-1/actions/br.com.recordarfotos.$PACOTE.policy" \
            "/usr/share/icons/hicolor/256x256/apps/$APP_ID.png"; do
     grep -qx "$f" <<<"$arquivos" || { erro "falta no pacote: $f"; exit 1; }
   done

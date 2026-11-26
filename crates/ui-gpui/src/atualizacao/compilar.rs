@@ -270,7 +270,15 @@ pub fn binario_instalado() -> Option<PathBuf> {
         }
         std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Applications").join(app))
     } else {
-        std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/bin/vintagelightbox-gpui"))
+        let local = std::env::var_os("HOME")
+            .map(|h| PathBuf::from(h).join(".local/bin/vintagelightbox-gpui"));
+        // 📦 Só o RPM nesta máquina (#55): o app mora em /usr/bin.
+        match local {
+            Some(l) if !l.exists() && Path::new(BINARIO_DO_RPM).exists() => {
+                Some(PathBuf::from(BINARIO_DO_RPM))
+            }
+            outro => outro,
+        }
     }
 }
 
@@ -435,6 +443,25 @@ fn rodar_travado(
     registro: &Path,
     avisar: &dyn Fn(Andamento),
 ) -> Result<String, String> {
+    // 📦 #55: no Fedora com o RPM, a ordem do dono — o RPM do R2, o do GitHub
+    // (as duas no ajudante) e, só se nenhum servir, o script abaixo.
+    if cfg!(target_os = "linux") {
+        match tentar_o_rpm(
+            Path::new(AJUDANTE_DO_RPM),
+            "pkexec",
+            versao_esperada,
+            registro,
+            avisar,
+        ) {
+            Ok(()) => {
+                if let Some(home) = std::env::var_os("HOME") {
+                    apontar_para_o_rpm(&PathBuf::from(home), Path::new(BINARIO_DO_RPM));
+                }
+                return conferir_o_instalado(versao_esperada);
+            }
+            Err(motivo) => anotar(registro, &format!("RPM: {motivo}; segue pelo script")),
+        }
+    }
     avisar(Andamento::Etapa("baixando o instalador".into()));
     let texto = cargo_packager_updater::reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(60))
@@ -450,7 +477,10 @@ fn rodar_travado(
     std::fs::write(&arquivo, &texto)
         .map_err(|e| format!("não consegui guardar o instalador ({e})"))?;
 
-    let saida = std::fs::File::create(registro)
+    let saida = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(registro)
         .map_err(|e| format!("não consegui abrir o registro ({e})"))?;
     let erros = saida
         .try_clone()
@@ -502,7 +532,11 @@ fn rodar_travado(
         ));
     }
 
-    // 🔑 Só é "instalada" se o binário no lugar responde a versão.
+    conferir_o_instalado(versao_esperada)
+}
+
+/// 🔑 Só é "instalada" se o binário no lugar responde a versão.
+fn conferir_o_instalado(versao_esperada: &str) -> Result<String, String> {
     let binario = binario_instalado().ok_or("não sei onde o instalador põe o app")?;
     let resposta = std::process::Command::new(&binario)
         .arg("--versao")
@@ -516,6 +550,113 @@ fn rodar_travado(
         ));
     }
     Ok(instalada)
+}
+
+// ── 📦 O RPM (#55) ─────────────────────────────────────────────────────────
+
+/// O ajudante que o RPM instala e o polkit libera sem senha para a sessão
+/// ativa (`empacotamento/linux/`). Ele tenta o R2 e depois o GitHub.
+pub const AJUDANTE_DO_RPM: &str = "/usr/libexec/vintagelightbox/atualizar-rpm";
+/// Onde o RPM põe o app.
+pub const BINARIO_DO_RPM: &str = "/usr/bin/vintagelightbox-gpui";
+
+/// Uma linha no registro da atualização, para o caminho que não deu certo.
+fn anotar(registro: &Path, texto: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(registro)
+    {
+        let _ = writeln!(f, "{texto}");
+    }
+}
+
+/// Roda o ajudante do RPM (`programa ajudante versão`, o `pkexec` fora dos
+/// testes) e repassa as etapas dele à faixa. `Err` diz por que não serviu —
+/// sem o ajudante, sem RPM publicado, sha256 errado, `dnf` recusando — e a
+/// atualização segue pelo script.
+///
+/// ⚠️ Não se interrompe: o `dnf` no meio de uma transação é a única etapa que
+/// pode deixar o sistema pela metade, e o download inteiro leva segundos.
+fn tentar_o_rpm(
+    ajudante: &Path,
+    programa: &str,
+    versao: &str,
+    registro: &Path,
+    avisar: &dyn Fn(Andamento),
+) -> Result<(), String> {
+    if !ajudante.exists() {
+        return Err("esta máquina não tem o RPM (sem o ajudante)".into());
+    }
+    let saida = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(registro)
+        .map_err(|e| format!("não consegui abrir o registro ({e})"))?;
+    let erros = saida
+        .try_clone()
+        .map_err(|e| format!("não consegui abrir o registro ({e})"))?;
+    let lidas_antes = std::fs::read_to_string(registro)
+        .map(|t| t.lines().count())
+        .unwrap_or(0);
+    let mut filho = std::process::Command::new(programa)
+        .arg(ajudante)
+        .arg(versao)
+        .stdin(std::process::Stdio::null())
+        .stdout(saida)
+        .stderr(erros)
+        .spawn()
+        .map_err(|e| format!("não consegui rodar o ajudante ({e})"))?;
+    let mut lidas = lidas_antes;
+    loop {
+        if let Ok(texto) = std::fs::read_to_string(registro) {
+            let linhas: Vec<&str> = texto.lines().collect();
+            for linha in &linhas[lidas.min(linhas.len())..] {
+                if let Some(e) = etapa(linha) {
+                    avisar(Andamento::Etapa(e));
+                }
+            }
+            lidas = linhas.len();
+        }
+        match filho.try_wait() {
+            Ok(Some(status)) if status.success() => return Ok(()),
+            Ok(Some(status)) => {
+                return Err(match status.code() {
+                    Some(3) => "nenhum RPM desta versão no R2 nem no GitHub".into(),
+                    _ => format!("o ajudante do RPM parou ({status})"),
+                })
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(300)),
+            Err(e) => return Err(format!("perdi o ajudante de vista ({e})")),
+        }
+    }
+}
+
+/// 🔗 Depois do RPM, o atalho do script não pode abrir a cópia velha: o
+/// `.desktop` de `~/.local` vence o de `/usr` no menu, e aponta para
+/// `~/.local/bin`. A cópia compilada vira `.anterior` e o lugar dela passa a
+/// ser um atalho para o binário do RPM. Máquina sem nada do script: nada a
+/// fazer. (Se depois o script voltar a compilar, ele troca o atalho pelo
+/// binário dele, como sempre.)
+fn apontar_para_o_rpm(home: &Path, do_rpm: &Path) {
+    let bin = home.join(".local/bin/vintagelightbox-gpui");
+    let atalho = home.join(".local/share/applications/vintagelightbox-gpui.desktop");
+    if std::fs::read_link(&bin).is_ok_and(|alvo| alvo == do_rpm) {
+        return;
+    }
+    let tem_copia = std::fs::symlink_metadata(&bin).is_ok();
+    if !tem_copia && !atalho.exists() {
+        return;
+    }
+    if tem_copia {
+        let _ = std::fs::rename(&bin, bin.with_extension("anterior"));
+    }
+    if let Some(pasta) = bin.parent() {
+        let _ = std::fs::create_dir_all(pasta);
+    }
+    #[cfg(unix)]
+    let _ = std::os::unix::fs::symlink(do_rpm, &bin);
 }
 
 /// O instalador sobrevive ao app: fechar o VintageLightbox no meio da
@@ -580,6 +721,91 @@ pub fn aviso_de_compilar(versao: &str, novidades: Option<Novidades>) -> VersaoNo
 #[cfg(test)]
 mod testes {
     use super::*;
+
+    // ── 📦 O RPM (#55) ──────────────────────────────────────────────────────
+
+    /// Um ajudante de mentira: um `sh` que anuncia as etapas como o de
+    /// verdade e sai com o código pedido.
+    fn ajudante(pasta: &Path, codigo: i32) -> PathBuf {
+        let arquivo = pasta.join("atualizar-rpm");
+        std::fs::write(
+            &arquivo,
+            format!(
+                "echo \"▸ baixando o RPM do Cloudflare R2\"\necho \"versão $1\"\nexit {codigo}\n"
+            ),
+        )
+        .unwrap();
+        arquivo
+    }
+
+    fn etapas_do_rpm(ajudante: &Path, registro: &Path) -> (Result<(), String>, Vec<String>) {
+        let vistas = std::sync::Mutex::new(Vec::new());
+        let r = tentar_o_rpm(ajudante, "sh", "0.1.205", registro, &|a| {
+            if let Andamento::Etapa(e) = a {
+                vistas.lock().unwrap().push(e);
+            }
+        });
+        (r, vistas.into_inner().unwrap())
+    }
+
+    #[test]
+    fn o_rpm_instalado_dispensa_o_script() {
+        let pasta = tempfile::tempdir().unwrap();
+        let registro = pasta.path().join("atualizacao.log");
+        let (r, etapas) = etapas_do_rpm(&ajudante(pasta.path(), 0), &registro);
+        assert_eq!(r, Ok(()));
+        assert_eq!(etapas, vec!["baixando o RPM do Cloudflare R2".to_string()]);
+        // O ajudante recebeu a versão esperada.
+        let texto = std::fs::read_to_string(&registro).unwrap();
+        assert!(texto.contains("versão 0.1.205"), "{texto}");
+    }
+
+    #[test]
+    fn sem_rpm_publicado_ou_sem_ajudante_segue_pelo_script() {
+        let pasta = tempfile::tempdir().unwrap();
+        let registro = pasta.path().join("atualizacao.log");
+        let (r, _) = etapas_do_rpm(&ajudante(pasta.path(), 3), &registro);
+        assert_eq!(
+            r,
+            Err("nenhum RPM desta versão no R2 nem no GitHub".to_string())
+        );
+        let (r, _) = etapas_do_rpm(&ajudante(pasta.path(), 1), &registro);
+        assert!(r.unwrap_err().starts_with("o ajudante do RPM parou"));
+        // Máquina sem o RPM: nem roda nada (e nunca pede senha).
+        let (r, etapas) = etapas_do_rpm(&pasta.path().join("nao-existe"), &registro);
+        assert!(r.unwrap_err().contains("sem o ajudante"));
+        assert!(etapas.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn depois_do_rpm_o_atalho_do_script_abre_o_binario_do_rpm() {
+        let home = tempfile::tempdir().unwrap();
+        let do_rpm = home.path().join("usr-bin-vintagelightbox-gpui");
+        std::fs::write(&do_rpm, "rpm").unwrap();
+        let bin = home.path().join(".local/bin/vintagelightbox-gpui");
+
+        // Sem nada do script: não cria nada.
+        apontar_para_o_rpm(home.path(), &do_rpm);
+        assert!(std::fs::symlink_metadata(&bin).is_err());
+
+        // Com a cópia compilada: ela vira .anterior e o lugar aponta para o RPM.
+        std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
+        std::fs::write(&bin, "compilado").unwrap();
+        apontar_para_o_rpm(home.path(), &do_rpm);
+        assert_eq!(std::fs::read_link(&bin).unwrap(), do_rpm);
+        assert_eq!(
+            std::fs::read_to_string(bin.with_extension("anterior")).unwrap(),
+            "compilado"
+        );
+        // De novo: já aponta, nada muda (o .anterior continua o compilado).
+        apontar_para_o_rpm(home.path(), &do_rpm);
+        assert_eq!(std::fs::read_link(&bin).unwrap(), do_rpm);
+        assert_eq!(
+            std::fs::read_to_string(bin.with_extension("anterior")).unwrap(),
+            "compilado"
+        );
+    }
 
     fn main(versao: &str) -> Option<Novidades> {
         Some(Novidades {
