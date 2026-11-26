@@ -35,7 +35,7 @@ use super::dados::{self, CaixaDoBalcao, Conferencia};
 use super::tela::{
     codificar, com_tecla, Caixa, ConcluirVenda, ConfirmarDialogo, DescontoNoTotal, EmPercentual,
     EmReais, FecharDialogo, FocarDesconto, Forma1, Forma2, Forma3, Forma4, Forma5, Forma6, Forma7,
-    Forma8, Sangria, Suprimento, TipoDeRecado, TirarUltimo, DIALOGO,
+    Forma8, Sangria, Suprimento, TipoDeRecado, TirarUltimo, Vista, DIALOGO,
 };
 use crate::estilo;
 use crate::recursos::Icone;
@@ -61,6 +61,16 @@ pub(super) struct FormAbrir {
     fundo: Entity<InputState>,
     erro: Option<String>,
     enviando: bool,
+    /// 🖥️ O caixa deste balcão está aberto por outra pessoa: a frase da API, e
+    /// o botão de encerrar o dela (`caixa/ponto.rs`).
+    pub(super) ponto_ocupado: Option<String>,
+}
+
+/// 🔁 O fechamento às cegas do caixa de outra pessoa, no ponto deste balcão.
+pub(super) struct Encerramento {
+    pub ponto: String,
+    /// "O CX1 está aberto por … desde …" — a frase da recusa da abertura.
+    pub frase: String,
 }
 
 pub(super) struct FormDesconto {
@@ -172,6 +182,9 @@ pub(super) struct FormFechamento {
     resultado: Option<CaixaDoBalcao>,
     erro: Option<String>,
     enviando: bool,
+    /// 🔁 Não é o caixa do operador: é o de quem estava no ponto, encerrado
+    /// às cegas e sem conferência (`caixa/ponto.rs`).
+    pub(super) encerrar: Option<Encerramento>,
 }
 
 /// A negociação completa (`negociacao-dialog.tsx`), aberta pelo `N` do painel.
@@ -325,16 +338,20 @@ pub(super) struct DesSinalizacao {
     falhas: usize,
 }
 
-fn campo(window: &mut Window, cx: &mut Context<Caixa>, dica: &str) -> Entity<InputState> {
+pub(super) fn campo(
+    window: &mut Window,
+    cx: &mut Context<Caixa>,
+    dica: &str,
+) -> Entity<InputState> {
     let dica = dica.to_string();
     cx.new(|cx| InputState::new(window, cx).placeholder(dica))
 }
 
-fn valor_de(campo: &Entity<InputState>, cx: &Context<Caixa>) -> String {
+pub(super) fn valor_de(campo: &Entity<InputState>, cx: &Context<Caixa>) -> String {
     campo.read(cx).value().to_string()
 }
 
-fn escrever(
+pub(super) fn escrever(
     campo: &Entity<InputState>,
     texto: String,
     window: &mut Window,
@@ -371,6 +388,8 @@ impl Caixa {
             TipoDeDialogo::Atalhos => (Dialogo::Atalhos, None),
             TipoDeDialogo::Vendas => (Dialogo::Vendas, None),
             TipoDeDialogo::Abrir => {
+                // 🖥️ Os caixas do estúdio, para o "Caixa deste balcão".
+                self.pedir_os_pontos(cx);
                 let fundo = campo(window, cx, "0,00");
                 let foco = fundo.read(cx).focus_handle(cx);
                 (
@@ -379,6 +398,7 @@ impl Caixa {
                         fundo,
                         erro: None,
                         enviando: false,
+                        ponto_ocupado: None,
                     }),
                     Some(foco),
                 )
@@ -484,6 +504,7 @@ impl Caixa {
                         resultado: None,
                         erro: None,
                         enviando: false,
+                        encerrar: None,
                     })),
                     Some(foco),
                 )
@@ -833,6 +854,7 @@ impl Caixa {
             (Some(Dialogo::Pagamento(f)), "motivo") => f.motivo.clone(),
             (Some(Dialogo::Estorno(f)), "motivo") => f.motivo.clone(),
             (Some(Dialogo::Estorno(f)), "valor") => f.valor.clone(),
+            (Some(Dialogo::Fechar(f)), "observacao") => f.observacao.clone(),
             (Some(Dialogo::Fechar(f)), forma) => f
                 .campos
                 .iter()
@@ -921,6 +943,8 @@ impl Caixa {
             Some(Dialogo::Estorno(_)) => self.estornar(cx),
             Some(Dialogo::Fechar(form)) => {
                 if form.resultado.is_some() {
+                } else if form.encerrar.is_some() {
+                    self.enviar_o_encerramento(cx);
                 } else if form.conferencia.is_some() {
                     self.fechar_caixa(cx);
                 } else {
@@ -1042,21 +1066,22 @@ impl Caixa {
             return;
         };
         form.erro = None;
+        form.ponto_ocupado = None;
         form.enviando = true;
         let chave = form.chave.clone();
+        let ponto = self.ponto_do_balcao().map(|p| p.id.clone());
         self.em_curso.push(EmCurso::Abrir { fundo });
-        self.gravar(
-            "abrir",
-            "POST",
-            "/pos-venda/caixa".into(),
-            json!({
-                "estudio_id": estudio,
-                "fundo_de_troco_centavos": fundo,
-                "chave": chave,
-                "local": biblioteca_core::local::texto_do_caixa(self.local_do_caixa()),
-            }),
-            cx,
-        );
+        let mut corpo = json!({
+            "estudio_id": estudio,
+            "fundo_de_troco_centavos": fundo,
+            "chave": chave,
+            "local": biblioteca_core::local::texto_do_caixa(self.local_do_caixa()),
+        });
+        // 🖥️ Só com o balcão fixado num caixa do estúdio.
+        if let Some(ponto) = ponto {
+            corpo["ponto_de_caixa_id"] = json!(ponto);
+        }
+        self.gravar("abrir", "POST", "/pos-venda/caixa".into(), corpo, cx);
         cx.notify();
     }
 
@@ -1533,6 +1558,51 @@ impl Caixa {
 
     // ── Fechamento cego ─────────────────────────────────────────────────────
 
+    /// 🔁 O que o encerramento manda: a contagem, o motivo, a chave e o ponto.
+    #[allow(clippy::type_complexity)]
+    pub(super) fn ler_o_encerramento(
+        &self,
+        cx: &Context<Self>,
+    ) -> Option<(Result<regras::PorForma, String>, String, String, String)> {
+        let lido = self.contagem(cx)?;
+        let Some(Dialogo::Fechar(form)) = self.dialogo.as_ref() else {
+            return None;
+        };
+        let encerrar = form.encerrar.as_ref()?;
+        if form.enviando {
+            return None;
+        }
+        Some((
+            lido,
+            valor_de(&form.observacao, cx).trim().to_string(),
+            form.chave.clone(),
+            encerrar.ponto.clone(),
+        ))
+    }
+
+    pub(super) fn erro_no_fechamento(&mut self, erro: String, cx: &mut Context<Self>) {
+        if let Some(Dialogo::Fechar(form)) = self.dialogo.as_mut() {
+            form.enviando = false;
+            form.erro = Some(erro);
+        }
+        cx.notify();
+    }
+
+    pub(super) fn marcar_o_fechamento_enviando(&mut self) {
+        if let Some(Dialogo::Fechar(form)) = self.dialogo.as_mut() {
+            form.erro = None;
+            form.enviando = true;
+        }
+    }
+
+    pub(super) fn mostrar_o_resultado_do_fechamento(&mut self, caixa: Option<CaixaDoBalcao>) {
+        if let Some(Dialogo::Fechar(form)) = self.dialogo.as_mut() {
+            form.enviando = false;
+            form.resultado = caixa;
+            self.foco_no_dialogo = true;
+        }
+    }
+
     fn contagem(&self, cx: &Context<Self>) -> Option<Result<regras::PorForma, String>> {
         let Some(Dialogo::Fechar(form)) = self.dialogo.as_ref() else {
             return None;
@@ -1584,6 +1654,19 @@ impl Caixa {
         cx.notify();
     }
 
+    /// ⏰ O motivo do atraso escrito no portão chega ao fechamento já escrito.
+    pub(super) fn escrever_o_motivo_do_fechamento(
+        &mut self,
+        motivo: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(Dialogo::Fechar(form)) = self.dialogo.as_ref() {
+            let observacao = form.observacao.clone();
+            escrever(&observacao, motivo, window, cx);
+        }
+    }
+
     fn corrigir_contagem(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(Dialogo::Fechar(form)) = self.dialogo.as_mut() {
             if form.enviando {
@@ -1599,6 +1682,9 @@ impl Caixa {
     fn fechar_caixa(&mut self, cx: &mut Context<Self>) {
         let estudio = self.estudio_do_caixa().map(str::to_string);
         let local_do_caixa = self.local_do_caixa();
+        // ⏰ Passou do horário de corte: a observação vira o motivo do atraso, e
+        // é obrigatória (a API recusa sem ela).
+        let vencido = self.vista.as_ref().is_some_and(Vista::caixa_vencido);
         let Some(Dialogo::Fechar(form)) = self.dialogo.as_mut() else {
             return;
         };
@@ -1615,13 +1701,24 @@ impl Caixa {
         // O backend recalcula o esperado com o caixa travado: o que fecha é o da hora.
         let observacao = valor_de(&form.observacao, cx);
         let observacao = observacao.trim();
-        let corpo = json!({
+        if vencido && observacao.is_empty() {
+            form.erro = Some(regras::SEM_MOTIVO_DO_ATRASO.into());
+            self.foco_pendente = Some(form.observacao.clone());
+            cx.notify();
+            return;
+        }
+        form.erro = None;
+        let mut corpo = json!({
             "estudio_id": estudio,
             "contado": dados::contado_json(&conferencia.contado),
             "observacao": (!observacao.is_empty()).then_some(observacao),
             "chave": form.chave,
             "local": biblioteca_core::local::texto_do_caixa(local_do_caixa),
         });
+        // ⏰ Só no caixa vencido: a API grava (e exige) o motivo do atraso.
+        if vencido {
+            corpo["motivo_do_atraso"] = json!(observacao);
+        }
         form.enviando = true;
         self.gravar(
             "fechar",
@@ -1671,7 +1768,7 @@ impl Caixa {
             "movimento" => Some("Movimento"),
             "venda" => Some("Pagamento"),
             "estorno" => Some("Estorno"),
-            "conferir" | "fechar" => Some("Fechamento"),
+            "conferir" | "fechar" | "encerrar" => Some("Fechamento"),
             "cadastrar" => Some("Pessoas"),
             _ => None,
         } {
@@ -1698,14 +1795,20 @@ impl Caixa {
                         self.recarregar(cx);
                     }
                     Err(erro) => {
+                        let frase =
+                            dados::mensagem_do_erro(&erro, "Não foi possível abrir o caixa.");
+                        let ocupado = super::ponto::e_ponto_ocupado(&erro);
                         if let Some(Dialogo::Abrir(form)) = self.dialogo.as_mut() {
                             form.enviando = false;
+                            // 🖥️ O caixa deste balcão é de outra pessoa: a
+                            // frase fica no diálogo, com o encerramento.
+                            if ocupado {
+                                form.ponto_ocupado = Some(frase.clone());
+                            }
                         }
-                        self.avisar(
-                            dados::mensagem_do_erro(&erro, "Não foi possível abrir o caixa."),
-                            TipoDeRecado::Erro,
-                            cx,
-                        );
+                        if !ocupado {
+                            self.avisar(frase, TipoDeRecado::Erro, cx);
+                        }
                     }
                 }
             }
@@ -1927,6 +2030,8 @@ impl Caixa {
                 }
             },
             "lote" => self.receber_lote(resultado, cx),
+            "pontos" => self.receber_os_pontos(resultado),
+            "encerrar" => self.receber_o_encerramento(resultado, cx),
             "cadastrar" => {
                 let lido = resultado.and_then(dados::ler_funcionario);
                 let Some(Dialogo::Pessoas(form)) = self.dialogo.as_mut() else {
@@ -2101,7 +2206,17 @@ impl Caixa {
                     self.corpo_negociacao(cx),
                 ),
                 Dialogo::Fechar(form) => {
-                    let (titulo, descricao) = if form.resultado.is_some() {
+                    let (titulo, descricao) = if form.encerrar.is_some() && form.resultado.is_some() {
+                        (
+                            "Caixa encerrado",
+                            "Contado, esperado e diferença do caixa encerrado. Agora abra o seu.",
+                        )
+                    } else if form.encerrar.is_some() {
+                        (
+                            "Encerrar o caixa de outra pessoa",
+                            "O caixa deste balcão está aberto por outra pessoa. Encerre-o antes de abrir o seu.",
+                        )
+                    } else if form.resultado.is_some() {
                         (
                             "Caixa fechado",
                             "Contado, esperado e diferença por forma de pagamento.",
@@ -2308,10 +2423,28 @@ impl Caixa {
             return div().into_any_element();
         };
         let (fundo, erro, enviando) = (form.fundo.clone(), form.erro.clone(), form.enviando);
+        let ocupado = form.ponto_ocupado.clone();
+        let linha_do_ponto = self.linha_do_ponto(cx);
         v_flex()
             .gap(px(16.))
             .child(campo_de_valor("Fundo de troco", &fundo, cx))
+            .children(linha_do_ponto)
             .children(erro.map(|e| erro_do_form(e, cx)))
+            .children(ocupado.map(|frase| {
+                v_flex()
+                    .id("caixa-ponto-ocupado")
+                    .gap(px(8.))
+                    .child(erro_do_form(frase, cx))
+                    .child(
+                        h_flex().child(
+                            estilo::botao_contorno("caixa-encerrar-o-outro", cx)
+                                .child("Encerrar este caixa (contagem às cegas)")
+                                .on_click(cx.listener(|t, _: &ClickEvent, w, cx| {
+                                    t.abrir_o_encerramento(w, cx)
+                                })),
+                        ),
+                    )
+            }))
             .child(
                 rodape().child(
                     com_tecla(
@@ -3432,6 +3565,18 @@ impl Caixa {
 
         if let Some(conferencia) = &form.conferencia {
             let (frase, alerta) = regras::frase_da_conferencia(&conferencia.diferenca);
+            // ⏰ O caixa vencido fecha com o motivo do atraso, que vai ao dono.
+            let vencido = self
+                .vista
+                .as_ref()
+                .and_then(|v| v.caixa.as_ref().filter(|_| v.caixa_vencido()));
+            let atraso = vencido.map(|c| {
+                format!(
+                    "Este caixa, de {}, passou do fechamento das {}. O motivo vai no resumo do dono.",
+                    c.dia(),
+                    c.hora_do_corte()
+                )
+            });
             return v_flex()
                 .gap(px(16.))
                 .child(tabela_do_fechamento(
@@ -3450,10 +3595,21 @@ impl Caixa {
                         })
                         .child(frase),
                 )
+                .children(atraso.map(|frase| {
+                    div()
+                        .id("caixa-fechamento-atrasado")
+                        .text_color(cores::quente_clara())
+                        .child(frase)
+                }))
                 .child(rotulado(
-                    "Observação (opcional)",
+                    if vencido.is_some() {
+                        "Por que o caixa não foi fechado no horário?"
+                    } else {
+                        "Observação (opcional)"
+                    },
                     crate::estilo::campo(Input::new(&form.observacao)),
                 ))
+                .children(form.erro.clone().map(|e| erro_do_form(e, cx)))
                 .child(
                     rodape()
                         .child(
@@ -3481,6 +3637,59 @@ impl Caixa {
                             )
                             .on_click(cx.listener(|t, _: &ClickEvent, _, cx| t.fechar_caixa(cx))),
                         ),
+                )
+                .into_any_element();
+        }
+
+        // 🔁 O caixa de outra pessoa, no ponto deste balcão: conta às cegas e
+        // encerra direto, com o motivo — a conferência é do dono do caixa.
+        if let Some(encerrar) = &form.encerrar {
+            return v_flex()
+                .gap(px(16.))
+                .child(div().text_color(apagado).child(format!(
+                    "{} Conte a gaveta e os comprovantes: o esperado aparece depois de encerrar, e o dono recebe o resumo.",
+                    encerrar.frase
+                )))
+                .child(
+                    div()
+                        .grid()
+                        .grid_cols(2)
+                        .gap(px(12.))
+                        .children(form.campos.iter().map(|(f, c)| {
+                            campo_de_valor(
+                                if *f == FormaDePagamento::Dinheiro {
+                                    "Dinheiro na gaveta (com o fundo)"
+                                } else {
+                                    f.rotulo()
+                                },
+                                c,
+                                cx,
+                            )
+                        })),
+                )
+                .child(rotulado(
+                    "Por que você está encerrando este caixa?",
+                    crate::estilo::campo(Input::new(&form.observacao)),
+                ))
+                .children(form.erro.clone().map(|e| erro_do_form(e, cx)))
+                .child(
+                    rodape().child(
+                        com_tecla(
+                            estilo::desligado(
+                                estilo::botao_perigo("caixa-encerrar", cx),
+                                enviando,
+                            ),
+                            if enviando {
+                                "Encerrando…"
+                            } else {
+                                "Encerrar o caixa"
+                            },
+                            "Enter",
+                        )
+                        .on_click(
+                            cx.listener(|t, _: &ClickEvent, _, cx| t.enviar_o_encerramento(cx)),
+                        ),
+                    ),
                 )
                 .into_any_element();
         }
@@ -3728,7 +3937,7 @@ fn rodape() -> Div {
 }
 
 /// `Label` em cima, campo embaixo.
-fn rotulado(rotulo: &str, campo: impl IntoElement) -> Div {
+pub(super) fn rotulado(rotulo: &str, campo: impl IntoElement) -> Div {
     // 🧪 O campo é achável pelo rótulo (`caixa-campo-quem-fotografou`): o e2e do
     // ciclo de vida clica onde o operador clica.
     let seletor = format!("caixa-campo-{}", seletor_do_rotulo(rotulo));
@@ -3781,7 +3990,7 @@ fn campo_de_valor(rotulo: &str, campo: &Entity<InputState>, cx: &Context<Caixa>)
     )
 }
 
-fn erro_do_form(erro: String, cx: &Context<Caixa>) -> Div {
+pub(super) fn erro_do_form(erro: String, cx: &Context<Caixa>) -> Div {
     div()
         .text_sm()
         .text_color(cx.theme().danger)

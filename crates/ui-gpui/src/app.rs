@@ -26,6 +26,7 @@ mod guias;
 /// 🖥️ Em qual monitor a tela do cliente abre, quando há mais de um.
 mod monitor_do_cliente;
 mod painel;
+pub(crate) mod portao_do_caixa;
 pub mod resgate;
 mod resolucao_cheia;
 mod retomada;
@@ -569,6 +570,12 @@ pub struct Aplicativo {
     pub(crate) caixa: Entity<Caixa>,
     /// 🧾 O caixa flutuante da galeria — por cima da grade e da revelação.
     pub(crate) caixa_flutuante: Entity<Caixa>,
+    /// ⏰ O portão do caixa do dia (#52, `app/portao_do_caixa.rs`): o último
+    /// que a tela do caixa contou, o que espera a cobrança do painel terminar
+    /// e a retomada que espera o portão soltar.
+    pub(crate) portao_do_caixa: biblioteca_core::caixa::Portao,
+    pub(crate) portao_pendente: Option<biblioteca_core::caixa::Portao>,
+    pub(crate) retomada_espera_o_portao: bool,
     /// ⏱️ O painel de Desempenho, aberto pelo botão do rodapé.
     pub(crate) desempenho: Entity<crate::desempenho::painel::PainelDeDesempenho>,
     /// O rodapé se redesenha quando a janela de Desempenho abre ou fecha, ou
@@ -1057,6 +1064,8 @@ pub struct Aplicativo {
     compilacao_automatica: bool,
     /// O pedido de interrupção já saiu — um por compilação.
     interrupcao_pedida: bool,
+    /// 🚨 A atualização obrigatória instalada já mandou reabrir: uma vez só.
+    reabrindo_a_obrigatoria: bool,
     _atividade_no_teclado: gpui_kit::Subscription,
     /// O canal por onde o resultado da procura e o da instalação voltam.
     avisos_de_versao: (Sender<Aviso>, Receiver<Aviso>),
@@ -1338,6 +1347,7 @@ impl Aplicativo {
                     raiz.veio_do_caixa = true;
                     window.focus(&raiz.foco, cx);
                 }
+                PedidoDoCaixa::Portao(portao) => raiz.receber_o_portao(*portao, window, cx),
             },
         );
         let nova_sessao = cx.new(|cx| NovaSessao::nova(portas_da_nova, window, cx));
@@ -1531,6 +1541,9 @@ impl Aplicativo {
             detalhe,
             caixa,
             caixa_flutuante,
+            portao_do_caixa: biblioteca_core::caixa::Portao::Livre,
+            portao_pendente: None,
+            retomada_espera_o_portao: false,
             desempenho: desempenho.clone(),
             _desempenho_mudou: cx.subscribe(
                 &desempenho,
@@ -1681,6 +1694,7 @@ impl Aplicativo {
             ultima_atividade: cx.background_executor().now(),
             compilacao_automatica: false,
             interrupcao_pedida: false,
+            reabrindo_a_obrigatoria: false,
             _atividade_no_teclado: atividade_no_teclado,
             avisos_de_versao,
             rolagem_das_novidades: gpui_kit::ScrollHandle::new(),
@@ -1789,6 +1803,13 @@ impl Aplicativo {
             // 🧑‍💼 A compilação automática só com o balcão parado.
             if raiz
                 .update(cx, |raiz, cx| raiz.vigiar_o_balcao(cx))
+                .is_err()
+            {
+                break;
+            }
+            // ⏰ A virada do caixa com o app aberto (`app/portao_do_caixa.rs`).
+            if raiz
+                .update(cx, |raiz, cx| raiz.vigiar_o_portao(cx))
                 .is_err()
             {
                 break;
@@ -1951,7 +1972,30 @@ impl Aplicativo {
             self.interrupcao_pedida = false;
         }
         let parado = self.balcao_parado(cx);
-        if self.atualizacao.esperando_o_balcao && !self.atualizacao.instalando && parado {
+        // 🚨 A emergência não espera o balcão parar para compilar, nem é
+        // interrompida quando ele volta; e, instalada, reabre sozinha assim que
+        // ele para (a retomada devolve o operador aonde estava).
+        let obrigatoria = self.atualizacao.obrigatoria();
+        if obrigatoria
+            && parado
+            && matches!(self.atualizacao.aviso, Some(Aviso::Instalada(_)))
+            && !self.reabrindo_a_obrigatoria
+        {
+            self.reabrindo_a_obrigatoria = true;
+            if let Some(v) = &self.atualizacao.versao {
+                crate::telemetria::reagir(
+                    &v.versao,
+                    "reabrir",
+                    Some("atualização obrigatória: reabriu sozinha com o balcão parado".into()),
+                );
+            }
+            self.atender(PedidoDeAtualizacao::Reabrir, cx);
+            return;
+        }
+        if self.atualizacao.esperando_o_balcao
+            && !self.atualizacao.instalando
+            && (parado || obrigatoria)
+        {
             if let Some(v) = &self.atualizacao.versao {
                 crate::telemetria::reagir(
                     &v.versao,
@@ -1967,6 +2011,7 @@ impl Aplicativo {
             && self.compilacao_automatica
             && !self.interrupcao_pedida
             && !parado
+            && !obrigatoria
         {
             self.interrupcao_pedida = true;
             self.atualizador.interromper();
@@ -11098,6 +11143,7 @@ mod testes {
                     data: None,
                     titulo: "Chatbot e Agendamentos".into(),
                     importante: true,
+                    obrigatoria: false,
                     novidades: vec!["o chatbot".into()],
                     por_que_atualizar: "para não perder cliente".into(),
                 }),
@@ -11150,6 +11196,7 @@ mod testes {
             data: Some("2030-01-02".into()),
             titulo: format!("A {v}"),
             importante: false,
+            obrigatoria: false,
             novidades: vec![item.into()],
             por_que_atualizar: "porque sim".into(),
         };

@@ -359,6 +359,11 @@ impl Aplicativo {
         if self.tela_fechada(tela) {
             return;
         }
+        // ⏰ O portão do caixa do dia segura as outras telas.
+        if self.portao_recusa(tela.secao(), cx) {
+            cx.notify();
+            return;
+        }
         // 💬 O chatbot só relê com a tela na frente; escondido, ele só acende
         // as novidades e avisa.
         if (self.tela == Tela::Chatbot) != (tela == Tela::Chatbot) {
@@ -603,6 +608,14 @@ impl Aplicativo {
                         let acesso = self.conta.as_ref().and_then(|c| c.acesso.clone());
                         // 📍 O local da sessão e os caixas leem daqui.
                         crate::acesso_da_conta::definir_acesso(acesso.clone());
+                        // ⏰ O portão do caixa do dia: quem opera o caixa fecha
+                        // o vencido e abre o de hoje antes de qualquer tela —
+                        // e a retomada espera ele soltar.
+                        let passa =
+                            biblioteca_core::caixa::passa_pelo_portao(acesso.as_ref(), pode)
+                                && !super::portao_do_caixa::desligado_no_teste();
+                        self.retomada_espera_o_portao = passa;
+                        self.caixa.update(cx, |t, cx| t.ligar_o_portao(passa, cx));
                         let (restritos, nenhum) = acesso
                             .map(|a| (a.estudios_restritos(), a.sem_estudio()))
                             .unwrap_or_default();
@@ -614,8 +627,11 @@ impl Aplicativo {
                         // desta conta — só agora se sabe quem entrou.
                         self.repor_guias();
                         // 🔁 E a tela, a guia da frente e a foto em que ela
-                        // estava (`app/retomada.rs`).
-                        self.decidir_a_retomada(cx);
+                        // estava (`app/retomada.rs`) — com o portão, só
+                        // depois de ele soltar.
+                        if !passa {
+                            self.decidir_a_retomada(cx);
+                        }
                     }
                     Err(erro) => crate::telemetria::avisar!("⚠️ [Conta] /auth/me: {erro}"),
                 }
@@ -679,6 +695,8 @@ impl Aplicativo {
                     item: SidebarMenuItem::new(item.titulo)
                         .icon(Icon::new(item.icone).size(px(16.)))
                         .active(item.tela == secao)
+                        // ⏰ Com o portão de pé, só o Caixa abre.
+                        .disable(self.portao_segura() && item.tela != Tela::Caixa)
                         .on_click(move |_, window, cx| {
                             let _ = raiz.update(cx, |raiz, cx| raiz.ir_para(destino, window, cx));
                         }),

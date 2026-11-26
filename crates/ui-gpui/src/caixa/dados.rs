@@ -627,6 +627,61 @@ pub struct CaixaDoBalcao {
     pub movimentos: Vec<Movimento>,
     pub vendas: Vec<Venda>,
     pub estornos: Vec<Estorno>,
+    /// ⏰ Até quando o caixa recebe: o próximo horário de corte do estúdio
+    /// depois da abertura (RFC 3339). `None` é a API de antes do corte (#116).
+    pub fechar_ate: Option<String>,
+    /// ⏰ A API já o via vencido quando respondeu.
+    pub esquecido: bool,
+    /// Por que foi fechado depois do corte.
+    pub motivo_do_atraso: Option<String>,
+    /// 🖥️ Em qual caixa do estúdio ele está (CX1, CX2…), e o id dele.
+    pub ponto_de_caixa: Option<String>,
+    pub ponto_de_caixa_id: Option<String>,
+    /// 🔁 Encerrado por outro operador que chegou ao mesmo ponto.
+    pub encerrado_por_troca: bool,
+}
+
+impl CaixaDoBalcao {
+    /// ⏰ Passou do horário de corte e continua aberto. Vale com o app aberto
+    /// na virada: a hora de agora conta, e não só o que a API disse na carga.
+    pub fn vencido(&self, agora: chrono::DateTime<chrono::Utc>) -> bool {
+        self.esquecido
+            || self
+                .fechar_ate
+                .as_deref()
+                .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                .is_some_and(|ate| agora >= ate)
+    }
+
+    /// `"24/11"` — o dia do caixa, que é o da abertura.
+    pub fn dia(&self) -> String {
+        no_estudio(&self.aberto_em).map_or_else(String::new, |d| d.format("%d/%m").to_string())
+    }
+
+    /// `"00:00"` — o horário de corte em que ele devia ter fechado.
+    pub fn hora_do_corte(&self) -> String {
+        self.fechar_ate.as_deref().map(hora_br).unwrap_or_default()
+    }
+}
+
+/// 🖥️ Um caixa cadastrado do estúdio (CX1, CX2…): o balcão é fixado num deles.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct PontoDoCaixa {
+    pub id: String,
+    pub nome: String,
+    #[serde(default = "verdadeiro")]
+    pub ativo: bool,
+}
+
+fn verdadeiro() -> bool {
+    true
+}
+
+/// `GET /pos-venda/caixa/pontos?estudio_id=` — os ativos, na ordem da API.
+pub fn ler_pontos(valor: Value) -> Result<Vec<PontoDoCaixa>, String> {
+    serde_json::from_value::<Vec<PontoDoCaixa>>(valor)
+        .map(|l| l.into_iter().filter(|p| p.ativo).collect())
+        .map_err(|e| ilegivel("Os caixas do estúdio", e))
 }
 
 #[derive(Deserialize)]
@@ -654,6 +709,18 @@ struct CaixaDaApi {
     vendas: Vec<VendaDaApi>,
     #[serde(default)]
     estornos: Vec<EstornoDaApi>,
+    #[serde(default)]
+    fechar_ate: Option<String>,
+    #[serde(default)]
+    esquecido: bool,
+    #[serde(default)]
+    motivo_do_atraso: Option<String>,
+    #[serde(default)]
+    ponto_de_caixa: Option<String>,
+    #[serde(default)]
+    ponto_de_caixa_id: Option<String>,
+    #[serde(default)]
+    encerrado_por_troca: bool,
 }
 
 fn caixa_da_api(c: CaixaDaApi) -> CaixaDoBalcao {
@@ -680,6 +747,12 @@ fn caixa_da_api(c: CaixaDaApi) -> CaixaDoBalcao {
             .collect(),
         vendas: c.vendas.into_iter().map(Into::into).collect(),
         estornos: c.estornos.into_iter().map(Into::into).collect(),
+        fechar_ate: c.fechar_ate.filter(|t| !t.is_empty()),
+        esquecido: c.esquecido,
+        motivo_do_atraso: c.motivo_do_atraso,
+        ponto_de_caixa: c.ponto_de_caixa,
+        ponto_de_caixa_id: c.ponto_de_caixa_id,
+        encerrado_por_troca: c.encerrado_por_troca,
     }
 }
 
@@ -987,6 +1060,46 @@ mod testes {
         assert_eq!(c.movimentos[0].tipo, TipoDeMovimento::Suprimento);
         assert_eq!(c.vendas.len(), 1);
         assert_eq!(c.primeira_contagem, None);
+        // A API de antes do corte (#116): o caixa nunca vence.
+        assert_eq!(c.fechar_ate, None);
+        assert!(!c.vencido(chrono::Utc::now()));
+    }
+
+    #[test]
+    fn o_caixa_vence_no_horario_de_corte_mesmo_com_o_app_aberto() {
+        let c = ler_caixa(json!({
+            "id": "c", "estudio_id": "e", "operador_email": "op@x",
+            "fundo_de_troco_centavos": 0, "aberto_em": "2026-11-24T12:05:00Z",
+            "fechar_ate": "2026-11-25T03:00:00Z", "esquecido": false,
+            "ponto_de_caixa": "CX1", "ponto_de_caixa_id": "p1"
+        }))
+        .unwrap();
+        let antes = chrono::DateTime::parse_from_rfc3339("2026-11-25T02:59:00Z").unwrap();
+        let na_hora = chrono::DateTime::parse_from_rfc3339("2026-11-25T03:00:00Z").unwrap();
+        assert!(!c.vencido(antes.into()));
+        assert!(c.vencido(na_hora.into()));
+        // O dia e a hora no fuso do estúdio: aberto às 09:05 de 24/11, corte à meia-noite.
+        assert_eq!(c.dia(), "24/11");
+        assert_eq!(c.hora_do_corte(), "00:00");
+        assert_eq!(c.ponto_de_caixa.as_deref(), Some("CX1"));
+        // O que a API já viu vencido vale, seja qual for a hora daqui.
+        let esquecido = CaixaDoBalcao {
+            esquecido: true,
+            ..c
+        };
+        assert!(esquecido.vencido(antes.into()));
+    }
+
+    #[test]
+    fn os_pontos_do_estudio_vem_sem_os_inativos() {
+        let pontos = ler_pontos(json!([
+            { "id": "p1", "estudio_id": "e", "nome": "CX1", "ativo": true },
+            { "id": "p2", "estudio_id": "e", "nome": "CX2", "ativo": false },
+            { "id": "p3", "nome": "CX3" }
+        ]))
+        .unwrap();
+        let nomes: Vec<_> = pontos.iter().map(|p| p.nome.as_str()).collect();
+        assert_eq!(nomes, ["CX1", "CX3"]);
     }
 
     #[test]

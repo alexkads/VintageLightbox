@@ -515,9 +515,15 @@ pub fn anuncio_do_evento(
         .get("importante")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
-    Some(crate::atualizacao::novidades::Novidades::do_anuncio(
-        versao, titulo, importante,
-    ))
+    // 🚨 A emergência também pode vir no anúncio (a API que a conhecer).
+    let obrigatoria = dados
+        .get("obrigatoria")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    Some(crate::atualizacao::novidades::Novidades {
+        obrigatoria,
+        ..crate::atualizacao::novidades::Novidades::do_anuncio(versao, titulo, importante)
+    })
 }
 
 /// Esvazia o depósito quando entra relato novo, quando o fluxo abre e a cada

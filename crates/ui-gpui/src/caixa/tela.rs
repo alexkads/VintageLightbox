@@ -184,6 +184,9 @@ pub fn init(cx: &mut App) {
 pub enum PedidoDoCaixa {
     /// "Abrir sessão": a galeria da sessão escolhida, com a volta para cá.
     AbrirSessao(String),
+    /// ⏰ O portão do caixa do dia mudou (ou a primeira carga chegou): a raiz
+    /// segura as outras telas enquanto ele não está livre.
+    Portao(regras::Portao),
 }
 
 impl EventEmitter<PedidoDoCaixa> for Caixa {}
@@ -222,6 +225,9 @@ pub(super) struct Vista {
     pub fotos: Vec<FotoDoCupom>,
     pub faixas: Vec<FaixaDoCatalogo>,
     pub padrao: Faixa,
+    /// 🖥️ Os caixas cadastrados do estúdio (CX1, CX2…), lidos quando o
+    /// diálogo de abrir aparece (`caixa/ponto.rs`).
+    pub pontos: Vec<dados::PontoDoCaixa>,
 }
 
 impl Vista {
@@ -251,7 +257,15 @@ impl Vista {
             tem_estudio: self.estudio_id.is_some(),
             indisponivel: self.indisponivel,
             aberto: self.caixa.is_some(),
+            vencido: self.caixa_vencido(),
         }
+    }
+
+    /// ⏰ O caixa na tela passou do horário de corte — pela hora de agora.
+    pub fn caixa_vencido(&self) -> bool {
+        self.caixa
+            .as_ref()
+            .is_some_and(|c| c.vencido(chrono::Utc::now()))
     }
 
     fn estudio(&self) -> Option<&EstudioDoCaixa> {
@@ -398,6 +412,9 @@ pub struct Caixa {
     pub(super) leituras_soltas: usize,
     /// Quem tinha o foco antes de o diálogo abrir — volta a ele ao fechar.
     pub(super) foco_antes: crate::modal::DevolverFoco,
+    /// ⏰ O portão do caixa do dia (`caixa/portao.rs`): ligado para a conta
+    /// que passa por ele, o último que a raiz soube e o motivo do atraso.
+    pub(super) portao: super::portao::EstadoDoPortao,
 }
 
 /// O último trio escolhido — o balcão costuma repeti-lo o dia inteiro. No site
@@ -504,6 +521,7 @@ impl Caixa {
             lote: None,
             leituras_soltas: 0,
             foco_antes: crate::modal::DevolverFoco::default(),
+            portao: Default::default(),
         }
     }
 
@@ -685,6 +703,7 @@ impl Caixa {
                 self.vista = Some(self.montar_vista(carga));
             }
             mudou = true;
+            self.contar_o_portao(cx);
         }
         if mudou {
             // A carga ou a releitura que segurava a vez chegou.
@@ -917,6 +936,14 @@ impl Caixa {
             }
         }
 
+        // 🖥️ Os caixas do estúdio ficam de uma carga para a outra: o diálogo
+        // de abrir os relê quando aparece.
+        let pontos = self
+            .vista
+            .as_ref()
+            .filter(|v| v.estudio_id == estudio_id)
+            .map(|v| v.pontos.clone())
+            .unwrap_or_default();
         Vista {
             estudios,
             estudio_id,
@@ -931,6 +958,7 @@ impl Caixa {
             fotos,
             faixas: faixas_da_vista,
             padrao: padrao_da_vista,
+            pontos,
         }
     }
 
@@ -1008,6 +1036,7 @@ impl Caixa {
                 tem_estudio: false,
                 indisponivel: false,
                 aberto: false,
+                vencido: false,
             },
             Vista::situacao,
         )
@@ -1036,6 +1065,11 @@ impl Caixa {
         match desfecho {
             Desfecho::Seguir => self.abrir_dialogo(seguir, window, cx),
             Desfecho::AbrirCaixa => self.abrir_dialogo(TipoDeDialogo::Abrir, window, cx),
+            // ⏰ Vender num caixa vencido: o fechamento abre, com o motivo do atraso.
+            Desfecho::FecharOVencido => {
+                self.avisar(regras::CAIXA_VENCIDO, TipoDeRecado::Informacao, cx);
+                self.abrir_dialogo(TipoDeDialogo::Fechar, window, cx);
+            }
             Desfecho::Erro(frase) => self.avisar(frase, TipoDeRecado::Erro, cx),
             Desfecho::Aviso(frase) => self.avisar(frase, TipoDeRecado::Informacao, cx),
             Desfecho::PessoasAntes => {
@@ -1261,6 +1295,11 @@ impl Render for Caixa {
         self.aplicar_pendencias_do_dialogo(window, cx);
         self.avisos_em_toast(window, cx);
         let (fundo, texto) = (cx.theme().background, cx.theme().foreground);
+        // ⏰ O caixa de ontem aberto, ou nenhum: o portão no lugar do PDV.
+        let portao = self.portao_agora();
+        if portao != regras::Portao::Livre {
+            return self.render_portao(portao, window, cx);
+        }
         let colunas = self.colunas_do_caixa(cx);
         let seta = |id, lado, dica, cx: &mut Context<Self>| {
             use crate::docas::Lado;
@@ -1460,10 +1499,21 @@ impl Caixa {
             Some(v) => {
                 let descricao = match (v.estudio(), &v.caixa) {
                     (None, _) => "Nenhum estúdio ativo no cadastro.".to_string(),
-                    (Some(e), Some(c)) => format!(
-                        "{} · aberto às {} por {} · fundo de troco {}",
+                    (Some(e), Some(c)) if v.caixa_vencido() => format!(
+                        "{} · o caixa de {} passou do fechamento das {}: feche-o (F8) e abra o de hoje para vender.",
                         e.nome,
+                        c.dia(),
+                        c.hora_do_corte()
+                    ),
+                    (Some(e), Some(c)) => format!(
+                        "{} · {}aberto às {} de {} por {} · fundo de troco {}",
+                        e.nome,
+                        c.ponto_de_caixa
+                            .as_deref()
+                            .map(|p| format!("{p} · "))
+                            .unwrap_or_default(),
                         dados::hora_br(&c.aberto_em),
+                        c.dia(),
                         c.operador_email,
                         dinheiro::formatar(c.fundo_de_troco)
                     ),
@@ -1476,8 +1526,10 @@ impl Caixa {
                 let nome = crate::acesso_da_conta::nome_do_caixa(v.local_do_caixa);
                 let (situacao, cor) = if v.indisponivel {
                     (format!("{nome} indisponível"), cx.theme().danger)
-                } else if v.caixa.is_some() {
-                    (format!("{nome} aberto"), esmeralda_500())
+                } else if let Some(c) = v.caixa.as_ref().filter(|_| v.caixa_vencido()) {
+                    (format!("{nome} de {} aberto", c.dia()), cores::atencao())
+                } else if let Some(c) = &v.caixa {
+                    (format!("{nome} de {} aberto", c.dia()), esmeralda_500())
                 } else {
                     (format!("{nome} fechado"), apagado)
                 };

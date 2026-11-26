@@ -426,6 +426,78 @@ fn f8_com_o_caixa_fechado_abre_e_grava_o_fundo(cx: &mut TestAppContext) {
     });
 }
 
+/// ⏰ #52: sem caixa aberto, o portão pede o de hoje; aberto, solta.
+#[gpui_kit::test]
+fn o_portao_pede_o_caixa_de_hoje_e_solta_quando_ele_abre(cx: &mut TestAppContext) {
+    use biblioteca_core::caixa::Portao;
+    let publicador = Arc::new(PublicadorDoCaixa::default());
+    let j = janela(cx, publicador.clone());
+    com(cx, &j, |t, _, cx| t.ligar_o_portao(true, cx));
+    colher(cx, &j);
+    com(cx, &j, |t, w, cx| {
+        assert_eq!(t.portao_agora(), Portao::AbrirODeHoje);
+        t.abrir_ou_fechar(w, cx);
+        assert_eq!(t.dialogo_aberto(), Some("Abrir"));
+        t.preencher("fundo", "0,00", w, cx);
+    });
+    // A API passa a ter o caixa de hoje aberto.
+    *publicador.caixa.lock().unwrap() = caixa_aberto();
+    com(cx, &j, |t, w, cx| t.confirmar(w, cx));
+    colher(cx, &j);
+    com(cx, &j, |t, _, _| {
+        assert_eq!(t.portao_agora(), Portao::Livre)
+    });
+    // Desligado (o dono, ou a conta sem o caixa), nunca segura.
+    *publicador.caixa.lock().unwrap() = Value::Null;
+    com(cx, &j, |t, _, cx| t.ligar_o_portao(false, cx));
+    colher(cx, &j);
+    com(cx, &j, |t, _, _| {
+        assert_eq!(t.portao_agora(), Portao::Livre)
+    });
+}
+
+/// ⏰ #52: o caixa de um dia passado não vende, e o fechamento dele pede o
+/// motivo do atraso — que vai à API.
+#[gpui_kit::test]
+fn o_caixa_vencido_vira_portao_e_o_fechamento_pede_o_motivo(cx: &mut TestAppContext) {
+    use biblioteca_core::caixa::{Portao, SEM_MOTIVO_DO_ATRASO};
+    let publicador = Arc::new(PublicadorDoCaixa::default());
+    let mut vencido = caixa_aberto();
+    vencido["fechar_ate"] = json!("2026-09-17T03:00:00Z");
+    *publicador.caixa.lock().unwrap() = vencido;
+    let j = janela(cx, publicador.clone());
+    com(cx, &j, |t, _, cx| t.ligar_o_portao(true, cx));
+    colher(cx, &j);
+    com(cx, &j, |t, w, cx| {
+        assert_eq!(t.portao_agora(), Portao::FecharOVencido);
+        // Sem o motivo, a página do portão recusa a contagem.
+        t.contar_o_vencido(w, cx);
+        assert_eq!(t.dialogo_aberto(), None);
+        assert_eq!(t.portao.erro.as_deref(), Some(SEM_MOTIVO_DO_ATRASO));
+        // F6 (sangria) num caixa vencido leva ao fechamento.
+        t.com_caixa(TipoDeDialogo::Movimento, w, cx);
+        assert_eq!(t.dialogo_aberto(), Some("Fechamento"));
+        t.preencher("dinheiro", "100,00", w, cx);
+        t.confirmar(w, cx);
+    });
+    colher(cx, &j);
+    com(cx, &j, |t, w, cx| {
+        // Conferido; fechar sem o motivo é recusado aqui, antes da API.
+        t.confirmar(w, cx);
+        assert_eq!(t.erro_no_dialogo().as_deref(), Some(SEM_MOTIVO_DO_ATRASO));
+        t.preencher("observacao", "esqueci de fechar", w, cx);
+        t.confirmar(w, cx);
+    });
+    colher(cx, &j);
+    let fechar = publicador
+        .gravacoes()
+        .into_iter()
+        .find(|p| p.caminho == "/pos-venda/caixa/fechar")
+        .expect("o fechamento saiu");
+    let corpo = fechar.corpo.expect("o corpo do fechamento");
+    assert_eq!(corpo["motivo_do_atraso"], "esqueci de fechar", "{corpo}");
+}
+
 #[gpui_kit::test]
 fn f4_pede_os_nomes_antes_e_a_venda_sai_como_o_backend_espera(cx: &mut TestAppContext) {
     let publicador = Arc::new(PublicadorDoCaixa::default());

@@ -989,7 +989,55 @@ pub struct SituacaoDoPdv {
     /// A API não respondeu: não dá para saber se o caixa está aberto.
     pub indisponivel: bool,
     pub aberto: bool,
+    /// ⏰ O caixa aberto passou do horário de corte do estúdio (dono,
+    /// 25/11/2026: *"às 00:00 o caixa precisa ser fechado!"*): não vende mais,
+    /// e fechar pede o motivo do atraso.
+    pub vencido: bool,
 }
+
+/// ⏰ **O portão do caixa do dia** (#52): em que pé o caixa está quando o
+/// operador quer começar a trabalhar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Portao {
+    /// O caixa de hoje está aberto, ou a conta não passa pelo portão.
+    Livre,
+    /// O caixa aberto passou do horário de corte: fecha antes de tudo.
+    FecharOVencido,
+    /// Nenhum caixa aberto: abre o de hoje antes de começar.
+    AbrirODeHoje,
+}
+
+/// Quem passa pelo portão: a conta que opera o caixa, **inclusive o
+/// administrador** — o balcão de Gramado vende com uma conta `ADMIN` sem perfil
+/// (25/11/2026, 219 vendas num caixa aberto desde 20/10). Só o dono fica de
+/// fora: ele administra, e o caixa dele é quando ele quiser.
+///
+/// Sem `acesso` (a API de antes dos perfis) ninguém passa: na dúvida, o portão
+/// não segura o balcão — quem recusa a venda num caixa vencido é a API.
+pub fn passa_pelo_portao(acesso: Option<&crate::acesso::Acesso>, dono: bool) -> bool {
+    !dono && acesso.is_some_and(|a| a.pode(crate::acesso::CAIXA))
+}
+
+/// O portão, pela situação do caixa. Sem estúdio ou sem resposta da API, não
+/// segura: o balcão não para por não saber.
+pub fn portao(passa: bool, s: SituacaoDoPdv) -> Portao {
+    if !passa || !s.tem_estudio || s.indisponivel {
+        Portao::Livre
+    } else if s.aberto && s.vencido {
+        Portao::FecharOVencido
+    } else if !s.aberto {
+        Portao::AbrirODeHoje
+    } else {
+        Portao::Livre
+    }
+}
+
+/// A frase de quem tenta vender num caixa vencido: a tela abre o fechamento.
+pub const CAIXA_VENCIDO: &str =
+    "Este caixa passou do horário de fechamento. Feche-o e abra o de hoje para vender.";
+
+/// A frase do fechamento atrasado sem o motivo — a mesma da API.
+pub const SEM_MOTIVO_DO_ATRASO: &str = "Diga por que o caixa não foi fechado no horário.";
 
 /// O que um gesto do PDV resolve fazer.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -998,6 +1046,8 @@ pub enum Desfecho {
     Seguir,
     /// O caixa está fechado: abre o diálogo de abrir.
     AbrirCaixa,
+    /// ⏰ O caixa aberto passou do horário de corte: abre o fechamento.
+    FecharOVencido,
     /// Uma frase de erro, e nada abre.
     Erro(String),
     /// Uma frase informativa, e nada abre.
@@ -1018,6 +1068,8 @@ pub fn precisa_caixa(s: SituacaoDoPdv) -> Desfecho {
         Desfecho::Erro(SEM_RESPOSTA.into())
     } else if !s.aberto {
         Desfecho::AbrirCaixa
+    } else if s.vencido {
+        Desfecho::FecharOVencido
     } else {
         Desfecho::Seguir
     }
@@ -1728,7 +1780,66 @@ mod testes {
             tem_estudio,
             indisponivel,
             aberto,
+            vencido: false,
         }
+    }
+
+    fn vencido() -> SituacaoDoPdv {
+        SituacaoDoPdv {
+            vencido: true,
+            ..situacao(true, false, true)
+        }
+    }
+
+    #[test]
+    fn o_caixa_vencido_nao_vende_e_leva_ao_fechamento() {
+        assert_eq!(precisa_caixa(vencido()), Desfecho::FecharOVencido);
+        assert_eq!(
+            finalizar(vencido(), true, 1, true),
+            Desfecho::FecharOVencido
+        );
+        // F8 segue para o fechamento, como em qualquer caixa aberto.
+        assert_eq!(abrir_ou_fechar(vencido()), Desfecho::Seguir);
+    }
+
+    #[test]
+    fn o_portao_fecha_o_vencido_abre_o_de_hoje_e_solta_o_resto() {
+        assert_eq!(portao(true, vencido()), Portao::FecharOVencido);
+        assert_eq!(
+            portao(true, situacao(true, false, false)),
+            Portao::AbrirODeHoje
+        );
+        assert_eq!(portao(true, situacao(true, false, true)), Portao::Livre);
+        // Quem não passa pelo portão, a API sem resposta e a falta de estúdio
+        // nunca seguram o balcão.
+        assert_eq!(portao(false, vencido()), Portao::Livre);
+        assert_eq!(portao(true, situacao(true, true, false)), Portao::Livre);
+        assert_eq!(portao(true, situacao(false, false, false)), Portao::Livre);
+    }
+
+    #[test]
+    fn passa_pelo_portao_quem_opera_o_caixa_menos_o_dono() {
+        use crate::acesso::{Acesso, CAIXA, OPERAR_O_BALCAO};
+        let funcionario = Acesso {
+            perfil: Some("Balcão".into()),
+            perfil_ativo: true,
+            permissoes: vec![OPERAR_O_BALCAO.into(), CAIXA.into()],
+            ..Acesso::default()
+        };
+        let administrador = Acesso {
+            admin: true,
+            ..Acesso::default()
+        };
+        let sem_caixa = Acesso {
+            permissoes: vec![OPERAR_O_BALCAO.into()],
+            ..funcionario.clone()
+        };
+        assert!(passa_pelo_portao(Some(&funcionario), false));
+        // 🔑 O administrador também: Gramado vende com uma conta ADMIN.
+        assert!(passa_pelo_portao(Some(&administrador), false));
+        assert!(!passa_pelo_portao(Some(&administrador), true));
+        assert!(!passa_pelo_portao(Some(&sem_caixa), false));
+        assert!(!passa_pelo_portao(None, false));
     }
 
     #[test]
