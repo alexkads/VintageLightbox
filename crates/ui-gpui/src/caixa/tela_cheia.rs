@@ -322,6 +322,14 @@ impl Caixa {
             Desfecho::Erro(frase) => self.avisar(frase, TipoDeRecado::Erro, cx),
             Desfecho::Aviso(frase) => self.avisar(frase, TipoDeRecado::Informacao, cx),
             Desfecho::AbrirCaixa => self.focar_regiao("Abrir", window, cx),
+            Desfecho::FecharOVencido => {
+                self.avisar(regras::CAIXA_VENCIDO, TipoDeRecado::Informacao, cx);
+                if self.tem_form("Fechamento") {
+                    self.focar_regiao("Fechamento", window, cx);
+                } else {
+                    self.abrir_dialogo(TipoDeDialogo::Fechar, window, cx);
+                }
+            }
             Desfecho::PessoasAntes => {
                 self.avisar(
                     "Escolha quem fotografou, quem atendeu e quem auxiliou.",

@@ -587,6 +587,7 @@ mod testes {
             data: None,
             titulo: "Chatbot e Agendamentos".into(),
             importante: true,
+            obrigatoria: false,
             novidades: vec!["o chatbot".into()],
             por_que_atualizar: "para não perder cliente".into(),
         })

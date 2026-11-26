@@ -76,6 +76,12 @@ pub struct Novidades {
     /// Atualização que não deve esperar — a faixa fica em destaque.
     #[serde(default)]
     pub importante: bool,
+    /// 🚨 **Atualização de emergência** (dono, 25/11/2026: *"precisa ser tratada
+    /// como obrigatória e com emergência"*): compila na hora, sem esperar o
+    /// balcão parar e sem "Depois", e reabre sozinha assim que ele para. Só
+    /// obedece o app que conhece o campo — a 0.1.203 em diante.
+    #[serde(default)]
+    pub obrigatoria: bool,
     /// O que mudou, um item por linha.
     pub novidades: Vec<String>,
     /// Por que vale atualizar agora.
@@ -223,6 +229,7 @@ impl Novidades {
             data: None,
             titulo,
             importante,
+            obrigatoria: false,
             novidades: Vec::new(),
             por_que_atualizar: String::new(),
         }
@@ -420,6 +427,12 @@ mod testes {
         let sem_importante =
             ler(r#"{"versao":"1.0","titulo":"t","novidades":[],"por_que_atualizar":"p"}"#).unwrap();
         assert!(!sem_importante.importante, "ausente é não importante");
+        assert!(!sem_importante.obrigatoria, "ausente é não obrigatória");
+        let emergencia = ler(
+            r#"{"versao":"1.0","titulo":"t","obrigatoria":true,"novidades":[],"por_que_atualizar":"p"}"#,
+        )
+        .unwrap();
+        assert!(emergencia.obrigatoria);
     }
 
     #[test]

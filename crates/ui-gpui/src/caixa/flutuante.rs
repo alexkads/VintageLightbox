@@ -1556,9 +1556,19 @@ impl Caixa {
             ("Sessão sem estúdio".into(), cores::atencao())
         } else if v.indisponivel {
             ("Caixa indisponível".into(), cx.theme().danger)
+        } else if let Some(c) = v.caixa.as_ref().filter(|_| v.caixa_vencido()) {
+            // ⏰ O dia fica à vista: o caixa de ontem não passa pelo de hoje.
+            (
+                format!("Caixa de {} · passou do fechamento", c.dia()),
+                cores::atencao(),
+            )
         } else if let Some(c) = &v.caixa {
             (
-                format!("Caixa aberto · {}", dados::hora_br(&c.aberto_em)),
+                format!(
+                    "Caixa de {} · aberto às {}",
+                    c.dia(),
+                    dados::hora_br(&c.aberto_em)
+                ),
                 gpui_kit::rgb(0x00bc7d).into(),
             )
         } else {

@@ -63,6 +63,7 @@ use crate::revelacao::tela::Revelacao;
 use crate::sessoes::detalhe::Detalhe;
 
 mod operacional;
+mod portao;
 mod sem_internet;
 mod tenebroso;
 mod triste;
@@ -687,6 +688,13 @@ struct Cena {
 
 /// Monta o cenário `rotulo` com `fotos` no cartão e entra na conta.
 fn preparar(cx: &mut TestAppContext, rotulo: &str, fotos: u32) -> Cena {
+    preparar_com_portao(cx, rotulo, fotos, false)
+}
+
+/// ⏰ O mesmo, escolhendo se o portão do caixa do dia segura a conta: só o
+/// cenário do portão ([`portao`]) o liga.
+fn preparar_com_portao(cx: &mut TestAppContext, rotulo: &str, fotos: u32, portao: bool) -> Cena {
+    crate::app::portao_do_caixa::desligar_no_teste(!portao);
     let servidor = ler_o_servidor();
     let cartao = tempfile::TempDir::new().expect("a pasta do cartão");
     let arquivos = gravar_o_cartao(cartao.path(), fotos);
@@ -744,7 +752,7 @@ fn preparar(cx: &mut TestAppContext, rotulo: &str, fotos: u32) -> Cena {
         "a conta entra e a lista de sessões carrega",
         |b, cx| {
             b.app(cx, |app, _w, _cx| {
-                app.entrou() && app.tela() == Tela::Sessoes
+                app.entrou() && (portao || app.tela() == Tela::Sessoes)
             })
         },
     );

@@ -1,9 +1,14 @@
 {
-  "versao": "0.1.202",
-  "titulo": "O caixa aberto acompanha o que o site confirma.",
+  "versao": "0.1.203",
+  "titulo": "Caixa do dia: o app pede o caixa de hoje antes de começar.",
   "importante": true,
+  "obrigatoria": true,
   "novidades": [
-    "Quando você marca B (levar) numa foto que ainda está subindo, o caixa que já está aberto atualiza sozinho assim que o site confirma: o cupom passa a cobrar todas as fotos que o cliente leva, sem fechar e abrir o caixa."
+    "Ao entrar, o app pede o caixa do dia antes de qualquer outra tela. Se o caixa de um dia anterior ficou aberto, você fecha ele primeiro, com o motivo do atraso, e depois abre o de hoje.",
+    "O caixa fecha no horário do estúdio (à meia-noite, se nada foi mudado). Depois desse horário o caixa velho não vende mais: a tecla de vender leva ao fechamento.",
+    "O caixa mostra o dia em que foi aberto, no alto da tela do caixa e no painel da galeria.",
+    "No Abrir caixa, dá para fixar este computador num caixa do estúdio (CX1, CX2…). Se outra pessoa deixou o caixa dela aberto neste computador, você conta a gaveta e encerra o caixa dela antes de abrir o seu.",
+    "As próximas atualizações de emergência instalam sozinhas, sem esperar o balcão parar."
   ],
-  "por_que_atualizar": "Para o caixa aberto não ficar com o valor de antes e cobrar menos fotos do que o cliente leva."
+  "por_que_atualizar": "Para cada dia ter a sua conta no caixa, e o dono receber o resumo de cada fechamento."
 }

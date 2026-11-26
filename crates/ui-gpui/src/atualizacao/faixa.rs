@@ -133,7 +133,16 @@ impl Estado {
         self.versao
             .as_ref()
             .and_then(|v| v.novidades.as_ref())
-            .is_some_and(|n| n.importante)
+            .is_some_and(|n| n.importante || n.obrigatoria)
+    }
+
+    /// 🚨 A versão anunciada é de emergência: não espera o balcão parar, não
+    /// tem "Depois", e reabre sozinha quando o balcão para.
+    pub fn obrigatoria(&self) -> bool {
+        self.versao
+            .as_ref()
+            .and_then(|v| v.novidades.as_ref())
+            .is_some_and(|n| n.obrigatoria)
     }
 
     /// A versão que veio só do anúncio do servidor não tem a lista: o botão
@@ -241,6 +250,12 @@ impl Estado {
             Aviso::Disponivel { versao, .. } if self.instalando => {
                 format!("Baixando a versão {}…", versao.versao)
             }
+            Aviso::Disponivel { versao, .. } if self.obrigatoria() => {
+                format!(
+                    "Atualização obrigatória {}: instalando agora, o app continua funcionando",
+                    versao.versao
+                )
+            }
             Aviso::Disponivel { versao, .. } if self.esperando_o_balcao => {
                 // Curta de propósito: a faixa mora no rodapé, e o fim da frase
                 // (o "quando") é o que não pode sumir no corte.
@@ -269,6 +284,9 @@ impl Estado {
                     _ => abertura,
                 }
             }
+            Aviso::Instalada(versao) if self.obrigatoria() => format!(
+                "Atualização obrigatória {versao} instalada: o app reabre sozinho quando o balcão parar — ou reabra agora."
+            ),
             Aviso::Instalada(versao) if self.jeito() == JeitoDeAtualizar::Compilar => format!(
                 "Versão {versao} instalada. Ela entra na próxima vez que o app abrir — ou reabra agora."
             ),
@@ -369,7 +387,10 @@ pub fn botoes(estado: &Estado) -> Vec<(&'static str, &'static str, bool, Pedido)
             if estado.tem_novidades() {
                 lista.push(novidades);
             }
-            lista.push(("atualizar-depois", "Depois", false, Pedido::Dispensar));
+            // 🚨 A emergência não se dispensa.
+            if !estado.obrigatoria() {
+                lista.push(("atualizar-depois", "Depois", false, Pedido::Dispensar));
+            }
         }
         Aviso::Instalada(_) => {
             lista.push(("atualizar-reabrir", "Reabrir agora", true, Pedido::Reabrir));
@@ -931,6 +952,7 @@ mod testes {
                     data: None,
                     titulo: "Chatbot e Agendamentos".into(),
                     importante,
+                    obrigatoria: false,
                     novidades: vec!["o chatbot".into()],
                     por_que_atualizar: "para não perder cliente".into(),
                 }),
@@ -947,6 +969,38 @@ mod testes {
 
     fn rotulos(e: &Estado) -> Vec<&'static str> {
         botoes(e).into_iter().map(|(_, r, _, _)| r).collect()
+    }
+
+    /// 🚨 A emergência (dono, 25/11/2026): sem "Depois", instalando já, e a
+    /// instalada avisa que reabre sozinha.
+    #[test]
+    fn a_atualizacao_obrigatoria_nao_se_dispensa() {
+        let Aviso::Disponivel {
+            mut versao,
+            automatico,
+        } = para_compilar("0.2.0", true, true)
+        else {
+            unreachable!()
+        };
+        if let Some(n) = versao.novidades.as_mut() {
+            n.obrigatoria = true;
+        }
+        let mut estado = com(Aviso::Disponivel { versao, automatico });
+        assert!(estado.obrigatoria());
+        assert!(
+            !rotulos(&estado).contains(&"Depois"),
+            "{:?}",
+            rotulos(&estado)
+        );
+        assert_eq!(
+            estado.texto().as_deref(),
+            Some("Atualização obrigatória 0.2.0: instalando agora, o app continua funcionando")
+        );
+        estado.receber(Aviso::Instalada("0.2.0".into()));
+        assert!(estado
+            .texto()
+            .is_some_and(|t| t.contains("reabre sozinho quando o balcão parar")));
+        assert_eq!(rotulos(&estado).first(), Some(&"Reabrir agora"));
     }
 
     #[test]

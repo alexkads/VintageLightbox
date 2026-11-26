@@ -20,6 +20,10 @@ mod flutuante;
 /// Os gestos do caixa para os cenários de ponta a ponta. Só testes.
 #[cfg(test)]
 mod para_e2e;
+/// 🖥️ O caixa deste balcão (CX1, CX2…) e o encerramento na troca de operador.
+mod ponto;
+/// ⏰ O portão do caixa do dia (#52): fechar o vencido e abrir o de hoje antes de começar.
+mod portao;
 pub mod tela;
 mod tela_cheia;
 
