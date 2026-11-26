@@ -608,12 +608,11 @@ impl Aplicativo {
                         let acesso = self.conta.as_ref().and_then(|c| c.acesso.clone());
                         // 📍 O local da sessão e os caixas leem daqui.
                         crate::acesso_da_conta::definir_acesso(acesso.clone());
-                        // ⏰ O portão do caixa do dia: quem opera o caixa fecha
-                        // o vencido e abre o de hoje antes de qualquer tela —
-                        // e a retomada espera ele soltar.
-                        let passa =
-                            biblioteca_core::caixa::passa_pelo_portao(acesso.as_ref(), pode)
-                                && !super::portao_do_caixa::desligado_no_teste();
+                        // ⏰ O portão do caixa do dia: quem opera o caixa, o dono
+                        // inclusive, fecha o vencido e abre o de hoje antes de
+                        // qualquer tela — e a retomada espera ele soltar.
+                        let passa = biblioteca_core::caixa::passa_pelo_portao(acesso.as_ref())
+                            && !super::portao_do_caixa::desligado_no_teste();
                         self.retomada_espera_o_portao = passa;
                         self.caixa.update(cx, |t, cx| t.ligar_o_portao(passa, cx));
                         let (restritos, nenhum) = acesso
