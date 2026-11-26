@@ -589,6 +589,13 @@ fn tentar_o_rpm(
     if !ajudante.exists() {
         return Err("esta máquina não tem o RPM (sem o ajudante)".into());
     }
+    // 🔐 Só pelo pkexec de verdade: se o polkit pediria senha (a sessão não é
+    // a ativa da máquina, ou a regra não carregou), uma janela de senha de
+    // administrador apareceria no meio do balcão. Pergunta antes, sem
+    // interação, e segue pelo script (achado na fedora, 26/11).
+    if programa == "pkexec" && !liberado_sem_senha() {
+        return Err("o polkit pediria senha nesta sessão".into());
+    }
     let saida = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -635,6 +642,23 @@ fn tentar_o_rpm(
             None => std::thread::sleep(Duration::from_millis(300)),
         }
     }
+}
+
+/// O polkit libera o ajudante para este processo sem perguntar nada?
+/// (`pkcheck` sem `-u` responde 0 só quando não há o que autenticar.)
+fn liberado_sem_senha() -> bool {
+    std::process::Command::new("pkcheck")
+        .args([
+            "--action-id",
+            "br.com.recordarfotos.vintagelightbox.atualizar",
+            "--process",
+            &std::process::id().to_string(),
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
 }
 
 /// 🔗 Depois do RPM, o atalho do script não pode abrir a cópia velha: o
