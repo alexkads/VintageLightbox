@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!-- O VintageLightbox instala a própria versão nova por RPM (#55): só o
+     ajudante /usr/libexec/vintagelightbox/atualizar-rpm, sem senha para quem
+     está na frente da máquina. Ele só aceita uma versão e só instala o
+     pacote oficial (ver o comentário dele). -->
+<policyconfig>
+  <vendor>RecordarFotos</vendor>
+  <action id="br.com.recordarfotos.vintagelightbox.atualizar">
+    <description>Atualizar o VintageLightbox</description>
+    <message>O VintageLightbox quer instalar a versão nova</message>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/libexec/vintagelightbox/atualizar-rpm</annotate>
+  </action>
+</policyconfig>

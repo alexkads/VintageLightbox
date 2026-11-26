@@ -1,0 +1,73 @@
+#!/usr/bin/bash
+#
+# 📦 O ajudante da atualização por RPM (#55) — instalado pelo próprio RPM em
+# /usr/libexec/vintagelightbox/atualizar-rpm e chamado pelo app com `pkexec`,
+# que o roda como root sem pedir senha para a sessão ativa (a regra do polkit
+# br.com.recordarfotos.vintagelightbox.atualizar).
+#
+#   atualizar-rpm <versão>      ex.: atualizar-rpm 0.1.205
+#
+# A ordem é a do dono (26/11/2026): 1) o RPM do Cloudflare R2, 2) o RPM do
+# GitHub Release. Se nenhum servir, sai com 3 e o app compila pelo script.
+#
+# 🔐 **Por que é seguro deixar sem senha.** O único dado de fora é a versão, e
+#    ela só passa se for N.N.N. Os endereços são fixos, o download vai para uma
+#    pasta do root, e antes do `dnf` o pacote precisa ter o sha256 publicado ao
+#    lado dele e ser `vintagelightbox` daquela versão. Quem chama não escolhe
+#    arquivo nenhum: no máximo instala o VintageLightbox oficial.
+set -euo pipefail
+export LC_ALL=C PATH=/usr/sbin:/usr/bin
+
+VERSAO="${1:-}"
+if ! [[ "$VERSAO" =~ ^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$ ]]; then
+  echo "uso: atualizar-rpm <versão N.N.N>" >&2
+  exit 2
+fi
+[ "$(id -u)" -eq 0 ] || { echo "precisa rodar como root (pelo pkexec)" >&2; exit 2; }
+
+FEDORA=$(rpm -E '%{?fedora}')
+[[ "$FEDORA" =~ ^[0-9]+$ ]] || { echo "esta máquina não é Fedora" >&2; exit 3; }
+ARQUIVO="vintagelightbox-$VERSAO-1.fc$FEDORA.x86_64.rpm"
+
+R2="https://pub-f97274c3a83f47ff903a64fc1578efb0.r2.dev/rpm/fc$FEDORA"
+GITHUB="https://github.com/alexkads/VintageLightbox/releases/download/v$VERSAO"
+
+PASTA=$(mktemp -d /var/tmp/vintagelightbox-rpm.XXXXXX)
+trap 'rm -rf "$PASTA"' EXIT
+
+# tentar <nome da fonte> <base>: baixa, confere e instala. 0 = instalou.
+tentar() {
+  local nome="$1" base="$2" rpm="$PASTA/$ARQUIVO" soma esperado
+  echo "▸ baixando o RPM do $nome"
+  rm -f "$rpm" "$rpm.sha256"
+  if ! curl -fsSL --proto '=https' --max-time 600 --retry 2 -o "$rpm" "$base/$ARQUIVO" \
+     || ! curl -fsSL --proto '=https' --max-time 60 --retry 2 -o "$rpm.sha256" "$base/$ARQUIVO.sha256"; then
+    echo "  o $nome não tem o $ARQUIVO"
+    return 1
+  fi
+  esperado=$(awk 'NR==1 {print $1}' "$rpm.sha256")
+  soma=$(sha256sum "$rpm" | awk '{print $1}')
+  if ! [[ "$esperado" =~ ^[0-9a-f]{64}$ ]] || [ "$soma" != "$esperado" ]; then
+    echo "  o sha256 do RPM do $nome não confere"
+    return 1
+  fi
+  if [ "$(rpm -qp --qf '%{NAME} %{VERSION}' "$rpm" 2>/dev/null)" != "vintagelightbox $VERSAO" ]; then
+    echo "  o RPM do $nome não é o vintagelightbox $VERSAO"
+    return 1
+  fi
+  echo "▸ instalando o RPM do $nome"
+  if ! dnf install -y -q "$rpm"; then
+    echo "  o dnf recusou o RPM do $nome"
+    return 1
+  fi
+  [ "$(rpm -q --qf '%{VERSION}' vintagelightbox)" = "$VERSAO" ] || {
+    echo "  o dnf terminou, mas a versão instalada não é a $VERSAO"
+    return 1
+  }
+  echo "instalado do $nome: $ARQUIVO"
+}
+
+tentar "Cloudflare R2" "$R2" && exit 0
+tentar "GitHub" "$GITHUB" && exit 0
+echo "nenhum RPM da $VERSAO para o Fedora $FEDORA; o app compila pelo script"
+exit 3

@@ -1,5 +1,15 @@
 [
   {
+    "versao": "0.1.205",
+    "data": "2026-11-26",
+    "titulo": "No Fedora, a versão nova chega pronta, sem compilar.",
+    "importante": false,
+    "novidades": [
+      "No Fedora com o pacote do VintageLightbox instalado, a atualização baixa a versão nova já pronta, primeiro do Cloudflare e depois do GitHub, sem compilar no computador. Se o pacote ainda não estiver lá, ela compila como sempre."
+    ],
+    "por_que_atualizar": "Para o computador com Fedora não passar meia hora compilando a cada versão."
+  },
+  {
     "versao": "0.1.204",
     "data": "2026-11-26",
     "titulo": "O caixa do dia vale para todas as contas.",

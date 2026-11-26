@@ -51,11 +51,40 @@ compilada. Para isso continuar funcionando:
 | Tirar endereço de `enderecos-de-atualizacao.txt` ou de `novidades::ENDERECOS` | os apps já instalados só conhecem os endereços com que foram compilados |
 | Trocar `chave-publica.txt` ou perder `~/.vintagelightbox/atualizacao.key` | se um dia o pacote voltar, toda atualização vira "assinatura inválida" |
 
-## O `.rpm` do Fedora
+## O `.rpm` do Fedora e a ordem da atualização (#55)
 
-[`scripts/empacotar-rpm.sh`](../scripts/empacotar-rpm.sh) continua: gera um `.rpm` na própria
-máquina Fedora, para instalar em outros computadores sem compilar em cada um. Não é publicado em
-lugar nenhum.
+> Dono, 26/11/2026: *"Vamos compilar na máquina o RPM na macpro-i7 e disponibilizar no github ou
+> claudflare R2, mas crie uma ordem de verificação para atualização automática: 1 - RPM ClaudFlare;
+> 2 - RPM Github; 3 - Script Github (Como está hoje)"*.
+
+Num Fedora com o RPM instalado, a atualização tenta, nesta ordem:
+
+| # | De onde | Quem faz |
+|---|---|---|
+| 1 | o RPM do Cloudflare R2 (`rpm/fc<N>/` no bucket `vintagelightbox`) | o ajudante do RPM |
+| 2 | o RPM do GitHub Release `v<versão>` | o ajudante do RPM |
+| 3 | o script do `main`, que compila (como sempre) | o app (`atualizacao/compilar.rs`) |
+
+- **Quem gera e publica:** o job `rpm-vintagelightbox` do Jenkins da fedora (`macpro-i7-alex`).
+  A cada 15 min ele roda o [`scripts/rpm-na-oficina.sh`](../scripts/rpm-na-oficina.sh): se a versão
+  do `main` ainda não tem RPM, compila no perfil `instalador`
+  ([`empacotar-rpm.sh`](../scripts/empacotar-rpm.sh)) e publica nos dois lugares
+  ([`publicar-rpm.sh`](../scripts/publicar-rpm.sh)), cada `.rpm` com o seu `.sha256`.
+- **Quem instala:** o ajudante `/usr/libexec/vintagelightbox/atualizar-rpm`
+  ([`linux/atualizar-rpm`](linux/atualizar-rpm)), que vem no próprio RPM. O app o chama com
+  `pkexec`, e a regra do polkit ([`linux/br.com.recordarfotos.vintagelightbox.policy`](linux/br.com.recordarfotos.vintagelightbox.policy))
+  o libera sem senha para quem está na frente da máquina. Ele só aceita uma versão `N.N.N`, baixa de
+  endereços fixos para uma pasta do root e confere o `sha256` e o nome e a versão do pacote antes do
+  `dnf`.
+- **Máquina sem o RPM** (sem o ajudante): segue direto para o script, sem pedir senha. Para uma
+  máquina passar a receber RPM, basta instalar um RPM uma vez, à mão:
+  `sudo dnf install https://github.com/alexkads/VintageLightbox/releases/download/v<versão>/vintagelightbox-<versão>-1.fc<N>.x86_64.rpm`.
+- **O atalho do script vence o do RPM no menu** (`~/.local/share/applications`). Depois de instalar
+  pelo RPM, o app troca `~/.local/bin/vintagelightbox-gpui` por um atalho para
+  `/usr/bin/vintagelightbox-gpui` (a cópia compilada fica como `.anterior`). Se o script voltar a
+  compilar, ele põe o binário dele no lugar, como sempre.
+- ⚠️ Um `.rpm` gerado no Fedora N instala no N e nos seguintes: a fedora é Fedora 45, e um balcão
+  num Fedora mais antigo não acha o `fc<N>` dele e compila pelo script.
 
 ## Trocar o ícone
 
