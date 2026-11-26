@@ -1,9 +1,9 @@
 {
-  "versao": "0.1.204",
-  "titulo": "O caixa do dia vale para todas as contas.",
+  "versao": "0.1.205",
+  "titulo": "No Fedora, a versão nova chega pronta, sem compilar.",
   "importante": false,
   "novidades": [
-    "Toda conta que vende passa pelo caixa do dia ao entrar, também as de administrador: se o caixa de um dia anterior ficou aberto, você fecha ele primeiro, com o motivo do atraso, e depois abre o de hoje. Só a conta do dono pode ignorar o pedido."
+    "No Fedora com o pacote do VintageLightbox instalado, a atualização baixa a versão nova já pronta, primeiro do Cloudflare e depois do GitHub, sem compilar no computador. Se o pacote ainda não estiver lá, ela compila como sempre."
   ],
-  "por_que_atualizar": "Para nenhum computador começar o dia sem o caixa de hoje aberto."
+  "por_que_atualizar": "Para o computador com Fedora não passar meia hora compilando a cada versão."
 }
