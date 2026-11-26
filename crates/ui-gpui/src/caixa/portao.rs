@@ -53,6 +53,10 @@ pub(crate) struct EstadoDoPortao {
     /// O dia do caixa vencido (`"24/11"`), para o passo "Fechar o caixa de
     /// DD/MM" seguir com a data depois que ele fecha e sai da vista.
     pub dia_do_vencido: Option<String>,
+    /// 👑 A conta é a do dono: ele também passa pelo portão, mas pode
+    /// ignorá-lo (dono, 26/11/2026: *"Até o dono tem que fechar o caixa!"* e
+    /// *"O dono pode ignorar!"*).
+    pub pode_ignorar: bool,
 }
 
 impl Caixa {
@@ -68,6 +72,21 @@ impl Caixa {
             cx.emit(PedidoDoCaixa::Portao(Portao::Livre));
         }
         cx.notify();
+    }
+
+    /// 👑 Só a conta do dono ganha o "Ignorar o caixa por agora".
+    pub fn deixar_ignorar(&mut self, pode: bool, cx: &mut Context<Self>) {
+        self.portao.pode_ignorar = pode;
+        cx.notify();
+    }
+
+    /// 👑 O dono ignorou o portão: ele solta até o app abrir de novo. A venda
+    /// num caixa vencido continua recusada (pela tela e pela API).
+    pub(crate) fn ignorar_o_portao(&mut self, cx: &mut Context<Self>) {
+        if !self.portao.pode_ignorar {
+            return;
+        }
+        self.ligar_o_portao(false, cx);
     }
 
     /// 🧾 Uma cobrança no ar ou um diálogo aberto: o portão espera.
@@ -282,7 +301,18 @@ impl Caixa {
                             .min_w(px(0.))
                             .gap(px(16.))
                             .child(self.passos(portao, cx))
-                            .child(principal),
+                            .child(principal)
+                            .when(self.portao.pode_ignorar, |coluna| {
+                                coluna.child(
+                                    h_flex().max_w(px(640.)).child(
+                                        estilo::botao_fantasma("caixa-portao-ignorar", cx)
+                                            .label("Ignorar o caixa por agora (só o dono)")
+                                            .on_click(cx.listener(|t, _: &ClickEvent, _, cx| {
+                                                t.ignorar_o_portao(cx)
+                                            })),
+                                    ),
+                                )
+                            }),
                     )
                     .child(
                         v_flex()
