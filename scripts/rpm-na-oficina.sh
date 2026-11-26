@@ -50,8 +50,16 @@ publicado() { curl -fsSL -o /dev/null --max-time 30 "$1/$ARQUIVO.sha256"; }
 no_r2=0; no_github=0
 publicado "$PUBLICO/rpm/fc$FEDORA" && no_r2=1
 publicado "https://github.com/$REPO/releases/download/v$VERSAO" && no_github=1
-if [ "$FORCAR" -eq 0 ] && [ "$no_r2" -eq 1 ] && [ "$no_github" -eq 1 ]; then
-  echo "✅ a $VERSAO já está no R2 e no GitHub: nada a fazer"
+# Sem a chave do R2 nesta máquina, o R2 não é pendência: sem isso o job
+# reempacotaria e reenviaria ao GitHub a cada 15 min só para o R2 recusar de novo.
+tem_chave_do_r2=0
+[ -n "${R2_ACCESS_KEY_ID:-}" ] && [ -n "${R2_SECRET_ACCESS_KEY:-}" ] && [ -n "${R2_ACCOUNT_ID:-}" ] && tem_chave_do_r2=1
+if [ "$FORCAR" -eq 0 ] && [ "$no_github" -eq 1 ] && { [ "$no_r2" -eq 1 ] || [ "$tem_chave_do_r2" -eq 0 ]; }; then
+  if [ "$no_r2" -eq 1 ]; then
+    echo "✅ a $VERSAO já está no R2 e no GitHub: nada a fazer"
+  else
+    echo "✅ a $VERSAO já está no GitHub; o R2 espera a chave em $SEGREDO"
+  fi
   exit 0
 fi
 echo "  R2: $([ $no_r2 -eq 1 ] && echo tem || echo falta) · GitHub: $([ $no_github -eq 1 ] && echo tem || echo falta)"
