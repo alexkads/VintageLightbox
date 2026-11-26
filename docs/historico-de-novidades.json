@@ -3,8 +3,7 @@
     "versao": "0.1.204",
     "data": "2026-11-26",
     "titulo": "O caixa do dia vale para todas as contas.",
-    "importante": true,
-    "obrigatoria": true,
+    "importante": false,
     "novidades": [
       "Toda conta que vende passa pelo caixa do dia ao entrar, também as de administrador: se o caixa de um dia anterior ficou aberto, você fecha ele primeiro, com o motivo do atraso, e depois abre o de hoje. Só a conta do dono pode ignorar o pedido."
     ],
