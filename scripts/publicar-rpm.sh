@@ -8,8 +8,11 @@
 # Ao lado de cada .rpm vai o .sha256 (gerado pelo empacotar-rpm.sh), que o
 # ajudante da atualização confere antes do dnf.
 #
-# - **R2**: bucket `vintagelightbox`, em `rpm/fc<N>/`, pelo `wrangler` (precisa
-#   de `wrangler login` ou de CLOUDFLARE_API_TOKEN com escrita no bucket).
+# - **R2**: bucket `vintagelightbox`, em `rpm/fc<N>/`, pela API S3 do R2 com o
+#   próprio `curl --aws-sigv4`: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID e
+#   R2_SECRET_ACCESS_KEY de uma chave do R2 restrita a este bucket (na fedora,
+#   em ~/oficina/segredos/r2-vintagelightbox.env). Sem a chave, tenta o
+#   `wrangler` autenticado (o Mac do dono).
 # - **GitHub**: o Release `v<versão>`, criado sobre o `main` se ainda não
 #   existe, pelo `gh` autenticado.
 #
@@ -33,16 +36,29 @@ PUBLICO="https://pub-f97274c3a83f47ff903a64fc1578efb0.r2.dev"
 REPO="alexkads/VintageLightbox"
 falhou=0
 
+# enviar_r2 <arquivo> <chave no bucket> <content-type>
+enviar_r2() {
+  if [ -n "${R2_ACCESS_KEY_ID:-}" ] && [ -n "${R2_SECRET_ACCESS_KEY:-}" ] && [ -n "${R2_ACCOUNT_ID:-}" ]; then
+    curl -fsS -o /dev/null --aws-sigv4 "aws:amz:auto:s3" \
+      --user "$R2_ACCESS_KEY_ID:$R2_SECRET_ACCESS_KEY" \
+      -H "Content-Type: $3" -T "$1" \
+      "https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com/$BUCKET/$2"
+  elif command -v wrangler >/dev/null; then
+    wrangler r2 object put "$BUCKET/$2" --remote --file "$1" --content-type "$3" >/dev/null
+  else
+    echo "  sem a chave do R2 (R2_ACCESS_KEY_ID…) e sem o wrangler" >&2
+    return 1
+  fi
+}
+
 echo "▸ R2: rpm/fc$FEDORA/$ARQUIVO"
-if command -v wrangler >/dev/null \
-   && wrangler r2 object put "$BUCKET/rpm/fc$FEDORA/$ARQUIVO" --remote --file "$RPM" \
-        --content-type application/x-rpm >/dev/null \
-   && wrangler r2 object put "$BUCKET/rpm/fc$FEDORA/$ARQUIVO.sha256" --remote --file "$RPM.sha256" \
-        --content-type text/plain >/dev/null \
+# O .sha256 vai por último: o ajudante só tenta um RPM que tem o .sha256.
+if enviar_r2 "$RPM" "rpm/fc$FEDORA/$ARQUIVO" application/x-rpm \
+   && enviar_r2 "$RPM.sha256" "rpm/fc$FEDORA/$ARQUIVO.sha256" text/plain \
    && curl -fsS -o /dev/null "$PUBLICO/rpm/fc$FEDORA/$ARQUIVO.sha256"; then
   echo "  ✅ $PUBLICO/rpm/fc$FEDORA/$ARQUIVO"
 else
-  echo "  ❌ o R2 não recebeu (o wrangler está autenticado com escrita no bucket $BUCKET?)"
+  echo "  ❌ o R2 não recebeu (a chave do R2 escreve no bucket $BUCKET?)"
   falhou=1
 fi
 

@@ -15,7 +15,8 @@
 #
 # Variáveis: VLB_RPM_CLONE (o clone do main), CARGO_TARGET_DIR (um só,
 # reaproveitado), e as credenciais do R2 em ~/oficina/segredos/r2-vintagelightbox.env
-# (CLOUDFLARE_API_TOKEN e CLOUDFLARE_ACCOUNT_ID, para o wrangler).
+# (R2_ACCOUNT_ID, R2_ACCESS_KEY_ID e R2_SECRET_ACCESS_KEY de uma chave do R2
+# restrita ao bucket `vintagelightbox`, com leitura e escrita de objetos).
 set -euo pipefail
 
 FORCAR=0
